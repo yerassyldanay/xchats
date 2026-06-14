@@ -1,0 +1,20 @@
+{
+  "event": "send.message",
+  "instance": "xpayment",
+  "data": {
+    "key": { "remoteJid": "77000000000@s.whatsapp.net", "fromMe": true, "id": "3EB063FA228F78C7FAE3CE" },
+    "pushName": "Você",
+    "status": "PENDING",
+    "message": { "conversation": "[snapshot] webhook capture - text" },
+    "contextInfo": null,
+    "messageType": "conversation",
+    "messageTimestamp": 1781372023,
+    "instanceId": "acf950c6-8dd6-4466-a81f-37d54646df01",
+    "source": "web"
+  },
+  "destination": "http://xchats-backend:8080/evolution/api/v1/webhook/{account}",
+  "date_time": "2026-06-13T14:33:43.568Z",
+  "sender": "77011111111@s.whatsapp.net",
+  "server_url": "http://evolution-api:8080",
+  "apikey": "***REDACTED***"
+}

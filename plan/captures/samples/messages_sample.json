@@ -1,0 +1,48 @@
+[
+  {
+    "id": "cmqcfsy7g03e0t75qbofb2at6",
+    "key": {
+      "id": "3A99E9FE969F341B7D3D",
+      "fromMe": false,
+      "remoteJid": "5231387607239@lid",
+      "participant": "",
+      "remoteJidAlt": "77000000000@s.whatsapp.net",
+      "addressingMode": "lid"
+    },
+    "pushName": "Test Contact",
+    "messageType": "conversation",
+    "message": { "conversation": "Check the read and deliver status", "messageContextInfo": { "messageSecret": "***REDACTED***" } },
+    "messageTimestamp": 1781360089,
+    "instanceId": "acf950c6-8dd6-4466-a81f-37d54646df01",
+    "source": "ios",
+    "MessageUpdate": [ { "status": "READ" } ]
+  },
+  {
+    "id": "cmqcfsy7g03e0t75qbofbmedia",
+    "key": {
+      "id": "3ABA7192D3DC90707512",
+      "fromMe": false,
+      "remoteJid": "5231387607239@lid",
+      "participant": "",
+      "remoteJidAlt": "77000000000@s.whatsapp.net",
+      "addressingMode": "lid"
+    },
+    "pushName": "Test Contact",
+    "messageType": "imageMessage",
+    "message": {
+      "imageMessage": {
+        "url": "https://mmg.whatsapp.net/v/t62.7118-24/....enc?mms3=true",
+        "mimetype": "image/jpeg",
+        "fileLength": { "low": 87154, "high": 0, "unsigned": true },
+        "caption": null,
+        "mediaKey": "***REDACTED***",
+        "directPath": "/v/t62.7118-24/....enc",
+        "fileEncSha256": "***",
+        "jpegThumbnail": "<base64 thumbnail elided>"
+      }
+    },
+    "messageTimestamp": 1781360094,
+    "instanceId": "acf950c6-8dd6-4466-a81f-37d54646df01",
+    "source": "ios"
+  }
+]
