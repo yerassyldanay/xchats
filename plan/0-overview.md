@@ -44,6 +44,7 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
 ## Document map — where an agent/dev finds what
 
 - **0-overview.md** (this) — vision, the architecture picture, where to start, principles.
+- **0.1-definition-of-done.md** — per-phase acceptance criteria (what "done" means for phases 1–4).
 - **1-concept.md** — what & why, glossary, product principles (non-chatbot, suggest-and-approve).
 - **2-architecture.md** — components, monorepo layout, env-driven addressing, **v1 decisions**
   (users/org seed, auto-response, WhatsApp-accounts manager, Postgres-only, security, frontend),
@@ -68,6 +69,9 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
   - **8.3-ai-assistant-profile.md** — building & using the contact profile.
   - **8.4-ai-assistant-knowledge-base.md** — topics, media catalog, price tokens, links.
   - **8.5-ai-assistant-providers.md** — multi-provider LLM (openrouter/openai/gemini).
+  - **8.6-port-checklist.md** — porting the brain from the submodule (reuse/adapt/drop + the new Postgres reader).
+- **9-database-schema.md** — the full PostgreSQL schema in a dedicated `xchats` schema (fully-named
+  tables, e.g. `xchats.conversations`), keys, indexes, constraints, and a normalization review.
 - **examples/repos/xpayment-crm/** — the working brain, vendored as a git submodule (the
   implementation the AI docs above describe; entry `IMPLEMENTATION.md`).
 - **scripts/evolution_client.py** — working Evolution client + normalization (the oracle).
