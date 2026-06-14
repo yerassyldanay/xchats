@@ -95,8 +95,18 @@ Build order (phased):
    env-driven addressing, DB migrations; backend reaches the reused Evolution + Postgres.
 2. **Transport** — webhook receiver → normalize → DB; send text/media; delivery/read status.
    Reuse `scripts/evolution_client.py` + the captured payloads as the oracle.
+2.5. **AI dry-run (de-risk the differentiator early)** — once normalized messages exist, port just
+   `HandleMessage` + a new Postgres Window/Profile reader and run it against `captures/` fixtures
+   (or wire the Playground to Phase-2 rows), dumping drafts to a log / minimal view. The brain is
+   standalone and mockable, so this is cheap — and it answers "are the suggestions any good?"
+   **weeks before** the full UI, instead of discovering it last.
 3. **UI** — connect WhatsApp (QR), conversation inbox, send, live updates over SSE.
 4. **AI** — port the assistant; drafts appear in the inbox; persona/knowledge configurable in the UI.
+
+> **Where the risk actually is:** the highest-risk, least-proven v1 work is **WhatsApp
+> transport + sync** (multi-device reconciliation, `@lid`↔phone identity, gap detection, monotonic
+> status). The AI brain is a **vendored, tested port** (`8-ai-assistant.md`) and is comparatively
+> de-risked — it is the product's *value*, not where the build effort or risk concentrates.
 
 ## The final point (done =)
 

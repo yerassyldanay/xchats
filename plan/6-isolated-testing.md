@@ -63,7 +63,11 @@ MinIO/S3 or Kafka in prod is a config change, not a code change.
 ## Real smoke (manual, outside isolation)
 
 A tiny optional check against the live Evolution (`localhost:9700`) confirms reachability +
-credentials. Everything else is covered by fixtures that are byte-for-byte real Evolution output —
-so a green isolated suite means the contract is correct.
+credentials. The fixtures are byte-for-byte real Evolution output, so a green isolated suite proves
+**normalizer/transport parity on the captured events**. Full contract trust requires the complete
+live event set — and the current `captures/` set is missing the core inbound `messages.upsert`, the
+`getBase64` response, and a matched send→`messages.update` pair (see `captures/README.md`). Until
+those are captured, "green" means "correct on what we've captured", not "the whole contract is
+proven".
 ```
 

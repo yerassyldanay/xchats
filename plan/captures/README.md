@@ -14,6 +14,18 @@ asserted against them. Secrets (`apikey`, `messageSecret`) are redacted.
 - `samples/messages_sample.json` — two `findMessages` records (text + image); note each `key` has
   **both** `remoteJid` (`@lid`) and `remoteJidAlt` (the real phone) + `addressingMode: "lid"`.
 
-> This is a representative seed. Expand it with a full live capture (all event types: messages.upsert
-> inbound text+media, connection.update, qrcode.updated, contacts.*) before relying on the e2e suite
-> for full coverage — record by pointing a logging tee / the webhook receiver at a live instance.
+> **This is a seed, not full coverage — and it is missing the core inbound event.** The e2e suite
+> cannot be trusted until these are captured and committed (a green run today does *not* prove the
+> contract). Record by pointing a logging tee / the webhook receiver at a live instance, and add:
+>
+> - **`messages.upsert` inbound — text** (the primary event the whole product is built on; absent here).
+> - **`messages.upsert` inbound — `imageMessage`**, plus the matching **`getBase64FromMediaMessage`**
+>   response (the media path is asserted against an uncaptured shape; the contract is only pinned by
+>   `scripts/evolution_client.py` today).
+> - **A matched pair: one outbound `send.message` followed by *its own* `messages.update`.** The two
+>   existing files are *different* conversations, so they cannot prove status correlation. `key.id`
+>   (22 chars) ≠ `keyId` (40 chars); the matched pair settles which field status actually keys on
+>   (see `../9-database-schema.md` → `status_correlation_id`).
+> - **A `chats.upsert` (`@lid`-only) that precedes the first message** — to exercise the lid-only
+>   ordering case (no `remoteJidAlt`/phone present; see `../3-sync.md`).
+> - `connection.update`, `qrcode.updated`, `contacts.*`.
