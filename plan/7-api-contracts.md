@@ -139,9 +139,9 @@ GET    /xchats/api/v1/media/{id}                        stream stored media (res
 
 ```text
 # v1 — the draft loop:
-POST   /xchats/api/v1/chats/{id}/ai-drafts     Suggest: trigger a draft on demand (v1)
-GET    /xchats/api/v1/chats/{id}/ai-drafts
-POST   /xchats/api/v1/ai-drafts/{id}/approve           approve -> send (idempotent; 409 on conflict/stale)
+POST   /xchats/api/v1/chats/{id}/ai-drafts     Suggest: on-demand → 1–3 reply options (text + media)
+GET    /xchats/api/v1/chats/{id}/ai-drafts             the 1–3 pending options
+POST   /xchats/api/v1/ai-drafts/{id}/approve           send this option (edited text + kept media; idempotent, 409 on conflict/stale)
 
 # deferred — Phase 4B (KB CMS):
 GET    /xchats/api/v1/assistant/config                 persona/knowledge/prices/assets (published)

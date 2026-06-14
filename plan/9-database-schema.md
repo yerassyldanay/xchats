@@ -32,9 +32,10 @@ no SQL files yet.
   - **Removed** (not in v1): `evolution_events` and `jobs` (async work uses the in-memory queue, not
     DB tables); `wa_qr_sessions` (connect/QR deferred); `sync_jobs` (live-only); `message_media`
     (text-only).
-  - **Defined but empty/unused** in v1: `ai_audit_log`, `assignment_events`, `ai_draft_assets`,
-    `ai_assets`, `ai_prices`. Don't pour migration/wiring effort into them until their phase (see
-    `0.1-definition-of-done.md`).
+  - **Defined but empty/unused** in v1: `ai_audit_log`, `assignment_events`. (The seeded KB —
+    `ai_topics` / `ai_assets` / `ai_prices` — and `ai_draft_assets` **are** used: the brain suggests
+    1–3 options, each with optional media drawn from the seeded asset catalog.) Don't pour
+    migration/wiring effort into the empty ones until their phase (see `0.1-definition-of-done.md`).
 
 ---
 
@@ -261,23 +262,29 @@ amount_text  text
 UNIQUE (snapshot_id, token)
 ```
 
-### xchats.ai_drafts  (one suggestion per inbound)
+### xchats.ai_drafts  (one suggested reply OPTION; a "Suggest" writes 1–3 per inbound)
 ```
 id                 uuid  PK
 chat_id            uuid  FK -> wa_chats              -- organization derived via chat (3NF)
-trigger_message_id uuid  FK -> wa_messages
-draft_text         text   -- prices already injected
-sent_message_id    uuid  FK -> wa_messages  NULL  -- the message a user actually sent (final text after edits); NULL until approved. Makes draft-acceptance / edit-distance computable from day one (the v1 success metric)
+trigger_message_id uuid  FK -> wa_messages           -- the inbound this answers; GROUPS the 1–3 options
+option_ordinal     int    -- 1..3 — the option's position in the suggestion
+draft_text         text   -- the option's text (prices already injected); user may edit before sending
+sent_message_id    uuid  FK -> wa_messages  NULL  -- the message actually sent (final text after edits); set on the CHOSEN option. NULL until approved. Makes draft-acceptance / edit-distance computable from day one (the v1 success metric)
 context_state      text   -- 'full' (v1 live-only; no partial/syncing context)
 confidence         numeric
 escalate           bool
 escalation_reason  text
-draft_state        text   -- 'suggested'|'approved'|'rejected'|'sent'|'superseded'
+draft_state        text   -- 'suggested'|'sent'|'rejected'|'superseded'
 created_at, updated_at
-PARTIAL UNIQUE (chat_id) WHERE draft_state='suggested'  -- one pending draft per chat (replaces the brain's in-process keyedMutex); approve via conditional UPDATE … WHERE draft_state='suggested' → 409 on conflict
+PARTIAL UNIQUE (chat_id, option_ordinal) WHERE draft_state='suggested'  -- the active suggestion holds ≤3 pending options (ordinals 1–3); a new Suggest supersedes the old set; approving one option sends it and supersedes its siblings (conditional UPDATE … WHERE draft_state='suggested' → 409 on conflict)
 ```
+> A "Suggest" writes 1–3 option rows sharing `(chat_id, trigger_message_id)`. Each option's suggested
+> media lives in `ai_draft_assets` (attach/detach before sending). **Responses are text + media
+> only.** Approve sends the chosen option's (possibly edited) text + final media via the outbound
+> pipeline. If the brain escalates, it writes **one** option with `escalate=true` + `escalation_reason`
+> and empty text (the UI shows "reply manually").
 
-### xchats.ai_draft_assets  (the media a draft suggested — normalized list)
+### xchats.ai_draft_assets  (media attached to a draft option; attach/detach before send)
 ```
 id             uuid PK
 draft_id       uuid FK -> ai_drafts
