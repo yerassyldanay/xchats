@@ -156,14 +156,14 @@ POST   /xchats/api/v1/assistant/playground             dry-run a draft (no send)
 
 ```text
 GET    /xchats/api/v1/realtime                          SSE stream (message.*, conversation.*,
-                                                         ai_draft.created, whatsapp_account.status_changed,
+                                                         ai_draft.created, wa_account.status_changed,
                                                          sync.progress)
 ```
 
 ### Evolution webhook ingress — `/evolution/api/v1`
 
 ```text
-POST   /evolution/api/v1/webhook/{whatsapp_account_id}            (+ /{event} subpaths if webhookByEvents)
+POST   /evolution/api/v1/webhook/{wa_account_id}            (+ /{event} subpaths if webhookByEvents)
 ```
 Authenticated by the **single shared token** from `.env` (`WEBHOOK_UNAUTHORIZED` if missing/wrong).
 Handler is store-raw + enqueue + `200` only.

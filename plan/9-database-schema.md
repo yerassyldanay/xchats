@@ -15,11 +15,12 @@ no SQL files yet.
 - **3NF by default**: a child table does **not** repeat an ancestor's `organization_id` when it is
   reachable by foreign keys (it is derived by join). Deliberate, documented denormalizations are
   listed at the end.
-- **v1 scope marker:** this is the full data model; **v1 only populates a subset.** Tables for
-  deferred surfaces stay defined but **empty/unused** in v1: `sync_jobs`, `ai_audit_log`,
-  `assignment_events`, `ai_draft_assets`, `whatsapp_qr_sessions` (no connect UI), and the media/price
-  tables `message_media` / `ai_assets` / `ai_prices` (media + suggested assets are deferred). Don't
-  pour migration/wiring effort into them until their phase (see `0.1-definition-of-done.md`).
+- **v1 scope marker:** this is the full data model; **v1 only populates a subset.**
+  - **Removed entirely** (no history sync, text-only — see `3-sync.md`): `sync_jobs` and
+    `message_media`. They come back additively when history import / media land.
+  - **Defined but empty/unused** in v1: `wa_qr_sessions` (connect/QR deferred),
+    `ai_audit_log`, `assignment_events`, `ai_draft_assets`, `ai_assets`, `ai_prices`. Don't pour
+    migration/wiring effort into them until their phase (see `0.1-definition-of-done.md`).
 
 ---
 
@@ -63,7 +64,7 @@ INDEX (member_id)
 
 ## WhatsApp transport
 
-### xchats.whatsapp_accounts  (mirrors an Evolution instance)
+### xchats.wa_accounts  (mirrors an Evolution instance)
 ```
 account_id               uuid  PK
 organization_id          uuid  FK -> organizations  NULL   -- NULL = unassigned (not handled)
@@ -73,18 +74,18 @@ evolution_instance_id    text
 owner_jid                text
 phone_number             text
 connection_state         text  -- 'connecting'|'qr_required'|'connected'|'disconnected'|'error'
-sync_state               text  -- 'idle'|'syncing'|'partial'|'complete'|'failed'
-history_state            text  -- 'full'|'partial'|'live_only'|'syncing'|'unknown'
-last_live_event_at, last_synced_at, last_reconcile_at  timestamptz
+last_live_event_at       timestamptz
 created_at, updated_at
 ```
+> Live-only: `sync_state` / `history_state` / `last_synced_at` / `last_reconcile_at` are dropped —
+> there is no sync to track. They return with history import.
 > "Assigned" is **derived** (`organization_id IS NOT NULL`) — no stored flag. Shared Evolution
 > credentials live in `.env`.
 
-### xchats.whatsapp_qr_sessions
+### xchats.wa_qr_sessions
 ```
 qr_session_id  uuid  PK
-account_id     uuid  FK -> whatsapp_accounts
+account_id     uuid  FK -> wa_accounts
 qr_code        text
 pairing_code   text
 qr_state       text  -- 'qr_required'|'connected'|'expired'
@@ -108,7 +109,7 @@ created_at, updated_at
 ```
 identity_id      uuid  PK
 contact_id       uuid  FK -> contacts               -- organization derived via contact (3NF: not stored)
-account_id       uuid  FK -> whatsapp_accounts      -- a real attribute (identities are per account)
+account_id       uuid  FK -> wa_accounts      -- a real attribute (identities are per account)
 identity_kind    text  -- 'phone'|'phone_jid'|'lid_jid'|'push_name'
 identity_value   text
 created_at
@@ -119,13 +120,12 @@ INDEX  (account_id, identity_value)                 -- lookup an inbound jid
 ### xchats.conversations  (one account + one contact/remote jid)
 ```
 conversation_id   uuid  PK
-account_id        uuid  FK -> whatsapp_accounts     -- organization derived via account (3NF: not stored)
+account_id        uuid  FK -> wa_accounts     -- organization derived via account (3NF: not stored)
 contact_id        uuid  FK -> contacts
 remote_jid        text  -- canonical key (phone JID preferred; from remoteJidAlt)
 lid_jid           text  -- alias if the contact also appears as @lid
 conversation_state text -- 'open'|'pending'|'resolved'
 assignee_member_id uuid FK -> members  NULL
-history_state     text  -- 'full'|'partial'|'syncing'|'unknown'
 stage             text  -- brain conversation stage
 ai_summary        text  -- reserved (future rolling summary)
 last_message_at   timestamptz          -- (cached aggregate — see denormalizations)
@@ -138,7 +138,7 @@ UNIQUE (account_id, remote_jid)
 ### xchats.messages
 ```
 message_id           uuid  PK
-account_id           uuid  FK -> whatsapp_accounts  -- kept for the dedup unique (see denormalizations)
+account_id           uuid  FK -> wa_accounts  -- kept for the dedup unique (see denormalizations)
 conversation_id      uuid  FK -> conversations
 direction            text  -- 'in'|'out'
 sender_kind          text  -- 'contact'|'member'|'ai'|'external_account'
@@ -157,31 +157,16 @@ UNIQUE (account_id, evolution_message_id)
 INDEX  (conversation_id, message_ts)
 INDEX  (account_id, status_correlation_id)   -- status updates resolve here, not on the dedup key
 ```
-> **Status correlation is unverified.** Evolution uses three id namespaces: outbound `send.message`
-> carries `data.key.id` (~22 chars), `messages.update` keys delivery/read on `data.keyId` (~40 chars)
-> **and** carries a cuid `data.messageId` — and `key.id` does **not** match `keyId` in the captured
-> fixtures. We therefore store **both**: `evolution_message_id` (`key.id`, the dedup natural key) and
-> `status_correlation_id` (the field a matched send→`messages.update` capture proves status keys on —
-> most likely the cuid `messageId`). Resolve a `messages.update` against `status_correlation_id`.
-> Confirm empirically with the matched-pair fixture before writing status code (see
-> `0.1-definition-of-done.md` Phase 2, `4-wa-connection-example.md`, `captures/README.md`).
+> **Status correlation — resolved by capture; `status_correlation_id` likely redundant.** In the
+> matched outbound capture, `messages.update.data.keyId` **equals** the `send.message` `data.key.id`
+> (both 22 chars, all pairs matched). The earlier fear that `key.id` (22) ≠ `keyId` (40) was wrong
+> for Evolution v2.3.7. So apply delivery/read by matching `messages.update.keyId` →
+> `messages.evolution_message_id` (the dedup key); `status_correlation_id` and its index can be
+> **dropped** (kept defined for now pending one more confirmation). `messages.update` also carries a
+> cuid `data.messageId` we don't need. See `captures/README.md` finding 4.
 
-### xchats.message_media  (1:1 with a media message)
-```
-media_id        uuid  PK
-message_id      uuid  FK -> messages  UNIQUE       -- one media per message
-media_kind      text  -- 'image'|'video'|'audio'|'document'|'sticker'
-mimetype        text
-file_name       text
-file_size       bigint
-duration_ms     int
-evolution_media_url text
-storage_url     text   -- blob store reference after download
-thumbnail_url   text
-transcript      text
-download_state  text   -- 'pending'|'ready'|'failed'
-created_at, updated_at
-```
+> **`message_media` removed in v1** (text-only). Media bodies are ignored; the table returns 1:1
+> with messages when the media phase lands.
 
 ### xchats.assignment_events  (history; current assignee lives on conversations)
 ```
@@ -285,7 +270,7 @@ created_at
 ### xchats.evolution_events  (raw webhooks; store-first, replay, idempotency)
 ```
 event_id           uuid PK
-account_id         uuid FK -> whatsapp_accounts  NULL  -- organization derived via account (3NF)
+account_id         uuid FK -> wa_accounts  NULL  -- organization derived via account (3NF)
 evolution_event_kind text  -- 'messages.upsert'|'messages.update'|'send.message'|...
 external_event_id  text  -- derived (key.id / keyId+status / payload hash)
 payload            jsonb
@@ -298,7 +283,7 @@ INDEX  (process_state)
 ### xchats.jobs  (queue / message bus — swappable adapter)
 ```
 job_id        uuid PK
-job_kind      text  -- 'process_event'|'media_download'|'ai_draft'|'outbound_send'|'reconcile'
+job_kind      text  -- v1: 'process_event'|'ai_draft'|'outbound_send'  (media_download/reconcile later)
 payload       jsonb -- polymorphic job args
 job_state     text  -- 'pending'|'running'|'done'|'failed'
 run_after     timestamptz
@@ -309,17 +294,7 @@ created_at, updated_at
 INDEX (job_state, run_after)            -- worker poll: FOR UPDATE SKIP LOCKED
 ```
 
-### xchats.sync_jobs
-```
-sync_job_id   uuid PK
-account_id    uuid FK -> whatsapp_accounts          -- organization derived via account (3NF)
-sync_kind     text  -- 'initial'|'resync'|'targeted'
-sync_state    text  -- 'pending'|'running'|'complete'|'partial'|'failed'
-progress_done, progress_total            int
-contacts_done, chats_done, messages_done int
-last_error    text
-started_at, finished_at  timestamptz
-```
+> **`sync_jobs` removed in v1** — live-only, nothing to track. It returns when history import lands.
 
 ## The three load-bearing constraints
 
@@ -344,10 +319,10 @@ is automatic.
 
 **3NF** — no transitive dependencies: a child table does **not** store an ancestor's
 `organization_id` when it's reachable by FK. `organization_id` is stored **only** where it's a
-direct fact — `organizations`, `organization_members`, `whatsapp_accounts` (the assignment),
+direct fact — `organizations`, `organization_members`, `wa_accounts` (the assignment),
 `contacts`, `ai_snapshots`, `ai_audit_log` — and **derived by join** everywhere else
 (`contact_identities`, `conversations`, `messages`, `ai_topics/assets/prices`, `ai_drafts`,
-`evolution_events`, `sync_jobs`). The `assigned` flag was removed (derived from `organization_id`).
+`evolution_events`). The `assigned` flag was removed (derived from `organization_id`).
 
 ### Deliberate, documented denormalizations (3 exceptions, each justified)
 

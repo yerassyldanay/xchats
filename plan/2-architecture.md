@@ -359,7 +359,7 @@ Events:
 - `conversation.updated`
 - `assignment.changed`
 - `ai_draft.created`
-- `whatsapp_account.status_changed`
+- `wa_account.status_changed`
 - `sync.progress`
 
 ### UI
@@ -407,7 +407,7 @@ Core tables:
 organizations
 users
 organization_members
-whatsapp_accounts
+wa_accounts
 contacts
 contact_identities
 conversations
@@ -422,9 +422,9 @@ sync_jobs
 Important constraints:
 
 ```text
-unique(whatsapp_account_id, remote_jid) on conversations
-unique(whatsapp_account_id, evolution_message_id) on messages
-unique(contact_id, whatsapp_account_id, identity_type, value) on contact_identities
+unique(wa_account_id, remote_jid) on conversations
+unique(wa_account_id, evolution_message_id) on messages
+unique(contact_id, wa_account_id, identity_type, value) on contact_identities
 ```
 
 ### Media Store

@@ -1,0 +1,174 @@
+{
+  "endpoint": "POST /message/sendMedia/{instance}",
+  "instance": "xpayment",
+  "http_status": 201,
+  "request": {
+    "number": "77000000000",
+    "mediatype": "image",
+    "mimetype": "image/jpeg",
+    "media": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYa...[TRUNCATED 18708 chars]",
+    "fileName": "xchats_fixture.jpg",
+    "caption": "[xchats fixture] sendMedia — image + caption"
+  },
+  "response": {
+    "key": {
+      "remoteJid": "77000000000@s.whatsapp.net",
+      "fromMe": true,
+      "id": "3EB003A9CDFAD4B4300AEC"
+    },
+    "pushName": "Você",
+    "status": "PENDING",
+    "message": {
+      "imageMessage": {
+        "interactiveAnnotations": [],
+        "scanLengths": [],
+        "annotations": [],
+        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQPWQxOXRapO4ElZwnRBX0odAcSLphadqJlMHZ...[TRUNCATED 250 chars]",
+        "mimetype": "image/jpeg",
+        "caption": "[xchats fixture] sendMedia — image + caption",
+        "fileSha256": {
+          "0": 70,
+          "1": 153,
+          "2": 224,
+          "3": 102,
+          "4": 84,
+          "5": 112,
+          "6": 14,
+          "7": 111,
+          "8": 56,
+          "9": 242,
+          "10": 192,
+          "11": 235,
+          "12": 173,
+          "13": 228,
+          "14": 71,
+          "15": 88,
+          "16": 203,
+          "17": 0,
+          "18": 77,
+          "19": 61,
+          "20": 183,
+          "21": 17,
+          "22": 96,
+          "23": 199,
+          "24": 154,
+          "25": 110,
+          "26": 57,
+          "27": 61,
+          "28": 40,
+          "29": 235,
+          "30": 25,
+          "31": 241
+        },
+        "fileLength": {
+          "low": 8778,
+          "high": 0,
+          "unsigned": true
+        },
+        "mediaKey": {
+          "0": 237,
+          "1": 125,
+          "2": 113,
+          "3": 150,
+          "4": 182,
+          "5": 148,
+          "6": 20,
+          "7": 67,
+          "8": 18,
+          "9": 223,
+          "10": 185,
+          "11": 242,
+          "12": 7,
+          "13": 53,
+          "14": 11,
+          "15": 22,
+          "16": 96,
+          "17": 5,
+          "18": 225,
+          "19": 177,
+          "20": 253,
+          "21": 169,
+          "22": 170,
+          "23": 81,
+          "24": 117,
+          "25": 25,
+          "26": 151,
+          "27": 238,
+          "28": 123,
+          "29": 202,
+          "30": 242,
+          "31": 191
+        },
+        "fileEncSha256": {
+          "0": 248,
+          "1": 222,
+          "2": 83,
+          "3": 140,
+          "4": 71,
+          "5": 204,
+          "6": 19,
+          "7": 183,
+          "8": 13,
+          "9": 93,
+          "10": 167,
+          "11": 137,
+          "12": 133,
+          "13": 199,
+          "14": 75,
+          "15": 85,
+          "16": 197,
+          "17": 250,
+          "18": 141,
+          "19": 27,
+          "20": 4,
+          "21": 108,
+          "22": 238,
+          "23": 55,
+          "24": 165,
+          "25": 124,
+          "26": 76,
+          "27": 72,
+          "28": 65,
+          "29": 139,
+          "30": 123,
+          "31": 121
+        },
+        "directPath": "/o1/v/t24/f2/m238/AQPWQxOXRapO4ElZwnRBX0odAcSLphadqJlMHZqTSBSndwK-0MUcQ5fJOmydst...[TRUNCATED 216 chars]",
+        "mediaKeyTimestamp": {
+          "low": 1781461807,
+          "high": 0,
+          "unsigned": false
+        },
+        "contextInfo": {
+          "mentionedJid": [],
+          "groupMentions": [],
+          "ephemeralSettingTimestamp": {
+            "low": 1781289007,
+            "high": 0,
+            "unsigned": false
+          },
+          "disappearingMode": {
+            "initiator": 0
+          }
+        }
+      },
+      "base64": "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSop...[TRUNCATED 11704 chars]"
+    },
+    "contextInfo": {
+      "mentionedJid": [],
+      "groupMentions": [],
+      "ephemeralSettingTimestamp": {
+        "low": 1781289007,
+        "high": 0,
+        "unsigned": false
+      },
+      "disappearingMode": {
+        "initiator": 0
+      }
+    },
+    "messageType": "imageMessage",
+    "messageTimestamp": 1781461807,
+    "instanceId": "acf950c6-8dd6-4466-a81f-37d54646df01",
+    "source": "web"
+  }
+}
