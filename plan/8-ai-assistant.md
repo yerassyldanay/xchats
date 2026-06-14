@@ -2,8 +2,8 @@
 
 The brain is the core of xchats. Given a customer conversation it produces **one reviewed reply
 draft** — text and/or attached media, in the customer's language, grounded **only** in a curated
-knowledge base. It never sends by itself (suggest-and-approve; auto-send is gated by the org
-`auto_response_mode`).
+knowledge base. It never sends by itself (suggest-and-approve). In **v1 the auto-send path is not
+built at all** (the `respond_mode` auto modes are deferred — see *v1 adapter mode* below).
 
 It is **already implemented** and reused as-is — vendored into this repo as a git submodule:
 
@@ -13,6 +13,20 @@ It is **already implemented** and reused as-is — vendored into this repo as a 
 
 xchats **ports** it: replace the Chatwoot reads with xchats Postgres reads, write the draft to an
 `ai_drafts` row, and move config storage from SQLite to Postgres. The logic stays the same.
+
+## v1 adapter mode (the minimal slice)
+
+In v1 the brain runs in a reduced mode — the same ported logic, a smaller surface:
+- **Text-only drafts.** `asset_refs` may be emitted but are **ignored/logged, not rendered or sent**
+  (suggested media is deferred — `8.2`, `8.6`).
+- **One active seeded Snapshot**, loaded from `0002_seed.sql`/markdown on boot. **No admin UI, no
+  publish/rollback, no Playground** (the CMS is deferred — `8.6`, `5-ui-pages.md`).
+- **On-demand trigger:** a draft is produced when the member presses **"Suggest reply"**, not on every
+  inbound — this controls LLM spend and latency in v1. Auto-draft-on-inbound is a fast-follow.
+- **No auto-send.** The human approves every send.
+
+Everything beyond this (media, CMS, auto-send) is designed in `8.*` but staged to v2+ (see
+`0.1-definition-of-done.md` Phases 4B–4D).
 
 ## Core idea in one line
 

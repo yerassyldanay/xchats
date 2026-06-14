@@ -48,17 +48,16 @@ Run the same stack and iterate: env points the backend at local Postgres + fake 
 exercise endpoints with the captured payloads; watch logs. Because **addressing is env-driven**,
 the only difference from prod is which hosts/ports the env points at.
 
-## Testing the swappable stack
+## Stack (v1 = one implementation per boundary)
 
-The blob store and the queue/bus are **ports with interchangeable adapters** (see
-`2-architecture.md`). Isolated runs use the lightweight defaults; the heavier adapters are tested
-behind compose profiles when needed:
+v1 ships **one adapter each** behind the blob and queue ports (see `2-architecture.md`):
 
-- blob: `local-disk` (default)  ↔  `minio` (S3-compatible) test container.
-- queue/bus: `channel` / `postgres` (default)  ↔  `kafka` test container.
+- blob: `local-disk` only (media bytes are a deferred surface anyway — v1 renders placeholders).
+- queue/bus: the **Postgres job table** only (an in-process Go channel is for tests only).
 
-A single **adapter conformance suite** runs against every implementation, so switching to
-MinIO/S3 or Kafka in prod is a config change, not a code change.
+**Deferred (v2+):** the `minio`/`kafka` adapters and the **adapter conformance suite** that runs
+across implementations. There is no second adapter to conform to in v1 — don't build it until one
+exists.
 
 ## Real smoke (manual, outside isolation)
 

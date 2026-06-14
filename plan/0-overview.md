@@ -90,29 +90,42 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
 
 Reading order: **0 (this) → 1-concept → 2-architecture → 3-sync → 4-wa-connection-example.**
 
-Build order (phased):
+Build order (phased — v1 is the minimal slice; see `0.1-definition-of-done.md`):
+0. **Prerequisites (blocking)** — init + verify the brain submodule (`go test ./...` passes); capture
+   the missing inbound `messages.upsert` + a matched `send.message`→`messages.update` pair; seed a
+   **non-empty** KB. Phases 2 and 4 are guesses until these land.
 1. **Foundation** — monorepo scaffold (`backend/`, `frontend/`, `deploy/`), one-command run,
    env-driven addressing, DB migrations; backend reaches the reused Evolution + Postgres.
-2. **Transport** — webhook receiver → normalize → DB; send text/media; delivery/read status.
-   Reuse `scripts/evolution_client.py` + the captured payloads as the oracle.
+2. **Transport** — webhook receiver → normalize → DB; send text; delivery/read status (inbound media
+   is a placeholder in v1). Reuse `scripts/evolution_client.py` + the captured payloads as the oracle.
 2.5. **AI dry-run (de-risk the differentiator early)** — once normalized messages exist, port just
-   `HandleMessage` + a new Postgres Window/Profile reader and run it against `captures/` fixtures
-   (or wire the Playground to Phase-2 rows), dumping drafts to a log / minimal view. The brain is
-   standalone and mockable, so this is cheap — and it answers "are the suggestions any good?"
-   **weeks before** the full UI, instead of discovering it last.
-3. **UI** — connect WhatsApp (QR), conversation inbox, send, live updates over SSE.
-4. **AI** — port the assistant; drafts appear in the inbox; persona/knowledge configurable in the UI.
+   `HandleMessage` + a new Postgres Window/Profile reader and run it against `captures/` fixtures,
+   dumping drafts to a log / minimal view. Cheap (the brain is standalone and mockable), and answers
+   "are the suggestions any good?" **weeks before** the full UI.
+3. **UI (slice)** — Login + Chatboard only (conversation list + thread + composer + AI draft card).
+   One **pre-connected** account; the multi-account/QR connect manager is deferred.
+4. **AI (slice = draft loop)** — port the assistant in **v1 adapter mode** (text-only, one seeded
+   snapshot, on-demand "Suggest" trigger, no media refs, no admin UI, no playground, no auto-send);
+   drafts appear in the inbox; the KB is seeded from `0002_seed.sql`/markdown, not edited in a UI.
 
 > **Where the risk actually is:** the highest-risk, least-proven v1 work is **WhatsApp
 > transport + sync** (multi-device reconciliation, `@lid`↔phone identity, gap detection, monotonic
-> status). The AI brain is a **vendored, tested port** (`8-ai-assistant.md`) and is comparatively
-> de-risked — it is the product's *value*, not where the build effort or risk concentrates.
+> status). The AI brain is a **vendored, tested port** (`8-ai-assistant.md`, submodule now
+> initialized) and is comparatively de-risked — it is the product's *value*, not where the build
+> effort or risk concentrates. **Verify once before relying on it:**
+> `cd plan/examples/repos/xpayment-crm && go test ./...` must pass.
 
-## The final point (done =)
+## The final point (done =) — the v1 vertical slice
 
-One `make up` brings up Evolution + backend + frontend. From the UI a member can: **connect a
-WhatsApp number (QR), receive and send text + media, see sent/delivered/read status, and get
-AI-suggested replies they approve and send** — with the assistant configurable in the same UI.
+v1 is **one ruthless vertical slice**, not a platform. One `make up` brings up Evolution + backend +
+frontend, and against a **single pre-connected** WhatsApp account a member can: **receive a WhatsApp
+text message, see it in the inbox, get one grounded AI-suggested text reply, edit/approve it, send it,
+and see delivery/read status** — surviving duplicate webhooks and retries without corrupting data.
+
+Out of the v1 bar (deferred, design kept — see each doc's "deferred" markers): media send/receive
+beyond a placeholder, the multi-account/QR connect manager, full history sync, the KB admin CMS,
+auto-send, and the Contacts/Settings pages. The rule: *if a feature can't break the
+inbound→draft→approve→send→status loop, it isn't in v1.*
 
 ## Non-negotiable principles
 
@@ -121,4 +134,5 @@ AI-suggested replies they approve and send** — with the assistant configurable
   idempotent upsert path** for live + sync (dedup on `evolution_message_id`).
 - **Stable identity:** resolve `@lid` ↔ phone via `remoteJidAlt`; key conversations on the phone identity.
 - **Env-driven addressing**; reuse existing Postgres / Redis / Evolution.
-- **Suggest-and-approve AI** by default — no uncontrolled auto-send.
+- **Suggest-and-approve AI** — in v1 the auto-send path is **not built** (not just disabled); the
+  human approves every send.

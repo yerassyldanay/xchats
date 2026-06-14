@@ -16,16 +16,23 @@ Evolution two ways, and normalize both into our Postgres:
 
 ### Three sync flows
 
-1. **Live sync — keep new data in sync (steady state).**
+> **v1 builds only live sync.** Staging: **v1 = live sync only**; **v2 = targeted recent sync**
+> (fetch the last ~10–20 messages for a conversation on first appearance, if Evolution makes it
+> easy); **v3 = full initial sync + reconcile scheduler**. The design for all three stays here, but
+> full backfill can become the whole project and can bury a fresh inbox under stale messages on
+> connect — so it is staged, not built first. The AI must always carry the `history_state`
+> (`live_only | partial | unknown`) so it never pretends to know older history.
+
+1. **Live sync — keep new data in sync (steady state). [v1]**
    Evolution → webhook edge → store raw event → enqueue → worker normalizes → upsert
    contact / conversation / message / status. Every new inbound, outbound, and status change
    flows through here in real time.
-2. **Initial (old) sync — collect history when an account connects.**
+2. **Initial (old) sync — collect history when an account connects. [v2 targeted / v3 full]**
    A background job pulls existing **contacts, chats, and messages** from Evolution's `find*`
    endpoints and upserts them through the **same code path** as live. Recent/active chats are
    imported first so the inbox is usable immediately; the rest backfills. Media is fetched
    lazily by a separate job.
-3. **Reconcile — gap-fill for resilience.**
+3. **Reconcile — gap-fill for resilience. [v3]**
    A periodic job re-pulls recent chats/messages to catch anything missed during downtime or a
    dropped webhook. Because upserts are idempotent, re-pulling never creates duplicates.
 
@@ -530,16 +537,19 @@ Later, unread state can become per-member.
 
 ## Q: How do we handle groups?
 
-For v1, either disable groups or store them separately.
+**v1: drop `@g.us` events at the webhook/normalizer before upsert** — `process_event` and `ai_draft`
+never run for group JIDs (a group message would otherwise produce a nonsensical single-contact
+draft). This is the cheapest safe default; no `conversation_type`/participants schema is needed in v1.
 
-Group chats introduce participants, mentions, sender identity per message, and different assignment behavior. If included, conversations need:
+Group chats introduce participants, mentions, sender identity per message, and different assignment
+behavior. **If later included (v2+),** conversations need:
 
 ```text
 conversation_type=direct/group
 participants table
 ```
 
-Direct chats should be completed first.
+Direct chats are completed first regardless.
 
 ## Q: How do we safely change Evolution versions?
 

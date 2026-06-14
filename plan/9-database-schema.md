@@ -15,6 +15,11 @@ no SQL files yet.
 - **3NF by default**: a child table does **not** repeat an ancestor's `organization_id` when it is
   reachable by foreign keys (it is derived by join). Deliberate, documented denormalizations are
   listed at the end.
+- **v1 scope marker:** this is the full data model; **v1 only populates a subset.** Tables for
+  deferred surfaces stay defined but **empty/unused** in v1: `sync_jobs`, `ai_audit_log`,
+  `assignment_events`, `ai_draft_assets`, `whatsapp_qr_sessions` (no connect UI), and the media/price
+  tables `message_media` / `ai_assets` / `ai_prices` (media + suggested assets are deferred). Don't
+  pour migration/wiring effort into them until their phase (see `0.1-definition-of-done.md`).
 
 ---
 
@@ -243,12 +248,14 @@ draft_id           uuid  PK
 conversation_id    uuid  FK -> conversations         -- organization derived via conversation (3NF)
 trigger_message_id uuid  FK -> messages
 draft_text         text   -- prices already injected
+sent_message_id    uuid  FK -> messages  NULL  -- the message a member actually sent (final text after edits); NULL until approved. Makes draft-acceptance / edit-distance computable from day one (the v1 success metric)
 context_state      text   -- 'full'|'partial'|'syncing'
 confidence         numeric
 escalate           bool
 escalation_reason  text
-draft_state        text   -- 'suggested'|'approved'|'rejected'|'sent'
+draft_state        text   -- 'suggested'|'approved'|'rejected'|'sent'|'superseded'
 created_at, updated_at
+PARTIAL UNIQUE (conversation_id) WHERE draft_state='suggested'  -- one pending draft per conversation (replaces the brain's in-process keyedMutex); approve via conditional UPDATE … WHERE draft_state='suggested' → 409 on conflict
 ```
 
 ### xchats.ai_draft_assets  (the media a draft suggested — normalized list)
