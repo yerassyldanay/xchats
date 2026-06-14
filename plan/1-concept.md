@@ -8,7 +8,7 @@ The first supported channel is WhatsApp through Evolution API. The platform shou
 
 ## Vision
 
-Businesses should be able to connect one or many WhatsApp accounts, invite members, receive customer messages in real time, assign conversations, and respond with help from AI. The AI should understand conversation context, old synced history, business knowledge, and available media assets.
+Businesses should be able to connect one or many WhatsApp accounts, invite members, receive customer messages in real time, assign conversations, and respond with help from AI. The AI should understand conversation context, business knowledge, and available media assets.
 
 The product should feel like a lightweight Chatwoot-style team inbox, but without the full complexity of a generic helpdesk platform.
 

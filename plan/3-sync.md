@@ -1,15 +1,14 @@
 # Message Handling (Live)
 
 How WhatsApp messages get into our Postgres. **v1 is live-only: we store what Evolution sends us,
-nothing more.** No history pull, no backfill, no reconcile.
+as it arrives — nothing more.**
 
 ## The whole thing in one paragraph
 
 We never talk to WhatsApp. **Evolution** is a linked device on the WhatsApp account (like WhatsApp
 Web) and is the only thing that touches WhatsApp. After an account is connected, Evolution
 **pushes** every event — new message, outbound reply, status change — to our webhook, and we store
-it. That's the entire system: *a message arrives → we store it.* History that existed before we
-connected is **not** imported in v1 (see "Deferred" — it's additive later, on the same code path).
+it. That's the entire system: *a message arrives → we store it.*
 
 ```
  Evolution ──webhook──► store raw ──► worker ──► upsert ──► broadcast to UI
@@ -34,9 +33,6 @@ the things that would otherwise be "edge cases" cost no extra code:
   same `key.id`. Dedup is not optional; it's load-bearing. See `captures/README.md` finding 3.)
 - **Events arriving out of order** → upsert doesn't care about order.
 - **A message for a chat we've never seen** → the worker just creates the conversation.
-
-(The same rule is also what will later let history pull share this path without duplicating data —
-but that's a v2 concern.)
 
 ## Receiving is split from processing (why nothing is lost)
 
@@ -85,7 +81,7 @@ Why v1 survives without resolving `@lid`:
 - **Status** correlates by message id (`keyId`), **not** by JID (see below) — so the `@lid` on
   `messages.update` never needs mapping.
 - **`@lid`-keyed `chats.*`/`contacts.*`** events are cosmetic (unread, profile pic). v1 ignores
-  them; mapping `@lid`→phone is deferred with history import/enrichment.
+  them; mapping `@lid`→phone is deferred (later enrichment).
 
 `contact_identities` still earns its place for that later enrichment (and so one shared contact can
 reach several accounts — **contact is shared, conversations are separate**, one per
@@ -96,12 +92,9 @@ account + remote_jid). It is just not load-bearing for the core v1 loop.
 Outbound status arrives later via `messages.update`. Apply it **monotonically** — a late event
 never downgrades `read` back to `sent`.
 
-> **Status correlation — resolved by capture.** In the matched outbound capture,
-> `messages.update.data.keyId` **equals** the `send.message` `data.key.id` (both 22 chars, all pairs
-> matched). The earlier fear that `key.id` (22) ≠ `keyId` (40) was wrong for v2.3.7. So apply status
-> by matching `messages.update.keyId` → `messages.evolution_message_id` (the dedup key). The separate
-> `status_correlation_id` column looks **redundant** and can likely be dropped (`messages.update`
-> also carries a cuid `data.messageId` we don't need). See `captures/README.md` finding 4.
+> **Status correlation:** apply delivery/read by matching `messages.update.data.keyId` →
+> `messages.evolution_message_id` — verified equal in the captures (v2.3.7), so no separate
+> correlation id is needed. See `captures/README.md` finding 4.
 
 ## Replies sent from another device
 
@@ -125,9 +118,8 @@ Parse all of this behind **one normalizer module** so an Evolution version chang
 the whole app. Because we store raw events, old payloads can be replayed against an updated
 normalizer.
 
-> The `*_SET` events (`MESSAGES_SET`, `CHATS_SET`, `CONTACTS_SET`) are Evolution's on-connect
-> history dump. v1 **ignores** them (live-only). When history is wanted later, simply stop ignoring
-> them and upsert through the same path — no new code, free recent history.
+> The `*_SET` events (`MESSAGES_SET`, `CHATS_SET`, `CONTACTS_SET`) are **ignored** — v1 handles only
+> the live `*_UPSERT` / `*_UPDATE` / `SEND_MESSAGE` events listed above.
 
 ## Sending
 
@@ -137,7 +129,7 @@ POST /xchats/api/v1/conversations/{id}/messages
   2. Evolution POST /message/sendText
   3. store returned evolution_message_id
   4. status=sent or failed; broadcast message.updated
-  5. later: delivered/read arrive via messages.update  (status_correlation_id)
+  5. later: delivered/read arrive via messages.update  (matched on evolution_message_id)
 ```
 
 Human and AI replies share this pipeline; an AI send just starts from a member-approved `ai_draft`.
@@ -162,9 +154,7 @@ None of these are needed for correct live operation; add them in their phase, no
 
 | Deferred | Note |
 |---|---|
-| History import (`*_SET` events, or `chat/find*` pull) | Stop ignoring `*_SET`, or run a pull job → same upsert. No rework. |
 | Media (download, thumbnail, transcription) | v1 text-only. (`message_media` table removed until then.) |
-| Reconcile / gap-fill | Only matters once history import exists. |
 | Groups (`@g.us`) | Dropped at the webhook in v1 — no participants schema. |
 | Per-member unread, auto-reply/auto-send | Product features, not message correctness. |
 

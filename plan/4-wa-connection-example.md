@@ -13,12 +13,12 @@ Evolution is just the WhatsApp transport.
 ## Services
 
 ```
-Vue UI            account setup, QR screen, sync progress, inbox/chat
+Vue UI            account setup, QR screen, inbox/chat
 Backend API       account CRUD, QR polling, chat/message APIs, send endpoint
 Evolution adapter backend module that calls Evolution's REST API + normalizes responses
 Webhook receiver  catches Evolution events, stores raw, returns 200 fast
-Workers           process events, pull history, download media, run AI drafts, retry
-Realtime gateway  WebSocket/SSE → UI (account status, sync progress, new messages, drafts)
+Workers           process events, run AI drafts, retry
+Realtime gateway  WebSocket/SSE → UI (account status, new messages, drafts)
 AI assistant      reads normalized app data, suggests replies
 ```
 
@@ -31,7 +31,7 @@ POST /instance/create               POST /webhook/set/{instance}
 GET  /instance/connect/{instance}   GET  /instance/connectionState/{instance}
 POST /message/sendText/{instance}
 ```
-(`chat/findContacts|findChats|findMessages` and `sendMedia` are deferred — no history pull, text-only.)
+(`sendMedia` is deferred — text-only.)
 The full outbound surface (text/media/audio/sticker/reaction bodies) is in `4.1-evolution-send-api.md`.
 
 Ours:
@@ -54,7 +54,6 @@ GET  /xchats/api/v1/realtime
 ```
 
 Transport: QR = UI polling; events = webhook; inbox updates = WebSocket/SSE; send = plain HTTP.
-(No history pull in v1 — `chat/find*` and the `/sync` endpoints are deferred.)
 
 ## The accounts page is a thin Evolution manager
 
@@ -70,14 +69,14 @@ processed; webhook events for unassigned ones are ignored.
 UI asks for an instance name, then `POST /xchats/api/v1/whatsapp-accounts`:
 
 ```json
-{ "display_name": "Sales WhatsApp", "instance_name": "sales", "sync_full_history": true }
+{ "display_name": "Sales WhatsApp", "instance_name": "sales" }
 ```
 
 Backend:
 
 ```
 1. create wa_accounts row (connection_state=creating, organization_id=null until assigned)
-2. Evolution POST /instance/create   (WHATSAPP-BAILEYS, qrcode=true, syncFullHistory=true)
+2. Evolution POST /instance/create   (WHATSAPP-BAILEYS, qrcode=true, syncFullHistory=false — live-only)
 3. Evolution POST /webhook/set/{instance}  → points at our webhook, subscribes to the events in 3-sync.md
 4. connection_state=qr_required
 ```
@@ -122,9 +121,7 @@ The account is usable right away — there is nothing else to wait for.
 
 **One thing happens: live push.** Every new message/reply/status Evolution sees is pushed to the
 webhook, stored raw, then a worker upserts it (`3-sync.md` → "The one mechanism"). The inbox starts
-empty and fills in going forward. There is **no history import in v1** — chats that existed before
-the scan are not pulled. (When history is wanted later it's purely additive on the same upsert path;
-see `3-sync.md` → "Deferred".)
+empty and fills in going forward from live events.
 
 ```
 1. Evolution pushes MESSAGES_UPSERT
@@ -143,7 +140,7 @@ POST /xchats/api/v1/conversations/{id}/messages
   2. Evolution POST /message/sendText (or sendMedia)
   3. store returned evolution_message_id
   4. status=sent or failed; broadcast message.updated
-  5. later: delivered/read arrive via messages.update  (status_correlation_id — see 3-sync.md)
+  5. later: delivered/read arrive via messages.update  (matched on evolution_message_id — see 3-sync.md)
 ```
 
 Human and AI replies share this pipeline; an AI send just starts from a member-approved `ai_draft`.
@@ -161,8 +158,7 @@ Auto-send is a deferred feature (v1 = on-demand drafts only).
 12:00:22  AI drafts using the live message (+ any messages since connect)
 ```
 
-Useful the instant it connects; each conversation accumulates history going forward from live
-events. No backfill, no blocking.
+Useful the instant it connects; each conversation builds up from live events going forward.
 
 ## Tables
 

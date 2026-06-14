@@ -49,10 +49,10 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
 - **2-architecture.md** — components, monorepo layout, env-driven addressing, **v1 decisions**
   (users/org seed, auto-response, WhatsApp-accounts manager, Postgres-only, security, frontend),
   the **two-file config model**, and the **testing strategy** (one-command isolated e2e).
-- **3-sync.md** — the sync model + detailed Q&A: live events, initial/old sync, reconcile/gaps,
-  dedup, media, `@lid`↔phone, and **multi-device (phone/Web) sync**.
-- **4-wa-connection-example.md** — concrete flows + the **Postgres schema**: account connect/QR,
-  initial sync, incoming/outgoing handling, table DDL.
+- **3-sync.md** — live message handling: store-first → idempotent upsert, dedup, `@lid`↔phone,
+  status correlation, and **multi-device (phone/Web) sync** (v1 is live-only).
+- **4-wa-connection-example.md** — concrete live flows: incoming/outgoing handling and sending
+  (account connect/QR kept as the deferred reference design).
 - **5-ui-pages.md** — the frontend pages (Login, Chatboard, Contacts, WhatsApp Accounts, AI
   Assistant, Settings); reference screenshot `./ui-chatboard.png`.
 - **6-isolated-testing.md** — how to develop & verify the whole app (and each element) in an
@@ -109,7 +109,7 @@ Build order (phased — v1 is the minimal slice; see `0.1-definition-of-done.md`
    drafts appear in the inbox; the KB is seeded from `0002_seed.sql`/markdown, not edited in a UI.
 
 > **Where the risk actually is:** the highest-risk, least-proven v1 work is **WhatsApp
-> transport + sync** (multi-device reconciliation, `@lid`↔phone identity, gap detection, monotonic
+> transport** (multi-device reconciliation, `@lid`↔phone identity, monotonic
 > status). The AI brain is a **vendored, tested port** (`8-ai-assistant.md`, submodule now
 > initialized) and is comparatively de-risked — it is the product's *value*, not where the build
 > effort or risk concentrates. **Verify once before relying on it:**
@@ -123,7 +123,7 @@ text message, see it in the inbox, get one grounded AI-suggested text reply, edi
 and see delivery/read status** — surviving duplicate webhooks and retries without corrupting data.
 
 Out of the v1 bar (deferred, design kept — see each doc's "deferred" markers): media send/receive
-beyond a placeholder, the multi-account/QR connect manager, full history sync, the KB admin CMS,
+beyond a placeholder, the multi-account/QR connect manager, the KB admin CMS,
 auto-send, and the Contacts/Settings pages. The rule: *if a feature can't break the
 inbound→draft→approve→send→status loop, it isn't in v1.*
 
@@ -131,7 +131,7 @@ inbound→draft→approve→send→status loop, it isn't in v1.*
 
 - Evolution is transport; the **backend is the source of truth** (never read Evolution's tables directly).
 - Webhook **ingests fast** (store-raw + 200 + enqueue); **workers do the real work**; **one
-  idempotent upsert path** for live + sync (dedup on `evolution_message_id`).
+  idempotent upsert path** for live ingest + retries (dedup on `evolution_message_id`).
 - **Stable identity:** resolve `@lid` ↔ phone via `remoteJidAlt`; key conversations on the phone identity.
 - **Env-driven addressing**; reuse existing Postgres / Redis / Evolution.
 - **Suggest-and-approve AI** — in v1 the auto-send path is **not built** (not just disabled); the

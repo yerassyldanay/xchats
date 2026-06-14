@@ -120,8 +120,6 @@ POST   /xchats/api/v1/whatsapp-accounts/{id}/qr        (re)generate QR
 GET    /xchats/api/v1/whatsapp-accounts/{id}/qr        poll QR / connection status
 POST   /xchats/api/v1/whatsapp-accounts/{id}/assign
 POST   /xchats/api/v1/whatsapp-accounts/{id}/unassign
-POST   /xchats/api/v1/whatsapp-accounts/{id}/sync      trigger (re)sync
-GET    /xchats/api/v1/whatsapp-accounts/{id}/sync      sync progress
 ```
 
 ### Inbox: conversations, messages, contacts — `/xchats/api/v1`
@@ -156,8 +154,7 @@ POST   /xchats/api/v1/assistant/playground             dry-run a draft (no send)
 
 ```text
 GET    /xchats/api/v1/realtime                          SSE stream (message.*, conversation.*,
-                                                         ai_draft.created, wa_account.status_changed,
-                                                         sync.progress)
+                                                         ai_draft.created, wa_account.status_changed)
 ```
 
 ### Evolution webhook ingress — `/evolution/api/v1`

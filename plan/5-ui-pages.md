@@ -35,8 +35,7 @@ A three-pane, Chatwoot-style team inbox. Reference screenshot: `./ui-chatboard.p
       send) — the familiar path, not a second editor.
     - **Escalation must be legible:** when the brain has no KB answer it returns a holding reply —
       the card shows *"AI doesn't know this — reply manually"* + the `escalation_reason`, never a
-      confident-looking wrong draft. Low confidence shows a badge; `partial/syncing` context shows a
-      soft "history incomplete" note. (Suggested **media** is **not** rendered in v1.)
+      confident-looking wrong draft. Low confidence shows a badge. (Suggested **media** is **not** rendered in v1.)
     - Approve is idempotent: once sent (or superseded by a newer inbound), the card greys out via
       `ai_draft.updated` so a second agent can't double-send.
   - **Contact mini-profile** — the contact's key attributes/identities (phone, `@lid`, push name).

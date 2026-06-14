@@ -16,8 +16,8 @@ no SQL files yet.
   reachable by foreign keys (it is derived by join). Deliberate, documented denormalizations are
   listed at the end.
 - **v1 scope marker:** this is the full data model; **v1 only populates a subset.**
-  - **Removed entirely** (no history sync, text-only — see `3-sync.md`): `sync_jobs` and
-    `message_media`. They come back additively when history import / media land.
+  - **Removed** (not used in v1): `sync_jobs` (live-only — nothing to sync) and `message_media`
+    (text-only).
   - **Defined but empty/unused** in v1: `wa_qr_sessions` (connect/QR deferred),
     `ai_audit_log`, `assignment_events`, `ai_draft_assets`, `ai_assets`, `ai_prices`. Don't pour
     migration/wiring effort into them until their phase (see `0.1-definition-of-done.md`).
@@ -78,7 +78,7 @@ last_live_event_at       timestamptz
 created_at, updated_at
 ```
 > Live-only: `sync_state` / `history_state` / `last_synced_at` / `last_reconcile_at` are dropped —
-> there is no sync to track. They return with history import.
+> there is no sync to track.
 > "Assigned" is **derived** (`organization_id IS NOT NULL`) — no stored flag. Shared Evolution
 > credentials live in `.env`.
 
@@ -143,27 +143,21 @@ conversation_id      uuid  FK -> conversations
 direction            text  -- 'in'|'out'
 sender_kind          text  -- 'contact'|'member'|'ai'|'external_account'
 sender_member_id     uuid  FK -> members  NULL
-evolution_message_id text  -- Evolution key.id (dedupe natural key)
-status_correlation_id text -- the id messages.update keys status on (likely the cuid messageId, NOT key.id) -- UNVERIFIED, see note
+evolution_message_id text  -- Evolution key.id (dedupe natural key; status correlates here too)
 participant_jid      text  -- group sender (groups deferred v1); contact/remote derived via conversation
 message_kind         text  -- 'conversation'|'extendedTextMessage'|'imageMessage'|...
 body                 text  -- text or media caption
 delivery_state       text  -- 'queued'|'sent'|'delivered'|'read'|'failed'
-source               text  -- 'live_webhook'|'sync'|'app'
+source               text  -- 'live_webhook'|'app'
 raw                  jsonb -- the original event document (audit/replay)
 message_ts           timestamptz
 created_at, updated_at
 UNIQUE (account_id, evolution_message_id)
 INDEX  (conversation_id, message_ts)
-INDEX  (account_id, status_correlation_id)   -- status updates resolve here, not on the dedup key
 ```
-> **Status correlation — resolved by capture; `status_correlation_id` likely redundant.** In the
-> matched outbound capture, `messages.update.data.keyId` **equals** the `send.message` `data.key.id`
-> (both 22 chars, all pairs matched). The earlier fear that `key.id` (22) ≠ `keyId` (40) was wrong
-> for Evolution v2.3.7. So apply delivery/read by matching `messages.update.keyId` →
-> `messages.evolution_message_id` (the dedup key); `status_correlation_id` and its index can be
-> **dropped** (kept defined for now pending one more confirmation). `messages.update` also carries a
-> cuid `data.messageId` we don't need. See `captures/README.md` finding 4.
+> **Status correlation:** apply delivery/read by matching `messages.update.data.keyId` →
+> `messages.evolution_message_id` — verified equal in the captures (v2.3.7), so no separate
+> correlation column is needed. See `captures/README.md` finding 4.
 
 > **`message_media` removed in v1** (text-only). Media bodies are ignored; the table returns 1:1
 > with messages when the media phase lands.
@@ -234,7 +228,7 @@ conversation_id    uuid  FK -> conversations         -- organization derived via
 trigger_message_id uuid  FK -> messages
 draft_text         text   -- prices already injected
 sent_message_id    uuid  FK -> messages  NULL  -- the message a member actually sent (final text after edits); NULL until approved. Makes draft-acceptance / edit-distance computable from day one (the v1 success metric)
-context_state      text   -- 'full'|'partial'|'syncing'
+context_state      text   -- 'full' (v1 live-only; no partial/syncing context)
 confidence         numeric
 escalate           bool
 escalation_reason  text
@@ -283,7 +277,7 @@ INDEX  (process_state)
 ### xchats.jobs  (queue / message bus — swappable adapter)
 ```
 job_id        uuid PK
-job_kind      text  -- v1: 'process_event'|'ai_draft'|'outbound_send'  (media_download/reconcile later)
+job_kind      text  -- v1: 'process_event'|'ai_draft'|'outbound_send'  (media_download later)
 payload       jsonb -- polymorphic job args
 job_state     text  -- 'pending'|'running'|'done'|'failed'
 run_after     timestamptz
@@ -294,7 +288,7 @@ created_at, updated_at
 INDEX (job_state, run_after)            -- worker poll: FOR UPDATE SKIP LOCKED
 ```
 
-> **`sync_jobs` removed in v1** — live-only, nothing to track. It returns when history import lands.
+> **`sync_jobs` removed in v1** — live-only, nothing to sync.
 
 ## The three load-bearing constraints
 

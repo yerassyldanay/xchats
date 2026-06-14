@@ -12,7 +12,7 @@ real-but-local (Postgres) or a controllable fake (Evolution, the LLM).
 ## Test doubles & locals
 
 - **Fake Evolution** — a small HTTP stub implementing the endpoints we call (`instance/create`,
-  `instance/connect`, `message/sendText`, `message/sendMedia`, `chat/find*`,
+  `instance/connect`, `message/sendText`, `message/sendMedia`,
   `getBase64FromMediaMessage`) with recorded responses, that can also **POST captured webhook
   events** at our webhook edge. It **records what we sent** so tests can assert send shapes
   (e.g. that we send to the phone, not the `@lid`).

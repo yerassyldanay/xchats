@@ -50,7 +50,7 @@ under the hood; the orchestration is what ties them together.
   We do **not** fork or rebuild it. It is pure WhatsApp transport.
 - The orchestration gives Evolution its own Postgres database/schema, a Redis cache, and a
   persistent volume (Baileys session).
-- Our backend drives Evolution over REST (send, media, history) and receives its webhooks.
+- Our backend drives Evolution over REST (send, media) and receives its webhooks.
   Evolution's own Manager UI is internal/admin only — never the product UI.
 
 ### Webhook receiver — do we write it from scratch?
@@ -153,14 +153,13 @@ behave the same. The key: the Evolution contract is pinned to **real captured pa
 can reproduce it deterministically.
 
 - **Fake Evolution** — a small stub HTTP server implementing the Evolution endpoints we call
-  (`instance/create`, `instance/connect`, `message/sendText`, `message/sendMedia`, `chat/find*`,
+  (`instance/create`, `instance/connect`, `message/sendText`, `message/sendMedia`,
   `getBase64FromMediaMessage`) with canned responses, and able to **POST captured webhook events**
   to our webhook edge.
 - **Fixtures** — the real payloads in `captures/` are the webhook inputs and expected REST shapes.
-  The current set is a **seed** (`send.message`, `messages.update`, `chats.upsert`, a `findMessages`
-  sample); it is **missing** the core inbound `messages.upsert` (text + media), the `getBase64`
-  response, and a matched send→`messages.update` pair. These must be captured before the suite is
-  trustworthy — see `captures/README.md` and `0.1-definition-of-done.md` Phase 2.
+  The set covers inbound `messages.upsert` (text + image), the outbound send fixtures
+  (`sendText`/`sendMedia`/`sendSticker`), `messages.update`, `chats.upsert`, and a matched
+  send→`messages.update` pair — see `captures/README.md`.
 - **Test stack (one run)** — `make test-e2e` brings up **Postgres + backend + fake-Evolution**
   (e.g. `deploy/compose.test.yaml`), runs migrations, then executes the suite that:
   1. replays captured webhook events → asserts normalized rows (contacts/conversations/messages),
@@ -282,8 +281,8 @@ Configuration is split by **secrecy and change-rate**:
   Evolution base URL + API key, the shared webhook token, the LLM API key, `API_BASE_URL`. Secret;
   never committed (an `.env.example` is).
 - **`config.yaml`** — non-secret app setup and tunables: timeouts, retry/backoff, min/max values
-  (rate limits, queue concurrency, page sizes), auth settings (session TTL, password policy), sync
-  intervals, auto-response defaults, and the **seed: default organization + initial users**
+  (rate limits, queue concurrency, page sizes), auth settings (session TTL, password policy),
+  auto-response defaults, and the **seed: default organization + initial users**
   (email + password), upserted on startup.
 
 Rule of thumb: **secrets → `.env`; behavior, limits, and seed data → `config.yaml`.** Both load at
@@ -333,12 +332,9 @@ Workers process work that should not block user requests or webhook responses.
 Responsibilities:
 
 - process raw Evolution events
-- sync old contacts/chats/messages
-- download and store media
 - update delivery/read statuses
 - run AI draft jobs
 - retry failed outbound sends
-- reconcile gaps after downtime
 
 Workers can initially run inside the same Go binary as background goroutines. They can later be split into separate processes if load grows.
 
@@ -360,7 +356,6 @@ Events:
 - `assignment.changed`
 - `ai_draft.created`
 - `wa_account.status_changed`
-- `sync.progress`
 
 ### UI
 
@@ -378,7 +373,6 @@ Core screens:
 - assignment control
 - contact panel
 - AI suggestions panel
-- media picker
 
 The first version should avoid complex helpdesk features such as SLA, campaigns, detailed permissions, macros, reports, billing, and omnichannel automation.
 
@@ -389,11 +383,9 @@ The AI assistant helps members respond faster.
 Responsibilities:
 
 - generate reply drafts
-- suggest media files
 - summarize long conversations
 - suggest next action
 - detect missing information
-- optionally auto-reply only when explicitly enabled by rules
 
 The assistant should read from the app database, not directly from Evolution tables.
 
@@ -405,18 +397,17 @@ Core tables:
 
 ```text
 organizations
-users
+members
 organization_members
 wa_accounts
 contacts
 contact_identities
 conversations
 messages
-message_media
-conversation_assignments
+assignment_events
 ai_drafts
 evolution_events
-sync_jobs
+jobs
 ```
 
 Important constraints:
@@ -493,6 +484,5 @@ The app owns:
 - normalized messages
 - media references
 - AI drafts
-- sync state
-- raw event history
+- raw event log
 

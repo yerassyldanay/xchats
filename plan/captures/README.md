@@ -17,7 +17,6 @@ multi-MB inline media `base64` are redacted/truncated.
 | `samples/webhook_bodies/send_message.json` | `send.message` (outbound echo) | `data.key.id` = evolution_message_id; `status: PENDING` |
 | `samples/webhook_bodies/messages_update.json` | `messages.update` (status) | delivery/read; keyed by `data.keyId`; `status: DELIVERY_ACK` |
 | `samples/webhook_bodies/chats_upsert.json` | `chats.upsert` | `data` is an **array**, keyed by `@lid` |
-| `samples/messages_sample.json` | `findMessages` records | history-pull shape (deferred feature) |
 
 Every webhook body has the same envelope: `event`, `instance`, `data`, and top-level
 `destination`, `date_time`, `sender`, `server_url`, `apikey`.
@@ -83,7 +82,7 @@ join those two id-spaces by JID:
 - **Conversations** are built from message events → keyed by the **phone** `remoteJid`.
 - **Status updates** correlate by message id (`keyId`), **not** by JID — see finding 4.
 - **`@lid`-keyed `chats.*` / `contacts.*`** events are cosmetic (unread/profile pic). v1 can ignore
-  them; mapping `@lid`→phone is only needed later for enrichment (defer with history import).
+  them; mapping `@lid`→phone is only needed later for enrichment.
 
 So `contact_identities` still earns its place (it links the ids when we do enrichment later), but
 v1 functions without resolving `@lid` for chat/contact events.
