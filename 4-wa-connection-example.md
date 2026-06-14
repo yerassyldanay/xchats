@@ -65,22 +65,27 @@ Evolution supports instance creation with `syncFullHistory`, QR/pairing generati
 ## App Endpoints We Expose
 
 ```text
-POST /api/whatsapp-accounts
-GET  /api/whatsapp-accounts
-GET  /api/whatsapp-accounts/{id}
-POST /api/whatsapp-accounts/{id}/qr
-GET  /api/whatsapp-accounts/{id}/qr
-POST /api/whatsapp-accounts/{id}/sync
-GET  /api/whatsapp-accounts/{id}/sync
+# WhatsApp accounts = simplified Evolution manager
+GET  /xchats/api/v1/whatsapp-accounts                 # ALL Evolution instances, each with status + assigned flag
+POST /xchats/api/v1/whatsapp-accounts                 # add: create a new Evolution instance (by name)
+GET  /xchats/api/v1/whatsapp-accounts/{id}
+POST /xchats/api/v1/whatsapp-accounts/{id}/qr         # (re)generate the QR to connect
+GET  /xchats/api/v1/whatsapp-accounts/{id}/qr         # poll QR / connection status
+POST /xchats/api/v1/whatsapp-accounts/{id}/assign     # start handling this instance for the org
+POST /xchats/api/v1/whatsapp-accounts/{id}/unassign   # stop handling it
+POST /xchats/api/v1/whatsapp-accounts/{id}/sync       # trigger (re)sync
+GET  /xchats/api/v1/whatsapp-accounts/{id}/sync       # sync progress
 
-POST /api/evolution/webhook/{whatsapp_account_id}
+# Evolution -> us (authenticated with the single shared token from .env)
+POST /evolution/api/v1/webhook/{whatsapp_account_id}
 
-GET  /api/conversations
-GET  /api/conversations/{id}/messages
-POST /api/conversations/{id}/messages
-POST /api/conversations/{id}/assign
+# Inbox
+GET  /xchats/api/v1/conversations
+GET  /xchats/api/v1/conversations/{id}/messages
+POST /xchats/api/v1/conversations/{id}/messages
+POST /xchats/api/v1/conversations/{id}/assign
 
-GET  /api/realtime
+GET  /xchats/api/v1/realtime
 ```
 
 Transport:
@@ -91,51 +96,59 @@ Transport:
 - Send message: normal HTTP request from UI to backend.
 - Old sync/resync: background worker with progress updates.
 
+## Managing Instances (the simplified manager)
+
+xchats **reuses a running Evolution**. The WhatsApp-accounts page mirrors Evolution's `/manager`,
+with a simpler UX:
+
+- `GET /xchats/api/v1/whatsapp-accounts` returns **all Evolution instances** (fetched from Evolution), each
+  with connection status and an **assigned** flag.
+- **Assign / unassign** toggles whether xchats handles an instance. Only **assigned** instances are
+  processed; webhook events for unassigned instances are ignored. Old/pre-existing instances appear
+  in the list with an **Assign** button.
+
 ## Flow: Add WhatsApp Account
 
 ### 1. User clicks "Add WhatsApp Account"
 
-UI calls:
+UI opens a modal for an **instance name** + scan instructions, then calls:
 
 ```text
-POST /api/whatsapp-accounts
+POST /xchats/api/v1/whatsapp-accounts
 ```
 
-Example:
-
 ```json
-{
-  "display_name": "Sales WhatsApp",
-  "sync_full_history": true
-}
+{ "display_name": "Sales WhatsApp", "instance_name": "sales", "sync_full_history": true }
 ```
 
 Backend:
 
 ```text
-1. creates whatsapp_accounts row with status=creating
-2. generates internal Evolution instance name
-3. calls Evolution POST /instance/create
-4. calls Evolution POST /webhook/set/{instance}
-5. updates account status=qr_required
-6. returns account id
+1. creates whatsapp_accounts row (status=creating, organization_id=null until assigned)
+2. calls Evolution POST /instance/create  (integration=WHATSAPP-BAILEYS, qrcode=true, syncFullHistory=true)
+3. calls Evolution POST /webhook/set/{instance} pointing at our webhook edge
+4. updates account status=qr_required
+5. returns account id
 ```
 
-Evolution instance creation should enable:
+The webhook Evolution is told to call (creds from `.env`, not per-account):
 
 ```text
-integration=WHATSAPP-BAILEYS
-qrcode=true
-syncFullHistory=true
-webhook url=https://our-app/api/evolution/webhook/{whatsapp_account_id}
+url    = {WEBHOOK_PUBLIC_BASE_URL}/evolution/api/v1/webhook/{whatsapp_account_id}
+auth   = single shared token from .env (Evolution sends it; backend verifies it)
+events = MESSAGES_UPSERT, MESSAGES_UPDATE, SEND_MESSAGE, CONNECTION_UPDATE, QRCODE_UPDATED,
+         CONTACTS_*, CHATS_*
 ```
+
+(`WEBHOOK_PUBLIC_BASE_URL`, the Evolution base URL + global API key, and the shared webhook token
+all live in `.env`; tunables/seed live in `config.yaml` — see `2-architecture.md`.)
 
 ### 2. User clicks "Generate WhatsApp QR"
 
 UI calls:
 
 ```text
-POST /api/whatsapp-accounts/{id}/qr
+POST /xchats/api/v1/whatsapp-accounts/{id}/qr
 ```
 
 Backend:
@@ -162,7 +175,7 @@ Response:
 UI polls:
 
 ```text
-GET /api/whatsapp-accounts/{id}/qr
+GET /xchats/api/v1/whatsapp-accounts/{id}/qr
 ```
 
 Every 2-3 seconds while account status is `qr_required`.
@@ -189,7 +202,7 @@ CONNECTION_UPDATE
 to:
 
 ```text
-POST /api/evolution/webhook/{whatsapp_account_id}
+POST /evolution/api/v1/webhook/{whatsapp_account_id}
 ```
 
 Backend:
@@ -199,8 +212,9 @@ Backend:
 2. updates whatsapp_accounts.connection_status=connected
 3. stores owner_jid / phone_number if available
 4. marks QR session as consumed
-5. starts initial sync job
-6. broadcasts whatsapp_account.connected and sync.started
+5. auto-assigns the instance to the organization (it was just added to be handled)
+6. starts initial sync job
+7. broadcasts whatsapp_account.connected and sync.started
 ```
 
 ## Initial Sync
@@ -230,7 +244,7 @@ live messages during sync: 7
 Progress comes from:
 
 ```text
-GET /api/whatsapp-accounts/{id}/sync
+GET /xchats/api/v1/whatsapp-accounts/{id}/sync
 ```
 
 and realtime events:
@@ -280,10 +294,13 @@ This prevents AI from answering with incomplete context. The draft can include `
 
 ### organizations
 
-Company/workspace.
+Company/workspace. Carries the auto-response policy.
 
 ```text
-id, name, created_at, updated_at
+id, name,
+auto_response_mode,     -- NEVER | CONFIGURE_TIME | ALWAYS
+auto_response_window,   -- time window used when mode = CONFIGURE_TIME
+created_at, updated_at
 ```
 
 ### users
@@ -304,16 +321,17 @@ id, organization_id, user_id, created_at
 
 ### whatsapp_accounts
 
-One connected WhatsApp number/Evolution instance.
+Mirrors an Evolution instance. `organization_id` is **null when unassigned** and set when
+assigned — only assigned accounts are processed. Shared Evolution credentials (base URL, global
+API key, webhook token) live in `.env`, **not** per row.
 
 ```text
 id
-organization_id
+organization_id           -- null = unassigned (not handled); set = assigned to the org
+assigned                  -- convenience flag (organization_id IS NOT NULL)
 display_name
-evolution_base_url
 evolution_instance_name
 evolution_instance_id
-api_key_encrypted
 owner_jid
 phone_number
 connection_status
@@ -563,7 +581,7 @@ Backend:
 Human sends from UI:
 
 ```text
-POST /api/conversations/{id}/messages
+POST /xchats/api/v1/conversations/{id}/messages
 ```
 
 Backend:

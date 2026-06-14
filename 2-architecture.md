@@ -145,20 +145,109 @@ network, and production domains by changing env only.
 - Frontend: component/unit tests (Vitest); optional end-to-end (Playwright) against a running backend.
 - The two are tested independently; an e2e layer covers the full loop (UI → API → worker).
 
+#### One-command end-to-end test in an isolated environment
+
+We must be able to validate the **whole app — including Evolution integration and webhook
+handling — in an isolated environment with no real WhatsApp**, and trust that the real run will
+behave the same. The key: the Evolution contract is pinned to **real captured payloads**, so we
+can reproduce it deterministically.
+
+- **Fake Evolution** — a small stub HTTP server implementing the Evolution endpoints we call
+  (`instance/create`, `instance/connect`, `message/sendText`, `message/sendMedia`, `chat/find*`,
+  `getBase64FromMediaMessage`) with canned responses, and able to **POST captured webhook events**
+  to our webhook edge.
+- **Fixtures** — the real payloads in `captures/` (messages.upsert/update/send.message, text +
+  media) are the webhook inputs and the expected REST shapes.
+- **Test stack (one run)** — `make test-e2e` brings up **Postgres + backend + fake-Evolution**
+  (e.g. `deploy/compose.test.yaml`), runs migrations, then executes the suite that:
+  1. replays captured webhook events → asserts normalized rows (contacts/conversations/messages),
+     dedup, and `@lid`↔phone resolution;
+  2. calls the backend send API → asserts the fake Evolution received the correct call (phone, not `@lid`);
+  3. replays status events → asserts `sent → delivered → read` transitions;
+  4. exercises the media path against the fake `getBase64`.
+  Then it tears the stack down. **No external network** — this runs fully inside Claude Code's
+  isolated environment from one command.
+- **Real smoke (manual, outside isolation)** — a tiny optional check against the live Evolution
+  (`localhost:9700`) confirms reachability/credentials; everything else is covered by the fixtures,
+  which ARE byte-for-byte real Evolution output.
+
 ### Where the endpoints live
 
 The **backend** service exposes these route groups:
 
 | Consumer | Routes | Notes |
 |---|---|---|
-| Frontend (members) | `/api/*` and `/api/realtime` (SSE) | authenticated; queries, commands, live stream |
-| Evolution webhook | `/api/evolution/webhook/{account}/...` | token-secured; only Evolution calls it; store-raw + 200-fast + enqueue |
+| Frontend (members) | `/xchats/api/v1/*` and `/xchats/api/v1/realtime` (SSE) | authenticated; queries, commands, live stream |
+| Evolution webhook | `/evolution/api/v1/webhook/{account}/...` | token-secured; only Evolution calls it; store-raw + 200-fast + enqueue |
 | Ops | `/healthz`, `/readyz`, `/metrics` | health & monitoring |
 
 The **frontend** service serves the UI (built Vue app) on its own port and only consumes the
 backend's `/api`. **Background workers expose no public HTTP endpoints** — they are goroutines
 (or, later, a separate worker process) that consume the Postgres job queue; their interface is
 the queue, not HTTP (a split-out worker would expose only `/healthz`/`/metrics`).
+
+## v1 Scope & Decisions
+
+### Users & organization — seeded, then self-served
+
+- **One default organization** in v1; every member belongs to it.
+- The service is **bootstrapped from a config file** (JSON or YAML) that defines the default
+  organization and an initial list of users (email + password). On startup the backend **upserts**
+  them (idempotent — safe to re-run). The idea: configure the user list, then run the service.
+- After boot, any user can **create more users** (email + password) from the UI/API; new users
+  join the default organization. Login = email + password + session.
+
+### Organization settings — auto-response
+
+- The organization carries an **auto-response mode**: `NEVER | CONFIGURE_TIME | ALWAYS`, plus a
+  **time window** used when the mode is `CONFIGURE_TIME`. This governs when the AI may respond on
+  its own (default-safe: `NEVER` → suggest-and-approve only).
+
+### WhatsApp accounts — a simplified Evolution `/manager`
+
+Same idea as Evolution's `/manager` page, but a simpler UX:
+
+- **List all Evolution instances** (fetched from Evolution) with their connection status.
+- **Assign / unassign** each instance to the organization. Only **assigned** instances have their
+  messages handled by xchats; events for unassigned instances are ignored/not surfaced.
+- **Add WhatsApp account**: click → enter an instance name + scan instructions → backend creates
+  the instance and shows the **QR code** → user scans → on success it is **assigned** to the org
+  (with an **unassign** button). Existing/old instances also show assign/unassign controls.
+- Detailed connect/QR flow: see `4-wa-connection-example.md`.
+
+### Storage — PostgreSQL only
+
+- **Everything xchats owns lives in PostgreSQL** — product state, the job queue, **and** the AI
+  assistant's config/snapshots (the ported brain moves off SQLite). Different databases or schemas
+  are fine, but it is the **same Postgres server, only Postgres** — no SQLite, no other store.
+- Media **bytes** still go to the blob store (local disk → object storage); their **metadata** is
+  in Postgres. (Redis stays Evolution's cache — reused, not used by xchats directly.)
+
+### Security — single shared token
+
+- The Evolution webhook is protected by a **single shared token set in `.env`** (a general token,
+  not per-account). Evolution includes it; the backend verifies it on every webhook call.
+
+### Frontend — fast SPA
+
+- Vue 3 + Vite **single-page app** (Pinia + Vue Router), optimized purely for a fast, snappy UX —
+  no SEO/SSR/geo concerns. Talks to the backend over `/api` + SSE.
+
+### Configuration — two files
+
+Configuration is split by **secrecy and change-rate**:
+
+- **`.env`** — credentials and environment wiring: hosts, ports, passwords, the Postgres DSN, the
+  Evolution base URL + API key, the shared webhook token, the LLM API key, `API_BASE_URL`. Secret;
+  never committed (an `.env.example` is).
+- **`config.yaml`** — non-secret app setup and tunables: timeouts, retry/backoff, min/max values
+  (rate limits, queue concurrency, page sizes), auth settings (session TTL, password policy), sync
+  intervals, auto-response defaults, and the **seed: default organization + initial users**
+  (email + password), upserted on startup.
+
+Rule of thumb: **secrets → `.env`; behavior, limits, and seed data → `config.yaml`.** Both load at
+startup; `.env` may override `config.yaml` for ops. Because the seed block contains passwords, a
+populated `config.yaml` is treated as sensitive (gitignored; a `config.example.yaml` is committed).
 
 ## Apps And Components
 
@@ -312,13 +401,24 @@ The app should store:
 - transcription when available
 - download status
 
-Local disk can be used for development. Object storage should be used for production.
+Local disk can be used for development. Object storage should be used for production. Both sit
+behind a **blob-store interface** (`Put` / `Get` / `URL`); the local-disk and **S3 / MinIO**
+implementations are selected by config — no caller changes.
 
-### Queue
+> **Swappable stack (principle):** storage and the queue/bus are **ports with interchangeable
+> adapters**, chosen by config. Defaults are lightweight and in-isolation friendly (local disk +
+> Go channel / Postgres); production can switch to MinIO/S3 and Kafka without touching call sites.
+> A shared adapter conformance test runs against every implementation.
 
-The first version can use a PostgreSQL-backed job table.
+### Queue / message bus (swappable)
 
-Later, Redis, NATS, or a dedicated queue can be added if throughput requires it.
+Inbound processing and outbound sending flow through a **queue behind an interface**, so the
+implementation is chosen by config — never hard-wired:
+
+- v1: an in-process **Go channel** (simplest) or a **PostgreSQL-backed job table** (durable —
+  default for work that must survive restarts).
+- later: **Kafka / NATS / Redis** for higher throughput or cross-process fan-out — same interface,
+  no caller changes.
 
 ## Suggested Deployment Shape
 

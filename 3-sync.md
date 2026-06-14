@@ -48,7 +48,7 @@ The sections below are the detailed Q&A for each concern.
 Evolution should be configured to send webhooks directly to the backend:
 
 ```text
-POST /api/evolution/webhook/{whatsapp_account_id}
+POST /evolution/api/v1/webhook/{whatsapp_account_id}
 ```
 
 The handler should:
@@ -274,7 +274,7 @@ Assignments and statuses belong to conversations, not directly to contacts.
 All outbound messages should go through the backend:
 
 ```text
-POST /api/conversations/{conversation_id}/messages
+POST /xchats/api/v1/conversations/{conversation_id}/messages
 ```
 
 Flow:
@@ -290,17 +290,34 @@ Flow:
 
 Human replies and AI replies should share the same send pipeline.
 
-## Q: What if a member sends a message from the phone directly?
+## Q: What if a message is sent from another app (WhatsApp mobile or Web)?
 
-Evolution may emit it as `fromMe`.
+This is normal and must stay in sync. WhatsApp is multi-device: the operator may reply from the
+phone app or WhatsApp Web instead of xchats. Because Evolution is a linked device on the same
+account, it still sees that activity and emits it to us — so xchats reflects the **full**
+conversation regardless of where the reply was typed.
 
-The app should import it as an outbound message with sender type:
+How Evolution reports it:
+
+- An outbound `messages.upsert` with `key.fromMe: true` (and/or a `send.message` event), carrying
+  a `source` such as `ios`, `android`, or `web`.
+
+How we handle it — the **same upsert path** as everything else:
 
 ```text
-external_account
+1. normalize and upsert into the conversation as an OUTBOUND message
+2. sender_type = external_account   (sent outside xchats — not a known member, not the AI)
+3. source = live_webhook
+4. if the chat/contact is new (operator messaged someone we hadn't seen), create the
+   conversation + contact from this event (resolve lid/phone via remoteJidAlt)
+5. update conversation last_message_at / ordering and broadcast message.created
 ```
 
-If the message cannot be matched to an app member, it should still appear in the conversation history.
+Delivery/read status for these arrive via `messages.update` like any other outbound message.
+Anything sent from another app while xchats was down is picked up by initial sync / reconcile
+through the same idempotent upsert (deduped on `evolution_message_id`), so the chats and messages
+lists converge no matter which device sent. In short: **`fromMe` but not from us → outbound /
+external**, and it appears in the inbox exactly like an app-sent reply.
 
 ## Q: How do we handle AI responses?
 
