@@ -156,8 +156,11 @@ can reproduce it deterministically.
   (`instance/create`, `instance/connect`, `message/sendText`, `message/sendMedia`, `chat/find*`,
   `getBase64FromMediaMessage`) with canned responses, and able to **POST captured webhook events**
   to our webhook edge.
-- **Fixtures** — the real payloads in `captures/` (messages.upsert/update/send.message, text +
-  media) are the webhook inputs and the expected REST shapes.
+- **Fixtures** — the real payloads in `captures/` are the webhook inputs and expected REST shapes.
+  The current set is a **seed** (`send.message`, `messages.update`, `chats.upsert`, a `findMessages`
+  sample); it is **missing** the core inbound `messages.upsert` (text + media), the `getBase64`
+  response, and a matched send→`messages.update` pair. These must be captured before the suite is
+  trustworthy — see `captures/README.md` and `0.1-definition-of-done.md` Phase 2.
 - **Test stack (one run)** — `make test-e2e` brings up **Postgres + backend + fake-Evolution**
   (e.g. `deploy/compose.test.yaml`), runs migrations, then executes the suite that:
   1. replays captured webhook events → asserts normalized rows (contacts/conversations/messages),
@@ -168,8 +171,9 @@ can reproduce it deterministically.
   Then it tears the stack down. **No external network** — this runs fully inside Claude Code's
   isolated environment from one command.
 - **Real smoke (manual, outside isolation)** — a tiny optional check against the live Evolution
-  (`localhost:9700`) confirms reachability/credentials; everything else is covered by the fixtures,
-  which ARE byte-for-byte real Evolution output.
+  (`localhost:9700`) confirms reachability/credentials. The fixtures ARE byte-for-byte real Evolution
+  output, so the suite proves parity **on the captured events**; full contract trust needs the
+  complete live set (the seed above is not yet complete).
 
 ### Where the endpoints live
 
@@ -227,6 +231,21 @@ Same idea as Evolution's `/manager` page, but a simpler UX:
 
 - The Evolution webhook is protected by a **single shared token set in `.env`** (a general token,
   not per-account). Evolution includes it; the backend verifies it on every webhook call.
+
+### LLM data boundary (compliance — decide before any real send)
+
+- **What leaves the boundary:** generating a draft sends the **last ~15 messages + the contact
+  profile** (`xchats.contacts.attributes`) to the LLM provider (`8.5-ai-assistant-providers.md`).
+  That is customer personal data leaving our infrastructure, and for a Kazakhstan-facing product it
+  is **cross-border processing** when the provider is foreign (OpenRouter/OpenAI/Gemini).
+- The vendored brain flags this as a **go-live blocker** ("LLM_API_KEY sends conversation text
+  abroad — confirm before production"); xchats inherits the exposure, so it inherits the gate.
+- **Stance to decide and record (a documented decision, not a build):** either point `LLM_BASE_URL`
+  at an **in-region / self-hosted** OpenAI-compatible model (the brain is provider-neutral, so this
+  is config, not code — the compliant default), **or** establish a lawful basis (consent in the
+  first reply + PII minimization + a DPA with the provider). Pair it with a data retention/deletion
+  stance. This is a **Phase-4 go-live gate**, not a blocker on isolated build/test (see
+  `0.1-definition-of-done.md` Phase 4, `8-ai-assistant.md`).
 
 ### Frontend — fast SPA
 

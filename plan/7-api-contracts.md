@@ -62,6 +62,7 @@ fast `2xx`; on success it returns `{"payload":null,"errcode":"OK"}`.
 | `MEDIA_UNAVAILABLE` | 502 | media could not be fetched/stored |
 | `EVOLUTION_ERROR` | 502 | generic upstream Evolution error |
 | `AI_UNAVAILABLE` | 503 | LLM/assistant call failed |
+| `EVAL_GATE_FAILED` | 409 | snapshot publish refused: quality gate not met (see `8.7-ai-evals.md`) |
 | `INTERNAL` | 500 | unexpected server error |
 
 New codes are added here only; the set is shared by backend and frontend.

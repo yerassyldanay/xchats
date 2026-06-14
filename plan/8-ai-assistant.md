@@ -30,6 +30,18 @@ contact **profile**, force the model to return strict `emit_draft` JSON, then **
 - Short (~120 words), warm, **one** clear next step or question. Never ask for passwords.
 - **Suggest-only**: a human approves before anything is sent.
 
+## Two things the port must NOT drop (the working brain had them)
+
+- **A seeded KB + a quality gate.** The brain answers **only** from the published KB and escalates on
+  any gap — so an empty KB makes every draft a useless escalation. Seeding the KB (and a golden set)
+  by mining real chats is the *load-bearing first task*, and answer quality must be gated, not just
+  "a row was produced". See `8.4-ai-assistant-knowledge-base.md`, `8.7-ai-evals.md`, and the Phase-4
+  criteria in `0.1-definition-of-done.md`.
+- **A compliance decision for the LLM data boundary.** Drafting sends the last ~15 messages + the
+  contact profile to the LLM provider — cross-border personal data for a KZ-facing product. Decide
+  in-region/self-host (`LLM_BASE_URL`) vs. consent + DPA **before any real send**. See
+  `2-architecture.md` (LLM data boundary) and `8.5-ai-assistant-providers.md`.
+
 ## Detail docs
 
 - **8.1-ai-assistant-prompt.md** — prompt structure (`[A]–[E]`), conversation flow (start/middle/end), language.
@@ -37,3 +49,4 @@ contact **profile**, force the model to return strict `emit_draft` JSON, then **
 - **8.3-ai-assistant-profile.md** — how the contact profile is built and used.
 - **8.4-ai-assistant-knowledge-base.md** — how the KB (topics, media catalog, prices, links) is organized.
 - **8.5-ai-assistant-providers.md** — multi-provider LLM (openrouter / openai / gemini).
+- **8.7-ai-evals.md** — the golden set, deterministic quality metrics, and the publish gate (regression net).

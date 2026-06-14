@@ -551,10 +551,17 @@ SEND_MESSAGE
 Backend:
 
 ```text
-1. find message by whatsapp_account_id + evolution_message_id
-2. update status: pending, sent, delivered, read, failed
+1. find message by whatsapp_account_id + status_correlation_id
+   (messages.update keys on data.keyId / data.messageId, NOT the dedup key data.key.id —
+    correlation is UNVERIFIED; confirm with a matched send->update capture, see 9-database-schema.md)
+2. update status: pending, sent, delivered, read, failed (monotonic — never downgrade on a late event)
 3. broadcast message.updated
 ```
+
+> The outbound `send.message` stores `key.id` as `evolution_message_id` (the dedup key) **and** must
+> also store the id that `messages.update` will later key on (`status_correlation_id`) so the two
+> paths actually join. In the current fixtures `key.id` (22 chars) ≠ `keyId` (40 chars), so do not
+> assume they match — settle it with the matched-pair capture first.
 
 ### Contact/chat sync events
 

@@ -138,7 +138,8 @@ conversation_id      uuid  FK -> conversations
 direction            text  -- 'in'|'out'
 sender_kind          text  -- 'contact'|'member'|'ai'|'external_account'
 sender_member_id     uuid  FK -> members  NULL
-evolution_message_id text  -- Evolution key.id (dedupe + status correlation)
+evolution_message_id text  -- Evolution key.id (dedupe natural key)
+status_correlation_id text -- the id messages.update keys status on (likely the cuid messageId, NOT key.id) -- UNVERIFIED, see note
 participant_jid      text  -- group sender (groups deferred v1); contact/remote derived via conversation
 message_kind         text  -- 'conversation'|'extendedTextMessage'|'imageMessage'|...
 body                 text  -- text or media caption
@@ -149,7 +150,16 @@ message_ts           timestamptz
 created_at, updated_at
 UNIQUE (account_id, evolution_message_id)
 INDEX  (conversation_id, message_ts)
+INDEX  (account_id, status_correlation_id)   -- status updates resolve here, not on the dedup key
 ```
+> **Status correlation is unverified.** Evolution uses three id namespaces: outbound `send.message`
+> carries `data.key.id` (~22 chars), `messages.update` keys delivery/read on `data.keyId` (~40 chars)
+> **and** carries a cuid `data.messageId` — and `key.id` does **not** match `keyId` in the captured
+> fixtures. We therefore store **both**: `evolution_message_id` (`key.id`, the dedup natural key) and
+> `status_correlation_id` (the field a matched send→`messages.update` capture proves status keys on —
+> most likely the cuid `messageId`). Resolve a `messages.update` against `status_correlation_id`.
+> Confirm empirically with the matched-pair fixture before writing status code (see
+> `0.1-definition-of-done.md` Phase 2, `4-wa-connection-example.md`, `captures/README.md`).
 
 ### xchats.message_media  (1:1 with a media message)
 ```
