@@ -2,6 +2,47 @@
 
 This document describes how the product should handle live Evolution events, old chat sync, gaps, retries, media, and edge cases.
 
+## Sync Model (High Level)
+
+### The chain: WhatsApp account → Evolution → us
+
+The WhatsApp account is linked to Evolution (Baileys); Evolution holds the live session and is
+the **only** thing that talks to WhatsApp. We never touch WhatsApp directly. We get data from
+Evolution two ways, and normalize both into our Postgres:
+
+- **Push** — Evolution sends live events to our webhook as they happen.
+- **Pull** — Evolution exposes existing history via `chat/findContacts`, `chat/findChats`,
+  `chat/findMessages`, and media bytes via `getBase64FromMediaMessage`.
+
+### Three sync flows
+
+1. **Live sync — keep new data in sync (steady state).**
+   Evolution → webhook edge → store raw event → enqueue → worker normalizes → upsert
+   contact / conversation / message / status. Every new inbound, outbound, and status change
+   flows through here in real time.
+2. **Initial (old) sync — collect history when an account connects.**
+   A background job pulls existing **contacts, chats, and messages** from Evolution's `find*`
+   endpoints and upserts them through the **same code path** as live. Recent/active chats are
+   imported first so the inbox is usable immediately; the rest backfills. Media is fetched
+   lazily by a separate job.
+3. **Reconcile — gap-fill for resilience.**
+   A periodic job re-pulls recent chats/messages to catch anything missed during downtime or a
+   dropped webhook. Because upserts are idempotent, re-pulling never creates duplicates.
+
+### What keeps it correct
+
+- **One upsert path** for live + initial + reconcile — duplicates are impossible and fields are
+  enriched, never blindly overwritten.
+- **Stable identity / dedup:** messages keyed `(whatsapp_account_id, evolution_message_id)`,
+  conversations `(whatsapp_account_id, remote_jid)`, contacts via `contact_identities` —
+  resolving `@lid` ↔ phone using the message key's `remoteJidAlt`.
+- **History status** per conversation (`full | partial | live_only | syncing | unknown`) plus
+  explicit gap markers, so the UI and the AI know when older history may be missing.
+- **Status lifecycle** (sent → delivered → read) applied monotonically from `messages.update`
+  events, so a late event never downgrades a message.
+
+The sections below are the detailed Q&A for each concern.
+
 ## Q: How do we receive live events?
 
 Evolution should be configured to send webhooks directly to the backend:
