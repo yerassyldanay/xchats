@@ -79,13 +79,14 @@ The same person is `77000000000@s.whatsapp.net` *and* `5200000000000@lid`, and o
 derivable from the other. But for **live-only v1 this barely matters**, because we never need to
 join those two id-spaces by JID:
 
-- **Conversations** are built from message events → keyed by the **phone** `remoteJid`.
+- **Chats** are built from message events → keyed by the **phone** `remoteJid`.
 - **Status updates** correlate by message id (`keyId`), **not** by JID — see finding 4.
 - **`@lid`-keyed `chats.*` / `contacts.*`** events are cosmetic (unread/profile pic). v1 can ignore
   them; mapping `@lid`→phone is only needed later for enrichment.
 
-So `contact_identities` still earns its place (it links the ids when we do enrichment later), but
-v1 functions without resolving `@lid` for chat/contact events.
+So the `@lid`↔phone mapping lives on the single `wa_contacts` row (phone is the key; `lid_jid`
+stored alongside), each account owns its contacts (no cross-account sharing), but v1 functions
+without resolving `@lid` for chat/contact events.
 
 ### 3. Each message is delivered TWICE — dedup is mandatory and works ✅
 

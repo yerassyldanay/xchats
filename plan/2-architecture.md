@@ -66,7 +66,7 @@ under the hood; the orchestration is what ties them together.
 ### UI — one app
 
 - A single UI app covers the whole product: connect WhatsApp (QR), the team inbox
-  (conversations + send), and AI assistant setup. One login, one URL.
+  (chats + send), and AI assistant setup. One login, one URL.
 - Whether it is embedded in the backend binary or shipped as its own container is a deployment
   detail; conceptually there is exactly one product UI.
 
@@ -77,8 +77,9 @@ under the hood; the orchestration is what ties them together.
 - **Reuse-first, runnable standalone**: by default the stack reuses an existing Postgres/Redis;
   it can also run its own via **separate, optional compose scripts** (Postgres and Redis each in
   their own script), selected by env. Both modes are possible at the same time.
-- **Redis** is used by Evolution (cache). The backend does **not** require Redis in v1 — its job
-  queue is a Postgres table. Redis stays optional.
+- **Redis** is used by Evolution (cache). The backend does **not** require Redis in v1 — its async
+  work rides an in-memory queue (Go channels) behind a `Queue` port, not a DB table. Redis stays
+  optional (a later `QUEUE_DRIVER`).
 - **Media / files** are stored by us behind an abstraction (local disk in dev, object storage in
   prod) — never left only inside Evolution.
 - **AI assistant** is a backend component using an OpenAI-compatible LLM provider (e.g.
@@ -162,7 +163,7 @@ can reproduce it deterministically.
   send→`messages.update` pair — see `captures/README.md`.
 - **Test stack (one run)** — `make test-e2e` brings up **Postgres + backend + fake-Evolution**
   (e.g. `deploy/compose.test.yaml`), runs migrations, then executes the suite that:
-  1. replays captured webhook events → asserts normalized rows (contacts/conversations/messages),
+  1. replays captured webhook events → asserts normalized rows (wa_contacts/wa_chats/wa_messages),
      dedup, and `@lid`↔phone resolution;
   2. calls the backend send API → asserts the fake Evolution received the correct call (phone, not `@lid`);
   3. replays status events → asserts `sent → delivered → read` transitions;
@@ -180,20 +181,20 @@ The **backend** service exposes these route groups:
 
 | Consumer | Routes | Notes |
 |---|---|---|
-| Frontend (members) | `/xchats/api/v1/*` and `/xchats/api/v1/realtime` (SSE) | authenticated; queries, commands, live stream |
-| Evolution webhook | `/evolution/api/v1/webhook/{account}/...` | token-secured; only Evolution calls it; store-raw + 200-fast + enqueue |
+| Frontend (users) | `/xchats/api/v1/*` and `/xchats/api/v1/realtime` (SSE) | authenticated; queries, commands, live stream |
+| Evolution webhook | `/evolution/api/v1/webhook/{account}/...` | token-secured; only Evolution calls it; enqueue to in-memory queue + 200 (no DB write) |
 | Ops | `/healthz`, `/readyz`, `/metrics` | health & monitoring |
 
 The **frontend** service serves the UI (built Vue app) on its own port and only consumes the
 backend's `/api`. **Background workers expose no public HTTP endpoints** — they are goroutines
-(or, later, a separate worker process) that consume the Postgres job queue; their interface is
-the queue, not HTTP (a split-out worker would expose only `/healthz`/`/metrics`).
+(or, later, a separate worker process) that consume the in-memory queue (behind the `Queue` port);
+their interface is the queue, not HTTP (a split-out worker would expose only `/healthz`/`/metrics`).
 
 ## v1 Scope & Decisions
 
 ### Users & organization — seeded, then self-served
 
-- **One default organization** in v1; every member belongs to it.
+- **One default organization** in v1; every user belongs to it.
 - The service is **bootstrapped from a config file** (JSON or YAML) that defines the default
   organization and an initial list of users (email + password). On startup the backend **upserts**
   them (idempotent — safe to re-run). The idea: configure the user list, then run the service.
@@ -203,7 +204,8 @@ the queue, not HTTP (a split-out worker would expose only `/healthz`/`/metrics`)
 ### Organization settings — auto-response
 
 - The organization carries an **auto-response mode** column: `NEVER | CONFIGURE_TIME | ALWAYS`, plus a
-  **time window** used when the mode is `CONFIGURE_TIME`. **In v1 only `NEVER` exists in code** — the
+  **time window** (stored in **UTC**, no timezone column) used when the mode is `CONFIGURE_TIME`.
+  **In v1 only `NEVER` exists in code** — the
   column is kept default-safe (`NEVER` → suggest-and-approve only), but the `CONFIGURE_TIME` / `ALWAYS`
   send path is **not built** (deferred to Phase 4D — see `0.1-definition-of-done.md`,
   `8.6-port-checklist.md`).
@@ -221,13 +223,18 @@ Same idea as Evolution's `/manager` page, but a simpler UX:
 - **Add WhatsApp account**: click → enter an instance name + scan instructions → backend creates
   the instance and shows the **QR code** → user scans → on success it is **assigned** to the org
   (with an **unassign** button). Existing/old instances also show assign/unassign controls.
+- **Account identity = the WhatsApp number, not the instance.** `wa_accounts.id = uuidv5(owner_jid)`,
+  so deleting an instance and re-adding the **same number** resolves to the **same** account — its
+  chats/messages are never lost; the Evolution instance is just an ephemeral binding (see
+  `9-database-schema.md` → `wa_accounts`).
 - Detailed connect/QR flow: see `4-wa-connection-example.md`.
 
 ### Storage — PostgreSQL only
 
-- **Everything xchats owns lives in PostgreSQL** — product state, the job queue, **and** the AI
-  assistant's config/snapshots (the ported brain moves off SQLite). Different databases or schemas
-  are fine, but it is the **same Postgres server, only Postgres** — no SQLite, no other store.
+- **Everything xchats owns lives in PostgreSQL** — product state **and** the AI assistant's
+  config/snapshots (the ported brain moves off SQLite). Different databases or schemas are fine, but
+  it is the **same Postgres server, only Postgres** — no SQLite, no other store. (Async work is the
+  one exception: it rides an in-memory queue behind a `Queue` port, not a DB table.)
 - Media **bytes** still go to the blob store (local disk → object storage); their **metadata** is
   in Postgres. (Redis stays Evolution's cache — reused, not used by xchats directly.)
 
@@ -237,26 +244,26 @@ Same idea as Evolution's `/manager` page, but a simpler UX:
   not per-account). Evolution includes it in a **header only** (not a query param, so it never lands
   in access logs); the backend verifies it on every webhook call and rejects fast at the edge when
   the path account is unknown/unassigned. Token rotation is a config change.
-- **Member auth hardening (greenfield surface):** session cookies are `HttpOnly`, `SameSite=Lax`,
+- **User auth hardening (greenfield surface):** session cookies are `HttpOnly`, `SameSite=Lax`,
   `Secure` in prod; passwords hashed with **argon2id/bcrypt — explicitly not sha256** (do not inherit
   the submodule's sha256 admin hash); a min password length; login throttling; `SESSION_SECRET` in
-  the `.env` catalog. Permissions are **flat** in v1 (no RBAC; any member can manage users/config —
+  the `.env` catalog. Permissions are **flat** in v1 (no RBAC; any user can manage users/config —
   accepted risk).
 
 ### Ops & data lifecycle (v1 minimums)
 
-- **Backup/DR:** Postgres is the single source of truth (product state + queue + AI config) — nightly
+- **Backup/DR:** Postgres is the single source of truth (product state + AI config) — nightly
   `pg_dump` to object storage, restore-tested per release.
-- **Metrics (`/metrics`):** webhook auth-rejection rate, queue depth, job failures, send failures,
-  LLM error/latency. Failed jobs are queryable (no silent dead jobs).
-- **Retention/erasure:** raw payloads (`evolution_events.payload`, `messages.raw`) get a TTL; a
-  documented hard-delete-by-contact procedure (FK cascades make this additive); encryption-at-rest is
+- **Metrics (`/metrics`):** webhook auth-rejection rate, queue depth, queue-handler failures, send
+  failures, LLM error/latency. Failed handlers are observable (no silent dead work).
+- **Retention/erasure:** raw payloads (`wa_messages.raw`) get a TTL; a documented
+  hard-delete-by-contact procedure (FK cascades make this additive); encryption-at-rest is
   deployment-provided. Fine to implement late, but listed so it isn't forgotten.
 
 ### LLM data boundary (compliance — decide before any real send)
 
 - **What leaves the boundary:** generating a draft sends the **last ~15 messages + the contact
-  profile** (`xchats.contacts.attributes`) to the LLM provider (`8.5-ai-assistant-providers.md`).
+  profile** (`xchats.wa_contacts.attributes`) to the LLM provider (`8.5-ai-assistant-providers.md`).
   That is customer personal data leaving our infrastructure, and for a Kazakhstan-facing product it
   is **cross-border processing** when the provider is foreign (OpenRouter/OpenAI/Gemini).
 - The vendored brain flags this as a **go-live blocker** ("LLM_API_KEY sends conversation text
@@ -314,10 +321,10 @@ Suggested stack: Go + PostgreSQL.
 
 Responsibilities:
 
-- organization and member management
+- organization and user management
 - WhatsApp account registration
 - webhook receiver for Evolution events
-- normalized contacts, conversations, and messages
+- normalized contacts, chats, and messages
 - assignment/reassignment
 - send-message API
 - media metadata
@@ -333,7 +340,7 @@ Responsibilities:
 
 - process raw Evolution events
 - update delivery/read statuses
-- run AI draft jobs
+- run on-demand AI drafts
 - retry failed outbound sends
 
 Workers can initially run inside the same Go binary as background goroutines. They can later be split into separate processes if load grows.
@@ -351,8 +358,8 @@ Events:
 
 - `message.created`
 - `message.updated`
-- `conversation.created`
-- `conversation.updated`
+- `chat.created`
+- `chat.updated`
 - `assignment.changed`
 - `ai_draft.created`
 - `wa_account.status_changed`
@@ -368,7 +375,7 @@ Core screens:
 - login
 - organization workspace
 - WhatsApp accounts/settings
-- conversation list
+- chat list
 - chat view
 - assignment control
 - contact panel
@@ -378,12 +385,12 @@ The first version should avoid complex helpdesk features such as SLA, campaigns,
 
 ### AI Assistant
 
-The AI assistant helps members respond faster.
+The AI assistant helps users respond faster.
 
 Responsibilities:
 
 - generate reply drafts
-- summarize long conversations
+- summarize long chats
 - suggest next action
 - detect missing information
 
@@ -397,25 +404,24 @@ Core tables:
 
 ```text
 organizations
-members
-organization_members
+users
+organization_users
 wa_accounts
-contacts
-contact_identities
-conversations
-messages
+wa_contacts
+wa_chats
+wa_messages
 assignment_events
+ai_snapshots
+ai_topics
 ai_drafts
-evolution_events
-jobs
 ```
 
 Important constraints:
 
 ```text
-unique(wa_account_id, remote_jid) on conversations
-unique(wa_account_id, evolution_message_id) on messages
-unique(contact_id, wa_account_id, identity_type, value) on contact_identities
+unique(account_id, remote_jid) on wa_chats
+unique(account_id, evolution_message_id) on wa_messages
+unique(account_id, phone_jid) on wa_contacts
 ```
 
 ### Media Store
@@ -439,20 +445,22 @@ changes — but not built in v1. (Media bytes are a deferred surface anyway: v1 
 as a placeholder — see `3-sync.md`, `5-ui-pages.md`.)
 
 > **Swappable stack (principle, but v1 builds ONE impl):** storage and the queue/bus sit behind
-> ports, but in v1 we ship **exactly one adapter each** — a **Postgres job table** for the queue and
-> **local disk** for the blob store. Build an interface only where an external system actually touches
-> us, and only one implementation behind it; **MinIO/S3, Kafka/NATS/Redis, and the adapter
-> conformance suite are deferred to v2+** (no second adapter until a second adapter exists).
+> ports, but in v1 we ship **exactly one adapter each** — an **in-memory queue** (Go channels) for
+> the queue and **local disk** for the blob store. Build an interface only where an external system
+> actually touches us, and only one implementation behind it; **MinIO/S3, Kafka/NATS/Redis, and the
+> adapter conformance suite are deferred to v2+** (no second adapter until a second adapter exists).
 
-### Queue / message bus (v1 = Postgres job table; alternatives deferred)
+### Queue / message bus (v1 = in-memory queue; alternatives deferred)
 
-Inbound processing and outbound sending flow through a **queue behind an interface**, so the
-implementation is chosen by config — never hard-wired:
+Inbound processing and outbound sending flow through a **queue behind a `Queue` port**, so the
+implementation is chosen by config (`QUEUE_DRIVER`) — never hard-wired. **It is not a DB table.**
 
-- **v1: a PostgreSQL-backed job table** (durable — survives restarts; `FOR UPDATE SKIP LOCKED`). This
-  is the single v1 implementation. (An in-process Go channel is fine for tests only.)
-- **Deferred (v2+): Kafka / NATS / Redis** for higher throughput or cross-process fan-out — same
-  interface, no caller changes. Not built until load demands it.
+- **v1: an in-memory queue** (`inmem` — a buffered Go channel + a small worker-goroutine pool). This
+  is the single v1 implementation; the webhook only enqueues and a worker consumes (raw kept on
+  `wa_messages.raw`). An event still in the queue is lost on restart — v1 accepts this; idempotent
+  upserts make any re-delivery a no-op. See `3-sync.md` → "Queue abstraction".
+- **Deferred (v2+): Kafka / NATS / Redis** for durability, higher throughput, or cross-process
+  fan-out — same interface, no caller changes. Not built until load demands it.
 
 ## Suggested Deployment Shape
 
@@ -476,13 +484,13 @@ Evolution owns WhatsApp transport details.
 The app owns:
 
 - organizations
-- members
+- users
 - connected account configuration
 - contacts
-- conversations
+- chats
 - assignments
 - normalized messages
 - media references
 - AI drafts
-- raw event log
+- raw event payloads (on `wa_messages.raw`)
 

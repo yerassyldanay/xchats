@@ -99,8 +99,8 @@ Quick guide to the three "permission" cases the UI must distinguish:
 POST   /xchats/api/v1/auth/login          {email, password} -> session
 POST   /xchats/api/v1/auth/logout
 GET    /xchats/api/v1/me                   current user + org
-GET    /xchats/api/v1/users                list members
-POST   /xchats/api/v1/users               {email, password} create member (joins default org)
+GET    /xchats/api/v1/users                list users
+POST   /xchats/api/v1/users               {email, password} create user (joins default org)
 ```
 
 ### Organization — `/xchats/api/v1`
@@ -122,14 +122,14 @@ POST   /xchats/api/v1/whatsapp-accounts/{id}/assign
 POST   /xchats/api/v1/whatsapp-accounts/{id}/unassign
 ```
 
-### Inbox: conversations, messages, contacts — `/xchats/api/v1`
+### Inbox: chats, messages, contacts — `/xchats/api/v1`
 
 ```text
-GET    /xchats/api/v1/conversations                    list/filter
-GET    /xchats/api/v1/conversations/{id}/messages
-POST   /xchats/api/v1/conversations/{id}/messages      send text/media (-> outbound pipeline)
-POST   /xchats/api/v1/conversations/{id}/assign        assign to a member
-POST   /xchats/api/v1/conversations/{id}/read          mark read
+GET    /xchats/api/v1/chats                    list/filter
+GET    /xchats/api/v1/chats/{id}/messages
+POST   /xchats/api/v1/chats/{id}/messages      send text/media (-> outbound pipeline)
+POST   /xchats/api/v1/chats/{id}/assign        assign to a user
+POST   /xchats/api/v1/chats/{id}/read          mark read
 GET    /xchats/api/v1/contacts
 GET    /xchats/api/v1/contacts/{id}
 GET    /xchats/api/v1/media/{id}                        stream stored media (resolves blob store)
@@ -139,8 +139,8 @@ GET    /xchats/api/v1/media/{id}                        stream stored media (res
 
 ```text
 # v1 — the draft loop:
-POST   /xchats/api/v1/conversations/{id}/ai-drafts     Suggest: trigger a draft on demand (v1)
-GET    /xchats/api/v1/conversations/{id}/ai-drafts
+POST   /xchats/api/v1/chats/{id}/ai-drafts     Suggest: trigger a draft on demand (v1)
+GET    /xchats/api/v1/chats/{id}/ai-drafts
 POST   /xchats/api/v1/ai-drafts/{id}/approve           approve -> send (idempotent; 409 on conflict/stale)
 
 # deferred — Phase 4B (KB CMS):
@@ -153,7 +153,7 @@ POST   /xchats/api/v1/assistant/playground             dry-run a draft (no send)
 ### Realtime — `/xchats/api/v1`
 
 ```text
-GET    /xchats/api/v1/realtime                          SSE stream (message.*, conversation.*,
+GET    /xchats/api/v1/realtime                          SSE stream (message.*, chat.*,
                                                          ai_draft.created, wa_account.status_changed)
 ```
 
@@ -163,7 +163,7 @@ GET    /xchats/api/v1/realtime                          SSE stream (message.*, c
 POST   /evolution/api/v1/webhook/{wa_account_id}            (+ /{event} subpaths if webhookByEvents)
 ```
 Authenticated by the **single shared token** from `.env` (`WEBHOOK_UNAUTHORIZED` if missing/wrong).
-Handler is store-raw + enqueue + `200` only.
+Handler enqueues the raw event to the in-memory queue → returns `200` fast (no DB write).
 
 ### Ops (no version, no envelope)
 

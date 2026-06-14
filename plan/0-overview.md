@@ -5,7 +5,7 @@ Entry point for anyone joining the project. Read this first, then the numbered d
 ## What we're building
 
 A WhatsApp-first **team inbox with an AI assistant**: businesses connect WhatsApp accounts,
-members handle customer conversations together, and the AI suggests replies (suggest-and-approve
+users handle customer chats together, and the AI suggests replies (suggest-and-approve
 by default — humans stay in control). The whole system **runs from one place** (one
 orchestration) and is built as a **monorepo**.
 
@@ -14,13 +14,13 @@ orchestration) and is built as a **monorepo**.
 ```text
 +--------------------- runs from one place: docker compose / make up ----------------------+
 |                                                                                          |
-|   member's browser                                                                       |
+|   user's browser                                                                         |
 |        | HTTP + SSE                                                                       |
 |        v                                                                                  |
 |   +------------------+    /api + SSE      +------------------- backend (Go) -----------+  |
 |   | frontend (Vue 3) | -----------------> | api edge      /xchats/api/v1/* (+SSE)      |  |
 |   |  SPA, own port   |  (API_BASE_URL env)| webhook edge  /evolution/api/v1/webhook    |  |
-|   +------------------+                    | workers   <-- Postgres job queue (the seam) |  |
+|   +------------------+                    | workers   <-- in-memory queue (the seam)    |  |
 |                                          | AI assistant (LLM, OpenAI-compatible)       |  |
 |                                          +------+-----------------------+--------------+  |
 |                          webhook events         | SQL                   | media bytes     |
@@ -28,7 +28,7 @@ orchestration) and is built as a **monorepo**.
 |  WhatsApp  <=>  +---------------+        +----------------+     +------------------+        |
 |  phone / web /  |  Evolution    | -----> |  PostgreSQL    |     |  blob store      |        |
 |  mobile app     |  reused :9700 | <----- |  (only store)  |     |  disk -> object  |        |
-|                 +---------------+  REST  |  product+queue |     +------------------+        |
+|                 +---------------+  REST  |  product state |     +------------------+        |
 |                  (send, media,  find*)   |  + AI config   |                                |
 |                                          +----------------+                                |
 |                                                                                          |
@@ -49,7 +49,7 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
 - **2-architecture.md** — components, monorepo layout, env-driven addressing, **v1 decisions**
   (users/org seed, auto-response, WhatsApp-accounts manager, Postgres-only, security, frontend),
   the **two-file config model**, and the **testing strategy** (one-command isolated e2e).
-- **3-sync.md** — live message handling: store-first → idempotent upsert, dedup, `@lid`↔phone,
+- **3-sync.md** — live message handling: enqueue → worker idempotent upsert, dedup, `@lid`↔phone,
   status correlation, and **multi-device (phone/Web) sync** (v1 is live-only).
 - **4-wa-connection-example.md** — concrete live flows: incoming/outgoing handling and sending
   (account connect/QR kept as the deferred reference design).
@@ -71,7 +71,7 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
   - **8.5-ai-assistant-providers.md** — multi-provider LLM (openrouter/openai/gemini).
   - **8.6-port-checklist.md** — porting the brain from the submodule (reuse/adapt/drop + the new Postgres reader).
 - **9-database-schema.md** — the full PostgreSQL schema in a dedicated `xchats` schema (fully-named
-  tables, e.g. `xchats.conversations`), keys, indexes, constraints, and a normalization review.
+  tables, e.g. `xchats.wa_chats`), keys, indexes, constraints, and a normalization review.
 - **examples/repos/xpayment-crm/** — the working brain, vendored as a git submodule (the
   implementation the AI docs above describe; entry `IMPLEMENTATION.md`).
 - **scripts/evolution_client.py** — working Evolution client + normalization (the oracle).
@@ -81,8 +81,8 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
 
 - **Evolution** — WhatsApp transport only (reused, not forked): connect accounts, send, emit events.
 - **Backend (Go)** — the source of truth. Two HTTP edges (webhook ingest + UI API) + background
-  workers + the AI assistant. A **Postgres-backed job queue is the seam** between the edges and
-  the workers.
+  workers + the AI assistant. An **in-memory queue behind a `Queue` port is the seam** between the
+  edges and the workers (Go channels in v1; swappable to Redis/Kafka via `QUEUE_DRIVER`).
 - **Frontend (Vue 3 + TS)** — the single UI (connect WhatsApp, inbox, AI setup); talks only to the backend.
 - **Postgres / Redis** — reused infra (Postgres = product state + Evolution's own DB; Redis = Evolution cache).
 
@@ -102,7 +102,7 @@ Build order (phased — v1 is the minimal slice; see `0.1-definition-of-done.md`
    `HandleMessage` + a new Postgres Window/Profile reader and run it against `captures/` fixtures,
    dumping drafts to a log / minimal view. Cheap (the brain is standalone and mockable), and answers
    "are the suggestions any good?" **weeks before** the full UI.
-3. **UI (slice)** — Login + Chatboard only (conversation list + thread + composer + AI draft card).
+3. **UI (slice)** — Login + Chatboard only (chat list + thread + composer + AI draft card).
    One **pre-connected** account; the multi-account/QR connect manager is deferred.
 4. **AI (slice = draft loop)** — port the assistant in **v1 adapter mode** (text-only, one seeded
    snapshot, on-demand "Suggest" trigger, no media refs, no admin UI, no playground, no auto-send);
@@ -118,7 +118,7 @@ Build order (phased — v1 is the minimal slice; see `0.1-definition-of-done.md`
 ## The final point (done =) — the v1 vertical slice
 
 v1 is **one ruthless vertical slice**, not a platform. One `make up` brings up Evolution + backend +
-frontend, and against a **single pre-connected** WhatsApp account a member can: **receive a WhatsApp
+frontend, and against a **single pre-connected** WhatsApp account a user can: **receive a WhatsApp
 text message, see it in the inbox, get one grounded AI-suggested text reply, edit/approve it, send it,
 and see delivery/read status** — surviving duplicate webhooks and retries without corrupting data.
 
@@ -130,9 +130,9 @@ inbound→draft→approve→send→status loop, it isn't in v1.*
 ## Non-negotiable principles
 
 - Evolution is transport; the **backend is the source of truth** (never read Evolution's tables directly).
-- Webhook **ingests fast** (store-raw + 200 + enqueue); **workers do the real work**; **one
+- Webhook **ingests fast** (enqueue + 200); **workers consume and upsert**; **one
   idempotent upsert path** for live ingest + retries (dedup on `evolution_message_id`).
-- **Stable identity:** resolve `@lid` ↔ phone via `remoteJidAlt`; key conversations on the phone identity.
+- **Stable identity:** resolve `@lid` ↔ phone via `remoteJidAlt`; key chats on the phone identity.
 - **Env-driven addressing**; reuse existing Postgres / Redis / Evolution.
 - **Suggest-and-approve AI** — in v1 the auto-send path is **not built** (not just disabled); the
   human approves every send.

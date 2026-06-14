@@ -16,7 +16,7 @@ Evolution is just the WhatsApp transport.
 Vue UI            account setup, QR screen, inbox/chat
 Backend API       account CRUD, QR polling, chat/message APIs, send endpoint
 Evolution adapter backend module that calls Evolution's REST API + normalizes responses
-Webhook receiver  catches Evolution events, stores raw, returns 200 fast
+Webhook receiver  catches Evolution events, enqueues them, returns 200 fast (no DB write)
 Workers           process events, run AI drafts, retry
 Realtime gateway  WebSocket/SSE → UI (account status, new messages, drafts)
 AI assistant      reads normalized app data, suggests replies
@@ -47,9 +47,9 @@ POST .../whatsapp-accounts/{id}/assign|unassign  # start / stop handling an inst
 POST /evolution/api/v1/webhook/{account_id}
 
 # Inbox
-GET  /xchats/api/v1/conversations
-GET/POST .../conversations/{id}/messages
-POST .../conversations/{id}/assign
+GET  /xchats/api/v1/chats
+GET/POST .../chats/{id}/messages
+POST .../chats/{id}/assign
 GET  /xchats/api/v1/realtime
 ```
 
@@ -75,10 +75,10 @@ UI asks for an instance name, then `POST /xchats/api/v1/whatsapp-accounts`:
 Backend:
 
 ```
-1. create wa_accounts row (connection_state=creating, organization_id=null until assigned)
-2. Evolution POST /instance/create   (WHATSAPP-BAILEYS, qrcode=true, syncFullHistory=false — live-only)
-3. Evolution POST /webhook/set/{instance}  → points at our webhook, subscribes to the events in 3-sync.md
-4. connection_state=qr_required
+1. Evolution POST /instance/create   (WHATSAPP-BAILEYS, qrcode=true, syncFullHistory=false — live-only)
+2. Evolution POST /webhook/set/{instance}  → points at our webhook, subscribes to the events in 3-sync.md
+3. show QR; status=qr_required
+   (the wa_accounts row is created at connect, once owner_jid → id is known — step 4)
 ```
 
 The webhook URL and the shared token come from `.env`, not per account:
@@ -90,29 +90,36 @@ auth   = single shared token from .env  (Evolution sends it; backend verifies it
 
 ### 2–3. Show & refresh the QR
 
-`POST .../qr` calls `GET /instance/connect/{instance}`, stores the result in
-`wa_qr_sessions`, returns it:
+`POST .../qr` calls `GET /instance/connect/{instance}` and returns the QR straight from Evolution
+(it is shown to the user, **not** persisted — QR is fetched live, never stored):
 
 ```json
 { "status": "qr_required", "qr_code": "2@y8eK...", "pairing_code": "WZYEH1YY",
   "expires_at": "2026-06-13T12:00:00Z" }
 ```
 
-UI polls `GET .../qr` every 2–3s while `qr_required`: if connected → say so; if the cached QR is
-fresh → return it; else re-call Evolution and return the newest. (Evolution also emits
-`QRCODE_UPDATED`, which we store — but the screen uses polling because it's simpler and reliable.)
+UI polls `GET .../qr` every 2–3s while `qr_required`: if connected → say so; else re-call Evolution
+and return the newest QR. (Evolution also emits `QRCODE_UPDATED`, but the screen uses polling because
+it's simpler and reliable.)
 
 ### 4. User scans → connected
 
 Evolution sends `CONNECTION_UPDATE` to our webhook. Backend:
 
 ```
-1. store raw event
-2. connection_state=connected; save owner_jid / phone_number
-3. mark the QR session consumed
-4. auto-assign the instance to the org (it was just added to be handled)
-5. broadcast wa_account.connected
+1. enqueue the raw event (no DB write); a worker handles it
+2. compute account id = uuidv5(owner_jid); upsert wa_accounts
+   (INSERT … ON CONFLICT (id) DO UPDATE) — a re-added number lands on the SAME account_id,
+   so its existing chats/messages stay attached; nothing is lost
+3. connection_state=connected; save phone_number; refresh evolution_instance_name/id
+4. stop polling/showing the QR (it was never stored)
+5. auto-assign the instance to the org (it was just added to be handled)
+6. broadcast wa_account.connected
 ```
+
+**Deleting + re-adding the same number is safe:** because `id = uuidv5(owner_jid)` doesn't change,
+the recreated instance resolves to the same `wa_accounts.id`, and all its `wa_chats` / `wa_messages`
+stay attached (see `9-database-schema.md` → `wa_accounts`).
 
 **From this moment, Evolution pushes live events and they're stored immediately** (see `3-sync.md`).
 The account is usable right away — there is nothing else to wait for.
@@ -125,17 +132,17 @@ empty and fills in going forward from live events.
 
 ```
 1. Evolution pushes MESSAGES_UPSERT
-2. webhook stores raw event, returns 200          ← durable, nothing lost
-3. worker upserts it immediately
-4. if the contact/conversation is new → create it from the live event
+2. webhook enqueues the raw event, returns 200     ← in-memory queue; idempotent upserts cover re-delivery
+3. worker consumes the queue and upserts immediately (raw kept on wa_messages.raw)
+4. if the wa_contact/wa_chat is new → create it from the live event
 5. broadcast message.created
-6. enqueue an AI draft job (on-demand; no auto-send in v1)
+6. enqueue an on-demand AI draft (no auto-send in v1)
 ```
 
 ## Sending
 
 ```
-POST /xchats/api/v1/conversations/{id}/messages
+POST /xchats/api/v1/chats/{id}/messages
   1. create local message status=queued; broadcast message.created
   2. Evolution POST /message/sendText (or sendMedia)
   3. store returned evolution_message_id
@@ -143,7 +150,7 @@ POST /xchats/api/v1/conversations/{id}/messages
   5. later: delivered/read arrive via messages.update  (matched on evolution_message_id — see 3-sync.md)
 ```
 
-Human and AI replies share this pipeline; an AI send just starts from a member-approved `ai_draft`.
+Human and AI replies share this pipeline; an AI send just starts from a user-approved `ai_draft`.
 Auto-send is a deferred feature (v1 = on-demand drafts only).
 
 ## Example timeline
@@ -158,17 +165,18 @@ Auto-send is a deferred feature (v1 = on-demand drafts only).
 12:00:22  AI drafts using the live message (+ any messages since connect)
 ```
 
-Useful the instant it connects; each conversation builds up from live events going forward.
+Useful the instant it connects; each chat builds up from live events going forward.
 
 ## Tables
 
 The authoritative data model lives in **`9-database-schema.md`** (schema `xchats`). The ones this
-flow touches: `wa_accounts`, `wa_qr_sessions` (deferred with the connect UI),
-`evolution_events`, `jobs`, `contacts`, `contact_identities`, `conversations`, `messages`,
-`ai_drafts`. Load-bearing constraints (the reason live upserts never duplicate):
+flow touches: `wa_accounts`, `wa_contacts`, `wa_chats`, `wa_messages`, `ai_drafts`. (QR is fetched
+live from Evolution and never stored, so there is no QR table; the raw event rides the in-memory
+queue, so there is no `evolution_events` / `jobs` table either.) Load-bearing constraints (the reason
+live upserts never duplicate):
 
 ```
-UNIQUE (account_id, remote_jid)                                on conversations
-UNIQUE (account_id, evolution_message_id)                      on messages
-UNIQUE (contact_id, account_id, identity_kind, identity_value) on contact_identities
+UNIQUE (account_id, remote_jid)            on wa_chats
+UNIQUE (account_id, evolution_message_id)  on wa_messages
+UNIQUE (account_id, phone_jid)             on wa_contacts
 ```

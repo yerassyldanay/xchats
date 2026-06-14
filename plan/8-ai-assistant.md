@@ -21,7 +21,7 @@ In v1 the brain runs in a reduced mode — the same ported logic, a smaller surf
   (suggested media is deferred — `8.2`, `8.6`).
 - **One active seeded Snapshot**, loaded from `0002_seed.sql`/markdown on boot. **No admin UI, no
   publish/rollback, no Playground** (the CMS is deferred — `8.6`, `5-ui-pages.md`).
-- **On-demand trigger:** a draft is produced when the member presses **"Suggest reply"**, not on every
+- **On-demand trigger:** a draft is produced when the user presses **"Suggest reply"**, not on every
   inbound — this controls LLM spend and latency in v1. Auto-draft-on-inbound is a fast-follow.
 - **No auto-send.** The human approves every send.
 
