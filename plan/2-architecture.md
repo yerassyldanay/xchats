@@ -203,11 +203,16 @@ the queue, not HTTP (a split-out worker would expose only `/healthz`/`/metrics`)
 
 ### Organization settings — auto-response
 
-- The organization carries an **auto-response mode**: `NEVER | CONFIGURE_TIME | ALWAYS`, plus a
-  **time window** used when the mode is `CONFIGURE_TIME`. This governs when the AI may respond on
-  its own (default-safe: `NEVER` → suggest-and-approve only).
+- The organization carries an **auto-response mode** column: `NEVER | CONFIGURE_TIME | ALWAYS`, plus a
+  **time window** used when the mode is `CONFIGURE_TIME`. **In v1 only `NEVER` exists in code** — the
+  column is kept default-safe (`NEVER` → suggest-and-approve only), but the `CONFIGURE_TIME` / `ALWAYS`
+  send path is **not built** (deferred to Phase 4D — see `0.1-definition-of-done.md`,
+  `8.6-port-checklist.md`).
 
-### WhatsApp accounts — a simplified Evolution `/manager`
+### WhatsApp accounts — a simplified Evolution `/manager` (deferred to v2)
+
+> **v1 uses a single pre-connected account** from config — no accounts manager, no QR/connect UI.
+> The design below is v2+.
 
 Same idea as Evolution's `/manager` page, but a simpler UX:
 
@@ -230,7 +235,24 @@ Same idea as Evolution's `/manager` page, but a simpler UX:
 ### Security — single shared token
 
 - The Evolution webhook is protected by a **single shared token set in `.env`** (a general token,
-  not per-account). Evolution includes it; the backend verifies it on every webhook call.
+  not per-account). Evolution includes it in a **header only** (not a query param, so it never lands
+  in access logs); the backend verifies it on every webhook call and rejects fast at the edge when
+  the path account is unknown/unassigned. Token rotation is a config change.
+- **Member auth hardening (greenfield surface):** session cookies are `HttpOnly`, `SameSite=Lax`,
+  `Secure` in prod; passwords hashed with **argon2id/bcrypt — explicitly not sha256** (do not inherit
+  the submodule's sha256 admin hash); a min password length; login throttling; `SESSION_SECRET` in
+  the `.env` catalog. Permissions are **flat** in v1 (no RBAC; any member can manage users/config —
+  accepted risk).
+
+### Ops & data lifecycle (v1 minimums)
+
+- **Backup/DR:** Postgres is the single source of truth (product state + queue + AI config) — nightly
+  `pg_dump` to object storage, restore-tested per release.
+- **Metrics (`/metrics`):** webhook auth-rejection rate, queue depth, job failures, send failures,
+  LLM error/latency. Failed jobs are queryable (no silent dead jobs).
+- **Retention/erasure:** raw payloads (`evolution_events.payload`, `messages.raw`) get a TTL; a
+  documented hard-delete-by-contact procedure (FK cascades make this additive); encryption-at-rest is
+  deployment-provided. Fine to implement late, but listed so it isn't forgotten.
 
 ### LLM data boundary (compliance — decide before any real send)
 
@@ -244,8 +266,8 @@ Same idea as Evolution's `/manager` page, but a simpler UX:
   at an **in-region / self-hosted** OpenAI-compatible model (the brain is provider-neutral, so this
   is config, not code — the compliant default), **or** establish a lawful basis (consent in the
   first reply + PII minimization + a DPA with the provider). Pair it with a data retention/deletion
-  stance. This is a **Phase-4 go-live gate**, not a blocker on isolated build/test (see
-  `0.1-definition-of-done.md` Phase 4, `8-ai-assistant.md`).
+  stance. This is a **Phase-4A go-live gate**, not a blocker on isolated build/test (see
+  `0.1-definition-of-done.md` Phase 4A, `8-ai-assistant.md`).
 
 ### Frontend — fast SPA
 
@@ -420,24 +442,26 @@ The app should store:
 - transcription when available
 - download status
 
-Local disk can be used for development. Object storage should be used for production. Both sit
-behind a **blob-store interface** (`Put` / `Get` / `URL`); the local-disk and **S3 / MinIO**
-implementations are selected by config — no caller changes.
+Local disk is the **single v1 implementation** behind a **blob-store interface** (`Put` / `Get` /
+`URL`). An **S3 / MinIO** adapter is deferred to production scale — selected by config, no caller
+changes — but not built in v1. (Media bytes are a deferred surface anyway: v1 renders inbound media
+as a placeholder — see `3-sync.md`, `5-ui-pages.md`.)
 
-> **Swappable stack (principle):** storage and the queue/bus are **ports with interchangeable
-> adapters**, chosen by config. Defaults are lightweight and in-isolation friendly (local disk +
-> Go channel / Postgres); production can switch to MinIO/S3 and Kafka without touching call sites.
-> A shared adapter conformance test runs against every implementation.
+> **Swappable stack (principle, but v1 builds ONE impl):** storage and the queue/bus sit behind
+> ports, but in v1 we ship **exactly one adapter each** — a **Postgres job table** for the queue and
+> **local disk** for the blob store. Build an interface only where an external system actually touches
+> us, and only one implementation behind it; **MinIO/S3, Kafka/NATS/Redis, and the adapter
+> conformance suite are deferred to v2+** (no second adapter until a second adapter exists).
 
-### Queue / message bus (swappable)
+### Queue / message bus (v1 = Postgres job table; alternatives deferred)
 
 Inbound processing and outbound sending flow through a **queue behind an interface**, so the
 implementation is chosen by config — never hard-wired:
 
-- v1: an in-process **Go channel** (simplest) or a **PostgreSQL-backed job table** (durable —
-  default for work that must survive restarts).
-- later: **Kafka / NATS / Redis** for higher throughput or cross-process fan-out — same interface,
-  no caller changes.
+- **v1: a PostgreSQL-backed job table** (durable — survives restarts; `FOR UPDATE SKIP LOCKED`). This
+  is the single v1 implementation. (An in-process Go channel is fine for tests only.)
+- **Deferred (v2+): Kafka / NATS / Redis** for higher throughput or cross-process fan-out — same
+  interface, no caller changes. Not built until load demands it.
 
 ## Suggested Deployment Shape
 

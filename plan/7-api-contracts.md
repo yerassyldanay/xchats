@@ -50,7 +50,7 @@ fast `2xx`; on success it returns `{"payload":null,"errcode":"OK"}`.
 | `OK` | 200/201 | success |
 | `VALIDATION_ERROR` | 400 | malformed/invalid input |
 | `UNAUTHORIZED` | 401 | missing/invalid session |
-| `FORBIDDEN` | 403 | authenticated but not allowed |
+| `FORBIDDEN` | 403 | authenticated but not allowed (**unused in v1** — permissions are flat; reserved for a future `is_admin` gate on user-create / config-publish) |
 | `NOT_FOUND` | 404 | resource does not exist |
 | `CONFLICT` | 409 | duplicate / state conflict (e.g. instance name taken) |
 | `RATE_LIMITED` | 429 | too many requests / send throttle hit |
@@ -140,12 +140,16 @@ GET    /xchats/api/v1/media/{id}                        stream stored media (res
 ### AI assistant — `/xchats/api/v1`
 
 ```text
+# v1 — the draft loop:
+POST   /xchats/api/v1/conversations/{id}/ai-drafts     Suggest: trigger a draft on demand (v1)
+GET    /xchats/api/v1/conversations/{id}/ai-drafts
+POST   /xchats/api/v1/ai-drafts/{id}/approve           approve -> send (idempotent; 409 on conflict/stale)
+
+# deferred — Phase 4B (KB CMS):
 GET    /xchats/api/v1/assistant/config                 persona/knowledge/prices/assets (published)
 PUT    /xchats/api/v1/assistant/config                 edit draft config
-POST   /xchats/api/v1/assistant/publish                publish a config version
+POST   /xchats/api/v1/assistant/publish                publish a config version (eval-gated)
 POST   /xchats/api/v1/assistant/playground             dry-run a draft (no send)
-GET    /xchats/api/v1/conversations/{id}/ai-drafts
-POST   /xchats/api/v1/ai-drafts/{id}/approve           approve -> send via outbound pipeline
 ```
 
 ### Realtime — `/xchats/api/v1`

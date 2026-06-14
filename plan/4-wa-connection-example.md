@@ -1,5 +1,9 @@
 # WhatsApp Connection Example
 
+> **v1 note:** v1 uses a **single pre-connected** account from config — the connect/QR + old-sync flow
+> below is **deferred to v2** (see `0.1-definition-of-done.md`, `2-architecture.md` → WhatsApp
+> accounts). Kept here as the reference design for when the accounts manager is built.
+
 This document describes the flow for adding a WhatsApp account from our app UI, showing an always-refreshing QR code, syncing old chats/messages/contacts, receiving live messages during sync, and using that data for AI-assisted replies.
 
 The UI never talks to Evolution directly. The UI talks to our backend. The backend owns product state and calls Evolution as the WhatsApp transport.
