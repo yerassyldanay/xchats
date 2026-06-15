@@ -1,0 +1,33 @@
+# xchats — non-secret tunables + seed (copy to config.yaml).
+# A populated config.yaml is sensitive (it may carry seed passwords) and is
+# gitignored; only this example is committed. Secrets proper live in .env.
+
+# server / logging
+http_addr: ":8080"
+api_base_url: "http://localhost:8080"
+cors_origins:
+  - "http://localhost:5173"
+log_format: "logfmt"
+log_level: "info"
+
+# auth / sessions
+session_ttl_hours: 720
+secure_cookies: false # set true in prod (HTTPS)
+min_password_len: 8
+
+# blob store (local disk) + in-memory queue
+blob_dir: "./blobdata"
+queue_driver: "inmem"
+queue_workers: 4
+
+# the single pre-connected WhatsApp account
+evolution_instance: "xpayment"
+wa_account_display_name: "Sales WhatsApp"
+# wa_owner_jid: "77011111111@s.whatsapp.net"   # or learned via FetchInstances
+
+# seed: default organization + admin login (passwords better set via .env)
+org_name: "XChats"
+# seed_admin_email: "admin@example.com"
+# seed_admin_password: "change-me"
+
+page_size: 50

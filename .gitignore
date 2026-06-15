@@ -1,1 +1,26 @@
 feedback
+
+# secrets / local config (commit only the *.example.* files)
+.env
+config.yaml
+backend/.env
+backend/config.yaml
+frontend/.env
+
+# blob store (local-disk media bytes)
+blobdata/
+backend/blobdata/
+
+# build output
+backend/bin/
+backend/xchats
+frontend/dist/
+frontend/node_modules/
+node_modules/
+
+# go
+*.test
+
+# editor / os
+.DS_Store
+*.swp
