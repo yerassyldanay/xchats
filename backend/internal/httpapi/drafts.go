@@ -19,8 +19,7 @@ func (s *Server) handleSuggest(c *gin.Context) {
 	if !okID {
 		return
 	}
-	if _, err := s.store.ChatByID(ctx(c), chatID); err != nil {
-		fail(c, http.StatusNotFound, ErrNotFound, "chat not found")
+	if _, ok := s.orgChat(c, chatID); !ok {
 		return
 	}
 	pending, err := s.store.PendingDrafts(ctx(c), chatID)
@@ -47,6 +46,9 @@ func (s *Server) handleListDrafts(c *gin.Context) {
 	if !okID {
 		return
 	}
+	if _, ok := s.orgChat(c, chatID); !ok {
+		return
+	}
 	pending, err := s.store.PendingDrafts(ctx(c), chatID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
@@ -71,6 +73,22 @@ func (s *Server) handleApprove(c *gin.Context) {
 	var req approveReq
 	_ = c.ShouldBindJSON(&req)
 
+	// Resolve the draft's chat and enforce org membership *before* the guarded
+	// claim, so a cross-org caller can never flip a draft to 'sent'.
+	d0, err := s.store.DraftByID(ctx(c), draftID)
+	if errors.Is(err, store.ErrNotFound) {
+		fail(c, http.StatusNotFound, ErrNotFound, "draft not found")
+		return
+	}
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	chat, okChat := s.orgChat(c, d0.ChatID)
+	if !okChat {
+		return
+	}
+
 	claim, err := s.store.ClaimDraft(ctx(c), draftID)
 	if errors.Is(err, store.ErrNotFound) {
 		s.classifyLostClaim(c, draftID)
@@ -78,12 +96,6 @@ func (s *Server) handleApprove(c *gin.Context) {
 	}
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
-		return
-	}
-
-	chat, err := s.store.ChatByID(ctx(c), claim.ChatID)
-	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, "chat missing")
 		return
 	}
 

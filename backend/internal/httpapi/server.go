@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -26,35 +27,41 @@ const webhookTokenHeader = "X-Webhook-Token"
 
 // Server wires the HTTP edges to their dependencies.
 type Server struct {
-	cfg       *config.Config
-	store     *store.Store
-	queue     queue.Queue
-	hub       *realtime.Hub
-	blob      blob.Store
-	drafter   assistant.Drafter
-	evo       evolution.Client
-	accountID uuid.UUID
-	log       *slog.Logger
+	cfg     *config.Config
+	store   *store.Store
+	queue   queue.Queue
+	hub     *realtime.Hub
+	blob    blob.Store
+	drafter assistant.Drafter
+	evo     evolution.Client
+	log     *slog.Logger
+
+	// pendingNames carries the display_name from "add account" (POST) to the QR
+	// connect step (where the wa_accounts row is finally written): pre-connect
+	// there is no row to hold it. Keyed by instance name; best-effort (process-
+	// local) — a lost entry just falls back to the instance name.
+	pendingMu    sync.Mutex
+	pendingNames map[string]string
 }
 
 // Deps is the constructor input.
 type Deps struct {
-	Cfg       *config.Config
-	Store     *store.Store
-	Queue     queue.Queue
-	Hub       *realtime.Hub
-	Blob      blob.Store
-	Drafter   assistant.Drafter
-	Evo       evolution.Client
-	AccountID uuid.UUID
-	Log       *slog.Logger
+	Cfg     *config.Config
+	Store   *store.Store
+	Queue   queue.Queue
+	Hub     *realtime.Hub
+	Blob    blob.Store
+	Drafter assistant.Drafter
+	Evo     evolution.Client
+	Log     *slog.Logger
 }
 
 // New builds a Server.
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, drafter: d.Drafter, evo: d.Evo, accountID: d.AccountID, log: d.Log,
+		blob: d.Blob, drafter: d.Drafter, evo: d.Evo, log: d.Log,
+		pendingNames: map[string]string{},
 	}
 }
 
@@ -88,6 +95,15 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/users", s.handleListUsers)
 	auth.POST("/users", s.handleCreateUser)
 	auth.GET("/organization", s.handleGetOrg)
+
+	// WhatsApp accounts manager (Build 1).
+	auth.GET("/whatsapp-accounts", s.handleListWhatsAppAccounts)
+	auth.POST("/whatsapp-accounts", s.handleCreateWhatsAppAccount)
+	auth.GET("/whatsapp-accounts/qr", s.handleWhatsAppAccountQR)
+	auth.POST("/whatsapp-accounts/:id/reconnect", s.handleReconnectWhatsAppAccount)
+	auth.DELETE("/whatsapp-accounts/:id", s.handleDeleteWhatsAppAccount)
+	auth.GET("/whatsapp-instances", s.handleListInstances)
+	auth.DELETE("/whatsapp-instances/:name", s.handleDeleteInstance)
 
 	auth.GET("/chats", s.handleListChats)
 	auth.POST("/chats", s.handleCreateChat)

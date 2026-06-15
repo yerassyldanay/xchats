@@ -94,6 +94,45 @@ type AiDraft struct {
 	CreatedAt        string       `json:"created_at"`
 }
 
+// WhatsAppAccount is the API shape for one connected number (mirrors an Evolution
+// instance). "assigned" is derived (organization_id IS NOT NULL), never stored.
+type WhatsAppAccount struct {
+	ID               string  `json:"id"`
+	InstanceName     string  `json:"instance_name"`
+	DisplayName      string  `json:"display_name"`
+	ConnectionStatus string  `json:"connection_status"`
+	Assigned         bool    `json:"assigned"`
+	OwnerJID         string  `json:"owner_jid"`
+	PhoneNumber      string  `json:"phone_number"`
+	LastLiveEventAt  *string `json:"last_live_event_at"`
+	CreatedAt        *string `json:"created_at"`
+}
+
+// MapAccount maps a store.Account. liveStatus overrides the stored connection_state
+// when a live FetchInstances/connection.update is available (else pass the stored
+// state). A blank display_name falls back to the instance name for the UI.
+func MapAccount(a store.Account, liveStatus string) WhatsAppAccount {
+	name := a.DisplayName
+	if name == "" {
+		name = a.InstanceName
+	}
+	status := liveStatus
+	if status == "" {
+		status = a.ConnectionState
+	}
+	return WhatsAppAccount{
+		ID:               a.ID.String(),
+		InstanceName:     a.InstanceName,
+		DisplayName:      name,
+		ConnectionStatus: status,
+		Assigned:         a.OrganizationID.Valid,
+		OwnerJID:         a.OwnerJID,
+		PhoneNumber:      a.PhoneNumber,
+		LastLiveEventAt:  tsPtr(a.LastLiveEventAt),
+		CreatedAt:        tsPtr(&a.CreatedAt),
+	}
+}
+
 func mediaURL(id uuid.UUID) string { return "/xchats/api/v1/media/" + id.String() }
 
 func tsPtr(t *time.Time) *string {

@@ -6,9 +6,10 @@ import (
 )
 
 // SentCall records one outbound Evolution call for test assertions
-// (e.g. "we sent to the phone JID, not the @lid").
+// (e.g. "we sent to the phone JID, not the @lid", "on the right instance").
 type SentCall struct {
 	Action    string // sendText | sendMedia
+	Instance  string
 	Number    string
 	Text      string
 	Mediatype string
@@ -18,8 +19,8 @@ type SentCall struct {
 	Base64Len int
 }
 
-// Fake is an in-process Client used by component/e2e tests. It records every
-// send and returns deterministic, monotonically-unique key ids.
+// Fake is an in-process Client used by component/e2e tests. It records every send
+// and lifecycle call and returns deterministic, monotonically-unique key ids.
 type Fake struct {
 	mu        sync.Mutex
 	seq       int
@@ -29,14 +30,26 @@ type Fake struct {
 	FailNext error
 	// NotOnWhatsApp, when set, makes OnWhatsApp report numbers as unregistered.
 	NotOnWhatsApp bool
+
+	// --- lifecycle knobs ---
+	ConnState    string   // configurable connection state ConnectionState returns (default "open")
+	QR           QR       // canned QR ConnectQR returns
+	NewOwnerJID  string   // owner_jid a freshly created instance reports once "connected"
+	Created      []string // instance names passed to CreateInstance
+	Deleted      []string // instance names passed to Delete/LogoutInstance
 }
 
-// NewFake returns a Fake with one connected instance.
+// NewFake returns a Fake with one connected instance and canned lifecycle defaults.
 func NewFake(instanceName, ownerJID string) *Fake {
-	return &Fake{Instances: []Instance{{
-		Name: instanceName, OwnerJID: ownerJID, ID: "fake-instance",
-		ConnectionStatus: "open",
-	}}}
+	return &Fake{
+		Instances: []Instance{{
+			Name: instanceName, OwnerJID: ownerJID, ID: "fake-instance",
+			ConnectionStatus: "open",
+		}},
+		ConnState:   "open",
+		QR:          QR{Code: "2@FAKEQRCODE", Base64: "data:image/png;base64," + tinyPNGBase64, PairingCode: "FAKEPAIR"},
+		NewOwnerJID: "77022222222@s.whatsapp.net",
+	}
 }
 
 func (f *Fake) nextID() string {
@@ -44,30 +57,30 @@ func (f *Fake) nextID() string {
 	return "FAKEKEY" + pad(f.seq)
 }
 
-func (f *Fake) SendText(ctx context.Context, number, text string) (SendResult, error) {
+func (f *Fake) SendText(ctx context.Context, instance, number, text string) (SendResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.takeFail(); err != nil {
 		return SendResult{}, err
 	}
-	f.Calls = append(f.Calls, SentCall{Action: "sendText", Number: number, Text: text})
+	f.Calls = append(f.Calls, SentCall{Action: "sendText", Instance: instance, Number: number, Text: text})
 	return SendResult{KeyID: f.nextID(), Status: "PENDING"}, nil
 }
 
-func (f *Fake) SendMedia(ctx context.Context, number, mediatype, mimetype, base64Data, fileName, caption string) (SendResult, error) {
+func (f *Fake) SendMedia(ctx context.Context, instance, number, mediatype, mimetype, base64Data, fileName, caption string) (SendResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.takeFail(); err != nil {
 		return SendResult{}, err
 	}
 	f.Calls = append(f.Calls, SentCall{
-		Action: "sendMedia", Number: number, Mediatype: mediatype, Mimetype: mimetype,
+		Action: "sendMedia", Instance: instance, Number: number, Mediatype: mediatype, Mimetype: mimetype,
 		FileName: fileName, Caption: caption, Base64Len: len(base64Data),
 	})
 	return SendResult{KeyID: f.nextID(), Status: "PENDING"}, nil
 }
 
-func (f *Fake) GetBase64(ctx context.Context, messageID string) (string, string, string, error) {
+func (f *Fake) GetBase64(ctx context.Context, instance, messageID string) (string, string, string, error) {
 	// A tiny valid 1x1 PNG, base64, for the download fallback path.
 	return tinyPNGBase64, "downloaded.png", "image/png", nil
 }
@@ -78,16 +91,66 @@ func (f *Fake) FetchInstances(ctx context.Context) ([]Instance, error) {
 	return append([]Instance(nil), f.Instances...), nil
 }
 
-func (f *Fake) SetWebhook(ctx context.Context, url, tokenHeader, token string, events []string) error {
+func (f *Fake) SetWebhook(ctx context.Context, instance, url, tokenHeader, token string, events []string) error {
 	return nil
 }
 
 // OnWhatsApp reports a number as registered by default. Set NotOnWhatsApp to
 // simulate a non-WhatsApp number.
-func (f *Fake) OnWhatsApp(ctx context.Context, number string) (bool, error) {
+func (f *Fake) OnWhatsApp(ctx context.Context, instance, number string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return !f.NotOnWhatsApp, nil
+}
+
+// CreateInstance records the name and adds a (configurably-stated) instance so a
+// subsequent ConnectionState/FetchInstances can drive the connect flow offline.
+func (f *Fake) CreateInstance(ctx context.Context, instance, displayName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.takeFail(); err != nil {
+		return err
+	}
+	f.Created = append(f.Created, instance)
+	f.Instances = append(f.Instances, Instance{
+		Name: instance, OwnerJID: f.NewOwnerJID, ConnectionStatus: f.ConnState, ID: "fake-" + instance,
+	})
+	return nil
+}
+
+func (f *Fake) ConnectQR(ctx context.Context, instance string) (QR, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.takeFail(); err != nil {
+		return QR{}, err
+	}
+	return f.QR, nil
+}
+
+func (f *Fake) ConnectionState(ctx context.Context, instance string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ConnState, nil
+}
+
+func (f *Fake) DeleteInstance(ctx context.Context, instance string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Deleted = append(f.Deleted, instance)
+	for i := range f.Instances {
+		if f.Instances[i].Name == instance {
+			f.Instances = append(f.Instances[:i], f.Instances[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
+func (f *Fake) LogoutInstance(ctx context.Context, instance string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Deleted = append(f.Deleted, instance)
+	return nil
 }
 
 func (f *Fake) takeFail() error {

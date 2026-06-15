@@ -69,7 +69,11 @@ type Account struct {
 	OwnerJID        string
 	PhoneNumber     string
 	InstanceName    string
+	InstanceID      string
 	ConnectionState string
+	LastLiveEventAt *time.Time
+	CreatedAt       time.Time
+	DeletedAt       *time.Time
 }
 
 type Contact struct {
@@ -181,7 +185,8 @@ func (s *Store) SeedUser(ctx context.Context, orgID uuid.UUID, email, passwordHa
 	return u, err
 }
 
-// SeedAccount upserts the single pre-connected WhatsApp account by its derived id.
+// SeedAccount upserts the pre-connected xpayment account by its derived id. Kept
+// for the Build 0 seed; the manager (B1) connects further accounts via QR.
 func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO xchats.wa_accounts
@@ -192,10 +197,11 @@ func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 			display_name = EXCLUDED.display_name,
 			evolution_instance_name = EXCLUDED.evolution_instance_name,
 			connection_state = EXCLUDED.connection_state,
+			deleted_at = NULL,
 			updated_at = now()
-		RETURNING id, organization_id, display_name, owner_jid, phone_number, evolution_instance_name, connection_state`,
+		RETURNING `+accountCols,
 		a.ID, a.OrganizationID, a.DisplayName, a.OwnerJID, a.PhoneNumber, a.InstanceName, a.ConnectionState).
-		Scan(&a.ID, &a.OrganizationID, &a.DisplayName, &a.OwnerJID, &a.PhoneNumber, &a.InstanceName, &a.ConnectionState)
+		Scan(scanAccountDst(&a)...)
 	return a, err
 }
 
@@ -203,29 +209,130 @@ func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 // Accounts
 // ---------------------------------------------------------------------------
 
+// accountCols is the canonical wa_accounts projection; scanAccountDst pairs with it.
+const accountCols = `id, organization_id, display_name, owner_jid, phone_number,
+	evolution_instance_name, evolution_instance_id, connection_state,
+	last_live_event_at, created_at, deleted_at`
+
+func scanAccountDst(a *Account) []any {
+	return []any{
+		&a.ID, &a.OrganizationID, &a.DisplayName, &a.OwnerJID, &a.PhoneNumber,
+		&a.InstanceName, &a.InstanceID, &a.ConnectionState,
+		&a.LastLiveEventAt, &a.CreatedAt, &a.DeletedAt,
+	}
+}
+
+// AccountByID returns a live (non-deleted) account by its derived id.
 func (s *Store) AccountByID(ctx context.Context, id uuid.UUID) (Account, error) {
 	var a Account
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, organization_id, display_name, owner_jid, phone_number, evolution_instance_name, connection_state
-		FROM xchats.wa_accounts WHERE id = $1`, id).
-		Scan(&a.ID, &a.OrganizationID, &a.DisplayName, &a.OwnerJID, &a.PhoneNumber, &a.InstanceName, &a.ConnectionState)
+	err := s.pool.QueryRow(ctx, `SELECT `+accountCols+`
+		FROM xchats.wa_accounts WHERE id = $1 AND deleted_at IS NULL`, id).
+		Scan(scanAccountDst(&a)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, ErrNotFound
 	}
 	return a, err
 }
 
-// FirstAccount returns the single seeded account (Build 0 has exactly one).
-func (s *Store) FirstAccount(ctx context.Context) (Account, error) {
-	var a Account
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, organization_id, display_name, owner_jid, phone_number, evolution_instance_name, connection_state
-		FROM xchats.wa_accounts ORDER BY created_at LIMIT 1`).
-		Scan(&a.ID, &a.OrganizationID, &a.DisplayName, &a.OwnerJID, &a.PhoneNumber, &a.InstanceName, &a.ConnectionState)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return a, ErrNotFound
+// ListAccountsForOrg returns the org's live (non-deleted) accounts, oldest first.
+func (s *Store) ListAccountsForOrg(ctx context.Context, orgID uuid.UUID) ([]Account, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+accountCols+`
+		FROM xchats.wa_accounts
+		WHERE organization_id = $1 AND deleted_at IS NULL
+		ORDER BY created_at`, orgID)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
+	var out []Account
+	for rows.Next() {
+		var a Account
+		if err := rows.Scan(scanAccountDst(&a)...); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// UpsertConnectedAccount writes (or revives) the row for a freshly connected
+// number. Identity is uuidv5(owner_jid), so a re-added number lands on the SAME
+// row — its chats/messages stay attached and deleted_at is cleared. A blank
+// display_name keeps the existing one (so reconnect doesn't clobber the label).
+func (s *Store) UpsertConnectedAccount(ctx context.Context, a Account) (Account, error) {
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO xchats.wa_accounts
+			(id, organization_id, display_name, owner_jid, phone_number,
+			 evolution_instance_name, evolution_instance_id, connection_state, last_live_event_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+		ON CONFLICT (id) DO UPDATE SET
+			organization_id = EXCLUDED.organization_id,
+			display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name ELSE xchats.wa_accounts.display_name END,
+			phone_number = EXCLUDED.phone_number,
+			evolution_instance_name = EXCLUDED.evolution_instance_name,
+			evolution_instance_id = EXCLUDED.evolution_instance_id,
+			connection_state = EXCLUDED.connection_state,
+			last_live_event_at = now(),
+			deleted_at = NULL,
+			updated_at = now()
+		RETURNING `+accountCols,
+		a.ID, a.OrganizationID, a.DisplayName, a.OwnerJID, a.PhoneNumber,
+		a.InstanceName, a.InstanceID, a.ConnectionState).
+		Scan(scanAccountDst(&a)...)
 	return a, err
+}
+
+// SetAccountState updates a live account's connection_state (and stamps activity).
+func (s *Store) SetAccountState(ctx context.Context, id uuid.UUID, state string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE xchats.wa_accounts SET connection_state = $2, last_live_event_at = now(), updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL`, id, state)
+	return err
+}
+
+// SetAccountStateByInstance maps a connection.update (which carries the instance
+// name, not the id) to its account and updates the state. Returns the account id,
+// or ErrNotFound for an unknown/pre-connect/deleted instance.
+func (s *Store) SetAccountStateByInstance(ctx context.Context, instanceName, state string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := s.pool.QueryRow(ctx, `
+		UPDATE xchats.wa_accounts SET connection_state = $2, last_live_event_at = now(), updated_at = now()
+		WHERE evolution_instance_name = $1 AND deleted_at IS NULL
+		RETURNING id`, instanceName, state).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return id, ErrNotFound
+	}
+	return id, err
+}
+
+// SoftDeleteAccount hides an account (a "clean"): its chats drop out of the inbox
+// but the rows stay, so re-adding the number revives everything.
+func (s *Store) SoftDeleteAccount(ctx context.Context, id uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE xchats.wa_accounts SET deleted_at = now(), connection_state = 'disconnected', updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL`, id)
+	return err
+}
+
+// ManagedInstanceNames returns the instance names of all live (non-deleted)
+// accounts — the maintenance view flags everything else as a stray instance.
+func (s *Store) ManagedInstanceNames(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT evolution_instance_name FROM xchats.wa_accounts
+		WHERE deleted_at IS NULL AND evolution_instance_name <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
 }
 
 // ---------------------------------------------------------------------------
