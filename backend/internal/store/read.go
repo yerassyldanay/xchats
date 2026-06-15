@@ -10,23 +10,47 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ChatFilter holds the inbox list filters.
+// ChatFilter holds the inbox list filters. Build 1 scopes the inbox to an org
+// (chats across all that org's live accounts) with an optional single-account
+// filter (the "from number" chip).
 type ChatFilter struct {
-	Status   string
-	Assignee string // me|unassigned|<uuid>
-	MeUserID uuid.UUID
-	Query    string
-	Limit    int
-	Offset   int
+	OrgID       uuid.UUID
+	WaAccountID uuid.NullUUID // optional: restrict to one account
+	Status      string
+	Assignee    string // me|unassigned|<uuid>
+	MeUserID    uuid.UUID
+	Query       string
+	Limit       int
+	Offset      int
 }
 
-// ListChats returns inbox rows (with contact) ordered by recency, plus the total.
-func (s *Store) ListChats(ctx context.Context, accountID uuid.UUID, f ChatFilter) ([]Chat, int, error) {
+// chatCols is the canonical wa_chats (+ contact) projection.
+const chatCols = `c.id, c.account_id, c.contact_id, c.remote_jid, c.chat_state, c.assignee_user_id,
+	c.last_message_at, c.last_message_preview, c.unread_count,
+	ct.id, ct.phone_number, ct.phone_jid, COALESCE(ct.lid_jid,''), ct.push_name, ct.display_name, ct.attributes`
+
+func scanChatDst(c *Chat) []any {
+	return []any{
+		&c.ID, &c.AccountID, &c.ContactID, &c.RemoteJID, &c.ChatState, &c.AssigneeUserID,
+		&c.LastMessageAt, &c.LastMessagePreview, &c.UnreadCount,
+		&c.Contact.ID, &c.Contact.PhoneNumber, &c.Contact.PhoneJID, &c.Contact.LidJID,
+		&c.Contact.PushName, &c.Contact.DisplayName, &c.Contact.Attributes,
+	}
+}
+
+// ListChatsForOrg returns the org's inbox rows (joined over all its live accounts)
+// ordered by recency, plus the total. The join to wa_accounts both scopes by org
+// and hides chats of soft-deleted accounts.
+func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int, error) {
 	var where []string
 	var args []any
-	args = append(args, accountID)
-	where = append(where, "c.account_id = $1")
+	args = append(args, f.OrgID)
+	where = append(where, "a.organization_id = $1", "a.deleted_at IS NULL")
 
+	if f.WaAccountID.Valid {
+		args = append(args, f.WaAccountID.UUID)
+		where = append(where, "c.account_id = $"+itoa(len(args)))
+	}
 	if f.Status != "" {
 		args = append(args, f.Status)
 		where = append(where, "c.chat_state = $"+itoa(len(args)))
@@ -49,13 +73,12 @@ func (s *Store) ListChats(ctx context.Context, accountID uuid.UUID, f ChatFilter
 		where = append(where, "(lower(ct.display_name) LIKE $"+i+" OR lower(ct.phone_number) LIKE $"+i+" OR ct.phone_jid LIKE $"+i+")")
 	}
 	clause := strings.Join(where, " AND ")
+	const joins = `xchats.wa_chats c
+		JOIN xchats.wa_contacts ct ON ct.id = c.contact_id
+		JOIN xchats.wa_accounts a ON a.id = c.account_id`
 
 	args = append(args, f.Limit, f.Offset)
-	q := `
-		SELECT c.id, c.account_id, c.contact_id, c.remote_jid, c.chat_state, c.assignee_user_id,
-		       c.last_message_at, c.last_message_preview, c.unread_count,
-		       ct.id, ct.phone_number, ct.phone_jid, COALESCE(ct.lid_jid,''), ct.push_name, ct.display_name, ct.attributes
-		FROM xchats.wa_chats c JOIN xchats.wa_contacts ct ON ct.id = c.contact_id
+	q := `SELECT ` + chatCols + ` FROM ` + joins + `
 		WHERE ` + clause + `
 		ORDER BY c.last_message_at DESC NULLS LAST
 		LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
@@ -67,30 +90,39 @@ func (s *Store) ListChats(ctx context.Context, accountID uuid.UUID, f ChatFilter
 	var out []Chat
 	for rows.Next() {
 		var c Chat
-		if err := rows.Scan(&c.ID, &c.AccountID, &c.ContactID, &c.RemoteJID, &c.ChatState, &c.AssigneeUserID,
-			&c.LastMessageAt, &c.LastMessagePreview, &c.UnreadCount,
-			&c.Contact.ID, &c.Contact.PhoneNumber, &c.Contact.PhoneJID, &c.Contact.LidJID, &c.Contact.PushName, &c.Contact.DisplayName, &c.Contact.Attributes); err != nil {
+		if err := rows.Scan(scanChatDst(&c)...); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, c)
 	}
 	var total int
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM xchats.wa_chats c JOIN xchats.wa_contacts ct ON ct.id=c.contact_id WHERE `+clause, args[:len(args)-2]...).Scan(&total)
+	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM `+joins+` WHERE `+clause, args[:len(args)-2]...).Scan(&total)
 	return out, total, rows.Err()
 }
 
 // ChatByID returns a chat with its contact.
 func (s *Store) ChatByID(ctx context.Context, id uuid.UUID) (Chat, error) {
 	var c Chat
-	err := s.pool.QueryRow(ctx, `
-		SELECT c.id, c.account_id, c.contact_id, c.remote_jid, c.chat_state, c.assignee_user_id,
-		       c.last_message_at, c.last_message_preview, c.unread_count,
-		       ct.id, ct.phone_number, ct.phone_jid, COALESCE(ct.lid_jid,''), ct.push_name, ct.display_name, ct.attributes
+	err := s.pool.QueryRow(ctx, `SELECT `+chatCols+`
 		FROM xchats.wa_chats c JOIN xchats.wa_contacts ct ON ct.id = c.contact_id
-		WHERE c.id = $1`, id).
-		Scan(&c.ID, &c.AccountID, &c.ContactID, &c.RemoteJID, &c.ChatState, &c.AssigneeUserID,
-			&c.LastMessageAt, &c.LastMessagePreview, &c.UnreadCount,
-			&c.Contact.ID, &c.Contact.PhoneNumber, &c.Contact.PhoneJID, &c.Contact.LidJID, &c.Contact.PushName, &c.Contact.DisplayName, &c.Contact.Attributes)
+		WHERE c.id = $1`, id).Scan(scanChatDst(&c)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c, ErrNotFound
+	}
+	return c, err
+}
+
+// ChatByIDForOrg returns a chat only if it belongs to one of the org's live
+// accounts — the membership guard behind every chat-scoped endpoint. ErrNotFound
+// otherwise (a cross-org id is indistinguishable from a missing one).
+func (s *Store) ChatByIDForOrg(ctx context.Context, id, orgID uuid.UUID) (Chat, error) {
+	var c Chat
+	err := s.pool.QueryRow(ctx, `SELECT `+chatCols+`
+		FROM xchats.wa_chats c
+		JOIN xchats.wa_contacts ct ON ct.id = c.contact_id
+		JOIN xchats.wa_accounts a ON a.id = c.account_id
+		WHERE c.id = $1 AND a.organization_id = $2 AND a.deleted_at IS NULL`, id, orgID).
+		Scan(scanChatDst(&c)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, ErrNotFound
 	}

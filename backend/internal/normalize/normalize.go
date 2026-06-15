@@ -163,6 +163,20 @@ func (e Envelope) StatusUpdate() (*StatusUpdate, error) {
 	}, nil
 }
 
+// ConnectionState returns the connection state from a connection.update event
+// ("open" | "connecting" | "close"), or "" for any other event. The state may be
+// at data.state (v2) — the instance name rides the envelope's top-level field.
+func (e Envelope) ConnectionState() string {
+	if e.Event != "connection.update" {
+		return ""
+	}
+	var d struct {
+		State string `json:"state"`
+	}
+	_ = json.Unmarshal(e.Data, &d)
+	return d.State
+}
+
 func extractContent(mtype string, msg map[string]json.RawMessage) (string, *Media) {
 	if msg == nil {
 		return "", nil

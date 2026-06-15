@@ -105,7 +105,7 @@ func newHarness(t *testing.T) *harness {
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Evo: fake, AccountID: accountID, Log: log,
+		Drafter: drafter, Evo: fake, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)

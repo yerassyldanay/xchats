@@ -29,11 +29,6 @@ import (
 
 const webhookTokenHeader = "X-Webhook-Token"
 
-var webhookEvents = []string{
-	"messages.upsert", "messages.update", "send.message",
-	"connection.update", "contacts.update", "chats.upsert",
-}
-
 func main() {
 	cfgPath := flag.String("config", envOr("XCHATS_CONFIG", "config.yaml"), "path to config.yaml")
 	envPath := flag.String("env", envOr("XCHATS_ENV", ".env"), "path to .env")
@@ -95,7 +90,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Evo: evo, AccountID: accountID, Log: log,
+		Drafter: drafter, Evo: evo, Log: log,
 	})
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
 
@@ -133,7 +128,7 @@ func runWebhookSet(cfg *config.Config, log *slog.Logger) {
 	accountID := config.AccountID(ownerJID)
 	url := strings.TrimRight(cfg.WebhookPublicBaseURL, "/") + "/evolution/api/v1/webhook/" + accountID.String()
 	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
-	if err := evo.SetWebhook(ctx, url, webhookTokenHeader, cfg.WebhookToken, webhookEvents); err != nil {
+	if err := evo.SetWebhook(ctx, cfg.EvolutionInstance, url, webhookTokenHeader, cfg.WebhookToken, evolution.WebhookEvents); err != nil {
 		fatal("set webhook", err)
 	}
 	log.Info("webhook registered", "url", url)

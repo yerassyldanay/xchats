@@ -25,6 +25,7 @@ import (
 type OutboundTask struct {
 	MessageID uuid.UUID
 	AccountID uuid.UUID
+	Instance  string // the sending account's Evolution instance (multi-account)
 	PhoneJID  string
 	Text      string
 	MediaID   string // blob id; empty => text send
@@ -34,6 +35,7 @@ type OutboundTask struct {
 // MediaDownloadTask fetches media bytes when they weren't inline.
 type MediaDownloadTask struct {
 	MessageID          uuid.UUID
+	Instance           string // the receiving account's Evolution instance
 	EvolutionMessageID string
 	BlobID             string
 }
@@ -79,6 +81,9 @@ func (w *Worker) handleWaEvent(ctx context.Context, raw []byte) error {
 	if env.Event == "messages.update" {
 		return w.handleStatus(ctx, env)
 	}
+	if env.Event == "connection.update" {
+		return w.handleConnection(ctx, env)
+	}
 	m, err := env.Message()
 	if err != nil || m == nil {
 		return err
@@ -88,7 +93,8 @@ func (w *Worker) handleWaEvent(ctx context.Context, raw []byte) error {
 		return nil
 	}
 	acct := config.AccountID(m.OwnerJID)
-	if _, err := w.Store.AccountByID(ctx, acct); err != nil {
+	account, err := w.Store.AccountByID(ctx, acct)
+	if err != nil {
 		w.Log.Warn("event for unknown account", "owner_jid", m.OwnerJID)
 		return nil
 	}
@@ -134,7 +140,28 @@ func (w *Worker) handleWaEvent(ctx context.Context, raw []byte) error {
 		w.emitChat(ctx, "chat.updated", res.ChatID)
 	}
 	if m.Media != nil {
-		w.ingestMedia(ctx, res.MessageID, m)
+		w.ingestMedia(ctx, res.MessageID, account.InstanceName, m)
+	}
+	return nil
+}
+
+// handleConnection maps a connection.update (instance + state) to its account and
+// updates the live status badge. Unknown/pre-connect instances are a no-op.
+func (w *Worker) handleConnection(ctx context.Context, env normalize.Envelope) error {
+	state := env.ConnectionState()
+	mapped := map[string]string{"open": "connected", "close": "disconnected", "connecting": "connecting"}[state]
+	if mapped == "" {
+		return nil
+	}
+	id, err := w.Store.SetAccountStateByInstance(ctx, env.Instance, mapped)
+	if err == store.ErrNotFound {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if acct, aerr := w.Store.AccountByID(ctx, id); aerr == nil {
+		w.Hub.Broadcast("wa_account.status_changed", dto.MapAccount(acct, mapped))
 	}
 	return nil
 }
@@ -157,7 +184,7 @@ func (w *Worker) handleStatus(ctx context.Context, env normalize.Envelope) error
 }
 
 // ingestMedia writes the blob (inline or via a download task) and the media row.
-func (w *Worker) ingestMedia(ctx context.Context, messageID uuid.UUID, m *normalize.Message) {
+func (w *Worker) ingestMedia(ctx context.Context, messageID uuid.UUID, instance string, m *normalize.Message) {
 	blobID := "msg-" + m.EvolutionMessageID // deterministic: a re-delivery overwrites
 	ref := store.MediaRef{
 		MediaType: m.Media.Kind,
@@ -182,14 +209,14 @@ func (w *Worker) ingestMedia(ctx context.Context, messageID uuid.UUID, m *normal
 	}
 	if status == "pending" {
 		_ = w.Queue.Publish(queue.Message{Kind: queue.KindMediaDownload, Payload: MediaDownloadTask{
-			MessageID: messageID, EvolutionMessageID: m.EvolutionMessageID, BlobID: blobID,
+			MessageID: messageID, Instance: instance, EvolutionMessageID: m.EvolutionMessageID, BlobID: blobID,
 		}})
 	}
 	w.emitMessage(ctx, "message.updated", messageID)
 }
 
 func (w *Worker) handleMediaDownload(ctx context.Context, t MediaDownloadTask) error {
-	b64, fileName, mimetype, err := w.Evo.GetBase64(ctx, t.EvolutionMessageID)
+	b64, fileName, mimetype, err := w.Evo.GetBase64(ctx, t.Instance, t.EvolutionMessageID)
 	if err != nil {
 		return err
 	}
@@ -214,14 +241,14 @@ func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
 	var res evolution.SendResult
 	var err error
 	if t.MediaID == "" {
-		res, err = w.Evo.SendText(ctx, number, t.Text)
+		res, err = w.Evo.SendText(ctx, t.Instance, number, t.Text)
 	} else {
 		data, meta, gerr := w.Blob.Get(t.MediaID)
 		if gerr != nil {
 			err = gerr
 		} else {
 			b64 := base64.StdEncoding.EncodeToString(data)
-			res, err = w.Evo.SendMedia(ctx, number, meta.MediaType, meta.Mimetype, b64, meta.FileName, t.Caption)
+			res, err = w.Evo.SendMedia(ctx, t.Instance, number, meta.MediaType, meta.Mimetype, b64, meta.FileName, t.Caption)
 		}
 	}
 	if err != nil {

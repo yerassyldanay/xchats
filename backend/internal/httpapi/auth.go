@@ -95,6 +95,17 @@ func currentUser(c *gin.Context) store.User {
 	return u
 }
 
+// orgOf resolves the current user's organization, failing the request if missing.
+// It is the scoping root for the multi-account inbox and the accounts manager.
+func (s *Server) orgOf(c *gin.Context) (store.Organization, bool) {
+	org, err := s.store.OrgForUser(ctx(c), currentUser(c).ID)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "no organization")
+		return store.Organization{}, false
+	}
+	return org, true
+}
+
 // --- handlers -------------------------------------------------------------
 
 type loginReq struct {

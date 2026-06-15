@@ -263,7 +263,7 @@ Same idea as Evolution's `/manager` page, but a simpler UX:
 ### LLM data boundary (compliance — decide before any real send)
 
 - **What leaves the boundary:** generating a draft sends the **last ~15 messages + the contact
-  profile** (`xchats.wa_contacts.attributes`) to the LLM provider (`8.5-ai-assistant-providers.md`).
+  profile** (`xchats.wa_contacts.attributes`) to the LLM provider (`8-ai-assistant.md` → Providers).
   That is customer personal data leaving our infrastructure, and for a Kazakhstan-facing product it
   is **cross-border processing** when the provider is foreign (OpenRouter/OpenAI/Gemini).
 - The vendored brain flags this as a **go-live blocker** ("LLM_API_KEY sends conversation text
