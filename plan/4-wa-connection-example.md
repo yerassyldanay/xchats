@@ -29,9 +29,9 @@ Evolution (called only by backend):
 ```
 POST /instance/create               POST /webhook/set/{instance}
 GET  /instance/connect/{instance}   GET  /instance/connectionState/{instance}
-POST /message/sendText/{instance}
+POST /message/sendText/{instance}     POST /message/sendMedia/{instance}
 ```
-(`sendMedia` is deferred — text-only.)
+(Build 0 builds **both** `sendText` and `sendMedia`; `sendWhatsAppAudio`/`sendSticker`/`sendReaction` later.)
 The full outbound surface (text/media/audio/sticker/reaction bodies) is in `4.1-evolution-send-api.md`.
 
 Ours:

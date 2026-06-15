@@ -63,6 +63,7 @@ fast `2xx`; on success it returns `{"payload":null,"errcode":"OK"}`.
 | `EVOLUTION_ERROR` | 502 | generic upstream Evolution error |
 | `AI_UNAVAILABLE` | 503 | LLM/assistant call failed |
 | `EVAL_GATE_FAILED` | 409 | snapshot publish refused: quality gate not met (see `8.7-ai-evals.md`) |
+| `DRAFT_STALE` | 409 | approve refused: the draft was superseded by a newer inbound (see `7.1-endpoints.md`) |
 | `INTERNAL` | 500 | unexpected server error |
 
 New codes are added here only; the set is shared by backend and frontend.
@@ -127,11 +128,12 @@ POST   /xchats/api/v1/whatsapp-accounts/{id}/unassign
 ```text
 GET    /xchats/api/v1/chats                    list/filter
 GET    /xchats/api/v1/chats/{id}/messages
-POST   /xchats/api/v1/chats/{id}/messages      send text/media (-> outbound pipeline)
+POST   /xchats/api/v1/chats/{id}/messages      send {text?, media_ids?[]} (fan-out: one msg per part)
 POST   /xchats/api/v1/chats/{id}/assign        assign to a user
 POST   /xchats/api/v1/chats/{id}/read          mark read
 GET    /xchats/api/v1/contacts
 GET    /xchats/api/v1/contacts/{id}
+POST   /xchats/api/v1/media                             upload (multipart) -> {media_id}
 GET    /xchats/api/v1/media/{id}                        stream stored media (resolves blob store)
 ```
 

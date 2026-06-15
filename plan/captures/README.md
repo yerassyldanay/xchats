@@ -112,8 +112,10 @@ image only    -> data.message.imageMessage  (caption=null)            ; data.mes
 image + text  -> data.message.imageMessage.caption = "<the text>"     ; data.messageType="imageMessage"
 ```
 
-**Image + text is a single message**, not a text message plus a media message. v1 (text-only) stores
-the `caption` as `body` and ignores the media; a pure image has `caption: null` → empty body.
+**Image + text is a single message**, not a text message plus a media message. The `caption` is stored as
+`body`; a pure image has `caption: null` → empty body. The original text-only v1 ignored the image bytes;
+**Build 0 ships media**, so it also writes the inline `data.message.base64` to the blob + a `message_media`
+row (see `TODO.md` B6).
 
 ### 6. Inline media — full bytes arrive in the webhook
 

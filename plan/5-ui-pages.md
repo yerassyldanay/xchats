@@ -91,13 +91,15 @@ per-chat account indicator** (every chat is the same number).
 - **Core:** message timeline (inbound left/grey, outbound right/green), date separators, **delivery/
   read ticks**, composer (text + green **Отправить**).
 - **One-click:** header = contact **name + phone** only; **Назначить** is one icon-button → a user
-  picker. The composer is **text-only** for manual replies (no generic file attach — there is no
-  upload endpoint; media only travels with an AI option, below).
+  picker. **Build 0 delta:** the composer **does** support a file attach (backed by `POST …/media` upload +
+  `media_ids[]` send — see `TODO.md`); attaching N files sends N separate messages. *(The plan's original
+  text-only-composer rule — "media only travels with an AI option" — is superseded for Build 0.)*
 - **Removed (not backed):** ~~online/last-seen presence~~ (we don't track presence), ~~Решить/Resolve~~
   (no status endpoint), ~~profile-picture avatars~~ (initials only).
-- **▸ Backed by:** `GET /chats/{id}/messages` → `Message{direction, content, media, status, timestamp}`;
-  `POST /chats/{id}/messages {type:text}`; `POST /chats/{id}/assign {user_id}` (+ `GET /users` for the
-  picker); read-on-open via `POST /chats/{id}/read`; ticks from `message.status` over SSE.
+- **▸ Backed by:** `GET /chats/{id}/messages` → `Message{direction, content, media(list of urls), status,
+  timestamp}`; `POST /chats/{id}/messages {text?, media_ids?[]}` (+ `POST /media` upload); `POST
+  /chats/{id}/assign {user_id}` (+ `GET /users` for the picker); read-on-open via `POST /chats/{id}/read`;
+  ticks from `message.status` over SSE.
 
 ### Assistant panel (pane 3) — **1–3 reply options, text + media**
 The product's wedge; collapsible.

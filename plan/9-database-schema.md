@@ -30,8 +30,10 @@ no SQL files yet.
   200; workers consume and upsert. See `3-sync.md` → "Queue abstraction".
 - **v1 scope marker:** this is the full data model; **v1 only populates a subset.**
   - **Removed** (not in v1): `evolution_events` and `jobs` (async work uses the in-memory queue, not
-    DB tables); `wa_qr_sessions` (connect/QR deferred); `sync_jobs` (live-only); `message_media`
-    (text-only).
+    DB tables); `wa_qr_sessions` (connect/QR deferred); `sync_jobs` (live-only).
+  - **Build 0 delta — `message_media` is back** (the first build ships media; see `TODO.md`). DDL below; it
+    carries its own dedup key `UNIQUE(message_id)` so the doubled webhook delivery can't write it twice. (The
+    plan's original text-only v1 removed it; Build 0 un-defers it.)
   - **Defined but empty/unused** in v1: `ai_audit_log`, `assignment_events`. (The seeded KB —
     `ai_topics` / `ai_assets` / `ai_prices` — and `ai_draft_assets` **are** used: the brain suggests
     1–3 options, each with optional media drawn from the seeded asset catalog.) Don't pour
@@ -190,18 +192,37 @@ INDEX  (chat_id, message_ts)
 > `wa_messages.evolution_message_id` — verified equal in the captures (v2.3.7), so no separate
 > correlation column is needed. See `captures/README.md` finding 4.
 
-> **`message_media` removed in v1** (text-only). Media bodies are ignored; the table returns 1:1
-> with `wa_messages` when the media phase lands.
+### xchats.message_media  (Build 0: media is shipped — one row per media message)
+```
+id              uuid  PK
+message_id      uuid  FK -> wa_messages   UNIQUE   -- dedup: doubled webhook delivery can't insert twice
+media_type      text  -- 'image'|'video'|'audio'|'document'|'sticker'
+mimetype        text
+file_name       text
+file_size       int
+storage_url     text  -- blob path; served via GET /xchats/api/v1/media/{id}
+download_status text  -- 'pending'|'ready'|'failed'
+created_at, updated_at  timestamptz
+UNIQUE (message_id)
+```
+> `Message.media` is exposed to the UI as a **list of URLs** (one per media row) pointing at
+> `GET /media/{id}`. The ingest worker writes the blob + this row **only when the `wa_messages` upsert was a
+> genuine INSERT** (idempotent against the doubled delivery). `duration_ms`/`thumbnail_url` from the API
+> `MessageMedia` shape are not stored in Build 0 (derive/empty).
 
 > **`wa_messages.raw` example** (the original Evolution event; full shapes in `captures/`):
 > ```json
 > { "event": "messages.upsert", "instance": "sales",
+>   "sender": "77011111111@s.whatsapp.net",
 >   "data": { "key": { "remoteJid": "77058686509@s.whatsapp.net",
 >                      "remoteJidAlt": "77058686509@s.whatsapp.net",
 >                      "fromMe": false, "id": "3A1FE00DBC50780B05E2" },
 >             "pushName": "Ербол", "message": { "conversation": "Сколько стоит?" },
 >             "messageType": "conversation", "messageTimestamp": 1781459144, "source": "ios" } }
 > ```
+> **Owner vs customer:** the **top-level `sender`** is the *account's own* JID (`owner_jid` → `wa_accounts.id =
+> uuidv5(XCHATS_WA_NS, owner_jid)`). `data.key.remoteJid`/`remoteJidAlt` is the **customer** (the contact/chat
+> key). Do not confuse them — using `remoteJid` as `owner_jid` yields a different account id per customer.
 
 ### xchats.assignment_events  (history; current assignee lives on wa_chats)
 ```
