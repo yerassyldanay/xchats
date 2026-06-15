@@ -122,8 +122,10 @@ func (c *HTTP) do(ctx context.Context, method, path string, body any, out any) e
 }
 
 type sendResp struct {
-	Key    struct{ ID string `json:"id"` } `json:"key"`
-	Status string                          `json:"status"`
+	Key struct {
+		ID string `json:"id"`
+	} `json:"key"`
+	Status string `json:"status"`
 }
 
 func (c *HTTP) SendText(ctx context.Context, instance, number, text string) (SendResult, error) {

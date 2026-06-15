@@ -32,11 +32,11 @@ type Fake struct {
 	NotOnWhatsApp bool
 
 	// --- lifecycle knobs ---
-	ConnState    string   // configurable connection state ConnectionState returns (default "open")
-	QR           QR       // canned QR ConnectQR returns
-	NewOwnerJID  string   // owner_jid a freshly created instance reports once "connected"
-	Created      []string // instance names passed to CreateInstance
-	Deleted      []string // instance names passed to Delete/LogoutInstance
+	ConnState   string   // configurable connection state ConnectionState returns (default "open")
+	QR          QR       // canned QR ConnectQR returns
+	NewOwnerJID string   // owner_jid a freshly created instance reports once "connected"
+	Created     []string // instance names passed to CreateInstance
+	Deleted     []string // instance names passed to Delete/LogoutInstance
 }
 
 // NewFake returns a Fake with one connected instance and canned lifecycle defaults.
