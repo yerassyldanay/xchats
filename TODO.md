@@ -368,3 +368,95 @@ whole suite runs offline and deterministically.
 
 > Get the **live receive→send** loop solid (steps 2–4) first; the AI stub (step 5) rides the same send
 > pipeline. History sync, the real brain, and the accounts/QR manager are **out of Build 0**.
+
+---
+
+# Build 1 — WhatsApp Accounts manager (add via QR · reconnect · clean)
+
+> **Goal in one line:** a logged-in user can **add a WhatsApp number** from the UI (create an Evolution
+> instance → show a QR → poll live → persist on connect), see **all connected numbers' chats together**
+> in one inbox, **reconnect** a number whose Evolution session broke, and **clean** instances (delete on
+> Evolution + soft-delete on our side). Builds the connect/QR manager deferred from Build 0
+> (`plan/4-wa-connection-example.md`, `plan/7.1-endpoints.md`).
+
+**Why it's tractable:** ingest is *already* multi-account — the webhook handler ignores the URL
+`account_id` and the worker resolves the account from the payload `owner_jid` (`worker.go` →
+`config.AccountID(m.OwnerJID)`); only the **read** side is hardcoded to one account (`s.accountID`).
+Identity is `wa_accounts.id = uuidv5(owner_jid)`, so delete-instance + re-scan the same number lands on
+the **same row** — chats/messages are never lost (safe soft-delete + reconnect).
+
+## Acceptance — the manager loop
+
+1. **Accounts** page lists the org's connected numbers with a live status badge
+   (`connected|disconnected|qr_required|error`).
+2. **Add account** → name an instance → a **QR appears and refreshes** (polled) → scan on a phone →
+   the row flips to **connected**; a `wa_accounts` row is written with `id = uuidv5(owner_jid)`.
+3. The **inbox shows chats from all connected numbers together**, each labeled by account and
+   **filterable** by number; the **+** composer gets a "from number" picker when >1 account exists.
+4. **Reconnect** a number whose session broke (Evolution `close`/error) → re-scan QR → **same account
+   row**, history intact.
+5. **Clean** an account → Evolution instance deleted (logout+delete) + row `deleted_at` set (history
+   kept, chats hidden); re-adding the same number **revives** the row with its history.
+6. A separate **Instances maintenance** view lists *all* raw Evolution instances with status + age,
+   flags ones **not connected and >7 days old** as **stale**, and deletes them.
+
+## Isolated build & test (HARD CONSTRAINT — no Evolution, no DB, no stack)
+
+Everything ships behind the offline gate (already `make test`'s model: *fake Evolution via
+`net/http/httptest`; testcontainers ephemeral PG; DB tests skip without `DATABASE_URL`*):
+
+```
+cd backend  && go build ./...                # no network/DB
+cd backend  && go test  ./...                # unit + component; DB tests SKIP without DATABASE_URL
+cd frontend && npm ci && npm run build       # vue-tsc + vite, offline
+```
+Rules that keep it true: **all** Evolution calls go through the `evolution.Client` interface and are
+faked by `evolution.Fake` (canned QR, configurable conn-state, records create/delete) → handler/worker
+tests inject the fake, **zero network**; a fake Evolution `httptest` server lets the *binary* run the
+Add→QR→connected flow offline. DB code runs only when a PG is present, else skips. Pure logic
+(stale-rule `isStale(inst, now)`, QR-poll decision, account-id) is unit-tested with no deps. New account
+endpoints return `EVOLUTION_ERROR` (never panic) when Evolution is unreachable, so the app builds/boots
+in isolation.
+
+## Backend — `backend/`
+
+- **A1. Evolution lifecycle client** (`internal/evolution/client.go` + interface + `fake.go`):
+  `CreateInstance` (`POST /instance/create`, WHATSAPP-BAILEYS, qrcode, syncFullHistory:false),
+  `ConnectQR` (`GET /instance/connect/{n}` → base64-PNG QR + pairing), `ConnectionState`
+  (`GET /instance/connectionState/{n}`), `DeleteInstance`/`LogoutInstance` (`DELETE /instance/delete|logout/{n}`).
+  Extend `Instance`/`parseInstances` with `CreatedAt` (for stale). Add all to `Client` + `Fake`.
+- **A2. Migration** `0002_accounts_softdelete.{up,down}.sql`: `wa_accounts ADD COLUMN deleted_at timestamptz` (embedded, runs on boot).
+- **A3. Account store** (`internal/store/store.go`,`read.go`): `Account{+InstanceID,+DeletedAt}`;
+  `UpsertConnectedAccount` (ON CONFLICT(id) DO UPDATE, sets instance id/name/state/phone, **clears `deleted_at`**),
+  `ListAccountsForOrg` (non-deleted), `SoftDeleteAccount`, `SetAccountState`; `AccountByID` gains a
+  `deleted_at IS NULL` guard; new `ListChatsForOrg(orgID, filter)` (join `wa_chats→wa_accounts`).
+- **A4. Account-manager API** (new `internal/httpapi/accounts.go`, register in `server.go`; `s.evo` already wired):
+  `GET /whatsapp-accounts` (org's accounts + live status), `POST /whatsapp-accounts` `{display_name,instance_name}`
+  (create + set webhook → `qr_required`, **no row yet**), `GET /whatsapp-accounts/qr?instance=` (poll; on `open` →
+  `FetchInstances` → `UpsertConnectedAccount(uuidv5(owner_jid), org)` → `connected`),
+  `POST …/{id}/reconnect`, `DELETE …/{id}` (logout+delete instance, soft-delete row). **Pre-connect handle =
+  instance_name; post-connect = account id.**
+- **A5. Instances maintenance API** (same file): `GET /whatsapp-instances` (all raw instances + `{managed, stale}`,
+  `stale = connectionStatus!="open" && createdAt < now-7d`), `DELETE /whatsapp-instances/{name}` (refuse if managed).
+- **A6. Multi-account read side:** `handleListChats` → org-scoped via `ListChatsForOrg` + `wa_account_id?` filter;
+  `handleCreateChat` takes optional `wa_account_id` (default if single, else `VALIDATION_ERROR`); org-membership
+  guard on `ChatByID`/send; drop baked `accountID` from `Server`/`Deps`/`main.go` (keep `seed()` for xpayment).
+- **A7. Webhook enums:** send **UPPER_SNAKE** events (`MESSAGES_UPSERT, MESSAGES_UPDATE, SEND_MESSAGE,
+  CONNECTION_UPDATE, CONTACTS_UPDATE, CHATS_UPSERT`) in `SetWebhook` + `main.go:webhookEvents` (fixes the v2.3.7 400).
+- **A8. Live status:** `worker.go:handleWaEvent` handles `connection.update` → map `instance`→account by
+  `evolution_instance_name` → `SetAccountState` (`open→connected`, `close→disconnected`).
+
+## Frontend — `frontend/`
+
+- **U1.** Route `/accounts` (`router.ts`) + nav-rail button in `Chatboard.vue`; new `views/Accounts.vue`
+  (list + status + Add + per-row Reconnect/Delete).
+- **U2.** `components/AddAccountDialog.vue` (reuse `NewMessageDialog.vue` modal): create → poll `…/qr` every
+  ~2.5s → `<img :src="base64 PNG">` → on `connected` close+refresh; Reconnect reuses it.
+- **U3.** Instances maintenance view (`/instances` or dialog): all instances + age + **Stale** badge + delete + "delete all stale".
+- **U4.** `stores/accounts.ts` (list/create/pollQR/reconnect/delete); `ChatList.vue` account label + filter
+  (passes `wa_account_id` to `loadChats`); `NewMessageDialog.vue` "from number" picker; `types.ts` add `Account`/QR types.
+
+## Build order
+
+Step 0 push pending Build-0.5 work → **A1–A4 + A7** → **U1–U2** → **A6 + U4** (multi-account inbox) →
+**A5 + U3** (stale maintenance) → **A8** (live status). Each step lands with its offline tests green.

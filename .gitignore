@@ -7,6 +7,11 @@ backend/.env
 backend/config.yaml
 frontend/.env
 
+# local-only deploy helpers (machine-specific host ports; restore script holds a
+# local Evolution API key) — keep out of git
+deploy/docker-compose.override.yaml
+deploy/restore-evolution-webhook.sh
+
 # blob store (local-disk media bytes)
 blobdata/
 backend/blobdata/
