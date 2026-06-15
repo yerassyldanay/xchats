@@ -75,6 +75,10 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
   `10`: the option & decisions (`11`), the additive DDL incl. the deferred snapshot tables (`11.1`),
   the API + SSE (`11.2`), the chat **builder agent** + tools + proactive policy (`11.3`), the editor/
   chat UI + **git-like diff cards** (`11.4`), and the phased build + test plan (`11.5`).
+- **12-knowledge-base-contract.md** — the **three-component rethink** (brain · knowledge base ·
+  playground) with the **KB as the shared contract**: the draft/published two-layer model, the access
+  contract both sides code against, and the KB-first build sequence. **The organizing doc** — read it
+  before `8`/`10`/`11` for the current framing.
 - **examples/repos/xpayment-crm/** — the working brain, vendored as a git submodule (the
   implementation the AI docs above describe; entry `IMPLEMENTATION.md`).
 - **scripts/evolution_client.py** — working Evolution client + normalization (the oracle).

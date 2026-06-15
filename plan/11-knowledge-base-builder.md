@@ -4,6 +4,13 @@ This is the **concrete, buildable implementation** of the experience sketched in
 `10-knowledge-builder.md`. `10` is the *what/why* (conceptual UX). The `11.*` set is the *how*:
 schema, API, the builder agent, the git-like diff system, the UI, and the phased build plan.
 
+> **Framing update — read `12-knowledge-base-contract.md` first.** The system is now organized around
+> **three components** (brain · knowledge base · playground) with the **KB as the shared contract**. In
+> that framing the "builder" here is the **playground** (chat + editor), and its **core** interaction is
+> the simpler **per-item accept/deny + questions** model — the **git-like changesets** below are an
+> **optional enhancement** for bulk/risky edits, not the v1 core. `11.1`–`11.5` remain the detailed
+> specs (schema/API/agent/UI/build) that plug into the `12` contract.
+
 > **One line:** the operator **talks to a builder assistant** — drops files, links, notes, answers a
 > few questions — and the assistant turns it into a reviewed **draft Snapshot** (identity · goal ·
 > quality · support + topics-of-media + prices), showing a **git-style diff before any important
