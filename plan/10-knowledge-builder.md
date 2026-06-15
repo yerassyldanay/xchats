@@ -6,9 +6,10 @@ corrects. This is the authoring front-end to the brain's `xchats.ai_*` tables (r
 `8-ai-assistant.md`). It is the **deferred CMS** (designed here; built Phase 4B — see
 `0.1-definition-of-done.md`), not v1.
 
-> **This doc is the conceptual UX.** The **concrete, buildable spec** — additive DDL, API + SSE, the
-> chat builder agent + tools, the git-like change-diff (changeset) model, the UI, and the phased build
-> plan — lives in the **`11-knowledge-base-builder.md`** set (`11`, `11.1`–`11.5`). Read `11` for *how*.
+> **This doc is the conceptual UX.** For the **bird's-eye view** of the whole AI side — the three
+> components (brain · knowledge base · playground), the main design solutions, and their advantages &
+> limitations — see **`11-design-overview.md`** (start there). The data model lives in
+> `9-database-schema.md`; the brain in `8-ai-assistant.md`.
 
 ## Why automatic is safe here (the unlock)
 

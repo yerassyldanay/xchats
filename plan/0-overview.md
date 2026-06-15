@@ -71,14 +71,10 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
 - **10-knowledge-builder.md** — the automatic KB authoring experience (deferred CMS): a builder chat
   that turns URLs/media/text into draft topics + per-asset media, the editor page, and the
   popup/request primitive (describe-media · confirm-price · accept/deny/comment). *Conceptual UX.*
-- **11-knowledge-base-builder.md** (+ `11.1`–`11.5`) — the **concrete, buildable implementation** of
-  `10`: the option & decisions (`11`), the additive DDL incl. the deferred snapshot tables (`11.1`),
-  the API + SSE (`11.2`), the chat **builder agent** + tools + proactive policy (`11.3`), the editor/
-  chat UI + **git-like diff cards** (`11.4`), and the phased build + test plan (`11.5`).
-- **12-knowledge-base-contract.md** — the **three-component rethink** (brain · knowledge base ·
-  playground) with the **KB as the shared contract**: the draft/published two-layer model, the access
-  contract both sides code against, and the KB-first build sequence. **The organizing doc** — read it
-  before `8`/`10`/`11` for the current framing.
+- **11-design-overview.md** — the **bird's-eye view** of the AI side: the three components (brain ·
+  knowledge base · playground), the main design solutions, and **what each buys us vs. costs us**
+  (trade-offs), plus the KB-first build sequence. **Start here** to understand the whole AI/KB picture;
+  it consolidates the earlier detailed split into one map.
 - **examples/repos/xpayment-crm/** — the working brain, vendored as a git submodule (the
   implementation the AI docs above describe; entry `IMPLEMENTATION.md`).
 - **scripts/evolution_client.py** — working Evolution client + normalization (the oracle).
