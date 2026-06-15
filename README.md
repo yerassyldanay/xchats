@@ -24,6 +24,18 @@ make webhook-set                # register our webhook on the live Evolution ins
 
 Local dev (no Docker): `make dev-backend` (`:8080`) and `make dev-frontend` (`:5173`).
 
+## Build 1 — WhatsApp accounts manager (add via QR · reconnect · clean)
+
+On top of Build 0's single seeded number, a logged-in user can **manage numbers from the UI**
+(`/accounts`): **add** a number (create an Evolution instance → scan a live-polled **QR** → the row
+is written on connect with `id = uuidv5(owner_jid)`), see **all numbers' chats together** in one
+inbox (labelled + filterable by number, with a "from number" picker in the composer),
+**reconnect** a broken session (same row, history intact), and **clean** a number (delete the
+instance + soft-delete the row — re-adding the same number **revives** it with its history). A
+separate **`/instances`** view sweeps stray/stale Evolution instances. Identity is the WhatsApp
+number, so instance churn never loses chats. Endpoints: `GET/POST /whatsapp-accounts`,
+`GET …/qr`, `POST …/{id}/reconnect`, `DELETE …/{id}`, `GET/DELETE /whatsapp-instances`.
+
 ```bash
 make test        # Go unit/component + normalizer-vs-captures + frontend typecheck/build
 make test-e2e    # full demo loop against a Postgres (DATABASE_URL=...): ingest→dedup→media,

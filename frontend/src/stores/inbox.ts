@@ -24,6 +24,7 @@ export const useInbox = defineStore('inbox', {
     messages: [] as Message[],
     drafts: [] as AiDraft[],
     filter: 'all' as Assignee,
+    accountFilter: null as string | null, // wa_account_id; null = all numbers
     query: '',
     composerText: '',
     loadingChats: false,
@@ -42,6 +43,7 @@ export const useInbox = defineStore('inbox', {
       try {
         const params = new URLSearchParams()
         if (this.filter !== 'all') params.set('assignee', this.filter)
+        if (this.accountFilter) params.set('wa_account_id', this.accountFilter)
         if (this.query) params.set('q', this.query)
         const p = await api.get<ListChats>('/chats?' + params.toString())
         this.chats = p.items
@@ -92,8 +94,9 @@ export const useInbox = defineStore('inbox', {
       }
     },
     // composeNew starts (or reuses) a chat by phone number and sends the first
-    // message, then opens that chat. Uploads media first, like send().
-    async composeNew(phone: string, text: string, files: File[]): Promise<Chat> {
+    // message, then opens that chat. Uploads media first, like send(). With more
+    // than one connected number, accountId picks the "from" account.
+    async composeNew(phone: string, text: string, files: File[], accountId?: string): Promise<Chat> {
       const media_ids: string[] = []
       for (const f of files) {
         const up = await api.upload(f)
@@ -103,6 +106,7 @@ export const useInbox = defineStore('inbox', {
         phone,
         text: text || undefined,
         media_ids: media_ids.length ? media_ids : undefined,
+        wa_account_id: accountId || undefined,
       })
       this.upsertChat(res.chat)
       await this.selectChat(res.chat.id)

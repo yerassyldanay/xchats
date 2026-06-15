@@ -39,6 +39,7 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 export const api = {
   get: <T>(path: string) => send<T>('GET', path),
   post: <T>(path: string, body?: unknown) => send<T>('POST', path, body),
+  del: <T>(path: string) => send<T>('DELETE', path),
   async upload(file: File): Promise<{ media_id: string; url: string; media_type: string }> {
     const form = new FormData()
     form.append('file', file)

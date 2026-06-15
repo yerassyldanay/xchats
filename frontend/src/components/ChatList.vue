@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useInbox } from '../stores/inbox'
+import { useAccounts } from '../stores/accounts'
 import { initials, colorFor, shortTime } from '../lib/format'
 import NewMessageDialog from './NewMessageDialog.vue'
 
 const inbox = useInbox()
+const accounts = useAccounts()
 const showNew = ref(false)
 
 const filters: { key: 'me' | 'unassigned' | 'all'; label: string }[] = [
@@ -15,6 +17,10 @@ const filters: { key: 'me' | 'unassigned' | 'all'; label: string }[] = [
 
 function setFilter(k: 'me' | 'unassigned' | 'all') {
   inbox.filter = k
+  inbox.loadChats()
+}
+function setAccount(id: string | null) {
+  inbox.accountFilter = id
   inbox.loadChats()
 }
 let t: number | undefined
@@ -44,6 +50,16 @@ function onSearch() {
           {{ f.label }}
         </button>
       </div>
+      <!-- account filter: only meaningful with more than one connected number -->
+      <select
+        v-if="accounts.hasMultiple"
+        :value="inbox.accountFilter || ''"
+        @change="setAccount(($event.target as HTMLSelectElement).value || null)"
+        class="mt-2 w-full rounded-lg bg-panel border border-hair px-2 py-1.5 text-xs outline-none focus:border-brand"
+      >
+        <option value="">Все номера</option>
+        <option v-for="a in accounts.accounts" :key="a.id" :value="a.id">{{ a.display_name }}</option>
+      </select>
     </div>
 
     <div class="flex-1 overflow-y-auto">
@@ -67,6 +83,12 @@ function onSearch() {
           <div class="flex items-baseline justify-between gap-2">
             <span class="font-medium truncate">{{ c.contact.display_name }}</span>
             <span class="text-[11px] text-slate-400 shrink-0">{{ shortTime(c.last_message_at) }}</span>
+          </div>
+          <div
+            v-if="accounts.hasMultiple && accounts.accountName(c.wa_account_id)"
+            class="text-[11px] text-slate-400 truncate"
+          >
+            📱 {{ accounts.accountName(c.wa_account_id) }}
           </div>
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm text-slate-500 truncate">{{ c.last_message_preview }}</span>

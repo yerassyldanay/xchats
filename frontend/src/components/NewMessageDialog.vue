@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useInbox } from '../stores/inbox'
+import { useAccounts } from '../stores/accounts'
 import { ApiError } from '../api/client'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 const inbox = useInbox()
+const accounts = useAccounts()
 
 const phone = ref('')
 const text = ref('')
 const files = ref<File[]>([])
+const fromAccount = ref(accounts.accounts[0]?.id || '')
 const fileInput = ref<HTMLInputElement | null>(null)
 const sending = ref(false)
 const error = ref('')
@@ -34,7 +37,7 @@ async function submit() {
   }
   sending.value = true
   try {
-    await inbox.composeNew(digits, text.value.trim(), files.value)
+    await inbox.composeNew(digits, text.value.trim(), files.value, fromAccount.value || undefined)
     emit('close')
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось отправить сообщение.'
@@ -58,6 +61,17 @@ async function submit() {
       </div>
 
       <div class="px-5 py-4 space-y-3">
+        <div v-if="accounts.hasMultiple">
+          <label class="text-xs text-slate-500">Отправить с номера</label>
+          <select
+            v-model="fromAccount"
+            class="mt-1 w-full rounded-xl border border-hair px-3 py-2.5 outline-none focus:border-brand"
+          >
+            <option v-for="a in accounts.accounts" :key="a.id" :value="a.id">
+              {{ a.display_name }}{{ a.phone_number ? ' (+' + a.phone_number + ')' : '' }}
+            </option>
+          </select>
+        </div>
         <div>
           <label class="text-xs text-slate-500">Номер телефона</label>
           <input

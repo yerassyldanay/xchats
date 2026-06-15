@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, RouterLink } from 'vue-router'
 import { useAuth } from '../stores/auth'
 import { useInbox } from '../stores/inbox'
+import { useAccounts } from '../stores/accounts'
 import { initials, colorFor } from '../lib/format'
 import ChatList from '../components/ChatList.vue'
 import ChatThread from '../components/ChatThread.vue'
@@ -10,12 +11,14 @@ import AssistantPanel from '../components/AssistantPanel.vue'
 
 const auth = useAuth()
 const inbox = useInbox()
+const accounts = useAccounts()
 const router = useRouter()
 const menuOpen = ref(false)
 
 onMounted(() => {
   inbox.loadChats()
   inbox.startRealtime()
+  accounts.load() // for the per-chat account labels + the "from number" picker
 })
 onBeforeUnmount(() => inbox.stopRealtime())
 
@@ -33,6 +36,13 @@ async function logout() {
       <button class="mt-6 w-9 h-9 rounded-lg bg-white/10 text-white grid place-items-center" title="Инбокс">
         <span class="text-lg">💬</span>
       </button>
+      <RouterLink
+        :to="{ name: 'accounts' }"
+        class="mt-3 w-9 h-9 rounded-lg hover:bg-white/10 text-white/80 grid place-items-center"
+        title="Номера WhatsApp"
+      >
+        <span class="text-lg">📱</span>
+      </RouterLink>
       <div class="mt-auto relative">
         <button
           class="w-9 h-9 rounded-full grid place-items-center text-white text-xs font-semibold"

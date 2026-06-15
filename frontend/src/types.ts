@@ -47,6 +47,34 @@ export interface Message {
   source: string
   timestamp: string | null
 }
+export interface WhatsAppAccount {
+  id: string
+  instance_name: string
+  display_name: string
+  connection_status: string // connecting | qr_required | connected | disconnected | error
+  assigned: boolean
+  owner_jid: string
+  phone_number: string
+  last_live_event_at: string | null
+  created_at: string | null
+}
+export interface QrResponse {
+  status: string // qr_required | connecting | connected
+  qr_code?: string | null
+  qr_base64?: string | null
+  pairing_code?: string | null
+  wa_account_id?: string
+  instance_name?: string
+}
+export interface EvolutionInstance {
+  name: string
+  connection_status: string
+  owner_jid: string
+  phone_number: string
+  created_at: string | null
+  managed: boolean
+  stale: boolean
+}
 export interface DraftMedia {
   asset_id: string
   media_kind: string
