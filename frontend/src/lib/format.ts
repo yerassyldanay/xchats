@@ -40,18 +40,19 @@ export function connStatus(status: string): { label: string; cls: string; dot: s
   }
 }
 
-// delivery ticks: queued ·, sent ✓, delivered ✓✓, read ✓✓ (blue), failed ✕
-export function tick(status: string): { glyph: string; cls: string } {
+// delivery ticks (FontAwesome) — colored for the green outgoing bubble:
+// queued clock, sent check, delivered double-check, read double-check (blue), failed warning.
+export function tick(status: string): { icon: string; cls: string } {
   switch (status) {
     case 'sent':
-      return { glyph: '✓', cls: 'text-slate-400' }
+      return { icon: 'fa-check', cls: 'text-white/70' }
     case 'delivered':
-      return { glyph: '✓✓', cls: 'text-slate-400' }
+      return { icon: 'fa-check-double', cls: 'text-white/70' }
     case 'read':
-      return { glyph: '✓✓', cls: 'text-sky-500' }
+      return { icon: 'fa-check-double', cls: 'text-sky-200' }
     case 'failed':
-      return { glyph: '✕', cls: 'text-red-500' }
+      return { icon: 'fa-triangle-exclamation', cls: 'text-rose-200' }
     default:
-      return { glyph: '·', cls: 'text-slate-300' }
+      return { icon: 'fa-clock', cls: 'text-white/50' }
   }
 }

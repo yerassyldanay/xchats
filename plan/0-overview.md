@@ -62,16 +62,15 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
   `/evolution/api/v1` path convention (authoritative; supersedes the shorthand `/api/...`).
 - **7.1-endpoints.md** — per-endpoint request & response parameters (bodies, query, payload shapes,
   shared entity schemas).
-- **8-ai-assistant.md** — the AI brain overview (the core of the product): `HandleMessage`, the
-  `emit_draft` → `escalate→refs→prices→profile→status` pipeline, ~15-message window, suggest-only.
-  - **8.1-ai-assistant-prompt.md** — prompt `[A]–[E]`, conversation flow (start/middle/end), language.
-  - **8.2-ai-assistant-responses.md** — `emit_draft` output, text/media/both, incoming media handling.
-  - **8.3-ai-assistant-profile.md** — building & using the contact profile.
-  - **8.4-ai-assistant-knowledge-base.md** — topics, media catalog, price tokens, links.
-  - **8.5-ai-assistant-providers.md** — multi-provider LLM (openrouter/openai/gemini).
-  - **8.6-port-checklist.md** — porting the brain from the submodule (reuse/adapt/drop + the new Postgres reader).
+- **8-ai-assistant.md** — the AI brain, end to end (the core of the product): the `[A]–[E]` prompt,
+  the `emit_draft` → `escalate→refs→prices→profile→status` pipeline, the knowledge base (text/media/
+  prices, media-as-knowledge via companion topics, the chat authoring flow), the contact profile,
+  providers + data boundary, evals + publish gate, and the submodule port checklist.
 - **9-database-schema.md** — the full PostgreSQL schema in a dedicated `xchats` schema (fully-named
   tables, e.g. `xchats.wa_chats`), keys, indexes, constraints, and a normalization review.
+- **10-knowledge-builder.md** — the automatic KB authoring experience (deferred CMS): a builder chat
+  that turns URLs/media/text into draft topics + per-asset media, the editor page, and the
+  popup/request primitive (describe-media · confirm-price · accept/deny/comment).
 - **examples/repos/xpayment-crm/** — the working brain, vendored as a git submodule (the
   implementation the AI docs above describe; entry `IMPLEMENTATION.md`).
 - **scripts/evolution_client.py** — working Evolution client + normalization (the oracle).

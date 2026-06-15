@@ -48,76 +48,64 @@ async function submit() {
 </script>
 
 <template>
-  <div
-    class="fixed inset-0 z-30 grid place-items-center bg-black/40 p-4"
-    @click.self="emit('close')"
-  >
-    <div class="w-full max-w-md rounded-2xl bg-white shadow-xl">
-      <div class="flex items-center justify-between border-b border-hair px-5 py-3">
-        <h2 class="font-semibold">Новое сообщение</h2>
-        <button class="text-slate-400 hover:text-slate-700 text-xl leading-none" @click="emit('close')">
-          ×
-        </button>
+  <div class="fixed inset-0 z-40 grid place-items-center bg-ink/50 backdrop-blur-sm p-4" @click.self="emit('close')">
+    <div class="w-full max-w-md rounded-3xl bg-white shadow-pop overflow-hidden">
+      <div class="flex items-center justify-between border-b border-hair px-5 py-4">
+        <h2 class="flex items-center gap-2.5 font-semibold">
+          <span class="w-8 h-8 rounded-xl bg-brand-soft text-brand grid place-items-center">
+            <i class="fa-solid fa-pen-to-square text-sm"></i>
+          </span>
+          Новое сообщение
+        </h2>
+        <button class="icon-btn" @click="emit('close')"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
-      <div class="px-5 py-4 space-y-3">
+      <div class="px-5 py-5 space-y-4">
         <div v-if="accounts.hasMultiple">
-          <label class="text-xs text-slate-500">Отправить с номера</label>
-          <select
-            v-model="fromAccount"
-            class="mt-1 w-full rounded-xl border border-hair px-3 py-2.5 outline-none focus:border-brand"
-          >
+          <label class="text-xs font-medium text-muted">Отправить с номера</label>
+          <select v-model="fromAccount" class="field mt-1.5">
             <option v-for="a in accounts.accounts" :key="a.id" :value="a.id">
               {{ a.display_name }}{{ a.phone_number ? ' (+' + a.phone_number + ')' : '' }}
             </option>
           </select>
         </div>
         <div>
-          <label class="text-xs text-slate-500">Номер телефона</label>
+          <label class="text-xs font-medium text-muted">Номер телефона</label>
           <input
             v-model="phone"
             inputmode="tel"
             placeholder="77001234567"
-            class="mt-1 w-full rounded-xl border border-hair px-3 py-2.5 outline-none focus:border-brand"
+            class="field mt-1.5"
             @keydown.enter.prevent="submit"
           />
         </div>
         <div>
-          <label class="text-xs text-slate-500">Сообщение</label>
-          <textarea
-            v-model="text"
-            rows="3"
-            placeholder="Введите сообщение…"
-            class="mt-1 w-full resize-none rounded-xl border border-hair px-3 py-2.5 outline-none focus:border-brand"
-          />
+          <label class="text-xs font-medium text-muted">Сообщение</label>
+          <textarea v-model="text" rows="3" placeholder="Введите сообщение…" class="field mt-1.5 resize-none" />
         </div>
         <div v-if="files.length" class="flex flex-wrap gap-2">
           <span
             v-for="(f, i) in files"
             :key="i"
-            class="flex items-center gap-1 rounded-full bg-panel border border-hair px-3 py-1 text-xs"
+            class="flex items-center gap-1.5 rounded-full bg-panel border border-hair px-3 py-1 text-xs"
           >
-            📎 {{ f.name }}
-            <button class="text-slate-400 hover:text-red-500" @click="removeFile(i)">×</button>
+            <i class="fa-solid fa-paperclip text-slate-400"></i> {{ f.name }}
+            <button class="text-slate-400 hover:text-red-500" @click="removeFile(i)"><i class="fa-solid fa-xmark"></i></button>
           </span>
         </div>
-        <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
+        <p v-if="error" class="flex items-center gap-2 text-sm text-red-600">
+          <i class="fa-solid fa-circle-exclamation"></i> {{ error }}
+        </p>
       </div>
 
-      <div class="flex items-center justify-between gap-2 border-t border-hair px-5 py-3">
-        <button
-          class="w-10 h-10 rounded-lg hover:bg-panel grid place-items-center text-slate-500"
-          title="Прикрепить файл"
-          @click="fileInput?.click()"
-        >
-          📎
+      <div class="flex items-center justify-between gap-2 border-t border-hair px-5 py-4">
+        <button class="icon-btn" title="Прикрепить файл" @click="fileInput?.click()">
+          <i class="fa-solid fa-paperclip"></i>
         </button>
         <input ref="fileInput" type="file" multiple class="hidden" @change="pick" />
-        <button
-          :disabled="sending"
-          class="h-10 px-5 rounded-xl bg-wa text-white font-medium hover:opacity-90 disabled:opacity-60"
-          @click="submit"
-        >
+        <button :disabled="sending" class="btn-wa" @click="submit">
+          <i v-if="sending" class="fa-solid fa-spinner fa-spin"></i>
+          <i v-else class="fa-solid fa-paper-plane"></i>
           {{ sending ? 'Отправка…' : 'Отправить' }}
         </button>
       </div>

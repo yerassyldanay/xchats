@@ -52,59 +52,75 @@ async function removeAllStale() {
 
 <template>
   <div class="h-full flex flex-col bg-panel">
-    <header class="h-14 px-6 flex items-center justify-between border-b border-hair bg-white shrink-0">
+    <header class="px-8 py-5 flex items-center justify-between border-b border-hair bg-white shrink-0">
       <div class="flex items-center gap-4">
-        <RouterLink :to="{ name: 'accounts' }" class="text-slate-400 hover:text-slate-700" title="К номерам">←</RouterLink>
-        <h1 class="font-semibold">Обслуживание инстансов</h1>
+        <RouterLink :to="{ name: 'accounts' }" class="icon-btn" title="К номерам">
+          <i class="fa-solid fa-arrow-left"></i>
+        </RouterLink>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight">Обслуживание инстансов</h1>
+          <p class="text-sm text-muted">Все инстансы Evolution · удаление устаревших</p>
+        </div>
       </div>
       <button
         v-if="stale.length"
         :disabled="busy === 'all'"
-        class="h-9 px-4 rounded-xl bg-red-500 text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
+        class="btn bg-red-500 text-white hover:bg-red-600 shadow-sm"
         @click="removeAllStale"
       >
-        Удалить устаревшие ({{ stale.length }})
+        <i class="fa-solid fa-broom"></i> Удалить устаревшие ({{ stale.length }})
       </button>
     </header>
 
-    <div class="flex-1 overflow-y-auto p-6">
-      <div class="mx-auto max-w-3xl space-y-3">
-        <p v-if="error" class="rounded-lg bg-red-50 text-red-600 text-sm px-3 py-2">{{ error }}</p>
-        <p v-if="!accounts.instances.length" class="text-center text-sm text-slate-400 py-10">
-          Инстансы не найдены.
+    <div class="flex-1 overflow-y-auto">
+      <div class="mx-auto max-w-4xl px-8 py-6 space-y-4">
+        <p v-if="error" class="flex items-center gap-2 rounded-xl bg-red-50 text-red-600 text-sm px-4 py-3">
+          <i class="fa-solid fa-circle-exclamation"></i> {{ error }}
         </p>
 
-        <div
-          v-for="i in accounts.instances"
-          :key="i.name"
-          class="flex items-center gap-3 rounded-2xl border border-hair bg-white px-4 py-3 shadow-sm"
-        >
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <span class="font-mono font-medium truncate">{{ i.name }}</span>
-              <span v-if="i.managed" class="rounded-full bg-indigo-50 text-brand px-2 py-0.5 text-[11px]">наш</span>
-              <span v-if="i.stale" class="rounded-full bg-amber-50 text-amber-700 px-2 py-0.5 text-[11px]">устарел</span>
-            </div>
-            <div class="text-xs text-slate-400 mt-0.5">
-              создан {{ i.created_at ? shortTime(i.created_at) : '—' }}
-              <span v-if="i.owner_jid"> · {{ i.owner_jid }}</span>
-            </div>
+        <div class="card overflow-hidden">
+          <div class="px-5 py-3.5 border-b border-hair flex items-center justify-between">
+            <span class="font-semibold">Инстансы Evolution</span>
+            <span class="text-sm text-muted">{{ accounts.instances.length }} всего</span>
           </div>
-          <span
-            class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
-            :class="connStatus(i.connection_status).cls"
+
+          <p v-if="!accounts.instances.length" class="px-5 py-14 text-center text-sm text-slate-400">
+            Инстансы не найдены.
+          </p>
+
+          <div
+            v-for="i in accounts.instances"
+            :key="i.name"
+            class="flex items-center gap-4 px-5 py-4 border-b border-hair last:border-0 hover:bg-panel/60 transition"
           >
-            <span class="w-1.5 h-1.5 rounded-full" :class="connStatus(i.connection_status).dot" />
-            {{ connStatus(i.connection_status).label }}
-          </span>
-          <button
-            :disabled="i.managed || busy === i.name"
-            class="text-sm text-red-500 hover:underline disabled:opacity-40 disabled:no-underline"
-            :title="i.managed ? 'Управляется приложением — удалите номер на странице номеров' : ''"
-            @click="remove(i)"
-          >
-            {{ busy === i.name ? '…' : 'Удалить' }}
-          </button>
+            <div class="w-10 h-10 rounded-xl bg-panel grid place-items-center text-slate-400 shrink-0">
+              <i class="fa-solid fa-server"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="font-mono font-medium truncate">{{ i.name }}</span>
+                <span v-if="i.managed" class="badge bg-brand-soft text-brand">наш</span>
+                <span v-if="i.stale" class="badge bg-amber-50 text-amber-700">устарел</span>
+              </div>
+              <div class="text-xs text-slate-400 mt-0.5 truncate">
+                создан {{ i.created_at ? shortTime(i.created_at) : '—' }}
+                <span v-if="i.owner_jid"> · {{ i.owner_jid }}</span>
+              </div>
+            </div>
+            <span class="badge shrink-0" :class="connStatus(i.connection_status).cls">
+              <span class="w-1.5 h-1.5 rounded-full" :class="connStatus(i.connection_status).dot" />
+              {{ connStatus(i.connection_status).label }}
+            </span>
+            <button
+              :disabled="i.managed || busy === i.name"
+              class="btn-ghost btn-sm !px-2.5 text-red-500 hover:bg-red-50 disabled:text-slate-300 disabled:hover:bg-white shrink-0"
+              :title="i.managed ? 'Управляется приложением — удалите номер на странице номеров' : 'Удалить инстанс'"
+              @click="remove(i)"
+            >
+              <i v-if="busy === i.name" class="fa-solid fa-spinner fa-spin"></i>
+              <i v-else class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
         </div>
       </div>
     </div>

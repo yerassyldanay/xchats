@@ -3,25 +3,47 @@ SHELL := /bin/bash
 
 BACKEND := backend
 FRONTEND := frontend
-COMPOSE := docker compose -f deploy/docker-compose.yaml
+# Use the root .env and the local host-port override when present (this dev box
+# remaps backend→8090, frontend→8081, db→5433 to dodge port conflicts) under a
+# stable project name; a clean checkout without them falls back to compose
+# defaults (backend→8080, frontend→8081, db→5432).
+COMPOSE := docker compose -p xchats $(if $(wildcard .env),--env-file .env,) -f deploy/docker-compose.yaml $(if $(wildcard deploy/docker-compose.override.yaml),-f deploy/docker-compose.override.yaml,)
 DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/xchats?sslmode=disable
 GORUN := go run ./cmd/xchats -env ../.env -config ../config.yaml
 
-.PHONY: help up down logs migrate seed webhook-set dev-backend dev-frontend \
+# Ports kill-ports frees (override: make kill-ports PORTS="8080 5173")
+PORTS ?= 8080 8090 5173 8081
+
+.PHONY: help up up-fg down logs ps kill-ports migrate seed webhook-set dev-backend dev-frontend \
         test test-backend test-frontend test-e2e build smoke
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-up: ## Build + run the whole stack (Postgres + backend + frontend)
+up: ## Rebuild + run the whole stack detached (Postgres + backend + frontend)
+	$(COMPOSE) up -d --build
+	@echo "✅ up — frontend: http://localhost:8081 · backend: http://localhost:8090 · logs: make logs"
+
+up-fg: ## Same as up but foreground (Ctrl-C to stop, attached logs)
 	$(COMPOSE) up --build
 
-down: ## Stop the stack
+down: ## Stop + remove the stack
 	$(COMPOSE) down
 
-logs: ## Tail stack logs
+logs: ## Tail stack logs (Ctrl-C to detach)
 	$(COMPOSE) logs -f
+
+ps: ## Show stack container status
+	$(COMPOSE) ps
+
+kill-ports: ## Free backend/frontend ports (default 8080 8090 5173 8081; override PORTS=). Docker stack: prefer 'make down'.
+	@for p in $(PORTS); do \
+	  if fuser $$p/tcp >/dev/null 2>&1; then \
+	    fuser -k $$p/tcp >/dev/null 2>&1 && echo "  killed listener on :$$p" \
+	      || echo "  :$$p in use but not killed (Docker-owned? use 'make down', or sudo)"; \
+	  else echo "  :$$p free"; fi; \
+	done
 
 migrate: ## Apply DB migrations
 	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) migrate
