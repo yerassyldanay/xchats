@@ -16,7 +16,8 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'connected'): void }>()
 const accounts = useAccounts()
 
 type Step = 'form' | 'qr' | 'connected'
-const step = ref<Step>('form')
+// Reconnect skips the name form (it auto-starts onMounted), so open straight to QR.
+const step = ref<Step>(props.reconnect ? 'qr' : 'form')
 const displayName = ref(props.reconnect?.displayName || '')
 const instanceName = ref(props.reconnect?.instance || '')
 const qr = ref<QrResponse | null>(null)
