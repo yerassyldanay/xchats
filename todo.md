@@ -121,3 +121,40 @@ are **value tokens**, never digits in topic bodies.
 - The realtime multi-user "generating" signal (see `~/.claude/plans/1-we-must-add-cuddly-diffie.md`).
 - `ai_*` KB tables + authoring CMS (the snapshot stays embedded for now).
 - The `ai_suggestions` jsonb storage refactor (current per-option `ai_drafts` storage is untouched).
+
+---
+
+## Status — implemented (this branch)
+
+Steps 1–7 done; step 8 done except the two checks that need a live `LLM_API_KEY`.
+
+- [x] **1. Brain ported** → `backend/internal/brain/`: `domain/{content,draft,message,catalog}.go`
+  (module path rewritten; `ChatID` dropped from `message.go`), `prompt.go` (package `brain`: `Prompt`
+  type, `BuildSystem`, `BuildUser` **with the PROFILE block omitted when none**, exported `PostProcess`,
+  the consts + `ErrNoPublishedConfig`), `llm/openrouter.go` (package `llm`, repointed to `brain.Prompt`
+  + `brain/domain`, forced `emit_draft` tool + defensive parse).
+- [x] **2. Value tokens** → reused the ported `PriceBook.Render`; demo book mapped onto `Tariffs`
+  (basic/standard/premium/free_delivery_min) + `Placeholders` (delivery/contacts).
+- [x] **3. LLM config** → `config.go` gains `LLMProvider/LLMAPIKey/LLMBaseURL/LLMFastModel/
+  LLMMaxTokens/LLMTemperature` + defaults (openrouter, `openai/gpt-4o-mini`, 1024, 0.3) +
+  `LLMResolvedBaseURL()`. Documented in `.env.example` / `config.example.yaml`.
+- [x] **4. Embedded seed** → `brain/seed.go` `SeedSnapshot()` = the "Demo Shop" KB (config + price book
+  + 4 topics + 3 assets); asset URLs `/xchats/api/v1/media/<ref>`.
+- [x] **5. KB media** → `brain/kb-media/{pricing_card.png,catalog_pdf.pdf,intro_audio.wav}` (placeholder
+  bytes) `//go:embed`-ed; `brain.LoadMedia(blob.Store)` mirrors `NewStub` (ref == blob id).
+- [x] **6. RealDrafter** → `internal/assistant/real.go`: reads the last 15 msgs via
+  `store.MessagesForChat`, builds the prompt (no profile), calls the LLM, `PostProcess`es, returns ONE
+  option (text + resolved media); LLM error → one escalation option (holding reply). `NewReal(...)`.
+- [x] **7. Wired** → `main.go buildDrafter`: `LLM_API_KEY` set → load KB media + `assistant.NewReal`
+  (logs `mode=real`); else `NewStub` (logs `mode=stub`). Same `Drafter` passed to worker + HTTP server.
+- [x] **8. Build/test** → `go build ./...` + `go vet ./...` clean; parity tests pass —
+  `internal/brain/prompt_test.go` (escalation stops, refs resolved/dropped, price-render failure →
+  manual note, seed tokens resolve) + `internal/assistant/real_test.go` (grounded option, LLM-error
+  escalation, bad chat id) with a fake LLM + fake window store. **No live LLM used.**
+- [ ] **8. Manual e2e with a real key** — pending: set `LLM_API_KEY`, ask "Сколько стоит?" → grounded
+  card with injected price + catalog asset; off-KB "Вы возвращаете деньги?" → escalates; unset key →
+  boots on the stub. (Can't run here — no key in this environment.)
+
+> Note on the port source: the `xpayment-crm` submodule is unreachable from this environment (SSH/proxy
+> blocked), so the brain was ported from a **direct HTTPS clone** of the same repo — the literal
+> copy + module-path rewrite the todo describes, not a reconstruction.
