@@ -201,6 +201,41 @@ func (s *Store) InsertOutboundMessage(ctx context.Context, chatID, accountID uui
 	return id, tx.Commit(ctx)
 }
 
+// FindOrCreateChat upserts a contact + chat for an outbound-initiated conversation
+// — composing to a phone number that may have no inbound history yet. It mirrors
+// the contact/chat half of UpsertInbound (minus a message) and returns the chat id
+// plus whether the chat row was freshly created. The contact's display_name seeds
+// to the phone number so a brand-new chat shows something until a pushName arrives.
+func (s *Store) FindOrCreateChat(ctx context.Context, accountID uuid.UUID, phoneJID, phoneNumber string) (uuid.UUID, bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	defer tx.Rollback(ctx)
+
+	var contactID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO xchats.wa_contacts (account_id, phone_jid, phone_number, display_name)
+		VALUES ($1, $2, $3, $3)
+		ON CONFLICT (account_id, phone_jid) DO UPDATE SET updated_at = now()
+		RETURNING id`,
+		accountID, phoneJID, phoneNumber).Scan(&contactID); err != nil {
+		return uuid.Nil, false, wrap("upsert contact", err)
+	}
+
+	var chatID uuid.UUID
+	var created bool
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO xchats.wa_chats (account_id, contact_id, remote_jid)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (account_id, remote_jid) DO UPDATE SET updated_at = now()
+		RETURNING id, (xmax = 0)`,
+		accountID, contactID, phoneJID).Scan(&chatID, &created); err != nil {
+		return uuid.Nil, false, wrap("upsert chat", err)
+	}
+	return chatID, created, tx.Commit(ctx)
+}
+
 // StampEvolutionID records the gateway's key.id onto a sent outbound row; this is
 // what lets the fromMe=true echo collapse onto it instead of duplicating.
 func (s *Store) StampEvolutionID(ctx context.Context, messageID uuid.UUID, keyID string) error {

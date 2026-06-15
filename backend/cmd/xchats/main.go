@@ -95,7 +95,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, AccountID: accountID, Log: log,
+		Drafter: drafter, Evo: evo, AccountID: accountID, Log: log,
 	})
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
 

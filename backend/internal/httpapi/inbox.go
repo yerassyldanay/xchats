@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
+	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -143,6 +144,67 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 	return out, nil
 }
 
+type composeReq struct {
+	Phone    string   `json:"phone"`
+	Text     string   `json:"text"`
+	MediaIDs []string `json:"media_ids"`
+}
+
+// handleCreateChat starts (or reuses) a conversation by phone number and sends the
+// first message — the "compose to a new number" entry point. It find-or-creates the
+// contact+chat, then reuses sendParts so the outbound text/media path is identical
+// to replying inside an existing chat.
+func (s *Server) handleCreateChat(c *gin.Context) {
+	var req composeReq
+	_ = c.ShouldBindJSON(&req)
+
+	phone := digitsOnly(req.Phone)
+	if len(phone) < 7 || len(phone) > 15 {
+		fail(c, http.StatusBadRequest, ErrValidation, "phone must be 7–15 digits (country code + number)")
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" && len(req.MediaIDs) == 0 {
+		fail(c, http.StatusBadRequest, ErrValidation, "text or media_ids required")
+		return
+	}
+
+	// Pre-flight: fail fast with a clear reason if the number isn't on WhatsApp,
+	// instead of creating a chat whose first message silently fails to send.
+	if s.evo != nil {
+		exists, err := s.evo.OnWhatsApp(ctx(c), phone)
+		if err != nil {
+			fail(c, http.StatusBadGateway, ErrEvolution, "could not verify the number: "+err.Error())
+			return
+		}
+		if !exists {
+			fail(c, http.StatusBadRequest, ErrNotOnWhatsApp,
+				"Этот номер не зарегистрирован в WhatsApp. Укажите номер с кодом страны, например 77001234567.")
+			return
+		}
+	}
+	jid := config.CanonicalJID(phone) // phone -> phone@s.whatsapp.net
+
+	chatID, _, err := s.store.FindOrCreateChat(ctx(c), s.accountID, jid, phone)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	chat, err := s.store.ChatByID(ctx(c), chatID)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	s.hub.Broadcast("chat.updated", dto.MapChat(chat))
+
+	u := currentUser(c)
+	items, err := s.sendParts(c, chat, "user", uuid.NullUUID{UUID: u.ID, Valid: true}, req.Text, req.MediaIDs)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	created(c, gin.H{"chat": dto.MapChat(chat), "items": items})
+}
+
 func (s *Server) handleReadChat(c *gin.Context) {
 	chatID, okID := parseUUID(c, "id")
 	if !okID {
@@ -218,6 +280,17 @@ func (s *Server) handleServeMedia(c *gin.Context) {
 }
 
 // --- small helpers --------------------------------------------------------
+
+// digitsOnly keeps only ASCII digits, so "+7 (702) 976-65-09" -> "77029766509".
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteByte(byte(r))
+		}
+	}
+	return b.String()
+}
 
 func preview(text string) string {
 	if len([]rune(text)) > 120 {

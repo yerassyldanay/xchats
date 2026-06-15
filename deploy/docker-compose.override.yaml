@@ -1,0 +1,28 @@
+# Local override: this host already runs a Postgres on :5432 and something on
+# :8080, so remap the stack's HOST ports to free ones. The app itself is
+# unaffected — the frontend reaches the backend over the compose network
+# (backend:8080) and the backend reaches Postgres at postgres:5432 internally;
+# only the host-facing published ports change.
+#
+# `!override` REPLACES the base port list instead of appending to it (Compose
+# merges sequences by appending by default).
+#
+# Apply alongside the base file, loading the root .env for interpolation:
+#   docker compose --env-file ./.env -p xchats \
+#     -f deploy/docker-compose.yaml -f deploy/docker-compose.override.yaml up --build
+services:
+  postgres:
+    ports: !override
+      - "5433:5432"   # host 5432 is taken by another Postgres
+  backend:
+    ports: !override
+      - "8090:8080"   # host 8080 is taken
+    environment:
+      # The Evolution webhook UI has no custom-header field, so it can't echo the
+      # X-Webhook-Token xchats expects. Empty token => skip the header check and
+      # accept events (the URL's account_id is the only guard). Set a token +
+      # webhook header for production.
+      WEBHOOK_TOKEN: ""
+  frontend:
+    ports: !override
+      - "8081:80"     # unchanged; 8081 is free

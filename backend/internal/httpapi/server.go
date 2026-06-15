@@ -14,6 +14,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/assistant"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -31,6 +32,7 @@ type Server struct {
 	hub       *realtime.Hub
 	blob      blob.Store
 	drafter   assistant.Drafter
+	evo       evolution.Client
 	accountID uuid.UUID
 	log       *slog.Logger
 }
@@ -43,6 +45,7 @@ type Deps struct {
 	Hub       *realtime.Hub
 	Blob      blob.Store
 	Drafter   assistant.Drafter
+	Evo       evolution.Client
 	AccountID uuid.UUID
 	Log       *slog.Logger
 }
@@ -51,7 +54,7 @@ type Deps struct {
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, drafter: d.Drafter, accountID: d.AccountID, log: d.Log,
+		blob: d.Blob, drafter: d.Drafter, evo: d.Evo, accountID: d.AccountID, log: d.Log,
 	}
 }
 
@@ -87,6 +90,7 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/organization", s.handleGetOrg)
 
 	auth.GET("/chats", s.handleListChats)
+	auth.POST("/chats", s.handleCreateChat)
 	auth.GET("/chats/:id/messages", s.handleListMessages)
 	auth.POST("/chats/:id/messages", s.handleSendMessage)
 	auth.POST("/chats/:id/read", s.handleReadChat)

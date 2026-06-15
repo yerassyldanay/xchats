@@ -36,6 +36,7 @@ type Client interface {
 	GetBase64(ctx context.Context, messageID string) (b64, fileName, mimetype string, err error)
 	FetchInstances(ctx context.Context) ([]Instance, error)
 	SetWebhook(ctx context.Context, url, tokenHeader, token string, events []string) error
+	OnWhatsApp(ctx context.Context, number string) (bool, error)
 }
 
 // HTTP is the real Evolution REST client.
@@ -148,6 +149,25 @@ func (c *HTTP) SetWebhook(ctx context.Context, url, tokenHeader, token string, e
 		},
 	}
 	return c.do(ctx, http.MethodPost, "/webhook/set/"+c.instance, body, nil)
+}
+
+// OnWhatsApp reports whether a phone number is a registered WhatsApp account,
+// via POST /chat/whatsappNumbers/{instance}. Used to give the composer immediate
+// feedback instead of a silent failed send.
+func (c *HTTP) OnWhatsApp(ctx context.Context, number string) (bool, error) {
+	var out []struct {
+		JID    string `json:"jid"`
+		Exists bool   `json:"exists"`
+		Number string `json:"number"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/chat/whatsappNumbers/"+c.instance,
+		map[string]any{"numbers": []string{number}}, &out); err != nil {
+		return false, err
+	}
+	for _, r := range out {
+		return r.Exists, nil
+	}
+	return false, nil
 }
 
 // parseInstances tolerates the v2.x flat shape and the older nested shape.

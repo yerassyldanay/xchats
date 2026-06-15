@@ -27,6 +27,8 @@ type Fake struct {
 	Instances []Instance
 	// FailNext, when set, makes the next send return this error.
 	FailNext error
+	// NotOnWhatsApp, when set, makes OnWhatsApp report numbers as unregistered.
+	NotOnWhatsApp bool
 }
 
 // NewFake returns a Fake with one connected instance.
@@ -78,6 +80,14 @@ func (f *Fake) FetchInstances(ctx context.Context) ([]Instance, error) {
 
 func (f *Fake) SetWebhook(ctx context.Context, url, tokenHeader, token string, events []string) error {
 	return nil
+}
+
+// OnWhatsApp reports a number as registered by default. Set NotOnWhatsApp to
+// simulate a non-WhatsApp number.
+func (f *Fake) OnWhatsApp(ctx context.Context, number string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.NotOnWhatsApp, nil
 }
 
 func (f *Fake) takeFail() error {

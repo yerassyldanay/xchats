@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useInbox } from '../stores/inbox'
 import { initials, colorFor, shortTime } from '../lib/format'
+import NewMessageDialog from './NewMessageDialog.vue'
 
 const inbox = useInbox()
+const showNew = ref(false)
 
 const filters: { key: 'me' | 'unassigned' | 'all'; label: string }[] = [
   { key: 'me', label: 'Мои' },
@@ -22,7 +25,7 @@ function onSearch() {
 </script>
 
 <template>
-  <aside class="flex flex-col bg-white">
+  <aside class="relative flex flex-col bg-white">
     <div class="p-3 border-b border-hair">
       <input
         v-model="inbox.query"
@@ -77,5 +80,15 @@ function onSearch() {
         </div>
       </button>
     </div>
+
+    <!-- New message (compose by phone number) -->
+    <button
+      class="absolute bottom-5 right-5 w-14 h-14 rounded-full bg-wa text-white shadow-lg hover:opacity-90 grid place-items-center text-3xl leading-none"
+      title="Новое сообщение"
+      @click="showNew = true"
+    >
+      +
+    </button>
+    <NewMessageDialog v-if="showNew" @close="showNew = false" />
   </aside>
 </template>

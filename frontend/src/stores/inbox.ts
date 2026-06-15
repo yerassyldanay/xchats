@@ -91,6 +91,23 @@ export const useInbox = defineStore('inbox', {
         this.sending = false
       }
     },
+    // composeNew starts (or reuses) a chat by phone number and sends the first
+    // message, then opens that chat. Uploads media first, like send().
+    async composeNew(phone: string, text: string, files: File[]): Promise<Chat> {
+      const media_ids: string[] = []
+      for (const f of files) {
+        const up = await api.upload(f)
+        media_ids.push(up.media_id)
+      }
+      const res = await api.post<{ chat: Chat }>('/chats', {
+        phone,
+        text: text || undefined,
+        media_ids: media_ids.length ? media_ids : undefined,
+      })
+      this.upsertChat(res.chat)
+      await this.selectChat(res.chat.id)
+      return res.chat
+    },
     async suggest() {
       if (!this.activeId) return
       this.suggesting = true

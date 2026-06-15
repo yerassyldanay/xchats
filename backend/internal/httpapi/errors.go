@@ -14,6 +14,7 @@ const (
 	ErrAccountNotConnected = "ACCOUNT_NOT_CONNECTED"
 	ErrInstanceNotFound    = "INSTANCE_NOT_FOUND"
 	ErrSendFailed          = "SEND_FAILED"
+	ErrNotOnWhatsApp       = "NUMBER_NOT_ON_WHATSAPP"
 	ErrMediaUnavailable    = "MEDIA_UNAVAILABLE"
 	ErrEvolution           = "EVOLUTION_ERROR"
 	ErrAIUnavailable       = "AI_UNAVAILABLE"
