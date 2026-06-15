@@ -70,7 +70,11 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
   tables, e.g. `xchats.wa_chats`), keys, indexes, constraints, and a normalization review.
 - **10-knowledge-builder.md** — the automatic KB authoring experience (deferred CMS): a builder chat
   that turns URLs/media/text into draft topics + per-asset media, the editor page, and the
-  popup/request primitive (describe-media · confirm-price · accept/deny/comment).
+  popup/request primitive (describe-media · confirm-price · accept/deny/comment). *Conceptual UX.*
+- **11-knowledge-base-builder.md** (+ `11.1`–`11.5`) — the **concrete, buildable implementation** of
+  `10`: the option & decisions (`11`), the additive DDL incl. the deferred snapshot tables (`11.1`),
+  the API + SSE (`11.2`), the chat **builder agent** + tools + proactive policy (`11.3`), the editor/
+  chat UI + **git-like diff cards** (`11.4`), and the phased build + test plan (`11.5`).
 - **examples/repos/xpayment-crm/** — the working brain, vendored as a git submodule (the
   implementation the AI docs above describe; entry `IMPLEMENTATION.md`).
 - **scripts/evolution_client.py** — working Evolution client + normalization (the oracle).
