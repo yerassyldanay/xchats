@@ -61,9 +61,9 @@ Each is a real decision. **Buys us** = advantage; **Costs us** = limitation.
 - **Costs us:** the brain **never sees the media** — it trusts the human's text, so a **bad description
   = the wrong file sent**; a big media catalog inflates the prompt.
 
-### 4. Prices (and limits) are **tokens, never digits** in prose
+### 4. Values (prices, limits, counts, …) are **tokens, never digits** in prose
 - **Buys us:** numbers are always correct and **centrally editable**; the model **cannot invent** a
-  price; change a price in one place and every answer updates.
+  price (or any value); change it in one place — in `ai_values` — and every answer updates.
 - **Costs us:** indirection (the author/agent must tokenise); every token needs a **confirmed** value;
   the system must fail safe on an unknown/leftover token (refuse, never ship a half-rendered price).
 
@@ -133,7 +133,7 @@ the real brain and the playground at once.
 ## Where the detail lives (so this stays a map)
 
 - **`8-ai-assistant.md`** — the brain: the prompt, how it grounds, the publish/eval gate.
-- **`9-database-schema.md`** — the full data model the KB maps onto (`ai_snapshots/topics/assets/prices`).
+- **`9-database-schema.md`** — the full data model the KB maps onto (`ai_snapshots/topics/assets/values`).
 - **`10-knowledge-builder.md`** — the original conceptual playground UX (popups, topic-as-container).
 - **This doc** — the three components, the main solutions, and the trade-offs. Start here.
 

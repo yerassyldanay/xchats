@@ -35,8 +35,8 @@ no SQL files yet.
     carries its own dedup key `UNIQUE(message_id)` so the doubled webhook delivery can't write it twice. (The
     plan's original text-only v1 removed it; Build 0 un-defers it.)
   - **Defined but empty/unused** in v1: `ai_audit_log`, `assignment_events`. (The seeded KB —
-    `ai_topics` / `ai_assets` / `ai_prices` — and `ai_draft_assets` **are** used: the brain suggests
-    1–3 options, each with optional media drawn from the seeded asset catalog.) Don't pour
+    `ai_topics` / `ai_assets` / `ai_values` — and `ai_suggestions` **are** used: each Suggest writes one
+    row whose `options` jsonb holds 1–3 variants, each with optional media from the seeded catalog.) Don't pour
     migration/wiring effort into the empty ones until their phase (see `0.1-definition-of-done.md`).
 
 ---
@@ -142,7 +142,7 @@ lid_jid        text   -- '<n>@lid' alias, if the contact also appears as @lid
 push_name      text
 display_name   text
 avatar_url     text
-attributes     jsonb  -- open profile keyset, e.g. {"business_type":"retail","monthly_volume_tenge":4000000,"city":"Almaty","lang":"ru"}
+attributes     jsonb  -- open profile keyset, e.g. {"business_type":"retail","monthly_volume_tenge":4000000,"city":"Almaty","lang":"ru"}  -- manual/CRM only in v1; the brain does NOT read it (see 8-ai-assistant.md → Memory)
 created_at, updated_at
 UNIQUE (account_id, phone_jid)
 INDEX  (account_id, lid_jid)                    -- resolve an inbound @lid back to the contact
@@ -274,58 +274,116 @@ asset_url    text
 UNIQUE (snapshot_id, ref)
 ```
 
-### xchats.ai_prices  (price tokens; belongs to a snapshot version)
+### xchats.ai_values  (named value tokens — prices AND any other confirmed number/value; belongs to a snapshot version)
 ```
 id           uuid  PK
 snapshot_id  uuid  FK -> ai_snapshots
-token        text  -- e.g. 'price.growth'
-amount_text  text
-UNIQUE (snapshot_id, token)
+token        text  -- namespace.key — e.g. 'price.growth', 'limit.growth', 'time.api_setup', 'contact.whatsapp'
+lang         text  -- 'ru' | 'kk' | '*'  — '*' = language-neutral (numbers, phones, addresses, e-mails)
+value_text   text  -- the confirmed value, as text — '25 000 ₸/мес', 'до 2 000 платежей/мес', '5 минут' (any unit; code substitutes verbatim)
+description  text  NULL  -- what this value means, for the editor/builder UX & the confirm popup; NOT injected into the prompt
+UNIQUE (snapshot_id, token, lang)
 ```
+> **Generalized from the old `ai_prices`.** This was always a **token → confirmed-value** store; the
+> reason it exists is the *token discipline* — the model must never invent a factual number/fact and you
+> want it centrally editable — which applies to **any** value (limits, durations, SLAs, contacts,
+> addresses, min/max), not just prices. `price.*` stays the canonical namespace; new namespaces
+> (`limit.*`, `time.*`, `contact.*`, `trial.*`, `min.*`/`max.*`, …) need **no schema change** — code does
+> a pure string substitution of `{{namespace.key}}` → `value_text`. The publish gate's "price-safety =
+> 1.0" reads as "**every token resolves**". `value_text` is text precisely so any unit fits. The
+> `description` is **human-only** (editor / `confirm_price` popup / reviewer); the model never sees it.
+>
+> **Language-aware.** Rendering differs by language (`Бесплатно`/`Тегін`, `…/мес`/`…/ай`), so values are
+> keyed by `lang` too: injection resolves `(token, reply_language)` first, then falls back to the **`'*'`
+> language-neutral** row (phone numbers, addresses, e-mails, bare counts that read the same either way);
+> if neither exists the token is unresolved → `PricingError`/escalate (never ship a half-rendered value).
+> Mirrors `ai_topics.lang` and the brain's "reply in the customer's language" rule.
 
-### xchats.ai_drafts  (one suggested reply OPTION; a "Suggest" writes 1–3 per inbound)
-```
-id                 uuid  PK
-chat_id            uuid  FK -> wa_chats              -- organization derived via chat (3NF)
-trigger_message_id uuid  FK -> wa_messages           -- the inbound this answers; GROUPS the 1–3 options
-option_ordinal     int    -- 1..3 — the option's position in the suggestion
-draft_text         text   -- the option's text (prices already injected); user may edit before sending
-sent_message_id    uuid  FK -> wa_messages  NULL  -- the message actually sent (final text after edits); set on the CHOSEN option. NULL until approved. Makes draft-acceptance / edit-distance computable from day one (the v1 success metric)
-context_state      text   -- 'full' (v1 live-only; no partial/syncing context)
-confidence         numeric
-escalate           bool
-escalation_reason  text
-draft_state        text   -- 'suggested'|'sent'|'rejected'|'superseded'
-created_at, updated_at
-PARTIAL UNIQUE (chat_id, option_ordinal) WHERE draft_state='suggested'  -- the active suggestion holds ≤3 pending options (ordinals 1–3); a new Suggest supersedes the old set; approving one option sends it and supersedes its siblings (conditional UPDATE … WHERE draft_state='suggested' → 409 on conflict)
-```
-> A "Suggest" writes 1–3 option rows sharing `(chat_id, trigger_message_id)`. Each option's suggested
-> media lives in `ai_draft_assets` (attach/detach before sending). **Responses are text + media
-> only.** Approve sends the chosen option's (possibly edited) text + final media via the outbound
-> pipeline. If the brain escalates, it writes **one** option with `escalate=true` + `escalation_reason`
-> and empty text (the UI shows "reply manually").
+> **Worked example — the xPayment value book** (one published snapshot; the `tariffs` topic body uses
+> `{{price.growth}}`, `{{limit.growth}}`, `{{time.api_setup}}`, `{{contact.whatsapp}}`, …):
+>
+> | token | lang | value_text | description |
+> |---|---|---|---|
+> | `price.trial` | ru | Бесплатно | Пробный доступ — стоимость |
+> | `price.trial` | kk | Тегін | то же, по-казахски |
+> | `price.start` | ru | 10 000 ₸/мес | Тариф «Старт» — фикс. цена в месяц |
+> | `price.growth` | ru | 25 000 ₸/мес | Тариф «Рост» (основной) — фикс. цена в месяц |
+> | `price.scale` | ru | 60 000 ₸/мес | Тариф «Масштаб» — фикс. цена в месяц |
+> | `trial.days` | ru | 3 дня | Длительность бесплатного пробного периода |
+> | `limit.growth` | ru | до 2 000 платежей/мес | Лимит платежей/мес на «Рост» |
+> | `limit.scale` | ru | безлимит платежей | Лимит платежей на «Масштаб» |
+> | `limit.cashiers` | ru | до 5 виртуальных касс | Макс. число виртуальных касс (все тарифы) |
+> | `time.api_setup` | ru | 5 минут | Время на подключение Kaspi Pay API |
+> | `time.callback` | ru | 1 час | В течение какого времени перезвонят |
+> | `contact.whatsapp` | * | +7 702 976-65-09 | WhatsApp поддержки (язык-нейтрально) |
+> | `contact.email` | * | support@xpayment.kz | E-mail поддержки |
+> | `contact.address` | * | г. Шымкент, ул. Аргынбеков, 29/4 | Юридический адрес |
+> | `contact.legal` | * | ИП «XGroup», Республика Казахстан | Реквизиты |
 
-### xchats.ai_draft_assets  (media attached to a draft option; attach/detach before send)
+### xchats.ai_suggestions  (one row per "Suggest"; the 1–3 reply OPTIONS live in the `options` jsonb)
 ```
-id             uuid PK
-draft_id       uuid FK -> ai_drafts
-asset_ref      text
-media_kind     text
-media_url      text   -- resolved at draft time (frozen)
-ordinal        int
-UNIQUE (draft_id, ordinal)
+id                   uuid  PK
+chat_id              uuid  FK -> wa_chats            -- organization derived via chat (3NF)
+trigger_message_id   uuid  FK -> wa_messages         -- the inbound this answers
+requested_by_user_id uuid  FK -> users  NULL          -- provenance only (who pressed "Suggest"); NULL = system/auto-draft. NOT part of the key
+state                text  -- 'generating'|'suggested'|'resolved'|'superseded'  (a failed generation → 'superseded', freeing the lock)
+reply_language       text  -- 'ru'|'kk' — the turn's language; drives value injection
+confidence           numeric
+escalate             bool
+escalation_reason    text
+options              jsonb -- the 1..3 variants, each with its own nested media:
+                     --   [{ "ordinal":1, "text":"…final text, values already injected…",
+                     --      "assets":[{ "ref":"tariffs_overview","kind":"image","url":"/media/…","ordinal":1 }] }, …]
+suggested_status     jsonb -- { "stage":"qualifying" } | null
+suggested_callback   jsonb -- { "due_at":"…", "note":"…" } | null
+chosen_ordinal       int   NULL  -- which option the agent approved
+sent_message_id      uuid  FK -> wa_messages  NULL   -- the outbound created on approve (final text after edits)
+context_state        text  -- 'full' (v1 live-only; no partial/syncing context)
+created_at, updated_at  timestamptz
+PARTIAL UNIQUE (chat_id) WHERE state IN ('generating','suggested')  -- the GENERATE LOCK: at most ONE in-flight-or-pending suggestion per chat (shared; not per agent)
 ```
+> **One row per "Suggest"; options in `jsonb`.** A press runs the brain and writes **one** row whose
+> `options` array holds the 1–3 variants (each its own text + nested media) — no per-option rows, no
+> separate `ai_draft_assets` table. Keyed on **`chat_id` alone**: at most one active suggestion per
+> chat (shared, not per agent), so the suggestion is a property of the conversation's current state, not
+> of whoever clicked. A re-press (by anyone) **supersedes the chat's pending row** (one-row `UPDATE …
+> SET state='superseded' WHERE chat_id=? AND state IN ('generating','suggested')`). `requested_by_user_id`
+> is provenance only (NULL = system) — keeping it out of the key keeps this forward-compatible with the
+> deferred **auto-draft-on-inbound** mode, which has no user.
+>
+> **Generate is a two-step lock (multi-agent safe).** A "Generate" click conditionally INSERTs a
+> `state='generating'` row; because the partial unique covers `('generating','suggested')`, a second
+> concurrent click (from the same or another agent) hits the constraint → `409`, and the realtime
+> channel broadcasts **`ai_draft.generating`** so *every* viewer of the chat sees a spinner + a disabled
+> button. The worker fills `options` and flips the row to `suggested` → broadcasts **`ai_draft.created`**
+> (cards appear for everyone); a failed generation flips it to `superseded`, freeing the lock. The DB —
+> not in-memory UI state — is the coordination point, so it holds across users and processes.
+> **Approve:** set `chosen_ordinal` + `sent_message_id`, `state='resolved'`, send the chosen option's
+> (possibly edited) text + media via the outbound pipeline. **Escalation** = one row, `escalate=true` +
+> `escalation_reason`, empty `options` (UI shows "reply manually"). **Responses are text + media only.**
+>
+> The v1 success metric still computes exactly — edit-distance / acceptance = compare
+> `options[chosen_ordinal].text` against the body of `sent_message_id`. Turn-level facts (language,
+> escalate, confidence, status, callback) live **once** on the row, never repeated per
+> option. The `options` jsonb is a deliberate document column (see *Normalization* → denormalizations).
 
 ### xchats.ai_audit_log
 ```
 id               uuid PK
 organization_id  uuid FK -> organizations            -- DIRECT, kept
-action           text
-actor_user_id    uuid FK -> users  NULL
-version          int
-note             text
+action           text   -- 'publish'|'rollback'|'snapshot_created'|'edit' — a KB-lifecycle event
+actor_user_id    uuid FK -> users  NULL              -- who did it (NULL = system, e.g. seed on boot)
+version          int                                 -- which ai_snapshots.version the action targeted
+note             text                                -- free-text detail ('published v4', 'rolled back v4→v3')
 created_at
 ```
+> **Append-only history of the KB's lifecycle** — *not* per-message or per-draft activity. One row per
+> significant snapshot action (publish, rollback, snapshot created/edited): who, which version, when,
+> why. It answers "who published the price that went out last Tuesday, and what did it replace?" — the
+> provenance/compliance trail behind the `draft → published` gate, and the record a rollback reads. It is
+> **never read on the hot path** and the brain never touches it. **v1: defined but empty** — nothing
+> writes it until the publish/rollback flow exists (Phase 4B); the seed-on-boot may write one
+> `snapshot_created` row. Distinct from `wa_messages` (conversation) and `ai_suggestions` (suggestions).
 
 ## Infrastructure
 
@@ -354,8 +412,9 @@ UNIQUE (account_id, phone_jid)             on xchats.wa_contacts
 
 **1NF** — every column is atomic. The auto-response window is split into atomic
 `respond_window_start/end` (UTC; no composite). Repeating lists are their own tables
-(`organization_users`, `ai_topics/assets/prices`, `ai_draft_assets`, `assignment_events`) — no
-array/CSV columns.
+(`organization_users`, `ai_topics/assets/values`, `assignment_events`) — no array/CSV columns,
+**except `ai_suggestions.options`** (a deliberate jsonb document holding the 1–3 reply variants as one
+atomic suggestion — see denormalizations).
 
 **2NF** — no partial dependencies. Junctions (`organization_users`) carry only attributes that
 depend on the whole composite key (`joined_at`). Every other table has a single-column PK (`id`), so
@@ -365,7 +424,7 @@ depend on the whole composite key (`joined_at`). Every other table has a single-
 `organization_id` when it's reachable by FK. `organization_id` is stored **only** where it's a
 direct fact — `organizations`, `organization_users`, `wa_accounts` (the assignment), `ai_snapshots`,
 `ai_audit_log` — and **derived by join** everywhere else (`wa_contacts`, `wa_chats`, `wa_messages`,
-`ai_topics/assets/prices`, `ai_drafts`). The `assigned` flag was removed (derived from
+`ai_topics/assets/values`, `ai_suggestions`). The `assigned` flag was removed (derived from
 `organization_id`).
 
 ### Deliberate, documented denormalizations (3 exceptions, each justified)
@@ -377,9 +436,12 @@ direct fact — `organizations`, `organization_users`, `wa_accounts` (the assign
 2. **`wa_chats.last_message_at` / `last_message_preview` / `unread_count`** — **cached aggregates**
    of `wa_messages`, maintained on write, for fast inbox listing. Source of truth is `wa_messages`;
    they can be recomputed.
-3. **`jsonb` document columns** (`wa_contacts.attributes`, `wa_messages.raw`) — intentional
-   semi-structured/document storage (open keyset, raw audit document), not repeating groups — a
-   deliberate choice, not a 1NF violation.
+3. **`jsonb` document columns** (`wa_contacts.attributes`, `wa_messages.raw`, `ai_suggestions.options`
+   + its `suggested_status`/`suggested_callback`) — intentional semi-structured/document
+   storage (open keyset, raw audit document, the 1–3 reply variants kept as one atomic suggestion), not
+   repeating groups — a deliberate choice, not a 1NF violation. The `options` array trades per-option
+   queryability for one-row supersede + no join to render a suggestion; the success metric stays
+   computable (chosen option text vs the sent message).
 
 > Trade-off note: if you later want strict tenant isolation / row-level security, denormalizing
 > `organization_id` onto every child table is a valid, common alternative — at the cost of the 3NF

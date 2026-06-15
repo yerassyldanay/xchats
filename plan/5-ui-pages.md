@@ -173,7 +173,7 @@ instance name, status pill (green "Подключён" / amber "QR" / grey "От
 - **One-click:** **Опубликовать** (eval-gated); a **Плейграунд** that shows the same **1–3 option
   cards** as the Chatboard.
 - **▸ Backed by (deferred — Phase 4B):** `GET|PUT /assistant/config`, `POST /assistant/publish`,
-  `POST /assistant/playground`; data in `ai_snapshots/ai_topics/ai_assets/ai_prices`.
+  `POST /assistant/playground`; data in `ai_snapshots/ai_topics/ai_assets/ai_values`.
 
 **Image prompt:** *AI assistant config page in the XChats shell. Left sub-nav (Персона, Знания, Цены,
 Медиа-ассеты, Плейграунд). Center "Персона" editor: text-area fields and a green "Опубликовать"

@@ -413,7 +413,7 @@ wa_messages
 assignment_events
 ai_snapshots
 ai_topics
-ai_drafts
+ai_suggestions
 ```
 
 Important constraints:
