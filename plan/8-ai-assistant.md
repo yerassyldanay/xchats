@@ -8,7 +8,7 @@ base. It never sends by itself (suggest-and-approve).
 `examples/repos/xpayment-crm/` (entry: `IMPLEMENTATION.md`; core in
 `internal/usecase/assistant/{brain,prompt,ports}.go`, `internal/domain/{catalog,draft}.go`,
 `internal/infrastructure/llm/`). xchats **ports** it: Chatwoot reads → xchats Postgres reads, draft
-→ `xchats.ai_drafts` rows, config storage SQLite → Postgres. The logic is unchanged. Full port table
+→ an `xchats.ai_suggestions` row, config storage SQLite → Postgres. The logic is unchanged. Full port table
 in the *Porting* section below.
 
 ## v1 adapter mode (the minimal slice)
@@ -26,10 +26,11 @@ v2+ (see `0.1-definition-of-done.md` Phases 4B–4D).
 
 ## Core idea in one line
 
-A **stateless** call — `HandleMessage(window, profile, snapshot) -> Draft`: build a cache-stable
-system prompt from the published **Snapshot**, add the recent **message window** + the contact
-**profile**, force the model to return strict `emit_draft` JSON, then **post-process** it
-(`escalate → resolve media refs → inject prices → merge profile → set stage`) into a final Draft.
+A **stateless** call — `HandleMessage(window, snapshot) -> Draft`: build a cache-stable
+system prompt from the published **Snapshot**, add the recent **message window** (last ~M messages),
+force the model to return strict `emit_draft` JSON, then **post-process** it
+(`escalate → resolve media refs → inject values → set stage`) into a final Draft. **v1 sends no contact
+profile** — the model infers everything from the window (see *Memory*).
 
 ---
 
@@ -45,15 +46,15 @@ The prefix is rebuilt only on publish (`BuildSystem(snapshot)`); mark the cache 
 │ [D] KNOWLEDGE  every topic: `# topic: <slug> (<lang>)` + keywords + body (tokens intact) │
 │ [E] MEDIA      the whole catalog as `ref | kind | topic | description` — the pick menu  │
 ├──────────────────────────  ⟵ cache breakpoint  ───────────────────────────────┤
-│     DYNAMIC    PROFILE (known facts) · WINDOW (~15 msgs, oldest first) · CURRENT MESSAGE │
+│     DYNAMIC    WINDOW (~15 msgs, oldest first) · CURRENT MESSAGE   (no profile in v1)     │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **`[A]` the hard rules (never editable):** answer **only** from the KB `[D]`, else **escalate** —
 never guess; prices/limits are **tokens** (`{{price.growth}}`), never digits — code fills them after;
 attach media **only** by refs that exist in `[E]`, **max 3**; reply in the **customer's language**
-(KK+RU mix → Russian); **~120 words**, warm, **one** next step; never handle passwords; `profile_patch`
-holds only newly-confident facts; **must call `emit_draft`**.
+(KK+RU mix → Russian); **~120 words**, warm, **one** next step; never handle passwords; **must call
+`emit_draft`**.
 
 **Conversation flow** is not a state machine — the persona + the model's `suggested_status.stage`
 (`greeting → qualifying → presenting → closing`, stored on the chat) drive it, with the window giving
@@ -71,22 +72,20 @@ The model returns exactly this (structured `emit_draft`):
   "reply_text": "uses {{price.*}}/{{limit.*}} tokens, never numerals",
   "reply_language": "ru | kk",
   "asset_refs": ["catalog refs only, max 3; [] if none"],
-  "profile_patch": { "only newly-confident fields": "..." },
   "suggested_callback": { "due_at": "…|null", "note": "…" } | null,
   "suggested_status": { "stage": "qualifying" } | null,
   "confidence": 0.0, "escalate": false, "escalation_reason": ""
 }
 ```
 
-Post-processing, **in order** (`escalate → refs → prices → profile → status`):
+Post-processing, **in order** (`escalate → refs → values → status`):
 1. **escalate** — if true (KB gap / low confidence), flag for a human; ship only a short holding reply.
 2. **refs** — `ResolveAssets`: keep only refs that exist, **cap 3**; unknown refs dropped + logged →
    no hallucinated files. Result is media URLs.
-3. **prices** — replace every `{{…}}` token from the price book in the target language; an
-   unknown/leftover token → `PricingError` (post "check pricing manually", never a half-rendered price).
-4. **profile** — **additively merge** `profile_patch` onto the contact: add/overwrite newly-confident
-   fields, **never null** a known one; strip the `stage` key (that's status).
-5. **status** — apply `suggested_status.stage` (+ any `suggested_callback`).
+3. **values** — replace every `{{…}}` token from the value book (`ai_values`) in the target language,
+   falling back to the `'*'` language-neutral row; an unknown/leftover/unresolved-in-this-language token
+   → `PricingError` (post "check pricing manually", never a half-rendered value).
+4. **status** — apply `suggested_status.stage` (+ any `suggested_callback`).
 
 **Text / media / both** is the model's choice via `asset_refs` (text-only = `[]`; media-only = minimal
 text + refs; both = text is the caption). We only ever send **approved catalog assets by reference** —
@@ -102,9 +101,12 @@ later vision/transcription step can add a description to the window). It never s
 
 A published **Snapshot** = config + topics + media catalog + prices. Edited, **versioned**, and
 **published** (publish swaps the live snapshot atomically; rollback restores a prior version). Stored
-normalized per version in `xchats.ai_snapshots / ai_topics / ai_assets / ai_prices` (see
-`9-database-schema.md`). The brain loads it into one immutable in-memory snapshot and never queries the
-DB on the hot path.
+normalized per version in `xchats.ai_snapshots / ai_topics / ai_assets / ai_values` (see
+`9-database-schema.md`). The brain loads it into one **immutable in-memory snapshot** (keyed per org)
+and **never queries the DB on the hot path**: the cached prefix `[A]–[E]` is built **once** — on boot and
+on publish, not per message. Per inbound message it reads only the small **dynamic suffix** (window +
+profile). Updates never mutate the live snapshot in place; **publish builds a new one and atomically
+swaps the pointer**, so a message handler never sees a half-updated KB.
 
 **One principle resolves how text, images, and video are stored: the model only ever reasons over
 *text*. It never sees an image or watches a video** — everything it "knows" about a piece of media is
@@ -114,7 +116,7 @@ the *text you wrote for it*. So content lives in three forms:
 |---|---|---|---|
 | **Text knowledge** (topics) | `ai_topics`: `slug`, `lang`, `keywords`, `body_md` | `[D]` | reads it; answers **only** from it |
 | **Media** (image/video/doc/audio) | `ai_assets`: `ref`, `kind`, `topic_slug`, `description`, `url` | `[E]` | picks a `ref` (max 3); bytes attached at send |
-| **Prices/numbers** | `ai_prices`: `token` → `amount_text` | tokens in text | never sees the number; code fills it after |
+| **Values/numbers** | `ai_values`: `token` → `value_text` (prices, limits, counts, durations…) | tokens in text | never sees the value; code fills it after |
 
 ### Media is a knowledge source — via a companion summary topic
 
@@ -131,11 +133,13 @@ cashier'") the model picks on. Companion topics are **answer-shaped summaries (~
 verbatim transcripts — keeping the cached prefix lean and the system deterministic. (If verbatim recall
 from long media is ever needed, that's the trigger to add pgvector retrieval — see *Scaling* below.)
 
-### Prices — tokens, not numbers
+### Values (prices, limits, counts…) — tokens, not literals
 
-`{{price.growth}}`, `{{limit.growth}}`, `{{pay.start}}` are referenced in topics/replies; the price book
-holds the real values; code injects them **after** drafting. Prices stay correct, centrally editable,
-and impossible for the model to invent. The namespace selects the field; the key selects the row.
+`{{price.growth}}`, `{{limit.growth}}`, `{{spots.summer_camp}}`, `{{nights.deluxe}}` are referenced in
+topics/replies; the value book (`ai_values`) holds the real values; code injects them **after** drafting.
+**Any** factual number stays correct, centrally editable, and impossible for the model to invent — not
+just prices. The namespace selects the kind (`price.*`, `limit.*`, `spots.*`, `min.*`/`max.*`, …); the
+key selects the row. (Prices are the canonical case and the one the publish gate hard-checks.)
 
 ### Authoring — a chat where the assistant builds the KB
 
@@ -164,18 +168,22 @@ behind the same context port, in the same Postgres, **without changing the brain
 
 ---
 
-## Memory — two horizons, no summary
+## Memory — the window only (v1)
 
 | Horizon | Lives on | Scope | Role |
 |---|---|---|---|
-| **Window** | the chat | last ~15 messages / 48h of *this* conversation | short-term memory |
-| **Profile** | the contact (`wa_contacts.attributes`) | durable facts about the person/business | long-term memory |
+| **Window** | the chat | last ~M messages (~15) / 48h of *this* conversation | the brain's **only** memory in v1 |
 
-A returning customer starting a *new* conversation has a short window but a full profile — so the brain
-"remembers" them with no stored conversation state. The profile is a small JSON of known facts (+ the
-`stage`); it's grown by the additive `profile_patch` merge each turn (pre-defined keys; unknown keys
-ignored; never re-asks a known fact). No running summary in v1; if long threads later need it, add one
-rolling-summary attribute behind the reader/writer ports without touching the core.
+**v1 decision: no contact profile is fed to the brain.** Each call sends only the recent message
+window; the model infers who they are, what they want, and the stage from those messages. There is **no
+`profile_patch`** and no long-term-memory merge. This keeps the call simple and stateless and avoids a
+PII profile leaving the system.
+
+The cost, stated plainly: a returning customer is **not "remembered"** across conversations — a new
+conversation starts cold with only its own window. `wa_contacts.attributes` still exists for
+**manual/CRM** use, but the brain neither reads nor writes it in v1. If long-term memory is wanted
+later, reintroduce a profile (and an optional rolling summary) **behind the reader/writer ports**
+without touching the core — the seam is deliberately kept.
 
 ---
 
@@ -202,8 +210,8 @@ useless escalation — so quality is **measured**, not assumed. A **golden set**
 from real chats, checked into git): each has a `window` + `profile` + `expect` (`must_include` /
 `must_exclude`, `asset_refs`, `reply_language`, `escalate`).
 
-**Deterministic metrics (offline, no live LLM — gate publish & CI):** price-safety (every token
-rendered, no bare digits) **target 1.0 hard**; asset-ref precision/recall **≥ 0.9**; language match
+**Deterministic metrics (offline, no live LLM — gate publish & CI):** price-safety (every value token
+rendered — prices and all other `ai_values` tokens — no bare digits) **target 1.0 hard**; asset-ref precision/recall **≥ 0.9**; language match
 (RU→`ru`, KK→`kk`, mixed→`ru`); escalation correctness; must-include/exclude. **LLM-as-judge** (1–5
 rubric on tone/grounding, **mean ≥ 4.0**) is reported but **does not gate** — it needs a live key, so it
 runs nightly/manual. `POST …/assistant/publish` refuses a snapshot unless **price-safety = 1.0** and
@@ -224,12 +232,14 @@ deferred to Phase 4B** (HTML templates dropped — xchats is an SPA + JSON API).
 
 **Adapt:**
 - **Reader port** (`ChatwootReader` → xchats Postgres): `Window` = last ~15 `wa_messages` for the chat
-  (mapped to `domain.Message`); `Profile` = `wa_contacts.attributes` (+ chat `stage`).
+  (mapped to `domain.Message`). **No profile in v1** — the conversation `stage` still rides on
+  `wa_chats.stage`; `wa_contacts.attributes` is not read.
 - **Draft persistence:** an `ai_draft` worker (in-memory queue, no DB `jobs` table) takes the returned
-  **1–3 options** and inserts 1–3 `ai_drafts` rows (+ `ai_draft_assets` for suggested media) + emits
-  `ai_draft.created`. Escalation / `PricingError` / low confidence → draft flags, not a note. Producing
-  up to 3 text variants is the one logic adaptation (one structured call returning ≤3 options).
-- **Config/snapshot store:** reimplement on Postgres (`ai_snapshots/ai_topics/ai_assets/ai_prices/
+  **1–3 options** and inserts **one** `ai_suggestions` row whose `options` jsonb holds the variants (each
+  with nested media) + emits `ai_draft.created`. Escalation / `PricingError` / low confidence → row
+  flags, not a note. Producing up to 3 text variants is the one logic adaptation (one structured call
+  returning ≤3 options).
+- **Config/snapshot store:** reimplement on Postgres (`ai_snapshots/ai_topics/ai_assets/ai_values/
   ai_audit_log`); keep publish/rollback/dedup semantics.
 - **Seed snapshot:** carry `0002_seed.sql` into the `ai_*` tables on first boot (the cold-start fix).
 - **Eval harness:** port the golden set + deterministic metrics + publish gate (incl. the language
@@ -241,9 +251,9 @@ deferred to Phase 4B** (HTML templates dropped — xchats is an SPA + JSON API).
 has its own accounts/QR manager, webhook, and Evolution client.
 
 **One pending suggestion per chat:** enforce with the partial unique
-`(chat_id, option_ordinal) WHERE draft_state='suggested'` (≤3 options) and/or a per-chat advisory lock —
-not the submodule's in-process mutex. Approve sends the chosen option (conditional `UPDATE … WHERE
-draft_state='suggested'`; siblings → `superseded`).
+`(chat_id) WHERE state='suggested'` — not the submodule's in-process mutex. A re-press (by anyone)
+supersedes the chat's pending row (one-row `UPDATE … SET state='superseded'`). Approve sets
+`chosen_ordinal` + `sent_message_id`, `state='resolved'`, and sends the chosen option.
 
 **Auto-send (deferred — Phase 4D):** v1 does not build it; `respond_mode` defaults `NEVER`. The send
 path is gated on `escalate=false`, `PricingError=false`, `confidence ≥ threshold` (calibrated later),
@@ -253,7 +263,7 @@ and an active snapshot that passed the golden gate.
 
 - `go test ./internal/assistant/...` passes after the module-path rewrite (parity check).
 - A seeded Snapshot loads from `0002_seed.sql` on boot (no admin UI).
-- Pressing **Suggest** on an inbound fixture produces an `ai_drafts` row + `ai_draft.created`
+- Pressing **Suggest** on an inbound fixture produces an `ai_suggestions` row + `ai_draft.created`
   end-to-end, and — **against the non-empty seed** — the draft is **grounded** (not an escalation) while
   an off-KB question correctly escalates. A bare escalation row does **not** satisfy the gate.
 - The golden-set deterministic metrics pass offline.

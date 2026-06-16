@@ -153,16 +153,22 @@ type DraftAsset struct {
 // SeedOrganization upserts the single default organization by name and returns it.
 func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization, error) {
 	var o Organization
+	// Idempotent without a UNIQUE(name) constraint: reuse the existing org for this
+	// name (preferring the one that owns a WhatsApp account, else the oldest) and
+	// only insert when none exists. The old code used `ON CONFLICT DO NOTHING` with
+	// no conflict target, so every boot inserted a fresh "XChats" — this stops that
+	// at the source without deleting the historical duplicates.
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO xchats.organizations (name)
-		VALUES ($1)
-		ON CONFLICT DO NOTHING
-		RETURNING id, name, respond_mode`, name).Scan(&o.ID, &o.Name, &o.RespondMode)
+		SELECT o.id, o.name, o.respond_mode
+		FROM xchats.organizations o
+		WHERE o.name = $1
+		ORDER BY (EXISTS (SELECT 1 FROM xchats.wa_accounts a WHERE a.organization_id = o.id)) DESC,
+		         o.created_at ASC
+		LIMIT 1`, name).Scan(&o.ID, &o.Name, &o.RespondMode)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// already existed (no unique on name) — fetch the first
 		err = s.pool.QueryRow(ctx, `
-			SELECT id, name, respond_mode FROM xchats.organizations
-			WHERE name = $1 ORDER BY created_at LIMIT 1`, name).Scan(&o.ID, &o.Name, &o.RespondMode)
+			INSERT INTO xchats.organizations (name) VALUES ($1)
+			RETURNING id, name, respond_mode`, name).Scan(&o.ID, &o.Name, &o.RespondMode)
 	}
 	return o, err
 }
@@ -390,11 +396,17 @@ func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]User, int, 
 
 func (s *Store) OrgForUser(ctx context.Context, userID uuid.UUID) (Organization, error) {
 	var o Organization
+	// Deterministic pick: prefer an org that actually owns a WhatsApp account
+	// (where the chats live), then the oldest. Guards against a stray duplicate
+	// org silently shadowing the real one (see migration 0003).
 	err := s.pool.QueryRow(ctx, `
 		SELECT o.id, o.name, o.respond_mode
 		FROM xchats.organizations o
 		JOIN xchats.organization_users ou ON ou.organization_id = o.id
-		WHERE ou.user_id = $1 LIMIT 1`, userID).Scan(&o.ID, &o.Name, &o.RespondMode)
+		WHERE ou.user_id = $1
+		ORDER BY (EXISTS (SELECT 1 FROM xchats.wa_accounts a WHERE a.organization_id = o.id)) DESC,
+		         o.created_at ASC
+		LIMIT 1`, userID).Scan(&o.ID, &o.Name, &o.RespondMode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, ErrNotFound
 	}

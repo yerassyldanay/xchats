@@ -39,6 +39,13 @@ services:
       SEED_ADMIN_EMAIL: "${SEED_ADMIN_EMAIL:-admin@example.com}"
       SEED_ADMIN_PASSWORD: "${SEED_ADMIN_PASSWORD:-change-me-strong-password}"
       WA_OWNER_JID: "${WA_OWNER_JID:-}"
+      # LLM / AI brain — when LLM_API_KEY is empty the backend uses the Stub drafter.
+      LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_FAST_MODEL: "${LLM_FAST_MODEL:-openai/gpt-4o-mini}"
+      LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-1024}"
+      LLM_TEMPERATURE: "${LLM_TEMPERATURE:-0.3}"
     ports:
       - "8080:8080"
     volumes:

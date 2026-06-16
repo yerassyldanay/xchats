@@ -22,14 +22,18 @@ func (s *Server) handleSuggest(c *gin.Context) {
 	if _, ok := s.orgChat(c, chatID); !ok {
 		return
 	}
-	pending, err := s.store.PendingDrafts(ctx(c), chatID)
-	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
-		return
-	}
-	if len(pending) > 0 {
-		ok(c, gin.H{"items": mapDrafts(pending), "trigger_message_id": triggerOf(pending)})
-		return
+	// force=true (the panel's "Regenerate") skips the idempotent return and asks for
+	// a brand-new draft; the worker's WriteDraftSet supersedes the prior pending row.
+	if c.Query("force") != "true" {
+		pending, err := s.store.PendingDrafts(ctx(c), chatID)
+		if err != nil {
+			fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+			return
+		}
+		if len(pending) > 0 {
+			ok(c, gin.H{"items": mapDrafts(pending), "trigger_message_id": triggerOf(pending)})
+			return
+		}
 	}
 	trigger, _ := s.store.LatestInboundMessageID(ctx(c), chatID)
 	_ = s.queue.Publish(queue.Message{Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: chatID}})

@@ -20,6 +20,14 @@ blob_dir: "./blobdata"
 queue_driver: "inmem"
 queue_workers: 4
 
+# AI brain (LLM). The api key is a secret -> set LLM_API_KEY in .env (empty => stub).
+# These are non-secret tunables; provider is OpenAI-compatible.
+llm_provider: "openrouter"            # openrouter | openai | gemini
+llm_fast_model: "openai/gpt-4o-mini"  # drafting model
+llm_max_tokens: 1024
+llm_temperature: 0.3
+# llm_base_url: ""                    # override the provider default (self-host/in-region)
+
 # the single pre-connected WhatsApp account
 evolution_instance: "xpayment"
 wa_account_display_name: "Sales WhatsApp"

@@ -70,7 +70,11 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
   tables, e.g. `xchats.wa_chats`), keys, indexes, constraints, and a normalization review.
 - **10-knowledge-builder.md** — the automatic KB authoring experience (deferred CMS): a builder chat
   that turns URLs/media/text into draft topics + per-asset media, the editor page, and the
-  popup/request primitive (describe-media · confirm-price · accept/deny/comment).
+  popup/request primitive (describe-media · confirm-price · accept/deny/comment). *Conceptual UX.*
+- **11-design-overview.md** — the **bird's-eye view** of the AI side: the three components (brain ·
+  knowledge base · playground), the main design solutions, and **what each buys us vs. costs us**
+  (trade-offs), plus the KB-first build sequence. **Start here** to understand the whole AI/KB picture;
+  it consolidates the earlier detailed split into one map.
 - **examples/repos/xpayment-crm/** — the working brain, vendored as a git submodule (the
   implementation the AI docs above describe; entry `IMPLEMENTATION.md`).
 - **scripts/evolution_client.py** — working Evolution client + normalization (the oracle).

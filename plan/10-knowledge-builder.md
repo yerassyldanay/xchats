@@ -6,6 +6,11 @@ corrects. This is the authoring front-end to the brain's `xchats.ai_*` tables (r
 `8-ai-assistant.md`). It is the **deferred CMS** (designed here; built Phase 4B — see
 `0.1-definition-of-done.md`), not v1.
 
+> **This doc is the conceptual UX.** For the **bird's-eye view** of the whole AI side — the three
+> components (brain · knowledge base · playground), the main design solutions, and their advantages &
+> limitations — see **`11-design-overview.md`** (start there). The data model lives in
+> `9-database-schema.md`; the brain in `8-ai-assistant.md`.
+
 ## Why automatic is safe here (the unlock)
 
 An auto-generated KB row cannot reach a customer without passing **three independent gates**, so the
@@ -33,7 +38,7 @@ SNAPSHOT (draft → published)
 ├─ Topics[]     the knowledge — each a CONTAINER:
 │   ├─ body_md      the answer text (price TOKENS, never digits) (ai_topics)
 │   └─ media[]      attached assets, EACH WITH ITS OWN description (ai_assets, topic_slug → topic)
-└─ Prices       the single source of numbers, as tokens          (ai_prices)
+└─ Values       the single source of numbers (prices, limits, counts…), as tokens  (ai_values)
 ```
 
 **Identity / Goal / Guardrails** are the "what must this assistant achieve" blocks the operator writes
@@ -129,7 +134,7 @@ A request = `{ id, type, prompt, context (thumbnail/topic/detected value), targe
 | Request type | Popup asks | Resolves into |
 |---|---|---|
 | `describe_media` | text — "Describe what this shows and when to send it." | `ai_assets.description` (+ kind/topic) |
-| `confirm_price` | accept / edit — "Map '25 000 ₸' → `{{price.growth}}`?" | a `ai_prices` token + value (never a digit in text) |
+| `confirm_price` | accept / edit — "Map '25 000 ₸' → `{{price.growth}}`?" | a `ai_values` token + value (never a digit in text) |
 | `approve_topic` / `approve_asset` | **accept · deny · edit** | flips the row's `review_state` |
 | `resolve_duplicate` | merge · keep both | dedup / merge of topics or assets |
 | `choose_topic` | pick / create — "Which topic does this image belong to?" | the asset's `topic_slug` |
@@ -145,7 +150,7 @@ channel) nudges the builder to proceed.
 operator can **accept** (`approved`), **edit** (`approved`, edited), or **deny** (`rejected`). Publish
 includes approved rows only; rejected rows are kept for provenance but excluded.
 
-> Storage: the draft `ai_topics` / `ai_assets` / `ai_prices` rows gain two lightweight, **draft-side**
+> Storage: the draft `ai_topics` / `ai_assets` / `ai_values` rows gain two lightweight, **draft-side**
 > fields — `review_state` and `provenance` (source ref) — and requests live in a small `ai_builder_requests`
 > queue keyed to the draft snapshot. All additive; the **live** runtime tables and the brain are
 > untouched. Exact DDL folds into `9-database-schema.md` when this phase lands.

@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/assistant"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
+	"github.com/yerassyldanay/xchats/backend/internal/brain"
+	"github.com/yerassyldanay/xchats/backend/internal/brain/llm"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
@@ -77,10 +79,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	if err != nil {
 		fatal("blob", err)
 	}
-	drafter, err := assistant.NewStub(blobStore, "")
-	if err != nil {
-		fatal("assistant", err)
-	}
+	drafter := buildDrafter(cfg, st, blobStore, log)
 	q := queue.NewInMem(2048, cfg.QueueWorkers, log)
 	hub := realtime.NewHub()
 	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
@@ -107,6 +106,27 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
 	q.Close()
+}
+
+// buildDrafter chooses the AI drafter: the real KB-grounded brain when an
+// LLM_API_KEY is configured (loading the embedded KB media into the blob store so
+// approved drafts can send catalog files), otherwise the hardcoded Stub so the app
+// still boots and runs without a key.
+func buildDrafter(cfg *config.Config, st *store.Store, blobStore blob.Store, log *slog.Logger) assistant.Drafter {
+	if cfg.LLMAPIKey != "" {
+		if err := brain.LoadMedia(blobStore); err != nil {
+			fatal("kb media", err)
+		}
+		lc := llm.New(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMFastModel, "", cfg.LLMMaxTokens, cfg.LLMTemperature)
+		log.Info("assistant drafter active", "mode", "real", "provider", cfg.LLMProvider, "model", cfg.LLMFastModel)
+		return assistant.NewReal(st, lc, brain.SeedSnapshot(), log)
+	}
+	d, err := assistant.NewStub(blobStore, "")
+	if err != nil {
+		fatal("assistant", err)
+	}
+	log.Info("assistant drafter active", "mode", "stub")
+	return d
 }
 
 func runMigrate(cfg *config.Config, log *slog.Logger) {

@@ -46,6 +46,15 @@ type Config struct {
 	QueueDriver  string `yaml:"queue_driver" env:"QUEUE_DRIVER"`
 	QueueWorkers int    `yaml:"queue_workers" env:"QUEUE_WORKERS"`
 
+	// --- LLM / AI brain (key is a secret via .env; the rest are tunables) ---
+	// When LLMAPIKey is empty the app falls back to the hardcoded Stub drafter.
+	LLMProvider    string  `yaml:"llm_provider" env:"LLM_PROVIDER"`     // openrouter|openai|gemini
+	LLMAPIKey      string  `env:"LLM_API_KEY"`                          // secret
+	LLMBaseURL     string  `yaml:"llm_base_url" env:"LLM_BASE_URL"`     // overrides the provider default
+	LLMFastModel   string  `yaml:"llm_fast_model" env:"LLM_FAST_MODEL"` // drafting model
+	LLMMaxTokens   int     `yaml:"llm_max_tokens" env:"LLM_MAX_TOKENS"`
+	LLMTemperature float64 `yaml:"llm_temperature" env:"LLM_TEMPERATURE"`
+
 	// --- seed + account identity (config.yaml, secrets via env) ---
 	OrgName              string `yaml:"org_name" env:"ORG_NAME"`
 	WaAccountDisplayName string `yaml:"wa_account_display_name"`
@@ -69,8 +78,28 @@ func defaults() Config {
 		BlobDir:         "./blobdata",
 		QueueDriver:     "inmem",
 		QueueWorkers:    4,
+		LLMProvider:     "openrouter",
+		LLMFastModel:    "openai/gpt-4o-mini",
+		LLMMaxTokens:    1024,
+		LLMTemperature:  0.3,
 		OrgName:         "XChats",
 		PageSize:        50,
+	}
+}
+
+// LLMResolvedBaseURL returns the OpenAI-compatible base URL for the configured
+// provider. An explicit LLMBaseURL always wins (self-hosted / in-region model).
+func (c *Config) LLMResolvedBaseURL() string {
+	if c.LLMBaseURL != "" {
+		return strings.TrimRight(c.LLMBaseURL, "/")
+	}
+	switch strings.ToLower(c.LLMProvider) {
+	case "openai":
+		return "https://api.openai.com/v1"
+	case "gemini":
+		return "https://generativelanguage.googleapis.com/v1beta/openai"
+	default: // openrouter
+		return "https://openrouter.ai/api/v1"
 	}
 }
 
