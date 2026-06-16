@@ -1,5 +1,21 @@
 # TODO — Playground (chat → builds/updates the Knowledge Base)
 
+> **Build status (backend landed).** L1–L4 are implemented and tested against a
+> real Postgres (`make test-e2e`):
+> - **L1** ✅ generic `ai_values` model (lossy `PriceBook` removed), migration
+>   `0003_ai_kb`, `internal/kbstore` (load/seed/draft/publish-gate/rollback),
+>   brain source-swap (DB snapshot + literal fallback, hot-reload on publish).
+> - **L2** ✅ draft editor API + deterministic publish gate (`/playground/*`).
+> - **L3** ✅ ingest adapters (text/url/media) on the queue; multimodal
+>   `llm.Vision` client behind `LLM_VISION_MODEL` (nil → describe popups).
+> - **L4** ✅ `internal/playground` builder with a deterministic `RuleSynthesizer`
+>   (tokenizes prices → confirm popups, one topic per batch, update-vs-create diff).
+>   An **LLM synthesizer** behind the same `Synthesizer` interface is the next step.
+> - **Remaining:** the **frontend** Playground page; the **LLM synthesizer** (real
+>   cross-material judgment); the live multimodal/golden-set evals. See "Frontend"
+>   and the manual-e2e section below.
+
+
 Build the **Playground**: a chat where an operator drops **any mix of material** (text, URLs, images,
 PDFs, docs, video), the assistant **extracts** it, **builds or updates** the KB, and a human reviews &
 **publishes**. Design: [`plan/12-playground-build.md`](plan/12-playground-build.md) (concept: `plan/10`,
