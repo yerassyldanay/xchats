@@ -18,10 +18,12 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/assistant"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/brain"
+	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/brain/llm"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -75,11 +77,21 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	}
 	accountID := seed(ctx, cfg, st, log)
 
+	// The KB lives in the DB now: seed the published snapshot from the literal on
+	// first boot, then the brain reads the DB snapshot (literal kept as fallback).
+	kb := kbstore.New(st.Pool())
+	orgID := seededOrgID(ctx, cfg, st, log)
+	if orgID != uuid.Nil {
+		if err := kb.SeedIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
+			log.Warn("kb seed failed; using literal fallback", "err", err)
+		}
+	}
+
 	blobStore, err := blob.NewDisk(cfg.BlobDir)
 	if err != nil {
 		fatal("blob", err)
 	}
-	drafter := buildDrafter(cfg, st, blobStore, log)
+	drafter := buildDrafter(ctx, cfg, st, kb, orgID, blobStore, log)
 	q := queue.NewInMem(2048, cfg.QueueWorkers, log)
 	hub := realtime.NewHub()
 	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
@@ -89,7 +101,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Evo: evo, Log: log,
+		Drafter: drafter, Evo: evo, KB: kb, OrgID: orgID, Log: log,
 	})
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
 
@@ -112,14 +124,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 // LLM_API_KEY is configured (loading the embedded KB media into the blob store so
 // approved drafts can send catalog files), otherwise the hardcoded Stub so the app
 // still boots and runs without a key.
-func buildDrafter(cfg *config.Config, st *store.Store, blobStore blob.Store, log *slog.Logger) assistant.Drafter {
+func buildDrafter(ctx context.Context, cfg *config.Config, st *store.Store, kb *kbstore.Store, orgID uuid.UUID, blobStore blob.Store, log *slog.Logger) assistant.Drafter {
 	if cfg.LLMAPIKey != "" {
 		if err := brain.LoadMedia(blobStore); err != nil {
 			fatal("kb media", err)
 		}
 		lc := llm.New(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMFastModel, "", cfg.LLMMaxTokens, cfg.LLMTemperature)
 		log.Info("assistant drafter active", "mode", "real", "provider", cfg.LLMProvider, "model", cfg.LLMFastModel)
-		return assistant.NewReal(st, lc, brain.SeedSnapshot(), log)
+		return assistant.NewReal(st, lc, publishedOrSeed(ctx, kb, orgID, log), log)
 	}
 	d, err := assistant.NewStub(blobStore, "")
 	if err != nil {
@@ -127,6 +139,30 @@ func buildDrafter(cfg *config.Config, st *store.Store, blobStore blob.Store, log
 	}
 	log.Info("assistant drafter active", "mode", "stub")
 	return d
+}
+
+// publishedOrSeed loads the org's published KB snapshot from the DB, falling back
+// to the embedded literal if the DB is empty/unreachable (so the brain always boots).
+func publishedOrSeed(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, log *slog.Logger) *domain.Snapshot {
+	if orgID != uuid.Nil {
+		if snap, err := kb.LoadPublished(ctx, orgID); err == nil {
+			log.Info("brain KB source", "source", "db", "version", snap.Config.Version)
+			return snap
+		} else {
+			log.Warn("load published KB failed; using literal", "err", err)
+		}
+	}
+	return brain.SeedSnapshot()
+}
+
+// seededOrgID returns the seeded org's id (idempotent re-seed) for the KB + playground.
+func seededOrgID(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) uuid.UUID {
+	org, err := st.SeedOrganization(ctx, cfg.OrgName)
+	if err != nil {
+		log.Warn("resolve org id failed", "err", err)
+		return uuid.Nil
+	}
+	return org.ID
 }
 
 func runMigrate(cfg *config.Config, log *slog.Logger) {

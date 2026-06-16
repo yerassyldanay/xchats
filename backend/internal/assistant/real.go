@@ -33,19 +33,26 @@ const windowSize = 15
 // and returns ONE reply option (text + resolved catalog media). It satisfies
 // assistant.Drafter, so it drops in wherever the Stub was used.
 type RealDrafter struct {
-	store windowReader
-	llm   brainDrafter
-	snap  *domain.Snapshot
-	log   *slog.Logger
+	store   windowReader
+	llm     brainDrafter
+	content *domain.Content // hot-swappable published snapshot (reloaded on publish)
+	log     *slog.Logger
 }
 
-// NewReal builds a RealDrafter. snap is the published KB (brain.SeedSnapshot()).
+// NewReal builds a RealDrafter. snap is the initial published KB (the DB snapshot,
+// or brain.SeedSnapshot() as fallback). Call SetSnapshot to hot-swap it on publish.
 func NewReal(s windowReader, llm brainDrafter, snap *domain.Snapshot, log *slog.Logger) *RealDrafter {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &RealDrafter{store: s, llm: llm, snap: snap, log: log}
+	c := &domain.Content{}
+	c.Set(snap)
+	return &RealDrafter{store: s, llm: llm, content: c, log: log}
 }
+
+// SetSnapshot atomically swaps the published KB the brain drafts from. The
+// playground calls this after a successful Publish so new replies use the new KB.
+func (r *RealDrafter) SetSnapshot(snap *domain.Snapshot) { r.content.Set(snap) }
 
 // Draft implements Drafter: window → prompt → LLM → post-process → one Option.
 func (r *RealDrafter) Draft(ctx context.Context, in Input) ([]Option, error) {
@@ -59,8 +66,9 @@ func (r *RealDrafter) Draft(ctx context.Context, in Input) ([]Option, error) {
 	}
 	window, current := splitWindow(msgs, in.LastInboundText)
 
+	snap := r.content.Get()
 	prompt := brain.Prompt{
-		System: brain.BuildSystem(r.snap),
+		System: brain.BuildSystem(snap),
 		User:   brain.BuildUser(nil, window, current), // no profile in v1
 	}
 	raw, err := r.llm.Draft(ctx, prompt)
@@ -71,7 +79,7 @@ func (r *RealDrafter) Draft(ctx context.Context, in Input) ([]Option, error) {
 		return []Option{{Ordinal: 1, Text: brain.HoldingReply, Escalate: true, Reason: "llm_error: " + err.Error()}}, nil
 	}
 
-	d := brain.PostProcess(raw, r.snap, r.log)
+	d := brain.PostProcess(raw, snap, r.log)
 	return []Option{optionFromDraft(d)}, nil
 }
 
