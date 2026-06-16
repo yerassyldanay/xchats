@@ -24,6 +24,7 @@ queue_workers: 4
 # These are non-secret tunables; provider is OpenAI-compatible.
 llm_provider: "openrouter"            # openrouter | openai | gemini
 llm_fast_model: "openai/gpt-4o-mini"  # drafting model
+llm_vision_model: ""                  # multimodal model for Playground KB media extraction (empty => describe popups)
 llm_max_tokens: 1024
 llm_temperature: 0.3
 # llm_base_url: ""                    # override the provider default (self-host/in-region)
