@@ -97,9 +97,15 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	hub := realtime.NewHub()
 	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
 
-	// Playground engine: Stage-1 ingest adapters (no vision client in v1 → media
-	// falls back to describe popups) + the Stage-2 builder (deterministic synth).
-	extractor := playground.NewExtractor(nil, log)
+	// Playground engine: Stage-1 ingest adapters + the Stage-2 builder. A
+	// multimodal model (LLM_VISION_MODEL) enables image auto-captioning; without
+	// one, media falls back to describe_media popups (fully chat-driven).
+	var vision playground.VisionClient
+	if cfg.LLMAPIKey != "" && cfg.LLMVisionModel != "" {
+		vision = llm.NewVision(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMVisionModel, cfg.LLMMaxTokens)
+		log.Info("playground vision extractor active", "model", cfg.LLMVisionModel)
+	}
+	extractor := playground.NewExtractor(vision, log)
 	builder := playground.NewBuilder(nil, hub)
 
 	w := &worker.Worker{Store: st, Queue: q, Evo: evo, Blob: blobStore, Hub: hub,
