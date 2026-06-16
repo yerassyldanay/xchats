@@ -24,6 +24,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
+	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -96,12 +97,18 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	hub := realtime.NewHub()
 	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
 
-	w := &worker.Worker{Store: st, Queue: q, Evo: evo, Blob: blobStore, Hub: hub, Drafter: drafter, Log: log}
+	// Playground engine: Stage-1 ingest adapters (no vision client in v1 → media
+	// falls back to describe popups) + the Stage-2 builder (deterministic synth).
+	extractor := playground.NewExtractor(nil, log)
+	builder := playground.NewBuilder(nil, hub)
+
+	w := &worker.Worker{Store: st, Queue: q, Evo: evo, Blob: blobStore, Hub: hub,
+		Drafter: drafter, KB: kb, Extract: extractor, Log: log}
 	q.Start(ctx, w.Handle)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Evo: evo, KB: kb, OrgID: orgID, Log: log,
+		Drafter: drafter, Evo: evo, KB: kb, Builder: builder, OrgID: orgID, Log: log,
 	})
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
 
