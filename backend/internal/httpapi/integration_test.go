@@ -16,9 +16,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/assistant"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
+	"github.com/yerassyldanay/xchats/backend/internal/brain"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
+	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -93,6 +96,11 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("blob: %v", err)
 	}
+	// Load the embedded KB media so seed assets have stored bytes (as production's
+	// buildDrafter does) — the publish gate's dangling-blob check needs them.
+	if err := brain.LoadMedia(blobStore); err != nil {
+		t.Fatalf("kb media: %v", err)
+	}
 	drafter, err := assistant.NewStub(blobStore, "")
 	if err != nil {
 		t.Fatalf("stub: %v", err)
@@ -100,12 +108,22 @@ func newHarness(t *testing.T) *harness {
 	q := queue.NewInMem(256, 2, log)
 	hub := realtime.NewHub()
 	fake := evolution.NewFake("xpayment", ownerJID)
-	w := &worker.Worker{Store: st, Queue: q, Evo: fake, Blob: blobStore, Hub: hub, Drafter: drafter, Log: log}
+
+	// Playground KB engine (seed the published snapshot so the brain + builder work).
+	kb := kbstore.New(st.Pool())
+	if err := kb.SeedIfEmpty(ctx, org.ID, brain.SeedSnapshot()); err != nil {
+		t.Fatalf("seed kb: %v", err)
+	}
+	extractor := playground.NewExtractor(nil, log)
+	builder := playground.NewBuilder(nil, hub)
+
+	w := &worker.Worker{Store: st, Queue: q, Evo: fake, Blob: blobStore, Hub: hub,
+		Drafter: drafter, KB: kb, Extract: extractor, Log: log}
 	q.Start(context.Background(), w.Handle)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Evo: fake, Log: log,
+		Drafter: drafter, Evo: fake, KB: kb, Builder: builder, OrgID: org.ID, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)

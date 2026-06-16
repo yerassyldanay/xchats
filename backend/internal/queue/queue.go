@@ -13,10 +13,11 @@ import (
 type Kind string
 
 const (
-	KindWaEvent       Kind = "wa_event"
-	KindMediaDownload Kind = "media_download"
-	KindOutboundSend  Kind = "outbound_send"
-	KindAIDraft       Kind = "ai_draft"
+	KindWaEvent         Kind = "wa_event"
+	KindMediaDownload   Kind = "media_download"
+	KindOutboundSend    Kind = "outbound_send"
+	KindAIDraft         Kind = "ai_draft"
+	KindExtractMaterial Kind = "extract_material"
 )
 
 // Message is one unit of async work. Payload is kind-specific.

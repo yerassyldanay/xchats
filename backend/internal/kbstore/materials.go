@@ -170,6 +170,18 @@ func (s *Store) CreateRequest(ctx context.Context, orgID uuid.UUID, in RequestIn
 	return r, err
 }
 
+// GetRequest returns one popup by id.
+func (s *Store) GetRequest(ctx context.Context, id uuid.UUID) (Request, error) {
+	var r Request
+	err := s.pool.QueryRow(ctx, `SELECT id, material_id, req_type, prompt, context::text, target::text, state, resolution::text, created_at, resolved_at
+		FROM xchats.ai_builder_requests WHERE id = $1`, id).
+		Scan(&r.ID, &r.MaterialID, &r.ReqType, &r.Prompt, &r.Context, &r.Target, &r.State, &r.Resolution, &r.CreatedAt, &r.ResolvedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return r, ErrUnknownKind
+	}
+	return r, err
+}
+
 // ResolveRequest marks a popup resolved (or dismissed) with the operator's answer.
 // The caller applies the resulting draft mutation separately.
 func (s *Store) ResolveRequest(ctx context.Context, id uuid.UUID, state, resolution string) error {
