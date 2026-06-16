@@ -129,6 +129,19 @@ export const useInbox = defineStore('inbox', {
         this.suggesting = false
       }
     },
+    // regenerate forces a fresh draft (the panel's "↻"), discarding the current
+    // cards immediately; the new option arrives over SSE / the refetch below.
+    async regenerate() {
+      if (!this.activeId) return
+      this.suggesting = true
+      this.drafts = []
+      try {
+        await api.post(`/chats/${this.activeId}/ai-drafts?force=true`)
+        await this.loadDrafts(this.activeId)
+      } finally {
+        this.suggesting = false
+      }
+    },
     async approve(draftId: string, editedText: string | undefined, mediaIds: string[]) {
       try {
         await api.post(`/ai-drafts/${draftId}/approve`, {
@@ -156,7 +169,14 @@ export const useInbox = defineStore('inbox', {
         chatCreated: (c) => this.upsertChat(c),
         chatUpdated: (c) => this.upsertChat(c),
         draftCreated: (d) => {
-          if (d.chat_id === this.activeId) this.upsertDraft(d)
+          if (d.chat_id !== this.activeId) return
+          // A fresh suggestion set (auto-drafted on a new inbound, or a re-press)
+          // supersedes the prior cards: if this option answers a different message,
+          // drop the stale ones before adding it so the panel never mixes sets.
+          if (this.drafts.length && this.drafts[0].trigger_message_id !== d.trigger_message_id) {
+            this.drafts = []
+          }
+          this.upsertDraft(d)
         },
         draftUpdated: (d) => {
           if (d.chat_id === this.activeId) this.drafts = []

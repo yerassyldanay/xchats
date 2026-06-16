@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useInbox } from '../stores/inbox'
+import { vAutosize } from '../lib/autosize'
 
 defineProps<{ sending: boolean }>()
 const emit = defineEmits<{ (e: 'send', text: string, files: File[]): void }>()
@@ -47,9 +48,10 @@ function submit() {
       <div class="flex-1 flex items-end rounded-2xl bg-panel border border-hair focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/10 transition px-3">
         <textarea
           v-model="inbox.composerText"
+          v-autosize
           rows="1"
           placeholder="Введите сообщение…"
-          class="flex-1 resize-none bg-transparent py-2.5 outline-none max-h-32 text-[15px]"
+          class="flex-1 resize-none bg-transparent py-2.5 outline-none max-h-[40vh] overflow-y-auto text-[15px]"
           @keydown.enter.exact.prevent="submit"
         />
         <button class="pb-2.5 pl-2 text-slate-400 hover:text-amber-500 transition" title="Эмодзи" type="button">

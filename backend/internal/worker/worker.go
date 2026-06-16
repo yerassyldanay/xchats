@@ -142,6 +142,14 @@ func (w *Worker) handleWaEvent(ctx context.Context, raw []byte) error {
 	if m.Media != nil {
 		w.ingestMedia(ctx, res.MessageID, account.InstanceName, m)
 	}
+	// Auto-draft: a brand-new inbound customer message gets a fresh AI suggestion
+	// pushed to the inbox without anyone pressing "Suggest". handleAIDraft's
+	// WriteDraftSet supersedes the chat's prior pending options, so the panel
+	// always reflects the latest message instead of a stale first draft. Outbound
+	// echoes (direction "out") and dedup hits (handled above) never reach here.
+	if m.Direction == "in" {
+		_ = w.Queue.Publish(queue.Message{Kind: queue.KindAIDraft, Payload: AIDraftTask{ChatID: res.ChatID}})
+	}
 	return nil
 }
 

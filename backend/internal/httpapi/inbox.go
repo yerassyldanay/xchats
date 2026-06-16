@@ -145,10 +145,13 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		instance = acct.InstanceName
 	}
 
-	if strings.TrimSpace(text) != "" {
+	text = strings.TrimSpace(text)
+
+	// sendText emits a standalone text message (no media, or no media ref resolved).
+	sendText := func() error {
 		msgID, err := s.store.InsertOutboundMessage(ctx(c), chat.ID, chat.AccountID, senderKind, senderUserID, "conversation", text, preview(text))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		msg, _ := s.store.MessageByID(ctx(c), msgID)
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
@@ -156,15 +159,36 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 			MessageID: msgID, AccountID: chat.AccountID, Instance: instance, PhoneJID: chat.RemoteJID, Text: text,
 		}})
 		out = append(out, dto.MapMessage(msg))
+		return nil
 	}
 
+	if len(mediaIDs) == 0 {
+		if text == "" {
+			return out, nil
+		}
+		return out, sendText()
+	}
+
+	// With media: the first resolvable asset carries the text as its caption, so the
+	// customer (and the inbox) see ONE message — image + caption — instead of a text
+	// bubble followed by an empty media bubble. Extra assets follow captionless.
+	textPlaced := false
 	for _, mid := range mediaIDs {
 		meta, found := s.blob.Meta(mid)
 		if !found {
 			continue
 		}
+		caption := ""
+		if !textPlaced {
+			caption = text // "" for a media-only send — fine
+			textPlaced = true
+		}
+		prev := placeholderFor(meta.MediaType)
+		if caption != "" {
+			prev = preview(caption)
+		}
 		kind := mediaMessageKind(meta.MediaType)
-		msgID, err := s.store.InsertOutboundMessage(ctx(c), chat.ID, chat.AccountID, senderKind, senderUserID, kind, "", placeholderFor(meta.MediaType))
+		msgID, err := s.store.InsertOutboundMessage(ctx(c), chat.ID, chat.AccountID, senderKind, senderUserID, kind, caption, prev)
 		if err != nil {
 			return nil, err
 		}
@@ -174,9 +198,14 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		msg, _ := s.store.MessageByID(ctx(c), msgID)
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
 		_ = s.queue.Publish(queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
-			MessageID: msgID, AccountID: chat.AccountID, Instance: instance, PhoneJID: chat.RemoteJID, MediaID: mid,
+			MessageID: msgID, AccountID: chat.AccountID, Instance: instance, PhoneJID: chat.RemoteJID, MediaID: mid, Caption: caption,
 		}})
 		out = append(out, dto.MapMessage(msg))
+	}
+
+	// No media ref resolved (all unknown) but we still have text — don't drop it.
+	if !textPlaced && text != "" {
+		return out, sendText()
 	}
 	return out, nil
 }
