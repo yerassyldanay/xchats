@@ -16,6 +16,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
+	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -34,6 +35,8 @@ type Server struct {
 	blob    blob.Store
 	drafter assistant.Drafter
 	evo     evolution.Client
+	kb      *kbstore.Store
+	orgID   uuid.UUID
 	log     *slog.Logger
 
 	// pendingNames carries the display_name from "add account" (POST) to the QR
@@ -53,6 +56,8 @@ type Deps struct {
 	Blob    blob.Store
 	Drafter assistant.Drafter
 	Evo     evolution.Client
+	KB      *kbstore.Store
+	OrgID   uuid.UUID
 	Log     *slog.Logger
 }
 
@@ -60,7 +65,7 @@ type Deps struct {
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, drafter: d.Drafter, evo: d.Evo, log: d.Log,
+		blob: d.Blob, drafter: d.Drafter, evo: d.Evo, kb: d.KB, orgID: d.OrgID, log: d.Log,
 		pendingNames: map[string]string{},
 	}
 }

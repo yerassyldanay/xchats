@@ -9,9 +9,9 @@ import (
 func testSnapshot() *domain.Snapshot {
 	return &domain.Snapshot{
 		Config: domain.AssistantConfig{Persona: "p", Guardrails: "g"},
-		Prices: domain.PriceBook{Tariffs: map[string]domain.Tariff{
-			"standard": {Key: "standard", PriceTenge: 19900},
-		}},
+		Values: domain.NewValueBook(
+			domain.Value{Token: "price.standard", Lang: "ru", Text: "19 900 ₸"},
+		),
 		Topics: []domain.Topic{{Slug: "pricing", Language: "ru", BodyMD: "{{price.standard}}"}},
 		Assets: []domain.Asset{{Ref: "pricing_card", Kind: "image", URL: "/media/p.png"}},
 	}
@@ -91,7 +91,7 @@ func TestPostProcess_PriceRenderFailurePostsManualNote(t *testing.T) {
 func TestSeedSnapshot_TokensResolve(t *testing.T) {
 	snap := SeedSnapshot()
 	for _, topic := range snap.Topics {
-		if _, err := snap.Prices.Render(topic.BodyMD, topic.Language); err != nil {
+		if _, err := snap.Values.Render(topic.BodyMD, topic.Language); err != nil {
 			t.Fatalf("topic %q has an unresolved token: %v", topic.Slug, err)
 		}
 	}

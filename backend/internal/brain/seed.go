@@ -36,20 +36,19 @@ func SeedSnapshot() *domain.Snapshot {
 			LanguagePolicy: "Отвечай на языке клиента. Если сообщение смешивает казахский и русский — отвечай по-русски.",
 			ReplyMaxWords:  120,
 		},
-		Prices: domain.PriceBook{
-			Tariffs: map[string]domain.Tariff{
-				"basic":             {Key: "basic", PriceTenge: 9900},
-				"standard":          {Key: "standard", PriceTenge: 19900},
-				"premium":           {Key: "premium", PriceTenge: 39900},
-				"free_delivery_min": {Key: "free_delivery_min", PriceTenge: 30000},
-			},
-			Placeholders: map[string]domain.Placeholder{
-				"delivery.days":    {Token: "delivery.days", ValueRU: "1–3 дня", ValueKK: "1–3 күн"},
-				"contact.whatsapp": {Token: "contact.whatsapp", ValueRU: "+7 700 123 45 67", ValueKK: "+7 700 123 45 67"},
-				"contact.email":    {Token: "contact.email", ValueRU: "hello@demoshop.kz", ValueKK: "hello@demoshop.kz"},
-				"contact.address":  {Token: "contact.address", ValueRU: "Алматы, ул. Абая, 10", ValueKK: "Алматы, ул. Абая, 10"},
-			},
-		},
+		// Values are free-text per (token, lang): units live IN the value so they
+		// render verbatim. Contacts are language-neutral ('*').
+		Values: domain.NewValueBook(
+			domain.Value{Token: "price.basic", Lang: "ru", Text: "9 900 ₸", Description: "Тариф «Базовый» — цена в месяц"},
+			domain.Value{Token: "price.standard", Lang: "ru", Text: "19 900 ₸", Description: "Тариф «Стандарт» — цена в месяц"},
+			domain.Value{Token: "price.premium", Lang: "ru", Text: "39 900 ₸", Description: "Тариф «Премиум» — цена в месяц"},
+			domain.Value{Token: "price.free_delivery_min", Lang: "ru", Text: "30 000 ₸", Description: "Сумма заказа для бесплатной доставки"},
+			domain.Value{Token: "delivery.days", Lang: "ru", Text: "1–3 дня", Description: "Срок доставки"},
+			domain.Value{Token: "delivery.days", Lang: "kk", Text: "1–3 күн", Description: "Жеткізу мерзімі"},
+			domain.Value{Token: "contact.whatsapp", Lang: "*", Text: "+7 700 123 45 67", Description: "WhatsApp поддержки"},
+			domain.Value{Token: "contact.email", Lang: "*", Text: "hello@demoshop.kz", Description: "E-mail поддержки"},
+			domain.Value{Token: "contact.address", Lang: "*", Text: "Алматы, ул. Абая, 10", Description: "Адрес"},
+		),
 		Topics: []domain.Topic{
 			{
 				Slug: "pricing", Language: "ru", Keywords: "цена, цены, тариф, тарифы, сколько стоит, стоимость, план",
