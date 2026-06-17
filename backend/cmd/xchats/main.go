@@ -106,6 +106,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		log.Info("playground vision extractor active", "model", cfg.LLMVisionModel)
 	}
 	extractor := playground.NewExtractor(vision, log)
+	extractor.AllowPrivateHosts = cfg.KBAllowPrivateFetch
 	builder := playground.NewBuilder(nil, hub)
 
 	w := &worker.Worker{Store: st, Queue: q, Evo: evo, Blob: blobStore, Hub: hub,

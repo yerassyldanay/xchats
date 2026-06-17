@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,14 +38,68 @@ type Extractor struct {
 	Vision VisionClient // optional
 	HTTP   *http.Client
 	Log    *slog.Logger
+
+	// AllowPrivateHosts disables the SSRF guard on the URL adapter (loopback /
+	// private / link-local addresses are otherwise refused). Default false so the
+	// server-side fetch can never be aimed at internal services or the cloud
+	// metadata endpoint; tests/self-hosted setups that fetch localhost set it true.
+	AllowPrivateHosts bool
 }
 
-// NewExtractor builds an Extractor with sane defaults.
+// NewExtractor builds an Extractor with sane defaults. The URL adapter's HTTP
+// client is SSRF-hardened: it refuses to dial non-public addresses (catching DNS
+// rebinding and redirect hops alike) unless AllowPrivateHosts is set.
 func NewExtractor(vision VisionClient, log *slog.Logger) *Extractor {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Extractor{Vision: vision, HTTP: &http.Client{Timeout: 15 * time.Second}, Log: log}
+	e := &Extractor{Vision: vision, Log: log}
+	e.HTTP = e.safeHTTPClient(15 * time.Second)
+	return e
+}
+
+// safeHTTPClient builds the URL-adapter client. A net.Dialer.Control hook vets the
+// *resolved* IP of every connection (initial and each redirect), so a hostname that
+// resolves to a private/loopback/link-local address — or rebinds to one mid-fetch —
+// is refused before any bytes flow. Redirects are also capped and limited to http(s).
+func (e *Extractor) safeHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			if e.AllowPrivateHosts {
+				return nil
+			}
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			ip := net.ParseIP(host)
+			if ip == nil || !isPublicIP(ip) {
+				return fmt.Errorf("blocked non-public address %s", address)
+			}
+			return nil
+		},
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: &http.Transport{DialContext: dialer.DialContext},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("stopped after 5 redirects")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("blocked redirect to %q scheme", req.URL.Scheme)
+			}
+			return nil
+		},
+	}
+}
+
+// isPublicIP reports whether an IP is safe to fetch from a server: not loopback,
+// private (RFC1918 / ULA), link-local, unspecified or multicast.
+func isPublicIP(ip net.IP) bool {
+	return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast())
 }
 
 // Extract processes one staged material: it runs the right adapter, records the
@@ -80,8 +137,8 @@ func (e *Extractor) Extract(ctx context.Context, kb *kbstore.Store, bs blob.Stor
 			MaterialID: &materialID,
 			ReqType:    "describe_media",
 			Prompt:     prompt,
-			Context:    fmt.Sprintf(`{"source_type":%q,"source_ref":%q}`, m.SourceType, m.SourceRef),
-			Target:     fmt.Sprintf(`{"material_id":%q}`, materialID),
+			Context:    jsonObj(map[string]any{"source_type": m.SourceType, "source_ref": m.SourceRef}),
+			Target:     jsonObj(map[string]any{"material_id": materialID.String()}),
 		}); rerr != nil {
 			e.Log.Warn("raise describe_media failed", "err", rerr)
 		}
@@ -93,9 +150,14 @@ func (e *Extractor) Extract(ctx context.Context, kb *kbstore.Store, bs blob.Stor
 }
 
 // extractURL does a best-effort server-side fetch → readable text. On any failure
-// (non-200, empty, blocked) it flags needs_human → the paste/screenshot popup.
-func (e *Extractor) extractURL(ctx context.Context, url string) kbstore.MaterialExtraction {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// (bad scheme, non-200, empty, blocked address) it flags needs_human → the
+// paste/screenshot popup. The SSRF guard lives in the client's dialer (see
+// safeHTTPClient); the scheme is rejected here, before any request is built.
+func (e *Extractor) extractURL(ctx context.Context, rawURL string) kbstore.MaterialExtraction {
+	if u, perr := url.Parse(rawURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return needsHuman("unsupported url (only http/https)")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return needsHuman("bad url")
 	}
@@ -140,7 +202,7 @@ func (e *Extractor) extractMedia(ctx context.Context, bs blob.Store, m kbstore.M
 
 func needsHuman(reason string) kbstore.MaterialExtraction {
 	return kbstore.MaterialExtraction{Status: "needs_human",
-		Extraction: fmt.Sprintf(`{"method":"none","error":%q}`, reason)}
+		Extraction: jsonObj(map[string]any{"method": "none", "error": reason})}
 }
 
 var (

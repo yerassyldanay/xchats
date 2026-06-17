@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS xchats.ai_materials (
     blob_id        text NOT NULL DEFAULT '',          -- stored bytes, if any (candidate asset)
     extracted_text text NOT NULL DEFAULT '',          -- THE COMMON FORM the synthesis agent reads
     media_kind     text NOT NULL DEFAULT '',          -- if sendable: 'image'|'video'|'document'|'audio'
-    status         text NOT NULL DEFAULT 'pending',   -- 'pending'|'extracting'|'ready'|'needs_human'|'failed'
+    status         text NOT NULL DEFAULT 'pending',   -- 'pending'|'extracting'|'ready'|'built'|'needs_human'|'failed'
     extraction     jsonb NOT NULL DEFAULT '{}'::jsonb,-- { method, model, confidence, error }
     created_at     timestamptz NOT NULL DEFAULT now(),
     updated_at     timestamptz NOT NULL DEFAULT now()

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -12,6 +14,26 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
+
+// kbFail maps a kbstore error to the right HTTP status + machine code, so callers
+// don't bucket everything as 500. Unknown errors stay 500.
+func (s *Server) kbFail(c *gin.Context, err error) {
+	var ge *kbstore.GateError
+	switch {
+	case errors.As(err, &ge):
+		fail(c, http.StatusUnprocessableEntity, ErrValidation, ge.Error())
+	case errors.Is(err, kbstore.ErrNoDraft):
+		fail(c, http.StatusBadRequest, ErrValidation, "no open draft")
+	case errors.Is(err, kbstore.ErrUnknownKind):
+		fail(c, http.StatusBadRequest, ErrValidation, "unknown row kind")
+	case errors.Is(err, kbstore.ErrStale):
+		fail(c, http.StatusConflict, ErrDraftStale, "draft changed since you loaded it; reload and retry")
+	case errors.Is(err, kbstore.ErrNoPublished):
+		fail(c, http.StatusNotFound, ErrNotFound, "no published version")
+	default:
+		fail(c, http.StatusInternalServerError, ErrInternal, "kb: "+err.Error())
+	}
+}
 
 // brainReloader is implemented by the real drafter: it hot-swaps the published KB
 // the brain drafts from. The stub drafter does not implement it (no-op reload).
@@ -54,6 +76,9 @@ func (s *Server) reloadBrain(c *gin.Context, orgID uuid.UUID) {
 
 // --- draft read / lifecycle ------------------------------------------------
 
+// handlePlaygroundDraft is a side-effect-free read: it returns the open draft if
+// one exists, or {has_draft:false} otherwise. Opening a draft is the explicit job
+// of POST /draft, so a GET never clones the published snapshot.
 func (s *Server) handlePlaygroundDraft(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -62,9 +87,13 @@ func (s *Server) handlePlaygroundDraft(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	view, err := s.kb.GetDraft(ctx(c), orgID)
+	view, err := s.kb.ReadDraft(ctx(c), orgID)
+	if errors.Is(err, kbstore.ErrNoDraft) {
+		ok(c, gin.H{"has_draft": false})
+		return
+	}
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	ok(c, view)
@@ -79,12 +108,12 @@ func (s *Server) handlePlaygroundOpenDraft(c *gin.Context) {
 		return
 	}
 	if _, err := s.kb.OpenDraft(ctx(c), orgID); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	view, err := s.kb.GetDraft(ctx(c), orgID)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	created(c, view)
@@ -99,7 +128,7 @@ func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 		return
 	}
 	if err := s.kb.DiscardDraft(ctx(c), orgID); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	ok(c, nil)
@@ -129,7 +158,7 @@ func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
 		Slug: req.Slug, Lang: req.Lang, Title: req.Title, Keywords: req.Keywords, BodyMD: req.BodyMD,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)
@@ -141,7 +170,7 @@ func (s *Server) handlePlaygroundDeleteTopic(c *gin.Context) {
 		return
 	}
 	if err := s.kb.DeleteTopic(ctx(c), orgID, c.Param("slug")); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)
@@ -182,7 +211,7 @@ func (s *Server) handlePlaygroundUploadAsset(c *gin.Context) {
 		URL: "/xchats/api/v1/media/" + ref, Lang: c.PostForm("lang"),
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)
@@ -203,7 +232,7 @@ func (s *Server) handlePlaygroundPatchAsset(c *gin.Context) {
 	if err := s.kb.PatchAsset(ctx(c), orgID, c.Param("ref"), kbstore.AssetPatch{
 		Description: req.Description, TopicSlug: req.TopicSlug,
 	}); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)
@@ -215,7 +244,7 @@ func (s *Server) handlePlaygroundDeleteAsset(c *gin.Context) {
 		return
 	}
 	if err := s.kb.DeleteAsset(ctx(c), orgID, c.Param("ref")); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)
@@ -244,7 +273,7 @@ func (s *Server) handlePlaygroundUpsertValue(c *gin.Context) {
 		Token: req.Token, Lang: req.Lang, ValueText: req.ValueText, Description: req.Description,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)
@@ -256,7 +285,7 @@ func (s *Server) handlePlaygroundDeleteValue(c *gin.Context) {
 		return
 	}
 	if err := s.kb.DeleteValue(ctx(c), orgID, c.Param("token"), c.Query("lang")); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)
@@ -286,7 +315,7 @@ func (s *Server) handlePlaygroundPatchConfig(c *gin.Context) {
 		Persona: req.Persona, Mission: req.Mission, Guardrails: req.Guardrails,
 		LanguagePolicy: req.LanguagePolicy, ReplyMaxWords: req.ReplyMaxWords,
 	}); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)
@@ -319,7 +348,7 @@ func (s *Server) handlePlaygroundReview(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)
@@ -346,7 +375,7 @@ func (s *Server) handlePlaygroundPublish(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.reloadBrain(c, orgID)
@@ -377,7 +406,7 @@ func (s *Server) handlePlaygroundRollback(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.reloadBrain(c, orgID)
@@ -387,20 +416,45 @@ func (s *Server) handlePlaygroundRollback(c *gin.Context) {
 
 // --- shared helpers --------------------------------------------------------
 
-// pgWrite is the common preamble for a draft write: KB ready + org resolved.
+// pgWrite is the common preamble for a draft write: KB ready + org resolved, plus
+// an OPTIONAL optimistic-concurrency check. A client that sends If-Match (the
+// draft's updated_at from its last load) gets a 409 DRAFT_STALE if the draft has
+// since moved — so concurrent edits don't silently clobber each other. Clients
+// that omit the header keep last-write-wins (v1 single-operator default).
 func (s *Server) pgWrite(c *gin.Context) (uuid.UUID, bool) {
 	if !s.kbReady(c) {
 		return uuid.Nil, false
 	}
-	return s.pgOrg(c)
+	orgID, proceed := s.pgOrg(c)
+	if !proceed {
+		return uuid.Nil, false
+	}
+	if tok := strings.Trim(strings.TrimSpace(c.GetHeader("If-Match")), `"`); tok != "" {
+		cur, err := s.kb.DraftUpdatedAt(ctx(c), orgID)
+		if err != nil {
+			s.kbFail(c, err)
+			return uuid.Nil, false
+		}
+		want, perr := time.Parse(time.RFC3339Nano, tok)
+		if perr != nil || !want.Equal(cur) {
+			fail(c, http.StatusConflict, ErrDraftStale, "draft changed since you loaded it; reload and retry")
+			return uuid.Nil, false
+		}
+	}
+	return orgID, true
 }
 
-// kbChanged broadcasts the row change and returns the refreshed draft view so the
+// kbChanged is the common write epilogue: it advances the draft's concurrency
+// token, broadcasts the row change, and returns the refreshed draft view so the
 // editor and the chat stay in sync over the same draft.
 func (s *Server) kbChanged(c *gin.Context, orgID uuid.UUID) {
+	if err := s.kb.TouchDraft(ctx(c), orgID); err != nil {
+		s.kbFail(c, err)
+		return
+	}
 	view, err := s.kb.GetDraft(ctx(c), orgID)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.hub.Broadcast("kb.row.changed", gin.H{"version": view.Config.Version})

@@ -55,6 +55,9 @@ type Config struct {
 	LLMVisionModel string  `yaml:"llm_vision_model" env:"LLM_VISION_MODEL"` // multimodal model for KB media extraction (empty → describe popups)
 	LLMMaxTokens   int     `yaml:"llm_max_tokens" env:"LLM_MAX_TOKENS"`
 	LLMTemperature float64 `yaml:"llm_temperature" env:"LLM_TEMPERATURE"`
+	// KBAllowPrivateFetch lets the playground URL adapter fetch private/loopback
+	// hosts. Default false (SSRF-safe); enable only for trusted self-hosted setups.
+	KBAllowPrivateFetch bool `yaml:"kb_allow_private_fetch" env:"KB_ALLOW_PRIVATE_FETCH"`
 
 	// --- seed + account identity (config.yaml, secrets via env) ---
 	OrgName              string `yaml:"org_name" env:"ORG_NAME"`

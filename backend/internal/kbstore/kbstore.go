@@ -10,8 +10,10 @@ package kbstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,11 +24,25 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 )
 
+// jsonObj marshals a small map to a compact JSON string for a jsonb column —
+// safer than fmt formatting, which only produces valid JSON for safe-charset input.
+func jsonObj(m map[string]any) string {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
 // ErrNoDraft is returned when an operation needs an open draft but none exists.
 var ErrNoDraft = errors.New("kbstore: no open draft")
 
 // ErrNoPublished is returned when no published snapshot exists for an org.
 var ErrNoPublished = errors.New("kbstore: no published snapshot")
+
+// ErrStale is returned when an optimistic-concurrency check (If-Match) fails: the
+// draft moved since the client loaded it.
+var ErrStale = errors.New("kbstore: stale draft write")
 
 // draftVersion is the sentinel version of the single open draft; publishing
 // stamps it with the next real (monotonic, >0) version.
@@ -297,7 +313,13 @@ func (s *Store) Publish(ctx context.Context, orgID uuid.UUID, blobExists func(re
 	if err := s.loadSnapshotContent(ctx, draftID, approved, true); err != nil {
 		return 0, err
 	}
-	if reasons := gate(approved, s.pendingRequestCount(ctx, draftID), blobExists); len(reasons) > 0 {
+	// The gate is a safety boundary, so a failed pending-request count fails closed
+	// (block the publish) rather than silently treating it as zero.
+	pending, err := s.pendingRequestCount(ctx, draftID)
+	if err != nil {
+		return 0, err
+	}
+	if reasons := gate(approved, pending, blobExists); len(reasons) > 0 {
 		return 0, &GateError{Reasons: reasons}
 	}
 
@@ -347,6 +369,13 @@ func gate(snap *domain.Snapshot, pendingRequests int, blobExists func(ref string
 		if _, err := snap.Values.Render(t.BodyMD, t.Language); err != nil {
 			reasons = append(reasons, fmt.Sprintf("topic %q: %v", t.Slug, err))
 		}
+		// A literal price/currency amount in a body is an unconfirmed number shipping
+		// to customers — it must be a value token instead. (This enforces the subset
+		// of the "no digits in bodies" rule that is safety-critical; broader numeric
+		// tokenization is the LLM synthesizer's job.)
+		if lit := rawCurrencyRE.FindString(t.BodyMD); lit != "" {
+			reasons = append(reasons, fmt.Sprintf("topic %q has a literal amount %q — use a value token", t.Slug, strings.TrimSpace(lit)))
+		}
 	}
 	if pendingRequests > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d unresolved request(s)", pendingRequests))
@@ -354,11 +383,17 @@ func gate(snap *domain.Snapshot, pendingRequests int, blobExists func(ref string
 	return reasons
 }
 
-func (s *Store) pendingRequestCount(ctx context.Context, snapID uuid.UUID) int {
+// rawCurrencyRE matches a number immediately followed by a currency marker
+// ("25 000 ₸", "9900тг", "$50"): the class of unconfirmed amount that must live in
+// ai_values as a token, never as a literal in a rendered reply body. Step numbers
+// ("1) 2) 3)") and bare counts are intentionally NOT matched.
+var rawCurrencyRE = regexp.MustCompile(`(?:[0-9][0-9 \x{00a0}.,]*\s*(?:₸|₽|€|£|тг|тенге|руб)|[$€£]\s*[0-9])`)
+
+func (s *Store) pendingRequestCount(ctx context.Context, snapID uuid.UUID) (int, error) {
 	var n int
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM xchats.ai_builder_requests
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM xchats.ai_builder_requests
 		WHERE snapshot_id = $1 AND state = 'pending'`, snapID).Scan(&n)
-	return n
+	return n, err
 }
 
 // Rollback re-publishes a prior version's content as a new highest version, making
@@ -402,7 +437,7 @@ func (s *Store) Rollback(ctx context.Context, orgID uuid.UUID, version int) (int
 		prior.Config.LanguagePolicy, orDefaultInt(prior.Config.ReplyMaxWords, 120)).Scan(&newID); err != nil {
 		return 0, err
 	}
-	if err := insertContent(ctx, tx, newID, prior, "approved", fmt.Sprintf(`{"source":"rollback","from_version":%d}`, version)); err != nil {
+	if err := insertContent(ctx, tx, newID, prior, "approved", jsonObj(map[string]any{"source": "rollback", "from_version": version})); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {

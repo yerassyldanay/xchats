@@ -73,11 +73,47 @@ type DraftView struct {
 }
 
 // GetDraft assembles the full draft view, opening a draft if none is present.
+// Use it on write paths (which need a working copy); the read-only GET endpoint
+// uses ReadDraft so a plain read never mutates state.
 func (s *Store) GetDraft(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
 	draftID, err := s.OpenDraft(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
+	return s.buildDraftView(ctx, draftID)
+}
+
+// ReadDraft assembles the draft view WITHOUT opening one — a side-effect-free read.
+// Returns ErrNoDraft when no draft is open (the caller decides how to present that).
+func (s *Store) ReadDraft(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
+	draftID, err := s.draftID(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildDraftView(ctx, draftID)
+}
+
+// DraftUpdatedAt returns the open draft's updated_at — the optimistic-concurrency
+// token clients echo via If-Match. ErrNoDraft when none is open.
+func (s *Store) DraftUpdatedAt(ctx context.Context, orgID uuid.UUID) (time.Time, error) {
+	id, err := s.draftID(ctx, orgID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var t time.Time
+	err = s.pool.QueryRow(ctx, `SELECT updated_at FROM xchats.ai_snapshots WHERE id = $1`, id).Scan(&t)
+	return t, err
+}
+
+// TouchDraft bumps the open draft's updated_at so the concurrency token advances
+// after any row mutation (called once per successful write). No-op if no draft.
+func (s *Store) TouchDraft(ctx context.Context, orgID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `UPDATE xchats.ai_snapshots SET updated_at = now()
+		WHERE organization_id = $1 AND snapshot_state = 'draft'`, orgID)
+	return err
+}
+
+func (s *Store) buildDraftView(ctx context.Context, draftID uuid.UUID) (*DraftView, error) {
 	v := &DraftView{}
 	if err := s.pool.QueryRow(ctx, `
 		SELECT id, version, snapshot_state, persona, mission, guardrails, language_policy, reply_max_words, updated_at

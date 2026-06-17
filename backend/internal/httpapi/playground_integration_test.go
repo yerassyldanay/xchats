@@ -10,7 +10,7 @@ import (
 func TestPlayground_BuildConfirmPublish(t *testing.T) {
 	h := newHarness(t)
 
-	// The draft opens on first read and clones the published seed.
+	// POST /draft opens the working copy (clones the published seed); GET is read-only.
 	var draft struct {
 		Config struct {
 			Version int `json:"version"`
@@ -22,9 +22,14 @@ func TestPlayground_BuildConfirmPublish(t *testing.T) {
 			Review string `json:"review_state"`
 		} `json:"topics"`
 	}
-	h.get("/xchats/api/v1/playground/draft", &draft)
+	// Open the draft explicitly — GET is side-effect-free; POST clones the seed.
+	_, openEnv := h.postJSON("/xchats/api/v1/playground/draft", map[string]any{})
+	mustPayload(t, openEnv, &draft)
 	if draft.Config.Version != 0 {
 		t.Fatalf("draft version should be 0, got %d", draft.Config.Version)
+	}
+	if len(draft.Topics) == 0 {
+		t.Fatal("opened draft should clone the seed topics")
 	}
 
 	// 1. Drop raw material with a price.
@@ -109,7 +114,7 @@ func TestPlayground_BuildConfirmPublish(t *testing.T) {
 // The publish gate blocks (422) when a proposed topic uses an unconfirmed token.
 func TestPlayground_PublishGateBlocksUnconfirmed(t *testing.T) {
 	h := newHarness(t)
-	h.get("/xchats/api/v1/playground/draft", new(any)) // open the draft
+	h.postJSON("/xchats/api/v1/playground/draft", map[string]any{}) // open the draft (GET no longer auto-opens)
 
 	resp, _ := h.postJSON("/xchats/api/v1/playground/draft/topics",
 		map[string]string{"slug": "broken", "lang": "ru", "body_md": "Цена {{price.ghost}}"})

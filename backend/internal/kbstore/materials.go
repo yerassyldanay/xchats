@@ -109,6 +109,19 @@ func (s *Store) ReadyMaterials(ctx context.Context, orgID uuid.UUID) ([]Material
 	return ready, nil
 }
 
+// MarkMaterialsBuilt flips the given materials to status 'built' so a later build
+// turn does not re-synthesize them (ReadyMaterials only returns 'ready' rows). This
+// is what makes RunTurn idempotent: re-running the same instruction is a no-op once
+// its materials are consumed.
+func (s *Store) MarkMaterialsBuilt(ctx context.Context, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE xchats.ai_materials
+		SET status = 'built', updated_at = now() WHERE id = ANY($1) AND status = 'ready'`, ids)
+	return err
+}
+
 func (s *Store) listMaterials(ctx context.Context, snapID uuid.UUID) ([]Material, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction::text, created_at, updated_at
 		FROM xchats.ai_materials WHERE snapshot_id = $1 ORDER BY created_at`, snapID)

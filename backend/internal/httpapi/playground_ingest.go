@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -32,7 +33,7 @@ func (s *Server) handlePlaygroundCreateMaterial(c *gin.Context) {
 		return
 	}
 	if _, err := s.kb.OpenDraft(ctx(c), orgID); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 
@@ -75,7 +76,7 @@ func (s *Server) handlePlaygroundCreateMaterial(c *gin.Context) {
 
 	m, err := s.kb.CreateMaterial(ctx(c), orgID, in)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	// Text is born ready; everything else needs an extraction pass.
@@ -95,9 +96,13 @@ func (s *Server) handlePlaygroundListMaterials(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	view, err := s.kb.GetDraft(ctx(c), orgID)
+	view, err := s.kb.ReadDraft(ctx(c), orgID)
+	if errors.Is(err, kbstore.ErrNoDraft) {
+		ok(c, gin.H{"items": []any{}})
+		return
+	}
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	ok(c, gin.H{"items": view.Materials})
@@ -122,12 +127,12 @@ func (s *Server) handlePlaygroundChat(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	res, err := s.builder.RunTurn(ctx(c), s.kb, orgID, req.Instruction)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	view, err := s.kb.GetDraft(ctx(c), orgID)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	ok(c, gin.H{"result": res, "draft": view})
@@ -143,9 +148,13 @@ func (s *Server) handlePlaygroundListRequests(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	view, err := s.kb.GetDraft(ctx(c), orgID)
+	view, err := s.kb.ReadDraft(ctx(c), orgID)
+	if errors.Is(err, kbstore.ErrNoDraft) {
+		ok(c, gin.H{"items": []any{}})
+		return
+	}
 	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	ok(c, gin.H{"items": view.Requests})
@@ -184,7 +193,7 @@ func (s *Server) handlePlaygroundResolveRequest(c *gin.Context) {
 		}
 	}
 	if err := s.kb.ResolveRequest(ctx(c), reqID, orDefaultStr(body.State, "resolved"), string(orDefaultJSON(body.Resolution))); err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		s.kbFail(c, err)
 		return
 	}
 	s.kbChanged(c, orgID)

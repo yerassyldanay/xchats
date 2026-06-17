@@ -154,6 +154,7 @@ func TestExtractURL_Ready(t *testing.T) {
 		t.Fatalf("material: %v", err)
 	}
 	ex := playground.NewExtractor(nil, nil)
+	ex.AllowPrivateHosts = true // httptest binds loopback; opt past the SSRF guard
 	bs, _ := blob.NewDisk(t.TempDir())
 	if err := ex.Extract(ctx, kb, bs, nil, orgID, m.ID); err != nil {
 		t.Fatalf("extract: %v", err)

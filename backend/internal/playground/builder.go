@@ -2,6 +2,7 @@ package playground
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -102,13 +103,18 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 
 	var res TurnResult
 	res.Comment = plan.Comment
-	prov := `{"source":"builder"}`
+	prov := jsonObj(map[string]any{"source": "builder"})
 
 	for _, t := range plan.Topics {
 		body := t.BodyMD
 		// Diff vs the draft: an existing slug is an UPDATE (append), not a twin.
+		// Guard the append so a re-run with the same body is a no-op, not a duplicate.
 		if existing := findTopic(draft, t.Slug); existing != nil && existing.BodyMD != "" {
-			body = existing.BodyMD + "\n\n" + t.BodyMD
+			if strings.Contains(existing.BodyMD, strings.TrimSpace(t.BodyMD)) {
+				body = existing.BodyMD
+			} else {
+				body = existing.BodyMD + "\n\n" + t.BodyMD
+			}
 		}
 		if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
 			Slug: t.Slug, Lang: t.Lang, Title: t.Title, Keywords: t.Keywords, BodyMD: body,
@@ -129,7 +135,7 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 		if strings.TrimSpace(a.Description) == "" {
 			_, _ = kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
 				ReqType: "describe_media", Prompt: "Опишите, что показывает этот файл и когда его отправлять.",
-				Target: fmt.Sprintf(`{"asset_ref":%q}`, a.Ref),
+				Target: jsonObj(map[string]any{"asset_ref": a.Ref}),
 			})
 			res.Describes++
 		}
@@ -139,8 +145,8 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 		if _, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
 			MaterialID: mid, ReqType: "confirm_value",
 			Prompt:  fmt.Sprintf("Подтвердите значение для %s: «%s»?", cv.Token, cv.Suggested),
-			Context: fmt.Sprintf(`{"suggested":%q,"description":%q}`, cv.Suggested, cv.Description),
-			Target:  fmt.Sprintf(`{"token":%q,"lang":%q}`, cv.Token, orElse(cv.Lang, "ru")),
+			Context: jsonObj(map[string]any{"suggested": cv.Suggested, "description": cv.Description}),
+			Target:  jsonObj(map[string]any{"token": cv.Token, "lang": orElse(cv.Lang, "ru")}),
 		}); err != nil {
 			return res, err
 		}
@@ -151,16 +157,37 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 		if _, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
 			MaterialID: mid, ReqType: "describe_media",
 			Prompt: orElse(d.Prompt, "Опишите этот материал."),
-			Target: fmt.Sprintf(`{"material_id":%q}`, d.MaterialID),
+			Target: jsonObj(map[string]any{"material_id": d.MaterialID}),
 		}); err != nil {
 			return res, err
 		}
 		res.Describes++
 	}
+
+	// Consume the synthesized materials so a repeat turn does not re-process them.
+	builtIDs := make([]uuid.UUID, 0, len(ready))
+	for _, m := range ready {
+		builtIDs = append(builtIDs, m.ID)
+	}
+	if err := kb.MarkMaterialsBuilt(ctx, builtIDs); err != nil {
+		return res, err
+	}
+
 	if b.hub != nil {
 		b.hub.Broadcast("kb.row.changed", map[string]any{"turn": res})
 	}
 	return res, nil
+}
+
+// jsonObj marshals a small map to a compact JSON string for a jsonb column. Using
+// the encoder (not fmt %q) keeps the output valid for any value — quotes, newlines,
+// non-ASCII — instead of only the safe-charset inputs string formatting handles.
+func jsonObj(m map[string]any) string {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }
 
 func findTopic(d *kbstore.DraftView, slug string) *kbstore.TopicRow {
