@@ -20,8 +20,8 @@ onBeforeUnmount(() => inbox.stopRealtime())
 <template>
   <!-- The persistent nav rail is rendered by App.vue; this is just the inbox panes. -->
   <div class="flex h-full">
-    <ChatList class="w-[340px] shrink-0 border-r border-hair" />
+    <ChatList class="w-[340px] shrink-0 border-r border-border" />
     <ChatThread class="flex-1 min-w-0" />
-    <AssistantPanel class="w-[340px] shrink-0 border-l border-hair" />
+    <AssistantPanel class="w-[340px] shrink-0 border-l border-border" />
   </div>
 </template>
