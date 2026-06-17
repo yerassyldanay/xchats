@@ -1,160 +1,147 @@
-# TODO — Implement the AI Assistant Suggestion (real brain)
+# Frontend visual overhaul — shadcn-vue + Linear-style minimal
 
-## Goal
+## Context
 
-Replace the hardcoded `Stub` drafter with a **real, KB-grounded brain** so that pressing
-"Подсказать ответ" produces a genuine reply suggestion (text + optional media) drawn from a
-Knowledge Base. The KB content and media files are **invented here** (a small demo business) — no
-external data needed.
+The xchats frontend (Vue 3 + Vite + TS + Tailwind 3.4) is **well-built code** but
+reads as "cheap / school-project" because of a few *visual* choices, not architecture:
+default Tailwind indigo `#4F46E5` + bright WhatsApp green, gradients everywhere
+(logo, login panel, avatars), FontAwesome CDN icons, and oversized radii
+(`rounded-2xl`/`3xl`) — the "glittery candy" look.
 
-Scope decisions (locked):
-- **One option** per suggestion to start (the UI already renders 1–N cards).
-- **Text + media**: the brain may attach catalog media by ref; we ship the media files and serve them.
-- **No chat profile**: send only the last ~15 messages; the model infers from them.
-- **Embedded KB** (in-memory snapshot at boot) — no `ai_*` DB tables yet; swap to DB later behind the
-  same `ContentSource` seam.
-- **Stub fallback**: if `LLM_API_KEY` is unset, keep the Stub so the app still runs.
+Goal: make it look like a premium SaaS tool (Linear/Front/Missive class) by adopting
+**shadcn-vue** (Reka UI + Tailwind, accessible copy-paste components we own) as the
+design system, themed in a **Linear-style minimal** direction: refined cool neutrals,
+one confident accent used sparingly, tight radii, hairline borders over heavy shadows,
+crisp dense type, **no gradients**. WhatsApp green is retained ONLY for message bubbles,
+the WA glyph, and the "connected" status dot.
 
-## Current state (already built — reuse, don't rebuild)
+Stack stays on **Tailwind v3** (not v4) — shadcn-vue **v3 convention**: HSL CSS variables
+mapped in `tailwind.config.js`, `cssVariables: true`, `baseColor: slate`, default style,
+`tailwindcss-animate`.
 
-- `internal/assistant/assistant.go` — the `Drafter` interface (`Draft(ctx, Input) ([]Option, error)`)
-  + `Input`, `Option`, `Media`, and `NewStub` (embeds sample media → blob store, keyed by ref).
-- `internal/worker/worker.go` `handleAIDraft` — calls `Drafter.Draft`, writes via `WriteDraftSet`,
-  broadcasts `ai_draft.created`.
-- `internal/httpapi/drafts.go` — `handleSuggest` / `handleListDrafts` / `handleApprove` (approve
-  sends text + `media_ids` via `sendParts`).
-- `internal/config/config.go` — two-file config (yaml + env), `caarlos0/env` tags.
-- Brain to port: `plan/examples/repos/xpayment-crm/internal/{domain,usecase/assistant,infrastructure/llm}`.
+**Critical version note (resolve before starting).** As of late 2025 shadcn-vue's
+`@latest`/docs went **v4-only** (OKLCH colors, `@theme` CSS-first, `new-york` default
+style, `tw-animate-css` instead of `tailwindcss-animate`, `data-slot`). This entire plan
+is written against **v3**, which is the correct target for an existing v3 project. To
+avoid the v4 conventions silently overriding the plan:
+- **Pin the CLI to a v3-era `shadcn-vue`** (do NOT use `@latest`). Verify the resolved
+  version targets v3 before running `init`.
+- Follow **v3.shadcn-vue.com** for ALL component snippets / `add` flows — current docs are v4.
+- **Inspect `init` output before committing.** If it scaffolds `@theme`/OKLCH tokens or
+  pulls `tw-animate-css`, it went v4 — abort, re-pin, and redo. The plan expects HSL vars
+  in `tailwind.config.js` + `tailwindcss-animate`.
 
-## The invented Knowledge Base (demo business: "Demo Shop")
+The app must keep working and building at every step. Legacy tokens + the
+`@layer components` bridge stay live until each consumer is migrated; removed only in
+final cleanup. Commit after each screen so regressions are bisectable.
 
-A small online shop assistant. Put this content in the seed file (step 4). Prices/numbers/contacts
-are **value tokens**, never digits in topic bodies.
+## Phase 1 — Setup (zero visual change)
 
-- **Persona**: friendly, concrete sales assistant for an online shop; explains simply; no hard-selling.
-- **Guardrails**: never invent prices; if asked about refunds/legal/an angry customer → escalate;
-  always offer a next step.
-- **Language policy**: reply in the customer's language; KK+RU mix → Russian.
-- **Topics** (`slug`, lang, body with tokens):
-  - `pricing` (ru): three plans — Базовый `{{price.basic}}`, Стандарт `{{price.standard}}`,
-    Премиум `{{price.premium}}`; delivery `{{delivery.days}}`.
-  - `delivery` (ru): delivery time `{{delivery.days}}`, free over `{{price.free_delivery_min}}`.
-  - `how_to_order` (ru): steps to order via WhatsApp.
-  - `contacts` (ru): WhatsApp `{{contact.whatsapp}}`, e-mail `{{contact.email}}`, address
-    `{{contact.address}}`.
-- **Value book** (token → value, with lang; `*` = language-neutral):
-  - `price.basic` = "9 900 ₸", `price.standard` = "19 900 ₸", `price.premium` = "39 900 ₸"
-  - `price.free_delivery_min` = "30 000 ₸", `delivery.days` (ru) = "1–3 дня"
-  - `contact.whatsapp` (*) = "+7 700 123 45 67", `contact.email` (*) = "hello@demoshop.kz"
-  - `contact.address` (*) = "Алматы, ул. Абая, 10"
-  - (The ported `PriceBook` uses `price.<key>`/`limit.<key>` for tariffs and `ns.key` placeholders for
-    the rest — map the above onto Tariffs + Placeholders, or extend it; see step 2 note.)
-- **Media catalog** (asset `ref` | kind | topic | description) — files shipped in step 5:
-  - `pricing_card` | image | pricing | "Карточка с тремя тарифами и ценами (RU). Для вопросов о цене."
-  - `catalog_pdf` | document | pricing | "PDF-каталог товаров с ценами. Когда просят подробности."
-  - `intro_audio` | audio | how_to_order | "Голосовое: как оформить заказ за минуту."
+- **Path alias `@/` → `src`** in BOTH (must match or typecheck breaks):
+  - `frontend/vite.config.ts`: add `resolve.alias` via `fileURLToPath(new URL('./src', import.meta.url))` (keep `server.proxy` + `build`).
+  - `frontend/tsconfig.json`: add `"baseUrl": "."` and `"paths": { "@/*": ["./src/*"] }`.
+- **Deps** — runtime: `reka-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-vue-next`, `@vueuse/core`. dev: `tailwindcss-animate`.
+- **`cn()` util** → `frontend/src/lib/utils.ts` (clsx + twMerge).
+- **`shadcn-vue init` (pinned v3 CLI, not `@latest`)** with `components.json`: framework
+  `vite`, `style: default`, `tailwind.config: tailwind.config.js`, `css: src/style.css`,
+  `baseColor: slate`, `cssVariables: true`. Confirm output is HSL + `tailwindcss-animate`
+  (see Critical version note). **Merge, don't overwrite** its edits against existing
+  `theme.extend` tokens, `boxShadow`, `fontFamily`, and the `@layer components` block +
+  scrollbar CSS in `style.css` — review the diff and re-add anything dropped.
+- Gate: `npm run typecheck && npm run build && npm run dev` all green, no visual change.
 
-## Implementation steps
+## Phase 2 — Theme tokens (Linear minimal)
 
-### 1. Port the brain core into `backend/internal/brain/`
-- [ ] `internal/brain/domain/` ← copy `domain/{content,draft,message,catalog}.go` (module path
-  `github.com/yessaliyev/xpayment-crm` → `github.com/yerassyldanay/xchats/backend`). Drop the unused
-  `ChatID` type from `message.go` (keep `Message`, `Role`).
-- [ ] `internal/brain/prompt.go` (package `brain`) ← `usecase/assistant/{prompt.go + the postProcess
-  pipeline from brain.go + errors}`. Add a `Prompt{System,User}` type. **Modify `BuildUser`** to omit
-  the PROFILE block when no profile is given (we pass none). Export `PostProcess(raw, snap, log)`.
-- [ ] `internal/brain/llm/openrouter.go` (package `llm`) ← copy; repoint `assistant.Prompt` →
-  `brain.Prompt` and the domain import. Keep the forced `emit_draft` tool + defensive JSON parse.
+- Merge HSL `:root` (light) + `.dark` blocks into `frontend/src/style.css`; set
+  `darkMode: ['class']` and the `border/input/ring/background/foreground/primary/...`
+  color mappings + `borderRadius: var(--radius)` in `tailwind.config.js`.
+- Token intent (space-separated H S% L%): cool near-white `--background`, ink
+  `--foreground 222 47% 11%`, `--primary 243 75% 59%` (reuse `#4F46E5` so accent doesn't
+  shift), `--muted-foreground 215 16% 47%`, hairline `--border 220 16% 91%`,
+  `--ring = --primary`, **`--radius: 0.5rem`** (tight). `.dark` = deep cool charcoal
+  (`--background 224 30% 8%`), lifted primary `243 80% 67%`.
+- Add shadcn tokens **alongside** legacy `brand/wa/ink/muted/panel/hair/rail` — inert
+  until reskin references `bg-background`/`text-foreground`/`border-border`.
+- **Dark-mode wiring (default light):** set `document.documentElement.classList` from a
+  localStorage pref in `main.ts`/`App.vue`. No UI toggle required for v1, BUT **actually
+  toggle `.dark` on `<html>` in devtools on every screen during Phase 4** — otherwise dark
+  tokens rot silently until someone enables them. This is a verification obligation, not optional.
+- Gate: build green, still no visual change.
 
-### 2. Knowledge-base value tokens
-- [ ] Reuse the ported `PriceBook.Render` (`price.*`/`limit.*` → tariffs; `ns.key` → bilingual
-  placeholders). Map the demo value book onto `Tariffs` (basic/standard/premium with a price; limits
-  optional) + `Placeholders` (delivery, contacts). If a non-tariff numeric token is needed, add it as
-  a placeholder. (Keeps the port faithful; the doc-level `ai_values` rename is a later DB concern.)
+## Phase 3 — Primitives (add + verify one at a time)
 
-### 3. LLM config
-- [ ] Add to `internal/config/config.go`: `LLMProvider` (`env:"LLM_PROVIDER"`), `LLMAPIKey`
-  (`env:"LLM_API_KEY"`), `LLMBaseURL`, `LLMFastModel`, `LLMMaxTokens`, `LLMTemperature` + defaults
-  (provider `openrouter`, model `openai/gpt-4o-mini`, maxTokens 1024, temp 0.3) + a
-  `LLMResolvedBaseURL()` helper (openrouter/openai/gemini base URLs; `LLMBaseURL` overrides).
-- [ ] Document the keys in `.env.example` / `config.example.yaml`.
+`shadcn-vue add <name>` (pinned v3 CLI, NOT `@latest`) → lands in `src/components/ui/<name>/`.
+Minimum set: **Button, Input, Textarea, Dialog, DropdownMenu, Select, Badge, Avatar,
+Skeleton, Tabs, Tooltip, Separator** (ScrollArea optional — existing scrollbar CSS already clean).
 
-### 4. Embedded seed snapshot
-- [ ] `internal/brain/seed.go` — `func SeedSnapshot() *domain.Snapshot` returning the "Demo Shop" KB
-  above (Config + PriceBook + Topics + Assets). Asset URLs = `/xchats/api/v1/media/<ref>`.
+- Button replaces `.btn*`/`.icon-btn` (variants: default=primary, outline=ghost,
+  secondary, ghost, destructive, `size=sm|icon`). **Decision (up front, not per-screen):
+  the send button uses `default` (primary), NOT a green `wa` variant** — a green send
+  button reintroduces the exact two-accent look we're removing. Green stays confined to
+  message bubbles, the WA glyph, and the connected dot. Do not add a `wa` cva variant.
+- **After adding EACH component run `npm run typecheck`** — generated `ui/` files can
+  carry unused imports that fail `vue-tsc --noEmit` in `build` while `dev` passes. This is
+  the single most likely CI break; prune unused symbols immediately.
 
-### 5. KB media files
-- [ ] Add `internal/brain/kb-media/` with the three assets (`pricing_card.png`, `catalog_pdf.pdf`,
-  `intro_audio.*`) — generate simple placeholder files (a rendered pricing PNG, reuse the existing
-  `sample-doc.pdf` shape, a short audio). `//go:embed kb-media/*`.
-- [ ] A loader (mirror `NewStub`): on boot, `blob.Put(ref, bytes, Meta{...})` for each asset so
-  approve→`sendParts` can serve/send them by ref.
+## Phase 4 — Per-screen reskin (simplest first, commit each)
 
-### 6. RealDrafter behind `assistant.Drafter`
-- [ ] `internal/assistant/real.go` — `RealDrafter{store, llm, snap, log}` implementing
-  `Draft(ctx, Input) ([]Option, error)`:
-  - parse `Input.ChatID`; `store.MessagesForChat(ctx, chatID, time.Time{}, 15)` → window.
-  - current = latest `Direction=="in"` message (fallback `Input.LastInboundText`); window = the rest,
-    mapped to `domain.Message` (in→customer, out→agent).
-  - `brain.BuildSystem(snap)` + `brain.BuildUser(nil, window, current)` → `llm.Draft` → on error,
-    return one escalation option (holding reply); else `brain.PostProcess` → map `domain.Draft` to one
-    `Option` (Text, Confidence, Escalate, Reason, **Media** from `ResolveAssets`).
-- [ ] `NewReal(store, llmClient, snap, log)`.
+Swap legacy→semantic classes per screen: `bg-white/bg-panel`→`bg-background/bg-card`,
+`text-ink`→`text-foreground`, `text-muted/text-slate-*`→`text-muted-foreground`,
+`border-hair`→`border-border`, `bg-brand/text-brand/bg-brand-soft`→`bg-primary/text-primary/bg-accent`,
+`ring-brand/10`→`ring-ring`; downshift `rounded-2xl/3xl`→`rounded-lg/xl`; kill gradients
+(logo `from-indigo-500 to-violet-500`→solid `bg-primary`; login orbs/panel→flat). Swap
+FontAwesome `<i>`→`lucide-vue-next` components inside each screen (spinners→`<Loader2 class="animate-spin"/>`).
+**Preserve all Russian labels and emit/store contracts verbatim.**
 
-### 7. Wire it up
-- [ ] `cmd/xchats/main.go`: if `cfg.LLMAPIKey != ""` build `llm.New(cfg.LLMResolvedBaseURL(), key,
-  fastModel, "", maxTokens, temp)` + load KB media into blob + `assistant.NewReal(st, lc,
-  brain.SeedSnapshot(), log)`; else keep `assistant.NewStub`. Pass the chosen `Drafter` to both the
-  worker and the HTTP server (as today). Log which drafter is active.
+Order:
+1. **Login.vue** — validates Button/Input/icon/token pipeline on a low-risk screen.
+2. **AddAccountDialog.vue + NewMessageDialog.vue** — to Reka Dialog + Select + Input/Textarea;
+   keep `@close`/`@connected` emits via `@update:open` and AddAccount's QR-polling lifecycle.
+3. **NavRail.vue** — DropdownMenu (user menu), Avatar, `WhatsappIcon`; keep `w-[68px]`.
+4. **ChatList.vue** — Input search, Tabs/segmented filter, Select (account), Avatar, Badge
+   (unread), FAB→Button `size=icon`; keep `w-[340px] border-r`.
+5. **ChatThread.vue** — header Buttons + DropdownMenu, Avatar, bubbles (**keep `bg-wa`
+   out-bubbles**, in-bubbles→`bg-card border-border`), `tick()` refactor.
+6. **Composer.vue** — Textarea (keep `v-autosize`), send Button, icon buttons.
+7. **AssistantPanel.vue** — Skeleton (shimmer), Badge (confidence), Textarea (draft,
+   autosize), Button actions, `mediaMeta` lucide map; kill header gradient; keep `w-[340px] border-l`.
+8. **Accounts.vue + InstancesMaintenance.vue** — Buttons, Badges, cards→`rounded-lg border-border`.
 
-### 8. Build, test, verify
-- [ ] `go build ./...` and `go vet ./...` in `backend/`.
-- [ ] Port `usecase/assistant/brain_test.go` → `internal/brain` as a parity check (escalation stops
-  pipeline, refs resolved/dropped, value render failure → manual note). Use a fake `llm` Drafter.
-- [ ] Manual e2e: set `LLM_API_KEY` (+ provider/model), run backend+frontend, open a chat with an
-  inbound like "Сколько стоит?", press "Подсказать ответ" → a grounded card appears with the real
-  price injected (`{{price.*}}` → "… ₸") and, when relevant, an attached catalog asset.
-- [ ] Off-KB question (e.g. "Вы возвращаете деньги?") → the option correctly escalates.
-- [ ] Unset `LLM_API_KEY` → app still boots on the Stub.
+**Icons/status in logic** (`frontend/src/lib/format.ts`): **keep `format.ts` pure** —
+refactor `tick()` and `connStatus()` to return a plain discriminant
+(e.g. `'sent' | 'delivered' | 'read' | 'failed'`, `'connected' | 'disconnected' | ...`),
+and map discriminant → lucide component + class / Badge variant **in the component**
+(ChatThread, Accounts). Avoids coupling a formatting util to UI components. Do this once
+their consumers are migrated. **`WhatsappIcon.vue`** (inline WA SVG) under
+`src/components/icons/` since lucide has no brand glyph.
 
-## Out of scope (separate)
-- The realtime multi-user "generating" signal (see `~/.claude/plans/1-we-must-add-cuddly-diffie.md`).
-- `ai_*` KB tables + authoring CMS (the snapshot stays embedded for now).
-- The `ai_suggestions` jsonb storage refactor (current per-option `ai_drafts` storage is untouched).
+Preserve the 3-pane layout structure (`flex h-full`, `shrink-0`, `min-w-0`, fixed widths) —
+reskin inside panes only.
 
----
+## Phase 5 — Cleanup
 
-## Status — implemented (this branch)
+Remove `@layer components` (`.btn*/.field/.card/.badge/.icon-btn`) and legacy tokens
+(`brand*/ink/muted/panel/hair/rail`, unused `boxShadow`) from `style.css`/`tailwind.config.js`;
+remove FontAwesome `<link>` from `index.html` (update `theme-color`). Re-grep to confirm
+zero hits: `class="fa`, `bg-brand|border-hair|bg-panel|text-ink`, `gradient|from-|to-`.
 
-Steps 1–7 done; step 8 done except the two checks that need a live `LLM_API_KEY`.
+## Verification
 
-- [x] **1. Brain ported** → `backend/internal/brain/`: `domain/{content,draft,message,catalog}.go`
-  (module path rewritten; `ChatID` dropped from `message.go`), `prompt.go` (package `brain`: `Prompt`
-  type, `BuildSystem`, `BuildUser` **with the PROFILE block omitted when none**, exported `PostProcess`,
-  the consts + `ErrNoPublishedConfig`), `llm/openrouter.go` (package `llm`, repointed to `brain.Prompt`
-  + `brain/domain`, forced `emit_draft` tool + defensive parse).
-- [x] **2. Value tokens** → reused the ported `PriceBook.Render`; demo book mapped onto `Tariffs`
-  (basic/standard/premium/free_delivery_min) + `Placeholders` (delivery/contacts).
-- [x] **3. LLM config** → `config.go` gains `LLMProvider/LLMAPIKey/LLMBaseURL/LLMFastModel/
-  LLMMaxTokens/LLMTemperature` + defaults (openrouter, `openai/gpt-4o-mini`, 1024, 0.3) +
-  `LLMResolvedBaseURL()`. Documented in `.env.example` / `config.example.yaml`.
-- [x] **4. Embedded seed** → `brain/seed.go` `SeedSnapshot()` = the "Demo Shop" KB (config + price book
-  + 4 topics + 3 assets); asset URLs `/xchats/api/v1/media/<ref>`.
-- [x] **5. KB media** → `brain/kb-media/{pricing_card.png,catalog_pdf.pdf,intro_audio.wav}` (placeholder
-  bytes) `//go:embed`-ed; `brain.LoadMedia(blob.Store)` mirrors `NewStub` (ref == blob id).
-- [x] **6. RealDrafter** → `internal/assistant/real.go`: reads the last 15 msgs via
-  `store.MessagesForChat`, builds the prompt (no profile), calls the LLM, `PostProcess`es, returns ONE
-  option (text + resolved media); LLM error → one escalation option (holding reply). `NewReal(...)`.
-- [x] **7. Wired** → `main.go buildDrafter`: `LLM_API_KEY` set → load KB media + `assistant.NewReal`
-  (logs `mode=real`); else `NewStub` (logs `mode=stub`). Same `Drafter` passed to worker + HTTP server.
-- [x] **8. Build/test** → `go build ./...` + `go vet ./...` clean; parity tests pass —
-  `internal/brain/prompt_test.go` (escalation stops, refs resolved/dropped, price-render failure →
-  manual note, seed tokens resolve) + `internal/assistant/real_test.go` (grounded option, LLM-error
-  escalation, bad chat id) with a fake LLM + fake window store. **No live LLM used.**
-- [ ] **8. Manual e2e with a real key** — pending: set `LLM_API_KEY`, ask "Сколько стоит?" → grounded
-  card with injected price + catalog asset; off-KB "Вы возвращаете деньги?" → escalates; unset key →
-  boots on the stub. (Can't run here — no key in this environment.)
+- After every step: `npm run typecheck` (fastest signal; catches alias + unused-import traps).
+- After setup/theme/each screen: `npm run dev`, eyeball affected screen (no gradients, tight
+  radii, hairline borders, one accent); toggle `.dark` on `<html>` in devtools.
+- Before each commit + final: `npm run build` (the CI gate — green `dev` ≠ green `build`).
+- Functional smoke (dev `/xchats` proxy → `localhost:8080`): login, chat list, open thread,
+  send message, AssistantPanel suggest, Add-Account dialog (QR polling), account-filter
+  Select, NavRail menu + logout — exercises every migrated component + preserved contracts.
+- Final grep gates (expect zero hits) as listed in Phase 5.
 
-> Note on the port source: the `xpayment-crm` submodule is unreachable from this environment (SSH/proxy
-> blocked), so the brain was ported from a **direct HTTPS clone** of the same repo — the literal
-> copy + module-path rewrite the todo describes, not a reconstruction.
+## Critical files
+
+- `frontend/vite.config.ts` + `frontend/tsconfig.json` — `@/`→`src` alias (must match).
+- `frontend/src/lib/utils.ts` — new `cn()`.
+- `frontend/tailwind.config.js` — shadcn color mappings, `darkMode`, radius; later strip legacy.
+- `frontend/src/style.css` — HSL `:root`/`.dark` token set; later remove `@layer components`.
+- `frontend/src/lib/format.ts` — `tick()`/`connStatus()` refactor to pure discriminants (mapped to icons/variants in components).
+- `frontend/src/components/ChatThread.vue` — most complex consumer; canonical test of theming + icons + WA-green retention.
+- `frontend/index.html` — remove FontAwesome CDN at the end.
