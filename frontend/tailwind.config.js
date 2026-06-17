@@ -1,20 +1,64 @@
+import animate from 'tailwindcss-animate'
+
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: ['class'],
   content: ['./index.html', './src/**/*.{vue,ts}'],
   theme: {
     extend: {
       colors: {
+        // --- legacy tokens (retained until each consumer is reskinned; removed in cleanup) ---
         brand: '#4F46E5', // indigo
         'brand-600': '#4338CA',
         'brand-soft': '#EEF0FF',
-        wa: '#22C55E', // WhatsApp green
-        'wa-600': '#16A34A',
         navy: '#0F172A',
         rail: '#0E1730', // dark nav rail
         ink: '#0F172A',
-        muted: '#64748B',
         panel: '#F4F5F7', // app background
         hair: '#E8EAEE', // hairline borders
+        // WhatsApp green — retained PERMANENTLY (message bubbles, WA glyph, connected dot)
+        wa: '#22C55E',
+        'wa-600': '#16A34A',
+        // --- shadcn-vue semantic tokens (HSL CSS variables from style.css) ---
+        border: 'hsl(var(--border))',
+        input: 'hsl(var(--input))',
+        ring: 'hsl(var(--ring))',
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
+        },
+      },
+      borderRadius: {
+        xl: 'calc(var(--radius) + 4px)',
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
       },
       boxShadow: {
         card: '0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.05)',
@@ -26,5 +70,5 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 }

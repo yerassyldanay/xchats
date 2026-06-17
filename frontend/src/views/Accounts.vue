@@ -58,7 +58,7 @@ const steps = [
       <header class="px-8 py-5 flex items-center justify-between border-b border-hair bg-white shrink-0">
         <div>
           <h1 class="text-xl font-bold tracking-tight">WhatsApp аккаунты</h1>
-          <p class="text-sm text-muted">Подключайте и управляйте номерами WhatsApp</p>
+          <p class="text-sm text-muted-foreground">Подключайте и управляйте номерами WhatsApp</p>
         </div>
         <div class="flex items-center gap-3">
           <RouterLink :to="{ name: 'instances' }" class="btn-ghost btn-sm">
@@ -77,19 +77,19 @@ const steps = [
             <div class="w-12 h-12 rounded-2xl bg-green-50 text-wa grid place-items-center text-xl">
               <i class="fa-solid fa-circle-check"></i>
             </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.connected }}</div><div class="text-sm text-muted mt-1">Подключено</div></div>
+            <div><div class="text-2xl font-bold leading-none">{{ stats.connected }}</div><div class="text-sm text-muted-foreground mt-1">Подключено</div></div>
           </div>
           <div class="card p-5 flex items-center gap-4">
             <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-500 grid place-items-center text-xl">
               <i class="fa-solid fa-qrcode"></i>
             </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.qr }}</div><div class="text-sm text-muted mt-1">Требуют QR</div></div>
+            <div><div class="text-2xl font-bold leading-none">{{ stats.qr }}</div><div class="text-sm text-muted-foreground mt-1">Требуют QR</div></div>
           </div>
           <div class="card p-5 flex items-center gap-4">
             <div class="w-12 h-12 rounded-2xl bg-red-50 text-red-500 grid place-items-center text-xl">
               <i class="fa-solid fa-plug-circle-xmark"></i>
             </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.off }}</div><div class="text-sm text-muted mt-1">Не подключено</div></div>
+            <div><div class="text-2xl font-bold leading-none">{{ stats.off }}</div><div class="text-sm text-muted-foreground mt-1">Не подключено</div></div>
           </div>
         </div>
 
@@ -97,7 +97,7 @@ const steps = [
         <div>
           <div class="flex items-center justify-between mb-3">
             <span class="font-semibold">Номера</span>
-            <span class="text-sm text-muted">{{ accounts.accounts.length }} всего</span>
+            <span class="text-sm text-muted-foreground">{{ accounts.accounts.length }} всего</span>
           </div>
 
           <p v-if="accounts.loading && !accounts.accounts.length" class="card px-5 py-12 text-center text-sm text-slate-400">
@@ -132,7 +132,7 @@ const steps = [
                 </div>
                 <div class="min-w-0 flex-1">
                   <div class="font-semibold truncate">{{ a.display_name }}</div>
-                  <div class="text-sm text-muted truncate">{{ a.phone_number ? '+' + a.phone_number : '—' }}</div>
+                  <div class="text-sm text-muted-foreground truncate">{{ a.phone_number ? '+' + a.phone_number : '—' }}</div>
                   <div class="text-xs text-slate-400 flex items-center gap-1 mt-0.5 truncate">
                     <i class="fa-solid fa-server text-[10px]"></i> {{ a.instance_name }}
                   </div>
@@ -205,7 +205,7 @@ const steps = [
         <div class="flex items-center gap-2 text-sm font-medium">
           <i class="fa-brands fa-whatsapp text-wa"></i> Безопасное подключение
         </div>
-        <p class="mt-1.5 text-xs text-muted leading-relaxed">QR-код берётся напрямую из Evolution и нигде не сохраняется. Сессия живёт на сервере, как «Связанное устройство».</p>
+        <p class="mt-1.5 text-xs text-muted-foreground leading-relaxed">QR-код берётся напрямую из Evolution и нигде не сохраняется. Сессия живёт на сервере, как «Связанное устройство».</p>
       </div>
     </aside>
 

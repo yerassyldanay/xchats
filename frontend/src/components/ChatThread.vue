@@ -46,7 +46,7 @@ function isAudio(m: Message['media'][number]) {
           </div>
           <div class="min-w-0">
             <div class="font-semibold leading-tight truncate">{{ chat.contact.display_name }}</div>
-            <div class="text-xs text-muted truncate">{{ chat.contact.phone_number || chat.contact.phone_jid }}</div>
+            <div class="text-xs text-muted-foreground truncate">{{ chat.contact.phone_number || chat.contact.phone_jid }}</div>
           </div>
         </div>
         <div class="flex items-center gap-2">

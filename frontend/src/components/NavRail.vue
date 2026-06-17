@@ -67,7 +67,7 @@ async function logout() {
           </div>
           <div class="min-w-0">
             <div class="text-sm font-semibold truncate">{{ auth.user?.name || '—' }}</div>
-            <div class="text-xs text-muted truncate">{{ auth.user?.email }}</div>
+            <div class="text-xs text-muted-foreground truncate">{{ auth.user?.email }}</div>
           </div>
         </div>
         <div class="text-xs text-slate-400 mt-2 px-1">{{ auth.org?.name }}</div>

@@ -84,7 +84,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
             <span class="block h-3 w-11/12 rounded-full bg-slate-100"></span>
             <span class="block h-3 w-2/3 rounded-full bg-slate-100"></span>
           </div>
-          <p class="text-xs text-muted flex items-center gap-2">
+          <p class="text-xs text-muted-foreground flex items-center gap-2">
             <i class="fa-solid fa-wand-magic-sparkles text-brand"></i> ИИ готовит ответ…
           </p>
         </div>
@@ -133,7 +133,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
               </span>
               <div class="min-w-0 flex-1">
                 <div class="text-[13px] font-medium text-ink truncate">{{ media(md.media_kind).label }}</div>
-                <div class="text-[11px] text-muted truncate">{{ md.asset_id }}</div>
+                <div class="text-[11px] text-muted-foreground truncate">{{ md.asset_id }}</div>
               </div>
               <button
                 class="w-7 h-7 rounded-lg grid place-items-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition"
@@ -169,7 +169,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
               <i class="fa-solid fa-wand-magic-sparkles"></i>
             </div>
             <p class="text-[13px] font-medium text-ink">Ответ ещё не предложен</p>
-            <p class="text-xs text-muted mt-0.5">Сгенерируйте черновик на основе базы знаний.</p>
+            <p class="text-xs text-muted-foreground mt-0.5">Сгенерируйте черновик на основе базы знаний.</p>
           </div>
           <button class="w-full btn-brand" @click="inbox.suggest()">
             <i class="fa-solid fa-wand-magic-sparkles"></i> Подсказать ответ
@@ -178,7 +178,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
 
         <button
           v-if="hasDrafts"
-          class="w-full text-center text-[13px] text-muted hover:text-rose-500 py-1 transition"
+          class="w-full text-center text-[13px] text-muted-foreground hover:text-rose-500 py-1 transition"
           @click="inbox.drafts = []"
         >
           Отклонить
@@ -197,7 +197,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
     <div v-if="inbox.activeChat" class="border-t border-hair p-4 shrink-0">
       <div class="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">Контакт</div>
       <div class="font-semibold">{{ inbox.activeChat.contact.display_name }}</div>
-      <div class="text-sm text-muted">
+      <div class="text-sm text-muted-foreground">
         {{ inbox.activeChat.contact.phone_number || inbox.activeChat.contact.phone_jid }}
       </div>
       <dl v-if="attrs.length" class="mt-2.5 space-y-1">

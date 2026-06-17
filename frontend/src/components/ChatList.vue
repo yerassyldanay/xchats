@@ -58,7 +58,7 @@ function onSearch() {
           :key="f.key"
           @click="setFilter(f.key)"
           class="flex-1 rounded-lg py-1.5 transition"
-          :class="inbox.filter === f.key ? 'bg-white shadow-sm font-semibold text-ink' : 'text-muted hover:text-ink'"
+          :class="inbox.filter === f.key ? 'bg-white shadow-sm font-semibold text-ink' : 'text-muted-foreground hover:text-ink'"
         >
           {{ f.label }}
         </button>
@@ -122,7 +122,7 @@ function onSearch() {
             <i class="fa-brands fa-whatsapp text-wa"></i> {{ accounts.accountName(c.wa_account_id) }}
           </div>
           <div class="mt-0.5 flex items-center justify-between gap-2">
-            <span class="text-[13px] text-muted truncate">{{ c.last_message_preview }}</span>
+            <span class="text-[13px] text-muted-foreground truncate">{{ c.last_message_preview }}</span>
             <span
               v-if="c.unread_count > 0"
               class="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-brand text-white text-[11px] font-semibold grid place-items-center"

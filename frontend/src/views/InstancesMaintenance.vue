@@ -59,7 +59,7 @@ async function removeAllStale() {
         </RouterLink>
         <div>
           <h1 class="text-xl font-bold tracking-tight">Обслуживание инстансов</h1>
-          <p class="text-sm text-muted">Все инстансы Evolution · удаление устаревших</p>
+          <p class="text-sm text-muted-foreground">Все инстансы Evolution · удаление устаревших</p>
         </div>
       </div>
       <button
@@ -81,7 +81,7 @@ async function removeAllStale() {
         <div class="card overflow-hidden">
           <div class="px-5 py-3.5 border-b border-hair flex items-center justify-between">
             <span class="font-semibold">Инстансы Evolution</span>
-            <span class="text-sm text-muted">{{ accounts.instances.length }} всего</span>
+            <span class="text-sm text-muted-foreground">{{ accounts.instances.length }} всего</span>
           </div>
 
           <p v-if="!accounts.instances.length" class="px-5 py-14 text-center text-sm text-slate-400">

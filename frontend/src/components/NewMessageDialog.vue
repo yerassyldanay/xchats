@@ -62,7 +62,7 @@ async function submit() {
 
       <div class="px-5 py-5 space-y-4">
         <div v-if="accounts.hasMultiple">
-          <label class="text-xs font-medium text-muted">Отправить с номера</label>
+          <label class="text-xs font-medium text-muted-foreground">Отправить с номера</label>
           <select v-model="fromAccount" class="field mt-1.5">
             <option v-for="a in accounts.accounts" :key="a.id" :value="a.id">
               {{ a.display_name }}{{ a.phone_number ? ' (+' + a.phone_number + ')' : '' }}
@@ -70,7 +70,7 @@ async function submit() {
           </select>
         </div>
         <div>
-          <label class="text-xs font-medium text-muted">Номер телефона</label>
+          <label class="text-xs font-medium text-muted-foreground">Номер телефона</label>
           <input
             v-model="phone"
             inputmode="tel"
@@ -80,7 +80,7 @@ async function submit() {
           />
         </div>
         <div>
-          <label class="text-xs font-medium text-muted">Сообщение</label>
+          <label class="text-xs font-medium text-muted-foreground">Сообщение</label>
           <textarea v-model="text" rows="3" placeholder="Введите сообщение…" class="field mt-1.5 resize-none" />
         </div>
         <div v-if="files.length" class="flex flex-wrap gap-2">

@@ -104,16 +104,16 @@ onBeforeUnmount(stopPolling)
         <!-- step 1: name the instance -->
         <div v-if="step === 'form'" class="space-y-4">
           <div>
-            <label class="text-xs font-medium text-muted">Название (для вас)</label>
+            <label class="text-xs font-medium text-muted-foreground">Название (для вас)</label>
             <input v-model="displayName" placeholder="Например, Отдел продаж" class="field mt-1.5" />
           </div>
           <div>
-            <label class="text-xs font-medium text-muted">Имя инстанса</label>
+            <label class="text-xs font-medium text-muted-foreground">Имя инстанса</label>
             <input
               v-model="instanceName"
               placeholder="sales"
               :disabled="!!reconnect"
-              class="field mt-1.5 disabled:bg-panel disabled:text-muted"
+              class="field mt-1.5 disabled:bg-panel disabled:text-muted-foreground"
               @keydown.enter.prevent="start"
             />
             <p class="mt-1 text-[11px] text-slate-400">Латиница, цифры, «-» и «_».</p>
@@ -130,7 +130,7 @@ onBeforeUnmount(stopPolling)
 
         <!-- step 2: scan the QR -->
         <div v-else-if="step === 'qr'" class="text-center space-y-4">
-          <p class="text-sm text-muted leading-relaxed">
+          <p class="text-sm text-muted-foreground leading-relaxed">
             Откройте WhatsApp → <span class="font-medium text-ink">«Связанные устройства»</span> →
             «Привязать устройство» и отсканируйте код.
           </p>

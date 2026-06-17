@@ -65,7 +65,7 @@ async function submit() {
           XChats
         </div>
         <h2 class="text-2xl font-bold mb-1">Вход в аккаунт</h2>
-        <p class="text-sm text-muted mb-7">Войдите, чтобы открыть инбокс</p>
+        <p class="text-sm text-muted-foreground mb-7">Войдите, чтобы открыть инбокс</p>
 
         <label class="block text-sm font-medium mb-1.5">Email</label>
         <div class="relative mb-4">
