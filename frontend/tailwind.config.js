@@ -7,18 +7,8 @@ export default {
   theme: {
     extend: {
       colors: {
-        // --- legacy tokens (retained until each consumer is reskinned; removed in cleanup) ---
-        brand: '#4F46E5', // indigo
-        'brand-600': '#4338CA',
-        'brand-soft': '#EEF0FF',
-        navy: '#0F172A',
-        rail: '#0E1730', // dark nav rail
-        ink: '#0F172A',
-        panel: '#F4F5F7', // app background
-        hair: '#E8EAEE', // hairline borders
-        // WhatsApp green — retained PERMANENTLY (message bubbles, WA glyph, connected dot)
+        // WhatsApp green — retained (message bubbles, WA glyph, connected status dot)
         wa: '#22C55E',
-        'wa-600': '#16A34A',
         // --- shadcn-vue semantic tokens (HSL CSS variables from style.css) ---
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
@@ -63,7 +53,6 @@ export default {
       boxShadow: {
         card: '0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.05)',
         pop: '0 12px 32px rgba(16,24,40,.14)',
-        rail: '0 8px 24px rgba(79,70,229,.35)',
       },
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
