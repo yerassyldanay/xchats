@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
-import { Inbox, LogOut } from 'lucide-vue-next'
+import { Blocks, Inbox, Library, LogOut } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
 import {
@@ -15,13 +15,21 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 
-// Persistent left navigation rail — always present on authed pages (inbox,
-// accounts, instances). Rendered once by App.vue so it never disappears.
+// Persistent left navigation rail — always present on authed pages. Rendered once
+// by App.vue so it never disappears.
 const auth = useAuth()
 const router = useRouter()
 const route = useRoute()
 
-const onAccounts = computed(() => route.name === 'accounts' || route.name === 'instances')
+const nav: { name: string; icon: Component; label: string; match: string[] }[] = [
+  { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
+  { name: 'accounts', icon: WhatsappIcon, label: 'Номера WhatsApp', match: ['accounts', 'instances'] },
+  { name: 'playground', icon: Blocks, label: 'Конструктор', match: ['playground'] },
+  { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
+]
+function isActive(match: string[]) {
+  return match.includes(route.name as string)
+}
 
 async function logout() {
   await auth.logout()
@@ -37,29 +45,17 @@ async function logout() {
 
     <TooltipProvider :delay-duration="300">
       <div class="mt-6 flex flex-col gap-2">
-        <Tooltip>
+        <Tooltip v-for="item in nav" :key="item.name">
           <TooltipTrigger as-child>
             <RouterLink
-              :to="{ name: 'chatboard' }"
+              :to="{ name: item.name }"
               class="w-11 h-11 rounded-lg grid place-items-center transition"
-              :class="!onAccounts ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
+              :class="isActive(item.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
             >
-              <Inbox class="w-5 h-5" />
+              <component :is="item.icon" class="w-5 h-5" />
             </RouterLink>
           </TooltipTrigger>
-          <TooltipContent side="right">Инбокс</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <RouterLink
-              :to="{ name: 'accounts' }"
-              class="w-11 h-11 rounded-lg grid place-items-center transition"
-              :class="onAccounts ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
-            >
-              <WhatsappIcon class="w-5 h-5" />
-            </RouterLink>
-          </TooltipTrigger>
-          <TooltipContent side="right">Номера WhatsApp</TooltipContent>
+          <TooltipContent side="right">{{ item.label }}</TooltipContent>
         </Tooltip>
       </div>
     </TooltipProvider>

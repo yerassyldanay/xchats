@@ -9,6 +9,11 @@ export interface SSEHandlers {
   chatUpdated?: (c: Chat) => void
   draftCreated?: (d: AiDraft) => void
   draftUpdated?: (d: AiDraft) => void
+  // Knowledge-Base (Playground) live events — small payloads; the client refetches
+  // the DraftView on any of them.
+  kbMaterialUpdated?: (d: { material_id: string; status: string }) => void
+  kbRowChanged?: (d: { version: number }) => void
+  kbPublished?: (d: { version: number }) => void
 }
 
 // connectRealtime opens the SSE stream and dispatches each named event. Returns
@@ -31,6 +36,9 @@ export function connectRealtime(h: SSEHandlers): () => void {
   bind('chat.updated', h.chatUpdated)
   bind('ai_draft.created', h.draftCreated)
   bind('ai_draft.updated', h.draftUpdated)
+  bind('kb.material.updated', h.kbMaterialUpdated)
+  bind('kb.row.changed', h.kbRowChanged)
+  bind('kb.published', h.kbPublished)
   es.onopen = () => log.info('sse connected')
   es.onerror = () => log.warn('sse error; browser will retry')
   return () => es.close()
