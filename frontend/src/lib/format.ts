@@ -40,19 +40,20 @@ export function connStatus(status: string): { label: string; cls: string; dot: s
   }
 }
 
-// delivery ticks (FontAwesome) — colored for the green outgoing bubble:
-// queued clock, sent check, delivered double-check, read double-check (blue), failed warning.
-export function tick(status: string): { icon: string; cls: string } {
+// tick maps a message delivery status to a UI-agnostic discriminant. The
+// component maps the discriminant to an icon + class, keeping this module pure.
+export type TickStatus = 'queued' | 'sent' | 'delivered' | 'read' | 'failed'
+export function tick(status: string): TickStatus {
   switch (status) {
     case 'sent':
-      return { icon: 'fa-check', cls: 'text-white/70' }
+      return 'sent'
     case 'delivered':
-      return { icon: 'fa-check-double', cls: 'text-white/70' }
+      return 'delivered'
     case 'read':
-      return { icon: 'fa-check-double', cls: 'text-sky-200' }
+      return 'read'
     case 'failed':
-      return { icon: 'fa-triangle-exclamation', cls: 'text-rose-200' }
+      return 'failed'
     default:
-      return { icon: 'fa-clock', cls: 'text-white/50' }
+      return 'queued'
   }
 }
