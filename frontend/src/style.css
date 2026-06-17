@@ -58,7 +58,7 @@ body,
   margin: 0;
 }
 body {
-  @apply font-sans text-ink bg-panel antialiased;
+  @apply font-sans text-foreground bg-background antialiased;
 }
 
 /* Reusable building blocks so templates stay clean and consistent. */
