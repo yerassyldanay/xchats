@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { Paperclip, Send, Smile, X } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { vAutosize } from '../lib/autosize'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 
 defineProps<{ sending: boolean }>()
 const emit = defineEmits<{ (e: 'send', text: string, files: File[]): void }>()
@@ -27,40 +30,40 @@ function submit() {
 </script>
 
 <template>
-  <div class="border-t border-hair bg-white px-4 py-3 shrink-0">
+  <div class="border-t border-border bg-card px-4 py-3 shrink-0">
     <div v-if="files.length" class="mb-2 flex flex-wrap gap-2">
       <span
         v-for="(f, i) in files"
         :key="i"
-        class="flex items-center gap-1.5 rounded-full bg-panel border border-hair px-3 py-1 text-xs"
+        class="flex items-center gap-1.5 rounded-full bg-muted border border-border px-3 py-1 text-xs"
       >
-        <i class="fa-solid fa-paperclip text-slate-400"></i> {{ f.name }}
-        <button class="text-slate-400 hover:text-red-500" @click="removeFile(i)">
-          <i class="fa-solid fa-xmark"></i>
+        <Paperclip class="w-3.5 h-3.5 text-muted-foreground" /> {{ f.name }}
+        <button class="text-muted-foreground hover:text-destructive" @click="removeFile(i)">
+          <X class="w-3.5 h-3.5" />
         </button>
       </span>
     </div>
     <div class="flex items-end gap-2">
-      <button class="icon-btn shrink-0" title="Прикрепить файл" @click="fileInput?.click()">
-        <i class="fa-solid fa-paperclip"></i>
-      </button>
+      <Button variant="ghost" size="icon" class="shrink-0" title="Прикрепить файл" @click="fileInput?.click()">
+        <Paperclip class="w-[18px] h-[18px]" />
+      </Button>
       <input ref="fileInput" type="file" multiple class="hidden" @change="pick" />
-      <div class="flex-1 flex items-end rounded-2xl bg-panel border border-hair focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/10 transition px-3">
-        <textarea
+      <div class="flex-1 flex items-end rounded-xl bg-muted border border-border focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30 transition px-3">
+        <Textarea
           v-model="inbox.composerText"
           v-autosize
           rows="1"
           placeholder="Введите сообщение…"
-          class="flex-1 resize-none bg-transparent py-2.5 outline-none max-h-[40vh] overflow-y-auto text-[15px]"
+          class="flex-1 resize-none border-0 bg-transparent py-2.5 min-h-0 max-h-[40vh] overflow-y-auto text-[15px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           @keydown.enter.exact.prevent="submit"
         />
-        <button class="pb-2.5 pl-2 text-slate-400 hover:text-amber-500 transition" title="Эмодзи" type="button">
-          <i class="fa-regular fa-face-smile"></i>
+        <button class="pb-2.5 pl-2 text-muted-foreground hover:text-foreground transition" title="Эмодзи" type="button">
+          <Smile class="w-5 h-5" />
         </button>
       </div>
-      <button :disabled="sending" class="btn-wa shrink-0" @click="submit">
-        <i class="fa-solid fa-paper-plane"></i> Отправить
-      </button>
+      <Button :disabled="sending" class="shrink-0" @click="submit">
+        <Send class="w-4 h-4" /> Отправить
+      </Button>
     </div>
   </div>
 </template>
