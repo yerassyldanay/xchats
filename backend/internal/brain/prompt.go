@@ -144,7 +144,7 @@ func PostProcess(raw domain.RawDraft, snap *domain.Snapshot, log *slog.Logger) d
 	if lang == "" {
 		lang = "ru"
 	}
-	rendered, err := snap.Prices.Render(raw.ReplyText, lang)
+	rendered, err := snap.Values.Render(raw.ReplyText, lang)
 	if err != nil {
 		log.Warn("price render failed; posting check-pricing note", "err", err)
 		d.PricingError = true

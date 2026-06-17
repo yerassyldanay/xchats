@@ -3,7 +3,6 @@ package domain
 import (
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -40,31 +39,71 @@ type Asset struct {
 	Language    string
 }
 
-// Tariff is the single source of price numbers (Decision 8).
-type Tariff struct {
-	Key          string
-	PriceTenge   int64
-	CashierLimit int64
+// Value is one ai_values row: a confirmed (token, lang) → text fact. It is the
+// single source of every number/contact/limit the assistant may state — prices,
+// SLAs, addresses, counts — and the only thing token rendering substitutes. The
+// text is free-form precisely so any unit fits ("25 000 ₸/мес", "до 2 000
+// платежей/мес", "5 минут"): the renderer substitutes it verbatim, never
+// reformatting it (the old typed Tariff/formatTenge path silently dropped units).
+type Value struct {
+	Token       string // namespace.key — e.g. 'price.growth', 'contact.whatsapp'
+	Lang        string // 'ru' | 'kk' | '*'  ('*' = language-neutral)
+	Text        string // the confirmed value, substituted verbatim
+	Description string // human-only (editor / confirm popup); never injected into the prompt
 }
 
-// Placeholder is a non-tariff bilingual token (e.g. support.phone).
-type Placeholder struct {
-	Token   string
-	ValueRU string
-	ValueKK string
+// ValueBook is the snapshot's value store: a (token, lang) → text lookup with a
+// '*' language-neutral fallback. It replaces the old PriceBook's typed Tariff
+// map, so unit-bearing values round-trip losslessly.
+type ValueBook struct {
+	list  []Value
+	index map[string]map[string]string // token -> lang -> text
 }
 
-// PriceBook is the single source of numbers and the only thing that renders tokens.
-type PriceBook struct {
-	Tariffs      map[string]Tariff
-	Placeholders map[string]Placeholder
+// NewValueBook builds a ValueBook from rows (seed literal, DB load, or tests).
+func NewValueBook(values ...Value) ValueBook {
+	b := ValueBook{index: map[string]map[string]string{}}
+	for _, v := range values {
+		b.Add(v)
+	}
+	return b
+}
+
+// Add records one value row (last write wins per token+lang).
+func (b *ValueBook) Add(v Value) {
+	if b.index == nil {
+		b.index = map[string]map[string]string{}
+	}
+	if b.index[v.Token] == nil {
+		b.index[v.Token] = map[string]string{}
+	}
+	b.index[v.Token][v.Lang] = v.Text
+	b.list = append(b.list, v)
+}
+
+// List returns the value rows in insertion order (for the editor/kbstore).
+func (b ValueBook) List() []Value { return b.list }
+
+// lookup resolves a token for a language, falling back to the '*' row.
+func (b ValueBook) lookup(token, lang string) (string, bool) {
+	langs := b.index[token]
+	if langs == nil {
+		return "", false
+	}
+	if t, ok := langs[lang]; ok {
+		return t, true
+	}
+	if t, ok := langs["*"]; ok {
+		return t, true
+	}
+	return "", false
 }
 
 // Snapshot is the immutable content the brain reasons from, loaded from the
 // content source and hot-swapped on publish (docs/03 · snapshot).
 type Snapshot struct {
 	Config AssistantConfig
-	Prices PriceBook
+	Values ValueBook
 	Topics []Topic
 	Assets []Asset
 	Loaded time.Time
@@ -84,44 +123,21 @@ func (c *Content) Set(s *Snapshot) { c.snap.Store(s) }
 // tokenRE matches {{namespace.key}} with simple identifier segments.
 var tokenRE = regexp.MustCompile(`\{\{\s*([a-zA-Z_]+)\.([a-zA-Z0-9_]+)\s*\}\}`)
 
-// Render replaces every {{namespace.key}} in text for lang. It errors if any
-// token is unknown or any '{{' remains — the caller must not ship a half-rendered
-// price (Decision 8; docs/03 · pricing & tokens).
-//
-//	price.<tariff> → formatted tenge (e.g. "19 900 ₸")
-//	limit.<tariff> → cashier limit (e.g. "5")
-//	<other>        → placeholders[token] value in lang
-func (p *PriceBook) Render(text, lang string) (string, error) {
+// Render replaces every {{namespace.key}} in text with its confirmed value for
+// lang (falling back to the '*' language-neutral row). It errors if any token is
+// unresolved or any '{{' remains — the caller must not ship a half-rendered value
+// (Decision 8; docs/03 · pricing & tokens). The value is substituted verbatim, so
+// units carried in the value text survive intact.
+func (b ValueBook) Render(text, lang string) (string, error) {
 	var firstErr error
 	out := tokenRE.ReplaceAllStringFunc(text, func(m string) string {
 		sub := tokenRE.FindStringSubmatch(m)
-		ns, key := sub[1], sub[2]
-		switch ns {
-		case "price":
-			t, ok := p.Tariffs[key]
-			if !ok {
-				firstErr = orErr(firstErr, fmt.Errorf("unknown price token: %s.%s", ns, key))
-				return m
-			}
-			return formatTenge(t.PriceTenge)
-		case "limit":
-			t, ok := p.Tariffs[key]
-			if !ok {
-				firstErr = orErr(firstErr, fmt.Errorf("unknown limit token: %s.%s", ns, key))
-				return m
-			}
-			return strconv.FormatInt(t.CashierLimit, 10)
-		default:
-			ph, ok := p.Placeholders[ns+"."+key]
-			if !ok {
-				firstErr = orErr(firstErr, fmt.Errorf("unknown placeholder token: %s.%s", ns, key))
-				return m
-			}
-			if lang == "kk" {
-				return ph.ValueKK
-			}
-			return ph.ValueRU
+		token := sub[1] + "." + sub[2]
+		if v, ok := b.lookup(token, lang); ok {
+			return v
 		}
+		firstErr = orErr(firstErr, fmt.Errorf("unresolved value token: %s", token))
+		return m
 	})
 	if firstErr != nil {
 		return "", firstErr
@@ -138,26 +154,4 @@ func orErr(existing, e error) error {
 		return existing
 	}
 	return e
-}
-
-// formatTenge renders integer tenge with a space thousands separator and ₸,
-// e.g. 19900 → "19 900 ₸".
-func formatTenge(v int64) string {
-	neg := v < 0
-	if neg {
-		v = -v
-	}
-	s := strconv.FormatInt(v, 10)
-	var b strings.Builder
-	for i, c := range s {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			b.WriteByte(' ')
-		}
-		b.WriteRune(c)
-	}
-	res := b.String() + " ₸"
-	if neg {
-		res = "-" + res
-	}
-	return res
 }

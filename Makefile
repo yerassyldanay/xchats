@@ -68,8 +68,11 @@ test-backend: ## Go unit tests (DB tests skip unless DATABASE_URL is set)
 test-frontend: ## Frontend typecheck + build
 	cd $(FRONTEND) && npm run build
 
-test-e2e: ## Full demo loop vs a real Postgres (set DATABASE_URL)
-	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" go test ./internal/httpapi/ -count=1 -v
+test-e2e: ## Full demo loop + KB/playground vs a real Postgres (set DATABASE_URL)
+	# -p 1: these packages each reset the shared xchats schema, so they must not
+	# run concurrently against the same database.
+	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" go test -p 1 -count=1 \
+		./internal/httpapi/ ./internal/kbstore/ ./internal/playground/
 
 build: ## Build backend binary + frontend bundle
 	cd $(BACKEND) && go build -o bin/xchats ./cmd/xchats

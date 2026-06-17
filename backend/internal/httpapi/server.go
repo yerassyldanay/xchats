@@ -16,6 +16,8 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
+	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
+	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -34,6 +36,9 @@ type Server struct {
 	blob    blob.Store
 	drafter assistant.Drafter
 	evo     evolution.Client
+	kb      *kbstore.Store
+	builder *playground.Builder
+	orgID   uuid.UUID
 	log     *slog.Logger
 
 	// pendingNames carries the display_name from "add account" (POST) to the QR
@@ -53,6 +58,9 @@ type Deps struct {
 	Blob    blob.Store
 	Drafter assistant.Drafter
 	Evo     evolution.Client
+	KB      *kbstore.Store
+	Builder *playground.Builder
+	OrgID   uuid.UUID
 	Log     *slog.Logger
 }
 
@@ -60,7 +68,8 @@ type Deps struct {
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, drafter: d.Drafter, evo: d.Evo, log: d.Log,
+		blob: d.Blob, drafter: d.Drafter, evo: d.Evo, kb: d.KB, builder: d.Builder,
+		orgID: d.OrgID, log: d.Log,
 		pendingNames: map[string]string{},
 	}
 }
@@ -118,6 +127,28 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/media", s.handleUploadMedia)
 	auth.GET("/media/:id", s.handleServeMedia)
 	auth.GET("/realtime", s.handleRealtime)
+
+	// Playground — the KB builder (chat → materials → draft KB → publish).
+	pg := auth.Group("/playground")
+	pg.GET("/draft", s.handlePlaygroundDraft)
+	pg.POST("/draft", s.handlePlaygroundOpenDraft)
+	pg.DELETE("/draft", s.handlePlaygroundDiscardDraft)
+	pg.POST("/draft/topics", s.handlePlaygroundUpsertTopic)
+	pg.DELETE("/draft/topics/:slug", s.handlePlaygroundDeleteTopic)
+	pg.POST("/draft/assets", s.handlePlaygroundUploadAsset)
+	pg.PATCH("/draft/assets/:ref", s.handlePlaygroundPatchAsset)
+	pg.DELETE("/draft/assets/:ref", s.handlePlaygroundDeleteAsset)
+	pg.POST("/draft/values", s.handlePlaygroundUpsertValue)
+	pg.DELETE("/draft/values/:token", s.handlePlaygroundDeleteValue)
+	pg.PATCH("/draft/config", s.handlePlaygroundPatchConfig)
+	pg.POST("/draft/review/:kind/:id", s.handlePlaygroundReview)
+	pg.POST("/draft/materials", s.handlePlaygroundCreateMaterial)
+	pg.GET("/draft/materials", s.handlePlaygroundListMaterials)
+	pg.POST("/chat", s.handlePlaygroundChat)
+	pg.GET("/requests", s.handlePlaygroundListRequests)
+	pg.POST("/requests/:id/resolve", s.handlePlaygroundResolveRequest)
+	pg.POST("/publish", s.handlePlaygroundPublish)
+	pg.POST("/rollback", s.handlePlaygroundRollback)
 	return r
 }
 
