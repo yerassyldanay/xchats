@@ -23,6 +23,12 @@ frontend/dist/
 frontend/node_modules/
 node_modules/
 
+# playwright e2e artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/playwright/.cache/
+
 # go
 *.test
 

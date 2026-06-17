@@ -170,7 +170,7 @@ async function dismiss(id: string) {
               @keydown.enter.exact.prevent="send"
             />
           </div>
-          <Button :disabled="pg.busy" class="shrink-0" @click="send">
+          <Button :disabled="pg.busy" class="shrink-0" title="Отправить" @click="send">
             <LoaderCircle v-if="pg.busy" class="w-4 h-4 animate-spin" />
             <Send v-else class="w-4 h-4" />
           </Button>
