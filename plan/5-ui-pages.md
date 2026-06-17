@@ -1,8 +1,11 @@
 # UI Pages
 
 The frontend is a single Vue 3 SPA (see `2-architecture.md`). It talks only to the backend
-(`/api` + SSE). **v1 ships four routed pages — Login, Chatboard, WhatsApp Accounts, and Instances
-Maintenance.** Contacts, AI Assistant, and Settings are **deferred** (designed here, not yet routed).
+(`/api` + SSE). **v1 ships six routed pages — Login, Chatboard, WhatsApp Accounts, Instances
+Maintenance, Конструктор базы знаний (`/playground`), and Редактор базы знаний (`/knowledge-base`).**
+The first four are live; the two Knowledge-Base pages are **backend-ready, UI in progress** (this
+spec + `ui/ai-playground.png`/`ui/ai-knowledge-base.png` drive that build). Contacts and Settings
+are **deferred** (designed here, not yet routed).
 
 > **Hard rule (every element is backed).** Nothing on a page may show data we can't retrieve or
 > trigger an action we don't expose. Each region below lists **▸ Backed by:** the exact
@@ -103,9 +106,11 @@ filter appear.
 ```
 
 ### Nav rail (icon-only, far left, `w-[68px]`, flat dark slate)
-- **Core:** **two** nav icons — **Inbox** (`/`, active = solid indigo) and **WhatsApp accounts**
-  (`/accounts`, the `WhatsappIcon`); a round user **Avatar** pinned at the bottom. Icons carry
-  **Tooltips** ("Инбокс", "Номера WhatsApp").
+- **Core:** **four** nav icons — **Inbox** (`/`, active = solid indigo), **WhatsApp accounts**
+  (`/accounts`, the `WhatsappIcon`), **Конструктор** (`/playground`, `MessagesSquare` — or a more
+  distinct `Blocks`/`Bot`), and **База знаний** (`/knowledge-base`, `Library`); a round user
+  **Avatar** pinned at the bottom. Icons carry **Tooltips** ("Инбокс", "Номера WhatsApp",
+  "Конструктор", "База знаний").
 - **One-click:** the avatar is a **DropdownMenu** trigger → menu with **name · email · org** and a
   destructive **Выйти** item.
 - The rail is flat `slate-900` (the old indigo gradient + glow is gone). Instances Maintenance is not
@@ -274,19 +279,90 @@ showing a contact's initials avatar, name, phone, a few key-value attributes, an
 
 ---
 
-## 6. AI Assistant — `/assistant` *(deferred; v1 seeds the KB from SQL/markdown, no UI)*
+## 6. Конструктор базы знаний — `/playground` *(backend ready · UI to build; design: `ui/ai-playground.png`)*
 
-- **Core:** left sub-nav (Персона · Знания · Цены · Медиа-ассеты · Плейграунд) + the editor.
-- **One-click:** **Опубликовать** (eval-gated); a **Плейграунд** that shows the same **1–3 option
-  cards** as the Chatboard assistant panel.
-- **▸ Backed by (deferred — Phase 4B):** `GET|PUT /assistant/config`, `POST /assistant/publish`,
-  `POST /assistant/playground`; data in `ai_snapshots/ai_topics/ai_assets/ai_values`.
+The KB **builder**: enrich the assistant's knowledge in a chat-like flow — drop materials, run the
+builder, answer **"Запросы AI"** popups — then **Сохранить в базу** applies it to the live KB the
+brain reads. **One KB, no versions** (the mockup's version/history chrome is intentionally dropped).
+Both KB pages edit the **same working draft** and share `stores/playground.ts`.
 
-**Image prompt:** *AI assistant config page in the XChats shell (flat dark slate rail), Linear-minimal,
-light theme, NO gradients, hairline borders, one indigo accent. Left sub-nav (Персона, Знания, Цены,
-Медиа-ассеты, Плейграунд). Center "Персона" editor: text-area fields and a primary indigo
-"Опубликовать" button. Right "Плейграунд" strip with a sample-chat input and 1–3 generated suggestion
-cards (indigo "Отправить" buttons, small green confidence badges). Inter font, tight corners.*
+```
+┌──┬────────────────────────────────────┬──────────────────────┐
+│N │ Конструктор   [Сохранить][Отменить] │ Обзор базы знаний     │
+│a │ chat: operator · AI ассистент       │  tiles (темы/медиа/…) │
+│v │ material bubbles + «Предложенные…»  │ Запросы AI (popups)   │
+│  │ [ composer: текст + 📎 ]            │ Последние изменения   │
+└──┴────────────────────────────────────┴──────────────────────┘
+```
+
+- **Core:** a **chat thread** (operator turns + **"AI ассистент"** turns; material-upload bubbles
+  with thumbnails; "Предложенные изменения" summaries) and a **composer** (text + attach).
+- **One-click:** header **Сохранить в базу** (apply) / **Отменить изменения** (discard); right rail
+  **"Обзор базы знаний"** tiles, **"Запросы AI"** popup cards (confirm / describe), **"Последние
+  изменения"**, and a **readiness** bar.
+- **v1 builder is deterministic** (`RuleSynthesizer`): the "AI ассистент" turn concatenates `ready`
+  materials into a topic and regex-detects ₸ values — its replies **summarize what it synthesized**,
+  they are **not** a conversational LLM (an LLM synthesizer is a later upgrade). Image materials
+  without `LLM_VISION_MODEL` create a `describe_media` popup instead of an auto-caption.
+- **Stub / not-backed:** none — every control maps to an endpoint below. *(No version/history.)*
+- **▸ Backed by:** `GET/POST/DELETE /playground/draft` (open/read/discard the working copy);
+  `POST /playground/chat {instruction}` → `{result, draft}` (builder turn);
+  `POST /playground/draft/materials` (multipart `file` **or** `{source_type,text,url}`) + live
+  `kb.material.updated`; `GET /playground/requests` + `POST /playground/requests/{id}/resolve`
+  (`confirm_value`→`{value_text}`, `describe_media`→`{description}`);
+  `POST /playground/publish` ("Сохранить в базу" — gate over **approved** rows, **422** if it fails,
+  then hot-reloads the brain + `kb.published`). Overview tiles + "Последние изменения" + readiness are
+  **derived client-side** from the `DraftView` (row counts, `updated_at`/`provenance`, `review_state`).
+  Writes send an optional `If-Match` (draft `updated_at`) → `409 DRAFT_STALE`. Full shapes in `7.1`.
+
+**Image prompt:** *Knowledge-base "builder" page in the XChats shell (flat dark slate rail),
+Linear-minimal, light theme, NO gradients, hairline borders, one indigo accent, Russian UI. Header
+"Конструктор базы знаний" with a primary indigo "Сохранить в базу" and a ghost "Отменить изменения".
+Center: a chat thread — operator messages right, "AI ассистент" messages left with a small bot/sparkles
+tile, an uploaded-image bubble with a thumbnail, and a light "Предложенные изменения" card with chips;
+a bottom composer with a paperclip and a text field. Right column: an "Обзор базы знаний" card of small
+stat tiles (Темы, Медиа-ресурсы, Значения), a "Запросы AI" list of small popup cards each with a
+confirm/▷ action, and a "Последние изменения" list. Soft shadows only on menus, tight corners.*
+
+---
+
+## 6b. Редактор базы знаний — `/knowledge-base` *(backend ready · UI to build; design: `ui/ai-knowledge-base.png`)*
+
+The KB **editor**: a tabbed, structural view of the **same draft** — see everything and edit it
+directly, then **Сохранить в базу**.
+
+```
+┌──┬───────────────────────────────────────────────┬────────────────┐
+│N │ Редактор базы знаний            [Сохранить]    │ Быстрый доступ │
+│a │ [Темы 12][Медиа 15][Значения 8][Правки 4]      │ Последние изм. │
+│v │ Обзор · Темы · Медиа-ресурсы · Значения · Правки│ Готовность ▓▓░ │
+│  │ list ┆ row editor (slug/keywords/body/links)   │                │
+└──┴───────────────────────────────────────────────┴────────────────┘
+```
+
+- **Core:** stat cards (**Темы / Медиа-ресурсы / Значения / Правки**) and tabs **Обзор · Темы ·
+  Медиа-ресурсы · Значения · Правки** — each tab lists its rows and an inline editor.
+- **One-click:** header **Сохранить в базу**; right rail **"Быстрый доступ"**, **"Последние
+  изменения"**, **"Готовность к публикации"** (how many rows still need approval before publish).
+- **Removed (intentionally, vs the mockup):** ~~История~~ tab and ~~Версия~~ stat card / version
+  list — there is **one** KB, no version history or rollback in the UI.
+- **▸ Backed by:** everything reads from **`GET /playground/draft`** (`DraftView` = config + topics +
+  assets + values + materials + requests, each row with `review_state`/`provenance`/`updated_at`).
+  Edits: topics `POST/DELETE /playground/draft/topics[/{slug}]`; assets `POST` (multipart) `/PATCH
+  /DELETE /playground/draft/assets[/{ref}]`; values `POST/DELETE /playground/draft/values[/{token}]`;
+  config `PATCH /playground/draft/config`; **Правки** = `POST /playground/draft/review/{kind}/{id}
+  {state:approved|rejected}`. **Сохранить в базу** = `POST /playground/publish`. Stat cards +
+  readiness are **counts derived from `DraftView`**; live refresh via `kb.row.changed`. (Stat counts +
+  tab contents come straight from the one `DraftView` — no per-tab endpoint.)
+
+**Image prompt:** *Knowledge-base "editor" page in the XChats shell (flat dark slate rail),
+Linear-minimal, light theme, NO gradients, hairline borders, one indigo accent, Russian UI. Header
+"Редактор базы знаний" with a primary indigo "Сохранить в базу" (NO "История", NO "Версия"). A row of
+stat cards: Темы, Медиа-ресурсы, Значения, Правки. A tab strip "Обзор · Темы · Медиа-ресурсы ·
+Значения · Правки". Below, a two-pane editor: a left list of topics (Тарифы, Доставка, Оплата, FAQ…)
+and a right form (slug, keywords, a content textarea, linked TOKEN_* values and media chips). Right
+column: "Быстрый доступ", "Последние изменения", and a "Готовность к публикации" progress bar with a
+small checklist. Inter font, dense, tight corners.*
 
 ---
 
