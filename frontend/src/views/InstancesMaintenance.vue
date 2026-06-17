@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { ArrowLeft, CircleAlert, LoaderCircle, Server, Trash2 } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
-import { connStatus, shortTime } from '../lib/format'
+import { connStatus, shortTime, type ConnTone } from '../lib/format'
 import { ApiError } from '../api/client'
 import type { EvolutionInstance } from '../types'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 
 // InstancesMaintenance is the broom: every raw Evolution instance with a managed
 // flag (we hold an account for it) and a stale flag (not connected, >7 days old).
@@ -12,6 +15,19 @@ import type { EvolutionInstance } from '../types'
 const accounts = useAccounts()
 const error = ref('')
 const busy = ref('')
+
+// connection tone -> badge + dot classes (connected keeps WhatsApp green)
+const toneMeta: Record<ConnTone, { badge: string; dot: string }> = {
+  connected: { badge: 'bg-wa/10 text-wa', dot: 'bg-wa' },
+  qr: { badge: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', dot: 'bg-amber-500' },
+  connecting: { badge: 'bg-sky-500/10 text-sky-600 dark:text-sky-400', dot: 'bg-sky-500' },
+  disconnected: { badge: 'bg-muted text-muted-foreground', dot: 'bg-muted-foreground' },
+  error: { badge: 'bg-destructive/10 text-destructive', dot: 'bg-destructive' },
+}
+function conn(status: string) {
+  const { label, tone } = connStatus(status)
+  return { label, ...toneMeta[tone] }
+}
 
 const stale = computed(() => accounts.instances.filter((i) => i.stale && !i.managed))
 
@@ -51,75 +67,79 @@ async function removeAllStale() {
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-panel">
-    <header class="px-8 py-5 flex items-center justify-between border-b border-hair bg-white shrink-0">
+  <div class="h-full flex flex-col bg-background">
+    <header class="px-8 py-5 flex items-center justify-between border-b border-border bg-card shrink-0">
       <div class="flex items-center gap-4">
-        <RouterLink :to="{ name: 'accounts' }" class="icon-btn" title="К номерам">
-          <i class="fa-solid fa-arrow-left"></i>
-        </RouterLink>
+        <Button as-child variant="ghost" size="icon" title="К номерам">
+          <RouterLink :to="{ name: 'accounts' }">
+            <ArrowLeft class="w-4 h-4" />
+          </RouterLink>
+        </Button>
         <div>
           <h1 class="text-xl font-bold tracking-tight">Обслуживание инстансов</h1>
           <p class="text-sm text-muted-foreground">Все инстансы Evolution · удаление устаревших</p>
         </div>
       </div>
-      <button
+      <Button
         v-if="stale.length"
+        variant="destructive"
         :disabled="busy === 'all'"
-        class="btn bg-red-500 text-white hover:bg-red-600 shadow-sm"
         @click="removeAllStale"
       >
-        <i class="fa-solid fa-broom"></i> Удалить устаревшие ({{ stale.length }})
-      </button>
+        <Trash2 class="w-4 h-4" /> Удалить устаревшие ({{ stale.length }})
+      </Button>
     </header>
 
     <div class="flex-1 overflow-y-auto">
       <div class="mx-auto max-w-4xl px-8 py-6 space-y-4">
-        <p v-if="error" class="flex items-center gap-2 rounded-xl bg-red-50 text-red-600 text-sm px-4 py-3">
-          <i class="fa-solid fa-circle-exclamation"></i> {{ error }}
+        <p v-if="error" class="flex items-center gap-2 rounded-lg bg-destructive/10 text-destructive text-sm px-4 py-3">
+          <CircleAlert class="w-4 h-4 shrink-0" /> {{ error }}
         </p>
 
-        <div class="card overflow-hidden">
-          <div class="px-5 py-3.5 border-b border-hair flex items-center justify-between">
+        <div class="rounded-lg border border-border bg-card overflow-hidden">
+          <div class="px-5 py-3.5 border-b border-border flex items-center justify-between">
             <span class="font-semibold">Инстансы Evolution</span>
             <span class="text-sm text-muted-foreground">{{ accounts.instances.length }} всего</span>
           </div>
 
-          <p v-if="!accounts.instances.length" class="px-5 py-14 text-center text-sm text-slate-400">
+          <p v-if="!accounts.instances.length" class="px-5 py-14 text-center text-sm text-muted-foreground">
             Инстансы не найдены.
           </p>
 
           <div
             v-for="i in accounts.instances"
             :key="i.name"
-            class="flex items-center gap-4 px-5 py-4 border-b border-hair last:border-0 hover:bg-panel/60 transition"
+            class="flex items-center gap-4 px-5 py-4 border-b border-border last:border-0 hover:bg-muted/50 transition"
           >
-            <div class="w-10 h-10 rounded-xl bg-panel grid place-items-center text-slate-400 shrink-0">
-              <i class="fa-solid fa-server"></i>
+            <div class="w-10 h-10 rounded-lg bg-muted grid place-items-center text-muted-foreground shrink-0">
+              <Server class="w-4 h-4" />
             </div>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="font-mono font-medium truncate">{{ i.name }}</span>
-                <span v-if="i.managed" class="badge bg-brand-soft text-brand">наш</span>
-                <span v-if="i.stale" class="badge bg-amber-50 text-amber-700">устарел</span>
+                <Badge v-if="i.managed" variant="secondary" class="bg-primary/10 text-primary">наш</Badge>
+                <Badge v-if="i.stale" variant="secondary" class="bg-amber-500/10 text-amber-600 dark:text-amber-400">устарел</Badge>
               </div>
-              <div class="text-xs text-slate-400 mt-0.5 truncate">
+              <div class="text-xs text-muted-foreground mt-0.5 truncate">
                 создан {{ i.created_at ? shortTime(i.created_at) : '—' }}
                 <span v-if="i.owner_jid"> · {{ i.owner_jid }}</span>
               </div>
             </div>
-            <span class="badge shrink-0" :class="connStatus(i.connection_status).cls">
-              <span class="w-1.5 h-1.5 rounded-full" :class="connStatus(i.connection_status).dot" />
-              {{ connStatus(i.connection_status).label }}
-            </span>
-            <button
+            <Badge variant="secondary" class="shrink-0" :class="conn(i.connection_status).badge">
+              <span class="w-1.5 h-1.5 rounded-full" :class="conn(i.connection_status).dot" />
+              {{ conn(i.connection_status).label }}
+            </Badge>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="w-8 h-8 shrink-0 text-destructive hover:bg-destructive/10 disabled:text-muted-foreground disabled:hover:bg-transparent"
               :disabled="i.managed || busy === i.name"
-              class="btn-ghost btn-sm !px-2.5 text-red-500 hover:bg-red-50 disabled:text-slate-300 disabled:hover:bg-white shrink-0"
               :title="i.managed ? 'Управляется приложением — удалите номер на странице номеров' : 'Удалить инстанс'"
               @click="remove(i)"
             >
-              <i v-if="busy === i.name" class="fa-solid fa-spinner fa-spin"></i>
-              <i v-else class="fa-solid fa-trash-can"></i>
-            </button>
+              <LoaderCircle v-if="busy === i.name" class="w-4 h-4 animate-spin" />
+              <Trash2 v-else class="w-4 h-4" />
+            </Button>
           </div>
         </div>
       </div>

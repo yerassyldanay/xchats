@@ -24,19 +24,21 @@ export function shortTime(iso: string | null): string {
     : d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
 
-// connStatus maps a WhatsApp account connection_status to a label + badge class.
-export function connStatus(status: string): { label: string; cls: string; dot: string } {
+// connStatus maps a WhatsApp account connection_status to a Russian label + a
+// UI-agnostic tone discriminant; the component maps the tone to badge/dot classes.
+export type ConnTone = 'connected' | 'qr' | 'connecting' | 'disconnected' | 'error'
+export function connStatus(status: string): { label: string; tone: ConnTone } {
   switch (status) {
     case 'connected':
-      return { label: 'Подключён', cls: 'bg-green-50 text-green-700', dot: 'bg-wa' }
+      return { label: 'Подключён', tone: 'connected' }
     case 'qr_required':
-      return { label: 'Нужен QR', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-400' }
+      return { label: 'Нужен QR', tone: 'qr' }
     case 'connecting':
-      return { label: 'Подключение…', cls: 'bg-sky-50 text-sky-700', dot: 'bg-sky-400' }
+      return { label: 'Подключение…', tone: 'connecting' }
     case 'disconnected':
-      return { label: 'Отключён', cls: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' }
+      return { label: 'Отключён', tone: 'disconnected' }
     default:
-      return { label: status || 'Ошибка', cls: 'bg-red-50 text-red-600', dot: 'bg-red-500' }
+      return { label: status || 'Ошибка', tone: 'error' }
   }
 }
 
