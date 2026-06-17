@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { CircleAlert, FileText, LoaderCircle, Plus, Save, Trash2, WandSparkles } from 'lucide-vue-next'
 import { usePlayground } from '../stores/playground'
 import { shortTime } from '../lib/format'
@@ -31,7 +31,11 @@ function seedCfg() {
   cfg.language_policy = c.language_policy
   cfg.reply_max_words = c.reply_max_words
 }
-onMounted(seedCfg)
+// Re-seed whenever the draft's config arrives/changes — the initial onMounted runs
+// before pg.load() resolves, so seeding only there would leave the form blank (and a
+// "Сохранить настройки" would blank-overwrite persona/mission). `immediate` covers the
+// case where the store already holds a draft from the sibling page.
+watch(() => pg.draft?.config, seedCfg, { immediate: true })
 async function saveConfig() {
   await pg.patchConfig({ ...cfg })
 }

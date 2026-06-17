@@ -23,11 +23,26 @@ multi-version list.** Internally we reuse the backend's existing "edit working c
 apply" path (its publish path, **with version semantics hidden** — the version field
 just stays put and is never shown). The editor/builder mutate the working copy; one
 **"Сохранить в базу"** action writes it to the live KB and reloads the brain.
-*(Alternative if preferred: edits go live to the brain instantly with no apply step —
-say the word and I'll wire that instead; it's a small backend change.)*
 
-Decisions: **docs-first** (spec before build), **match the images** for routes/labels,
-**single KB / no versioning**.
+**Locked decisions (2026-06-17):**
+- **Builder brain = Simple ingest (RuleSynthesizer, ship now).** No conversational LLM
+  builder in v1. Page 2 = upload media/text → fold into KB topics/values via the existing
+  deterministic synthesizer. **G2 is dropped for v1; Phase B is a no-op.**
+- **Publish = explicit apply button.** Edits stage in the working copy; **"Сохранить в
+  базу"** is the single action that writes to the live KB + reloads the brain. No
+  instant-live mode.
+- **Images = true background.** Enable `LLM_VISION_MODEL` so image uploads auto-caption
+  with **no `describe_media` popups**. This is **required**, not optional.
+- **docs-first** (spec before build), **match the images** for routes/labels,
+  **single KB / no versioning**.
+
+**One-button flow (resolve the "update store" mental model).** "Сохранить в базу" only
+**publishes**; it is NOT a single call that ingests+synthesizes+publishes. The chain is:
+composer attach/text → `POST /materials` (auto-caption via vision) → the builder folds
+ready materials into draft rows (`POST /chat` with a default "ingest" instruction, fired
+automatically when a material finishes extraction) → user clicks **"Сохранить в базу"** →
+`POST /publish`. The UI must make this read as "drop stuff in, then one Save" even though
+it's three endpoints under the hood.
 
 ---
 
@@ -58,14 +73,11 @@ handlers in [playground.go](backend/internal/httpapi/playground.go) +
 **Gaps — backend:**
 
 - *(G1 — version-history listing) — **dropped.** No versioning per decision above.*
-- [ ] **G2 — LLM-backed builder synthesizer (for a real "AI ассистент" chat).**
-  Today [main.go:110](backend/cmd/xchats/main.go#L110) passes `nil` → deterministic
-  `RuleSynthesizer` ([builder.go:233](backend/internal/playground/builder.go#L233)):
-  it concatenates ready material text into one topic + regex-detects ₸ prices; the
-  instruction only seeds slug/title/keywords. The page WORKS with this, but to match
-  the conversational design, implement the existing `Synthesizer` interface with the
-  LLM client and wire `NewBuilder(llmSynth, hub)`. **Decision needed: ship v1 with
-  RuleSynthesizer (functional) or build the LLM synthesizer now.**
+- *(G2 — LLM-backed builder synthesizer) — **dropped for v1.** Locked decision: ship with
+  the deterministic `RuleSynthesizer` ([builder.go:233](backend/internal/playground/builder.go#L233);
+  `main.go:110` keeps passing `nil`). It folds ready material text into a topic +
+  regex-detects ₸ prices — functional, no conversation. The Конструктор UI must therefore
+  present as "upload + ingest", NOT a chat with an LLM persona. Revisit G2 post-v1.*
 
 ---
 
@@ -78,7 +90,7 @@ by:"** endpoints per region · UI-stub call-outs · image prompt). Also update t
 
 - [ ] **§6 — Конструктор базы знаний — `/playground`**
   - Header: title + "Соберите знания в диалоге с AI"; **Сохранить в базу** / **Отменить изменения**. ▸ `GET/POST/DELETE /playground/draft`, `POST /playground/publish` (apply, no version shown).
-  - Chat thread: operator + "AI ассистент" turns, material-upload bubbles + thumbnails, "Предложенные изменения" + quick replies. ▸ `POST /playground/chat`.
+  - Chat thread: operator turns + **system "Добавлено в базу" confirmations** (NOT an LLM persona — RuleSynthesizer is deterministic), material-upload bubbles + thumbnails, a "Что добавилось" summary of the rows the ingest produced. ▸ `POST /playground/chat` (default ingest instruction). **No conversational quick-replies — the model doesn't talk back.**
   - Composer: text + attach (`Paperclip`) → materials. ▸ `POST /playground/draft/materials`; live `kb.material.updated`.
   - Right rail: "Обзор базы знаний" tiles, "Запросы AI" popups, "Последние изменения", readiness. ▸ `GET /playground/requests`, `POST /requests/:id/resolve`; counts from draft view.
 - [ ] **§6b — Редактор базы знаний — `/knowledge-base`**
@@ -86,18 +98,18 @@ by:"** endpoints per region · UI-stub call-outs · image prompt). Also update t
   - Stat cards: Темы / Медиа-ресурсы / Значения / Правки. ▸ counts from draft view.
   - Tabs: **Обзор · Темы · Медиа-ресурсы · Значения · Правки** — each region lists its backing endpoint (topics/assets/values CRUD, review). *(No История tab.)*
   - Right rail: "Быстрый доступ", "Последние изменения", "Готовность к публикации". ▸ draft view + `kb.row.changed`.
-  - Note: image auto-captioning needs `LLM_VISION_MODEL` (unset + not passed in compose) — without it, image uploads create `describe_media` popups.
+  - **Review (Правки tab) is informational, not a hard gate** — "Сохранить в базу" publishes the working copy regardless of `review_state`; approve/reject just lets the user curate. (User did not request an approval gate.)
+  - **Vision required (locked):** enable `LLM_VISION_MODEL` so images auto-caption; `describe_media` popups should be the rare fallback, not the norm.
 - [ ] Verify §6 against both PNGs (ignoring the version/history UI in the mockups, which we're dropping): every kept element has a "▸ Backed by" endpoint or an explicit stub note; routes/labels match (`/playground`=Конструктор, `/knowledge-base`=База знаний). **User reviews the doc before any code.**
 
 ---
 
-## Phase B — Backend (only if G2 is chosen)
+## Phase B — Backend — **NO-OP (G2 dropped)**
 
-No version/history work (dropped). The existing apply path covers everything else.
-
-- [ ] **G2 (if chosen)** LLM `Synthesizer` impl (`internal/playground/llm_synth.go`) using the
-  existing `brain/llm` client; wire in `main.go`; keep `RuleSynthesizer` as the no-key fallback.
-- [ ] If G2: `cd backend && gofmt + go build ./... + go test ./...` green. *(If G2 skipped, Phase B is a no-op.)*
+Locked: ship with `RuleSynthesizer`. No version/history work, no LLM synthesizer. The
+existing apply path + deterministic ingest cover v1. **The only backend-adjacent change is
+config**, handled in Phase C: enable `LLM_VISION_MODEL` in `.env` **and** the compose
+backend block so image auto-captioning works (this is required, see Phase C).
 
 ---
 
@@ -106,9 +118,9 @@ No version/history work (dropped). The existing apply path covers everything els
 - [ ] **Plumbing** — `postForm<T>(path, FormData)` in [client.ts](frontend/src/api/client.ts) (asset/material multipart with extra fields); add KB SSE events (`kb.material.updated`, `kb.row.changed`, `kb.published`) to [sse.ts](frontend/src/lib/sse.ts).
 - [ ] **`stores/playground.ts`** — one method per `/playground/*` endpoint; shared `draft`/`materials`/`requests` state; `lastUpdatedAt` → `If-Match`; realtime refresh. Both pages share this store.
 - [ ] **`views/Playground.vue`** (Конструктор) — chat + materials + requests, per §6.
-- [ ] **`views/KnowledgeBase.vue`** (Редактор) — tabbed editor (Обзор/Темы/Медиа/Значения/Правки/История), per §6b.
+- [ ] **`views/KnowledgeBase.vue`** (Редактор) — tabbed editor **Обзор/Темы/Медиа/Значения/Правки** (no История — versioning dropped), per §6b.
 - [ ] **Route + nav** — add `/playground` + `/knowledge-base` to [router.ts](frontend/src/router.ts); two rail icons in [NavRail.vue](frontend/src/components/NavRail.vue) (`MessagesSquare` "Конструктор", `Library` "База знаний").
-- [ ] **(Optional)** enable `LLM_VISION_MODEL` in [.env](.env) **and** add it to the compose backend block ([docker-compose.yaml:42-48](deploy/docker-compose.yaml#L42)).
+- [ ] **Vision (required)** — enable `LLM_VISION_MODEL` in [.env](.env) **and** add it to the compose backend block ([docker-compose.yaml:42-48](deploy/docker-compose.yaml#L42)); verify an image upload produces an auto-caption (no `describe_media` popup).
 
 ---
 
