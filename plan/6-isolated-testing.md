@@ -12,24 +12,25 @@ real-but-local (Postgres) or a controllable fake (Evolution, the LLM).
 ## Test doubles & locals
 
 - **Fake Evolution** — a small HTTP stub implementing the endpoints we call (`instance/create`,
-  `instance/connect`, `message/sendText`, `message/sendMedia`, `chat/find*`,
+  `instance/connect`, `message/sendText`, `message/sendMedia`,
   `getBase64FromMediaMessage`) with recorded responses, that can also **POST captured webhook
   events** at our webhook edge. It **records what we sent** so tests can assert send shapes
   (e.g. that we send to the phone, not the `@lid`).
 - **Fake LLM** — an OpenAI-compatible stub returning a fixed `emit_draft`, so AI-draft tests are
   deterministic and free.
 - **Real local Postgres** — the same engine as prod, a throwaway DB/schema, so SQL runs for real.
-- **Default in-proc adapters** — local-disk blob store + Go-channel / Postgres queue.
+- **Default in-proc adapters** — local-disk blob store + the in-memory Go-channel queue (behind the
+  `Queue` port).
 
 ## Layers of tests
 
 - **Unit** — `normalize` against captured payloads (text/media, `@lid`↔phone, status 0–5); pure,
   no I/O.
-- **Component** — the webhook handler (store-raw + 200 + enqueue + dedup) and each worker (upsert,
-  media, status, send) against the fakes + local Postgres.
-- **End-to-end (one command)** — drives the full loop: replay webhook → assert normalized rows →
-  call send API → assert the fake Evolution received the right call → replay status → assert
-  sent→delivered→read → media path → AI draft.
+- **Component** — the webhook handler (enqueue to in-memory queue + 200) and each worker
+  (consume + dedup + upsert; media, status, send) against the fakes + local Postgres.
+- **End-to-end (one command)** — drives the full loop: replay webhook → assert normalized rows
+  (`wa_contacts`/`wa_chats`/`wa_messages`) → call send API → assert the fake Evolution received the
+  right call → replay status → assert sent→delivered→read → media path → AI draft.
 - **Frontend** — Vitest component tests; optional Playwright against the backend wired to the fakes.
 
 ## One command
@@ -53,11 +54,12 @@ the only difference from prod is which hosts/ports the env points at.
 v1 ships **one adapter each** behind the blob and queue ports (see `2-architecture.md`):
 
 - blob: `local-disk` only (media bytes are a deferred surface anyway — v1 renders placeholders).
-- queue/bus: the **Postgres job table** only (an in-process Go channel is for tests only).
+- queue/bus: the **in-memory `inmem` driver** only (a buffered Go channel + worker pool behind the
+  `Queue` port; there is no Postgres `jobs` / `evolution_events` table).
 
-**Deferred (v2+):** the `minio`/`kafka` adapters and the **adapter conformance suite** that runs
-across implementations. There is no second adapter to conform to in v1 — don't build it until one
-exists.
+**Deferred (v2+):** the `minio` blob adapter, the `redis`/`kafka` queue drivers (selected via
+`QUEUE_DRIVER`), and the **adapter conformance suite** that runs across implementations. There is no
+second adapter to conform to in v1 — don't build it until one exists.
 
 ## Real smoke (manual, outside isolation)
 

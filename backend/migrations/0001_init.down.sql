@@ -1,0 +1,12 @@
+SET search_path = xchats, public;
+DROP TABLE IF EXISTS xchats.ai_draft_assets;
+DROP TABLE IF EXISTS xchats.ai_drafts;
+DROP TABLE IF EXISTS xchats.message_media;
+DROP TABLE IF EXISTS xchats.wa_messages;
+DROP TABLE IF EXISTS xchats.wa_chats;
+DROP TABLE IF EXISTS xchats.wa_contacts;
+DROP TABLE IF EXISTS xchats.wa_accounts;
+DROP TABLE IF EXISTS xchats.sessions;
+DROP TABLE IF EXISTS xchats.organization_users;
+DROP TABLE IF EXISTS xchats.users;
+DROP TABLE IF EXISTS xchats.organizations;

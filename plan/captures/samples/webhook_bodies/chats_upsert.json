@@ -2,11 +2,11 @@
   "event": "chats.upsert",
   "instance": "xpayment",
   "data": [
-    { "remoteJid": "5231387607239@lid", "instanceId": "acf950c6-8dd6-4466-a81f-37d54646df01", "name": "", "unreadMessages": 0 }
+    { "remoteJid": "5200000000000@lid", "instanceId": "acf950c6-8dd6-4466-a81f-37d54646df01", "name": "", "unreadMessages": 0 }
   ],
   "destination": "http://xchats-backend:8080/evolution/api/v1/webhook/{account}",
   "date_time": "2026-06-13T14:33:45.352Z",
-  "sender": "77029766509@s.whatsapp.net",
+  "sender": "77011111111@s.whatsapp.net",
   "server_url": "http://evolution-api:8080",
   "apikey": "***REDACTED***"
 }

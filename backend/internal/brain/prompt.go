@@ -1,0 +1,192 @@
+// Package brain is the ported assistant core: it builds the cache-stable system
+// prompt + the dynamic user block from a published Snapshot, and post-processes
+// the model's emit_draft output into a final Draft (escalate → resolve refs →
+// inject prices → clean profile → flatten status). It performs no writes and has
+// no transport dependency — the caller (internal/assistant.RealDrafter) wires it
+// to the LLM and the store. Ported from xpayment-crm (module path rewritten).
+package brain
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
+)
+
+// Prompt is the assembled LLM input: a cache-stable System prefix + a dynamic User block.
+type Prompt struct {
+	System string
+	User   string
+}
+
+// ErrNoPublishedConfig is returned when drafting runs before any snapshot is loaded.
+var ErrNoPublishedConfig = errors.New("brain: no published config snapshot loaded")
+
+// frame is the code-owned [A] block — the hard rules, never editable (docs/10 · [A]).
+const frame = `You are the drafting engine for an online shop's WhatsApp sales assistant. You write ONE reply
+draft that a human will review and send. You never send messages yourself.
+
+Rules (hard, non-negotiable):
+1. Answer ONLY from the KNOWLEDGE BASE below. If the answer is not there, do not guess —
+   set "escalate": true with a short escalation_reason and a brief holding reply.
+2. NEVER write a price or a number as a digit. Use the tokens exactly as written
+   in the knowledge base, e.g. {{price.standard}}. Code fills the real values after you.
+3. Attach media ONLY by returning refs that exist in the MEDIA CATALOG. Maximum 3. If none fit, [].
+4. Reply in the customer's language. If the latest message mixes Kazakh and Russian, reply in Russian.
+5. Keep the reply under ~120 words, warm and concrete. One clear next step or question.
+6. Never ask for or repeat passwords or other secrets.
+7. Extract into profile_patch ONLY facts you are newly confident about. Do not invent fields.
+
+You MUST respond by calling the emit_draft tool with the required JSON. No prose outside the tool call.`
+
+// BuildSystem renders the cache-stable system prefix [A]–[E] from the snapshot
+// (docs/10 · implementation checklist step 1). Rebuilt only on publish.
+func BuildSystem(s *domain.Snapshot) string {
+	var b strings.Builder
+	b.WriteString(frame)
+	b.WriteString("\n\n# IDENTITY\n")
+	b.WriteString(s.Config.Persona)
+	if s.Config.Mission != "" {
+		b.WriteString("\nMission: ")
+		b.WriteString(s.Config.Mission)
+	}
+	b.WriteString("\n\n# GUARDRAILS\n")
+	b.WriteString(s.Config.Guardrails)
+	if s.Config.LanguagePolicy != "" {
+		b.WriteString("\n")
+		b.WriteString(s.Config.LanguagePolicy)
+	}
+
+	b.WriteString("\n\nKNOWLEDGE BASE:\n")
+	for _, t := range s.Topics {
+		fmt.Fprintf(&b, "\n# topic: %s (%s)\n", t.Slug, t.Language)
+		if t.Keywords != "" {
+			fmt.Fprintf(&b, "keywords: %s\n", t.Keywords)
+		}
+		fmt.Fprintf(&b, "%s\n", t.BodyMD)
+	}
+
+	b.WriteString("\nMEDIA CATALOG:\n")
+	b.WriteString("ref | kind | topic | description\n")
+	for _, a := range s.Assets {
+		fmt.Fprintf(&b, "%s | %s | %s | %s\n", a.Ref, a.Kind, a.TopicSlug, a.Description)
+	}
+	return b.String()
+}
+
+// BuildUser builds the dynamic per-message block: an optional PROFILE block + the
+// window transcript (oldest first) + the current message. When profile is empty
+// (xchats passes none) the PROFILE block is omitted entirely.
+func BuildUser(profile map[string]any, window []domain.Message, current domain.Message) string {
+	var b strings.Builder
+	if len(profile) > 0 {
+		b.WriteString("PROFILE (what we already know about this contact):\n")
+		b.WriteString(marshalProfile(profile))
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("CONVERSATION (most recent messages, oldest first):\n")
+	for _, m := range window {
+		fmt.Fprintf(&b, "%s: %s\n", m.Role, m.Content)
+	}
+
+	b.WriteString("\nCURRENT MESSAGE:\n")
+	fmt.Fprintf(&b, "%s: %s\n", domain.RoleCustomer, current.Content)
+	return b.String()
+}
+
+func marshalProfile(profile map[string]any) string {
+	if len(profile) == 0 {
+		return "{}"
+	}
+	// json.Marshal sorts map keys, so the block is deterministic across calls.
+	out, err := json.Marshal(profile)
+	if err != nil {
+		return "{}"
+	}
+	return string(out)
+}
+
+// PostProcess runs the pipeline (docs/02 · post-processing), in order: escalate
+// gate → resolve+cap asset refs → inject prices → clean profile_patch → flatten
+// status. It never returns an error: a price-render failure becomes a manual-check
+// note, an escalation stops the pipeline.
+func PostProcess(raw domain.RawDraft, snap *domain.Snapshot, log *slog.Logger) domain.Draft {
+	if log == nil {
+		log = slog.Default()
+	}
+
+	// 2. Escalate gate — flag for a human and stop (no media, no auto-send).
+	if raw.Escalate {
+		d := escalationDraft(raw.ReplyText, raw.EscalationReason)
+		d.Confidence = raw.Confidence
+		return d
+	}
+
+	// 3. Validate + resolve asset_refs (drop unknown, cap 3).
+	resolved, unknown := snap.ResolveAssets(raw.AssetRefs)
+	if len(unknown) > 0 {
+		log.Warn("dropped unknown asset_refs", "refs", unknown)
+	}
+
+	d := domain.Draft{
+		Media:             resolved,
+		DroppedRefs:       unknown,
+		Confidence:        raw.Confidence,
+		SuggestedCallback: raw.SuggestedCallback,
+	}
+
+	// 4. Inject prices — never ship a half-rendered price (Decision 8).
+	lang := raw.ReplyLanguage
+	if lang == "" {
+		lang = "ru"
+	}
+	rendered, err := snap.Values.Render(raw.ReplyText, lang)
+	if err != nil {
+		log.Warn("price render failed; posting check-pricing note", "err", err)
+		d.PricingError = true
+		d.ReplyText = pricingManualNote
+		d.Media = nil
+		return d
+	}
+	d.ReplyText = rendered
+
+	// 5. profile_patch — drop the stage key (that is status, handled next).
+	d.ProfilePatch = cleanProfilePatch(raw.ProfilePatch)
+
+	// 6. status — flatten suggested_status.stage to a label.
+	if raw.SuggestedStatus != nil {
+		d.SuggestedStatus = raw.SuggestedStatus.Stage
+	}
+
+	return d
+}
+
+// cleanProfilePatch copies the patch minus the reserved "stage" key (Decision 9).
+func cleanProfilePatch(patch map[string]any) map[string]any {
+	if len(patch) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(patch))
+	for k, v := range patch {
+		if k == "stage" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func escalationDraft(reply, reason string) domain.Draft {
+	return domain.Draft{ReplyText: reply, Escalate: true, EscalationReason: reason}
+}
+
+const (
+	// HoldingReply is the brief reply shipped when drafting fails or the model
+	// escalates without its own text (the LLM-error path in RealDrafter uses it).
+	HoldingReply      = "Уточню это у коллеги и вернусь с точным ответом — буквально пару минут."
+	pricingManualNote = "⚠️ Не удалось подставить цену автоматически — проверьте перед отправкой."
+)

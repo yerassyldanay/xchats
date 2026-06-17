@@ -11,10 +11,10 @@ Env (or flags):
   EVO_INST   instance name, default "xpayment"
 
 Examples:
-  EVO_KEY=... python evolution_client.py messages 5231387607239@lid --limit 20
+  EVO_KEY=... python evolution_client.py messages 5200000000000@lid --limit 20
   EVO_KEY=... python evolution_client.py download 3ABA7192D3DC90707512 out.jpg
-  EVO_KEY=... python evolution_client.py text 77058686509 "hello"
-  EVO_KEY=... python evolution_client.py media 77058686509 ./photo.jpg "caption here"
+  EVO_KEY=... python evolution_client.py text 77000000000 "hello"
+  EVO_KEY=... python evolution_client.py media 77000000000 ./photo.jpg "caption here"
 
 KEY LID FACTS (v2.3.7):
   - Each message key has BOTH `remoteJid` (often <id>@lid) and `remoteJidAlt`

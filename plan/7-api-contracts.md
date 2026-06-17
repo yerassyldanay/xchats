@@ -63,6 +63,7 @@ fast `2xx`; on success it returns `{"payload":null,"errcode":"OK"}`.
 | `EVOLUTION_ERROR` | 502 | generic upstream Evolution error |
 | `AI_UNAVAILABLE` | 503 | LLM/assistant call failed |
 | `EVAL_GATE_FAILED` | 409 | snapshot publish refused: quality gate not met (see `8.7-ai-evals.md`) |
+| `DRAFT_STALE` | 409 | approve refused: the draft was superseded by a newer inbound (see `7.1-endpoints.md`) |
 | `INTERNAL` | 500 | unexpected server error |
 
 New codes are added here only; the set is shared by backend and frontend.
@@ -99,8 +100,8 @@ Quick guide to the three "permission" cases the UI must distinguish:
 POST   /xchats/api/v1/auth/login          {email, password} -> session
 POST   /xchats/api/v1/auth/logout
 GET    /xchats/api/v1/me                   current user + org
-GET    /xchats/api/v1/users                list members
-POST   /xchats/api/v1/users               {email, password} create member (joins default org)
+GET    /xchats/api/v1/users                list users
+POST   /xchats/api/v1/users               {email, password} create user (joins default org)
 ```
 
 ### Organization — `/xchats/api/v1`
@@ -120,20 +121,19 @@ POST   /xchats/api/v1/whatsapp-accounts/{id}/qr        (re)generate QR
 GET    /xchats/api/v1/whatsapp-accounts/{id}/qr        poll QR / connection status
 POST   /xchats/api/v1/whatsapp-accounts/{id}/assign
 POST   /xchats/api/v1/whatsapp-accounts/{id}/unassign
-POST   /xchats/api/v1/whatsapp-accounts/{id}/sync      trigger (re)sync
-GET    /xchats/api/v1/whatsapp-accounts/{id}/sync      sync progress
 ```
 
-### Inbox: conversations, messages, contacts — `/xchats/api/v1`
+### Inbox: chats, messages, contacts — `/xchats/api/v1`
 
 ```text
-GET    /xchats/api/v1/conversations                    list/filter
-GET    /xchats/api/v1/conversations/{id}/messages
-POST   /xchats/api/v1/conversations/{id}/messages      send text/media (-> outbound pipeline)
-POST   /xchats/api/v1/conversations/{id}/assign        assign to a member
-POST   /xchats/api/v1/conversations/{id}/read          mark read
+GET    /xchats/api/v1/chats                    list/filter
+GET    /xchats/api/v1/chats/{id}/messages
+POST   /xchats/api/v1/chats/{id}/messages      send {text?, media_ids?[]} (fan-out: one msg per part)
+POST   /xchats/api/v1/chats/{id}/assign        assign to a user
+POST   /xchats/api/v1/chats/{id}/read          mark read
 GET    /xchats/api/v1/contacts
 GET    /xchats/api/v1/contacts/{id}
+POST   /xchats/api/v1/media                             upload (multipart) -> {media_id}
 GET    /xchats/api/v1/media/{id}                        stream stored media (resolves blob store)
 ```
 
@@ -141,9 +141,9 @@ GET    /xchats/api/v1/media/{id}                        stream stored media (res
 
 ```text
 # v1 — the draft loop:
-POST   /xchats/api/v1/conversations/{id}/ai-drafts     Suggest: trigger a draft on demand (v1)
-GET    /xchats/api/v1/conversations/{id}/ai-drafts
-POST   /xchats/api/v1/ai-drafts/{id}/approve           approve -> send (idempotent; 409 on conflict/stale)
+POST   /xchats/api/v1/chats/{id}/ai-drafts     Suggest: on-demand → 1–3 reply options (text + media)
+GET    /xchats/api/v1/chats/{id}/ai-drafts             the 1–3 pending options
+POST   /xchats/api/v1/ai-drafts/{id}/approve           send this option (edited text + kept media; idempotent, 409 on conflict/stale)
 
 # deferred — Phase 4B (KB CMS):
 GET    /xchats/api/v1/assistant/config                 persona/knowledge/prices/assets (published)
@@ -155,18 +155,17 @@ POST   /xchats/api/v1/assistant/playground             dry-run a draft (no send)
 ### Realtime — `/xchats/api/v1`
 
 ```text
-GET    /xchats/api/v1/realtime                          SSE stream (message.*, conversation.*,
-                                                         ai_draft.created, whatsapp_account.status_changed,
-                                                         sync.progress)
+GET    /xchats/api/v1/realtime                          SSE stream (message.*, chat.*,
+                                                         ai_draft.created, wa_account.status_changed)
 ```
 
 ### Evolution webhook ingress — `/evolution/api/v1`
 
 ```text
-POST   /evolution/api/v1/webhook/{whatsapp_account_id}            (+ /{event} subpaths if webhookByEvents)
+POST   /evolution/api/v1/webhook/{wa_account_id}            (+ /{event} subpaths if webhookByEvents)
 ```
 Authenticated by the **single shared token** from `.env` (`WEBHOOK_UNAUTHORIZED` if missing/wrong).
-Handler is store-raw + enqueue + `200` only.
+Handler enqueues the raw event to the in-memory queue → returns `200` fast (no DB write).
 
 ### Ops (no version, no envelope)
 

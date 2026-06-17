@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+body {
+  @apply font-sans text-ink bg-panel antialiased;
+}
+
+/* Reusable building blocks so templates stay clean and consistent. */
+@layer components {
+  .card {
+    @apply bg-white rounded-2xl border border-hair shadow-card;
+  }
+  .icon-btn {
+    @apply w-9 h-9 rounded-lg grid place-items-center text-slate-500 hover:bg-panel hover:text-ink transition-colors;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl text-sm font-semibold transition disabled:opacity-60 disabled:pointer-events-none;
+  }
+  .btn-brand {
+    @apply btn bg-brand text-white hover:bg-brand-600 shadow-sm;
+  }
+  .btn-wa {
+    @apply btn bg-wa text-white hover:bg-wa-600 shadow-sm;
+  }
+  .btn-ghost {
+    @apply btn border border-hair bg-white text-ink hover:bg-panel;
+  }
+  .btn-sm {
+    @apply h-8 px-3 text-[13px];
+  }
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+  .field {
+    @apply w-full rounded-xl border border-hair bg-white px-3 py-2.5 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/10;
+  }
+}
+
+/* Tidy scrollbars to match the clean aesthetic. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

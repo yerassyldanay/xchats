@@ -1,0 +1,66 @@
+# One-command stack: Postgres + xchats backend + xchats frontend.
+# Evolution is REUSED (not bundled) — point EVOLUTION_BASE_URL at the running
+# instance (host.docker.internal:9700 reaches an Evolution on the host).
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: xchats
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d xchats"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ../backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/xchats?sslmode=disable"
+      BLOB_DIR: "/data/blob"
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:8081"
+      EVOLUTION_BASE_URL: "${EVOLUTION_BASE_URL:-http://host.docker.internal:9700}"
+      EVOLUTION_API_KEY: "${EVOLUTION_API_KEY:-}"
+      EVOLUTION_INSTANCE: "${EVOLUTION_INSTANCE:-xpayment}"
+      WEBHOOK_TOKEN: "${WEBHOOK_TOKEN:-change-me-shared-token}"
+      WEBHOOK_PUBLIC_BASE_URL: "${WEBHOOK_PUBLIC_BASE_URL:-http://backend:8080}"
+      SESSION_SECRET: "${SESSION_SECRET:-change-me-random}"
+      SECURE_COOKIES: "false"
+      SEED_ADMIN_EMAIL: "${SEED_ADMIN_EMAIL:-admin@example.com}"
+      SEED_ADMIN_PASSWORD: "${SEED_ADMIN_PASSWORD:-change-me-strong-password}"
+      WA_OWNER_JID: "${WA_OWNER_JID:-}"
+      # LLM / AI brain — when LLM_API_KEY is empty the backend uses the Stub drafter.
+      LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_FAST_MODEL: "${LLM_FAST_MODEL:-openai/gpt-4o-mini}"
+      LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-1024}"
+      LLM_TEMPERATURE: "${LLM_TEMPERATURE:-0.3}"
+    ports:
+      - "8080:8080"
+    volumes:
+      - blobdata:/data/blob
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ../frontend
+    depends_on:
+      - backend
+    ports:
+      - "8081:80"
+
+volumes:
+  pgdata:
+  blobdata:

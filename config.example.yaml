@@ -1,0 +1,42 @@
+# xchats — non-secret tunables + seed (copy to config.yaml).
+# A populated config.yaml is sensitive (it may carry seed passwords) and is
+# gitignored; only this example is committed. Secrets proper live in .env.
+
+# server / logging
+http_addr: ":8080"
+api_base_url: "http://localhost:8080"
+cors_origins:
+  - "http://localhost:5173"
+log_format: "logfmt"
+log_level: "info"
+
+# auth / sessions
+session_ttl_hours: 720
+secure_cookies: false # set true in prod (HTTPS)
+min_password_len: 8
+
+# blob store (local disk) + in-memory queue
+blob_dir: "./blobdata"
+queue_driver: "inmem"
+queue_workers: 4
+
+# AI brain (LLM). The api key is a secret -> set LLM_API_KEY in .env (empty => stub).
+# These are non-secret tunables; provider is OpenAI-compatible.
+llm_provider: "openrouter"            # openrouter | openai | gemini
+llm_fast_model: "openai/gpt-4o-mini"  # drafting model
+llm_vision_model: ""                  # multimodal model for Playground KB media extraction (empty => describe popups)
+llm_max_tokens: 1024
+llm_temperature: 0.3
+# llm_base_url: ""                    # override the provider default (self-host/in-region)
+
+# the single pre-connected WhatsApp account
+evolution_instance: "xpayment"
+wa_account_display_name: "Sales WhatsApp"
+# wa_owner_jid: "77011111111@s.whatsapp.net"   # or learned via FetchInstances
+
+# seed: default organization + admin login (passwords better set via .env)
+org_name: "XChats"
+# seed_admin_email: "admin@example.com"
+# seed_admin_password: "change-me"
+
+page_size: 50
