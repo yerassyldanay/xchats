@@ -59,6 +59,15 @@ type Config struct {
 	// hosts. Default false (SSRF-safe); enable only for trusted self-hosted setups.
 	KBAllowPrivateFetch bool `yaml:"kb_allow_private_fetch" env:"KB_ALLOW_PRIVATE_FETCH"`
 
+	// --- Langfuse (LLM observability; secrets via .env) ---
+	// Tracing is best-effort: when disabled or keys are missing the LLM clients
+	// emit to OTel's no-op tracer (≈ free). See internal/telemetry.NewLangfuseProvider.
+	LangfuseEnabled         bool   `env:"LANGFUSE_ENABLED"`
+	LangfuseHost            string `env:"LANGFUSE_HOST"` // e.g. https://cloud.langfuse.com
+	LangfusePublicKey       string `env:"LANGFUSE_PUBLIC_KEY"`
+	LangfuseSecretKey       string `env:"LANGFUSE_SECRET_KEY"`
+	LangfuseFlushIntervalMS int    `env:"LANGFUSE_FLUSH_INTERVAL_MS"` // span batch timeout; 0 → OTel default
+
 	// --- seed + account identity (config.yaml, secrets via env) ---
 	OrgName              string `yaml:"org_name" env:"ORG_NAME"`
 	WaAccountDisplayName string `yaml:"wa_account_display_name"`
@@ -105,6 +114,13 @@ func (c *Config) LLMResolvedBaseURL() string {
 	default: // openrouter
 		return "https://openrouter.ai/api/v1"
 	}
+}
+
+// LangfuseTracingEnabled reports whether LLM calls should export traces to
+// Langfuse. It requires the explicit toggle plus both keys (a host falls back to
+// the public cloud default in the telemetry provider).
+func (c *Config) LangfuseTracingEnabled() bool {
+	return c.LangfuseEnabled && c.LangfusePublicKey != "" && c.LangfuseSecretKey != ""
 }
 
 // Load reads optional .env then config.yaml, then applies env overrides.

@@ -57,7 +57,7 @@ func TestLive_RealBrain(t *testing.T) {
 	}
 	temp, _ := strconv.ParseFloat(os.Getenv("LLM_TEMPERATURE"), 64)
 
-	client := llm.New(resolveBaseURL(), key, fast, os.Getenv("LLM_THINKING_MODEL"), maxTok, temp)
+	client := llm.New(resolveBaseURL(), key, os.Getenv("LLM_PROVIDER"), fast, os.Getenv("LLM_THINKING_MODEL"), maxTok, temp)
 
 	t.Run("grounded pricing question renders a real price", func(t *testing.T) {
 		r := NewReal(liveWindow("Сколько стоит?"), client, brain.SeedSnapshot(), nil)

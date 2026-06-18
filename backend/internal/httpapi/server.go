@@ -5,10 +5,12 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -155,24 +157,40 @@ func (s *Server) Router() *gin.Engine {
 // handleWebhook verifies the shared token (header only), enqueues the raw event,
 // and returns 200 fast — no DB write at the edge.
 func (s *Server) handleWebhook(c *gin.Context) {
+	accountID := c.Param("account_id")
 	if s.cfg.WebhookToken != "" {
 		tok := c.GetHeader(webhookTokenHeader)
 		if tok == "" {
 			tok = c.GetHeader("apikey")
 		}
 		if tok != s.cfg.WebhookToken {
+			s.log.Warn("webhook auth rejected", "account_id", accountID, "reason", "bad token")
 			fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook token")
 			return
 		}
 	}
 	raw, err := c.GetRawData()
 	if err != nil {
+		s.log.Warn("webhook unreadable body", "account_id", accountID, "err", err)
 		fail(c, http.StatusBadRequest, ErrValidation, "unreadable body")
 		return
 	}
 	cp := make([]byte, len(raw))
 	copy(cp, raw)
 	_ = s.queue.Publish(queue.Message{Kind: queue.KindWaEvent, Payload: cp})
+
+	// Cheap top-level peek for the event type + instance (no full parse). The full
+	// body is only logged at debug to keep customer PII out of info logs.
+	var peek struct {
+		Event    string `json:"event"`
+		Instance string `json:"instance"`
+	}
+	_ = json.Unmarshal(raw, &peek)
+	s.log.Info("webhook received",
+		"account_id", accountID, "event", peek.Event, "instance", peek.Instance,
+		"bytes", len(raw), "queued", true)
+	s.log.Debug("webhook body", "account_id", accountID, "body", string(raw))
+
 	ok(c, nil)
 }
 
@@ -202,10 +220,12 @@ func (s *Server) cors() gin.HandlerFunc {
 
 func (s *Server) requestLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		start := time.Now()
 		c.Next()
 		s.log.Info("http request",
 			"method", c.Request.Method, "path", c.Request.URL.Path,
-			"status", c.Writer.Status())
+			"status", c.Writer.Status(),
+			"latency_ms", time.Since(start).Milliseconds())
 	}
 }
 

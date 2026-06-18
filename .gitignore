@@ -35,3 +35,5 @@ frontend/playwright/.cache/
 # editor / os
 .DS_Store
 *.swp
+
+.claude

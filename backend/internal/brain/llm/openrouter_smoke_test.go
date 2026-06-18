@@ -30,7 +30,7 @@ func TestDraft_LiveHTTPPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := New(srv.URL, "test-key", "openai/gpt-4o-mini", "", 1024, 0.3)
+	d := New(srv.URL, "test-key", "openai", "openai/gpt-4o-mini", "", 1024, 0.3)
 	raw, err := d.Draft(context.Background(), brain.Prompt{System: "sys", User: "Сколько стоит?"})
 	if err != nil {
 		t.Fatalf("live draft: %v", err)
@@ -51,7 +51,7 @@ func TestDraft_ContentFallback(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := New(srv.URL, "k", "m", "", 256, 0.2)
+	d := New(srv.URL, "k", "openai", "m", "", 256, 0.2)
 	raw, err := d.Draft(context.Background(), brain.Prompt{})
 	if err != nil {
 		t.Fatalf("content fallback: %v", err)

@@ -143,6 +143,11 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 	instance := ""
 	if acct, err := s.store.AccountByID(ctx(c), chat.AccountID); err == nil {
 		instance = acct.InstanceName
+	} else {
+		// No account row → the worker falls back to the default Evolution instance.
+		// If that default is wrong, sends go nowhere; make the fallback visible.
+		s.log.Warn("send: account lookup failed; using default instance",
+			"chat_id", chat.ID, "account_id", chat.AccountID, "err", err)
 	}
 
 	text = strings.TrimSpace(text)
@@ -158,6 +163,8 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		_ = s.queue.Publish(queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Instance: instance, PhoneJID: chat.RemoteJID, Text: text,
 		}})
+		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "instance", instance,
+			"sender_kind", senderKind, "kind", "text")
 		out = append(out, dto.MapMessage(msg))
 		return nil
 	}
@@ -200,6 +207,8 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		_ = s.queue.Publish(queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Instance: instance, PhoneJID: chat.RemoteJID, MediaID: mid, Caption: caption,
 		}})
+		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "instance", instance,
+			"sender_kind", senderKind, "kind", kind, "media_id", mid)
 		out = append(out, dto.MapMessage(msg))
 	}
 
