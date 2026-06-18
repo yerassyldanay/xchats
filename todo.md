@@ -1,283 +1,213 @@
-# Knowledge-Base UI — Конструктор (builder) + Редактор (editor)
+# Architecture: `drafted_at` KB model + thin entities with polymorphic values & media
 
 ## Context
 
-Drafts in the inbox feel "the same / generic" not because the LLM is stubbed — it
-isn't (backend logs `mode=real`; the DB holds varied, KB-grounded replies). They
-feel generic because **~54% escalate** ("я передам вашей команде"): the live KB is
-only the **seed snapshot (v1)**, so the model has nothing to ground on. The fix is
-to **enrich the KB**, which needs the **Playground / Knowledge-Base UI — which does
-not exist on the frontend yet** (the backend is built + integration-tested).
+**Why this change.** Three needs converged:
 
-Two pages, from the designs ([plan/ui/ai-playground.png](plan/ui/ai-playground.png),
-[plan/ui/ai-knowledge-base.png](plan/ui/ai-knowledge-base.png)):
+1. **A simpler draft/approval model.** Replace versioned *snapshots* + per-row
+   `review_state` with a single living KB per org where each row is flagged pending via a
+   `drafted_at` timestamp and held out of the prompt until a human approves it.
+2. **Structured catalog data** for many spheres: add **`ai_products`** (a sellable item)
+   and **`ai_tariffs`** (a pricing *plan* — fixed/percentage, limits, pros/cons). The two
+   are independent (no links).
+3. **Media + numbers on any entity**, without fattening the entity tables or coupling
+   reply templates to column names.
 
-| Page | Route | Nav label | What it does |
+**The central design principle (Principle 0 below):** entity tables stay *thin and
+descriptive*. Every embeddable number lives in `ai_values`, every media file lives in
+`ai_assets`, and both attach back to their entity through one shared `(owner_kind,
+owner_ref)` pair. Templates embed only `{{namespace.key}}` from `ai_values` — they never
+reference a table column. This is what keeps the schema small and the embedding uniform.
+
+**Decisions (with the user).**
+- Draft = a per-row `drafted_at` timestamp; approval is per-element or all-at-once.
+- `ai_products` and `ai_tariffs` are independent (no FKs between them).
+- Numbers never become entity columns → no column-name templating.
+- `limits` is jsonb; `advantages`/`disadvantages` are text columns; the rest of a tariff
+  is a small descriptive spine + `data` jsonb.
+- Accepted trade-off: no versioned history / rollback.
+
+This round delivers the **architecture doc only**; migration + Go/Vue code follow.
+
+---
+
+## Principle 0 — Thin entities; values & media attach polymorphically; templates use tokens only
+
+**The embedding question, answered:** there is exactly **one** way to put a value into
+text — `{{namespace.key}}`, resolved from `ai_values` by `ValueBook.Render`
+([content.go](backend/internal/brain/domain/content.go), regex `{{ns.key}}`). We do **not**
+template column names. Therefore embeddable numbers must not live on entity tables.
+
+```
+ai_products  ref='nike-x'  name='Nike X'  category='Обувь'  data={size:'40-45'}   ← descriptive only
+ai_values    token='price.nike_x'  value_text='25 000 ₸'  owner_kind='product' owner_ref='nike-x'
+ai_assets    ref='img-42'  description='...'  owner_kind='product' owner_ref='nike-x'
+```
+
+- A reply template says `{{price.nike_x}}` → renders `25 000 ₸` verbatim. The renderer is
+  unchanged and never sees the product table.
+- An entity's numbers = `SELECT … FROM ai_values WHERE owner_kind=$1 AND owner_ref=$2`.
+- An entity's media = the same query on `ai_assets`.
+- `owner_kind ∈ {'topic','product','tariff',''}`; `''` = a global scalar (e.g.
+  `contact.whatsapp`) or an unattached asset.
+
+This single move (a) removes every numeric column from products/tariffs — fixing "too
+many columns", (b) keeps one embedding mechanism, (c) reuses the polymorphic pattern for
+both media and values, and (d) preserves the hallucination-safety the token system exists
+for.
+
+---
+
+## Principle 1 — Draft state is a per-row `drafted_at`; the prompt reads only live rows
+
+| `drafted_at` | Meaning | In prompt? | In `/playground`? |
 |---|---|---|---|
-| **Конструктор базы знаний** | `/playground` | Конструктор | Chat-like builder: upload materials + talk to AI + answer "Запросы AI" popups |
-| **Редактор базы знаний** | `/knowledge-base` | База знаний | Tabbed editor: Обзор · Темы · Медиа-ресурсы · Значения · Правки |
+| `NOT NULL` | pending (new or edited) | **no** | yes — edit + approve |
+| `NULL` | approved / live | **yes** | yes |
 
-**Single KB — no versions.** There is exactly **one** knowledge base: you edit it and
-the AI-assistant brain reads that same KB. **No version history, no rollback, no
-multi-version list.** Internally we reuse the backend's existing "edit working copy →
-apply" path (its publish path, **with version semantics hidden** — the version field
-just stays put and is never shown). The editor/builder mutate the working copy; one
-**"Сохранить в базу"** action writes it to the live KB and reloads the brain.
+- **Brain read** ([kbstore.go](backend/internal/kbstore/kbstore.go), `LoadPublished` →
+  `LoadLive`): every content query gains `AND drafted_at IS NULL`.
+- **Playground read** ([draft.go](backend/internal/kbstore/draft.go) `GetDraft`): all rows;
+  `drafted_at` drives the "pending" badge.
+- **Approve** = `UPDATE … SET drafted_at = NULL` for one row or all draft rows.
+- **Add-on-top**: new media / values insert rows with `drafted_at = now()`.
+- **Editing a live row** re-marks it `drafted_at = now()` (drops from prompt until
+  re-approved; previous value overwritten — accepted trade-off).
 
-**Locked decisions (2026-06-17):**
-- **Builder brain = Simple ingest (RuleSynthesizer, ship now).** No conversational LLM
-  builder in v1. Page 2 = upload media/text → fold into KB topics/values via the existing
-  deterministic synthesizer. **G2 is dropped for v1; Phase B is a no-op.**
-- **Publish = explicit apply button.** Edits stage in the working copy; **"Сохранить в
-  базу"** is the single action that writes to the live KB + reloads the brain. No
-  instant-live mode.
-- **Images = true background.** Enable `LLM_VISION_MODEL` so image uploads auto-caption
-  with **no `describe_media` popups**. This is **required**, not optional.
-- **docs-first** (spec before build), **match the images** for routes/labels,
-  **single KB / no versioning**.
-
-**One-button flow (resolve the "update store" mental model).** "Сохранить в базу" only
-**publishes**; it is NOT a single call that ingests+synthesizes+publishes. The chain is:
-composer attach/text → `POST /materials` (auto-caption via vision) → the builder folds
-ready materials into draft rows (`POST /chat` with a default "ingest" instruction, fired
-automatically when a material finishes extraction) → user clicks **"Сохранить в базу"** →
-`POST /publish`. The UI must make this read as "drop stuff in, then one Save" even though
-it's three endpoints under the hood.
+**Schema delta from `0003`:** `ai_snapshots` → one living KB row per org (drop `version`,
+`snapshot_state`, `published_at`; keep config + FK parent); all content tables **drop
+`review_state`, add `drafted_at`**; `ai_materials` / `ai_builder_requests` unchanged.
 
 ---
 
-## Backend readiness
+## Principle 2 — Approval is gated for consistency
 
-**Ready — no work needed** (routes in [server.go:131-151](backend/internal/httpapi/server.go#L131),
-handlers in [playground.go](backend/internal/httpapi/playground.go) +
-[playground_ingest.go](backend/internal/httpapi/playground_ingest.go)):
+The deterministic gate ([kbstore.go](backend/internal/kbstore/kbstore.go) `gate`) **moves
+from publish to approval**:
 
-- Draft lifecycle — `GET/POST/DELETE /playground/draft`; full `DraftView` returns
-  `config{version,persona,mission,guardrails,language_policy,reply_max_words,updated_at}`,
-  `topics[]`, `assets[]`, `values[]`, `materials[]`, `requests[]` — all with `review_state`,
-  `provenance`, `updated_at` ([draft.go:14-73](backend/internal/kbstore/draft.go#L14)).
-- Topics — `POST/DELETE /playground/draft/topics[/:slug]`.
-- Assets (media + meta) — `POST` (multipart) / `PATCH /:ref` / `DELETE /:ref`.
-- Values — `POST` / `DELETE /:token` `/playground/draft/values`.
-- Config — `PATCH /playground/draft/config`.
-- Review — `POST /playground/draft/review/:kind/:id {state:approved|rejected}`.
-- Materials — `POST` (text/url/file) / `GET /playground/draft/materials`; non-text enqueues extraction.
-- Builder chat — `POST /playground/chat {instruction}` → `{result, draft}`.
-- Requests / popups — `GET /playground/requests`, `POST /playground/requests/:id/resolve` (`confirm_value`, `describe_media`).
-- Apply to live KB — `POST /playground/publish` (relabel UI "Сохранить в базу"); writes the working copy to the single KB, reloads the brain, broadcasts `kb.published`. **Version semantics hidden; `rollback` and version listing intentionally unused.**
-- Optimistic concurrency — `If-Match` (draft `updated_at`) → `DRAFT_STALE` 409.
-- Media — `POST /media`, `GET /media/:id`. SSE — `kb.material.updated`, `kb.row.changed`, `kb.published`.
-- Derivable client-side (no endpoint needed): "Последние изменения" (from row `updated_at`/`provenance`),
-  "Готовность к публикации" (from `review_state` counts).
+- **Approve all** → gate-check the resulting live set (every `{{token}}` in a live body
+  resolves; every owned media blob exists; no literal currency in a topic body).
+- **Approve one element** → block with a precise reason if it would leave a dangling token
+  ("approve `price.nike_x` first, or use Approve all").
 
-**Gaps — backend:**
-
-- *(G1 — version-history listing) — **dropped.** No versioning per decision above.*
-- *(G2 — LLM-backed builder synthesizer) — **dropped for v1.** Locked decision: ship with
-  the deterministic `RuleSynthesizer` ([builder.go:233](backend/internal/playground/builder.go#L233);
-  `main.go:110` keeps passing `nil`). It folds ready material text into a topic +
-  regex-detects ₸ prices — functional, no conversation. The Конструктор UI must therefore
-  present as "upload + ingest", NOT a chat with an LLM persona. Revisit G2 post-v1.*
+Reuses `ValueBook.Render` exactly as today. Token uniqueness across all `ai_values` is
+enforced here.
 
 ---
 
-## Phase A — Docs first: rewrite [plan/5-ui-pages.md](plan/5-ui-pages.md) §6
+## Proposed schema — migration `0004` (design)
 
-Replace the outdated single "AI Assistant — `/assistant` *(deferred)*" section with **two
-page specs**, in the doc's existing format (ASCII sketch · visibility tiers · **"▸ Backed
-by:"** endpoints per region · UI-stub call-outs · image prompt). Also update the intro
-("v1 ships … pages") and the §2 NavRail note to mention the two added rail icons.
+Thin entities + two extended shared tables.
 
-- [ ] **§6 — Конструктор базы знаний — `/playground`**
-  - Header: title + "Соберите знания в диалоге с AI"; **Сохранить в базу** / **Отменить изменения**. ▸ `GET/POST/DELETE /playground/draft`, `POST /playground/publish` (apply, no version shown).
-  - Chat thread: operator turns + **system "Добавлено в базу" confirmations** (NOT an LLM persona — RuleSynthesizer is deterministic), material-upload bubbles + thumbnails, a "Что добавилось" summary of the rows the ingest produced. ▸ `POST /playground/chat` (default ingest instruction). **No conversational quick-replies — the model doesn't talk back.**
-  - Composer: text + attach (`Paperclip`) → materials. ▸ `POST /playground/draft/materials`; live `kb.material.updated`.
-  - Right rail: "Обзор базы знаний" tiles, "Запросы AI" popups, "Последние изменения", readiness. ▸ `GET /playground/requests`, `POST /requests/:id/resolve`; counts from draft view.
-- [ ] **§6b — Редактор базы знаний — `/knowledge-base`**
-  - Header: title + "Управляйте темами…"; **Сохранить в базу** (no История, no версии).
-  - Stat cards: Темы / Медиа-ресурсы / Значения / Правки. ▸ counts from draft view.
-  - Tabs: **Обзор · Темы · Медиа-ресурсы · Значения · Правки** — each region lists its backing endpoint (topics/assets/values CRUD, review). *(No История tab.)*
-  - Right rail: "Быстрый доступ", "Последние изменения", "Готовность к публикации". ▸ draft view + `kb.row.changed`.
-  - **Review (Правки tab) is informational, not a hard gate** — "Сохранить в базу" publishes the working copy regardless of `review_state`; approve/reject just lets the user curate. (User did not request an approval gate.)
-  - **Vision required (locked):** enable `LLM_VISION_MODEL` so images auto-caption; `describe_media` popups should be the rare fallback, not the norm.
-- [ ] Verify §6 against both PNGs (ignoring the version/history UI in the mockups, which we're dropping): every kept element has a "▸ Backed by" endpoint or an explicit stub note; routes/labels match (`/playground`=Конструктор, `/knowledge-base`=База знаний). **User reviews the doc before any code.**
+```sql
+-- A sellable item: descriptive only. Its price/numbers are owned ai_values rows.
+CREATE TABLE xchats.ai_products (
+    id          uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    kb_id       uuid NOT NULL REFERENCES xchats.ai_snapshots(id) ON DELETE CASCADE,
+    ref         text NOT NULL,                       -- stable key 'nike-x'
+    name        text NOT NULL DEFAULT '',
+    description text NOT NULL DEFAULT '',
+    category    text NOT NULL DEFAULT '',
+    data        jsonb NOT NULL DEFAULT '{}'::jsonb,   -- sphere-specific attrs (size, color…)
+    lang        text NOT NULL DEFAULT 'ru',
+    status      text NOT NULL DEFAULT 'active',
+    drafted_at  timestamptz,
+    provenance  jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (kb_id, ref)
+);
+
+-- A pricing PLAN / tariff: small descriptive spine. Its numbers are owned ai_values rows.
+CREATE TABLE xchats.ai_tariffs (
+    id            uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    kb_id         uuid NOT NULL REFERENCES xchats.ai_snapshots(id) ON DELETE CASCADE,
+    ref           text NOT NULL,                      -- 'standard' | 'pro'
+    name          text NOT NULL DEFAULT '',
+    summary       text NOT NULL DEFAULT '',
+    pricing_type  text NOT NULL DEFAULT 'fixed',      -- 'fixed'|'percentage'|'tiered'|'hybrid'
+    advantages    text NOT NULL DEFAULT '',           -- text input
+    disadvantages text NOT NULL DEFAULT '',           -- text input
+    limits        jsonb NOT NULL DEFAULT '{}'::jsonb, -- context ranges {monthly_cap, per_tx_max}
+    data          jsonb NOT NULL DEFAULT '{}'::jsonb, -- description, conditions, billing_period…
+    lang          text NOT NULL DEFAULT 'ru',
+    status        text NOT NULL DEFAULT 'active',
+    drafted_at    timestamptz,
+    provenance    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (kb_id, ref)
+);
+
+-- Shared tables gain the polymorphic owner pair (ai_assets also drops topic_slug):
+ALTER ai_values  ADD owner_kind text NOT NULL DEFAULT '',  ADD owner_ref text NOT NULL DEFAULT '',
+                 DROP review_state, ADD drafted_at timestamptz;
+ALTER ai_assets  DROP topic_slug,
+                 ADD owner_kind text NOT NULL DEFAULT '',  ADD owner_ref text NOT NULL DEFAULT '',
+                 DROP review_state, ADD drafted_at timestamptz;
+ALTER ai_topics  DROP review_state, ADD drafted_at timestamptz;
+```
+
+Notes:
+- A tariff's rate / fee / caps that the assistant must quote exactly → owned `ai_values`
+  (`owner_kind='tariff'`); purely illustrative ranges can stay in `limits` jsonb as
+  context the model paraphrases. `tiers` (for tiered plans) live in `data` jsonb.
+- The exact descriptive-column set on tariffs is tunable (could promote
+  `description`/`conditions`/`billing_period` out of `data` into columns) — the embedding
+  design doesn't depend on it.
 
 ---
 
-## Phase B — Backend — **NO-OP (G2 dropped)**
+## Integration touchpoints (spec for the follow-up implementation round)
 
-Locked: ship with `RuleSynthesizer`. No version/history work, no LLM synthesizer. The
-existing apply path + deterministic ingest cover v1. **The only backend-adjacent change is
-config**, handled in Phase C: enable `LLM_VISION_MODEL` in `.env` **and** the compose
-backend block so image auto-captioning works (this is required, see Phase C).
+1. **Domain** — [content.go](backend/internal/brain/domain/content.go): add `Product`,
+   `Tariff`, `snap.Products`, `snap.Tariffs`; `Value` and `Asset` gain `OwnerKind/OwnerRef`;
+   all owned values still flow into the one `ValueBook`.
+2. **Load** — [kbstore.go](backend/internal/kbstore/kbstore.go) `loadSnapshotContent`:
+   filter `drafted_at IS NULL`; add product/tariff scans; values/assets scans read owners.
+3. **System prompt** — [prompt.go](backend/internal/brain/prompt.go) `BuildSystem`: add
+   `PRODUCT CATALOG:` + `TARIFFS:` sections that list each entity with its owned **value
+   tokens** (so the model emits `{{price.nike_x}}`) and owned media refs; `MEDIA CATALOG:`
+   line becomes `ref | kind | owner | description`.
+4. **Approval gate** — relocate `gate` to approve-all / approve-element (Principle 2).
+5. **Draft store + API** — [draft.go](backend/internal/kbstore/draft.go),
+   [playground.go](backend/internal/httpapi/playground.go),
+   [server.go](backend/internal/httpapi/server.go): `GetDraft` returns all rows incl.
+   `drafted_at`; CRUD for products & tariffs mirroring `UpsertValue`; value/asset upserts
+   accept `owner_kind`/`owner_ref`; approve routes (`POST /playground/approve`,
+   `…/approve/:kind/:id`).
+6. **Frontend** — [KnowledgeBase.vue](frontend/src/views/KnowledgeBase.vue),
+   [types.ts](frontend/src/types.ts): new **"Товары"** / **"Тарифы"** tabs; each entity
+   editor shows its **owned values** (the embeddable tokens) and **owned media** grouped
+   under it, plus an "add media / add value" affordance; "pending" badges + per-row/bulk
+   **Approve** driven by `drafted_at`.
+7. **Synthesis (future)** —
+   [playground/builder.go](backend/internal/playground/builder.go) emits product/tariff
+   rows + owned values from materials, created with `drafted_at` set for approval.
 
 ---
 
-## Phase C — Frontend build (Vue 3 + shadcn-vue, Russian UI)
+## Deliverable for this round
 
-- [ ] **Plumbing** — `postForm<T>(path, FormData)` in [client.ts](frontend/src/api/client.ts) (asset/material multipart with extra fields); add KB SSE events (`kb.material.updated`, `kb.row.changed`, `kb.published`) to [sse.ts](frontend/src/lib/sse.ts).
-- [ ] **`stores/playground.ts`** — one method per `/playground/*` endpoint; shared `draft`/`materials`/`requests` state; `lastUpdatedAt` → `If-Match`; realtime refresh. Both pages share this store.
-- [ ] **`views/Playground.vue`** (Конструктор) — chat + materials + requests, per §6.
-- [ ] **`views/KnowledgeBase.vue`** (Редактор) — tabbed editor **Обзор/Темы/Медиа/Значения/Правки** (no История — versioning dropped), per §6b.
-- [ ] **Route + nav** — add `/playground` + `/knowledge-base` to [router.ts](frontend/src/router.ts); two rail icons in [NavRail.vue](frontend/src/components/NavRail.vue) (`MessagesSquare` "Конструктор", `Library` "База знаний").
-- [ ] **Vision (required)** — enable `LLM_VISION_MODEL` in [.env](.env) **and** add it to the compose backend block ([docker-compose.yaml:42-48](deploy/docker-compose.yaml#L42)); verify an image upload produces an auto-caption (no `describe_media` popup).
+Architecture doc only. Create **`docs/products-tariffs-and-media.md`** (new `docs/` dir at
+the xchats root, matching the `docs/NN` convention the brain comments reference). It
+contains Principles 0–2, the `0004` DDL + schema delta, and the integration checklist.
+**No migration is run, no Go/Vue code changes this round.**
 
----
+## Verification (doc round)
 
-## Verification (closes the original problem)
+- Confirm the `0004` DDL is consistent with
+  [0003_ai_kb.up.sql](backend/migrations/0003_ai_kb.up.sql) (FK + cascade, `provenance`,
+  `(kb_id, ref)` keys, polymorphic `owner_kind/owner_ref` on values + assets).
+- Confirm the embedding path is column-free: a `{{price.nike_x}}` token resolves through
+  `ai_values` only; no entity column is referenced anywhere in template text.
+- Walk one end-to-end example: create product `nike-x` (thin) + value `price.nike_x` +
+  photo `img-42`, all `owner_ref='nike-x'`, as drafts → playground shows them grouped &
+  pending → approve-all (gate passes) → a reply with `{{price.nike_x}}` renders `25 000 ₸`.
 
-1. `make test-frontend` (typecheck + build) + `make test-e2e` (playground integration) green.
-2. Rebuild (`make up`), open `:8081`, hard-refresh, log in.
-3. **Конструктор** → Open draft → add a text material + upload an image → resolve the `describe_media` popup → run a builder-chat instruction → confirm a `confirm_value` popup.
-4. **Редактор** → Темы/Медиа/Значения populated → approve in **Правки** → **Сохранить в базу**; confirm `brain KB reloaded` in `make logs` + `kb.published` SSE.
-5. **Inbox → Regenerate** a draft → it now reflects the richer KB with fewer escalations. ✔ original "same/generic" complaint resolved.
+## Open sub-decisions (in the doc, not blockers)
 
----
-
-# (Archived) Frontend visual overhaul — shadcn-vue + Linear-style minimal
-
-## Context
-
-The xchats frontend (Vue 3 + Vite + TS + Tailwind 3.4) is **well-built code** but
-reads as "cheap / school-project" because of a few *visual* choices, not architecture:
-default Tailwind indigo `#4F46E5` + bright WhatsApp green, gradients everywhere
-(logo, login panel, avatars), FontAwesome CDN icons, and oversized radii
-(`rounded-2xl`/`3xl`) — the "glittery candy" look.
-
-Goal: make it look like a premium SaaS tool (Linear/Front/Missive class) by adopting
-**shadcn-vue** (Reka UI + Tailwind, accessible copy-paste components we own) as the
-design system, themed in a **Linear-style minimal** direction: refined cool neutrals,
-one confident accent used sparingly, tight radii, hairline borders over heavy shadows,
-crisp dense type, **no gradients**. WhatsApp green is retained ONLY for message bubbles,
-the WA glyph, and the "connected" status dot.
-
-Stack stays on **Tailwind v3** (not v4) — shadcn-vue **v3 convention**: HSL CSS variables
-mapped in `tailwind.config.js`, `cssVariables: true`, `baseColor: slate`, default style,
-`tailwindcss-animate`.
-
-**Critical version note (resolve before starting).** As of late 2025 shadcn-vue's
-`@latest`/docs went **v4-only** (OKLCH colors, `@theme` CSS-first, `new-york` default
-style, `tw-animate-css` instead of `tailwindcss-animate`, `data-slot`). This entire plan
-is written against **v3**, which is the correct target for an existing v3 project. To
-avoid the v4 conventions silently overriding the plan:
-- **Pin the CLI to a v3-era `shadcn-vue`** (do NOT use `@latest`). Verify the resolved
-  version targets v3 before running `init`.
-- Follow **v3.shadcn-vue.com** for ALL component snippets / `add` flows — current docs are v4.
-- **Inspect `init` output before committing.** If it scaffolds `@theme`/OKLCH tokens or
-  pulls `tw-animate-css`, it went v4 — abort, re-pin, and redo. The plan expects HSL vars
-  in `tailwind.config.js` + `tailwindcss-animate`.
-
-The app must keep working and building at every step. Legacy tokens + the
-`@layer components` bridge stay live until each consumer is migrated; removed only in
-final cleanup. Commit after each screen so regressions are bisectable.
-
-## Phase 1 — Setup (zero visual change)
-
-- **Path alias `@/` → `src`** in BOTH (must match or typecheck breaks):
-  - `frontend/vite.config.ts`: add `resolve.alias` via `fileURLToPath(new URL('./src', import.meta.url))` (keep `server.proxy` + `build`).
-  - `frontend/tsconfig.json`: add `"baseUrl": "."` and `"paths": { "@/*": ["./src/*"] }`.
-- **Deps** — runtime: `reka-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-vue-next`, `@vueuse/core`. dev: `tailwindcss-animate`.
-- **`cn()` util** → `frontend/src/lib/utils.ts` (clsx + twMerge).
-- **`shadcn-vue init` (pinned v3 CLI, not `@latest`)** with `components.json`: framework
-  `vite`, `style: default`, `tailwind.config: tailwind.config.js`, `css: src/style.css`,
-  `baseColor: slate`, `cssVariables: true`. Confirm output is HSL + `tailwindcss-animate`
-  (see Critical version note). **Merge, don't overwrite** its edits against existing
-  `theme.extend` tokens, `boxShadow`, `fontFamily`, and the `@layer components` block +
-  scrollbar CSS in `style.css` — review the diff and re-add anything dropped.
-- Gate: `npm run typecheck && npm run build && npm run dev` all green, no visual change.
-
-## Phase 2 — Theme tokens (Linear minimal)
-
-- Merge HSL `:root` (light) + `.dark` blocks into `frontend/src/style.css`; set
-  `darkMode: ['class']` and the `border/input/ring/background/foreground/primary/...`
-  color mappings + `borderRadius: var(--radius)` in `tailwind.config.js`.
-- Token intent (space-separated H S% L%): cool near-white `--background`, ink
-  `--foreground 222 47% 11%`, `--primary 243 75% 59%` (reuse `#4F46E5` so accent doesn't
-  shift), `--muted-foreground 215 16% 47%`, hairline `--border 220 16% 91%`,
-  `--ring = --primary`, **`--radius: 0.5rem`** (tight). `.dark` = deep cool charcoal
-  (`--background 224 30% 8%`), lifted primary `243 80% 67%`.
-- Add shadcn tokens **alongside** legacy `brand/wa/ink/muted/panel/hair/rail` — inert
-  until reskin references `bg-background`/`text-foreground`/`border-border`.
-- **Dark-mode wiring (default light):** set `document.documentElement.classList` from a
-  localStorage pref in `main.ts`/`App.vue`. No UI toggle required for v1, BUT **actually
-  toggle `.dark` on `<html>` in devtools on every screen during Phase 4** — otherwise dark
-  tokens rot silently until someone enables them. This is a verification obligation, not optional.
-- Gate: build green, still no visual change.
-
-## Phase 3 — Primitives (add + verify one at a time)
-
-`shadcn-vue add <name>` (pinned v3 CLI, NOT `@latest`) → lands in `src/components/ui/<name>/`.
-Minimum set: **Button, Input, Textarea, Dialog, DropdownMenu, Select, Badge, Avatar,
-Skeleton, Tabs, Tooltip, Separator** (ScrollArea optional — existing scrollbar CSS already clean).
-
-- Button replaces `.btn*`/`.icon-btn` (variants: default=primary, outline=ghost,
-  secondary, ghost, destructive, `size=sm|icon`). **Decision (up front, not per-screen):
-  the send button uses `default` (primary), NOT a green `wa` variant** — a green send
-  button reintroduces the exact two-accent look we're removing. Green stays confined to
-  message bubbles, the WA glyph, and the connected dot. Do not add a `wa` cva variant.
-- **After adding EACH component run `npm run typecheck`** — generated `ui/` files can
-  carry unused imports that fail `vue-tsc --noEmit` in `build` while `dev` passes. This is
-  the single most likely CI break; prune unused symbols immediately.
-
-## Phase 4 — Per-screen reskin (simplest first, commit each)
-
-Swap legacy→semantic classes per screen: `bg-white/bg-panel`→`bg-background/bg-card`,
-`text-ink`→`text-foreground`, `text-muted/text-slate-*`→`text-muted-foreground`,
-`border-hair`→`border-border`, `bg-brand/text-brand/bg-brand-soft`→`bg-primary/text-primary/bg-accent`,
-`ring-brand/10`→`ring-ring`; downshift `rounded-2xl/3xl`→`rounded-lg/xl`; kill gradients
-(logo `from-indigo-500 to-violet-500`→solid `bg-primary`; login orbs/panel→flat). Swap
-FontAwesome `<i>`→`lucide-vue-next` components inside each screen (spinners→`<Loader2 class="animate-spin"/>`).
-**Preserve all Russian labels and emit/store contracts verbatim.**
-
-Order:
-1. **Login.vue** — validates Button/Input/icon/token pipeline on a low-risk screen.
-2. **AddAccountDialog.vue + NewMessageDialog.vue** — to Reka Dialog + Select + Input/Textarea;
-   keep `@close`/`@connected` emits via `@update:open` and AddAccount's QR-polling lifecycle.
-3. **NavRail.vue** — DropdownMenu (user menu), Avatar, `WhatsappIcon`; keep `w-[68px]`.
-4. **ChatList.vue** — Input search, Tabs/segmented filter, Select (account), Avatar, Badge
-   (unread), FAB→Button `size=icon`; keep `w-[340px] border-r`.
-5. **ChatThread.vue** — header Buttons + DropdownMenu, Avatar, bubbles (**keep `bg-wa`
-   out-bubbles**, in-bubbles→`bg-card border-border`), `tick()` refactor.
-6. **Composer.vue** — Textarea (keep `v-autosize`), send Button, icon buttons.
-7. **AssistantPanel.vue** — Skeleton (shimmer), Badge (confidence), Textarea (draft,
-   autosize), Button actions, `mediaMeta` lucide map; kill header gradient; keep `w-[340px] border-l`.
-8. **Accounts.vue + InstancesMaintenance.vue** — Buttons, Badges, cards→`rounded-lg border-border`.
-
-**Icons/status in logic** (`frontend/src/lib/format.ts`): **keep `format.ts` pure** —
-refactor `tick()` and `connStatus()` to return a plain discriminant
-(e.g. `'sent' | 'delivered' | 'read' | 'failed'`, `'connected' | 'disconnected' | ...`),
-and map discriminant → lucide component + class / Badge variant **in the component**
-(ChatThread, Accounts). Avoids coupling a formatting util to UI components. Do this once
-their consumers are migrated. **`WhatsappIcon.vue`** (inline WA SVG) under
-`src/components/icons/` since lucide has no brand glyph.
-
-Preserve the 3-pane layout structure (`flex h-full`, `shrink-0`, `min-w-0`, fixed widths) —
-reskin inside panes only.
-
-## Phase 5 — Cleanup
-
-Remove `@layer components` (`.btn*/.field/.card/.badge/.icon-btn`) and legacy tokens
-(`brand*/ink/muted/panel/hair/rail`, unused `boxShadow`) from `style.css`/`tailwind.config.js`;
-remove FontAwesome `<link>` from `index.html` (update `theme-color`). Re-grep to confirm
-zero hits: `class="fa`, `bg-brand|border-hair|bg-panel|text-ink`, `gradient|from-|to-`.
-
-## Verification
-
-- After every step: `npm run typecheck` (fastest signal; catches alias + unused-import traps).
-- After setup/theme/each screen: `npm run dev`, eyeball affected screen (no gradients, tight
-  radii, hairline borders, one accent); toggle `.dark` on `<html>` in devtools.
-- Before each commit + final: `npm run build` (the CI gate — green `dev` ≠ green `build`).
-- Functional smoke (dev `/xchats` proxy → `localhost:8080`): login, chat list, open thread,
-  send message, AssistantPanel suggest, Add-Account dialog (QR polling), account-filter
-  Select, NavRail menu + logout — exercises every migrated component + preserved contracts.
-- Final grep gates (expect zero hits) as listed in Phase 5.
-
-## Critical files
-
-- `frontend/vite.config.ts` + `frontend/tsconfig.json` — `@/`→`src` alias (must match).
-- `frontend/src/lib/utils.ts` — new `cn()`.
-- `frontend/tailwind.config.js` — shadcn color mappings, `darkMode`, radius; later strip legacy.
-- `frontend/src/style.css` — HSL `:root`/`.dark` token set; later remove `@layer components`.
-- `frontend/src/lib/format.ts` — `tick()`/`connStatus()` refactor to pure discriminants (mapped to icons/variants in components).
-- `frontend/src/components/ChatThread.vue` — most complex consumer; canonical test of theming + icons + WA-green retention.
-- `frontend/index.html` — remove FontAwesome CDN at the end.
+- Media/value reuse across entities (single owner now vs a join table later).
+- Which tariff descriptors stay in `data` jsonb vs get promoted to columns.
+- Config drafting shape (`pending jsonb` overlay vs shadow row).
+- Whether `inactive` products/tariffs are dropped from the prompt entirely (lean yes).
