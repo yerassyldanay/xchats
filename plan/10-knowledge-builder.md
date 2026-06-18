@@ -14,32 +14,50 @@ corrects. This is the authoring front-end to the brain's `xchats.ai_*` tables (r
 ## Why automatic is safe here (the unlock)
 
 An auto-generated KB row cannot reach a customer without passing **three independent gates**, so the
-builder can be aggressive:
+builder can be aggressive. There is **one living KB per org** — the brain reads the **live** rows; the
+builder's new rows are held out as **pending** until a human lets them in:
 
-1. **The builder writes only a *draft* Snapshot** (`ai_snapshots.snapshot_state='draft'`) — never live.
-2. **Human review + publish.** Publish runs the deterministic gate (price-safety = 1.0, asset precision
-   ≥ 0.9 — `8-ai-assistant.md` → Evals) and is the only path draft → live.
+1. **The builder writes rows as *pending*** (`drafted_at` set) — never live. A pending row shows in the
+   playground/editor but is excluded from the prompt.
+2. **Human approval.** Approving a row (or all) runs the deterministic gate (price-safety = 1.0, asset
+   precision ≥ 0.9 — `8-ai-assistant.md` → Evals) and is the **only** path pending → live (it clears
+   `drafted_at`).
 3. **Customer-facing is suggest-and-approve.** Every reply is human-approved before send.
 
-A builder mistake must survive an editor, a publish gate, **and** a draft-reviewer to do harm.
+A builder mistake must survive an editor, the approve gate, **and** a draft-reviewer to do harm.
 
 ---
 
 ## What it builds — the KB blocks
 
-A Snapshot is a few **config blocks** + a list of **topics** (each a container of text + media) + a
-**price book**. The builder produces all of it; the editor page exposes all of it.
+The KB is a few **config blocks** + a list of **topics** (each a container of text + media) +
+**products** + **tariffs** + the **values** (the single source of numbers, as tokens). The builder
+produces all of it; the editor page exposes all of it. It is **one living KB** — rows are live or
+pending (`drafted_at`), not draft vs. published copies.
 
 ```
-SNAPSHOT (draft → published)
+KB  (one living KB per org — rows are live or pending via drafted_at)
 ├─ Identity     who the assistant is — persona, tone            (ai_snapshots.persona)
 ├─ Goal         what it must achieve — mission, what "good" is  (ai_snapshots.mission)
 ├─ Guardrails   quality & support rules — must / must-not       (ai_snapshots.guardrails, language_policy)
 ├─ Topics[]     the knowledge — each a CONTAINER:
-│   ├─ body_md      the answer text (price TOKENS, never digits) (ai_topics)
-│   └─ media[]      attached assets, EACH WITH ITS OWN description (ai_assets, topic_slug → topic)
+│   ├─ body_md      the answer text (value TOKENS, never digits) (ai_topics)
+│   └─ media[]      OWNED assets, EACH WITH ITS OWN description  (ai_assets, owner_kind=topic)
+├─ Products[]   sellable items — THIN/descriptive               (ai_products: name, description, category, data)
+│   ├─ price + numbers  OWNED value tokens                      (ai_values, owner_kind=product)
+│   └─ media[]          OWNED assets                            (ai_assets, owner_kind=product)
+├─ Tariffs[]    pricing PLANS — independent of products         (ai_tariffs: pricing_type, advantages/disadvantages, limits)
+│   ├─ rate/fee/caps     OWNED value tokens                     (ai_values, owner_kind=tariff)
+│   └─ media[]           OWNED assets                           (ai_assets, owner_kind=tariff)
 └─ Values       the single source of numbers (prices, limits, counts…), as tokens  (ai_values)
 ```
+
+**Products and tariffs.** An `ai_products` row is a **sellable item** kept thin and descriptive (name,
+description, category, `data jsonb`) — its **price and quotable numbers are OWNED `ai_values` rows**, and
+its photos are **OWNED `ai_assets` rows**. An `ai_tariffs` row is a **pricing plan**
+(`pricing_type` ∈ fixed/percentage/tiered, `advantages`/`disadvantages` text, `limits jsonb`) — its
+quotable numbers (rate/fee/caps) are likewise **OWNED `ai_values` rows**. Products and tariffs are
+**independent** — there are no links between them.
 
 **Identity / Goal / Guardrails** are the "what must this assistant achieve" blocks the operator writes
 in plain language (e.g. Goal = "qualify the lead and present the right tariff"; Guardrails = "always
@@ -47,8 +65,10 @@ warm, never pushy, escalate on anything off-KB"). They become prompt blocks `[B]
 
 ### A topic is a container of media — each asset has its own description
 
-This is the core model. A single topic groups everything about one subject, and holds **several media
-assets**, because *which one to send depends on the moment*:
+This is the core model, and it is **polymorphic**: media and values attach to **any** entity — a topic,
+a product, or a tariff — via one shared `(owner_kind, owner_ref)` pair on `ai_assets` and `ai_values`.
+So "add media to a topic / product / tariff" is **one mechanism**. A single topic groups everything
+about one subject, and holds **several media assets**, because *which one to send depends on the moment*:
 
 ```
 topic: tariffs   body_md: "4 tariffs … {{price.start}} / {{price.growth}} …"
@@ -62,35 +82,42 @@ At answer time the brain sees the topic body **and** every asset's description, 
 asset(s) by `ref` (max 3) — a video for one customer, an image for another. **Each asset's description
 is its selection cue** (what it shows + when to send it); that's why every asset needs its own, and why
 the builder's job per file is "store the bytes + write that one sentence" (auto, or by asking — below).
+The same mechanism applies one level out: **a product can own its photos** exactly this way — each photo
+is an `ai_assets` row with `owner_kind=product` and its own description.
 
 ---
 
-## Two surfaces over one draft
+## Two surfaces over one living KB
 
-The chat and the editor edit the **same** draft Snapshot — no sync problem, just two speeds.
+The chat and the editor edit the **same** living KB — no sync problem, just two speeds. New rows land
+**pending** (`drafted_at` set), held out of the prompt until approved.
 
 ```
    material (URLs, media, text)
             │
             ▼
    ┌──────────────────┐   creates / updates    ┌────────────────────────────┐
-   │  BUILDER CHAT    │──────  ai_* rows  ─────▶│  draft Snapshot (ai_*)      │
-   │  bulk intake     │                         └────────────────────────────┘
-   │  + proactive Qs  │◀── popups (requests) ──▶            ▲
-   └──────────────────┘                                     │ CRUD + accept/deny/edit
+   │  BUILDER CHAT    │──────  ai_* rows  ─────▶│  LIVING KB (ai_*)           │
+   │  bulk intake     │       (as pending)      │  live rows + pending rows   │
+   │  + proactive Qs  │◀── popups (requests) ──▶└────────────────────────────┘
+   └──────────────────┘                                     ▲
+                                                            │ CRUD + approve/delete/edit
                                                             │
                                           ┌────────────────────────────────────┐
                                           │  KB EDITOR PAGE                      │
-                                          │  topics · media · identity/goal ·   │
-                                          │  prices · provenance · Publish      │
+                                          │  topics · products · tariffs ·       │
+                                          │  media · identity/goal · values ·    │
+                                          │  provenance · Approve                │
                                           └────────────────────────────────────┘
 ```
 
-- **Builder chat** — the fast path. Drop material, the assistant creates many rows and asks when unsure.
-- **KB editor page** — the precise path. A structured view of the draft: the config blocks, the topic
-  list (expand a topic → its body + its media gallery, each asset with its description), the price book.
-  Every row is editable and shows **provenance** ("created from: chat msg #12 / source: <url>").
-  A **Publish** button runs the gate and swaps the snapshot live.
+- **Builder chat** — the fast path. Drop material, the assistant creates many (pending) rows and asks
+  when unsure.
+- **KB editor page** — the precise path. A structured view of the KB: the config blocks, the topic
+  list (expand a topic → its body + its media gallery, each asset with its description), products,
+  tariffs, and the values. Pending rows are visibly flagged. Every row is editable and shows
+  **provenance** ("created from: chat msg #12 / source: <url>"). An **Approve** button runs the gate and
+  clears `drafted_at` on the selected rows (or all), letting the brain read them.
 
 ---
 
@@ -100,8 +127,9 @@ Every input, whatever its type, is driven to **text**, then structured into the 
 
 1. **Ingest** — accept a URL, file, or message.
 2. **Normalize to text** — extract the content (table below).
-3. **Structure** — create/append a topic, attach assets, propose price tokens, suggest identity/goal
-   edits. Each generated row is tagged `proposed` with its provenance.
+3. **Structure** — create/append a topic, attach assets to any entity, register products & tariffs,
+   propose value tokens, suggest identity/goal edits. Each generated row is written **pending**
+   (`drafted_at` set) with its provenance.
 4. **Ask when unsure** — anything ambiguous or unextractable becomes a **request** (a popup), not a
    guess. The builder is **proactive**: it confirms prices, proposes merges, and requests missing
    descriptions before the row is considered done.
@@ -125,66 +153,74 @@ Every input, whatever its type, is driven to **text**, then structured into the 
 
 The builder can't block waiting on a human, so it emits structured **requests** that the UI renders as
 **popups/modals**. This is a human-in-the-loop tool call: the builder "calls a tool" that needs human
-input; the popup is that tool's UI; the operator's answer is the tool result, which mutates the draft
-and lets the builder continue.
+input; the popup is that tool's UI; the operator's answer is the tool result, which mutates the pending
+row and lets the builder continue.
 
-A request = `{ id, type, prompt, context (thumbnail/topic/detected value), target draft row, state }`,
+A request = `{ id, type, prompt, context (thumbnail/topic/detected value), target row, state }`,
 `state ∈ {pending, resolved, dismissed}`.
 
 | Request type | Popup asks | Resolves into |
 |---|---|---|
-| `describe_media` | text — "Describe what this shows and when to send it." | `ai_assets.description` (+ kind/topic) |
-| `confirm_price` | accept / edit — "Map '25 000 ₸' → `{{price.growth}}`?" | a `ai_values` token + value (never a digit in text) |
-| `approve_topic` / `approve_asset` | **accept · deny · edit** | flips the row's `review_state` |
-| `resolve_duplicate` | merge · keep both | dedup / merge of topics or assets |
-| `choose_topic` | pick / create — "Which topic does this image belong to?" | the asset's `topic_slug` |
+| `describe_media` | text — "Describe what this shows and when to send it." | `ai_assets.description` (+ kind, owner) |
+| `confirm_value` / `confirm_price` | accept / edit — "Map '25 000 ₸' → `{{price.growth}}`?" | a `ai_values` token + value (never a digit in text); can target a product/tariff via `owner_kind/owner_ref` |
+| `resolve_duplicate` | merge · keep both | dedup / merge of topics, products, tariffs, or assets |
+| `choose_topic` | pick / create — "Which entity does this belong to?" | the asset's/value's owner (`owner_kind/owner_ref` → topic, product, or tariff) |
 | `comment` | free text the builder reads next turn | a note steering the next build step |
 
 **Where they appear:** inline as cards in the builder chat **and** as a **review-queue badge** on the
-editor page; clicking either opens the modal. **Unresolved `pending` requests are surfaced at publish**
-(e.g. an asset with no description, or an unconfirmed price blocks publish — they'd fail the gate
-anyway). Resolving a request updates the draft row, marks the request `resolved`, and (via the realtime
+editor page; clicking either opens the modal. **Unresolved `pending` requests are surfaced at approve**
+(e.g. an asset with no description, or an unconfirmed value blocks approving its row — it'd fail the gate
+anyway). Resolving a request updates the pending row, marks the request `resolved`, and (via the realtime
 channel) nudges the builder to proceed.
 
-**Row review states** make accept/deny first-class: every auto-created row starts `proposed`; the
-operator can **accept** (`approved`), **edit** (`approved`, edited), or **deny** (`rejected`). Publish
-includes approved rows only; rejected rows are kept for provenance but excluded.
+**Approve / delete** is the row-level control, expressed through `drafted_at`: every auto-created row
+starts **pending** (`drafted_at` set). The operator **approves** — per-row or all — which clears
+`drafted_at` after running the deterministic gate, the only path pending → live; or **deletes** (reject =
+delete the pending row). Editing a pending row leaves it pending until approved.
 
-> Storage: the draft `ai_topics` / `ai_assets` / `ai_values` rows gain two lightweight, **draft-side**
-> fields — `review_state` and `provenance` (source ref) — and requests live in a small `ai_builder_requests`
-> queue keyed to the draft snapshot. All additive; the **live** runtime tables and the brain are
-> untouched. Exact DDL folds into `9-database-schema.md` when this phase lands.
+> Storage: a pending `ai_topics` / `ai_products` / `ai_tariffs` / `ai_assets` / `ai_values` row carries
+> `drafted_at` (NULL = live, set = pending) and `provenance` (source ref) — there is **no** `review_state`
+> enum; requests live in a small `ai_builder_requests` queue. All additive on the **one living KB**; the
+> brain simply filters `drafted_at IS NULL`. Exact DDL folds into `9-database-schema.md` when this phase lands.
 
 ---
 
 ## Prices — the one thing never auto-written
 
-Numbers are the only place an extraction error is shippable harm (a wrong/stale price). So the builder
-**never bakes a digit into a topic body**: on detecting a price/limit it writes a `{{token}}` and raises
-a `confirm_price` popup; the real number lands in the price book **only** by human confirmation. This is
-the same token discipline the runtime enforces (`8-ai-assistant.md` → Prices).
+Numbers are the only place an extraction error is shippable harm (a wrong/stale price). This applies to
+**every** number — product prices, tariff rates, limits, counts — not just topic prices. **Embedding is
+column-free:** the only way to put a value into any text is `{{namespace.key}}`, resolved from
+`ai_values`. Entity tables hold **no** embeddable numbers — a product's price is an owned value token
+(e.g. `price.nike_x`), a tariff's rate is `rate.<plan>`. So the builder **never bakes a digit anywhere**:
+on detecting a price/rate/limit it writes a `{{token}}` and raises a `confirm_value` / `confirm_price`
+popup; the real number enters `ai_values` **only** by human confirmation. Products and tariffs are thus
+confirmed number **sources**. This is the same token discipline the runtime enforces
+(`8-ai-assistant.md` → Prices).
 
 ## Provenance & dedup
 
 - **Provenance** — every generated row records what produced it (chat message, URL, file), shown in the
   editor so a reviewer can check a summary against its source in one click.
-- **Dedup / merge** — re-feeding the same URL or an overlapping topic raises `resolve_duplicate` rather
-  than silently creating a twin; topics are containers, so a new tariff image **appends** to the
-  existing `tariffs` topic instead of forking it.
+- **Dedup / merge** — re-feeding the same URL or an overlapping entity raises `resolve_duplicate` rather
+  than silently creating a twin; topics (and products/tariffs) are containers, so a new tariff image
+  **appends** to the existing `tariffs` topic instead of forking it.
 
-## Publish → live
+## Approve → live
 
-Publish validates the draft (every asset description present, every price token resolves, no dangling
-media URLs — the deterministic gate), then atomically swaps it live and reloads the brain's snapshot.
-Rollback re-publishes a prior version. From there the brain answers from it, suggest-only.
+There is no atomic snapshot swap and no rollback — the KB is one living set of rows. **Approving**
+validates the pending rows being approved (every asset has a description, every `{{token}}` resolves, no
+dangling media, no literal currency in topic bodies, tokens unique — the deterministic gate), then
+**clears `drafted_at`** on those rows. The brain reloads its live view (`drafted_at IS NULL`) and answers
+from it, suggest-only.
 
 ---
 
 ## Build notes / sequencing
 
 - **Reuses, doesn't change, the runtime.** The builder writes the same `ai_*` blocks the brain already
-  reads; the `topic_slug` container model and per-asset `description` already exist (the xpayment seed's
-  `tariffs` topic with its four cards is the worked example). No brain changes.
+  reads; the `(owner_kind, owner_ref)` container model and per-asset `description` already exist (the
+  xpayment seed's `tariffs` topic with its four cards is the worked example). The brain just filters
+  `drafted_at IS NULL`. No brain changes.
 - **First build (Phase 4B):** the builder chat + editor page + the request/popup primitive, with
   **text/URL auto-structuring** and **`describe_media` popups** for media (operator-described). This is
   fully chat-driven without any vision/transcription dependency.
