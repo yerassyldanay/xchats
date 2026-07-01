@@ -289,8 +289,9 @@ brain) or **PENDING** — a row with `drafted_at` set is a **«Черновик�
 **approving** it clears `drafted_at` and makes it live. Both KB pages edit the **same living KB** and
 share `stores/playground.ts`.
 
-> **Values are tokens.** A value is embedded in any text only as a `{{TOKEN}}` (from **Значения**) —
-> **never** a raw number. Products and tariffs keep their prices/rates as value tokens too.
+> **Facts are typed columns, quoted as tokens.** An exact fact is embedded in any text only as a
+> `{{table.slug.field}}` token — **never** a raw number. Product/tariff prices and org contacts are **typed
+> columns** (verbatim, one row per language) on `ai_products` / `ai_tariffs` / `ai_contacts`.
 
 ### Filled state
 
@@ -311,12 +312,12 @@ Populated KB — several topics, products, tariffs, media and values, with a han
   with thumbnails; "Предложенные изменения" summaries whose new rows carry an amber **«Черновик»**
   badge) and a **composer** (text + attach).
 - **One-click:** header **Сохранить в базу** (approve all pending) / **Отменить изменения** (discard);
-  right rail **"Обзор базы знаний"** tiles (Темы · Товары · Тарифы · Медиа-ресурсы · Значения), **"Запросы
+  right rail **"Обзор базы знаний"** tiles (Темы · Товары · Тарифы · Медиа-ресурсы · Контакты), **"Запросы
   AI"** popup cards (confirm / describe), **"Последние изменения"**, and a **readiness** bar (how many
   **«Черновик»** rows remain). A pending bubble's row can also be approved **one at a time** via a
   **«Подтвердить»** action.
 - **v1 builder is deterministic** (`RuleSynthesizer`): the "AI ассистент" turn concatenates `ready`
-  materials into a topic and regex-detects ₸ values (emitting them as `{{TOKEN}}` value rows) — its
+  materials into a topic and regex-detects ₸ values (raising `confirm_fact` popups to set a typed column) — its
   replies **summarize what it synthesized** as **pending** («Черновик») rows, they are **not** a
   conversational LLM (an LLM synthesizer is a later upgrade). Image materials without `LLM_VISION_MODEL`
   create a `describe_media` popup instead of an auto-caption.
@@ -327,7 +328,7 @@ Populated KB — several topics, products, tariffs, media and values, with a han
   `POST /playground/chat {instruction}` → `{result, draft}` (builder turn);
   `POST /playground/draft/materials` (multipart `file` **or** `{source_type,text,url}`) + live
   `kb.material.updated`; `GET /playground/requests` + `POST /playground/requests/{id}/resolve`
-  (`confirm_value`→`{value_text}`, `describe_media`→`{description}`);
+  (`confirm_fact`→`{table,slug,field,lang,value}`, `describe_media`→`{description}`);
   `POST /playground/draft/approve` ("Сохранить в базу" — gate over all **pending** rows, **422** if it
   fails, clears their `drafted_at`, then hot-reloads the brain + `kb.approved`) and
   `POST /playground/draft/approve/{kind}/{id}` (approve a **single** pending row). Overview tiles +
@@ -343,7 +344,7 @@ Center: a chat thread — operator messages right, "AI ассистент" messa
 tile, an uploaded-image bubble with a thumbnail, and a light "Предложенные изменения" card with chips,
 where freshly-added rows carry a small amber "Черновик" badge and a tiny "Подтвердить" link; a bottom
 composer with a paperclip and a text field. Right column: an "Обзор базы знаний" card of small stat
-tiles (Темы, Товары, Тарифы, Медиа-ресурсы, Значения), a "Запросы AI" list of small popup cards each
+tiles (Темы, Товары, Тарифы, Медиа-ресурсы, Контакты), a "Запросы AI" list of small popup cards each
 with a confirm/▷ action, and a "Последние изменения" list. Soft shadows only on menus, tight corners.*
 
 ### Empty state
@@ -357,7 +358,7 @@ thread, and a primary call-to-action. The right rail shows **zeros** / «ещё 
 │N │ Конструктор   [Сохранить ⌀][Отмен.] │ Обзор базы знаний     │
 │a │                                      │  Темы 0 · Товары 0    │
 │v │        ✦ База знаний пуста           │  Тарифы 0 · Медиа 0   │
-│  │   Перетащите материалы сюда или      │  Значения 0           │
+│  │   Перетащите материалы сюда или      │  Контакты 0           │
 │  │   [＋ Добавить первую тему]          │ Запросы AI: ещё нет   │
 │  │   (illustration · onboarding)        │ Последние изм.: пусто │
 │  │ [ composer: текст + 📎 ]            │ Готовность: ▢▢▢ пусто │
@@ -383,7 +384,7 @@ UI. Header "Конструктор базы знаний" with a DISABLED greyed
 box/inbox), a heading "База знаний пуста", grey subtext "Перетащите материалы сюда или добавьте первую
 тему, товар или тариф", a primary indigo "Добавить первую тему" button and a ghost "Загрузить материалы"
 button with a paperclip; a bottom composer with a paperclip and text field. Right column: an "Обзор базы
-знаний" card whose tiles all read 0 (Темы 0, Товары 0, Тарифы 0, Медиа-ресурсы 0, Значения 0), a "Запросы
+знаний" card whose tiles all read 0 (Темы 0, Товары 0, Тарифы 0, Медиа-ресурсы 0, Контакты 0), a "Запросы
 AI" card saying "ещё нет запросов", a "Последние изменения" card saying "пока пусто", and an empty
 readiness bar. Calm, inviting onboarding feel, tight corners, soft shadows only on menus.*
 
@@ -397,18 +398,19 @@ is **LIVE** or **PENDING** (`drafted_at` set ⇒ a **«Черновик»** badg
 approving clears `drafted_at`. The **«Правки»** tab is the list of all **pending** rows (across topics,
 products, tariffs, media and values).
 
-> **Values are tokens.** A value is embedded in any text only as a `{{TOKEN}}` (from **Значения**) —
-> **never** a raw number. Products and tariffs keep their prices/rates as value tokens too.
+> **Facts are typed columns, quoted as tokens.** An exact fact is embedded in any text only as a
+> `{{table.slug.field}}` token — **never** a raw number. Product/tariff prices and org contacts are **typed
+> columns** (verbatim, one row per language) on `ai_products` / `ai_tariffs` / `ai_contacts`.
 
-The editor tabs are **Обзор · Темы · Товары · Тарифы · Медиа-ресурсы · Значения · Правки**:
-- **Товары** (products) — thin records: **name**, **description**, **category**, a **`data`**
-  key-value attributes editor, plus the product's **owned media** (attached files) and **owned values**
-  (its price as a `{{TOKEN}}`).
-- **Тарифы** (tariffs) — pricing **plans**: **name**, **summary**, **pricing_type** (fixed /
-  percentage / tiered), **advantages** & **disadvantages** (text), a **limits** (json / key-value)
-  editor, **owned values** (rate / fee `{{TOKEN}}`s) and **owned media**.
+The editor tabs are **Обзор · Темы · Товары · Тарифы · Медиа-ресурсы · Контакты · Правки**:
+- **Товары** (products) — **name**, **PRICE** (typed column, verbatim, per language), **description**,
+  **category**, a **`data`** key-value attributes editor, plus the product's **owned media** (attached files).
+- **Тарифы** (tariffs) — pricing **plans**: **name**, **PRICE** / **LIMIT_TEXT** / **FEE** (typed columns,
+  verbatim, per language), **summary**, **pricing_type** (fixed / percentage / tiered), **advantages** &
+  **disadvantages** (text), and **owned media**.
 - **Медиа-ресурсы** now attach to **any entity** — each media item shows its **owner** (тема / товар /
-  тариф, or global). **Значения** likewise can belong to a product / tariff or be **global**.
+  тариф, or global). **Контакты** holds the org support scalars (whatsapp / email / address / legal /
+  callback_time), one row per language.
 
 ### Filled state
 
@@ -418,14 +420,14 @@ rows. The normal tabbed editor layout.
 ```
 ┌──┬──────────────────────────────────────────────────────┬────────────────┐
 │N │ Редактор базы знаний                     [Сохранить]  │ Быстрый доступ │
-│a │ [Темы 12][Товары 9][Тарифы 4][Медиа 15][Знач. 8][Прав.4]│ Последние изм. │
-│v │ Обзор · Темы · Товары · Тарифы · Медиа · Значения · Правки│ Готовность ▓▓░ │
-│  │ list ┆ row editor (name/data/limits · {{TOKEN}}/медиа)  │ Черновиков: 4  │
+│a │ [Темы 12][Товары 9][Тарифы 4][Медиа 15][Конт. 8][Прав.4]│ Последние изм. │
+│v │ Обзор · Темы · Товары · Тарифы · Медиа · Контакты · Правки│ Готовность ▓▓░ │
+│  │ list ┆ row editor (name/data/limits · цена/лим./медиа)  │ Черновиков: 4  │
 └──┴──────────────────────────────────────────────────────┴────────────────┘
 ```
 
-- **Core:** stat cards (**Темы / Товары / Тарифы / Медиа-ресурсы / Значения / Правки**) and tabs
-  **Обзор · Темы · Товары · Тарифы · Медиа-ресурсы · Значения · Правки** — each tab lists its rows
+- **Core:** stat cards (**Темы / Товары / Тарифы / Медиа-ресурсы / Контакты / Правки**) and tabs
+  **Обзор · Темы · Товары · Тарифы · Медиа-ресурсы · Контакты · Правки** — each tab lists its rows
   (pending rows carry an amber **«Черновик»** badge) and an inline editor.
 - **One-click:** header **Сохранить в базу** (approve all pending); per **«Черновик»** row a
   **«Подтвердить»** (approve one) action; right rail **"Быстрый доступ"**, **"Последние изменения"**,
@@ -438,8 +440,8 @@ rows. The normal tabbed editor layout.
   /playground/draft/topics[/{slug}]`; products `POST/DELETE /playground/draft/products[/{ref}]`;
   tariffs `POST/DELETE /playground/draft/tariffs[/{ref}]`; assets `POST` (multipart) `/PATCH /DELETE
   /playground/draft/assets[/{ref}]` accepting `owner_kind`/`owner_ref` (attach to topic|product|tariff);
-  values `POST/DELETE /playground/draft/values[/{token}]` also accepting `owner_kind`/`owner_ref`
-  (global, or owned by a product|tariff); config `PATCH /playground/draft/config`. **«Правки»** lists
+  contacts `PATCH /playground/draft/contacts` (org support scalars, per lang — product/tariff prices are
+  typed columns set via their own `products`/`tariffs` upserts); config `PATCH /playground/draft/config`. **«Правки»** lists
   the rows with `drafted_at` set; **Сохранить в базу** = `POST /playground/draft/approve` (approve all,
   gate-checked → **422** on failure) and per-row **«Подтвердить»** = `POST
   /playground/draft/approve/{kind}/{id}` — both clear `drafted_at` and hot-reload the brain. Stat cards
@@ -451,12 +453,12 @@ rows. The normal tabbed editor layout.
 **Image prompt:** *Knowledge-base "editor" page in the XChats shell (flat dark slate rail),
 Linear-minimal, light theme, NO gradients, hairline borders, one indigo accent, Russian UI. Header
 "Редактор базы знаний" with a primary indigo "Сохранить в базу" (NO "История", NO "Версия"). A row of
-stat cards: Темы, Товары, Тарифы, Медиа-ресурсы, Значения, Правки. A tab strip "Обзор · Темы · Товары ·
-Тарифы · Медиа-ресурсы · Значения · Правки". Below, a two-pane editor: a left list of rows (e.g. on the
+stat cards: Темы, Товары, Тарифы, Медиа-ресурсы, Контакты, Правки. A tab strip "Обзор · Темы · Товары ·
+Тарифы · Медиа-ресурсы · Контакты · Правки". Below, a two-pane editor: a left list of rows (e.g. on the
 Товары tab — product names with category and a small amber "Черновик" badge on a couple) and a right
-form (for a product: name, description, category, a key-value data editor, owned {{TOKEN}} price chips
+form (for a product: name, a typed price field (verbatim), description, category, a key-value data editor,
 and owned media chips; for a tariff: name, summary, a fixed/percentage/tiered selector, advantages and
-disadvantages text, a limits key-value editor, rate {{TOKEN}} chips); pending rows show a small
+disadvantages text, typed price/limit_text/fee fields); pending rows show a small
 "Подтвердить" link. Right column: "Быстрый доступ", "Последние изменения", and a "Готовность к
 публикации" progress bar reading "Черновиков: 4". Inter font, dense, tight corners.*
 
@@ -468,8 +470,8 @@ guiding the operator to create the first row, with per-tab empty illustrations.
 ```
 ┌──┬──────────────────────────────────────────────────────┬────────────────┐
 │N │ Редактор базы знаний               [Сохранить ⌀]      │ Быстрый доступ │
-│a │ [Темы 0][Товары 0][Тарифы 0][Медиа 0][Знач. 0][Прав.0]│ Последние: пусто│
-│v │ Обзор · Темы · Товары · Тарифы · Медиа · Значения · Правки│ Готовность ▢▢▢ │
+│a │ [Темы 0][Товары 0][Тарифы 0][Медиа 0][Конт. 0][Прав.0]│ Последние: пусто│
+│v │ Обзор · Темы · Товары · Тарифы · Медиа · Контакты · Правки│ Готовность ▢▢▢ │
 │  │        ✦ Здесь пока пусто                              │ Черновиков: 0   │
 │  │   В этой вкладке ещё нет данных                        │                │
 │  │   [＋ Добавить тему / товар / тариф]                   │                │
@@ -479,7 +481,7 @@ guiding the operator to create the first row, with per-tab empty illustrations.
 - **Core:** all stat cards read **0**; each tab body shows a **per-tab empty-state** — a small
   illustration, a heading **«Здесь пока пусто»** and a tab-specific line (e.g. Товары →
   «Добавьте первый товар», Тарифы → «Создайте первый тариф», Медиа-ресурсы → «Прикрепите первый файл»,
-  Значения → «Создайте первый `{{TOKEN}}`») with a **primary "Добавить…"** call-to-action. The
+  Контакты → «Укажите контакты поддержки») with a **primary "Добавить…"** call-to-action. The
   **Обзор** tab shows a single onboarding card linking to the **Конструктор** to drop materials.
 - **One-click:** header **Сохранить в базу** is **disabled** (nothing pending); the primary "Добавить…"
   per tab opens the inline row editor.
@@ -494,8 +496,8 @@ guiding the operator to create the first row, with per-tab empty illustrations.
 **Image prompt:** *Empty-state of the knowledge-base "editor" page in the XChats shell (flat dark slate
 rail), Linear-minimal, light theme, NO gradients, hairline borders, one indigo accent, Russian UI.
 Header "Редактор базы знаний" with a DISABLED greyed "Сохранить в базу". A row of stat cards all reading
-0: Темы 0, Товары 0, Тарифы 0, Медиа-ресурсы 0, Значения 0, Правки 0. A tab strip "Обзор · Темы · Товары
-· Тарифы · Медиа-ресурсы · Значения · Правки" with the Товары tab active. Below, a centered per-tab
+0: Темы 0, Товары 0, Тарифы 0, Медиа-ресурсы 0, Контакты 0, Правки 0. A tab strip "Обзор · Темы · Товары
+· Тарифы · Медиа-ресурсы · Контакты · Правки" with the Товары tab active. Below, a centered per-tab
 empty state: a soft line-art illustration, a heading "Здесь пока пусто", grey subtext "Добавьте первый
 товар", and a primary indigo "Добавить товар" button. Right column: an empty "Быстрый доступ", a
 "Последние изменения" card saying "пока пусто", and a "Готовность к публикации" bar reading "Черновиков:

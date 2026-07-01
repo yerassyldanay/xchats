@@ -19,7 +19,7 @@ builder's new rows are held out as **pending** until a human lets them in:
 
 1. **The builder writes rows as *pending*** (`drafted_at` set) — never live. A pending row shows in the
    playground/editor but is excluded from the prompt.
-2. **Human approval.** Approving a row (or all) runs the deterministic gate (price-safety = 1.0, asset
+2. **Human approval.** Approving a row (or all) runs the deterministic gate (fact-safety = 1.0, asset
    precision ≥ 0.9 — `8-ai-assistant.md` → Evals) and is the **only** path pending → live (it clears
    `drafted_at`).
 3. **Customer-facing is suggest-and-approve.** Every reply is human-approved before send.
@@ -31,7 +31,7 @@ A builder mistake must survive an editor, the approve gate, **and** a draft-revi
 ## What it builds — the KB blocks
 
 The KB is a few **config blocks** + a list of **topics** (each a container of text + media) +
-**products** + **tariffs** + the **values** (the single source of numbers, as tokens). The builder
+**products** + **tariffs** + **contacts** (the typed **fact** tables — exact numbers as columns). The builder
 produces all of it; the editor page exposes all of it. It is **one living KB** — rows are live or
 pending (`drafted_at`), not draft vs. published copies.
 
@@ -40,24 +40,25 @@ KB  (one living KB per org — rows are live or pending via drafted_at)
 ├─ Identity     who the assistant is — persona, tone            (ai_snapshots.persona)
 ├─ Goal         what it must achieve — mission, what "good" is  (ai_snapshots.mission)
 ├─ Guardrails   quality & support rules — must / must-not       (ai_snapshots.guardrails, language_policy)
-├─ Topics[]     the knowledge — each a CONTAINER:
-│   ├─ body_md      the answer text (value TOKENS, never digits) (ai_topics)
+├─ Topics[]     the Knowledge lane — each a CONTAINER:
+│   ├─ body_md      the answer prose (fact TOKENS, never digits) (ai_topics)
 │   └─ media[]      OWNED assets, EACH WITH ITS OWN description  (ai_assets, owner_kind=topic)
-├─ Products[]   sellable items — THIN/descriptive               (ai_products: name, description, category, data)
-│   ├─ price + numbers  OWNED value tokens                      (ai_values, owner_kind=product)
+├─ Products[]   the Facts lane — sellable items                 (ai_products: name, PRICE, description, category, data; one row per lang)
 │   └─ media[]          OWNED assets                            (ai_assets, owner_kind=product)
-├─ Tariffs[]    pricing PLANS — independent of products         (ai_tariffs: pricing_type, advantages/disadvantages, limits)
-│   ├─ rate/fee/caps     OWNED value tokens                     (ai_values, owner_kind=tariff)
-│   └─ media[]           OWNED assets                           (ai_assets, owner_kind=tariff)
-└─ Values       the single source of numbers (prices, limits, counts…), as tokens  (ai_values)
+├─ Tariffs[]    the Facts lane — pricing PLANS                  (ai_tariffs: name, PRICE, LIMIT_TEXT, FEE, pricing_type, advantages/disadvantages; one row per lang)
+│   └─ media[]           OWNED assets                            (ai_assets, owner_kind=tariff)
+└─ Contacts     the Facts lane — org support scalars            (ai_contacts: whatsapp, email, address, legal, callback_time; one row per lang)
+
+   exact numbers are TYPED COLUMNS on the fact tables; quoted in any text only as {{table.slug.field}}
 ```
 
-**Products and tariffs.** An `ai_products` row is a **sellable item** kept thin and descriptive (name,
-description, category, `data jsonb`) — its **price and quotable numbers are OWNED `ai_values` rows**, and
-its photos are **OWNED `ai_assets` rows**. An `ai_tariffs` row is a **pricing plan**
-(`pricing_type` ∈ fixed/percentage/tiered, `advantages`/`disadvantages` text, `limits jsonb`) — its
-quotable numbers (rate/fee/caps) are likewise **OWNED `ai_values` rows**. Products and tariffs are
-**independent** — there are no links between them.
+**Products, tariffs and contacts.** An `ai_products` row is a **sellable item**; its **price is a typed
+column** (verbatim, one row per language), alongside descriptive `name`/`description`/`category`/`data
+jsonb`; its photos are **OWNED `ai_assets` rows**. An `ai_tariffs` row is a **pricing plan** (`pricing_type`
+∈ fixed/percentage/tiered, `advantages`/`disadvantages` text) whose quotable numbers (`price`,
+`limit_text`, `fee`) are **typed columns**. An `ai_contacts` row holds org support scalars (`whatsapp`,
+`email`, `address`, `legal`, `callback_time`) as typed columns. All three are the **Facts lane** — exact,
+verbatim, quoted only as `{{table.slug.field}}` — and **independent** (no links between them).
 
 **Identity / Goal / Guardrails** are the "what must this assistant achieve" blocks the operator writes
 in plain language (e.g. Goal = "qualify the lead and present the right tariff"; Guardrails = "always
@@ -65,13 +66,13 @@ warm, never pushy, escalate on anything off-KB"). They become prompt blocks `[B]
 
 ### A topic is a container of media — each asset has its own description
 
-This is the core model, and it is **polymorphic**: media and values attach to **any** entity — a topic,
-a product, or a tariff — via one shared `(owner_kind, owner_ref)` pair on `ai_assets` and `ai_values`.
-So "add media to a topic / product / tariff" is **one mechanism**. A single topic groups everything
+This is the core model, and it is **polymorphic**: **media** attaches to **any** entity — a topic,
+a product, or a tariff — via one shared `(owner_kind, owner_ref)` pair on `ai_assets`. (Exact **facts** are
+typed columns on the entity, not polymorphic.) So "add media to a topic / product / tariff" is **one mechanism**. A single topic groups everything
 about one subject, and holds **several media assets**, because *which one to send depends on the moment*:
 
 ```
-topic: tariffs   body_md: "4 tariffs … {{price.start}} / {{price.growth}} …"
+topic: tariffs   body_md: "4 tariffs … {{tariff.start.price}} / {{tariff.growth.price}} …"
   ├─ asset tariffs_overview (image)  "All 4 tariffs on one card — for a general 'what are your prices' question."
   ├─ asset tariffs_growth   (image)  "The Рост card — when the customer is focused on the Рост plan."
   ├─ asset tariffs_compare  (pdf)    "Full side-by-side PDF — when they ask to compare in detail."
@@ -127,8 +128,8 @@ Every input, whatever its type, is driven to **text**, then structured into the 
 
 1. **Ingest** — accept a URL, file, or message.
 2. **Normalize to text** — extract the content (table below).
-3. **Structure** — create/append a topic, attach assets to any entity, register products & tariffs,
-   propose value tokens, suggest identity/goal edits. Each generated row is written **pending**
+3. **Structure** — create/append a topic, attach assets to any entity, register products, tariffs &
+   contacts, confirm fact values (typed columns), suggest identity/goal edits. Each generated row is written **pending**
    (`drafted_at` set) with its provenance.
 4. **Ask when unsure** — anything ambiguous or unextractable becomes a **request** (a popup), not a
    guess. The builder is **proactive**: it confirms prices, proposes merges, and requests missing
@@ -162,14 +163,14 @@ A request = `{ id, type, prompt, context (thumbnail/topic/detected value), targe
 | Request type | Popup asks | Resolves into |
 |---|---|---|
 | `describe_media` | text — "Describe what this shows and when to send it." | `ai_assets.description` (+ kind, owner) |
-| `confirm_value` / `confirm_price` | accept / edit — "Map '25 000 ₸' → `{{price.growth}}`?" | a `ai_values` token + value (never a digit in text); can target a product/tariff via `owner_kind/owner_ref` |
+| `confirm_fact` | accept / edit — "Set `tariff.growth.price` = '25 000 ₸/мес'?" | writes the **typed column** on `ai_tariffs`/`ai_products`/`ai_contacts` for that language (never a digit in prose) |
 | `resolve_duplicate` | merge · keep both | dedup / merge of topics, products, tariffs, or assets |
-| `choose_topic` | pick / create — "Which entity does this belong to?" | the asset's/value's owner (`owner_kind/owner_ref` → topic, product, or tariff) |
+| `choose_topic` | pick / create — "Which entity does this belong to?" | the asset's owner (`owner_kind/owner_ref` → topic, product, or tariff) |
 | `comment` | free text the builder reads next turn | a note steering the next build step |
 
 **Where they appear:** inline as cards in the builder chat **and** as a **review-queue badge** on the
 editor page; clicking either opens the modal. **Unresolved `pending` requests are surfaced at approve**
-(e.g. an asset with no description, or an unconfirmed value blocks approving its row — it'd fail the gate
+(e.g. an asset with no description, or an unconfirmed fact blocks approving its row — it'd fail the gate
 anyway). Resolving a request updates the pending row, marks the request `resolved`, and (via the realtime
 channel) nudges the builder to proceed.
 
@@ -178,24 +179,23 @@ starts **pending** (`drafted_at` set). The operator **approves** — per-row or 
 `drafted_at` after running the deterministic gate, the only path pending → live; or **deletes** (reject =
 delete the pending row). Editing a pending row leaves it pending until approved.
 
-> Storage: a pending `ai_topics` / `ai_products` / `ai_tariffs` / `ai_assets` / `ai_values` row carries
+> Storage: a pending `ai_topics` / `ai_products` / `ai_tariffs` / `ai_contacts` / `ai_assets` row carries
 > `drafted_at` (NULL = live, set = pending) and `provenance` (source ref) — there is **no** `review_state`
 > enum; requests live in a small `ai_builder_requests` queue. All additive on the **one living KB**; the
 > brain simply filters `drafted_at IS NULL`. Exact DDL folds into `9-database-schema.md` when this phase lands.
 
 ---
 
-## Prices — the one thing never auto-written
+## Facts — the one thing never auto-written
 
 Numbers are the only place an extraction error is shippable harm (a wrong/stale price). This applies to
-**every** number — product prices, tariff rates, limits, counts — not just topic prices. **Embedding is
-column-free:** the only way to put a value into any text is `{{namespace.key}}`, resolved from
-`ai_values`. Entity tables hold **no** embeddable numbers — a product's price is an owned value token
-(e.g. `price.nike_x`), a tariff's rate is `rate.<plan>`. So the builder **never bakes a digit anywhere**:
-on detecting a price/rate/limit it writes a `{{token}}` and raises a `confirm_value` / `confirm_price`
-popup; the real number enters `ai_values` **only** by human confirmation. Products and tariffs are thus
-confirmed number **sources**. This is the same token discipline the runtime enforces
-(`8-ai-assistant.md` → Prices).
+**every** fact — product prices, tariff rates, limits, contacts — not just topic prices. Exact facts are
+**typed columns** on the fact tables (`ai_tariffs` / `ai_products` / `ai_contacts`), stored verbatim; the
+only way to put one into any text is a `{{table.slug.field}}` token, resolved from that column for the
+reply's language. So the builder **never bakes a digit anywhere**: on detecting a price/rate/limit it
+writes a `{{table.slug.field}}` token and raises a `confirm_fact` popup; the real number enters the typed
+column **only** by human confirmation. This is the same token discipline the runtime enforces
+(`8-ai-assistant.md` → Facts).
 
 ## Provenance & dedup
 
@@ -208,8 +208,9 @@ confirmed number **sources**. This is the same token discipline the runtime enfo
 ## Approve → live
 
 There is no atomic snapshot swap and no rollback — the KB is one living set of rows. **Approving**
-validates the pending rows being approved (every asset has a description, every `{{token}}` resolves, no
-dangling media, no literal currency in topic bodies, tokens unique — the deterministic gate), then
+validates the pending rows being approved (every asset has a description, every `{{table.slug.field}}`
+resolves to a column value per required language, no dangling media, no literal currency in topic bodies —
+the deterministic gate), then
 **clears `drafted_at`** on those rows. The brain reloads its live view (`drafted_at IS NULL`) and answers
 from it, suggest-only.
 

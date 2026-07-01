@@ -35,7 +35,7 @@ no SQL files yet.
     carries its own dedup key `UNIQUE(message_id)` so the doubled webhook delivery can't write it twice. (The
     plan's original text-only v1 removed it; Build 0 un-defers it.)
   - **Defined but empty/unused** in v1: `ai_audit_log`, `assignment_events`. (The seeded KB —
-    `ai_topics` / `ai_assets` / `ai_values` / `ai_products` / `ai_tariffs` — and `ai_suggestions` **are** used: each Suggest writes one
+    `ai_topics` / `ai_assets` / `ai_tariffs` / `ai_products` / `ai_contacts` (the typed **fact** tables) — and `ai_suggestions` **are** used: each Suggest writes one
     row whose `options` jsonb holds 1–3 variants, each with optional media from the seeded catalog.) Don't pour
     migration/wiring effort into the empty ones until their phase (see `0.1-definition-of-done.md`).
 
@@ -294,120 +294,120 @@ UNIQUE (snapshot_id, ref)
 > owner_ref)` pair: an entity's media = `ai_assets WHERE owner_kind/owner_ref match`. The old
 > `topic_slug` is gone — a topic is now just `owner_kind='topic'`, `owner_ref=<slug>`.
 
-### xchats.ai_values  (named value tokens — prices AND any other confirmed number/value)
-```
-id           uuid  PK
-snapshot_id  uuid  FK -> ai_snapshots
-token        text  -- namespace.key — e.g. 'price.growth', 'limit.growth', 'time.api_setup', 'contact.whatsapp'
-lang         text  -- 'ru' | 'kk' | '*'  — '*' = language-neutral (numbers, phones, addresses, e-mails)
-value_text   text  -- the confirmed value, as text — '25 000 ₸/мес', 'до 2 000 платежей/мес', '5 минут' (any unit; code substitutes verbatim)
-description  text  NULL  -- what this value means, for the editor/builder UX & the confirm popup; NOT injected into the prompt
-owner_kind   text  -- 'topic'|'product'|'tariff'|''  ('' = a global scalar like contact.whatsapp)
-owner_ref    text  -- the owner's ref/slug; '' = global scalar
-drafted_at   timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
-provenance   jsonb
-UNIQUE (snapshot_id, token, lang)
-```
-> **Generalized from the old `ai_prices`.** This was always a **token → confirmed-value** store; the
-> reason it exists is the *token discipline* — the model must never invent a factual number/fact and you
-> want it centrally editable — which applies to **any** value (limits, durations, SLAs, contacts,
-> addresses, min/max), not just prices. `price.*` stays the canonical namespace; new namespaces
-> (`limit.*`, `time.*`, `contact.*`, `trial.*`, `min.*`/`max.*`, …) need **no schema change** — code does
-> a pure string substitution of `{{namespace.key}}` → `value_text`. The approve gate's "price-safety =
-> 1.0" reads as "**every live token resolves**". `value_text` is text precisely so any unit fits. The
-> `description` is **human-only** (editor / `confirm_price` popup / reviewer); the model never sees it.
->
-> **Owner dimension — products and tariffs OWN their values.** `(owner_kind, owner_ref)` ties a value
-> to a specific entity: `owner_kind=''` is a **global scalar** (`contact.whatsapp`, `price.growth`);
-> `owner_kind='product'`, `owner_ref='nike-x'` is the price that **belongs to** product `nike-x`
-> (token e.g. `price.nike_x`); `owner_kind='tariff'` is a rate/fee/cap the assistant must **quote
-> exactly**. The entity tables (`ai_products`, `ai_tariffs`) hold **no** embeddable numbers — a
-> product's price is an owned `ai_values` row, not a column. That's *why* those tables are thin.
->
-> **Embedding is column-free.** There is exactly **one** way to put a value into reply/topic text:
-> `{{namespace.key}}`, resolved from `ai_values`. Templates **never** reference column names —
-> entity tables hold no embeddable numbers — so the only quotable, injectable facts are the confirmed
-> `ai_values` rows. A product's `25 000 ₸` reaches a reply only as `{{price.nike_x}}`; there is no
-> `products.price` to interpolate.
->
-> **Language-aware.** Rendering differs by language (`Бесплатно`/`Тегін`, `…/мес`/`…/ай`), so values are
-> keyed by `lang` too: injection resolves `(token, reply_language)` first, then falls back to the **`'*'`
-> language-neutral** row (phone numbers, addresses, e-mails, bare counts that read the same either way);
-> if neither exists the token is unresolved → `PricingError`/escalate (never ship a half-rendered value).
-> Mirrors `ai_topics.lang` and the brain's "reply in the customer's language" rule.
+### KB facts — the **Facts lane** (typed tables; `ai_values` is removed)
 
-> **Worked example — the xPayment value book** (the org's one KB; the `tariffs` topic body uses
-> `{{price.growth}}`, `{{limit.growth}}`, `{{time.api_setup}}`, `{{contact.whatsapp}}`, …). Most rows
-> are global scalars (`owner_kind=''`); the last two show a value **owned** by a product / tariff:
+> **Two lanes (see `8.4` / `11`).** Exact facts — prices, tariffs, limits, times, hours, addresses,
+> phones — are **never authored by the model**: they live in **typed tables with concrete columns** and
+> code substitutes the stored value **verbatim**. Explanatory prose lives in `ai_topics` (the Knowledge
+> lane) and is grounded by a judge. The old generic value bag **`ai_values` is removed** — a nearest-key
+> lookup can return the *wrong* fact; a typed column cannot.
 >
-> | token | lang | value_text | description | owner_kind | owner_ref |
-> |---|---|---|---|---|---|
-> | `price.trial` | ru | Бесплатно | Пробный доступ — стоимость | | |
-> | `price.trial` | kk | Тегін | то же, по-казахски | | |
-> | `price.start` | ru | 10 000 ₸/мес | Тариф «Старт» — фикс. цена в месяц | | |
-> | `price.growth` | ru | 25 000 ₸/мес | Тариф «Рост» (основной) — фикс. цена в месяц | | |
-> | `price.scale` | ru | 60 000 ₸/мес | Тариф «Масштаб» — фикс. цена в месяц | | |
-> | `trial.days` | ru | 3 дня | Длительность бесплатного пробного периода | | |
-> | `limit.growth` | ru | до 2 000 платежей/мес | Лимит платежей/мес на «Рост» | | |
-> | `limit.scale` | ru | безлимит платежей | Лимит платежей на «Масштаб» | | |
-> | `limit.cashiers` | ru | до 5 виртуальных касс | Макс. число виртуальных касс (все тарифы) | | |
-> | `time.api_setup` | ru | 5 минут | Время на подключение Kaspi Pay API | | |
-> | `time.callback` | ru | 1 час | В течение какого времени перезвонят | | |
-> | `contact.whatsapp` | * | +7 702 976-65-09 | WhatsApp поддержки (язык-нейтрально) | | |
-> | `contact.email` | * | support@xpayment.kz | E-mail поддержки | | |
-> | `contact.address` | * | г. Шымкент, ул. Аргынбеков, 29/4 | Юридический адрес | | |
-> | `contact.legal` | * | ИП «XGroup», Республика Казахстан | Реквизиты | | |
-> | `price.nike_x` | ru | 25 000 ₸ | Цена товара Nike X — owned by product | product | nike-x |
-> | `fee.pro` | * | 1.5 % за транзакцию | Комиссия тарифа Pro — quoted exactly | tariff | pro |
+> **Language is a row, never a column.** Every fact table keys on `(snapshot_id, ref, lang)` (contacts on
+> `(snapshot_id, lang)`): one row per `(entity, language)`, plus a `*` row for language-neutral values
+> (phones, e-mails, addresses). Adding a language = **inserting rows**, never a schema change — there are
+> no `name_ru`/`name_kk` columns. This is the same per-language shape `ai_topics` already uses, so the
+> whole KB is uniform.
+>
+> **Reference model — `{{table.slug.field}}`.** A fact is quoted in a topic body or a reply only as a
+> token `{{table.slug.field}}`: `table` selects the fact table, `slug` the row, `field` the column —
+> e.g. `{{tariff.growth.price}}`, `{{tariff.growth.limit_text}}`, `{{product.nike_x.price}}`,
+> `{{contact.support.whatsapp}}`. Code resolves the token against the typed table **for the reply's
+> language** (falling back reply-language → org-default → `*`) and substitutes the stored value verbatim
+> (units included; code never reformats a number). The model **never emits a digit** for a known fact —
+> it emits the token. **Fail closed:** an unresolved token never ships — it becomes a holding reply /
+> manual review. Values are typed **columns on the entity**; there is no separate value store to own.
+>
+> **Worked example — the xPayment facts** (`{{tariff.growth.price}}` etc. appear in the `tariffs` topic
+> body and in replies; code fills them per reply language):
+>
+> | table.slug | lang | columns (stored verbatim) |
+> |---|---|---|
+> | `tariff.trial` | ru / kk | name «Пробный»/«Тегін», price «Бесплатно»/«Тегін», limit_text «3 дня»/«3 күн» |
+> | `tariff.growth` | ru | name «Рост», price «25 000 ₸/мес», limit_text «до 2 000 платежей/мес» |
+> | `tariff.growth` | kk | name «Өсу», price «25 000 ₸/ай», limit_text «айына 2 000 төлемге дейін» |
+> | `tariff.scale` | ru | name «Масштаб», price «60 000 ₸/мес», limit_text «безлимит платежей» |
+> | `tariff.pro` | * | fee «1.5 % за транзакцию» |
+> | `contact.support` | * | whatsapp «+7 702 976-65-09», email «support@xpayment.kz», address «г. Шымкент, ул. Аргынбеков, 29/4», legal «ИП «XGroup», РК» |
+> | `contact.support` | ru / kk | callback_time «1 час» / «1 сағат» |
 
-### xchats.ai_products  (descriptive catalog; one row per product — thin, independent)
+### xchats.ai_contacts  (typed org-support facts — one singleton entity, `slug='support'`)
+```
+id            uuid  PK
+snapshot_id   uuid  FK -> ai_snapshots
+slug          text  -- singleton 'support' — keeps the 3-part token grammar {{contact.support.<field>}}
+lang          text  -- 'ru' | 'kk' | '*'  — '*' = language-neutral (phones, e-mails, addresses)
+whatsapp      text  -- support WhatsApp — language-neutral (lives on the '*' row)
+email         text  -- support e-mail — language-neutral
+address       text  -- legal / office address — language-neutral
+legal         text  -- legal entity / requisites — language-neutral
+callback_time text  -- how soon we call back ('1 час' / '1 сағат') — language-bearing (ru/kk rows)
+drafted_at    timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
+provenance    jsonb
+UNIQUE (snapshot_id, lang)
+```
+> **A dedicated typed table for org-level scalars** — support contacts + callback time — not a generic
+> bag. Token resolution is **per field** with language fallback: `{{contact.support.whatsapp}}` finds its
+> value on the `*` row; `{{contact.support.callback_time}}` finds it on the `ru`/`kk` row. A **new**
+> category of org fact (e.g. working hours) gets its **own typed table**, never a key–value row.
+
+### xchats.ai_products  (typed fact table — one row per (product, language))
 ```
 id           uuid  PK
 snapshot_id  uuid  FK -> ai_snapshots               -- organization derived via snapshot (3NF)
 ref          text  -- stable key, e.g. 'nike-x'
-name         text
+lang         text  -- 'ru' | 'kk' | '*'  — language is a ROW (one row per product per language)
+name         text  -- verbatim, per language
+price        text  -- the confirmed price, verbatim WITH units ('25 000 ₸'); code never reformats
 description  text
 category     text
-data         jsonb -- sphere-specific attrs: {size, color, area_m2, …}
-lang         text
+data         jsonb -- sphere-specific descriptive attrs: {size, color, area_m2, …}
 status       text  -- 'active'|'inactive'
 drafted_at   timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
 provenance   jsonb
 created_at, updated_at  timestamptz
-UNIQUE (snapshot_id, ref)
+UNIQUE (snapshot_id, ref, lang)
 ```
-> **A product is DESCRIPTIVE ONLY — no price column.** Its price/numbers are **owned `ai_values`
-> rows** (`owner_kind='product'`, token e.g. `price.nike_x`); its media are **owned `ai_assets`
-> rows** (`owner_kind='product'`, `owner_ref=<ref>`). The table holds only descriptive attrs (name,
-> category, sphere-specific `data`) — which is why it's thin and FK-free toward `ai_tariffs`.
+> **A product's price is a typed column, quoted verbatim.** `price` (and any other exact field) is a
+> concrete column stored **verbatim with units**; the model quotes it only as `{{product.nike_x.price}}`,
+> resolved for the reply's language — never a digit it writes itself. **Language is a row**
+> (`UNIQUE (snapshot_id, ref, lang)`); a `*` row carries language-neutral values. Media still attach
+> **polymorphically** as `ai_assets` rows (`owner_kind='product'`, `owner_ref=<ref>`) — only *values*
+> moved onto the entity as columns.
 
-### xchats.ai_tariffs  (descriptive tariff/plan catalog; one row per tariff — thin, independent)
+### xchats.ai_tariffs  (typed fact table — one row per (tariff, language))
 ```
 id            uuid  PK
 snapshot_id   uuid  FK -> ai_snapshots
-ref           text  -- 'standard'|'pro'
-name          text
+ref           text  -- 'trial'|'start'|'growth'|'scale'|'pro'
+lang          text  -- 'ru' | 'kk' | '*'  — language is a ROW
+name          text  -- verbatim, per language ('Рост' / 'Өсу')
+price         text  -- confirmed price, verbatim with units ('25 000 ₸/мес' / '25 000 ₸/ай'); '' if fee-based
+limit_text    text  -- confirmed limit, verbatim ('до 2 000 платежей/мес' / 'безлимит платежей')
+fee           text  -- per-transaction fee for percentage plans ('1.5 % за транзакцию'); '' otherwise
 summary       text
 pricing_type  text  -- 'fixed'|'percentage'|'tiered'|'hybrid'
 advantages    text
 disadvantages text
-limits        jsonb -- DESCRIPTIVE ranges only: {monthly_cap, per_tx_max}
-data          jsonb -- description / conditions / billing_period / tiers
-lang          text
+data          jsonb -- descriptive prose the model may paraphrase: conditions / billing_period / tiers
 status        text  -- 'active'|'inactive'
 drafted_at    timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
 provenance    jsonb
 created_at, updated_at  timestamptz
-UNIQUE (snapshot_id, ref)
+UNIQUE (snapshot_id, ref, lang)
 ```
-> **A tariff's quotable numbers are owned `ai_values` rows.** Any rate / fee / cap the assistant must
-> **quote exactly** is an owned `ai_values` row (`owner_kind='tariff'`, `owner_ref=<ref>`); only
-> **descriptive** ranges (e.g. `{monthly_cap, per_tx_max}`) live in `limits` jsonb. The two new tables
-> have **no foreign keys between them** — each is an independent, thin descriptor.
+> **A tariff's quotable numbers are typed columns, verbatim.** `price`, `limit_text`, `fee` are concrete
+> columns; the assistant quotes them only as `{{tariff.growth.price}}`, `{{tariff.growth.limit_text}}`,
+> `{{tariff.pro.fee}}`, resolved for the reply's language. **Language is a row**
+> (`UNIQUE (snapshot_id, ref, lang)`) — `Рост`/`Өсу` and `…/мес`/`…/ай` are two rows, not two columns.
+> Only *descriptive* prose the model may paraphrase (conditions, tiers) stays in `data` jsonb. The two
+> entity tables have **no foreign keys between them** — each is an independent typed descriptor. A
+> cross-tariff limit (e.g. an all-plans cashier cap) repeats per row, or becomes its own typed table if it
+> grows into a category.
 >
-> **Products & tariffs are confirmed number sources** (like `ai_values`) — so they are **exempt** from
-> the "no literal amount in a topic body" rule, which applies only to **topic bodies**: an owned price
-> on a product/tariff is a confirmed fact, not an invented one.
+> **Facts vs prose.** Products, tariffs and contacts are the **Facts lane** — exact, code-substituted,
+> **exempt** from the "no literal amount in a topic body" rule, because a column value is a confirmed fact,
+> not an invented one. A `topic` body is the **Knowledge lane** — prose the model writes and the grounding
+> judge checks; any number in it must be a `{{table.slug.field}}` token, never a digit.
 
 ### xchats.ai_suggestions  (one row per "Suggest"; the 1–3 reply OPTIONS live in the `options` jsonb)
 ```
@@ -463,7 +463,7 @@ organization_id  uuid FK -> organizations            -- DIRECT, kept
 action           text   -- 'approve'|'edit' — a KB-lifecycle event
 actor_user_id    uuid FK -> users  NULL              -- who did it (NULL = system, e.g. seed on boot)
 version          int                                 -- LEGACY/UNUSED: KB is no longer versioned
-note             text                                -- free-text detail ('approved 3 topics', 'edited price.growth')
+note             text                                -- free-text detail ('approved 3 topics', 'edited tariff.growth.price')
 created_at
 ```
 > **Append-only history of the KB's lifecycle** — *not* per-message or per-draft activity. One row per
@@ -502,7 +502,7 @@ UNIQUE (account_id, phone_jid)             on xchats.wa_contacts
 
 **1NF** — every column is atomic. The auto-response window is split into atomic
 `respond_window_start/end` (UTC; no composite). Repeating lists are their own tables
-(`organization_users`, `ai_topics/assets/values`, `ai_products`, `ai_tariffs`, `assignment_events`) —
+(`organization_users`, `ai_topics/assets`, `ai_products`, `ai_tariffs`, `ai_contacts`, `assignment_events`) —
 no array/CSV columns, **except `ai_suggestions.options`** (a deliberate jsonb document holding the 1–3
 reply variants as one atomic suggestion — see denormalizations).
 
@@ -514,7 +514,7 @@ depend on the whole composite key (`joined_at`). Every other table has a single-
 `organization_id` when it's reachable by FK. `organization_id` is stored **only** where it's a
 direct fact — `organizations`, `organization_users`, `wa_accounts` (the assignment), `ai_snapshots`,
 `ai_audit_log` — and **derived by join** everywhere else (`wa_contacts`, `wa_chats`, `wa_messages`,
-`ai_topics/assets/values`, `ai_products`, `ai_tariffs`, `ai_suggestions`) — the new KB tables reach
+`ai_topics/assets`, `ai_products`, `ai_tariffs`, `ai_contacts`, `ai_suggestions`) — the new KB tables reach
 `organization_id` via their `snapshot_id`. The `assigned` flag was removed (derived from
 `organization_id`).
 
@@ -528,7 +528,7 @@ direct fact — `organizations`, `organization_users`, `wa_accounts` (the assign
    of `wa_messages`, maintained on write, for fast inbox listing. Source of truth is `wa_messages`;
    they can be recomputed.
 3. **`jsonb` document columns** (`wa_contacts.attributes`, `wa_messages.raw`, `ai_suggestions.options`
-   + its `suggested_status`/`suggested_callback`, `ai_products.data`, `ai_tariffs.data`/`limits`,
+   + its `suggested_status`/`suggested_callback`, `ai_products.data`, `ai_tariffs.data`,
    plus the `provenance` source-tracking columns on every KB row) — intentional
    semi-structured/document storage (open keyset, raw audit document, the 1–3 reply variants kept as
    one atomic suggestion, sphere-specific product attrs, descriptive tariff ranges/conditions), not

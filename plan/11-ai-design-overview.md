@@ -23,7 +23,7 @@ choices; dive into those only when you implement.
 | Component | One-line job | Touches the KB how |
 |---|---|---|
 | **Brain (AI)** | conversation + KB → **reply drafts**; never sends on its own | **reads only** the **LIVE** rows (`drafted_at IS NULL`) |
-| **Knowledge Base** | the single store of product knowledge: prose blocks + topics + **media** + prices; **one living set, rows live or pending** | **the contract** both sides agree on |
+| **Knowledge Base** | the single store of product knowledge: prose blocks + topics + **media** + **typed facts** (prices/limits/contacts); **one living set, rows live or pending** | **the contract** both sides agree on |
 | **Playground** | where a human curates the KB: a **chat** (builds on its own, asks questions) + an **editor** (manual) | **the only writer**; new/edited rows land **pending** until approved |
 
 **The rule that keeps it clean:** *only the playground writes; only the brain reads; they meet at the
@@ -63,28 +63,34 @@ Each is a real decision. **Buys us** = advantage; **Costs us** = limitation.
   "answer from a video's content" works by adding a companion text summary — **no schema change**.
 - **Costs us:** the brain **never sees the media** — it trusts the human's text, so a **bad description
   = the wrong file sent**; a big media catalog inflates the prompt.
-- **Generalizes:** topics aren't the only media owners — **products and tariffs** own media and values
-  too, through the same polymorphic pattern (see §4 below).
+- **Generalizes:** topics aren't the only media owners — **products, tariffs and contacts** own media
+  too, through the same polymorphic pattern, and carry their exact facts as **typed columns** (see §4–§5).
 
-### 4. Values (prices, limits, counts, …) are **tokens, never digits** in prose
-- **Buys us:** numbers are always correct and **centrally editable**; the model **cannot invent** a
-  price (or any value); change it in one place — in `ai_values` — and every answer updates. This is the
-  **only embedding mechanism for *all* numbers** — products' prices and tariffs' rates included; templates
-  only ever reference `{{namespace.key}}`, **never an entity column**.
-- **Costs us:** indirection (the author/agent must tokenise); every token needs a **confirmed** value;
-  the system must fail safe on an unknown/leftover token (refuse, never ship a half-rendered price).
+### 4. Facts (prices, limits, times, contacts, …) are **typed columns**, quoted as **tokens, never digits**
+- **The two lanes.** The KB splits into a **Facts lane** (exact, code-substituted) and a **Knowledge
+  lane** (prose the model writes, then a judge checks). This split *is* the anti-hallucination strategy
+  (decision record `13`).
+- **Buys us:** every exact fact is a **typed column** on a typed table (`ai_tariffs` / `ai_products` /
+  `ai_contacts`), stored **verbatim with units**; the model **cannot invent** a price — it quotes the
+  column only as a token `{{table.slug.field}}` (e.g. `{{tariff.growth.price}}`), which code resolves for
+  the reply's language. Change the value in one place — the column — and every answer updates. **Language
+  is a row, not a column** — a new language is new rows, no schema change.
+- **Costs us:** indirection (the author/agent must tokenise); every column needs a **confirmed** value;
+  the system must fail safe on an unresolved token (refuse, never ship a half-rendered fact).
+- **Rejected:** the old generic `ai_values` token bag (a nearest-key lookup can return the *wrong*
+  tariff) and per-language columns (`name_ru`/`name_kk`).
 
-### 5. Structured entities (products, tariffs) are **thin**; their numbers and media attach **polymorphically**
-- The KB also has `ai_products` (a sellable item) and `ai_tariffs` (a pricing **plan** — fixed/percentage,
-  limits, advantages/disadvantages), **independent of each other** (no links). They're **thin / descriptive**:
-  every embeddable number lives in `ai_values`, every media file in `ai_assets`, both attached back to
-  their entity by **one shared `(owner_kind, owner_ref)` pair** — products and tariffs are confirmed number
-  **sources** that expose owned value tokens.
-- **Buys us:** many spheres (e-commerce, real-estate, services) **reuse the same shape**; few columns; **one**
-  embedding mechanism (templates always say `{{namespace.key}}`, never a table column); media attaches to
-  **any** entity uniformly.
-- **Costs us:** more rows / a **join** to assemble an entity; the `data jsonb` escape hatch is **loosely
-  typed**.
+### 5. Structured entities (products, tariffs, contacts) are **typed fact tables**; media attaches **polymorphically**
+- The Facts lane is `ai_products` (a sellable item), `ai_tariffs` (a pricing **plan** — fixed/percentage,
+  advantages/disadvantages), and `ai_contacts` (org-support scalars), **independent of each other** (no
+  links). Each **holds its exact numbers as typed columns** (`price`, `limit_text`, `fee`, `whatsapp`, …),
+  stored verbatim, **one row per `(entity, language)`**. Media still attaches to **any** entity by **one
+  shared `(owner_kind, owner_ref)` pair** on `ai_assets`.
+- **Buys us:** many spheres (e-commerce, real-estate, services) **reuse the same per-language shape**;
+  facts resolve by **exact** `{{table.slug.field}}` lookup (no wrong-tariff risk); media attaches to **any**
+  entity uniformly; a new fact category is a **new typed table**, never a generic bag.
+- **Costs us:** more rows (one per language); the `data jsonb` escape hatch (descriptive prose only) is
+  **loosely typed**.
 
 ### 6. Knowledge is **curated-in-prompt** (no vector search yet)
 - **Buys us:** deterministic, cheap, **no retrieval errors** — the model sees the whole (small) KB and
@@ -118,6 +124,15 @@ Each is a real decision. **Buys us** = advantage; **Costs us** = limitation.
 - **Costs us:** the v1 queue is in-memory (not durable — accepted); sending conversation + profile to an
   external LLM is a **cross-border / PII decision** to settle before going live (the data boundary).
 
+### 11. Two guardrails over every draft: a **number check** (deterministic) + a **prose grounding judge** (LLM)
+- **Buys us:** a two-part safety net matching the two lanes — every currency/unit number in a draft must
+  trace to an injected fact value (deterministic, exact), and every non-numeric claim must be supported by
+  the injected topics (a cheap LLM judge, **biased to escalate**). Numbers are guarded deterministically,
+  prose by the judge; neither auto-approves. With human review as the final gate, a fabricated specific is
+  impossible and unsupported prose is caught (see `8.2` pipeline, `8.7` evals, decision record `13`).
+- **Costs us:** the judge adds a cheap per-draft LLM call and some deliberate false-positive escalations
+  (on doubt it defers to a human).
+
 ---
 
 ## Open decisions (worth settling before building)
@@ -125,8 +140,9 @@ Each is a real decision. **Buys us** = advantage; **Costs us** = limitation.
 These are genuine forks, not yet locked:
 
 1. **Approval-gate strictness** — approving runs the deterministic gate over the resulting **live** set:
-   hard "every `{{token}}` resolves" + "every owned media exists" + "no literal currency in a topic body" +
-   "no open questions"? What asset-coverage bar? (Stricter = safer but harder to approve.)
+   hard "every `{{table.slug.field}}` resolves (for each required language)" + "every owned media exists" +
+   "no literal currency in a topic body" + "no open questions"? What asset-coverage bar? (Stricter = safer
+   but harder to approve.)
 2. **Per-row vs. all-at-once approval UX** — approve a single pending row, or sweep all pending at once?
    (One living KB already makes "one set per org" automatic — branchable drafts are off the table.)
 3. **When (if ever)** to add changesets (§8) and `pgvector` retrieval (§6) — only on real pain.
@@ -138,8 +154,8 @@ These are genuine forks, not yet locked:
 ## Build sequence (the order that de-risks)
 
 ```text
-1. Lock + migrate the one-living-KB contract   ← entities + drafted_at + thin products/tariffs
-                                                  + polymorphic owner on values/assets + approve gate
+1. Lock + migrate the one-living-KB contract   ← entities + drafted_at + typed products/tariffs/contacts
+                                                  + polymorphic media owner on assets + approve gate
 2. Seed knowledge manually                     ← brain boots usable AND the playground has real content to edit
 3. Editor first (no LLM)                       ← proves the KB write contract with a simple, deterministic writer
 4. Chat next (the agent)                       ← the interactive build, riding the already-proven contract
@@ -155,8 +171,8 @@ the real brain and the playground at once.
 ## Where the detail lives (so this stays a map)
 
 - **`8-ai-assistant.md`** — the brain: the prompt, how it grounds (live rows only), the approve/eval gate.
-- **`9-database-schema.md`** — the full data model the KB maps onto (`ai_topics/products/tariffs/values/assets`,
-  the `drafted_at` flag, and the polymorphic `(owner_kind, owner_ref)` pair).
+- **`9-database-schema.md`** — the full data model the KB maps onto (`ai_topics/products/tariffs/contacts/assets`,
+  the `drafted_at` flag, typed fact columns, and the polymorphic `(owner_kind, owner_ref)` media pair).
 - **`10-knowledge-builder.md`** — the original conceptual playground UX (popups, topic-as-container).
 - **This doc** — the three components, the main solutions, and the trade-offs. Start here.
 

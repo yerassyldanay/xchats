@@ -29,14 +29,14 @@ v2+ (see `0.1-definition-of-done.md` Phases 4B–4D).
 A **stateless** call — `HandleMessage(window, snapshot) -> Draft`: build a cache-stable
 system prompt from the published **Snapshot**, add the recent **message window** (last ~M messages),
 force the model to return strict `emit_draft` JSON, then **post-process** it
-(`escalate → resolve media refs → inject values → set stage`) into a final Draft. **v1 sends no contact
-profile** — the model infers everything from the window (see *Memory*).
+(`escalate → render facts → number check → grounding judge → media refs → status`) into a final Draft.
+**v1 sends no contact profile** — the model infers everything from the window (see *Memory*).
 
 ---
 
-## The prompt — cached prefix `[A]–[E]` + dynamic suffix
+## The prompt — cached prefix `[A]–[F]` + dynamic suffix
 
-The prefix is rebuilt only on publish (`BuildSystem(snapshot)`); mark the cache breakpoint after `[E]`.
+The prefix is rebuilt only on publish (`BuildSystem(snapshot)`); mark the cache breakpoint after `[F]`.
 
 ```
 ┌──────────────────── CACHED PREFIX (stable across messages) ────────────────────┐
@@ -45,13 +45,14 @@ The prefix is rebuilt only on publish (`BuildSystem(snapshot)`); mark the cache 
 │ [C] GUARDRAILS guardrails (+ language policy) from the snapshot config              │
 │ [D] KNOWLEDGE  every topic: `# topic: <slug> (<lang>)` + keywords + body (tokens intact) │
 │ [E] MEDIA      the whole catalog as `ref | kind | topic | description` — the pick menu  │
+│ [F] FACTS      the Facts lane: per fact `token | label | value(reply-lang)` — emit the token │
 ├──────────────────────────  ⟵ cache breakpoint  ───────────────────────────────┤
 │     DYNAMIC    WINDOW (~15 msgs, oldest first) · CURRENT MESSAGE   (no profile in v1)     │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **`[A]` the hard rules (never editable):** answer **only** from the KB `[D]`, else **escalate** —
-never guess; prices/limits are **tokens** (`{{price.growth}}`), never digits — code fills them after;
+never guess; facts (prices, limits, times, contacts) are **tokens** (`{{table.slug.field}}`, e.g. `{{tariff.growth.price}}`), never digits — code fills them after;
 attach media **only** by refs that exist in `[E]`, **max 3**; reply in the **customer's language**
 (KK+RU mix → Russian); **~120 words**, warm, **one** next step; never handle passwords; **must call
 `emit_draft`**.
@@ -59,7 +60,7 @@ attach media **only** by refs that exist in `[E]`, **max 3**; reply in the **cus
 **Conversation flow** is not a state machine — the persona + the model's `suggested_status.stage`
 (`greeting → qualifying → presenting → closing`, stored on the chat) drive it, with the window giving
 continuity. Each turn: **ask** one concise question when a qualifying fact is missing; **answer** from
-the KB (+ optional media, + price tokens) when it's covered; **escalate** when it isn't.
+the KB (+ optional media, + fact tokens) when it's covered; **escalate** when it isn't.
 
 ---
 
@@ -69,7 +70,7 @@ The model returns exactly this (structured `emit_draft`):
 
 ```jsonc
 {
-  "reply_text": "uses {{price.*}}/{{limit.*}} tokens, never numerals",
+  "reply_text": "uses {{table.slug.field}} fact tokens, never numerals",
   "reply_language": "ru | kk",
   "asset_refs": ["catalog refs only, max 3; [] if none"],
   "suggested_callback": { "due_at": "…|null", "note": "…" } | null,
@@ -78,14 +79,19 @@ The model returns exactly this (structured `emit_draft`):
 }
 ```
 
-Post-processing, **in order** (`escalate → refs → values → status`):
-1. **escalate** — if true (KB gap / low confidence), flag for a human; ship only a short holding reply.
-2. **refs** — `ResolveAssets`: keep only refs that exist, **cap 3**; unknown refs dropped + logged →
+Post-processing, **in order** (the safety spine of decision record `13`, Decision 6):
+1. **escalate gate** — if true (KB gap / low confidence), flag for a human; ship only a short holding reply.
+2. **render facts** — replace every `{{table.slug.field}}` token with the typed column value in the reply
+   language (fallback reply-language → org-default → `'*'`); an unresolved token → `PricingError` (post
+   "check facts manually", never a half-rendered value).
+3. **number check** — every currency-/unit-adjacent number must trace to a value injected in step 2; a
+   number from nowhere → **escalate** (deterministic backstop; also catches any inline digit).
+4. **grounding judge** — a cheap LLM checks every non-numeric claim is supported by the topics; unsupported
+   → **escalate**. Biased to escalate; never auto-approves.
+5. **media refs** — `ResolveAssets`: keep only refs that exist, **cap 3**; unknown refs dropped + logged →
    no hallucinated files. Result is media URLs.
-3. **values** — replace every `{{…}}` token from the value book (`ai_values`) in the target language,
-   falling back to the `'*'` language-neutral row; an unknown/leftover/unresolved-in-this-language token
-   → `PricingError` (post "check pricing manually", never a half-rendered value).
-4. **status** — apply `suggested_status.stage` (+ any `suggested_callback`).
+6. **status** — apply `suggested_status.stage` (+ any `suggested_callback`); then **human review** is the
+   final gate (drafts are never auto-sent).
 
 **Text / media / both** is the model's choice via `asset_refs` (text-only = `[]`; media-only = minimal
 text + refs; both = text is the caption). We only ever send **approved catalog assets by reference** —
@@ -101,9 +107,9 @@ later vision/transcription step can add a description to the window). It never s
 
 A published **Snapshot** = config + topics + media catalog + prices. Edited, **versioned**, and
 **published** (publish swaps the live snapshot atomically; rollback restores a prior version). Stored
-normalized per version in `xchats.ai_snapshots / ai_topics / ai_assets / ai_values` (see
+normalized in `xchats.ai_snapshots / ai_topics / ai_assets / ai_tariffs / ai_products / ai_contacts` (see
 `9-database-schema.md`). The brain loads it into one **immutable in-memory snapshot** (keyed per org)
-and **never queries the DB on the hot path**: the cached prefix `[A]–[E]` is built **once** — on boot and
+and **never queries the DB on the hot path**: the cached prefix `[A]–[F]` is built **once** — on boot and
 on publish, not per message. Per inbound message it reads only the small **dynamic suffix** (window +
 profile). Updates never mutate the live snapshot in place; **publish builds a new one and atomically
 swaps the pointer**, so a message handler never sees a half-updated KB.
@@ -116,7 +122,7 @@ the *text you wrote for it*. So content lives in three forms:
 |---|---|---|---|
 | **Text knowledge** (topics) | `ai_topics`: `slug`, `lang`, `keywords`, `body_md` | `[D]` | reads it; answers **only** from it |
 | **Media** (image/video/doc/audio) | `ai_assets`: `ref`, `kind`, `topic_slug`, `description`, `url` | `[E]` | picks a `ref` (max 3); bytes attached at send |
-| **Values/numbers** | `ai_values`: `token` → `value_text` (prices, limits, counts, durations…) | tokens in text | never sees the value; code fills it after |
+| **Facts** (prices, limits, times, contacts) | typed columns on `ai_tariffs` / `ai_products` / `ai_contacts`, verbatim, language a row | `{{table.slug.field}}` tokens in text (`[F]`) | picks the right fact by label + value; emits the token, never the number |
 
 ### Media is a knowledge source — via a companion summary topic
 
@@ -133,21 +139,24 @@ cashier'") the model picks on. Companion topics are **answer-shaped summaries (~
 verbatim transcripts — keeping the cached prefix lean and the system deterministic. (If verbatim recall
 from long media is ever needed, that's the trigger to add pgvector retrieval — see *Scaling* below.)
 
-### Values (prices, limits, counts…) — tokens, not literals
+### Facts (prices, limits, times, contacts) — the Facts lane; typed columns, not literals
 
-`{{price.growth}}`, `{{limit.growth}}`, `{{spots.summer_camp}}`, `{{nights.deluxe}}` are referenced in
-topics/replies; the value book (`ai_values`) holds the real values; code injects them **after** drafting.
-**Any** factual number stays correct, centrally editable, and impossible for the model to invent — not
-just prices. The namespace selects the kind (`price.*`, `limit.*`, `spots.*`, `min.*`/`max.*`, …); the
-key selects the row. (Prices are the canonical case and the one the publish gate hard-checks.)
+`{{tariff.growth.price}}`, `{{tariff.growth.limit_text}}`, `{{product.nike_x.price}}`,
+`{{contact.support.whatsapp}}` are referenced in topics/replies; each value is a **typed column** on a
+typed fact table (`ai_tariffs` / `ai_products` / `ai_contacts`), stored **verbatim with units**; code
+substitutes it **after** drafting, for the reply's language (**language is a row, not a column**). **Any**
+factual number stays correct, centrally editable, and impossible for the model to invent — not just
+prices. The token grammar is uniform: `{{table.slug.field}}` — table selects the fact table, slug the row,
+field the column. The old generic `ai_values` bag is **removed** (a nearest-key lookup can return the
+*wrong* tariff). (Prices are the canonical case and the one the publish gate hard-checks.)
 
 ### Authoring — a chat where the assistant builds the KB
 
 The authoring model (deferred CMS, designed now): an operator opens a **builder chat**, drops material
 (URLs, images, videos, PDFs, raw text), and the **builder assistant turns it into a draft Snapshot on
-its own** — topics (each a container of media, every asset with its own send-description), price tokens,
-and identity/goal/guardrails edits — asking via **popups** when it needs a description or a price
-confirmed. A **KB editor page** exposes everything it created for accept/deny/edit, and **publish** runs
+its own** — topics (each a container of media, every asset with its own send-description), typed facts
+(prices/limits/contacts as columns), and identity/goal/guardrails edits — asking via **popups** when it
+needs a description or a fact value confirmed. A **KB editor page** exposes everything it created for accept/deny/edit, and **publish** runs
 the gate (below). Full UX — the blocks, the topic-as-media-container model, the popup/request primitive
 — is **`10-knowledge-builder.md`**. It writes the same `ai_*` tables; nothing goes live unreviewed.
 
@@ -210,11 +219,14 @@ useless escalation — so quality is **measured**, not assumed. A **golden set**
 from real chats, checked into git): each has a `window` + `profile` + `expect` (`must_include` /
 `must_exclude`, `asset_refs`, `reply_language`, `escalate`).
 
-**Deterministic metrics (offline, no live LLM — gate publish & CI):** price-safety (every value token
-rendered — prices and all other `ai_values` tokens — no bare digits) **target 1.0 hard**; asset-ref precision/recall **≥ 0.9**; language match
-(RU→`ru`, KK→`kk`, mixed→`ru`); escalation correctness; must-include/exclude. **LLM-as-judge** (1–5
-rubric on tone/grounding, **mean ≥ 4.0**) is reported but **does not gate** — it needs a live key, so it
-runs nightly/manual. `POST …/assistant/publish` refuses a snapshot unless **price-safety = 1.0** and
+**Deterministic metrics (offline, no live LLM — gate publish & CI):** fact-safety (every
+`{{table.slug.field}}` token renders to its typed column value for the reply language, and every
+currency-/unit number in the draft traces to an injected value — no bare digits) **target 1.0 hard**;
+asset-ref precision/recall **≥ 0.9**; language match (RU→`ru`, KK→`kk`, mixed→`ru`); escalation
+correctness; must-include/exclude. The runtime **prose grounding judge** (a cheap LLM, **biased to
+escalate**) guards non-numeric claims; its offline analogue is the **LLM-as-judge** (1–5 rubric on
+tone/grounding, **mean ≥ 4.0**), reported but **does not gate** — it needs a live key, so it runs
+nightly/manual. `POST …/assistant/publish` refuses a snapshot unless **fact-safety = 1.0** and
 **asset precision ≥ 0.9** (thresholds in `config.yaml`).
 
 ---
@@ -239,8 +251,8 @@ deferred to Phase 4B** (HTML templates dropped — xchats is an SPA + JSON API).
   with nested media) + emits `ai_draft.created`. Escalation / `PricingError` / low confidence → row
   flags, not a note. Producing up to 3 text variants is the one logic adaptation (one structured call
   returning ≤3 options).
-- **Config/snapshot store:** reimplement on Postgres (`ai_snapshots/ai_topics/ai_assets/ai_values/
-  ai_audit_log`); keep publish/rollback/dedup semantics.
+- **Config/snapshot store:** reimplement on Postgres (`ai_snapshots/ai_topics/ai_assets/ai_tariffs/
+  ai_products/ai_contacts/ai_audit_log`); keep publish/rollback/dedup semantics.
 - **Seed snapshot:** carry `0002_seed.sql` into the `ai_*` tables on first boot (the cold-start fix).
 - **Eval harness:** port the golden set + deterministic metrics + publish gate (incl. the language
   assertion).

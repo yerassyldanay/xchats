@@ -17,7 +17,7 @@ thing the todo list ([`../todo-playground.md`](../todo-playground.md)) executes.
 > The operator drops **any mix of materials** — a URL, several images, a PDF, a plain description,
 > a video — and says *"here are my tariffs, understand them and build/update the KB."* The assistant
 > **extracts** the content from each input, **synthesizes** it (cross-referencing the pieces and
-> diffing against the live KB), proposes new/updated topics · assets · value tokens · products · tariffs,
+> diffing against the live KB), proposes new/updated topics · assets · typed facts (products · tariffs · contacts),
 > asks via **popups** when unsure, and the operator **reviews & approves**. New/edited rows land as
 > **pending** (`drafted_at` set) in the playground; **approve** clears `drafted_at` so the brain reads them.
 
@@ -60,7 +60,7 @@ These tighten — they don't replace — the design in 10/11.
 
 The KB is currently a **Go literal**: [`backend/internal/brain/seed.go`](../backend/internal/brain/seed.go)
 `SeedSnapshot()` returns an in-memory `*domain.Snapshot`. The KB tables designed in
-[`9-database-schema.md`](9-database-schema.md) — `ai_snapshots / ai_topics / ai_assets / ai_values` —
+[`9-database-schema.md`](9-database-schema.md) — `ai_snapshots / ai_topics / ai_assets / ai_tariffs / ai_products / ai_contacts` —
 **are not in any migration** (only `ai_drafts` / `ai_draft_assets`, the *runtime suggestion* storage,
 exist). **A playground that writes the KB cannot write to a Go literal**, so the first thing this
 feature must do is land the **writable KB DB layer** the design already specifies. The brain switches
@@ -145,13 +145,13 @@ and emit **pending** changes for review.
                 │ writes PENDING rows (drafted_at, provenance)  │ resolves requests
                 ▼                                               ▼
         ┌──────────────────── ONE LIVING KB (per org) ───────────────────────────────────┐
-        │  ai_snapshots(config) · ai_topics · ai_assets · ai_values · ai_products ·       │
-        │  ai_tariffs · ai_builder_requests · ai_materials                                │
+        │  ai_snapshots(config) · ai_topics · ai_assets · ai_products · ai_tariffs ·     │
+        │  ai_contacts · ai_builder_requests · ai_materials                              │
         │     rows are LIVE   (drafted_at IS NULL)  → read by the brain                   │
         │           or PENDING (drafted_at set)     → playground-only, held out           │
         └───────────────────────────────────┬───────────────────────────────────────────┘
                                              │  [Approve] (one row | all) → gate (every asset
-                                             │   described, every live value token resolves, no
+                                             │   described, every live fact token resolves, no
                                              │   open req.) → clear drafted_at → brain reloads
                                              ▼  (NO version, NO copy, NO swap, NO rollback)
                                     BRAIN reads LIVE rows (unchanged read contract)
@@ -162,8 +162,8 @@ and emit **pending** changes for review.
 
 The brain's **read contract** (`*domain.Snapshot`) is unchanged; its *source* moves literal → DB (the
 **live** rows, `drafted_at IS NULL`), and
-its value rendering moves to a faithful token-substitution model (below). Everything else new is on the
-write side.
+its fact rendering moves to a faithful `{{table.slug.field}}` token-substitution model (below). Everything
+else new is on the write side.
 
 ---
 
@@ -174,20 +174,22 @@ shippable and testable on its own.
 
 ### L1 — KB contract: writable, DB-backed *one living KB* + drafted_at lifecycle  *(unblocks everything)*
 - Migration `0003_ai_kb.up.sql`: `ai_snapshots`(config, **one row per org**), `ai_topics`, `ai_assets`,
-  `ai_values`, **plus** the new entity tables `ai_products` / `ai_tariffs`, the `drafted_at` +
-  `provenance` (+ `owner_kind`/`owner_ref`) columns, `ai_builder_requests`, and `ai_materials` (data
-  model below). `ai_snapshots` keeps its name and the `snapshot_id` FK (legacy names, migration
+  the typed **fact** tables `ai_tariffs` / `ai_products` / `ai_contacts` (exact values as columns, language
+  a row), the `drafted_at` + `provenance` (+ `owner_kind`/`owner_ref` on `ai_assets`) columns,
+  `ai_builder_requests`, and `ai_materials` (data model below). `ai_snapshots` keeps its name and the `snapshot_id` FK (legacy names, migration
   continuity) but is no longer versioned — `UNIQUE (organization_id)`, one row per org.
-- **Generic value model (fixes the lossy bridge).** `ai_values` is `(token, lang) → value_text` (free
-  text, any unit). Snapshot rendering becomes **pure substitution**: `{{namespace.key}}` → `value_text`
-  for the reply language, falling back to the `'*'` row; an unresolved token → escalate (never ship a
-  half-rendered value). This **replaces** `PriceBook`'s typed `Tariff{PriceTenge int64}` + `formatTenge`
-  path, which silently corrupts values with units (`"25 000 ₸/мес"` → `"25 000 ₸"`). Re-express the
-  Demo Shop seed as `ai_values` rows (`price.basic | ru | "9 900 ₸"`, …). The `*domain.Snapshot` shape
-  the brain consumes stays; only its `Values` carrier + `Render` internals change.
+- **Typed fact tables (fixes the lossy bridge).** Exact facts are **typed columns** on `ai_tariffs` /
+  `ai_products` / `ai_contacts`, stored **verbatim with units**, one row per `(entity, language)`. Snapshot
+  rendering becomes **pure substitution**: `{{table.slug.field}}` → the column value for the reply
+  language, falling back to the org default then the `'*'` row; an unresolved token → escalate (never ship
+  a half-rendered value). This **replaces** `PriceBook`'s typed `Tariff{PriceTenge int64}` + `formatTenge`
+  path, which silently corrupts unit-bearing values (`"25 000 ₸/мес"` → `"25 000 ₸"`), and retires the old
+  generic `ai_values` token bag. Re-express the Demo Shop seed as typed rows (`ai_tariffs: basic | ru |
+  price "9 900 ₸"`, …). The `*domain.Snapshot` shape the brain consumes stays; only its fact carriers +
+  `Render` internals change.
 - `internal/kbstore/` — a `KBStore`: `LoadLive(orgID) (*domain.Snapshot, error)` (live rows only,
   `drafted_at IS NULL`); `Open(orgID)` (read live + pending rows — no clone, no copy); draft CRUD for
-  topics/assets/values/**products**/**tariffs** that **stamps `drafted_at`** (pending) on write; material
+  topics/assets/**products**/**tariffs**/**contacts** that **stamps `drafted_at`** (pending) on write; material
   create/extract-update; request create/resolve; `Approve(orgID, rowIDs|all)` (run the gate, then **clear
   `drafted_at`** on the approved rows). No `OpenDraft`-clone, no `Publish`-swap, no `Rollback`,
   no `DiscardDraft` — rejecting a pending row is a plain delete.
@@ -203,12 +205,13 @@ shippable and testable on its own.
 
 ### L2 — Editor (deterministic, no LLM)  *(proves the write contract)*
 - Read endpoints over the living KB: config block, topic list (each topic → body + its media gallery,
-  each asset with description + kind + owner), **product list**, **tariff list**, the value book, the
+  each asset with description + kind + owner), **product list**, **tariff list**, **contacts**, the
   request queue. Each row is flagged LIVE or PENDING by its `drafted_at`.
 - Write endpoints (each stamps `drafted_at` = now → **pending** + `provenance`): create/update/delete
   topic; **create/update/delete product; upsert/delete tariff**; upload+attach asset with
   **`owner_kind`/`owner_ref`** (topic|product|tariff); update asset description / **reassign owner** /
-  delete asset; create/update/delete value with **`owner_kind`/`owner_ref`**; edit
+  delete asset; edit the exact **fact columns** inline on a product/tariff (`price`, `limit_text`, `fee`, …)
+  and the **contacts** row (`whatsapp`, `email`, `callback_time`, …); edit
   persona/mission/guardrails/language.
 - **Approve / deny** per row: **approve** clears `drafted_at` (after the gate) → the row goes live;
   **deny** deletes the pending row. Manual editor edits land pending like any other write.
@@ -227,7 +230,7 @@ shippable and testable on its own.
   - **url** → best-effort fetch → readable main text; on failure → paste/screenshot popup.
   - **image** → multimodal vision call ("what it shows + when to send it") → proposed asset description.
   - **pdf / doc** → extract text (Go extractor or hand pages to the multimodal LLM); detected numbers
-    surface later as `confirm_price`/`propose_value`, never digits in a body.
+    surface later as `confirm_fact` popups (writing the exact value into a typed column), never digits in a body.
   - **video / audio** → store bytes only + `describe_media` popup. No transcription in v1.
 - Config: add `LLMVisionModel` (multimodal) alongside `LLMFastModel`; document in `.env.example` /
   `config.example.yaml`.
@@ -236,7 +239,7 @@ shippable and testable on its own.
 
 ### L4 — Builder chat agent (Stage 2: synthesis over the common form)
 - A new `internal/playground/builder` agent: input = the operator's chat turn + the **ready materials**
-  for this build + a **summary of the live KB** (topics/products/tariffs/values, capped); output =
+  for this build + a **summary of the live KB** (topics/products/tariffs/contacts, capped); output =
   **tool calls** that write **pending** rows via `KBStore`, plus **requests** (popups) when unsure.
   Tool contract below.
 - **Synthesis, not per-file captioning:** cross-reference the materials into coherent
@@ -246,7 +249,7 @@ shippable and testable on its own.
   material is unprocessed) — no open-ended looping. The live-KB summary, not the full KB, is its context.
 - Rides the existing realtime hub: each written pending row and each new `pending` request is broadcast
   so the chat **and** the editor update live over the same KB.
-- Tests: **parity** with a fake LLM (price in material → token + `confirm_price`, never a digit in the
+- Tests: **parity** with a fake LLM (price in material → `{{table.slug.field}}` token + `confirm_fact`, never a digit in the
   body; a loose image → `choose_topic`; a re-fed topic → `resolve_duplicate`) **and** a small **golden
   set** of `material → expected pending structure` cases (judged loosely) so the agent's *judgment* —
   not just its plumbing — is measured.
@@ -260,8 +263,9 @@ shippable and testable on its own.
 
 ## Data-model deltas (additive to doc 9)
 
-The four KB tables are exactly doc 9's DDL. The playground adds the **`drafted_at` lifecycle** fields,
-two **structured-entity** tables (`ai_products` / `ai_tariffs`), and two infra tables (the popup queue
+The core KB tables (config, topics, assets) are exactly doc 9's DDL. The playground adds the
+**`drafted_at` lifecycle** fields, three **typed fact** tables (`ai_products` / `ai_tariffs` /
+`ai_contacts` — exact values as columns, language a row), and two infra tables (the popup queue
 and the ingest staging area) — all additive; the **one living KB** holds both LIVE and PENDING rows
 (distinguished by `drafted_at`), and the brain reads only the LIVE rows.
 
@@ -269,64 +273,77 @@ and the ingest staging area) — all additive; the **one living KB** holds both 
 ai_snapshots                           ONE row per org (the assistant config: persona / mission /
    UNIQUE (organization_id)            guardrails / language_policy / reply_max_words) — not versioned.
 
-ai_topics / ai_assets / ai_values      gain:
+ai_topics / ai_assets                  gain:
    drafted_at    timestamptz NULL  -- NULL = LIVE (read by the brain); set = PENDING (playground-only)
    provenance    jsonb   -- { "source":"material", "material_id":"…", "at":"…" }
    (this REPLACES the old `review_state` enum — pending/live is the only lifecycle now)
 
 ai_assets                              additionally:
    DROP topic_slug
-   owner_kind    text  -- 'topic' | 'product' | 'tariff' | ''   (which entity this media belongs to)
+   owner_kind    text  -- 'topic' | 'product' | 'tariff' | ''   (which entity this MEDIA belongs to)
    owner_ref     text  -- the ref/slug of that entity
+   -- NOTE: only MEDIA is polymorphic. Exact VALUES are typed columns on the fact tables below;
+   -- `ai_values` is removed. The only way to quote a fact is `{{table.slug.field}}` (a typed column).
 
-ai_values                              additionally (polymorphic, column-free embedding):
-   owner_kind    text  -- 'topic' | 'product' | 'tariff' | ''   (default '' = global scalar)
-   owner_ref     text  -- the ref/slug of the owner (e.g. a product's price → owner='product:nike_x')
-   -- the ONLY way to embed a value is `{{namespace.key}}` from ai_values; entity tables hold NO
-   -- embeddable numbers — a product's price is an owned value token (e.g. `price.nike_x`).
-
-ai_products  (a sellable item — thin / descriptive; no links)
+ai_products  (typed FACT table — one row per (product, language))
    id            uuid  PK
    snapshot_id   uuid  FK -> ai_snapshots
-   ref           text  -- stable handle (UNIQUE (snapshot_id, ref))
-   name          text
+   ref           text  -- stable handle
+   lang          text  -- 'ru' | 'kk' | '*'  — language is a ROW
+   name          text  -- verbatim, per language
+   price         text  -- confirmed price, verbatim WITH units ('25 000 ₸'); quoted as {{product.<ref>.price}}
    description   text
    category      text
-   data          jsonb -- free descriptive attributes (no embeddable numbers — use owned values)
-   lang          text
+   data          jsonb -- descriptive attrs only (size, color…); no exact numbers — those are columns
    status        text
    drafted_at    timestamptz NULL  -- NULL = LIVE ; set = PENDING
    provenance    jsonb
    created_at, updated_at
-   UNIQUE (snapshot_id, ref)
+   UNIQUE (snapshot_id, ref, lang)
 
-ai_tariffs  (a pricing PLAN — thin / descriptive; no links)
+ai_tariffs  (typed FACT table — one row per (tariff, language))
    id            uuid  PK
    snapshot_id   uuid  FK -> ai_snapshots
-   ref           text  -- stable handle (UNIQUE (snapshot_id, ref))
-   name          text
+   ref           text  -- stable handle
+   lang          text  -- 'ru' | 'kk' | '*'  — language is a ROW
+   name          text  -- verbatim, per language ('Рост' / 'Өсу')
+   price         text  -- confirmed price, verbatim with units ('25 000 ₸/мес'); '' if fee-based
+   limit_text    text  -- confirmed limit, verbatim ('до 2 000 платежей/мес')
+   fee           text  -- per-transaction fee for percentage plans ('1.5 % за транзакцию'); '' otherwise
    summary       text
    pricing_type  text  -- 'fixed' | 'percentage' | 'tiered'
    advantages    text
    disadvantages text
-   limits        jsonb
-   data          jsonb -- free descriptive attributes (no embeddable numbers — use owned values)
-   lang          text
+   data          jsonb -- descriptive prose only (conditions / billing_period / tiers)
    status        text
    drafted_at    timestamptz NULL  -- NULL = LIVE ; set = PENDING
    provenance    jsonb
    created_at, updated_at
-   UNIQUE (snapshot_id, ref)
+   UNIQUE (snapshot_id, ref, lang)
+
+ai_contacts  (typed org-support FACT table — singleton slug 'support', one row per language)
+   id            uuid  PK
+   snapshot_id   uuid  FK -> ai_snapshots
+   slug          text  -- 'support' (keeps the 3-part token grammar {{contact.support.<field>}})
+   lang          text  -- 'ru' | 'kk' | '*'  — '*' = language-neutral (phones/e-mails/addresses)
+   whatsapp      text  -- language-neutral (on the '*' row)
+   email         text
+   address       text
+   legal         text
+   callback_time text  -- language-bearing ('1 час' / '1 сағат')
+   drafted_at    timestamptz NULL  -- NULL = LIVE ; set = PENDING
+   provenance    jsonb
+   UNIQUE (snapshot_id, lang)
 
 ai_builder_requests  (the popup / human-in-the-loop queue)
    id            uuid  PK
    snapshot_id   uuid  FK -> ai_snapshots
    material_id   uuid  FK -> ai_materials  NULL  -- the input that raised it, if any
-   req_type      text  -- 'describe_media'|'confirm_price'|'approve_topic'|'approve_asset'
+   req_type      text  -- 'describe_media'|'confirm_fact'|'approve_topic'|'approve_asset'
                        --  |'resolve_duplicate'|'choose_topic'|'comment'
    prompt        text  -- what the popup asks
    context       jsonb -- thumbnail ref / detected value / candidate topics — what the popup renders
-   target        jsonb -- which row it resolves into (owner_kind/owner_ref / asset ref / token)
+   target        jsonb -- which row it resolves into (owner_kind/owner_ref / asset ref / table.slug.field)
    state         text  -- 'pending' | 'resolved' | 'dismissed'
    resolution    jsonb NULL  -- the operator's answer (becomes the row mutation)
    created_at, resolved_at
@@ -353,25 +370,26 @@ ai_materials  (Stage-1 ⇄ Stage-2 staging: one row per dropped input — the No
 ## Builder agent — tool contract
 
 The agent never writes SQL; it calls these (each maps to a `KBStore` mutation or a request). `create_topic`,
-`create_product`, `upsert_tariff` and `propose_value` are **upserts** — the same call updates an existing
-row (matched on slug/ref/token) or creates a new one, which is how "build *or* update" works. Every
+`create_product`, `upsert_tariff` and `set_contacts` are **upserts** — the same call updates an existing
+row (matched on slug/ref + lang) or creates a new one, which is how "build *or* update" works. Every
 written row lands **pending** (`drafted_at` set).
 
 | Tool | Effect |
 |---|---|
 | `create_topic{slug,lang,title,keywords,body_md}` | upsert a pending `ai_topics` row; existing slug → update |
-| `create_product{ref,name,description,category,data}` | upsert a pending `ai_products` row; existing ref → update |
-| `upsert_tariff{ref,name,pricing_type,advantages,disadvantages,limits,...}` | upsert a pending `ai_tariffs` row; existing ref → update |
+| `create_product{ref,lang,name,price,description,category,data}` | upsert a pending `ai_products` row (per language); `price` is a **typed column** confirmed via `confirm_fact`; existing (ref,lang) → update |
+| `upsert_tariff{ref,lang,name,price,limit_text,fee,pricing_type,advantages,disadvantages,...}` | upsert a pending `ai_tariffs` row (per language); `price`/`limit_text`/`fee` are **typed columns** each confirmed via `confirm_fact`; existing (ref,lang) → update |
 | `attach_asset{ref,kind,owner_kind,owner_ref,description,material_id}` | pending `ai_assets` row (media owned by a topic\|product\|tariff) pointing at the material's bytes |
-| `propose_value{token,lang,value_text,owner_kind,owner_ref,description}` | raises `confirm_price` → on accept, upsert a pending `ai_values` row (scalar or owned by an entity) |
+| `confirm_fact{table,slug,field,lang,value}` | popup — the human confirms an exact fact value; on accept it writes the **typed column** on `ai_tariffs`/`ai_products`/`ai_contacts` (never a digit in prose) |
+| `set_contacts{lang,whatsapp,email,address,legal,callback_time}` | upsert the pending `ai_contacts` row (per language), each field via `confirm_fact` |
 | `describe_media{material_id|asset_ref}` | popup asking the operator for a description (esp. **video** / failed extraction) |
 | `choose_topic{asset_ref, candidates[]}` | popup — which owner does this asset belong to |
-| `resolve_duplicate{kind, a, b}` | popup — merge or keep both (re-fed URL / overlapping topic/product/tariff/value) |
+| `resolve_duplicate{kind, a, b}` | popup — merge or keep both (re-fed URL / overlapping topic/product/tariff) |
 | `comment{text}` | a note the operator can answer; steers the next build turn |
 
 **Guardrail (same as the runtime brain):** the agent **never bakes a digit into a topic body** — it
-writes a `{{token}}` and a `propose_value`/`confirm_price` request; the real number enters `ai_values`
-only on human confirmation. Numbers are the one thing never auto-written.
+writes a `{{table.slug.field}}` token and raises a `confirm_fact` request; the real number enters the
+typed fact column **only** on human confirmation. Numbers are the one thing never auto-written.
 
 ---
 
@@ -380,14 +398,14 @@ only on human confirmation. Numbers are the one thing never auto-written.
 Approve (one row or all) is the only pending → live path. It validates the **resulting LIVE set** —
 the rows being approved plus the rows already live — and refuses unless:
 - every `ai_assets` row (being approved or already live) has a non-empty `description`;
-- every `{{namespace.key}}` used in a **live** `ai_topics.body_md` resolves in `ai_values`
-  (the "price-safety = 1.0 / every token resolves" bar);
+- every `{{table.slug.field}}` used in a **live** `ai_topics.body_md` resolves to a column value in the
+  typed fact tables **for each required language** (the "fact-safety = 1.0 / every token resolves" bar);
 - no owned media blob dangles (the blob exists);
-- no `pending` builder-request remains (an undescribed asset / unconfirmed value would fail above anyway);
-- tokens are unique across `ai_values`.
+- no `pending` builder-request remains (an undescribed asset / unconfirmed fact would fail above anyway);
+- every referenced entity has a row for each required language (or a `*` fallback).
 
 Approving a **single** row is blocked with a precise reason if it would leave a dangling token (e.g.
-approving a topic whose `{{token}}` is still pending) — approve the value too, or approve-all.
+approving a topic whose `{{table.slug.field}}` is still pending) — approve that fact row too, or approve-all.
 
 > v1 ships the **structural** gate above (buildable today). The golden-set / asset-precision eval gate
 > (`8-ai-assistant.md` → Evals) layers on once the golden set exists — it is not a precondition for L1–L5.
@@ -401,7 +419,7 @@ trade-off in v1.
 ## API surface (new — under `/xchats/api/v1/playground`)
 
 ```
-GET    /playground/draft                      → the living KB: config + topics[+assets] + values + products + tariffs + requests + materials (LIVE and PENDING rows, each flagged by drafted_at)
+GET    /playground/draft                      → the living KB: config + topics[+assets] + products + tariffs + contacts + requests + materials (LIVE and PENDING rows, each flagged by drafted_at)
 POST   /playground/draft/topics               upsert a topic (lands pending)
 DELETE /playground/draft/topics/:slug
 POST   /playground/draft/products             upsert a product (lands pending)
@@ -411,13 +429,12 @@ DELETE /playground/draft/tariffs/:ref
 POST   /playground/draft/assets               upload bytes + create asset (multipart: file + meta incl. owner_kind/owner_ref)
 PATCH  /playground/draft/assets/:ref          edit description / reassign owner_kind+owner_ref
 DELETE /playground/draft/assets/:ref
-POST   /playground/draft/values               upsert a value token (accepts owner_kind/owner_ref)
-DELETE /playground/draft/values/:token
+PATCH  /playground/draft/contacts             upsert the org contacts row (per lang): whatsapp/email/address/legal/callback_time
 PATCH  /playground/draft/config               persona / mission / guardrails / language_policy
 POST   /playground/draft/materials            drop material (Stage 1): bytes/url/text → ai_materials + enqueue extraction
 GET    /playground/draft/materials            list materials + extraction status
 POST   /playground/draft/approve              run gate over ALL pending rows → clear drafted_at → reload brain
-POST   /playground/draft/approve/:kind/:id    approve ONE pending row (kind = topic|product|tariff|asset|value) → gate → clear drafted_at → reload brain
+POST   /playground/draft/approve/:kind/:id    approve ONE pending row (kind = topic|product|tariff|asset|contact) → gate → clear drafted_at → reload brain
 POST   /playground/chat                       a builder-chat turn (instruction + material_ids) → synthesis pass
 GET    /playground/requests                   the popup queue
 POST   /playground/requests/:id/resolve       answer a popup → writes a pending row
@@ -437,10 +454,10 @@ A new **Playground** page (route + NavRail entry), two panes over the **same liv
   inline **request cards** (popups) rendered where they occur.
 - **Editor** (right): config block; topic list (expand → `body_md` editor + media gallery, each asset
   showing kind/description and an **owner selector** — topic|product|tariff — to reassign, plus
-  delete/replace); a **Products** list and a **Tariffs** list (each editable, with their owned
-  values/media); the value book (token → value, editable, with owner). Every row carries a **pending
-  badge** driven by `drafted_at`; **Approve** acts per-row and an **Approve all** button runs the gate
-  and shows failures inline. No version/publish button.
+  delete/replace); a **Products** list and a **Tariffs** list (each editable, with their **typed fact
+  columns** — price/limit_text/fee — and owned media); a **Contacts** panel (whatsapp/email/address/legal/
+  callback_time, per language). Every row carries a **pending badge** driven by `drafted_at`; **Approve**
+  acts per-row and an **Approve all** button runs the gate and shows failures inline. No version/publish button.
 
 Reuses the existing API envelope, SSE client, blob upload, and auth — no new infra.
 
