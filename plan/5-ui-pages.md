@@ -302,7 +302,7 @@ Populated KB — several topics, products, tariffs, media and values, with a han
 ┌──┬────────────────────────────────────┬──────────────────────┐
 │N │ Конструктор   [Сохранить][Отменить] │ Обзор базы знаний     │
 │a │ chat: operator · AI ассистент       │  tiles (темы/товары/  │
-│v │ material bubbles + «Предложенные…»  │   тарифы/медиа/знач.)  │
+│v │ material bubbles + «Предложенные…»  │   тарифы/медиа/конт.)  │
 │  │ • «Черновик» chips on new rows      │ Запросы AI (popups)   │
 │  │ [ composer: текст + 📎 ]            │ Последние изменения   │
 └──┴────────────────────────────────────┴──────────────────────┘
@@ -490,7 +490,7 @@ guiding the operator to create the first row, with per-tab empty illustrations.
 - **▸ Backed by:** identical to the filled state — `GET /playground/draft` returns an empty
   `DraftView` (zero rows across all kinds, no requests). The empty copy / illustrations are
   **derived client-side** from the zero counts; creating the first row (`POST
-  /playground/draft/{topics|products|tariffs|values}` or an asset upload) transitions the tab into the
+  /playground/draft/{topics|products|tariffs}`, `PATCH /playground/draft/contacts`, or an asset upload) transitions the tab into the
   filled state with the new row flagged **«Черновик»** (`drafted_at` set) until approved.
 
 **Image prompt:** *Empty-state of the knowledge-base "editor" page in the XChats shell (flat dark slate

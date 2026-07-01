@@ -62,9 +62,10 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
   `/evolution/api/v1` path convention (authoritative; supersedes the shorthand `/api/...`).
 - **7.1-endpoints.md** — per-endpoint request & response parameters (bodies, query, payload shapes,
   shared entity schemas).
-- **8-ai-assistant.md** — the AI brain, end to end (the core of the product): the `[A]–[E]` prompt,
-  the `emit_draft` → `escalate→refs→prices→profile→status` pipeline, the knowledge base (text/media/
-  prices, media-as-knowledge via companion topics, the chat authoring flow), the contact profile,
+- **8-ai-assistant.md** — the AI brain, end to end (the core of the product): the `[A]–[F]` prompt,
+  the `emit_draft` → `escalate → render facts → number check → grounding judge → media → human review`
+  pipeline, the knowledge base (text/media/typed facts, media-as-knowledge via companion topics, the
+  chat authoring flow), the contact profile,
   providers + data boundary, evals + publish gate, and the submodule port checklist.
 - **9-database-schema.md** — the full PostgreSQL schema in a dedicated `xchats` schema (fully-named
   tables, e.g. `xchats.wa_chats`), keys, indexes, constraints, and a normalization review.

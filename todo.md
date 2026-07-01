@@ -221,7 +221,8 @@ contains Principles 0–2, the `0004` DDL + schema delta, and the integration ch
 
 - Confirm the `0004` DDL is consistent with
   [0003_ai_kb.up.sql](backend/migrations/0003_ai_kb.up.sql) (FK + cascade, `provenance`,
-  `(kb_id, ref)` keys, polymorphic `owner_kind/owner_ref` on values + assets).
+  `(kb_id, ref, lang)` keys, polymorphic `owner_kind/owner_ref` on **assets (media) only** — `ai_values`
+  dropped, facts are typed columns).
 - Confirm facts are typed columns: `{{product.nike_x.price}}` resolves to the `price` column for the
   reply language; `ai_values` is gone; no generic token bag remains.
 - Walk one end-to-end example: create product `nike-x` (ru row with `price='25 000 ₸'`) +

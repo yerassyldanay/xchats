@@ -107,7 +107,7 @@ The chat and the editor edit the **same** living KB — no sync problem, just tw
                                           ┌────────────────────────────────────┐
                                           │  KB EDITOR PAGE                      │
                                           │  topics · products · tariffs ·       │
-                                          │  media · identity/goal · values ·    │
+                                          │  media · identity/goal · contacts ·  │
                                           │  provenance · Approve                │
                                           └────────────────────────────────────┘
 ```
@@ -116,7 +116,7 @@ The chat and the editor edit the **same** living KB — no sync problem, just tw
   when unsure.
 - **KB editor page** — the precise path. A structured view of the KB: the config blocks, the topic
   list (expand a topic → its body + its media gallery, each asset with its description), products,
-  tariffs, and the values. Pending rows are visibly flagged. Every row is editable and shows
+  tariffs, and contacts. Pending rows are visibly flagged. Every row is editable and shows
   **provenance** ("created from: chat msg #12 / source: <url>"). An **Approve** button runs the gate and
   clears `drafted_at` on the selected rows (or all), letting the brain read them.
 
