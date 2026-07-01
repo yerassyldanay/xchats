@@ -35,7 +35,7 @@ no SQL files yet.
     carries its own dedup key `UNIQUE(message_id)` so the doubled webhook delivery can't write it twice. (The
     plan's original text-only v1 removed it; Build 0 un-defers it.)
   - **Defined but empty/unused** in v1: `ai_audit_log`, `assignment_events`. (The seeded KB —
-    `ai_topics` / `ai_assets` / `ai_values` — and `ai_suggestions` **are** used: each Suggest writes one
+    `ai_topics` / `ai_assets` / `ai_values` / `ai_products` / `ai_tariffs` — and `ai_suggestions` **are** used: each Suggest writes one
     row whose `options` jsonb holds 1–3 variants, each with optional media from the seeded catalog.) Don't pour
     migration/wiring effort into the empty ones until their phase (see `0.1-definition-of-done.md`).
 
@@ -234,23 +234,35 @@ actor_user_id     uuid FK -> users  NULL
 created_at
 ```
 
-## AI assistant (ported brain — normalized per snapshot version)
+## AI assistant (ported brain — ONE living KB per org)
 
-### xchats.ai_snapshots  (a versioned config the prompt is built from)
+### xchats.ai_snapshots  (the single per-org assistant config)
 ```
 id               uuid  PK
 organization_id  uuid  FK -> organizations          -- DIRECT, kept
-version          int
-snapshot_state   text  -- 'draft'|'published'
 persona          text
 mission          text
 guardrails       text
 language_policy  text
-published_at, created_at  timestamptz
-UNIQUE (organization_id, version)
+reply_max_words  int
+created_at, updated_at  timestamptz
+UNIQUE (organization_id)
 ```
+> **One living KB per org — no versions, no snapshots, no rollback.** There is exactly **one** row
+> per org holding the assistant config (persona / mission / guardrails / language_policy /
+> reply_max_words). The table name `ai_snapshots` and the FK `snapshot_id` are **legacy** — kept to
+> avoid churn across the schema and migrations; nothing here is versioned anymore. The old
+> `version` / `snapshot_state` / `published_at` columns and `UNIQUE(organization_id, version)` are
+> dropped; the key is now `UNIQUE(organization_id)` (one row per org).
+>
+> **Draft is a per-row timestamp.** Every content row below carries `drafted_at timestamptz NULL`:
+> `drafted_at IS NULL` → **LIVE** (the brain reads it; included in the prompt); `drafted_at IS NOT
+> NULL` → **PENDING** (shown in the playground with editors, **excluded** from the prompt). This
+> replaces the old `review_state` enum. Each content row also carries `provenance jsonb` (source
+> tracking). **Approve = `UPDATE … SET drafted_at = NULL`** (per-row or all-at-once); the
+> deterministic gate runs **at approve time** — no publish/swap, no version copy, no rollback.
 
-### xchats.ai_topics  (KB; belongs to a snapshot version)
+### xchats.ai_topics  (KB; belongs to the org's KB)
 ```
 id           uuid  PK
 snapshot_id  uuid  FK -> ai_snapshots               -- organization derived via snapshot (3NF)
@@ -258,23 +270,31 @@ slug         text
 lang         text
 keywords     text
 body_md      text
+drafted_at   timestamptz  NULL  -- NULL = LIVE (in prompt); NOT NULL = PENDING (playground only)
+provenance   jsonb              -- source tracking (where this row came from)
 created_at, updated_at
 UNIQUE (snapshot_id, slug)
 ```
 
-### xchats.ai_assets  (media catalog; belongs to a snapshot version)
+### xchats.ai_assets  (media catalog; attaches to ANY entity)
 ```
 id           uuid  PK
 snapshot_id  uuid  FK -> ai_snapshots
 ref          text  -- stable id the model uses in asset_refs
 asset_kind   text  -- 'image'|'video'|'document'|'audio'
-topic_slug   text
+owner_kind   text  -- 'topic'|'product'|'tariff'|''  ('' = unattached)
+owner_ref    text  -- the owner's ref/slug; '' = unattached
 description  text
 asset_url    text
+drafted_at   timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
+provenance   jsonb
 UNIQUE (snapshot_id, ref)
 ```
+> **Polymorphic media.** A media blob attaches to **any** entity via the shared `(owner_kind,
+> owner_ref)` pair: an entity's media = `ai_assets WHERE owner_kind/owner_ref match`. The old
+> `topic_slug` is gone — a topic is now just `owner_kind='topic'`, `owner_ref=<slug>`.
 
-### xchats.ai_values  (named value tokens — prices AND any other confirmed number/value; belongs to a snapshot version)
+### xchats.ai_values  (named value tokens — prices AND any other confirmed number/value)
 ```
 id           uuid  PK
 snapshot_id  uuid  FK -> ai_snapshots
@@ -282,6 +302,10 @@ token        text  -- namespace.key — e.g. 'price.growth', 'limit.growth', 'ti
 lang         text  -- 'ru' | 'kk' | '*'  — '*' = language-neutral (numbers, phones, addresses, e-mails)
 value_text   text  -- the confirmed value, as text — '25 000 ₸/мес', 'до 2 000 платежей/мес', '5 минут' (any unit; code substitutes verbatim)
 description  text  NULL  -- what this value means, for the editor/builder UX & the confirm popup; NOT injected into the prompt
+owner_kind   text  -- 'topic'|'product'|'tariff'|''  ('' = a global scalar like contact.whatsapp)
+owner_ref    text  -- the owner's ref/slug; '' = global scalar
+drafted_at   timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
+provenance   jsonb
 UNIQUE (snapshot_id, token, lang)
 ```
 > **Generalized from the old `ai_prices`.** This was always a **token → confirmed-value** store; the
@@ -289,9 +313,22 @@ UNIQUE (snapshot_id, token, lang)
 > want it centrally editable — which applies to **any** value (limits, durations, SLAs, contacts,
 > addresses, min/max), not just prices. `price.*` stays the canonical namespace; new namespaces
 > (`limit.*`, `time.*`, `contact.*`, `trial.*`, `min.*`/`max.*`, …) need **no schema change** — code does
-> a pure string substitution of `{{namespace.key}}` → `value_text`. The publish gate's "price-safety =
-> 1.0" reads as "**every token resolves**". `value_text` is text precisely so any unit fits. The
+> a pure string substitution of `{{namespace.key}}` → `value_text`. The approve gate's "price-safety =
+> 1.0" reads as "**every live token resolves**". `value_text` is text precisely so any unit fits. The
 > `description` is **human-only** (editor / `confirm_price` popup / reviewer); the model never sees it.
+>
+> **Owner dimension — products and tariffs OWN their values.** `(owner_kind, owner_ref)` ties a value
+> to a specific entity: `owner_kind=''` is a **global scalar** (`contact.whatsapp`, `price.growth`);
+> `owner_kind='product'`, `owner_ref='nike-x'` is the price that **belongs to** product `nike-x`
+> (token e.g. `price.nike_x`); `owner_kind='tariff'` is a rate/fee/cap the assistant must **quote
+> exactly**. The entity tables (`ai_products`, `ai_tariffs`) hold **no** embeddable numbers — a
+> product's price is an owned `ai_values` row, not a column. That's *why* those tables are thin.
+>
+> **Embedding is column-free.** There is exactly **one** way to put a value into reply/topic text:
+> `{{namespace.key}}`, resolved from `ai_values`. Templates **never** reference column names —
+> entity tables hold no embeddable numbers — so the only quotable, injectable facts are the confirmed
+> `ai_values` rows. A product's `25 000 ₸` reaches a reply only as `{{price.nike_x}}`; there is no
+> `products.price` to interpolate.
 >
 > **Language-aware.** Rendering differs by language (`Бесплатно`/`Тегін`, `…/мес`/`…/ай`), so values are
 > keyed by `lang` too: injection resolves `(token, reply_language)` first, then falls back to the **`'*'`
@@ -299,26 +336,78 @@ UNIQUE (snapshot_id, token, lang)
 > if neither exists the token is unresolved → `PricingError`/escalate (never ship a half-rendered value).
 > Mirrors `ai_topics.lang` and the brain's "reply in the customer's language" rule.
 
-> **Worked example — the xPayment value book** (one published snapshot; the `tariffs` topic body uses
-> `{{price.growth}}`, `{{limit.growth}}`, `{{time.api_setup}}`, `{{contact.whatsapp}}`, …):
+> **Worked example — the xPayment value book** (the org's one KB; the `tariffs` topic body uses
+> `{{price.growth}}`, `{{limit.growth}}`, `{{time.api_setup}}`, `{{contact.whatsapp}}`, …). Most rows
+> are global scalars (`owner_kind=''`); the last two show a value **owned** by a product / tariff:
 >
-> | token | lang | value_text | description |
-> |---|---|---|---|
-> | `price.trial` | ru | Бесплатно | Пробный доступ — стоимость |
-> | `price.trial` | kk | Тегін | то же, по-казахски |
-> | `price.start` | ru | 10 000 ₸/мес | Тариф «Старт» — фикс. цена в месяц |
-> | `price.growth` | ru | 25 000 ₸/мес | Тариф «Рост» (основной) — фикс. цена в месяц |
-> | `price.scale` | ru | 60 000 ₸/мес | Тариф «Масштаб» — фикс. цена в месяц |
-> | `trial.days` | ru | 3 дня | Длительность бесплатного пробного периода |
-> | `limit.growth` | ru | до 2 000 платежей/мес | Лимит платежей/мес на «Рост» |
-> | `limit.scale` | ru | безлимит платежей | Лимит платежей на «Масштаб» |
-> | `limit.cashiers` | ru | до 5 виртуальных касс | Макс. число виртуальных касс (все тарифы) |
-> | `time.api_setup` | ru | 5 минут | Время на подключение Kaspi Pay API |
-> | `time.callback` | ru | 1 час | В течение какого времени перезвонят |
-> | `contact.whatsapp` | * | +7 702 976-65-09 | WhatsApp поддержки (язык-нейтрально) |
-> | `contact.email` | * | support@xpayment.kz | E-mail поддержки |
-> | `contact.address` | * | г. Шымкент, ул. Аргынбеков, 29/4 | Юридический адрес |
-> | `contact.legal` | * | ИП «XGroup», Республика Казахстан | Реквизиты |
+> | token | lang | value_text | description | owner_kind | owner_ref |
+> |---|---|---|---|---|---|
+> | `price.trial` | ru | Бесплатно | Пробный доступ — стоимость | | |
+> | `price.trial` | kk | Тегін | то же, по-казахски | | |
+> | `price.start` | ru | 10 000 ₸/мес | Тариф «Старт» — фикс. цена в месяц | | |
+> | `price.growth` | ru | 25 000 ₸/мес | Тариф «Рост» (основной) — фикс. цена в месяц | | |
+> | `price.scale` | ru | 60 000 ₸/мес | Тариф «Масштаб» — фикс. цена в месяц | | |
+> | `trial.days` | ru | 3 дня | Длительность бесплатного пробного периода | | |
+> | `limit.growth` | ru | до 2 000 платежей/мес | Лимит платежей/мес на «Рост» | | |
+> | `limit.scale` | ru | безлимит платежей | Лимит платежей на «Масштаб» | | |
+> | `limit.cashiers` | ru | до 5 виртуальных касс | Макс. число виртуальных касс (все тарифы) | | |
+> | `time.api_setup` | ru | 5 минут | Время на подключение Kaspi Pay API | | |
+> | `time.callback` | ru | 1 час | В течение какого времени перезвонят | | |
+> | `contact.whatsapp` | * | +7 702 976-65-09 | WhatsApp поддержки (язык-нейтрально) | | |
+> | `contact.email` | * | support@xpayment.kz | E-mail поддержки | | |
+> | `contact.address` | * | г. Шымкент, ул. Аргынбеков, 29/4 | Юридический адрес | | |
+> | `contact.legal` | * | ИП «XGroup», Республика Казахстан | Реквизиты | | |
+> | `price.nike_x` | ru | 25 000 ₸ | Цена товара Nike X — owned by product | product | nike-x |
+> | `fee.pro` | * | 1.5 % за транзакцию | Комиссия тарифа Pro — quoted exactly | tariff | pro |
+
+### xchats.ai_products  (descriptive catalog; one row per product — thin, independent)
+```
+id           uuid  PK
+snapshot_id  uuid  FK -> ai_snapshots               -- organization derived via snapshot (3NF)
+ref          text  -- stable key, e.g. 'nike-x'
+name         text
+description  text
+category     text
+data         jsonb -- sphere-specific attrs: {size, color, area_m2, …}
+lang         text
+status       text  -- 'active'|'inactive'
+drafted_at   timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
+provenance   jsonb
+created_at, updated_at  timestamptz
+UNIQUE (snapshot_id, ref)
+```
+> **A product is DESCRIPTIVE ONLY — no price column.** Its price/numbers are **owned `ai_values`
+> rows** (`owner_kind='product'`, token e.g. `price.nike_x`); its media are **owned `ai_assets`
+> rows** (`owner_kind='product'`, `owner_ref=<ref>`). The table holds only descriptive attrs (name,
+> category, sphere-specific `data`) — which is why it's thin and FK-free toward `ai_tariffs`.
+
+### xchats.ai_tariffs  (descriptive tariff/plan catalog; one row per tariff — thin, independent)
+```
+id            uuid  PK
+snapshot_id   uuid  FK -> ai_snapshots
+ref           text  -- 'standard'|'pro'
+name          text
+summary       text
+pricing_type  text  -- 'fixed'|'percentage'|'tiered'|'hybrid'
+advantages    text
+disadvantages text
+limits        jsonb -- DESCRIPTIVE ranges only: {monthly_cap, per_tx_max}
+data          jsonb -- description / conditions / billing_period / tiers
+lang          text
+status        text  -- 'active'|'inactive'
+drafted_at    timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
+provenance    jsonb
+created_at, updated_at  timestamptz
+UNIQUE (snapshot_id, ref)
+```
+> **A tariff's quotable numbers are owned `ai_values` rows.** Any rate / fee / cap the assistant must
+> **quote exactly** is an owned `ai_values` row (`owner_kind='tariff'`, `owner_ref=<ref>`); only
+> **descriptive** ranges (e.g. `{monthly_cap, per_tx_max}`) live in `limits` jsonb. The two new tables
+> have **no foreign keys between them** — each is an independent, thin descriptor.
+>
+> **Products & tariffs are confirmed number sources** (like `ai_values`) — so they are **exempt** from
+> the "no literal amount in a topic body" rule, which applies only to **topic bodies**: an owned price
+> on a product/tariff is a confirmed fact, not an invented one.
 
 ### xchats.ai_suggestions  (one row per "Suggest"; the 1–3 reply OPTIONS live in the `options` jsonb)
 ```
@@ -371,19 +460,20 @@ PARTIAL UNIQUE (chat_id) WHERE state IN ('generating','suggested')  -- the GENER
 ```
 id               uuid PK
 organization_id  uuid FK -> organizations            -- DIRECT, kept
-action           text   -- 'publish'|'rollback'|'snapshot_created'|'edit' — a KB-lifecycle event
+action           text   -- 'approve'|'edit' — a KB-lifecycle event
 actor_user_id    uuid FK -> users  NULL              -- who did it (NULL = system, e.g. seed on boot)
-version          int                                 -- which ai_snapshots.version the action targeted
-note             text                                -- free-text detail ('published v4', 'rolled back v4→v3')
+version          int                                 -- LEGACY/UNUSED: KB is no longer versioned
+note             text                                -- free-text detail ('approved 3 topics', 'edited price.growth')
 created_at
 ```
 > **Append-only history of the KB's lifecycle** — *not* per-message or per-draft activity. One row per
-> significant snapshot action (publish, rollback, snapshot created/edited): who, which version, when,
-> why. It answers "who published the price that went out last Tuesday, and what did it replace?" — the
-> provenance/compliance trail behind the `draft → published` gate, and the record a rollback reads. It is
-> **never read on the hot path** and the brain never touches it. **v1: defined but empty** — nothing
-> writes it until the publish/rollback flow exists (Phase 4B); the seed-on-boot may write one
-> `snapshot_created` row. Distinct from `wa_messages` (conversation) and `ai_suggestions` (suggestions).
+> significant action (a row/batch **approve** = `drafted_at` cleared, an **edit**): who, when, why. It
+> answers "who approved the price that went out last Tuesday?" — the provenance/compliance trail behind
+> the per-row approve gate. There is no publish/rollback (the KB is one living copy, not versioned), so
+> the `version` column is **legacy/unused** — kept only to avoid churn. It is **never read on the hot
+> path** and the brain never touches it. **v1: defined but empty** — nothing writes it until the
+> approve flow exists; the seed-on-boot may write one row. Distinct from `wa_messages` (conversation)
+> and `ai_suggestions` (suggestions).
 
 ## Infrastructure
 
@@ -412,9 +502,9 @@ UNIQUE (account_id, phone_jid)             on xchats.wa_contacts
 
 **1NF** — every column is atomic. The auto-response window is split into atomic
 `respond_window_start/end` (UTC; no composite). Repeating lists are their own tables
-(`organization_users`, `ai_topics/assets/values`, `assignment_events`) — no array/CSV columns,
-**except `ai_suggestions.options`** (a deliberate jsonb document holding the 1–3 reply variants as one
-atomic suggestion — see denormalizations).
+(`organization_users`, `ai_topics/assets/values`, `ai_products`, `ai_tariffs`, `assignment_events`) —
+no array/CSV columns, **except `ai_suggestions.options`** (a deliberate jsonb document holding the 1–3
+reply variants as one atomic suggestion — see denormalizations).
 
 **2NF** — no partial dependencies. Junctions (`organization_users`) carry only attributes that
 depend on the whole composite key (`joined_at`). Every other table has a single-column PK (`id`), so
@@ -424,7 +514,8 @@ depend on the whole composite key (`joined_at`). Every other table has a single-
 `organization_id` when it's reachable by FK. `organization_id` is stored **only** where it's a
 direct fact — `organizations`, `organization_users`, `wa_accounts` (the assignment), `ai_snapshots`,
 `ai_audit_log` — and **derived by join** everywhere else (`wa_contacts`, `wa_chats`, `wa_messages`,
-`ai_topics/assets/values`, `ai_suggestions`). The `assigned` flag was removed (derived from
+`ai_topics/assets/values`, `ai_products`, `ai_tariffs`, `ai_suggestions`) — the new KB tables reach
+`organization_id` via their `snapshot_id`. The `assigned` flag was removed (derived from
 `organization_id`).
 
 ### Deliberate, documented denormalizations (3 exceptions, each justified)
@@ -437,8 +528,10 @@ direct fact — `organizations`, `organization_users`, `wa_accounts` (the assign
    of `wa_messages`, maintained on write, for fast inbox listing. Source of truth is `wa_messages`;
    they can be recomputed.
 3. **`jsonb` document columns** (`wa_contacts.attributes`, `wa_messages.raw`, `ai_suggestions.options`
-   + its `suggested_status`/`suggested_callback`) — intentional semi-structured/document
-   storage (open keyset, raw audit document, the 1–3 reply variants kept as one atomic suggestion), not
+   + its `suggested_status`/`suggested_callback`, `ai_products.data`, `ai_tariffs.data`/`limits`,
+   plus the `provenance` source-tracking columns on every KB row) — intentional
+   semi-structured/document storage (open keyset, raw audit document, the 1–3 reply variants kept as
+   one atomic suggestion, sphere-specific product attrs, descriptive tariff ranges/conditions), not
    repeating groups — a deliberate choice, not a 1NF violation. The `options` array trades per-option
    queryability for one-row supersede + no join to render a suggestion; the success metric stays
    computable (chosen option text vs the sent message).

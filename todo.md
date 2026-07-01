@@ -1,160 +1,213 @@
-# TODO — Implement the AI Assistant Suggestion (real brain)
+# Architecture: `drafted_at` KB model + thin entities with polymorphic values & media
 
-## Goal
+## Context
 
-Replace the hardcoded `Stub` drafter with a **real, KB-grounded brain** so that pressing
-"Подсказать ответ" produces a genuine reply suggestion (text + optional media) drawn from a
-Knowledge Base. The KB content and media files are **invented here** (a small demo business) — no
-external data needed.
+**Why this change.** Three needs converged:
 
-Scope decisions (locked):
-- **One option** per suggestion to start (the UI already renders 1–N cards).
-- **Text + media**: the brain may attach catalog media by ref; we ship the media files and serve them.
-- **No chat profile**: send only the last ~15 messages; the model infers from them.
-- **Embedded KB** (in-memory snapshot at boot) — no `ai_*` DB tables yet; swap to DB later behind the
-  same `ContentSource` seam.
-- **Stub fallback**: if `LLM_API_KEY` is unset, keep the Stub so the app still runs.
+1. **A simpler draft/approval model.** Replace versioned *snapshots* + per-row
+   `review_state` with a single living KB per org where each row is flagged pending via a
+   `drafted_at` timestamp and held out of the prompt until a human approves it.
+2. **Structured catalog data** for many spheres: add **`ai_products`** (a sellable item)
+   and **`ai_tariffs`** (a pricing *plan* — fixed/percentage, limits, pros/cons). The two
+   are independent (no links).
+3. **Media + numbers on any entity**, without fattening the entity tables or coupling
+   reply templates to column names.
 
-## Current state (already built — reuse, don't rebuild)
+**The central design principle (Principle 0 below):** entity tables stay *thin and
+descriptive*. Every embeddable number lives in `ai_values`, every media file lives in
+`ai_assets`, and both attach back to their entity through one shared `(owner_kind,
+owner_ref)` pair. Templates embed only `{{namespace.key}}` from `ai_values` — they never
+reference a table column. This is what keeps the schema small and the embedding uniform.
 
-- `internal/assistant/assistant.go` — the `Drafter` interface (`Draft(ctx, Input) ([]Option, error)`)
-  + `Input`, `Option`, `Media`, and `NewStub` (embeds sample media → blob store, keyed by ref).
-- `internal/worker/worker.go` `handleAIDraft` — calls `Drafter.Draft`, writes via `WriteDraftSet`,
-  broadcasts `ai_draft.created`.
-- `internal/httpapi/drafts.go` — `handleSuggest` / `handleListDrafts` / `handleApprove` (approve
-  sends text + `media_ids` via `sendParts`).
-- `internal/config/config.go` — two-file config (yaml + env), `caarlos0/env` tags.
-- Brain to port: `plan/examples/repos/xpayment-crm/internal/{domain,usecase/assistant,infrastructure/llm}`.
+**Decisions (with the user).**
+- Draft = a per-row `drafted_at` timestamp; approval is per-element or all-at-once.
+- `ai_products` and `ai_tariffs` are independent (no FKs between them).
+- Numbers never become entity columns → no column-name templating.
+- `limits` is jsonb; `advantages`/`disadvantages` are text columns; the rest of a tariff
+  is a small descriptive spine + `data` jsonb.
+- Accepted trade-off: no versioned history / rollback.
 
-## The invented Knowledge Base (demo business: "Demo Shop")
-
-A small online shop assistant. Put this content in the seed file (step 4). Prices/numbers/contacts
-are **value tokens**, never digits in topic bodies.
-
-- **Persona**: friendly, concrete sales assistant for an online shop; explains simply; no hard-selling.
-- **Guardrails**: never invent prices; if asked about refunds/legal/an angry customer → escalate;
-  always offer a next step.
-- **Language policy**: reply in the customer's language; KK+RU mix → Russian.
-- **Topics** (`slug`, lang, body with tokens):
-  - `pricing` (ru): three plans — Базовый `{{price.basic}}`, Стандарт `{{price.standard}}`,
-    Премиум `{{price.premium}}`; delivery `{{delivery.days}}`.
-  - `delivery` (ru): delivery time `{{delivery.days}}`, free over `{{price.free_delivery_min}}`.
-  - `how_to_order` (ru): steps to order via WhatsApp.
-  - `contacts` (ru): WhatsApp `{{contact.whatsapp}}`, e-mail `{{contact.email}}`, address
-    `{{contact.address}}`.
-- **Value book** (token → value, with lang; `*` = language-neutral):
-  - `price.basic` = "9 900 ₸", `price.standard` = "19 900 ₸", `price.premium` = "39 900 ₸"
-  - `price.free_delivery_min` = "30 000 ₸", `delivery.days` (ru) = "1–3 дня"
-  - `contact.whatsapp` (*) = "+7 700 123 45 67", `contact.email` (*) = "hello@demoshop.kz"
-  - `contact.address` (*) = "Алматы, ул. Абая, 10"
-  - (The ported `PriceBook` uses `price.<key>`/`limit.<key>` for tariffs and `ns.key` placeholders for
-    the rest — map the above onto Tariffs + Placeholders, or extend it; see step 2 note.)
-- **Media catalog** (asset `ref` | kind | topic | description) — files shipped in step 5:
-  - `pricing_card` | image | pricing | "Карточка с тремя тарифами и ценами (RU). Для вопросов о цене."
-  - `catalog_pdf` | document | pricing | "PDF-каталог товаров с ценами. Когда просят подробности."
-  - `intro_audio` | audio | how_to_order | "Голосовое: как оформить заказ за минуту."
-
-## Implementation steps
-
-### 1. Port the brain core into `backend/internal/brain/`
-- [ ] `internal/brain/domain/` ← copy `domain/{content,draft,message,catalog}.go` (module path
-  `github.com/yessaliyev/xpayment-crm` → `github.com/yerassyldanay/xchats/backend`). Drop the unused
-  `ChatID` type from `message.go` (keep `Message`, `Role`).
-- [ ] `internal/brain/prompt.go` (package `brain`) ← `usecase/assistant/{prompt.go + the postProcess
-  pipeline from brain.go + errors}`. Add a `Prompt{System,User}` type. **Modify `BuildUser`** to omit
-  the PROFILE block when no profile is given (we pass none). Export `PostProcess(raw, snap, log)`.
-- [ ] `internal/brain/llm/openrouter.go` (package `llm`) ← copy; repoint `assistant.Prompt` →
-  `brain.Prompt` and the domain import. Keep the forced `emit_draft` tool + defensive JSON parse.
-
-### 2. Knowledge-base value tokens
-- [ ] Reuse the ported `PriceBook.Render` (`price.*`/`limit.*` → tariffs; `ns.key` → bilingual
-  placeholders). Map the demo value book onto `Tariffs` (basic/standard/premium with a price; limits
-  optional) + `Placeholders` (delivery, contacts). If a non-tariff numeric token is needed, add it as
-  a placeholder. (Keeps the port faithful; the doc-level `ai_values` rename is a later DB concern.)
-
-### 3. LLM config
-- [ ] Add to `internal/config/config.go`: `LLMProvider` (`env:"LLM_PROVIDER"`), `LLMAPIKey`
-  (`env:"LLM_API_KEY"`), `LLMBaseURL`, `LLMFastModel`, `LLMMaxTokens`, `LLMTemperature` + defaults
-  (provider `openrouter`, model `openai/gpt-4o-mini`, maxTokens 1024, temp 0.3) + a
-  `LLMResolvedBaseURL()` helper (openrouter/openai/gemini base URLs; `LLMBaseURL` overrides).
-- [ ] Document the keys in `.env.example` / `config.example.yaml`.
-
-### 4. Embedded seed snapshot
-- [ ] `internal/brain/seed.go` — `func SeedSnapshot() *domain.Snapshot` returning the "Demo Shop" KB
-  above (Config + PriceBook + Topics + Assets). Asset URLs = `/xchats/api/v1/media/<ref>`.
-
-### 5. KB media files
-- [ ] Add `internal/brain/kb-media/` with the three assets (`pricing_card.png`, `catalog_pdf.pdf`,
-  `intro_audio.*`) — generate simple placeholder files (a rendered pricing PNG, reuse the existing
-  `sample-doc.pdf` shape, a short audio). `//go:embed kb-media/*`.
-- [ ] A loader (mirror `NewStub`): on boot, `blob.Put(ref, bytes, Meta{...})` for each asset so
-  approve→`sendParts` can serve/send them by ref.
-
-### 6. RealDrafter behind `assistant.Drafter`
-- [ ] `internal/assistant/real.go` — `RealDrafter{store, llm, snap, log}` implementing
-  `Draft(ctx, Input) ([]Option, error)`:
-  - parse `Input.ChatID`; `store.MessagesForChat(ctx, chatID, time.Time{}, 15)` → window.
-  - current = latest `Direction=="in"` message (fallback `Input.LastInboundText`); window = the rest,
-    mapped to `domain.Message` (in→customer, out→agent).
-  - `brain.BuildSystem(snap)` + `brain.BuildUser(nil, window, current)` → `llm.Draft` → on error,
-    return one escalation option (holding reply); else `brain.PostProcess` → map `domain.Draft` to one
-    `Option` (Text, Confidence, Escalate, Reason, **Media** from `ResolveAssets`).
-- [ ] `NewReal(store, llmClient, snap, log)`.
-
-### 7. Wire it up
-- [ ] `cmd/xchats/main.go`: if `cfg.LLMAPIKey != ""` build `llm.New(cfg.LLMResolvedBaseURL(), key,
-  fastModel, "", maxTokens, temp)` + load KB media into blob + `assistant.NewReal(st, lc,
-  brain.SeedSnapshot(), log)`; else keep `assistant.NewStub`. Pass the chosen `Drafter` to both the
-  worker and the HTTP server (as today). Log which drafter is active.
-
-### 8. Build, test, verify
-- [ ] `go build ./...` and `go vet ./...` in `backend/`.
-- [ ] Port `usecase/assistant/brain_test.go` → `internal/brain` as a parity check (escalation stops
-  pipeline, refs resolved/dropped, value render failure → manual note). Use a fake `llm` Drafter.
-- [ ] Manual e2e: set `LLM_API_KEY` (+ provider/model), run backend+frontend, open a chat with an
-  inbound like "Сколько стоит?", press "Подсказать ответ" → a grounded card appears with the real
-  price injected (`{{price.*}}` → "… ₸") and, when relevant, an attached catalog asset.
-- [ ] Off-KB question (e.g. "Вы возвращаете деньги?") → the option correctly escalates.
-- [ ] Unset `LLM_API_KEY` → app still boots on the Stub.
-
-## Out of scope (separate)
-- The realtime multi-user "generating" signal (see `~/.claude/plans/1-we-must-add-cuddly-diffie.md`).
-- `ai_*` KB tables + authoring CMS (the snapshot stays embedded for now).
-- The `ai_suggestions` jsonb storage refactor (current per-option `ai_drafts` storage is untouched).
+This round delivers the **architecture doc only**; migration + Go/Vue code follow.
 
 ---
 
-## Status — implemented (this branch)
+## Principle 0 — Thin entities; values & media attach polymorphically; templates use tokens only
 
-Steps 1–7 done; step 8 done except the two checks that need a live `LLM_API_KEY`.
+**The embedding question, answered:** there is exactly **one** way to put a value into
+text — `{{namespace.key}}`, resolved from `ai_values` by `ValueBook.Render`
+([content.go](backend/internal/brain/domain/content.go), regex `{{ns.key}}`). We do **not**
+template column names. Therefore embeddable numbers must not live on entity tables.
 
-- [x] **1. Brain ported** → `backend/internal/brain/`: `domain/{content,draft,message,catalog}.go`
-  (module path rewritten; `ChatID` dropped from `message.go`), `prompt.go` (package `brain`: `Prompt`
-  type, `BuildSystem`, `BuildUser` **with the PROFILE block omitted when none**, exported `PostProcess`,
-  the consts + `ErrNoPublishedConfig`), `llm/openrouter.go` (package `llm`, repointed to `brain.Prompt`
-  + `brain/domain`, forced `emit_draft` tool + defensive parse).
-- [x] **2. Value tokens** → reused the ported `PriceBook.Render`; demo book mapped onto `Tariffs`
-  (basic/standard/premium/free_delivery_min) + `Placeholders` (delivery/contacts).
-- [x] **3. LLM config** → `config.go` gains `LLMProvider/LLMAPIKey/LLMBaseURL/LLMFastModel/
-  LLMMaxTokens/LLMTemperature` + defaults (openrouter, `openai/gpt-4o-mini`, 1024, 0.3) +
-  `LLMResolvedBaseURL()`. Documented in `.env.example` / `config.example.yaml`.
-- [x] **4. Embedded seed** → `brain/seed.go` `SeedSnapshot()` = the "Demo Shop" KB (config + price book
-  + 4 topics + 3 assets); asset URLs `/xchats/api/v1/media/<ref>`.
-- [x] **5. KB media** → `brain/kb-media/{pricing_card.png,catalog_pdf.pdf,intro_audio.wav}` (placeholder
-  bytes) `//go:embed`-ed; `brain.LoadMedia(blob.Store)` mirrors `NewStub` (ref == blob id).
-- [x] **6. RealDrafter** → `internal/assistant/real.go`: reads the last 15 msgs via
-  `store.MessagesForChat`, builds the prompt (no profile), calls the LLM, `PostProcess`es, returns ONE
-  option (text + resolved media); LLM error → one escalation option (holding reply). `NewReal(...)`.
-- [x] **7. Wired** → `main.go buildDrafter`: `LLM_API_KEY` set → load KB media + `assistant.NewReal`
-  (logs `mode=real`); else `NewStub` (logs `mode=stub`). Same `Drafter` passed to worker + HTTP server.
-- [x] **8. Build/test** → `go build ./...` + `go vet ./...` clean; parity tests pass —
-  `internal/brain/prompt_test.go` (escalation stops, refs resolved/dropped, price-render failure →
-  manual note, seed tokens resolve) + `internal/assistant/real_test.go` (grounded option, LLM-error
-  escalation, bad chat id) with a fake LLM + fake window store. **No live LLM used.**
-- [ ] **8. Manual e2e with a real key** — pending: set `LLM_API_KEY`, ask "Сколько стоит?" → grounded
-  card with injected price + catalog asset; off-KB "Вы возвращаете деньги?" → escalates; unset key →
-  boots on the stub. (Can't run here — no key in this environment.)
+```
+ai_products  ref='nike-x'  name='Nike X'  category='Обувь'  data={size:'40-45'}   ← descriptive only
+ai_values    token='price.nike_x'  value_text='25 000 ₸'  owner_kind='product' owner_ref='nike-x'
+ai_assets    ref='img-42'  description='...'  owner_kind='product' owner_ref='nike-x'
+```
 
-> Note on the port source: the `xpayment-crm` submodule is unreachable from this environment (SSH/proxy
-> blocked), so the brain was ported from a **direct HTTPS clone** of the same repo — the literal
-> copy + module-path rewrite the todo describes, not a reconstruction.
+- A reply template says `{{price.nike_x}}` → renders `25 000 ₸` verbatim. The renderer is
+  unchanged and never sees the product table.
+- An entity's numbers = `SELECT … FROM ai_values WHERE owner_kind=$1 AND owner_ref=$2`.
+- An entity's media = the same query on `ai_assets`.
+- `owner_kind ∈ {'topic','product','tariff',''}`; `''` = a global scalar (e.g.
+  `contact.whatsapp`) or an unattached asset.
+
+This single move (a) removes every numeric column from products/tariffs — fixing "too
+many columns", (b) keeps one embedding mechanism, (c) reuses the polymorphic pattern for
+both media and values, and (d) preserves the hallucination-safety the token system exists
+for.
+
+---
+
+## Principle 1 — Draft state is a per-row `drafted_at`; the prompt reads only live rows
+
+| `drafted_at` | Meaning | In prompt? | In `/playground`? |
+|---|---|---|---|
+| `NOT NULL` | pending (new or edited) | **no** | yes — edit + approve |
+| `NULL` | approved / live | **yes** | yes |
+
+- **Brain read** ([kbstore.go](backend/internal/kbstore/kbstore.go), `LoadPublished` →
+  `LoadLive`): every content query gains `AND drafted_at IS NULL`.
+- **Playground read** ([draft.go](backend/internal/kbstore/draft.go) `GetDraft`): all rows;
+  `drafted_at` drives the "pending" badge.
+- **Approve** = `UPDATE … SET drafted_at = NULL` for one row or all draft rows.
+- **Add-on-top**: new media / values insert rows with `drafted_at = now()`.
+- **Editing a live row** re-marks it `drafted_at = now()` (drops from prompt until
+  re-approved; previous value overwritten — accepted trade-off).
+
+**Schema delta from `0003`:** `ai_snapshots` → one living KB row per org (drop `version`,
+`snapshot_state`, `published_at`; keep config + FK parent); all content tables **drop
+`review_state`, add `drafted_at`**; `ai_materials` / `ai_builder_requests` unchanged.
+
+---
+
+## Principle 2 — Approval is gated for consistency
+
+The deterministic gate ([kbstore.go](backend/internal/kbstore/kbstore.go) `gate`) **moves
+from publish to approval**:
+
+- **Approve all** → gate-check the resulting live set (every `{{token}}` in a live body
+  resolves; every owned media blob exists; no literal currency in a topic body).
+- **Approve one element** → block with a precise reason if it would leave a dangling token
+  ("approve `price.nike_x` first, or use Approve all").
+
+Reuses `ValueBook.Render` exactly as today. Token uniqueness across all `ai_values` is
+enforced here.
+
+---
+
+## Proposed schema — migration `0004` (design)
+
+Thin entities + two extended shared tables.
+
+```sql
+-- A sellable item: descriptive only. Its price/numbers are owned ai_values rows.
+CREATE TABLE xchats.ai_products (
+    id          uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    kb_id       uuid NOT NULL REFERENCES xchats.ai_snapshots(id) ON DELETE CASCADE,
+    ref         text NOT NULL,                       -- stable key 'nike-x'
+    name        text NOT NULL DEFAULT '',
+    description text NOT NULL DEFAULT '',
+    category    text NOT NULL DEFAULT '',
+    data        jsonb NOT NULL DEFAULT '{}'::jsonb,   -- sphere-specific attrs (size, color…)
+    lang        text NOT NULL DEFAULT 'ru',
+    status      text NOT NULL DEFAULT 'active',
+    drafted_at  timestamptz,
+    provenance  jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (kb_id, ref)
+);
+
+-- A pricing PLAN / tariff: small descriptive spine. Its numbers are owned ai_values rows.
+CREATE TABLE xchats.ai_tariffs (
+    id            uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    kb_id         uuid NOT NULL REFERENCES xchats.ai_snapshots(id) ON DELETE CASCADE,
+    ref           text NOT NULL,                      -- 'standard' | 'pro'
+    name          text NOT NULL DEFAULT '',
+    summary       text NOT NULL DEFAULT '',
+    pricing_type  text NOT NULL DEFAULT 'fixed',      -- 'fixed'|'percentage'|'tiered'|'hybrid'
+    advantages    text NOT NULL DEFAULT '',           -- text input
+    disadvantages text NOT NULL DEFAULT '',           -- text input
+    limits        jsonb NOT NULL DEFAULT '{}'::jsonb, -- context ranges {monthly_cap, per_tx_max}
+    data          jsonb NOT NULL DEFAULT '{}'::jsonb, -- description, conditions, billing_period…
+    lang          text NOT NULL DEFAULT 'ru',
+    status        text NOT NULL DEFAULT 'active',
+    drafted_at    timestamptz,
+    provenance    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (kb_id, ref)
+);
+
+-- Shared tables gain the polymorphic owner pair (ai_assets also drops topic_slug):
+ALTER ai_values  ADD owner_kind text NOT NULL DEFAULT '',  ADD owner_ref text NOT NULL DEFAULT '',
+                 DROP review_state, ADD drafted_at timestamptz;
+ALTER ai_assets  DROP topic_slug,
+                 ADD owner_kind text NOT NULL DEFAULT '',  ADD owner_ref text NOT NULL DEFAULT '',
+                 DROP review_state, ADD drafted_at timestamptz;
+ALTER ai_topics  DROP review_state, ADD drafted_at timestamptz;
+```
+
+Notes:
+- A tariff's rate / fee / caps that the assistant must quote exactly → owned `ai_values`
+  (`owner_kind='tariff'`); purely illustrative ranges can stay in `limits` jsonb as
+  context the model paraphrases. `tiers` (for tiered plans) live in `data` jsonb.
+- The exact descriptive-column set on tariffs is tunable (could promote
+  `description`/`conditions`/`billing_period` out of `data` into columns) — the embedding
+  design doesn't depend on it.
+
+---
+
+## Integration touchpoints (spec for the follow-up implementation round)
+
+1. **Domain** — [content.go](backend/internal/brain/domain/content.go): add `Product`,
+   `Tariff`, `snap.Products`, `snap.Tariffs`; `Value` and `Asset` gain `OwnerKind/OwnerRef`;
+   all owned values still flow into the one `ValueBook`.
+2. **Load** — [kbstore.go](backend/internal/kbstore/kbstore.go) `loadSnapshotContent`:
+   filter `drafted_at IS NULL`; add product/tariff scans; values/assets scans read owners.
+3. **System prompt** — [prompt.go](backend/internal/brain/prompt.go) `BuildSystem`: add
+   `PRODUCT CATALOG:` + `TARIFFS:` sections that list each entity with its owned **value
+   tokens** (so the model emits `{{price.nike_x}}`) and owned media refs; `MEDIA CATALOG:`
+   line becomes `ref | kind | owner | description`.
+4. **Approval gate** — relocate `gate` to approve-all / approve-element (Principle 2).
+5. **Draft store + API** — [draft.go](backend/internal/kbstore/draft.go),
+   [playground.go](backend/internal/httpapi/playground.go),
+   [server.go](backend/internal/httpapi/server.go): `GetDraft` returns all rows incl.
+   `drafted_at`; CRUD for products & tariffs mirroring `UpsertValue`; value/asset upserts
+   accept `owner_kind`/`owner_ref`; approve routes (`POST /playground/approve`,
+   `…/approve/:kind/:id`).
+6. **Frontend** — [KnowledgeBase.vue](frontend/src/views/KnowledgeBase.vue),
+   [types.ts](frontend/src/types.ts): new **"Товары"** / **"Тарифы"** tabs; each entity
+   editor shows its **owned values** (the embeddable tokens) and **owned media** grouped
+   under it, plus an "add media / add value" affordance; "pending" badges + per-row/bulk
+   **Approve** driven by `drafted_at`.
+7. **Synthesis (future)** —
+   [playground/builder.go](backend/internal/playground/builder.go) emits product/tariff
+   rows + owned values from materials, created with `drafted_at` set for approval.
+
+---
+
+## Deliverable for this round
+
+Architecture doc only. Create **`docs/products-tariffs-and-media.md`** (new `docs/` dir at
+the xchats root, matching the `docs/NN` convention the brain comments reference). It
+contains Principles 0–2, the `0004` DDL + schema delta, and the integration checklist.
+**No migration is run, no Go/Vue code changes this round.**
+
+## Verification (doc round)
+
+- Confirm the `0004` DDL is consistent with
+  [0003_ai_kb.up.sql](backend/migrations/0003_ai_kb.up.sql) (FK + cascade, `provenance`,
+  `(kb_id, ref)` keys, polymorphic `owner_kind/owner_ref` on values + assets).
+- Confirm the embedding path is column-free: a `{{price.nike_x}}` token resolves through
+  `ai_values` only; no entity column is referenced anywhere in template text.
+- Walk one end-to-end example: create product `nike-x` (thin) + value `price.nike_x` +
+  photo `img-42`, all `owner_ref='nike-x'`, as drafts → playground shows them grouped &
+  pending → approve-all (gate passes) → a reply with `{{price.nike_x}}` renders `25 000 ₸`.
+
+## Open sub-decisions (in the doc, not blockers)
+
+- Media/value reuse across entities (single owner now vs a join table later).
+- Which tariff descriptors stay in `data` jsonb vs get promoted to columns.
+- Config drafting shape (`pending jsonb` overlay vs shadow row).
+- Whether `inactive` products/tariffs are dropped from the prompt entirely (lean yes).

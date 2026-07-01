@@ -94,3 +94,84 @@ export interface AiDraft {
   status: string
   created_at: string
 }
+
+// --- Knowledge Base (Playground) — see plan/7.1-endpoints.md ---
+export type ReviewState = 'proposed' | 'approved' | 'rejected'
+
+export interface DraftConfig {
+  snapshot_id: string
+  version: number
+  state: string
+  persona: string
+  mission: string
+  guardrails: string
+  language_policy: string
+  reply_max_words: number
+  updated_at: string
+}
+export interface TopicRow {
+  id: string
+  slug: string
+  lang: string
+  title: string
+  keywords: string
+  body_md: string
+  review_state: ReviewState
+  provenance: string
+  updated_at: string
+}
+export interface AssetRow {
+  id: string
+  ref: string
+  kind: string
+  topic_slug: string
+  title: string
+  description: string
+  url: string
+  lang: string
+  review_state: ReviewState
+  provenance: string
+  updated_at: string
+}
+export interface ValueRow {
+  id: string
+  token: string
+  lang: string
+  value_text: string
+  description: string
+  review_state: ReviewState
+  provenance: string
+  updated_at: string
+}
+export interface KbMaterial {
+  id: string
+  source_type: string
+  source_ref: string
+  blob_id: string
+  extracted_text: string
+  media_kind: string
+  status: string // ready | pending | failed
+  extraction: string
+  created_at: string
+  updated_at: string
+}
+export interface KbRequest {
+  id: string
+  material_id: string | null
+  req_type: string // confirm_value | describe_media | comment
+  prompt: string
+  context: string // JSON string, e.g. {"suggested":"5000 ₸"}
+  target: string // JSON string, e.g. {token,lang} | {asset_ref} | {material_id}
+  state: string // open | resolved | dismissed
+  resolution: string | null
+  created_at: string
+  resolved_at: string | null
+}
+export interface DraftView {
+  config: DraftConfig
+  topics: TopicRow[]
+  assets: AssetRow[]
+  values: ValueRow[]
+  materials: KbMaterial[]
+  requests: KbRequest[]
+}

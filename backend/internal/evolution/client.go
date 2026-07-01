@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -70,16 +71,22 @@ type HTTP struct {
 	apiKey   string
 	instance string
 	hc       *http.Client
+	log      *slog.Logger
 }
 
 // NewHTTP builds a client against base with the shared apikey and a default
-// instance name (used when a per-call instance argument is empty).
-func NewHTTP(base, apiKey, instance string) *HTTP {
+// instance name (used when a per-call instance argument is empty). log may be nil
+// (falls back to slog.Default); every REST call is logged at debug, non-2xx at warn.
+func NewHTTP(base, apiKey, instance string, log *slog.Logger) *HTTP {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &HTTP{
 		base:     base,
 		apiKey:   apiKey,
 		instance: instance,
 		hc:       &http.Client{Timeout: 60 * time.Second},
+		log:      log,
 	}
 }
 
@@ -106,13 +113,22 @@ func (c *HTTP) do(ctx context.Context, method, path string, body any, out any) e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("apikey", c.apiKey)
+	start := time.Now()
 	resp, err := c.hc.Do(req)
 	if err != nil {
+		// Transport failure (DNS, refused, timeout) — the gateway is unreachable.
+		c.log.Warn("evolution request error", "method", method, "path", path,
+			"latency_ms", time.Since(start).Milliseconds(), "err", err)
 		return err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
+	c.log.Debug("evolution request", "method", method, "path", path,
+		"status", resp.StatusCode, "latency_ms", time.Since(start).Milliseconds(),
+		"resp", truncate(raw, 300))
 	if resp.StatusCode >= 300 {
+		c.log.Warn("evolution non-2xx", "method", method, "path", path,
+			"status", resp.StatusCode, "resp", truncate(raw, 300))
 		return fmt.Errorf("evolution %s %s: http %d: %s", method, path, resp.StatusCode, truncate(raw, 300))
 	}
 	if out != nil && len(raw) > 0 {

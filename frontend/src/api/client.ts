@@ -26,10 +26,12 @@ async function unwrap<T>(res: Response, path: string): Promise<T> {
   return env.payload
 }
 
-async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const opts: RequestInit = { method, credentials: 'include', headers: {} }
+type Headers = Record<string, string>
+
+async function send<T>(method: string, path: string, body?: unknown, headers?: Headers): Promise<T> {
+  const opts: RequestInit = { method, credentials: 'include', headers: { ...(headers || {}) } }
   if (body !== undefined) {
-    opts.headers = { 'Content-Type': 'application/json' }
+    opts.headers = { 'Content-Type': 'application/json', ...(headers || {}) }
     opts.body = JSON.stringify(body)
   }
   const res = await fetch(API_BASE + PREFIX + path, opts)
@@ -37,9 +39,21 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const api = {
-  get: <T>(path: string) => send<T>('GET', path),
-  post: <T>(path: string, body?: unknown) => send<T>('POST', path, body),
-  del: <T>(path: string) => send<T>('DELETE', path),
+  get: <T>(path: string, headers?: Headers) => send<T>('GET', path, undefined, headers),
+  post: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('POST', path, body, headers),
+  patch: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('PATCH', path, body, headers),
+  del: <T>(path: string, headers?: Headers) => send<T>('DELETE', path, undefined, headers),
+  // postForm sends multipart/form-data (the browser sets the boundary; do NOT set
+  // Content-Type). Used for KB asset/material uploads that carry extra text fields.
+  async postForm<T>(path: string, form: FormData, headers?: Headers): Promise<T> {
+    const res = await fetch(API_BASE + PREFIX + path, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { ...(headers || {}) },
+      body: form,
+    })
+    return unwrap<T>(res, path)
+  },
   async upload(file: File): Promise<{ media_id: string; url: string; media_type: string }> {
     const form = new FormData()
     form.append('file', file)

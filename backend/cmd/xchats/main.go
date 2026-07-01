@@ -28,6 +28,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/migrations"
 )
@@ -71,6 +72,21 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Langfuse LLM tracing (best-effort): install a global OTel TracerProvider so
+	// the LLM clients export each call as a generation. Never fatal.
+	if cfg.LangfuseTracingEnabled() {
+		if tp, err := telemetry.NewLangfuseProvider(ctx, cfg, "xchats"); err != nil {
+			log.Warn("langfuse tracing init failed; continuing without it", "err", err)
+		} else {
+			log.Info("langfuse tracing enabled", "host", cfg.LangfuseHost)
+			defer func() {
+				shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = tp.Shutdown(shutCtx)
+			}()
+		}
+	}
+
 	st := mustStore(cfg, log)
 	defer st.Close()
 	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
@@ -95,14 +111,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	drafter := buildDrafter(ctx, cfg, st, kb, orgID, blobStore, log)
 	q := queue.NewInMem(2048, cfg.QueueWorkers, log)
 	hub := realtime.NewHub()
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
+	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
 
 	// Playground engine: Stage-1 ingest adapters + the Stage-2 builder. A
 	// multimodal model (LLM_VISION_MODEL) enables image auto-captioning; without
 	// one, media falls back to describe_media popups (fully chat-driven).
 	var vision playground.VisionClient
 	if cfg.LLMAPIKey != "" && cfg.LLMVisionModel != "" {
-		vision = llm.NewVision(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMVisionModel, cfg.LLMMaxTokens)
+		vision = llm.NewVision(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMProvider, cfg.LLMVisionModel, cfg.LLMMaxTokens)
 		log.Info("playground vision extractor active", "model", cfg.LLMVisionModel)
 	}
 	extractor := playground.NewExtractor(vision, log)
@@ -143,7 +159,7 @@ func buildDrafter(ctx context.Context, cfg *config.Config, st *store.Store, kb *
 		if err := brain.LoadMedia(blobStore); err != nil {
 			fatal("kb media", err)
 		}
-		lc := llm.New(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMFastModel, "", cfg.LLMMaxTokens, cfg.LLMTemperature)
+		lc := llm.New(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMProvider, cfg.LLMFastModel, "", cfg.LLMMaxTokens, cfg.LLMTemperature)
 		log.Info("assistant drafter active", "mode", "real", "provider", cfg.LLMProvider, "model", cfg.LLMFastModel)
 		return assistant.NewReal(st, lc, publishedOrSeed(ctx, kb, orgID, log), log)
 	}
@@ -197,7 +213,7 @@ func runWebhookSet(cfg *config.Config, log *slog.Logger) {
 	}
 	accountID := config.AccountID(ownerJID)
 	url := strings.TrimRight(cfg.WebhookPublicBaseURL, "/") + "/evolution/api/v1/webhook/" + accountID.String()
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
+	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
 	if err := evo.SetWebhook(ctx, cfg.EvolutionInstance, url, webhookTokenHeader, cfg.WebhookToken, evolution.WebhookEvents); err != nil {
 		fatal("set webhook", err)
 	}
@@ -250,7 +266,7 @@ func resolveOwnerJID(ctx context.Context, cfg *config.Config, log *slog.Logger) 
 	if cfg.EvolutionBaseURL == "" || cfg.EvolutionAPIKey == "" {
 		return ""
 	}
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
+	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	insts, err := evo.FetchInstances(cctx)

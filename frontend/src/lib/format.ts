@@ -24,35 +24,38 @@ export function shortTime(iso: string | null): string {
     : d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
 
-// connStatus maps a WhatsApp account connection_status to a label + badge class.
-export function connStatus(status: string): { label: string; cls: string; dot: string } {
+// connStatus maps a WhatsApp account connection_status to a Russian label + a
+// UI-agnostic tone discriminant; the component maps the tone to badge/dot classes.
+export type ConnTone = 'connected' | 'qr' | 'connecting' | 'disconnected' | 'error'
+export function connStatus(status: string): { label: string; tone: ConnTone } {
   switch (status) {
     case 'connected':
-      return { label: 'Подключён', cls: 'bg-green-50 text-green-700', dot: 'bg-wa' }
+      return { label: 'Подключён', tone: 'connected' }
     case 'qr_required':
-      return { label: 'Нужен QR', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-400' }
+      return { label: 'Нужен QR', tone: 'qr' }
     case 'connecting':
-      return { label: 'Подключение…', cls: 'bg-sky-50 text-sky-700', dot: 'bg-sky-400' }
+      return { label: 'Подключение…', tone: 'connecting' }
     case 'disconnected':
-      return { label: 'Отключён', cls: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' }
+      return { label: 'Отключён', tone: 'disconnected' }
     default:
-      return { label: status || 'Ошибка', cls: 'bg-red-50 text-red-600', dot: 'bg-red-500' }
+      return { label: status || 'Ошибка', tone: 'error' }
   }
 }
 
-// delivery ticks (FontAwesome) — colored for the green outgoing bubble:
-// queued clock, sent check, delivered double-check, read double-check (blue), failed warning.
-export function tick(status: string): { icon: string; cls: string } {
+// tick maps a message delivery status to a UI-agnostic discriminant. The
+// component maps the discriminant to an icon + class, keeping this module pure.
+export type TickStatus = 'queued' | 'sent' | 'delivered' | 'read' | 'failed'
+export function tick(status: string): TickStatus {
   switch (status) {
     case 'sent':
-      return { icon: 'fa-check', cls: 'text-white/70' }
+      return 'sent'
     case 'delivered':
-      return { icon: 'fa-check-double', cls: 'text-white/70' }
+      return 'delivered'
     case 'read':
-      return { icon: 'fa-check-double', cls: 'text-sky-200' }
+      return 'read'
     case 'failed':
-      return { icon: 'fa-triangle-exclamation', cls: 'text-rose-200' }
+      return 'failed'
     default:
-      return { icon: 'fa-clock', cls: 'text-white/50' }
+      return 'queued'
   }
 }

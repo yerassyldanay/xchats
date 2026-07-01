@@ -10,6 +10,7 @@ import (
 
 	"github.com/yerassyldanay/xchats/backend/internal/brain"
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
+	"github.com/yerassyldanay/xchats/backend/internal/brain/llm"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
 
@@ -66,6 +67,17 @@ func (r *RealDrafter) Draft(ctx context.Context, in Input) ([]Option, error) {
 	}
 	window, current := splitWindow(msgs, in.LastInboundText)
 
+	// One Langfuse trace per reply draft: the root carries the conversation
+	// (session), contact (user), feature tag, and trace input = the customer
+	// message we're answering — NOT the full assembled prompt. The LLM call nests
+	// under it as a generation. No-op when Langfuse is disabled.
+	ctx, tr := llm.StartTrace(ctx, "draft-reply", llm.TraceOptions{
+		SessionID: in.ChatID,
+		UserID:    in.ContactName,
+		Tags:      []string{"xchats", "ai-draft"},
+		Input:     current.Content,
+	})
+
 	snap := r.content.Get()
 	prompt := brain.Prompt{
 		System: brain.BuildSystem(snap),
@@ -76,10 +88,12 @@ func (r *RealDrafter) Draft(ctx context.Context, in Input) ([]Option, error) {
 		// A failed/malformed LLM response is a low-confidence escalation, not a
 		// crash (the human just replies manually) — same stance as the brain.
 		r.log.WarnContext(ctx, "llm draft failed; escalating", "chat", in.ChatID, "err", err)
+		tr.End(brain.HoldingReply, err)
 		return []Option{{Ordinal: 1, Text: brain.HoldingReply, Escalate: true, Reason: "llm_error: " + err.Error()}}, nil
 	}
 
 	d := brain.PostProcess(raw, snap, r.log)
+	tr.End(d.ReplyText, nil)
 	return []Option{optionFromDraft(d)}, nil
 }
 

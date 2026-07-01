@@ -3,6 +3,8 @@ import Login from './views/Login.vue'
 import Chatboard from './views/Chatboard.vue'
 import Accounts from './views/Accounts.vue'
 import InstancesMaintenance from './views/InstancesMaintenance.vue'
+import Playground from './views/Playground.vue'
+import KnowledgeBase from './views/KnowledgeBase.vue'
 import { useAuth } from './stores/auth'
 
 const router = createRouter({
@@ -12,6 +14,8 @@ const router = createRouter({
     { path: '/', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
     { path: '/accounts', name: 'accounts', component: Accounts, meta: { requiresAuth: true } },
     { path: '/instances', name: 'instances', component: InstancesMaintenance, meta: { requiresAuth: true } },
+    { path: '/playground', name: 'playground', component: Playground, meta: { requiresAuth: true } },
+    { path: '/knowledge-base', name: 'knowledge-base', component: KnowledgeBase, meta: { requiresAuth: true } },
   ],
 })
 
