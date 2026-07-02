@@ -1,5 +1,10 @@
 # Knowledge Builder — the automatic KB authoring experience
 
+> ⚠️ **Partially superseded by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
+> The pending-row (`drafted_at`) lifecycle is replaced by separate **draft tables** (approve = gate →
+> copy → embed), and topic bodies carry **no fact tokens**, so `confirm_fact` writes draft fact columns
+> and the approve gate needs no token-dependency check. Updated lazily; 14 wins on conflict.
+
 How an operator turns a pile of material (URLs, images, video, PDFs, plain descriptions) into a
 publishable knowledge base **without filling forms** — the assistant builds it, the human reviews and
 corrects. This is the authoring front-end to the brain's `xchats.ai_*` tables (runtime in

@@ -1,5 +1,10 @@
 # AI Assistant (the Brain)
 
+> ⚠️ **Partially superseded by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
+> The grounding-judge pipeline step is **deferred from v1**; the `[F]` facts block is single-language in
+> v1 (cache-stable); topic bodies carry **no fact tokens**; knowledge retrieval per 14 Decision 5.
+> Updated lazily; 14 wins on conflict.
+
 The core of xchats. Given a customer conversation it produces **reviewed reply drafts** — text
 (and, later, attached media) in the customer's language, grounded **only** in a curated knowledge
 base. It never sends by itself (suggest-and-approve).

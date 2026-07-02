@@ -1,5 +1,9 @@
 # UI Pages
 
+> ⚠️ **KB pages partially superseded by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
+> The «Черновик» badge now means "the row exists in the **draft tables**", not `drafted_at`; approve
+> copies rows to live; topic bodies carry no fact tokens. Layouts stay valid. Updated lazily; 14 wins.
+
 The frontend is a single Vue 3 SPA (see `2-architecture.md`). It talks only to the backend
 (`/api` + SSE). **v1 ships six routed pages — Login, Chatboard, WhatsApp Accounts, Instances
 Maintenance, Конструктор базы знаний (`/playground`), and Редактор базы знаний (`/knowledge-base`).**

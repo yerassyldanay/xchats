@@ -1,5 +1,10 @@
 # Knowledge Base & AI — Design Overview (bird's-eye)
 
+> ⚠️ **Partially superseded by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
+> §4–§5: topic bodies carry **no fact tokens** (tables fully independent); §6: embeddings retrieval is
+> now **allowed for the Knowledge lane** (topics), never for facts; §11: the grounding judge is
+> **deferred from v1**; the `drafted_at` lifecycle → separate draft tables. Updated lazily; 14 wins.
+
 The whole AI side of xchats at altitude: the **three components**, the **handful of big decisions** that
 shape everything, and — honestly — **what each buys us and what it costs**. This is the map and the
 rationale, not the blueprint. Schema lives in `9-database-schema.md`, brain logic in `8-ai-assistant.md`,

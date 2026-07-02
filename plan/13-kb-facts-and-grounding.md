@@ -1,5 +1,10 @@
 # 13 — KB Facts & Anti-Hallucination — Architecture Decision
 
+> **Amended by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md):** Decision 6
+> step 4 (prose grounding judge) is **deferred from v1**; Decision 8's embeddings rejection is relaxed —
+> embeddings are allowed **for the Knowledge lane only** (facts still resolve by exact lookup); and topic
+> bodies no longer carry fact tokens (tokens appear only in model replies). Everything else stands.
+
 **Purpose:** capture the architecture we agreed on for storing exact facts and for keeping the
 assistant from hallucinating. This is a decision record, not an implementation plan. The other
 `plan/*.md` docs should be updated to reflect it (see "Docs to update" at the end).

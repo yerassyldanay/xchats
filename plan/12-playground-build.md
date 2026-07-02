@@ -1,5 +1,11 @@
 # Playground — Build Plan (component 3, made buildable)
 
+> ⚠️ **Partially superseded by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
+> The L1 data model, the approve gate, and every `drafted_at` reference below are superseded: drafts live
+> in separate **draft twin tables**; approve = gate → **copy to live** → embed; deletes via a
+> delete-marker; no fact tokens in topic bodies (no dependency checks); v1 is ru-only. The layer
+> sequence, tool contract, and endpoints remain directionally valid. Updated lazily; 14 wins on conflict.
+
 The **concrete, buildable design** for the Playground: a **chat where an operator drops a mix of
 material (text, URLs, images, PDFs, docs, and video), the assistant extracts and understands it,
 builds *or updates* the **one living Knowledge Base**, and a human reviews & approves**. The *concept* and

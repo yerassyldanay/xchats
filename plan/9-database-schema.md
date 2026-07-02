@@ -1,5 +1,9 @@
 # Database Schema (PostgreSQL)
 
+> ⚠️ **Partially superseded by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
+> The `drafted_at` columns are replaced by separate **draft twin tables**; topic `body_md` carries **no
+> fact tokens** (pure prose); v1 fills **ru rows only**. This doc is updated lazily; 14 wins on conflict.
+
 The authoritative data model. **All state is PostgreSQL.** Design reference, **not** a migration —
 no SQL files yet.
 

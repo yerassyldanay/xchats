@@ -72,14 +72,34 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
 - **10-knowledge-builder.md** — the automatic KB authoring experience (deferred CMS): a builder chat
   that turns URLs/media/text into draft topics + per-asset media, the editor page, and the
   popup/request primitive (describe-media · confirm-price · accept/deny/comment). *Conceptual UX.*
-- **11-design-overview.md** — the **bird's-eye view** of the AI side: the three components (brain ·
+- **11-ai-design-overview.md** — the **bird's-eye view** of the AI side: the three components (brain ·
   knowledge base · playground), the main design solutions, and **what each buys us vs. costs us**
   (trade-offs), plus the KB-first build sequence. **Start here** to understand the whole AI/KB picture;
   it consolidates the earlier detailed split into one map.
+- **12-playground-build.md** — the concrete, buildable Playground design: layers L1–L5, the KB data
+  model, the builder-agent tool contract, and the playground endpoint list.
+- **13-kb-facts-and-grounding.md** — *decision record:* typed fact tables (Facts vs Knowledge lanes),
+  the `{{table.slug.field}}` token model, and the anti-hallucination checks.
+- **14-draft-staging-and-retrieval.md** — *decision record:* separate draft tables (approve = gate →
+  copy → embed), fully independent tables (no tokens in topic bodies), ru-only v1, and
+  embeddings retrieval for the Knowledge lane. **Latest record — wins on conflict.**
 - **examples/repos/xpayment-crm/** — the working brain, vendored as a git submodule (the
   implementation the AI docs above describe; entry `IMPLEMENTATION.md`).
 - **scripts/evolution_client.py** — working Evolution client + normalization (the oracle).
 - **captures/** — real captured Evolution webhook payloads (fixtures for the e2e tests).
+
+### How we write these plans
+
+Rules that keep the doc set reviewable (born of the PR #15 pain — one decision touched 16 files):
+
+1. **One owner per fact.** Each fact lives in exactly one doc (schema → 9, pipeline → 8.2, …);
+   every other doc links to it with at most a one-line summary — never a second full copy.
+2. **Decision records are the unit of change.** A new decision = one short numbered record
+   (`13`, `14`, …) + a 1–3 line "superseded by" banner on each affected doc. Affected docs are
+   rewritten **lazily** — only when next touched for their own sake. On conflict, the newest record wins.
+3. **Keep volatile detail out.** Exact UI labels, full DDL, and full request bodies churn on every
+   rename and carry no decisions — sketch the shape here; let migrations/code carry the detail.
+4. **`todo.md` points at the plan.** It tracks tasks and links here; it never restates architecture.
 
 ## Components (who owns what)
 
