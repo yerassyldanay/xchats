@@ -107,7 +107,7 @@ xchats/
                normalize, store, queue, blob, realtime), migrations/
   frontend/    Vue 3 + TypeScript (Vite) — src/, dist/ (build output, embedded into the binary)
   deploy/      docker compose + env + Makefile  — the one place to run it
-  docs/        1-concept, 2-architecture, 3-sync, 4-wa-connection-example
+  docs/        0-overview, 2-architecture, 3-sync, 4-wa-connection-example
   scripts/     evolution_client.py (normalization oracle), captures/ (real payload fixtures)
 ```
 
@@ -208,7 +208,7 @@ their interface is the queue, not HTTP (a split-out worker would expose only `/h
   **In v1 only `NEVER` exists in code** — the
   column is kept default-safe (`NEVER` → suggest-and-approve only), but the `CONFIGURE_TIME` / `ALWAYS`
   send path is **not built** (deferred to Phase 4D — see `0.1-definition-of-done.md`,
-  `8.6-port-checklist.md`).
+  `8-ai-assistant.md` → *Porting*).
 
 ### WhatsApp accounts — a simplified Evolution `/manager` (deferred to v2)
 

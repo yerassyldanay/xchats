@@ -62,7 +62,7 @@ fast `2xx`; on success it returns `{"payload":null,"errcode":"OK"}`.
 | `MEDIA_UNAVAILABLE` | 502 | media could not be fetched/stored |
 | `EVOLUTION_ERROR` | 502 | generic upstream Evolution error |
 | `AI_UNAVAILABLE` | 503 | LLM/assistant call failed |
-| `EVAL_GATE_FAILED` | 409 | snapshot publish refused: quality gate not met (see `8.7-ai-evals.md`) |
+| `EVAL_GATE_FAILED` | 409 | snapshot publish refused: quality gate not met (see `8-ai-assistant.md` → *Evals*) |
 | `DRAFT_STALE` | 409 | approve refused: the draft was superseded by a newer inbound (see `7.1-endpoints.md`) |
 | `INTERNAL` | 500 | unexpected server error |
 

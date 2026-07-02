@@ -8,8 +8,8 @@
 The whole AI side of xchats at altitude: the **three components**, the **handful of big decisions** that
 shape everything, and — honestly — **what each buys us and what it costs**. This is the map and the
 rationale, not the blueprint. Schema lives in `9-database-schema.md`, brain logic in `8-ai-assistant.md`,
-the original conceptual UX in `10-knowledge-builder.md`. Read this one to understand *all of it* and the
-choices; dive into those only when you implement.
+the buildable playground design in `12-playground-build.md`. Read this one to understand *all of it* and
+the choices; dive into those only when you implement.
 
 ---
 
@@ -178,9 +178,9 @@ the real brain and the playground at once.
 - **`8-ai-assistant.md`** — the brain: the prompt, how it grounds (live rows only), the approve/eval gate.
 - **`9-database-schema.md`** — the full data model the KB maps onto (`ai_topics/products/tariffs/contacts/assets`,
   the `drafted_at` flag, typed fact columns, and the polymorphic `(owner_kind, owner_ref)` media pair).
-- **`10-knowledge-builder.md`** — the original conceptual playground UX (popups, topic-as-container).
+- **`12-playground-build.md`** — the buildable playground design (layers, tool contract, endpoints;
+  it also carries what survives of the retired `10-knowledge-builder.md` conceptual UX).
 - **This doc** — the three components, the main solutions, and the trade-offs. Start here.
 
-> *This overview replaces the earlier detailed split (`11.1`–`11.5`, `12`) — deliberately one file at
-> altitude, per the "no pile of detailed md files" steer. Detail is added back into `8`/`9` only when a
-> piece is actually built.*
+> *Deliberately one file at altitude, per the "no pile of detailed md files" steer. Detail lives in
+> `8`/`9`/`12`; decisions in the numbered records (`13`, `14`, …).*

@@ -131,13 +131,9 @@ For each drafted reply:
 
 - `plan/9-database-schema.md` — replace `ai_values` with the typed fact tables
   (`kb_tariffs`, `kb_products`, uniform per-language shape); note "language is a row."
-- `plan/8.4-ai-assistant-knowledge-base.md` — describe the two lanes (Facts vs Knowledge) and
-  the typed-table storage model.
-- `plan/8.1-ai-assistant-prompt.md` — the FACTS catalog block (token + label + value) and the
-  updated "never write a digit; emit `{{table.slug.field}}`" rule.
-- `plan/8.2-ai-assistant-responses.md` — the post-processing pipeline order (Decision 6) with
-  the number check and grounding judge added.
-- `plan/8.7-ai-evals.md` — the number check and prose grounding judge as evaluation/guardrail
-  steps, plus fail-closed/escalation behavior.
+- `plan/8-ai-assistant.md` — (one doc; it absorbed the former `8.1`–`8.7`) the two lanes and the
+  typed-table storage model; the FACTS catalog block (token + label + value) and the "never write a
+  digit; emit `{{table.slug.field}}`" rule; the post-processing pipeline order (Decision 6) with the
+  number check and grounding judge; the evals/guardrail metrics with fail-closed behavior.
 - `plan/11-ai-design-overview.md` / `plan/12-playground-build.md` — the playground now curates
   typed `tariffs`/`products` (per language) instead of generic `values`.

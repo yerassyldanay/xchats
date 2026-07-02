@@ -6,7 +6,10 @@ Entry point for anyone joining the project. Read this first, then the numbered d
 
 A WhatsApp-first **team inbox with an AI assistant**: businesses connect WhatsApp accounts,
 users handle customer chats together, and the AI suggests replies (suggest-and-approve
-by default — humans stay in control). The whole system **runs from one place** (one
+by default — humans stay in control). It is **not a classic chatbot** — the AI helps agents respond
+faster; it never auto-responds by default. WhatsApp (via Evolution API) is the **first** channel,
+not the only future one: later channels (Instagram, Telegram, Messenger, website chat, email) must
+plug in **without changing the core chat model**. The whole system **runs from one place** (one
 orchestration) and is built as a **monorepo**.
 
 ## The shape
@@ -45,14 +48,14 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
 
 - **0-overview.md** (this) — vision, the architecture picture, where to start, principles.
 - **0.1-definition-of-done.md** — per-phase acceptance criteria (what "done" means for phases 1–4).
-- **1-concept.md** — what & why, glossary, product principles (non-chatbot, suggest-and-approve).
 - **2-architecture.md** — components, monorepo layout, env-driven addressing, **v1 decisions**
   (users/org seed, auto-response, WhatsApp-accounts manager, Postgres-only, security, frontend),
   the **two-file config model**, and the **testing strategy** (one-command isolated e2e).
 - **3-sync.md** — live message handling: enqueue → worker idempotent upsert, dedup, `@lid`↔phone,
   status correlation, and **multi-device (phone/Web) sync** (v1 is live-only).
 - **4-wa-connection-example.md** — concrete live flows: incoming/outgoing handling and sending
-  (account connect/QR kept as the deferred reference design).
+  (account connect/QR kept as the deferred reference design), plus the **Evolution send API
+  appendix** (per-message-type request bodies).
 - **5-ui-pages.md** — the frontend pages (Login, Chatboard, Contacts, WhatsApp Accounts, AI
   Assistant, Settings); reference screenshot `./ui-chatboard.png`.
 - **6-isolated-testing.md** — how to develop & verify the whole app (and each element) in an
@@ -62,16 +65,13 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
   `/evolution/api/v1` path convention (authoritative; supersedes the shorthand `/api/...`).
 - **7.1-endpoints.md** — per-endpoint request & response parameters (bodies, query, payload shapes,
   shared entity schemas).
-- **8-ai-assistant.md** — the AI brain, end to end (the core of the product): the `[A]–[F]` prompt,
-  the `emit_draft` → `escalate → render facts → number check → grounding judge → media → human review`
-  pipeline, the knowledge base (text/media/typed facts, media-as-knowledge via companion topics, the
-  chat authoring flow), the contact profile,
-  providers + data boundary, evals + publish gate, and the submodule port checklist.
+- **8-ai-assistant.md** — the AI brain, end to end, in **one doc** (absorbs the former `8.1`–`8.7`):
+  the `[A]–[F]` prompt, the `emit_draft` output contract + safety pipeline (grounding judge deferred
+  per record 14), the knowledge base (two lanes, media-as-knowledge via companion topics), memory &
+  the deferred contact profile, providers + data boundary, evals + the quality gate, and the
+  submodule port checklist.
 - **9-database-schema.md** — the full PostgreSQL schema in a dedicated `xchats` schema (fully-named
   tables, e.g. `xchats.wa_chats`), keys, indexes, constraints, and a normalization review.
-- **10-knowledge-builder.md** — the automatic KB authoring experience (deferred CMS): a builder chat
-  that turns URLs/media/text into draft topics + per-asset media, the editor page, and the
-  popup/request primitive (describe-media · confirm-price · accept/deny/comment). *Conceptual UX.*
 - **11-ai-design-overview.md** — the **bird's-eye view** of the AI side: the three components (brain ·
   knowledge base · playground), the main design solutions, and **what each buys us vs. costs us**
   (trade-offs), plus the KB-first build sequence. **Start here** to understand the whole AI/KB picture;
@@ -92,14 +92,15 @@ domain — switch by changing env). Postgres and Evolution are **reused**, not b
 
 Rules that keep the doc set reviewable (born of the PR #15 pain — one decision touched 16 files):
 
-1. **One owner per fact.** Each fact lives in exactly one doc (schema → 9, pipeline → 8.2, …);
+1. **One owner per fact.** Each fact lives in exactly one doc (schema → 9, the brain → 8, …);
    every other doc links to it with at most a one-line summary — never a second full copy.
 2. **Decision records are the unit of change.** A new decision = one short numbered record
    (`13`, `14`, …) + a 1–3 line "superseded by" banner on each affected doc. Affected docs are
    rewritten **lazily** — only when next touched for their own sake. On conflict, the newest record wins.
 3. **Keep volatile detail out.** Exact UI labels, full DDL, and full request bodies churn on every
    rename and carry no decisions — sketch the shape here; let migrations/code carry the detail.
-4. **`todo.md` points at the plan.** It tracks tasks and links here; it never restates architecture.
+4. **Task lists point at the plan.** A todo file tracks tasks and links here; it never restates
+   architecture.
 
 ## Components (who owns what)
 
@@ -112,7 +113,7 @@ Rules that keep the doc set reviewable (born of the PR #15 pain — one decision
 
 ## Where to start
 
-Reading order: **0 (this) → 1-concept → 2-architecture → 3-sync → 4-wa-connection-example.**
+Reading order: **0 (this) → 2-architecture → 3-sync → 4-wa-connection-example.**
 
 Build order (phased — v1 is the minimal slice; see `0.1-definition-of-done.md`):
 0. **Prerequisites (blocking)** — init + verify the brain submodule (`go test ./...` passes); capture
@@ -160,3 +161,22 @@ inbound→draft→approve→send→status loop, it isn't in v1.*
 - **Env-driven addressing**; reuse existing Postgres / Redis / Evolution.
 - **Suggest-and-approve AI** — in v1 the auto-send path is **not built** (not just disabled); the
   human approves every send.
+
+## Glossary
+
+- **Organization** — the company or workspace using the product.
+- **User** — a person inside an organization; in v1 all users have equal access.
+- **Channel** — a communication source (WhatsApp now; Instagram / Telegram / website chat later).
+- **WhatsApp Account** — one connected WhatsApp number/instance managed through Evolution API.
+- **Evolution API** — the external WhatsApp gateway: connects accounts, emits events, sends messages.
+- **Contact** — the customer talking to the business; may have several identities (phone, WhatsApp
+  JID, LID JID).
+- **Chat** — a thread between one WhatsApp account and one contact (open / assigned / resolved / waiting).
+- **Message** — an inbound/outbound item in a chat: text, image, video, audio, document, sticker, or
+  system event.
+- **Assignment** — the user currently responsible for a chat.
+- **AI Assistant** — reads conversation context and suggests replies, summaries, media, next actions.
+- **AI Draft** — a suggested reply generated by the AI but not yet sent.
+- **Media Asset** — a reusable file (product photo, guide PDF, video) that can be suggested or sent.
+- **Raw Event** — the original webhook payload from Evolution before normalization; kept on
+  `wa_messages.raw` (no separate events table).

@@ -8,11 +8,12 @@
 
 The **concrete, buildable design** for the Playground: a **chat where an operator drops a mix of
 material (text, URLs, images, PDFs, docs, and video), the assistant extracts and understands it,
-builds *or updates* the **one living Knowledge Base**, and a human reviews & approves**. The *concept* and
-trade-offs already live in [`10-knowledge-builder.md`](10-knowledge-builder.md) (the UX) and
-[`11-ai-design-overview.md`](11-ai-design-overview.md) (the three components + the big decisions).
-This doc turns that into layers, a data model, an agent tool-contract, and an endpoint list — the
-thing the todo list ([`../todo-playground.md`](../todo-playground.md)) executes.
+builds *or updates* the **one living Knowledge Base**, and a human reviews & approves**. The
+trade-offs and rationale live in [`11-ai-design-overview.md`](11-ai-design-overview.md) (the three
+components + the big decisions). This doc turns that into layers, a data model, an agent
+tool-contract, and an endpoint list — the thing the implementation task list executes. (It also
+carries what survives of the retired `10-knowledge-builder.md` conceptual UX: the popup/request
+primitive and the ingest tables.)
 
 > Read 11 first for *why*. This doc is *how* and *in what order*.
 
@@ -38,9 +39,9 @@ turning a pile of heterogeneous material into a coherent, *updated* KB. The desi
 The forks open in doc 11 are settled for v1:
 
 1. **Full chat-agent build** (not the deterministic editor-only slice). The operator bulk-drops
-   material; an LLM agent creates/updates topics/assets/values, asks via popups, and the operator
-   accepts/denies — per [`10-knowledge-builder.md`](10-knowledge-builder.md). (L2's editor is still
-   built first, as the deterministic proof of the write contract — it's a layer, not the end state.)
+   material; an LLM agent creates/updates topics/assets/facts, asks via popups, and the operator
+   accepts/denies. (L2's editor is still built first, as the deterministic proof of the write
+   contract — it's a layer, not the end state.)
 2. **Normalize any input to a common form, then synthesize.** Per-type **ingest adapters** turn text /
    URL / image / PDF / doc / video into one `NormalizedMaterial` (text + optional bytes + provenance);
    a single **type-agnostic synthesis pass** reasons only over that. Auto-extraction depth is phased:

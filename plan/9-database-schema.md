@@ -35,7 +35,7 @@ no SQL files yet.
 - **v1 scope marker:** this is the full data model; **v1 only populates a subset.**
   - **Removed** (not in v1): `evolution_events` and `jobs` (async work uses the in-memory queue, not
     DB tables); `wa_qr_sessions` (connect/QR deferred); `sync_jobs` (live-only).
-  - **Build 0 delta — `message_media` is back** (the first build ships media; see `TODO.md`). DDL below; it
+  - **Build 0 delta — `message_media` is back** (the first build ships media). DDL below; it
     carries its own dedup key `UNIQUE(message_id)` so the doubled webhook delivery can't write it twice. (The
     plan's original text-only v1 removed it; Build 0 un-defers it.)
   - **Defined but empty/unused** in v1: `ai_audit_log`, `assignment_events`. (The seeded KB —

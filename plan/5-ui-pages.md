@@ -529,4 +529,4 @@ Active "Организация": fields for org name, an auto-response mode segm
 ## Out of scope (v1)
 
 Reports/analytics, campaigns, SLA, macros, billing, granular permissions, self-signup, OAuth,
-password reset, presence, i18n (per `1-concept.md`). Not shown, not stubbed.
+password reset, presence, i18n (per `0-overview.md`). Not shown, not stubbed.

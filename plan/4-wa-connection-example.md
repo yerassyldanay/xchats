@@ -32,7 +32,8 @@ GET  /instance/connect/{instance}   GET  /instance/connectionState/{instance}
 POST /message/sendText/{instance}     POST /message/sendMedia/{instance}
 ```
 (Build 0 builds **both** `sendText` and `sendMedia`; `sendWhatsAppAudio`/`sendSticker`/`sendReaction` later.)
-The full outbound surface (text/media/audio/sticker/reaction bodies) is in `4.1-evolution-send-api.md`.
+The full outbound surface (text/media/audio/sticker/reaction bodies) is in the
+**Appendix — Evolution send API** at the end of this doc.
 
 Ours:
 
@@ -180,3 +181,108 @@ UNIQUE (account_id, remote_jid)            on wa_chats
 UNIQUE (account_id, evolution_message_id)  on wa_messages
 UNIQUE (account_id, phone_jid)             on wa_contacts
 ```
+
+---
+
+## Appendix — Evolution send API (reference)
+
+The outbound transport surface: how we tell Evolution to send each message type. Verified against
+the official v2 docs (`doc.evolution-api.com/v2`) for `evoapicloud/evolution-api:v2.3.7`. A working
+reference implementation already exists: `scripts/evolution_client.py` (`text` / `media` commands).
+
+### Common shape
+
+Every send is:
+
+```
+POST {EVO_BASE}/message/{action}/{instance}
+headers: apikey: <global API key>,  Content-Type: application/json
+```
+
+- **`number`** = recipient **phone** (digits, country code, no `+`), e.g. `77000000000`. Take it
+  from the inbound `key.remoteJidAlt` (the phone) — see `captures/README.md`. (v2.3.x can also send
+  to `@lid`, but phone is safest.)
+- **media fields** accept a **public URL or base64** string.
+- common optionals: `delay` (ms typing presence before send), `quoted` (reply to a message:
+  `{ key: { id }, message: { conversation } }`), `mentioned` / `mentionsEveryOne` (groups).
+- **Response** (HTTP 201) echoes the sent message; we store `response.key.id` as
+  `evolution_message_id`, and `status` starts `PENDING`. Delivery/read then arrive via
+  `messages.update` keyed on that same id (`captures/README.md` finding 4).
+
+> **Verified — real request/response fixtures** for `sendText`, `sendMedia`, `sendSticker` are stored
+> in `captures/samples/api_calls/` (sent against the live v2.3.7 instance, HTTP 201). `sendMedia`/
+> `sendSticker` responses echo the full media metadata (`url`, `mediaKey`, `directPath`,
+> `fileLength`) plus inline `base64`. Binary fields come as index-keyed byte objects; `fileLength`
+> is a Long `{low,high,unsigned}` — see `captures/README.md`.
+
+### Endpoint table
+
+| Type | action (path `/message/{action}/{instance}`) | v1? |
+|---|---|---|
+| Text | `sendText` | **v1** ✅ |
+| Image / video / document | `sendMedia` | v2 (media) |
+| Voice note | `sendWhatsAppAudio` | later |
+| Sticker | `sendSticker` | later |
+| Reaction (emoji) | `sendReaction` | later |
+| Location, Contact, Poll, List, Buttons | `sendLocation` / `sendContact` / `sendPoll` / `sendList` / `sendButtons` | not planned |
+
+### Bodies (the ones we'll actually use)
+
+#### sendText — `POST /message/sendText/{instance}` **[v1]**
+```json
+{ "number": "77000000000", "text": "hello" }
+```
+Optional: `delay` (int), `linkPreview` (bool), `quoted` (obj), `mentioned` (string[]),
+`mentionsEveryOne` (bool).
+
+#### sendMedia — `POST /message/sendMedia/{instance}` (image / video / document)
+```json
+{ "number": "77000000000", "mediatype": "image", "mimetype": "image/jpeg",
+  "media": "<url-or-base64>", "fileName": "photo.jpg", "caption": "optional text" }
+```
+`mediatype` ∈ `image | video | document`. `media` = URL or base64. **Image + caption is one
+sendMedia call** (mirrors how inbound delivers image+text as one `imageMessage.caption`).
+Optional: `delay`, `quoted`, `mentioned`, `mentionsEveryOne`.
+
+#### sendWhatsAppAudio — `POST /message/sendWhatsAppAudio/{instance}` (voice note)
+```json
+{ "number": "77000000000", "audio": "<url-or-base64>" }
+```
+Use this (not `sendMedia`) for a real WhatsApp **voice note**. Optional: `delay`, `quoted`.
+
+#### sendSticker — `POST /message/sendSticker/{instance}`
+```json
+{ "number": "77000000000", "sticker": "<url-or-base64>" }
+```
+Optional: `delay`, `quoted`. (Sticker source should be WebP.)
+
+#### sendReaction — `POST /message/sendReaction/{instance}`
+```json
+{ "key": { "remoteJid": "77000000000@s.whatsapp.net", "fromMe": false,
+           "id": "<evolution_message_id of the target message>" },
+  "reaction": "👍" }
+```
+Note: **reaction is keyed by the target message's `key`**, not by `number`. `reaction: ""` removes a
+reaction. The `key` is the one we stored from that message's `messages.upsert`.
+
+### v1 stance
+
+The original v1 was **text-only** (only `sendText`). **Build 0 ships media too**, so it builds **both
+`sendText` and `sendMedia`** (one file per call; a `text` + N `media_ids` send fans out to N+1
+messages). The human/AI send pipeline (`POST /xchats/api/v1/chats/{id}/messages` →
+`sendText`/`sendMedia` → store `key.id` → status via `messages.update`) is the *Sending* section
+above. `sendWhatsAppAudio` / `sendSticker` / `sendReaction` come after. They share the same
+pipeline — only the action + body differ.
+
+> **Inbound counterparts still uncaptured:** an inbound **reaction** arrives as
+> `message.reactionMessage` and a **voice note** as `message.audioMessage` (`ptt: true`); neither is
+> in `captures/` yet. Capture them before building those paths.
+
+### Verifying live
+
+`scripts/evolution_client.py` already sends text and media against the live instance:
+```
+EVO_KEY=<key> EVO_INST=xpayment python plan/scripts/evolution_client.py text 7705... "hi"
+EVO_KEY=<key> EVO_INST=xpayment python plan/scripts/evolution_client.py media 7705... ./photo.jpg "cap"
+```
+These send **real WhatsApp messages** — run only against a number you control.

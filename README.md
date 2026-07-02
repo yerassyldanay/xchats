@@ -6,7 +6,7 @@ The **implementation plan** (design docs + reference assets) lives under [`plan/
 **Build 0** — the runnable first version — is implemented in [`backend/`](backend/) (Go) and
 [`frontend/`](frontend/) (Vue 3), orchestrated by [`deploy/`](deploy/) + the [`Makefile`](Makefile).
 
-Plan entry point → **[`plan/0-overview.md`](plan/0-overview.md)** · Build 0 scope → **[`TODO.md`](TODO.md)**.
+Plan entry point → **[`plan/0-overview.md`](plan/0-overview.md)**.
 
 ## Build 0 — run it
 
@@ -56,20 +56,20 @@ plan/       the design docs + captures (the source of truth)
 
 ```
 plan/
-  0-overview.md              entry point: vision, architecture diagram, build order, principles
+  0-overview.md              entry point: vision, architecture diagram, glossary, build order, principles
   0.1-definition-of-done.md  per-phase acceptance criteria
-  1-concept.md               what & why, glossary, product principles
   2-architecture.md          components, monorepo layout, env addressing, v1 decisions, config, testing
   3-sync.md                  sync model (live / initial / reconcile) + detailed Q&A
-  4-wa-connection-example.md account/QR + assign-manager flows, and the Postgres schema
+  4-wa-connection-example.md account/QR + assign-manager flows + the Evolution send-API appendix
   5-ui-pages.md              the frontend pages (ref: ui-chatboard.png)
   6-isolated-testing.md      how to build & test the whole app in isolation (one command)
   7-api-contracts.md         path convention, {payload,errcode} envelope, error codes, HTTP statuses, endpoints
   7.1-endpoints.md           per-endpoint request/response parameters + entity schemas
-  8-ai-assistant.md          the AI brain (overview) ...
-  8.1..8.5-ai-assistant-*.md ... prompt/flow, responses/media, profile, knowledge base, providers
-  8.6-port-checklist.md      porting the brain from the submodule into the backend
+  8-ai-assistant.md          the AI brain, end to end: prompt, responses, profile, KB, providers, evals, port checklist
   9-database-schema.md       full PostgreSQL schema (schema xchats, fully-named tables), keys, constraints, normalization
+  11-ai-design-overview.md   bird's-eye view of the AI side: components, decisions, trade-offs
+  12-playground-build.md     the buildable Playground (KB authoring) design
+  13-*.md / 14-*.md          decision records (typed facts & grounding; draft staging & retrieval)
   scripts/evolution_client.py   Evolution client + normalization (the oracle)
   captures/                  real Evolution v2.3.7 webhook payloads (test fixtures)
   examples/repos/xpayment-crm   the working AI brain, as a git submodule (reference implementation)
@@ -77,9 +77,9 @@ plan/
 
 ## Reading order
 
-`0-overview` → `1-concept` → `2-architecture` → `3-sync` → `4-wa-connection-example` →
-`5-ui-pages` → `6-isolated-testing` → `7-api-contracts` → `7.1-endpoints` → `8-ai-assistant`
-(+ `8.1`–`8.5`).
+`0-overview` → `2-architecture` → `3-sync` → `4-wa-connection-example` →
+`5-ui-pages` → `6-isolated-testing` → `7-api-contracts` → `7.1-endpoints` → `8-ai-assistant`;
+for the AI/KB side then `11` → `12` → the decision records `13`/`14`.
 
 ## Get the reference implementation (submodule)
 

@@ -42,7 +42,8 @@ Real `POST /message/{action}/{instance}` calls captured against the live instanc
 - **Normalizer note:** binary fields (`mediaKey`, `fileSha256`, `fileEncSha256`) come as
   index-keyed objects (`{"0":237,"1":125,...}` = a byte array), and `fileLength`/timestamps are Longs
   (`{low, high, unsigned}`). Reconstruct accordingly.
-- See `4.1-evolution-send-api.md` for the request bodies and full endpoint surface.
+- See `4-wa-connection-example.md` → *Appendix — Evolution send API* for the request bodies and full
+  endpoint surface.
 
 ---
 
@@ -115,7 +116,7 @@ image + text  -> data.message.imageMessage.caption = "<the text>"     ; data.mes
 **Image + text is a single message**, not a text message plus a media message. The `caption` is stored as
 `body`; a pure image has `caption: null` → empty body. The original text-only v1 ignored the image bytes;
 **Build 0 ships media**, so it also writes the inline `data.message.base64` to the blob + a `message_media`
-row (see `TODO.md` B6).
+row (see `9-database-schema.md`).
 
 ### 6. Inline media — full bytes arrive in the webhook
 

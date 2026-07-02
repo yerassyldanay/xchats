@@ -173,7 +173,7 @@ Just the mechanism — three cheap pieces:
 
 Plus one trivial guard: **drop `@g.us` (group) events at the door** (one `if` — no group schema in v1).
 (The original plan also had a **text-only** guard; **Build 0 ships media** instead — receive→blob→serve +
-send, idempotent on the doubled delivery. See `TODO.md` B6/B7.)
+send, idempotent on the doubled delivery.)
 
 ## Deferred (each is additive on the same upsert path)
 
@@ -181,7 +181,7 @@ None of these are needed for correct live operation; add them in their phase, no
 
 | Deferred | Note |
 |---|---|
-| Media (download, thumbnail, transcription) | **Build 0 ships media** (receive→blob→serve + send; `message_media` is back with a dedup key — see `TODO.md` / `9-database-schema.md`). Thumbnails/transcription stay deferred. |
+| Media (download, thumbnail, transcription) | **Build 0 ships media** (receive→blob→serve + send; `message_media` is back with a dedup key — see `9-database-schema.md`). Thumbnails/transcription stay deferred. |
 | Groups (`@g.us`) | Dropped at the webhook in v1 — no participants schema. |
 | Per-user unread, auto-reply/auto-send | Product features, not message correctness. |
 
