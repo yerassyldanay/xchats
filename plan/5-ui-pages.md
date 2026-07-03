@@ -1,8 +1,10 @@
 # UI Pages
 
-> ⚠️ **KB pages partially superseded by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
-> The «Черновик» badge now means "the row exists in the **draft tables**", not `drafted_at`; approve
-> copies rows to live; topic bodies carry no fact tokens. Layouts stay valid. Updated lazily; 14 wins.
+> ⚠️ **KB pages' pending/«Черновик» semantics superseded by [`15-kb-groups-keys-and-draft-blob.md`](15-kb-groups-keys-and-draft-blob.md)** (which amends [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md)).
+> The «Черновик» badge now means "this **entity** is present in the **`kbd_draft` blob**" (one jsonb draft
+> per org — 15 Decision 3), **not** "its `drafted_at` is set" and **not** a separate "draft table" row;
+> **approve** = **materialize** the blob's pending entries into the live `ai_` tables; topic bodies carry
+> no fact tokens. Layouts stay valid. Updated lazily; 15 wins.
 
 The frontend is a single Vue 3 SPA (see `2-architecture.md`). It talks only to the backend
 (`/api` + SSE). **v1 ships six routed pages — Login, Chatboard, WhatsApp Accounts, Instances
@@ -288,10 +290,11 @@ showing a contact's initials avatar, name, phone, a few key-value attributes, an
 The KB **builder**: enrich the assistant's knowledge in a chat-like flow — drop materials, run the
 builder, answer **"Запросы AI"** popups — then **Сохранить в базу** **approves** the pending rows into
 the live KB the brain reads. **One KB, no versions** (the mockup's version/history chrome is
-intentionally dropped). There is exactly **one living KB**: every row is either **LIVE** (used by the
-brain) or **PENDING** — a row with `drafted_at` set is a **«Черновик»** (not yet used by the brain);
-**approving** it clears `drafted_at` and makes it live. Both KB pages edit the **same living KB** and
-share `stores/playground.ts`.
+intentionally dropped). There is exactly **one living KB**: every entity is either **LIVE** (a row in a
+live `ai_` table, used by the brain) or **PENDING** — an entity present in the **`kbd_draft` blob** (the
+one jsonb draft per org) is a **«Черновик»** (not yet used by the brain); **approving** it
+**materializes** it from the blob into the live `ai_` table and makes it live. Both KB pages edit the
+**same living KB** and share `stores/playground.ts`.
 
 > **Facts are typed columns, quoted as tokens.** An exact fact is embedded in any text only as a
 > `{{table.slug.field}}` token — **never** a raw number. Product/tariff prices and org contacts are **typed
@@ -328,16 +331,20 @@ Populated KB — several topics, products, tariffs, media and values, with a han
 - **Stub / not-backed:** none — every control maps to an endpoint below. *(No version/history.)*
 - **▸ Backed by:** `GET/POST/DELETE /playground/draft` (open/read/discard the working copy) — the
   `DraftView` returns **config + topics + products + tariffs + assets + values + materials + requests**,
-  each row carrying `drafted_at` / `provenance` / `updated_at` (**no** `review_state`);
+  merging the **live `ai_` rows** with the pending entries from the **`kbd_draft` blob** — an entity is a
+  **«Черновик»** iff it's present in the blob (each blob entry carries `provenance`), **LIVE** iff it's a
+  row in a live `ai_` table (**no** per-row `drafted_at`, **no** `review_state`);
   `POST /playground/chat {instruction}` → `{result, draft}` (builder turn);
   `POST /playground/draft/materials` (multipart `file` **or** `{source_type,text,url}`) + live
   `kb.material.updated`; `GET /playground/requests` + `POST /playground/requests/{id}/resolve`
   (`confirm_fact`→`{table,slug,field,lang,value}`, `describe_media`→`{description}`);
-  `POST /playground/draft/approve` ("Сохранить в базу" — gate over all **pending** rows, **422** if it
-  fails, clears their `drafted_at`, then hot-reloads the brain + `kb.approved`) and
-  `POST /playground/draft/approve/{kind}/{id}` (approve a **single** pending row). Overview tiles +
-  "Последние изменения" + readiness are **derived client-side** from the `DraftView` (row counts,
-  `drafted_at`/`updated_at`/`provenance`). Live via `kb.row.changed` / `kb.material.updated` /
+  `POST /playground/draft/approve` ("Сохранить в базу" — gate over all **pending** entries, **422** if it
+  fails, **materializes** them from the `kbd_draft` blob into the live `ai_` tables (removing them from the
+  blob), then hot-reloads the brain + `kb.approved`) and
+  `POST /playground/draft/approve/{kind}/{id}` (approve a **single** pending entity). Overview tiles +
+  "Последние изменения" + readiness are **derived client-side** from the `DraftView` (entity counts,
+  which entities are present in the blob, plus `updated_at` / blob `provenance`). Live via
+  `kb.row.changed` / `kb.material.updated` /
   `kb.approved`. Writes send an optional `If-Match` (draft `updated_at`) → `409 DRAFT_STALE`. Full
   shapes in `7.1`.
 
@@ -397,10 +404,11 @@ readiness bar. Calm, inviting onboarding feel, tight corners, soft shadows only 
 ## 6b. Редактор базы знаний — `/knowledge-base` *(backend ready · UI to build; design: `ui/ai-knowledge-base.png`)*
 
 The KB **editor**: a tabbed, structural view of the **same living KB** — see everything and edit it
-directly, then **Сохранить в базу** to **approve** the pending rows. **One KB, no versions.** Every row
-is **LIVE** or **PENDING** (`drafted_at` set ⇒ a **«Черновик»** badge, not yet used by the brain);
-approving clears `drafted_at`. The **«Правки»** tab is the list of all **pending** rows (across topics,
-products, tariffs, media and values).
+directly, then **Сохранить в базу** to **approve** the pending edits. **One KB, no versions.** Every
+entity is **LIVE** or **PENDING** (present in the **`kbd_draft` blob** ⇒ a **«Черновик»** badge, not yet
+used by the brain); approving **materializes** it from the blob into the live `ai_` table. The
+**«Правки»** tab is the list of all **pending** entities (across topics, products, tariffs, media and
+values).
 
 > **Facts are typed columns, quoted as tokens.** An exact fact is embedded in any text only as a
 > `{{table.slug.field}}` token — **never** a raw number. Product/tariff prices and org contacts are **typed
@@ -439,17 +447,20 @@ rows. The normal tabbed editor layout.
 - **Removed (intentionally, vs the mockup):** ~~История~~ tab and ~~Версия~~ stat card / version
   list — there is **one** KB, no version history or rollback in the UI.
 - **▸ Backed by:** everything reads from **`GET /playground/draft`** (`DraftView` = config + topics +
-  products + tariffs + assets + values + materials + requests, each row with
-  `drafted_at`/`provenance`/`updated_at` — **no** `review_state`). Edits: topics `POST/DELETE
+  products + tariffs + assets + values + materials + requests, merging the **live `ai_` rows** with the
+  pending entries from the **`kbd_draft` blob** — an entity is **«Черновик»** iff it's present in the blob
+  (each blob entry carries `provenance`), **LIVE** iff a row in a live `ai_` table; **no** per-row
+  `drafted_at`, **no** `review_state`). Edits: topics `POST/DELETE
   /playground/draft/topics[/{slug}]`; products `POST/DELETE /playground/draft/products[/{ref}]`;
   tariffs `POST/DELETE /playground/draft/tariffs[/{ref}]`; assets `POST` (multipart) `/PATCH /DELETE
   /playground/draft/assets[/{ref}]` accepting `owner_kind`/`owner_ref` (attach to topic|product|tariff);
   contacts `PATCH /playground/draft/contacts` (org support scalars, per lang — product/tariff prices are
   typed columns set via their own `products`/`tariffs` upserts); config `PATCH /playground/draft/config`. **«Правки»** lists
-  the rows with `drafted_at` set; **Сохранить в базу** = `POST /playground/draft/approve` (approve all,
-  gate-checked → **422** on failure) and per-row **«Подтвердить»** = `POST
-  /playground/draft/approve/{kind}/{id}` — both clear `drafted_at` and hot-reload the brain. Stat cards
-  + readiness are **counts derived from `DraftView`** (rows, `drafted_at`); live refresh via
+  the entities present in the `kbd_draft` blob; **Сохранить в базу** = `POST /playground/draft/approve`
+  (approve all, gate-checked → **422** on failure) and per-entity **«Подтвердить»** = `POST
+  /playground/draft/approve/{kind}/{id}` — both **materialize** the pending entries from the blob into the
+  live `ai_` tables and hot-reload the brain. Stat cards + readiness are **counts derived from
+  `DraftView`** (entities, blob presence); live refresh via
   `kb.row.changed` / `kb.material.updated` / `kb.approved`. Writes send an optional `If-Match` (draft
   `updated_at`) → `409 DRAFT_STALE`. (Stat counts + tab contents come straight from the one
   `DraftView` — no per-tab endpoint.)
@@ -495,7 +506,7 @@ guiding the operator to create the first row, with per-tab empty illustrations.
   `DraftView` (zero rows across all kinds, no requests). The empty copy / illustrations are
   **derived client-side** from the zero counts; creating the first row (`POST
   /playground/draft/{topics|products|tariffs}`, `PATCH /playground/draft/contacts`, or an asset upload) transitions the tab into the
-  filled state with the new row flagged **«Черновик»** (`drafted_at` set) until approved.
+  filled state with the new entity flagged **«Черновик»** (present in the `kbd_draft` blob) until approved.
 
 **Image prompt:** *Empty-state of the knowledge-base "editor" page in the XChats shell (flat dark slate
 rail), Linear-minimal, light theme, NO gradients, hairline borders, one indigo accent, Russian UI.

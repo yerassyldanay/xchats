@@ -4,6 +4,11 @@
 > step 4 (prose grounding judge) is **deferred from v1**; Decision 8's embeddings rejection is relaxed —
 > embeddings are allowed **for the Knowledge lane only** (facts still resolve by exact lookup); and topic
 > bodies no longer carry fact tokens (tokens appear only in model replies). Everything else stands.
+>
+> **Further amended by [`15`](15-kb-groups-keys-and-draft-blob.md):** tables are grouped by prefix
+> (`ai_`/`kbd_`/`rp_`); the `drafted_at` lifecycle is fully removed (draft KB = one jsonb blob,
+> `kbd_draft`); KB tables key on `organization_id`; `ai_snapshots`→`ai_assistants`; the suggestion
+> table is `rp_suggestions`. **15 wins on conflict.**
 
 **Purpose:** capture the architecture we agreed on for storing exact facts and for keeping the
 assistant from hallucinating. This is a decision record, not an implementation plan. The other

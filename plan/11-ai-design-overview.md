@@ -1,9 +1,13 @@
 # Knowledge Base & AI — Design Overview (bird's-eye)
 
-> ⚠️ **Partially superseded by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
-> §4–§5: topic bodies carry **no fact tokens** (tables fully independent); §6: embeddings retrieval is
-> now **allowed for the Knowledge lane** (topics), never for facts; §11: the grounding judge is
-> **deferred from v1**; the `drafted_at` lifecycle → separate draft tables. Updated lazily; 14 wins.
+> ⚠️ **Superseded in part by [`15-kb-groups-keys-and-draft-blob.md`](15-kb-groups-keys-and-draft-blob.md) (latest)
+> and [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
+> Per **15**: the KB splits into **three prefix groups** — **`ai_`** live KB · **`kbd_`** draft+staging ·
+> **`rp_`** suggestions; `ai_snapshots`→**`ai_assistants`** (config, one row/org), `snapshot_id`→direct
+> **`organization_id`**, and the per-row `drafted_at` lifecycle → **one `kbd_draft` jsonb blob** per org
+> (not separate draft tables). Per **14**: §4–§5 topic bodies carry **no fact tokens** (tables fully
+> independent); §6 embeddings retrieval is now **allowed for the Knowledge lane** (topics), never for
+> facts; §11 the grounding judge is **deferred from v1**. Updated lazily; **15 wins**.
 
 The whole AI side of xchats at altitude: the **three components**, the **handful of big decisions** that
 shape everything, and — honestly — **what each buys us and what it costs**. This is the map and the
@@ -16,20 +20,20 @@ the choices; dive into those only when you implement.
 ## The big picture — three components, one contract
 
 ```text
-   ┌──────────────────────┐   writes (PENDING)  ┌────────────────────┐  reads LIVE rows      ┌─────────┐
-   │  PLAYGROUND          │ ──────────────────► │   KNOWLEDGE BASE    │  (drafted_at IS NULL) │  BRAIN  │
-   │  chat + editor       │                     │   (one living KB;   │ ────────────────────► │  (AI)   │
-   │  the only WRITER     │ ◄──── questions ───  │   rows live/pending)│                       │ suggests│
-   └──────────────────────┘                     └────────────────────┘                       └────┬────┘
-                                                                                                   ▼ drafts (a human approves every send)
-                                                                                                customer
+   ┌──────────────────────┐   writes (PENDING)  ┌──────────────────────────┐  reads LIVE ai_ tables ┌─────────┐
+   │  PLAYGROUND          │ ──────────────────► │  KNOWLEDGE BASE          │                        │  BRAIN  │
+   │  chat + editor       │                     │  live typed KB (ai_) +   │ ────────────────────►  │  (AI)   │
+   │  the only WRITER     │ ◄──── questions ──  │  a draft blob (kbd_draft)│                        │ suggests│
+   └──────────────────────┘                     └──────────────────────────┘                        └────┬────┘
+                                                                                                         ▼ drafts (a human approves every send)
+                                                                                                      customer
 ```
 
 | Component | One-line job | Touches the KB how |
 |---|---|---|
-| **Brain (AI)** | conversation + KB → **reply drafts**; never sends on its own | **reads only** the **LIVE** rows (`drafted_at IS NULL`) |
-| **Knowledge Base** | the single store of product knowledge: prose blocks + topics + **media** + **typed facts** (prices/limits/contacts); **one living set, rows live or pending** | **the contract** both sides agree on |
-| **Playground** | where a human curates the KB: a **chat** (builds on its own, asks questions) + an **editor** (manual) | **the only writer**; new/edited rows land **pending** until approved |
+| **Brain (AI)** | conversation + KB → **reply drafts**; never sends on its own | **reads only** the **LIVE** `ai_` typed tables |
+| **Knowledge Base** | the single store of product knowledge: prose blocks + topics + **media** + **typed facts** (prices/limits/contacts); a **live typed KB (`ai_`)** the brain reads + a **draft blob (`kbd_draft`)** the playground stages edits in | **the contract** both sides agree on |
+| **Playground** | where a human curates the KB: a **chat** (builds on its own, asks questions) + an **editor** (manual) | **the only writer**; new/edited entries land in the **`kbd_draft`** blob until approved |
 
 **The rule that keeps it clean:** *only the playground writes; only the brain reads; they meet at the
 KB.* The two never talk directly — they're decoupled **through** the KB. Get the KB right and each side
@@ -50,17 +54,21 @@ Each is a real decision. **Buys us** = advantage; **Costs us** = limitation.
 - **Costs us:** the KB schema becomes the coupling point — if it's wrong, **both** sides hurt; no
   brain↔playground shortcuts (everything must pass through stored knowledge).
 
-### 2. The KB is **one living set**; pending rows carry `drafted_at` and are held out of the prompt until approved
-- **Buys us:** the brain only ever sees **approved/live** rows (`drafted_at IS NULL`) — a half-built
-  topic can't leak, because it's still drafted; editing never disturbs live answers (an edit re-marks the
-  row **pending**); a **single, simple mechanism** (one flag, not a copy); the playground shows
-  **everything** (live + pending) in one place.
-- **Costs us:** **no versioned rollback** — there's no published snapshot to revert to; editing a live row
-  **pulls it out of the prompt** until re-approved, and overwrites the old value **in place**; the gate
-  must run **at approve time** over the resulting live set.
+### 2. The KB is **one living set** (the live `ai_` tables); pending edits pool in a separate **`kbd_draft` blob**, held out of the prompt until approved
+- **Buys us:** the brain reads the **live `ai_` typed tables whole** — there is nothing pending to filter
+  out, so a half-built topic **can't leak** (it lives only in the draft blob, which the brain never
+  touches); editing never disturbs live answers (edits accumulate in the blob; the live row is untouched
+  until approve); a **single, simple hold-out** — one jsonb document per org (`kbd_draft`), not a per-row
+  flag and not a shadow copy of every table; the playground reads/writes that one blob and shows **live +
+  pending** together in one place.
+- **Costs us:** **no versioned rollback** — the blob is a working draft, not a version history, so there's
+  no published snapshot to revert to; approve **overwrites the old live value in place**; the gate must run
+  **at approve time** over the resulting live set; the blob's arrays must mirror the live tables (kept in
+  step by convention, not enforced by the DB).
 - **Alternative rejected:** a draft/published two-copy model with versioning — buys rollback, but costs a
-  publish step, a second copy to keep in sync, and version storage; the `drafted_at` flag gives the same
-  safety wall (nothing unapproved reaches a customer) with one row, not two.
+  publish step, a second full copy to keep in sync, and version storage; the **`kbd_draft` blob** is the
+  hold-out that gives the same safety wall (nothing unapproved reaches a customer) with **one document**,
+  not a parallel table set.
 
 ### 3. A topic is a **container of text + several media**, each media with **its own description**
 - **Buys us:** matches reality — for "what are your prices?" you might send a card, a PDF, or a 90-sec
@@ -148,8 +156,9 @@ These are genuine forks, not yet locked:
    hard "every `{{table.slug.field}}` resolves (for each required language)" + "every owned media exists" +
    "no literal currency in a topic body" + "no open questions"? What asset-coverage bar? (Stricter = safer
    but harder to approve.)
-2. **Per-row vs. all-at-once approval UX** — approve a single pending row, or sweep all pending at once?
-   (One living KB already makes "one set per org" automatic — branchable drafts are off the table.)
+2. **Per-entity vs. all-at-once approval UX** — approve a single pending entity (a selection out of the
+   `kbd_draft` blob), or sweep the whole draft at once? (One living KB already makes "one set per org"
+   automatic — branchable drafts are off the table.)
 3. **When (if ever)** to add changesets (§8) and `pgvector` retrieval (§6) — only on real pain.
 4. **Auto-extraction timing & provider** (§9), and the **PII/data-boundary stance** for the builder LLM.
 5. **Concurrency** when the chat agent and a human edit the same row at once.
@@ -159,12 +168,12 @@ These are genuine forks, not yet locked:
 ## Build sequence (the order that de-risks)
 
 ```text
-1. Lock + migrate the one-living-KB contract   ← entities + drafted_at + typed products/tariffs/contacts
-                                                  + polymorphic media owner on assets + approve gate
+1. Lock + migrate the one-living-KB contract   ← entities keyed on organization_id + typed facts (products/tariffs/contacts)
+                                                 + polymorphic media owner on assets + the kbd_draft blob + approve gate
 2. Seed knowledge manually                     ← brain boots usable AND the playground has real content to edit
 3. Editor first (no LLM)                       ← proves the KB write contract with a simple, deterministic writer
 4. Chat next (the agent)                       ← the interactive build, riding the already-proven contract
-5. Approve wires pending → live                ← drafted_at cleared; brain reloads — through the gate
+5. Approve wires draft → live                  ← approve materializes the kbd_draft blob → live; brain reloads — through the gate
 ```
 
 **Editor before chat** on purpose: it forces the KB contract to be correct against a simple writer
@@ -175,9 +184,10 @@ the real brain and the playground at once.
 
 ## Where the detail lives (so this stays a map)
 
-- **`8-ai-assistant.md`** — the brain: the prompt, how it grounds (live rows only), the approve/eval gate.
-- **`9-database-schema.md`** — the full data model the KB maps onto (`ai_topics/products/tariffs/contacts/assets`,
-  the `drafted_at` flag, typed fact columns, and the polymorphic `(owner_kind, owner_ref)` media pair).
+- **`8-ai-assistant.md`** — the brain: the prompt, how it grounds (live `ai_` tables only), the approve/eval gate.
+- **`9-database-schema.md`** — the full data model, grouped by prefix — **`ai_`** live KB · **`kbd_`** draft+staging · **`rp_`** suggestions:
+  `ai_assistants` + `ai_topics/products/tariffs/contacts/assets`, the `kbd_draft` draft blob, typed fact
+  columns, and the polymorphic `(owner_kind, owner_ref)` media pair.
 - **`12-playground-build.md`** — the buildable playground design (layers, tool contract, endpoints;
   it also carries what survives of the retired `10-knowledge-builder.md` conceptual UX).
 - **This doc** — the three components, the main solutions, and the trade-offs. Start here.

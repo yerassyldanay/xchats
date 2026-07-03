@@ -1,5 +1,12 @@
 # 14 — Draft Staging, Table Independence, Language Scope & Retrieval — Architecture Decision
 
+> ⚠️ **Decision 1 (draft twin tables) is superseded by [`15`](15-kb-groups-keys-and-draft-blob.md):**
+> draft rows now live in ONE jsonb blob per org (`kbd_draft`), not per-table twins; `drafted_at` stays
+> retired; tables are grouped `ai_`/`kbd_`/`rp_`, key on `organization_id`, and `ai_snapshots`→`ai_assistants`,
+> suggestions = `rp_suggestions`. **Decision 2** (approve = gate → copy → embed) **STANDS**, copy source
+> now the blob. **Decisions 3–6** (pure-prose topics, ru-only v1, embeddings for the Knowledge lane,
+> judge deferred) **UNCHANGED**. **15 wins on conflict.**
+
 **Purpose:** capture the architecture agreed after Decision 13: how KB drafts are staged and
 approved, how the tables are decoupled so partial approval is always safe, what language scope v1
 ships with, and how the response side retrieves knowledge. This is a decision record, not an
@@ -23,7 +30,7 @@ Three things needed settling after Decision 13:
 ## Decision 1 — Draft staging: separate mirror tables (replaces `drafted_at`)
 
 - The per-row **`drafted_at` timestamp lifecycle is removed** from the design.
-- Draft rows live in **dedicated draft tables**, one **draft twin per KB table**, with the **same
+- Draft rows live in **dedicated draft tables**, one **draft twin per KB table** (superseded by 15 — now a single `kbd_draft` jsonb blob), with the **same
   columns** as the live table. Same structure ⇒ the UI displays draft and live rows the same way.
 - **Live tables are never edited directly** — not even a one-character fix. The playground writes
   drafts only; **approve is the only write path to live**. One writer path, always.

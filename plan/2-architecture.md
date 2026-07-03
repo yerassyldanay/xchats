@@ -232,7 +232,8 @@ Same idea as Evolution's `/manager` page, but a simpler UX:
 ### Storage — PostgreSQL only
 
 - **Everything xchats owns lives in PostgreSQL** — product state **and** the AI assistant's
-  config/snapshots (the ported brain moves off SQLite). Different databases or schemas are fine, but
+  per-org config row (the ported brain moves off SQLite; the config table is `ai_assistants`, one row
+  per org — 15 Decision 1). Different databases or schemas are fine, but
   it is the **same Postgres server, only Postgres** — no SQLite, no other store. (Async work is the
   one exception: it rides an in-memory queue behind a `Queue` port, not a DB table.)
 - Media **bytes** still go to the blob store (local disk → object storage); their **metadata** is
@@ -411,9 +412,9 @@ wa_contacts
 wa_chats
 wa_messages
 assignment_events
-ai_snapshots
+ai_assistants
 ai_topics
-ai_suggestions
+rp_suggestions
 ```
 
 Important constraints:

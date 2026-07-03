@@ -2,7 +2,11 @@
 
 > Single doc for the whole brain: prompt, responses, profile, knowledge base, providers, evals, and
 > the port checklist (formerly `8.1`–`8.7`). Consistent with decision records
-> [`13`](13-kb-facts-and-grounding.md) / [`14`](14-draft-staging-and-retrieval.md); on conflict they win.
+> [`13`](13-kb-facts-and-grounding.md) / [`14`](14-draft-staging-and-retrieval.md) /
+> [`15`](15-kb-groups-keys-and-draft-blob.md) (latest); on conflict they win. Per **15**: the KB is
+> three prefix groups — **`ai_`** live · **`kbd_`** draft+staging · **`rp_`** suggestions — every table
+> keys on **`organization_id`** (no `snapshot_id`), the config table is **`ai_assistants`** (was
+> `ai_snapshots`), and the draft KB is **one `kbd_draft` jsonb blob** per org, not twin tables.
 
 The core of xchats. Given a customer conversation it produces **reviewed reply drafts** — text
 (and, later, attached media) in the customer's language, grounded **only** in a curated knowledge
@@ -12,7 +16,7 @@ base. It never sends by itself (suggest-and-approve).
 `examples/repos/xpayment-crm/` (entry: `IMPLEMENTATION.md`; core in
 `internal/usecase/assistant/{brain,prompt,ports}.go`, `internal/domain/{catalog,draft}.go`,
 `internal/infrastructure/llm/`). xchats **ports** it: Chatwoot reads → xchats Postgres reads, draft
-→ an `xchats.ai_suggestions` row, config storage SQLite → Postgres. The logic is unchanged. Full port
+→ an `xchats.rp_suggestions` row, config storage SQLite → Postgres. The logic is unchanged. Full port
 table in the *Porting* section below.
 
 ## v1 adapter mode (the minimal slice)
@@ -207,10 +211,11 @@ model; explanatory things are authored but checked.
 
 ### Lifecycle — draft tables, approve, live
 
-The KB lives in `xchats.ai_snapshots / ai_topics / ai_assets / ai_tariffs / ai_products /
-ai_contacts` (see `9-database-schema.md`). The Playground stages changes in **separate draft twin
-tables**; **approve = gate → copy to live → embed** (14 Decisions 1–2) — the only write path to
-live. The brain reads **live rows only**, loads them into one **immutable in-memory snapshot**
+The KB lives in `xchats.ai_assistants / ai_topics / ai_assets / ai_tariffs / ai_products /
+ai_contacts` (see `9-database-schema.md`). The Playground stages changes in **a single `kbd_draft`
+jsonb blob (one per org)**; **approve = gate → copy to live → embed** (15 Decisions 3–4 — the copy
+source is the blob) — the only write path to live. The brain reads **live rows only**, loads them
+into one **immutable in-memory snapshot**
 (keyed per org), and **never queries the DB on the hot path**: the cached prefix `[A]–[F]` is built
 **once** — on boot and on approve, not per message. An approve builds a new snapshot and
 **atomically swaps the pointer**, so a message handler never sees a half-updated KB.
@@ -461,8 +466,8 @@ Rewrite import path `github.com/yessaliyev/xpayment-crm` → the xchats backend 
 | Item | Action |
 |---|---|
 | The conversation/profile reader port (in the submodule, `ChatwootReader` with `Window` + `Profile`) | Implement a **new xchats Postgres reader** with the same interface: `Window` = last ~15 `wa_messages` rows for the chat (mapped to `domain.Message{Role: customer if direction='in' else agent, Content, ...}`). **No profile in v1** — the conversation `stage` rides on `wa_chats.stage`; `wa_contacts.attributes` is not read. |
-| Draft persistence (submodule writes a Chatwoot private note) | An `ai_draft` worker (in-memory queue, no DB `jobs` table) takes the returned **1–3 options** and inserts **one** `ai_suggestions` row whose `options` jsonb holds the variants (each with nested media) + emits `ai_draft.created`. Escalation / `PricingError` / low confidence → row flags, not a note. Producing up to 3 text variants is the one logic adaptation (one structured call returning ≤3 options). |
-| Config/snapshot store (`internal/infrastructure/sqlite/*`) | Reimplement on **Postgres**: live tables `xchats.ai_snapshots / ai_topics / ai_assets / ai_tariffs / ai_products / ai_contacts` + their **draft twins** + `ai_audit_log` (see `9-database-schema.md`, 14 Decisions 1–2). |
+| Draft persistence (submodule writes a Chatwoot private note) | An `ai_draft` worker (in-memory queue, no DB `jobs` table) takes the returned **1–3 options** and inserts **one** `rp_suggestions` row whose `options` jsonb holds the variants (each with nested media) + emits `ai_draft.created`. Escalation / `PricingError` / low confidence → row flags, not a note. Producing up to 3 text variants is the one logic adaptation (one structured call returning ≤3 options). |
+| Config/snapshot store (`internal/infrastructure/sqlite/*`) | Reimplement on **Postgres**: live tables `xchats.ai_assistants / ai_topics / ai_assets / ai_tariffs / ai_products / ai_contacts` + the `kbd_draft` blob (+ `kbd_materials` / `kbd_requests`) + `ai_audit_log` (see `9-database-schema.md`, 15 Decisions 1–4). |
 | **Seed snapshot** (`migrations/0002_seed.sql`) | Carry it: load a minimal **published** starter persona/topics/facts/assets into the Postgres `xchats.ai_*` tables on first boot, so the service "boots usable" and the admin edits a working example, not a blank form (the cold-start fix — see *Cold start* above). Decide reuse-xpayment-KB vs. mine-this-org's-chats. |
 | **Eval / golden harness** (`docs/07-testing-and-evals.md`) | Port it — golden set + deterministic metrics + the gate (see *Evals* above), incl. the **language** assertion as a deterministic golden metric. |
 | Config catalog (`internal/infrastructure/config`) | Keep `LLM_*`, `Admin`, media settings; drop the Chatwoot/Evolution-provisioning blocks. Fold into the xchats `internal/config` (`.env` + `config.yaml`). |

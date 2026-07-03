@@ -1,8 +1,11 @@
 # Database Schema (PostgreSQL)
 
-> ⚠️ **Partially superseded by [`14-draft-staging-and-retrieval.md`](14-draft-staging-and-retrieval.md).**
-> The `drafted_at` columns are replaced by separate **draft twin tables**; topic `body_md` carries **no
-> fact tokens** (pure prose); v1 fills **ru rows only**. This doc is updated lazily; 14 wins on conflict.
+> ⚠️ **Superseded in part by [`15`](15-kb-groups-keys-and-draft-blob.md) (latest) and
+> [`14`](14-draft-staging-and-retrieval.md).** Per **15**: tables are grouped by prefix — **`ai_`** live
+> KB · **`kbd_`** draft+staging · **`rp_`** suggestions; `ai_snapshots`→**`ai_assistants`**,
+> `snapshot_id`→**`organization_id`**, **`drafted_at` and `provenance` dropped** from live tables, and
+> the draft KB is **one jsonb blob** (`kbd_draft`), not twin tables. Per **14**: topic `body_md` is
+> **pure prose** (no fact tokens); v1 fills **ru rows only**. Updated lazily; **15 wins on conflict**.
 
 The authoritative data model. **All state is PostgreSQL.** Design reference, **not** a migration —
 no SQL files yet.
@@ -16,10 +19,15 @@ no SQL files yet.
   number keeps the same id across Evolution-instance churn (see `wa_accounts`). Foreign keys are
   descriptive — `<entity>_id` referencing `<table>.id` (e.g. `account_id` → `wa_accounts.id`,
   `chat_id` → `wa_chats.id`, `user_id` → `users.id`, `organization_id` → `organizations.id`).
-- **WhatsApp-channel tables are prefixed `wa_`** (`wa_accounts`, `wa_contacts`, `wa_chats`,
-  `wa_messages`). Each channel owns its own contacts/chats; a future channel adds its own `ig_*` /
-  `tg_*` tables. Shared tables (`organizations`, `users`, `organization_users`, `sessions`) and AI
-  tables (`ai_*`) are unprefixed.
+- **Tables are grouped by a name prefix** (15 Decision 5), so the schema reads at a glance:
+  - **`wa_*`** — WhatsApp transport (`wa_accounts`, `wa_contacts`, `wa_chats`, `wa_messages`); each
+    channel owns its own contacts/chats, and a future channel adds its own `ig_*` / `tg_*` tables.
+  - **`ai_*`** — the **live knowledge base** the brain reads (`ai_assistants`, `ai_topics`, `ai_assets`,
+    `ai_tariffs`, `ai_products`, `ai_contacts`, `ai_audit_log`).
+  - **`kbd_*`** — the **draft KB + playground staging** (`kbd_draft`, `kbd_materials`, `kbd_requests`);
+    playground-only, never read by the brain.
+  - **`rp_*`** — **response suggestions** per chat (`rp_suggestions`).
+  - **Unprefixed** — shared identity (`organizations`, `users`, `organization_users`, `sessions`).
 - Keys are `uuid` unless noted; flexible documents are `jsonb`.
 - **Time is always UTC.** Every timestamp is `timestamptz`, which Postgres stores as a **UTC instant**
   — it does **not** store a timezone (the type name is misleading). We read/write UTC everywhere; a
@@ -39,7 +47,7 @@ no SQL files yet.
     carries its own dedup key `UNIQUE(message_id)` so the doubled webhook delivery can't write it twice. (The
     plan's original text-only v1 removed it; Build 0 un-defers it.)
   - **Defined but empty/unused** in v1: `ai_audit_log`, `assignment_events`. (The seeded KB —
-    `ai_topics` / `ai_assets` / `ai_tariffs` / `ai_products` / `ai_contacts` (the typed **fact** tables) — and `ai_suggestions` **are** used: each Suggest writes one
+    `ai_topics` / `ai_assets` / `ai_tariffs` / `ai_products` / `ai_contacts` (the typed **fact** tables) — and `rp_suggestions` **are** used: each Suggest writes one
     row whose `options` jsonb holds 1–3 variants, each with optional media from the seeded catalog.) Don't pour
     migration/wiring effort into the empty ones until their phase (see `0.1-definition-of-done.md`).
 
@@ -240,10 +248,10 @@ created_at
 
 ## AI assistant (ported brain — ONE living KB per org)
 
-### xchats.ai_snapshots  (the single per-org assistant config)
+### xchats.ai_assistants  (the single per-org assistant config)  — renamed from `ai_snapshots`
 ```
 id               uuid  PK
-organization_id  uuid  FK -> organizations          -- DIRECT, kept
+organization_id  uuid  FK -> organizations          -- DIRECT
 persona          text
 mission          text
 guardrails       text
@@ -252,47 +260,45 @@ reply_max_words  int
 created_at, updated_at  timestamptz
 UNIQUE (organization_id)
 ```
-> **One living KB per org — no versions, no snapshots, no rollback.** There is exactly **one** row
-> per org holding the assistant config (persona / mission / guardrails / language_policy /
-> reply_max_words). The table name `ai_snapshots` and the FK `snapshot_id` are **legacy** — kept to
-> avoid churn across the schema and migrations; nothing here is versioned anymore. The old
-> `version` / `snapshot_state` / `published_at` columns and `UNIQUE(organization_id, version)` are
-> dropped; the key is now `UNIQUE(organization_id)` (one row per org).
+> **One living KB per org — no versions, no snapshots, no rollback.** Exactly **one** row per org
+> holds the assistant config (persona / mission / guardrails / language_policy / reply_max_words).
+> **Renamed `ai_snapshots` → `ai_assistants` (15 Decision 1)** — it is a config row, not a snapshot of
+> anything. The old `version` / `snapshot_state` / `published_at` columns are gone; the key is
+> `UNIQUE (organization_id)`.
 >
-> **Draft is a per-row timestamp.** Every content row below carries `drafted_at timestamptz NULL`:
-> `drafted_at IS NULL` → **LIVE** (the brain reads it; included in the prompt); `drafted_at IS NOT
-> NULL` → **PENDING** (shown in the playground with editors, **excluded** from the prompt). This
-> replaces the old `review_state` enum. Each content row also carries `provenance jsonb` (source
-> tracking). **Approve = `UPDATE … SET drafted_at = NULL`** (per-row or all-at-once); the
-> deterministic gate runs **at approve time** — no publish/swap, no version copy, no rollback.
+> **KB tables key on `organization_id` directly (15 Decision 1).** The legacy `snapshot_id` FK is
+> **retired** — every content/fact table below carries `organization_id` (FK → `organizations`); there
+> is no snapshot join.
+>
+> **Live tables hold live rows only (15 Decision 2).** The old per-row `drafted_at` flag **and** the
+> `provenance jsonb` column are **removed** from every live table below. Pending edits live in the
+> **`kbd_draft`** blob — one jsonb document per org (15 Decision 3, defined below in the `kbd_` group).
+> **Approve** validates the blob and materializes rows into these live tables — the only write path to
+> live (15 Decision 4). No `drafted_at`, no in-place pending state, no `review_state` enum.
 
-### xchats.ai_topics  (KB; belongs to the org's KB)
+### xchats.ai_topics  (KB; the Knowledge lane)
 ```
-id           uuid  PK
-snapshot_id  uuid  FK -> ai_snapshots               -- organization derived via snapshot (3NF)
-slug         text
-lang         text
-keywords     text
-body_md      text
-drafted_at   timestamptz  NULL  -- NULL = LIVE (in prompt); NOT NULL = PENDING (playground only)
-provenance   jsonb              -- source tracking (where this row came from)
+id               uuid  PK
+organization_id  uuid  FK -> organizations
+slug             text
+lang             text
+keywords         text
+body_md          text   -- pure prose: no digits, no fact tokens (14 Decision 3)
 created_at, updated_at
-UNIQUE (snapshot_id, slug)
+UNIQUE (organization_id, slug)
 ```
 
 ### xchats.ai_assets  (media catalog; attaches to ANY entity)
 ```
-id           uuid  PK
-snapshot_id  uuid  FK -> ai_snapshots
-ref          text  -- stable id the model uses in asset_refs
-asset_kind   text  -- 'image'|'video'|'document'|'audio'
-owner_kind   text  -- 'topic'|'product'|'tariff'|''  ('' = unattached)
-owner_ref    text  -- the owner's ref/slug; '' = unattached
-description  text
-asset_url    text
-drafted_at   timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
-provenance   jsonb
-UNIQUE (snapshot_id, ref)
+id               uuid  PK
+organization_id  uuid  FK -> organizations
+ref              text  -- stable id the model uses in asset_refs
+asset_kind       text  -- 'image'|'video'|'document'|'audio'
+owner_kind       text  -- 'topic'|'product'|'tariff'|''  ('' = unattached)
+owner_ref        text  -- the owner's ref/slug; '' = unattached
+description      text
+asset_url        text
+UNIQUE (organization_id, ref)
 ```
 > **Polymorphic media.** A media blob attaches to **any** entity via the shared `(owner_kind,
 > owner_ref)` pair: an entity's media = `ai_assets WHERE owner_kind/owner_ref match`. The old
@@ -306,14 +312,15 @@ UNIQUE (snapshot_id, ref)
 > lane) and is grounded by a judge. The old generic value bag **`ai_values` is removed** — a nearest-key
 > lookup can return the *wrong* fact; a typed column cannot.
 >
-> **Language is a row, never a column.** Every fact table keys on `(snapshot_id, ref, lang)` (contacts on
-> `(snapshot_id, lang)`): one row per `(entity, language)`, plus a `*` row for language-neutral values
+> **Language is a row, never a column.** Every fact table keys on `(organization_id, ref, lang)` (contacts on
+> `(organization_id, lang)`): one row per `(entity, language)`, plus a `*` row for language-neutral values
 > (phones, e-mails, addresses). Adding a language = **inserting rows**, never a schema change — there are
 > no `name_ru`/`name_kk` columns. This is the same per-language shape `ai_topics` already uses, so the
 > whole KB is uniform.
 >
-> **Reference model — `{{table.slug.field}}`.** A fact is quoted in a topic body or a reply only as a
-> token `{{table.slug.field}}`: `table` selects the fact table, `slug` the row, `field` the column —
+> **Reference model — `{{table.slug.field}}`.** A fact is quoted **only in a model reply** as a
+> token `{{table.slug.field}}` (topic bodies are pure prose — no tokens, no digits — per 14 Decision 3):
+> `table` selects the fact table, `slug` the row, `field` the column —
 > e.g. `{{tariff.growth.price}}`, `{{tariff.growth.limit_text}}`, `{{product.nike_x.price}}`,
 > `{{contact.support.whatsapp}}`. Code resolves the token against the typed table **for the reply's
 > language** (falling back reply-language → org-default → `*`) and substitutes the stored value verbatim
@@ -336,18 +343,16 @@ UNIQUE (snapshot_id, ref)
 
 ### xchats.ai_contacts  (typed org-support facts — one singleton entity, `slug='support'`)
 ```
-id            uuid  PK
-snapshot_id   uuid  FK -> ai_snapshots
-slug          text  -- singleton 'support' — keeps the 3-part token grammar {{contact.support.<field>}}
-lang          text  -- 'ru' | 'kk' | '*'  — '*' = language-neutral (phones, e-mails, addresses)
-whatsapp      text  -- support WhatsApp — language-neutral (lives on the '*' row)
-email         text  -- support e-mail — language-neutral
-address       text  -- legal / office address — language-neutral
-legal         text  -- legal entity / requisites — language-neutral
-callback_time text  -- how soon we call back ('1 час' / '1 сағат') — language-bearing (ru/kk rows)
-drafted_at    timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
-provenance    jsonb
-UNIQUE (snapshot_id, lang)
+id               uuid  PK
+organization_id  uuid  FK -> organizations
+slug             text  -- singleton 'support' — keeps the 3-part token grammar {{contact.support.<field>}}
+lang             text  -- 'ru' | 'kk' | '*'  — '*' = language-neutral (phones, e-mails, addresses)
+whatsapp         text  -- support WhatsApp — language-neutral (lives on the '*' row)
+email            text  -- support e-mail — language-neutral
+address          text  -- legal / office address — language-neutral
+legal            text  -- legal entity / requisites — language-neutral
+callback_time    text  -- how soon we call back ('1 час' / '1 сағат') — language-bearing (ru/kk rows)
+UNIQUE (organization_id, lang)
 ```
 > **A dedicated typed table for org-level scalars** — support contacts + callback time — not a generic
 > bag. Token resolution is **per field** with language fallback: `{{contact.support.whatsapp}}` finds its
@@ -356,64 +361,126 @@ UNIQUE (snapshot_id, lang)
 
 ### xchats.ai_products  (typed fact table — one row per (product, language))
 ```
-id           uuid  PK
-snapshot_id  uuid  FK -> ai_snapshots               -- organization derived via snapshot (3NF)
-ref          text  -- stable key, e.g. 'nike-x'
-lang         text  -- 'ru' | 'kk' | '*'  — language is a ROW (one row per product per language)
-name         text  -- verbatim, per language
-price        text  -- the confirmed price, verbatim WITH units ('25 000 ₸'); code never reformats
-description  text
-category     text
-data         jsonb -- sphere-specific descriptive attrs: {size, color, area_m2, …}
-status       text  -- 'active'|'inactive'
-drafted_at   timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
-provenance   jsonb
+id               uuid  PK
+organization_id  uuid  FK -> organizations
+ref              text  -- stable key, e.g. 'nike-x'
+lang             text  -- 'ru' | 'kk' | '*'  — language is a ROW (one row per product per language)
+name             text  -- verbatim, per language
+price            text  -- the confirmed price, verbatim WITH units ('25 000 ₸'); code never reformats
+description      text
+category         text
+data             jsonb -- sphere-specific descriptive attrs: {size, color, area_m2, …}
+status           text  -- 'active'|'inactive'
 created_at, updated_at  timestamptz
-UNIQUE (snapshot_id, ref, lang)
+UNIQUE (organization_id, ref, lang)
 ```
 > **A product's price is a typed column, quoted verbatim.** `price` (and any other exact field) is a
 > concrete column stored **verbatim with units**; the model quotes it only as `{{product.nike_x.price}}`,
 > resolved for the reply's language — never a digit it writes itself. **Language is a row**
-> (`UNIQUE (snapshot_id, ref, lang)`); a `*` row carries language-neutral values. Media still attach
+> (`UNIQUE (organization_id, ref, lang)`); a `*` row carries language-neutral values. Media still attach
 > **polymorphically** as `ai_assets` rows (`owner_kind='product'`, `owner_ref=<ref>`) — only *values*
 > moved onto the entity as columns.
 
 ### xchats.ai_tariffs  (typed fact table — one row per (tariff, language))
 ```
-id            uuid  PK
-snapshot_id   uuid  FK -> ai_snapshots
-ref           text  -- 'trial'|'start'|'growth'|'scale'|'pro'
-lang          text  -- 'ru' | 'kk' | '*'  — language is a ROW
-name          text  -- verbatim, per language ('Рост' / 'Өсу')
-price         text  -- confirmed price, verbatim with units ('25 000 ₸/мес' / '25 000 ₸/ай'); '' if fee-based
-limit_text    text  -- confirmed limit, verbatim ('до 2 000 платежей/мес' / 'безлимит платежей')
-fee           text  -- per-transaction fee for percentage plans ('1.5 % за транзакцию'); '' otherwise
-summary       text
-pricing_type  text  -- 'fixed'|'percentage'|'tiered'|'hybrid'
-advantages    text
-disadvantages text
-data          jsonb -- descriptive prose the model may paraphrase: conditions / billing_period / tiers
-status        text  -- 'active'|'inactive'
-drafted_at    timestamptz  NULL  -- NULL = LIVE; NOT NULL = PENDING
-provenance    jsonb
+id               uuid  PK
+organization_id  uuid  FK -> organizations
+ref              text  -- 'trial'|'start'|'growth'|'scale'|'pro'
+lang             text  -- 'ru' | 'kk' | '*'  — language is a ROW
+name             text  -- verbatim, per language ('Рост' / 'Өсу')
+price            text  -- confirmed price, verbatim with units ('25 000 ₸/мес' / '25 000 ₸/ай'); '' if fee-based
+limit_text       text  -- confirmed limit, verbatim ('до 2 000 платежей/мес' / 'безлимит платежей')
+fee              text  -- per-transaction fee for percentage plans ('1.5 % за транзакцию'); '' otherwise
+summary          text
+pricing_type     text  -- 'fixed'|'percentage'|'tiered'|'hybrid'
+advantages       text
+disadvantages    text
+data             jsonb -- descriptive prose the model may paraphrase: conditions / billing_period / tiers
+status           text  -- 'active'|'inactive'
 created_at, updated_at  timestamptz
-UNIQUE (snapshot_id, ref, lang)
+UNIQUE (organization_id, ref, lang)
 ```
 > **A tariff's quotable numbers are typed columns, verbatim.** `price`, `limit_text`, `fee` are concrete
 > columns; the assistant quotes them only as `{{tariff.growth.price}}`, `{{tariff.growth.limit_text}}`,
 > `{{tariff.pro.fee}}`, resolved for the reply's language. **Language is a row**
-> (`UNIQUE (snapshot_id, ref, lang)`) — `Рост`/`Өсу` and `…/мес`/`…/ай` are two rows, not two columns.
+> (`UNIQUE (organization_id, ref, lang)`) — `Рост`/`Өсу` and `…/мес`/`…/ай` are two rows, not two columns.
 > Only *descriptive* prose the model may paraphrase (conditions, tiers) stays in `data` jsonb. The two
 > entity tables have **no foreign keys between them** — each is an independent typed descriptor. A
 > cross-tariff limit (e.g. an all-plans cashier cap) repeats per row, or becomes its own typed table if it
 > grows into a category.
 >
-> **Facts vs prose.** Products, tariffs and contacts are the **Facts lane** — exact, code-substituted,
-> **exempt** from the "no literal amount in a topic body" rule, because a column value is a confirmed fact,
-> not an invented one. A `topic` body is the **Knowledge lane** — prose the model writes and the grounding
-> judge checks; any number in it must be a `{{table.slug.field}}` token, never a digit.
+> **Facts vs prose.** Products, tariffs and contacts are the **Facts lane** — exact values stored as
+> typed columns, code-substituted into replies. A `topic` body is the **Knowledge lane** — **pure prose**
+> the model writes and the grounding judge checks; it carries **no literal amounts and no fact tokens**
+> (14 Decision 3). Facts never live in a topic body; they are quoted only in a reply, as a
+> `{{table.slug.field}}` token resolved from the typed tables at reply time.
 
-### xchats.ai_suggestions  (one row per "Suggest"; the 1–3 reply OPTIONS live in the `options` jsonb)
+## Draft KB + playground staging — the `kbd_` group
+
+> **Playground-only, never read by the brain (15 Decision 5).** `kbd_draft` holds the whole pending KB
+> as one jsonb blob; `kbd_materials` and `kbd_requests` are the ingest/human-in-the-loop scratch that
+> tracks job status. **Approve** materializes `kbd_draft` entries into the live `ai_` tables (15
+> Decision 4); the other two are discarded once resolved. All key on `organization_id`.
+
+### xchats.kbd_draft  (the whole pending KB as one document; one row per org)
+```
+organization_id  uuid  PK  FK -> organizations   -- one draft blob per org
+draft            jsonb      -- the pending KB: { config, topics[], assets[], tariffs[], products[], contacts[], deletes[] }
+base_version     bigint     -- optimistic-concurrency counter; bumped on each save (stale write → 409)
+updated_at       timestamptz
+updated_by       uuid  FK -> users  NULL
+```
+> **The draft KB is one jsonb document, not per-row drafts (15 Decision 3).** The playground reads/writes
+> this blob as a whole working copy; the **brain never touches it** (it reads only the live `ai_` typed
+> tables above). The blob's arrays mirror the live tables one-for-one — each entry has the same fields as
+> a live row, plus an authoring `provenance` object; a `deletes[]` entry marks a live row for removal.
+> This **replaces Decision 14's draft twin tables**: the draft needs no relational querying, no per-row
+> indexes, and no schema kept in lockstep with N live tables — "one separate place" is literally one
+> column.
+>
+> **Approve = validate → materialize → clear (15 Decision 4).** Approving the whole draft (or a selected
+> subset of entities) runs the deterministic gate, **upserts** the approved entries into the live typed
+> tables on their natural key (`(organization_id, ref, lang)` etc.), applies `deletes[]`, **removes those
+> entries from the blob**, and refreshes topic embeddings. Rejecting an edit drops that entry from the
+> blob. Approve stays the **only** write path to live; the brain reloads its live snapshot afterwards.
+> Blob shape and worked example live in `15-kb-groups-keys-and-draft-blob.md`.
+
+### xchats.kbd_materials  (ingest staging — one row per dropped input; the NormalizedMaterial contract)
+```
+id               uuid  PK
+organization_id  uuid  FK -> organizations   -- the org this build targets
+source_type      text  -- 'text'|'url'|'image'|'pdf'|'doc'|'video'|'audio'
+source_ref       text  -- url / filename / chat message id
+blob_id          text  NULL  -- stored bytes, if any (candidate asset)
+extracted_text   text        -- THE COMMON FORM the synthesis agent reads
+media_kind       text  NULL  -- if sendable as an asset: 'image'|'video'|'document'|'audio'
+status           text  -- 'pending'|'extracting'|'ready'|'needs_human'|'failed'  (the extraction JOB status)
+extraction       jsonb -- { method, model, confidence, error }
+created_at, updated_at  timestamptz
+```
+> **Stage-1 ⇄ Stage-2 staging (was `ai_materials`).** One row per dropped input; a queue job fills
+> `extracted_text` (or flags `needs_human`). Discarded once its material is synthesized into the draft.
+
+### xchats.kbd_requests  (the popup / human-in-the-loop queue)
+```
+id               uuid  PK
+organization_id  uuid  FK -> organizations
+material_id      uuid  FK -> kbd_materials  NULL  -- the input that raised it, if any
+req_type         text  -- 'describe_media'|'confirm_fact'|'approve_topic'|'approve_asset'|'resolve_duplicate'|'choose_topic'|'comment'
+prompt           text  -- what the popup asks
+context          jsonb -- thumbnail ref / detected value / candidate topics — what the popup renders
+target           jsonb -- which draft entry it resolves into (owner_kind/owner_ref / asset ref / table.slug.field)
+state            text  -- 'pending'|'resolved'|'dismissed'  (the request's job status)
+resolution       jsonb NULL  -- the operator's answer (becomes the draft mutation)
+created_at, resolved_at  timestamptz
+```
+> **The builder's ask-a-human queue (was `ai_builder_requests`).** When the builder agent is unsure
+> (describe this file? confirm this price?) it raises a request; the operator's answer becomes a mutation
+> on the `kbd_draft` blob. Discarded once resolved.
+
+## Response suggestions — the `rp_` group
+
+### xchats.rp_suggestions  (one row per "Suggest"; the 1–3 reply OPTIONS live in the `options` jsonb)
 ```
 id                   uuid  PK
 chat_id              uuid  FK -> wa_chats            -- organization derived via chat (3NF)
@@ -437,7 +504,8 @@ PARTIAL UNIQUE (chat_id) WHERE state IN ('generating','suggested')  -- the GENER
 ```
 > **One row per "Suggest"; options in `jsonb`.** A press runs the brain and writes **one** row whose
 > `options` array holds the 1–3 variants (each its own text + nested media) — no per-option rows, no
-> separate `ai_draft_assets` table. Keyed on **`chat_id` alone**: at most one active suggestion per
+> separate assets table (15 Decision 6 folds media into `options`; the old `ai_drafts`/`ai_draft_assets`
+> pair is retired). Keyed on **`chat_id` alone**: at most one active suggestion per
 > chat (shared, not per agent), so the suggestion is a property of the conversation's current state, not
 > of whoever clicked. A re-press (by anyone) **supersedes the chat's pending row** (one-row `UPDATE …
 > SET state='superseded' WHERE chat_id=? AND state IN ('generating','suggested')`). `requested_by_user_id`
@@ -471,13 +539,14 @@ note             text                                -- free-text detail ('appro
 created_at
 ```
 > **Append-only history of the KB's lifecycle** — *not* per-message or per-draft activity. One row per
-> significant action (a row/batch **approve** = `drafted_at` cleared, an **edit**): who, when, why. It
+> significant action (a row/batch **approve** = entries materialized from the `kbd_draft` blob into the
+> live tables, an **edit**): who, when, why. It
 > answers "who approved the price that went out last Tuesday?" — the provenance/compliance trail behind
 > the per-row approve gate. There is no publish/rollback (the KB is one living copy, not versioned), so
 > the `version` column is **legacy/unused** — kept only to avoid churn. It is **never read on the hot
-> path** and the brain never touches it. **v1: defined but empty** — nothing writes it until the
-> approve flow exists; the seed-on-boot may write one row. Distinct from `wa_messages` (conversation)
-> and `ai_suggestions` (suggestions).
+> path** and the brain never touches it. **v1: defined but empty** — nothing writes it until the approve
+> flow exists; the seed-on-boot may write one row. Distinct from `wa_messages` (conversation)
+> and `rp_suggestions` (suggestions).
 
 ## Infrastructure
 
@@ -507,20 +576,22 @@ UNIQUE (account_id, phone_jid)             on xchats.wa_contacts
 **1NF** — every column is atomic. The auto-response window is split into atomic
 `respond_window_start/end` (UTC; no composite). Repeating lists are their own tables
 (`organization_users`, `ai_topics/assets`, `ai_products`, `ai_tariffs`, `ai_contacts`, `assignment_events`) —
-no array/CSV columns, **except `ai_suggestions.options`** (a deliberate jsonb document holding the 1–3
-reply variants as one atomic suggestion — see denormalizations).
+no array/CSV columns, **except two deliberate jsonb documents**: `rp_suggestions.options` (the 1–3 reply
+variants as one atomic suggestion) and `kbd_draft.draft` (the whole pending KB as one working document —
+15 Decision 3). Both are document storage, not repeating groups — see denormalizations.
 
 **2NF** — no partial dependencies. Junctions (`organization_users`) carry only attributes that
 depend on the whole composite key (`joined_at`). Every other table has a single-column PK (`id`), so
 2NF is automatic.
 
-**3NF** — no transitive dependencies: a child table does **not** store an ancestor's
-`organization_id` when it's reachable by FK. `organization_id` is stored **only** where it's a
-direct fact — `organizations`, `organization_users`, `wa_accounts` (the assignment), `ai_snapshots`,
-`ai_audit_log` — and **derived by join** everywhere else (`wa_contacts`, `wa_chats`, `wa_messages`,
-`ai_topics/assets`, `ai_products`, `ai_tariffs`, `ai_contacts`, `ai_suggestions`) — the new KB tables reach
-`organization_id` via their `snapshot_id`. The `assigned` flag was removed (derived from
-`organization_id`).
+**3NF** — no transitive dependencies. `organization_id` is stored where it is a **direct** fact — the
+identity tables (`organizations`, `organization_users`, `wa_accounts`), the config row
+(`ai_assistants`), `ai_audit_log`, and **every KB / draft / staging table** (`ai_topics`, `ai_assets`,
+`ai_tariffs`, `ai_products`, `ai_contacts`, `kbd_draft`, `kbd_materials`, `kbd_requests`), which now
+carry a **direct `organization_id` FK** (the legacy `snapshot_id` indirection was retired — 15
+Decision 1; the org is each row's direct owner, not a transitive hop). It is **derived by join** only
+where a nearer parent already carries it: `wa_contacts` / `wa_chats` / `wa_messages` (via `account_id`)
+and `rp_suggestions` (via `chat_id`). The `assigned` flag was removed (derived from `organization_id`).
 
 ### Deliberate, documented denormalizations (3 exceptions, each justified)
 
@@ -531,14 +602,16 @@ direct fact — `organizations`, `organization_users`, `wa_accounts` (the assign
 2. **`wa_chats.last_message_at` / `last_message_preview` / `unread_count`** — **cached aggregates**
    of `wa_messages`, maintained on write, for fast inbox listing. Source of truth is `wa_messages`;
    they can be recomputed.
-3. **`jsonb` document columns** (`wa_contacts.attributes`, `wa_messages.raw`, `ai_suggestions.options`
-   + its `suggested_status`/`suggested_callback`, `ai_products.data`, `ai_tariffs.data`,
-   plus the `provenance` source-tracking columns on every KB row) — intentional
-   semi-structured/document storage (open keyset, raw audit document, the 1–3 reply variants kept as
-   one atomic suggestion, sphere-specific product attrs, descriptive tariff ranges/conditions), not
-   repeating groups — a deliberate choice, not a 1NF violation. The `options` array trades per-option
-   queryability for one-row supersede + no join to render a suggestion; the success metric stays
-   computable (chosen option text vs the sent message).
+3. **`jsonb` document columns** (`wa_contacts.attributes`, `wa_messages.raw`, `rp_suggestions.options`
+   + its `suggested_status`/`suggested_callback`, `ai_products.data`, `ai_tariffs.data`, and
+   `kbd_draft.draft`) — intentional semi-structured/document storage (open keyset, raw audit document,
+   the 1–3 reply variants kept as one atomic suggestion, sphere-specific product attrs, descriptive
+   tariff ranges/conditions, and the whole pending KB kept as one working draft), not repeating groups —
+   a deliberate choice, not a 1NF violation. The `options` array trades per-option queryability for
+   one-row supersede + no join to render a suggestion; the success metric stays computable (chosen option
+   text vs the sent message). `kbd_draft.draft` is read/written only as a whole by the playground, so it
+   needs no relational shape (15 Decision 3). **`provenance` is no longer a live-table column** — it moved
+   into the draft blob; approve history lives in `ai_audit_log`.
 
 > Trade-off note: if you later want strict tenant isolation / row-level security, denormalizing
 > `organization_id` onto every child table is a valid, common alternative — at the cost of the 3NF

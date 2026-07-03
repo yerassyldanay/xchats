@@ -171,7 +171,7 @@ Useful the instant it connects; each chat builds up from live events going forwa
 ## Tables
 
 The authoritative data model lives in **`9-database-schema.md`** (schema `xchats`). The ones this
-flow touches: `wa_accounts`, `wa_contacts`, `wa_chats`, `wa_messages`, `ai_suggestions`. (QR is fetched
+flow touches: `wa_accounts`, `wa_contacts`, `wa_chats`, `wa_messages`, `rp_suggestions`. (QR is fetched
 live from Evolution and never stored, so there is no QR table; the raw event rides the in-memory
 queue, so there is no `evolution_events` / `jobs` table either.) Load-bearing constraints (the reason
 live upserts never duplicate):
