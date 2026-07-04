@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
-  CircleAlert, Download, ExternalLink, FileText, Film, Folder, Globe, Hash, History,
-  Images, Layers, Link2, ListTree, LoaderCircle, MoreHorizontal, PanelsTopLeft, Pencil,
-  Play, Plus, Save, Search, ShieldCheck, Tag, Target, Trash2, Upload, UserRound, WandSparkles,
+  CircleAlert, Download, ExternalLink, FileText, Film, Folder, Globe, Hash,
+  Images, Layers, Link2, ListTree, LoaderCircle, MoreHorizontal, Package, PanelsTopLeft, Pencil,
+  Phone, Play, Plus, Receipt, Save, Search, ShieldCheck, Target, Trash2, Upload, UserRound, WandSparkles,
 } from 'lucide-vue-next'
 import { usePlayground } from '../stores/playground'
 import { shortTime } from '../lib/format'
 import { api } from '../api/client'
-import type { AssetRow, TopicRow, ValueRow } from '../types'
+import type { AssetRow, ContactRow, ProductRow, TariffRow, TopicRow } from '../types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -16,20 +16,20 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
+// This page shows and edits the LIVE knowledge base ONLY — every save here
+// (POST/PATCH/DELETE /kb/*) is immediately final, no draft step. It never
+// reads or writes the Playground draft blob, so the two flows can never mix
+// (see plan "Playground redesign" — drafting/building lives on /playground).
 const pg = usePlayground()
 const tab = ref('overview')
 
 onMounted(async () => {
-  await pg.load()
+  await pg.loadLive()
   pg.startRealtime()
 })
 onBeforeUnmount(() => pg.stopRealtime())
 
 // --- Обзор as a readable document --------------------------------------------
-// The assistant config is a fixed set of fields; we render each as a document
-// "section" (icon + accent + heading + content). Editing happens in a drawer, so
-// the main view stays clean. accent classes are written verbatim so Tailwind keeps
-// them; render decides how the value is shown (paragraphs / bullets / badge).
 type SectionKey = 'persona' | 'mission' | 'guardrails' | 'language_policy' | 'reply_max_words'
 type Render = 'text' | 'list' | 'badge'
 interface Section {
@@ -55,7 +55,7 @@ const accent: Record<Section['accent'], { box: string; bar: string }> = {
   indigo: { box: 'bg-indigo-100 text-indigo-600', bar: 'bg-indigo-400' },
 }
 function val(k: SectionKey): string | number {
-  const c = pg.draft?.config as Record<string, unknown> | undefined
+  const c = pg.live?.config as Record<string, unknown> | undefined
   return (c?.[k] as string | number) ?? ''
 }
 function lines(s: string | number): string[] {
@@ -76,7 +76,7 @@ async function saveEdit() {
   if (!s) return
   const patch: Record<string, unknown> = {}
   patch[s.key] = s.render === 'badge' ? Number(editNum.value) || 0 : editText.value
-  await pg.patchConfig(patch as any)
+  await pg.livePatchConfig(patch as any)
   editing.value = null
 }
 
@@ -116,36 +116,33 @@ function fileExt(a: AssetRow): string {
 // Per-asset keywords aren't in the data model; surface the linked topic's keywords
 // so the card still shows how the file connects to customer questions.
 function assetTopicRow(a: AssetRow): TopicRow | undefined {
-  return pg.draft?.topics.find((t) => t.slug === a.topic_slug)
+  if (a.owner_kind !== 'topic' && a.owner_kind !== '') return undefined
+  return pg.live?.topics.find((t) => t.slug === a.owner_ref)
 }
 function assetKeywords(a: AssetRow): string[] {
   return (assetTopicRow(a)?.keywords || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 6)
 }
-function assetTopicTitle(a: AssetRow): string {
-  return assetTopicRow(a)?.title || a.topic_slug || ''
-}
-// A file with no description can't be used safely by the assistant → flag it.
-const assetStatusMeta: Record<string, { label: string; cls: string }> = {
-  needs_desc: { label: 'Требует описания', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-  approved: { label: 'Подтверждено', cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-  proposed: { label: 'На проверке', cls: 'bg-sky-500/10 text-sky-600 dark:text-sky-400' },
-  rejected: { label: 'Отклонено', cls: 'bg-destructive/10 text-destructive' },
-}
-function assetStatus(a: AssetRow) {
-  if (!a.description?.trim()) return assetStatusMeta.needs_desc
-  return assetStatusMeta[a.review_state] || assetStatusMeta.proposed
+// A file's owner is a Тема, Товар, Тариф, or Глобально (owner_kind ''); resolve the
+// owner's display name across all kinds so the card shows the real link.
+function ownerTitle(a: AssetRow): string {
+  if (a.owner_kind === 'product') return pg.live?.products.find((p) => p.ref === a.owner_ref)?.name || a.owner_ref || ''
+  if (a.owner_kind === 'tariff') return pg.live?.tariffs.find((t) => t.ref === a.owner_ref)?.name || a.owner_ref || ''
+  return assetTopicRow(a)?.title || a.owner_ref || ''
 }
 const filteredAssets = computed(() => {
-  const all = pg.draft?.assets || []
+  const all = pg.live?.assets || []
   const q = mediaSearch.value.trim().toLowerCase()
   return all.filter((a) => {
     if (mediaFilter.value !== 'all' && mediaCategory(a) !== mediaFilter.value) return false
     if (!q) return true
-    return (a.title + ' ' + a.ref + ' ' + a.description + ' ' + assetTopicTitle(a)).toLowerCase().includes(q)
+    return (a.title + ' ' + a.ref + ' ' + a.description + ' ' + ownerTitle(a)).toLowerCase().includes(q)
   })
 })
-function bindTopic(a: AssetRow, slug: string) {
-  return pg.patchAsset(a.ref, { topic_slug: slug })
+// Bind a media file to any owner (kind '' → Глобально / unattached). Only
+// owner_kind/owner_ref are patched — description is left untouched, so this
+// never trips the description-required check on a live asset write.
+function bindOwner(a: AssetRow, owner_kind: string, owner_ref: string) {
+  return pg.livePatchAsset(a.ref, owner_kind ? { owner_kind, owner_ref } : { owner_kind: '', owner_ref: '' })
 }
 function openAsset(a: AssetRow) {
   if (a.url) window.open(api.mediaURL(a.url), '_blank', 'noopener')
@@ -157,74 +154,114 @@ function downloadAsset(a: AssetRow) {
   el.download = a.title || a.ref || ''
   el.click()
 }
-// asset edit drawer
+// asset edit drawer — description is required for a live asset (backend 422s
+// an empty one), so Save stays disabled until it's non-blank.
 const editingAsset = ref<AssetRow | null>(null)
 const aEdit = reactive({ description: '', topic_slug: '' })
 function openAssetEdit(a: AssetRow) {
   editingAsset.value = a
   aEdit.description = a.description
-  aEdit.topic_slug = a.topic_slug
+  aEdit.topic_slug = a.owner_kind === 'topic' ? a.owner_ref : ''
 }
 async function saveAssetEdit() {
   const a = editingAsset.value
-  if (!a) return
-  await pg.patchAsset(a.ref, { description: aEdit.description, topic_slug: aEdit.topic_slug })
+  if (!a || !aEdit.description.trim()) return
+  const owner = aEdit.topic_slug ? { owner_kind: 'topic', owner_ref: aEdit.topic_slug } : { owner_kind: '', owner_ref: '' }
+  await pg.livePatchAsset(a.ref, { description: aEdit.description, ...owner })
   editingAsset.value = null
 }
-const vBuf = reactive<Record<string, { value_text: string; description: string }>>({})
-function vmValue(v: ValueRow) {
-  if (!vBuf[v.id]) vBuf[v.id] = { value_text: v.value_text, description: v.description }
-  return vBuf[v.id]
+// upload dialog — a live asset needs its description up front (no later
+// describe_media popup exists here; this page has no draft/pending concept).
+const uploading = ref(false)
+const uploadFileInput = ref<HTMLInputElement | null>(null)
+const uploadForm = reactive({ file: null as File | null, description: '', topic_slug: '' })
+function openUpload() {
+  uploadForm.file = null
+  uploadForm.description = ''
+  uploadForm.topic_slug = ''
+  uploading.value = true
+}
+function pickUploadFile(e: Event) {
+  uploadForm.file = (e.target as HTMLInputElement).files?.[0] || null
+}
+const canUpload = computed(() => !!uploadForm.file && uploadForm.description.trim().length > 0)
+async function submitUpload() {
+  if (!uploadForm.file || !canUpload.value) return
+  const owner = uploadForm.topic_slug ? { owner_kind: 'topic', owner_ref: uploadForm.topic_slug } : {}
+  await pg.liveUploadAsset(uploadForm.file, { description: uploadForm.description, ...owner })
+  uploading.value = false
+}
+
+// --- Тарифы: per-row edit buffers + a new-row form ---
+type TariffBuf = { name: string; price: string; limit_text: string; fee: string; summary: string; pricing_type: string; advantages: string; disadvantages: string }
+const tarBuf = reactive<Record<string, TariffBuf>>({})
+function vmTariff(t: TariffRow): TariffBuf {
+  if (!tarBuf[t.id]) tarBuf[t.id] = { name: t.name, price: t.price, limit_text: t.limit_text, fee: t.fee, summary: t.summary, pricing_type: t.pricing_type || 'fixed', advantages: t.advantages, disadvantages: t.disadvantages }
+  return tarBuf[t.id]
+}
+const pricingTypes = [
+  { key: 'fixed', label: 'Фиксированная' },
+  { key: 'percentage', label: 'Процент' },
+  { key: 'tiered', label: 'Пороговая' },
+]
+
+// --- Товары: per-row edit buffers + a new-row form ---
+type ProductBuf = { name: string; price: string; description: string; category: string }
+const prodBuf = reactive<Record<string, ProductBuf>>({})
+function vmProduct(p: ProductRow): ProductBuf {
+  if (!prodBuf[p.id]) prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category }
+  return prodBuf[p.id]
+}
+
+// --- Контакты: the 'support' singleton — one always-visible form, seeded from
+// the current live row and re-seeded when it changes.
+const contactRow = computed<ContactRow | undefined>(() => pg.live?.contacts?.[0])
+const contactForm = reactive({ whatsapp: '', email: '', address: '', legal: '', callback_time: '' })
+function seedContactForm() {
+  const c = contactRow.value
+  contactForm.whatsapp = c?.whatsapp ?? ''
+  contactForm.email = c?.email ?? ''
+  contactForm.address = c?.address ?? ''
+  contactForm.legal = c?.legal ?? ''
+  contactForm.callback_time = c?.callback_time ?? ''
+}
+watch(() => tab.value, (t) => { if (t === 'contacts') seedContactForm() })
+async function saveContacts() {
+  await pg.livePatchContacts({ ...contactForm })
+  seedContactForm()
 }
 
 // --- new-row forms ---
 const newTopic = reactive({ slug: '', title: '', keywords: '', body_md: '' })
 async function addTopic() {
   if (!newTopic.slug.trim()) return
-  await pg.upsertTopic({ ...newTopic })
+  await pg.liveUpsertTopic({ ...newTopic })
   newTopic.slug = newTopic.title = newTopic.keywords = newTopic.body_md = ''
 }
-const newValue = reactive({ token: '', value_text: '', description: '' })
-async function addValue() {
-  if (!newValue.token.trim()) return
-  await pg.upsertValue({ ...newValue })
-  newValue.token = newValue.value_text = newValue.description = ''
+const newTariff = reactive({ ref: '', name: '', price: '', summary: '', pricing_type: 'fixed' })
+async function addTariff() {
+  if (!newTariff.ref.trim()) return
+  await pg.liveUpsertTariff({ ...newTariff })
+  newTariff.ref = newTariff.name = newTariff.price = newTariff.summary = ''
+  newTariff.pricing_type = 'fixed'
 }
-const assetFile = ref<HTMLInputElement | null>(null)
-const assetTopic = ref('')
-async function uploadAsset(e: Event) {
-  const f = (e.target as HTMLInputElement).files?.[0]
-  if (f) await pg.uploadAsset(f, { topic_slug: assetTopic.value || undefined })
-  if (assetFile.value) assetFile.value.value = ''
+const newProduct = reactive({ ref: '', name: '', price: '', category: '', description: '' })
+async function addProduct() {
+  if (!newProduct.ref.trim()) return
+  await pg.liveUpsertProduct({ ...newProduct })
+  newProduct.ref = newProduct.name = newProduct.price = newProduct.category = newProduct.description = ''
 }
-
-// --- review badge ---
-const reviewMeta: Record<string, { label: string; cls: string }> = {
-  proposed: { label: 'на проверке', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-  approved: { label: 'подтверждено', cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-  rejected: { label: 'отклонено', cls: 'bg-destructive/10 text-destructive' },
-}
-
-// --- Правки (pending review across kinds) ---
-type Pending = { kind: 'topics' | 'assets' | 'values'; id: string; label: string }
-const pendingRows = computed<Pending[]>(() => {
-  const d = pg.draft
-  if (!d) return []
-  const out: Pending[] = []
-  for (const t of d.topics) if (t.review_state === 'proposed') out.push({ kind: 'topics', id: t.id, label: 'Тема · ' + (t.title || t.slug) })
-  for (const a of d.assets) if (a.review_state === 'proposed') out.push({ kind: 'assets', id: a.id, label: 'Медиа · ' + (a.title || a.ref) })
-  for (const v of d.values) if (v.review_state === 'proposed') out.push({ kind: 'values', id: v.id, label: 'Значение · ' + v.token })
-  return out
-})
 
 // --- Последние изменения ---
 const recent = computed(() => {
-  const d = pg.draft
+  const d = pg.live
   if (!d) return [] as { label: string; at: string }[]
   const rows = [
-    ...d.topics.map((t) => ({ label: 'Тема · ' + (t.title || t.slug), at: t.updated_at })),
-    ...d.assets.map((a) => ({ label: 'Медиа · ' + (a.title || a.ref), at: a.updated_at })),
-    ...d.values.map((v) => ({ label: 'Значение · ' + v.token, at: v.updated_at })),
+    ...(d.topics ?? []).map((t) => ({ label: 'Тема · ' + (t.title || t.slug), at: t.updated_at })),
+    ...(d.products ?? []).map((p) => ({ label: 'Товар · ' + (p.name || p.ref), at: p.updated_at })),
+    ...(d.tariffs ?? []).map((t) => ({ label: 'Тариф · ' + (t.name || t.ref), at: t.updated_at })),
+    ...(d.assets ?? []).map((a) => ({ label: 'Медиа · ' + (a.title || a.ref), at: a.updated_at })),
+    ...(d.contacts ?? []).map((c) => ({ label: 'Контакты', at: c.updated_at })),
   ]
   return rows.sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, 6)
 })
@@ -232,9 +269,10 @@ const recent = computed(() => {
 const tabs = [
   { key: 'overview', label: 'Обзор', icon: PanelsTopLeft },
   { key: 'topics', label: 'Темы', icon: ListTree },
+  { key: 'products', label: 'Товары', icon: Package },
+  { key: 'tariffs', label: 'Тарифы', icon: Receipt },
   { key: 'assets', label: 'Медиа-ресурсы', icon: Images },
-  { key: 'values', label: 'Значения', icon: Tag },
-  { key: 'review', label: 'Правки', icon: History },
+  { key: 'contacts', label: 'Контакты', icon: Phone },
 ]
 </script>
 
@@ -243,46 +281,43 @@ const tabs = [
     <div class="flex-1 flex flex-col min-w-0">
       <header class="px-8 py-4 flex items-center justify-between border-b border-border bg-card shrink-0">
         <div>
-          <h1 class="text-lg font-bold tracking-tight">Редактор базы знаний</h1>
-          <p class="text-sm text-muted-foreground">Управляйте темами, медиа и значениями</p>
+          <h1 class="text-lg font-bold tracking-tight">База знаний</h1>
+          <p class="text-sm text-muted-foreground">Финальные данные, которые использует ассистент</p>
         </div>
-        <Button v-if="pg.hasDraft" size="sm" :disabled="pg.publishing" @click="pg.publish()">
-          <LoaderCircle v-if="pg.publishing" class="w-4 h-4 animate-spin" />
-          <Save v-else class="w-4 h-4" />
-          Сохранить в базу
-        </Button>
       </header>
 
-      <!-- empty -->
-      <div v-if="!pg.hasDraft && !pg.loading" class="flex-1 grid place-items-center p-8">
+      <!-- loading -->
+      <div v-if="pg.liveLoading && !pg.live" class="flex-1 grid place-items-center p-8">
         <div class="text-center max-w-sm">
           <div class="mx-auto w-12 h-12 rounded-xl bg-primary/10 text-primary grid place-items-center mb-3">
             <WandSparkles class="w-6 h-6" />
           </div>
-          <p class="font-medium">Черновик не открыт</p>
-          <p class="text-sm text-muted-foreground mt-0.5 mb-4">Откройте черновик, чтобы редактировать базу знаний.</p>
-          <Button :disabled="pg.busy" @click="pg.open()"><WandSparkles class="w-4 h-4" /> Открыть черновик</Button>
+          <p class="text-sm text-muted-foreground">Загрузка базы знаний…</p>
         </div>
       </div>
 
       <div v-else class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
         <!-- stat cards -->
-        <div class="grid grid-cols-4 gap-4">
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
           <div class="rounded-xl border border-border bg-card p-5">
-            <div class="text-3xl font-bold leading-none">{{ pg.counts.topics }}</div>
+            <div class="text-3xl font-bold leading-none">{{ pg.live?.topics.length ?? 0 }}</div>
             <div class="text-sm text-muted-foreground mt-2">Темы</div>
           </div>
           <div class="rounded-xl border border-border bg-card p-5">
-            <div class="text-3xl font-bold leading-none">{{ pg.counts.assets }}</div>
+            <div class="text-3xl font-bold leading-none">{{ pg.live?.products.length ?? 0 }}</div>
+            <div class="text-sm text-muted-foreground mt-2">Товары</div>
+          </div>
+          <div class="rounded-xl border border-border bg-card p-5">
+            <div class="text-3xl font-bold leading-none">{{ pg.live?.tariffs.length ?? 0 }}</div>
+            <div class="text-sm text-muted-foreground mt-2">Тарифы</div>
+          </div>
+          <div class="rounded-xl border border-border bg-card p-5">
+            <div class="text-3xl font-bold leading-none">{{ pg.live?.assets.length ?? 0 }}</div>
             <div class="text-sm text-muted-foreground mt-2">Медиа-ресурсы</div>
           </div>
           <div class="rounded-xl border border-border bg-card p-5">
-            <div class="text-3xl font-bold leading-none">{{ pg.counts.values }}</div>
-            <div class="text-sm text-muted-foreground mt-2">Значения</div>
-          </div>
-          <div class="rounded-xl border border-border bg-card p-5">
-            <div class="text-3xl font-bold leading-none">{{ pg.pending }}</div>
-            <div class="text-sm text-muted-foreground mt-2">Правки</div>
+            <div class="text-3xl font-bold leading-none">{{ pg.live?.contacts.length ?? 0 }}</div>
+            <div class="text-sm text-muted-foreground mt-2">Контакты</div>
           </div>
         </div>
 
@@ -362,27 +397,18 @@ const tabs = [
             <Input v-model="newTopic.slug" placeholder="slug (напр. tariffs)" class="h-9" />
             <Input v-model="newTopic.title" placeholder="Название" class="h-9" />
             <Input v-model="newTopic.keywords" placeholder="Ключевые слова" class="h-9" />
-            <Button size="sm" :disabled="pg.busy || !newTopic.slug.trim()" @click="addTopic"><Plus class="w-4 h-4" /> Добавить тему</Button>
+            <Button size="sm" :disabled="pg.liveBusy || !newTopic.slug.trim()" @click="addTopic"><Plus class="w-4 h-4" /> Добавить тему</Button>
           </div>
-          <p v-if="!pg.draft?.topics.length" class="text-sm text-muted-foreground py-6 text-center">Тем пока нет.</p>
-          <div v-for="t in pg.draft?.topics" :key="t.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
+          <p v-if="!pg.live?.topics.length" class="text-sm text-muted-foreground py-6 text-center">Тем пока нет.</p>
+          <div v-for="t in pg.live?.topics" :key="t.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
             <div class="flex items-center justify-between gap-2">
               <code class="text-[13px] font-mono font-medium">{{ t.slug }}</code>
-              <div class="flex items-center gap-2">
-                <Badge variant="secondary" :class="reviewMeta[t.review_state]?.cls">{{ reviewMeta[t.review_state]?.label }}</Badge>
-                <Button variant="ghost" size="icon" class="w-8 h-8 text-destructive hover:bg-destructive/10" :disabled="pg.busy" @click="pg.deleteTopic(t.slug)"><Trash2 class="w-4 h-4" /></Button>
-              </div>
+              <Button variant="ghost" size="icon" class="w-8 h-8 text-destructive hover:bg-destructive/10" :disabled="pg.liveBusy" @click="pg.liveDeleteTopic(t.slug)"><Trash2 class="w-4 h-4" /></Button>
             </div>
             <Input v-model="vmTopic(t).title" placeholder="Название" class="h-9" />
             <Input v-model="vmTopic(t).keywords" placeholder="Ключевые слова" class="h-9" />
             <Textarea v-model="vmTopic(t).body_md" rows="3" placeholder="Текст темы…" class="min-h-0 text-[14px]" />
-            <div class="flex items-center gap-2">
-              <Button size="sm" :disabled="pg.busy" @click="pg.upsertTopic({ slug: t.slug, ...vmTopic(t) })"><Save class="w-4 h-4" /> Сохранить</Button>
-              <template v-if="t.review_state === 'proposed'">
-                <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.review('topics', t.id, 'approved')">Подтвердить</Button>
-                <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.review('topics', t.id, 'rejected')">Отклонить</Button>
-              </template>
-            </div>
+            <Button size="sm" :disabled="pg.liveBusy" @click="pg.liveUpsertTopic({ slug: t.slug, ...vmTopic(t) })"><Save class="w-4 h-4" /> Сохранить</Button>
           </div>
         </div>
 
@@ -405,12 +431,11 @@ const tabs = [
                 <component :is="f.icon" class="w-4 h-4" /> {{ f.label }}
               </button>
             </div>
-            <Button class="ml-auto" :disabled="pg.busy" @click="assetFile?.click()"><Upload class="w-4 h-4" /> Загрузить медиа</Button>
-            <input ref="assetFile" type="file" class="hidden" @change="uploadAsset" />
+            <Button class="ml-auto" :disabled="pg.liveBusy" @click="openUpload"><Upload class="w-4 h-4" /> Загрузить медиа</Button>
           </div>
 
           <p v-if="!filteredAssets.length" class="text-sm text-muted-foreground py-10 text-center">
-            {{ pg.draft?.assets.length ? 'Ничего не найдено.' : 'Медиа-ресурсов пока нет.' }}
+            {{ pg.live?.assets.length ? 'Ничего не найдено.' : 'Медиа-ресурсов пока нет.' }}
           </p>
 
           <!-- media cards -->
@@ -433,20 +458,16 @@ const tabs = [
                 <Badge variant="secondary" class="text-[11px] font-mono">{{ fileExt(a) }}</Badge>
               </div>
               <span class="inline-flex items-center gap-1 text-xs text-muted-foreground rounded-md bg-muted px-2 py-1">
-                <Folder class="w-3.5 h-3.5" /> {{ assetTopicTitle(a) || 'Без темы' }}
+                <Folder class="w-3.5 h-3.5" /> {{ ownerTitle(a) || 'Глобально' }}
               </span>
               <div v-if="assetKeywords(a).length" class="flex flex-wrap gap-1">
                 <span v-for="(k, i) in assetKeywords(a)" :key="i" class="text-[11px] rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground">{{ k }}</span>
               </div>
             </div>
 
-            <!-- middle: status + description -->
+            <!-- middle: description -->
             <div class="flex-1 min-w-0 space-y-2">
-              <Badge variant="secondary" :class="assetStatus(a).cls" class="font-medium">{{ assetStatus(a).label }}</Badge>
-              <p class="text-sm leading-relaxed">
-                <span v-if="a.description" class="text-foreground/80">{{ a.description }}</span>
-                <span v-else class="text-amber-600 italic">Добавьте описание, чтобы ассистент мог использовать файл.</span>
-              </p>
+              <p class="text-sm leading-relaxed text-foreground/80">{{ a.description }}</p>
             </div>
 
             <!-- right: updated + actions -->
@@ -460,79 +481,136 @@ const tabs = [
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem v-if="a.url" @select="openAsset(a)"><ExternalLink class="w-4 h-4" /> Открыть файл</DropdownMenuItem>
                     <DropdownMenuItem v-if="a.url" @select="downloadAsset(a)"><Download class="w-4 h-4" /> Скачать</DropdownMenuItem>
-                    <DropdownMenuItem v-if="a.review_state === 'proposed'" @select="pg.review('assets', a.id, 'approved')"><Save class="w-4 h-4" /> Отправить в базу</DropdownMenuItem>
-                    <DropdownMenuItem class="text-destructive focus:bg-destructive/10 focus:text-destructive" @select="pg.deleteAsset(a.ref)"><Trash2 class="w-4 h-4" /> Удалить</DropdownMenuItem>
+                    <DropdownMenuItem class="text-destructive focus:bg-destructive/10 focus:text-destructive" @select="pg.liveDeleteAsset(a.ref)"><Trash2 class="w-4 h-4" /> Удалить</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
               <div class="flex items-center gap-4 text-sm">
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child>
-                    <button class="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition"><Link2 class="w-4 h-4" /> Привязать к теме</button>
+                    <button class="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition"><Link2 class="w-4 h-4" /> Привязать</button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" class="max-h-64 overflow-y-auto">
-                    <DropdownMenuItem @select="bindTopic(a, '')">Без темы</DropdownMenuItem>
-                    <DropdownMenuItem v-for="t in pg.draft?.topics" :key="t.id" @select="bindTopic(a, t.slug)">{{ t.title || t.slug }}</DropdownMenuItem>
+                  <DropdownMenuContent align="end" class="max-h-72 overflow-y-auto">
+                    <DropdownMenuItem @select="bindOwner(a, '', '')">Глобально</DropdownMenuItem>
+                    <template v-if="pg.live?.topics.length">
+                      <div class="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Темы</div>
+                      <DropdownMenuItem v-for="t in pg.live?.topics" :key="'t-' + t.id" @select="bindOwner(a, 'topic', t.slug)">{{ t.title || t.slug }}</DropdownMenuItem>
+                    </template>
+                    <template v-if="pg.live?.products.length">
+                      <div class="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Товары</div>
+                      <DropdownMenuItem v-for="p in pg.live?.products" :key="'p-' + p.id" @select="bindOwner(a, 'product', p.ref)">{{ p.name || p.ref }}</DropdownMenuItem>
+                    </template>
+                    <template v-if="pg.live?.tariffs.length">
+                      <div class="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Тарифы</div>
+                      <DropdownMenuItem v-for="t in pg.live?.tariffs" :key="'tar-' + t.id" @select="bindOwner(a, 'tariff', t.ref)">{{ t.name || t.ref }}</DropdownMenuItem>
+                    </template>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <button class="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition" @click="openAssetEdit(a)"><Pencil class="w-4 h-4" /> Редактировать</button>
-                <button class="text-destructive hover:text-destructive/80 transition" :disabled="pg.busy" aria-label="Удалить" @click="pg.deleteAsset(a.ref)"><Trash2 class="w-4 h-4" /></button>
+                <button class="text-destructive hover:text-destructive/80 transition" :disabled="pg.liveBusy" aria-label="Удалить" @click="pg.liveDeleteAsset(a.ref)"><Trash2 class="w-4 h-4" /></button>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Значения -->
-        <div v-show="tab === 'values'" class="space-y-3">
+        <!-- Товары -->
+        <div v-show="tab === 'products'" class="space-y-3">
           <div class="rounded-lg border border-dashed border-border p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <Input v-model="newValue.token" placeholder="TOKEN (напр. PRICE_BASIC)" class="h-9 font-mono" />
-            <Input v-model="newValue.value_text" placeholder="Значение (напр. 5000 ₸)" class="h-9" />
-            <Input v-model="newValue.description" placeholder="Описание" class="h-9" />
-            <Button size="sm" :disabled="pg.busy || !newValue.token.trim()" @click="addValue"><Plus class="w-4 h-4" /> Добавить значение</Button>
+            <Input v-model="newProduct.ref" placeholder="Артикул (напр. coffee-machine)" class="h-9 font-mono" />
+            <Input v-model="newProduct.name" placeholder="Название" class="h-9" />
+            <Input v-model="newProduct.price" placeholder="Цена (напр. 129 900 ₸)" class="h-9 font-mono" />
+            <Input v-model="newProduct.category" placeholder="Категория" class="h-9" />
+            <Button size="sm" :disabled="pg.liveBusy || !newProduct.ref.trim()" @click="addProduct"><Plus class="w-4 h-4" /> Добавить товар</Button>
           </div>
-          <p v-if="!pg.draft?.values.length" class="text-sm text-muted-foreground py-6 text-center">Значений пока нет.</p>
-          <div v-for="v in pg.draft?.values" :key="v.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
+          <p v-if="!pg.live?.products.length" class="text-sm text-muted-foreground py-6 text-center">Товаров пока нет.</p>
+          <div v-for="p in pg.live?.products" :key="p.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
             <div class="flex items-center justify-between gap-2">
-              <code class="text-[13px] font-mono font-medium">{{ v.token }}</code>
-              <div class="flex items-center gap-2">
-                <Badge variant="secondary" :class="reviewMeta[v.review_state]?.cls">{{ reviewMeta[v.review_state]?.label }}</Badge>
-                <Button variant="ghost" size="icon" class="w-8 h-8 text-destructive hover:bg-destructive/10" :disabled="pg.busy" @click="pg.deleteValue(v.token, v.lang)"><Trash2 class="w-4 h-4" /></Button>
-              </div>
+              <code class="text-[13px] font-mono font-medium">{{ p.ref }}</code>
+              <Button variant="ghost" size="icon" class="w-8 h-8 text-destructive hover:bg-destructive/10" :disabled="pg.liveBusy" @click="pg.liveDeleteProduct(p.ref)"><Trash2 class="w-4 h-4" /></Button>
             </div>
-            <Input v-model="vmValue(v).value_text" placeholder="Значение" class="h-9" />
-            <Input v-model="vmValue(v).description" placeholder="Описание" class="h-9" />
-            <div class="flex items-center gap-2">
-              <Button size="sm" :disabled="pg.busy" @click="pg.upsertValue({ token: v.token, lang: v.lang, ...vmValue(v) })"><Save class="w-4 h-4" /> Сохранить</Button>
-              <template v-if="v.review_state === 'proposed'">
-                <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.review('values', v.id, 'approved')">Подтвердить</Button>
-                <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.review('values', v.id, 'rejected')">Отклонить</Button>
-              </template>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Input v-model="vmProduct(p).name" placeholder="Название" class="h-9" />
+              <Input v-model="vmProduct(p).price" placeholder="Цена" class="h-9 font-mono" />
+              <Input v-model="vmProduct(p).category" placeholder="Категория" class="h-9" />
             </div>
+            <Textarea v-model="vmProduct(p).description" rows="2" placeholder="Описание товара…" class="min-h-0 text-[14px]" />
+            <Button size="sm" :disabled="pg.liveBusy" @click="pg.liveUpsertProduct({ ref: p.ref, lang: p.lang, ...vmProduct(p) })"><Save class="w-4 h-4" /> Сохранить</Button>
           </div>
         </div>
 
-        <!-- Правки -->
-        <div v-show="tab === 'review'" class="space-y-2">
-          <p v-if="!pendingRows.length" class="text-sm text-muted-foreground py-6 text-center">Нет строк на проверке — всё подтверждено.</p>
-          <div v-for="r in pendingRows" :key="r.id" class="rounded-lg border border-border bg-card px-4 py-3 flex items-center justify-between gap-3">
-            <span class="text-sm truncate">{{ r.label }}</span>
-            <div class="flex items-center gap-2 shrink-0">
-              <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.review(r.kind, r.id, 'approved')">Подтвердить</Button>
-              <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.review(r.kind, r.id, 'rejected')">Отклонить</Button>
+        <!-- Тарифы -->
+        <div v-show="tab === 'tariffs'" class="space-y-3">
+          <div class="rounded-lg border border-dashed border-border p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Input v-model="newTariff.ref" placeholder="Код (напр. standard)" class="h-9 font-mono" />
+            <Input v-model="newTariff.name" placeholder="Название" class="h-9" />
+            <Input v-model="newTariff.price" placeholder="Цена (напр. 19 900 ₸)" class="h-9 font-mono" />
+            <select v-model="newTariff.pricing_type" class="h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option v-for="pt in pricingTypes" :key="pt.key" :value="pt.key">{{ pt.label }}</option>
+            </select>
+            <Button size="sm" :disabled="pg.liveBusy || !newTariff.ref.trim()" @click="addTariff"><Plus class="w-4 h-4" /> Добавить тариф</Button>
+          </div>
+          <p v-if="!pg.live?.tariffs.length" class="text-sm text-muted-foreground py-6 text-center">Тарифов пока нет.</p>
+          <div v-for="t in pg.live?.tariffs" :key="t.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <code class="text-[13px] font-mono font-medium">{{ t.ref }}</code>
+              <Button variant="ghost" size="icon" class="w-8 h-8 text-destructive hover:bg-destructive/10" :disabled="pg.liveBusy" @click="pg.liveDeleteTariff(t.ref)"><Trash2 class="w-4 h-4" /></Button>
             </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Input v-model="vmTariff(t).name" placeholder="Название" class="h-9" />
+              <select v-model="vmTariff(t).pricing_type" class="h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <option v-for="pt in pricingTypes" :key="pt.key" :value="pt.key">{{ pt.label }}</option>
+              </select>
+              <Input v-model="vmTariff(t).price" placeholder="Цена" class="h-9 font-mono" />
+              <Input v-model="vmTariff(t).limit_text" placeholder="Лимит (напр. до 100 заказов)" class="h-9 font-mono" />
+              <Input v-model="vmTariff(t).fee" placeholder="Комиссия (напр. 2%)" class="h-9 font-mono" />
+            </div>
+            <Textarea v-model="vmTariff(t).summary" rows="2" placeholder="Краткое описание тарифа…" class="min-h-0 text-[14px]" />
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Textarea v-model="vmTariff(t).advantages" rows="2" placeholder="Преимущества (по строке)…" class="min-h-0 text-[14px]" />
+              <Textarea v-model="vmTariff(t).disadvantages" rows="2" placeholder="Ограничения (по строке)…" class="min-h-0 text-[14px]" />
+            </div>
+            <Button size="sm" :disabled="pg.liveBusy" @click="pg.liveUpsertTariff({ ref: t.ref, lang: t.lang, ...vmTariff(t) })"><Save class="w-4 h-4" /> Сохранить</Button>
           </div>
         </div>
 
-        <p v-if="pg.gateReasons" class="flex items-start gap-2 text-sm text-destructive rounded-lg bg-destructive/10 p-3">
-          <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ pg.gateReasons }}
-        </p>
-        <p v-else-if="pg.error" class="flex items-center gap-2 text-sm text-destructive">
-          <CircleAlert class="w-4 h-4 shrink-0" /> {{ pg.error }}
+        <!-- Контакты (the 'support' singleton) -->
+        <div v-show="tab === 'contacts'" class="space-y-3">
+          <div class="rounded-xl border border-border bg-card p-5 space-y-3 max-w-2xl">
+            <h3 class="font-semibold leading-tight">Контакты поддержки</h3>
+            <p class="text-xs text-muted-foreground">Ассистент подставляет эти данные в ответы как факты — цифры и адреса не пишутся вручную.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label class="block">
+                <span class="text-xs font-medium text-muted-foreground">WhatsApp</span>
+                <Input v-model="contactForm.whatsapp" placeholder="+7 700 123 45 67" class="mt-1 h-9 font-mono" />
+              </label>
+              <label class="block">
+                <span class="text-xs font-medium text-muted-foreground">E-mail</span>
+                <Input v-model="contactForm.email" placeholder="hello@example.kz" class="mt-1 h-9" />
+              </label>
+              <label class="block sm:col-span-2">
+                <span class="text-xs font-medium text-muted-foreground">Адрес</span>
+                <Input v-model="contactForm.address" placeholder="Город, улица, дом" class="mt-1 h-9" />
+              </label>
+              <label class="block sm:col-span-2">
+                <span class="text-xs font-medium text-muted-foreground">Реквизиты</span>
+                <Textarea v-model="contactForm.legal" rows="2" placeholder="Юридические реквизиты…" class="mt-1 min-h-0 text-[14px]" />
+              </label>
+              <label class="block sm:col-span-2">
+                <span class="text-xs font-medium text-muted-foreground">Время обратного звонка</span>
+                <Input v-model="contactForm.callback_time" placeholder="в течение часа" class="mt-1 h-9" />
+              </label>
+            </div>
+            <Button size="sm" :disabled="pg.liveBusy" @click="saveContacts"><Save class="w-4 h-4" /> Сохранить</Button>
+          </div>
+        </div>
+
+        <p v-if="pg.liveError" class="flex items-center gap-2 text-sm text-destructive">
+          <CircleAlert class="w-4 h-4 shrink-0" /> {{ pg.liveError }}
         </p>
       </div>
     </div>
 
-    <!-- right rail: status only -->
+    <!-- right rail: recent changes only -->
     <aside class="w-72 shrink-0 border-l border-border bg-card overflow-y-auto p-5 space-y-6 hidden xl:block">
       <h2 class="text-sm font-semibold">Быстрый доступ</h2>
       <div>
@@ -544,13 +622,6 @@ const tabs = [
           </li>
           <li v-if="!recent.length" class="text-xs text-muted-foreground">—</li>
         </ul>
-      </div>
-      <div v-if="pg.hasDraft">
-        <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">Готовность к публикации</h3>
-        <div class="h-2 rounded-full bg-muted overflow-hidden">
-          <div class="h-full bg-primary transition-all" :style="{ width: Math.round(pg.readiness * 100) + '%' }" />
-        </div>
-        <p class="text-xs text-muted-foreground mt-2">{{ pg.pending ? pg.pending + ' на проверке' : 'Готово к публикации' }}</p>
       </div>
     </aside>
   </div>
@@ -573,8 +644,8 @@ const tabs = [
       </div>
       <DialogFooter>
         <Button variant="ghost" size="sm" @click="editing = null">Отмена</Button>
-        <Button size="sm" :disabled="pg.busy" @click="saveEdit">
-          <LoaderCircle v-if="pg.busy" class="w-4 h-4 animate-spin" /><Save v-else class="w-4 h-4" /> Сохранить
+        <Button size="sm" :disabled="pg.liveBusy" @click="saveEdit">
+          <LoaderCircle v-if="pg.liveBusy" class="w-4 h-4 animate-spin" /><Save v-else class="w-4 h-4" /> Сохранить
         </Button>
       </DialogFooter>
     </DialogContent>
@@ -632,19 +703,55 @@ const tabs = [
           <label class="text-xs font-medium text-muted-foreground">Тема</label>
           <select v-model="aEdit.topic_slug" class="mt-1.5 w-full h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <option value="">Без темы</option>
-            <option v-for="t in pg.draft?.topics" :key="t.id" :value="t.slug">{{ t.title || t.slug }}</option>
+            <option v-for="t in pg.live?.topics" :key="t.id" :value="t.slug">{{ t.title || t.slug }}</option>
           </select>
         </div>
         <div>
-          <label class="text-xs font-medium text-muted-foreground">Описание</label>
+          <label class="text-xs font-medium text-muted-foreground">Описание <span class="text-destructive">*</span></label>
           <Textarea v-model="aEdit.description" rows="5" placeholder="Что показывает файл и когда его отправлять клиенту…" class="mt-1.5 text-[14px]" />
-          <p class="text-xs text-muted-foreground mt-1.5">Описание нужно, чтобы ассистент понимал, когда использовать файл.</p>
+          <p class="text-xs text-muted-foreground mt-1.5">Описание обязательно — по нему ассистент понимает, когда использовать файл.</p>
         </div>
       </div>
       <DialogFooter>
         <Button variant="ghost" size="sm" @click="editingAsset = null">Отмена</Button>
-        <Button size="sm" :disabled="pg.busy" @click="saveAssetEdit">
-          <LoaderCircle v-if="pg.busy" class="w-4 h-4 animate-spin" /><Save v-else class="w-4 h-4" /> Сохранить
+        <Button size="sm" :disabled="pg.liveBusy || !aEdit.description.trim()" @click="saveAssetEdit">
+          <LoaderCircle v-if="pg.liveBusy" class="w-4 h-4 animate-spin" /><Save v-else class="w-4 h-4" /> Сохранить
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <!-- media upload dialog -->
+  <Dialog :open="uploading" @update:open="(v) => (uploading = v)">
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>
+          <span class="w-8 h-8 rounded-lg bg-primary/10 text-primary grid place-items-center"><Upload class="w-4 h-4" /></span>
+          Загрузить медиа
+        </DialogTitle>
+      </DialogHeader>
+      <div class="px-5 py-5 space-y-4">
+        <div>
+          <Button variant="outline" size="sm" @click="uploadFileInput?.click()">{{ uploadForm.file ? uploadForm.file.name : 'Выбрать файл' }}</Button>
+          <input ref="uploadFileInput" type="file" class="hidden" @change="pickUploadFile" />
+        </div>
+        <div>
+          <label class="text-xs font-medium text-muted-foreground">Тема</label>
+          <select v-model="uploadForm.topic_slug" class="mt-1.5 w-full h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <option value="">Без темы</option>
+            <option v-for="t in pg.live?.topics" :key="t.id" :value="t.slug">{{ t.title || t.slug }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-muted-foreground">Описание <span class="text-destructive">*</span></label>
+          <Textarea v-model="uploadForm.description" rows="4" placeholder="Что показывает файл и когда его отправлять клиенту…" class="mt-1.5 text-[14px]" />
+          <p class="text-xs text-muted-foreground mt-1.5">Описание обязательно — без него ассистент не сможет использовать файл.</p>
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" size="sm" @click="uploading = false">Отмена</Button>
+        <Button size="sm" :disabled="pg.liveBusy || !canUpload" @click="submitUpload">
+          <LoaderCircle v-if="pg.liveBusy" class="w-4 h-4 animate-spin" /><Upload v-else class="w-4 h-4" /> Загрузить
         </Button>
       </DialogFooter>
     </DialogContent>

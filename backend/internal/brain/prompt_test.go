@@ -1,19 +1,34 @@
 package brain
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 )
 
 func testSnapshot() *domain.Snapshot {
+	tariffs := []domain.Tariff{
+		{Ref: "standard", Lang: "ru", Name: "Стандарт", Price: "19 900 ₸"},
+	}
 	return &domain.Snapshot{
-		Config: domain.AssistantConfig{Persona: "p", Guardrails: "g"},
-		Values: domain.NewValueBook(
-			domain.Value{Token: "price.standard", Lang: "ru", Text: "19 900 ₸"},
-		),
-		Topics: []domain.Topic{{Slug: "pricing", Language: "ru", BodyMD: "{{price.standard}}"}},
-		Assets: []domain.Asset{{Ref: "pricing_card", Kind: "image", URL: "/media/p.png"}},
+		Config:  domain.AssistantConfig{Persona: "p", Guardrails: "g"},
+		Tariffs: tariffs,
+		Facts:   domain.NewFactBook(tariffs, nil, nil),
+		Topics:  []domain.Topic{{Slug: "pricing", Language: "ru", BodyMD: "Наш стандартный тариф покрывает основные нужды."}},
+		Assets:  []domain.Asset{{Ref: "pricing_card", Kind: "image", URL: "/media/p.png"}},
+	}
+}
+
+// BuildSystem must advertise the Facts lane [F] block so the model has a token to
+// emit — bodies are pure prose now, so this catalog is the only place the tokens live.
+func TestBuildSystem_IncludesFactsBlock(t *testing.T) {
+	sys := BuildSystem(testSnapshot())
+	if !strings.Contains(sys, "FACTS — when the customer asks") {
+		t.Fatalf("system prompt missing [F] FACTS block:\n%s", sys)
+	}
+	if !strings.Contains(sys, "{{tariff.standard.price}}") {
+		t.Fatalf("FACTS block missing the tariff price token:\n%s", sys)
 	}
 }
 
@@ -21,7 +36,7 @@ func testSnapshot() *domain.Snapshot {
 // prices, resolves+drops refs, strips the stage key, and flattens status.
 func TestPostProcess_NormalPricingAnswer(t *testing.T) {
 	raw := domain.RawDraft{
-		ReplyText:       "Стандарт — {{price.standard}}/мес.",
+		ReplyText:       "Стандарт — {{tariff.standard.price}}/мес.",
 		ReplyLanguage:   "ru",
 		AssetRefs:       []string{"pricing_card", "hallucinated_ref"},
 		ProfilePatch:    map[string]any{"interested_plan": "standard", "stage": "qualifying"},
@@ -70,7 +85,7 @@ func TestPostProcess_EscalateGateStops(t *testing.T) {
 
 func TestPostProcess_PriceRenderFailurePostsManualNote(t *testing.T) {
 	raw := domain.RawDraft{
-		ReplyText:     "{{price.enterprise}}", // unknown tariff
+		ReplyText:     "{{tariff.enterprise.price}}", // unknown tariff
 		ReplyLanguage: "ru",
 		AssetRefs:     []string{"pricing_card"},
 	}
@@ -86,13 +101,23 @@ func TestPostProcess_PriceRenderFailurePostsManualNote(t *testing.T) {
 	}
 }
 
-// The embedded Demo Shop KB must be internally consistent: every {{token}} in a
-// topic body resolves against the price book (catches a seed typo at test time).
-func TestSeedSnapshot_TokensResolve(t *testing.T) {
+// The embedded Demo Shop KB must be internally consistent: topic bodies are PURE
+// PROSE (no fact tokens — 14 D3), and every fact advertised in the [F] catalog
+// resolves against the FactBook (catches a seed typo at test time).
+func TestSeedSnapshot_PureProseAndFactsResolve(t *testing.T) {
 	snap := SeedSnapshot()
 	for _, topic := range snap.Topics {
-		if _, err := snap.Values.Render(topic.BodyMD, topic.Language); err != nil {
-			t.Fatalf("topic %q has an unresolved token: %v", topic.Slug, err)
+		if strings.Contains(topic.BodyMD, "{{") {
+			t.Fatalf("topic %q body must be pure prose, found a token: %q", topic.Slug, topic.BodyMD)
+		}
+	}
+	facts := snap.Facts.List()
+	if len(facts) == 0 {
+		t.Fatal("seed must advertise at least one fact in the [F] catalog")
+	}
+	for _, f := range facts {
+		if _, err := snap.Facts.Render(f.Token, "ru"); err != nil {
+			t.Fatalf("advertised fact %q does not resolve: %v", f.Token, err)
 		}
 	}
 }

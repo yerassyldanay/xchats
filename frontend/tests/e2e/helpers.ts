@@ -12,9 +12,3 @@ export async function login(page: Page) {
   await page.getByRole('button', { name: 'Войти' }).click()
   await expect(page).toHaveURL('/')
 }
-
-// open a KB working draft if the empty state is showing (idempotent across runs).
-export async function ensureDraft(page: Page) {
-  const open = page.getByRole('button', { name: 'Открыть черновик' })
-  if (await open.isVisible().catch(() => false)) await open.click()
-}

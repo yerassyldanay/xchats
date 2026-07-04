@@ -60,8 +60,8 @@ The forks open in doc 11 are settled for v1:
    There is no per-row flag — this replaces the `review_state` enum, the old `drafted_at` model, *and* the
    draft-cloned-from-published model (15 Decisions 2–3).
 4. **Approve into the living KB — no version, no swap, no rollback.** The operator edits the one draft
-   freely (topic/asset text, add/replace/delete files, (re)assign an asset's owner, edit values, add
-   products/tariffs, accept/deny); **Approve** (the whole blob or a selected subset of entities) runs the
+   freely (topic/asset text, add/replace/delete files, (re)assign an asset's owner, edit typed fact columns,
+   add products/tariffs/contacts, accept/deny); **Approve** (the whole blob or a selected subset of entities) runs the
    gate and **materializes** the approved entries from `kbd_draft` into the live `ai_` tables so the brain
    reads them. There is no version copy and no rollback — **version history is an accepted dropped
    trade-off** in v1 (15 Decision 4).
@@ -154,7 +154,7 @@ and emit **draft** changes (into the `kbd_draft` blob) for review.
 │  STAGE 2: Builder chat (LLM agent)       │       Editor (manual, deterministic)       │
 │   • reads materials + LIVE ai_ rows      │        • topic/product/tariff list → body  │
 │   • cross-reference + diff (upd|new)     │        • edit text / add·replace·del files │
-│   • write entries into kbd_draft blob    │       • (re)assign asset owner, edit values│
+│   • write entries into kbd_draft blob    │       • (re)assign asset owner, edit facts │
 │   • emit popups (requests) when unsure   │      • approve / reject each draft entry   │
 └───────────────┬───────────────────────────────────────────────┬───────────────────────┘
                 │ writes into the kbd_draft blob                │ resolves requests

@@ -26,7 +26,7 @@ func TestDraft_LiveHTTPPath(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"choices":[{"message":{"tool_calls":[{"function":{"name":"emit_draft",
-			"arguments":"{\"reply_text\":\"Стандарт — {{price.standard}}.\",\"reply_language\":\"ru\",\"asset_refs\":[\"pricing_card\"],\"confidence\":0.9,\"escalate\":false}"}}]}}]}`)
+			"arguments":"{\"reply_text\":\"Стандарт — {{tariff.standard.price}}.\",\"reply_language\":\"ru\",\"asset_refs\":[\"pricing_card\"],\"confidence\":0.9,\"escalate\":false}"}}]}}]}`)
 	}))
 	defer srv.Close()
 
@@ -35,7 +35,7 @@ func TestDraft_LiveHTTPPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("live draft: %v", err)
 	}
-	if !strings.Contains(raw.ReplyText, "{{price.standard}}") {
+	if !strings.Contains(raw.ReplyText, "{{tariff.standard.price}}") {
 		t.Fatalf("token should survive the wire intact: %q", raw.ReplyText)
 	}
 	if raw.ReplyLanguage != "ru" || raw.Escalate || len(raw.AssetRefs) != 1 {

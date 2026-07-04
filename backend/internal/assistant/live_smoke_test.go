@@ -60,7 +60,7 @@ func TestLive_RealBrain(t *testing.T) {
 	client := llm.New(resolveBaseURL(), key, os.Getenv("LLM_PROVIDER"), fast, os.Getenv("LLM_THINKING_MODEL"), maxTok, temp)
 
 	t.Run("grounded pricing question renders a real price", func(t *testing.T) {
-		r := NewReal(liveWindow("Сколько стоит?"), client, brain.SeedSnapshot(), nil)
+		r := NewReal(liveWindow("Сколько стоит тариф Стандарт?"), client, brain.SeedSnapshot(), nil)
 		opts, err := r.Draft(context.Background(), Input{ChatID: uuid.New().String()})
 		if err != nil {
 			t.Fatalf("live draft: %v", err)

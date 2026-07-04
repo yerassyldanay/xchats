@@ -95,52 +95,90 @@ export interface AiDraft {
   created_at: string
 }
 
-// --- Knowledge Base (Playground) — see plan/7.1-endpoints.md ---
-export type ReviewState = 'proposed' | 'approved' | 'rejected'
+// --- Knowledge Base (Playground) — see plan/7.1-endpoints.md, plan/15 ---
+// An entity is either LIVE (a row in a live ai_ table) or «Черновик» — present
+// in the kbd_draft blob, flagged `draft: true` here. There is no more
+// review_state/proposed-approved-rejected: a pending entity IS the "Правки" set.
 
 export interface DraftConfig {
-  snapshot_id: string
-  version: number
-  state: string
+  organization_id: string
   persona: string
   mission: string
   guardrails: string
   language_policy: string
   reply_max_words: number
+  draft: boolean
+  base_version: number
   updated_at: string
 }
 export interface TopicRow {
-  id: string
+  id: string // = slug (blob entries carry no DB row id)
   slug: string
   lang: string
   title: string
   keywords: string
   body_md: string
-  review_state: ReviewState
-  provenance: string
+  draft: boolean
+  provenance?: string
   updated_at: string
 }
 export interface AssetRow {
-  id: string
+  id: string // = ref
   ref: string
   kind: string
-  topic_slug: string
+  owner_kind: string // 'topic' | 'product' | 'tariff' | '' (unattached)
+  owner_ref: string
   title: string
   description: string
   url: string
   lang: string
-  review_state: ReviewState
-  provenance: string
+  draft: boolean
+  provenance?: string
   updated_at: string
 }
-export interface ValueRow {
-  id: string
-  token: string
+// Facts lane — typed entity rows. Every exact fact (price, limit, phone, …) is a
+// CONCRETE COLUMN here, never a generic key→value; the brain quotes it in replies
+// as a {{table.slug.field}} token. `id` = the row's natural key (ref, or the
+// contact singleton lang) since blob entries carry no DB row id.
+export interface TariffRow {
+  id: string // = ref
+  ref: string
   lang: string
-  value_text: string
+  name: string
+  price: string
+  limit_text: string
+  fee: string
+  summary: string
+  pricing_type: string // fixed | percentage | tiered
+  advantages: string
+  disadvantages: string
+  draft: boolean
+  provenance?: string
+  updated_at: string
+}
+export interface ProductRow {
+  id: string // = ref
+  ref: string
+  lang: string
+  name: string
+  price: string
   description: string
-  review_state: ReviewState
-  provenance: string
+  category: string
+  draft: boolean
+  provenance?: string
+  updated_at: string
+}
+export interface ContactRow {
+  id: string // = lang (the 'support' singleton, one row per language)
+  slug: string
+  lang: string
+  whatsapp: string
+  email: string
+  address: string
+  legal: string
+  callback_time: string
+  draft: boolean
+  provenance?: string
   updated_at: string
 }
 export interface KbMaterial {
@@ -158,11 +196,11 @@ export interface KbMaterial {
 export interface KbRequest {
   id: string
   material_id: string | null
-  req_type: string // confirm_value | describe_media | comment
+  req_type: string // confirm_fact | describe_media | comment
   prompt: string
   context: string // JSON string, e.g. {"suggested":"5000 ₸"}
-  target: string // JSON string, e.g. {token,lang} | {asset_ref} | {material_id}
-  state: string // open | resolved | dismissed
+  target: string // JSON string, e.g. {table,slug,field,lang} | {asset_ref} | {material_id}
+  state: string // pending | resolved | dismissed
   resolution: string | null
   created_at: string
   resolved_at: string | null
@@ -171,7 +209,9 @@ export interface DraftView {
   config: DraftConfig
   topics: TopicRow[]
   assets: AssetRow[]
-  values: ValueRow[]
+  tariffs: TariffRow[]
+  products: ProductRow[]
+  contacts: ContactRow[]
   materials: KbMaterial[]
   requests: KbRequest[]
 }

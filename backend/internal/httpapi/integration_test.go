@@ -109,9 +109,9 @@ func newHarness(t *testing.T) *harness {
 	hub := realtime.NewHub()
 	fake := evolution.NewFake("xpayment", ownerJID)
 
-	// Playground KB engine (seed the published snapshot so the brain + builder work).
+	// Playground KB engine (seed the org's live KB so the brain + builder work).
 	kb := kbstore.New(st.Pool())
-	if err := kb.SeedIfEmpty(ctx, org.ID, brain.SeedSnapshot()); err != nil {
+	if err := kb.SeedLiveIfEmpty(ctx, org.ID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed kb: %v", err)
 	}
 	extractor := playground.NewExtractor(nil, log)

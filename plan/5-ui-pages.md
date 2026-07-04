@@ -294,218 +294,128 @@ connected, old). Managed instances can't be deleted here. Reached from the Accou
 
 ---
 
-## 5. Конструктор базы знаний — `/playground` *(backend-ready · UI to build)*
+## 5. Конструктор базы знаний — `/playground` *(shipped)*
 
-The KB **builder**: enrich the assistant's knowledge in a chat-like flow — **drop materials**, run the
-builder, answer **«Запросы AI»** popups — then **«Сохранить в базу»** approves the pending entities into
-the live KB. **One KB, no versions** (version/history chrome intentionally dropped).
+**The whole draft workflow, on one page — and ONLY the draft workflow** ("Playground redesign", plan
+`12`/`15`): stage files with a per-file comment, one **«Отправить»** sends everything and runs one builder
+turn, and the resulting **draft** is reviewed and accepted **right here** — no navigation to
+`/knowledge-base` to find out what an upload became. Nothing uploads before Send. `/knowledge-base` is a
+**separate, live-only** page (§6) that never shows or shares this draft — the two flows do not mix.
 
 ```
-┌──┬────────────────────────────────────┬──────────────────────┐
-│N │ Конструктор   [Сохранить][Отменить] │ Обзор базы знаний     │
-│a │ chat: operator · AI ассистент       │  tiles (темы/товары/  │
-│v │ material bubbles + «Предложенные…»  │   тарифы/медиа/конт.)  │
-│  │ «Черновик» chips on new rows        │ Запросы AI (popups)   │
-│  │ [ composer: текст + 📎 ]            │ Последние изменения   │
-└──┴────────────────────────────────────┴──────────────────────┘
+┌────────────────────────────────────────────────┐
+│ Конструктор базы знаний                          │
+│ [ drop zone: перетащите файлы / выбрать файлы ]  │
+│ staged file cards: превью + комментарий + ✕      │
+│ [ composer: текст/ссылка …            ] [→]      │
+│ Обработка: материалы, ещё не встроенные в черновик│
+│ Вопросы ИИ: confirm_fact / describe_media         │
+│ Черновик (N)          [Отклонить всё][Принять всё]│
+│   Темы / Товары / Тарифы / Медиа / Контакты       │
+│   — только draft:true, editable inline —          │
+└────────────────────────────────────────────────┘
 ```
 
-- **Left = chat thread** (operator turns + **«AI ассистент»** turns; material-upload bubbles with
-  thumbnails; **«Предложенные изменения»** summaries whose new rows carry an amber **«Черновик»** badge) +
-  a **composer** (text + attach).
-- **Right rail:** **«Обзор базы знаний»** tiles (Темы · Товары · Тарифы · Медиа-ресурсы · Контакты),
-  **«Запросы AI»** popup cards, **«Последние изменения»**, and a **«Готовность»** bar (how many
-  «Черновик» remain).
-- **v1 builder is deterministic** (`RuleSynthesizer`): the «AI ассистент» turn concatenates `ready`
-  materials into a topic and regex-detects ₸ values (raising `confirm_fact` popups) — it **summarizes what
-  it synthesized as «Черновик» rows**, it is **not** a conversational LLM.
-- **▸ Backed by:** `GET /playground/draft` → **`DraftView`** (config + topics + products + tariffs +
-  assets + contacts + **materials** + **requests**); an entity is **«Черновик»** iff pending, **LIVE** iff
-  already in the live KB. `POST /playground/chat {instruction}` → `{result, draft}`; `POST
-  /playground/draft/materials` (multipart `file` **or** `{source_type,text,url}`) + SSE
-  `kb.material.updated`; `GET /playground/requests` → `KbRequest[]`; `POST /playground/requests/{id}/resolve`;
-  `POST /playground/draft/approve` («Сохранить в базу» — gate → materialize pending → live, **422** on
-  gate failure) + `POST /playground/draft/approve/{kind}/{id}` (approve one). Overview tiles / «Последние
-  изменения» / readiness are **derived client-side** from the `DraftView` (entity counts + which are
-  pending + `updated_at`). Live via `kb.row.changed` / `kb.material.updated` / `kb.approved`.
+- **Composer** (the only intake): a drop zone + «Выбрать файлы» + a paperclip on the text box — all three
+  paths only **stage** files (no upload happens yet). Each staged file shows a thumbnail (or a file-type
+  icon), its name, an optional **comment** textarea ("what it is and when to send it" — used as the parsing
+  comment; see `12`), and a remove ✕. One text box below takes free text or a URL. **«Отправить»** uploads
+  every staged file (with its comment), then the text/URL, **then runs exactly one builder turn** — never
+  auto-triggered mid-send (a `maybeBuild` safety net only fires later, from realtime, to pick up materials
+  whose extraction finished asynchronously — see `12`).
+- **Обработка** — a compact strip of materials not yet consumed into the draft, each with a status chip
+  (`pending`/`extracting` → «Обрабатывается…», `ready` → «Готово к сборке», `needs_human` → «Нужно
+  описание», `failed` → «Ошибка»); hidden when empty.
+- **Вопросы ИИ** — `confirm_fact`/`describe_media` popup cards, directly above the draft they block.
+- **Черновик** — everything pending (`draft:true`), grouped Темы/Товары/Тарифы/Медиа/Контакты, each row
+  **editable inline** with its own **Сохранить** (save the draft edit) / **Принять** (approve just this
+  row) / **Отклонить** (discard just this row); the section header carries **«Принять всё»** / **«Отклонить
+  всё»** for the whole draft. Empty → "Черновик пуст — добавьте материалы выше."
+- **▸ Backed by:** `GET /playground/draft` → `DraftView`; the composer's Send: `POST
+  /playground/draft/materials` per file (multipart `file`+`description?`) or once for text/URL, then `POST
+  /playground/chat {instruction}`. A described image/media material is born `ready` immediately (no
+  extraction job, no `describe_media` popup) — the description substitutes for auto-extraction; a
+  described URL keeps trying a real fetch, falling back to the comment only if it fails. Popups: `GET
+  /playground/requests`, `POST /playground/requests/{id}/resolve`. Draft row edits: `POST/DELETE
+  /playground/draft/{topics,products,tariffs,assets}[/{key}]`, `PATCH …/contacts`. Accept: `POST
+  /playground/draft/approve/{kind}/{key}` (one row — **not** blocked by an unrelated pending request) /
+  `POST /playground/draft/approve` (all — blocked while any request is pending, **422** on gate failure).
+  Live via `kb.material.updated` / `kb.row.changed` / `kb.request.created` / `kb.request.resolved` /
+  `kb.approved`.
 
-**Cases** — *this is the page you most want case-images for.*
+**Cases**
 
-| Case | File | What differs |
-|---|---|---|
-| **5a · Empty** | `ui/playground-empty.png` | first run: onboarding canvas, all tiles 0 |
-| **5b · Jobs running** | `ui/playground-jobs.png` | materials just dropped, **extraction jobs in progress** |
-| **5c · Draft filled** | `ui/ai-playground.png` *(exists)* | builder produced a draft **across several tables + media** |
-| **5d · AI requests** | `ui/playground-requests.png` | pending **«Запросы AI»** popups (confirm price / describe media) |
-
-- **5a · Empty.** Centered empty-state card in the thread — sparkles/inbox illustration, **«База знаний
-  пуста»**, subtext **«Перетащите материалы сюда или добавьте первую тему, товар или тариф»**, a primary
-  **«Добавить первую тему»** + a ghost **«Загрузить материалы»** (📎). Header **«Сохранить в базу»** and
-  **«Отменить»** are **disabled**. Right rail tiles all **0**; «Запросы AI» → «ещё нет запросов»;
-  «Последние изменения» → «пока пусто»; readiness empty.
-  **▸ Backed by:** `GET /playground/draft` returns an empty `DraftView` (zero topics/products/tariffs/
-  assets/contacts, no materials, no requests). First upload/write transitions to a filled state.
-  - **Image prompt:** *Knowledge-base "builder" page. Header "Конструктор базы знаний" with a DISABLED
-    greyed "Сохранить в базу" and disabled "Отменить изменения". Center: a large empty canvas with a soft
-    line-art illustration (sparkles over an open box), heading "База знаний пуста", grey subtext
-    "Перетащите материалы сюда или добавьте первую тему, товар или тариф", a primary indigo "Добавить
-    первую тему" and a ghost "Загрузить материалы" with a paperclip; a bottom composer. Right column: an
-    "Обзор базы знаний" card whose tiles all read 0 (Темы 0, Товары 0, Тарифы 0, Медиа-ресурсы 0,
-    Контакты 0), a "Запросы AI" card "ещё нет запросов", a "Последние изменения" card "пока пусто", an
-    empty readiness bar. Calm onboarding feel.*
-
-- **5b · Jobs running (background extraction).** The operator just dropped a PDF, an image and a URL. The
-  thread shows **material bubbles** each with a **status chip**: a spinning `LoaderCircle` + **«Обработка…»**
-  (extracting), a grey **«В очереди»** (pending), or a green **«Готово»** (ready); a failed one shows an
-  amber **«Не удалось — опишите вручную»**. No «Предложенные изменения» yet (synthesis waits for `ready`).
-  Right rail overview still reflects the **current** KB (unchanged); a small "Обрабатывается: 2" note.
-  **▸ Backed by:** `POST /playground/draft/materials` → `KbMaterial{source_type, status:
-  pending|extracting|ready|failed, media_kind, extraction}`; `GET /playground/draft/materials`; live
-  **`kb.material.updated {material_id, status}`** flips each chip. (Text materials are born `ready`; file/
-  url enqueue an extraction pass.)
-  - **Image prompt:** *…same builder layout. Center thread shows three uploaded-material bubbles: (1) a PDF
-    tile "прайс.pdf" with a small spinning loader and grey label "Обработка…"; (2) an image thumbnail with
-    a grey "В очереди" chip; (3) a link card "example.kz" with a green "Готово" chip. No suggestion card
-    yet. A bottom composer. Right column: the "Обзор базы знаний" tiles show existing non-zero counts
-    (e.g. Темы 8, Товары 5), a small grey note "Обрабатывается: 2", and "Запросы AI: ещё нет". Convey
-    active background work via the spinner and status chips.*
-
-- **5c · Draft filled across tables + media.** The builder produced a **«Предложенные изменения»** card in
-  the thread summarizing what it created; multiple **«Черновик»** rows now exist **across kinds** — new
-  **topics**, **products** (with prices), **tariffs**, and attached **media**. Right-rail tiles show the
-  bumped counts with small amber "+N черновик" deltas; readiness bar reads e.g. **«Черновиков: 6»**; each
-  pending item offers a **«Подтвердить»**; header **«Сохранить в базу»** is **enabled**.
-  **▸ Backed by:** `POST /playground/chat` result + `DraftView` now carrying pending `topics/products/
-  tariffs/assets` entries (each with `provenance`); `POST /playground/draft/approve/{kind}/{id}` per row;
-  `POST /playground/draft/approve` for all.
-  - **Image prompt:** *…same builder layout, populated. Center thread: an operator message on the right,
-    an "AI ассистент" message on the left with a small bot/sparkles tile and a light "Предложенные
-    изменения" card listing chips — "Тема: Тарифы", "Товар: Nike X — 25 000 ₸", "Тариф: Рост", "Медиа:
-    прайс.pdf" — each chip with a small amber "Черновик" badge and a tiny "Подтвердить" link; a bottom
-    composer. Right column: an "Обзор базы знаний" card of stat tiles with non-zero counts and small amber
-    "+2" deltas (Темы 9, Товары 6, Тарифы 4, Медиа-ресурсы 12, Контакты 1), a "Последние изменения" list,
-    and a "Готовность" progress bar reading "Черновиков: 6". Header "Сохранить в базу" is a solid indigo
-    (enabled) button.*
-
-- **5d · AI requests (popups).** The right rail **«Запросы AI»** holds pending popup cards: a
-  **`confirm_fact`** — *"Подтвердите цену тарифа «Рост»"* with a prefilled value **«25 000 ₸/мес»**, an
-  editable field and a primary **«Подтвердить»**; and a **`describe_media`** — a thumbnail + *"Опишите, что
-  на изображении"* with a text field. A small red count badge sits on the «Запросы AI» header.
-  **▸ Backed by:** `GET /playground/requests` → `KbRequest{req_type: confirm_fact|describe_media, prompt,
-  context, target, state:open}`; `POST /playground/requests/{id}/resolve` (`confirm_fact` →
-  `{table,slug,field,lang,value}`; `describe_media` → `{description}`).
-  - **Image prompt:** *…same builder layout. Right column "Запросы AI" is prominent with a small red "2"
-    badge and two popup cards: card one "Подтвердите цену тарифа «Рост»" with a text field prefilled "25
-    000 ₸/мес" and a primary indigo "Подтвердить" plus a ghost "Пропустить"; card two shows a small image
-    thumbnail, "Опишите, что на изображении", a short text field and a "Сохранить" button. The center chat
-    thread is lightly visible behind. Convey "the assistant is asking the operator to confirm facts".*
-
+| Case | What differs |
+|---|---|
+| **5a · Empty** | nothing staged, draft empty — composer only, "Черновик пуст" |
+| **5b · Обработка running** | files just sent, extraction in progress — status chips, no draft rows yet |
+| **5c · Черновик filled** | draft has rows across Темы/Товары/Тарифы/Медиа — inline-editable, «Принять всё» enabled |
+| **5d · Вопросы ИИ pending** | a `confirm_fact`/`describe_media` card sits above the draft, blocking «Принять всё» |
 ---
 
-## 6. Редактор базы знаний — `/knowledge-base` *(backend-ready · UI to build)*
+## 6. База знаний — `/knowledge-base` *(shipped)*
 
-The KB **editor**: a tabbed, structural view of the **same living KB** — see everything and edit it
-directly, then **«Сохранить в базу»** to approve pending edits. **One KB, no versions.** Tabs: **Обзор ·
-Темы · Товары · Тарифы · Медиа-ресурсы · Контакты · Правки**.
+**Live-only.** A tabbed, structural view of the **final data the assistant actually uses** — the live
+`ai_*` tables, nothing else. There is **no draft here, no «Правки» tab, no «Сохранить в базу» step**: every
+edit (`POST/PATCH/DELETE /kb/*`) applies **immediately**. Drafting/building lives entirely on `/playground`
+(§5); this page never reads or writes the `kbd_draft` blob, and a Playground draft edit never shows up
+here until it has been through Playground's own Accept. Tabs: **Обзор · Темы · Товары · Тарифы ·
+Медиа-ресурсы · Контакты**.
 
 > **Facts are typed columns, quoted as tokens.** A price/limit is a **typed column** stored verbatim, one
 > row **per language**, on `ai_products` / `ai_tariffs` / `ai_contacts`. In any prose it appears only as a
 > `{{table.slug.field}}` token — never a raw number. Topic bodies are pure prose (no tokens, no digits).
 
-- **Core:** stat cards (Темы / Товары / Тарифы / Медиа-ресурсы / Контакты / Правки) + the tab strip; each
-  tab lists rows (pending rows carry an amber **«Черновик»** badge) with an inline editor. **Removed vs the
-  old mockup:** ~~История~~ tab, ~~Версия~~ card — one KB, no version history/rollback in the UI.
-- **▸ Backed by:** everything reads **`GET /playground/draft`** (`DraftView`); edits: topics
-  `POST/DELETE /playground/draft/topics[/{slug}]`; products `…/products[/{ref}]`; tariffs
-  `…/tariffs[/{ref}]`; assets `POST`(multipart)`/PATCH/DELETE …/assets[/{ref}]` with `owner_kind`/`owner_ref`;
-  contacts `PATCH …/contacts` (per `lang`); config `PATCH …/config`. Approve: `POST
-  /playground/draft/approve/{kind}/{id}` (one) / `POST /playground/draft/approve` (all). Stat counts +
-  readiness derived from `DraftView`; live via `kb.row.changed` / `kb.approved`. Writes send optional
-  `If-Match` (draft `updated_at`) → `409 DRAFT_STALE`.
+- **Core:** stat cards (Темы / Товары / Тарифы / Медиа-ресурсы / Контакты — no «Правки» card, nothing is
+  ever pending here) + the tab strip; each tab lists LIVE rows with an inline editor whose **«Сохранить»**
+  writes straight to the live table. **Removed vs the old design:** ~~«Правки» tab~~, ~~«черновик»
+  badges~~, ~~per-row «Подтвердить»/«Отклонить»~~, ~~header «Сохранить в базу»~~, ~~readiness bar~~ — a
+  live write has no pending state to confirm.
+- **Медиа-ресурсы:** uploading (or editing) requires a **description up front** — there is no later
+  `describe_media` popup on this page (that mechanism is Playground-only), so an upload dialog collects
+  file + description together; the description field cannot be saved blank (backend **422**s it).
+- **▸ Backed by:** everything reads **`GET /kb`** → the `DraftView` shape with every row `draft:false` and
+  `materials`/`requests` always `[]`. Writes: topics `POST/DELETE /kb/topics[/{slug}]`; products
+  `…/products[/{ref}]`; tariffs `…/tariffs[/{ref}]`; assets `POST`(multipart, `description` **required**)
+  `/PATCH/DELETE …/assets[/{ref}]` with `owner_kind`/`owner_ref`; contacts `PATCH …/contacts` (per `lang`);
+  config `PATCH …/config`. Every write is immediately final — no approve step, no `If-Match` — and
+  **hot-reloads the brain** before responding with the refreshed live view. Live via `kb.row.changed`.
 
-**Cases** — *this is the KB you want empty / populated / multi-language / edits variants for.*
+**Cases**
 
-| Case | File | What differs |
-|---|---|---|
-| **6a · Empty** | `ui/kb-empty.png` | first run: every tab empty, all stat cards 0 |
-| **6b · Обзор populated** | `ui/ai-knowledge-base.png` *(exists)* | filled stat cards + recent changes |
-| **6c · Товары editor** | `ui/kb-products.png` | product list + inline editor (typed price, `data`, owned media) |
-| **6d · Тарифы editor** | `ui/kb-tariffs.png` | tariff editor (price/limit_text/fee, pricing_type, adv/disadv) |
-| **6e · Multi-language entity** | `ui/kb-multilang.png` | one entity shown with its **ru + kk** rows |
-| **6f · Медиа-ресурсы** | `ui/kb-media.png` | asset grid, each showing its **owner** (тема/товар/тариф/global) |
-| **6g · Контакты** | `ui/kb-contacts.png` | org support scalars, **per language** |
-| **6h · Правки** | `ui/kb-edits.png` | the list of **all pending «Черновик»** entities across kinds |
+| Case | What differs |
+|---|---|
+| **6a · Empty** | first run: every tab empty, all stat cards 0 |
+| **6b · Обзор populated** | filled stat cards + recent changes |
+| **6c · Товары editor** | product list + inline editor (typed price, owned media) |
+| **6d · Тарифы editor** | tariff editor (price/limit_text/fee, pricing_type, adv/disadv) |
+| **6e · Multi-language entity** | one entity shown with its **ru + kk** rows (design reference; v1 fills ru only) |
+| **6f · Медиа-ресурсы** | asset grid + upload dialog (file + required description together), each card shows its **owner** (тема/товар/тариф/global) |
+| **6g · Контакты** | org support scalars, **per language** |
 
-- **6a · Empty.** Stat cards all **0**; the active tab body shows a **per-tab empty-state** (Товары →
-  «Добавьте первый товар», Тарифы → «Создайте первый тариф», Медиа → «Прикрепите первый файл», Контакты →
-  «Укажите контакты поддержки») with a primary **«Добавить…»**; the **Обзор** tab links to the
-  **Конструктор** to drop materials. Header **«Сохранить в базу»** disabled.
-  **▸ Backed by:** `GET /playground/draft` → empty `DraftView`.
-  - **Image prompt:** *Knowledge-base "editor" page. Header "Редактор базы знаний" with a DISABLED greyed
-    "Сохранить в базу". A row of stat cards all reading 0: Темы 0, Товары 0, Тарифы 0, Медиа-ресурсы 0,
-    Контакты 0, Правки 0. Tab strip "Обзор · Темы · Товары · Тарифы · Медиа-ресурсы · Контакты · Правки"
-    with Товары active. Below, a centered per-tab empty state: a soft line-art illustration, "Здесь пока
-    пусто", grey "Добавьте первый товар", a primary indigo "Добавить товар". Right column: empty "Быстрый
-    доступ", "Последние изменения — пока пусто", a "Готовность" bar "Черновиков: 0".*
-- **6b · Обзор populated.** **▸ Backed by:** counts + recents from a populated `DraftView`.
-  - **Image prompt:** *…header with a primary "Сохранить в базу" (NO "История", NO "Версия"). Stat cards
-    with counts: Темы 12, Товары 9, Тарифы 4, Медиа-ресурсы 15, Контакты 8, Правки 4. Tab strip with
-    "Обзор" active showing summary cards (a "Последние изменения" list and a "Готовность к публикации" bar
-    reading "Черновиков: 4"). Dense, calm.*
-- **6c · Товары editor.** Two-pane: a left list of products (name + category, some with an amber
-  «Черновик» badge and a «Подтвердить» link) and a right form — **name**, a **typed PRICE** field (verbatim,
-  "25 000 ₸"), **description**, **category**, a **`data` key-value editor**, and **owned-media chips**.
-  **▸ Backed by:** `DraftView.products` (`ProductRow{ref,lang,name,price,description,category}`) + attached
-  `assets` where `owner=product`; `POST /playground/draft/products`.
-  - **Image prompt:** *…"Товары" tab active. Two-pane editor: LEFT a list of product rows (name + small
-    grey category, a couple with an amber "Черновик" badge and a "Подтвердить" link); RIGHT a form for the
-    selected product — a name field "Nike X", a PRICE field showing "25 000 ₸" (verbatim), a description
-    textarea, a category field, a small key-value "data" editor (size / color rows), and a row of
-    owned-media thumbnail chips. Right column "Быстрый доступ" + "Готовность (Черновиков: 4)".*
-- **6d · Тарифы editor.** Right form — **name**, **summary**, a **pricing_type** segmented control
-  (fixed / percentage / tiered), typed **PRICE / LIMIT_TEXT / FEE** fields (verbatim), **advantages** &
-  **disadvantages** text, owned media. **▸ Backed by:** `DraftView.tariffs` (`TariffRow{ref,lang,name,
-  price,limit_text,fee,pricing_type,advantages,disadvantages}`); `POST /playground/draft/tariffs`.
-  - **Image prompt:** *…"Тарифы" tab active. Two-pane: LEFT tariff rows (Пробный, Рост, Масштаб, Про);
-    RIGHT a form for "Рост" — name, summary, a segmented "fixed / percentage / tiered" with "fixed"
-    selected, a PRICE field "25 000 ₸/мес", a LIMIT_TEXT field "до 2 000 платежей/мес", an empty FEE
-    field, two text areas "Преимущества" and "Недостатки", and owned-media chips. Amber "Черновик" badge
-    on the row header, a "Подтвердить" link.*
-- **6e · Multi-language entity (the "different languages" case).** The editor exposes **language as a
-  row**: the selected tariff shows a small **language switch «RU / KK»** (and a `+ язык` affordance), and
-  the two language rows sit side by side — **ru**: name «Рост», price «25 000 ₸/мес»; **kk**: name «Өсу»,
-  price «25 000 ₸/ай». Language-neutral fields (a phone) show a **`*`** marker. v1 fills **ru** only; kk is
-  shown here to illustrate the design (UI chrome stays Russian — no app-language switcher).
-  **▸ Backed by:** every KB row carries **`lang`** ('ru'|'kk'|'*'); upserts take an optional `lang`
-  (`POST /playground/draft/{topics|products|tariffs}`, `PATCH …/contacts`) — one row per `(entity, lang)`.
-  - **Image prompt:** *…"Тарифы" tab, editing tariff "Рост". At the top of the right form a small
-    segmented language switch "RU · KK" plus a faint "+ язык"; below it two stacked language rows: a RU row
-    (name "Рост", price "25 000 ₸/мес", limit "до 2 000 платежей/мес") and a KK row (name "Өсу", price "25
-    000 ₸/ай", limit "айына 2 000 төлемге дейін"), each labelled with a small "RU"/"KK" pill; a
-    language-neutral WhatsApp field marked with a grey "*". Convey "one row per language". Everything else
-    identical to the editor.*
-- **6f · Медиа-ресурсы.** A grid/list of assets; each item shows a type icon (`Image`/`Film`/`FileText`/
-  `Mic`), title, description, and an **owner** pill (**тема / товар / тариф / глобально**) with a control
-  to reassign. **▸ Backed by:** `DraftView.assets` (`AssetRow{ref,kind,description,url,owner_kind,
-  owner_ref,lang}`); `PATCH /playground/draft/assets/{ref}` (`description?`, `owner`).
-  - **Image prompt:** *…"Медиа-ресурсы" tab active. A grid of media cards, each a thumbnail or type-icon
-    tile with a title, a one-line description, and a small owner pill ("Тема: Тарифы", "Товар: Nike X",
-    "Глобально"); a couple carry an amber "Черновик" badge. A primary "Загрузить файл" button top-right.*
-- **6g · Контакты.** A single form of org support scalars **per language**: whatsapp, email, address,
-  legal, callback_time — with the same «RU / KK / \*» language control (phones/emails on the `*` row).
-  **▸ Backed by:** `DraftView.contacts` (`ContactRow{slug:'support',lang,whatsapp,email,address,legal,
-  callback_time}`); `PATCH /playground/draft/contacts`.
-  - **Image prompt:** *…"Контакты" tab active. A single card "Контакты поддержки" with fields WhatsApp
-    (+7 702 976-65-09), Email, Адрес, Юр. лицо (all marked language-neutral "*") and a "Время обратного
-    звонка" field with a small "RU/KK" switch (RU: "1 час"). A primary "Сохранить" button. Calm form.*
-- **6h · Правки.** A flat list of **every pending «Черновик»** entity across kinds — each row: a kind icon
-  + label (Тема/Товар/Тариф/Медиа/Контакт), the entity name, a small `provenance` hint (откуда), and a
-  **«Подтвердить»** / **«Отклонить»** pair; a header **«Подтвердить все»**. **▸ Backed by:** the pending
-  subset of the `DraftView`; `POST /playground/draft/approve/{kind}/{id}` / `…/approve`.
-  - **Image prompt:** *…"Правки" tab active (its stat card reads "Правки 4"). A list of four pending rows,
-    each with a small kind icon and label ("Товар — Nike X", "Тариф — Рост", "Тема — Доставка", "Медиа —
-    прайс.pdf"), a faint source hint, an amber "Черновик" badge, and "Подтвердить"/"Отклонить" buttons; a
-    header "Подтвердить все" primary button and a "Готовность (Черновиков: 4)" bar on the right.*
+- **6a · Empty.** Stat cards all **0**; the active tab body shows a per-tab empty-state (Товары →
+  «Добавьте первый товар», Тарифы → «Создайте первый тариф», Медиа → «Загрузите первый файл», Контакты →
+  «Укажите контакты поддержки») with a primary add action; the **Обзор** tab points at **Конструктор** to
+  build a draft first. **▸ Backed by:** `GET /kb` → empty `DraftView`.
+- **6b · Обзор populated.** **▸ Backed by:** stat cards + «Последние изменения» from a populated `GET /kb`.
+- **6c · Товары editor.** A list of product rows (name + category) each with an inline form — **name**, a
+  **typed PRICE** field (verbatim, "25 000 ₸"), **description**, **category** — and a **«Сохранить»** that
+  writes straight to `ai_products`. **▸ Backed by:** `POST /kb/products`.
+- **6d · Тарифы editor.** Per-row form — **name**, **summary**, a **pricing_type** select (fixed /
+  percentage / tiered), typed **PRICE / LIMIT_TEXT / FEE** fields (verbatim), **advantages** &
+  **disadvantages** text. **▸ Backed by:** `POST /kb/tariffs`.
+- **6e · Multi-language entity.** Every KB row carries **`lang`** ('ru'|'kk'|'\*'); upserts take an
+  optional `lang` (`POST /kb/{topics,products,tariffs}`, `PATCH /kb/contacts`) — one row per
+  `(entity, lang)`. v1 fills **ru** only (this case is a design reference for the future multilang editor
+  — UI chrome stays Russian, no app-language switcher).
+- **6f · Медиа-ресурсы.** A grid/list of assets; each item shows a type icon, title, description, and an
+  **owner** pill (**тема / товар / тариф / глобально**) with a «Привязать» control to reassign (owner-only
+  patches never touch `description`, so they never trip the required-description check). **«Загрузить
+  медиа»** opens a dialog: pick a file, optional owner (Тема), and a **required** description — Submit is
+  disabled until both are present. **▸ Backed by:** `POST /kb/assets` (multipart, `description` required);
+  `PATCH /kb/assets/{ref}`.
+- **6g · Контакты.** A single always-visible form of org support scalars **per language**: whatsapp,
+  email, address, legal, callback_time. **▸ Backed by:** `PATCH /kb/contacts`.
 
 ---
 

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -22,20 +22,16 @@ func (s *Server) kbFail(c *gin.Context, err error) {
 	switch {
 	case errors.As(err, &ge):
 		fail(c, http.StatusUnprocessableEntity, ErrValidation, ge.Error())
-	case errors.Is(err, kbstore.ErrNoDraft):
-		fail(c, http.StatusBadRequest, ErrValidation, "no open draft")
 	case errors.Is(err, kbstore.ErrUnknownKind):
 		fail(c, http.StatusBadRequest, ErrValidation, "unknown row kind")
 	case errors.Is(err, kbstore.ErrStale):
 		fail(c, http.StatusConflict, ErrDraftStale, "draft changed since you loaded it; reload and retry")
-	case errors.Is(err, kbstore.ErrNoPublished):
-		fail(c, http.StatusNotFound, ErrNotFound, "no published version")
 	default:
 		fail(c, http.StatusInternalServerError, ErrInternal, "kb: "+err.Error())
 	}
 }
 
-// brainReloader is implemented by the real drafter: it hot-swaps the published KB
+// brainReloader is implemented by the real drafter: it hot-swaps the live KB
 // the brain drafts from. The stub drafter does not implement it (no-op reload).
 type brainReloader interface {
 	SetSnapshot(*domain.Snapshot)
@@ -59,26 +55,26 @@ func (s *Server) pgOrg(c *gin.Context) (uuid.UUID, bool) {
 	return org.ID, true
 }
 
-// reloadBrain reloads the published KB into the drafter after a publish/rollback.
+// reloadBrain reloads the live KB into the drafter after an approve.
 func (s *Server) reloadBrain(c *gin.Context, orgID uuid.UUID) {
 	r, ok := s.drafter.(brainReloader)
 	if !ok {
 		return
 	}
-	snap, err := s.kb.LoadPublished(ctx(c), orgID)
+	snap, err := s.kb.LoadLive(ctx(c), orgID)
 	if err != nil {
-		s.log.Warn("reload brain after publish failed", "err", err)
+		s.log.Warn("reload brain after approve failed", "err", err)
 		return
 	}
 	r.SetSnapshot(snap)
-	s.log.Info("brain KB reloaded", "version", snap.Config.Version)
+	s.log.Info("brain KB reloaded", "topics", len(snap.Topics))
 }
 
-// --- draft read / lifecycle ------------------------------------------------
+// --- draft read / discard ---------------------------------------------------
 
-// handlePlaygroundDraft is a side-effect-free read: it returns the open draft if
-// one exists, or {has_draft:false} otherwise. Opening a draft is the explicit job
-// of POST /draft, so a GET never clones the published snapshot.
+// handlePlaygroundDraft is a side-effect-free read: it always returns the
+// merged working view — live rows overlaid by any pending blob entries. There
+// is no more "open a draft" step; the blob is created lazily on first write.
 func (s *Server) handlePlaygroundDraft(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -87,11 +83,7 @@ func (s *Server) handlePlaygroundDraft(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	view, err := s.kb.ReadDraft(ctx(c), orgID)
-	if errors.Is(err, kbstore.ErrNoDraft) {
-		ok(c, gin.H{"has_draft": false})
-		return
-	}
+	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
@@ -99,26 +91,8 @@ func (s *Server) handlePlaygroundDraft(c *gin.Context) {
 	ok(c, view)
 }
 
-func (s *Server) handlePlaygroundOpenDraft(c *gin.Context) {
-	if !s.kbReady(c) {
-		return
-	}
-	orgID, proceed := s.pgOrg(c)
-	if !proceed {
-		return
-	}
-	if _, err := s.kb.OpenDraft(ctx(c), orgID); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	view, err := s.kb.GetDraft(ctx(c), orgID)
-	if err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	created(c, view)
-}
-
+// handlePlaygroundDiscardDraft clears every pending edit ("Отменить изменения").
+// Live rows are untouched.
 func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -127,7 +101,7 @@ func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	if err := s.kb.DiscardDraft(ctx(c), orgID); err != nil {
+	if err := s.kb.ClearDraft(ctx(c), orgID); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -205,8 +179,16 @@ func (s *Server) handlePlaygroundUploadAsset(c *gin.Context) {
 		fail(c, http.StatusBadGateway, ErrMediaUnavailable, "store failed")
 		return
 	}
+	// owner_kind defaults to 'topic' when only owner_ref is given — the common
+	// case of attaching media to a topic (owner_kind must be given explicitly to
+	// attach to a product/tariff once those land).
+	ownerKind := c.PostForm("owner_kind")
+	ownerRef := c.PostForm("owner_ref")
+	if ownerKind == "" && ownerRef != "" {
+		ownerKind = "topic"
+	}
 	if err := s.kb.UpsertAsset(ctx(c), orgID, kbstore.AssetInput{
-		Ref: ref, Kind: mediaType, TopicSlug: c.PostForm("topic_slug"),
+		Ref: ref, Kind: mediaType, OwnerKind: ownerKind, OwnerRef: ownerRef,
 		Title: fh.Filename, Description: c.PostForm("description"),
 		URL: "/xchats/api/v1/media/" + ref, Lang: c.PostForm("lang"),
 		Provenance: `{"source":"manual"}`,
@@ -219,7 +201,8 @@ func (s *Server) handlePlaygroundUploadAsset(c *gin.Context) {
 
 type assetPatchReq struct {
 	Description *string `json:"description"`
-	TopicSlug   *string `json:"topic_slug"`
+	OwnerKind   *string `json:"owner_kind"`
+	OwnerRef    *string `json:"owner_ref"`
 }
 
 func (s *Server) handlePlaygroundPatchAsset(c *gin.Context) {
@@ -230,7 +213,7 @@ func (s *Server) handlePlaygroundPatchAsset(c *gin.Context) {
 	var req assetPatchReq
 	_ = c.ShouldBindJSON(&req)
 	if err := s.kb.PatchAsset(ctx(c), orgID, c.Param("ref"), kbstore.AssetPatch{
-		Description: req.Description, TopicSlug: req.TopicSlug,
+		Description: req.Description, OwnerKind: req.OwnerKind, OwnerRef: req.OwnerRef,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -250,27 +233,34 @@ func (s *Server) handlePlaygroundDeleteAsset(c *gin.Context) {
 	s.kbChanged(c, orgID)
 }
 
-// --- values ----------------------------------------------------------------
+// --- typed facts: tariffs / products / contacts ----------------------------
 
-type valueReq struct {
-	Token       string `json:"token"`
-	Lang        string `json:"lang"`
-	ValueText   string `json:"value_text"`
-	Description string `json:"description"`
+type tariffReq struct {
+	Ref           string `json:"ref"`
+	Lang          string `json:"lang"`
+	Name          string `json:"name"`
+	Price         string `json:"price"`
+	LimitText     string `json:"limit_text"`
+	Fee           string `json:"fee"`
+	Summary       string `json:"summary"`
+	PricingType   string `json:"pricing_type"`
+	Advantages    string `json:"advantages"`
+	Disadvantages string `json:"disadvantages"`
 }
 
-func (s *Server) handlePlaygroundUpsertValue(c *gin.Context) {
+func (s *Server) handlePlaygroundUpsertTariff(c *gin.Context) {
 	orgID, proceed := s.pgWrite(c)
 	if !proceed {
 		return
 	}
-	var req valueReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.Token == "" {
-		fail(c, http.StatusBadRequest, ErrValidation, "token required")
+	var req tariffReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Ref == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
 		return
 	}
-	if err := s.kb.UpsertValue(ctx(c), orgID, kbstore.ValueInput{
-		Token: req.Token, Lang: req.Lang, ValueText: req.ValueText, Description: req.Description,
+	if err := s.kb.UpsertTariff(ctx(c), orgID, kbstore.TariffInput{
+		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
+		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
@@ -279,12 +269,82 @@ func (s *Server) handlePlaygroundUpsertValue(c *gin.Context) {
 	s.kbChanged(c, orgID)
 }
 
-func (s *Server) handlePlaygroundDeleteValue(c *gin.Context) {
+func (s *Server) handlePlaygroundDeleteTariff(c *gin.Context) {
 	orgID, proceed := s.pgWrite(c)
 	if !proceed {
 		return
 	}
-	if err := s.kb.DeleteValue(ctx(c), orgID, c.Param("token"), c.Query("lang")); err != nil {
+	if err := s.kb.DeleteTariff(ctx(c), orgID, c.Param("ref")); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
+type productReq struct {
+	Ref         string `json:"ref"`
+	Lang        string `json:"lang"`
+	Name        string `json:"name"`
+	Price       string `json:"price"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+}
+
+func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	var req productReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Ref == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
+		return
+	}
+	if err := s.kb.UpsertProduct(ctx(c), orgID, kbstore.ProductInput{
+		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price,
+		Description: req.Description, Category: req.Category, Provenance: `{"source":"manual"}`,
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
+func (s *Server) handlePlaygroundDeleteProduct(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	if err := s.kb.DeleteProduct(ctx(c), orgID, c.Param("ref")); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
+type contactsReq struct {
+	Lang         string  `json:"lang"`
+	WhatsApp     *string `json:"whatsapp"`
+	Email        *string `json:"email"`
+	Address      *string `json:"address"`
+	Legal        *string `json:"legal"`
+	CallbackTime *string `json:"callback_time"`
+}
+
+func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	var req contactsReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "bad contacts")
+		return
+	}
+	if err := s.kb.PatchContacts(ctx(c), orgID, kbstore.ContactPatch{
+		Lang: req.Lang, WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
+		Legal: req.Legal, CallbackTime: req.CallbackTime, Provenance: `{"source":"manual"}`,
+	}); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -321,42 +381,12 @@ func (s *Server) handlePlaygroundPatchConfig(c *gin.Context) {
 	s.kbChanged(c, orgID)
 }
 
-// --- review (accept / deny a proposed row) ---------------------------------
+// --- approve (materialize pending entries into the live KB — 15 Decision 4) -
 
-type reviewReq struct {
-	State string `json:"state"` // 'approved' | 'rejected'
-}
-
-func (s *Server) handlePlaygroundReview(c *gin.Context) {
-	orgID, proceed := s.pgWrite(c)
-	if !proceed {
-		return
-	}
-	rowID, proceed := parseUUID(c, "id")
-	if !proceed {
-		return
-	}
-	var req reviewReq
-	_ = c.ShouldBindJSON(&req)
-	if req.State != "approved" && req.State != "rejected" {
-		fail(c, http.StatusBadRequest, ErrValidation, "state must be approved|rejected")
-		return
-	}
-	err := s.kb.SetReviewState(ctx(c), orgID, c.Param("kind"), rowID, req.State)
-	if errors.Is(err, kbstore.ErrUnknownKind) {
-		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|assets|values")
-		return
-	}
-	if err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbChanged(c, orgID)
-}
-
-// --- publish / rollback ----------------------------------------------------
-
-func (s *Server) handlePlaygroundPublish(c *gin.Context) {
+// handlePlaygroundApprove approves the WHOLE pending draft ("Сохранить в базу"):
+// gate over live ∪ pending → materialize every pending entry into the live
+// tables → clear them from the blob → hot-reload the brain.
+func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
 	}
@@ -364,30 +394,24 @@ func (s *Server) handlePlaygroundPublish(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	version, err := s.kb.Publish(ctx(c), orgID, s.blob.Exists)
-	var ge *kbstore.GateError
-	if errors.As(err, &ge) {
-		fail(c, http.StatusUnprocessableEntity, ErrValidation, ge.Error())
-		return
-	}
-	if errors.Is(err, kbstore.ErrNoDraft) {
-		fail(c, http.StatusBadRequest, ErrValidation, "no open draft to publish")
-		return
-	}
-	if err != nil {
+	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{}, s.blob.Exists); err != nil {
 		s.kbFail(c, err)
 		return
 	}
 	s.reloadBrain(c, orgID)
-	s.hub.Broadcast("kb.published", gin.H{"version": version})
-	ok(c, gin.H{"version": version})
+	view, err := s.kb.Draft(ctx(c), orgID)
+	if err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.hub.Broadcast("kb.approved", gin.H{})
+	ok(c, view)
 }
 
-type rollbackReq struct {
-	Version int `json:"version"`
-}
-
-func (s *Server) handlePlaygroundRollback(c *gin.Context) {
+// handlePlaygroundApproveEntity approves ONE pending entity by natural key
+// ("Подтвердить" on a single row). kind ∈ topics|assets|tariffs|products|contacts;
+// id = slug | ref | ref | ref | lang.
+func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
 	}
@@ -395,30 +419,33 @@ func (s *Server) handlePlaygroundRollback(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	var req rollbackReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.Version < 1 {
-		fail(c, http.StatusBadRequest, ErrValidation, "version required")
+	kind := c.Param("kind")
+	switch kind {
+	case "topics", "assets", "tariffs", "products", "contacts":
+	default:
+		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|assets|tariffs|products|contacts")
 		return
 	}
-	version, err := s.kb.Rollback(ctx(c), orgID, req.Version)
-	if errors.Is(err, kbstore.ErrNoPublished) {
-		fail(c, http.StatusNotFound, ErrNotFound, "no such published version")
-		return
-	}
-	if err != nil {
+	key := c.Param("id")
+	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{Kind: kind, Key: key}, s.blob.Exists); err != nil {
 		s.kbFail(c, err)
 		return
 	}
 	s.reloadBrain(c, orgID)
-	s.hub.Broadcast("kb.published", gin.H{"version": version, "rolled_back_from": req.Version})
-	ok(c, gin.H{"version": version})
+	view, err := s.kb.Draft(ctx(c), orgID)
+	if err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.hub.Broadcast("kb.approved", gin.H{"kind": kind})
+	ok(c, view)
 }
 
 // --- shared helpers --------------------------------------------------------
 
 // pgWrite is the common preamble for a draft write: KB ready + org resolved, plus
 // an OPTIONAL optimistic-concurrency check. A client that sends If-Match (the
-// draft's updated_at from its last load) gets a 409 DRAFT_STALE if the draft has
+// draft's base_version from its last load) gets a 409 DRAFT_STALE if the blob has
 // since moved — so concurrent edits don't silently clobber each other. Clients
 // that omit the header keep last-write-wins (v1 single-operator default).
 func (s *Server) pgWrite(c *gin.Context) (uuid.UUID, bool) {
@@ -430,13 +457,13 @@ func (s *Server) pgWrite(c *gin.Context) (uuid.UUID, bool) {
 		return uuid.Nil, false
 	}
 	if tok := strings.Trim(strings.TrimSpace(c.GetHeader("If-Match")), `"`); tok != "" {
-		cur, err := s.kb.DraftUpdatedAt(ctx(c), orgID)
+		cur, err := s.kb.DraftBaseVersion(ctx(c), orgID)
 		if err != nil {
 			s.kbFail(c, err)
 			return uuid.Nil, false
 		}
-		want, perr := time.Parse(time.RFC3339Nano, tok)
-		if perr != nil || !want.Equal(cur) {
+		want, perr := strconv.ParseInt(tok, 10, 64)
+		if perr != nil || want != cur {
 			fail(c, http.StatusConflict, ErrDraftStale, "draft changed since you loaded it; reload and retry")
 			return uuid.Nil, false
 		}
@@ -444,19 +471,14 @@ func (s *Server) pgWrite(c *gin.Context) (uuid.UUID, bool) {
 	return orgID, true
 }
 
-// kbChanged is the common write epilogue: it advances the draft's concurrency
-// token, broadcasts the row change, and returns the refreshed draft view so the
-// editor and the chat stay in sync over the same draft.
+// kbChanged is the common write epilogue: it broadcasts the row change and
+// returns the refreshed draft view so the editor and the chat stay in sync.
 func (s *Server) kbChanged(c *gin.Context, orgID uuid.UUID) {
-	if err := s.kb.TouchDraft(ctx(c), orgID); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	view, err := s.kb.GetDraft(ctx(c), orgID)
+	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
-	s.hub.Broadcast("kb.row.changed", gin.H{"version": view.Config.Version})
+	s.hub.Broadcast("kb.row.changed", gin.H{"base_version": view.Config.BaseVersion})
 	ok(c, view)
 }

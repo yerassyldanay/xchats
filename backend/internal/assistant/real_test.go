@@ -41,7 +41,7 @@ func TestRealDrafter_GroundedOption(t *testing.T) {
 	r := NewReal(
 		inboundWindow("Сколько стоит?"),
 		fakeLLM{raw: domain.RawDraft{
-			ReplyText:     "Стандарт — {{price.standard}}.",
+			ReplyText:     "Стандарт — {{tariff.standard.price}}.",
 			ReplyLanguage: "ru",
 			AssetRefs:     []string{brain.RefPricingCard},
 			Confidence:    0.8,

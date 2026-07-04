@@ -289,7 +289,7 @@ func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.
 	return nil
 }
 
-func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c domain.Contact) error {
+func upsertContactRow(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, c domain.Contact) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_contacts
 		(organization_id, slug, lang, whatsapp, email, address, legal, callback_time)
 		VALUES ($1,'support',$2,$3,$4,$5,$6,$7)
@@ -319,45 +319,28 @@ func (e *GateError) Error() string { return "publish gate failed: " + strings.Jo
 func gate(snap *domain.Snapshot, pendingRequests int, blobExists func(ref string) bool) []string {
 	var reasons []string
 	for _, a := range snap.Assets {
-		reasons = append(reasons, gateAsset(a, blobExists)...)
+		if strings.TrimSpace(a.Description) == "" {
+			reasons = append(reasons, fmt.Sprintf("asset %q has no description", a.Ref))
+		}
+		if blobExists != nil && a.Ref != "" && !blobExists(a.Ref) {
+			reasons = append(reasons, fmt.Sprintf("asset %q has no stored bytes", a.Ref))
+		}
 	}
 	for _, t := range snap.Topics {
-		reasons = append(reasons, gateTopicBody(t.Slug, t.BodyMD)...)
+		// Topic bodies are pure prose (14 Decision 3): a fact token in a body means
+		// stored knowledge is carrying a value — it belongs in a typed column, quoted
+		// only in replies.
+		if strings.Contains(t.BodyMD, "{{") {
+			reasons = append(reasons, fmt.Sprintf("topic %q body must be pure prose — no {{...}} tokens", t.Slug))
+		}
+		// A literal price/currency amount in a body is an unconfirmed number shipping
+		// to customers — the fact belongs in a typed tariff/product column.
+		if lit := rawCurrencyRE.FindString(t.BodyMD); lit != "" {
+			reasons = append(reasons, fmt.Sprintf("topic %q has a literal amount %q — put the fact in a typed column", t.Slug, strings.TrimSpace(lit)))
+		}
 	}
 	if pendingRequests > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d unresolved request(s)", pendingRequests))
-	}
-	return reasons
-}
-
-// gateAsset is the per-asset half of the gate — also reused stand-alone by the
-// /kb/* live-write path (live.go), so a single asset write is held to the exact
-// same bar as an approve.
-func gateAsset(a domain.Asset, blobExists func(ref string) bool) []string {
-	var reasons []string
-	if strings.TrimSpace(a.Description) == "" {
-		reasons = append(reasons, fmt.Sprintf("asset %q has no description", a.Ref))
-	}
-	if blobExists != nil && a.Ref != "" && !blobExists(a.Ref) {
-		reasons = append(reasons, fmt.Sprintf("asset %q has no stored bytes", a.Ref))
-	}
-	return reasons
-}
-
-// gateTopicBody is the per-topic half of the gate — also reused stand-alone by
-// the /kb/* live-write path (live.go).
-func gateTopicBody(slug, bodyMD string) []string {
-	var reasons []string
-	// Topic bodies are pure prose (14 Decision 3): a fact token in a body means
-	// stored knowledge is carrying a value — it belongs in a typed column, quoted
-	// only in replies.
-	if strings.Contains(bodyMD, "{{") {
-		reasons = append(reasons, fmt.Sprintf("topic %q body must be pure prose — no {{...}} tokens", slug))
-	}
-	// A literal price/currency amount in a body is an unconfirmed number shipping
-	// to customers — the fact belongs in a typed tariff/product column.
-	if lit := rawCurrencyRE.FindString(bodyMD); lit != "" {
-		reasons = append(reasons, fmt.Sprintf("topic %q has a literal amount %q — put the fact in a typed column", slug, strings.TrimSpace(lit)))
 	}
 	return reasons
 }
