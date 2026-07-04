@@ -34,7 +34,7 @@ Three things were still wrong or unsettled after Decision 14:
 
 - Every KB table keys on **`organization_id`** directly (FK → `organizations`). **`snapshot_id` is
   retired** across `ai_topics` / `ai_assets` / `ai_tariffs` / `ai_products` / `ai_contacts` /
-  `kbd_materials` / `kbd_requests`.
+  `ai_policies` / `kbd_materials` / `kbd_requests`.
 - The config table `ai_snapshots` is renamed **`ai_assistants`** — one config row per org
   (`persona` / `mission` / `guardrails` / `language_policy` / `reply_max_words`),
   `UNIQUE (organization_id)`. It is **not** a snapshot of anything; the old name misled.
@@ -63,8 +63,9 @@ Three things were still wrong or unsettled after Decision 14:
   "topics":   [ { "slug": "pricing", "lang": "ru", "keywords": "…", "body_md": "…prose only…", "provenance": {…} } ],
   "assets":   [ { "ref": "price_pdf", "asset_kind": "document", "owner_kind": "topic", "owner_ref": "pricing", "description": "…", "asset_url": "…" } ],
   "tariffs":  [ { "ref": "growth", "lang": "ru", "name": "Рост", "price": "25 000 ₸/мес", "limit_text": "…", "fee": "", "pricing_type": "fixed", "…": "…" } ],
-  "products": [ { "ref": "nike-x", "lang": "ru", "name": "…", "price": "25 000 ₸", "…": "…" } ],
-  "contacts": [ { "lang": "*", "whatsapp": "+7 …", "email": "…", "address": "…", "legal": "…" } ],
+  "products": [ { "ref": "nike-x", "lang": "ru", "name": "…", "price": "25 000 ₸", "availability": "В наличии", "…": "…" } ],
+  "contacts": [ { "lang": "*", "whatsapp": "+7 …", "email": "…", "address": "…", "legal": "…", "working_hours": "…", "phone": "…", "website": "…", "instagram": "…" } ],
+  "policies": [ { "lang": "*", "delivery_cost": "…", "delivery_time": "…", "free_delivery_from": "…", "min_order": "…", "prepayment": "…", "installment": "…", "return_period": "…", "warranty": "…" } ],
   "deletes":  [ { "kind": "tariff", "ref": "old_plan", "lang": "ru" } ]   // delete-markers, applied at approve
 }
 ```
@@ -91,7 +92,7 @@ Every AI/KB table carries a prefix that names its **group**, so the schema reads
 
 | Prefix | Group | Who writes | Who reads | Tables |
 |---|---|---|---|---|
-| **`ai_`** | **Live knowledge base** | approve only | the **brain** | `ai_assistants` (config) · `ai_topics` · `ai_assets` · `ai_tariffs` · `ai_products` · `ai_contacts` · `ai_audit_log` |
+| **`ai_`** | **Live knowledge base** | approve only | the **brain** | `ai_assistants` (config) · `ai_topics` · `ai_assets` · `ai_tariffs` · `ai_products` · `ai_contacts` · `ai_policies` · `ai_audit_log` |
 | **`kbd_`** | **Draft + playground staging** | the **playground** | the playground | `kbd_draft` (one jsonb blob/org) · `kbd_materials` (ingest staging) · `kbd_requests` (popup queue) |
 | **`rp_`** | **Response suggestions** (per chat) | the brain worker | the inbox UI | `rp_suggestions` |
 
@@ -124,8 +125,9 @@ GROUP ai_  — LIVE KB (brain reads; organization_id key)
   ai_topics       organization_id · slug · lang · keywords · body_md (pure prose)                UNIQUE(organization_id, slug)
   ai_assets       organization_id · ref · asset_kind · owner_kind · owner_ref · description · asset_url      UNIQUE(organization_id, ref)
   ai_tariffs      organization_id · ref · lang · name · price · limit_text · fee · pricing_type · advantages · disadvantages · data · status   UNIQUE(organization_id, ref, lang)
-  ai_products     organization_id · ref · lang · name · price · description · category · data · status       UNIQUE(organization_id, ref, lang)
-  ai_contacts     organization_id · lang · whatsapp · email · address · legal · callback_time                UNIQUE(organization_id, lang)
+  ai_products     organization_id · ref · lang · name · price · description · category · availability · data · status   UNIQUE(organization_id, ref, lang)
+  ai_contacts     organization_id · lang · whatsapp · email · address · legal · callback_time · working_hours · phone · website · instagram   UNIQUE(organization_id, lang)
+  ai_policies     organization_id · lang · delivery_cost · delivery_time · free_delivery_from · min_order · prepayment · installment · return_period · warranty   UNIQUE(organization_id, lang)
   ai_audit_log    organization_id · action · actor_user_id · note · created_at
 
 GROUP kbd_ — DRAFT + PLAYGROUND STAGING (playground only)

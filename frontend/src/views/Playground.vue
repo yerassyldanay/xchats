@@ -2,14 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   AlignLeft, CircleAlert, FileText, Image as ImageIcon, Inbox, Link2, ListTree, LoaderCircle,
-  Package, Paperclip, Phone, Receipt, Save, Send as SendIcon, UploadCloud, X,
+  Package, Paperclip, PanelsTopLeft, Phone, Receipt, Save, Send as SendIcon, Truck, UploadCloud, X,
 } from 'lucide-vue-next'
 import { usePlayground, parseJSON } from '../stores/playground'
+import { shortTime } from '../lib/format'
 import { api } from '../api/client'
-import type { AssetRow, ContactRow, KbMaterial, ProductRow, TariffRow, TopicRow } from '../types'
+import type { AssetRow, ContactRow, KbMaterial, PolicyRow, ProductRow, TariffRow, TopicRow } from '../types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
 
 // The Constructor is now the WHOLE draft workflow, on one page: stage files with
 // a comment, send, watch the builder work, and accept the resulting draft (all
@@ -18,7 +20,10 @@ import { Textarea } from '@/components/ui/textarea'
 const pg = usePlayground()
 
 onMounted(async () => {
-  await pg.load()
+  // loadLive() runs alongside load() so the draft view can tell a brand-new
+  // entity from an edit to an already-published one, and the rail can show
+  // recent published activity — see store.ts header comment.
+  await Promise.all([pg.load(), pg.loadLive()])
   await pg.maybeBuild()
   pg.startRealtime()
 })
@@ -144,16 +149,93 @@ const draftProducts = computed(() => (pg.draft?.products ?? []).filter((p) => p.
 const draftTariffs = computed(() => (pg.draft?.tariffs ?? []).filter((t) => t.draft))
 const draftAssets = computed(() => (pg.draft?.assets ?? []).filter((a) => a.draft))
 const draftContact = computed<ContactRow | undefined>(() => pg.draft?.contacts?.find((c) => c.draft))
+const draftPolicy = computed<PolicyRow | undefined>(() => pg.draft?.policies?.find((p) => p.draft))
+
+// --- «Новый» vs «Изменён»: a pending row overlays/replaces its live counterpart
+// (see kbstore.mergedView), so telling them apart means checking the LIVE slice
+// for the same natural key (slug/ref/lang) — never derivable from the draft row alone.
+const liveTopicSlugs = computed(() => new Set((pg.live?.topics ?? []).map((t) => t.slug)))
+const liveProductRefs = computed(() => new Set((pg.live?.products ?? []).map((p) => p.ref)))
+const liveTariffRefs = computed(() => new Set((pg.live?.tariffs ?? []).map((t) => t.ref)))
+const liveAssetRefs = computed(() => new Set((pg.live?.assets ?? []).map((a) => a.ref)))
+const liveContactLangs = computed(() => new Set((pg.live?.contacts ?? []).map((c) => c.lang)))
+const livePolicyLangs = computed(() => new Set((pg.live?.policies ?? []).map((p) => p.lang)))
+const DRAFT_BADGE = {
+  new: { label: 'Новый', cls: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
+  changed: { label: 'Изменён', cls: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
+}
+function draftBadge(isNew: boolean) {
+  return isNew ? DRAFT_BADGE.new : DRAFT_BADGE.changed
+}
+
+// --- Черновик tabs: Обзор (everything, mixed) + one per non-empty kind --------
+type DraftTabKey = 'overview' | 'topics' | 'products' | 'tariffs' | 'assets' | 'contacts' | 'policies'
+const draftTab = ref<DraftTabKey>('overview')
+const draftTabs = computed(() => {
+  const tabs: { key: DraftTabKey; label: string; icon: any; count: number | null }[] = [
+    { key: 'overview', label: 'Обзор', icon: PanelsTopLeft, count: null },
+  ]
+  if (draftTopics.value.length) tabs.push({ key: 'topics', label: 'Темы', icon: ListTree, count: draftTopics.value.length })
+  if (draftProducts.value.length) tabs.push({ key: 'products', label: 'Товары', icon: Package, count: draftProducts.value.length })
+  if (draftTariffs.value.length) tabs.push({ key: 'tariffs', label: 'Тарифы', icon: Receipt, count: draftTariffs.value.length })
+  if (draftAssets.value.length) tabs.push({ key: 'assets', label: 'Медиа-ресурсы', icon: ImageIcon, count: draftAssets.value.length })
+  if (draftContact.value) tabs.push({ key: 'contacts', label: 'Контакты', icon: Phone, count: 1 })
+  if (draftPolicy.value) tabs.push({ key: 'policies', label: 'Политики', icon: Truck, count: 1 })
+  return tabs
+})
+// A tab whose kind just emptied out (accepted/rejected the last row) falls back
+// to Обзор instead of showing a dead pane.
+watch(draftTabs, (tabs) => {
+  if (!tabs.some((t) => t.key === draftTab.value)) draftTab.value = 'overview'
+})
+function tabActive(key: DraftTabKey) {
+  return draftTab.value === 'overview' || draftTab.value === key
+}
+
+// --- Последние изменения rail: ЧЕРНОВИК (pending) + ОПУБЛИКОВАНО (live) ------
+// Pending rows share one updated_at (the whole blob's timestamp — kbstore
+// mergedView), so there is no real per-row recency to sort by; kind order is
+// kept stable and each kind's own list is shown newest-added-first.
+const pendingRailAll = computed(() => {
+  const rows = [
+    ...draftTopics.value.map((t) => ({ label: 'Тема · ' + (t.title || t.slug), at: t.updated_at })),
+    ...draftProducts.value.map((p) => ({ label: 'Товар · ' + (p.name || p.ref), at: p.updated_at })),
+    ...draftTariffs.value.map((t) => ({ label: 'Тариф · ' + (t.name || t.ref), at: t.updated_at })),
+    ...draftAssets.value.map((a) => ({ label: 'Медиа · ' + (a.title || a.ref), at: a.updated_at })),
+  ]
+  if (draftContact.value) rows.push({ label: 'Контакты', at: draftContact.value.updated_at })
+  if (draftPolicy.value) rows.push({ label: 'Политики', at: draftPolicy.value.updated_at })
+  return rows
+})
+// Published rows keep their own real updated_at, so this half is a true recency sort.
+const publishedRailAll = computed(() => {
+  const d = pg.live
+  if (!d) return [] as { label: string; at: string }[]
+  const rows = [
+    ...(d.topics ?? []).map((t) => ({ label: 'Тема · ' + (t.title || t.slug), at: t.updated_at })),
+    ...(d.products ?? []).map((p) => ({ label: 'Товар · ' + (p.name || p.ref), at: p.updated_at })),
+    ...(d.tariffs ?? []).map((t) => ({ label: 'Тариф · ' + (t.name || t.ref), at: t.updated_at })),
+    ...(d.assets ?? []).map((a) => ({ label: 'Медиа · ' + (a.title || a.ref), at: a.updated_at })),
+    ...(d.contacts ?? []).map((c) => ({ label: 'Контакты', at: c.updated_at })),
+    ...(d.policies ?? []).map((p) => ({ label: 'Политики', at: p.updated_at })),
+  ]
+  return rows.sort((a, b) => (b.at || '').localeCompare(a.at || ''))
+})
+const RAIL_CAP = 6
+const showAllChanges = ref(false)
+const pendingRail = computed(() => (showAllChanges.value ? pendingRailAll.value : pendingRailAll.value.slice(0, RAIL_CAP)))
+const publishedRail = computed(() => (showAllChanges.value ? publishedRailAll.value : publishedRailAll.value.slice(0, RAIL_CAP)))
+const hasMoreChanges = computed(() => pendingRailAll.value.length > RAIL_CAP || publishedRailAll.value.length > RAIL_CAP)
 
 const tBuf = reactive<Record<string, { title: string; keywords: string; body_md: string; lang: string }>>({})
 function vmTopic(t: TopicRow) {
   if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, keywords: t.keywords, body_md: t.body_md, lang: t.lang || 'ru' }
   return tBuf[t.id]
 }
-type ProductBuf = { name: string; price: string; description: string; category: string }
+type ProductBuf = { name: string; price: string; description: string; category: string; availability: string }
 const prodBuf = reactive<Record<string, ProductBuf>>({})
 function vmProduct(p: ProductRow): ProductBuf {
-  if (!prodBuf[p.id]) prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category }
+  if (!prodBuf[p.id]) prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category, availability: p.availability }
   return prodBuf[p.id]
 }
 type TariffBuf = { name: string; price: string; limit_text: string; fee: string; summary: string; pricing_type: string; advantages: string; disadvantages: string }
@@ -176,7 +258,10 @@ function assetCategory(a: AssetRow): 'image' | 'other' {
   return a.kind === 'image' ? 'image' : 'other'
 }
 
-const contactForm = reactive({ whatsapp: '', email: '', address: '', legal: '', callback_time: '' })
+const contactForm = reactive({
+  whatsapp: '', email: '', address: '', legal: '', callback_time: '',
+  working_hours: '', phone: '', website: '', instagram: '',
+})
 // Re-seed the form whenever a NEW pending contact row appears (by id) — not on
 // every re-render, so the operator's in-progress edits survive an unrelated
 // draft reload (e.g. an SSE refresh from an unrelated topic edit).
@@ -191,6 +276,33 @@ watch(
     contactForm.address = c.address
     contactForm.legal = c.legal
     contactForm.callback_time = c.callback_time
+    contactForm.working_hours = c.working_hours
+    contactForm.phone = c.phone
+    contactForm.website = c.website
+    contactForm.instagram = c.instagram
+  },
+  { immediate: true }
+)
+
+const policyForm = reactive({
+  delivery_cost: '', delivery_time: '', free_delivery_from: '', min_order: '',
+  prepayment: '', installment: '', return_period: '', warranty: '',
+})
+// Same re-seed-on-new-id pattern as contactForm above.
+let policySeededFor = ''
+watch(
+  draftPolicy,
+  (p) => {
+    if (!p || policySeededFor === p.id) return
+    policySeededFor = p.id
+    policyForm.delivery_cost = p.delivery_cost
+    policyForm.delivery_time = p.delivery_time
+    policyForm.free_delivery_from = p.free_delivery_from
+    policyForm.min_order = p.min_order
+    policyForm.prepayment = p.prepayment
+    policyForm.installment = p.installment
+    policyForm.return_period = p.return_period
+    policyForm.warranty = p.warranty
   },
   { immediate: true }
 )
@@ -323,11 +435,29 @@ async function discardAll() {
           </p>
 
           <template v-else>
+            <!-- tabs: Обзор (everything, mixed) + one per non-empty kind -->
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                v-for="t in draftTabs"
+                :key="t.key"
+                type="button"
+                class="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition"
+                :class="draftTab === t.key ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted'"
+                @click="draftTab = t.key"
+              >
+                <component :is="t.icon" class="w-4 h-4" /> <span>{{ t.label }}</span>
+                <span v-if="t.count" class="text-xs opacity-70">{{ t.count }}</span>
+              </button>
+            </div>
+
             <!-- Темы -->
-            <div v-if="draftTopics.length" class="space-y-2">
-              <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5"><ListTree class="w-3.5 h-3.5" /> Темы</h3>
-              <div v-for="t in draftTopics" :key="t.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
-                <code class="text-[13px] font-mono font-medium">{{ t.slug }}</code>
+            <div v-if="draftTopics.length && tabActive('topics')" class="space-y-2">
+              <div v-for="t in [...draftTopics].reverse()" :key="t.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><ListTree class="w-3.5 h-3.5" /> Тема</span>
+                  <code class="text-[13px] font-mono font-medium">{{ t.slug }}</code>
+                  <Badge variant="secondary" :class="draftBadge(!liveTopicSlugs.has(t.slug)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveTopicSlugs.has(t.slug)).label }}</Badge>
+                </div>
                 <Input v-model="vmTopic(t).title" placeholder="Название" class="h-9" />
                 <Input v-model="vmTopic(t).keywords" placeholder="Ключевые слова" class="h-9" />
                 <Textarea v-model="vmTopic(t).body_md" rows="3" placeholder="Текст темы…" class="min-h-0 text-[14px]" />
@@ -340,14 +470,18 @@ async function discardAll() {
             </div>
 
             <!-- Товары -->
-            <div v-if="draftProducts.length" class="space-y-2">
-              <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5"><Package class="w-3.5 h-3.5" /> Товары</h3>
-              <div v-for="p in draftProducts" :key="p.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
-                <code class="text-[13px] font-mono font-medium">{{ p.ref }}</code>
+            <div v-if="draftProducts.length && tabActive('products')" class="space-y-2">
+              <div v-for="p in [...draftProducts].reverse()" :key="p.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Package class="w-3.5 h-3.5" /> Товар</span>
+                  <code class="text-[13px] font-mono font-medium">{{ p.ref }}</code>
+                  <Badge variant="secondary" :class="draftBadge(!liveProductRefs.has(p.ref)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveProductRefs.has(p.ref)).label }}</Badge>
+                </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Input v-model="vmProduct(p).name" placeholder="Название" class="h-9" />
                   <Input v-model="vmProduct(p).price" placeholder="Цена" class="h-9 font-mono" />
                   <Input v-model="vmProduct(p).category" placeholder="Категория" class="h-9" />
+                  <Input v-model="vmProduct(p).availability" placeholder="Наличие" class="h-9" />
                 </div>
                 <Textarea v-model="vmProduct(p).description" rows="2" placeholder="Описание товара…" class="min-h-0 text-[14px]" />
                 <div class="flex items-center gap-2">
@@ -359,10 +493,13 @@ async function discardAll() {
             </div>
 
             <!-- Тарифы -->
-            <div v-if="draftTariffs.length" class="space-y-2">
-              <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5"><Receipt class="w-3.5 h-3.5" /> Тарифы</h3>
-              <div v-for="t in draftTariffs" :key="t.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
-                <code class="text-[13px] font-mono font-medium">{{ t.ref }}</code>
+            <div v-if="draftTariffs.length && tabActive('tariffs')" class="space-y-2">
+              <div v-for="t in [...draftTariffs].reverse()" :key="t.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Receipt class="w-3.5 h-3.5" /> Тариф</span>
+                  <code class="text-[13px] font-mono font-medium">{{ t.ref }}</code>
+                  <Badge variant="secondary" :class="draftBadge(!liveTariffRefs.has(t.ref)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveTariffRefs.has(t.ref)).label }}</Badge>
+                </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Input v-model="vmTariff(t).name" placeholder="Название" class="h-9" />
                   <select v-model="vmTariff(t).pricing_type" class="h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -386,15 +523,18 @@ async function discardAll() {
             </div>
 
             <!-- Медиа -->
-            <div v-if="draftAssets.length" class="space-y-2">
-              <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5"><ImageIcon class="w-3.5 h-3.5" /> Медиа</h3>
-              <div v-for="a in draftAssets" :key="a.id" class="rounded-lg border border-border bg-card p-4 flex gap-3">
+            <div v-if="draftAssets.length && tabActive('assets')" class="space-y-2">
+              <div v-for="a in [...draftAssets].reverse()" :key="a.id" class="rounded-lg border border-border bg-card p-4 flex gap-3">
                 <div class="w-14 h-14 rounded-lg border border-border overflow-hidden shrink-0 grid place-items-center bg-muted">
                   <img v-if="assetCategory(a) === 'image' && a.url" :src="api.mediaURL(a.url)" class="w-full h-full object-cover" />
                   <FileText v-else class="w-6 h-6 text-muted-foreground" />
                 </div>
                 <div class="flex-1 min-w-0 space-y-2">
-                  <div class="text-sm font-medium truncate">{{ a.title || a.ref }}</div>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><ImageIcon class="w-3.5 h-3.5" /> Медиа</span>
+                    <span class="text-sm font-medium truncate">{{ a.title || a.ref }}</span>
+                    <Badge variant="secondary" :class="draftBadge(!liveAssetRefs.has(a.ref)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveAssetRefs.has(a.ref)).label }}</Badge>
+                  </div>
                   <Textarea :model-value="vmAsset(a)" @update:model-value="(v) => (aBuf[a.id] = String(v))" rows="2" placeholder="Описание файла…" class="min-h-0 text-[13px]" />
                   <div class="flex items-center gap-2">
                     <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchAsset(a.ref, { description: aBuf[a.id] })">Сохранить</Button>
@@ -406,18 +546,50 @@ async function discardAll() {
             </div>
 
             <!-- Контакты -->
-            <div v-if="draftContact" class="space-y-2">
-              <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5"><Phone class="w-3.5 h-3.5" /> Контакты</h3>
+            <div v-if="draftContact && tabActive('contacts')" class="space-y-2">
               <div class="rounded-lg border border-border bg-card p-4 space-y-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Phone class="w-3.5 h-3.5" /> Контакты</span>
+                  <Badge variant="secondary" :class="draftBadge(!liveContactLangs.has(draftContact.lang)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveContactLangs.has(draftContact.lang)).label }}</Badge>
+                </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Input v-model="contactForm.whatsapp" placeholder="WhatsApp" class="h-9 font-mono" />
+                  <Input v-model="contactForm.phone" placeholder="Телефон" class="h-9 font-mono" />
                   <Input v-model="contactForm.email" placeholder="E-mail" class="h-9" />
+                  <Input v-model="contactForm.website" placeholder="Сайт" class="h-9" />
+                  <Input v-model="contactForm.instagram" placeholder="Instagram" class="h-9" />
+                  <Input v-model="contactForm.working_hours" placeholder="График работы" class="h-9" />
                   <Input v-model="contactForm.address" placeholder="Адрес" class="h-9 sm:col-span-2" />
+                  <Textarea v-model="contactForm.legal" rows="2" placeholder="Юридические реквизиты…" class="min-h-0 text-[14px] sm:col-span-2" />
                   <Input v-model="contactForm.callback_time" placeholder="Время обратного звонка" class="h-9 sm:col-span-2" />
                 </div>
                 <div class="flex items-center gap-2">
                   <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchContacts({ lang: draftContact.lang, ...contactForm })">Сохранить</Button>
                   <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('contacts', draftContact.lang)">Принять</Button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Политики -->
+            <div v-if="draftPolicy && tabActive('policies')" class="space-y-2">
+              <div class="rounded-lg border border-border bg-card p-4 space-y-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Truck class="w-3.5 h-3.5" /> Политики</span>
+                  <Badge variant="secondary" :class="draftBadge(!livePolicyLangs.has(draftPolicy.lang)).cls + ' text-[11px] font-medium'">{{ draftBadge(!livePolicyLangs.has(draftPolicy.lang)).label }}</Badge>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Input v-model="policyForm.delivery_cost" placeholder="Стоимость доставки" class="h-9 font-mono" />
+                  <Input v-model="policyForm.delivery_time" placeholder="Срок доставки" class="h-9 font-mono" />
+                  <Input v-model="policyForm.free_delivery_from" placeholder="Бесплатная доставка от" class="h-9 font-mono" />
+                  <Input v-model="policyForm.min_order" placeholder="Минимальный заказ" class="h-9 font-mono" />
+                  <Input v-model="policyForm.prepayment" placeholder="Предоплата" class="h-9" />
+                  <Input v-model="policyForm.installment" placeholder="Рассрочка" class="h-9" />
+                  <Input v-model="policyForm.return_period" placeholder="Срок возврата" class="h-9 font-mono" />
+                  <Input v-model="policyForm.warranty" placeholder="Гарантия" class="h-9" />
+                </div>
+                <div class="flex items-center gap-2">
+                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchPolicies({ lang: draftPolicy.lang, ...policyForm })">Сохранить</Button>
+                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('policies', draftPolicy.lang)">Принять</Button>
                 </div>
               </div>
             </div>
@@ -436,5 +608,38 @@ async function discardAll() {
         </p>
       </div>
     </div>
+
+    <!-- right rail: pending + published activity, side by side with the draft -->
+    <aside class="w-72 shrink-0 border-l border-border bg-card overflow-y-auto p-5 space-y-6 hidden xl:block">
+      <h2 class="text-sm font-semibold">Последние изменения</h2>
+      <div>
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">Черновик</h3>
+        <ul class="space-y-2.5">
+          <li v-for="(r, i) in pendingRail" :key="i" class="text-xs">
+            <div class="truncate text-foreground">{{ r.label }}</div>
+            <div class="text-muted-foreground">{{ shortTime(r.at) }}</div>
+          </li>
+          <li v-if="!pendingRail.length" class="text-xs text-muted-foreground">—</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">Опубликовано</h3>
+        <ul class="space-y-2.5">
+          <li v-for="(r, i) in publishedRail" :key="i" class="text-xs">
+            <div class="truncate text-foreground">{{ r.label }}</div>
+            <div class="text-muted-foreground">{{ shortTime(r.at) }}</div>
+          </li>
+          <li v-if="!publishedRail.length" class="text-xs text-muted-foreground">—</li>
+        </ul>
+      </div>
+      <button
+        v-if="hasMoreChanges"
+        type="button"
+        class="w-full rounded-lg border border-border py-2 text-xs font-medium text-muted-foreground hover:bg-muted transition"
+        @click="showAllChanges = !showAllChanges"
+      >
+        {{ showAllChanges ? 'Свернуть' : 'Посмотреть все изменения' }}
+      </button>
+    </aside>
   </div>
 </template>

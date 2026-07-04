@@ -93,9 +93,10 @@ Each is a real decision. **Buys us** = advantage; **Costs us** = limitation.
 - **Rejected:** the old generic `ai_values` token bag (a nearest-key lookup can return the *wrong*
   tariff) and per-language columns (`name_ru`/`name_kk`).
 
-### 5. Structured entities (products, tariffs, contacts) are **typed fact tables**; media attaches **polymorphically**
+### 5. Structured entities (products, tariffs, contacts, policies) are **typed fact tables**; media attaches **polymorphically**
 - The Facts lane is `ai_products` (a sellable item), `ai_tariffs` (a pricing **plan** — fixed/percentage,
-  advantages/disadvantages), and `ai_contacts` (org-support scalars), **independent of each other** (no
+  advantages/disadvantages), `ai_contacts` (org-support scalars), and `ai_policies` (org commerce-policy
+  scalars — delivery/payment/returns terms), **independent of each other** (no
   links). Each **holds its exact numbers as typed columns** (`price`, `limit_text`, `fee`, `whatsapp`, …),
   stored verbatim, **one row per `(entity, language)`**. Media still attaches to **any** entity by **one
   shared `(owner_kind, owner_ref)` pair** on `ai_assets`.
@@ -168,7 +169,7 @@ These are genuine forks, not yet locked:
 ## Build sequence (the order that de-risks)
 
 ```text
-1. Lock + migrate the one-living-KB contract   ← entities keyed on organization_id + typed facts (products/tariffs/contacts)
+1. Lock + migrate the one-living-KB contract   ← entities keyed on organization_id + typed facts (products/tariffs/contacts/policies)
                                                  + polymorphic media owner on assets + the kbd_draft blob + approve gate
 2. Seed knowledge manually                     ← brain boots usable AND the playground has real content to edit
 3. Editor first (no LLM)                       ← proves the KB write contract with a simple, deterministic writer
@@ -186,7 +187,7 @@ the real brain and the playground at once.
 
 - **`8-ai-assistant.md`** — the brain: the prompt, how it grounds (live `ai_` tables only), the approve/eval gate.
 - **`9-database-schema.md`** — the full data model, grouped by prefix — **`ai_`** live KB · **`kbd_`** draft+staging · **`rp_`** suggestions:
-  `ai_assistants` + `ai_topics/products/tariffs/contacts/assets`, the `kbd_draft` draft blob, typed fact
+  `ai_assistants` + `ai_topics/products/tariffs/contacts/policies/assets`, the `kbd_draft` draft blob, typed fact
   columns, and the polymorphic `(owner_kind, owner_ref)` media pair.
 - **`12-playground-build.md`** — the buildable playground design (layers, tool contract, endpoints;
   it also carries what survives of the retired `10-knowledge-builder.md` conceptual UX).

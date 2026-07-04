@@ -79,7 +79,7 @@ Block by block:
   topic prose with `[F]` facts itself when drafting.
 - **[E] Media catalog** — rows `ref | kind | topic | description`.
 - **[F] Facts catalog** — the **Facts lane**: per fact, a row `token | label (its meaning) | value`,
-  drawn from the typed fact tables (`ai_tariffs` / `ai_products` / `ai_contacts`). The value is shown
+  drawn from the typed fact tables (`ai_tariffs` / `ai_products` / `ai_contacts` / `ai_policies`). The value is shown
   **so the model can pick the right fact** (e.g. which tariff fits the customer); the model must still
   output the **token** `{{table.slug.field}}`, never the number. **v1 is ru-only**, so `[F]` is
   single-valued and fully cache-stable; once more languages exist, values resolve per reply language
@@ -212,7 +212,7 @@ model; explanatory things are authored but checked.
 ### Lifecycle — draft tables, approve, live
 
 The KB lives in `xchats.ai_assistants / ai_topics / ai_assets / ai_tariffs / ai_products /
-ai_contacts` (see `9-database-schema.md`). The Playground stages changes in **a single `kbd_draft`
+ai_contacts / ai_policies` (see `9-database-schema.md`). The Playground stages changes in **a single `kbd_draft`
 jsonb blob (one per org)**; **approve = gate → copy to live → embed** (15 Decisions 3–4 — the copy
 source is the blob) — the only write path to live. The brain reads **live rows only**, loads them
 into one **immutable in-memory snapshot**
@@ -228,7 +228,7 @@ is the *text you wrote for it*. So content lives in three forms:
 |---|---|---|---|
 | **Text knowledge** (topics) | `ai_topics`: `slug`, `lang`, `keywords`, `body_md` — **pure prose, no digits/tokens** | `[D]` | reads it; answers **only** from it |
 | **Media** (image/video/doc/audio) | `ai_assets`: `ref`, `kind`, `topic_slug`, `description`, `url` | `[E]` | picks a `ref` (max 3); bytes attached at send |
-| **Facts** (prices, limits, times, contacts) | typed columns on `ai_tariffs` / `ai_products` / `ai_contacts`, verbatim, language a row | `[F]` | picks the right fact by label + value; emits the token `{{table.slug.field}}` in the **reply**, never the number |
+| **Facts** (prices, limits, times, contacts, policies) | typed columns on `ai_tariffs` / `ai_products` / `ai_contacts` / `ai_policies`, verbatim, language a row | `[F]` | picks the right fact by label + value; emits the token `{{table.slug.field}}` in the **reply**, never the number |
 
 ### Topics — the Knowledge lane (`[D]`)
 
@@ -264,9 +264,10 @@ that's a trigger for Knowledge-lane retrieval — see *Scaling*.)
 
 ### Facts — the Facts lane (`[F]`)
 
-Every exact fact is a **column on a typed table** (`ai_tariffs`, `ai_products`, `ai_contacts` — see
-`9-database-schema.md`), stored **verbatim with units**. In replies it is referenced only as a token
-`{{table.slug.field}}` (e.g. `{{tariff.growth.price}}`, `{{contact.support.whatsapp}}` — table
+Every exact fact is a **column on a typed table** (`ai_tariffs`, `ai_products`, `ai_contacts`,
+`ai_policies` — see `9-database-schema.md`), stored **verbatim with units**. In replies it is referenced
+only as a token `{{table.slug.field}}` (e.g. `{{tariff.growth.price}}`, `{{contact.support.whatsapp}}`,
+`{{policy.main.delivery_cost}}` — table
 selects the fact table, slug the row, field the column); code substitutes the stored value **after**
 drafting. **Language is a row, not a column** (one row per `(entity, language)`, `*` for
 language-neutral; v1 fills `ru` only). The old generic `ai_values` bag is **removed** (a nearest-key
@@ -467,7 +468,7 @@ Rewrite import path `github.com/yessaliyev/xpayment-crm` → the xchats backend 
 |---|---|
 | The conversation/profile reader port (in the submodule, `ChatwootReader` with `Window` + `Profile`) | Implement a **new xchats Postgres reader** with the same interface: `Window` = last ~15 `wa_messages` rows for the chat (mapped to `domain.Message{Role: customer if direction='in' else agent, Content, ...}`). **No profile in v1** — the conversation `stage` rides on `wa_chats.stage`; `wa_contacts.attributes` is not read. |
 | Draft persistence (submodule writes a Chatwoot private note) | An `ai_draft` worker (in-memory queue, no DB `jobs` table) takes the returned **1–3 options** and inserts **one** `rp_suggestions` row whose `options` jsonb holds the variants (each with nested media) + emits `ai_draft.created`. Escalation / `PricingError` / low confidence → row flags, not a note. Producing up to 3 text variants is the one logic adaptation (one structured call returning ≤3 options). |
-| Config/snapshot store (`internal/infrastructure/sqlite/*`) | Reimplement on **Postgres**: live tables `xchats.ai_assistants / ai_topics / ai_assets / ai_tariffs / ai_products / ai_contacts` + the `kbd_draft` blob (+ `kbd_materials` / `kbd_requests`) + `ai_audit_log` (see `9-database-schema.md`, 15 Decisions 1–4). |
+| Config/snapshot store (`internal/infrastructure/sqlite/*`) | Reimplement on **Postgres**: live tables `xchats.ai_assistants / ai_topics / ai_assets / ai_tariffs / ai_products / ai_contacts / ai_policies` + the `kbd_draft` blob (+ `kbd_materials` / `kbd_requests`) + `ai_audit_log` (see `9-database-schema.md`, 15 Decisions 1–4). |
 | **Seed snapshot** (`migrations/0002_seed.sql`) | Carry it: load a minimal **published** starter persona/topics/facts/assets into the Postgres `xchats.ai_*` tables on first boot, so the service "boots usable" and the admin edits a working example, not a blank form (the cold-start fix — see *Cold start* above). Decide reuse-xpayment-KB vs. mine-this-org's-chats. |
 | **Eval / golden harness** (`docs/07-testing-and-evals.md`) | Port it — golden set + deterministic metrics + the gate (see *Evals* above), incl. the **language** assertion as a deterministic golden metric. |
 | Config catalog (`internal/infrastructure/config`) | Keep `LLM_*`, `Admin`, media settings; drop the Chatwoot/Evolution-provisioning blocks. Fold into the xchats `internal/config` (`.env` + `config.yaml`). |

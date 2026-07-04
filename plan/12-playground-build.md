@@ -326,6 +326,7 @@ ai_products  (typed FACT table — one row per (product, language))
    price            text  -- confirmed price, verbatim WITH units ('25 000 ₸'); quoted as {{product.<ref>.price}}
    description      text
    category         text
+   availability     text  -- verbatim stock status ('В наличии' / 'Под заказ, 3–5 дней'); quoted as {{product.<ref>.availability}}
    data             jsonb -- descriptive attrs only (size, color…); no exact numbers — those are columns
    status           text
    created_at, updated_at
@@ -359,13 +360,33 @@ ai_contacts  (typed org-support FACT table — singleton slug 'support', one row
    address          text
    legal            text
    callback_time    text  -- language-bearing ('1 час' / '1 сағат')
+   working_hours    text  -- language-neutral ('Пн–Сб, 9:00–19:00')
+   phone            text  -- language-neutral (landline/office, distinct from the WhatsApp mobile)
+   website          text  -- language-neutral
+   instagram        text  -- language-neutral
+   UNIQUE (organization_id, lang)
+
+ai_policies  (typed org commerce-policy FACT table — singleton slug 'main', one row per language;
+              an exact structural clone of ai_contacts)
+   id                  uuid  PK
+   organization_id     uuid  FK -> organizations   -- DIRECT
+   slug                text  -- 'main' (keeps the 3-part token grammar {{policy.main.<field>}})
+   lang                text  -- 'ru' | 'kk' | '*'  — '*' = language-neutral
+   delivery_cost       text
+   delivery_time       text
+   free_delivery_from  text
+   min_order           text
+   prepayment          text
+   installment         text
+   return_period       text
+   warranty            text
    UNIQUE (organization_id, lang)
 
 -- DRAFT + STAGING (group kbd_): playground-only; the brain never reads these. All key on organization_id.
 
 kbd_draft  (the whole pending KB as ONE jsonb blob — one row per org; 15 Decision 3)
    organization_id  uuid  PK  FK -> organizations
-   draft            jsonb  -- { config, topics[], assets[], tariffs[], products[], contacts[], deletes[] }
+   draft            jsonb  -- { config, topics[], assets[], tariffs[], products[], contacts[], policies[], deletes[] }
                     --   each entry mirrors a live-table row + an authoring `provenance` object;
                     --   a deletes[] entry = { kind, ref, lang } marks a live row for removal at approve.
    base_version     bigint  -- optimistic-concurrency counter; bumped per save (stale write → 409)
@@ -418,11 +439,12 @@ written entry lands in the **`kbd_draft`** blob (a draft, not live).
 | Tool | Effect |
 |---|---|
 | `create_topic{slug,lang,title,keywords,body_md}` | upsert a draft `topics[]` entry in `kbd_draft`; existing slug → update |
-| `create_product{ref,lang,name,price,description,category,data}` | upsert a draft `products[]` entry (per language); `price` is a **typed field** confirmed via `confirm_fact`; existing (ref,lang) → update |
+| `create_product{ref,lang,name,price,description,category,availability,data}` | upsert a draft `products[]` entry (per language); `price`/`availability` are **typed fields** confirmed via `confirm_fact`; existing (ref,lang) → update |
 | `upsert_tariff{ref,lang,name,price,limit_text,fee,pricing_type,advantages,disadvantages,...}` | upsert a draft `tariffs[]` entry (per language); `price`/`limit_text`/`fee` are **typed fields** each confirmed via `confirm_fact`; existing (ref,lang) → update |
 | `attach_asset{ref,kind,owner_kind,owner_ref,description,material_id}` | draft `assets[]` entry (media owned by a topic\|product\|tariff) pointing at the material's bytes |
-| `confirm_fact{table,slug,field,lang,value}` | popup — the human confirms an exact fact value; on accept it sets the **typed field** on the draft `tariffs`/`products`/`contacts` entry (never a digit in prose) |
-| `set_contacts{lang,whatsapp,email,address,legal,callback_time}` | upsert the draft `contacts[]` entry (per language), each field via `confirm_fact` |
+| `confirm_fact{table,slug,field,lang,value}` | popup — the human confirms an exact fact value; on accept it sets the **typed field** on the draft `tariffs`/`products`/`contacts`/`policies` entry (never a digit in prose) |
+| `set_contacts{lang,whatsapp,email,address,legal,callback_time,working_hours,phone,website,instagram}` | upsert the draft `contacts[]` entry (per language), each field via `confirm_fact` |
+| `set_policies{lang,delivery_cost,delivery_time,free_delivery_from,min_order,prepayment,installment,return_period,warranty}` | upsert the draft `policies[]` entry (per language), each field via `confirm_fact` — mirrors `set_contacts` |
 | `describe_media{material_id|asset_ref}` | popup asking the operator for a description (esp. **video** / failed extraction) |
 | `choose_topic{asset_ref, candidates[]}` | popup — which owner does this asset belong to |
 | `resolve_duplicate{kind, a, b}` | popup — merge or keep both (re-fed URL / overlapping topic/product/tariff) |
@@ -430,10 +452,14 @@ written entry lands in the **`kbd_draft`** blob (a draft, not live).
 
 **Guardrail:** a topic body is **pure prose — no digits and no fact tokens** (14 Decision 3). The agent
 **never writes an amount into a topic body**; an exact value goes only into a **typed fact column**
-(`ai_tariffs`/`ai_products`/`ai_contacts`), and only via a `confirm_fact` request — the real number
-enters the column **on human confirmation**. Facts are quoted (as `{{table.slug.field}}` tokens) **only
-at reply time** by the runtime brain, never baked into stored knowledge. Numbers are the one thing never
-auto-written.
+(`ai_tariffs`/`ai_products`/`ai_contacts`/`ai_policies`), and only via a `confirm_fact` request — the real
+number enters the column **on human confirmation**. Facts are quoted (as `{{table.slug.field}}` tokens)
+**only at reply time** by the runtime brain, never baked into stored knowledge. Numbers are the one thing
+never auto-written.
+
+> **v1 note:** `set_policies` is defined in the tool contract for completeness, but the current
+> `RuleSynthesizer` only auto-detects tariff prices — policy values reach the draft via the editor's
+> manual PATCH or a `confirm_fact` resolve, not agent auto-detection (see `builder.go`).
 
 ---
 
@@ -464,22 +490,23 @@ trade-off in v1.
 ## API surface (new — under `/xchats/api/v1/playground`)
 
 ```
-GET    /playground/draft                      → the living KB: config + topics[+assets] + products + tariffs + contacts + requests + materials (live ai_ rows + kbd_draft entries, each flagged LIVE or DRAFT)
+GET    /playground/draft                      → the living KB: config + topics[+assets] + products + tariffs + contacts + policies + requests + materials (live ai_ rows + kbd_draft entries, each flagged LIVE or DRAFT)
 POST   /playground/draft/topics               upsert a topic (into the kbd_draft blob)
 DELETE /playground/draft/topics/:slug
-POST   /playground/draft/products             upsert a product (into the kbd_draft blob)
+POST   /playground/draft/products             upsert a product (into the kbd_draft blob) — incl. availability
 DELETE /playground/draft/products/:ref
 POST   /playground/draft/tariffs              upsert a tariff (into the kbd_draft blob)
 DELETE /playground/draft/tariffs/:ref
 POST   /playground/draft/assets               upload bytes + create asset (multipart: file + meta incl. owner_kind/owner_ref)
 PATCH  /playground/draft/assets/:ref          edit description / reassign owner_kind+owner_ref
 DELETE /playground/draft/assets/:ref
-PATCH  /playground/draft/contacts             upsert the org contacts row (per lang): whatsapp/email/address/legal/callback_time
+PATCH  /playground/draft/contacts             upsert the org contacts row (per lang): whatsapp/email/address/legal/callback_time/working_hours/phone/website/instagram
+PATCH  /playground/draft/policies             upsert the org policies row (per lang): delivery_cost/delivery_time/free_delivery_from/min_order/prepayment/installment/return_period/warranty
 PATCH  /playground/draft/config               persona / mission / guardrails / language_policy
 POST   /playground/draft/materials            drop material (Stage 1): bytes/url/text → kbd_materials + enqueue extraction
 GET    /playground/draft/materials            list materials + extraction status
 POST   /playground/draft/approve              run gate over the WHOLE draft → materialize kbd_draft → live ai_ + reload brain
-POST   /playground/draft/approve/:kind/:id    approve ONE draft entry (kind = topic|product|tariff|asset|contact) → gate → materialize → reload brain
+POST   /playground/draft/approve/:kind/:id    approve ONE draft entry (kind = topic|product|tariff|asset|contact|policy) → gate → materialize → reload brain
 POST   /playground/chat                       a builder-chat turn (instruction + material_ids) → synthesis pass
 GET    /playground/requests                   the popup queue
 POST   /playground/requests/:id/resolve       answer a popup → writes a draft entry
@@ -493,18 +520,17 @@ Realtime (existing SSE hub): `kb.material.updated` (extraction progress), `kb.ro
 
 ## Frontend
 
-A new **Playground** page (route + NavRail entry), two panes over the **same living KB**:
-- **Builder chat** (left): message list + composer with **file-drop + URL paste** (text/url/image/pdf/
-  doc/video); dropped material shows an **extraction-status chip** (extracting → ready / needs-you);
-  inline **request cards** (popups) rendered where they occur.
-- **Editor** (right): config block; topic list (expand → `body_md` editor + media gallery, each asset
-  showing kind/description and an **owner selector** — topic|product|tariff — to reassign, plus
-  delete/replace); a **Products** list and a **Tariffs** list (each editable, with their **typed fact
-  columns** — price/limit_text/fee — and owned media); a **Contacts** panel (whatsapp/email/address/legal/
-  callback_time, per language). Every entity carries a **draft badge** = "present in `kbd_draft`"; **Approve**
-  acts per-entity and an **Approve all** button runs the gate and shows failures inline. No version/publish button.
+> ⚠️ **Superseded by [`5-ui-pages.md`](5-ui-pages.md) §5** — shipped as **one page**, not the two-pane
+> chat-left/editor-right split originally sketched here. Read `5` §5 for the current, authoritative
+> layout (composer → Обработка → Вопросы ИИ → tabbed, inline-editable Черновик → a Последние-изменения
+> rail); this section is kept only as a one-line pointer so the doc's history stays legible.
 
-Reuses the existing API envelope, SSE client, blob upload, and auth — no new infra.
+The shipped **Playground** page is the whole draft workflow on one page: a file/URL/text composer feeds
+the builder, and the resulting draft is reviewed and approved **on the same page** — Темы/Товары/Тарифы/
+Медиа-ресурсы/Контакты behind a tab strip (plus an Обзор tab mixing everything), each row inline-editable
+with per-row Сохранить/Принять/Отклонить, a «Новый»/«Изменён» tag per row, and a right-rail activity log
+(pending + published). Reuses the existing API envelope, SSE client, blob upload, and auth — no new
+infra, and (per `5` §5) reads the live `GET /kb` view alongside the draft, never writes it.
 
 ---
 

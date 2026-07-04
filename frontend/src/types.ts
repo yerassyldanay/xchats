@@ -164,6 +164,7 @@ export interface ProductRow {
   price: string
   description: string
   category: string
+  availability: string
   draft: boolean
   provenance?: string
   updated_at: string
@@ -177,6 +178,28 @@ export interface ContactRow {
   address: string
   legal: string
   callback_time: string
+  working_hours: string
+  phone: string
+  website: string
+  instagram: string
+  draft: boolean
+  provenance?: string
+  updated_at: string
+}
+// PolicyRow — org commerce-policy scalars (delivery/payment/returns terms), a
+// structural clone of ContactRow (id = lang, the 'main' singleton).
+export interface PolicyRow {
+  id: string // = lang
+  slug: string
+  lang: string
+  delivery_cost: string
+  delivery_time: string
+  free_delivery_from: string
+  min_order: string
+  prepayment: string
+  installment: string
+  return_period: string
+  warranty: string
   draft: boolean
   provenance?: string
   updated_at: string
@@ -212,6 +235,7 @@ export interface DraftView {
   tariffs: TariffRow[]
   products: ProductRow[]
   contacts: ContactRow[]
+  policies: PolicyRow[]
   materials: KbMaterial[]
   requests: KbRequest[]
 }

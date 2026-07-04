@@ -146,6 +146,7 @@ func (s *Server) Router() *gin.Engine {
 	pg.POST("/draft/products", s.handlePlaygroundUpsertProduct)
 	pg.DELETE("/draft/products/:ref", s.handlePlaygroundDeleteProduct)
 	pg.PATCH("/draft/contacts", s.handlePlaygroundPatchContacts)
+	pg.PATCH("/draft/policies", s.handlePlaygroundPatchPolicies)
 	pg.PATCH("/draft/config", s.handlePlaygroundPatchConfig)
 	pg.POST("/draft/materials", s.handlePlaygroundCreateMaterial)
 	pg.GET("/draft/materials", s.handlePlaygroundListMaterials)
@@ -171,6 +172,7 @@ func (s *Server) Router() *gin.Engine {
 	kb.POST("/products", s.handleKBUpsertProduct)
 	kb.DELETE("/products/:ref", s.handleKBDeleteProduct)
 	kb.PATCH("/contacts", s.handleKBPatchContacts)
+	kb.PATCH("/policies", s.handleKBPatchPolicies)
 	kb.PATCH("/config", s.handleKBPatchConfig)
 	return r
 }

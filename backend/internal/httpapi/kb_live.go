@@ -220,7 +220,7 @@ func (s *Server) handleKBUpsertProduct(c *gin.Context) {
 	}
 	if err := s.kb.PutLiveProduct(ctx(c), orgID, kbstore.ProductInput{
 		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price,
-		Description: req.Description, Category: req.Category,
+		Description: req.Description, Category: req.Category, Availability: req.Availability,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -253,6 +253,30 @@ func (s *Server) handleKBPatchContacts(c *gin.Context) {
 	if err := s.kb.PatchLiveContacts(ctx(c), orgID, kbstore.ContactPatch{
 		Lang: req.Lang, WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
 		Legal: req.Legal, CallbackTime: req.CallbackTime,
+		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbLiveChanged(c, orgID)
+}
+
+// --- typed facts: commerce policies -------------------------------------------
+
+func (s *Server) handleKBPatchPolicies(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	var req policiesReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "bad policies")
+		return
+	}
+	if err := s.kb.PatchLivePolicies(ctx(c), orgID, kbstore.PolicyPatch{
+		Lang: req.Lang, DeliveryCost: req.DeliveryCost, DeliveryTime: req.DeliveryTime,
+		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
+		Installment: req.Installment, ReturnPeriod: req.ReturnPeriod, Warranty: req.Warranty,
 	}); err != nil {
 		s.kbFail(c, err)
 		return

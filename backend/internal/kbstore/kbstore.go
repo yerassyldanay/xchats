@@ -127,14 +127,14 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category
+	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category, availability
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for prows.Next() {
 		var p domain.Product
-		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category); err != nil {
+		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category, &p.Availability); err != nil {
 			prows.Close()
 			return err
 		}
@@ -145,14 +145,16 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	crows, err := s.pool.Query(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time
+	crows, err := s.pool.Query(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time,
+		working_hours, phone, website, instagram
 		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for crows.Next() {
 		var c domain.Contact
-		if err := crows.Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime); err != nil {
+		if err := crows.Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime,
+			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram); err != nil {
 			crows.Close()
 			return err
 		}
@@ -163,7 +165,27 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	snap.Facts = domain.NewFactBook(snap.Tariffs, snap.Products, snap.Contacts)
+	polrows, err := s.pool.Query(ctx, `SELECT lang, delivery_cost, delivery_time, free_delivery_from, min_order,
+		prepayment, installment, return_period, warranty
+		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return err
+	}
+	for polrows.Next() {
+		var p domain.Policy
+		if err := polrows.Scan(&p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.FreeDeliveryFrom, &p.MinOrder,
+			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty); err != nil {
+			polrows.Close()
+			return err
+		}
+		snap.Policies = append(snap.Policies, p)
+	}
+	polrows.Close()
+	if err := polrows.Err(); err != nil {
+		return err
+	}
+
+	snap.Facts = domain.NewFactBook(snap.Tariffs, snap.Products, snap.Contacts, snap.Policies)
 	return nil
 }
 
@@ -246,6 +268,11 @@ func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *do
 			return err
 		}
 	}
+	for _, p := range snap.Policies {
+		if err := upsertPolicyRow(ctx, tx, orgID, p); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -278,12 +305,12 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t domain.T
 
 func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Product) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_products
-		(organization_id, ref, lang, name, price, description, category)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		(organization_id, ref, lang, name, price, description, category, availability)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (organization_id, ref, lang) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
-			category=EXCLUDED.category, updated_at=now()`,
-		orgID, p.Ref, orDefault(p.Lang, "ru"), p.Name, p.Price, p.Description, p.Category); err != nil {
+			category=EXCLUDED.category, availability=EXCLUDED.availability, updated_at=now()`,
+		orgID, p.Ref, orDefault(p.Lang, "ru"), p.Name, p.Price, p.Description, p.Category, p.Availability); err != nil {
 		return fmt.Errorf("insert product %s/%s: %w", p.Ref, p.Lang, err)
 	}
 	return nil
@@ -291,13 +318,36 @@ func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.
 
 func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c domain.Contact) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_contacts
-		(organization_id, slug, lang, whatsapp, email, address, legal, callback_time)
-		VALUES ($1,'support',$2,$3,$4,$5,$6,$7)
+		(organization_id, slug, lang, whatsapp, email, address, legal, callback_time,
+		 working_hours, phone, website, instagram)
+		VALUES ($1,'support',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (organization_id, lang) DO UPDATE SET
 			whatsapp=EXCLUDED.whatsapp, email=EXCLUDED.email, address=EXCLUDED.address,
-			legal=EXCLUDED.legal, callback_time=EXCLUDED.callback_time, updated_at=now()`,
-		orgID, orDefault(c.Lang, "*"), c.WhatsApp, c.Email, c.Address, c.Legal, c.CallbackTime); err != nil {
+			legal=EXCLUDED.legal, callback_time=EXCLUDED.callback_time,
+			working_hours=EXCLUDED.working_hours, phone=EXCLUDED.phone,
+			website=EXCLUDED.website, instagram=EXCLUDED.instagram, updated_at=now()`,
+		orgID, orDefault(c.Lang, "*"), c.WhatsApp, c.Email, c.Address, c.Legal, c.CallbackTime,
+		c.WorkingHours, c.Phone, c.Website, c.Instagram); err != nil {
 		return fmt.Errorf("insert contact %s: %w", c.Lang, err)
+	}
+	return nil
+}
+
+// upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow
+// (singleton slug 'main', keyed by lang).
+func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Policy) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_policies
+		(organization_id, slug, lang, delivery_cost, delivery_time, free_delivery_from, min_order,
+		 prepayment, installment, return_period, warranty)
+		VALUES ($1,'main',$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (organization_id, lang) DO UPDATE SET
+			delivery_cost=EXCLUDED.delivery_cost, delivery_time=EXCLUDED.delivery_time,
+			free_delivery_from=EXCLUDED.free_delivery_from, min_order=EXCLUDED.min_order,
+			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
+			return_period=EXCLUDED.return_period, warranty=EXCLUDED.warranty, updated_at=now()`,
+		orgID, orDefault(p.Lang, "*"), p.DeliveryCost, p.DeliveryTime, p.FreeDeliveryFrom, p.MinOrder,
+		p.Prepayment, p.Installment, p.ReturnPeriod, p.Warranty); err != nil {
+		return fmt.Errorf("insert policy %s: %w", p.Lang, err)
 	}
 	return nil
 }

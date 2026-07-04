@@ -23,7 +23,7 @@ no SQL files yet.
   - **`wa_*`** — WhatsApp transport (`wa_accounts`, `wa_contacts`, `wa_chats`, `wa_messages`); each
     channel owns its own contacts/chats, and a future channel adds its own `ig_*` / `tg_*` tables.
   - **`ai_*`** — the **live knowledge base** the brain reads (`ai_assistants`, `ai_topics`, `ai_assets`,
-    `ai_tariffs`, `ai_products`, `ai_contacts`, `ai_audit_log`).
+    `ai_tariffs`, `ai_products`, `ai_contacts`, `ai_policies`, `ai_audit_log`).
   - **`kbd_*`** — the **draft KB + playground staging** (`kbd_draft`, `kbd_materials`, `kbd_requests`);
     playground-only, never read by the brain.
   - **`rp_*`** — **response suggestions** per chat (`rp_suggestions`).
@@ -47,7 +47,8 @@ no SQL files yet.
     carries its own dedup key `UNIQUE(message_id)` so the doubled webhook delivery can't write it twice. (The
     plan's original text-only v1 removed it; Build 0 un-defers it.)
   - **Defined but empty/unused** in v1: `ai_audit_log`, `assignment_events`. (The seeded KB —
-    `ai_topics` / `ai_assets` / `ai_tariffs` / `ai_products` / `ai_contacts` (the typed **fact** tables) — and `rp_suggestions` **are** used: each Suggest writes one
+    `ai_topics` / `ai_assets` / `ai_tariffs` / `ai_products` / `ai_contacts` / `ai_policies` (the typed
+    **fact** tables) — and `rp_suggestions` **are** used: each Suggest writes one
     row whose `options` jsonb holds 1–3 variants, each with optional media from the seeded catalog.) Don't pour
     migration/wiring effort into the empty ones until their phase (see `0.1-definition-of-done.md`).
 
@@ -312,17 +313,17 @@ UNIQUE (organization_id, ref)
 > lane) and is grounded by a judge. The old generic value bag **`ai_values` is removed** — a nearest-key
 > lookup can return the *wrong* fact; a typed column cannot.
 >
-> **Language is a row, never a column.** Every fact table keys on `(organization_id, ref, lang)` (contacts on
-> `(organization_id, lang)`): one row per `(entity, language)`, plus a `*` row for language-neutral values
-> (phones, e-mails, addresses). Adding a language = **inserting rows**, never a schema change — there are
-> no `name_ru`/`name_kk` columns. This is the same per-language shape `ai_topics` already uses, so the
-> whole KB is uniform.
+> **Language is a row, never a column.** Every fact table keys on `(organization_id, ref, lang)` (contacts
+> and **policies** on `(organization_id, lang)`): one row per `(entity, language)`, plus a `*` row for
+> language-neutral values (phones, e-mails, addresses). Adding a language = **inserting rows**, never a
+> schema change — there are no `name_ru`/`name_kk` columns. This is the same per-language shape
+> `ai_topics` already uses, so the whole KB is uniform.
 >
 > **Reference model — `{{table.slug.field}}`.** A fact is quoted **only in a model reply** as a
 > token `{{table.slug.field}}` (topic bodies are pure prose — no tokens, no digits — per 14 Decision 3):
 > `table` selects the fact table, `slug` the row, `field` the column —
 > e.g. `{{tariff.growth.price}}`, `{{tariff.growth.limit_text}}`, `{{product.nike_x.price}}`,
-> `{{contact.support.whatsapp}}`. Code resolves the token against the typed table **for the reply's
+> `{{contact.support.whatsapp}}`, `{{policy.main.delivery_cost}}`. Code resolves the token against the typed table **for the reply's
 > language** (falling back reply-language → org-default → `*`) and substitutes the stored value verbatim
 > (units included; code never reformats a number). The model **never emits a digit** for a known fact —
 > it emits the token. **Fail closed:** an unresolved token never ships — it becomes a holding reply /
@@ -352,12 +353,17 @@ email            text  -- support e-mail — language-neutral
 address          text  -- legal / office address — language-neutral
 legal            text  -- legal entity / requisites — language-neutral
 callback_time    text  -- how soon we call back ('1 час' / '1 сағат') — language-bearing (ru/kk rows)
+working_hours    text  -- e.g. 'Пн–Сб, 9:00–19:00' — language-neutral
+phone            text  -- landline/office number, distinct from the WhatsApp mobile — language-neutral
+website          text  -- language-neutral
+instagram        text  -- language-neutral
 UNIQUE (organization_id, lang)
 ```
 > **A dedicated typed table for org-level scalars** — support contacts + callback time — not a generic
 > bag. Token resolution is **per field** with language fallback: `{{contact.support.whatsapp}}` finds its
-> value on the `*` row; `{{contact.support.callback_time}}` finds it on the `ru`/`kk` row. A **new**
-> category of org fact (e.g. working hours) gets its **own typed table**, never a key–value row.
+> value on the `*` row; `{{contact.support.callback_time}}` finds it on the `ru`/`kk` row. A **new
+> category** of org fact gets its **own typed table**, never a key–value row — see `ai_policies` below
+> (commerce/delivery terms), added as its own table rather than folded into this one.
 
 ### xchats.ai_products  (typed fact table — one row per (product, language))
 ```
@@ -369,17 +375,18 @@ name             text  -- verbatim, per language
 price            text  -- the confirmed price, verbatim WITH units ('25 000 ₸'); code never reformats
 description      text
 category         text
+availability     text  -- verbatim stock status ('В наличии' / 'Под заказ, 3–5 дней'); code never reformats
 data             jsonb -- sphere-specific descriptive attrs: {size, color, area_m2, …}
 status           text  -- 'active'|'inactive'
 created_at, updated_at  timestamptz
 UNIQUE (organization_id, ref, lang)
 ```
-> **A product's price is a typed column, quoted verbatim.** `price` (and any other exact field) is a
-> concrete column stored **verbatim with units**; the model quotes it only as `{{product.nike_x.price}}`,
-> resolved for the reply's language — never a digit it writes itself. **Language is a row**
-> (`UNIQUE (organization_id, ref, lang)`); a `*` row carries language-neutral values. Media still attach
-> **polymorphically** as `ai_assets` rows (`owner_kind='product'`, `owner_ref=<ref>`) — only *values*
-> moved onto the entity as columns.
+> **A product's price — and availability — are typed columns, quoted verbatim.** `price`/`availability`
+> (and any other exact field) are concrete columns stored **verbatim**; the model quotes them only as
+> `{{product.nike_x.price}}` / `{{product.nike_x.availability}}`, resolved for the reply's language — never
+> a digit or stock claim it writes itself. **Language is a row** (`UNIQUE (organization_id, ref, lang)`);
+> a `*` row carries language-neutral values. Media still attach **polymorphically** as `ai_assets` rows
+> (`owner_kind='product'`, `owner_ref=<ref>`) — only *values* moved onto the entity as columns.
 
 ### xchats.ai_tariffs  (typed fact table — one row per (tariff, language))
 ```
@@ -409,11 +416,34 @@ UNIQUE (organization_id, ref, lang)
 > cross-tariff limit (e.g. an all-plans cashier cap) repeats per row, or becomes its own typed table if it
 > grows into a category.
 >
-> **Facts vs prose.** Products, tariffs and contacts are the **Facts lane** — exact values stored as
-> typed columns, code-substituted into replies. A `topic` body is the **Knowledge lane** — **pure prose**
-> the model writes and the grounding judge checks; it carries **no literal amounts and no fact tokens**
-> (14 Decision 3). Facts never live in a topic body; they are quoted only in a reply, as a
+> **Facts vs prose.** Products, tariffs, contacts and policies are the **Facts lane** — exact values
+> stored as typed columns, code-substituted into replies. A `topic` body is the **Knowledge lane** —
+> **pure prose** the model writes and the grounding judge checks; it carries **no literal amounts and no
+> fact tokens** (14 Decision 3). Facts never live in a topic body; they are quoted only in a reply, as a
 > `{{table.slug.field}}` token resolved from the typed tables at reply time.
+
+### xchats.ai_policies  (typed org commerce-policy facts — one singleton entity, `slug='main'`)
+```
+id                  uuid  PK
+organization_id     uuid  FK -> organizations
+slug                text  -- singleton 'main' — keeps the 3-part token grammar {{policy.main.<field>}}
+lang                text  -- 'ru' | 'kk' | '*'  — '*' = language-neutral
+delivery_cost       text  -- e.g. '1 500 ₸ по Алматы'
+delivery_time       text  -- e.g. '1–3 дня'
+free_delivery_from  text  -- e.g. '20 000 ₸'
+min_order           text  -- e.g. '5 000 ₸'
+prepayment          text  -- e.g. 'не требуется'
+installment         text  -- e.g. '0-0-3 при заказе от 50 000 ₸'
+return_period       text  -- e.g. '14 дней'
+warranty            text  -- e.g. '12 месяцев на технику'
+UNIQUE (organization_id, lang)
+```
+> **An exact structural clone of `ai_contacts`** — a singleton org-level entity, one row per language,
+> verbatim text columns, quoted only as `{{policy.main.<field>}}`. This is the concrete instance of the
+> "new category of org fact gets its own typed table" doctrine above: delivery cost/time, minimum order,
+> payment terms, and returns/warranty are a distinct commerce-policy category, not contact-support
+> scalars and not per-product/tariff facts, so they get their own table rather than being folded into
+> `ai_contacts` or repeated per product.
 
 ## Draft KB + playground staging — the `kbd_` group
 
@@ -425,7 +455,7 @@ UNIQUE (organization_id, ref, lang)
 ### xchats.kbd_draft  (the whole pending KB as one document; one row per org)
 ```
 organization_id  uuid  PK  FK -> organizations   -- one draft blob per org
-draft            jsonb      -- the pending KB: { config, topics[], assets[], tariffs[], products[], contacts[], deletes[] }
+draft            jsonb      -- the pending KB: { config, topics[], assets[], tariffs[], products[], contacts[], policies[], deletes[] }
 base_version     bigint     -- optimistic-concurrency counter; bumped on each save (stale write → 409)
 updated_at       timestamptz
 updated_by       uuid  FK -> users  NULL
@@ -575,7 +605,7 @@ UNIQUE (account_id, phone_jid)             on xchats.wa_contacts
 
 **1NF** — every column is atomic. The auto-response window is split into atomic
 `respond_window_start/end` (UTC; no composite). Repeating lists are their own tables
-(`organization_users`, `ai_topics/assets`, `ai_products`, `ai_tariffs`, `ai_contacts`, `assignment_events`) —
+(`organization_users`, `ai_topics/assets`, `ai_products`, `ai_tariffs`, `ai_contacts`, `ai_policies`, `assignment_events`) —
 no array/CSV columns, **except two deliberate jsonb documents**: `rp_suggestions.options` (the 1–3 reply
 variants as one atomic suggestion) and `kbd_draft.draft` (the whole pending KB as one working document —
 15 Decision 3). Both are document storage, not repeating groups — see denormalizations.
@@ -587,7 +617,7 @@ depend on the whole composite key (`joined_at`). Every other table has a single-
 **3NF** — no transitive dependencies. `organization_id` is stored where it is a **direct** fact — the
 identity tables (`organizations`, `organization_users`, `wa_accounts`), the config row
 (`ai_assistants`), `ai_audit_log`, and **every KB / draft / staging table** (`ai_topics`, `ai_assets`,
-`ai_tariffs`, `ai_products`, `ai_contacts`, `kbd_draft`, `kbd_materials`, `kbd_requests`), which now
+`ai_tariffs`, `ai_products`, `ai_contacts`, `ai_policies`, `kbd_draft`, `kbd_materials`, `kbd_requests`), which now
 carry a **direct `organization_id` FK** (the legacy `snapshot_id` indirection was retired — 15
 Decision 1; the org is each row's direct owner, not a transitive hop). It is **derived by join** only
 where a nearer parent already carries it: `wa_contacts` / `wa_chats` / `wa_messages` (via `account_id`)

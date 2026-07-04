@@ -118,7 +118,8 @@ func (s *Store) DeleteLiveTariff(ctx context.Context, orgID uuid.UUID, ref strin
 // PutLiveProduct upserts a product row directly into the live table.
 func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, in ProductInput) error {
 	return upsertProductRow(ctx, s.pool, orgID, domain.Product{
-		Ref: in.Ref, Lang: in.Lang, Name: in.Name, Price: in.Price, Description: in.Description, Category: in.Category,
+		Ref: in.Ref, Lang: in.Lang, Name: in.Name, Price: in.Price, Description: in.Description,
+		Category: in.Category, Availability: in.Availability,
 	})
 }
 
@@ -151,21 +152,89 @@ func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, p Contac
 	if p.CallbackTime != nil {
 		cur.CallbackTime = *p.CallbackTime
 	}
+	if p.WorkingHours != nil {
+		cur.WorkingHours = *p.WorkingHours
+	}
+	if p.Phone != nil {
+		cur.Phone = *p.Phone
+	}
+	if p.Website != nil {
+		cur.Website = *p.Website
+	}
+	if p.Instagram != nil {
+		cur.Instagram = *p.Instagram
+	}
 	return upsertContactRow(ctx, s.pool, orgID, domain.Contact{
 		Lang: cur.Lang, WhatsApp: cur.WhatsApp, Email: cur.Email, Address: cur.Address,
 		Legal: cur.Legal, CallbackTime: cur.CallbackTime,
+		WorkingHours: cur.WorkingHours, Phone: cur.Phone, Website: cur.Website, Instagram: cur.Instagram,
 	})
 }
 
 func (s *Store) currentLiveContact(ctx context.Context, orgID uuid.UUID, lang string) (DraftContact, error) {
 	var c DraftContact
-	err := s.pool.QueryRow(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time
+	err := s.pool.QueryRow(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time,
+		working_hours, phone, website, instagram
 		FROM xchats.ai_contacts WHERE organization_id = $1 AND lang = $2`, orgID, lang).
-		Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime)
+		Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime,
+			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftContact{Lang: lang}, nil
 	}
 	return c, err
+}
+
+// PatchLivePolicies edits the org's live commerce-policy row for a language,
+// starting from its current shape so an omitted field stays unchanged — an
+// exact clone of PatchLiveContacts.
+func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, p PolicyPatch) error {
+	lang := orDefault(p.Lang, "*")
+	cur, err := s.currentLivePolicy(ctx, orgID, lang)
+	if err != nil {
+		return err
+	}
+	if p.DeliveryCost != nil {
+		cur.DeliveryCost = *p.DeliveryCost
+	}
+	if p.DeliveryTime != nil {
+		cur.DeliveryTime = *p.DeliveryTime
+	}
+	if p.FreeDeliveryFrom != nil {
+		cur.FreeDeliveryFrom = *p.FreeDeliveryFrom
+	}
+	if p.MinOrder != nil {
+		cur.MinOrder = *p.MinOrder
+	}
+	if p.Prepayment != nil {
+		cur.Prepayment = *p.Prepayment
+	}
+	if p.Installment != nil {
+		cur.Installment = *p.Installment
+	}
+	if p.ReturnPeriod != nil {
+		cur.ReturnPeriod = *p.ReturnPeriod
+	}
+	if p.Warranty != nil {
+		cur.Warranty = *p.Warranty
+	}
+	return upsertPolicyRow(ctx, s.pool, orgID, domain.Policy{
+		Lang: cur.Lang, DeliveryCost: cur.DeliveryCost, DeliveryTime: cur.DeliveryTime,
+		FreeDeliveryFrom: cur.FreeDeliveryFrom, MinOrder: cur.MinOrder, Prepayment: cur.Prepayment,
+		Installment: cur.Installment, ReturnPeriod: cur.ReturnPeriod, Warranty: cur.Warranty,
+	})
+}
+
+func (s *Store) currentLivePolicy(ctx context.Context, orgID uuid.UUID, lang string) (DraftPolicy, error) {
+	var p DraftPolicy
+	err := s.pool.QueryRow(ctx, `SELECT lang, delivery_cost, delivery_time, free_delivery_from, min_order,
+		prepayment, installment, return_period, warranty
+		FROM xchats.ai_policies WHERE organization_id = $1 AND lang = $2`, orgID, lang).
+		Scan(&p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.FreeDeliveryFrom, &p.MinOrder,
+			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DraftPolicy{Lang: lang}, nil
+	}
+	return p, err
 }
 
 // PatchLiveConfig edits the org's live assistant config (only non-nil fields).

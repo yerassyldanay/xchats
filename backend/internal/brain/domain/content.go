@@ -54,6 +54,10 @@ type Asset struct {
 // contact token has the 3-part shape {{contact.support.<field>}}.
 const ContactSlug = "support"
 
+// PolicySlug is the singleton slug for the org commerce-policy entity, so every
+// policy token has the 3-part shape {{policy.main.<field>}}.
+const PolicySlug = "main"
+
 // Tariff is one ai_tariffs row (one language): a pricing plan whose exact numbers
 // (price / limit_text / fee) are verbatim typed columns.
 type Tariff struct {
@@ -62,12 +66,21 @@ type Tariff struct {
 
 // Product is one ai_products row (one language): a sellable item with a verbatim price.
 type Product struct {
-	Ref, Lang, Name, Price, Description, Category string
+	Ref, Lang, Name, Price, Description, Category, Availability string
 }
 
 // Contact is one ai_contacts row (one language): the org's support scalars.
 type Contact struct {
 	Lang, WhatsApp, Email, Address, Legal, CallbackTime string
+	WorkingHours, Phone, Website, Instagram             string
+}
+
+// Policy is one ai_policies row (one language): org commerce-policy scalars
+// (delivery/payment/returns terms) — a structural clone of Contact, quoted as
+// {{policy.main.<field>}}.
+type Policy struct {
+	Lang, DeliveryCost, DeliveryTime, FreeDeliveryFrom, MinOrder string
+	Prepayment, Installment, ReturnPeriod, Warranty              string
 }
 
 // Fact is one row of the prompt [F] catalog: the token the model must emit, a
@@ -94,16 +107,23 @@ func factKey(table, slug, field, lang string) string {
 // Field labels for the [F] catalog (the "meaning" column shown to the model).
 var (
 	tariffFieldLabel  = map[string]string{"price": "цена", "limit_text": "лимит", "fee": "комиссия"}
-	productFieldLabel = map[string]string{"price": "цена"}
+	productFieldLabel = map[string]string{"price": "цена", "availability": "наличие"}
 	contactFieldLabel = map[string]string{
 		"whatsapp": "WhatsApp", "email": "e-mail", "address": "адрес",
 		"legal": "реквизиты", "callback_time": "время обратного звонка",
+		"working_hours": "график работы", "phone": "телефон", "website": "сайт", "instagram": "Instagram",
+	}
+	policyFieldLabel = map[string]string{
+		"delivery_cost": "стоимость доставки", "delivery_time": "срок доставки",
+		"free_delivery_from": "бесплатная доставка от", "min_order": "минимальный заказ",
+		"prepayment": "предоплата", "installment": "рассрочка",
+		"return_period": "срок возврата", "warranty": "гарантия",
 	}
 )
 
 // NewFactBook indexes every column of the typed fact rows and builds the [F]
-// catalog entries (numeric/contact fields only — names stay prose in bodies).
-func NewFactBook(tariffs []Tariff, products []Product, contacts []Contact) FactBook {
+// catalog entries (numeric/contact/policy fields only — names stay prose in bodies).
+func NewFactBook(tariffs []Tariff, products []Product, contacts []Contact, policies []Policy) FactBook {
 	b := FactBook{index: map[string]string{}}
 	put := func(table, slug, field, lang, value string) {
 		if strings.TrimSpace(value) != "" {
@@ -131,6 +151,7 @@ func NewFactBook(tariffs []Tariff, products []Product, contacts []Contact) FactB
 	for _, p := range products {
 		put("product", p.Ref, "name", p.Lang, p.Name)
 		put("product", p.Ref, "price", p.Lang, p.Price)
+		put("product", p.Ref, "availability", p.Lang, p.Availability)
 	}
 	for _, c := range contacts {
 		put("contact", ContactSlug, "whatsapp", c.Lang, c.WhatsApp)
@@ -138,10 +159,25 @@ func NewFactBook(tariffs []Tariff, products []Product, contacts []Contact) FactB
 		put("contact", ContactSlug, "address", c.Lang, c.Address)
 		put("contact", ContactSlug, "legal", c.Lang, c.Legal)
 		put("contact", ContactSlug, "callback_time", c.Lang, c.CallbackTime)
+		put("contact", ContactSlug, "working_hours", c.Lang, c.WorkingHours)
+		put("contact", ContactSlug, "phone", c.Lang, c.Phone)
+		put("contact", ContactSlug, "website", c.Lang, c.Website)
+		put("contact", ContactSlug, "instagram", c.Lang, c.Instagram)
+	}
+	for _, p := range policies {
+		put("policy", PolicySlug, "delivery_cost", p.Lang, p.DeliveryCost)
+		put("policy", PolicySlug, "delivery_time", p.Lang, p.DeliveryTime)
+		put("policy", PolicySlug, "free_delivery_from", p.Lang, p.FreeDeliveryFrom)
+		put("policy", PolicySlug, "min_order", p.Lang, p.MinOrder)
+		put("policy", PolicySlug, "prepayment", p.Lang, p.Prepayment)
+		put("policy", PolicySlug, "installment", p.Lang, p.Installment)
+		put("policy", PolicySlug, "return_period", p.Lang, p.ReturnPeriod)
+		put("policy", PolicySlug, "warranty", p.Lang, p.Warranty)
 	}
 
-	// [F] entries in a stable order (tariffs → products → contacts), one per
-	// numeric/contact token. Names are excluded — the model writes them as prose.
+	// [F] entries in a stable order (tariffs → products → contacts → policies),
+	// one per numeric/contact/policy token. Names are excluded — the model
+	// writes them as prose.
 	seen := map[string]bool{}
 	once := func(ref string) bool {
 		if seen[ref] {
@@ -164,7 +200,10 @@ func NewFactBook(tariffs []Tariff, products []Product, contacts []Contact) FactB
 		if !once("product|"+p.Ref) {
 			continue
 		}
-		entry("product", p.Ref, "price", fmt.Sprintf("Товар «%s» — %s", p.Name, productFieldLabel["price"]))
+		name := p.Name
+		for _, f := range []string{"price", "availability"} {
+			entry("product", p.Ref, f, fmt.Sprintf("Товар «%s» — %s", name, productFieldLabel[f]))
+		}
 	}
 	seen = map[string]bool{}
 	for _, c := range contacts {
@@ -172,8 +211,20 @@ func NewFactBook(tariffs []Tariff, products []Product, contacts []Contact) FactB
 		if !once("contact") {
 			continue
 		}
-		for _, f := range []string{"whatsapp", "email", "address", "legal", "callback_time"} {
+		for _, f := range []string{"whatsapp", "email", "address", "legal", "callback_time",
+			"working_hours", "phone", "website", "instagram"} {
 			entry("contact", ContactSlug, f, "Контакты поддержки — "+contactFieldLabel[f])
+		}
+	}
+	seen = map[string]bool{}
+	for _, p := range policies {
+		_ = p
+		if !once("policy") {
+			continue
+		}
+		for _, f := range []string{"delivery_cost", "delivery_time", "free_delivery_from", "min_order",
+			"prepayment", "installment", "return_period", "warranty"} {
+			entry("policy", PolicySlug, f, "Условия — "+policyFieldLabel[f])
 		}
 	}
 	return b
@@ -205,6 +256,7 @@ type Snapshot struct {
 	Tariffs  []Tariff
 	Products []Product
 	Contacts []Contact
+	Policies []Policy
 	Facts    FactBook // derived from the typed slices for render + the [F] block
 	Loaded   time.Time
 }
@@ -221,8 +273,8 @@ func (c *Content) Get() *Snapshot { return c.snap.Load() }
 func (c *Content) Set(s *Snapshot) { c.snap.Store(s) }
 
 // tokenRE matches a 3-part fact token {{table.slug.field}} — table ∈
-// tariff|product|contact, slug a ref (hyphens allowed), field a column name.
-var tokenRE = regexp.MustCompile(`\{\{\s*(tariff|product|contact)\.([a-zA-Z0-9_-]+)\.([a-z_]+)\s*\}\}`)
+// tariff|product|contact|policy, slug a ref (hyphens allowed), field a column name.
+var tokenRE = regexp.MustCompile(`\{\{\s*(tariff|product|contact|policy)\.([a-zA-Z0-9_-]+)\.([a-z_]+)\s*\}\}`)
 
 // Render replaces every {{table.slug.field}} in text with its stored column value
 // for lang (fallback reply-lang → ru → '*'). It errors if any token is unresolved

@@ -19,11 +19,12 @@ const (
 )
 
 // SeedSnapshot returns the embedded "Demo Shop" knowledge base — a small online
-// shop assistant. Facts (tariff prices, product prices, support contacts) are
-// CONCRETE COLUMNS on typed rows (ai_tariffs / ai_products / ai_contacts), quoted
-// in replies only as {{table.slug.field}} tokens; topic bodies are PURE PROSE
-// (no digits, no tokens — 14 Decision 3). This is the in-memory ContentSource for
-// v1 and the boot-time fallback; the DB-backed snapshot loads the same shape.
+// shop assistant. Facts (tariff prices, product prices/availability, support
+// contacts, commerce policies) are CONCRETE COLUMNS on typed rows (ai_tariffs /
+// ai_products / ai_contacts / ai_policies), quoted in replies only as
+// {{table.slug.field}} tokens; topic bodies are PURE PROSE (no digits, no
+// tokens — 14 Decision 3). This is the in-memory ContentSource for v1 and the
+// boot-time fallback; the DB-backed snapshot loads the same shape.
 func SeedSnapshot() *domain.Snapshot {
 	tariffs := []domain.Tariff{
 		{Ref: "basic", Lang: "ru", Name: "Базовый", Price: "9 900 ₸", PricingType: "fixed",
@@ -35,13 +36,21 @@ func SeedSnapshot() *domain.Snapshot {
 	}
 	products := []domain.Product{
 		{Ref: "coffee-machine", Lang: "ru", Name: "Кофемашина DeLonghi", Price: "129 900 ₸",
-			Category: "Техника", Description: "Автоматическая кофемашина для дома."},
+			Category: "Техника", Description: "Автоматическая кофемашина для дома.", Availability: "В наличии"},
 		{Ref: "cookware-set", Lang: "ru", Name: "Набор посуды", Price: "24 900 ₸",
-			Category: "Кухня", Description: "Набор из 12 предметов."},
+			Category: "Кухня", Description: "Набор из 12 предметов.", Availability: "Под заказ, 3–5 дней"},
 	}
 	contacts := []domain.Contact{
 		{Lang: "*", WhatsApp: "+7 700 123 45 67", Email: "hello@demoshop.kz",
-			Address: "Алматы, ул. Абая, 10", CallbackTime: "в течение часа"},
+			Address: "Алматы, ул. Абая, 10", CallbackTime: "в течение часа",
+			WorkingHours: "Пн–Сб, 9:00–19:00", Phone: "+7 727 300 00 00",
+			Website: "demoshop.kz", Instagram: "@demoshop.kz"},
+	}
+	policies := []domain.Policy{
+		{Lang: "*", DeliveryCost: "1 500 ₸ по Алматы", DeliveryTime: "1–3 дня",
+			FreeDeliveryFrom: "20 000 ₸", MinOrder: "5 000 ₸", Prepayment: "не требуется",
+			Installment: "рассрочка 0-0-3 при заказе от 50 000 ₸", ReturnPeriod: "14 дней",
+			Warranty: "12 месяцев на технику"},
 	}
 
 	return &domain.Snapshot{
@@ -59,7 +68,8 @@ func SeedSnapshot() *domain.Snapshot {
 		Tariffs:  tariffs,
 		Products: products,
 		Contacts: contacts,
-		Facts:    domain.NewFactBook(tariffs, products, contacts),
+		Policies: policies,
+		Facts:    domain.NewFactBook(tariffs, products, contacts, policies),
 		// Topic bodies are PURE PROSE: names may appear, but exact prices/contacts
 		// never — the model quotes those as FACTS tokens when it drafts.
 		Topics: []domain.Topic{
@@ -77,9 +87,11 @@ func SeedSnapshot() *domain.Snapshot {
 					"Скажите, что ищете, и я назову цену и подберу вариант.",
 			},
 			{
-				Slug: "delivery", Language: "ru", Keywords: "доставка, доставить, сроки, когда привезут",
+				Slug: "delivery", Language: "ru", Keywords: "доставка, доставить, сроки, когда привезут, стоимость доставки, бесплатная доставка",
 				Title: "Доставка",
-				BodyMD: "Доставка занимает 1–3 дня. Стоимость зависит от адреса — уточню её при оформлении заказа.",
+				BodyMD: "Доставляем по городу и области; срок и стоимость зависят от адреса, а при заказе на " +
+					"крупную сумму доставка становится бесплатной. Если спрашивают про срок, стоимость или порог " +
+					"бесплатной доставки — называйте точные значения из FACTS, не оценивайте на глаз.",
 			},
 			{
 				Slug: "how_to_order", Language: "ru", Keywords: "как заказать, оформить, заказ, купить, оплата",

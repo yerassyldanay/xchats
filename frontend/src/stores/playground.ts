@@ -5,14 +5,18 @@ import { log } from '../lib/logfmt'
 import type { DraftView, KbMaterial } from '../types'
 
 // usePlayground backs the two KB pages — Конструктор (/playground) and Редактор
-// (/knowledge-base) — but they are now DELIBERATELY SEPARATE flows over the same
-// underlying KB, never mixed:
+// (/knowledge-base) — over the same underlying KB. WRITES stay DELIBERATELY
+// SEPARATE, never mixed:
 //   - `draft` (Конструктор): materials → builder → the pending kbd_draft blob,
 //     merged with live rows and flagged `draft: true`. Approve materializes it.
 //   - `live` (Редактор): the live ai_ tables only, via GET/POST/PATCH/DELETE
 //     /kb/* — every write there is immediately final, no draft step, and it
 //     never shows or touches pending Playground work.
-// Each page only ever touches its own slice below.
+// Конструктор additionally READS `live` (never writes it) — the draft view's
+// pending rows overlay/replace their live counterpart rather than listing both
+// (see kbstore.mergedView), so telling a brand-new draft entity from an edit to
+// an already-published one, and showing recent published activity alongside
+// pending changes, needs the live slice loaded too.
 export const usePlayground = defineStore('playground', {
   state: () => ({
     // --- draft slice (Конструктор) ------------------------------------------
@@ -44,6 +48,7 @@ export const usePlayground = defineStore('playground', {
         products: d?.products?.length ?? 0,
         tariffs: d?.tariffs?.length ?? 0,
         contacts: d?.contacts?.length ?? 0,
+        policies: d?.policies?.length ?? 0,
         assets: d?.assets?.length ?? 0,
         materials: d?.materials?.length ?? 0,
         requests: (d?.requests ?? []).filter((r) => r.state === 'pending').length,
@@ -56,7 +61,8 @@ export const usePlayground = defineStore('playground', {
       if (!d) return 0
       const p = (xs?: { draft: boolean }[]) => (xs ?? []).filter((x) => x.draft).length
       return (
-        p(d.topics) + p(d.assets) + p(d.tariffs) + p(d.products) + p(d.contacts) + (d.config?.draft ? 1 : 0)
+        p(d.topics) + p(d.assets) + p(d.tariffs) + p(d.products) + p(d.contacts) + p(d.policies) +
+        (d.config?.draft ? 1 : 0)
       )
     },
     openRequests(s) {
@@ -163,7 +169,7 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft products (typed facts: verbatim price column) ------------------
-    upsertProduct(input: { ref: string; lang?: string; name?: string; price?: string; description?: string; category?: string }) {
+    upsertProduct(input: { ref: string; lang?: string; name?: string; price?: string; description?: string; category?: string; availability?: string }) {
       return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/products', input, this.ifMatch())))
     },
     deleteProduct(ref: string) {
@@ -171,8 +177,19 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft contacts (the 'support' singleton — one PATCH per language row) -
-    patchContacts(patch: { lang?: string; whatsapp?: string; email?: string; address?: string; legal?: string; callback_time?: string }) {
+    patchContacts(patch: {
+      lang?: string; whatsapp?: string; email?: string; address?: string; legal?: string; callback_time?: string
+      working_hours?: string; phone?: string; website?: string; instagram?: string
+    }) {
       return this.write(async () => this.setDraft(await api.patch<DraftView>('/playground/draft/contacts', patch, this.ifMatch())))
+    },
+
+    // --- draft policies (the 'main' singleton — one PATCH per language row) ---
+    patchPolicies(patch: {
+      lang?: string; delivery_cost?: string; delivery_time?: string; free_delivery_from?: string; min_order?: string
+      prepayment?: string; installment?: string; return_period?: string; warranty?: string
+    }) {
+      return this.write(async () => this.setDraft(await api.patch<DraftView>('/playground/draft/policies', patch, this.ifMatch())))
     },
 
     // --- draft config -----------------------------------------------------------
@@ -228,13 +245,14 @@ export const usePlayground = defineStore('playground', {
 
     // --- approve ("Принять всё" / "Принять") ------------------------
     // approve(): the WHOLE pending draft. approveEntity(kind,key): one row —
-    // kind ∈ topics|assets|tariffs|products|contacts; key = the row's natural id
-    // (slug for topics, ref for assets/tariffs/products, lang for contacts).
+    // kind ∈ topics|assets|tariffs|products|contacts|policies; key = the row's
+    // natural id (slug for topics, ref for assets/tariffs/products, lang for
+    // contacts/policies).
     async approve(): Promise<boolean> {
       return this.approveWith('/playground/draft/approve')
     },
     async approveEntity(
-      kind: 'topics' | 'assets' | 'tariffs' | 'products' | 'contacts',
+      kind: 'topics' | 'assets' | 'tariffs' | 'products' | 'contacts' | 'policies',
       key: string
     ): Promise<boolean> {
       return this.approveWith(`/playground/draft/approve/${kind}/${encodeURIComponent(key)}`)
@@ -335,7 +353,7 @@ export const usePlayground = defineStore('playground', {
         this.live = await api.del<DraftView>('/kb/tariffs/' + encodeURIComponent(ref))
       })
     },
-    liveUpsertProduct(input: { ref: string; lang?: string; name?: string; price?: string; description?: string; category?: string }) {
+    liveUpsertProduct(input: { ref: string; lang?: string; name?: string; price?: string; description?: string; category?: string; availability?: string }) {
       return this.writeLive(async () => {
         this.live = await api.post<DraftView>('/kb/products', input)
       })
@@ -345,9 +363,20 @@ export const usePlayground = defineStore('playground', {
         this.live = await api.del<DraftView>('/kb/products/' + encodeURIComponent(ref))
       })
     },
-    livePatchContacts(patch: { lang?: string; whatsapp?: string; email?: string; address?: string; legal?: string; callback_time?: string }) {
+    livePatchContacts(patch: {
+      lang?: string; whatsapp?: string; email?: string; address?: string; legal?: string; callback_time?: string
+      working_hours?: string; phone?: string; website?: string; instagram?: string
+    }) {
       return this.writeLive(async () => {
         this.live = await api.patch<DraftView>('/kb/contacts', patch)
+      })
+    },
+    livePatchPolicies(patch: {
+      lang?: string; delivery_cost?: string; delivery_time?: string; free_delivery_from?: string; min_order?: string
+      prepayment?: string; installment?: string; return_period?: string; warranty?: string
+    }) {
+      return this.writeLive(async () => {
+        this.live = await api.patch<DraftView>('/kb/policies', patch)
       })
     },
     livePatchConfig(patch: { persona?: string; mission?: string; guardrails?: string; language_policy?: string; reply_max_words?: number }) {

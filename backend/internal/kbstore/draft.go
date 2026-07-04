@@ -70,13 +70,14 @@ type DraftTariff struct {
 }
 
 type DraftProduct struct {
-	Ref         string `json:"ref"`
-	Lang        string `json:"lang"`
-	Name        string `json:"name"`
-	Price       string `json:"price"`
-	Description string `json:"description"`
-	Category    string `json:"category"`
-	Provenance  string `json:"provenance,omitempty"`
+	Ref          string `json:"ref"`
+	Lang         string `json:"lang"`
+	Name         string `json:"name"`
+	Price        string `json:"price"`
+	Description  string `json:"description"`
+	Category     string `json:"category"`
+	Availability string `json:"availability"`
+	Provenance   string `json:"provenance,omitempty"`
 }
 
 type DraftContact struct {
@@ -86,13 +87,32 @@ type DraftContact struct {
 	Address      string `json:"address"`
 	Legal        string `json:"legal"`
 	CallbackTime string `json:"callback_time"`
+	WorkingHours string `json:"working_hours"`
+	Phone        string `json:"phone"`
+	Website      string `json:"website"`
+	Instagram    string `json:"instagram"`
 	Provenance   string `json:"provenance,omitempty"`
 }
 
+// DraftPolicy is a pending ai_policies entry — a structural clone of
+// DraftContact (singleton slug 'main', keyed by lang).
+type DraftPolicy struct {
+	Lang             string `json:"lang"`
+	DeliveryCost     string `json:"delivery_cost"`
+	DeliveryTime     string `json:"delivery_time"`
+	FreeDeliveryFrom string `json:"free_delivery_from"`
+	MinOrder         string `json:"min_order"`
+	Prepayment       string `json:"prepayment"`
+	Installment      string `json:"installment"`
+	ReturnPeriod     string `json:"return_period"`
+	Warranty         string `json:"warranty"`
+	Provenance       string `json:"provenance,omitempty"`
+}
+
 // DraftDelete marks a live entity for removal at approve. Key is the entity's
-// natural key: topic slug, asset ref, tariff/product ref, or contact lang.
+// natural key: topic slug, asset ref, tariff/product ref, contact/policy lang.
 type DraftDelete struct {
-	Kind string `json:"kind"` // 'topic'|'asset'|'tariff'|'product'|'contact'
+	Kind string `json:"kind"` // 'topic'|'asset'|'tariff'|'product'|'contact'|'policy'
 	Key  string `json:"key"`
 }
 
@@ -104,6 +124,7 @@ type DraftBlob struct {
 	Tariffs  []DraftTariff    `json:"tariffs"`
 	Products []DraftProduct   `json:"products"`
 	Contacts []DraftContact   `json:"contacts"`
+	Policies []DraftPolicy    `json:"policies"`
 	Deletes  []DraftDelete    `json:"deletes"`
 }
 
@@ -208,6 +229,28 @@ func (b *DraftBlob) removeContact(lang string) {
 		}
 	}
 	b.Contacts = out
+}
+
+// upsertPolicy / removePolicy — exact clone of upsertContact/removeContact,
+// keyed by lang (ai_policies is a singleton table like ai_contacts).
+func (b *DraftBlob) upsertPolicy(p DraftPolicy) {
+	for i := range b.Policies {
+		if b.Policies[i].Lang == p.Lang {
+			b.Policies[i] = p
+			return
+		}
+	}
+	b.Policies = append(b.Policies, p)
+}
+
+func (b *DraftBlob) removePolicy(lang string) {
+	out := b.Policies[:0]
+	for _, p := range b.Policies {
+		if p.Lang != lang {
+			out = append(out, p)
+		}
+	}
+	b.Policies = out
 }
 
 func (b *DraftBlob) addDelete(kind, key string) {
@@ -385,16 +428,17 @@ type TariffRow struct {
 }
 
 type ProductRow struct {
-	ID          string    `json:"id"`
-	Ref         string    `json:"ref"`
-	Lang        string    `json:"lang"`
-	Name        string    `json:"name"`
-	Price       string    `json:"price"`
-	Description string    `json:"description"`
-	Category    string    `json:"category"`
-	Draft       bool      `json:"draft"`
-	Provenance  string    `json:"provenance,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	Ref          string    `json:"ref"`
+	Lang         string    `json:"lang"`
+	Name         string    `json:"name"`
+	Price        string    `json:"price"`
+	Description  string    `json:"description"`
+	Category     string    `json:"category"`
+	Availability string    `json:"availability"`
+	Draft        bool      `json:"draft"`
+	Provenance   string    `json:"provenance,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type ContactRow struct {
@@ -406,9 +450,32 @@ type ContactRow struct {
 	Address      string    `json:"address"`
 	Legal        string    `json:"legal"`
 	CallbackTime string    `json:"callback_time"`
+	WorkingHours string    `json:"working_hours"`
+	Phone        string    `json:"phone"`
+	Website      string    `json:"website"`
+	Instagram    string    `json:"instagram"`
 	Draft        bool      `json:"draft"`
 	Provenance   string    `json:"provenance,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// PolicyRow is the editor-facing ai_policies row — a structural clone of
+// ContactRow (ID = lang, Slug = the singleton domain.PolicySlug).
+type PolicyRow struct {
+	ID               string    `json:"id"`
+	Slug             string    `json:"slug"`
+	Lang             string    `json:"lang"`
+	DeliveryCost     string    `json:"delivery_cost"`
+	DeliveryTime     string    `json:"delivery_time"`
+	FreeDeliveryFrom string    `json:"free_delivery_from"`
+	MinOrder         string    `json:"min_order"`
+	Prepayment       string    `json:"prepayment"`
+	Installment      string    `json:"installment"`
+	ReturnPeriod     string    `json:"return_period"`
+	Warranty         string    `json:"warranty"`
+	Draft            bool      `json:"draft"`
+	Provenance       string    `json:"provenance,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // DraftView is the whole working KB for the editor + builder: live rows merged
@@ -420,6 +487,7 @@ type DraftView struct {
 	Tariffs   []TariffRow  `json:"tariffs"`
 	Products  []ProductRow `json:"products"`
 	Contacts  []ContactRow `json:"contacts"`
+	Policies  []PolicyRow  `json:"policies"`
 	Materials []Material   `json:"materials"`
 	Requests  []Request    `json:"requests"`
 }
@@ -610,14 +678,14 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// products
 	productIdx := map[string]int{}
-	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category, updated_at
+	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category, availability, updated_at
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for prows.Next() {
 		var p ProductRow
-		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category, &p.UpdatedAt); err != nil {
+		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category, &p.Availability, &p.UpdatedAt); err != nil {
 			prows.Close()
 			return nil, err
 		}
@@ -631,7 +699,8 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	}
 	for _, bp := range blob.Products {
 		row := ProductRow{ID: bp.Ref, Ref: bp.Ref, Lang: bp.Lang, Name: bp.Name, Price: bp.Price,
-			Description: bp.Description, Category: bp.Category, Draft: true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
+			Description: bp.Description, Category: bp.Category, Availability: bp.Availability,
+			Draft: true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
 		k := refLangKey(bp.Ref, bp.Lang)
 		if i, ok := productIdx[k]; ok {
 			v.Products[i] = row
@@ -650,14 +719,16 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// contacts
 	contactIdx := map[string]int{}
-	crows, err := s.pool.Query(ctx, `SELECT slug, lang, whatsapp, email, address, legal, callback_time, updated_at
+	crows, err := s.pool.Query(ctx, `SELECT slug, lang, whatsapp, email, address, legal, callback_time,
+		working_hours, phone, website, instagram, updated_at
 		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for crows.Next() {
 		var c ContactRow
-		if err := crows.Scan(&c.Slug, &c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime, &c.UpdatedAt); err != nil {
+		if err := crows.Scan(&c.Slug, &c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime,
+			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.UpdatedAt); err != nil {
 			crows.Close()
 			return nil, err
 		}
@@ -671,7 +742,9 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	}
 	for _, bc := range blob.Contacts {
 		row := ContactRow{ID: bc.Lang, Slug: domain.ContactSlug, Lang: bc.Lang, WhatsApp: bc.WhatsApp, Email: bc.Email,
-			Address: bc.Address, Legal: bc.Legal, CallbackTime: bc.CallbackTime, Draft: true, Provenance: bc.Provenance, UpdatedAt: updatedAt}
+			Address: bc.Address, Legal: bc.Legal, CallbackTime: bc.CallbackTime,
+			WorkingHours: bc.WorkingHours, Phone: bc.Phone, Website: bc.Website, Instagram: bc.Instagram,
+			Draft: true, Provenance: bc.Provenance, UpdatedAt: updatedAt}
 		if i, ok := contactIdx[bc.Lang]; ok {
 			v.Contacts[i] = row
 		} else {
@@ -686,6 +759,50 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		}
 	}
 	v.Contacts = kc
+
+	// policies — an exact clone of the contacts section above (singleton table
+	// keyed by lang, slug domain.PolicySlug).
+	policyIdx := map[string]int{}
+	polrows, err := s.pool.Query(ctx, `SELECT slug, lang, delivery_cost, delivery_time, free_delivery_from, min_order,
+		prepayment, installment, return_period, warranty, updated_at
+		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for polrows.Next() {
+		var p PolicyRow
+		if err := polrows.Scan(&p.Slug, &p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.FreeDeliveryFrom, &p.MinOrder,
+			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty, &p.UpdatedAt); err != nil {
+			polrows.Close()
+			return nil, err
+		}
+		p.ID = p.Lang
+		v.Policies = append(v.Policies, p)
+		policyIdx[p.Lang] = len(v.Policies) - 1
+	}
+	polrows.Close()
+	if err := polrows.Err(); err != nil {
+		return nil, err
+	}
+	for _, bp := range blob.Policies {
+		row := PolicyRow{ID: bp.Lang, Slug: domain.PolicySlug, Lang: bp.Lang, DeliveryCost: bp.DeliveryCost,
+			DeliveryTime: bp.DeliveryTime, FreeDeliveryFrom: bp.FreeDeliveryFrom, MinOrder: bp.MinOrder,
+			Prepayment: bp.Prepayment, Installment: bp.Installment, ReturnPeriod: bp.ReturnPeriod, Warranty: bp.Warranty,
+			Draft: true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
+		if i, ok := policyIdx[bp.Lang]; ok {
+			v.Policies[i] = row
+		} else {
+			v.Policies = append(v.Policies, row)
+			policyIdx[bp.Lang] = len(v.Policies) - 1
+		}
+	}
+	kpol := v.Policies[:0]
+	for _, p := range v.Policies {
+		if !deleted["policy:"+p.Lang] {
+			kpol = append(kpol, p)
+		}
+	}
+	v.Policies = kpol
 
 	// Guarantee non-nil slices: every collection must serialize as a JSON array
 	// ([]), never null. A nil slice (empty table + empty blob) marshals to null,
@@ -704,6 +821,9 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	}
 	if v.Contacts == nil {
 		v.Contacts = []ContactRow{}
+	}
+	if v.Policies == nil {
+		v.Policies = []PolicyRow{}
 	}
 	return v, nil
 }
@@ -897,8 +1017,8 @@ func (s *Store) DeleteTariff(ctx context.Context, orgID uuid.UUID, ref string) e
 
 // ProductInput is an upsert payload for a draft product (one language row).
 type ProductInput struct {
-	Ref, Lang, Name, Price, Description, Category string
-	Provenance                                    string
+	Ref, Lang, Name, Price, Description, Category, Availability string
+	Provenance                                                  string
 }
 
 // UpsertProduct stages a product create/update in the draft blob, by (ref, lang).
@@ -906,7 +1026,8 @@ func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, in ProductIn
 	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
 		b.upsertProduct(DraftProduct{
 			Ref: in.Ref, Lang: orDefault(in.Lang, "ru"), Name: in.Name, Price: in.Price,
-			Description: in.Description, Category: in.Category, Provenance: orDefault(in.Provenance, "{}"),
+			Description: in.Description, Category: in.Category, Availability: in.Availability,
+			Provenance: orDefault(in.Provenance, "{}"),
 		})
 		return nil
 	})
@@ -929,6 +1050,10 @@ type ContactPatch struct {
 	Address      *string
 	Legal        *string
 	CallbackTime *string
+	WorkingHours *string
+	Phone        *string
+	Website      *string
+	Instagram    *string
 	Provenance   string
 }
 
@@ -956,8 +1081,75 @@ func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, p ContactPat
 		if p.CallbackTime != nil {
 			cur.CallbackTime = *p.CallbackTime
 		}
+		if p.WorkingHours != nil {
+			cur.WorkingHours = *p.WorkingHours
+		}
+		if p.Phone != nil {
+			cur.Phone = *p.Phone
+		}
+		if p.Website != nil {
+			cur.Website = *p.Website
+		}
+		if p.Instagram != nil {
+			cur.Instagram = *p.Instagram
+		}
 		cur.Provenance = orDefault(p.Provenance, orDefault(cur.Provenance, "{}"))
 		b.upsertContact(cur)
+		return nil
+	})
+}
+
+// PolicyPatch carries optional commerce-policy edits for one language row (nil
+// = leave) — a structural clone of ContactPatch.
+type PolicyPatch struct {
+	Lang             string // which row; "" → '*'
+	DeliveryCost     *string
+	DeliveryTime     *string
+	FreeDeliveryFrom *string
+	MinOrder         *string
+	Prepayment       *string
+	Installment      *string
+	ReturnPeriod     *string
+	Warranty         *string
+	Provenance       string
+}
+
+// PatchPolicies stages an edit to the org commerce-policy row for a language,
+// starting from its current merged shape so omitted fields stay unchanged — an
+// exact clone of PatchContacts.
+func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, p PolicyPatch) error {
+	lang := orDefault(p.Lang, "*")
+	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
+		cur, err := s.currentPolicy(ctx, orgID, lang, b)
+		if err != nil {
+			return err
+		}
+		if p.DeliveryCost != nil {
+			cur.DeliveryCost = *p.DeliveryCost
+		}
+		if p.DeliveryTime != nil {
+			cur.DeliveryTime = *p.DeliveryTime
+		}
+		if p.FreeDeliveryFrom != nil {
+			cur.FreeDeliveryFrom = *p.FreeDeliveryFrom
+		}
+		if p.MinOrder != nil {
+			cur.MinOrder = *p.MinOrder
+		}
+		if p.Prepayment != nil {
+			cur.Prepayment = *p.Prepayment
+		}
+		if p.Installment != nil {
+			cur.Installment = *p.Installment
+		}
+		if p.ReturnPeriod != nil {
+			cur.ReturnPeriod = *p.ReturnPeriod
+		}
+		if p.Warranty != nil {
+			cur.Warranty = *p.Warranty
+		}
+		cur.Provenance = orDefault(p.Provenance, orDefault(cur.Provenance, "{}"))
+		b.upsertPolicy(cur)
 		return nil
 	})
 }
@@ -1001,6 +1193,12 @@ func (s *Store) SetFactField(ctx context.Context, orgID uuid.UUID, table, slug, 
 			return ErrUnknownKind
 		}
 		return s.PatchContacts(ctx, orgID, p)
+	case "policy":
+		p := PolicyPatch{Lang: lang, Provenance: prov}
+		if !setPolicyPatchField(&p, field, value) {
+			return ErrUnknownKind
+		}
+		return s.PatchPolicies(ctx, orgID, p)
 	}
 	return ErrUnknownKind
 }
@@ -1033,6 +1231,8 @@ func setProductField(p *DraftProduct, field, value string) bool {
 		p.Description = value
 	case "category":
 		p.Category = value
+	case "availability":
+		p.Availability = value
 	default:
 		return false
 	}
@@ -1051,6 +1251,38 @@ func setContactPatchField(p *ContactPatch, field, value string) bool {
 		p.Legal = &value
 	case "callback_time":
 		p.CallbackTime = &value
+	case "working_hours":
+		p.WorkingHours = &value
+	case "phone":
+		p.Phone = &value
+	case "website":
+		p.Website = &value
+	case "instagram":
+		p.Instagram = &value
+	default:
+		return false
+	}
+	return true
+}
+
+func setPolicyPatchField(p *PolicyPatch, field, value string) bool {
+	switch field {
+	case "delivery_cost":
+		p.DeliveryCost = &value
+	case "delivery_time":
+		p.DeliveryTime = &value
+	case "free_delivery_from":
+		p.FreeDeliveryFrom = &value
+	case "min_order":
+		p.MinOrder = &value
+	case "prepayment":
+		p.Prepayment = &value
+	case "installment":
+		p.Installment = &value
+	case "return_period":
+		p.ReturnPeriod = &value
+	case "warranty":
+		p.Warranty = &value
 	default:
 		return false
 	}
@@ -1082,9 +1314,9 @@ func (s *Store) currentProduct(ctx context.Context, orgID uuid.UUID, ref, lang s
 		}
 	}
 	var p DraftProduct
-	err := s.pool.QueryRow(ctx, `SELECT ref, lang, name, price, description, category
+	err := s.pool.QueryRow(ctx, `SELECT ref, lang, name, price, description, category, availability
 		FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2 AND lang=$3`, orgID, ref, lang).
-		Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category)
+		Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category, &p.Availability)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftProduct{Ref: ref, Lang: lang}, nil
 	}
@@ -1100,13 +1332,35 @@ func (s *Store) currentContact(ctx context.Context, orgID uuid.UUID, lang string
 		}
 	}
 	var c DraftContact
-	err := s.pool.QueryRow(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time
+	err := s.pool.QueryRow(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time,
+		working_hours, phone, website, instagram
 		FROM xchats.ai_contacts WHERE organization_id = $1 AND lang = $2`, orgID, lang).
-		Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime)
+		Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime,
+			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftContact{Lang: lang}, nil
 	}
 	return c, err
+}
+
+// currentPolicy resolves the merged current commerce-policy row for a
+// language — an exact clone of currentContact.
+func (s *Store) currentPolicy(ctx context.Context, orgID uuid.UUID, lang string, b *DraftBlob) (DraftPolicy, error) {
+	for _, p := range b.Policies {
+		if p.Lang == lang {
+			return p, nil
+		}
+	}
+	var p DraftPolicy
+	err := s.pool.QueryRow(ctx, `SELECT lang, delivery_cost, delivery_time, free_delivery_from, min_order,
+		prepayment, installment, return_period, warranty
+		FROM xchats.ai_policies WHERE organization_id = $1 AND lang = $2`, orgID, lang).
+		Scan(&p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.FreeDeliveryFrom, &p.MinOrder,
+			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DraftPolicy{Lang: lang}, nil
+	}
+	return p, err
 }
 
 func orDefault(v, def string) string {
@@ -1124,8 +1378,8 @@ func orDefault(v, def string) string {
 // ApproveSelector picks what to materialize: a zero-value selector (Kind=="")
 // selects the WHOLE draft; a non-empty kind+key picks one entity.
 type ApproveSelector struct {
-	Kind string // "" | "topics" | "assets" | "tariffs" | "products" | "contacts"
-	Key  string // slug | ref | ref | ref | lang
+	Kind string // "" | "topics" | "assets" | "tariffs" | "products" | "contacts" | "policies"
+	Key  string // slug | ref | ref | ref | lang | lang
 }
 
 type approveSet struct {
@@ -1134,11 +1388,12 @@ type approveSet struct {
 	tariffs  []DraftTariff
 	products []DraftProduct
 	contacts []DraftContact
+	policies []DraftPolicy
 	deletes  []DraftDelete
 }
 
 func (a approveSet) empty() bool {
-	return len(a.topics)+len(a.assets)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.deletes) == 0
+	return len(a.topics)+len(a.assets)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.deletes) == 0
 }
 
 // Approve validates the resulting live set against the deterministic gate, then
@@ -1221,6 +1476,16 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 	for _, c := range set.contacts {
 		if err := upsertContactRow(ctx, tx, orgID, domain.Contact{
 			Lang: c.Lang, WhatsApp: c.WhatsApp, Email: c.Email, Address: c.Address, Legal: c.Legal, CallbackTime: c.CallbackTime,
+			WorkingHours: c.WorkingHours, Phone: c.Phone, Website: c.Website, Instagram: c.Instagram,
+		}); err != nil {
+			return err
+		}
+	}
+	for _, p := range set.policies {
+		if err := upsertPolicyRow(ctx, tx, orgID, domain.Policy{
+			Lang: p.Lang, DeliveryCost: p.DeliveryCost, DeliveryTime: p.DeliveryTime, FreeDeliveryFrom: p.FreeDeliveryFrom,
+			MinOrder: p.MinOrder, Prepayment: p.Prepayment, Installment: p.Installment,
+			ReturnPeriod: p.ReturnPeriod, Warranty: p.Warranty,
 		}); err != nil {
 			return err
 		}
@@ -1270,6 +1535,9 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 		for _, c := range set.contacts {
 			b.removeContact(c.Lang)
 		}
+		for _, p := range set.policies {
+			b.removePolicy(p.Lang)
+		}
 		for _, d := range set.deletes {
 			b.removeDelete(d.Kind, d.Key)
 		}
@@ -1294,6 +1562,8 @@ func applyDelete(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, d DraftDelete)
 		q = `DELETE FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2`
 	case "contact":
 		q = `DELETE FROM xchats.ai_contacts WHERE organization_id=$1 AND lang=$2`
+	case "policy":
+		q = `DELETE FROM xchats.ai_policies WHERE organization_id=$1 AND lang=$2`
 	default:
 		return nil
 	}
@@ -1305,15 +1575,15 @@ func approveNote(sel ApproveSelector, set approveSet) string {
 	if sel.Kind != "" {
 		return fmt.Sprintf("approved %s %s", strings.TrimSuffix(sel.Kind, "s"), sel.Key)
 	}
-	return fmt.Sprintf("approved %d topic(s), %d asset(s), %d tariff(s), %d product(s), %d contact(s), %d deletion(s)",
-		len(set.topics), len(set.assets), len(set.tariffs), len(set.products), len(set.contacts), len(set.deletes))
+	return fmt.Sprintf("approved %d topic(s), %d asset(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d deletion(s)",
+		len(set.topics), len(set.assets), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.deletes))
 }
 
 // selectApproved picks the blob entries an ApproveSelector targets. Deletes are
-// keyed by entity kind (singular): topic|asset|tariff|product|contact.
+// keyed by entity kind (singular): topic|asset|tariff|product|contact|policy.
 func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	if sel.Kind == "" {
-		return approveSet{b.Topics, b.Assets, b.Tariffs, b.Products, b.Contacts, b.Deletes}
+		return approveSet{b.Topics, b.Assets, b.Tariffs, b.Products, b.Contacts, b.Policies, b.Deletes}
 	}
 	var set approveSet
 	singular := strings.TrimSuffix(sel.Kind, "s")
@@ -1351,6 +1621,12 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 		for _, c := range b.Contacts {
 			if c.Lang == sel.Key {
 				set.contacts = append(set.contacts, c)
+			}
+		}
+	case "policies":
+		for _, p := range b.Policies {
+			if p.Lang == sel.Key {
+				set.policies = append(set.policies, p)
 			}
 		}
 	}

@@ -204,16 +204,17 @@ func TestDraft_CollectionsNeverNull(t *testing.T) {
 		t.Fatalf("draft: %v", err)
 	}
 	if view.Topics == nil || view.Assets == nil || view.Tariffs == nil ||
-		view.Products == nil || view.Contacts == nil || view.Materials == nil || view.Requests == nil {
-		t.Fatalf("a collection is nil: topics=%v assets=%v tariffs=%v products=%v contacts=%v materials=%v requests=%v",
+		view.Products == nil || view.Contacts == nil || view.Policies == nil ||
+		view.Materials == nil || view.Requests == nil {
+		t.Fatalf("a collection is nil: topics=%v assets=%v tariffs=%v products=%v contacts=%v policies=%v materials=%v requests=%v",
 			view.Topics == nil, view.Assets == nil, view.Tariffs == nil, view.Products == nil,
-			view.Contacts == nil, view.Materials == nil, view.Requests == nil)
+			view.Contacts == nil, view.Policies == nil, view.Materials == nil, view.Requests == nil)
 	}
 	blob, err := json.Marshal(view)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	for _, k := range []string{"topics", "assets", "tariffs", "products", "contacts", "materials", "requests"} {
+	for _, k := range []string{"topics", "assets", "tariffs", "products", "contacts", "policies", "materials", "requests"} {
 		if strings.Contains(string(blob), `"`+k+`":null`) {
 			t.Fatalf("collection %q serialized as null (must be []): %s", k, blob)
 		}

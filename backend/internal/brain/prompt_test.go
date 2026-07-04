@@ -14,7 +14,7 @@ func testSnapshot() *domain.Snapshot {
 	return &domain.Snapshot{
 		Config:  domain.AssistantConfig{Persona: "p", Guardrails: "g"},
 		Tariffs: tariffs,
-		Facts:   domain.NewFactBook(tariffs, nil, nil),
+		Facts:   domain.NewFactBook(tariffs, nil, nil, nil),
 		Topics:  []domain.Topic{{Slug: "pricing", Language: "ru", BodyMD: "Наш стандартный тариф покрывает основные нужды."}},
 		Assets:  []domain.Asset{{Ref: "pricing_card", Kind: "image", URL: "/media/p.png"}},
 	}

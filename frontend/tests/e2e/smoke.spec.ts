@@ -40,4 +40,6 @@ test('Конструктор: sending text builds a draft topic on the same page
   // the builder turn lands as a pending draft right on this page
   await expect(page.getByText(/Черновик \(\d+\)/)).toBeVisible()
   await expect(page.getByText('Темы', { exact: true })).toBeVisible()
+  // a topic with no live counterpart yet is flagged «Новый» in the draft feed
+  await expect(page.getByText('Новый', { exact: true })).toBeVisible()
 })

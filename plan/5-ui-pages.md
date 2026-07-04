@@ -303,17 +303,19 @@ turn, and the resulting **draft** is reviewed and accepted **right here** — no
 **separate, live-only** page (§6) that never shows or shares this draft — the two flows do not mix.
 
 ```
-┌────────────────────────────────────────────────┐
-│ Конструктор базы знаний                          │
-│ [ drop zone: перетащите файлы / выбрать файлы ]  │
-│ staged file cards: превью + комментарий + ✕      │
-│ [ composer: текст/ссылка …            ] [→]      │
-│ Обработка: материалы, ещё не встроенные в черновик│
-│ Вопросы ИИ: confirm_fact / describe_media         │
-│ Черновик (N)          [Отклонить всё][Принять всё]│
-│   Темы / Товары / Тарифы / Медиа / Контакты       │
-│   — только draft:true, editable inline —          │
-└────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┬──────────────────┐
+│ Конструктор базы знаний                          │ Последние        │
+│ [ drop zone: перетащите файлы / выбрать файлы ]  │ изменения        │
+│ staged file cards: превью + комментарий + ✕      │                  │
+│ [ composer: текст/ссылка …            ] [→]      │ ЧЕРНОВИК         │
+│ Обработка: материалы, ещё не встроенные в черновик│  • Тема · … 01:29│
+│ Вопросы ИИ: confirm_fact / describe_media         │  • Медиа · … 01:29│
+│ Черновик (N)          [Отклонить всё][Принять всё]│                  │
+│   [Обзор] [Темы 2] [Товары] [Тарифы] [Медиа 1]…   │ ОПУБЛИКОВАНО     │
+│   — только draft:true, editable inline, each      │  • Тема · … 01:12│
+│     row tagged «Новый»/«Изменён» —                │  • Тариф · …     │
+│                                                    │ [Посмотреть всё] │
+└────────────────────────────────────────────────┴──────────────────┘
 ```
 
 - **Composer** (the only intake): a drop zone + «Выбрать файлы» + a paperclip on the text box — all three
@@ -327,21 +329,39 @@ turn, and the resulting **draft** is reviewed and accepted **right here** — no
   (`pending`/`extracting` → «Обрабатывается…», `ready` → «Готово к сборке», `needs_human` → «Нужно
   описание», `failed` → «Ошибка»); hidden when empty.
 - **Вопросы ИИ** — `confirm_fact`/`describe_media` popup cards, directly above the draft they block.
-- **Черновик** — everything pending (`draft:true`), grouped Темы/Товары/Тарифы/Медиа/Контакты, each row
-  **editable inline** with its own **Сохранить** (save the draft edit) / **Принять** (approve just this
-  row) / **Отклонить** (discard just this row); the section header carries **«Принять всё»** / **«Отклонить
-  всё»** for the whole draft. Empty → "Черновик пуст — добавьте материалы выше."
+- **Черновик** — everything pending (`draft:true`), behind a **tab strip** — **Обзор** (all kinds mixed in
+  one feed, no per-kind headers) plus one tab per non-empty kind (**Темы / Товары / Тарифы /
+  Медиа-ресурсы / Контакты / Политики**, each carrying a count badge); a kind's tab disappears once its
+  last pending row is accepted/rejected (falls back to Обзор). Every row stays **editable inline** exactly as before —
+  its own **Сохранить** / **Принять** / **Отклонить** — this redesign only changes how rows are grouped and
+  labeled, never the edit affordances. Each row carries a small kind tag (icon + «Тема»/«Товар»/…) so its
+  type reads at a glance once Обзор removes the section headers, plus a **«Новый» / «Изменён»** badge:
+  «Новый» when no live row shares its natural key (slug/ref/lang) yet, «Изменён» when it's a pending edit
+  to an already-published entity. The section header keeps **«Принять всё»** / **«Отклонить всё»** for the
+  whole draft. Empty → "Черновик пуст — добавьте материалы выше."
+  - *Ordering caveat:* every pending row shares one `updated_at` (the whole draft blob's timestamp — there
+    is no per-row edit time), so Обзор cannot do a true recency sort across kinds; it lists kinds in a
+    fixed order, each kind's own rows newest-added-first. Good enough to read as "one feed," not a
+    verified chronology.
+- **Последние изменения** (new right rail, `xl:` breakpoint+) — activity alongside the draft, split
+  **ЧЕРНОВИК** (the same pending rows above, mirrored as a compact log) over **ОПУБЛИКОВАНО** (recent live
+  rows — the same list `/knowledge-base`'s own rail already shows, §6). Capped ~6 per bucket; **«Посмотреть
+  все изменения»** just lifts the cap in place — it is **not** a history/audit view (see caveat below).
 - **▸ Backed by:** `GET /playground/draft` → `DraftView`; the composer's Send: `POST
   /playground/draft/materials` per file (multipart `file`+`description?`) or once for text/URL, then `POST
   /playground/chat {instruction}`. A described image/media material is born `ready` immediately (no
   extraction job, no `describe_media` popup) — the description substitutes for auto-extraction; a
   described URL keeps trying a real fetch, falling back to the comment only if it fails. Popups: `GET
   /playground/requests`, `POST /playground/requests/{id}/resolve`. Draft row edits: `POST/DELETE
-  /playground/draft/{topics,products,tariffs,assets}[/{key}]`, `PATCH …/contacts`. Accept: `POST
+  /playground/draft/{topics,products,tariffs,assets}[/{key}]`, `PATCH …/contacts`, `PATCH …/policies`. Accept: `POST
   /playground/draft/approve/{kind}/{key}` (one row — **not** blocked by an unrelated pending request) /
   `POST /playground/draft/approve` (all — blocked while any request is pending, **422** on gate failure).
   Live via `kb.material.updated` / `kb.row.changed` / `kb.request.created` / `kb.request.resolved` /
-  `kb.approved`.
+  `kb.approved`. **The «Новый»/«Изменён» tag and the ОПУБЛИКОВАНО half of the rail additionally read `GET
+  /kb`** (the same live-only endpoint §6 uses) so the page can tell a brand-new draft entity from an edit
+  to a published one — a **read**, never a write, of the live slice; nothing here writes `/kb/*` or blurs
+  the draft/live separation. **No new endpoints** — `ai_audit_log` is **not** read by this page (it isn't
+  exposed by any endpoint yet); real history/version-log UI stays a deferred v1 trade-off (doc `12`).
 
 **Cases**
 
@@ -349,8 +369,9 @@ turn, and the resulting **draft** is reviewed and accepted **right here** — no
 |---|---|
 | **5a · Empty** | nothing staged, draft empty — composer only, "Черновик пуст" |
 | **5b · Обработка running** | files just sent, extraction in progress — status chips, no draft rows yet |
-| **5c · Черновик filled** | draft has rows across Темы/Товары/Тарифы/Медиа — inline-editable, «Принять всё» enabled |
+| **5c · Черновик filled** | tab strip with counts; Обзор shows rows across Темы/Товары/Тарифы/Медиа mixed, each inline-editable with a «Новый»/«Изменён» tag; «Принять всё» enabled; right rail shows matching ЧЕРНОВИК entries |
 | **5d · Вопросы ИИ pending** | a `confirm_fact`/`describe_media` card sits above the draft, blocking «Принять всё» |
+| **5e · Активность rail** | right rail populated on both sides — ЧЕРНОВИК entries above ОПУБЛИКОВАНО entries — with «Посмотреть все изменения» visible once either list exceeds ~6 |
 ---
 
 ## 6. База знаний — `/knowledge-base` *(shipped)*
@@ -360,26 +381,32 @@ turn, and the resulting **draft** is reviewed and accepted **right here** — no
 edit (`POST/PATCH/DELETE /kb/*`) applies **immediately**. Drafting/building lives entirely on `/playground`
 (§5); this page never reads or writes the `kbd_draft` blob, and a Playground draft edit never shows up
 here until it has been through Playground's own Accept. Tabs: **Обзор · Темы · Товары · Тарифы ·
-Медиа-ресурсы · Контакты**.
+Медиа-ресурсы · Контакты · Политики**.
 
 > **Facts are typed columns, quoted as tokens.** A price/limit is a **typed column** stored verbatim, one
-> row **per language**, on `ai_products` / `ai_tariffs` / `ai_contacts`. In any prose it appears only as a
-> `{{table.slug.field}}` token — never a raw number. Topic bodies are pure prose (no tokens, no digits).
+> row **per language**, on `ai_products` / `ai_tariffs` / `ai_contacts` / `ai_policies`. In any prose it
+> appears only as a `{{table.slug.field}}` token — never a raw number. Topic bodies are pure prose (no
+> tokens, no digits).
 
-- **Core:** stat cards (Темы / Товары / Тарифы / Медиа-ресурсы / Контакты — no «Правки» card, nothing is
-  ever pending here) + the tab strip; each tab lists LIVE rows with an inline editor whose **«Сохранить»**
-  writes straight to the live table. **Removed vs the old design:** ~~«Правки» tab~~, ~~«черновик»
-  badges~~, ~~per-row «Подтвердить»/«Отклонить»~~, ~~header «Сохранить в базу»~~, ~~readiness bar~~ — a
-  live write has no pending state to confirm.
+- **Core:** stat cards (Темы / Товары / Тарифы / Медиа-ресурсы / Контакты / Политики — no «Правки» card,
+  nothing is ever pending here) + the tab strip; each tab lists LIVE rows with an inline editor whose
+  **«Сохранить»** writes straight to the live table. **Removed vs the old design:** ~~«Правки» tab~~,
+  ~~«черновик» badges~~, ~~per-row «Подтвердить»/«Отклонить»~~, ~~header «Сохранить в базу»~~,
+  ~~readiness bar~~ — a live write has no pending state to confirm.
 - **Медиа-ресурсы:** uploading (or editing) requires a **description up front** — there is no later
   `describe_media` popup on this page (that mechanism is Playground-only), so an upload dialog collects
   file + description together; the description field cannot be saved blank (backend **422**s it).
+- **Политики** is a structural clone of **Контакты** — a single always-visible form of org
+  commerce-policy scalars (delivery cost/time, free-delivery threshold, min order, prepayment,
+  installment, return period, warranty), one row per language, no draft step.
 - **▸ Backed by:** everything reads **`GET /kb`** → the `DraftView` shape with every row `draft:false` and
   `materials`/`requests` always `[]`. Writes: topics `POST/DELETE /kb/topics[/{slug}]`; products
-  `…/products[/{ref}]`; tariffs `…/tariffs[/{ref}]`; assets `POST`(multipart, `description` **required**)
-  `/PATCH/DELETE …/assets[/{ref}]` with `owner_kind`/`owner_ref`; contacts `PATCH …/contacts` (per `lang`);
-  config `PATCH …/config`. Every write is immediately final — no approve step, no `If-Match` — and
-  **hot-reloads the brain** before responding with the refreshed live view. Live via `kb.row.changed`.
+  `…/products[/{ref}]` (incl. `availability`); tariffs `…/tariffs[/{ref}]`; assets `POST`(multipart,
+  `description` **required**) `/PATCH/DELETE …/assets[/{ref}]` with `owner_kind`/`owner_ref`; contacts
+  `PATCH …/contacts` (per `lang`, incl. `working_hours`/`phone`/`website`/`instagram`); policies
+  `PATCH …/policies` (per `lang`); config `PATCH …/config`. Every write is immediately final — no approve
+  step, no `If-Match` — and **hot-reloads the brain** before responding with the refreshed live view.
+  Live via `kb.row.changed`.
 
 **Cases**
 
@@ -391,7 +418,8 @@ here until it has been through Playground's own Accept. Tabs: **Обзор · Т
 | **6d · Тарифы editor** | tariff editor (price/limit_text/fee, pricing_type, adv/disadv) |
 | **6e · Multi-language entity** | one entity shown with its **ru + kk** rows (design reference; v1 fills ru only) |
 | **6f · Медиа-ресурсы** | asset grid + upload dialog (file + required description together), each card shows its **owner** (тема/товар/тариф/global) |
-| **6g · Контакты** | org support scalars, **per language** |
+| **6g · Контакты** | org support scalars (incl. working_hours/phone/website/instagram), **per language** |
+| **6h · Политики** | org commerce-policy scalars (delivery/payment/returns terms), **per language** — a structural clone of 6g |
 
 - **6a · Empty.** Stat cards all **0**; the active tab body shows a per-tab empty-state (Товары →
   «Добавьте первый товар», Тарифы → «Создайте первый тариф», Медиа → «Загрузите первый файл», Контакты →
@@ -399,8 +427,9 @@ here until it has been through Playground's own Accept. Tabs: **Обзор · Т
   build a draft first. **▸ Backed by:** `GET /kb` → empty `DraftView`.
 - **6b · Обзор populated.** **▸ Backed by:** stat cards + «Последние изменения» from a populated `GET /kb`.
 - **6c · Товары editor.** A list of product rows (name + category) each with an inline form — **name**, a
-  **typed PRICE** field (verbatim, "25 000 ₸"), **description**, **category** — and a **«Сохранить»** that
-  writes straight to `ai_products`. **▸ Backed by:** `POST /kb/products`.
+  **typed PRICE** field (verbatim, "25 000 ₸"), **description**, **category**, a **typed AVAILABILITY**
+  field (verbatim, "В наличии" / "Под заказ, 3–5 дней") — and a **«Сохранить»** that writes straight to
+  `ai_products`. **▸ Backed by:** `POST /kb/products`.
 - **6d · Тарифы editor.** Per-row form — **name**, **summary**, a **pricing_type** select (fixed /
   percentage / tiered), typed **PRICE / LIMIT_TEXT / FEE** fields (verbatim), **advantages** &
   **disadvantages** text. **▸ Backed by:** `POST /kb/tariffs`.
@@ -415,7 +444,11 @@ here until it has been through Playground's own Accept. Tabs: **Обзор · Т
   disabled until both are present. **▸ Backed by:** `POST /kb/assets` (multipart, `description` required);
   `PATCH /kb/assets/{ref}`.
 - **6g · Контакты.** A single always-visible form of org support scalars **per language**: whatsapp,
-  email, address, legal, callback_time. **▸ Backed by:** `PATCH /kb/contacts`.
+  phone, email, website, instagram, working_hours, address, legal, callback_time. **▸ Backed by:**
+  `PATCH /kb/contacts`.
+- **6h · Политики.** A single always-visible form of org commerce-policy scalars **per language** — a
+  structural clone of 6g: delivery_cost, delivery_time, free_delivery_from, min_order, prepayment,
+  installment, return_period, warranty. **▸ Backed by:** `PATCH /kb/policies`.
 
 ---
 

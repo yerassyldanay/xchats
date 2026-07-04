@@ -51,8 +51,8 @@ Three things needed settling after Decision 13:
   ("We have 4 plans, from starter to enterprise" — never "the Growth plan costs {{…}}".)
 - Fact tokens appear **only in model replies**, emitted from the facts catalog in the prompt and
   resolved at reply time from the **live** fact tables — fail closed, exactly as in Decision 13.
-- Consequence: **every table is independent**; approving a topic, a tariff, a product, or a contact
-  row in any order can never dangle. The approve gate needs **no dependency check** and no
+- Consequence: **every table is independent**; approving a topic, a tariff, a product, a contact, or a
+  policy row in any order can never dangle. The approve gate needs **no dependency check** and no
   "approve that fact row first" messaging.
 - Media ownership (`ai_assets.owner_kind/owner_ref`) stays polymorphic and is exempt from the
   independence rule: an orphaned asset is clutter, not a wrong price.

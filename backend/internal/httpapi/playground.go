@@ -282,12 +282,13 @@ func (s *Server) handlePlaygroundDeleteTariff(c *gin.Context) {
 }
 
 type productReq struct {
-	Ref         string `json:"ref"`
-	Lang        string `json:"lang"`
-	Name        string `json:"name"`
-	Price       string `json:"price"`
-	Description string `json:"description"`
-	Category    string `json:"category"`
+	Ref          string `json:"ref"`
+	Lang         string `json:"lang"`
+	Name         string `json:"name"`
+	Price        string `json:"price"`
+	Description  string `json:"description"`
+	Category     string `json:"category"`
+	Availability string `json:"availability"`
 }
 
 func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
@@ -302,7 +303,8 @@ func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
 	}
 	if err := s.kb.UpsertProduct(ctx(c), orgID, kbstore.ProductInput{
 		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price,
-		Description: req.Description, Category: req.Category, Provenance: `{"source":"manual"}`,
+		Description: req.Description, Category: req.Category, Availability: req.Availability,
+		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -329,6 +331,10 @@ type contactsReq struct {
 	Address      *string `json:"address"`
 	Legal        *string `json:"legal"`
 	CallbackTime *string `json:"callback_time"`
+	WorkingHours *string `json:"working_hours"`
+	Phone        *string `json:"phone"`
+	Website      *string `json:"website"`
+	Instagram    *string `json:"instagram"`
 }
 
 func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
@@ -343,7 +349,45 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 	}
 	if err := s.kb.PatchContacts(ctx(c), orgID, kbstore.ContactPatch{
 		Lang: req.Lang, WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
-		Legal: req.Legal, CallbackTime: req.CallbackTime, Provenance: `{"source":"manual"}`,
+		Legal: req.Legal, CallbackTime: req.CallbackTime,
+		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
+		Provenance: `{"source":"manual"}`,
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
+// --- typed facts: commerce policies -----------------------------------------
+
+type policiesReq struct {
+	Lang             string  `json:"lang"`
+	DeliveryCost     *string `json:"delivery_cost"`
+	DeliveryTime     *string `json:"delivery_time"`
+	FreeDeliveryFrom *string `json:"free_delivery_from"`
+	MinOrder         *string `json:"min_order"`
+	Prepayment       *string `json:"prepayment"`
+	Installment      *string `json:"installment"`
+	ReturnPeriod     *string `json:"return_period"`
+	Warranty         *string `json:"warranty"`
+}
+
+func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	var req policiesReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "bad policies")
+		return
+	}
+	if err := s.kb.PatchPolicies(ctx(c), orgID, kbstore.PolicyPatch{
+		Lang: req.Lang, DeliveryCost: req.DeliveryCost, DeliveryTime: req.DeliveryTime,
+		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
+		Installment: req.Installment, ReturnPeriod: req.ReturnPeriod, Warranty: req.Warranty,
+		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -409,8 +453,8 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 }
 
 // handlePlaygroundApproveEntity approves ONE pending entity by natural key
-// ("Подтвердить" on a single row). kind ∈ topics|assets|tariffs|products|contacts;
-// id = slug | ref | ref | ref | lang.
+// ("Подтвердить" on a single row). kind ∈ topics|assets|tariffs|products|contacts|policies;
+// id = slug | ref | ref | ref | lang | lang.
 func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -421,9 +465,9 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	}
 	kind := c.Param("kind")
 	switch kind {
-	case "topics", "assets", "tariffs", "products", "contacts":
+	case "topics", "assets", "tariffs", "products", "contacts", "policies":
 	default:
-		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|assets|tariffs|products|contacts")
+		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|assets|tariffs|products|contacts|policies")
 		return
 	}
 	key := c.Param("id")
