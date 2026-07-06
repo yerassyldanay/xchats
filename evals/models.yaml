@@ -1,0 +1,12 @@
+# evals/models.yaml — the model list every scenario runs against, in one place.
+# Add a model here and every scenario picks it up on its next render+run.
+providers:
+  - id: openrouter:openai/gpt-4o-mini
+    temperature: 0.3
+    max_tokens: 500
+  - id: openrouter:anthropic/claude-haiku-4.5
+    temperature: 0.3
+    max_tokens: 500
+  - id: openrouter:google/gemini-2.5-flash
+    temperature: 0.3
+    max_tokens: 500

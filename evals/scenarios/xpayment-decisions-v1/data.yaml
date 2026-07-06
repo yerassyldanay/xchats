@@ -1,0 +1,86 @@
+# evals/scenarios/xpayment-decisions-v1/data.yaml — a payments-SaaS imitation (tariffs
+# instead of shop products) built on the same DECISIONS.md structure as shop-decisions-v1.
+#
+# Note: the "pricing" topic below exists to own the "pricing.images" media group. The
+# hand-written prompt this scenario is based on referenced that group without any topic
+# or row owning it — an authoring gap fixed here rather than reproduced (a group must
+# belong to something real, or the catalog it's validated against would be a fiction).
+
+topics:
+  - ref: connect
+    title: "Подключение"
+    keywords: "подключить, начать, регистрация"
+    body: |
+      Подключение быстрое, нужен только БИН компании. Если спрашивают срок подключения —
+      называйте точное значение из FACTS, не оценивайте на глаз. Подробная инструкция —
+      в приложенном документе.
+    media:
+      - field: documents
+        files: ["connect-guide.pdf"]
+        description: "инструкция по подключению (PDF)"
+
+  - ref: fees
+    title: "Комиссии"
+    keywords: "комиссия, процент, сколько берёте"
+    body: |
+      Комиссия зависит от выбранного тарифа — точные проценты называй только из FACTS.
+
+  - ref: support
+    title: "Поддержка"
+    keywords: "поддержка, помощь, вопрос"
+    body: |
+      Поддержка на связи в рабочие часы; для срочных вопросов пишите прямо сюда.
+
+  - ref: pricing
+    title: "Тарифы"
+    keywords: "тарифы, цены, каталог"
+    body: |
+      У нас три тарифа — «Старт», «Стандарт», «Бизнес». Точные цены и лимиты называйте
+      только из FACTS.
+    media:
+      - field: images
+        files: ["tariff-card.png"]
+        description: "карточка тарифов"
+
+fact_tables:
+  - table: tariff
+    label_format: "«{display_name}» — {field_label}"
+    descriptions_label: "ТАРИФЫ (описания):"
+    fields:
+      - { name: price_monthly, label: "цена в месяц" }
+      - { name: commission_percent, label: "комиссия, %" }
+      - { name: payment_limit_monthly, label: "лимит в месяц" }
+    rows:
+      - ref: start
+        display_name: "Старт"
+        description: "для ИП и небольших магазинов, начать проще всего."
+        values: { price_monthly: "9 900 ₸", commission_percent: "3.5", payment_limit_monthly: "1 000 000 ₸" }
+      - ref: standard
+        display_name: "Стандарт"
+        description: "оптимален для растущего бизнеса."
+        values: { price_monthly: "19 900 ₸", commission_percent: "2.5", payment_limit_monthly: "5 000 000 ₸" }
+      - ref: business
+        display_name: "Бизнес"
+        description: "максимум объёма и приоритетная поддержка."
+        values: { price_monthly: "49 900 ₸", commission_percent: "1.9", payment_limit_monthly: "10 000 000 ₸" }
+        media:
+          - { field: documents, files: ["contract.pdf", "presentation.pdf"], description: "договор + презентация (PDF)" }
+
+  - table: contact
+    label_format: "{field_label}"
+    fields:
+      - { name: phone, label: "телефон" }
+      - { name: work_hours, label: "часы работы" }
+    rows:
+      - ref: support
+        display_name: "Контакты"
+        values: { phone: "+7 727 300 00 01", work_hours: "9:00–19:00" }
+
+  - table: policy
+    label_format: "{field_label}"
+    fields:
+      - { name: connection_days, label: "срок подключения, в рабочих днях" }
+    rows:
+      - ref: main
+        display_name: "Условия"
+        values: { connection_days: "1" }

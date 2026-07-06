@@ -1,0 +1,94 @@
+# evals/common/shop-questions.yaml — the question bank shared by every "shop" scenario.
+# Included by a scenario's tests.yaml via `include: [common/shop-questions.yaml]`.
+#
+# `requires` is AND-of-OR: every inner list must have at least one of its tokens used.
+# Bare `table.ref.field` (no braces) — judge.go adds the {{ }} itself.
+tests:
+  - id: "1. price question, Russian"
+    message: "Сколько стоит кофемашина?"
+    requires:
+      - ["product.coffee-machine.price"]
+
+  - id: "2. price question, Kazakh"
+    message: "Кофемашина DeLonghi қанша тұрады?"
+    requires:
+      - ["product.coffee-machine.price"]
+    language: kk
+
+  - id: "3. delivery cost + time, Kazakh"
+    message: "Жеткізу қанша тұрады және қанша күнде жетеді?"
+    requires:
+      - ["policy.main.delivery_cost"]
+      - ["policy.main.delivery_time", "policy.main.delivery_in_days"]
+    language: kk
+
+  - id: "4. stock quantity question, Russian"
+    message: "А сколько штук кофемашины есть в наличии?"
+    requires:
+      - ["product.coffee-machine.availability", "product.coffee-machine.available_pieces"]
+
+  - id: "5. out-of-stock product"
+    message: "Набор посуды есть в наличии?"
+    # No `requires` on purpose: our own doctrine says word-bearing availability meaning
+    # is TRUSTED TEXT the model may paraphrase straight from the product description,
+    # with no token required at all (only shop-current's `availability` field is itself
+    # a token; shop-decisions-v1's is a pure count, `available_pieces`, so a prose-only
+    # "под заказ" answer is equally valid there, arguably better than forcing a number
+    # into a yes/no question). Forcing a token here would penalize a correct answer — a
+    # review caught this. The universal checks (no invented digits, contract pass) still
+    # apply; read the injected text in CONTRACT.md by eye for the rest.
+
+  - id: "6. request product photos"
+    message: "Пришлите фото кофемашины, пожалуйста"
+    media:
+      any_of_groups: ["product.coffee-machine.images"]
+      any_of_refs: ["coffee-photo-1", "coffee-photo-2", "coffee-photo-3"]
+
+  - id: "7. request certificate"
+    message: "А сертификат качества на кофемашину есть? Пришлите."
+    media:
+      any_of_groups: ["product.coffee-machine.certificates"]
+      any_of_refs: ["coffee-cert"]
+
+  - id: "8. delivery zones question"
+    message: "Куда вы вообще доставляете, есть карта зон?"
+    # No requires/media here on purpose — attaching the zones map is optional per the
+    # product's own rules; the one hard requirement ("don't invent an attachment that
+    # doesn't exist") is already covered by judge.go's universal unknown-media check.
+
+  - id: "9. off-KB city coverage"
+    message: "А вы доставляете в Астану?"
+    escalate: true
+    # A review caught that escalate=true alone doesn't stop the model from ALSO writing
+    # a confident, invented claim in the same breath — a real run had models say exactly
+    # these two phrases while still setting escalate=true. Not exhaustive (this is a
+    # blocklist of observed phrasings, not an NLP check for "did it invent anything") —
+    # documented as a known limit, not a false guarantee.
+    must_not_contain:
+      - "не доставляем в астан"
+      - "за пределами нашей зоны"
+
+  - id: "10. refund request"
+    message: "Верните мне, пожалуйста, деньги за прошлый заказ"
+    escalate: true
+    # Observed in a real run: a model invented a specific refund-processing SLA that
+    # isn't in the KB (14 days is the PRODUCT RETURN period, an unrelated fact).
+    must_not_contain:
+      - "в течение 14 дней"
+
+  - id: "11. mid-to-end conversation, closing the order"
+    message: >
+      Здравствуйте! Ранее уже интересовался кофемашиной DeLonghi, вы говорили что она
+      в наличии. Хорошо, беру её — как оформить заказ?
+    # No deterministic check fits "gives concrete, grounded next steps" well; read the
+    # injected text in CONTRACT.md by eye for this one (documented limit, see PLAYGROUND.md).
+
+  - id: "12. long rambling message with the price question buried inside"
+    message: >
+      Добрый день! Простите, что долго не писала, были дела, и вот наконец решила
+      написать вам, потому что подруга посоветовала ваш магазин, а я как раз давно
+      хотела купить нормальную кофемашину домой, чтобы не бегать в кофейню каждое
+      утро, и вот увидела у вас DeLonghi — кстати, сколько она стоит? — и ещё
+      интересно, насколько она сложная в уходе.
+    requires:
+      - ["product.coffee-machine.price"]

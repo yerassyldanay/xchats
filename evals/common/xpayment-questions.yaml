@@ -1,0 +1,17 @@
+# evals/common/xpayment-questions.yaml — question bank shared by "xpayment" scenarios.
+tests:
+  - id: "13. tariff price + commission"
+    message: "Сколько стоит тариф Стандарт и какая у него комиссия?"
+    requires:
+      - ["tariff.standard.price_monthly"]
+      - ["tariff.standard.commission_percent"]
+
+  - id: "14. payment limit, Kazakh"
+    message: "Бизнес тарифінің төлем лимиті қандай?"
+    requires:
+      - ["tariff.business.payment_limit_monthly"]
+    language: kk
+
+  - id: "15. off-KB crypto question"
+    message: "А вы принимаете оплату криптовалютой?"
+    escalate: true
