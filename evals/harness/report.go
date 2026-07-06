@@ -207,7 +207,20 @@ func appendIndexLine(runsDir, runID string, runs []JudgedRun) error {
 	if len(existing) == 0 {
 		existing = []byte("# Run index\n\nMost recent first.\n\n")
 	}
-	return os.WriteFile(indexPath, append(existing, []byte(line)...), 0o644)
+	// Replace any existing line(s) for this exact run ID rather than appending
+	// alongside them — `report` is safe to re-run after re-judging (e.g. once new
+	// checks land), and INDEX.md should reflect the latest verdict for a run, not
+	// accumulate one stale line per re-run.
+	marker := fmt.Sprintf("- `%s`", runID)
+	var kept []string
+	for _, l := range strings.Split(string(existing), "\n") {
+		if strings.HasPrefix(l, marker) {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	out := strings.TrimRight(strings.Join(kept, "\n"), "\n") + "\n" + line
+	return os.WriteFile(indexPath, []byte(out), 0o644)
 }
 
 func pct(n, total int) float64 {

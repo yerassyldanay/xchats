@@ -1,6 +1,6 @@
 # Run 2026-07-06_18-01-41
 
-Generated 2026-07-06 18:04. One table per scenario; a scenario's own README/PLAYGROUND.md
+Generated 2026-07-06 19:32. One table per scenario; a scenario's own README/PLAYGROUND.md
 explains what "model-behavior" vs "contract" pass rate means.
 
 **Cost shows as n/a**: promptfoo has no pricing table for generic `openrouter:` provider IDs, so it reports $0 regardless of real spend — this is not "free", it's "unmeasured". Check OpenRouter's own dashboard for actual cost. Tokens are real and come straight from the API response.
