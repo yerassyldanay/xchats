@@ -29,7 +29,7 @@ fact_tables:
   - table: product
     label_format: "Товар «{display_name}» — {field_label}"
     fields:
-      - { name: price, label: "цена" }
+      - { name: price, label: "цена", value_kind: money_display }
       - { name: availability, label: "наличие" }
     rows:
       - ref: coffee-machine
@@ -42,11 +42,11 @@ fact_tables:
   - table: policy
     label_format: "{display_name} — {field_label}"
     fields:
-      - { name: delivery_cost, label: "стоимость доставки" }
-      - { name: delivery_time, label: "срок доставки" }
-      - { name: free_delivery_from, label: "бесплатная доставка от" }
-      - { name: return_period, label: "срок возврата" }
-      - { name: warranty, label: "гарантия" }
+      - { name: delivery_cost, label: "стоимость доставки", value_kind: money_display }
+      - { name: delivery_time, label: "срок доставки", value_kind: text_complete }
+      - { name: free_delivery_from, label: "бесплатная доставка от", value_kind: money_display }
+      - { name: return_period, label: "срок возврата", value_kind: text_complete }
+      - { name: warranty, label: "гарантия", value_kind: text_complete }
     rows:
       - ref: main
         display_name: "Условия"
@@ -62,7 +62,7 @@ fact_tables:
     fields:
       - { name: phone, label: "телефон" }
       - { name: instagram, label: "Instagram" }
-      - { name: working_hours, label: "график работы" }
+      - { name: working_hours, label: "график работы", value_kind: time_display }
     rows:
       - ref: support
         display_name: "Контакты поддержки"

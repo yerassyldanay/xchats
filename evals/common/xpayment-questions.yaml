@@ -15,3 +15,6 @@ tests:
   - id: "15. off-KB crypto question"
     message: "А вы принимаете оплату криптовалютой?"
     escalate: true
+    must_not_contain:
+      - "не принимаем оплату криптовалют"
+      - "работаем с традиционными методами"

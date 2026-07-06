@@ -32,8 +32,8 @@ fact_tables:
     label_format: "{display_name} — {field_label}"
     descriptions_label: "ТОВАРЫ (описания):"
     fields:
-      - { name: price, label: "цена" }
-      - { name: available_pieces, label: "штук в наличии" }
+      - { name: price, label: "цена", value_kind: money_display }
+      - { name: available_pieces, label: "штук в наличии", value_kind: number, unit_ru: "штук", unit_kk: "дана" }
     rows:
       - ref: coffee-machine
         display_name: "Кофемашина DeLonghi"
@@ -53,11 +53,11 @@ fact_tables:
   - table: policy
     label_format: "{field_label}"
     fields:
-      - { name: delivery_cost, label: "стоимость доставки" }
-      - { name: free_delivery_from, label: "бесплатная доставка от" }
-      - { name: delivery_in_days, label: "срок доставки, в днях" }
-      - { name: return_period_days, label: "срок возврата, в днях" }
-      - { name: warranty_months, label: "гарантия, в месяцах" }
+      - { name: delivery_cost, label: "стоимость доставки", value_kind: money_display }
+      - { name: free_delivery_from, label: "бесплатная доставка от", value_kind: money_display }
+      - { name: delivery_in_days, label: "срок доставки, в днях", value_kind: number_range, unit_ru: "дня", unit_kk: "күн" }
+      - { name: return_period_days, label: "срок возврата, в днях", value_kind: number, unit_ru: "дней", unit_kk: "күн" }
+      - { name: warranty_months, label: "гарантия, в месяцах", value_kind: number, unit_ru: "месяцев", unit_kk: "ай" }
     rows:
       - ref: main
         display_name: "Условия"
@@ -73,7 +73,7 @@ fact_tables:
     fields:
       - { name: phone, label: "телефон" }
       - { name: instagram, label: "Instagram" }
-      - { name: work_hours, label: "часы работы" }
+      - { name: work_hours, label: "часы работы", value_kind: time_display }
     rows:
       - ref: support
         display_name: "Контакты"

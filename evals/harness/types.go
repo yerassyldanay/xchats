@@ -58,8 +58,11 @@ type FactTable struct {
 
 // FieldSpec names one fact field and the human label shown for it in the FACTS block.
 type FieldSpec struct {
-	Name  string `yaml:"name"`  // column name, e.g. "delivery_in_days" -> token {{policy.main.delivery_in_days}}
-	Label string `yaml:"label"` // e.g. "срок доставки, в днях"
+	Name      string `yaml:"name"`       // column name, e.g. "delivery_in_days" -> token {{policy.main.delivery_in_days}}
+	Label     string `yaml:"label"`      // e.g. "срок доставки, в днях"
+	ValueKind string `yaml:"value_kind"` // e.g. "money_display", "number_range", "percent_number"
+	UnitRU    string `yaml:"unit_ru"`    // model-added unit for Russian, if the value is unitless
+	UnitKK    string `yaml:"unit_kk"`    // model-added unit for Kazakh, if the value is unitless
 }
 
 // FactRow is one row: Values holds this row's fact values keyed by field name (tokenized

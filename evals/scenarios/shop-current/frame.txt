@@ -37,5 +37,5 @@ ref | kind | topic | description
 FACTS — when the customer asks about one of these, quote it by emitting its token exactly as
 written (never the value; code substitutes it). The current value is shown only so you pick
 the right fact:
-token | meaning | current value
+token | meaning | current value | usage note
 %%FACTS%%

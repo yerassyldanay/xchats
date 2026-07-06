@@ -304,11 +304,34 @@ func renderFacts(factTables []FactTable) string {
 				label := labelFormat
 				label = strings.ReplaceAll(label, "{display_name}", row.DisplayName)
 				label = strings.ReplaceAll(label, "{field_label}", f.Label)
-				lines = append(lines, fmt.Sprintf("%s | %s | %s", factToken(ft.Table, row.Ref, f.Name), label, v))
+				line := fmt.Sprintf("%s | %s | %s", factToken(ft.Table, row.Ref, f.Name), label, v)
+				if usage := renderFieldUsage(f); usage != "" {
+					line += " | " + usage
+				}
+				lines = append(lines, line)
 			}
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func renderFieldUsage(f FieldSpec) string {
+	switch f.ValueKind {
+	case "money_display":
+		return "value already includes currency; do not add ₸/тенге"
+	case "time_display":
+		return "value already includes the complete time; do not add extra time words"
+	case "text_complete":
+		return "value already includes its own unit word; do not add another (e.g. never turn \"1–3 дня\" into \"1–3 дня дней\")"
+	case "percent_number":
+		return "add % after the placeholder"
+	case "number", "number_range":
+		if f.UnitRU == "" && f.UnitKK == "" {
+			return "number only"
+		}
+		return fmt.Sprintf("number only; add unit in reply language (ru: %s; kk: %s)", f.UnitRU, f.UnitKK)
+	}
+	return ""
 }
 
 func renderDescriptions(factTables []FactTable) string {

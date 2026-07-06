@@ -165,11 +165,14 @@ func buildContractReport(runs []JudgedRun) string {
 			if len(v.InventedDigits) > 0 {
 				fmt.Fprintf(&b, "- invented digits: %s\n", strings.Join(v.InventedDigits, ", "))
 			}
+			if len(v.UnitIssues) > 0 {
+				fmt.Fprintf(&b, "- unit/currency issues: %s\n", strings.Join(v.UnitIssues, ", "))
+			}
 			if !v.MustNotContainPass {
 				fmt.Fprintf(&b, "- **escalated but still committed to an invented answer** (forbidden phrase: %q)\n", v.ForbiddenPhrase)
 			}
-			fmt.Fprintf(&b, "- requires met: %v · media met: %v · escalate met: %v · language met: %v · no-invented-answer met: %v\n",
-				v.RequiresPass, v.MediaPass, v.EscalatePass, v.LanguagePass, v.MustNotContainPass)
+			fmt.Fprintf(&b, "- requires met: %v · media met: %v · escalate met: %v · language met: %v · no-invented-answer met: %v · units ok: %v\n",
+				v.RequiresPass, v.MediaPass, v.EscalatePass, v.LanguagePass, v.MustNotContainPass, len(v.UnitIssues) == 0)
 			if v.InjectedText != "" {
 				fmt.Fprintf(&b, "- injected text: %s\n", v.InjectedText)
 			}

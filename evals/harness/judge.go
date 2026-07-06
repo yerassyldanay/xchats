@@ -60,15 +60,16 @@ type Verdict struct {
 	MustNotContainPass bool     `json:"must_not_contain_pass"`
 	ForbiddenPhrase    string   `json:"forbidden_phrase,omitempty"`
 	InventedDigits     []string `json:"invented_digits"`
+	UnitIssues         []string `json:"unit_issues"`
 
 	// ContractPass: did the pipeline behave safely regardless of what the model said
 	// (parses, right shape, every token resolves, no leftover brace). This is the
 	// property that must never fail once this design ships for real.
 	ContractPass bool `json:"contract_pass"`
 	// ModelBehaviorPass: did the model itself do the right thing (right token, right
-	// media, right escalate, right language, no invented digits, no unknown media, no
-	// forbidden invented-answer phrase). This is what changes when you tweak a prompt or
-	// try a different model.
+	// media, right escalate, right language, no invented digits, no duplicated units, no
+	// unknown media, no forbidden invented-answer phrase). This is what changes when you
+	// tweak a prompt or try a different model.
 	ModelBehaviorPass bool `json:"model_behavior_pass"`
 
 	Cost      float64 `json:"cost"`
@@ -88,9 +89,21 @@ var (
 	fenceCloseRE = regexp.MustCompile("\\s*```\\s*$")
 	tokenSpanRE  = regexp.MustCompile(`\{\{[^}]*\}\}`)
 	digitRunRE   = regexp.MustCompile(`\d{2,}`)
+	unitIssueREs = []unitIssuePattern{
+		{label: "duplicated tenge symbol", re: regexp.MustCompile(`₸\s*₸`)},
+		{label: "duplicated tenge word", re: regexp.MustCompile(`₸\s*тенге`)},
+		{label: "duplicated Алматы qualifier", re: regexp.MustCompile(`(?i)по\s+алматы\s+по\s+алматы`)},
+		{label: "duplicated day unit", re: regexp.MustCompile(`(?i)(дня|дней)\s+(дня|дней)`)},
+		{label: "mixed Russian/Kazakh day-unit hint", re: regexp.MustCompile(`(?i)дня\s*/\s*күнде`)},
+	}
 )
 
 const kazakhOnlyLetters = "әғқңөұүһӘҒҚҢӨҰҮҺ"
+
+type unitIssuePattern struct {
+	label string
+	re    *regexp.Regexp
+}
 
 func cmdJudge(args []string) error {
 	fs := flag.NewFlagSet("judge", flag.ExitOnError)
@@ -243,6 +256,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		}
 		v.LanguagePass = looksKazakh(checkText)
 	}
+	v.UnitIssues = findUnitIssues(v.InjectedText)
 
 	v.MustNotContainPass = true
 	if len(tc.MustNotContain) > 0 {
@@ -263,7 +277,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	}
 
 	v.ModelBehaviorPass = v.RequiresPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
-		v.MustNotContainPass && len(v.InventedDigits) == 0 && len(v.UnknownMedia) == 0
+		v.MustNotContainPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0
 
 	if v.Reason == "" && !v.ModelBehaviorPass {
 		v.Reason = firstFailureReason(v)
@@ -288,6 +302,8 @@ func firstFailureReason(v Verdict) string {
 		return "escalated, but reply_text still commits to an invented answer (\"" + v.ForbiddenPhrase + "\")"
 	case len(v.InventedDigits) > 0:
 		return "invented digits outside any token: " + strings.Join(v.InventedDigits, ", ")
+	case len(v.UnitIssues) > 0:
+		return "unit/currency issue after injection: " + strings.Join(v.UnitIssues, ", ")
 	case len(v.UnknownMedia) > 0:
 		return "attached media not in the catalog: " + strings.Join(v.UnknownMedia, ", ")
 	}
@@ -375,6 +391,21 @@ func looksKazakh(text string) bool {
 		}
 	}
 	return count >= 2
+}
+
+func findUnitIssues(text string) []string {
+	if text == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var issues []string
+	for _, p := range unitIssueREs {
+		if p.re.MatchString(text) && !seen[p.label] {
+			seen[p.label] = true
+			issues = append(issues, p.label)
+		}
+	}
+	return issues
 }
 
 func readJSON(path string, v any) error {

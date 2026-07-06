@@ -47,9 +47,9 @@ fact_tables:
     label_format: "«{display_name}» — {field_label}"
     descriptions_label: "ТАРИФЫ (описания):"
     fields:
-      - { name: price_monthly, label: "цена в месяц" }
-      - { name: commission_percent, label: "комиссия, %" }
-      - { name: payment_limit_monthly, label: "лимит в месяц" }
+      - { name: price_monthly, label: "цена в месяц", value_kind: money_display }
+      - { name: commission_percent, label: "комиссия, %", value_kind: percent_number }
+      - { name: payment_limit_monthly, label: "лимит в месяц", value_kind: money_display }
     rows:
       - ref: start
         display_name: "Старт"
@@ -70,7 +70,7 @@ fact_tables:
     label_format: "{field_label}"
     fields:
       - { name: phone, label: "телефон" }
-      - { name: work_hours, label: "часы работы" }
+      - { name: work_hours, label: "часы работы", value_kind: time_display }
     rows:
       - ref: support
         display_name: "Контакты"
@@ -79,7 +79,7 @@ fact_tables:
   - table: policy
     label_format: "{field_label}"
     fields:
-      - { name: connection_days, label: "срок подключения, в рабочих днях" }
+      - { name: connection_days, label: "срок подключения, в рабочих днях", value_kind: number, unit_ru: "рабочий день", unit_kk: "жұмыс күні" }
     rows:
       - ref: main
         display_name: "Условия"
