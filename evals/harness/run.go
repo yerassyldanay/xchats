@@ -63,12 +63,12 @@ func cmdRun(args []string) error {
 		if err := runPromptfoo(sd, scenario.Name, absRunDir, *noCache); err != nil {
 			return fmt.Errorf("promptfoo eval for %s: %w", scenario.Name, err)
 		}
-		if err := judgeScenario(sd, absRunDir); err != nil {
+		if err := judgeScenario(sd, absRunDir, *modelsPath); err != nil {
 			return fmt.Errorf("judge %s: %w", scenario.Name, err)
 		}
 	}
 
-	return reportRun(runDir)
+	return reportRun(runDir, *modelsPath)
 }
 
 func runPromptfoo(scenarioDir, scenarioName, absRunDir string, noCache bool) error {

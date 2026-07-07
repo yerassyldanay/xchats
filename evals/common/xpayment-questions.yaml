@@ -5,6 +5,7 @@ tests:
     requires:
       - ["tariff.standard.price_monthly"]
       - ["tariff.standard.commission_percent"]
+    language: ru
 
   - id: "14. payment limit, Kazakh"
     message: "Бизнес тарифінің төлем лимиті қандай?"
@@ -15,6 +16,21 @@ tests:
   - id: "15. off-KB crypto question"
     message: "А вы принимаете оплату криптовалютой?"
     escalate: true
+    language: ru
     must_not_contain:
       - "не принимаем оплату криптовалют"
       - "работаем с традиционными методами"
+
+  - id: "16. conversation start, bare greeting"
+    message: "Здравствуйте!"
+    language: ru
+
+  - id: "17. conversation close, customer is done"
+    message: "Спасибо, разобрался, буду подключаться!"
+    escalate: false
+    language: ru
+
+  - id: "18. wrong understanding, asks about a service we don't offer"
+    message: "А у вас есть аренда NFC-терминалов для оффлайн-магазина?"
+    escalate: true
+    language: ru

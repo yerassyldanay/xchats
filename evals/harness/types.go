@@ -16,6 +16,12 @@ type ScenarioConfig struct {
 	Tests       string `yaml:"tests"`    // path to tests.yaml
 	Contract    string `yaml:"contract"` // "asset_refs" | "attach_groups" — which media field the model must return
 	TopicFormat string `yaml:"topic_format"`
+	// Limits caps how many rows of a named fact_tables table (keyed by Table, e.g.
+	// "product") this scenario renders — everything else about data.yaml is used as-is.
+	// Lets several scenario.yaml files point at ONE shared, large data.yaml and each
+	// imitate a different catalog size (10 vs 20 vs 30 products) without duplicating the
+	// pool or hand-truncating it out of sync with the grading catalog.
+	Limits map[string]int `yaml:"limits"`
 }
 
 // Data is data.yaml — the single source of truth a scenario's prompt is rendered from.
@@ -124,6 +130,20 @@ type TestCase struct {
 	// from ALSO writing a confident, invented answer in the same reply (e.g. "we don't
 	// deliver to Astana" — a claim the KB never actually makes) — seen for real in a run.
 	MustNotContain []string `yaml:"must_not_contain"`
+	// History is prior conversation turns rendered above {{message}} in the prompt, so a
+	// test can check multi-turn behavior (a follow-up that only makes sense given
+	// context, or a model asked to re-state a fact it already gave — must re-use the
+	// token, not copy the literal value it wrote earlier in History). Absent or empty
+	// means a fresh, no-history conversation, same as every test before this existed.
+	History []HistoryTurn `yaml:"history"`
+}
+
+// HistoryTurn is one prior message in a test's simulated conversation. Text is authored
+// prose (never a {{token}} — history represents what was ALREADY sent to the customer,
+// i.e. already-injected text), rendered verbatim into the prompt's history block.
+type HistoryTurn struct {
+	Role string `yaml:"role"` // "client" | "assistant"
+	Text string `yaml:"text"`
 }
 
 // MediaExpect describes what a test's answer must attach, checked against whichever of
@@ -133,15 +153,24 @@ type MediaExpect struct {
 	AnyOfRefs   []string `yaml:"any_of_refs"`   // e.g. ["coffee-photo-1", "coffee-photo-2"]
 }
 
-// ModelsFile is models.yaml — the provider list + params shared by every scenario run.
+// ModelsFile is models.yaml — the provider list + params shared by every scenario run, plus
+// pricing provenance (PricingSource/PricingCheckedAt) so a report can say WHEN a price was
+// last verified instead of presenting a hand-typed number as if it were always current.
 type ModelsFile struct {
-	Providers []ModelProvider `yaml:"providers"`
+	PricingSource    string          `yaml:"pricing_source"`
+	PricingCheckedAt string          `yaml:"pricing_checked_at"`
+	Providers        []ModelProvider `yaml:"providers"`
 }
 
+// ModelProvider is one provider entry. InputPerMTok/OutputPerMTok are pointers, not plain
+// floats: a model with no pricing entry (both nil) must report as "unknown_pricing", never
+// silently default to $0 — a nil is a fact ("we haven't verified this price"), a 0.0 isn't.
 type ModelProvider struct {
-	ID          string  `yaml:"id"`
-	Temperature float64 `yaml:"temperature"`
-	MaxTokens   int     `yaml:"max_tokens"`
+	ID             string   `yaml:"id"`
+	Temperature    float64  `yaml:"temperature"`
+	MaxTokens      int      `yaml:"max_tokens"`
+	InputPerMTok   *float64 `yaml:"input_per_mtok"`
+	OutputPerMTok  *float64 `yaml:"output_per_mtok"`
 }
 
 // Catalog is generated/catalog.json — the ground truth judge.go validates answers
@@ -152,6 +181,14 @@ type Catalog struct {
 	Tokens      []CatalogFact `json:"tokens"`
 	MediaRefs   []string      `json:"media_refs"`   // valid individual refs (asset_refs contract)
 	MediaGroups []string      `json:"media_groups"` // valid group names (attach_groups contract)
+	// TrustedDigits is every digit run found in a FactRow's Description — the ONE field
+	// this playground's own doctrine says is trusted prose a model may paraphrase, not a
+	// tokenized fact (see FactRow.Description's comment). A model repeating "1.7 л" or "7
+	// режимов" straight from a description is not inventing a number; judge.go's invented-
+	// digit check excludes anything in this list. Confirmed against a real run: without
+	// this, a model correctly quoting a description's spec got flagged as if it had
+	// hallucinated a number.
+	TrustedDigits []string `json:"trusted_digits"`
 }
 
 // CatalogFact is one resolvable token and the value injecting it must produce.

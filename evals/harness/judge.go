@@ -27,11 +27,19 @@ type PromptfooRow struct {
 	} `json:"testCase"`
 	Response struct {
 		Output string `json:"output"`
+		Cached bool   `json:"cached"`
 	} `json:"response"`
-	Cost       float64 `json:"cost"`
-	LatencyMs  int     `json:"latencyMs"`
+	Cost      float64 `json:"cost"`
+	LatencyMs int     `json:"latencyMs"`
+	// TokenUsage.Prompt/Completion are ONLY populated by promptfoo on a fresh (non-cached)
+	// call — a cached row reports prompt:0, completion:0, cached:<total> instead. Confirmed
+	// against a real stored run's results.json; costEstimate below depends on this exact
+	// shape, see its comment.
 	TokenUsage struct {
-		Total int `json:"total"`
+		Total      int `json:"total"`
+		Prompt     int `json:"prompt"`
+		Completion int `json:"completion"`
+		Cached     int `json:"cached"`
 	} `json:"tokenUsage"`
 }
 
@@ -57,6 +65,7 @@ type Verdict struct {
 	MediaPass          bool     `json:"media_pass"`
 	EscalatePass       bool     `json:"escalate_pass"`
 	LanguagePass       bool     `json:"language_pass"`
+	LanguageIssue      string   `json:"language_issue,omitempty"`
 	MustNotContainPass bool     `json:"must_not_contain_pass"`
 	ForbiddenPhrase    string   `json:"forbidden_phrase,omitempty"`
 	InventedDigits     []string `json:"invented_digits"`
@@ -76,6 +85,66 @@ type Verdict struct {
 	LatencyMs int     `json:"latency_ms"`
 	Tokens    int     `json:"tokens"`
 	Reason    string  `json:"reason"` // first failure found, human-readable
+
+	// Cost estimate fields — see CostBasis's doc comment for what each basis means and why
+	// the number must never be shown without it.
+	TokensIn        int     `json:"tokens_in"`
+	TokensOut       int     `json:"tokens_out"`
+	CostEstimateUSD float64 `json:"cost_estimate_usd"`
+	CostBasis       string  `json:"cost_basis"`
+}
+
+// CostBasis values — what CostEstimateUSD is actually computed from, so a report can never
+// present a number as more certain than it is:
+//   - "measured_split": this row is a fresh (non-cached) API call with promptfoo's own
+//     prompt/completion split — the estimate multiplies real token counts by models.yaml's
+//     hand-maintained price.
+//   - "cached_replay_borrowed": this row was a promptfoo cache hit (prompt/completion both
+//     report 0), but another row in the SAME judged run made a fresh call for the same
+//     (model, test) and reported a split — that split is borrowed to estimate this row's
+//     cost too, since a cache hit means the same request would have cost the same.
+//   - "cached_replay_unpriceable": a cache hit with no fresh row to borrow a split from in
+//     this run. No number is reported — CostEstimateUSD stays 0 and must be read as "no
+//     estimate", not "free".
+//   - "unknown_pricing": models.yaml has no input_per_mtok/output_per_mtok for this model
+//     (or one of the two is missing). No number is reported, regardless of cache state.
+const (
+	CostBasisMeasured       = "measured_split"
+	CostBasisCachedBorrowed = "cached_replay_borrowed"
+	CostBasisCachedUnpriced = "cached_replay_unpriceable"
+	CostBasisUnknownPricing = "unknown_pricing"
+)
+
+// tokenSplit is a (prompt, completion) token count borrowed across rows of the same run —
+// see judgeScenario's freshSplit map for why a cached row needs one from elsewhere.
+type tokenSplit struct{ in, out int }
+
+// applyCostEstimate fills a Verdict's cost-estimate fields. See CostBasis's doc comment for
+// the four possible outcomes; this is the one place that decides between them.
+func applyCostEstimate(v *Verdict, row PromptfooRow, priceByModel map[string]ModelProvider, freshSplit map[string]tokenSplit) {
+	price, known := priceByModel[row.Provider.ID]
+	if !known || price.InputPerMTok == nil || price.OutputPerMTok == nil {
+		v.CostBasis = CostBasisUnknownPricing
+		return
+	}
+
+	in, out := row.TokenUsage.Prompt, row.TokenUsage.Completion
+	basis := CostBasisMeasured
+	if row.Response.Cached || in == 0 {
+		key := row.Provider.ID + "|" + row.TestCase.Description
+		borrowed, ok := freshSplit[key]
+		if !ok {
+			v.CostBasis = CostBasisCachedUnpriced
+			return
+		}
+		in, out = borrowed.in, borrowed.out
+		basis = CostBasisCachedBorrowed
+	}
+
+	v.TokensIn = in
+	v.TokensOut = out
+	v.CostEstimateUSD = float64(in)/1_000_000*(*price.InputPerMTok) + float64(out)/1_000_000*(*price.OutputPerMTok)
+	v.CostBasis = basis
 }
 
 // JudgedRun is generated per run: runs/<id>/<scenario>.judged.json.
@@ -88,7 +157,13 @@ var (
 	fenceOpenRE  = regexp.MustCompile("^\\s*```[a-zA-Z]*\\s*")
 	fenceCloseRE = regexp.MustCompile("\\s*```\\s*$")
 	tokenSpanRE  = regexp.MustCompile(`\{\{[^}]*\}\}`)
-	digitRunRE   = regexp.MustCompile(`\d{2,}`)
+	// digitRunRE matches ANY digit run — a model inventing even a single-digit fact (e.g.
+	// "осталось 5 штук" without the token) is still an invented fact. listMarkerRE strips
+	// numbered-list markers ("1. ", "2) " at line start) first, the one legitimate place a
+	// model writes its own digits (step-by-step ordering instructions) — confirmed against
+	// a real run that models use BOTH "1." and "1)" for the same kind of list.
+	digitRunRE   = regexp.MustCompile(`\d+`)
+	listMarkerRE = regexp.MustCompile(`(?m)^\s*\d+[.)]\s`)
 	unitIssueREs = []unitIssuePattern{
 		{label: "duplicated tenge symbol", re: regexp.MustCompile(`₸\s*₸`)},
 		{label: "duplicated tenge word", re: regexp.MustCompile(`₸\s*тенге`)},
@@ -109,19 +184,29 @@ func cmdJudge(args []string) error {
 	fs := flag.NewFlagSet("judge", flag.ExitOnError)
 	scenarioDir := fs.String("scenario", "", "path to the scenario directory")
 	runDir := fs.String("run", "", "path to the run directory (contains results.json)")
+	modelsPath := fs.String("models", "models.yaml", "path to models.yaml (for cost-estimate pricing)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *scenarioDir == "" || *runDir == "" {
 		return fmt.Errorf("judge: -scenario and -run are both required")
 	}
-	return judgeScenario(*scenarioDir, *runDir)
+	return judgeScenario(*scenarioDir, *runDir, *modelsPath)
 }
 
-func judgeScenario(scenarioDir, runDir string) error {
+func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	scenario, err := loadScenario(scenarioDir)
 	if err != nil {
 		return fmt.Errorf("load scenario.yaml: %w", err)
+	}
+
+	models, err := loadModels(modelsPath)
+	if err != nil {
+		return fmt.Errorf("load %s: %w", modelsPath, err)
+	}
+	priceByModel := map[string]ModelProvider{}
+	for _, p := range models.Providers {
+		priceByModel[p.ID] = p
 	}
 
 	var catalog Catalog
@@ -156,13 +241,28 @@ func judgeScenario(scenarioDir, runDir string) error {
 		return fmt.Errorf("read %s: %w", resultsPath, err)
 	}
 
+	// freshSplit lets a cached row (promptfoo reports prompt:0, completion:0 on a cache
+	// hit) borrow the real in/out split from another row in THIS SAME run that made a
+	// fresh call for the identical (model, test) — a cache hit means an identical request
+	// would have cost the same, so the split is still a valid estimate, just not this
+	// row's own measurement.
+	freshSplit := map[string]tokenSplit{}
+	for _, row := range results.Results.Results {
+		if !row.Response.Cached && row.TokenUsage.Prompt > 0 {
+			key := row.Provider.ID + "|" + row.TestCase.Description
+			freshSplit[key] = tokenSplit{row.TokenUsage.Prompt, row.TokenUsage.Completion}
+		}
+	}
+
 	var verdicts []Verdict
 	for _, row := range results.Results.Results {
 		tc, ok := testByID[row.TestCase.Description]
 		if !ok {
 			continue // belongs to a different scenario's tests, if results were ever merged
 		}
-		verdicts = append(verdicts, judgeOne(tc, row, &catalog, tokenValue, validMediaRef, validMediaGroup))
+		v := judgeOne(tc, row, &catalog, tokenValue, validMediaRef, validMediaGroup)
+		applyCostEstimate(&v, row, priceByModel, freshSplit)
+		verdicts = append(verdicts, v)
 	}
 
 	out := JudgedRun{Scenario: scenario.Name, Verdicts: verdicts}
@@ -209,8 +309,12 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	}
 
 	// Fail-closed: every token the model used must resolve, or the real product would
-	// block the whole draft rather than ship a half-rendered fact.
+	// block the whole draft rather than ship a half-rendered fact. escalation_reason is
+	// internal (never shown to the customer) but still scanned: an unknown token there
+	// means the model referenced a fact that doesn't exist, the same underlying bug.
+	escalationReason, _ := obj["escalation_reason"].(string)
 	spans := tokenSpanRE.FindAllString(replyText, -1)
+	reasonSpans := tokenSpanRE.FindAllString(escalationReason, -1)
 	injected := replyText
 	for _, tok := range spans {
 		val, known := tokenValue[tok]
@@ -220,21 +324,41 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		}
 		injected = strings.ReplaceAll(injected, tok, val)
 	}
+	for _, tok := range reasonSpans {
+		if _, known := tokenValue[tok]; !known {
+			v.UnknownTokens = append(v.UnknownTokens, tok)
+		}
+	}
 	v.Blocked = len(v.UnknownTokens) > 0
 	if v.Blocked {
 		v.Reason = "unknown token(s), draft would be BLOCKED: " + strings.Join(v.UnknownTokens, ", ")
 	} else {
 		v.InjectedText = injected
-		if strings.Contains(injected, "{{") {
-			v.LeftoverBraces = true
-			v.Reason = "leftover '{{' survived injection"
+	}
+	// Any brace surviving injection is a mangled placeholder — not just an unclosed
+	// "{{", but also a single-brace typo like "{product.price}" that tokenSpanRE never
+	// even recognized as a span, so it was never substituted at all. Catalog values are
+	// guaranteed brace-free at render time (see validateCatalog), so ANY '{' or '}' left
+	// in the customer-facing text after injection can only have come from the model.
+	if strings.ContainsAny(injected, "{}") {
+		v.LeftoverBraces = true
+		if v.Reason == "" {
+			v.Reason = "leftover brace survived injection"
 		}
 	}
 	v.ContractPass = v.ParseOK && v.ContractFields && !v.Blocked && !v.LeftoverBraces
 
 	// Model-behavior checks (only meaningful once we know the contract held).
 	stripped := tokenSpanRE.ReplaceAllString(replyText, "")
-	v.InventedDigits = digitRunRE.FindAllString(stripped, -1)
+	stripped = listMarkerRE.ReplaceAllString(stripped, "")
+	// A digit run isn't an invented fact if it came from somewhere legitimate: the
+	// CUSTOMER's own message (e.g. "iPhone 15 Pro" — the model is just echoing it back),
+	// or a product's Description prose (this playground's own doctrine trusts that field
+	// as paraphrasable, unlike FACTS — see FactRow.Description's comment). Confirmed
+	// against real runs: a model repeating a customer-named off-catalog product's model
+	// number, or correctly quoting a description's "1.7 л" / "7 режимов" spec, both got
+	// wrongly flagged here before these exclusions existed.
+	v.InventedDigits = filterInventedDigits(digitRunRE.FindAllString(stripped, -1), tc.Message, catalog.TrustedDigits)
 
 	v.RequiresPass = requiresSatisfied(tc.Requires, replyText, tokenValue)
 
@@ -248,13 +372,34 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		v.EscalatePass = escalateVal == *tc.Escalate
 	}
 
+	// Two independent checks: does the TEXT read as the expected language (a Kazakh-letter
+	// heuristic for kk, its absence for ru), and does the model's own declared
+	// reply_language FIELD match — a model can write Russian prose while claiming
+	// reply_language: "kk" and the text-only heuristic would never catch that.
 	v.LanguagePass = true
-	if tc.Language == "kk" {
+	if tc.Language == "kk" || tc.Language == "ru" {
 		checkText := v.InjectedText
 		if checkText == "" {
 			checkText = replyText // e.g. blocked before injection — still check what the model wrote
 		}
-		v.LanguagePass = looksKazakh(checkText)
+		replyLang, _ := obj["reply_language"].(string)
+		var textOK bool
+		switch tc.Language {
+		case "kk":
+			textOK = looksKazakh(checkText)
+		case "ru":
+			textOK = !looksKazakh(checkText)
+		}
+		fieldOK := replyLang == tc.Language
+		v.LanguagePass = textOK && fieldOK
+		switch {
+		case !textOK && tc.Language == "kk":
+			v.LanguageIssue = "reply does not look like Kazakh (too few Kazakh-specific letters)"
+		case !textOK && tc.Language == "ru":
+			v.LanguageIssue = "reply looks like Kazakh but a Russian reply was expected"
+		case !fieldOK:
+			v.LanguageIssue = fmt.Sprintf("reply_language field is %q, expected %q", replyLang, tc.Language)
+		}
 	}
 	v.UnitIssues = findUnitIssues(v.InjectedText)
 
@@ -297,7 +442,7 @@ func firstFailureReason(v Verdict) string {
 	case !v.EscalatePass:
 		return "escalate did not match expectation"
 	case !v.LanguagePass:
-		return "reply does not look like Kazakh (too few Kazakh-specific letters)"
+		return v.LanguageIssue
 	case !v.MustNotContainPass:
 		return "escalated, but reply_text still commits to an invented answer (\"" + v.ForbiddenPhrase + "\")"
 	case len(v.InventedDigits) > 0:
@@ -348,6 +493,30 @@ func requiresSatisfied(requires [][]string, replyText string, tokenValue map[str
 // literal "{{table.ref.field}}" the model would have to emit.
 func factTokenLiteral(dotted string) string {
 	return "{{" + dotted + "}}"
+}
+
+// filterInventedDigits drops any digit run that isn't actually invented: one the customer
+// already wrote in their own message (the model is just echoing it back, e.g. a product
+// name like "iPhone 15 Pro"), or one that came from a product's Description prose (trusted,
+// paraphrasable text per this playground's own doctrine — see Catalog.TrustedDigits).
+func filterInventedDigits(found []string, message string, trustedDigits []string) []string {
+	if len(found) == 0 {
+		return nil
+	}
+	allowed := map[string]bool{}
+	for _, d := range digitRunRE.FindAllString(message, -1) {
+		allowed[d] = true
+	}
+	for _, d := range trustedDigits {
+		allowed[d] = true
+	}
+	var out []string
+	for _, d := range found {
+		if !allowed[d] {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func mediaEntries(obj map[string]any, field string) []string {

@@ -1,12 +1,30 @@
 # evals/models.yaml — the model list every scenario runs against, in one place.
 # Add a model here and every scenario picks it up on its next render+run.
+#
+# Pricing is HAND-MAINTAINED and produces an ESTIMATE, not real spend — OpenRouter prices
+# change, and promptfoo has no pricing table of its own for generic `openrouter:` IDs (see
+# README.md "Known limits"). Leave input_per_mtok/output_per_mtok unset (omit them) for a
+# model whose current price you haven't verified — the report will call it out as
+# "unknown_pricing" instead of showing a number that might be wrong. Check current prices at
+# pricing_source before filling one in, and update pricing_checked_at when you do.
+pricing_source: "https://openrouter.ai/models"
+pricing_checked_at: "2026-07-07"
 providers:
   - id: openrouter:openai/gpt-4o-mini
     temperature: 0.3
     max_tokens: 500
+    # Stable, well-documented OpenAI list price — unchanged for a long time as of
+    # pricing_checked_at. Still: verify at pricing_source before trusting it for a real
+    # budget decision, per the file-level note above.
+    input_per_mtok: 0.15
+    output_per_mtok: 0.60
   - id: openrouter:anthropic/claude-haiku-4.5
     temperature: 0.3
     max_tokens: 500
+    # input_per_mtok / output_per_mtok intentionally left unset: not verified against
+    # pricing_source as of pricing_checked_at. Fill in once checked — until then this
+    # model's cost reports as "unknown_pricing", not a guessed number.
   - id: openrouter:google/gemini-2.5-flash
     temperature: 0.3
     max_tokens: 500
+    # Same as claude-haiku-4.5 above: unset on purpose, not verified.

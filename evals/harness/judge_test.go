@@ -10,7 +10,8 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			{Token: "{{product.coffee-machine.price}}", Value: "129 900 ₸"},
 			{Token: "{{policy.main.delivery_cost}}", Value: "1 500 ₸"},
 		},
-		MediaGroups: []string{"product.coffee-machine.images"},
+		MediaGroups:   []string{"product.coffee-machine.images"},
+		TrustedDigits: []string{"1", "7"}, // as if a row's Description mentioned "1.7 л"
 	}
 	tokenValue := map[string]string{
 		"{{product.coffee-machine.price}}": "129 900 ₸",
@@ -82,6 +83,87 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       "unit/currency issue after injection: duplicated tenge symbol",
+		},
+		{
+			name:             "single-digit invented number fails behavior",
+			testCase:         TestCase{ID: "single-digit-invented"},
+			output:           `{"reply_text":"Осталось 5 штук.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       "invented digits outside any token: 5",
+		},
+		{
+			name:             "digit from a trusted product description is not invented",
+			testCase:         TestCase{ID: "description-digit-ok"},
+			output:           `{"reply_text":"Это чайник на 1.7 л.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: true,
+			wantReason:       "ok",
+		},
+		{
+			name: "digit echoed back from the customer's own message is not invented",
+			testCase: TestCase{
+				ID:      "echoed-digit-ok",
+				Message: "У вас есть iPhone 15 Pro?",
+			},
+			output:           `{"reply_text":"К сожалению, iPhone 15 Pro у нас нет в наличии.","reply_language":"ru","attach_groups":[],"escalate":true}`,
+			wantContractPass: true,
+			wantBehaviorPass: true,
+			wantReason:       "ok",
+		},
+		{
+			name:             "numbered list markers (dot style) are not invented digits",
+			testCase:         TestCase{ID: "numbered-list-ok"},
+			output:           `{"reply_text":"Как оформить:\n1. Напишите адрес.\n2. Подтвердите заказ.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: true,
+			wantReason:       "ok",
+		},
+		{
+			name:             "numbered list markers (paren style) are not invented digits",
+			testCase:         TestCase{ID: "numbered-list-paren-ok"},
+			output:           `{"reply_text":"Нужно:\n1) Подтвердить\n2) Указать адрес\n3) Мы пришлём счёт","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: true,
+			wantReason:       "ok",
+		},
+		{
+			name:             "mangled single-brace token fails contract",
+			testCase:         TestCase{ID: "mangled-token"},
+			output:           `{"reply_text":"Цена {product.coffee-machine.price}.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			wantContractPass: false,
+			wantBehaviorPass: true,
+			wantReason:       "leftover brace survived injection",
+		},
+		{
+			name:             "unknown token in escalation_reason blocks the draft",
+			testCase:         TestCase{ID: "escalation-reason-unknown-token"},
+			output:           `{"reply_text":"Хорошо.","reply_language":"ru","attach_groups":[],"escalate":true,"escalation_reason":"Нужно уточнить {{product.unknown.field}}"}`,
+			wantContractPass: false,
+			wantBehaviorPass: true,
+			wantReason:       "unknown token(s), draft would be BLOCKED: {{product.unknown.field}}",
+		},
+		{
+			name: "reply_language field mismatch fails language check even if text looks right",
+			testCase: TestCase{
+				ID:       "kk-field-mismatch",
+				Language: "kk",
+			},
+			output:           `{"reply_text":"Бұл сөйлем қазақша және қазақ әріптері бар: ә ғ қ.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       `reply_language field is "ru", expected "kk"`,
+		},
+		{
+			name: "Kazakh-looking text fails when Russian was expected",
+			testCase: TestCase{
+				ID:       "ru-text-is-kazakh",
+				Language: "ru",
+			},
+			output:           `{"reply_text":"Бұл сөйлем қазақша ә ғ қ.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       "reply looks like Kazakh but a Russian reply was expected",
 		},
 	}
 

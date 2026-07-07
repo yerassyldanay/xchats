@@ -25,7 +25,11 @@
       "cost": 0,
       "latency_ms": 20,
       "tokens": 1238,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "1. price question, Russian",
@@ -51,7 +55,11 @@
       "cost": 0,
       "latency_ms": 19,
       "tokens": 1703,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "1. price question, Russian",
@@ -77,7 +85,11 @@
       "cost": 0,
       "latency_ms": 18,
       "tokens": 1369,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "2. price question, Kazakh",
@@ -95,6 +107,7 @@
       "media_pass": true,
       "escalate_pass": true,
       "language_pass": false,
+      "language_issue": "reply does not look like Kazakh (too few Kazakh-specific letters)",
       "must_not_contain_pass": true,
       "invented_digits": null,
       "unit_issues": null,
@@ -103,7 +116,11 @@
       "cost": 0,
       "latency_ms": 18,
       "tokens": 1241,
-      "reason": "reply does not look like Kazakh (too few Kazakh-specific letters)"
+      "reason": "reply does not look like Kazakh (too few Kazakh-specific letters)",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "2. price question, Kazakh",
@@ -121,6 +138,7 @@
       "media_pass": true,
       "escalate_pass": true,
       "language_pass": false,
+      "language_issue": "reply does not look like Kazakh (too few Kazakh-specific letters)",
       "must_not_contain_pass": true,
       "invented_digits": null,
       "unit_issues": null,
@@ -129,7 +147,11 @@
       "cost": 0,
       "latency_ms": 9,
       "tokens": 1711,
-      "reason": "reply does not look like Kazakh (too few Kazakh-specific letters)"
+      "reason": "reply does not look like Kazakh (too few Kazakh-specific letters)",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "2. price question, Kazakh",
@@ -155,7 +177,11 @@
       "cost": 0,
       "latency_ms": 7,
       "tokens": 1382,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "3. delivery cost + time, Kazakh",
@@ -174,14 +200,21 @@
       "escalate_pass": true,
       "language_pass": true,
       "must_not_contain_pass": true,
-      "invented_digits": null,
+      "invented_digits": [
+        "1",
+        "3"
+      ],
       "unit_issues": null,
       "contract_pass": true,
       "model_behavior_pass": false,
       "cost": 0,
       "latency_ms": 4,
       "tokens": 1215,
-      "reason": "did not use the required fact token(s)"
+      "reason": "did not use the required fact token(s)",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "3. delivery cost + time, Kazakh",
@@ -199,6 +232,7 @@
       "media_pass": true,
       "escalate_pass": true,
       "language_pass": false,
+      "language_issue": "reply does not look like Kazakh (too few Kazakh-specific letters)",
       "must_not_contain_pass": true,
       "invented_digits": null,
       "unit_issues": null,
@@ -207,7 +241,11 @@
       "cost": 0,
       "latency_ms": 5,
       "tokens": 1698,
-      "reason": "reply does not look like Kazakh (too few Kazakh-specific letters)"
+      "reason": "reply does not look like Kazakh (too few Kazakh-specific letters)",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "3. delivery cost + time, Kazakh",
@@ -233,7 +271,11 @@
       "cost": 0,
       "latency_ms": 10,
       "tokens": 1407,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "4. stock quantity question, Russian",
@@ -259,7 +301,11 @@
       "cost": 0,
       "latency_ms": 8,
       "tokens": 1229,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "4. stock quantity question, Russian",
@@ -285,7 +331,11 @@
       "cost": 0,
       "latency_ms": 7,
       "tokens": 1683,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "4. stock quantity question, Russian",
@@ -311,7 +361,11 @@
       "cost": 0,
       "latency_ms": 4,
       "tokens": 1345,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "5. out-of-stock product",
@@ -337,7 +391,11 @@
       "cost": 0,
       "latency_ms": 11,
       "tokens": 1243,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "5. out-of-stock product",
@@ -363,7 +421,11 @@
       "cost": 0,
       "latency_ms": 9,
       "tokens": 1685,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "5. out-of-stock product",
@@ -389,7 +451,11 @@
       "cost": 0,
       "latency_ms": 6,
       "tokens": 1340,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "6. request product photos",
@@ -415,7 +481,11 @@
       "cost": 0,
       "latency_ms": 4,
       "tokens": 1225,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "6. request product photos",
@@ -441,7 +511,11 @@
       "cost": 0,
       "latency_ms": 7,
       "tokens": 1683,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "6. request product photos",
@@ -467,7 +541,11 @@
       "cost": 0,
       "latency_ms": 6,
       "tokens": 1351,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "7. request certificate",
@@ -493,7 +571,11 @@
       "cost": 0,
       "latency_ms": 4,
       "tokens": 1222,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "7. request certificate",
@@ -519,7 +601,11 @@
       "cost": 0,
       "latency_ms": 3,
       "tokens": 1717,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "7. request certificate",
@@ -545,7 +631,11 @@
       "cost": 0,
       "latency_ms": 7,
       "tokens": 1355,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "8. delivery zones question",
@@ -571,7 +661,11 @@
       "cost": 0,
       "latency_ms": 7,
       "tokens": 1228,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "8. delivery zones question",
@@ -597,7 +691,11 @@
       "cost": 0,
       "latency_ms": 6,
       "tokens": 1751,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "8. delivery zones question",
@@ -623,7 +721,11 @@
       "cost": 0,
       "latency_ms": 4,
       "tokens": 1347,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "9. off-KB city coverage",
@@ -649,7 +751,11 @@
       "cost": 0,
       "latency_ms": 8,
       "tokens": 1240,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "9. off-KB city coverage",
@@ -675,7 +781,11 @@
       "cost": 0,
       "latency_ms": 7,
       "tokens": 1714,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "9. off-KB city coverage",
@@ -701,7 +811,11 @@
       "cost": 0,
       "latency_ms": 6,
       "tokens": 1358,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "10. refund request",
@@ -729,7 +843,11 @@
       "cost": 0,
       "latency_ms": 4,
       "tokens": 1215,
-      "reason": "escalate did not match expectation"
+      "reason": "escalate did not match expectation",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "10. refund request",
@@ -755,7 +873,11 @@
       "cost": 0,
       "latency_ms": 5,
       "tokens": 1723,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "10. refund request",
@@ -781,7 +903,11 @@
       "cost": 0,
       "latency_ms": 5,
       "tokens": 0,
-      "reason": "could not parse JSON output"
+      "reason": "could not parse JSON output",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "11. mid-to-end conversation, closing the order",
@@ -807,7 +933,11 @@
       "cost": 0,
       "latency_ms": 3,
       "tokens": 1280,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "11. mid-to-end conversation, closing the order",
@@ -833,7 +963,11 @@
       "cost": 0,
       "latency_ms": 1,
       "tokens": 1806,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "11. mid-to-end conversation, closing the order",
@@ -859,7 +993,11 @@
       "cost": 0,
       "latency_ms": 6,
       "tokens": 1373,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "12. long rambling message with the price question buried inside",
@@ -885,7 +1023,11 @@
       "cost": 0,
       "latency_ms": 5,
       "tokens": 1342,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "cached_replay_unpriceable"
     },
     {
       "test_id": "12. long rambling message with the price question buried inside",
@@ -911,7 +1053,11 @@
       "cost": 0,
       "latency_ms": 3,
       "tokens": 1897,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     },
     {
       "test_id": "12. long rambling message with the price question buried inside",
@@ -937,7 +1083,11 @@
       "cost": 0,
       "latency_ms": 2,
       "tokens": 1483,
-      "reason": "ok"
+      "reason": "ok",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_estimate_usd": 0,
+      "cost_basis": "unknown_pricing"
     }
   ]
 }

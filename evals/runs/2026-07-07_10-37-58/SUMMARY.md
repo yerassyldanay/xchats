@@ -1,33 +1,33 @@
 # Run 2026-07-07_10-37-58
 
-Generated 2026-07-07 10:38. One table per scenario; a scenario's own README/PLAYGROUND.md
+Generated 2026-07-07 12:31. One table per scenario; a scenario's own README/PLAYGROUND.md
 explains what "model-behavior" vs "contract" pass rate means.
 
-**Cost shows as n/a**: promptfoo has no pricing table for generic `openrouter:` provider IDs, so it reports $0 regardless of real spend — this is not "free", it's "unmeasured". Check OpenRouter's own dashboard for actual cost. Tokens are real and come straight from the API response.
+**Cost is an ESTIMATE, not real spend.** Computed from models.yaml's hand-maintained prices (source: https://openrouter.ai/models, checked 2026-07-07) × token counts from the API response. promptfoo has no pricing table of its own for generic `openrouter:` provider IDs — this report fills that gap, at the accuracy of whoever last updated models.yaml. Check OpenRouter's own dashboard for real spend. A cached row (repeat run, same question) reports zero prompt/completion tokens from promptfoo, so its cost is estimated by BORROWING the split from a fresh row in the same run for the same (model, test) if one exists — otherwise it's marked unpriceable, not free. Every model/cost cell below says which of these applied.
 
 ## shop-current
 
-| model | model-behavior pass | contract pass | cost | avg latency | avg tokens |
-|---|---|---|---|---|---|
-| openrouter:anthropic/claude-haiku-4.5 | 9/12 (75%) | 12/12 (100%) | n/a | 6ms | 1994 |
-| openrouter:google/gemini-2.5-flash | 10/12 (83%) | 12/12 (100%) | n/a | 6ms | 1580 |
-| openrouter:openai/gpt-4o-mini | 8/12 (67%) | 12/12 (100%) | n/a | 8ms | 1479 |
+| model | model-behavior pass | contract pass | est. cost | avg latency | avg tokens | prompt share |
+|---|---|---|---|---|---|---|
+| openrouter:anthropic/claude-haiku-4.5 | 9/12 (75%) | 12/12 (100%) | unknown pricing | 6ms (cached — not meaningful) | 1994 | n/a |
+| openrouter:google/gemini-2.5-flash | 10/12 (83%) | 12/12 (100%) | unknown pricing | 6ms (cached — not meaningful) | 1580 | n/a |
+| openrouter:openai/gpt-4o-mini | 7/12 (58%) | 12/12 (100%) | unpriceable (cached, no split to borrow) | 8ms (cached — not meaningful) | 1479 | n/a |
 
 ## shop-decisions-v1
 
-| model | model-behavior pass | contract pass | cost | avg latency | avg tokens |
-|---|---|---|---|---|---|
-| openrouter:anthropic/claude-haiku-4.5 | 10/12 (83%) | 12/12 (100%) | n/a | 6ms | 1730 |
-| openrouter:google/gemini-2.5-flash | 11/12 (92%) | 11/12 (92%) | n/a | 6ms | 1259 |
-| openrouter:openai/gpt-4o-mini | 9/12 (75%) | 12/12 (100%) | n/a | 8ms | 1243 |
+| model | model-behavior pass | contract pass | est. cost | avg latency | avg tokens | prompt share |
+|---|---|---|---|---|---|---|
+| openrouter:anthropic/claude-haiku-4.5 | 10/12 (83%) | 12/12 (100%) | unknown pricing | 6ms (cached — not meaningful) | 1730 | n/a |
+| openrouter:google/gemini-2.5-flash | 11/12 (92%) | 11/12 (92%) | unknown pricing | 6ms (cached — not meaningful) | 1259 | n/a |
+| openrouter:openai/gpt-4o-mini | 9/12 (75%) | 12/12 (100%) | unpriceable (cached, no split to borrow) | 8ms (cached — not meaningful) | 1243 | n/a |
 
 ## xpayment-decisions-v1
 
-| model | model-behavior pass | contract pass | cost | avg latency | avg tokens |
-|---|---|---|---|---|---|
-| openrouter:anthropic/claude-haiku-4.5 | 3/3 (100%) | 3/3 (100%) | n/a | 11ms | 1801 |
-| openrouter:google/gemini-2.5-flash | 3/3 (100%) | 3/3 (100%) | n/a | 9ms | 1383 |
-| openrouter:openai/gpt-4o-mini | 2/3 (67%) | 3/3 (100%) | n/a | 14ms | 1255 |
+| model | model-behavior pass | contract pass | est. cost | avg latency | avg tokens | prompt share |
+|---|---|---|---|---|---|---|
+| openrouter:anthropic/claude-haiku-4.5 | 3/3 (100%) | 3/3 (100%) | unknown pricing | 11ms (cached — not meaningful) | 1801 | n/a |
+| openrouter:google/gemini-2.5-flash | 3/3 (100%) | 3/3 (100%) | unknown pricing | 9ms (cached — not meaningful) | 1383 | n/a |
+| openrouter:openai/gpt-4o-mini | 2/3 (67%) | 3/3 (100%) | unpriceable (cached, no split to borrow) | 14ms (cached — not meaningful) | 1255 | n/a |
 
 ## Failures (verbatim)
 
@@ -91,6 +91,11 @@ explains what "model-behavior" vs "contract" pass rate means.
 - message: А сколько штук кофемашины есть в наличии?
 - reason: did not use the required fact token(s)
 - raw output: `{"reply_text":"Кофемашина DeLonghi в наличии. Если хотите узнать цену или оформить заказ, дайте знать!","reply_language":"ru","asset_refs":[],"escalate":false,"escalation_reason":"","confidence":1}`
+
+**5. out-of-stock product** | openrouter:openai/gpt-4o-mini
+- message: Набор посуды есть в наличии?
+- reason: invented digits outside any token: 3, 5
+- raw output: `{"reply_text":"Набор посуды сейчас под заказ, срок доставки составляет 3–5 дней. Если хотите оформить заказ, напишите, пожалуйста, адрес доставки!","reply_language":"ru","asset_refs":[],"escalate":false,"escalation_reason":"","confidence":1}`
 
 **9. off-KB city coverage** | openrouter:openai/gpt-4o-mini
 - message: А вы доставляете в Астану?

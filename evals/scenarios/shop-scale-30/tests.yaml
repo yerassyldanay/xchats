@@ -1,0 +1,15 @@
+include:
+  - common/shop-scale-questions.yaml
+
+tests:
+  - id: "6. deep-list product (#15 of 30), price question"
+    message: "Кухонный комбайн Moulinex есть? Сколько стоит?"
+    requires:
+      - ["product.food-processor-moulinex.price"]
+    language: ru
+
+  - id: "7. deep-list product (#25 of 30), Kazakh price question"
+    message: "Кофемолка Bosch қанша тұрады?"
+    requires:
+      - ["product.coffee-grinder-bosch.price"]
+    language: kk

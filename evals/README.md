@@ -17,6 +17,7 @@ cd evals/harness && go build -o harness . && cd ..
 cd evals
 ./harness/harness run -scenario scenarios/shop-current
 ./harness/harness run -scenario scenarios/shop-current,scenarios/shop-decisions-v1
+./harness/harness run -scenario scenarios/shop-scale-10,scenarios/shop-scale-20,scenarios/shop-scale-30
 ./harness/harness run -all
 ```
 
@@ -26,6 +27,10 @@ escalation, language), and writes `runs/<timestamp>/SUMMARY.md` — read that fi
 model calls cost real money; unchanged answers are cached by promptfoo on repeat runs, so
 tweaking one scenario and re-running only pays for what changed. Add `-no-cache` to force
 everything fresh.
+
+Running two or more `shop-scale-N` scenarios together adds a "Scale comparison" table to
+`SUMMARY.md` — model-behavior pass % and avg tokens per answer at each catalog size, so
+"does quality hold up as the product list grows" is answerable from one place.
 
 ## Try an idea without spending anything
 
@@ -48,26 +53,47 @@ Copy the closest existing scenario folder, then edit:
   `%%FACTS%%` / `%%DESCRIPTIONS%%` / `%%MEDIA_FIELD%%` slots the renderer fills in.
 - `scenario.yaml` — points at the two files above plus `tests.yaml`, and says which
   response contract (`asset_refs` or `attach_groups`) this version's frame expects back.
+  Optionally caps a fact table's row count with `limits: { <table>: N }` (see
+  `scenarios/shop-scale-10/scenario.yaml`) — lets several scenarios share ONE larger
+  `data.yaml` while each imitating a different catalog size.
 - `tests.yaml` — usually just `include: [common/shop-questions.yaml]`; add scenario-only
-  questions under `tests:` if this version needs one a shared bank doesn't have.
+  questions under `tests:` if this version needs one a shared bank doesn't have. A test can
+  set `history: [{role: client, text: ...}, {role: assistant, text: ...}]` to simulate a
+  multi-turn conversation instead of a single fresh message — see
+  `common/shop-questions.yaml`'s "16. follow-up with history" for the pattern.
 
-Then `render` it (free) before you `run` it (costs money).
+Then `render` it (free) before you `run` it (costs money). `render` also now FAILS if the
+rendered prompt references a `{{token}}` not in this exact render's catalog, or if a
+`%%SLOT%%` was left unfilled — the same guarantee the injection check applies to model
+answers, applied to the prompt itself before any model ever sees it.
 
 ## Reading a run's output
 
 - **`SUMMARY.md`** — per scenario × model: model-behavior pass rate (did the model do the
   right thing), contract pass rate (did token resolution/injection/media validation hold
-  up), cost, latency, tokens. Failing answers are quoted in full underneath.
+  up), an **estimated** cost (see below), latency, tokens, and prompt-vs-completion token
+  share. Failing answers are quoted in full underneath. Running 2+ `shop-scale-N`
+  scenarios together also adds a scale-comparison table.
 - **`CONTRACT.md`** — one block per answer: parsed or not, which tokens resolved, whether
   the draft would be BLOCKED (an unknown/malformed token — the real product's fail-closed
-  behavior), the actual injected customer-facing text, and every check's pass/fail.
+  behavior), whether injection came out brace-clean, the actual injected customer-facing
+  text, cost basis for that one answer, and every check's pass/fail.
 - **`runs/INDEX.md`** — one line per run, so past attempts stay easy to find and compare.
 
 ## Known limits
 
-- **Cost shows as `n/a`, not $0.** promptfoo has no pricing table for generic
-  `openrouter:` provider IDs, so it always reports $0 — that means "unmeasured", not
-  "free". Tokens are real; for real spend, check OpenRouter's own dashboard.
+- **Cost is an ESTIMATE, never real spend.** `models.yaml` hand-maintains
+  `input_per_mtok`/`output_per_mtok` per model (with `pricing_source` + `pricing_checked_at`
+  so a report can say when a price was last verified) — promptfoo itself has no pricing
+  table for generic `openrouter:` provider IDs. A model with no price entry reports
+  **"unknown pricing"**, never a guessed number. A cached row (promptfoo replays a prior
+  answer, common on repeat runs) reports zero prompt/completion tokens from the API, so its
+  cost is estimated by **borrowing** the token split from a fresh row in the same run for
+  the same (model, test) if one exists — otherwise it's **"unpriceable"**, not free. Every
+  cost cell says which of these applied; always cross-check real spend on OpenRouter's own
+  dashboard.
+- **Latency under ~50ms is a cache artifact, not real API latency** — SUMMARY.md flags this
+  inline rather than presenting it as a real number.
 - **The harness is a playground twin of the real renderer, not the real renderer.** It
   proves the *design* can work; the product's own Go code that does this today is tested
   separately: [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L86).
@@ -76,9 +102,15 @@ Then `render` it (free) before you `run` it (costs money).
   (individual file refs) — see [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212).
   Check `scenario.yaml`'s `contract:` field before treating a pass rate as migration proof.
 - **`schema.sql` files are documentation, not a database.** Nothing runs or enforces them.
+- **Media is validated by NAME, not by file existence.** `data.yaml`'s media filenames
+  (e.g. `cm-1.jpg`) are fictional — judge.go checks a model attached a group/ref that
+  EXISTS IN THE CATALOG, not that the file itself is real. That's the right level for a
+  text-only prompt-design eval; testing real image/video files only matters once you're
+  testing vision or the shipped pipeline, not the prompt design.
 - **No LLM-judge layer.** Every check in `judge.go` is deterministic (token/media/escalate/
-  a Kazakh-letter heuristic). A few real questions (e.g. "does this read as a natural
-  next step") have no automated check — read the injected text in `CONTRACT.md` by eye.
+  a Kazakh-letter heuristic/reply_language field). A few real questions (e.g. "does this
+  read as a natural next step") have no automated check — read the injected text in
+  `CONTRACT.md` by eye.
 
 ## The one earlier eval this replaced
 

@@ -54,7 +54,10 @@ evals/
 │   │       ├── catalog.json
 │   │       └── promptfooconfig.yaml
 │   ├── shop-decisions-v1/
-│   └── xpayment-decisions-v1/
+│   ├── xpayment-decisions-v1/
+│   ├── shop-scale/                    ← data.yaml + frame.txt ONLY — no scenario.yaml of
+│   │                                     its own; shared by the three below via `limits:`
+│   └── shop-scale-{10,20,30}/         ← same pool, capped to N products each
 └── runs/
     ├── INDEX.md                       ← one line per run: what, when, headline numbers
     └── 2026-07-06_shop-compare/       ← one folder per run
@@ -88,21 +91,36 @@ free-standing on purpose, since it exists to try out ideas the product hasn't bu
    KNOWLEDGE BASE / MEDIA / FACTS text, writes `generated/prompt.txt` +
    `generated/catalog.json` (every valid token, every valid media group) +
    `generated/promptfooconfig.yaml` (wires in `models.yaml` + the resolved
-   `tests.yaml`). This is the only place scenario content becomes a prompt — nothing is
-   ever hand-typed into a prompt file again.
+   `tests.yaml`, including each test's `history:` turns rendered into the `{{history}}`
+   var). This is the only place scenario content becomes a prompt — nothing is ever
+   hand-typed into a prompt file again. `render` also FAILS (no prompt written) if a fact
+   value contains a brace character, if the rendered prompt references a `{{token}}` this
+   exact render's catalog doesn't resolve, or if a `%%SLOT%%` was left unfilled — the
+   "prompt and catalog can never disagree" claim is an enforced check, not a convention
+   (it caught a real `frame.txt`/`data.yaml` ref mismatch while building shop-scale).
 2. **promptfoo runs** against the generated config, exactly as before — this part doesn't
    change, promptfoo is still the right tool for "call N models with M questions."
 3. **`judge`** — reads promptfoo's raw answers and, per answer: parses the JSON (tolerant
    of a ```` ```json ```` wrapper) → checks every `{{token}}` used exists in the
    catalog (an unknown or malformed one gets the verdict **"BLOCKED — fail-closed"**,
-   exactly what the real product would do) → substitutes the catalog's values into the
-   text → checks the **substituted** text for leftover `{{`, invented digits, and correct
-   media groups/refs. This is the part that didn't exist before and is the actual reason
-   this playground exists — it tests the injection idea, not just "did the model try."
+   exactly what the real product would do; the same scan also covers `escalation_reason`,
+   not just the customer-facing text) → substitutes the catalog's values into the text →
+   checks the **substituted** text for ANY leftover brace character (not just `{{` — a
+   single-brace typo like `{product.price}` never matches a token span in the first place,
+   so it has to be caught this way instead), invented digits (any digit run, not just
+   multi-digit — numbered-list markers like "1." / "1)" are allow-listed first), and correct
+   media groups/refs. It also enforces the model's declared `reply_language` field matches
+   what a test expects, not just a Kazakh-letter heuristic on the text. This is the part
+   that didn't exist before promptfoo alone and is the actual reason this playground
+   exists — it tests the injection idea, not just "did the model try." It also computes an
+   **estimated** cost per answer (see `models.yaml`'s pricing fields and README's "Known
+   limits" — never presented as real spend).
 4. **`report`** — turns the judge's verdicts + promptfoo's own pass/fail into one
    `SUMMARY.md` per run: a stats table per scenario × model (model-behavior pass %,
-   contract pass %, cost, latency), the answers that failed quoted in full, and one line
-   appended to `runs/INDEX.md` so old runs stay easy to find and compare.
+   contract pass %, an honestly-labeled cost estimate, latency, tokens, prompt/completion
+   share), a scale-comparison table when 2+ `shop-scale-N` scenarios ran together, the
+   answers that failed quoted in full, and one line appended to `runs/INDEX.md` so old runs
+   stay easy to find and compare.
 5. **`run`** — ties the four steps together: render → promptfoo → judge → report, for
    one scenario or all of them, against whichever models you name.
 
@@ -115,7 +133,14 @@ free-standing on purpose, since it exists to try out ideas the product hasn't bu
   stray words from the other language leaking in through an injected value)?
 - Did the model choose the correct media group or file, and reject attaching something
   that doesn't exist?
-- Does the answer still hold up as the row count grows (10 products vs. 200)?
+- Does the answer still hold up as the row count grows? `shop-scale-{10,20,30}` share ONE
+  30-product pool (`scenarios/shop-scale/data.yaml`) capped per scenario via `scenario.yaml`'s
+  `limits: { product: N }` — run 2+ of them together and SUMMARY.md adds a size-series
+  comparison table (model-behavior pass % and avg tokens at each size). Extending to 50 or
+  200 is one more pool + one more 3-line scenario.yaml, not a new hand-written schema.
+- Does a real chat history change the right answer? A test can attach `history:` turns
+  (rendered into the prompt's own `{{history}}` slot, empty by default) — see
+  `common/shop-questions.yaml`'s conversation-start/close/follow-up/misunderstanding cases.
 
 **The rule that ties it together: promptfoo grades whether the model behaved well. The
 harness grades whether the contract — the actual template-and-injection idea — held up.**

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -39,6 +40,9 @@ func renderScenario(scenarioDir, modelsPath string) error {
 	if err != nil {
 		return fmt.Errorf("load %s: %w", dataPath, err)
 	}
+	if err := applyLimits(data, scenario.Limits); err != nil {
+		return fmt.Errorf("scenario %q: %w", scenario.Name, err)
+	}
 
 	framePath := filepath.Join(scenarioDir, scenario.Frame)
 	frameBytes, err := os.ReadFile(framePath)
@@ -57,7 +61,13 @@ func renderScenario(scenarioDir, modelsPath string) error {
 	}
 
 	catalog := buildCatalog(data, scenario.Contract)
+	if err := validateCatalog(catalog); err != nil {
+		return fmt.Errorf("scenario %q: %w", scenario.Name, err)
+	}
 	prompt := buildPrompt(string(frameBytes), scenario, data, catalog)
+	if err := validatePrompt(prompt, catalog); err != nil {
+		return fmt.Errorf("scenario %q: %w", scenario.Name, err)
+	}
 
 	genDir := filepath.Join(scenarioDir, "generated")
 	if err := os.MkdirAll(genDir, 0o755); err != nil {
@@ -92,6 +102,30 @@ func loadScenario(dir string) (*ScenarioConfig, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// applyLimits truncates a named fact_tables table's Rows in place, BEFORE buildCatalog
+// or buildPrompt ever see the data — so the prompt and the grading catalog are always
+// built from the exact same (already-truncated) rows and can never disagree about which
+// products exist at a given scale. Only the table named by the limit key is touched;
+// unrelated tables (policy, contact, ...) are untouched even if they have multiple rows.
+func applyLimits(data *Data, limits map[string]int) error {
+	for table, n := range limits {
+		found := false
+		for i := range data.FactTables {
+			if data.FactTables[i].Table != table {
+				continue
+			}
+			found = true
+			if n < len(data.FactTables[i].Rows) {
+				data.FactTables[i].Rows = data.FactTables[i].Rows[:n]
+			}
+		}
+		if !found {
+			return fmt.Errorf("limits references table %q, not found in fact_tables", table)
+		}
+	}
+	return nil
 }
 
 func loadData(path string) (*Data, error) {
@@ -187,10 +221,69 @@ func buildCatalog(data *Data, contract string) *Catalog {
 			cat.MediaRefs = append(cat.MediaRefs, a.Ref)
 		}
 	}
+	trustedDigits := map[string]bool{}
+	for _, ft := range data.FactTables {
+		for _, row := range ft.Rows {
+			for _, d := range digitRunRE.FindAllString(row.Description, -1) {
+				trustedDigits[d] = true
+			}
+		}
+	}
+	for d := range trustedDigits {
+		cat.TrustedDigits = append(cat.TrustedDigits, d)
+	}
 	sort.Slice(cat.Tokens, func(i, j int) bool { return cat.Tokens[i].Token < cat.Tokens[j].Token })
 	sort.Strings(cat.MediaRefs)
 	sort.Strings(cat.MediaGroups)
+	sort.Strings(cat.TrustedDigits)
 	return cat
+}
+
+// validateCatalog enforces that no fact value itself contains a brace character. This is
+// the invariant judge.go's "any brace surviving injection is a mangled placeholder" check
+// depends on — if a real fact value could legitimately contain '{' or '}', that check would
+// have false positives. Nothing in these scenarios' data ever needs a literal brace, so this
+// is a hard render-time failure, not a warning.
+func validateCatalog(cat *Catalog) error {
+	for _, t := range cat.Tokens {
+		if strings.ContainsAny(t.Value, "{}") {
+			return fmt.Errorf("catalog value for %s contains a brace character: %q", t.Token, t.Value)
+		}
+	}
+	return nil
+}
+
+var unfilledSlotRE = regexp.MustCompile(`%%[A-Z_]+%%`)
+
+// validatePrompt makes the "prompt and catalog can never disagree" claim in buildCatalog's
+// doc comment an enforced guarantee instead of a design convention: every {{token}} span
+// anywhere in the rendered prompt (including a frame.txt author's own inline example, like
+// the one in shop-decisions-v1/frame.txt) must resolve against this same render's catalog,
+// or render fails loudly instead of shipping a prompt that quietly instructs the model to
+// use a token nothing will ever inject a value for. Also fails on a leftover %%SLOT%% —
+// evidence a frame.txt slot name and render.go's ReplaceAll calls have drifted apart.
+// promptfooVarTokens are the ONLY "{{...}}" spans in a rendered prompt that are not fact
+// tokens — promptfoo's own templating vars, filled per-test at eval time, not by render.
+var promptfooVarTokens = map[string]bool{
+	"{{message}}": true,
+	"{{history}}": true,
+}
+
+func validatePrompt(prompt string, cat *Catalog) error {
+	if m := unfilledSlotRE.FindString(prompt); m != "" {
+		return fmt.Errorf("unfilled slot %s left in rendered prompt", m)
+	}
+	valid := map[string]bool{}
+	for _, t := range cat.Tokens {
+		valid[t.Token] = true
+	}
+	for _, span := range tokenSpanRE.FindAllString(prompt, -1) {
+		if valid[span] || promptfooVarTokens[span] {
+			continue
+		}
+		return fmt.Errorf("prompt contains token %s not in this scenario's catalog (check frame.txt example tokens against data.yaml)", span)
+	}
+	return nil
 }
 
 func factToken(table, ref, field string) string {
@@ -224,8 +317,28 @@ func buildPrompt(frame string, scenario *ScenarioConfig, data *Data, cat *Catalo
 	var b strings.Builder
 	b.WriteString("{% raw %}\n")
 	b.WriteString(strings.TrimRight(filled, "\n"))
-	b.WriteString("\n{% endraw %}\nКлиент пишет: {{message}}\n")
+	b.WriteString("\n{% endraw %}\n")
+	b.WriteString("История переписки (может быть пустой — тогда это начало разговора):\n{{history}}\n")
+	b.WriteString("Клиент пишет: {{message}}\n")
 	return b.String()
+}
+
+// renderHistory turns a test's prior turns into the plain-text block {{history}} fills —
+// authored prose, never a {{token}} (history is what was ALREADY sent, i.e. already
+// injected), so it can never trip validatePrompt or judge.go's token checks.
+func renderHistory(turns []HistoryTurn) string {
+	if len(turns) == 0 {
+		return "(пусто — начало разговора)"
+	}
+	var lines []string
+	for _, t := range turns {
+		label := "Клиент"
+		if t.Role == "assistant" {
+			label = "Ассистент"
+		}
+		lines = append(lines, label+": "+t.Text)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderKnowledgeBase(topics []Topic, format string) string {
@@ -397,7 +510,7 @@ func writePromptfooConfig(genDir string, scenario *ScenarioConfig, tests []TestC
 	for _, t := range tests {
 		cfg.Tests = append(cfg.Tests, testEntry{
 			Description: t.ID,
-			Vars:        map[string]string{"message": t.Message},
+			Vars:        map[string]string{"message": t.Message, "history": renderHistory(t.History)},
 			// A bare expression, NOT "return true;" — promptfoo treats a short
 			// javascript assert value as an expression to wrap (something like
 			// "return (<value>)"), so an explicit "return" here becomes invalid

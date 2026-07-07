@@ -13,16 +13,17 @@ import (
 func cmdReport(args []string) error {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	runDir := fs.String("run", "", "path to the run directory")
+	modelsPath := fs.String("models", "models.yaml", "path to models.yaml (for pricing provenance in the report header)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *runDir == "" {
 		return fmt.Errorf("report: -run is required")
 	}
-	return reportRun(*runDir)
+	return reportRun(*runDir, *modelsPath)
 }
 
-func reportRun(runDir string) error {
+func reportRun(runDir, modelsPath string) error {
 	judgedFiles, err := filepath.Glob(filepath.Join(runDir, "*.judged.json"))
 	if err != nil {
 		return err
@@ -41,7 +42,12 @@ func reportRun(runDir string) error {
 		runs = append(runs, jr)
 	}
 
-	summary := buildSummary(filepath.Base(runDir), runs)
+	models, err := loadModels(modelsPath)
+	if err != nil {
+		return fmt.Errorf("load %s: %w", modelsPath, err)
+	}
+
+	summary := buildSummary(filepath.Base(runDir), runs, models)
 	if err := os.WriteFile(filepath.Join(runDir, "SUMMARY.md"), []byte(summary), 0o644); err != nil {
 		return err
 	}
@@ -59,30 +65,67 @@ func reportRun(runDir string) error {
 type modelStats struct {
 	model                                  string
 	total, modelBehaviorPass, contractPass int
-	cost                                   float64
+	costEstimate                           float64
+	measuredN, borrowedN, unpricedN        int
+	unknownPricingN                        int
+	tokensInSum, tokensOutSum              int
 	latencySum, tokensSum                  int
 }
 
-func buildSummary(runID string, runs []JudgedRun) string {
+// formatCostCell turns one model's cost-basis tally into a single honest table cell —
+// never a bare dollar figure. See CostBasis's doc comment in judge.go for what each basis
+// means; this is where those meanings become human-readable.
+func formatCostCell(ms *modelStats) string {
+	priced := ms.measuredN + ms.borrowedN
+	if priced == 0 {
+		if ms.unknownPricingN == ms.total {
+			return "unknown pricing"
+		}
+		return "unpriceable (cached, no split to borrow)"
+	}
+	var basisParts []string
+	if ms.measuredN > 0 {
+		basisParts = append(basisParts, fmt.Sprintf("%d measured", ms.measuredN))
+	}
+	if ms.borrowedN > 0 {
+		basisParts = append(basisParts, fmt.Sprintf("%d cached-borrowed", ms.borrowedN))
+	}
+	if ms.unpricedN > 0 {
+		basisParts = append(basisParts, fmt.Sprintf("%d unpriceable", ms.unpricedN))
+	}
+	if ms.unknownPricingN > 0 {
+		basisParts = append(basisParts, fmt.Sprintf("%d unknown-pricing", ms.unknownPricingN))
+	}
+	return fmt.Sprintf("$%.4f est. (%s)", ms.costEstimate, strings.Join(basisParts, ", "))
+}
+
+func formatLatencyCell(avgMs int) string {
+	if avgMs < 50 {
+		return fmt.Sprintf("%dms (cached — not meaningful)", avgMs)
+	}
+	return fmt.Sprintf("%dms", avgMs)
+}
+
+func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Run %s\n\n", runID)
 	fmt.Fprintf(&b, "Generated %s. One table per scenario; a scenario's own README/PLAYGROUND.md\n", time.Now().Format("2006-01-02 15:04"))
 	b.WriteString("explains what \"model-behavior\" vs \"contract\" pass rate means.\n\n")
 
-	totalCost, totalTokens := 0.0, 0
-	for _, run := range runs {
-		for _, v := range run.Verdicts {
-			totalCost += v.Cost
-			totalTokens += v.Tokens
-		}
-	}
-	costUnknown := totalCost == 0 && totalTokens > 0
-	if costUnknown {
-		b.WriteString("**Cost shows as n/a**: promptfoo has no pricing table for generic " +
-			"`openrouter:` provider IDs, so it reports $0 regardless of real spend — this is " +
-			"not \"free\", it's \"unmeasured\". Check OpenRouter's own dashboard for actual " +
-			"cost. Tokens are real and come straight from the API response.\n\n")
-	}
+	fmt.Fprintf(&b, "**Cost is an ESTIMATE, not real spend.** Computed from models.yaml's "+
+		"hand-maintained prices (source: %s, checked %s) × token counts from the API "+
+		"response. promptfoo has no pricing table of its own for generic `openrouter:` "+
+		"provider IDs — this report fills that gap, at the accuracy of whoever last updated "+
+		"models.yaml. Check OpenRouter's own dashboard for real spend. A cached row (repeat "+
+		"run, same question) reports zero prompt/completion tokens from promptfoo, so its "+
+		"cost is estimated by BORROWING the split from a fresh row in the same run for the "+
+		"same (model, test) if one exists — otherwise it's marked unpriceable, not free. "+
+		"Every model/cost cell below says which of these applied.\n\n",
+		models.PricingSource, models.PricingCheckedAt)
+
+	// scaleStats collects shop-scale-N scenarios' per-model stats as they're computed below,
+	// so the scale-comparison table after the main loop doesn't recompute anything.
+	scaleStats := map[string]map[string]*modelStats{}
 
 	var allFailures []Verdict
 	for _, run := range runs {
@@ -104,7 +147,20 @@ func buildSummary(runID string, runs []JudgedRun) string {
 			if v.ContractPass {
 				ms.contractPass++
 			}
-			ms.cost += v.Cost
+			switch v.CostBasis {
+			case CostBasisMeasured:
+				ms.measuredN++
+				ms.costEstimate += v.CostEstimateUSD
+			case CostBasisCachedBorrowed:
+				ms.borrowedN++
+				ms.costEstimate += v.CostEstimateUSD
+			case CostBasisCachedUnpriced:
+				ms.unpricedN++
+			case CostBasisUnknownPricing:
+				ms.unknownPricingN++
+			}
+			ms.tokensInSum += v.TokensIn
+			ms.tokensOutSum += v.TokensOut
 			ms.latencySum += v.LatencyMs
 			ms.tokensSum += v.Tokens
 			if !v.ModelBehaviorPass || !v.ContractPass {
@@ -113,20 +169,29 @@ func buildSummary(runID string, runs []JudgedRun) string {
 		}
 		sort.Strings(order)
 
-		b.WriteString("| model | model-behavior pass | contract pass | cost | avg latency | avg tokens |\n")
-		b.WriteString("|---|---|---|---|---|---|\n")
+		b.WriteString("| model | model-behavior pass | contract pass | est. cost | avg latency | avg tokens | prompt share |\n")
+		b.WriteString("|---|---|---|---|---|---|---|\n")
 		for _, m := range order {
 			ms := byModel[m]
-			costStr := fmt.Sprintf("$%.4f", ms.cost)
-			if costUnknown {
-				costStr = "n/a"
+			promptShare := "n/a"
+			if total := ms.tokensInSum + ms.tokensOutSum; total > 0 {
+				promptShare = fmt.Sprintf("%.0f%%", 100*float64(ms.tokensInSum)/float64(total))
 			}
-			fmt.Fprintf(&b, "| %s | %d/%d (%.0f%%) | %d/%d (%.0f%%) | %s | %dms | %d |\n",
+			fmt.Fprintf(&b, "| %s | %d/%d (%.0f%%) | %d/%d (%.0f%%) | %s | %s | %d | %s |\n",
 				m, ms.modelBehaviorPass, ms.total, pct(ms.modelBehaviorPass, ms.total),
 				ms.contractPass, ms.total, pct(ms.contractPass, ms.total),
-				costStr, avg(ms.latencySum, ms.total), avg(ms.tokensSum, ms.total))
+				formatCostCell(ms), formatLatencyCell(avg(ms.latencySum, ms.total)), avg(ms.tokensSum, ms.total),
+				promptShare)
 		}
 		b.WriteString("\n")
+
+		if strings.HasPrefix(run.Scenario, "shop-scale-") {
+			scaleStats[run.Scenario] = byModel
+		}
+	}
+
+	if table := buildScaleComparison(scaleStats); table != "" {
+		b.WriteString(table)
 	}
 
 	if len(allFailures) > 0 {
@@ -139,6 +204,80 @@ func buildSummary(runID string, runs []JudgedRun) string {
 		}
 	}
 	return b.String()
+}
+
+// buildScaleComparison reads directly off the SAME modelStats buildSummary already computed
+// for each shop-scale-N scenario (no re-parsing of verdicts) and turns them into one
+// size-series table per model — model-behavior pass % and avg prompt tokens at each size —
+// so "does quality degrade as the catalog grows" and "what does that growth cost in tokens"
+// are both answerable from one place instead of eyeballing N separate per-scenario tables.
+func buildScaleComparison(scaleStats map[string]map[string]*modelStats) string {
+	if len(scaleStats) < 2 {
+		return ""
+	}
+	var scenarios []string
+	for name := range scaleStats {
+		scenarios = append(scenarios, name)
+	}
+	sort.Slice(scenarios, func(i, j int) bool {
+		return scaleSizeOf(scenarios[i]) < scaleSizeOf(scenarios[j])
+	})
+
+	models := map[string]bool{}
+	for _, byModel := range scaleStats {
+		for m := range byModel {
+			models[m] = true
+		}
+	}
+	var modelOrder []string
+	for m := range models {
+		modelOrder = append(modelOrder, m)
+	}
+	sort.Strings(modelOrder)
+
+	var b strings.Builder
+	b.WriteString("## Scale comparison (shop-scale-N)\n\n")
+	b.WriteString("Model-behavior pass % and avg total tokens per answer at each catalog size — the\n")
+	b.WriteString("direct answer to \"does answer quality hold up as the product list grows\" and what\n")
+	b.WriteString("that growth costs in tokens (avg tokens here is the raw API count, always\n")
+	b.WriteString("available regardless of whether this model's cost is priced — unlike the est.\n")
+	b.WriteString("cost column above).\n\n")
+	b.WriteString("| model |")
+	for _, s := range scenarios {
+		fmt.Fprintf(&b, " %s (behavior / avg tokens) |", s)
+	}
+	b.WriteString("\n|---|")
+	for range scenarios {
+		b.WriteString("---|")
+	}
+	b.WriteString("\n")
+	for _, m := range modelOrder {
+		fmt.Fprintf(&b, "| %s |", m)
+		for _, s := range scenarios {
+			ms, ok := scaleStats[s][m]
+			if !ok {
+				b.WriteString(" n/a |")
+				continue
+			}
+			fmt.Fprintf(&b, " %.0f%% / %d |", pct(ms.modelBehaviorPass, ms.total), avg(ms.tokensSum, ms.total))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// scaleSizeOf pulls the trailing number off a "shop-scale-N" scenario name for sort order
+// (plain string sort would put "shop-scale-10" before "shop-scale-20" only by luck of
+// digit count matching — this makes it correct regardless of how many sizes exist).
+func scaleSizeOf(scenario string) int {
+	n := 0
+	for _, r := range scenario {
+		if r >= '0' && r <= '9' {
+			n = n*10 + int(r-'0')
+		}
+	}
+	return n
 }
 
 // buildContractReport is the per-answer detail: what the model actually said, what the
@@ -176,6 +315,12 @@ func buildContractReport(runs []JudgedRun) string {
 			if v.InjectedText != "" {
 				fmt.Fprintf(&b, "- injected text: %s\n", v.InjectedText)
 			}
+			fmt.Fprintf(&b, "- injection clean (no brace survived, whether blocked or not): %v\n", !v.LeftoverBraces)
+			fmt.Fprintf(&b, "- cost basis: %s", v.CostBasis)
+			if v.CostBasis == CostBasisMeasured || v.CostBasis == CostBasisCachedBorrowed {
+				fmt.Fprintf(&b, " (%d in / %d out tokens, est. $%.6f)", v.TokensIn, v.TokensOut, v.CostEstimateUSD)
+			}
+			b.WriteString("\n")
 			fmt.Fprintf(&b, "- contract pass: **%v** · model-behavior pass: **%v**\n\n", v.ContractPass, v.ModelBehaviorPass)
 		}
 	}
