@@ -1,0 +1,228 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// numberRunRE matches a run of digits that may contain internal spaces, commas, or
+// hyphens as grouping separators (e.g. "25 000" — the source image's own Russian-style
+// thousands grouping; "25,000" — observed in practice: a model's prose `summary`
+// re-formatting the exact same value English-style even though its own `extracted_text`
+// correctly kept the source's spacing; "+7702-976-65-09" — a phone number re-grouped
+// with hyphens throughout instead of the source's space-then-hyphens mix). All of these
+// must be treated as ONE number, not split into fragments that then look "invented"
+// against the allow-list. Unlike judge.go's digitRunRE (\d+), which intentionally splits
+// on any non-digit (correct for its job: digits inside an already-injected customer
+// reply, no grouping left once a token is substituted).
+//
+// Known edge case: this also merges a bare, separator-joined ENUMERATION of distinct
+// numbers with nothing else between them (e.g. "10, 25, 60 тысяч" or "10-25-60") into
+// one run. None of this eval's current cases do that; if one ever does, the merged run
+// simply won't match any single allow-list entry and the check fails closed (flagged
+// for review) rather than silently passing something wrong.
+var numberRunRE = regexp.MustCompile(`\d(?:[\d, \-]*\d)?`)
+
+// canonicalNumber strips grouping separators (space, NBSP, comma, hyphen) so "25 000",
+// "25,000", "25-000" and "25000" all compare equal — the check cares about the VALUE
+// shown, not which grouping convention a particular field happened to use.
+func canonicalNumber(s string) string {
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "\u00A0", "") // NBSP
+	s = strings.ReplaceAll(s, ",", "")
+	s = strings.ReplaceAll(s, "-", "")
+	return s
+}
+
+var currencyRE = regexp.MustCompile(`(?i)₸|тенге|\bтг\b|kzt|\$`)
+
+// foldNBSPOnly folds NBSP to a normal space and nothing else — used only for the
+// invented-number haystack, where a real line break must survive as a hard boundary
+// (see inventedNumberCheck's comment). Unlike normalizeText, this does NOT lowercase
+// or collapse newlines/multi-space runs.
+func foldNBSPOnly(s string) string {
+	return strings.ReplaceAll(s, " ", " ")
+}
+
+// normalizeText lowercases, folds NBSP to a normal space, folds \u0451->\u0435 (a genuine, common
+// Russian orthographic equivalence \u2014 printed text and casual writing routinely drop the
+// diaeresis, e.g. "\u041F\u0435\u0442\u0440"/"\u041F\u0451\u0442\u0440" are both the same, correct name; this is not an error to
+// penalize), and collapses whitespace runs (including newlines) to a single space, so a
+// check like "contains 10 000" matches regardless of the model's exact spacing/line-wrapping.
+func normalizeText(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "\u00A0", " ") // NBSP -> normal space
+	s = strings.ReplaceAll(s, "\u0451", "\u0435")
+	s = strings.Join(strings.Fields(s), " ")
+	return s
+}
+
+// parseExtractionJSON decodes a model's raw answer into ExtractionResult, tolerating a
+// ```json ... ``` fence around the object (some models wrap fenced code even when asked
+// for response_format: json_object).
+func parseExtractionJSON(raw string) (ExtractionResult, error) {
+	cleaned := fenceOpenRE.ReplaceAllString(raw, "")
+	cleaned = fenceCloseRE.ReplaceAllString(cleaned, "")
+	var r ExtractionResult
+	if err := json.Unmarshal([]byte(cleaned), &r); err != nil {
+		return ExtractionResult{}, err
+	}
+	return r, nil
+}
+
+// runExtractChecks grades one parsed ExtractionResult against its case's requirements.
+// Every check is deterministic string/number matching — no LLM judge, matching this
+// harness's existing judge.go philosophy.
+func runExtractChecks(c ExtractCase, r ExtractionResult) []CheckResult {
+	var out []CheckResult
+
+	if len(c.Fields) > 0 {
+		keys := make([]string, 0, len(c.Fields))
+		for k := range c.Fields {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			want := c.Fields[key]
+			got, known := fieldValue(r, key)
+			switch {
+			case !known:
+				out = append(out, CheckResult{Name: "field:" + key, Pass: false,
+					Detail: fmt.Sprintf("unknown field %q in case definition", key)})
+			case !fieldMatchesAny(got, want):
+				out = append(out, CheckResult{Name: "field:" + key, Pass: false,
+					Detail: fmt.Sprintf("want %q, got %q", want, got)})
+			default:
+				out = append(out, CheckResult{Name: "field:" + key, Pass: true})
+			}
+		}
+	}
+
+	if len(c.TextContainsAll) > 0 {
+		out = append(out, containsAllCheck("text_contains_all", normalizeText(r.ExtractedText), c.TextContainsAll))
+	}
+	if len(c.IdentifyContainsAll) > 0 {
+		identify := normalizeText(r.Summary + " " + r.RelatesToHint)
+		out = append(out, containsAllCheck("identify_contains_all", identify, c.IdentifyContainsAll))
+	}
+	if len(c.IdentifyContainsAny) > 0 {
+		identify := normalizeText(r.Summary + " " + r.RelatesToHint)
+		out = append(out, containsAnyCheck("identify_contains_any", identify, c.IdentifyContainsAny))
+	}
+
+	// Invented-number check always runs (fail-closed default: an absent allowed_numbers
+	// key means "no numbers may appear", not "skip this check") — every case in
+	// cases.yaml is expected to declare it explicitly, even as an empty list.
+	out = append(out, inventedNumberCheck(c, r))
+
+	if c.ForbidCurrency {
+		haystack := strings.ToLower(r.ExtractedText + " " + r.Summary + " " + r.RelatesToHint)
+		if loc := currencyRE.FindString(haystack); loc != "" {
+			out = append(out, CheckResult{Name: "forbid_currency", Pass: false,
+				Detail: fmt.Sprintf("found currency mention %q, but this file shows no price", loc)})
+		} else {
+			out = append(out, CheckResult{Name: "forbid_currency", Pass: true})
+		}
+	}
+
+	return out
+}
+
+// fieldMatchesAny checks `got` against `want`, where `want` may be several
+// pipe-separated acceptable values (e.g. "infographic|tutorial") — for the rare field
+// where a real image honestly straddles two categories in our own vocabulary (observed:
+// a multi-panel numbered flow graphic gets called "tutorial" by one model, "infographic"
+// by another; neither is wrong, the vocabulary boundary is genuinely fuzzy). This is not
+// a way to launder an arbitrary wrong answer — cases should list only the alternatives
+// that are each independently defensible for that specific file.
+func fieldMatchesAny(got, want string) bool {
+	for _, alt := range strings.Split(want, "|") {
+		if normalizeText(got) == normalizeText(alt) {
+			return true
+		}
+	}
+	return false
+}
+
+func fieldValue(r ExtractionResult, key string) (string, bool) {
+	switch key {
+	case "content_kind":
+		return r.ContentKind, true
+	case "summary":
+		return r.Summary, true
+	case "extracted_text":
+		return r.ExtractedText, true
+	case "language":
+		return r.Language, true
+	case "visibility_suggestion":
+		return r.VisibilitySuggestion, true
+	case "media_role_hint":
+		return r.MediaRoleHint, true
+	case "relates_to_hint":
+		return r.RelatesToHint, true
+	default:
+		return "", false
+	}
+}
+
+func containsAllCheck(name, haystack string, wants []string) CheckResult {
+	var missing []string
+	for _, w := range wants {
+		if !strings.Contains(haystack, normalizeText(w)) {
+			missing = append(missing, w)
+		}
+	}
+	if len(missing) > 0 {
+		return CheckResult{Name: name, Pass: false,
+			Detail: "missing: " + strings.Join(missing, ", ")}
+	}
+	return CheckResult{Name: name, Pass: true}
+}
+
+func containsAnyCheck(name, haystack string, wants []string) CheckResult {
+	for _, w := range wants {
+		if strings.Contains(haystack, normalizeText(w)) {
+			return CheckResult{Name: name, Pass: true}
+		}
+	}
+	return CheckResult{Name: name, Pass: false,
+		Detail: "none of: " + strings.Join(wants, ", ")}
+}
+
+// inventedNumberCheck finds every number-like run in the model's text fields and fails
+// if any of them is not in the case's allow-list (normalized the same way) — this is the
+// eval's stand-in for DECISIONS.md's core rule that a model must never invent an exact
+// value it cannot see.
+func inventedNumberCheck(c ExtractCase, r ExtractionResult) CheckResult {
+	allowed := map[string]bool{}
+	for _, a := range c.AllowedNumbers {
+		allowed[canonicalNumber(normalizeText(a))] = true
+	}
+	// foldNBSPOnly, NOT normalizeText: a real line break is a genuine hard boundary
+	// between two numbers (e.g. an address "77/7" immediately followed, on the next
+	// line, by an unrelated count "2 кассира") — normalizeText's newline-to-space
+	// collapsing would destroy that boundary before numberRunRE ever sees it, merging
+	// two unrelated numbers into one bogus "invented" one. Case doesn't matter for
+	// digit/separator matching, so no lowercasing is needed here either.
+	haystack := foldNBSPOnly(r.ExtractedText + " " + r.Summary + " " + r.RelatesToHint)
+	found := numberRunRE.FindAllString(haystack, -1)
+
+	var invented []string
+	seen := map[string]bool{}
+	for _, n := range found {
+		key := canonicalNumber(n)
+		if allowed[key] || seen[key] {
+			continue
+		}
+		seen[key] = true
+		invented = append(invented, n) // report as originally seen (readable in Detail)
+	}
+	if len(invented) > 0 {
+		return CheckResult{Name: "no_invented_numbers", Pass: false,
+			Detail: "not in the allowed list: " + strings.Join(invented, ", ")}
+	}
+	return CheckResult{Name: "no_invented_numbers", Pass: true}
+}

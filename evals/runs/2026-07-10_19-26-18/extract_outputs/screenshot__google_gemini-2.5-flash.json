@@ -1,0 +1,12 @@
+{
+  "case_id": "screenshot",
+  "model": "google/gemini-2.5-flash",
+  "raw": "{\n  \"content_kind\": \"screenshot\",\n  \"summary\": \"This is a screenshot of a webpage",
+  "parse_error": "unexpected end of JSON input",
+  "usage": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0
+  },
+  "cost_usd_estimate": 0,
+  "cost_basis": "unknown_pricing"
+}

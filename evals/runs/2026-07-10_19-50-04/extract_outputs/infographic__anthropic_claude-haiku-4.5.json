@@ -1,0 +1,43 @@
+{
+  "case_id": "infographic",
+  "model": "anthropic/claude-haiku-4.5",
+  "raw": "```json\n{\n  \"content_kind\": \"infographic\",\n  \"summary\": \"A designed pricing card in Russian presenting four tariff plans for xraument.kz, a payment processing service. It shows plan names, monthly prices in Kazakhstani Tenge, features, and payment limits.\",\n  \"extracted_text\": \"Мы добавили новые тарифные планы xraument.kz\\n\\nВыберите подходящий тариф для приема оплат через Kaspi Pay\\n\\nПРОБНЫЙ\\nБесплатно\\n3 бесплатных дня\\nДля первого знакомства\\n\\nСТАРТ\\n10 000 ₸/мес\\nдо 250 платежей/мес\\nДля небольшого бизнеса\\n\\n★ ОСНОВНОЙ\\nРОСТ\\n25 000 ₸/мес\\nдо 2 000 платежей/мес\\nОптимальный выбор\\n\\nМАШТАБ\\n60 000 ₸/мес\\nбезлимит платежей\\nДля большого бизнеса\\n\\nдо 5 виртуальных касс\\nбезлимит вебхуков\\nQR / Deeplink / Инвойс\\nполный доступ к панели\\n\\nПодробнее на xraument.kz\",\n  \"language\": \"ru\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"pricing\",\n  \"relates_to_hint\": \"xraument.kz payment processing tariffs for Kaspi Pay integration\"\n}\n```",
+  "parsed": {
+    "content_kind": "infographic",
+    "summary": "A designed pricing card in Russian presenting four tariff plans for xraument.kz, a payment processing service. It shows plan names, monthly prices in Kazakhstani Tenge, features, and payment limits.",
+    "extracted_text": "Мы добавили новые тарифные планы xraument.kz\n\nВыберите подходящий тариф для приема оплат через Kaspi Pay\n\nПРОБНЫЙ\nБесплатно\n3 бесплатных дня\nДля первого знакомства\n\nСТАРТ\n10 000 ₸/мес\nдо 250 платежей/мес\nДля небольшого бизнеса\n\n★ ОСНОВНОЙ\nРОСТ\n25 000 ₸/мес\nдо 2 000 платежей/мес\nОптимальный выбор\n\nМАШТАБ\n60 000 ₸/мес\nбезлимит платежей\nДля большого бизнеса\n\nдо 5 виртуальных касс\nбезлимит вебхуков\nQR / Deeplink / Инвойс\nполный доступ к панели\n\nПодробнее на xraument.kz",
+    "language": "ru",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "pricing",
+    "relates_to_hint": "xraument.kz payment processing tariffs for Kaspi Pay integration"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": false,
+      "detail": "missing: масштаб, xpayment.kz"
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1828,
+    "completion_tokens": 441
+  },
+  "cost_usd_estimate": 0,
+  "cost_basis": "unknown_pricing"
+}

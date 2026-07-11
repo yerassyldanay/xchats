@@ -1,0 +1,44 @@
+{
+  "case_id": "how-to-cachier",
+  "model": "anthropic/claude-haiku-4.5",
+  "raw": "```json\n{\n  \"content_kind\": \"tutorial\",\n  \"summary\": \"A designed tutorial graphic showing a 4-step process for adding a cashier to a sales point in the Kaspi Pay app, with Russian-language instructions and UI mockups.\",\n  \"extracted_text\": \"Откройте «Точки продаж и кассиры»\\nНа главном экране Kaspi Pay нажмите на блок «Точки продаж и кассиры».\\n9:41\\nKaspi Pay\\nМП «Мой магазин»\\nРедакция за категория\\n245 600 ₸\\nКасса Помощник оператора\\nСчета на емайл\\nТочки продаж и кассиры\\nМагазины на Kaspi kz\\nСсылки на емайл\\nОн-лайн\\nМонетальные выплаты на Kaspi Gold\\nГлавная\\nРасчеты\\nСообщение\\nСервисы\\nВыберите точку продаж\\nВыберите точку продаж из списка, в которой вы хотите добавить кассира.\\n9:41\\nТочки продаж и кассиры\\nМой магазин\\nул. Абая, 132\\n1 кассир\\nМагазин №2\\nпр. Ал-Фараби, 777\\n2 кассира\\nМагазин №3\\nул. Толе би, 15\\n1 кассир\\n+ Добавить точку продаж\\nДобавьте кассира\\n• Введите ФИО кассира\\n• Укажите номер телефона\\n• Роль. Кассир (по умолчанию)\\n• Нажмите «Сохранить»\\n9:41\\nДобавьте кассира\\nФИО кассира\\nИванов Иван Иванович\\nНомер телефона\\n+7 777 123-45-67\\nРоль\\nКассир\\nКассир может принимать платежи и работать с сервисом\\nСохранить\\nОтменить\\nКассир добавлен\\nНовый кассир появился в списке.\\nОн получит SMS-приглашение и сможет войти в Kaspi Pay.\\n9:41\\nТочки продаж и кассиры\\nМой магазин\\nул. Абая, 132\\nИванов Иван Иванович\\n+7 777 123-45-67\\nПетров Петр Петрович\\n+7 777 000-11-22\\n+ Добавить кассира\\nМагазин №2\\nпр. Ал-Фараби, 777\\n2 кассира\\nМагазин №3\\nул. Толе би, 15\\n1 кассир\\nКассир добавлен\\nКассиру отправлено SMS-приглашение\",\n  \"language\": \"ru\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"instruction\",\n  \"relates_to_hint\": \"Kaspi Pay cashier management and sales point setup\"\n}\n```",
+  "parsed": {
+    "content_kind": "tutorial",
+    "summary": "A designed tutorial graphic showing a 4-step process for adding a cashier to a sales point in the Kaspi Pay app, with Russian-language instructions and UI mockups.",
+    "extracted_text": "Откройте «Точки продаж и кассиры»\nНа главном экране Kaspi Pay нажмите на блок «Точки продаж и кассиры».\n9:41\nKaspi Pay\nМП «Мой магазин»\nРедакция за категория\n245 600 ₸\nКасса Помощник оператора\nСчета на емайл\nТочки продаж и кассиры\nМагазины на Kaspi kz\nСсылки на емайл\nОн-лайн\nМонетальные выплаты на Kaspi Gold\nГлавная\nРасчеты\nСообщение\nСервисы\nВыберите точку продаж\nВыберите точку продаж из списка, в которой вы хотите добавить кассира.\n9:41\nТочки продаж и кассиры\nМой магазин\nул. Абая, 132\n1 кассир\nМагазин №2\nпр. Ал-Фараби, 777\n2 кассира\nМагазин №3\nул. Толе би, 15\n1 кассир\n+ Добавить точку продаж\nДобавьте кассира\n• Введите ФИО кассира\n• Укажите номер телефона\n• Роль. Кассир (по умолчанию)\n• Нажмите «Сохранить»\n9:41\nДобавьте кассира\nФИО кассира\nИванов Иван Иванович\nНомер телефона\n+7 777 123-45-67\nРоль\nКассир\nКассир может принимать платежи и работать с сервисом\nСохранить\nОтменить\nКассир добавлен\nНовый кассир появился в списке.\nОн получит SMS-приглашение и сможет войти в Kaspi Pay.\n9:41\nТочки продаж и кассиры\nМой магазин\nул. Абая, 132\nИванов Иван Иванович\n+7 777 123-45-67\nПетров Петр Петрович\n+7 777 000-11-22\n+ Добавить кассира\nМагазин №2\nпр. Ал-Фараби, 777\n2 кассира\nМагазин №3\nул. Толе би, 15\n1 кассир\nКассир добавлен\nКассиру отправлено SMS-приглашение",
+    "language": "ru",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "instruction",
+    "relates_to_hint": "Kaspi Pay cashier management and sales point setup"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": false,
+      "detail": "missing: 77/7"
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": false,
+      "detail": "not in the allowed list: 777, 4"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1717,
+    "completion_tokens": 857
+  },
+  "cost_usd_estimate": 0,
+  "cost_basis": "unknown_pricing"
+}

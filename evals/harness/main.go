@@ -1,8 +1,9 @@
 // Command harness is the eval playground's own tool: render turns a scenario's data.yaml
 // into a real prompt + promptfoo config; judge grades promptfoo's raw answers against the
 // scenario's fact/media catalog (token resolution, injection, fail-closed); report writes
-// the human-readable run summary. It imports nothing from backend/ — this is a free-
-// standing module on purpose (see evals/PLAYGROUND.md).
+// the human-readable run summary; extract runs Eval 1 (file -> extracted information)
+// via direct OpenRouter calls, graded against extract/cases.yaml. It imports nothing from
+// backend/ — this is a free-standing module on purpose (see evals/PLAYGROUND.md).
 package main
 
 import (
@@ -25,6 +26,8 @@ func main() {
 		err = cmdReport(os.Args[2:])
 	case "run":
 		err = cmdRun(os.Args[2:])
+	case "extract":
+		err = cmdExtract(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -42,5 +45,8 @@ commands:
   render -scenario <dir>              build generated/prompt.txt + catalog.json + promptfooconfig.yaml
   judge  -scenario <dir> -run <dir>   grade a run's results.json against the scenario's catalog
   report -run <dir>                   write runs/<id>/SUMMARY.md from judge verdicts
-  run    -scenario <dir>[,<dir>...] | -all   render -> promptfoo eval -> judge -> report`)
+  run    -scenario <dir>[,<dir>...] | -all   render -> promptfoo eval -> judge -> report
+  extract -cases <file> [-case <id>] [-models m1,m2] [-record]
+                                       Eval 1: file -> extracted information (direct
+                                       OpenRouter calls, no promptfoo); writes EXTRACT.md`)
 }

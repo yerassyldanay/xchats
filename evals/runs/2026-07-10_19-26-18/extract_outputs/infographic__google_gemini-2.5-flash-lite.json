@@ -1,0 +1,43 @@
+{
+  "case_id": "infographic",
+  "model": "google/gemini-2.5-flash-lite",
+  "raw": "{\n  \"content_kind\": \"infographic\",\n  \"summary\": \"This is an infographic detailing new tariff plans for xpayment.kz, offering different options for accepting payments via Kaspi Pay.\",\n  \"extracted_text\": \"Мы добавили\\nновые тарифные планы\\nxpayment.kz\\nВыберите подходящий тариф\\nдля приема оплат через Kaspi Pay\\nПРОБНЫЙ\\nБесплатно\\n3 бесплатных дня\\nДля первого знакомства\\nСТАРТ\\n10 000 Т/мес\\nдо 250 платежей/мес\\nДля небольшого бизнеса\\n* основной\\nPOCT\\n25 000 Т/мес\\nдо 2 000 платежей/мес\\nОптимальный выбор\\nМАСШТАБ\\n60 000 Т/мес\\nбезлимит платежей\\nДля большого бизнеса\\nдо 5\\nвиртуальных касс\\nбезлимит\\nвебхуков\\nQR/Deeplink/\\nИнвойс\\nполный доступ\\nк панели\\n• Подробнее на хpayment.kz\",\n  \"language\": \"ru\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"pricing\",\n  \"relates_to_hint\": \"xpayment.kz tariff plans\"\n}",
+  "parsed": {
+    "content_kind": "infographic",
+    "summary": "This is an infographic detailing new tariff plans for xpayment.kz, offering different options for accepting payments via Kaspi Pay.",
+    "extracted_text": "Мы добавили\nновые тарифные планы\nxpayment.kz\nВыберите подходящий тариф\nдля приема оплат через Kaspi Pay\nПРОБНЫЙ\nБесплатно\n3 бесплатных дня\nДля первого знакомства\nСТАРТ\n10 000 Т/мес\nдо 250 платежей/мес\nДля небольшого бизнеса\n* основной\nPOCT\n25 000 Т/мес\nдо 2 000 платежей/мес\nОптимальный выбор\nМАСШТАБ\n60 000 Т/мес\nбезлимит платежей\nДля большого бизнеса\nдо 5\nвиртуальных касс\nбезлимит\nвебхуков\nQR/Deeplink/\nИнвойс\nполный доступ\nк панели\n• Подробнее на хpayment.kz",
+    "language": "ru",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "pricing",
+    "relates_to_hint": "xpayment.kz tariff plans"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": false,
+      "detail": "missing: рост"
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1775,
+    "completion_tokens": 314
+  },
+  "cost_usd_estimate": 0.00030310000000000005,
+  "cost_basis": "measured_split"
+}

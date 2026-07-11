@@ -80,6 +80,31 @@ answers, applied to the prompt itself before any model ever sees it.
   text, cost basis for that one answer, and every check's pass/fail.
 - **`runs/INDEX.md`** — one line per run, so past attempts stay easy to find and compare.
 
+## Extraction eval (Eval 1: file -> extracted information)
+
+Separate from the scenarios above — this tests the playground's pass-1 extraction step
+in isolation, with real files and real OpenRouter vision calls (no promptfoo).
+
+```bash
+cd evals/harness && go build -o harness . && cd ..
+cp .env.example .env        # fill in OPENROUTER_API_KEY
+./harness/harness extract -all
+./harness/harness extract -case screenshot -models google/gemini-2.5-flash
+./harness/harness extract -record -case infographic -models google/gemini-2.5-flash
+```
+
+Each case in `extract/cases.yaml` names one real file under `assets/` and the exact
+requirements a correct extraction must satisfy (written by looking directly at the file —
+ground truth, not guesses). The model must answer with one fixed JSON shape (see
+`extract_types.go`'s `ExtractionResult` and the prompt in the same file) — every check is
+deterministic string/number matching, same philosophy as `judge.go`. Output is
+`runs/<timestamp>/EXTRACT.md` plus the raw per-(case,model) JSON under
+`runs/<timestamp>/extract_outputs/`. `-record` freezes a fully-passing output to
+`extract/fixtures/<case>.json`, meant to feed a later, separate eval (extracted
+information -> `ai_*` draft schema) without re-calling vision models.
+
+Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
+
 ## Known limits
 
 - **Cost is an ESTIMATE, never real spend.** `models.yaml` hand-maintains

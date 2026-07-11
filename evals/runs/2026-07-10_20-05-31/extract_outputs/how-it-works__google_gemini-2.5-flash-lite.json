@@ -1,0 +1,43 @@
+{
+  "case_id": "how-it-works",
+  "model": "google/gemini-2.5-flash-lite",
+  "raw": "{\n  \"content_kind\": \"infographic\",\n  \"summary\": \"This is an infographic explaining the integration flow of Kaspi Pay for a product using xpayment. It details the steps from setting up Kaspi Pay to successful payment by the client.\",\n  \"extracted_text\": \"xpayment\\nКак работает храyment\\nФлоу интеграции Kaspi Рау для вашего продукта\\n1 Kaspi Pay\\nкассир\\n2 Виртуальный кассир\\nxpayment\\nНомер кассира\\n123456789012\\nКод подтверждения\\n......\\nУ вас есть Kaspi Pay\\nкассир для приёма\\nплатежей.\\nKaspi Рау кассир\\nтеперь в храутент\\nкак виртуальный кассир\\n3 xpayment API\\nAPI\\n• создание платежей\\n• статусы\\n• уведомления\\n4\\nВаш продукт\\nинтернет-магазин\\nTelegram бот\\nCRM\\nмобильное\\nприложение\\n5 Клиент видит оплату в вашем продукте\\nQR\\nDeeplink\\nОформление заказ\\nКоплате\\n24 500 T\\nЗаказ #А-2041\\nКоплате\\n24 500 〒\\nОтсканируйте QR\\nв приложении Казрі.kz\\n• Оплатить через Каѕрі\\n6 Клиент видит оплату в Kaspi Pay\\n18:43\\nKaspi Pay\\nСканируйте QR-код\\nSG\\nX\\nЗаказ №А-2041\\n24 500 T\\nПродавец\\nСумма\\nTOO Green Basket\\n24 500\\n• Потратить Бонусы\\nНакоплено 320 〒\\nК оплате\\n24 500 T\\nСпособы оплаты\\nСкрыть суммы\\nO Kaspi Pay\\n1234\\n24 500 T\\nKaspi Gold\\n5678\\n24 500 T\\nОплатить 24 500 T\\n7 Успешная оплата\\n• платеж оплачен\\n• уведомление в ваш продукт\\nзаказ оплачен\",\n  \"language\": \"ru\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"instruction\",\n  \"relates_to_hint\": \"Kaspi Pay integration\"\n}",
+  "parsed": {
+    "content_kind": "infographic",
+    "summary": "This is an infographic explaining the integration flow of Kaspi Pay for a product using xpayment. It details the steps from setting up Kaspi Pay to successful payment by the client.",
+    "extracted_text": "xpayment\nКак работает храyment\nФлоу интеграции Kaspi Рау для вашего продукта\n1 Kaspi Pay\nкассир\n2 Виртуальный кассир\nxpayment\nНомер кассира\n123456789012\nКод подтверждения\n......\nУ вас есть Kaspi Pay\nкассир для приёма\nплатежей.\nKaspi Рау кассир\nтеперь в храутент\nкак виртуальный кассир\n3 xpayment API\nAPI\n• создание платежей\n• статусы\n• уведомления\n4\nВаш продукт\nинтернет-магазин\nTelegram бот\nCRM\nмобильное\nприложение\n5 Клиент видит оплату в вашем продукте\nQR\nDeeplink\nОформление заказ\nКоплате\n24 500 T\nЗаказ #А-2041\nКоплате\n24 500 〒\nОтсканируйте QR\nв приложении Казрі.kz\n• Оплатить через Каѕрі\n6 Клиент видит оплату в Kaspi Pay\n18:43\nKaspi Pay\nСканируйте QR-код\nSG\nX\nЗаказ №А-2041\n24 500 T\nПродавец\nСумма\nTOO Green Basket\n24 500\n• Потратить Бонусы\nНакоплено 320 〒\nК оплате\n24 500 T\nСпособы оплаты\nСкрыть суммы\nO Kaspi Pay\n1234\n24 500 T\nKaspi Gold\n5678\n24 500 T\nОплатить 24 500 T\n7 Успешная оплата\n• платеж оплачен\n• уведомление в ваш продукт\nзаказ оплачен",
+    "language": "ru",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "instruction",
+    "relates_to_hint": "Kaspi Pay integration"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": false,
+      "detail": "missing: как работает xpayment"
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2050,
+    "completion_tokens": 595
+  },
+  "cost_usd_estimate": 0.00044300000000000003,
+  "cost_basis": "measured_split"
+}

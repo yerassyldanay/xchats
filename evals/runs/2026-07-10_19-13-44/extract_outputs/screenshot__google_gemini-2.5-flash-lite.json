@@ -1,0 +1,12 @@
+{
+  "case_id": "screenshot",
+  "model": "google/gemini-2.5-flash-lite",
+  "raw": "{\n  \"content_kind\": \"infographic\",\n  \"summary\": \"This is a webpage screenshot from xPayment, a service for online payment automation in Kazakhstan. It offers a callback service for connecting to Kaspi Pay API and provides contact and legal information.\",\n  \"extracted_text\": \"Сложно разобраться,\\nили не хотите тратить время?\\nОставьте номер телефона. Мы перезвоним, уточним ваш сценарий и подскажем, как\\nподключить Kaspi Pay API без лишней ручной работы.\\nОставить номер →\\nВ Перезвоним в течение 1 часа\\nWhatsApp\\nxPayment\\nСервис автоматизации онлайн-платежей для\\nбизнеса в Казахстане. Не банк, не платёжная\\nорганизация, не партнёр Кaspi.\\nРЕКВИЗИТЫ\\nИП «XGroup»\\nРеспублика Казахстан\\nг. Шымкент",
+  "parse_error": "unexpected end of JSON input",
+  "usage": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0
+  },
+  "cost_usd_estimate": 0,
+  "cost_basis": "measured_split"
+}

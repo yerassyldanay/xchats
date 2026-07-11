@@ -1,0 +1,164 @@
+# evals/extract/cases.yaml — Eval 1: file -> extracted information.
+#
+# Each case names one real file (already staged in evals/assets/) plus the requirements a
+# correct extraction must satisfy. Requirements were written by looking directly at each
+# file — they are ground truth, not guesses. `file:` is relative to THIS file's directory.
+#
+# Checks (see extract_checks.go):
+#   fields                 exact match against a named ExtractionResult field
+#   text_contains_all      every phrase must appear in extracted_text (normalized)
+#   identify_contains_all  every phrase must appear in summary+relates_to_hint
+#   identify_contains_any  at least one phrase must appear in summary+relates_to_hint
+#   allowed_numbers        every number-like run found anywhere in the model's text
+#                          fields must be in this list — the invented-number check.
+#                          [] means "no number may appear at all". Numbers with an
+#                          internal thousands-style space (e.g. "25 000") are matched
+#                          as ONE run — see numberRunRE's doc comment for why.
+#   forbid_currency        extra check: no ₸/тенге/тг/$ mention at all
+
+cases:
+  - id: infographic
+    file: ../assets/fixed_tariff_006.png
+    fields:
+      content_kind: infographic
+      visibility_suggestion: visible
+      media_role_hint: pricing
+    text_contains_all:
+      - "пробный"
+      - "старт"
+      - "рост"
+      - "масштаб"
+      - "бесплатн"        # matches both "Бесплатно" (the trial's price) and "бесплатных" (below)
+      - "3 бесплатных"    # ties the trial length to its own label, not just a bare "3"
+      - "10 000"
+      - "250"
+      - "25 000"
+      - "2 000"
+      - "60 000"
+      - "безлимит"
+      - "xpayment.kz"
+      - "kaspi pay"
+    # 3 = trial days, 5 = "до 5 виртуальных касс" in the footer.
+    allowed_numbers: ["3", "5", "250", "2 000", "10 000", "25 000", "60 000"]
+
+  - id: product-photo
+    file: ../assets/drill_edh_01.jpeg
+    fields:
+      content_kind: product_photo
+      visibility_suggestion: visible
+      media_role_hint: gallery
+    # NOT "follis" — verified against the full-resolution source: the tool's own black
+    # handle crosses directly in front of the "Fo" letters at this camera angle, so only
+    # "...llis" is actually legible. Confirmed by 3 independent live models (Claude Haiku,
+    # both Gemini variants) converging on exactly "llis" — a correct, honest read of
+    # what's visible, not a shared hallucination. "llis" also still matches a model that
+    # correctly reads the full "Follis" (substring), so this doesn't get easier to pass —
+    # it gets fair.
+    #
+    # Checked against extracted_text, NOT identify_contains_all/any (summary +
+    # relates_to_hint): the prompt asks for verbatim label text in extracted_text and a
+    # general description in summary — a model correctly following those instructions
+    # writes "llis" in extracted_text and "a drill with a brand label" in summary,
+    # never repeating the exact text there. Checking the wrong field failed models for
+    # doing exactly what was asked.
+    text_contains_all:
+      - "llis"
+    identify_contains_any:
+      - "дрель"
+      - "сверлильн"
+      - "станок"
+      - "magnetic drill"
+      - "drill"
+    # Nothing exact (price, spec, model number) is legibly visible in this photo — a
+    # model that guesses one (from the ON/OFF panel, the warning sticker, etc.) fails.
+    allowed_numbers: []
+    forbid_currency: true
+
+  - id: screenshot
+    file: ../assets/screenshot-xpayment.png
+    fields:
+      content_kind: screenshot
+      visibility_suggestion: invisible   # the key check: a source file, never sent to a customer as-is
+    text_contains_all:
+      - "xpayment"
+      - "kaspi pay"
+      - "702 976-65-09"
+      - "support@xpayment.kz"
+      - "шымкент"
+      - "xgroup"
+      - "1 час"   # "Перезвоним в течение 1 часа" — substring-contained in "1 часа"
+    # The phone "+7 702 976-65-09" is one allowed_numbers entry, not split into
+    # per-group fragments: live models transcribe it with different groupings (source
+    # style "7 702 976-65-09", all-hyphens "7702-976-65-09", solid "77029766509", ...).
+    # numberRunRE merges any of these into ONE run (it tolerates space/comma/hyphen as
+    # continuation characters); canonicalNumber then strips all of those separators
+    # before comparing — so any correctly-transcribed grouping canonicalizes to the same
+    # bare digit string "77029766509" and matches this ONE entry, however it was grouped.
+    # A model that gets even one digit wrong (observed: 65 -> 45) produces a DIFFERENT
+    # 11-digit string and still correctly fails — this only forgives grouping, not typos.
+    allowed_numbers: ["1", "7 702 976-65-09", "29", "4", "2026"]
+
+  - id: how-to-cachier
+    file: ../assets/how-to-add-cachier.jpg
+    fields:
+      # "infographic" accepted alongside "tutorial": a live run showed a model correctly
+      # calling a sibling case's numbered-step graphic "infographic" (see how-it-works
+      # below) — the two categories genuinely aren't crisply separable for a designed
+      # multi-panel how-to, in either direction. Not a raw screenshot either way.
+      content_kind: tutorial|infographic
+      visibility_suggestion: visible   # designed-to-be-shared instructional graphic
+      media_role_hint: instruction
+    text_contains_all:
+      - "точки продаж и кассиры"
+      - "добавьте кассира"
+      - "иванов иван иванович"
+      - "петров петр петрович"
+      - "кассир добавлен"
+      - "245 600"
+      - "132"
+      - "77/7"
+      - "15"
+    # Two cashier phone numbers (each one allowed_numbers entry, matching the phone-number
+    # pattern established in the `screenshot` case above — any grouping style the model
+    # picks canonicalizes to the same bare digits); the sales figure; three store addresses
+    # ("77/7" splits into "77" and "7" — the "/" is not a tolerated separator); the store
+    # count/cashier-count digits reused across panels (1, 2, 3); the phone-mockup status
+    # bar clock shown in every panel (9:41 -> "9" and "41", ":" is not tolerated either).
+    allowed_numbers:
+      ["9", "41", "245 600", "132", "77", "7", "15", "1", "2", "3",
+       "7 777 123-45-67", "7 777 000-11-22"]
+
+  - id: how-it-works
+    file: ../assets/xpayment-how-it-works.png
+    fields:
+      # "tutorial" accepted alongside "infographic": this graphic has 7 numbered steps
+      # like a how-to AND a technical/pricing-adjacent flow like an infographic — a live
+      # run showed a model reasonably calling it "tutorial"; the boundary genuinely isn't
+      # crisp for this file (see how-to-cachier above for the mirror-image confusion).
+      content_kind: infographic|tutorial
+      visibility_suggestion: visible
+      media_role_hint: instruction
+    text_contains_all:
+      - "как работает xpayment"
+      - "kaspi pay кассир"
+      - "виртуальный кассир xpayment"
+      - "создание платежей"
+      - "статусы"
+      - "уведомления"
+      - "24 500"
+      - "накоплено 320"
+      - "green basket"
+      - "2041"
+      - "успешная оплата"
+    # "24 500" repeats ~6 times across the flow — a good drift check (a model that gets
+    # it right the first time but drifts on a later occurrence should fail here). 320 =
+    # bonus points; 2041 = order number (appears as "#A-2041", the "A" blocks any merge
+    # with an adjacent number); 18/43 = the phone mockup's clock ("18:43", ":" not
+    # tolerated); 1234/5678 = the two masked card suffixes; 123456789012 = the cashier
+    # id number (one long solid run, no separators at all); 5 = a plausible stray read of
+    # a "5G" signal-strength label in the phone mockup's status bar; 1-7 = the seven
+    # numbered step circles printed on the graphic itself (own ground-truth omission,
+    # caught by a live run failing all 4 models on the exact same "invented" numbers).
+    allowed_numbers:
+      ["1", "2", "3", "4", "5", "6", "7",
+       "24 500", "320", "2041", "18", "43", "1234", "5678", "123456789012"]

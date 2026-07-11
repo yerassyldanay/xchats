@@ -1,0 +1,51 @@
+{
+  "case_id": "product-photo",
+  "model": "google/gemini-2.5-flash",
+  "raw": "{\n  \"content_kind\": \"product_photo\",\n  \"summary\": \"This is a product photo of an orange and grey magnetic drill with a water bottle attached. It shows the drill from a slightly elevated front-right angle.\",\n  \"extracted_text\": \"llis\\nON\\nOFF\\nMAGNET SWITCH\\nELECTRIC DRILL SWITCH\\nATTENTION\",\n  \"language\": \"en\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"gallery\",\n  \"relates_to_hint\": \"magnetic drill\"\n}",
+  "parsed": {
+    "content_kind": "product_photo",
+    "summary": "This is a product photo of an orange and grey magnetic drill with a water bottle attached. It shows the drill from a slightly elevated front-right angle.",
+    "extracted_text": "llis\nON\nOFF\nMAGNET SWITCH\nELECTRIC DRILL SWITCH\nATTENTION",
+    "language": "en",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "gallery",
+    "relates_to_hint": "magnetic drill"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "identify_contains_all",
+      "pass": false,
+      "detail": "missing: follis"
+    },
+    {
+      "name": "identify_contains_any",
+      "pass": true
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": true
+    },
+    {
+      "name": "forbid_currency",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2291,
+    "completion_tokens": 126
+  },
+  "cost_usd_estimate": 0,
+  "cost_basis": "unknown_pricing"
+}

@@ -1,0 +1,52 @@
+{
+  "case_id": "product-photo",
+  "model": "google/gemini-2.5-flash-lite",
+  "raw": "{\n  \"content_kind\": \"product_photo\",\n  \"summary\": \"This is a product photo of an orange and grey magnetic drill press with a water coolant bottle attached. The drill has visible ON/OFF switches and a power cord.\",\n  \"extracted_text\": \"llis\\nON\\nOFF\\nELECTRIC DRILL SWITCH\\nMAGNET SWITCH\\nATTENTION\\n0000\\n0000\",\n  \"language\": \"en\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"gallery\",\n  \"relates_to_hint\": \"magnetic drill press\"\n}",
+  "parsed": {
+    "content_kind": "product_photo",
+    "summary": "This is a product photo of an orange and grey magnetic drill press with a water coolant bottle attached. The drill has visible ON/OFF switches and a power cord.",
+    "extracted_text": "llis\nON\nOFF\nELECTRIC DRILL SWITCH\nMAGNET SWITCH\nATTENTION\n0000\n0000",
+    "language": "en",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "gallery",
+    "relates_to_hint": "magnetic drill press"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "identify_contains_all",
+      "pass": false,
+      "detail": "missing: llis"
+    },
+    {
+      "name": "identify_contains_any",
+      "pass": true
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": false,
+      "detail": "not in the allowed list: 0000 0000"
+    },
+    {
+      "name": "forbid_currency",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2291,
+    "completion_tokens": 141
+  },
+  "cost_usd_estimate": 0.0002855,
+  "cost_basis": "measured_split"
+}
