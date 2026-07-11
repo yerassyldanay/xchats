@@ -7,6 +7,21 @@
 # model whose current price you haven't verified — the report will call it out as
 # "unknown_pricing" instead of showing a number that might be wrong. Check current prices at
 # pricing_source before filling one in, and update pricing_checked_at when you do.
+#
+# Three more optional per-provider fields exist (harness/types.go: ModelProvider) but are
+# deliberately left unset below, on every entry, for the same "mark unverified rather than
+# guess" reason as pricing:
+#   - label: disambiguates two entries that share one `id` but differ in config (e.g. a
+#     reasoning-on/reasoning-off comparison pair — see evals/models-reasoning.yaml for a
+#     worked example). Every entry below is the only one of its id, so none need it.
+#   - provider: {order: [...], allow_fallbacks: true|false} pins the exact OpenRouter
+#     upstream route for a comparison run, e.g.:
+#       provider:
+#         order: ["Google AI Studio"]   # verify the exact upstream name against
+#         allow_fallbacks: false        # OpenRouter's own model page before using this —
+#                                        # it is NOT verified for any entry below.
+#   - reasoning: {enabled, effort, max_tokens, exclude, billed_separately} opts a model
+#     into OpenRouter's reasoning API — see evals/models-reasoning.yaml.
 pricing_source: "https://openrouter.ai/models"
 pricing_checked_at: "2026-07-11"
 providers:

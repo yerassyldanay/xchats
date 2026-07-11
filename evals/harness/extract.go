@@ -222,12 +222,13 @@ func runOneExtraction(ctx context.Context, client *orClient, c ExtractCase, m Mo
 	var res extractRunResult
 	for attempt := 0; attempt <= parseFailureRetries; attempt++ {
 		res = extractRunResult{CaseID: c.ID, Model: orModelID(m.ID), Prompt: p.Ref, Preprocessor: preprocessorName}
-		raw, usage, err := client.describeImage(ctx, m, p.Content, imgData, mimetype)
+		raw, reasoning, usage, err := client.describeImage(ctx, m, p.Content, imgData, mimetype)
 		if err != nil {
 			res.Error = err.Error()
 			return res // a real HTTP/network error is not retried here
 		}
 		res.Raw = raw
+		res.Reasoning = reasoning
 		res.Usage = usage
 		res.Cost, res.CostBasis = estimateCost(m, usage)
 

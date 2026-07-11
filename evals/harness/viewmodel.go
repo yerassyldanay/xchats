@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"xchats-evals-harness/internal/evaltext"
 	"xchats-evals-harness/internal/provenance"
 )
 
@@ -68,6 +69,13 @@ type VOutput struct {
 	ParseOK    bool   `json:"parse_ok"`
 	ParseError string `json:"parse_error,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// RawHasReasoningMarkers flags Raw as containing a <think>/<thinking> tag marker —
+	// a visibility flag for the HTML viewer's raw-output panel, NOT a redaction: Raw's
+	// whole job is showing the unfiltered response for debugging in what is an internal
+	// eval-reviewer artifact, not a real customer-facing surface (the hard gate against
+	// reasoning leaking into an actual customer-facing field is judge.go's
+	// Verdict.ReasoningLeak / VScenarioDetails.ReasoningLeak, which scans reply_text).
+	RawHasReasoningMarkers bool `json:"raw_has_reasoning_markers,omitempty"`
 }
 
 // VCost mirrors the existing cost-basis discipline: EstimateUSD must never be read
@@ -91,6 +99,9 @@ type VScenarioDetails struct {
 	ForbiddenPhrase string   `json:"forbidden_phrase,omitempty"`
 	Blocked         bool     `json:"blocked"`
 	LeftoverBraces  bool     `json:"leftover_braces"`
+	FinishReason    string   `json:"finish_reason,omitempty"`
+	Truncated       bool     `json:"truncated"`
+	ReasoningLeak   bool     `json:"reasoning_leak"`
 }
 
 // VExtractDetails is the parsed ExtractionResult, carried alongside Scores so the
@@ -151,11 +162,25 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		parseDetail = ""
 	}
 
+	// finish_reason_ok is evaluated INDEPENDENTLY of parsing (row.Response.FinishReason
+	// is available regardless of whether the model's content parsed as JSON — and
+	// truncation is often the very CAUSE of a parse failure), so it deliberately does
+	// NOT go through the evaluated() gate above: routing it through evaluated() would
+	// wrongly report not_run on every parse failure, exactly the "reported not_run as
+	// if never evaluated" bug class evaluated() itself exists to prevent for every OTHER
+	// check. Follows parse_ok's own direct-status pattern instead.
+	finishReasonStatus := ScorePass
+	if v.Truncated {
+		finishReasonStatus = ScoreFail
+	}
+
 	scores := []VScore{
 		{Name: "parse_ok", Status: parseStatus, Detail: parseDetail},
+		{Name: "finish_reason_ok", Status: finishReasonStatus, Detail: v.FinishReason},
 		{Name: "contract_fields", Status: evaluated(v.ContractFields)},
 		{Name: "no_unknown_tokens", Status: evaluated(len(v.UnknownTokens) == 0), Detail: strings.Join(v.UnknownTokens, ", ")},
 		{Name: "no_leftover_braces", Status: evaluated(!v.LeftoverBraces)},
+		{Name: "no_reasoning_leak", Status: evaluated(!v.ReasoningLeak)},
 		{Name: "requires", Status: evaluated(v.RequiresPass)},
 		{Name: "media", Status: evaluated(v.MediaPass)},
 		{Name: "escalate", Status: evaluated(v.EscalatePass)},
@@ -182,8 +207,9 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		Subject: VSubject{Scenario: scenario, TestID: v.TestID, Message: v.Message},
 		Variant: VVariant{Model: v.Model},
 		Output: VOutput{
-			Raw:     v.RawOutput,
-			ParseOK: v.ParseOK,
+			Raw:                    v.RawOutput,
+			ParseOK:                v.ParseOK,
+			RawHasReasoningMarkers: evaltext.HasReasoningMarkers(v.RawOutput),
 		},
 		Scores:    scores,
 		Rollups:   rollups,
@@ -198,6 +224,9 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 			ForbiddenPhrase: v.ForbiddenPhrase,
 			Blocked:         v.Blocked,
 			LeftoverBraces:  v.LeftoverBraces,
+			FinishReason:    v.FinishReason,
+			Truncated:       v.Truncated,
+			ReasoningLeak:   v.ReasoningLeak,
 		},
 	}
 }
@@ -251,10 +280,11 @@ func extractExecutionFromResult(r extractRunResult) VExecution {
 		Subject: VSubject{CaseID: r.CaseID, InputRef: filepath.Join("inputs", r.CaseID+".jpg")},
 		Variant: VVariant{Model: r.Model, Prompt: r.Prompt, Preprocessor: r.Preprocessor},
 		Output: VOutput{
-			Raw:        r.Raw,
-			ParseOK:    r.Parsed != nil,
-			ParseError: r.ParseError,
-			Error:      r.Error,
+			Raw:                    r.Raw,
+			ParseOK:                r.Parsed != nil,
+			ParseError:             r.ParseError,
+			Error:                  r.Error,
+			RawHasReasoningMarkers: evaltext.HasReasoningMarkers(r.Raw),
 		},
 		Scores: scores,
 		Rollups: []VRollup{

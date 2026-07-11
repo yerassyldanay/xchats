@@ -88,13 +88,19 @@ type extractRunResult struct {
 	Prompt       provenance.PromptRef `json:"prompt"`
 	Preprocessor string               `json:"preprocessor,omitempty"`
 	Raw          string               `json:"raw,omitempty"`
-	Error        string               `json:"error,omitempty"`
-	ParseError   string               `json:"parse_error,omitempty"`
-	Parsed       *ExtractionResult    `json:"parsed,omitempty"`
-	Checks       []CheckResult        `json:"checks,omitempty"`
-	Usage        orUsage              `json:"usage"`
-	Cost         float64              `json:"cost_usd_estimate"`
-	CostBasis    string               `json:"cost_basis"`
+	// Reasoning is the model's separate reasoning/thinking content (OpenRouter's
+	// message.reasoning field), captured independently of Raw — never concatenated into
+	// it, so it can never be mistaken for or leak into the graded extraction output.
+	// Empty for every call that doesn't request reasoning (today, all of them) or whose
+	// provider doesn't return one.
+	Reasoning  string            `json:"reasoning,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	ParseError string            `json:"parse_error,omitempty"`
+	Parsed     *ExtractionResult `json:"parsed,omitempty"`
+	Checks     []CheckResult     `json:"checks,omitempty"`
+	Usage      orUsage           `json:"usage"`
+	Cost       float64           `json:"cost_usd_estimate"`
+	CostBasis  string            `json:"cost_basis"`
 }
 
 // extractMaxTokens is the default completion budget for an extraction call — generous

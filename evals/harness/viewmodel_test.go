@@ -42,9 +42,17 @@ func TestScenarioExecutionFromVerdict_ParseFailure_EverythingDownstreamIsNotRun(
 		t.Errorf("want parse_ok detail to carry the reason, got %q", parseOk.Detail)
 	}
 
+	// finish_reason_ok is evaluated independent of parsing (unlike everything in
+	// `downstream` below) — a parse failure with no truncation signal (v.Truncated is
+	// zero-value false here) must still report a REAL pass, not not_run.
+	finishOk, ok := scoreByName(exec.Scores, "finish_reason_ok")
+	if !ok || finishOk.Status != ScorePass {
+		t.Errorf("want finish_reason_ok=pass (evaluated independently of ParseOK), got %+v (found=%v)", finishOk, ok)
+	}
+
 	downstream := []string{
-		"contract_fields", "no_unknown_tokens", "no_leftover_braces", "requires",
-		"media", "escalate", "language", "language_text_ok", "language_field_ok",
+		"contract_fields", "no_unknown_tokens", "no_leftover_braces", "no_reasoning_leak",
+		"requires", "media", "escalate", "language", "language_text_ok", "language_field_ok",
 		"must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media",
 	}
 	for _, name := range downstream {
@@ -92,8 +100,8 @@ func TestScenarioExecutionFromVerdict_ParseOK_EveryScoreReflectsRealEvaluation(t
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
 
 	for _, name := range []string{"contract_fields", "no_unknown_tokens", "no_leftover_braces",
-		"requires", "media", "escalate", "language", "language_text_ok", "language_field_ok",
-		"must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media"} {
+		"no_reasoning_leak", "requires", "media", "escalate", "language", "language_text_ok",
+		"language_field_ok", "must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media"} {
 		s, ok := scoreByName(exec.Scores, name)
 		if !ok {
 			t.Fatalf("score %q missing", name)

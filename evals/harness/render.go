@@ -500,6 +500,46 @@ func renderDescriptions(factTables []FactTable) string {
 	return strings.Join(blocks, "\n\n")
 }
 
+// buildPassthrough turns a ModelProvider's optional Provider/Reasoning config into
+// promptfoo's own "passthrough" config key — confirmed (against a real committed
+// promptfoo results.json) as the mechanism promptfoo's OpenRouter provider uses to
+// forward arbitrary extra fields straight into the upstream HTTP request body. Returns
+// nil (not an empty map) when neither is set, so writePromptfooConfig omits the key
+// entirely — today's 4 models.yaml entries, which set neither, must generate a
+// byte-identical promptfooconfig.yaml to before this function existed.
+func buildPassthrough(p ModelProvider) map[string]any {
+	passthrough := map[string]any{}
+	if p.Provider != nil {
+		route := map[string]any{}
+		if len(p.Provider.Order) > 0 {
+			route["order"] = p.Provider.Order
+		}
+		if p.Provider.AllowFallbacks != nil {
+			route["allow_fallbacks"] = *p.Provider.AllowFallbacks
+		}
+		if len(route) > 0 {
+			passthrough["provider"] = route
+		}
+	}
+	if p.Reasoning != nil {
+		reasoning := map[string]any{"enabled": p.Reasoning.Enabled}
+		if p.Reasoning.Effort != "" {
+			reasoning["effort"] = p.Reasoning.Effort
+		}
+		if p.Reasoning.MaxTokens > 0 {
+			reasoning["max_tokens"] = p.Reasoning.MaxTokens
+		}
+		if p.Reasoning.Exclude {
+			reasoning["exclude"] = p.Reasoning.Exclude
+		}
+		passthrough["reasoning"] = reasoning
+	}
+	if len(passthrough) == 0 {
+		return nil
+	}
+	return passthrough
+}
+
 // writePromptfooConfig deliberately gives every test a trivial, always-passing assert —
 // ALL real grading (token correctness, injection, fail-closed, media, escalation,
 // language) happens in `judge`, in Go, against the raw answers this produces. Nothing
@@ -513,6 +553,7 @@ func writePromptfooConfig(genDir string, scenario *ScenarioConfig, tests []TestC
 	}
 	type providerEntry struct {
 		ID     string         `yaml:"id"`
+		Label  string         `yaml:"label,omitempty"`
 		Config map[string]any `yaml:"config"`
 	}
 	type assertEntry struct {
@@ -534,9 +575,14 @@ func writePromptfooConfig(genDir string, scenario *ScenarioConfig, tests []TestC
 		Prompts:     []promptEntry{{ID: "file://prompt.txt", Label: scenario.Name}},
 	}
 	for _, p := range models.Providers {
+		pConfig := map[string]any{"temperature": p.Temperature, "max_tokens": p.MaxTokens}
+		if pt := buildPassthrough(p); pt != nil {
+			pConfig["passthrough"] = pt
+		}
 		cfg.Providers = append(cfg.Providers, providerEntry{
 			ID:     p.ID,
-			Config: map[string]any{"temperature": p.Temperature, "max_tokens": p.MaxTokens},
+			Label:  p.Label,
+			Config: pConfig,
 		})
 	}
 	for _, t := range tests {

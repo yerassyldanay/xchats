@@ -108,6 +108,7 @@
         <details>
           <summary>extracted_text / raw output</summary>
           {{if .Extract}}<pre>{{.Extract.ExtractedText}}</pre>{{end}}
+          {{if .Output.RawHasReasoningMarkers}}<p class="status-fail"><b>Raw output contains a reasoning/thinking tag marker</b> (&lt;think&gt;/&lt;thinking&gt;) &mdash; see no_reasoning_leak above for whether it reached a customer-facing field</p>{{end}}
           <pre>{{.Output.Raw}}</pre>
         </details>
       </div>
@@ -162,6 +163,7 @@
   <p class="meta">{{costLabel .Cost}}{{if .LatencyMs}} &middot; {{.LatencyMs}}ms{{end}}</p>
   <details>
     <summary>raw output</summary>
+    {{if .Output.RawHasReasoningMarkers}}<p class="status-fail"><b>Raw output contains a reasoning/thinking tag marker</b> (&lt;think&gt;/&lt;thinking&gt;) &mdash; see no_reasoning_leak above for whether it reached reply_text</p>{{end}}
     <pre>{{.Output.Raw}}</pre>
   </details>
 </details>

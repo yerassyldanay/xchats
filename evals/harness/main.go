@@ -30,6 +30,10 @@ func main() {
 		err = cmdExtract(os.Args[2:])
 	case "html":
 		err = cmdHTML(os.Args[2:])
+	case "blind-export":
+		err = cmdBlindExport(os.Args[2:])
+	case "blind-report":
+		err = cmdBlindReport(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -56,5 +60,17 @@ commands:
                                        Eval 1: file -> extracted information (direct
                                        OpenRouter calls, no promptfoo); writes EXTRACT.md
   html   -run <dir>                   write runs/<id>/index.html (also auto-written,
-                                       best-effort, at the end of run/extract/report)`)
+                                       best-effort, at the end of run/extract/report)
+  blind-export -run <dir> -out <dir> [-force] [-seed N]
+                                       finalist-stage language review: strip prompt-
+                                       variant/model identity from a judged run's
+                                       ContractPass answers, shuffle, and write a
+                                       reviewer-facing review.csv (blank kk/ru/mixed/
+                                       unclear label column) plus a withheld mapping
+                                       file; also writes ROUTING_ACCURACY.md immediately
+                                       (needs no human review)
+  blind-report -review <file> -mapping <file> [-out <file>]
+                                       ingest a filled-in review.csv + its mapping file
+                                       and write BLIND_REPORT.md: declared reply_language
+                                       vs. the blinded human label, reported separately`)
 }

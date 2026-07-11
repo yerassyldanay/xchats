@@ -74,3 +74,19 @@ func StripFences(raw string) string {
 	cleaned = fenceCloseRE.ReplaceAllString(cleaned, "")
 	return cleaned
 }
+
+// ReasoningMarkerRE matches the documented `<think>`/`<thinking>` tag pair some models
+// emit in-band inside their own content string — a real, observed OpenRouter failure
+// mode across providers, independent of whether reasoning was even requested for that
+// call. Deliberately narrow: this is NOT a natural-language "did the model reason out
+// loud" heuristic (which would false-positive on any legitimate customer-facing text that
+// happens to contain the word "think") — only the specific tag markers.
+var ReasoningMarkerRE = regexp.MustCompile(`(?i)</?think(ing)?>`)
+
+// HasReasoningMarkers reports whether s contains a reasoning/thinking tag marker — used
+// both as a hard gate (judge.go's ReasoningLeak, extract_checks.go's analogous check,
+// scanning the model's customer-facing text fields) and as a visibility flag on raw,
+// unfiltered debug output (viewmodel.go's VOutput.RawHasReasoningMarkers).
+func HasReasoningMarkers(s string) bool {
+	return ReasoningMarkerRE.MatchString(s)
+}

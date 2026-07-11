@@ -24,6 +24,10 @@ type PromptfooResults struct {
 type PromptfooRow struct {
 	Provider struct {
 		ID string `json:"id"`
+		// Label disambiguates two provider entries sharing the same ID (see
+		// ModelProvider.Label in types.go) — e.g. a reasoning-on/reasoning-off pair of
+		// the same underlying model, compared side by side in one run.
+		Label string `json:"label"`
 	} `json:"provider"`
 	TestCase struct {
 		Description string `json:"description"`
@@ -31,6 +35,22 @@ type PromptfooRow struct {
 	Response struct {
 		Output string `json:"output"`
 		Cached bool   `json:"cached"`
+		// FinishReason mirrors promptfoo's own response.finishReason (confirmed present
+		// in real promptfoo output, sibling to Output/Cached — see evals/results/results.json,
+		// a committed real run). "length" (OpenAI/OpenRouter's canonical truncation
+		// signal) is normalized into a hard ContractPass failure by isTruncatedFinish —
+		// a truncated response is a pipeline-safety issue, the same category as an
+		// unknown token or a leftover brace, regardless of what the model said. Empty
+		// string means "not reported" (older data, or a provider that doesn't send one)
+		// and must NEVER be treated as truncation.
+		FinishReason string `json:"finishReason"`
+		// Reasoning is OpenRouter's own message.reasoning response field, IF promptfoo
+		// ever surfaces it in results.json — not independently confirmed present in this
+		// repo (only FinishReason is confirmed; see the comment above). Harmless if
+		// promptfoo never populates it. Never folded into Output/RawOutput — see
+		// judge.go's ReasoningLeak check, which scans the model's OWN reply_text field
+		// instead, the actual customer-facing leak path.
+		Reasoning string `json:"reasoning,omitempty"`
 	} `json:"response"`
 	Cost      float64 `json:"cost"`
 	LatencyMs int     `json:"latencyMs"`
@@ -82,9 +102,18 @@ type Verdict struct {
 	InventedDigits     []string `json:"invented_digits"`
 	UnitIssues         []string `json:"unit_issues"`
 
+	// FinishReason/Truncated and ReasoningLeak are both pipeline-safety facts, folded
+	// into ContractPass unconditionally — independent of model, prompt variant, or
+	// whether reasoning was even requested for this call (see their doc comments where
+	// computed, in judgeOne).
+	FinishReason  string `json:"finish_reason,omitempty"`
+	Truncated     bool   `json:"truncated"`
+	ReasoningLeak bool   `json:"reasoning_leak"`
+
 	// ContractPass: did the pipeline behave safely regardless of what the model said
-	// (parses, right shape, every token resolves, no leftover brace). This is the
-	// property that must never fail once this design ships for real.
+	// (parses, right shape, every token resolves, no leftover brace, response not
+	// truncated, no leaked reasoning/thinking content). This is the property that must
+	// never fail once this design ships for real.
 	ContractPass bool `json:"contract_pass"`
 	// ModelBehaviorPass: did the model itself do the right thing (right token, right
 	// media, right escalate, right language, no invented digits, no duplicated units, no
@@ -133,7 +162,8 @@ type tokenSplit struct{ in, out int }
 // applyCostEstimate fills a Verdict's cost-estimate fields. See CostBasis's doc comment for
 // the four possible outcomes; this is the one place that decides between them.
 func applyCostEstimate(v *Verdict, row PromptfooRow, priceByModel map[string]ModelProvider, freshSplit map[string]tokenSplit) {
-	price, known := priceByModel[row.Provider.ID]
+	modelKey := providerModelKey(row.Provider.ID, row.Provider.Label)
+	price, known := priceByModel[modelKey]
 	if !known || price.InputPerMTok == nil || price.OutputPerMTok == nil {
 		v.CostBasis = CostBasisUnknownPricing
 		return
@@ -142,7 +172,7 @@ func applyCostEstimate(v *Verdict, row PromptfooRow, priceByModel map[string]Mod
 	in, out := row.TokenUsage.Prompt, row.TokenUsage.Completion
 	basis := CostBasisMeasured
 	if row.Response.Cached || in == 0 {
-		key := row.Provider.ID + "|" + row.TestCase.Description
+		key := modelKey + "|" + row.TestCase.Description
 		borrowed, ok := freshSplit[key]
 		if !ok {
 			v.CostBasis = CostBasisCachedUnpriced
@@ -183,6 +213,32 @@ var (
 )
 
 const kazakhOnlyLetters = "әғқңөұүһӘҒҚҢӨҰҮҺ"
+
+// providerModelKey is the ONE key every grouping of judged results (Verdict.Model,
+// priceByModel, freshSplit) must use once two provider entries can share the same
+// underlying ID — e.g. a reasoning-on/reasoning-off comparison pair (ModelProvider.Label
+// in types.go). Without this, two such entries would silently merge into one bucket
+// downstream (report.go's byModel, viewmodel.go), corrupting exactly the side-by-side
+// comparison a Label exists to enable. Label empty (every model before this existed)
+// returns id unchanged, so nothing about today's single-entry-per-model runs changes.
+func providerModelKey(id, label string) string {
+	if label == "" {
+		return id
+	}
+	return id + " [" + label + "]"
+}
+
+// isTruncatedFinish normalizes a promptfoo/OpenAI-style finish_reason into "was this
+// response cut off before the model finished." "length" is the canonical truncation
+// signal (confirmed against extract.go's own documented observation of models truncating
+// exactly at their token budget). Deliberately narrow: an empty string ("not reported")
+// or any other value (e.g. "stop", "content_filter", "tool_calls") is NOT treated as
+// truncation — "content_filter"/"tool_calls" are real but different failure modes this
+// function doesn't claim to cover, and treating "" as truncation would break every
+// existing PromptfooRow fixture built before this field existed.
+func isTruncatedFinish(reason string) bool {
+	return reason == "length"
+}
 
 type unitIssuePattern struct {
 	label string
@@ -227,7 +283,7 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	}
 	priceByModel := map[string]ModelProvider{}
 	for _, p := range models.Providers {
-		priceByModel[p.ID] = p
+		priceByModel[providerModelKey(p.ID, p.Label)] = p
 	}
 
 	var catalog Catalog
@@ -270,7 +326,7 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	freshSplit := map[string]tokenSplit{}
 	for _, row := range results.Results.Results {
 		if !row.Response.Cached && row.TokenUsage.Prompt > 0 {
-			key := row.Provider.ID + "|" + row.TestCase.Description
+			key := providerModelKey(row.Provider.ID, row.Provider.Label) + "|" + row.TestCase.Description
 			freshSplit[key] = tokenSplit{row.TokenUsage.Prompt, row.TokenUsage.Completion}
 		}
 	}
@@ -297,19 +353,24 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 
 func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[string]string, validRef, validGroup map[string]bool) Verdict {
 	v := Verdict{
-		TestID:    tc.ID,
-		Model:     row.Provider.ID,
-		Message:   tc.Message,
-		RawOutput: row.Response.Output,
-		Cost:      row.Cost,
-		LatencyMs: row.LatencyMs,
-		Tokens:    row.TokenUsage.Total,
+		TestID:       tc.ID,
+		Model:        providerModelKey(row.Provider.ID, row.Provider.Label),
+		Message:      tc.Message,
+		RawOutput:    row.Response.Output,
+		Cost:         row.Cost,
+		LatencyMs:    row.LatencyMs,
+		Tokens:       row.TokenUsage.Total,
+		FinishReason: row.Response.FinishReason,
+		Truncated:    isTruncatedFinish(row.Response.FinishReason),
 	}
 
 	obj, ok := parseModelJSON(row.Response.Output)
 	v.ParseOK = ok
 	if !ok {
 		v.Reason = "could not parse JSON output"
+		if v.Truncated {
+			v.Reason += fmt.Sprintf(" (response was truncated, finish_reason=%s)", v.FinishReason)
+		}
 		return v
 	}
 
@@ -327,6 +388,18 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	v.ContractFields = hasReplyText && replyText != "" && hasLang && hasEscalate && hasMediaField
 	if !v.ContractFields {
 		v.Reason = fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array %s)", mediaField)
+	}
+
+	// Reasoning/thinking content must never leak into reply_text — the one field the
+	// real product would forward to a customer after human review. Scans replyText
+	// directly, not v.InjectedText: InjectedText is only set once injection succeeds
+	// (see the Blocked branch below), so a response that's ALSO blocked would otherwise
+	// have nothing set to scan and silently miss the leak. Unconditional — not gated on
+	// whether this call even requested reasoning (ReasoningConfig) — because a model can
+	// emit inline <think> tags on its own, independent of what was asked for.
+	v.ReasoningLeak = evaltext.HasReasoningMarkers(replyText)
+	if v.ReasoningLeak && v.Reason == "" {
+		v.Reason = "reasoning/thinking content leaked into reply_text"
 	}
 
 	// Fail-closed: every token the model used must resolve, or the real product would
@@ -353,7 +426,11 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	v.Blocked = len(v.UnknownTokens) > 0
 	if v.Blocked {
 		v.Reason = "unknown token(s), draft would be BLOCKED: " + strings.Join(v.UnknownTokens, ", ")
-	} else {
+	} else if !v.ReasoningLeak {
+		// InjectedText is documented and displayed everywhere (CONTRACT.md, the HTML
+		// viewer) as "the actual customer-facing text" — a leaking reply must never
+		// populate it, exactly like a Blocked reply doesn't, or the leaked content would
+		// reach the one field explicitly presented as safe, ready-to-send output.
 		v.InjectedText = injected
 	}
 	// Any brace surviving injection is a mangled placeholder — not just an unclosed
@@ -367,7 +444,10 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 			v.Reason = "leftover brace survived injection"
 		}
 	}
-	v.ContractPass = v.ParseOK && v.ContractFields && !v.Blocked && !v.LeftoverBraces
+	if v.Truncated && v.Reason == "" {
+		v.Reason = fmt.Sprintf("response truncated before completion (finish_reason=%s)", v.FinishReason)
+	}
+	v.ContractPass = v.ParseOK && v.ContractFields && !v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak
 
 	// Model-behavior checks (only meaningful once we know the contract held).
 	stripped := tokenSpanRE.ReplaceAllString(replyText, "")

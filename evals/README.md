@@ -42,6 +42,81 @@ Running two or more `shop-scale-N` scenarios together adds a "Scale comparison" 
 `SUMMARY.md` — model-behavior pass % and avg tokens per answer at each catalog size, so
 "does quality hold up as the product list grows" is answerable from one place.
 
+## Formalized sample sizes
+
+Two stages, two sample sizes — both uncached, both counted by the `-expect-calls` gate
+before anything is spent:
+
+- **Screening** (comparing frame/prompt variants, e.g. the language bake-off's V1-V4 or
+  an escalation-wording V1/V2): 3 uncached repetitions per (test, model) pair.
+  ```bash
+  ./harness/harness run -scenario scenarios/lang-canary-v1 -repeats 3 -no-cache -expect-calls 72
+  ```
+- **Survivor stage** (the 1-2 variants screening didn't eliminate): 15 unique Kazakh
+  intents x 5 repetitions = 75 outputs per prompt+model pair, at production temperature.
+  `-repeats N` (`N>1`) hard-requires `-no-cache` — promptfoo's own repeat/cache
+  interaction isn't something this harness trusts blindly (see `run.go`'s
+  `validateRepeats`), and a repeat that silently replayed a cached answer would
+  deflate exactly the variance a confidence interval depends on. **The 15-intent Kazakh
+  bank itself does not exist yet** — every Kazakh scenario in this repo is flagged DRAFT,
+  needing native-speaker review before a billed run, and that review is out of scope for
+  the harness changes that added `-repeats`; authoring it is separate, later work.
+  Alongside the production-temperature run, a **temperature-0 diagnostic** (same 75
+  intents, `temperature: 0` — does the answer even change run to run when nothing else
+  does?) is informational only: run it as its own separate `harness run` invocation
+  against a sibling models file (see `models-diagnostic-t0.yaml`), into its own run dir —
+  never merged into the production-temperature numbers.
+
+`SUMMARY.md`'s per-model row reports a 95% Wilson interval on the **pooled** result (all
+N outputs for that one prompt+model pair together) — never a per-intent interval; 5
+repetitions per intent is enough to notice one systematically-broken intent, not enough
+for its own confidence interval. Rows are always one-per-model: a specific prompt+model
+combination is the experimental unit throughout, and results are never pooled across
+different models.
+
+## Finalist workflow (language quality, once screening narrows to 1-2 variants)
+
+`judge.go`'s `looksKazakh` (a 2-letter presence heuristic) is fine for cheap early
+screening, but it grades the same kind of text `detectLang` uses to *route* — a
+circularity that isn't trustworthy for picking a real finalist. At the finalist stage,
+replace it with a blinded human read, and track three signals as genuinely separate
+numbers, never collapsed into one pass/fail:
+
+1. **Routing accuracy** — did `detectLang` pick the frame a human would have. Needs no
+   live review: a test's own `language:` field already **is** a human's judgment of the
+   correct frame, recorded at authoring time. Written automatically by `blind-export`
+   (below) as `ROUTING_ACCURACY.md`, or compute it standalone any time via
+   `computeRoutingAccuracy` (`blind_types.go`).
+2. **Declared `reply_language`** — the model's own self-reported field.
+3. **Blinded prose-language label** — a human, shown ONLY the customer's message and the
+   model's reply text (no model id, no prompt variant, no declared language), labels the
+   reply `kk` / `ru` / `mixed` / `unclear`.
+
+```bash
+./harness/harness blind-export -run runs/<finalist-run-id> -out runs/<finalist-run-id>/review
+# -> review/review.csv               (hand this to a reviewer; blank `label` column)
+# -> review/mapping.DO-NOT-SHARE-WITH-REVIEWER.json   (withhold — keeps the review blind)
+# -> review/ROUTING_ACCURACY.md      (signal 1, ready immediately, no review needed)
+
+# a reviewer fills in review.csv's `label` column with kk / ru / mixed / unclear, blind
+# to which model or prompt variant produced each row, then:
+./harness/harness blind-report -review runs/<finalist-run-id>/review/review.csv \
+  -mapping runs/<finalist-run-id>/review/mapping.DO-NOT-SHARE-WITH-REVIEWER.json
+# -> review/BLIND_REPORT.md          (signals 2 and 3, plus how often they agree)
+```
+
+`blind-export` only exports `ContractPass` rows (nothing else is a meaningful
+language-quality judgment) and refuses to overwrite an existing export without `-force`,
+so re-running it can't silently desync a reviewer's in-progress labels. `blind-report`
+rejects a `review.csv`/mapping pair that don't genuinely match (a content hash, not just
+the opaque row ids, which aren't unique across different exports of the same size).
+
+**The held-out canary**: `canary-holdout/tests.yaml` — sealed, outside `scenarios/` so
+`-all` can never reach it, empty until a finalist is actually chosen (see the file's own
+header for why real content isn't in it yet: native-speaker review is separate, later
+work). Never touched during screening or prompt iteration; opened only once, after a
+finalist is picked.
+
 ## Try an idea without spending anything
 
 ```bash

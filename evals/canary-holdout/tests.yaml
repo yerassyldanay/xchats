@@ -1,0 +1,33 @@
+# evals/canary-holdout/tests.yaml — SEALED. Do not open, run, or reference this file's
+# content until a finalist prompt+model has been chosen (see evals/README.md's
+# "Finalist workflow" section).
+#
+# This is the held-out canary subset the methodology plan requires: a set of Kazakh/
+# Russian/mixed customer messages that must NEVER be touched during detector calibration
+# (langdetect.go's thresholds) or prompt iteration (the V1-V4 frame bake-off, the
+# escalation-wording bake-off) — the whole point of a held-out set is that nobody,
+# including whoever is iterating on the prompts, has looked at it before the finalist
+# decision is made. Opening it early "just to check" would contaminate exactly the
+# signal it exists to provide.
+#
+# Deliberately empty (`tests: []`) as committed here: authoring real content requires
+# native-Kazakh-speaker review — every other Kazakh-language scenario in this repo
+# carries the same flag (see scenarios/lang-canary-v4-kk/scenario.yaml,
+# scenarios/escalation-canary-v1/tests.yaml's Kazakh case, common/shop-questions.yaml's
+# test 21) — and that review is separate, later work, out of scope for the
+# infrastructure change that added this file. A fabricated-but-plausible-looking
+# placeholder would risk being mistaken for reviewed content later, or for a real signal
+# if it were ever accidentally run; an honestly empty, structurally-sealed file is safer
+# than invented Kazakh prose.
+#
+# Deliberately located OUTSIDE evals/scenarios/ — `harness run -all` globs
+# scenarios/*/scenario.yaml, so a set living here can never be swept into a billed run
+# by that flag, not merely by convention. This directory has no scenario.yaml of its own
+# and should never gain one.
+#
+# canary_holdout_test.go enforces zero message overlap with every other test bank in
+# this repo (so real content, once added, is never accidentally duplicate of something
+# already used for calibration) and confirms this file parses — and DELIBERATELY asserts
+# nothing about detectLang's behavior against its content, since writing that assertion
+# would itself be "opening" it for calibration purposes.
+tests: []

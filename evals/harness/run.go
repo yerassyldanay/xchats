@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"xchats-evals-harness/internal/provenance"
@@ -18,8 +19,12 @@ func cmdRun(args []string) error {
 	noCache := fs.Bool("no-cache", false, "pass --no-cache to promptfoo (force fresh calls)")
 	modelsPath := fs.String("models-file", "models.yaml", "path to models.yaml")
 	modelsFilter := fs.String("models", "", "comma-separated model ids to run (default: every provider in models.yaml)")
-	expectCalls := fs.Int("expect-calls", 0, "if >0, hard-fail before spending anything unless the resolved (tests x models) call count matches exactly — a deliberate confirmation gate for billed runs")
+	expectCalls := fs.Int("expect-calls", 0, "if >0, hard-fail before spending anything unless the resolved (tests x models x repeats) call count matches exactly — a deliberate confirmation gate for billed runs")
+	repeats := fs.Int("repeats", 1, "run every (test, model) pair this many times (formalized sample sizes: 3 uncached repetitions for screening, 5 for a finalist's 15-intent bank) — requires -no-cache when >1")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateRepeats(*repeats, *noCache); err != nil {
 		return err
 	}
 	if os.Getenv("OPENROUTER_API_KEY") == "" {
@@ -72,11 +77,16 @@ func cmdRun(args []string) error {
 		}
 		totalTests += len(resolved.Tests)
 	}
-	totalCalls := totalTests * len(filteredModels)
-	fmt.Printf("run: %d scenario(s), %d test(s) total, %d model(s) => %d billed calls (cache hits may reduce this)\n",
-		len(scenarioDirs), totalTests, len(filteredModels), totalCalls)
+	totalCalls := resolveExpectedCalls(totalTests, len(filteredModels), *repeats)
+	if *repeats > 1 {
+		fmt.Printf("run: %d scenario(s), %d test(s) total, %d model(s), %d repeat(s) => %d billed calls (uncached — every repeat is a fresh call)\n",
+			len(scenarioDirs), totalTests, len(filteredModels), *repeats, totalCalls)
+	} else {
+		fmt.Printf("run: %d scenario(s), %d test(s) total, %d model(s) => %d billed calls (cache hits may reduce this)\n",
+			len(scenarioDirs), totalTests, len(filteredModels), totalCalls)
+	}
 	if *expectCalls > 0 && totalCalls != *expectCalls {
-		return fmt.Errorf("run: resolved %d calls, -expect-calls wanted %d — refusing to spend anything; adjust -scenario/-models/-expect-calls if this is intentional", totalCalls, *expectCalls)
+		return fmt.Errorf("run: resolved %d calls, -expect-calls wanted %d — refusing to spend anything; adjust -scenario/-models/-repeats/-expect-calls if this is intentional", totalCalls, *expectCalls)
 	}
 
 	runID, runDir, err := provenance.NewRunDir("runs")
@@ -116,7 +126,7 @@ func cmdRun(args []string) error {
 			return fmt.Errorf("snapshot %s: %w", scenario.Name, err)
 		}
 
-		if err := runPromptfoo(sd, scenario.Name, absRunDir, *noCache); err != nil {
+		if err := runPromptfoo(sd, scenario.Name, absRunDir, *noCache, *repeats); err != nil {
 			return fmt.Errorf("promptfoo eval for %s: %w", scenario.Name, err)
 		}
 		if sha, err := provenance.SHA256File(filepath.Join(runDir, scenario.Name+".results.json")); err == nil {
@@ -140,16 +150,45 @@ func cmdRun(args []string) error {
 	return reportRun(runDir, *modelsPath)
 }
 
-func runPromptfoo(scenarioDir, scenarioName, absRunDir string, noCache bool) error {
+func runPromptfoo(scenarioDir, scenarioName, absRunDir string, noCache bool, repeats int) error {
 	genDir := filepath.Join(scenarioDir, "generated")
 	outPath := filepath.Join(absRunDir, scenarioName+".results.json")
 	args := []string{"--yes", "promptfoo@" + provenance.PromptfooVersion, "eval", "-c", "promptfooconfig.yaml", "-o", outPath}
 	if noCache {
 		args = append(args, "--no-cache")
 	}
+	if repeats > 1 {
+		args = append(args, "--repeat", strconv.Itoa(repeats))
+	}
 	cmd := exec.Command("npx", args...)
 	cmd.Dir = genDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// resolveExpectedCalls is the ONE place the pre-flight billed-call count is computed —
+// factored out to a pure function so -expect-calls's safety arithmetic is independently
+// testable (run_test.go) rather than only exercised inline inside cmdRun.
+func resolveExpectedCalls(totalTests, numModels, repeats int) int {
+	return totalTests * numModels * repeats
+}
+
+// validateRepeats hard-requires -no-cache whenever -repeats requests more than one call
+// per (test, model) pair. promptfoo's --repeat/caching interaction has a documented
+// history of surprising behavior (a repeat silently replaying one cached response
+// instead of making an independent fresh call) and isn't independently re-verified
+// against this repo's pinned promptfoo version (see provenance.PromptfooVersion) without
+// a live call — disabling caching entirely sidesteps that ambiguity rather than trusting
+// unverified internals, and it's what "uncached repetitions" (the formalized sample-size
+// requirement this flag exists for) already asks for regardless. Also rejects repeats<1
+// outright — a repeat count only makes sense as a positive integer.
+func validateRepeats(repeats int, noCache bool) error {
+	if repeats < 1 {
+		return fmt.Errorf("run: -repeats must be >= 1, got %d", repeats)
+	}
+	if repeats > 1 && !noCache {
+		return fmt.Errorf("run: -repeats %d requires -no-cache — otherwise repeats beyond the first may replay a cached response instead of an independent sample, silently deflating the variance a Wilson interval depends on", repeats)
+	}
+	return nil
 }

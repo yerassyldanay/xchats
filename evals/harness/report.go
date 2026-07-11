@@ -180,20 +180,29 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 		}
 		sort.Strings(order)
 
-		b.WriteString("| model | model-behavior pass | contract pass | est. cost | avg latency | avg tokens | prompt share |\n")
-		b.WriteString("|---|---|---|---|---|---|---|\n")
+		b.WriteString("| model | model-behavior pass | 95% CI (Wilson, pooled) | contract pass | est. cost | avg latency | avg tokens | prompt share |\n")
+		b.WriteString("|---|---|---|---|---|---|---|---|\n")
 		for _, m := range order {
 			ms := byModel[m]
 			promptShare := "n/a"
 			if total := ms.tokensInSum + ms.tokensOutSum; total > 0 {
 				promptShare = fmt.Sprintf("%.0f%%", 100*float64(ms.tokensInSum)/float64(total))
 			}
-			fmt.Fprintf(&b, "| %s | %d/%d (%.0f%%) | %d/%d (%.0f%%) | %s | %s | %d | %s |\n",
+			ciLo, ciHi := wilsonInterval(ms.modelBehaviorPass, ms.total)
+			fmt.Fprintf(&b, "| %s | %d/%d (%.0f%%) | [%.0f%%, %.0f%%] | %d/%d (%.0f%%) | %s | %s | %d | %s |\n",
 				m, ms.modelBehaviorPass, ms.total, pct(ms.modelBehaviorPass, ms.total),
+				ciLo*100, ciHi*100,
 				ms.contractPass, ms.total, pct(ms.contractPass, ms.total),
 				formatCostCell(ms), formatLatencyCell(avg(ms.latencySum, ms.total)), avg(ms.tokensSum, ms.total),
 				promptShare)
 		}
+		// The CI column is a POOLED interval over every output this (scenario, model)
+		// row's total already counts — never a per-intent interval (a handful of
+		// repetitions per individual customer intent is enough to notice a
+		// systematically-broken intent, not enough for its own confidence interval; see
+		// wilson.go). Rows are already one-per-model, never merged across models — a
+		// specific prompt+model combination stays the experimental unit throughout, here
+		// same as everywhere else in this report.
 		b.WriteString("\n")
 
 		if strings.HasPrefix(run.Scenario, "shop-scale-") {
@@ -311,6 +320,12 @@ func buildContractReport(runs []JudgedRun) string {
 			}
 			if len(v.UnknownMedia) > 0 {
 				fmt.Fprintf(&b, "- unknown media (dropped by the real product, not blocked — but still counted against model-behavior here): %s\n", strings.Join(v.UnknownMedia, ", "))
+			}
+			if v.Truncated {
+				fmt.Fprintf(&b, "- **TRUNCATED — finish_reason=%s** (response cut off before the model finished; contract fails regardless of what parsed)\n", v.FinishReason)
+			}
+			if v.ReasoningLeak {
+				b.WriteString("- **REASONING LEAK — reply_text contains a <think>/<thinking> tag marker** (contract fails; a real customer would have received this)\n")
 			}
 			if len(v.InventedDigits) > 0 {
 				fmt.Fprintf(&b, "- invented digits: %s\n", strings.Join(v.InventedDigits, ", "))

@@ -133,3 +133,39 @@ func TestWriteRunHTML_EmptyRunDir(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestWriteRunHTML_ReasoningLeakWarningRenders proves the visibility flag added for a
+// raw response containing a <think> tag marker actually surfaces as a warning in the
+// rendered page, not just on the in-memory VOutput — the concrete guarantee behind
+// "never leaks into any report meant to show customer-facing output" for the debug raw
+// panel specifically (the hard gate against reply_text itself is judge_test.go's job).
+func TestWriteRunHTML_ReasoningLeakWarningRenders(t *testing.T) {
+	runDir := t.TempDir()
+
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test/model"
+	row.Response.Output = "<think>internal chain of thought, never meant for a customer</think>"
+	v := judgeOne(TestCase{ID: "leaky"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+
+	jr := JudgedRun{Scenario: "fixture-scenario", Verdicts: []Verdict{v}}
+	if err := writeJSON(filepath.Join(runDir, "fixture-scenario.judged.json"), jr); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeRunHTML(runDir); err != nil {
+		t.Fatalf("writeRunHTML: %v", err)
+	}
+	out, err := os.ReadFile(filepath.Join(runDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(out)
+
+	if !strings.Contains(page, "Raw output contains a reasoning/thinking tag marker") {
+		t.Error("expected the reasoning-marker warning to render for a raw output containing <think>")
+	}
+	if !strings.Contains(page, "no_reasoning_leak") {
+		t.Error("expected the no_reasoning_leak check name to render in the scores table")
+	}
+}

@@ -7,10 +7,12 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"xchats-evals-harness/internal/provenance"
@@ -424,7 +426,8 @@ func TestDescribeImage_FakeServer(t *testing.T) {
 		}
 		resp.Choices = []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning,omitempty"`
 			} `json:"message"`
 		}{{}}
 		resp.Choices[0].Message.Content = `{"content_kind":"product_photo","summary":"a drill","extracted_text":"","language":"none","visibility_suggestion":"visible","media_role_hint":"gallery","relates_to_hint":""}`
@@ -435,9 +438,12 @@ func TestDescribeImage_FakeServer(t *testing.T) {
 
 	client := newORClient(srv.URL, "test-key")
 	model := ModelProvider{ID: "openrouter:google/gemini-2.5-flash", Temperature: 0.3, MaxTokens: 700}
-	raw, usage, err := client.describeImage(context.Background(), model, "system prompt", []byte{0xFF, 0xD8}, "image/jpeg")
+	raw, reasoning, usage, err := client.describeImage(context.Background(), model, "system prompt", []byte{0xFF, 0xD8}, "image/jpeg")
 	if err != nil {
 		t.Fatalf("describeImage: %v", err)
+	}
+	if reasoning != "" {
+		t.Errorf("want empty reasoning (fake server never set it), got %q", reasoning)
 	}
 	if usage.PromptTokens != 123 || usage.CompletionTokens != 45 {
 		t.Errorf("unexpected usage: %+v", usage)
@@ -463,6 +469,105 @@ func TestDescribeImage_FakeServer(t *testing.T) {
 	}
 }
 
+// TestDescribeImage_ProviderAndReasoningPrefsRoundTrip proves both halves of fix
+// 4b/5's wiring against a real (fake-server) HTTP round trip, not just struct
+// construction: (1) a ModelProvider with Provider/Reasoning config set produces the
+// exact OpenRouter wire shape ({"order":...,"allow_fallbacks":...} /
+// {"enabled":...,"effort":...,"max_tokens":...}) on the outgoing request, and (2) a
+// response's separate message.reasoning field is captured into its OWN return value —
+// never appended to, or confused with, raw (which stays exactly message.content).
+func TestDescribeImage_ProviderAndReasoningPrefsRoundTrip(t *testing.T) {
+	var gotReq orRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("server: decode request: %v", err)
+		}
+		resp := orResponse{Usage: &orUsage{PromptTokens: 10, CompletionTokens: 5}}
+		resp.Choices = []struct {
+			Message struct {
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning,omitempty"`
+			} `json:"message"`
+		}{{}}
+		resp.Choices[0].Message.Content = `{"content_kind":"other","summary":"x","extracted_text":"","language":"none","visibility_suggestion":"visible","media_role_hint":"none","relates_to_hint":""}`
+		resp.Choices[0].Message.Reasoning = "internal chain of thought that must never reach the graded output"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	allowFallbacks := false
+	model := ModelProvider{
+		ID:          "openrouter:google/gemini-2.5-flash",
+		Temperature: 0.3,
+		MaxTokens:   500,
+		Provider:    &ProviderRoute{Order: []string{"Google AI Studio"}, AllowFallbacks: &allowFallbacks},
+		Reasoning:   &ReasoningConfig{Enabled: true, Effort: "low"},
+	}
+	client := newORClient(srv.URL, "test-key")
+	raw, reasoning, _, err := client.describeImage(context.Background(), model, "system prompt", []byte{0xFF, 0xD8}, "image/jpeg")
+	if err != nil {
+		t.Fatalf("describeImage: %v", err)
+	}
+
+	if gotReq.Provider == nil {
+		t.Fatal("want the request to carry a provider preference block")
+	}
+	if len(gotReq.Provider.Order) != 1 || gotReq.Provider.Order[0] != "Google AI Studio" {
+		t.Errorf("want provider.order=[Google AI Studio], got %+v", gotReq.Provider.Order)
+	}
+	if gotReq.Provider.AllowFallbacks == nil || *gotReq.Provider.AllowFallbacks != false {
+		t.Errorf("want provider.allow_fallbacks=false, got %+v", gotReq.Provider.AllowFallbacks)
+	}
+	if gotReq.Reasoning == nil || !gotReq.Reasoning.Enabled || gotReq.Reasoning.Effort != "low" {
+		t.Errorf("want reasoning={enabled:true, effort:low}, got %+v", gotReq.Reasoning)
+	}
+
+	if reasoning != "internal chain of thought that must never reach the graded output" {
+		t.Errorf("want the response's reasoning field captured verbatim, got %q", reasoning)
+	}
+	if strings.Contains(raw, "internal chain of thought") {
+		t.Fatal("reasoning content leaked into raw (=message.content) — these must stay separate return values")
+	}
+}
+
+// TestDescribeImage_NoProviderOrReasoningConfigOmitsFieldsEntirely proves the "unset
+// means omitted, not null" contract for a model with neither Provider nor Reasoning
+// configured (today, every entry in models.yaml) — the request must not even mention
+// these keys, matching this harness's existing "never present a fact more confidently
+// than it's known" discipline.
+func TestDescribeImage_NoProviderOrReasoningConfigOmitsFieldsEntirely(t *testing.T) {
+	var rawBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		rawBody = b
+		resp := orResponse{Usage: &orUsage{PromptTokens: 1, CompletionTokens: 1}}
+		resp.Choices = []struct {
+			Message struct {
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning,omitempty"`
+			} `json:"message"`
+		}{{}}
+		resp.Choices[0].Message.Content = `{"content_kind":"other","summary":"x","extracted_text":"","language":"none","visibility_suggestion":"visible","media_role_hint":"none","relates_to_hint":""}`
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	model := ModelProvider{ID: "openrouter:openai/gpt-4o-mini", Temperature: 0.3, MaxTokens: 500}
+	client := newORClient(srv.URL, "test-key")
+	if _, _, _, err := client.describeImage(context.Background(), model, "p", []byte{1}, "image/jpeg"); err != nil {
+		t.Fatalf("describeImage: %v", err)
+	}
+
+	if strings.Contains(string(rawBody), `"provider"`) {
+		t.Errorf("want no \"provider\" key on the wire when unset, got body: %s", rawBody)
+	}
+	if strings.Contains(string(rawBody), `"reasoning"`) {
+		t.Errorf("want no \"reasoning\" key on the wire when unset, got body: %s", rawBody)
+	}
+}
+
 func TestDescribeImage_HTTPErrorSurfaced(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -472,7 +577,7 @@ func TestDescribeImage_HTTPErrorSurfaced(t *testing.T) {
 
 	client := newORClient(srv.URL, "test-key")
 	model := ModelProvider{ID: "x/y"}
-	_, _, err := client.describeImage(context.Background(), model, "p", []byte{1}, "image/jpeg")
+	_, _, _, err := client.describeImage(context.Background(), model, "p", []byte{1}, "image/jpeg")
 	if err == nil {
 		t.Fatalf("expected an error for a non-200 response")
 	}
@@ -497,7 +602,8 @@ func TestRunOneExtraction_RetriesOnParseFailure(t *testing.T) {
 		resp := orResponse{}
 		resp.Choices = []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning,omitempty"`
 			} `json:"message"`
 		}{{}}
 		resp.Choices[0].Message.Content = content
@@ -532,7 +638,8 @@ func TestRunOneExtraction_GivesUpAfterRetries(t *testing.T) {
 		resp := orResponse{}
 		resp.Choices = []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning,omitempty"`
 			} `json:"message"`
 		}{{}}
 		resp.Choices[0].Message.Content = `{"content_kind": "always cut off`

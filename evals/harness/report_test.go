@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildScaleComparison(t *testing.T) {
 	scaleStats := map[string]map[string]*modelStats{
@@ -66,6 +69,39 @@ func TestFormatCostCell(t *testing.T) {
 				t.Fatalf("formatCostCell() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestBuildSummary_WilsonIntervalIsPooledPerModelNeverAcrossModels proves both halves of
+// fix 3's sample-size reporting: the summary table carries a Wilson interval computed
+// from each model's OWN pooled total (not a per-intent number, and not shared across
+// rows), and two different models in the same scenario get two DIFFERENTLY-valued
+// intervals — the concrete guarantee behind "never pool results across different
+// models; a specific prompt+model combination is the experimental unit throughout".
+func TestBuildSummary_WilsonIntervalIsPooledPerModelNeverAcrossModels(t *testing.T) {
+	// modelA: 8/10 pass. modelB: 3/10 pass. Deliberately different pass rates so a bug
+	// that accidentally pooled the two models together would produce IDENTICAL (wrong)
+	// intervals for both rows instead of two distinct ones.
+	var verdicts []Verdict
+	for i := 0; i < 10; i++ {
+		verdicts = append(verdicts, Verdict{TestID: "t", Model: "modelA", ModelBehaviorPass: i < 8, ContractPass: true})
+		verdicts = append(verdicts, Verdict{TestID: "t", Model: "modelB", ModelBehaviorPass: i < 3, ContractPass: true})
+	}
+	runs := []JudgedRun{{Scenario: "fixture-scenario", Verdicts: verdicts}}
+	models := &ModelsFile{PricingSource: "test", PricingCheckedAt: "2026-01-01"}
+
+	summary := buildSummary("fixture-run", runs, models)
+
+	wantA := "[49%, 94%]" // wilsonInterval(8,10) — see wilson_test.go's reference value
+	wantB := "[11%, 60%]" // wilsonInterval(3,10)
+	if !strings.Contains(summary, wantA) {
+		t.Errorf("want modelA's pooled 8/10 Wilson interval %s in the summary, got:\n%s", wantA, summary)
+	}
+	if !strings.Contains(summary, wantB) {
+		t.Errorf("want modelB's pooled 3/10 Wilson interval %s in the summary, got:\n%s", wantB, summary)
+	}
+	if !strings.Contains(summary, "95% CI (Wilson, pooled)") {
+		t.Error("want the CI column explicitly labeled as pooled, not per-intent")
 	}
 }
 
