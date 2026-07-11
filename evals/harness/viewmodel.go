@@ -160,6 +160,12 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Name: "media", Status: evaluated(v.MediaPass)},
 		{Name: "escalate", Status: evaluated(v.EscalatePass)},
 		{Name: "language", Status: evaluated(v.LanguagePass), Detail: v.LanguageIssue},
+		// Reported separately from the combined "language" row above (Phase 0.4): looksKazakh
+		// is a cheap presence heuristic, not a whole-reply classifier — telling "the text
+		// didn't look Kazakh" apart from "the model declared the wrong reply_language field"
+		// matters when manually inspecting a Kazakh canary run's actual replies.
+		{Name: "language_text_ok", Status: evaluated(v.LanguageTextOK)},
+		{Name: "language_field_ok", Status: evaluated(v.LanguageFieldOK)},
 		{Name: "must_not_contain", Status: evaluated(v.MustNotContainPass), Detail: v.ForbiddenPhrase},
 		{Name: "no_invented_digits", Status: evaluated(len(v.InventedDigits) == 0), Detail: strings.Join(v.InventedDigits, ", ")},
 		{Name: "no_unit_issues", Status: evaluated(len(v.UnitIssues) == 0), Detail: strings.Join(v.UnitIssues, ", ")},

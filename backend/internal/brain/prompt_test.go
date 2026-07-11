@@ -83,6 +83,80 @@ func TestPostProcess_EscalateGateStops(t *testing.T) {
 	}
 }
 
+// TestPostProcess_EscalateReplacesInventedClaimWithHoldingReply is the safety test
+// for the exact failure mode observed in eval canaries: a model correctly sets
+// escalate=true but ALSO writes a confident, invented claim in reply_text (e.g.
+// asserting the business does not deliver somewhere — a claim the knowledge base
+// never makes). The prompt telling the model not to do this is a quality measure;
+// this test proves the pipeline enforces it regardless of what the model wrote.
+func TestPostProcess_EscalateReplacesInventedClaimWithHoldingReply(t *testing.T) {
+	raw := domain.RawDraft{
+		ReplyText:        "К сожалению, мы не доставляем в Астану. Уточню у коллеги.",
+		ReplyLanguage:    "ru",
+		Escalate:         true,
+		EscalationReason: "off-KB city coverage",
+		AssetRefs:        []string{"pricing_card"},
+	}
+	d := PostProcess(raw, testSnapshot(), nil)
+	if strings.Contains(d.ReplyText, "не доставляем") {
+		t.Fatalf("model's invented claim leaked into the customer-facing draft: %q", d.ReplyText)
+	}
+	if d.ReplyText != HoldingReply {
+		t.Fatalf("ReplyText = %q, want the trusted ru holding reply %q", d.ReplyText, HoldingReply)
+	}
+	if d.EscalationReason != "off-KB city coverage" {
+		t.Fatalf("EscalationReason must survive unchanged, got %q", d.EscalationReason)
+	}
+	if len(d.Media) != 0 {
+		t.Fatal("escalation must carry no media")
+	}
+}
+
+// TestPostProcess_EscalateKazakhGetsKazakhHoldingReply proves the fallback is
+// language-aware: a Kazakh-declaring escalation must not silently fall back to the
+// Russian holding reply (that would itself be the kind of language failure the
+// eval's Phase 2.1 language bake-off exists to catch, just relocated to the
+// escalation path instead of the normal-answer path).
+func TestPostProcess_EscalateKazakhGetsKazakhHoldingReply(t *testing.T) {
+	raw := domain.RawDraft{
+		ReplyText:        "Өкінішке орай, біз Астанаға жеткізбейміз.",
+		ReplyLanguage:    "kk",
+		Escalate:         true,
+		EscalationReason: "off-KB city coverage, kk",
+	}
+	d := PostProcess(raw, testSnapshot(), nil)
+	if d.ReplyText != holdingReplyByLanguage["kk"] {
+		t.Fatalf("ReplyText = %q, want the trusted kk holding reply %q", d.ReplyText, holdingReplyByLanguage["kk"])
+	}
+	if strings.Contains(d.ReplyText, "жеткізбейміз") {
+		t.Fatalf("model's invented Kazakh claim leaked into the customer-facing draft: %q", d.ReplyText)
+	}
+}
+
+// TestPostProcess_EscalateUnknownLanguageDefaultsToRussian mirrors the same
+// empty/unrecognized -> "ru" default PostProcess already applies to
+// raw.ReplyLanguage on the normal-answer path (see the fact-injection step above).
+func TestPostProcess_EscalateUnknownLanguageDefaultsToRussian(t *testing.T) {
+	for _, lang := range []string{"", "en", "mixed"} {
+		raw := domain.RawDraft{ReplyText: "anything", ReplyLanguage: lang, Escalate: true}
+		d := PostProcess(raw, testSnapshot(), nil)
+		if d.ReplyText != HoldingReply {
+			t.Errorf("lang=%q: ReplyText = %q, want the ru default %q", lang, d.ReplyText, HoldingReply)
+		}
+	}
+}
+
+// TestPostProcess_EscalatePreservesConfidence proves the fallback only replaces
+// ReplyText — Confidence (and, per the earlier tests, EscalationReason) still come
+// from the model, since only the customer-facing text is a hallucination risk.
+func TestPostProcess_EscalatePreservesConfidence(t *testing.T) {
+	raw := domain.RawDraft{ReplyText: "x", Escalate: true, Confidence: 0.42}
+	d := PostProcess(raw, testSnapshot(), nil)
+	if d.Confidence != 0.42 {
+		t.Fatalf("Confidence = %v, want 0.42 (must pass through from the model unchanged)", d.Confidence)
+	}
+}
+
 func TestPostProcess_PriceRenderFailurePostsManualNote(t *testing.T) {
 	raw := domain.RawDraft{
 		ReplyText:     "{{tariff.enterprise.price}}", // unknown tariff

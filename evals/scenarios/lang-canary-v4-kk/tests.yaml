@@ -1,0 +1,24 @@
+# V4's KK branch — exactly the tests detectLang (langdetect.go) would route to the KK
+# frame: both pure-Kazakh questions and the Kazakh escalation canary. Same source IDs as
+# lang-canary-v1/tests.yaml's tests 2, 3, 21 — kept in sync by hand, same caveat.
+tests:
+  - id: "2. price question, Kazakh"
+    message: "Кофемашина DeLonghi қанша тұрады?"
+    requires:
+      - ["product.coffee-machine.price"]
+    language: kk
+
+  - id: "3. delivery cost + time, Kazakh"
+    message: "Жеткізу қанша тұрады және қанша күнде жетеді?"
+    requires:
+      - ["policy.main.delivery_cost"]
+      - ["policy.main.delivery_time", "policy.main.delivery_in_days"]
+    language: kk
+
+  - id: "21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim"
+    message: "Сіздер Астанаға жеткізесіздер ме?"
+    escalate: true
+    language: kk
+    must_not_contain:
+      - "жеткізбейміз"
+      - "аймағымыздан тыс"

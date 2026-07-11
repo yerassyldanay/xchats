@@ -1,0 +1,51 @@
+# Phase 2.1's focused canary set — hand-picked from common/shop-questions.yaml (source
+# IDs noted per test below) rather than `include:`-ing the whole bank, on purpose: the
+# language bake-off (V1-V4) runs this SAME 6-test set at least 3x per variant per model,
+# and the full 20-test bank would make that 3x more expensive without adding signal the
+# bake-off needs. Shared by V1/V2/V3 (one frame answers everything); V4 splits this same
+# set in two (lang-canary-v4-kk/tests.yaml, lang-canary-v4-ru/tests.yaml) since a routed
+# production frame only ever sees one branch per message.
+#
+# If common/shop-questions.yaml's source tests are ever edited, these copies do NOT
+# update automatically — re-sync by hand and note it in a commit message.
+tests:
+  - id: "1. price question, Russian"
+    message: "Сколько стоит кофемашина?"
+    requires:
+      - ["product.coffee-machine.price"]
+    language: ru
+
+  - id: "2. price question, Kazakh"
+    message: "Кофемашина DeLonghi қанша тұрады?"
+    requires:
+      - ["product.coffee-machine.price"]
+    language: kk
+
+  - id: "3. delivery cost + time, Kazakh"
+    message: "Жеткізу қанша тұрады және қанша күнде жетеді?"
+    requires:
+      - ["policy.main.delivery_cost"]
+      - ["policy.main.delivery_time", "policy.main.delivery_in_days"]
+    language: kk
+
+  - id: "9. off-KB city coverage"
+    message: "А вы доставляете в Астану?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "не доставляем в астан"
+      - "за пределами нашей зоны"
+
+  - id: "20. mixed Kazakh/Russian message, rule says answer Russian when mixed"
+    message: "Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?"
+    requires:
+      - ["product.coffee-machine.price"]
+    language: ru
+
+  - id: "21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim"
+    message: "Сіздер Астанаға жеткізесіздер ме?"
+    escalate: true
+    language: kk
+    must_not_contain:
+      - "жеткізбейміз"
+      - "аймағымыздан тыс"

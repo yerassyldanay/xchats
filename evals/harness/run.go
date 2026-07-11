@@ -16,7 +16,9 @@ func cmdRun(args []string) error {
 	scenarioList := fs.String("scenario", "", "comma-separated scenario dirs, e.g. scenarios/shop-current,scenarios/shop-decisions-v1")
 	all := fs.Bool("all", false, "run every scenario under scenarios/")
 	noCache := fs.Bool("no-cache", false, "pass --no-cache to promptfoo (force fresh calls)")
-	modelsPath := fs.String("models", "models.yaml", "path to models.yaml")
+	modelsPath := fs.String("models-file", "models.yaml", "path to models.yaml")
+	modelsFilter := fs.String("models", "", "comma-separated model ids to run (default: every provider in models.yaml)")
+	expectCalls := fs.Int("expect-calls", 0, "if >0, hard-fail before spending anything unless the resolved (tests x models) call count matches exactly — a deliberate confirmation gate for billed runs")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -42,6 +44,41 @@ func cmdRun(args []string) error {
 		return fmt.Errorf("run: pass -scenario <dir>[,<dir>...] or -all")
 	}
 
+	// Pass 1 (free): render every scenario and resolve exactly how many (test x model)
+	// calls this invocation is about to bill, BEFORE any promptfoo call runs. Render is
+	// idempotent, so re-rendering in the pass-2 loop below is intentional, not wasted
+	// duplicate work worth avoiding — it keeps this counting pass a pure, side-effect-only
+	// read of what pass 2 will do.
+	models, err := loadModels(*modelsPath)
+	if err != nil {
+		return fmt.Errorf("load %s: %w", *modelsPath, err)
+	}
+	filteredModels, err := filterProviders(models, *modelsFilter)
+	if err != nil {
+		return err
+	}
+	if len(filteredModels) == 0 {
+		return fmt.Errorf("run: no models selected (empty models.yaml or -models matched nothing)")
+	}
+
+	totalTests := 0
+	for _, sd := range scenarioDirs {
+		if err := renderScenario(sd, *modelsPath, *modelsFilter); err != nil {
+			return fmt.Errorf("render %s: %w", sd, err)
+		}
+		var resolved ResolvedTests
+		if err := readJSON(filepath.Join(sd, "generated", "resolved_tests.json"), &resolved); err != nil {
+			return fmt.Errorf("read resolved tests for %s: %w", sd, err)
+		}
+		totalTests += len(resolved.Tests)
+	}
+	totalCalls := totalTests * len(filteredModels)
+	fmt.Printf("run: %d scenario(s), %d test(s) total, %d model(s) => %d billed calls (cache hits may reduce this)\n",
+		len(scenarioDirs), totalTests, len(filteredModels), totalCalls)
+	if *expectCalls > 0 && totalCalls != *expectCalls {
+		return fmt.Errorf("run: resolved %d calls, -expect-calls wanted %d — refusing to spend anything; adjust -scenario/-models/-expect-calls if this is intentional", totalCalls, *expectCalls)
+	}
+
 	runID, runDir, err := provenance.NewRunDir("runs")
 	if err != nil {
 		return err
@@ -63,9 +100,10 @@ func cmdRun(args []string) error {
 		return err
 	}
 
+	// Pass 2: the actual (billed) work.
 	for _, sd := range scenarioDirs {
 		fmt.Printf("--- %s ---\n", sd)
-		if err := renderScenario(sd, *modelsPath); err != nil {
+		if err := renderScenario(sd, *modelsPath, *modelsFilter); err != nil {
 			return fmt.Errorf("render %s: %w", sd, err)
 		}
 		scenario, err := loadScenario(sd)

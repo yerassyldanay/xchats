@@ -28,6 +28,16 @@ model calls cost real money; unchanged answers are cached by promptfoo on repeat
 tweaking one scenario and re-running only pays for what changed. Add `-no-cache` to force
 everything fresh.
 
+Before spending anything, `run` prints the resolved `(tests x models) = calls` count. Narrow
+which models run with `-models google/gemini-2.5-flash,openai/gpt-4o-mini` (default: every
+provider in `models.yaml`; `-models-file` overrides the models.yaml path itself). Pass
+`-expect-calls N` to hard-fail before any call if the resolved count doesn't match N — a
+deliberate confirmation gate for a run you want to cost-check first:
+
+```bash
+./harness/harness run -scenario scenarios/shop-current -models google/gemini-2.5-flash -expect-calls 19
+```
+
 Running two or more `shop-scale-N` scenarios together adds a "Scale comparison" table to
 `SUMMARY.md` — model-behavior pass % and avg tokens per answer at each catalog size, so
 "does quality hold up as the product list grows" is answerable from one place.

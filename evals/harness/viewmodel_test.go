@@ -44,8 +44,8 @@ func TestScenarioExecutionFromVerdict_ParseFailure_EverythingDownstreamIsNotRun(
 
 	downstream := []string{
 		"contract_fields", "no_unknown_tokens", "no_leftover_braces", "requires",
-		"media", "escalate", "language", "must_not_contain", "no_invented_digits",
-		"no_unit_issues", "no_unknown_media",
+		"media", "escalate", "language", "language_text_ok", "language_field_ok",
+		"must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media",
 	}
 	for _, name := range downstream {
 		s, ok := scoreByName(exec.Scores, name)
@@ -92,8 +92,8 @@ func TestScenarioExecutionFromVerdict_ParseOK_EveryScoreReflectsRealEvaluation(t
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
 
 	for _, name := range []string{"contract_fields", "no_unknown_tokens", "no_leftover_braces",
-		"requires", "media", "escalate", "language", "must_not_contain",
-		"no_invented_digits", "no_unit_issues", "no_unknown_media"} {
+		"requires", "media", "escalate", "language", "language_text_ok", "language_field_ok",
+		"must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media"} {
 		s, ok := scoreByName(exec.Scores, name)
 		if !ok {
 			t.Fatalf("score %q missing", name)
@@ -255,8 +255,8 @@ func TestScenarioExecutionFromVerdict_RealJudgeOne_ContractFieldsFailStillEvalua
 	}
 	// Every downstream behavior check must be a REAL evaluated result, not not_run —
 	// judgeOne kept going after contract_fields failed.
-	for _, name := range []string{"requires", "media", "escalate", "language", "must_not_contain",
-		"no_invented_digits", "no_unit_issues", "no_unknown_media"} {
+	for _, name := range []string{"requires", "media", "escalate", "language", "language_text_ok",
+		"language_field_ok", "must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media"} {
 		s, ok := scoreByName(exec.Scores, name)
 		if !ok {
 			t.Fatalf("score %q missing", name)

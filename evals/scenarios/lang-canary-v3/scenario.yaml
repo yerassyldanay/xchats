@@ -1,0 +1,13 @@
+name: lang-canary-v3
+description: >
+  Phase 2.1 language architecture bake-off, variant V3: the grounding, fact-token, and
+  language rules are each stated in BOTH Russian and Kazakh inside one frame (no
+  knowledge-base duplication — KB/FACTS stay Russian-only, per the plan's explicit
+  constraint against doubling KB tokens). Tests whether Kazakh instruction PRESENCE
+  alone breaks the Russian-context pull, without any routing machinery. DRAFT Kazakh
+  wording — needs native-speaker review before any billed run (see Phase 2.1 note).
+frame: frame.txt
+data: ../shop-current/data.yaml
+tests: ../lang-canary-v1/tests.yaml
+contract: asset_refs
+topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

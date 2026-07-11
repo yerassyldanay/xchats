@@ -139,8 +139,17 @@ func PostProcess(raw domain.RawDraft, snap *domain.Snapshot, log *slog.Logger) d
 	}
 
 	// 2. Escalate gate — flag for a human and stop (no media, no auto-send).
+	//
+	// The customer-facing text on this path is a TRUSTED holding reply, never
+	// raw.ReplyText: a model that correctly sets escalate=true can still write an
+	// invented claim in the same breath (observed in eval canaries — e.g. asserting
+	// "we don't deliver to Astana", a claim the knowledge base never makes). The
+	// prompt asking the model not to do that is a quality measure, not a safety
+	// guarantee; this substitution is the guarantee. EscalationReason (internal,
+	// never shown to the customer) and Confidence still come from the model — only
+	// the customer-facing ReplyText is replaced.
 	if raw.Escalate {
-		d := escalationDraft(raw.ReplyText, raw.EscalationReason)
+		d := escalationDraft(holdingReplyFor(raw.ReplyLanguage), raw.EscalationReason)
 		d.Confidence = raw.Confidence
 		return d
 	}
@@ -206,6 +215,29 @@ func escalationDraft(reply, reason string) domain.Draft {
 const (
 	// HoldingReply is the brief reply shipped when drafting fails or the model
 	// escalates without its own text (the LLM-error path in RealDrafter uses it).
+	// Also holdingReplyByLanguage["ru"] below — same wording, one source of truth
+	// for what "ru" means, since RealDrafter's error path has no reply_language to
+	// consult and must pick something.
 	HoldingReply      = "Уточню это у коллеги и вернусь с точным ответом — буквально пару минут."
 	pricingManualNote = "⚠️ Не удалось подставить цену автоматически — проверьте перед отправкой."
 )
+
+// holdingReplyByLanguage is the trusted, deterministic copy shown to a customer
+// whenever the model escalates (see PostProcess's escalate gate) — the only two
+// reply_language values the emit_draft tool schema allows (openrouter.go's tool
+// schema enum: "ru", "kk"). Never add a model-supplied string to this map at
+// runtime; it must stay a fixed, reviewed set.
+var holdingReplyByLanguage = map[string]string{
+	"ru": HoldingReply,
+	"kk": "Мұны әріптесіммен нақтылап, бірнеше минут ішінде нақты жауап беремін.",
+}
+
+// holdingReplyFor returns the trusted holding reply for lang, defaulting to "ru"
+// for an empty or unrecognized value — the same default PostProcess's fact-
+// injection path already uses for raw.ReplyLanguage.
+func holdingReplyFor(lang string) string {
+	if reply, ok := holdingReplyByLanguage[lang]; ok {
+		return reply
+	}
+	return holdingReplyByLanguage["ru"]
+}

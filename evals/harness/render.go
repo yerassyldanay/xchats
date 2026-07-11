@@ -18,17 +18,42 @@ import (
 func cmdRender(args []string) error {
 	fs := flag.NewFlagSet("render", flag.ExitOnError)
 	scenarioDir := fs.String("scenario", "", "path to the scenario directory, e.g. scenarios/shop-current")
-	modelsPath := fs.String("models", "models.yaml", "path to models.yaml")
+	modelsPath := fs.String("models-file", "models.yaml", "path to models.yaml")
+	modelsFilter := fs.String("models", "", "comma-separated model ids to render for (default: every provider in models.yaml)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *scenarioDir == "" {
 		return fmt.Errorf("render: -scenario is required")
 	}
-	return renderScenario(*scenarioDir, *modelsPath)
+	return renderScenario(*scenarioDir, *modelsPath, *modelsFilter)
 }
 
-func renderScenario(scenarioDir, modelsPath string) error {
+// filterProviders returns the providers from mf whose (de-prefixed) ID is named in the
+// comma-separated modelsFilter, in modelsFilter's order; an empty modelsFilter returns every
+// provider unchanged (today's default). Unlike extraction's resolveVisionModels, an unknown ID
+// is an error, not a one-off fallback — a chat run's providers must already be configured
+// (temperature/max_tokens/pricing) in models.yaml, not improvised at the command line.
+func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, error) {
+	if modelsFilter == "" {
+		return mf.Providers, nil
+	}
+	byID := map[string]ModelProvider{}
+	for _, p := range mf.Providers {
+		byID[orModelID(p.ID)] = p
+	}
+	out := make([]ModelProvider, 0, len(mf.Providers))
+	for _, id := range splitCSV(modelsFilter) {
+		p, ok := byID[orModelID(id)]
+		if !ok {
+			return nil, fmt.Errorf("model %q not found in models.yaml", id)
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func renderScenario(scenarioDir, modelsPath, modelsFilter string) error {
 	scenario, err := loadScenario(scenarioDir)
 	if err != nil {
 		return fmt.Errorf("load scenario.yaml: %w", err)
@@ -61,6 +86,11 @@ func renderScenario(scenarioDir, modelsPath string) error {
 	if err != nil {
 		return fmt.Errorf("load %s: %w", modelsPath, err)
 	}
+	filtered, err := filterProviders(models, modelsFilter)
+	if err != nil {
+		return fmt.Errorf("scenario %q: %w", scenario.Name, err)
+	}
+	models = &ModelsFile{PricingSource: models.PricingSource, PricingCheckedAt: models.PricingCheckedAt, Providers: filtered}
 
 	catalog := buildCatalog(data, scenario.Contract)
 	if err := validateCatalog(catalog); err != nil {

@@ -1,0 +1,24 @@
+# V4's RU branch — exactly the tests detectLang (langdetect.go) would route to the RU
+# frame: the plain-Russian control and the genuinely-mixed message (detectLang must
+# classify "mixed" as ru — see TestDetectLang_AgainstTestBankMessages). Same source IDs
+# as lang-canary-v1/tests.yaml's tests 1, 9, 20 — kept in sync by hand, same caveat.
+tests:
+  - id: "1. price question, Russian"
+    message: "Сколько стоит кофемашина?"
+    requires:
+      - ["product.coffee-machine.price"]
+    language: ru
+
+  - id: "9. off-KB city coverage"
+    message: "А вы доставляете в Астану?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "не доставляем в астан"
+      - "за пределами нашей зоны"
+
+  - id: "20. mixed Kazakh/Russian message, rule says answer Russian when mixed"
+    message: "Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?"
+    requires:
+      - ["product.coffee-machine.price"]
+    language: ru

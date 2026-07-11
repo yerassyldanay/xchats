@@ -69,6 +69,12 @@ func runExtractChecks(c ExtractCase, r ExtractionResult) []CheckResult {
 	// cases.yaml is expected to declare it explicitly, even as an empty list.
 	out = append(out, inventedNumberCheck(c, r))
 
+	// Required-number check is opt-in (a case with nothing recall-critical simply
+	// doesn't declare it) — the recall complement to the precision-only check above.
+	if len(c.RequiredNumbers) > 0 {
+		out = append(out, requiredNumberCheck(c, r))
+	}
+
 	if c.ForbidCurrency {
 		haystack := strings.ToLower(r.ExtractedText + " " + r.Summary + " " + r.RelatesToHint)
 		if loc := currencyRE.FindString(haystack); loc != "" {
@@ -176,4 +182,31 @@ func inventedNumberCheck(c ExtractCase, r ExtractionResult) CheckResult {
 			Detail: "not in the allowed list: " + strings.Join(invented, ", ")}
 	}
 	return CheckResult{Name: "no_invented_numbers", Pass: true}
+}
+
+// requiredNumberCheck is the RECALL complement to inventedNumberCheck's PRECISION-only
+// check (Phase 0.4 of the language/extraction plan): allowed_numbers proves a model
+// didn't invent anything, but says nothing about whether it dropped a real, visible,
+// business-relevant figure on a busy multi-panel image — a failure mode observed in
+// practice (a model correctly avoiding invention while also silently omitting a phone
+// number or price). Every entry in c.RequiredNumbers must be found, canonicalized the
+// same way as inventedNumberCheck, somewhere in the model's text fields.
+func requiredNumberCheck(c ExtractCase, r ExtractionResult) CheckResult {
+	haystack := evaltext.FoldNBSP(r.ExtractedText + " " + r.Summary + " " + r.RelatesToHint)
+	found := map[string]bool{}
+	for _, n := range evaltext.NumberRunRE.FindAllString(haystack, -1) {
+		found[evaltext.CanonicalNumber(n)] = true
+	}
+
+	var missing []string
+	for _, want := range c.RequiredNumbers {
+		if !found[evaltext.CanonicalNumber(want)] {
+			missing = append(missing, want)
+		}
+	}
+	if len(missing) > 0 {
+		return CheckResult{Name: "required_numbers", Pass: false,
+			Detail: "missing required number(s): " + strings.Join(missing, ", ")}
+	}
+	return CheckResult{Name: "required_numbers", Pass: true}
 }

@@ -13,7 +13,15 @@
 #                          fields must be in this list — the invented-number check.
 #                          [] means "no number may appear at all". Numbers with an
 #                          internal thousands-style space (e.g. "25 000") are matched
-#                          as ONE run — see numberRunRE's doc comment for why.
+#                          as ONE run — see numberRunRE's doc comment for why. This is
+#                          a PRECISION check only (no invention) — it says nothing about
+#                          whether every real number was actually transcribed.
+#   required_numbers       the RECALL complement to allowed_numbers: every entry here
+#                          must appear somewhere in the model's text fields, or the case
+#                          fails. Optional — most cases don't declare it. Use it for the
+#                          business-relevant figures a multi-panel image must not let a
+#                          model silently drop (a price, an order number, a phone
+#                          number), not every visible number.
 #   forbid_currency        extra check: no ₸/тенге/тг/$ mention at all
 
 cases:
@@ -40,6 +48,10 @@ cases:
       - "kaspi pay"
     # 3 = trial days, 5 = "до 5 виртуальных касс" in the footer.
     allowed_numbers: ["3", "5", "250", "2 000", "10 000", "25 000", "60 000"]
+    # Every number on a pricing card is business-critical — required = allowed here on
+    # purpose. Re-verified directly against the source PNG (Phase 0.4 audit): every
+    # figure in allowed_numbers above is genuinely visible and nothing was missed.
+    required_numbers: ["3", "5", "250", "2 000", "10 000", "25 000", "60 000"]
 
   - id: product-photo
     file: ../assets/drill_edh_01.jpeg
@@ -97,6 +109,9 @@ cases:
     # A model that gets even one digit wrong (observed: 65 -> 45) produces a DIFFERENT
     # 11-digit string and still correctly fails — this only forgives grouping, not typos.
     allowed_numbers: ["1", "7 702 976-65-09", "29", "4", "2026"]
+    # Only the support phone number is business-critical enough to require recall —
+    # the address/copyright-year digits matter far less if a model drops them.
+    required_numbers: ["7 702 976-65-09"]
 
   - id: how-to-cachier
     file: ../assets/how-to-add-cachier.jpg
@@ -127,6 +142,11 @@ cases:
     allowed_numbers:
       ["9", "41", "245 600", "132", "77", "7", "15", "1", "2", "3",
        "7 777 123-45-67", "7 777 000-11-22"]
+    # The sales figure and the two cashier phone numbers are the business-relevant facts
+    # this graphic exists to convey — deliberately NOT the address/step-count/status-bar
+    # digits above (a model dropping a UI clock or a store number doesn't matter the way
+    # dropping a phone number does). Verified against the source JPG (Phase 0.4 audit).
+    required_numbers: ["245 600", "7 777 123-45-67", "7 777 000-11-22"]
 
   - id: how-it-works
     file: ../assets/xpayment-how-it-works.png
@@ -162,3 +182,8 @@ cases:
     allowed_numbers:
       ["1", "2", "3", "4", "5", "6", "7",
        "24 500", "320", "2041", "18", "43", "1234", "5678", "123456789012"]
+    # The repeated price, the bonus-points figure, and the order number are the facts
+    # that matter if silently dropped — not the phone-mockup clock/masked-card digits/
+    # step-circle numbers. Verified against the source PNG (Phase 0.4 audit): every
+    # number in allowed_numbers above is genuinely visible, nothing was missed.
+    required_numbers: ["24 500", "320", "2041"]

@@ -8,7 +8,7 @@
 # "unknown_pricing" instead of showing a number that might be wrong. Check current prices at
 # pricing_source before filling one in, and update pricing_checked_at when you do.
 pricing_source: "https://openrouter.ai/models"
-pricing_checked_at: "2026-07-07"
+pricing_checked_at: "2026-07-11"
 providers:
   - id: openrouter:openai/gpt-4o-mini
     temperature: 0.3
@@ -21,13 +21,15 @@ providers:
   - id: openrouter:anthropic/claude-haiku-4.5
     temperature: 0.3
     max_tokens: 500
-    # input_per_mtok / output_per_mtok intentionally left unset: not verified against
-    # pricing_source as of pricing_checked_at. Fill in once checked — until then this
-    # model's cost reports as "unknown_pricing", not a guessed number.
+    # Verified against pricing_source on pricing_checked_at.
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
   - id: openrouter:google/gemini-2.5-flash
     temperature: 0.3
     max_tokens: 500
-    # Same as claude-haiku-4.5 above: unset on purpose, not verified.
+    # Verified against pricing_source on pricing_checked_at.
+    input_per_mtok: 0.30
+    output_per_mtok: 2.50
   - id: openrouter:google/gemini-2.5-flash-lite
     temperature: 0.3
     max_tokens: 500

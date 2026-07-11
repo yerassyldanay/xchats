@@ -1,0 +1,41 @@
+# Phase 2.2's focused escalation-trap canary set — every test in the bank where
+# escalate=true is expected AND a specific invented-claim phrase is known to be
+# observable (must_not_contain), plus the Kazakh escalation canary added in Phase 0.4.
+# Same source IDs as common/shop-questions.yaml 9, 10, 18, 19, 21 — kept in sync by
+# hand, same caveat as lang-canary-v1/tests.yaml.
+tests:
+  - id: "9. off-KB city coverage"
+    message: "А вы доставляете в Астану?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "не доставляем в астан"
+      - "за пределами нашей зоны"
+
+  - id: "10. refund request"
+    message: "Верните мне, пожалуйста, деньги за прошлый заказ"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "в течение 14 дней"
+
+  - id: "18. wrong understanding, asks about a product we don't sell"
+    message: "У вас есть iPhone 15 Pro?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "да, есть"
+      - "да, в наличии"
+
+  - id: "19. wrong understanding, asks about a service we don't offer"
+    message: "Вы кофемашины ремонтируете?"
+    escalate: true
+    language: ru
+
+  - id: "21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim"
+    message: "Сіздер Астанаға жеткізесіздер ме?"
+    escalate: true
+    language: kk
+    must_not_contain:
+      - "жеткізбейміз"
+      - "аймағымыздан тыс"

@@ -44,10 +44,14 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: harness <command> [flags]
 
 commands:
-  render -scenario <dir>              build generated/prompt.txt + catalog.json + promptfooconfig.yaml
+  render -scenario <dir> [-models m1,m2] [-models-file path]
+                                       build generated/prompt.txt + catalog.json + promptfooconfig.yaml
   judge  -scenario <dir> -run <dir>   grade a run's results.json against the scenario's catalog
   report -run <dir>                   write runs/<id>/SUMMARY.md from judge verdicts
-  run    -scenario <dir>[,<dir>...] | -all   render -> promptfoo eval -> judge -> report
+  run    -scenario <dir>[,<dir>...] | -all   [-models m1,m2] [-models-file path] [-expect-calls N]
+                                       render -> promptfoo eval -> judge -> report; prints the
+                                       resolved (tests x models) call count before spending
+                                       anything, and -expect-calls hard-fails if it doesn't match
   extract -cases <file> [-case <id>] [-models m1,m2] [-prompt name@vN] [-record]
                                        Eval 1: file -> extracted information (direct
                                        OpenRouter calls, no promptfoo); writes EXTRACT.md

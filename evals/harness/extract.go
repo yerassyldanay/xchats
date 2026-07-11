@@ -349,21 +349,24 @@ func writeExtractReport(path string, results []extractRunResult) error {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Extraction eval — %s\n\n", time.Now().Format("2006-01-02 15:04"))
-	fmt.Fprintf(&b, "Eval 1: file -> extracted information. Every check is deterministic (no LLM judge). Raw per-(case,model) outputs are saved alongside this file in `extract_outputs/`.\n\n")
+	fmt.Fprintf(&b, "Eval 1: file -> extracted information. Every check is deterministic (no LLM judge). Raw per-(case,model,prompt) outputs are saved alongside this file in `extract_outputs/`.\n\n")
+
+	fmt.Fprintf(&b, "%s\n", buildExtractAggregate(results))
 
 	for _, caseID := range caseOrder {
 		runs := byCase[caseID]
 		fmt.Fprintf(&b, "## %s\n\n", caseID)
-		fmt.Fprintf(&b, "| Model | Result | Cost | Details |\n|---|---|---|---|\n")
+		fmt.Fprintf(&b, "| Model | Prompt | Result | Cost | Details |\n|---|---|---|---|---|\n")
 		for _, r := range runs {
 			cost := formatCost(r.Cost, r.CostBasis)
+			prompt := r.Prompt.String()
 			switch {
 			case r.Error != "":
-				fmt.Fprintf(&b, "| %s | ERROR | — | %s |\n", r.Model, escapeMD(r.Error))
+				fmt.Fprintf(&b, "| %s | %s | ERROR | — | %s |\n", r.Model, prompt, escapeMD(r.Error))
 			case r.ParseError != "":
-				fmt.Fprintf(&b, "| %s | PARSE FAILED | %s | %s |\n", r.Model, cost, escapeMD(r.ParseError))
+				fmt.Fprintf(&b, "| %s | %s | PARSE FAILED | %s | %s |\n", r.Model, prompt, cost, escapeMD(r.ParseError))
 			default:
-				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", r.Model, passFailSummary(r.Checks), cost, checkDetails(r.Checks))
+				fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n", r.Model, prompt, passFailSummary(r.Checks), cost, checkDetails(r.Checks))
 			}
 		}
 		b.WriteString("\n")
@@ -381,7 +384,10 @@ func writeExtractReport(path string, results []extractRunResult) error {
 			if len(failing) == 0 {
 				continue
 			}
-			fmt.Fprintf(&b, "**%s failures:**\n\n", r.Model)
+			// Model AND prompt in the heading — two prompt versions of the same model
+			// on the same case would otherwise print two identically-labeled failure
+			// blocks with no way to tell which raw output belongs to which prompt.
+			fmt.Fprintf(&b, "**%s / %s failures:**\n\n", r.Model, r.Prompt.String())
 			for _, c := range failing {
 				fmt.Fprintf(&b, "- `%s`: %s\n", c.Name, c.Detail)
 			}
@@ -390,6 +396,121 @@ func writeExtractReport(path string, results []extractRunResult) error {
 	}
 
 	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+// extractAggregateRow is one (prompt, model) group's rolled-up numbers — Phase 0.3 of the
+// language/extraction plan: "full pass" alone collapses several independent questions
+// (did structured fields classify right? was visible text transcribed completely? did the
+// model avoid inventing numbers? what did it cost?) into one cliff-edge metric. Reporting
+// them separately is what makes an extract@v1,extract@v2 comparison actually attributable.
+type extractAggregateRow struct {
+	Prompt, Model                   string
+	Total                           int
+	FullPass                        int
+	FieldPass, FieldTotal           int
+	TextContainsPass, TextContainsN int
+	NoInventedPass, NoInventedN     int
+	RequiredPass, RequiredN         int
+	PricedCostSum                   float64
+	PricedCostN                     int
+	AvgTokens                       int
+	Errors, ParseFailures           int
+}
+
+// buildExtractAggregate groups results by (prompt, model) — in first-appearance order —
+// and renders the rolled-up table described on extractAggregateRow.
+func buildExtractAggregate(results []extractRunResult) string {
+	var order []string
+	byGroup := map[string]*extractAggregateRow{}
+	for _, r := range results {
+		key := r.Prompt.String() + "|" + r.Model
+		row, ok := byGroup[key]
+		if !ok {
+			row = &extractAggregateRow{Prompt: r.Prompt.String(), Model: r.Model}
+			byGroup[key] = row
+			order = append(order, key)
+		}
+		row.Total++
+		switch {
+		case r.Error != "":
+			row.Errors++
+			continue
+		case r.ParseError != "":
+			row.ParseFailures++
+			continue
+		}
+		if allChecksPass(r.Checks) {
+			row.FullPass++
+		}
+		tokens := 0
+		for _, c := range r.Checks {
+			switch {
+			case strings.HasPrefix(c.Name, "field:"):
+				row.FieldTotal++
+				if c.Pass {
+					row.FieldPass++
+				}
+			case c.Name == "text_contains_all":
+				row.TextContainsN++
+				if c.Pass {
+					row.TextContainsPass++
+				}
+			case c.Name == "no_invented_numbers":
+				row.NoInventedN++
+				if c.Pass {
+					row.NoInventedPass++
+				}
+			case c.Name == "required_numbers":
+				row.RequiredN++
+				if c.Pass {
+					row.RequiredPass++
+				}
+			}
+		}
+		tokens = r.Usage.PromptTokens + r.Usage.CompletionTokens
+		row.AvgTokens += tokens
+		if r.CostBasis == CostBasisMeasured {
+			row.PricedCostSum += r.Cost
+			row.PricedCostN++
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("## Aggregate by (prompt, model)\n\n")
+	b.WriteString("| Prompt | Model | Full pass | Field checks | text_contains_all | no_invented_numbers | required_numbers | Avg cost | Avg tokens |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|\n")
+	for _, key := range order {
+		row := byGroup[key]
+		graded := row.Total - row.Errors - row.ParseFailures
+		avgTokens := 0
+		if graded > 0 {
+			avgTokens = row.AvgTokens / graded
+		}
+		avgCost := "no estimate"
+		if row.PricedCostN > 0 {
+			avgCost = fmt.Sprintf("$%.5f avg (%d/%d priced)", row.PricedCostSum/float64(row.PricedCostN), row.PricedCostN, graded)
+		}
+		errNote := ""
+		if row.Errors+row.ParseFailures > 0 {
+			errNote = fmt.Sprintf(" (%d error/parse-fail)", row.Errors+row.ParseFailures)
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s%s | %s | %s | %s | %s | %s | %d |\n",
+			row.Prompt, row.Model,
+			pctFraction(row.FullPass, graded), errNote,
+			pctFraction(row.FieldPass, row.FieldTotal),
+			pctFraction(row.TextContainsPass, row.TextContainsN),
+			pctFraction(row.NoInventedPass, row.NoInventedN),
+			pctFraction(row.RequiredPass, row.RequiredN),
+			avgCost, avgTokens)
+	}
+	return b.String()
+}
+
+func pctFraction(pass, total int) string {
+	if total == 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%d/%d (%.0f%%)", pass, total, float64(pass)/float64(total)*100)
 }
 
 func checkDetails(checks []CheckResult) string {

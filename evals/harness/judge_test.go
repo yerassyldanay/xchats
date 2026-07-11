@@ -194,6 +194,57 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 	}
 }
 
+// TestJudgeOne_LanguageTextOKAndFieldOKAreIndependentSignals pins the exact failure mode
+// the plan's Phase 0.4 flagged: LanguagePass alone can't distinguish "the text didn't read
+// as Kazakh" from "the model declared the wrong reply_language field" — both are real,
+// distinct ways a language check can fail, and a Kazakh canary run needs to tell them
+// apart when someone is manually inspecting results, not just see one combined boolean.
+func TestJudgeOne_LanguageTextOKAndFieldOKAreIndependentSignals(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+
+	t.Run("text looks Kazakh, field wrongly says ru", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Бұл сөйлем қазақша және қазақ әріптері бар: ә ғ қ.","reply_language":"ru","attach_groups":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		if !got.LanguageTextOK {
+			t.Error("want LanguageTextOK=true (the text does read as Kazakh)")
+		}
+		if got.LanguageFieldOK {
+			t.Error("want LanguageFieldOK=false (declared reply_language is ru, not kk)")
+		}
+		if got.LanguagePass {
+			t.Error("want LanguagePass=false (combined check must still fail)")
+		}
+	})
+
+	t.Run("field correctly says kk, text does not look Kazakh", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Здравствуйте, чем могу помочь?","reply_language":"kk","attach_groups":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		if got.LanguageTextOK {
+			t.Error("want LanguageTextOK=false (the text is plain Russian, no Kazakh-specific letters)")
+		}
+		if !got.LanguageFieldOK {
+			t.Error("want LanguageFieldOK=true (declared reply_language correctly says kk)")
+		}
+		if got.LanguagePass {
+			t.Error("want LanguagePass=false (combined check must still fail — this is the exact 'model lies about its own language field' case)")
+		}
+	})
+
+	t.Run("both correct", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Жеткізу қанша тұрады?","reply_language":"kk","attach_groups":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		if !got.LanguageTextOK || !got.LanguageFieldOK || !got.LanguagePass {
+			t.Errorf("want all three true, got TextOK=%v FieldOK=%v Pass=%v", got.LanguageTextOK, got.LanguageFieldOK, got.LanguagePass)
+		}
+	})
+}
+
 func TestRenderFieldUsage(t *testing.T) {
 	tests := []struct {
 		name string

@@ -1,0 +1,12 @@
+name: escalation-canary-v2
+description: >
+  Phase 2.2 escalation-rule bake-off, variant V2: rule 1 (grounding/escalation)
+  strengthened with an explicit ban on asserting ANYTHING about the business — positive
+  or negative — when escalating, not just the specific observed phrasings the
+  must_not_contain blocklists happen to catch. Language rule untouched (V1's, unchanged)
+  — same canary set as escalation-canary-v1 so the two are directly comparable.
+frame: frame.txt
+data: ../shop-current/data.yaml
+tests: ../escalation-canary-v1/tests.yaml
+contract: asset_refs
+topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

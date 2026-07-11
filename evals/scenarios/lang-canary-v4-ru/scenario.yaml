@@ -1,0 +1,13 @@
+name: lang-canary-v4-ru
+description: >
+  Phase 2.1 language architecture bake-off, variant V4 (language-routed frame) — the RU
+  branch. Together with lang-canary-v4-kk, represents what a production router
+  (detectLang) would send: a message classified "ru" gets this UNCHANGED V1 frame, a
+  message classified "kk" gets the full Kazakh frame in the sibling scenario. Splitting
+  into two scenarios avoids needing runtime prompt routing inside the harness/promptfoo —
+  detectLang's own unit tests already prove these are the messages it would route here.
+frame: ../lang-canary-v1/frame.txt
+data: ../shop-current/data.yaml
+tests: tests.yaml
+contract: asset_refs
+topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

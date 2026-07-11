@@ -64,10 +64,18 @@ type Verdict struct {
 	LeftoverBraces bool     `json:"leftover_braces"`
 	UnknownMedia   []string `json:"unknown_media"` // -> the real product drops these (logged), does NOT block
 
-	RequiresPass       bool     `json:"requires_pass"`
-	MediaPass          bool     `json:"media_pass"`
-	EscalatePass       bool     `json:"escalate_pass"`
+	RequiresPass bool `json:"requires_pass"`
+	MediaPass    bool `json:"media_pass"`
+	EscalatePass bool `json:"escalate_pass"`
+	// LanguagePass = LanguageTextOK && LanguageFieldOK — kept as the single pass/fail
+	// gate everything else already depends on. The two components are ALSO reported
+	// separately (Phase 0.4 of the language plan): looksKazakh is a cheap heuristic, not
+	// a whole-reply classifier, so telling "the text didn't look Kazakh" apart from "the
+	// model declared the wrong reply_language" matters when manually inspecting a Kazakh
+	// canary run, not just when reading the one combined boolean.
 	LanguagePass       bool     `json:"language_pass"`
+	LanguageTextOK     bool     `json:"language_text_ok"`
+	LanguageFieldOK    bool     `json:"language_field_ok"`
 	LanguageIssue      string   `json:"language_issue,omitempty"`
 	MustNotContainPass bool     `json:"must_not_contain_pass"`
 	ForbiddenPhrase    string   `json:"forbidden_phrase,omitempty"`
@@ -390,6 +398,8 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	// reply_language FIELD match — a model can write Russian prose while claiming
 	// reply_language: "kk" and the text-only heuristic would never catch that.
 	v.LanguagePass = true
+	v.LanguageTextOK = true
+	v.LanguageFieldOK = true
 	if tc.Language == "kk" || tc.Language == "ru" {
 		checkText := v.InjectedText
 		if checkText == "" {
@@ -404,6 +414,8 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 			textOK = !looksKazakh(checkText)
 		}
 		fieldOK := replyLang == tc.Language
+		v.LanguageTextOK = textOK
+		v.LanguageFieldOK = fieldOK
 		v.LanguagePass = textOK && fieldOK
 		switch {
 		case !textOK && tc.Language == "kk":
@@ -564,6 +576,15 @@ func mediaExpectationMet(exp *MediaExpect, obj map[string]any, field string) boo
 	return false
 }
 
+// looksKazakh is a cheap presence heuristic, NOT a whole-reply language classifier: two or
+// more Kazakh-specific letters ANYWHERE in the text is enough to return true, even if the
+// surrounding sentence is mostly Russian prose with one Kazakh word borrowed in. It catches
+// the failure mode actually observed in eval runs (a reply that is entirely Russian, zero
+// Kazakh-specific letters), but passing this check is not proof the ENTIRE reply reads as
+// fluent Kazakh — see judgeOne's textOK/fieldOK split (reported separately on Verdict as
+// LanguageTextOK/LanguageFieldOK) and the plan's Phase 0.4 note: do not use this score alone
+// as a routing/production gate without manually inspecting the actual Kazakh canary replies
+// first. A real lexical or model-based language check is future work, not this function.
 func looksKazakh(text string) bool {
 	count := 0
 	for _, r := range text {

@@ -168,3 +168,20 @@ tests:
     requires:
       - ["product.coffee-machine.price"]
     language: ru
+
+  - id: "21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim"
+    # The Kazakh mirror of test 9, and the case the original suite had no coverage for at
+    # all: does a Kazakh-language escalation ALSO stay honest (escalate=true, holding reply
+    # actually in Kazakh, no invented claim), or does the model's escalation copy fall back
+    # to Russian, or assert something about city coverage that isn't in the KB? This is
+    # exactly the language x escalation interaction the language bake-off (Phase 2.1) must
+    # not accidentally break while fixing Kazakh replies.
+    message: "Сіздер Астанаға жеткізесіздер ме?"
+    escalate: true
+    language: kk
+    # DRAFT Kazakh phrasing, not yet reviewed by a native speaker (see the plan's Phase 2.1
+    # note: any Kazakh wording used in a billed comparison needs that review first). Mirrors
+    # test 9's Russian blocklist theme (an invented claim about NOT delivering to a city).
+    must_not_contain:
+      - "жеткізбейміз"
+      - "аймағымыздан тыс"

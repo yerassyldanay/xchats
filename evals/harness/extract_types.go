@@ -19,7 +19,15 @@ type ExtractCasesFile struct {
 //     where "did the model understand what this is" is the only meaningful check.
 //   - AllowedNumbers: the whitelist for the invented-number check (below) — every
 //     number-like run found anywhere in the model's JSON text fields must be in this
-//     list. An empty (but present) list means "no numbers may appear at all".
+//     list. An empty (but present) list means "no numbers may appear at all". This is
+//     a PRECISION check only — it says nothing about whether a real visible number was
+//     dropped.
+//   - RequiredNumbers: the RECALL complement to AllowedNumbers (Phase 0.4 of the
+//     language/extraction plan) — every entry here must appear somewhere in the
+//     model's text fields, or the case fails. Optional (nil/empty skips the check);
+//     use it for the business-relevant figures a multi-panel image must not let a
+//     model silently omit (a price, an order number, a phone number) — not every
+//     visible number needs to be required, only the ones that matter if dropped.
 //   - ForbidCurrency: an extra check that no currency symbol/word appears — for photos
 //     that visibly show no price.
 type ExtractCase struct {
@@ -35,6 +43,7 @@ type ExtractCase struct {
 	IdentifyContainsAll []string          `yaml:"identify_contains_all"`
 	IdentifyContainsAny []string          `yaml:"identify_contains_any"`
 	AllowedNumbers      []string          `yaml:"allowed_numbers"`
+	RequiredNumbers     []string          `yaml:"required_numbers"`
 	ForbidCurrency      bool              `yaml:"forbid_currency"`
 }
 
