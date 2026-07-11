@@ -28,6 +28,8 @@ func main() {
 		err = cmdRun(os.Args[2:])
 	case "extract":
 		err = cmdExtract(os.Args[2:])
+	case "html":
+		err = cmdHTML(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -46,7 +48,9 @@ commands:
   judge  -scenario <dir> -run <dir>   grade a run's results.json against the scenario's catalog
   report -run <dir>                   write runs/<id>/SUMMARY.md from judge verdicts
   run    -scenario <dir>[,<dir>...] | -all   render -> promptfoo eval -> judge -> report
-  extract -cases <file> [-case <id>] [-models m1,m2] [-record]
+  extract -cases <file> [-case <id>] [-models m1,m2] [-prompt name@vN] [-record]
                                        Eval 1: file -> extracted information (direct
-                                       OpenRouter calls, no promptfoo); writes EXTRACT.md`)
+                                       OpenRouter calls, no promptfoo); writes EXTRACT.md
+  html   -run <dir>                   write runs/<id>/index.html (also auto-written,
+                                       best-effort, at the end of run/extract/report)`)
 }

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>eval runs</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; margin: 2rem; line-height: 1.4; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+  .meta { color: #888; font-size: 0.9rem; }
+  table { border-collapse: collapse; margin: 1rem 0; width: 100%; }
+  th, td { border: 1px solid #8884; padding: 0.35rem 0.6rem; text-align: left; font-size: 0.9rem; vertical-align: top; }
+  th { background: #8881; position: sticky; top: 0; }
+  tr.legacy { opacity: 0.75; }
+  .family-scenario { color: #06c; }
+  .family-extract { color: #a35b00; }
+  .family-mixed { color: #6a3fb5; }
+  .family-unknown, .family-error { color: #cf222e; }
+  code { background: #8881; padding: 0.1rem 0.3rem; border-radius: 0.2rem; font-size: 0.85rem; }
+  .links a { margin-right: 0.6rem; }
+  input#filter { padding: 0.4rem 0.6rem; width: 100%; max-width: 24rem; margin-bottom: 0.5rem;
+    border: 1px solid #8886; border-radius: 0.3rem; font-size: 0.95rem; }
+</style>
+</head>
+<body>
+
+<h1>Eval runs</h1>
+<p class="meta">Generated {{.GeneratedAt}} &middot; {{len .Rows}} run(s)</p>
+
+<input id="filter" type="text" placeholder="filter by run id, family, or model (plain text, case-insensitive)">
+<script>
+  // The only script on this page: filters table rows by a plain substring match
+  // against their own text. No framework, no network calls, no state beyond the
+  // input's own value.
+  document.getElementById('filter').addEventListener('input', function (e) {
+    var q = e.target.value.toLowerCase();
+    document.querySelectorAll('#runs tbody tr').forEach(function (tr) {
+      tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+</script>
+
+<table id="runs">
+<thead>
+<tr>
+  <th>run</th>
+  <th>started</th>
+  <th>family</th>
+  <th>models</th>
+  <th>prompts</th>
+  <th>scenario (behavior / contract)</th>
+  <th>extract (checks)</th>
+  <th>links</th>
+</tr>
+</thead>
+<tbody>
+{{range .Rows}}
+<tr class="{{if not .HasManifest}}legacy{{end}}">
+  <td>{{if .IndexHref}}<a href="{{.IndexHref}}">{{.RunID}}</a>{{else}}{{.RunID}}{{end}}{{if not .HasManifest}} <span class="meta">(legacy)</span>{{end}}</td>
+  <td>{{if .StartedAt}}{{.StartedAt}}{{else}}&mdash;{{end}}</td>
+  <td class="family-{{.Family}}">{{.Family}}</td>
+  <td>{{range .Models}}<code>{{.}}</code> {{end}}</td>
+  <td>{{range .Prompts}}<code>{{.}}</code> {{end}}</td>
+  <td>{{if .ScenarioTotal}}{{pct .ScenarioBehaviorPass .ScenarioTotal}} / {{pct .ScenarioContractPass .ScenarioTotal}}{{else}}&mdash;{{end}}</td>
+  <td>{{if .ExtractTotal}}{{pct .ExtractChecksPass .ExtractTotal}}{{else}}&mdash;{{end}}</td>
+  <td class="links">
+    {{range .ReportLinks}}<a href="{{.Href}}">{{.Name}}</a>{{end}}
+  </td>
+</tr>
+{{if .LoadError}}
+<tr class="legacy"><td colspan="8" class="meta">{{.RunID}}: could not load ({{.LoadError}})</td></tr>
+{{end}}
+{{end}}
+</tbody>
+</table>
+
+</body>
+</html>

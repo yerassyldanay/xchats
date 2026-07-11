@@ -79,6 +79,15 @@ answers, applied to the prompt itself before any model ever sees it.
   behavior), whether injection came out brace-clean, the actual injected customer-facing
   text, cost basis for that one answer, and every check's pass/fail.
 - **`runs/INDEX.md`** — one line per run, so past attempts stay easy to find and compare.
+- **`index.html`** — one self-contained page per run covering BOTH families: for scenario
+  runs, the same model × pass-rate table as SUMMARY.md plus a collapsible per-verdict
+  detail (scores, injected text, evidence); for extraction runs, each case's captured
+  input image next to every model/prompt variant's parsed fields, checks, and raw
+  output. Written automatically at the end of `run`, `extract`, and `report` (best-effort
+  — a broken viewer never fails the underlying eval); regenerate by hand with `harness
+  html -run <dir>`. Gitignored (regenerate rather than diff in review). Works on runs
+  from before this existed too, degrading gracefully — no manifest section, and a
+  captured-input image shows as "input not captured" rather than a reconstructed guess.
 
 ## Extraction eval (Eval 1: file -> extracted information)
 
@@ -96,12 +105,19 @@ cp .env.example .env        # fill in OPENROUTER_API_KEY
 Each case in `extract/cases.yaml` names one real file under `assets/` and the exact
 requirements a correct extraction must satisfy (written by looking directly at the file —
 ground truth, not guesses). The model must answer with one fixed JSON shape (see
-`extract_types.go`'s `ExtractionResult` and the prompt in the same file) — every check is
-deterministic string/number matching, same philosophy as `judge.go`. Output is
-`runs/<timestamp>/EXTRACT.md` plus the raw per-(case,model) JSON under
-`runs/<timestamp>/extract_outputs/`. `-record` freezes a fully-passing output to
-`extract/fixtures/<case>.json`, meant to feed a later, separate eval (extracted
-information -> `ai_*` draft schema) without re-calling vision models.
+`extract_types.go`'s `ExtractionResult`) — every check is deterministic string/number
+matching, same philosophy as `judge.go`. Output is `runs/<timestamp>/EXTRACT.md` plus the
+raw per-(case,model,prompt) JSON under `runs/<timestamp>/extract_outputs/`. `-record`
+freezes a fully-passing output to `extract/fixtures/<case>.json` (plus a
+`<case>.provenance.json` sidecar naming the model/prompt/run that produced it), meant to
+feed a later, separate eval (extracted information -> `ai_*` draft schema) without
+re-calling vision models.
+
+The prompt under test lives in `prompts/extract/v1.txt`, not in Go — pass `-prompt
+extract@v1` (the default) or a comma-separated list (e.g. `-prompt
+extract@v1,extract@v2`) to compare prompt versions in one run; cut a new
+`prompts/extract/v2.txt` rather than editing `v1.txt` in place, since existing runs'
+results are tied to `v1`'s exact hash.
 
 Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
 
@@ -136,6 +152,15 @@ Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
   a Kazakh-letter heuristic/reply_language field). A few real questions (e.g. "does this
   read as a natural next step") have no automated check — read the injected text in
   `CONTRACT.md` by eye.
+- **A committed run is inspectable, not re-judgeable from a fresh clone.** Each run's
+  `manifest.json` and `snapshots/` (scenario.yaml, prompt.txt, catalog.json,
+  resolved_tests.json, promptfooconfig.yaml, models.yaml, extract cases — all small text)
+  are committed, so you can see exactly what a run graded against. But the raw
+  `*.results.json` (promptfoo's answers) and, for extraction, the processed input images
+  under `inputs/`, are gitignored — large and reproducible by re-running, not durable
+  history. `manifest.json` records their sha256 so you can tell if a local copy still
+  matches, but a fresh clone alone can't re-run `judge`/`report` end to end without
+  re-generating those first.
 
 ## The one earlier eval this replaced
 

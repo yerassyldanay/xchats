@@ -6,5 +6,14 @@ scenarios/*/generated/
 # SUMMARY.md/CONTRACT.md (the human-readable report) next to it ARE committed.
 runs/*/*.results.json
 
+# Heavy or reproducible per-run artifacts: manifest.json, snapshots/ (text, small), and
+# judged.json/EXTRACT.md/*.md ARE committed (the provenance record + human report). The
+# processed images, generated viewer pages, and a dirty-worktree patch are not — they're
+# either large, or derivable from the committed JSON, or a rare-case debugging aid.
+runs/*/inputs/
+runs/*/*.html
+runs/index.html
+runs/*/worktree.diff
+
 harness/harness
 harness/xchats-evals-harness

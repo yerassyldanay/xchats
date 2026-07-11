@@ -7,7 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"xchats-evals-harness/internal/provenance"
 )
 
 func cmdRun(args []string) error {
@@ -41,13 +42,24 @@ func cmdRun(args []string) error {
 		return fmt.Errorf("run: pass -scenario <dir>[,<dir>...] or -all")
 	}
 
-	runID := time.Now().Format("2006-01-02_15-04-05")
-	runDir := filepath.Join("runs", runID)
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
+	runID, runDir, err := provenance.NewRunDir("runs")
+	if err != nil {
 		return err
 	}
 	absRunDir, err := filepath.Abs(runDir)
 	if err != nil {
+		return err
+	}
+
+	manifest := provenance.NewManifest(runDir, runID, "scenario", "run", args)
+	manifest.PromptfooVersion = provenance.PromptfooVersion
+	manifest.ModelsPath = *modelsPath
+	if sha, err := provenance.SnapshotFile(*modelsPath, filepath.Join(runDir, "snapshots", "models.yaml")); err != nil {
+		return fmt.Errorf("snapshot %s: %w", *modelsPath, err)
+	} else {
+		manifest.ModelsSHA256 = sha
+	}
+	if err := provenance.WriteManifest(runDir, manifest); err != nil {
 		return err
 	}
 
@@ -60,12 +72,31 @@ func cmdRun(args []string) error {
 		if err != nil {
 			return err
 		}
+
+		ref, err := provenance.SnapshotScenario(sd, runDir, scenario.Name)
+		if err != nil {
+			return fmt.Errorf("snapshot %s: %w", scenario.Name, err)
+		}
+
 		if err := runPromptfoo(sd, scenario.Name, absRunDir, *noCache); err != nil {
 			return fmt.Errorf("promptfoo eval for %s: %w", scenario.Name, err)
 		}
+		if sha, err := provenance.SHA256File(filepath.Join(runDir, scenario.Name+".results.json")); err == nil {
+			ref.ResultsSHA256 = sha
+		}
+		manifest.Scenarios = append(manifest.Scenarios, ref)
+		if err := provenance.WriteManifest(runDir, manifest); err != nil {
+			return err
+		}
+
 		if err := judgeScenario(sd, absRunDir, *modelsPath); err != nil {
 			return fmt.Errorf("judge %s: %w", scenario.Name, err)
 		}
+	}
+
+	manifest.Finish()
+	if err := provenance.WriteManifest(runDir, manifest); err != nil {
+		return err
 	}
 
 	return reportRun(runDir, *modelsPath)
@@ -74,7 +105,7 @@ func cmdRun(args []string) error {
 func runPromptfoo(scenarioDir, scenarioName, absRunDir string, noCache bool) error {
 	genDir := filepath.Join(scenarioDir, "generated")
 	outPath := filepath.Join(absRunDir, scenarioName+".results.json")
-	args := []string{"--yes", "promptfoo@latest", "eval", "-c", "promptfooconfig.yaml", "-o", outPath}
+	args := []string{"--yes", "promptfoo@" + provenance.PromptfooVersion, "eval", "-c", "promptfooconfig.yaml", "-o", outPath}
 	if noCache {
 		args = append(args, "--no-cache")
 	}

@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"xchats-evals-harness/internal/evaltext"
+	"xchats-evals-harness/internal/provenance"
 )
 
 // PromptfooResults mirrors the shape of promptfoo's -o results.json — only the fields
@@ -154,9 +157,7 @@ type JudgedRun struct {
 }
 
 var (
-	fenceOpenRE  = regexp.MustCompile("^\\s*```[a-zA-Z]*\\s*")
-	fenceCloseRE = regexp.MustCompile("\\s*```\\s*$")
-	tokenSpanRE  = regexp.MustCompile(`\{\{[^}]*\}\}`)
+	tokenSpanRE = regexp.MustCompile(`\{\{[^}]*\}\}`)
 	// digitRunRE matches ANY digit run — a model inventing even a single-digit fact (e.g.
 	// "осталось 5 штук" without the token) is still an invented fact. listMarkerRE strips
 	// numbered-list markers ("1. ", "2) " at line start) first, the one legitimate place a
@@ -200,9 +201,21 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 		return fmt.Errorf("load scenario.yaml: %w", err)
 	}
 
-	models, err := loadModels(modelsPath)
+	// Prefer this run's own snapshot of what render produced over the live, mutable
+	// scenarios/*/generated/ — the whole point of snapshotting: re-judging an old run
+	// must grade against the requirements THAT RUN saw, not whatever the scenario looks
+	// like today. Legacy runs (no snapshot) and a standalone `judge` right after a fresh
+	// `render` fall back to genDir/modelsPath exactly as before this existed.
+	genDir := filepath.Join(scenarioDir, "generated")
+	resolvedModelsPath := modelsPath
+	if snapDir, ok := provenance.SnapshotDirFor(runDir, scenario.Name); ok {
+		genDir = snapDir
+		resolvedModelsPath = provenance.SnapshotModelsPath(runDir, modelsPath)
+	}
+
+	models, err := loadModels(resolvedModelsPath)
 	if err != nil {
-		return fmt.Errorf("load %s: %w", modelsPath, err)
+		return fmt.Errorf("load %s: %w", resolvedModelsPath, err)
 	}
 	priceByModel := map[string]ModelProvider{}
 	for _, p := range models.Providers {
@@ -210,7 +223,7 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	}
 
 	var catalog Catalog
-	if err := readJSON(filepath.Join(scenarioDir, "generated", "catalog.json"), &catalog); err != nil {
+	if err := readJSON(filepath.Join(genDir, "catalog.json"), &catalog); err != nil {
 		return fmt.Errorf("read catalog.json (did you run render first?): %w", err)
 	}
 	tokenValue := map[string]string{}
@@ -227,7 +240,7 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	}
 
 	var resolved ResolvedTests
-	if err := readJSON(filepath.Join(scenarioDir, "generated", "resolved_tests.json"), &resolved); err != nil {
+	if err := readJSON(filepath.Join(genDir, "resolved_tests.json"), &resolved); err != nil {
 		return fmt.Errorf("read resolved_tests.json: %w", err)
 	}
 	testByID := map[string]TestCase{}
@@ -456,8 +469,7 @@ func firstFailureReason(v Verdict) string {
 }
 
 func parseModelJSON(raw string) (map[string]any, bool) {
-	cleaned := fenceOpenRE.ReplaceAllString(raw, "")
-	cleaned = fenceCloseRE.ReplaceAllString(cleaned, "")
+	cleaned := evaltext.StripFences(raw)
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(cleaned), &obj); err != nil {
 		return nil, false

@@ -12,24 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-)
 
-func TestNormalizeText(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"  Старт   10 000 ₸/мес ", "старт 10 000 ₸/мес"},
-		{"MiXeD\nCase\twith\n\nwhitespace", "mixed case with whitespace"},
-		{"", ""},
-		// ё/е is a genuine, common Russian orthographic equivalence (diaeresis routinely
-		// dropped in casual/printed text) -- a model choosing either spelling of a name
-		// like "Пётр"/"Петр" must not be penalized as if it wrote a different name.
-		{"Петров Пётр Петрович", "петров петр петрович"},
-	}
-	for _, tc := range tests {
-		if got := normalizeText(tc.in); got != tc.want {
-			t.Errorf("normalizeText(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
+	"xchats-evals-harness/internal/provenance"
+)
 
 func TestInventedNumberCheck(t *testing.T) {
 	tests := []struct {
@@ -87,10 +72,11 @@ func TestInventedNumberCheck(t *testing.T) {
 			wantOK:  false,
 		},
 		{
-			// Regression: normalizeText's newline-to-space collapsing used to run BEFORE
-			// numberRunRE, destroying a genuine line-break boundary between two
-			// UNRELATED numbers and merging them into one bogus "7 2" run. inventedNumberCheck
-			// must use foldNBSPOnly (keeps real newlines as hard boundaries) instead.
+			// Regression: evaltext.NormalizeText's newline-to-space collapsing used to
+			// run BEFORE evaltext.NumberRunRE, destroying a genuine line-break boundary
+			// between two UNRELATED numbers and merging them into one bogus "7 2" run.
+			// inventedNumberCheck must use evaltext.FoldNBSP (keeps real newlines as hard
+			// boundaries) instead.
 			name:    "two unrelated numbers on separate lines never merge across the line break",
 			allowed: []string{"77", "7", "2"},
 			text:    "пр. Аль-Фараби, 77/7\n2 кассира",
@@ -522,7 +508,8 @@ func TestRunOneExtraction_RetriesOnParseFailure(t *testing.T) {
 	client := newORClient(srv.URL, "test-key")
 	c := ExtractCase{ID: "product-photo"}
 	m := ModelProvider{ID: "google/gemini-2.5-flash", Temperature: 0.3, MaxTokens: 700}
-	res := runOneExtraction(context.Background(), client, c, m, []byte{0xFF, 0xD8}, "image/jpeg")
+	p := provenance.LoadedPrompt{Ref: provenance.PromptRef{Name: "extract", Version: 1}, Content: "test prompt"}
+	res := runOneExtraction(context.Background(), client, c, m, p, preprocessorImageJPEG85, []byte{0xFF, 0xD8}, "image/jpeg")
 
 	if calls != parseFailureRetries+1 {
 		t.Fatalf("want exactly %d calls (retries exhausted then one more), got %d", parseFailureRetries+1, calls)
@@ -556,7 +543,8 @@ func TestRunOneExtraction_GivesUpAfterRetries(t *testing.T) {
 	client := newORClient(srv.URL, "test-key")
 	c := ExtractCase{ID: "product-photo"}
 	m := ModelProvider{ID: "x/y"}
-	res := runOneExtraction(context.Background(), client, c, m, []byte{0xFF, 0xD8}, "image/jpeg")
+	p := provenance.LoadedPrompt{Ref: provenance.PromptRef{Name: "extract", Version: 1}, Content: "test prompt"}
+	res := runOneExtraction(context.Background(), client, c, m, p, preprocessorImageJPEG85, []byte{0xFF, 0xD8}, "image/jpeg")
 
 	if calls != parseFailureRetries+1 {
 		t.Fatalf("want exactly %d calls (no calls beyond the retry budget), got %d", parseFailureRetries+1, calls)

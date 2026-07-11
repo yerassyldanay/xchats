@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"xchats-evals-harness/internal/provenance"
 )
 
 // cmdExtract runs the pass-1 extraction eval: for each case in cases.yaml, downscale its
@@ -26,6 +28,8 @@ func cmdExtract(args []string) error {
 	all := fs.Bool("all", false, "run every case (default when neither -case nor -all is given)")
 	modelsFlag := fs.String("models", "", "comma-separated model ids to run (default: $EVAL_VISION_MODELS, else every provider in models.yaml)")
 	modelsPath := fs.String("models-file", "models.yaml", "path to models.yaml")
+	promptsFlag := fs.String("prompt", "extract@v1", "comma-separated prompt specs to run, <name>@v<N> (e.g. extract@v1,extract@v2)")
+	promptsDir := fs.String("prompts-dir", "prompts", "directory containing <name>/v<N>.txt prompt files")
 	record := fs.Bool("record", false, "write the first fully-passing output per case to extract/fixtures/<case>.json")
 	baseURL := fs.String("base-url", "", "override the OpenRouter base URL (default: $EVAL_BASE_URL, else https://openrouter.ai/api/v1)")
 	envPath := fs.String("env", ".env", "path to a .env file to load (best-effort; missing file is fine)")
@@ -76,54 +80,113 @@ func cmdExtract(args []string) error {
 		models[i].MaxTokens = *maxTokens
 	}
 
+	prompts, err := provenance.LoadPromptSpecs(*promptsDir, splitCSV(*promptsFlag))
+	if err != nil {
+		return err
+	}
+	if len(prompts) == 0 {
+		return fmt.Errorf("extract: no prompts to run (pass -prompt <name>@v<N>[,...])")
+	}
+
 	client := newORClient(base, apiKey)
 	casesDir := filepath.Dir(*casesPath)
 
-	runID := time.Now().Format("2006-01-02_15-04-05")
-	runDir := filepath.Join("runs", runID)
+	runID, runDir, err := provenance.NewRunDir("runs")
+	if err != nil {
+		return err
+	}
 	outputsDir := filepath.Join(runDir, "extract_outputs")
 	if err := os.MkdirAll(outputsDir, 0o755); err != nil {
+		return err
+	}
+
+	manifest := provenance.NewManifest(runDir, runID, "extract", "extract", args)
+	manifest.ModelsPath = *modelsPath
+	if sha, err := provenance.SnapshotFile(*modelsPath, filepath.Join(runDir, "snapshots", "models.yaml")); err != nil {
+		return fmt.Errorf("snapshot %s: %w", *modelsPath, err)
+	} else {
+		manifest.ModelsSHA256 = sha
+	}
+	manifest.ExtractCasesPath = *casesPath
+	if sha, err := provenance.SnapshotFile(*casesPath, filepath.Join(runDir, "snapshots", "extract_cases.yaml")); err != nil {
+		return fmt.Errorf("snapshot %s: %w", *casesPath, err)
+	} else {
+		manifest.ExtractCasesSHA256 = sha
+	}
+	if err := provenance.WriteManifest(runDir, manifest); err != nil {
 		return err
 	}
 
 	var results []extractRunResult
 	for _, c := range cases {
 		imgPath := filepath.Join(casesDir, c.File)
-		imgData, mimetype, err := loadAndScaleImage(imgPath)
+		imgData, mimetype, preprocessorName, err := preprocess(c.Kind, imgPath)
 		if err != nil {
 			return fmt.Errorf("case %s: %w", c.ID, err)
 		}
 
+		originalSHA, err := provenance.SHA256File(imgPath)
+		if err != nil {
+			return fmt.Errorf("case %s: hash original input: %w", c.ID, err)
+		}
+		inputDst := filepath.Join(runDir, "inputs", c.ID+".jpg")
+		if err := os.MkdirAll(filepath.Dir(inputDst), 0o755); err != nil {
+			return err
+		}
+		if err := provenance.AtomicWriteFile(inputDst, imgData, 0o644); err != nil {
+			return fmt.Errorf("case %s: save processed input: %w", c.ID, err)
+		}
+		manifest.Inputs = append(manifest.Inputs, provenance.InputSnapshotRef{
+			CaseID:          c.ID,
+			OriginalSHA256:  originalSHA,
+			ProcessedSHA256: provenance.SHA256Bytes(imgData),
+		})
+		if err := provenance.WriteManifest(runDir, manifest); err != nil {
+			return err
+		}
+
 		recorded := false
 		for _, m := range models {
-			fmt.Printf("extract: case=%s model=%s ... ", c.ID, orModelID(m.ID))
-			res := runOneExtraction(context.Background(), client, c, m, imgData, mimetype)
-			results = append(results, res)
+			for _, p := range prompts {
+				fmt.Printf("extract: case=%s model=%s prompt=%s ... ", c.ID, orModelID(m.ID), p.Ref)
+				res := runOneExtraction(context.Background(), client, c, m, p, preprocessorName, imgData, mimetype)
+				results = append(results, res)
 
-			outPath := filepath.Join(outputsDir, fmt.Sprintf("%s__%s.json", c.ID, sanitizeModelID(m.ID)))
-			if werr := writeJSON(outPath, res); werr != nil {
-				return fmt.Errorf("write %s: %w", outPath, werr)
-			}
-
-			switch {
-			case res.Error != "":
-				fmt.Printf("ERROR: %s\n", res.Error)
-			case res.ParseError != "":
-				fmt.Printf("PARSE FAILED: %s\n", res.ParseError)
-			default:
-				fmt.Printf("%s\n", passFailSummary(res.Checks))
-			}
-
-			if *record && !recorded && res.Parsed != nil && allChecksPass(res.Checks) {
-				fixturePath := filepath.Join(casesDir, "fixtures", c.ID+".json")
-				if err := os.MkdirAll(filepath.Dir(fixturePath), 0o755); err != nil {
-					return err
+				outPath := filepath.Join(outputsDir, extractOutputFilename(c.ID, m, p.Ref))
+				if werr := writeJSON(outPath, res); werr != nil {
+					return fmt.Errorf("write %s: %w", outPath, werr)
 				}
-				if err := writeJSON(fixturePath, res.Parsed); err != nil {
-					return err
+
+				switch {
+				case res.Error != "":
+					fmt.Printf("ERROR: %s\n", res.Error)
+				case res.ParseError != "":
+					fmt.Printf("PARSE FAILED: %s\n", res.ParseError)
+				default:
+					fmt.Printf("%s\n", passFailSummary(res.Checks))
 				}
-				fmt.Printf("  recorded fixture: %s (model=%s)\n", fixturePath, orModelID(m.ID))
-				recorded = true
+
+				if *record && !recorded && res.Parsed != nil && allChecksPass(res.Checks) {
+					fixturePath := filepath.Join(casesDir, "fixtures", c.ID+".json")
+					if err := os.MkdirAll(filepath.Dir(fixturePath), 0o755); err != nil {
+						return err
+					}
+					if err := writeJSON(fixturePath, res.Parsed); err != nil {
+						return err
+					}
+					provPath := filepath.Join(casesDir, "fixtures", c.ID+".provenance.json")
+					prov := fixtureProvenance{
+						Model:                orModelID(m.ID),
+						Prompt:               p.Ref,
+						RunID:                runID,
+						ProcessedInputSHA256: provenance.SHA256Bytes(imgData),
+					}
+					if err := writeJSON(provPath, prov); err != nil {
+						return err
+					}
+					fmt.Printf("  recorded fixture: %s (model=%s, prompt=%s)\n", fixturePath, orModelID(m.ID), p.Ref)
+					recorded = true
+				}
 			}
 		}
 	}
@@ -133,6 +196,16 @@ func cmdExtract(args []string) error {
 		return err
 	}
 	fmt.Printf("\nwrote %s\n", reportPath)
+
+	manifest.Finish()
+	if err := provenance.WriteManifest(runDir, manifest); err != nil {
+		return err
+	}
+
+	// Best-effort: a broken HTML viewer must never turn a successful extraction run
+	// into a failed command.
+	writeRunHTMLBestEffort(runDir)
+
 	return appendExtractIndex(runDir, results)
 }
 
@@ -145,11 +218,11 @@ func cmdExtract(args []string) error {
 // reporting it as a hard failure would misrepresent the model being evaluated.
 const parseFailureRetries = 2
 
-func runOneExtraction(ctx context.Context, client *orClient, c ExtractCase, m ModelProvider, imgData []byte, mimetype string) extractRunResult {
+func runOneExtraction(ctx context.Context, client *orClient, c ExtractCase, m ModelProvider, p provenance.LoadedPrompt, preprocessorName string, imgData []byte, mimetype string) extractRunResult {
 	var res extractRunResult
 	for attempt := 0; attempt <= parseFailureRetries; attempt++ {
-		res = extractRunResult{CaseID: c.ID, Model: orModelID(m.ID)}
-		raw, usage, err := client.describeImage(ctx, m, extractSystemPrompt, imgData, mimetype)
+		res = extractRunResult{CaseID: c.ID, Model: orModelID(m.ID), Prompt: p.Ref, Preprocessor: preprocessorName}
+		raw, usage, err := client.describeImage(ctx, m, p.Content, imgData, mimetype)
 		if err != nil {
 			res.Error = err.Error()
 			return res // a real HTTP/network error is not retried here
@@ -221,6 +294,25 @@ func filterCases(cases []ExtractCase, id string) []ExtractCase {
 func sanitizeModelID(id string) string {
 	id = orModelID(id)
 	return strings.NewReplacer("/", "_", ":", "_").Replace(id)
+}
+
+// extractOutputFilename names one (case, model, prompt) result file. The prompt
+// segment is what makes results from two prompt versions of the same case+model
+// coexist in one run instead of the second silently overwriting the first.
+func extractOutputFilename(caseID string, m ModelProvider, prompt provenance.PromptRef) string {
+	return fmt.Sprintf("%s__%s__%s-v%d.json", caseID, sanitizeModelID(m.ID), prompt.Name, prompt.Version)
+}
+
+// fixtureProvenance is the sidecar written next to a -record'd fixture
+// (fixtures/<case>.provenance.json) — the fixture itself (fixtures/<case>.json) keeps
+// its existing shape (Eval 2's input contract) so nothing downstream needs to change;
+// this file answers "which model and prompt produced this fixture" for whoever reads
+// it later.
+type fixtureProvenance struct {
+	Model                string               `json:"model"`
+	Prompt               provenance.PromptRef `json:"prompt"`
+	RunID                string               `json:"run_id"`
+	ProcessedInputSHA256 string               `json:"processed_input_sha256"`
 }
 
 func splitCSV(s string) []string {

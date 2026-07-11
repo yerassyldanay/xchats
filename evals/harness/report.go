@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"xchats-evals-harness/internal/provenance"
 )
 
 func cmdReport(args []string) error {
@@ -42,9 +44,12 @@ func reportRun(runDir, modelsPath string) error {
 		runs = append(runs, jr)
 	}
 
-	models, err := loadModels(modelsPath)
+	// Prefer this run's own snapshotted models.yaml (pins the pricing disclaimer to
+	// what was in force at run time) over the live file; falls back for legacy runs.
+	resolvedModelsPath := provenance.SnapshotModelsPath(runDir, modelsPath)
+	models, err := loadModels(resolvedModelsPath)
 	if err != nil {
-		return fmt.Errorf("load %s: %w", modelsPath, err)
+		return fmt.Errorf("load %s: %w", resolvedModelsPath, err)
 	}
 
 	summary := buildSummary(filepath.Base(runDir), runs, models)
@@ -59,6 +64,12 @@ func reportRun(runDir, modelsPath string) error {
 		return err
 	}
 	fmt.Printf("report written: %s/SUMMARY.md, %s/CONTRACT.md\n", runDir, runDir)
+
+	// Best-effort: a broken HTML viewer must never turn a successful report into a
+	// failed command. Shared by cmdReport (standalone `harness report`) and cmdRun
+	// (which calls reportRun directly), so both entry points get the viewer for free.
+	writeRunHTMLBestEffort(runDir)
+
 	return nil
 }
 

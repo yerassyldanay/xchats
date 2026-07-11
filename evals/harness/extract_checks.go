@@ -6,66 +6,17 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"xchats-evals-harness/internal/evaltext"
 )
 
-// numberRunRE matches a run of digits that may contain internal spaces, commas, or
-// hyphens as grouping separators (e.g. "25 000" — the source image's own Russian-style
-// thousands grouping; "25,000" — observed in practice: a model's prose `summary`
-// re-formatting the exact same value English-style even though its own `extracted_text`
-// correctly kept the source's spacing; "+7702-976-65-09" — a phone number re-grouped
-// with hyphens throughout instead of the source's space-then-hyphens mix). All of these
-// must be treated as ONE number, not split into fragments that then look "invented"
-// against the allow-list. Unlike judge.go's digitRunRE (\d+), which intentionally splits
-// on any non-digit (correct for its job: digits inside an already-injected customer
-// reply, no grouping left once a token is substituted).
-//
-// Known edge case: this also merges a bare, separator-joined ENUMERATION of distinct
-// numbers with nothing else between them (e.g. "10, 25, 60 тысяч" or "10-25-60") into
-// one run. None of this eval's current cases do that; if one ever does, the merged run
-// simply won't match any single allow-list entry and the check fails closed (flagged
-// for review) rather than silently passing something wrong.
-var numberRunRE = regexp.MustCompile(`\d(?:[\d, \-]*\d)?`)
-
-// canonicalNumber strips grouping separators (space, NBSP, comma, hyphen) so "25 000",
-// "25,000", "25-000" and "25000" all compare equal — the check cares about the VALUE
-// shown, not which grouping convention a particular field happened to use.
-func canonicalNumber(s string) string {
-	s = strings.ReplaceAll(s, " ", "")
-	s = strings.ReplaceAll(s, "\u00A0", "") // NBSP
-	s = strings.ReplaceAll(s, ",", "")
-	s = strings.ReplaceAll(s, "-", "")
-	return s
-}
-
 var currencyRE = regexp.MustCompile(`(?i)₸|тенге|\bтг\b|kzt|\$`)
-
-// foldNBSPOnly folds NBSP to a normal space and nothing else — used only for the
-// invented-number haystack, where a real line break must survive as a hard boundary
-// (see inventedNumberCheck's comment). Unlike normalizeText, this does NOT lowercase
-// or collapse newlines/multi-space runs.
-func foldNBSPOnly(s string) string {
-	return strings.ReplaceAll(s, " ", " ")
-}
-
-// normalizeText lowercases, folds NBSP to a normal space, folds \u0451->\u0435 (a genuine, common
-// Russian orthographic equivalence \u2014 printed text and casual writing routinely drop the
-// diaeresis, e.g. "\u041F\u0435\u0442\u0440"/"\u041F\u0451\u0442\u0440" are both the same, correct name; this is not an error to
-// penalize), and collapses whitespace runs (including newlines) to a single space, so a
-// check like "contains 10 000" matches regardless of the model's exact spacing/line-wrapping.
-func normalizeText(s string) string {
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, "\u00A0", " ") // NBSP -> normal space
-	s = strings.ReplaceAll(s, "\u0451", "\u0435")
-	s = strings.Join(strings.Fields(s), " ")
-	return s
-}
 
 // parseExtractionJSON decodes a model's raw answer into ExtractionResult, tolerating a
 // ```json ... ``` fence around the object (some models wrap fenced code even when asked
 // for response_format: json_object).
 func parseExtractionJSON(raw string) (ExtractionResult, error) {
-	cleaned := fenceOpenRE.ReplaceAllString(raw, "")
-	cleaned = fenceCloseRE.ReplaceAllString(cleaned, "")
+	cleaned := evaltext.StripFences(raw)
 	var r ExtractionResult
 	if err := json.Unmarshal([]byte(cleaned), &r); err != nil {
 		return ExtractionResult{}, err
@@ -102,14 +53,14 @@ func runExtractChecks(c ExtractCase, r ExtractionResult) []CheckResult {
 	}
 
 	if len(c.TextContainsAll) > 0 {
-		out = append(out, containsAllCheck("text_contains_all", normalizeText(r.ExtractedText), c.TextContainsAll))
+		out = append(out, containsAllCheck("text_contains_all", evaltext.NormalizeText(r.ExtractedText), c.TextContainsAll))
 	}
 	if len(c.IdentifyContainsAll) > 0 {
-		identify := normalizeText(r.Summary + " " + r.RelatesToHint)
+		identify := evaltext.NormalizeText(r.Summary + " " + r.RelatesToHint)
 		out = append(out, containsAllCheck("identify_contains_all", identify, c.IdentifyContainsAll))
 	}
 	if len(c.IdentifyContainsAny) > 0 {
-		identify := normalizeText(r.Summary + " " + r.RelatesToHint)
+		identify := evaltext.NormalizeText(r.Summary + " " + r.RelatesToHint)
 		out = append(out, containsAnyCheck("identify_contains_any", identify, c.IdentifyContainsAny))
 	}
 
@@ -140,7 +91,7 @@ func runExtractChecks(c ExtractCase, r ExtractionResult) []CheckResult {
 // that are each independently defensible for that specific file.
 func fieldMatchesAny(got, want string) bool {
 	for _, alt := range strings.Split(want, "|") {
-		if normalizeText(got) == normalizeText(alt) {
+		if evaltext.NormalizeText(got) == evaltext.NormalizeText(alt) {
 			return true
 		}
 	}
@@ -171,7 +122,7 @@ func fieldValue(r ExtractionResult, key string) (string, bool) {
 func containsAllCheck(name, haystack string, wants []string) CheckResult {
 	var missing []string
 	for _, w := range wants {
-		if !strings.Contains(haystack, normalizeText(w)) {
+		if !strings.Contains(haystack, evaltext.NormalizeText(w)) {
 			missing = append(missing, w)
 		}
 	}
@@ -184,7 +135,7 @@ func containsAllCheck(name, haystack string, wants []string) CheckResult {
 
 func containsAnyCheck(name, haystack string, wants []string) CheckResult {
 	for _, w := range wants {
-		if strings.Contains(haystack, normalizeText(w)) {
+		if strings.Contains(haystack, evaltext.NormalizeText(w)) {
 			return CheckResult{Name: name, Pass: true}
 		}
 	}
@@ -199,21 +150,21 @@ func containsAnyCheck(name, haystack string, wants []string) CheckResult {
 func inventedNumberCheck(c ExtractCase, r ExtractionResult) CheckResult {
 	allowed := map[string]bool{}
 	for _, a := range c.AllowedNumbers {
-		allowed[canonicalNumber(normalizeText(a))] = true
+		allowed[evaltext.CanonicalNumber(evaltext.NormalizeText(a))] = true
 	}
-	// foldNBSPOnly, NOT normalizeText: a real line break is a genuine hard boundary
-	// between two numbers (e.g. an address "77/7" immediately followed, on the next
-	// line, by an unrelated count "2 кассира") — normalizeText's newline-to-space
-	// collapsing would destroy that boundary before numberRunRE ever sees it, merging
+	// evaltext.FoldNBSP, NOT evaltext.NormalizeText: a real line break is a genuine hard
+	// boundary between two numbers (e.g. an address "77/7" immediately followed, on the
+	// next line, by an unrelated count "2 кассира") — NormalizeText's newline-to-space
+	// collapsing would destroy that boundary before evaltext.NumberRunRE ever sees it, merging
 	// two unrelated numbers into one bogus "invented" one. Case doesn't matter for
 	// digit/separator matching, so no lowercasing is needed here either.
-	haystack := foldNBSPOnly(r.ExtractedText + " " + r.Summary + " " + r.RelatesToHint)
-	found := numberRunRE.FindAllString(haystack, -1)
+	haystack := evaltext.FoldNBSP(r.ExtractedText + " " + r.Summary + " " + r.RelatesToHint)
+	found := evaltext.NumberRunRE.FindAllString(haystack, -1)
 
 	var invented []string
 	seen := map[string]bool{}
 	for _, n := range found {
-		key := canonicalNumber(n)
+		key := evaltext.CanonicalNumber(n)
 		if allowed[key] || seen[key] {
 			continue
 		}

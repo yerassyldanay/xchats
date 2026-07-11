@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"xchats-evals-harness/internal/provenance"
 )
 
 func cmdRender(args []string) error {
@@ -534,5 +536,5 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	return provenance.AtomicWriteFile(path, b, 0o644)
 }
