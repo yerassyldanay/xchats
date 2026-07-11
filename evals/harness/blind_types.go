@@ -52,6 +52,23 @@ func computeRoutingAccuracy(tests []TestCase) RoutingAccuracyReport {
 	return report
 }
 
+// blindCandidate is one ContractPass verdict on its way through cmdBlindExport — carries
+// BOTH the reviewer-facing fields (Message, ReplyText) AND the fields withheld from the
+// reviewer (Scenario, TestID, Model, DeclaredReplyLanguage) together in ONE struct, so
+// shuffling and opaque-ID assignment can never desynchronize them. Split into
+// BlindReviewRow/BlindMappingEntry only at write time, once every candidate already has
+// its final OpaqueID — the alternative (two separate parallel slices, kept aligned only
+// by every future edit remembering to touch both identically) is exactly the kind of
+// invariant a structural change should make impossible rather than merely documented.
+type blindCandidate struct {
+	Message               string
+	ReplyText             string
+	Scenario              string
+	TestID                string
+	Model                 string
+	DeclaredReplyLanguage string
+}
+
 // BlindReviewRow is one row of the reviewer-facing export (review.csv). Deliberately
 // carries NOTHING beyond message + reply text: no model id, no prompt variant, no
 // declared reply_language — showing any of those would anchor the reviewer's judgment

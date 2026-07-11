@@ -69,6 +69,41 @@ func TestValidatePrompt(t *testing.T) {
 	}
 }
 
+// TestFilterProviders_SameIDDifferentLabelBothSelected is the regression test for a
+// real bug a review caught: byID used to be keyed by bare id only, so naming an id
+// shared by two Label-disambiguated entries (e.g. models-reasoning.yaml's reasoning-on/
+// off pair) silently returned only the LAST-registered one instead of both — exactly
+// the "collapse into one bucket" failure providerModelKey (judge.go) exists to prevent
+// everywhere else, just not applied here.
+func TestFilterProviders_SameIDDifferentLabelBothSelected(t *testing.T) {
+	mf := &ModelsFile{Providers: []ModelProvider{
+		{ID: "openrouter:google/gemini-2.5-flash", Label: "reasoning-off", Temperature: 0.3, MaxTokens: 500},
+		{ID: "openrouter:google/gemini-2.5-flash", Label: "reasoning-on", Temperature: 0.3, MaxTokens: 500},
+		{ID: "openrouter:openai/gpt-4o-mini", Temperature: 0.3, MaxTokens: 500},
+	}}
+
+	got, err := filterProviders(mf, "google/gemini-2.5-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want both labeled entries selected, got %d: %+v", len(got), got)
+	}
+	labels := map[string]bool{got[0].Label: true, got[1].Label: true}
+	if !labels["reasoning-off"] || !labels["reasoning-on"] {
+		t.Errorf("want both reasoning-off and reasoning-on present, got labels %+v", labels)
+	}
+
+	// Unfiltered (no -models) must still return every entry, unaffected.
+	all, err := filterProviders(mf, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("want all 3 entries with no filter, got %d", len(all))
+	}
+}
+
 func TestBuildPassthrough(t *testing.T) {
 	if got := buildPassthrough(ModelProvider{ID: "m"}); got != nil {
 		t.Fatalf("want nil passthrough when neither Provider nor Reasoning is set, got %+v", got)

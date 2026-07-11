@@ -34,21 +34,30 @@ func cmdRender(args []string) error {
 // provider unchanged (today's default). Unlike extraction's resolveVisionModels, an unknown ID
 // is an error, not a one-off fallback — a chat run's providers must already be configured
 // (temperature/max_tokens/pricing) in models.yaml, not improvised at the command line.
+//
+// byID maps one id to ALL provider entries sharing it, not just one — two entries CAN
+// legitimately share an id with different Label values (e.g. models-reasoning.yaml's
+// reasoning-on/reasoning-off pair), and naming that id in modelsFilter must select BOTH,
+// not silently keep only the last-registered one. Confirmed by a real bug this fixes: an
+// earlier single-value byID map made `-models <id>` against a labeled-pair models file
+// silently return 1 provider instead of 2 — exactly the "collapse into one bucket"
+// failure providerModelKey (judge.go) exists to prevent everywhere else.
 func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, error) {
 	if modelsFilter == "" {
 		return mf.Providers, nil
 	}
-	byID := map[string]ModelProvider{}
+	byID := map[string][]ModelProvider{}
 	for _, p := range mf.Providers {
-		byID[orModelID(p.ID)] = p
+		key := orModelID(p.ID)
+		byID[key] = append(byID[key], p)
 	}
 	out := make([]ModelProvider, 0, len(mf.Providers))
 	for _, id := range splitCSV(modelsFilter) {
-		p, ok := byID[orModelID(id)]
+		ps, ok := byID[orModelID(id)]
 		if !ok {
 			return nil, fmt.Errorf("model %q not found in models.yaml", id)
 		}
-		out = append(out, p)
+		out = append(out, ps...)
 	}
 	return out, nil
 }

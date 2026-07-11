@@ -568,6 +568,79 @@ func TestDescribeImage_NoProviderOrReasoningConfigOmitsFieldsEntirely(t *testing
 	}
 }
 
+// TestResolveVisionModels_SameIDDifferentLabelBothSelected mirrors
+// TestFilterProviders_SameIDDifferentLabelBothSelected for the extraction eval's own
+// model-selection path (a separate byID map from render.go's, with the identical bug
+// found independently by review).
+func TestResolveVisionModels_SameIDDifferentLabelBothSelected(t *testing.T) {
+	dir := t.TempDir()
+	modelsYAML := `providers:
+  - id: openrouter:google/gemini-2.5-flash
+    label: reasoning-off
+    temperature: 0.3
+    max_tokens: 700
+  - id: openrouter:google/gemini-2.5-flash
+    label: reasoning-on
+    temperature: 0.3
+    max_tokens: 700
+`
+	path := filepath.Join(dir, "models.yaml")
+	if err := os.WriteFile(path, []byte(modelsYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveVisionModels("google/gemini-2.5-flash", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want both labeled entries selected, got %d: %+v", len(got), got)
+	}
+	labels := map[string]bool{got[0].Label: true, got[1].Label: true}
+	if !labels["reasoning-off"] || !labels["reasoning-on"] {
+		t.Errorf("want both reasoning-off and reasoning-on present, got labels %+v", labels)
+	}
+}
+
+// TestDescribeImage_ReasoningEnabledFalseIsSentExplicitly is the regression test for a
+// bug a review caught: orReasoningPrefs.Enabled had `,omitempty` on a bool, so an
+// explicit Reasoning.Enabled=false was silently dropped from the wire request —
+// indistinguishable from Reasoning being unset entirely — while the promptfoo-mediated
+// path (render.go's buildPassthrough) always sent it. A config with Reasoning non-nil
+// but Enabled=false (e.g. `reasoning: {enabled: false, exclude: true}`) must produce an
+// explicit "enabled":false on the wire, matching that other path exactly.
+func TestDescribeImage_ReasoningEnabledFalseIsSentExplicitly(t *testing.T) {
+	var rawBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		rawBody = b
+		resp := orResponse{Usage: &orUsage{PromptTokens: 1, CompletionTokens: 1}}
+		resp.Choices = []struct {
+			Message struct {
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning,omitempty"`
+			} `json:"message"`
+		}{{}}
+		resp.Choices[0].Message.Content = `{"content_kind":"other","summary":"x","extracted_text":"","language":"none","visibility_suggestion":"visible","media_role_hint":"none","relates_to_hint":""}`
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	model := ModelProvider{
+		ID: "openrouter:google/gemini-2.5-flash", Temperature: 0.3, MaxTokens: 500,
+		Reasoning: &ReasoningConfig{Enabled: false, Exclude: true},
+	}
+	client := newORClient(srv.URL, "test-key")
+	if _, _, _, err := client.describeImage(context.Background(), model, "p", []byte{1}, "image/jpeg"); err != nil {
+		t.Fatalf("describeImage: %v", err)
+	}
+
+	if !strings.Contains(string(rawBody), `"enabled":false`) {
+		t.Errorf("want an explicit \"enabled\":false on the wire (Reasoning was set, just disabled) — omitempty must not silently drop it, got body: %s", rawBody)
+	}
+}
+
 func TestDescribeImage_HTTPErrorSurfaced(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)

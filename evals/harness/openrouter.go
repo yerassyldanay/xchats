@@ -108,7 +108,14 @@ type orProviderPrefs struct {
 // own API; this harness forwards whichever is set without validating the exclusivity
 // itself (see buildReasoningPrefs).
 type orReasoningPrefs struct {
-	Enabled   bool   `json:"enabled,omitempty"`
+	// Enabled deliberately has NO `omitempty` — this is a bool, and omitempty on a bool
+	// drops the key entirely when the value is false, making an explicit "reasoning off"
+	// indistinguishable on the wire from "no opinion" (the field absent). render.go's
+	// buildPassthrough (the promptfoo-mediated call path) already always includes this
+	// key via a raw map assignment; omitempty here made the two paths disagree on wire
+	// shape for the identical ModelProvider.Reasoning config — a real bug a review
+	// caught, fixed by matching that path's always-include behavior exactly.
+	Enabled   bool   `json:"enabled"`
 	Effort    string `json:"effort,omitempty"`
 	MaxTokens int    `json:"max_tokens,omitempty"`
 	Exclude   bool   `json:"exclude,omitempty"`
@@ -237,6 +244,11 @@ func estimateCost(model ModelProvider, usage orUsage) (float64, string) {
 // flag wins, else EVAL_VISION_MODELS from the environment, else every provider in
 // models.yaml. Model ids are matched after stripping the "openrouter:" prefix, so both
 // "google/gemini-2.5-flash" and "openrouter:google/gemini-2.5-flash" select the same entry.
+//
+// byID maps one id to ALL matching provider entries, not just one — see
+// render.go's filterProviders doc comment for why (two entries CAN legitimately share
+// an id with different Label values, and selecting that id must return every one of
+// them, not silently keep only the last-registered entry).
 func resolveVisionModels(flagValue, modelsPath string) ([]ModelProvider, error) {
 	mf, err := loadModels(modelsPath)
 	if err != nil {
@@ -245,12 +257,12 @@ func resolveVisionModels(flagValue, modelsPath string) ([]ModelProvider, error) 
 	// Normalize every provider's ID once, up front — every path below (default,
 	// matched, fallback) then returns de-prefixed IDs uniformly, so no caller needs to
 	// re-strip defensively and no divergence can creep back in between the paths.
-	byID := map[string]ModelProvider{}
+	byID := map[string][]ModelProvider{}
 	normalized := make([]ModelProvider, len(mf.Providers))
 	for i, p := range mf.Providers {
 		p.ID = orModelID(p.ID)
 		normalized[i] = p
-		byID[p.ID] = p
+		byID[p.ID] = append(byID[p.ID], p)
 	}
 
 	selected := flagValue
@@ -263,8 +275,8 @@ func resolveVisionModels(flagValue, modelsPath string) ([]ModelProvider, error) 
 	var out []ModelProvider
 	for _, id := range splitCSV(selected) {
 		id = orModelID(id)
-		if p, ok := byID[id]; ok {
-			out = append(out, p)
+		if ps, ok := byID[id]; ok {
+			out = append(out, ps...)
 			continue
 		}
 		// Not in models.yaml (e.g. a one-off comparison) — run it with harness defaults;

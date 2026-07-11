@@ -221,7 +221,11 @@ const parseFailureRetries = 2
 func runOneExtraction(ctx context.Context, client *orClient, c ExtractCase, m ModelProvider, p provenance.LoadedPrompt, preprocessorName string, imgData []byte, mimetype string) extractRunResult {
 	var res extractRunResult
 	for attempt := 0; attempt <= parseFailureRetries; attempt++ {
-		res = extractRunResult{CaseID: c.ID, Model: orModelID(m.ID), Prompt: p.Ref, Preprocessor: preprocessorName}
+		// providerModelKey (judge.go), not the bare id: two provider entries can share
+		// an id with different Label values (e.g. a reasoning-on/off pair), and every
+		// downstream grouping here (buildExtractAggregate, the HTML viewer) keys purely
+		// off this Model string — an unlabeled key would silently merge them.
+		res = extractRunResult{CaseID: c.ID, Model: providerModelKey(orModelID(m.ID), m.Label), Prompt: p.Ref, Preprocessor: preprocessorName}
 		raw, reasoning, usage, err := client.describeImage(ctx, m, p.Content, imgData, mimetype)
 		if err != nil {
 			res.Error = err.Error()

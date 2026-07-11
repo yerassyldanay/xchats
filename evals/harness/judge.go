@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"xchats-evals-harness/internal/evaltext"
@@ -109,6 +110,13 @@ type Verdict struct {
 	FinishReason  string `json:"finish_reason,omitempty"`
 	Truncated     bool   `json:"truncated"`
 	ReasoningLeak bool   `json:"reasoning_leak"`
+	// Reasoning mirrors PromptfooRow.Response.Reasoning verbatim, IF promptfoo ever
+	// populates it — kept as its own field (never merged into RawOutput or any
+	// customer-facing text) so a captured value isn't silently dropped once something
+	// downstream (viewmodel.go) starts reading it. Empty for every verdict today, since
+	// that upstream field isn't confirmed populated by promptfoo (see its own doc
+	// comment on PromptfooRow.Response.Reasoning).
+	Reasoning string `json:"reasoning,omitempty"`
 
 	// ContractPass: did the pipeline behave safely regardless of what the model said
 	// (parses, right shape, every token resolves, no leftover brace, response not
@@ -194,6 +202,30 @@ type JudgedRun struct {
 	Verdicts []Verdict `json:"verdicts"`
 }
 
+// loadJudgedRuns globs and reads every *.judged.json in runDir, in sorted order — the
+// ONE place this glob+sort+read sequence happens, shared by report.go's reportRun and
+// blind.go's cmdBlindExport (which previously each re-implemented it, and a third call
+// inside writeRoutingAccuracyReport re-read the same files cmdBlindExport had just
+// loaded moments earlier — collecting runs once here removes that redundant I/O too).
+// An empty result is NOT itself an error here — callers report that with their own
+// wording, since "did you run judge first?" (report.go) and "did you run judge/run
+// first?" (blind.go) are both accurate but different framings for their own commands.
+func loadJudgedRuns(runDir string) (runs []JudgedRun, files []string, err error) {
+	files, err = filepath.Glob(filepath.Join(runDir, "*.judged.json"))
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Strings(files)
+	for _, f := range files {
+		var jr JudgedRun
+		if err := readJSON(f, &jr); err != nil {
+			return nil, nil, fmt.Errorf("read %s: %w", f, err)
+		}
+		runs = append(runs, jr)
+	}
+	return runs, files, nil
+}
+
 var (
 	tokenSpanRE = regexp.MustCompile(`\{\{[^}]*\}\}`)
 	// digitRunRE matches ANY digit run — a model inventing even a single-digit fact (e.g.
@@ -221,11 +253,28 @@ const kazakhOnlyLetters = "әғқңөұүһӘҒҚҢӨҰҮҺ"
 // downstream (report.go's byModel, viewmodel.go), corrupting exactly the side-by-side
 // comparison a Label exists to enable. Label empty (every model before this existed)
 // returns id unchanged, so nothing about today's single-entry-per-model runs changes.
+//
+// Known, accepted assumption: this concatenates id/label with a human-readable
+// " [label]" separator, not an escaped/length-prefixed encoding, so a contrived id or
+// label containing that exact " [...]" pattern could theoretically collide with a
+// different entry's key. Deliberately not hardened against this: OpenRouter model IDs
+// are a controlled slash/hyphen/colon vocabulary that never contains literal brackets,
+// and Verdict.Model is displayed verbatim in every report/viewer — an unambiguous but
+// unreadable encoding (e.g. length-prefixed) would defeat that display purpose to guard
+// against an id shape that doesn't occur in practice.
 func providerModelKey(id, label string) string {
 	if label == "" {
 		return id
 	}
 	return id + " [" + label + "]"
+}
+
+// truncationNote is the one wording for "this response was truncated" — shared by
+// judgeOne's two call sites (the early parse-failure return, and the later fallback for
+// a response that parsed despite being cut short) so the fact reads identically in
+// SUMMARY.md/CONTRACT.md regardless of which path produced it.
+func truncationNote(finishReason string) string {
+	return fmt.Sprintf("response was truncated (finish_reason=%s)", finishReason)
 }
 
 // isTruncatedFinish normalizes a promptfoo/OpenAI-style finish_reason into "was this
@@ -362,6 +411,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		Tokens:       row.TokenUsage.Total,
 		FinishReason: row.Response.FinishReason,
 		Truncated:    isTruncatedFinish(row.Response.FinishReason),
+		Reasoning:    row.Response.Reasoning,
 	}
 
 	obj, ok := parseModelJSON(row.Response.Output)
@@ -369,7 +419,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	if !ok {
 		v.Reason = "could not parse JSON output"
 		if v.Truncated {
-			v.Reason += fmt.Sprintf(" (response was truncated, finish_reason=%s)", v.FinishReason)
+			v.Reason += " (" + truncationNote(v.FinishReason) + ")"
 		}
 		return v
 	}
@@ -426,6 +476,16 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	v.Blocked = len(v.UnknownTokens) > 0
 	if v.Blocked {
 		v.Reason = "unknown token(s), draft would be BLOCKED: " + strings.Join(v.UnknownTokens, ", ")
+		// Blocked's reason unconditionally overwrites whatever ReasoningLeak set above
+		// (matching this function's existing priority order — ContractFields/Blocked
+		// both always win, LeftoverBraces/Truncated only fill an empty Reason) — append
+		// rather than losing the leak fact outright, since a review caught that a
+		// verdict which is BOTH blocked AND leaking would otherwise report only the
+		// block, silently dropping the (arguably more serious) leak from every reader
+		// of v.Reason (e.g. SUMMARY.md's "Failures" section prints it verbatim).
+		if v.ReasoningLeak {
+			v.Reason += "; also leaked reasoning/thinking content into reply_text"
+		}
 	} else if !v.ReasoningLeak {
 		// InjectedText is documented and displayed everywhere (CONTRACT.md, the HTML
 		// viewer) as "the actual customer-facing text" — a leaking reply must never
@@ -445,7 +505,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		}
 	}
 	if v.Truncated && v.Reason == "" {
-		v.Reason = fmt.Sprintf("response truncated before completion (finish_reason=%s)", v.FinishReason)
+		v.Reason = truncationNote(v.FinishReason)
 	}
 	v.ContractPass = v.ParseOK && v.ContractFields && !v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak
 

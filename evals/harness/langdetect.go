@@ -38,8 +38,25 @@ const minRussianClauseRunes = 4
 // a razor-thin 5) since a generous threshold is low-risk — it only ever changes the
 // outcome when history's most recent client turn gives an unambiguous verdict, and with
 // no history (the common case: greetings open a conversation) the result is unchanged.
-// Calibrated against worked examples only, same caveat as minRussianClauseRunes: needs
-// native-speaker review before a billed comparison, not proof of correctness.
+//
+// KNOWN, ACCEPTED COST (raised independently by several reviewers — worth being explicit
+// about, not just implicit in the reasoning above): this threshold does not distinguish
+// "ambiguous short word" from "unambiguous but short Russian word." A single, ordinary
+// Russian reply like "Скажите." (7 letters — minRussianClauseRunes's OWN doc comment
+// above calls this one out as unambiguous on a Cyrillic-letter-count basis), "Привет."
+// (6), or "Спасибо." (7) falls at or under this threshold exactly like "Бар ма" (5) or
+// "Рахмет" (6) does, so it CAN be overridden by a disagreeing prior Kazakh customer turn
+// even though a human would never read it as anything but confidently Russian. There is
+// no single letter-count threshold that fixes this: "Привет"(6) and "Рахмет"(6) have the
+// identical length despite one being unambiguous and the other genuinely ambiguous, so
+// no number here can separate them by length alone. Accepted deliberately (see the
+// "low-risk" reasoning above — the failure mode requires BOTH a short reply AND
+// disagreeing prior history, and even then falls back to the SAME "ru" default a
+// message-only classifier would have produced whenever history offers no verdict) rather
+// than chased with a narrower threshold that would just as certainly miss "Бар ма" or
+// "Рахмет" instead. Calibrated against worked examples only, same caveat as
+// minRussianClauseRunes: needs native-speaker review before a billed comparison, not
+// proof of correctness.
 const shortMessageCyrillicThreshold = 8
 
 // scanClauses is detectLang's core per-clause read, factored out so it can be applied

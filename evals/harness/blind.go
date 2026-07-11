@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -40,23 +41,17 @@ func cmdBlindExport(args []string) error {
 		}
 	}
 
-	judgedFiles, err := filepath.Glob(filepath.Join(*runDir, "*.judged.json"))
+	runs, _, err := loadJudgedRuns(*runDir)
 	if err != nil {
 		return err
 	}
-	if len(judgedFiles) == 0 {
+	if len(runs) == 0 {
 		return fmt.Errorf("blind-export: no *.judged.json in %s (did you run judge/run first?)", *runDir)
 	}
-	sort.Strings(judgedFiles)
 
-	var entries []BlindMappingEntry
-	var rows []BlindReviewRow
+	var candidates []blindCandidate
 	excluded := 0
-	for _, f := range judgedFiles {
-		var jr JudgedRun
-		if err := readJSON(f, &jr); err != nil {
-			return fmt.Errorf("read %s: %w", f, err)
-		}
+	for _, jr := range runs {
 		for _, v := range jr.Verdicts {
 			if !v.ContractPass {
 				excluded++ // nothing here is a meaningful language-quality judgment
@@ -70,13 +65,13 @@ func cmdBlindExport(args []string) error {
 				// worth failing loudly over rather than exporting a broken row.
 				return fmt.Errorf("blind-export: %s test %s: ContractPass=true but could not re-extract reply_language: %w", jr.Scenario, v.TestID, derr)
 			}
-			entries = append(entries, BlindMappingEntry{
+			candidates = append(candidates, blindCandidate{
+				Message: v.Message, ReplyText: v.InjectedText,
 				Scenario: jr.Scenario, TestID: v.TestID, Model: v.Model, DeclaredReplyLanguage: declared,
 			})
-			rows = append(rows, BlindReviewRow{Message: v.Message, ReplyText: v.InjectedText})
 		}
 	}
-	if len(rows) == 0 {
+	if len(candidates) == 0 {
 		return fmt.Errorf("blind-export: no ContractPass verdicts in %s to review (%d excluded)", *runDir, excluded)
 	}
 
@@ -85,18 +80,19 @@ func cmdBlindExport(args []string) error {
 		seedVal = time.Now().UnixNano()
 	}
 	rnd := rand.New(rand.NewSource(seedVal))
-	rnd.Shuffle(len(rows), func(i, j int) {
-		rows[i], rows[j] = rows[j], rows[i]
-		entries[i], entries[j] = entries[j], entries[i]
+	rnd.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
 	})
 
-	idWidth := len(fmt.Sprintf("%d", len(rows)))
+	idWidth := len(fmt.Sprintf("%d", len(candidates)))
+	rows := make([]BlindReviewRow, len(candidates))
 	mapping := BlindMappingFile{RunDir: *runDir, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Excluded: excluded}
-	for i := range rows {
+	for i, c := range candidates {
 		id := fmt.Sprintf("R%0*d", idWidth, i+1)
-		rows[i].OpaqueID = id
-		entries[i].OpaqueID = id
-		mapping.Entries = append(mapping.Entries, entries[i])
+		rows[i] = BlindReviewRow{OpaqueID: id, Message: c.Message, ReplyText: c.ReplyText}
+		mapping.Entries = append(mapping.Entries, BlindMappingEntry{
+			OpaqueID: id, Scenario: c.Scenario, TestID: c.TestID, Model: c.Model, DeclaredReplyLanguage: c.DeclaredReplyLanguage,
+		})
 	}
 	mapping.ReviewSHA256 = reviewContentHash(rows)
 
@@ -112,7 +108,7 @@ func cmdBlindExport(args []string) error {
 		return err
 	}
 	routingPath := filepath.Join(*outDir, "ROUTING_ACCURACY.md")
-	if err := writeRoutingAccuracyReport(routingPath, judgedFiles, *runDir); err != nil {
+	if err := writeRoutingAccuracyReport(routingPath, runs, *runDir); err != nil {
 		return err
 	}
 
@@ -144,17 +140,24 @@ func declaredReplyLanguage(raw string) (string, error) {
 // Label, which is expected to change between export and report. See
 // BlindMappingFile.ReviewSHA256's doc comment for why this, not opaque-id-set membership
 // alone, is the real "these two files belong together" guarantee.
+//
+// Serializes via encoding/json rather than hand-delimited bytes: a customer message or
+// model reply can in principle contain ANY byte, including a literal NUL (valid JSON
+// input can encode one, and json.Unmarshal decodes it faithfully) -- so a raw separator
+// byte (this used to join fields with plain NUL and record-separator bytes) is not
+// provably unique. Two DIFFERENT row sets could then serialize to the same delimited
+// byte string and hash identically, silently defeating the one integrity check this
+// mapping file exists to provide. JSON string encoding escapes every byte unambiguously,
+// so that can't happen here.
 func reviewContentHash(rows []BlindReviewRow) string {
-	var b strings.Builder
-	for _, r := range rows {
-		b.WriteString(r.OpaqueID)
-		b.WriteByte(0)
-		b.WriteString(r.Message)
-		b.WriteByte(0)
-		b.WriteString(r.ReplyText)
-		b.WriteByte(0x1e) // record separator
+	type hashedRow struct{ ID, Message, Reply string }
+	items := make([]hashedRow, len(rows))
+	for i, r := range rows {
+		items[i] = hashedRow{ID: r.OpaqueID, Message: r.Message, Reply: r.ReplyText}
 	}
-	return provenance.SHA256Bytes([]byte(b.String()))
+	// Marshaling []hashedRow (plain strings only, no cycles) cannot fail.
+	b, _ := json.Marshal(items)
+	return provenance.SHA256Bytes(b)
 }
 
 func writeBlindReviewCSV(path string, rows []BlindReviewRow) error {
@@ -175,13 +178,22 @@ func writeBlindReviewCSV(path string, rows []BlindReviewRow) error {
 	return provenance.AtomicWriteFile(path, buf.Bytes(), 0o644)
 }
 
+// utf8BOM is the 3-byte UTF-8 byte-order mark some tools prepend when saving text.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 func readBlindReviewCSV(path string) ([]BlindReviewRow, error) {
-	f, err := os.Open(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	records, err := csv.NewReader(f).ReadAll()
+	// Strip a leading BOM before parsing — a real, expected artifact of this exact
+	// workflow: a non-technical reviewer editing Cyrillic text in review.csv and saving
+	// from Excel's "CSV UTF-8 (Comma delimited)" option, which prepends one. Without
+	// this, the header comparison below fails on a BOM-prefixed "opaque_id" != "opaque_id" with a
+	// confusing "has the file been hand-edited" error over a BOM the reviewer never
+	// touched. encoding/csv does not strip this on its own.
+	b = bytes.TrimPrefix(b, utf8BOM)
+	records, err := csv.NewReader(bytes.NewReader(b)).ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -204,25 +216,24 @@ func readBlindReviewCSV(path string) ([]BlindReviewRow, error) {
 	return rows, nil
 }
 
-// writeRoutingAccuracyReport computes and writes routing accuracy for every scenario
-// represented in judgedFiles — a pure function of each scenario's resolved test set
-// (read from this run's OWN snapshot, matching judge.go's snapshot-over-live preference,
-// so re-generating this report later still grades against what the run actually saw),
-// never of any model output. Runs from before provenance snapshotting existed (no
-// runs/<id>/snapshots/<scenario>/) report as unavailable for that scenario rather than
-// silently falling back to a live scenarios/*/generated/ that may have since changed.
-func writeRoutingAccuracyReport(path string, judgedFiles []string, runDir string) error {
+// writeRoutingAccuracyReport computes and writes routing accuracy for every scenario in
+// runs — a pure function of each scenario's resolved test set (read from this run's OWN
+// snapshot, matching judge.go's snapshot-over-live preference, so re-generating this
+// report later still grades against what the run actually saw), never of any model
+// output. Takes the already-loaded runs (not file paths) so a caller that already read
+// them via loadJudgedRuns — cmdBlindExport does — never re-reads the same files purely
+// to recover each one's Scenario field. Runs from before provenance snapshotting
+// existed (no runs/<id>/snapshots/<scenario>/) report as unavailable for that scenario
+// rather than silently falling back to a live scenarios/*/generated/ that may have
+// since changed.
+func writeRoutingAccuracyReport(path string, runs []JudgedRun, runDir string) error {
 	var b strings.Builder
 	b.WriteString("# Routing accuracy\n\n")
 	b.WriteString("detectLang(message, history) vs. each test's own hand-authored `language` field — computed directly from the resolved test set, independent of any model output or human review (see blind_types.go's computeRoutingAccuracy). This is its OWN metric: never combined with declared reply_language or the blinded prose-language label (BLIND_REPORT.md, written by blind-report) into one pass/fail.\n\n")
 
 	var scenarios []string
 	seen := map[string]bool{}
-	for _, f := range judgedFiles {
-		var jr JudgedRun
-		if err := readJSON(f, &jr); err != nil {
-			return fmt.Errorf("read %s: %w", f, err)
-		}
+	for _, jr := range runs {
 		if !seen[jr.Scenario] {
 			seen[jr.Scenario] = true
 			scenarios = append(scenarios, jr.Scenario)
@@ -359,13 +370,13 @@ func buildBlindReport(rows []BlindReviewRow, byID map[string]BlindMappingEntry) 
 	fmt.Fprintf(&b, "## Review completeness\n\n%d of %d rows labeled (%.0f%%)\n\n", labeled, len(rows), pct(labeled, len(rows)))
 
 	b.WriteString("## Declared reply_language (model's own field)\n\n")
-	for _, lang := range sortedCountKeys(declaredCounts) {
+	for _, lang := range sortedMapKeys(declaredCounts) {
 		fmt.Fprintf(&b, "- %s: %d\n", lang, declaredCounts[lang])
 	}
 	b.WriteString("\n")
 
 	b.WriteString("## Blinded prose-language label (human, blind to model/variant)\n\n")
-	for _, lang := range sortedCountKeys(labelCounts) {
+	for _, lang := range sortedMapKeys(labelCounts) {
 		fmt.Fprintf(&b, "- %s: %d\n", lang, labelCounts[lang])
 	}
 	b.WriteString("\n")
@@ -379,13 +390,4 @@ func buildBlindReport(rows []BlindReviewRow, byID map[string]BlindMappingEntry) 
 		}
 	}
 	return b.String()
-}
-
-func sortedCountKeys(m map[string]int) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

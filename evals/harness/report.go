@@ -26,22 +26,12 @@ func cmdReport(args []string) error {
 }
 
 func reportRun(runDir, modelsPath string) error {
-	judgedFiles, err := filepath.Glob(filepath.Join(runDir, "*.judged.json"))
+	runs, _, err := loadJudgedRuns(runDir)
 	if err != nil {
 		return err
 	}
-	if len(judgedFiles) == 0 {
+	if len(runs) == 0 {
 		return fmt.Errorf("no *.judged.json files in %s (did you run judge first?)", runDir)
-	}
-	sort.Strings(judgedFiles)
-
-	var runs []JudgedRun
-	for _, f := range judgedFiles {
-		var jr JudgedRun
-		if err := readJSON(f, &jr); err != nil {
-			return fmt.Errorf("read %s: %w", f, err)
-		}
-		runs = append(runs, jr)
 	}
 
 	// Prefer this run's own snapshotted models.yaml (pins the pricing disclaimer to

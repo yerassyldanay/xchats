@@ -7,6 +7,63 @@ import (
 	"testing"
 )
 
+// TestReviewContentHash_NoCollisionAcrossFieldBoundaries is the regression test for a
+// hash-collision review caught: a raw NUL byte inside a Message can shift where a
+// naive delimiter-joined encoding thinks the Message/ReplyText boundary falls. Row set
+// A's Message ends where row set B's Message stops one field early — under the old
+// scheme (join with a literal NUL, "id\x00msg\x00reply") these two row sets produced the
+// IDENTICAL byte string, hence the identical hash, even though they're genuinely
+// different content. The current JSON-based encoding must tell them apart.
+func TestReviewContentHash_NoCollisionAcrossFieldBoundaries(t *testing.T) {
+	a := []BlindReviewRow{{OpaqueID: "R1", Message: "foo\x00bar", ReplyText: "baz"}}
+	b := []BlindReviewRow{{OpaqueID: "R1", Message: "foo", ReplyText: "bar\x00baz"}}
+
+	hashA := reviewContentHash(a)
+	hashB := reviewContentHash(b)
+	if hashA == hashB {
+		t.Fatalf("row sets with a NUL byte straddling the Message/ReplyText boundary hashed identically (%s) — this is the exact collision a raw-byte-separator encoding was vulnerable to", hashA)
+	}
+}
+
+// TestReviewContentHash_DeterministicAndOrderSensitive pins the two properties
+// blind-report's mismatch check depends on: same input always hashes the same, and
+// reordering rows (a plausible hand-edit) changes the hash rather than being ignored.
+func TestReviewContentHash_DeterministicAndOrderSensitive(t *testing.T) {
+	rows := []BlindReviewRow{
+		{OpaqueID: "R1", Message: "Сколько стоит кофемашина?", ReplyText: "129 900 ₸."},
+		{OpaqueID: "R2", Message: "Кофемашина DeLonghi қанша тұрады?", ReplyText: "129 900 ₸."},
+	}
+	if reviewContentHash(rows) != reviewContentHash(rows) {
+		t.Fatal("want reviewContentHash to be deterministic for identical input")
+	}
+	reordered := []BlindReviewRow{rows[1], rows[0]}
+	if reviewContentHash(rows) == reviewContentHash(reordered) {
+		t.Fatal("want a reordered row set to hash differently")
+	}
+}
+
+// TestReadBlindReviewCSV_StripsLeadingBOM is the regression test for a real-world gotcha
+// review caught: Excel's "CSV UTF-8 (Comma delimited)" save option — a natural choice for
+// a reviewer editing Cyrillic text — prepends a UTF-8 byte-order mark, which
+// encoding/csv does not strip on its own. Without stripping it here, a review.csv saved
+// this way would fail the header check with a confusing "hand-edited beyond the label
+// column" error, even though the reviewer only touched the label column.
+func TestReadBlindReviewCSV_StripsLeadingBOM(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "review.csv")
+	content := append(append([]byte{}, utf8BOM...), []byte("opaque_id,message,reply_text,label\nR1,Сколько стоит кофемашина?,129 900 ₸.,ru\n")...)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := readBlindReviewCSV(path)
+	if err != nil {
+		t.Fatalf("readBlindReviewCSV should tolerate a leading BOM, got: %v", err)
+	}
+	if len(rows) != 1 || rows[0].OpaqueID != "R1" || rows[0].Label != "ru" {
+		t.Fatalf("want 1 row (R1, label=ru), got %+v", rows)
+	}
+}
+
 func TestComputeRoutingAccuracy(t *testing.T) {
 	tests := []TestCase{
 		{ID: "1", Message: "Кофемашина DeLonghi қанша тұрады?", Language: "kk"},

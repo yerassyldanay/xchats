@@ -76,6 +76,11 @@ type VOutput struct {
 	// reasoning leaking into an actual customer-facing field is judge.go's
 	// Verdict.ReasoningLeak / VScenarioDetails.ReasoningLeak, which scans reply_text).
 	RawHasReasoningMarkers bool `json:"raw_has_reasoning_markers,omitempty"`
+	// Reasoning is the model's separate reasoning/thinking content, captured
+	// independently of Raw (never concatenated into it) — surfaced here so a value
+	// that's actually captured (Verdict.Reasoning / extractRunResult.Reasoning) isn't
+	// silently invisible to every downstream report/viewer, same debug-only status as Raw.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // VCost mirrors the existing cost-basis discipline: EstimateUSD must never be read
@@ -210,6 +215,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 			Raw:                    v.RawOutput,
 			ParseOK:                v.ParseOK,
 			RawHasReasoningMarkers: evaltext.HasReasoningMarkers(v.RawOutput),
+			Reasoning:              v.Reasoning,
 		},
 		Scores:    scores,
 		Rollups:   rollups,
@@ -285,6 +291,7 @@ func extractExecutionFromResult(r extractRunResult) VExecution {
 			ParseError:             r.ParseError,
 			Error:                  r.Error,
 			RawHasReasoningMarkers: evaltext.HasReasoningMarkers(r.Raw),
+			Reasoning:              r.Reasoning,
 		},
 		Scores: scores,
 		Rollups: []VRollup{

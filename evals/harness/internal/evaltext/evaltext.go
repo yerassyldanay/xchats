@@ -87,6 +87,16 @@ var ReasoningMarkerRE = regexp.MustCompile(`(?i)</?think(ing)?>`)
 // both as a hard gate (judge.go's ReasoningLeak, extract_checks.go's analogous check,
 // scanning the model's customer-facing text fields) and as a visibility flag on raw,
 // unfiltered debug output (viewmodel.go's VOutput.RawHasReasoningMarkers).
+//
+// Known, accepted tradeoff: a regex match can't prove intent, only pattern presence —
+// legitimate customer-facing text that happens to contain a literal "<think>"-shaped
+// substring (vanishingly unlikely for a Kazakh/Russian shop-assistant reply, but not
+// impossible) would fail the contract exactly like a real leak. That's the deliberate,
+// fail-closed choice: wrongly flagging a rare, implausible pattern costs one re-run;
+// silently shipping a real reasoning leak into a customer-facing field is the failure
+// this check exists to prevent. Matches this codebase's existing fail-closed philosophy
+// elsewhere (judge.go: "every token the model used must resolve, or the real product
+// would block the whole draft").
 func HasReasoningMarkers(s string) bool {
 	return ReasoningMarkerRE.MatchString(s)
 }

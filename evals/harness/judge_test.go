@@ -417,6 +417,33 @@ func TestJudgeOne_ReasoningLeakInReplyTextFailsContractAndSuppressesInjectedText
 	}
 }
 
+// TestJudgeOne_ReasonMentionsBothBlockedAndReasoningLeak is the regression test for a
+// bug review caught: Blocked's reason-set unconditionally overwrites v.Reason (existing,
+// pre-diff behavior — it already did this to ContractFields' message), so a verdict that
+// is BOTH blocked (unknown token) AND leaking reasoning used to silently lose the leak
+// fact from the one human-readable Reason string, even though v.ReasoningLeak itself
+// stayed correctly true and ContractPass still correctly failed either way.
+func TestJudgeOne_ReasonMentionsBothBlockedAndReasoningLeak(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `{"reply_text":"<think>let me check the unknown fact</think>{{product.unknown.field}}","reply_language":"ru","attach_groups":[],"escalate":false}`
+
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if !v.Blocked {
+		t.Fatal("precondition failed: want Blocked=true (unresolvable token)")
+	}
+	if !v.ReasoningLeak {
+		t.Fatal("precondition failed: want ReasoningLeak=true")
+	}
+	if !strings.Contains(v.Reason, "BLOCKED") {
+		t.Errorf("want Reason to still mention the block, got %q", v.Reason)
+	}
+	if !strings.Contains(v.Reason, "reasoning") {
+		t.Errorf("want Reason to ALSO mention the reasoning leak, not just the block, got %q", v.Reason)
+	}
+}
+
 // TestApplyCostEstimate_CachedRowNeverBorrowsAcrossLabels is the regression test for the
 // collision the Label plumbing exists to prevent: a cached row for one labeled variant
 // (e.g. reasoning-off) must never borrow a fresh token split recorded under a DIFFERENT

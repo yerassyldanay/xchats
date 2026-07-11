@@ -156,8 +156,8 @@ func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
 			}
 		}
 	}
-	row.Models = sortedSetKeys(modelSet)
-	row.Prompts = sortedSetKeys(promptSet)
+	row.Models = sortedMapKeys(modelSet)
+	row.Prompts = sortedMapKeys(promptSet)
 
 	if row.Family == "" {
 		switch {
@@ -174,9 +174,12 @@ func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
 	return row, nil
 }
 
-func sortedSetKeys(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for k := range set {
+// sortedMapKeys returns a map's string keys, sorted — the value type is generic since
+// every caller so far only ever needs the keys (a set's bool, a tally's int); adding a
+// new value type never needs a new copy of this function.
+func sortedMapKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
 		out = append(out, k)
 	}
 	sort.Strings(out)
