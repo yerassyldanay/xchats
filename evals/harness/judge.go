@@ -400,6 +400,25 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	return nil
 }
 
+// appendReason accumulates fact onto v.Reason, joined with "; " when something is
+// already there — every contract-relevant fact judgeOne computes must show up in the
+// one human-readable Reason string, not just whichever fact happened to run first.
+// Before this existed, only the Blocked branch bothered to append onto a non-empty
+// Reason (with its own hand-rolled special case for ReasoningLeak specifically); every
+// other combination — e.g. ContractFields failing for a reason unrelated to reply_text
+// while reply_text ALSO contains a leaked <think> block — silently dropped the later
+// fact from Reason. SUMMARY.md's "Failures (verbatim)" section prints Reason verbatim
+// and nothing else, so a dropped fact there was genuinely invisible from that report
+// (CONTRACT.md and the HTML viewer are unaffected: both read v.ReasoningLeak/v.Truncated
+// directly as their own booleans, never through this string).
+func (v *Verdict) appendReason(fact string) {
+	if v.Reason == "" {
+		v.Reason = fact
+	} else {
+		v.Reason += "; " + fact
+	}
+}
+
 func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[string]string, validRef, validGroup map[string]bool) Verdict {
 	v := Verdict{
 		TestID:       tc.ID,
@@ -437,7 +456,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	_, hasMediaField := obj[mediaField].([]any)
 	v.ContractFields = hasReplyText && replyText != "" && hasLang && hasEscalate && hasMediaField
 	if !v.ContractFields {
-		v.Reason = fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array %s)", mediaField)
+		v.appendReason(fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array %s)", mediaField))
 	}
 
 	// Reasoning/thinking content must never leak into reply_text — the one field the
@@ -448,8 +467,8 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	// whether this call even requested reasoning (ReasoningConfig) — because a model can
 	// emit inline <think> tags on its own, independent of what was asked for.
 	v.ReasoningLeak = evaltext.HasReasoningMarkers(replyText)
-	if v.ReasoningLeak && v.Reason == "" {
-		v.Reason = "reasoning/thinking content leaked into reply_text"
+	if v.ReasoningLeak {
+		v.appendReason("reasoning/thinking content leaked into reply_text")
 	}
 
 	// Fail-closed: every token the model used must resolve, or the real product would
@@ -475,17 +494,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	}
 	v.Blocked = len(v.UnknownTokens) > 0
 	if v.Blocked {
-		v.Reason = "unknown token(s), draft would be BLOCKED: " + strings.Join(v.UnknownTokens, ", ")
-		// Blocked's reason unconditionally overwrites whatever ReasoningLeak set above
-		// (matching this function's existing priority order — ContractFields/Blocked
-		// both always win, LeftoverBraces/Truncated only fill an empty Reason) — append
-		// rather than losing the leak fact outright, since a review caught that a
-		// verdict which is BOTH blocked AND leaking would otherwise report only the
-		// block, silently dropping the (arguably more serious) leak from every reader
-		// of v.Reason (e.g. SUMMARY.md's "Failures" section prints it verbatim).
-		if v.ReasoningLeak {
-			v.Reason += "; also leaked reasoning/thinking content into reply_text"
-		}
+		v.appendReason("unknown token(s), draft would be BLOCKED: " + strings.Join(v.UnknownTokens, ", "))
 	} else if !v.ReasoningLeak {
 		// InjectedText is documented and displayed everywhere (CONTRACT.md, the HTML
 		// viewer) as "the actual customer-facing text" — a leaking reply must never
@@ -500,12 +509,10 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	// in the customer-facing text after injection can only have come from the model.
 	if strings.ContainsAny(injected, "{}") {
 		v.LeftoverBraces = true
-		if v.Reason == "" {
-			v.Reason = "leftover brace survived injection"
-		}
+		v.appendReason("leftover brace survived injection")
 	}
-	if v.Truncated && v.Reason == "" {
-		v.Reason = truncationNote(v.FinishReason)
+	if v.Truncated {
+		v.appendReason(truncationNote(v.FinishReason))
 	}
 	v.ContractPass = v.ParseOK && v.ContractFields && !v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak
 

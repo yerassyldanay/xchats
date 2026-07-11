@@ -494,3 +494,35 @@ func TestBuildContractReport_NeverEchoesReasoningLeakIntoInjectedTextLine(t *tes
 		t.Error("want the report to flag the reasoning leak explicitly")
 	}
 }
+
+// TestJudgeOne_ReasonAccumulatesAcrossEveryCombinationNotJustBlocked is the regression
+// test for the gap left after the Blocked+ReasoningLeak fix above: that fix only taught
+// the Blocked branch to append onto a non-empty Reason, so a ContractFields failure for
+// a reason UNRELATED to reply_text (e.g. escalate wrong-typed) occurring alongside a
+// reasoning leak in reply_text itself still silently dropped the leak from Reason —
+// invisible from SUMMARY.md's "Failures (verbatim)" section, which prints Reason and
+// nothing else (CONTRACT.md/the HTML viewer read v.ReasoningLeak directly as its own
+// boolean and were never affected by this gap). appendReason (judge.go) fixes this
+// generally — every fact-setting site now accumulates — not just for Blocked.
+func TestJudgeOne_ReasonAccumulatesAcrossEveryCombinationNotJustBlocked(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	// escalate is a STRING, not a bool -> ContractFields fails for a reason having
+	// nothing to do with reply_text, which is itself present, valid, AND leaking.
+	row.Response.Output = `{"reply_text":"<think>internal</think>ok","reply_language":"ru","attach_groups":[],"escalate":"false"}`
+
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if v.ContractFields {
+		t.Fatal("precondition failed: want ContractFields=false (escalate is a string, not bool)")
+	}
+	if !v.ReasoningLeak {
+		t.Fatal("precondition failed: want ReasoningLeak=true")
+	}
+	if !strings.Contains(v.Reason, "missing or wrong-typed contract field") {
+		t.Errorf("want Reason to still mention the contract-fields failure, got %q", v.Reason)
+	}
+	if !strings.Contains(v.Reason, "reasoning") {
+		t.Errorf("want Reason to ALSO mention the reasoning leak, not just the contract-fields failure, got %q", v.Reason)
+	}
+}
