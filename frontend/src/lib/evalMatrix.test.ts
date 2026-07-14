@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import type { RunSummary, VExecution } from '../types'
-import { buildComparisonMatrices, cellFor, costLabel, deriveLaunchStatus, groupRunsByLaunch, pct } from './evalMatrix'
+import {
+  buildComparisonMatrices,
+  cellFor,
+  costLabel,
+  deriveLaunchStatus,
+  filterLaunches,
+  formatDuration,
+  formatStartedAt,
+  groupRunsByLaunch,
+  launchListRow,
+  passBucket,
+  pct,
+  shortModelName,
+  type LaunchListRow,
+} from './evalMatrix'
 
 // scenarioExec is the fixture builder — every field a real VExecution carries,
 // defaulted to the "everything passed" shape so each test only overrides what it's
@@ -223,5 +237,129 @@ describe('groupRunsByLaunch', () => {
       summary({ run_id: 'b', launch_id: '2026-06-01_00-00-00-new' }),
     ])
     expect(groups.map((g) => g.launchID)).toEqual(['2026-06-01_00-00-00-new', '2026-01-01_00-00-00-old'])
+  })
+})
+
+describe('passBucket', () => {
+  it('buckets at the documented 80%/40% boundaries, inclusive on the low end of each band', () => {
+    expect(passBucket(8, 10)).toBe('green') // exactly 80%
+    expect(passBucket(79, 100)).toBe('amber') // just under 80%
+    expect(passBucket(4, 10)).toBe('amber') // exactly 40%
+    expect(passBucket(39, 100)).toBe('red') // just under 40%
+    expect(passBucket(0, 10)).toBe('red')
+  })
+  it('total=0 is its own bucket, never red — "nothing to report," not "failing"', () => {
+    expect(passBucket(0, 0)).toBe('none')
+  })
+})
+
+describe('shortModelName', () => {
+  it('keeps only the segment after the last "/"', () => {
+    expect(shortModelName('google/gemini-2.5-flash')).toBe('gemini-2.5-flash')
+    expect(shortModelName('demo/model-alpha')).toBe('model-alpha')
+  })
+  it('preserves a trailing " [label]" disambiguator (providerModelKey format)', () => {
+    expect(shortModelName('openrouter:google/gemini-2.5-flash [reasoning-on]')).toBe('gemini-2.5-flash [reasoning-on]')
+  })
+  it('a bare id with no "/" passes through unchanged', () => {
+    expect(shortModelName('gpt-4o')).toBe('gpt-4o')
+  })
+})
+
+describe('formatStartedAt', () => {
+  it('renders an RFC3339 UTC timestamp as the reference design\'s exact shape', () => {
+    expect(formatStartedAt('2026-07-14T15:53:00Z')).toBe('14 июля 2026, 15:53')
+  })
+  it('returns empty for missing or unparseable input, never a fabricated date', () => {
+    expect(formatStartedAt(undefined)).toBe('')
+    expect(formatStartedAt('')).toBe('')
+    expect(formatStartedAt('not-a-date')).toBe('')
+  })
+})
+
+describe('formatDuration', () => {
+  it('matches the reference design\'s worked examples exactly', () => {
+    expect(formatDuration(40 * 1000)).toBe('40с')
+    expect(formatDuration((18 * 60 + 42) * 1000)).toBe('18м 42с')
+    expect(formatDuration((24 * 60 + 18) * 1000)).toBe('24м 18с')
+  })
+  it('drops seconds once the span reaches an hour', () => {
+    expect(formatDuration((60 * 60 + 5 * 60) * 1000)).toBe('1ч 05м')
+  })
+})
+
+function demoRun(over: Partial<RunSummary> & { run_id: string }): RunSummary {
+  return summary(over)
+}
+
+describe('launchListRow', () => {
+  it('sums pass/total across every member run — the same math the original passSummary used', () => {
+    const row = launchListRow({
+      launchID: 'L1',
+      runs: [
+        demoRun({ run_id: 'chat', family: 'scenario', models: ['m1'], scenario_total: 12, scenario_behavior_pass: 11 }),
+        demoRun({ run_id: 'extract', family: 'extract', models: ['m2'], extract_total: 4, extract_checks_pass: 3 }),
+      ],
+    })
+    expect(row.pass).toBe(14)
+    expect(row.total).toBe(16)
+    expect(row.bucket).toBe('green') // 14/16 = 87.5%
+    expect(row.families.sort()).toEqual(['extract', 'scenario'])
+    expect(row.models.sort()).toEqual(['m1', 'm2'])
+    expect(row.shortId).toBe('L1') // no "-" in this fixture id, falls back to the whole id
+  })
+
+  it('shortId is the last hyphen-delimited segment of a real timestamp id', () => {
+    const row = launchListRow({ launchID: '2026-07-14_15-53-39-2cbb', runs: [demoRun({ run_id: 'r' })] })
+    expect(row.shortId).toBe('2cbb')
+  })
+
+  it('duration spans the EARLIEST start to the LATEST finish across members — concurrent, not summed', () => {
+    const row = launchListRow({
+      launchID: 'L1',
+      runs: [
+        demoRun({ run_id: 'chat', started_at: '2026-07-14T10:00:00Z', finished_at: '2026-07-14T10:05:00Z' }),
+        demoRun({ run_id: 'extract', started_at: '2026-07-14T10:01:00Z', finished_at: '2026-07-14T10:07:00Z' }),
+      ],
+    })
+    // earliest start 10:00:00, latest finish 10:07:00 -> 7 minutes, NOT 5+6=11.
+    expect(row.durationMs).toBe(7 * 60 * 1000)
+  })
+
+  it('duration is null (never a partial guess) when any member is missing a timestamp', () => {
+    const row = launchListRow({
+      launchID: 'L1',
+      runs: [
+        demoRun({ run_id: 'chat', started_at: '2026-07-14T10:00:00Z', finished_at: '2026-07-14T10:05:00Z' }),
+        demoRun({ run_id: 'extract', started_at: '2026-07-14T10:01:00Z' }), // still running — no finished_at
+      ],
+    })
+    expect(row.durationMs).toBeNull()
+  })
+})
+
+describe('filterLaunches', () => {
+  const rows: LaunchListRow[] = [
+    { id: '2026-07-14_a', shortId: 'a', startedAt: '', families: ['scenario'], models: ['m1'], pass: 8, total: 10, bucket: 'green', durationMs: null },
+    { id: '2026-07-10_b', shortId: 'b', startedAt: '', families: ['extract'], models: ['m2'], pass: 1, total: 20, bucket: 'red', durationMs: null },
+    { id: '2026-07-10_c', shortId: 'c', startedAt: '', families: ['scenario', 'extract'], models: ['m1', 'm2'], pass: 4, total: 20, bucket: 'amber', durationMs: null },
+  ]
+  it('narrows by launch-id substring', () => {
+    expect(filterLaunches(rows, { query: '07-14' }).map((r) => r.id)).toEqual(['2026-07-14_a'])
+  })
+  it('narrows by family membership', () => {
+    expect(filterLaunches(rows, { family: 'extract' }).map((r) => r.id).sort()).toEqual(['2026-07-10_b', '2026-07-10_c'])
+  })
+  it('narrows by model membership', () => {
+    expect(filterLaunches(rows, { model: 'm1' }).map((r) => r.id).sort()).toEqual(['2026-07-10_c', '2026-07-14_a'])
+  })
+  it('narrows by pass-rate bucket', () => {
+    expect(filterLaunches(rows, { bucket: 'red' }).map((r) => r.id)).toEqual(['2026-07-10_b'])
+  })
+  it('combines dimensions with AND', () => {
+    expect(filterLaunches(rows, { family: 'scenario', bucket: 'amber' }).map((r) => r.id)).toEqual(['2026-07-10_c'])
+  })
+  it('an empty filter returns everything unchanged', () => {
+    expect(filterLaunches(rows, {})).toHaveLength(3)
   })
 })

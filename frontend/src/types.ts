@@ -346,6 +346,7 @@ export interface RunSummary {
   models: string[]
   prompts: string[]
   started_at?: string
+  finished_at?: string // empty = interrupted/still running, never guessed
   scenario_total: number
   scenario_behavior_pass: number
   scenario_contract_pass: number

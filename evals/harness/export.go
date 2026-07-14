@@ -124,6 +124,7 @@ type RunSummary struct {
 	Models      []string `json:"models"`
 	Prompts     []string `json:"prompts"`
 	StartedAt   string   `json:"started_at,omitempty"`
+	FinishedAt  string   `json:"finished_at,omitempty"` // empty = interrupted/still running, never guessed
 
 	ScenarioTotal        int `json:"scenario_total"`
 	ScenarioBehaviorPass int `json:"scenario_behavior_pass"`
@@ -155,6 +156,7 @@ func runSummaryFromIndexRow(row runsIndexRow) RunSummary {
 		Models:               row.Models,
 		Prompts:              row.Prompts,
 		StartedAt:            row.StartedAt,
+		FinishedAt:           row.FinishedAt,
 		ScenarioTotal:        row.ScenarioTotal,
 		ScenarioBehaviorPass: row.ScenarioBehaviorPass,
 		ScenarioContractPass: row.ScenarioContractPass,

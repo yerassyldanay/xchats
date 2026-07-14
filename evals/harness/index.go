@@ -43,6 +43,11 @@ type runsIndexRow struct {
 	Models      []string
 	Prompts     []string // "name@vN", extraction only
 	StartedAt   string
+	// FinishedAt is empty for an interrupted/still-running run (manifest.FinishedAt
+	// is only stamped by Manifest.Finish(), called after the run's own work
+	// completes) — never guessed from StartedAt, so a duration computed from the
+	// pair can honestly report "unknown" instead of zero.
+	FinishedAt string
 
 	ScenarioTotal        int
 	ScenarioBehaviorPass int
@@ -131,6 +136,7 @@ func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
 		row.HasManifest = true
 		row.Family = m.Family
 		row.StartedAt = m.StartedAt
+		row.FinishedAt = m.FinishedAt
 		row.LaunchID = m.LaunchID
 	}
 	if row.LaunchID == "" {

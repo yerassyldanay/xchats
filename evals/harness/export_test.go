@@ -81,7 +81,8 @@ func TestWriteExecutionsJSON_NoManifestLeavesLaunchIDEmpty(t *testing.T) {
 func TestRunSummaryFromIndexRow_IsAPureFieldCopy(t *testing.T) {
 	row := runsIndexRow{
 		RunID: "r1", LaunchID: "l1", HasManifest: true, Family: "scenario",
-		Models: []string{"m1", "m2"}, Prompts: []string{"p@v1"}, StartedAt: "2026-01-01T00:00:00Z",
+		Models: []string{"m1", "m2"}, Prompts: []string{"p@v1"},
+		StartedAt: "2026-01-01T00:00:00Z", FinishedAt: "2026-01-01T00:24:18Z",
 		ScenarioTotal: 10, ScenarioBehaviorPass: 8, ScenarioContractPass: 10,
 		IndexHref: "r1/index.html",
 	}
@@ -92,8 +93,17 @@ func TestRunSummaryFromIndexRow_IsAPureFieldCopy(t *testing.T) {
 	if s.ScenarioBehaviorPass != 8 || s.ScenarioTotal != 10 {
 		t.Errorf("want counts copied verbatim (not recomputed), got %+v", s)
 	}
+	if s.FinishedAt != "2026-01-01T00:24:18Z" {
+		t.Errorf("want FinishedAt copied verbatim, got %q", s.FinishedAt)
+	}
 	if !s.HasIndexHTML {
 		t.Error("want HasIndexHTML=true when IndexHref is non-empty")
+	}
+
+	// An interrupted/still-running run has no FinishedAt — must stay empty, never
+	// guessed from StartedAt or "now".
+	if got := runSummaryFromIndexRow(runsIndexRow{RunID: "r3", StartedAt: "2026-01-01T00:00:00Z"}).FinishedAt; got != "" {
+		t.Errorf("want empty FinishedAt for an unfinished run, got %q", got)
 	}
 
 	rowNoIndex := runsIndexRow{RunID: "r2"}

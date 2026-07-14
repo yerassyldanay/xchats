@@ -235,3 +235,158 @@ export function groupRunsByLaunch(runs: RunSummary[]): LaunchGroup[] {
   groups.sort((a, b) => b.launchID.localeCompare(a.launchID))
   return groups
 }
+
+// --- /evals dashboard row logic — plan/ui/ui_20_evals_history.md's doctrine: this
+// page is a directory ("find the launch, see what was tested, see if it passed, open
+// it"), not a report. No cross-launch aggregate lives here on purpose; everything
+// below is per-row.
+
+export type PassBucket = 'green' | 'amber' | 'red' | 'none'
+
+// Thresholds named, not inlined, so the boundary is a single place to read/change —
+// and to test the >= vs > distinction precisely (0.80 must read green, 0.79 amber).
+export const PASS_BUCKET_GREEN_MIN = 0.8
+export const PASS_BUCKET_AMBER_MIN = 0.4
+
+// passBucket buckets a pass rate into the row's status-dot/progress-bar color.
+// total=0 is its OWN bucket ('none', rendered neutral gray) — a launch with zero
+// gradeable results is not "failing," it's "nothing to report," same "not_run vs
+// fail" discipline as evals/harness/viewmodel.go's ScoreStatus.
+export function passBucket(pass: number, total: number): PassBucket {
+  if (total <= 0) return 'none'
+  const rate = pass / total
+  if (rate >= PASS_BUCKET_GREEN_MIN) return 'green'
+  if (rate >= PASS_BUCKET_AMBER_MIN) return 'amber'
+  return 'red'
+}
+
+// shortModelName strips everything up to the last "/" (provider prefix), keeping a
+// trailing " [label]" disambiguator (providerModelKey's format, judge.go) intact —
+// "openrouter:google/gemini-2.5-flash [reasoning-on]" -> "gemini-2.5-flash
+// [reasoning-on]". The full id is still the right thing for a title/tooltip; this is
+// display-only.
+export function shortModelName(id: string): string {
+  const m = id.match(/^(.*?)(\s\[.+\])$/)
+  const base = m ? m[1] : id
+  const suffix = m ? m[2] : ''
+  const segments = base.split('/')
+  return segments[segments.length - 1] + suffix
+}
+
+const RU_MONTHS_GENITIVE = [
+  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+]
+
+// formatStartedAt renders an RFC3339 UTC timestamp (every timestamp this app reads
+// comes from evals/harness's time.Now().UTC() calls) as "14 июля 2026, 15:53" —
+// hand-built rather than Intl.DateTimeFormat so the exact shape is deterministic
+// across environments/locale-data versions, not just "close enough."
+export function formatStartedAt(iso: string | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const day = d.getUTCDate()
+  const month = RU_MONTHS_GENITIVE[d.getUTCMonth()]
+  const year = d.getUTCFullYear()
+  const hh = String(d.getUTCHours()).padStart(2, '0')
+  const mm = String(d.getUTCMinutes()).padStart(2, '0')
+  return `${day} ${month} ${year}, ${hh}:${mm}`
+}
+
+// formatDuration renders a millisecond span as "38с" / "18м 42с" / "1ч 05м" — seconds
+// dropped once the span reaches an hour, matching the reference design's examples.
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) return `${hours}ч ${String(minutes).padStart(2, '0')}м`
+  if (minutes > 0) return `${minutes}м ${String(seconds).padStart(2, '0')}с`
+  return `${seconds}с`
+}
+
+export interface LaunchListRow {
+  id: string
+  shortId: string
+  startedAt: string // '' if no member run reports one
+  families: string[] // raw family keys ("scenario"/"extract"/"mixed"/"unknown") — components own the display label
+  models: string[]
+  pass: number
+  total: number
+  bucket: PassBucket
+  durationMs: number | null // null when any member run is missing started_at/finished_at — never a partial guess
+}
+
+// launchListRow computes the ONE row plan/ui/ui_20_evals_history.md's table wants —
+// pass/total sums the SAME way EvalRuns.vue's original passSummary did (never a
+// second, different aggregation for the same fact). Duration is the outer span
+// across every member run (earliest start to latest finish), not a sum of member
+// durations — a launch's two members ran concurrently, not back to back.
+export function launchListRow(group: LaunchGroup): LaunchListRow {
+  const shortId = group.launchID.split('-').pop() || group.launchID
+  let pass = 0
+  let total = 0
+  const families = new Set<string>()
+  const models = new Set<string>()
+  let minStarted: number | null = null
+  let maxFinished: number | null = null
+  let earliestStartedAt = ''
+  let missingTimestamp = false
+
+  for (const r of group.runs) {
+    pass += r.scenario_behavior_pass + r.extract_checks_pass
+    total += r.scenario_total + r.extract_total
+    families.add(r.family)
+    for (const m of r.models) models.add(m)
+
+    if (r.started_at) {
+      const t = Date.parse(r.started_at)
+      if (!isNaN(t) && (minStarted === null || t < minStarted)) {
+        minStarted = t
+        earliestStartedAt = r.started_at
+      }
+    } else {
+      missingTimestamp = true
+    }
+    if (r.finished_at) {
+      const t = Date.parse(r.finished_at)
+      if (!isNaN(t) && (maxFinished === null || t > maxFinished)) maxFinished = t
+    } else {
+      missingTimestamp = true
+    }
+  }
+
+  return {
+    id: group.launchID,
+    shortId,
+    startedAt: earliestStartedAt,
+    families: Array.from(families),
+    models: Array.from(models),
+    pass,
+    total,
+    bucket: passBucket(pass, total),
+    durationMs: !missingTimestamp && minStarted !== null && maxFinished !== null ? maxFinished - minStarted : null,
+  }
+}
+
+export interface LaunchFilter {
+  query?: string
+  family?: string // '' = any
+  model?: string // '' = any
+  bucket?: PassBucket | '' // '' = any
+}
+
+// filterLaunches applies the dashboard's search box + three selects — AND across
+// dimensions, exact match within a dimension (family/model membership, bucket
+// equality), substring on the launch id for the free-text search.
+export function filterLaunches(rows: LaunchListRow[], filter: LaunchFilter): LaunchListRow[] {
+  const query = (filter.query || '').trim().toLowerCase()
+  return rows.filter((r) => {
+    if (query && !r.id.toLowerCase().includes(query)) return false
+    if (filter.family && !r.families.includes(filter.family)) return false
+    if (filter.model && !r.models.includes(filter.model)) return false
+    if (filter.bucket && r.bucket !== filter.bucket) return false
+    return true
+  })
+}
