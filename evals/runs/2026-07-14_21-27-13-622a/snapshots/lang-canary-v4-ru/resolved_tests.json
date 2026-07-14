@@ -1,0 +1,68 @@
+{
+  "tests": [
+    {
+      "ID": "1. price question, Russian",
+      "Message": "Сколько стоит кофемашина?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": null,
+      "Language": "ru",
+      "MustNotContain": null,
+      "History": null
+    },
+    {
+      "ID": "9. off-KB city coverage",
+      "Message": "А вы доставляете в Астану?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "не доставляем в астан",
+        "за пределами нашей зоны"
+      ],
+      "History": null
+    },
+    {
+      "ID": "20. mixed Kazakh/Russian message, rule says answer Russian when mixed",
+      "Message": "Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": null,
+      "Language": "ru",
+      "MustNotContain": null,
+      "History": null
+    },
+    {
+      "ID": "16. follow-up with history, needs delivery cost",
+      "Message": "А доставка сколько будет стоить?",
+      "Requires": [
+        [
+          "policy.main.delivery_cost"
+        ]
+      ],
+      "Media": null,
+      "Escalate": null,
+      "Language": "ru",
+      "MustNotContain": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Сколько стоит кофемашина DeLonghi?"
+        },
+        {
+          "role": "assistant",
+          "text": "Кофемашина DeLonghi стоит 129 900 ₸."
+        }
+      ]
+    }
+  ]
+}

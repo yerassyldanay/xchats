@@ -1,6 +1,6 @@
 # Phase 2.1's focused canary set — hand-picked from common/shop-questions.yaml (source
 # IDs noted per test below) rather than `include:`-ing the whole bank, on purpose: the
-# language bake-off (V1-V4) runs this SAME 6-test set at least 3x per variant per model,
+# language bake-off (V1-V4) runs this SAME 7-test set at least 3x per variant per model,
 # and the full 20-test bank would make that 3x more expensive without adding signal the
 # bake-off needs. Shared by V1/V2/V3 (one frame answers everything); V4 splits this same
 # set in two (lang-canary-v4-kk/tests.yaml, lang-canary-v4-ru/tests.yaml) since a routed
@@ -49,3 +49,14 @@ tests:
     must_not_contain:
       - "жеткізбейміз"
       - "аймағымыздан тыс"
+
+  - id: "16. follow-up with history, needs delivery cost"
+    history:
+      - role: client
+        text: "Сколько стоит кофемашина DeLonghi?"
+      - role: assistant
+        text: "Кофемашина DeLonghi стоит 129 900 ₸."
+    message: "А доставка сколько будет стоить?"
+    requires:
+      - ["policy.main.delivery_cost"]
+    language: ru
