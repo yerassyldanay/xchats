@@ -1,0 +1,63 @@
+{
+  "case_id": "product-photo",
+  "model": "google/gemini-2.5-flash-lite",
+  "prompt": {
+    "name": "extract",
+    "version": 2,
+    "sha256": "da111bab5b37dca380a0381d58c15f76e47878c80b73c08f4efe4b8d10281461"
+  },
+  "preprocessor": "image_1024_jpeg85",
+  "raw": "{\n  \"content_kind\": \"product_photo\",\n  \"summary\": \"This is a product photo showing an orange and gray magnetic drill with a water coolant bottle attached. The drill has control buttons and a power cord.\",\n  \"extracted_text\": \"llis\\nON\\nOFF\\nELECTRIC DRILL SWITCH\\nMAGNET SWITCH\\nATTENTION\\n\",\n  \"language\": \"ru\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"gallery\",\n  \"relates_to_hint\": \"magnetic drill\"\n}",
+  "parsed": {
+    "content_kind": "product_photo",
+    "summary": "This is a product photo showing an orange and gray magnetic drill with a water coolant bottle attached. The drill has control buttons and a power cord.",
+    "extracted_text": "llis\nON\nOFF\nELECTRIC DRILL SWITCH\nMAGNET SWITCH\nATTENTION\n",
+    "language": "ru",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "gallery",
+    "relates_to_hint": "magnetic drill"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": true
+    },
+    {
+      "name": "identify_contains_any",
+      "pass": true
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": true
+    },
+    {
+      "name": "no_reasoning_leak",
+      "pass": true
+    },
+    {
+      "name": "forbid_currency",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2695,
+    "completion_tokens": 126,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "cost_usd_estimate": 0.0003199,
+  "cost_basis": "measured_split"
+}
