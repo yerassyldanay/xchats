@@ -1,41 +1,64 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, CircleAlert, ExternalLink, FlaskConical, X } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
+import { ArrowLeft, ChevronDown, ChevronsDownUp, ChevronsUpDown, CircleAlert, Download, FlaskConical, X } from 'lucide-vue-next'
 import { evalsApi, EvalsUnavailableError } from '../api/evals'
-import { buildComparisonMatrices, costLabel, pct, type MatrixGroup } from '../lib/evalMatrix'
-import type { RunSummary, VExecution } from '../types'
+import { buildComparisonMatrices, formatDuration, formatStartedAt, groupTestCases, launchListRow, type Family, type MatrixGroup, type TestCaseGroup } from '../lib/evalMatrix'
+import type { LaunchManifest, RunSummary, VExecution } from '../types'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import DecisionMatrix from '@/components/evals/DecisionMatrix.vue'
+import StrategyDialog from '@/components/evals/StrategyDialog.vue'
+import TestCaseCard from '@/components/evals/TestCaseCard.vue'
 
-// The core deliverable: one launch's decision matrix (which prompt/setup + model
-// wins) per family tab, drilling down into every individual test/case — customer
-// message + history, exact prompt used, model's raw reply next to the post-injection
-// customer-facing text, every check, cost/latency. See evals/README.md's
-// "Comparing prompts and models" section for the whole data flow this reads from.
+// The launch detail page: matrix ALWAYS visible (plan/ui/ui_20_evals_specific.md —
+// "I would like to see it as matrix always"), guiding summary -> comparison ->
+// investigation. See evals/README.md's "Comparing prompts and models" for the data
+// flow this reads from.
 const route = useRoute()
 const launchId = computed(() => String(route.params.launchId))
 
 const loading = ref(true)
-const unavailable = ref(false)
+const notFound = ref(false)
 const error = ref('')
 const members = ref<RunSummary[]>([])
 const execsByRun = ref<Record<string, VExecution[]>>({})
 const activeRunId = ref('')
+const launchManifest = ref<LaunchManifest | null>(null)
 
 const familyLabel: Record<string, string> = { scenario: 'WhatsApp-ответы', extract: 'Разбор файлов' }
+const familyInfo: Record<string, string> = {
+  scenario: 'Результаты по ответам ассистента в WhatsApp. Сравните промпты и модели, чтобы понять, какие дают лучший результат и почему.',
+  extract: 'Результаты по разбору файлов и изображений. Сравните версии промпта и модели по точности извлечения данных.',
+}
 
 async function load() {
   loading.value = true
-  unavailable.value = false
+  notFound.value = false
   error.value = ''
+  members.value = []
+  execsByRun.value = {}
+  launchManifest.value = null
   try {
-    const file = await evalsApi.fetchRuns()
-    const own = file.runs.filter((r) => (r.launch_id || r.run_id) === launchId.value)
+    const [runsFile, manifest] = await Promise.all([
+      evalsApi.fetchRuns().catch((e) => {
+        if (e instanceof EvalsUnavailableError) return null
+        throw e
+      }),
+      evalsApi.fetchLaunch(launchId.value),
+    ])
+    launchManifest.value = manifest
+
+    const own = runsFile ? runsFile.runs.filter((r) => (r.launch_id || r.run_id) === launchId.value) : []
     if (own.length === 0) {
-      unavailable.value = true
+      // Correction 5: a launch that failed before any member run even started
+      // (e.g. `harness launch`'s pre-flight itself errored) still has a manifest
+      // recording what was planned — that's a real status to show, not "not found".
+      if (!manifest) notFound.value = true
       return
     }
     members.value = own
@@ -47,14 +70,13 @@ async function load() {
           const ef = await evalsApi.fetchExecutions(r.run_id)
           return [r.run_id, ef.executions] as const
         } catch {
-          return [r.run_id, []] as const // a member that never wrote executions.json (e.g. failed before any result) shows as empty, not a page-wide error
+          return [r.run_id, []] as const // a member with no executions.json (failed before any result) shows empty, not a page-wide error
         }
       }),
     )
     execsByRun.value = Object.fromEntries(pairs)
   } catch (e) {
-    if (e instanceof EvalsUnavailableError) unavailable.value = true
-    else error.value = e instanceof Error ? e.message : String(e)
+    error.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
   }
@@ -63,77 +85,138 @@ onMounted(load)
 watch(launchId, load)
 
 const activeMember = computed(() => members.value.find((m) => m.run_id === activeRunId.value))
-const activeFamily = computed<'scenario' | 'extract'>(() => (activeMember.value?.family === 'extract' ? 'extract' : 'scenario'))
+const activeFamily = computed<Family>(() => (activeMember.value?.family === 'extract' ? 'extract' : 'scenario'))
 const activeExecs = computed(() => execsByRun.value[activeRunId.value] || [])
 
-const groups = computed<MatrixGroup[]>(() => buildComparisonMatrices(activeExecs.value, activeFamily.value))
+// --- header: status badge + started/duration, reusing the dashboard's own row math ---
+const summaryRow = computed(() => (members.value.length ? launchListRow({ launchID: launchId.value, runs: members.value }) : null))
+type HeaderStatus = 'complete' | 'partial' | 'failed' | 'running'
+const headerStatus = computed<HeaderStatus | null>(() => {
+  if (launchManifest.value) {
+    const s = launchManifest.value.status
+    if (s === 'complete' || s === 'partial' || s === 'failed' || s === 'running') return s
+  }
+  // No manifest (a solo run, never through `harness launch`) — "complete" once
+  // every member has actually finished; otherwise no badge at all, never guessed.
+  if (members.value.length > 0 && members.value.every((m) => m.finished_at)) return 'complete'
+  return null
+})
+const statusLabel: Record<HeaderStatus, string> = { complete: 'Завершён', partial: 'Частично завершён', failed: 'Провален', running: 'Выполняется' }
+const statusClass: Record<HeaderStatus, string> = {
+  complete: 'bg-emerald-100 text-emerald-700',
+  partial: 'bg-amber-100 text-amber-700',
+  failed: 'bg-red-100 text-red-700',
+  running: 'bg-sky-100 text-sky-700',
+}
 
-// --- filters + cell-click drill-down ---
+// --- export dropdown: only links that actually resolve (correction 6) ---
+interface ExportLink { name: string; url: string }
+const exportLinks = ref<ExportLink[]>([])
+watch(
+  activeRunId,
+  async (id) => {
+    if (!id) {
+      exportLinks.value = []
+      return
+    }
+    const candidates = ['SUMMARY.md', 'CONTRACT.md', 'EXTRACT.md', 'executions.json']
+    const results = await Promise.all(
+      candidates.map(async (name) => {
+        const url = evalsApi.reportFileURL(id, name)
+        return (await evalsApi.probeFile(url)) ? { name, url } : null
+      }),
+    )
+    exportLinks.value = results.filter((r): r is ExportLink => r !== null)
+  },
+  { immediate: true },
+)
+
+// --- decision matrix + metric toggle ---
+const groups = computed<MatrixGroup[]>(() => buildComparisonMatrices(activeExecs.value, activeFamily.value))
+const metric = ref<'pass' | 'cost' | 'latency'>('pass')
+// Correction 1: extraction never captures call latency (extractRunResult has no
+// LatencyMs field in evals/harness) — offering the toggle would just show "н/д"
+// everywhere, which reads as a bug, not an honest "not measured."
+const availableMetrics = computed(() => {
+  const base: { key: 'pass' | 'cost' | 'latency'; label: string }[] = [
+    { key: 'pass', label: 'Pass rate' },
+    { key: 'cost', label: 'Стоимость' },
+  ]
+  if (activeFamily.value === 'scenario') base.push({ key: 'latency', label: 'Латентность' })
+  return base
+})
+watch(activeFamily, () => {
+  if (metric.value === 'latency' && activeFamily.value === 'extract') metric.value = 'pass'
+})
+
+// --- strategy dialog ---
+const strategyOpen = ref(false)
+const strategySetup = ref('')
+const strategyGroup = ref<MatrixGroup | null>(null)
+function openStrategy(group: MatrixGroup, setup: string) {
+  strategyGroup.value = group
+  strategySetup.value = setup
+  strategyOpen.value = true
+}
+
+// --- filters (reka-ui's Select reserves "" for "nothing selected" — same __any__
+// sentinel pattern as EvalRuns.vue's filters) ---
 const selectedModel = ref('')
 const selectedSetup = ref('')
-const failuresOnly = ref(false)
-// reka-ui's Select reserves the empty string to mean "nothing selected" internally
-// (a SelectItem may not use it as its own value) — ALL_MODELS is the sentinel for
-// "Все модели", translated to/from selectedModel's real empty-string-means-all
-// convention by the computed below.
-const ALL_MODELS = '__all__'
-const selectedModelChoice = computed({
-  get: () => selectedModel.value || ALL_MODELS,
-  set: (v: string) => { selectedModel.value = v === ALL_MODELS ? '' : v },
-})
+const statusFilter = ref<'' | 'pass' | 'fail'>('')
 watch(activeRunId, () => {
   selectedModel.value = ''
   selectedSetup.value = ''
-  failuresOnly.value = false
+  statusFilter.value = ''
+})
+const ANY = '__any__'
+function anyChoice(value: Ref<string>) {
+  return computed({ get: () => value.value || ANY, set: (v: string) => { value.value = v === ANY ? '' : v } })
+}
+const modelChoice = anyChoice(selectedModel)
+const setupChoice = anyChoice(selectedSetup)
+const statusChoice = computed({
+  get: () => statusFilter.value || ANY,
+  set: (v: string) => { statusFilter.value = (v === ANY ? '' : v) as '' | 'pass' | 'fail' },
 })
 
 const allModels = computed(() => Array.from(new Set(activeExecs.value.map((e) => e.variant.model))).sort())
+const allSetups = computed(() => Array.from(new Set(groups.value.flatMap((g) => g.setups))))
+const statusOptions: { key: 'pass' | 'fail'; label: string }[] = [{ key: 'pass', label: 'Пройден' }, { key: 'fail', label: 'Провален' }]
 
-function pickCell(setup: string, model: string) {
-  selectedSetup.value = selectedSetup.value === setup && selectedModel.value === model ? '' : setup
-  selectedModel.value = selectedSetup.value ? model : ''
-}
-
-function isPass(e: VExecution): boolean {
-  const key = e.family === 'scenario' ? 'model_behavior_pass' : 'all_checks_pass'
-  return e.rollups.find((r) => r.key === key)?.pass ?? false
-}
-
-interface DrillGroup {
-  id: string
-  message: string
-  execs: VExecution[]
-}
-const drillGroups = computed<DrillGroup[]>(() => {
-  let execs = activeExecs.value
-  if (selectedSetup.value) execs = execs.filter((e) => (e.variant.setup || e.variant.model) === selectedSetup.value)
-  if (selectedModel.value) execs = execs.filter((e) => e.variant.model === selectedModel.value)
-  if (failuresOnly.value) execs = execs.filter((e) => !isPass(e))
-
-  const byID = new Map<string, DrillGroup>()
-  const order: string[] = []
-  for (const e of execs) {
-    const id = e.subject.test_id || e.subject.case_id || ''
-    if (!byID.has(id)) {
-      byID.set(id, { id, message: e.subject.message || e.subject.case_id || id, execs: [] })
-      order.push(id)
-    }
-    byID.get(id)!.execs.push(e)
+function onSelectCell(setup: string, model: string) {
+  if (selectedSetup.value === setup && selectedModel.value === model) {
+    selectedSetup.value = ''
+    selectedModel.value = ''
+  } else {
+    selectedSetup.value = setup
+    selectedModel.value = model
   }
-  return order.map((id) => byID.get(id)!)
-})
+}
+function resetFilters() {
+  selectedModel.value = ''
+  selectedSetup.value = ''
+  statusFilter.value = ''
+}
+const hasActiveFilters = computed(() => !!(selectedModel.value || selectedSetup.value || statusFilter.value))
 
-function costOf(e: VExecution): string {
-  return costLabel(e.cost.basis, e.cost.estimate_usd)
+// --- test cases: filtered, sorted, collapsible ---
+const sort = ref<'default' | 'failuresFirst'>('default')
+const testCaseGroups = computed<TestCaseGroup[]>(() =>
+  groupTestCases(activeExecs.value, { setup: selectedSetup.value, model: selectedModel.value, status: statusFilter.value, sort: sort.value }),
+)
+const expandedCards = ref<Set<string>>(new Set())
+function toggleCard(id: string) {
+  const next = new Set(expandedCards.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedCards.value = next
 }
-function scoreClass(status: string): string {
-  if (status === 'pass') return 'text-emerald-600'
-  if (status === 'fail') return 'text-destructive'
-  if (status === 'error') return 'text-amber-600'
-  return 'text-muted-foreground italic'
+function expandAll() {
+  expandedCards.value = new Set(testCaseGroups.value.map((g) => g.id))
 }
-function onImgError(ev: Event) {
-  ;(ev.target as HTMLImageElement).style.display = 'none'
+function collapseAll() {
+  expandedCards.value = new Set()
 }
 </script>
 
@@ -143,10 +226,26 @@ function onImgError(ev: Event) {
       <RouterLink :to="{ name: 'evals' }" class="text-muted-foreground hover:text-foreground transition" aria-label="Назад к запускам">
         <ArrowLeft class="w-5 h-5" />
       </RouterLink>
-      <div class="min-w-0">
-        <h1 class="text-lg font-bold tracking-tight font-mono truncate">{{ launchId }}</h1>
-        <p class="text-sm text-muted-foreground">Сравнение промптов и моделей</p>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2">
+          <h1 class="text-lg font-bold tracking-tight font-mono truncate">{{ launchId }}</h1>
+          <Badge v-if="headerStatus" :class="statusClass[headerStatus]" class="hover:bg-current border-transparent shrink-0">{{ statusLabel[headerStatus] }}</Badge>
+        </div>
+        <p v-if="summaryRow" class="text-sm text-muted-foreground mt-0.5">
+          Запуск: {{ formatStartedAt(summaryRow.startedAt) }}
+          <template v-if="summaryRow.durationMs !== null"> · Длительность: {{ formatDuration(summaryRow.durationMs) }}</template>
+        </p>
       </div>
+      <DropdownMenu v-if="exportLinks.length">
+        <DropdownMenuTrigger as-child>
+          <Button variant="outline" size="sm"><Download class="w-3.5 h-3.5" /> Экспорт отчёта <ChevronDown class="w-3.5 h-3.5" /></Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem v-for="l in exportLinks" :key="l.name" as-child>
+            <a :href="l.url" target="_blank" rel="noopener">{{ l.name }}</a>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </header>
 
     <div v-if="loading" class="flex-1 grid place-items-center p-8">
@@ -158,7 +257,7 @@ function onImgError(ev: Event) {
       </div>
     </div>
 
-    <div v-else-if="unavailable" class="flex-1 grid place-items-center p-8">
+    <div v-else-if="notFound" class="flex-1 grid place-items-center p-8">
       <p class="text-sm text-muted-foreground">Запуск «{{ launchId }}» не найден.</p>
     </div>
 
@@ -166,8 +265,27 @@ function onImgError(ev: Event) {
       <CircleAlert class="w-4 h-4 shrink-0" /> {{ error }}
     </p>
 
+    <!-- manifest-only launch: planned, but no member run ever produced a result (correction 5) -->
+    <div v-else-if="!members.length && launchManifest" class="flex-1 overflow-y-auto px-8 py-6">
+      <div class="max-w-lg mx-auto rounded-xl border border-border bg-card p-6 space-y-4 text-center">
+        <Badge :class="statusClass[headerStatus || 'failed']" class="border-transparent">{{ statusLabel[headerStatus || 'failed'] }}</Badge>
+        <p class="text-sm text-muted-foreground">Этот запуск не создал ни одного результата.</p>
+        <div class="text-left space-y-2">
+          <p class="text-xs text-muted-foreground">Запланированные семейства: {{ launchManifest.planned_families.map((f) => familyLabel[f] || f).join(', ') }}</p>
+          <p class="text-xs text-muted-foreground">Ожидалось вызовов: {{ launchManifest.expected_calls.total }} (WhatsApp: {{ launchManifest.expected_calls.scenario }}, разбор файлов: {{ launchManifest.expected_calls.extract }})</p>
+          <div v-for="m in launchManifest.members" :key="m.family" class="rounded-lg border border-border p-2.5 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="font-medium">{{ familyLabel[m.family] || m.family }}</span>
+              <span>{{ m.status }}</span>
+            </div>
+            <p v-if="m.error" class="text-destructive mt-1">{{ m.error }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-else class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
-      <!-- family tabs: what did this launch run -->
+      <!-- family tabs -->
       <Tabs v-model="activeRunId">
         <TabsList>
           <TabsTrigger v-for="m in members" :key="m.run_id" :value="m.run_id">
@@ -178,165 +296,118 @@ function onImgError(ev: Event) {
 
         <TabsContent v-for="m in members" :key="m.run_id" :value="m.run_id" class="space-y-6 mt-4">
           <template v-if="m.run_id === activeRunId">
-            <!-- decision matrix: which prompt+model wins -->
-            <section v-for="g in groups" :key="g.experiment + '|' + (g.warning ? g.setups[0] : '')" class="rounded-xl border border-border bg-card overflow-hidden">
-              <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">
-                <h2 class="text-sm font-semibold">
-                  {{ g.experiment || 'Без эксперимента' }}
-                  <span class="ml-2 text-xs font-normal text-muted-foreground">{{ activeFamily === 'scenario' ? 'модель × промпт' : 'модель × версия промпта' }}</span>
-                </h2>
-              </div>
-              <p v-if="g.warning" class="px-4 py-2 text-xs text-amber-700 bg-amber-50 flex items-start gap-1.5">
-                <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-0.5" /> {{ g.warning }}
-              </p>
-              <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                  <thead>
-                    <tr class="border-b border-border bg-muted/40">
-                      <th class="text-left font-medium text-muted-foreground px-4 py-2">Модель</th>
-                      <th v-for="s in g.setups" :key="s" class="text-left font-medium text-muted-foreground px-4 py-2 font-mono">{{ s }}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="model in g.models" :key="model" class="border-b border-border last:border-0">
-                      <td class="px-4 py-2.5 font-mono text-xs">{{ model }}</td>
-                      <td v-for="s in g.setups" :key="s" class="px-4 py-2.5">
-                        <button
-                          v-if="g.cells.find((c) => c.setup === s && c.model === model)"
-                          class="text-left rounded-lg px-2 py-1 -mx-2 -my-1 transition hover:bg-primary/10"
-                          :class="selectedSetup === s && selectedModel === model ? 'bg-primary/10 ring-1 ring-primary/30' : ''"
-                          @click="pickCell(s, model)"
-                        >
-                          <template v-for="cell in [g.cells.find((c) => c.setup === s && c.model === model)!]" :key="cell.model">
-                            <div class="font-semibold">
-                              {{ activeFamily === 'scenario' ? pct(cell.behaviorPass, cell.n) : pct(cell.allChecksPass, cell.n) }}
-                            </div>
-                            <div class="text-xs text-muted-foreground">
-                              <template v-if="activeFamily === 'scenario'">контракт {{ pct(cell.contractPass, cell.n) }}</template>
-                              <template v-else-if="cell.parsePass !== null">парсинг {{ pct(cell.parsePass, cell.n) }}</template>
-                              · {{ cell.costLabel }}<template v-if="cell.avgLatencyMs"> · {{ cell.avgLatencyMs }}мс</template>
-                            </div>
-                          </template>
-                        </button>
-                        <span v-else class="text-muted-foreground text-xs">—</span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-            <p v-if="!groups.length" class="text-sm text-muted-foreground py-6 text-center">Нет результатов для сравнения в этом запуске.</p>
+            <p class="text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2">{{ familyInfo[m.family] || 'Результаты этого семейства проверок.' }}</p>
+            <p v-if="m.load_error" class="flex items-center gap-2 text-xs text-destructive bg-red-50 rounded-lg px-3 py-2">
+              <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ m.load_error }}
+            </p>
 
-            <!-- filters -->
-            <div class="flex items-center gap-3 flex-wrap">
-              <Select v-model="selectedModelChoice">
-                <SelectTrigger class="w-56"><span>{{ selectedModel || 'Все модели' }}</span></SelectTrigger>
-                <SelectContent>
-                  <SelectItem :value="ALL_MODELS">Все модели</SelectItem>
-                  <SelectItem v-for="m in allModels" :key="m" :value="m">{{ m }}</SelectItem>
-                </SelectContent>
-              </Select>
-              <label class="inline-flex items-center gap-2 text-sm">
-                <input v-model="failuresOnly" type="checkbox" class="rounded border-border" />
-                Только с ошибками
-              </label>
-              <button
-                v-if="selectedSetup"
-                class="inline-flex items-center gap-1 text-xs rounded-full bg-primary/10 text-primary px-2.5 py-1"
-                @click="selectedSetup = ''; selectedModel = ''"
-              >
-                {{ selectedSetup }} · {{ selectedModel }} <X class="w-3 h-3" />
-              </button>
+            <!-- 1. decision matrix -->
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <h2 class="text-sm font-semibold text-muted-foreground">1. Матрица результатов — {{ activeFamily === 'scenario' ? 'модели × промпты' : 'модели × версии промпта' }}</h2>
+              <div class="inline-flex rounded-lg border border-border p-0.5 bg-muted/40">
+                <button
+                  v-for="opt in availableMetrics"
+                  :key="opt.key"
+                  class="px-3 py-1 text-xs font-medium rounded-md transition"
+                  :class="metric === opt.key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                  @click="metric = opt.key"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+            </div>
+            <div class="space-y-4">
+              <DecisionMatrix
+                v-for="g in groups"
+                :key="g.experiment + '|' + g.setups.join(',')"
+                :group="g"
+                :executions="activeExecs"
+                :metric="metric"
+                :selected-setup="selectedSetup"
+                :selected-model="selectedModel"
+                @select-cell="onSelectCell"
+                @open-strategy="(s) => openStrategy(g, s)"
+              />
+              <p v-if="!groups.length" class="text-sm text-muted-foreground py-6 text-center">Нет результатов для сравнения в этом запуске.</p>
             </div>
 
-            <!-- drill-down: every individual test/case -->
-            <div class="space-y-4">
-              <div v-for="dg in drillGroups" :key="dg.id" class="rounded-xl border border-border bg-card overflow-hidden">
-                <div class="px-4 py-3 border-b border-border bg-muted/30">
-                  <code class="text-xs text-muted-foreground">{{ dg.id }}</code>
-                  <p class="text-sm mt-0.5">{{ dg.message }}</p>
-                  <div v-if="dg.execs[0]?.subject.history?.length" class="mt-2 space-y-1">
-                    <div v-for="(h, i) in dg.execs[0].subject.history" :key="i" class="text-xs text-muted-foreground">
-                      <span class="font-medium">{{ h.role === 'client' ? 'Клиент' : 'Ассистент' }}:</span> {{ h.text }}
-                    </div>
-                  </div>
-                </div>
+            <!-- 2. filters -->
+            <div class="space-y-2">
+              <h2 class="text-sm font-semibold text-muted-foreground">2. Фильтры для деталей</h2>
+              <div class="flex items-center gap-2 flex-wrap">
+                <Select v-model="modelChoice">
+                  <SelectTrigger class="w-52 h-9"><span class="truncate">{{ selectedModel || 'Все модели' }}</span></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem :value="ANY">Все модели</SelectItem>
+                    <SelectItem v-for="mo in allModels" :key="mo" :value="mo">{{ mo }}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select v-model="setupChoice">
+                  <SelectTrigger class="w-52 h-9"><span class="truncate">{{ selectedSetup || 'Все стратегии' }}</span></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem :value="ANY">Все стратегии</SelectItem>
+                    <SelectItem v-for="s in allSetups" :key="s" :value="s">{{ s }}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select v-model="statusChoice">
+                  <SelectTrigger class="w-40 h-9"><span>{{ statusFilter ? statusOptions.find((o) => o.key === statusFilter)?.label : 'Статус' }}</span></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem :value="ANY">Все статусы</SelectItem>
+                    <SelectItem v-for="o in statusOptions" :key="o.key" :value="o.key">{{ o.label }}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <button v-if="hasActiveFilters" class="text-xs text-muted-foreground hover:text-foreground transition" @click="resetFilters">Сбросить фильтры</button>
+              </div>
+              <div v-if="hasActiveFilters" class="flex items-center gap-2 flex-wrap">
+                <span v-if="selectedSetup" class="inline-flex items-center gap-1 text-xs rounded-full bg-primary/10 text-primary px-2.5 py-1">{{ selectedSetup }} <button @click="selectedSetup = ''"><X class="w-3 h-3" /></button></span>
+                <span v-if="selectedModel" class="inline-flex items-center gap-1 text-xs rounded-full bg-primary/10 text-primary px-2.5 py-1">{{ selectedModel }} <button @click="selectedModel = ''"><X class="w-3 h-3" /></button></span>
+                <span v-if="statusFilter" class="inline-flex items-center gap-1 text-xs rounded-full bg-primary/10 text-primary px-2.5 py-1">{{ statusOptions.find((o) => o.key === statusFilter)?.label }} <button @click="statusFilter = ''"><X class="w-3 h-3" /></button></span>
+              </div>
+            </div>
 
-                <div class="divide-y divide-border">
-                  <div v-for="(e, i) in dg.execs" :key="i" class="p-4 space-y-3">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <code class="text-xs font-medium">{{ e.variant.model }}</code>
-                      <Badge :variant="isPass(e) ? 'default' : 'destructive'" class="text-[11px]">
-                        {{ isPass(e) ? 'пройдено' : 'провалено' }}
-                      </Badge>
-                      <Badge v-if="e.family === 'scenario' && !e.rollups.find((r) => r.key === 'contract_pass')?.pass" variant="outline" class="text-[11px] border-amber-400 text-amber-700">
-                        контракт нарушен
-                      </Badge>
-                      <Badge v-if="e.scenario?.truncated" variant="outline" class="text-[11px] border-destructive text-destructive">обрезан ответ</Badge>
-                      <Badge v-if="e.scenario?.reasoning_leak" variant="outline" class="text-[11px] border-destructive text-destructive">утечка рассуждений</Badge>
-                      <span v-if="e.variant.prompt?.name" class="text-xs text-muted-foreground font-mono">
-                        {{ e.variant.prompt.name }}@v{{ e.variant.prompt.version }}
-                        <a
-                          v-if="e.subject.scenario"
-                          :href="evalsApi.promptFileURL(activeRunId, e.subject.scenario)"
-                          target="_blank"
-                          rel="noopener"
-                          class="inline-flex items-center gap-0.5 text-primary hover:underline ml-1"
-                        >смотреть промпт <ExternalLink class="w-3 h-3" /></a>
-                      </span>
-                      <span class="ml-auto text-xs text-muted-foreground">{{ costOf(e) }}<template v-if="e.latency_ms"> · {{ e.latency_ms }}мс</template></span>
-                    </div>
-
-                    <!-- extraction: captured input image -->
-                    <img
-                      v-if="e.family === 'extract' && e.subject.case_id"
-                      :src="evalsApi.inputImageURL(activeRunId, e.subject.case_id)"
-                      class="max-w-[220px] max-h-[220px] rounded-lg border border-border object-contain"
-                      alt="исходный файл"
-                      @error="onImgError"
-                    />
-
-                    <div class="grid gap-3" :class="e.family === 'scenario' ? 'sm:grid-cols-2' : ''">
-                      <div v-if="e.family === 'scenario'" class="space-y-1">
-                        <div class="text-xs font-medium text-muted-foreground">Ответ модели</div>
-                        <p class="text-sm bg-muted/50 rounded-lg p-2.5 whitespace-pre-wrap">{{ e.output.reply_text || '—' }}</p>
-                      </div>
-                      <div v-if="e.family === 'scenario'" class="space-y-1">
-                        <div class="text-xs font-medium text-muted-foreground">После подстановки (клиенту)</div>
-                        <p class="text-sm bg-muted/50 rounded-lg p-2.5 whitespace-pre-wrap">{{ e.scenario?.injected_text || '—' }}</p>
-                      </div>
-                      <div v-if="e.family === 'extract'" class="space-y-1 sm:col-span-2">
-                        <div class="text-xs font-medium text-muted-foreground">Извлечённый текст</div>
-                        <p class="text-sm bg-muted/50 rounded-lg p-2.5 whitespace-pre-wrap">{{ e.extract?.extracted_text || e.output.error || e.output.parse_error || '—' }}</p>
-                      </div>
-                    </div>
-
-                    <details class="text-xs">
-                      <summary class="cursor-pointer text-muted-foreground hover:text-foreground select-none">
-                        проверки ({{ e.scores.length }}) и сырой ответ
-                      </summary>
-                      <div class="mt-2 space-y-2">
-                        <table v-if="e.scores.length" class="w-full text-xs">
-                          <tbody>
-                            <tr v-for="s in e.scores" :key="s.name" class="border-b border-border/60 last:border-0">
-                              <td class="py-1 pr-3 font-mono">{{ s.name }}</td>
-                              <td class="py-1 pr-3 font-medium" :class="scoreClass(s.status)">{{ s.status.toUpperCase() }}</td>
-                              <td class="py-1 text-muted-foreground">{{ s.detail }}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                        <pre class="bg-muted/50 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap">{{ e.output.raw || e.output.error }}</pre>
-                        <pre v-if="e.output.reasoning" class="bg-amber-50 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap">{{ e.output.reasoning }}</pre>
-                      </div>
-                    </details>
-                  </div>
+            <!-- 3. test cases -->
+            <div class="space-y-3">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <h2 class="text-sm font-semibold text-muted-foreground">3. Детальные результаты по вопросам — {{ testCaseGroups.length }} {{ testCaseGroups.length === 1 ? 'вопрос' : 'вопросов' }}</h2>
+                <div class="flex items-center gap-2">
+                  <button class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition" @click="collapseAll"><ChevronsDownUp class="w-3.5 h-3.5" /> Свернуть всё</button>
+                  <button class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition" @click="expandAll"><ChevronsUpDown class="w-3.5 h-3.5" /> Развернуть всё</button>
+                  <Select v-model="sort">
+                    <SelectTrigger class="w-44 h-8 text-xs"><span>{{ sort === 'failuresFirst' ? 'Сначала ошибки' : 'По порядку' }}</span></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">По порядку</SelectItem>
+                      <SelectItem value="failuresFirst">Сначала ошибки</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
-              <p v-if="!drillGroups.length" class="text-sm text-muted-foreground py-6 text-center">Нет результатов, соответствующих фильтру.</p>
+              <div class="space-y-3">
+                <TestCaseCard
+                  v-for="g in testCaseGroups"
+                  :key="g.id"
+                  :group="g"
+                  :run-id="activeRunId"
+                  :expanded="expandedCards.has(g.id)"
+                  @toggle="toggleCard(g.id)"
+                />
+                <p v-if="!testCaseGroups.length" class="text-sm text-muted-foreground py-6 text-center">Нет результатов, соответствующих фильтру.</p>
+              </div>
             </div>
           </template>
         </TabsContent>
       </Tabs>
     </div>
+
+    <StrategyDialog
+      v-if="strategyGroup"
+      :open="strategyOpen"
+      :run-id="activeRunId"
+      :family="strategyGroup.family"
+      :experiment="strategyGroup.experiment"
+      :setup="strategySetup"
+      :question-count="strategyGroup.cells.find((c) => c.setup === strategySetup)?.n ?? 0"
+      :executions="activeExecs"
+      @update:open="(v) => (strategyOpen = v)"
+    />
   </div>
 </template>

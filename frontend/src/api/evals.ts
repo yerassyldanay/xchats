@@ -60,23 +60,52 @@ export const evalsApi = {
   // (review amendment 7: no mount -> no nav item), rather than showing a link that
   // always 404s.
   async probeAvailable(): Promise<boolean> {
+    return evalsApi.probeFile(PREFIX + '/runs.json')
+  },
+
+  // probeFile HEAD-checks whether an arbitrary URL actually resolves, without
+  // throwing — the general form probeAvailable is built on. Used to gate the launch
+  // detail page's export links (SUMMARY.md/CONTRACT.md/EXTRACT.md): a run that
+  // never produced one of these (e.g. the hand-authored sample launch, which has no
+  // Markdown reports at all) must not offer a link that only ever 404s.
+  async probeFile(url: string): Promise<boolean> {
     try {
-      const res = await fetch(PREFIX + '/runs.json', { method: 'HEAD' })
+      const res = await fetch(url, { method: 'HEAD' })
       return res.ok
     } catch {
       return false
     }
   },
 
-  // inputImageURL / promptFileURL build direct links into the static mount — the
-  // extraction case's captured input image, and the "view exact prompt" link to a
-  // scenario's snapshotted, fully-rendered prompt.txt (see evals README's
-  // "Comparison metadata" section for why this is prompt.txt, not frame.txt: it's
-  // the ACTUAL rendered text a run's model calls saw).
+  // inputImageURL / promptFileURL / reportFileURL build direct links into the
+  // static mount — the extraction case's captured input image, the "view exact
+  // prompt" link to a scenario's snapshotted, fully-rendered prompt.txt (see evals
+  // README's "Comparison metadata" section for why this is prompt.txt, not
+  // frame.txt: it's the ACTUAL rendered text a run's model calls saw), and a run's
+  // human-readable reports.
   inputImageURL(runID: string, caseID: string): string {
     return `${PREFIX}/${encodeURIComponent(runID)}/inputs/${encodeURIComponent(caseID)}.jpg`
   },
   promptFileURL(runID: string, scenario: string): string {
     return `${PREFIX}/${encodeURIComponent(runID)}/snapshots/${encodeURIComponent(scenario)}/prompt.txt`
+  },
+  reportFileURL(runID: string, filename: string): string {
+    return `${PREFIX}/${encodeURIComponent(runID)}/${encodeURIComponent(filename)}`
+  },
+
+  // fetchPromptText loads a scenario's exact rendered prompt as plain text — the
+  // strategy dialog's "Просмотр промпта" view. Throws EvalsUnavailableError on 404,
+  // which covers BOTH a legacy run with no snapshot at all AND an extraction setup
+  // (extraction prompts live in evals/prompts/, never snapshotted into the run dir —
+  // see the launch-detail plan's correction 2) — callers render the same "prompt
+  // text isn't available for this run" note for either case, which is honest: from
+  // the frontend's point of view they're indistinguishable.
+  async fetchPromptText(runID: string, scenario: string): Promise<string> {
+    const url = evalsApi.promptFileURL(runID, scenario)
+    const res = await fetch(url)
+    log.info('evals fetch', { path: url, status: res.status })
+    if (res.status === 404) throw new EvalsUnavailableError(url)
+    if (!res.ok) throw new Error(`prompt fetch failed: ${url} (${res.status})`)
+    return res.text()
   },
 }

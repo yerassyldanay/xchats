@@ -323,7 +323,7 @@ export interface VExecution {
   subject: VSubject
   variant: VVariant
   output: VOutput
-  scores: VScore[]
+  scores: VScore[] | null
   rollups: VRollup[]
   cost: VCost
   latency_ms?: number

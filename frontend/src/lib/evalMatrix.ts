@@ -39,6 +39,21 @@ function itemID(e: VExecution): string {
   return e.subject.test_id || e.subject.case_id || ''
 }
 
+// setupKey is the ONE fallback chain for "which comparison column does this
+// execution belong to" — used everywhere a setup needs deriving, so the matrix and
+// the test-case filters can never disagree about it. Regression fix: a run from
+// before scenario.yaml's setup/prompt_ref annotations existed (or extraction, which
+// has no `setup` concept at all — see viewmodel.go's extractExecutionFromResult,
+// which sets Setup to the prompt ref string) used to fall back straight to
+// variant.model, producing a nonsensical models-as-columns matrix for legacy scenario
+// runs. Falling back to subject.scenario first (the scenario name — always present
+// for the chat family, always meaningful as a column) fixes that; model stays the
+// last resort for anything with neither (shouldn't happen for real data, but the
+// chain must still terminate in something rather than an empty string).
+function setupKey(e: VExecution): string {
+  return e.variant.setup || e.subject.scenario || e.variant.model
+}
+
 function idSet(execs: VExecution[]): Set<string> {
   return new Set(execs.map(itemID).filter(Boolean))
 }
@@ -168,9 +183,9 @@ export function buildComparisonMatrices(executions: VExecution[], family: Family
 
   const groups: MatrixGroup[] = []
   for (const [experiment, execs] of byExperiment) {
-    const setups = firstAppearanceOrder(execs.map((e) => e.variant.setup || e.variant.model))
+    const setups = firstAppearanceOrder(execs.map(setupKey))
     const bySetup = new Map<string, VExecution[]>()
-    for (const s of setups) bySetup.set(s, execs.filter((e) => (e.variant.setup || e.variant.model) === s))
+    for (const s of setups) bySetup.set(s, execs.filter((e) => setupKey(e) === s))
 
     // Reference set: the item-id set covered by the FIRST setup in this experiment —
     // arbitrary but deterministic; every other setup in the group is compared to it.
@@ -201,6 +216,118 @@ export function cellFor(group: MatrixGroup, setup: string, model: string): Matri
 export function pct(pass: number | null, total: number): string {
   if (pass === null || total === 0) return 'н/д'
   return `${Math.round((pass / total) * 100)}% (${pass}/${total})`
+}
+
+// recommendedSetup picks the "★ Лучший результат" column: the setup with the
+// strictly highest pooled family-metric pass rate (behaviorPass for scenario,
+// allChecksPass for extract — same metric the matrix cell itself leads with,
+// never a different one). Pools every model's n/pass for that setup together
+// (this is a "which strategy wins overall" badge, not a per-model claim). Returns
+// null on a tie for the max, or when nothing in the group has gradeable data —
+// a badge is only trustworthy when there is one unambiguous winner, never guessed.
+export function recommendedSetup(group: MatrixGroup): string | null {
+  const rates = group.setups.map((setup) => {
+    let pass = 0
+    let total = 0
+    for (const c of group.cells) {
+      if (c.setup !== setup) continue
+      const p = group.family === 'scenario' ? c.behaviorPass : c.allChecksPass
+      if (p !== null) {
+        pass += p
+        total += c.n
+      }
+    }
+    return { setup, total, rate: total > 0 ? pass / total : -1 }
+  })
+  const withData = rates.filter((r) => r.total > 0)
+  if (withData.length === 0) return null
+  const maxRate = Math.max(...withData.map((r) => r.rate))
+  const winners = withData.filter((r) => r.rate === maxRate)
+  return winners.length === 1 ? winners[0].setup : null
+}
+
+export interface SetupFrame {
+  ref: string // "name@vN", '' when the execution never set a prompt ref (legacy/unannotated)
+  sha256?: string
+  scenario: string // chat family only; '' for extract (no scenario concept — see viewmodel.go)
+}
+
+// setupFrames lists the distinct (prompt ref, scenario) pairs behind one setup —
+// the strategy dialog's "frames included" list and the prompt-viewer's targets.
+// A routed strategy (e.g. lang-v4-routed = lang-canary-v4-kk + lang-canary-v4-ru)
+// returns TWO frames here even though it's ONE matrix column, by design.
+export function setupFrames(executions: VExecution[], family: Family, setup: string): SetupFrame[] {
+  const seen = new Set<string>()
+  const out: SetupFrame[] = []
+  for (const e of executions) {
+    if (e.family !== family || setupKey(e) !== setup) continue
+    const ref = e.variant.prompt?.name ? `${e.variant.prompt.name}@v${e.variant.prompt.version}` : ''
+    const scenario = e.subject.scenario || ''
+    const key = ref + '|' + scenario
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ ref, sha256: e.variant.prompt?.sha256, scenario })
+  }
+  return out
+}
+
+// execIsPass is the ONE per-execution pass/fail read — the family-appropriate
+// rollup, same keys buildCell already sums. Exported so components can render a
+// per-model pass/fail chip without re-deriving the rollup-key mapping themselves.
+export function execIsPass(e: VExecution): boolean {
+  const key = e.family === 'scenario' ? 'model_behavior_pass' : 'all_checks_pass'
+  return e.rollups.find((r) => r.key === key)?.pass ?? false
+}
+
+export interface TestCaseGroup {
+  id: string
+  message: string
+  execs: VExecution[]
+  passCount: number
+  total: number
+}
+
+export interface TestCaseFilter {
+  setup?: string // '' = any
+  model?: string // '' = any
+  status?: 'pass' | 'fail' | '' // '' = any
+  sort?: 'default' | 'failuresFirst'
+}
+
+// groupTestCases is the launch detail page's evidence list: every execution bucketed
+// by its test/case id (preserving first-appearance order — the same order the
+// scenario/case bank itself defines), each group carrying its own passCount/total so
+// a card can show "3/4 моделей прошли" without a component re-deriving it. Filtering
+// happens BEFORE grouping (a setup/model/status filter narrows which executions are
+// even considered), matching the matrix's own cell-click-to-filter behavior.
+export function groupTestCases(executions: VExecution[], filter: TestCaseFilter): TestCaseGroup[] {
+  let execs = executions
+  if (filter.setup) execs = execs.filter((e) => setupKey(e) === filter.setup)
+  if (filter.model) execs = execs.filter((e) => e.variant.model === filter.model)
+  if (filter.status === 'pass') execs = execs.filter((e) => execIsPass(e))
+  else if (filter.status === 'fail') execs = execs.filter((e) => !execIsPass(e))
+
+  const byID = new Map<string, TestCaseGroup>()
+  const order: string[] = []
+  for (const e of execs) {
+    const id = e.subject.test_id || e.subject.case_id || ''
+    if (!byID.has(id)) {
+      byID.set(id, { id, message: e.subject.message || e.subject.case_id || id, execs: [], passCount: 0, total: 0 })
+      order.push(id)
+    }
+    const g = byID.get(id)!
+    g.execs.push(e)
+    g.total++
+    if (execIsPass(e)) g.passCount++
+  }
+
+  const groups = order.map((id) => byID.get(id)!)
+  if (filter.sort === 'failuresFirst') {
+    // Stable partition (Array.prototype.sort is stable per spec): any-failure groups
+    // first, in their original relative order, then all-pass groups.
+    return [...groups].sort((a, b) => Number(a.passCount === a.total) - Number(b.passCount === b.total))
+  }
+  return groups
 }
 
 // deriveLaunchStatus is the display-time fallback for a launch with no
