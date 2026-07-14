@@ -5,6 +5,9 @@ description: >
   or negative — when escalating, not just the specific observed phrasings the
   must_not_contain blocklists happen to catch. Language rule untouched (V1's, unchanged)
   — same canary set as escalation-canary-v1 so the two are directly comparable.
+setup: escalation-v2
+prompt_ref: escalation-strengthened@v2
+experiment: escalation-bakeoff
 frame: frame.txt
 data: ../shop-current/data.yaml
 tests: ../escalation-canary-v1/tests.yaml

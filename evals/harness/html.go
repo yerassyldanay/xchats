@@ -63,6 +63,18 @@ func writeRunHTML(runDir string) error {
 		return err
 	}
 
+	// executions.json is the eval comparison UI's per-run data source — reuses the
+	// SAME loadRunExecutions this page's own data came from (buildRunPage already
+	// called it once; re-deriving here keeps writeRunHTML's signature simple, and run
+	// dirs are small enough that a second glob+read is not worth avoiding).
+	execs, err := loadRunExecutions(runDir)
+	if err != nil {
+		return err
+	}
+	if err := writeExecutionsJSON(runDir, execs); err != nil {
+		return err
+	}
+
 	// The cross-run index (step 6) is regenerated wholesale alongside every per-run
 	// page — best-effort, same as the per-run page itself must never fail an eval run.
 	writeRunsIndexBestEffort(filepath.Dir(runDir))

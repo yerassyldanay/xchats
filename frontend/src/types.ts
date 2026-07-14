@@ -239,3 +239,147 @@ export interface DraftView {
   materials: KbMaterial[]
   requests: KbRequest[]
 }
+
+// --- Eval comparison UI — mirrors evals/harness/viewmodel.go + export.go +
+// internal/provenance/launch.go's JSON shapes EXACTLY (field-for-field, same json
+// tags). Fetched as plain static files from /evals-data/ (frontend/nginx.conf),
+// never through the backend's envelope-wrapped API — see api/evals.ts.
+
+export type ScoreStatus = 'pass' | 'fail' | 'not_run' | 'error'
+
+export interface VScore {
+  name: string
+  status: ScoreStatus
+  detail?: string
+}
+export interface VRollup {
+  key: string
+  label: string
+  pass: boolean
+}
+export interface HistoryTurn {
+  role: 'client' | 'assistant'
+  text: string
+}
+export interface VSubject {
+  scenario?: string
+  test_id?: string
+  message?: string
+  history?: HistoryTurn[]
+  case_id?: string
+  input_ref?: string
+}
+export interface PromptRef {
+  name: string
+  version: number
+  sha256?: string
+}
+export interface VVariant {
+  model: string
+  setup?: string
+  experiment?: string
+  prompt?: PromptRef
+  preprocessor?: string
+}
+export interface VOutput {
+  raw?: string
+  parse_ok: boolean
+  reply_text?: string
+  parse_error?: string
+  error?: string
+  raw_has_reasoning_markers?: boolean
+  reasoning?: string
+}
+export interface VCost {
+  tokens_in: number
+  tokens_out: number
+  estimate_usd: number
+  basis: string // "measured_split" | "cached_replay_borrowed" | "cached_replay_unpriceable" | "unknown_pricing"
+}
+export interface VScenarioDetails {
+  injected_text?: string
+  unknown_tokens?: string[]
+  unknown_media?: string[]
+  invented_digits?: string[]
+  unit_issues?: string[]
+  forbidden_phrase?: string
+  blocked: boolean
+  leftover_braces: boolean
+  finish_reason?: string
+  truncated: boolean
+  reasoning_leak: boolean
+}
+export interface VExtractDetails {
+  content_kind?: string
+  summary?: string
+  extracted_text?: string
+  language?: string
+  visibility_suggestion?: string
+  media_role_hint?: string
+  relates_to_hint?: string
+}
+export interface VExecution {
+  family: 'scenario' | 'extract'
+  subject: VSubject
+  variant: VVariant
+  output: VOutput
+  scores: VScore[]
+  rollups: VRollup[]
+  cost: VCost
+  latency_ms?: number
+  scenario?: VScenarioDetails
+  extract?: VExtractDetails
+}
+export interface ExecutionsFile {
+  schema_version: number
+  run_id: string
+  launch_id?: string
+  generated_at: string
+  executions: VExecution[]
+}
+
+export interface RunSummary {
+  run_id: string
+  launch_id?: string
+  has_manifest: boolean
+  family: string // "scenario" | "extract" | "mixed" | "unknown"
+  models: string[]
+  prompts: string[]
+  started_at?: string
+  scenario_total: number
+  scenario_behavior_pass: number
+  scenario_contract_pass: number
+  extract_total: number
+  extract_checks_pass: number
+  has_index_html: boolean
+  load_error?: string
+}
+export interface RunsFile {
+  schema_version: number
+  generated_at: string
+  runs: RunSummary[]
+}
+
+export type LaunchMemberStatus = 'pending' | 'running' | 'complete' | 'failed'
+export type LaunchStatus = 'running' | 'complete' | 'failed' | 'partial'
+export interface LaunchCallCount {
+  scenario: number
+  extract: number
+  total: number
+}
+export interface LaunchMember {
+  family: string // "scenario" | "extract"
+  run_id?: string
+  status: LaunchMemberStatus
+  error?: string
+}
+export interface LaunchManifest {
+  schema_version: number
+  launch_id: string
+  status: LaunchStatus
+  planned_families: string[]
+  expected_calls: LaunchCallCount
+  members: LaunchMember[]
+  started_at: string
+  finished_at?: string
+}

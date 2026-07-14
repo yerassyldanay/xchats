@@ -73,7 +73,7 @@ func TestCmdExtract_WritesManifestSnapshotsAndInputs(t *testing.T) {
 
 	t.Setenv("OPENROUTER_API_KEY", "test-key")
 
-	err = cmdExtract([]string{
+	_, err = cmdExtract([]string{
 		"-cases", filepath.Join("extract", "cases.yaml"),
 		"-models", "test/model",
 		"-models-file", "models.yaml",

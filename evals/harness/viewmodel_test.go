@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"xchats-evals-harness/internal/provenance"
 )
 
@@ -286,4 +288,160 @@ func TestLoadRunExecutions_MissingFamilyIsFine(t *testing.T) {
 	if len(execs) != 0 {
 		t.Fatalf("want 0 executions for an empty run dir, got %d", len(execs))
 	}
+}
+
+// TestScenarioExecutionFromVerdict_ReplyTextExtractedFromRawOutput proves the eval
+// comparison UI's "LLM reply" column (Output.ReplyText) is populated from the SAME
+// parse RawOutput already went through in judgeOne — not left for the frontend to
+// re-implement JSON extraction — and stays empty (not an error) when RawOutput never
+// parsed, exactly like every other "not evaluated" field on this struct.
+func TestScenarioExecutionFromVerdict_ReplyTextExtractedFromRawOutput(t *testing.T) {
+	v := Verdict{
+		TestID:    "t1",
+		Model:     "test/model",
+		RawOutput: `{"reply_text":"Доставка 1500 тг.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+		ParseOK:   true,
+	}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
+	if exec.Output.ReplyText != "Доставка 1500 тг." {
+		t.Errorf("want ReplyText extracted from RawOutput, got %q", exec.Output.ReplyText)
+	}
+}
+
+func TestScenarioExecutionFromVerdict_ReplyTextEmptyOnParseFailure(t *testing.T) {
+	v := Verdict{TestID: "t1", Model: "test/model", RawOutput: "not json", ParseOK: false}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
+	if exec.Output.ReplyText != "" {
+		t.Errorf("want empty ReplyText when RawOutput doesn't parse, got %q", exec.Output.ReplyText)
+	}
+}
+
+// writeSnapshotScenario is the enrichScenarioExecutions test helper: hand-writes a
+// run dir's snapshots/<scenario>/{scenario.yaml,resolved_tests.json} exactly as
+// provenance.SnapshotScenario would, without needing a real render pipeline.
+func writeSnapshotScenario(t *testing.T, runDir, scenario string, sc ScenarioConfig, tests []TestCase) {
+	t.Helper()
+	sc.Name = scenario
+	snapDir := filepath.Join(runDir, "snapshots", scenario)
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scYAML, err := yaml.Marshal(sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, "scenario.yaml"), scYAML, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(snapDir, "resolved_tests.json"), ResolvedTests{Tests: tests}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestEnrichScenarioExecutions_SetupExperimentPromptRefAndHistory is the core proof
+// for the comparison-matrix metadata (review amendments 2 & 3): Setup/Experiment come
+// from the snapshotted scenario.yaml, Prompt is parsed from prompt_ref (not the
+// scenario name), and History is attached per-execution by matching TestID against
+// the snapshotted resolved_tests.json — none of which scenarioExecutionFromVerdict
+// alone could ever know from a bare Verdict.
+func TestEnrichScenarioExecutions_SetupExperimentPromptRefAndHistory(t *testing.T) {
+	runDir := t.TempDir()
+	writeSnapshotScenario(t, runDir, "lang-canary-v4-kk", ScenarioConfig{
+		Setup: "lang-v4-routed", PromptRef: "lang-kk@v4", Experiment: "lang-bakeoff",
+	}, []TestCase{
+		{ID: "t1", Message: "Жеткізу қанша тұрады?", History: []HistoryTurn{
+			{Role: "client", Text: "Сәлем!"}, {Role: "assistant", Text: "Сәлеметсіз бе!"},
+		}},
+		{ID: "t2", Message: "Рахмет"}, // no history
+	})
+
+	execs := []VExecution{
+		{Subject: VSubject{TestID: "t1"}, Variant: VVariant{Model: "m1"}},
+		{Subject: VSubject{TestID: "t2"}, Variant: VVariant{Model: "m1"}},
+	}
+	out := enrichScenarioExecutions(runDir, "lang-canary-v4-kk", "deadbeef", execs)
+
+	if out[0].Variant.Setup != "lang-v4-routed" {
+		t.Errorf("want Setup=lang-v4-routed, got %q", out[0].Variant.Setup)
+	}
+	if out[0].Variant.Experiment != "lang-bakeoff" {
+		t.Errorf("want Experiment=lang-bakeoff, got %q", out[0].Variant.Experiment)
+	}
+	if out[0].Variant.Prompt.Name != "lang-kk" || out[0].Variant.Prompt.Version != 4 {
+		t.Errorf("want Prompt=lang-kk@v4, got %+v", out[0].Variant.Prompt)
+	}
+	if out[0].Variant.Prompt.SHA256 != "deadbeef" {
+		t.Errorf("want the manifest-sourced SHA256 attached to Prompt, got %q", out[0].Variant.Prompt.SHA256)
+	}
+	if len(out[0].Subject.History) != 2 || out[0].Subject.History[0].Text != "Сәлем!" {
+		t.Errorf("want t1's history attached, got %+v", out[0].Subject.History)
+	}
+	if len(out[1].Subject.History) != 0 {
+		t.Errorf("want t2 (no history in its TestCase) to stay empty, got %+v", out[1].Subject.History)
+	}
+}
+
+// TestEnrichScenarioExecutions_RoutedStrategySharesOneSetupAcrossTwoPromptRefs is the
+// concrete V4-kk/V4-ru story ScenarioConfig.Setup's doc comment describes: two
+// DIFFERENT scenario dirs (two different prompt_refs, two different snapshots) must
+// still report the SAME Setup value, so the comparison matrix shows one "lang-v4-routed"
+// column, not two — while each execution still carries its OWN actual Prompt ref.
+func TestEnrichScenarioExecutions_RoutedStrategySharesOneSetupAcrossTwoPromptRefs(t *testing.T) {
+	runDir := t.TempDir()
+	writeSnapshotScenario(t, runDir, "lang-canary-v4-kk",
+		ScenarioConfig{Setup: "lang-v4-routed", PromptRef: "lang-kk@v4", Experiment: "lang-bakeoff"}, nil)
+	writeSnapshotScenario(t, runDir, "lang-canary-v4-ru",
+		ScenarioConfig{Setup: "lang-v4-routed", PromptRef: "lang-ru@v4", Experiment: "lang-bakeoff"}, nil)
+
+	kk := enrichScenarioExecutions(runDir, "lang-canary-v4-kk", "", []VExecution{{Variant: VVariant{Model: "m1"}}})
+	ru := enrichScenarioExecutions(runDir, "lang-canary-v4-ru", "", []VExecution{{Variant: VVariant{Model: "m1"}}})
+
+	if kk[0].Variant.Setup != ru[0].Variant.Setup {
+		t.Fatalf("want both scenarios to share one Setup column, got kk=%q ru=%q", kk[0].Variant.Setup, ru[0].Variant.Setup)
+	}
+	if kk[0].Variant.Prompt.Name == ru[0].Variant.Prompt.Name {
+		t.Errorf("want DIFFERENT prompt refs per execution (kk vs ru), both got %q", kk[0].Variant.Prompt.Name)
+	}
+}
+
+// TestEnrichScenarioExecutions_FallbacksForLegacyAndUnannotatedData proves nothing
+// regresses for data that predates this feature: no snapshot at all (a run from
+// before provenance snapshotting existed) leaves executions untouched; a snapshot
+// with an unannotated scenario.yaml (no setup/prompt_ref/experiment — e.g. shop-*)
+// falls back to the scenario name for both Setup and Prompt.Name, Experiment stays
+// empty (never auto-compared against anything).
+func TestEnrichScenarioExecutions_FallbacksForLegacyAndUnannotatedData(t *testing.T) {
+	execs := []VExecution{{Variant: VVariant{Model: "m1"}}}
+
+	t.Run("no snapshot at all (legacy run)", func(t *testing.T) {
+		runDir := t.TempDir()
+		out := enrichScenarioExecutions(runDir, "shop-current", "", execs)
+		if out[0].Variant.Setup != "" || out[0].Variant.Prompt.Name != "" {
+			t.Errorf("want untouched Variant with no snapshot, got %+v", out[0].Variant)
+		}
+	})
+
+	t.Run("snapshot present, scenario.yaml unannotated", func(t *testing.T) {
+		runDir := t.TempDir()
+		writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{}, nil)
+		out := enrichScenarioExecutions(runDir, "shop-current", "", execs)
+		if out[0].Variant.Setup != "shop-current" {
+			t.Errorf("want Setup to fall back to the scenario name, got %q", out[0].Variant.Setup)
+		}
+		if out[0].Variant.Prompt.Name != "shop-current" || out[0].Variant.Prompt.Version != 0 {
+			t.Errorf("want Prompt to fall back to (scenario name, v0), got %+v", out[0].Variant.Prompt)
+		}
+		if out[0].Variant.Experiment != "" {
+			t.Errorf("want Experiment to stay empty (never auto-compared), got %q", out[0].Variant.Experiment)
+		}
+	})
+
+	t.Run("malformed prompt_ref falls back rather than propagating garbage", func(t *testing.T) {
+		runDir := t.TempDir()
+		writeSnapshotScenario(t, runDir, "weird-scenario", ScenarioConfig{PromptRef: "not-a-valid-spec"}, nil)
+		out := enrichScenarioExecutions(runDir, "weird-scenario", "", execs)
+		if out[0].Variant.Prompt.Name != "weird-scenario" {
+			t.Errorf("want fallback to scenario name on an unparseable prompt_ref, got %+v", out[0].Variant.Prompt)
+		}
+	})
 }

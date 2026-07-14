@@ -8,6 +8,8 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --port 5173",
     "typecheck": "vue-tsc --noEmit",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "e2e:install": "playwright install chromium"
@@ -32,6 +34,7 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
+    "vitest": "^3.0.5",
     "vue-tsc": "^2.2.0"
   }
 }

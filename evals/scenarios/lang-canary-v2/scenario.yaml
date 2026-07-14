@@ -5,6 +5,9 @@ description: >
   comparator. If V2 alone reaches the Phase 3 gate, the architecture question (V3/V4) is
   moot; if it doesn't, that failure is itself evidence for the plan's hypothesis. Shares
   V1's canary test set and knowledge base — only the frame's language rule differs.
+setup: lang-v2
+prompt_ref: lang-strengthened@v2
+experiment: lang-bakeoff
 frame: frame.txt
 data: ../shop-current/data.yaml
 tests: ../lang-canary-v1/tests.yaml

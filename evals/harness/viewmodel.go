@@ -51,22 +51,51 @@ type VSubject struct {
 	Scenario string `json:"scenario,omitempty"`
 	TestID   string `json:"test_id,omitempty"`
 	Message  string `json:"message,omitempty"`
-	CaseID   string `json:"case_id,omitempty"`
-	InputRef string `json:"input_ref,omitempty"` // run-dir-relative path to the captured input, if any
+	// History is the prior conversation turns this test's message was asked against
+	// (TestCase.History) — populated by enrichScenarioExecutions from the run's own
+	// snapshotted resolved_tests.json, keyed by TestID. Empty for extraction
+	// executions and for scenario runs with no snapshot (legacy runs).
+	History  []HistoryTurn `json:"history,omitempty"`
+	CaseID   string        `json:"case_id,omitempty"`
+	InputRef string        `json:"input_ref,omitempty"` // run-dir-relative path to the captured input, if any
 }
 
-// VVariant identifies how it was tested. Prompt/Preprocessor are zero-valued for the
-// scenario family for now — scenario prompt variants are not modeled yet.
+// VVariant identifies how it was tested.
 type VVariant struct {
-	Model        string               `json:"model"`
+	Model string `json:"model"`
+	// Setup is the comparison-matrix COLUMN (ScenarioConfig.Setup for the scenario
+	// family, Prompt.String() for extraction — set directly in
+	// extractExecutionFromResult below) — see ScenarioConfig.Setup's doc comment for
+	// why this can differ from Prompt (a routed strategy spanning two frames is ONE
+	// setup, realized by two different prompt refs). Falls back to the scenario name
+	// for an unannotated/legacy scenario execution (enrichScenarioExecutions).
+	Setup string `json:"setup,omitempty"`
+	// Experiment is the comparison GROUP (ScenarioConfig.Experiment) — only
+	// executions sharing one Experiment value may be pooled into one matrix. Empty
+	// for extraction (that family's comparison group is implicit: one case's own
+	// prompt set) and for an unannotated/legacy scenario execution — empty means
+	// "never auto-compared against anything," the safer default.
+	Experiment string `json:"experiment,omitempty"`
+	// Prompt is the ACTUAL prompt/frame used. Scenario executions populate it from
+	// ScenarioConfig.PromptRef when set (enrichScenarioExecutions), falling back to
+	// Name=scenario name/Version=0 (this field's pre-existing zero-value display);
+	// extraction already always sets it (SHA256 included, from provenance.LoadPrompt).
 	Prompt       provenance.PromptRef `json:"prompt,omitempty"`
 	Preprocessor string               `json:"preprocessor,omitempty"`
 }
 
 // VOutput carries the raw model output and its parse state.
 type VOutput struct {
-	Raw        string `json:"raw,omitempty"`
-	ParseOK    bool   `json:"parse_ok"`
+	Raw     string `json:"raw,omitempty"`
+	ParseOK bool   `json:"parse_ok"`
+	// ReplyText is the model's OWN, pre-injection reply_text field, extracted from Raw
+	// when it parses — the "LLM reply" column in the comparison UI, shown alongside
+	// VScenarioDetails.InjectedText ("after injection") so the two read as visibly
+	// different things: what the model wrote vs. what a customer would actually
+	// receive once fact tokens are substituted. Empty when Raw doesn't parse, or for
+	// the extraction family (no reply_text field there — Extract.Summary/
+	// ExtractedText play that role instead).
+	ReplyText  string `json:"reply_text,omitempty"`
 	ParseError string `json:"parse_error,omitempty"`
 	Error      string `json:"error,omitempty"`
 	// RawHasReasoningMarkers flags Raw as containing a <think>/<thinking> tag marker —
@@ -207,6 +236,14 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Key: "model_behavior_pass", Label: "Model-behavior pass", Pass: v.ModelBehaviorPass},
 	}
 
+	// ReplyText re-parses RawOutput the same way judgeOne itself did — a second parse
+	// of already-validated JSON, not a new trust boundary; empty (not an error) when
+	// ParseOK is false, matching every other "not evaluated" field on this struct.
+	var replyText string
+	if obj, ok := parseModelJSON(v.RawOutput); ok {
+		replyText, _ = obj["reply_text"].(string)
+	}
+
 	return VExecution{
 		Family:  "scenario",
 		Subject: VSubject{Scenario: scenario, TestID: v.TestID, Message: v.Message},
@@ -214,6 +251,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		Output: VOutput{
 			Raw:                    v.RawOutput,
 			ParseOK:                v.ParseOK,
+			ReplyText:              replyText,
 			RawHasReasoningMarkers: evaltext.HasReasoningMarkers(v.RawOutput),
 			Reasoning:              v.Reasoning,
 		},
@@ -284,7 +322,11 @@ func extractExecutionFromResult(r extractRunResult) VExecution {
 	return VExecution{
 		Family:  "extract",
 		Subject: VSubject{CaseID: r.CaseID, InputRef: filepath.Join("inputs", r.CaseID+".jpg")},
-		Variant: VVariant{Model: r.Model, Prompt: r.Prompt, Preprocessor: r.Preprocessor},
+		// Setup = the prompt ref string ("extract@v1") — extraction's comparison
+		// column IS its prompt version, unlike chat's setup/prompt split (there is no
+		// routed-strategy concept here). Experiment deliberately left empty: every
+		// case's own prompt set is its own implicit comparison group.
+		Variant: VVariant{Model: r.Model, Setup: r.Prompt.String(), Prompt: r.Prompt, Preprocessor: r.Preprocessor},
 		Output: VOutput{
 			Raw:                    r.Raw,
 			ParseOK:                r.Parsed != nil,
@@ -302,23 +344,90 @@ func extractExecutionFromResult(r extractRunResult) VExecution {
 	}
 }
 
-// loadScenarioExecutions reads every *.judged.json in runDir and adapts each verdict.
-// Absent entirely for an extraction-only run — that's fine, the caller combines both.
+// loadScenarioExecutions reads every *.judged.json in runDir, adapts each verdict, and
+// enriches the result with this run's own snapshotted scenario metadata (setup,
+// experiment, prompt ref, conversation history — see enrichScenarioExecutions). Absent
+// entirely for an extraction-only run — that's fine, the caller combines both.
 func loadScenarioExecutions(runDir string) ([]VExecution, error) {
 	files, err := filepath.Glob(filepath.Join(runDir, "*.judged.json"))
 	if err != nil {
 		return nil, err
 	}
 	sort.Strings(files)
+
+	// promptSHAByScenario reads this run's OWN manifest (never the live,
+	// possibly-since-changed generated/prompt.txt) for the exact rendered-prompt hash
+	// per scenario — best-effort: a run from before provenance snapshotting existed,
+	// or a standalone `judge` with no manifest, simply attaches no SHA, not an error.
+	promptSHAByScenario := map[string]string{}
+	var manifest provenance.Manifest
+	if err := readJSON(filepath.Join(runDir, "manifest.json"), &manifest); err == nil {
+		for _, sref := range manifest.Scenarios {
+			promptSHAByScenario[sref.Scenario] = sref.PromptSHA256
+		}
+	}
+
 	var out []VExecution
 	for _, f := range files {
 		var jr JudgedRun
 		if err := readJSON(f, &jr); err != nil {
 			return nil, fmt.Errorf("read %s: %w", f, err)
 		}
-		out = append(out, scenarioExecutionsFromJudgedRun(jr)...)
+		execs := scenarioExecutionsFromJudgedRun(jr)
+		execs = enrichScenarioExecutions(runDir, jr.Scenario, promptSHAByScenario[jr.Scenario], execs)
+		out = append(out, execs...)
 	}
 	return out, nil
+}
+
+// enrichScenarioExecutions adds setup/experiment/prompt-ref/history context that
+// scenarioExecutionFromVerdict alone can't know (it only sees one Verdict, not the
+// scenario's own config or the customer's simulated conversation history) — sourced
+// entirely from this run's OWN snapshot (provenance.SnapshotDirFor), never the live,
+// possibly-since-changed scenarios/*/generated/. Legacy runs / scenarios with no
+// snapshot, or a scenario.yaml with no setup/prompt_ref annotation, fall back to the
+// scenario name for both Setup and Prompt.Name — the same value shown before this
+// enrichment existed, so nothing regresses for unannotated data.
+func enrichScenarioExecutions(runDir, scenario, promptSHA256 string, execs []VExecution) []VExecution {
+	snapDir, ok := provenance.SnapshotDirFor(runDir, scenario)
+	if !ok {
+		return execs // legacy run — nothing to enrich with
+	}
+	sc, err := loadScenario(snapDir) // scenario.yaml is one of the 5 files SnapshotScenario copies
+	if err != nil {
+		return execs // snapshot dir exists but scenario.yaml is unreadable — fail soft
+	}
+
+	setup := sc.Setup
+	if setup == "" {
+		setup = scenario
+	}
+	promptRef := provenance.PromptRef{Name: scenario} // fallback: unversioned, scenario-named
+	if sc.PromptRef != "" {
+		if name, version, perr := provenance.ParsePromptSpec(sc.PromptRef); perr == nil {
+			promptRef = provenance.PromptRef{Name: name, Version: version, SHA256: promptSHA256}
+		}
+	}
+
+	historyByTestID := map[string][]HistoryTurn{}
+	var resolved ResolvedTests
+	if err := readJSON(filepath.Join(snapDir, "resolved_tests.json"), &resolved); err == nil {
+		for _, tc := range resolved.Tests {
+			if len(tc.History) > 0 {
+				historyByTestID[tc.ID] = tc.History
+			}
+		}
+	}
+
+	for i := range execs {
+		execs[i].Variant.Setup = setup
+		execs[i].Variant.Experiment = sc.Experiment
+		execs[i].Variant.Prompt = promptRef
+		if h, ok := historyByTestID[execs[i].Subject.TestID]; ok {
+			execs[i].Subject.History = h
+		}
+	}
+	return execs
 }
 
 // loadExtractExecutions reads every extract_outputs/*.json in runDir and adapts each.

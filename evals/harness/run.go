@@ -12,7 +12,10 @@ import (
 	"xchats-evals-harness/internal/provenance"
 )
 
-func cmdRun(args []string) error {
+// cmdRun returns the fresh run's id on success (empty on any error) so a caller like
+// cmdLaunch can record it as that family's member without re-deriving it from
+// directory-listing side effects.
+func cmdRun(args []string) (runID string, err error) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	scenarioList := fs.String("scenario", "", "comma-separated scenario dirs, e.g. scenarios/shop-current,scenarios/shop-decisions-v1")
 	all := fs.Bool("all", false, "run every scenario under scenarios/")
@@ -21,21 +24,22 @@ func cmdRun(args []string) error {
 	modelsFilter := fs.String("models", "", "comma-separated model ids to run (default: every provider in models.yaml)")
 	expectCalls := fs.Int("expect-calls", 0, "if >0, hard-fail before spending anything unless the resolved (tests x models x repeats) call count matches exactly — a deliberate confirmation gate for billed runs")
 	repeats := fs.Int("repeats", 1, "run every (test, model) pair this many times (formalized sample sizes: 3 uncached repetitions for screening, 5 for a finalist's 15-intent bank) — requires -no-cache when >1")
+	launchID := fs.String("launch", "", "group this run under an existing launch id (see `harness launch`) — leave empty for a standalone run, which is then its own singleton launch")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return "", err
 	}
 	if err := validateRepeats(*repeats, *noCache); err != nil {
-		return err
+		return "", err
 	}
 	if os.Getenv("OPENROUTER_API_KEY") == "" {
-		return fmt.Errorf("run: OPENROUTER_API_KEY is not set (this makes real, billed model calls)")
+		return "", fmt.Errorf("run: OPENROUTER_API_KEY is not set (this makes real, billed model calls)")
 	}
 
 	var scenarioDirs []string
 	if *all {
 		matches, err := filepath.Glob(filepath.Join("scenarios", "*", "scenario.yaml"))
 		if err != nil {
-			return err
+			return "", err
 		}
 		for _, m := range matches {
 			scenarioDirs = append(scenarioDirs, filepath.Dir(m))
@@ -46,7 +50,7 @@ func cmdRun(args []string) error {
 		}
 	}
 	if len(scenarioDirs) == 0 {
-		return fmt.Errorf("run: pass -scenario <dir>[,<dir>...] or -all")
+		return "", fmt.Errorf("run: pass -scenario <dir>[,<dir>...] or -all")
 	}
 
 	// Pass 1 (free): render every scenario and resolve exactly how many (test x model)
@@ -56,24 +60,24 @@ func cmdRun(args []string) error {
 	// read of what pass 2 will do.
 	models, err := loadModels(*modelsPath)
 	if err != nil {
-		return fmt.Errorf("load %s: %w", *modelsPath, err)
+		return "", fmt.Errorf("load %s: %w", *modelsPath, err)
 	}
 	filteredModels, err := filterProviders(models, *modelsFilter)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if len(filteredModels) == 0 {
-		return fmt.Errorf("run: no models selected (empty models.yaml or -models matched nothing)")
+		return "", fmt.Errorf("run: no models selected (empty models.yaml or -models matched nothing)")
 	}
 
 	totalTests := 0
 	for _, sd := range scenarioDirs {
 		if err := renderScenario(sd, *modelsPath, *modelsFilter); err != nil {
-			return fmt.Errorf("render %s: %w", sd, err)
+			return "", fmt.Errorf("render %s: %w", sd, err)
 		}
 		var resolved ResolvedTests
 		if err := readJSON(filepath.Join(sd, "generated", "resolved_tests.json"), &resolved); err != nil {
-			return fmt.Errorf("read resolved tests for %s: %w", sd, err)
+			return "", fmt.Errorf("read resolved tests for %s: %w", sd, err)
 		}
 		totalTests += len(resolved.Tests)
 	}
@@ -86,68 +90,70 @@ func cmdRun(args []string) error {
 			len(scenarioDirs), totalTests, len(filteredModels), totalCalls)
 	}
 	if *expectCalls > 0 && totalCalls != *expectCalls {
-		return fmt.Errorf("run: resolved %d calls, -expect-calls wanted %d — refusing to spend anything; adjust -scenario/-models/-repeats/-expect-calls if this is intentional", totalCalls, *expectCalls)
+		return "", fmt.Errorf("run: resolved %d calls, -expect-calls wanted %d — refusing to spend anything; adjust -scenario/-models/-repeats/-expect-calls if this is intentional", totalCalls, *expectCalls)
 	}
 
-	runID, runDir, err := provenance.NewRunDir("runs")
+	var runDir string
+	runID, runDir, err = provenance.NewRunDir("runs")
 	if err != nil {
-		return err
+		return "", err
 	}
 	absRunDir, err := filepath.Abs(runDir)
 	if err != nil {
-		return err
+		return runID, err
 	}
 
 	manifest := provenance.NewManifest(runDir, runID, "scenario", "run", args)
 	manifest.PromptfooVersion = provenance.PromptfooVersion
 	manifest.ModelsPath = *modelsPath
+	manifest.LaunchID = *launchID
 	if sha, err := provenance.SnapshotFile(*modelsPath, filepath.Join(runDir, "snapshots", "models.yaml")); err != nil {
-		return fmt.Errorf("snapshot %s: %w", *modelsPath, err)
+		return runID, fmt.Errorf("snapshot %s: %w", *modelsPath, err)
 	} else {
 		manifest.ModelsSHA256 = sha
 	}
 	if err := provenance.WriteManifest(runDir, manifest); err != nil {
-		return err
+		return runID, err
 	}
 
 	// Pass 2: the actual (billed) work.
 	for _, sd := range scenarioDirs {
 		fmt.Printf("--- %s ---\n", sd)
 		if err := renderScenario(sd, *modelsPath, *modelsFilter); err != nil {
-			return fmt.Errorf("render %s: %w", sd, err)
+			return runID, fmt.Errorf("render %s: %w", sd, err)
 		}
 		scenario, err := loadScenario(sd)
 		if err != nil {
-			return err
+			return runID, err
 		}
 
 		ref, err := provenance.SnapshotScenario(sd, runDir, scenario.Name)
 		if err != nil {
-			return fmt.Errorf("snapshot %s: %w", scenario.Name, err)
+			return runID, fmt.Errorf("snapshot %s: %w", scenario.Name, err)
 		}
 
 		if err := runPromptfoo(sd, scenario.Name, absRunDir, *noCache, *repeats); err != nil {
-			return fmt.Errorf("promptfoo eval for %s: %w", scenario.Name, err)
+			return runID, fmt.Errorf("promptfoo eval for %s: %w", scenario.Name, err)
 		}
 		if sha, err := provenance.SHA256File(filepath.Join(runDir, scenario.Name+".results.json")); err == nil {
 			ref.ResultsSHA256 = sha
 		}
 		manifest.Scenarios = append(manifest.Scenarios, ref)
 		if err := provenance.WriteManifest(runDir, manifest); err != nil {
-			return err
+			return runID, err
 		}
 
 		if err := judgeScenario(sd, absRunDir, *modelsPath); err != nil {
-			return fmt.Errorf("judge %s: %w", scenario.Name, err)
+			return runID, fmt.Errorf("judge %s: %w", scenario.Name, err)
 		}
 	}
 
 	manifest.Finish()
 	if err := provenance.WriteManifest(runDir, manifest); err != nil {
-		return err
+		return runID, err
 	}
 
-	return reportRun(runDir, *modelsPath)
+	return runID, reportRun(runDir, *modelsPath)
 }
 
 func runPromptfoo(scenarioDir, scenarioName, absRunDir string, noCache bool, repeats int) error {

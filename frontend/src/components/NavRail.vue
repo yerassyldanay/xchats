@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { type Component } from 'vue'
+import { computed, onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
-import { Blocks, Inbox, Library, LogOut } from 'lucide-vue-next'
+import { Blocks, FlaskConical, Inbox, Library, LogOut } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
+import { evalsApi } from '../api/evals'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,12 +22,26 @@ const auth = useAuth()
 const router = useRouter()
 const route = useRoute()
 
-const nav: { name: string; icon: Component; label: string; match: string[] }[] = [
+// The "Эвалы" item only appears once /evals-data/ actually resolves — the local-dev
+// -only volume mount (deploy/docker-compose.override.yaml) is deliberately absent
+// from an internet-facing deploy, so that build should never show a nav item that
+// only ever 404s (review amendment 7). Probed once; a link that 404s later (mount
+// removed mid-session) is an edge case the "no data" state on the page itself covers.
+const evalsAvailable = ref(false)
+onMounted(async () => {
+  evalsAvailable.value = await evalsApi.probeAvailable()
+})
+
+const baseNav: { name: string; icon: Component; label: string; match: string[] }[] = [
   { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
   { name: 'accounts', icon: WhatsappIcon, label: 'Номера WhatsApp', match: ['accounts', 'instances'] },
   { name: 'playground', icon: Blocks, label: 'Конструктор', match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
 ]
+const nav = computed(() => [
+  ...baseNav,
+  ...(evalsAvailable.value ? [{ name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch'] }] : []),
+])
 function isActive(match: string[]) {
   return match.includes(route.name as string)
 }

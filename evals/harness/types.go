@@ -22,6 +22,32 @@ type ScenarioConfig struct {
 	// imitate a different catalog size (10 vs 20 vs 30 products) without duplicating the
 	// pool or hand-truncating it out of sync with the grading catalog.
 	Limits map[string]int `yaml:"limits"`
+
+	// Setup, PromptRef, and Experiment are the eval-comparison-UI metadata (all
+	// optional; every field empty is a legacy/unannotated scenario, handled by
+	// fallbacks in viewmodel.go's enrichScenarioExecutions — nothing regresses for
+	// data that predates these fields).
+	//
+	// Setup is the comparison COLUMN in the results matrix — a named strategy, not
+	// necessarily one prompt file. A routed strategy that dispatches to a Kazakh frame
+	// for Kazakh customers and a Russian frame for everyone else is ONE setup
+	// ("lang-v4-routed") realized by TWO scenario dirs (lang-canary-v4-kk and
+	// lang-canary-v4-ru), each with a DIFFERENT PromptRef — the matrix must show one
+	// column for the strategy, not silently split it into two. Falls back to the
+	// scenario's own Name when empty, so an unannotated scenario still gets its own
+	// column (today's behavior, unchanged).
+	Setup string `yaml:"setup,omitempty"`
+	// PromptRef identifies the ACTUAL frame file this scenario renders
+	// (ParsePromptSpec-valid: "<name>@v<N>", e.g. "lang-kk@v4") — distinct from Setup
+	// specifically so the drill-down can show "this execution used lang-kk@v4" even
+	// when its Setup column is the shared "lang-v4-routed". Falls back to the
+	// scenario's own Name (unversioned) when empty.
+	PromptRef string `yaml:"prompt_ref,omitempty"`
+	// Experiment is the comparison GROUP — only scenarios sharing one Experiment value
+	// may be pooled into the same matrix. Left empty, a scenario is never
+	// auto-compared against anything (safer default than accidentally merging an
+	// unrelated shop-scale run into a language bake-off's matrix).
+	Experiment string `yaml:"experiment,omitempty"`
 }
 
 // Data is data.yaml — the single source of truth a scenario's prompt is rendered from.
@@ -142,8 +168,8 @@ type TestCase struct {
 // prose (never a {{token}} — history represents what was ALREADY sent to the customer,
 // i.e. already-injected text), rendered verbatim into the prompt's history block.
 type HistoryTurn struct {
-	Role string `yaml:"role"` // "client" | "assistant"
-	Text string `yaml:"text"`
+	Role string `yaml:"role" json:"role"` // "client" | "assistant"
+	Text string `yaml:"text" json:"text"`
 }
 
 // MediaExpect describes what a test's answer must attach, checked against whichever of

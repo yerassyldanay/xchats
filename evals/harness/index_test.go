@@ -101,6 +101,43 @@ func TestWriteRunsIndex_EmptyRunsDir(t *testing.T) {
 	}
 }
 
+// TestBuildRunsIndexRows_SkipsLaunchesDir is the regression test for a real bug
+// caught by hand during manual verification: runs/launches/ (LaunchManifest files,
+// internal/provenance/launch.go) sits alongside real run dirs under the same
+// runsRoot, and buildRunsIndexRows must never treat it as a run — it has no
+// *.judged.json/extract_outputs/manifest.json of its own, so doing so produced a
+// bogus "launches" row with family="unknown" in the real runs.json output.
+func TestBuildRunsIndexRows_SkipsLaunchesDir(t *testing.T) {
+	runsRoot := t.TempDir()
+	realRun := filepath.Join(runsRoot, "2026-01-01_00-00-00-aaaa")
+	if err := os.MkdirAll(realRun, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jr := JudgedRun{Scenario: "s1", Verdicts: []Verdict{{TestID: "t1", Model: "m1", ParseOK: true}}}
+	if err := writeJSON(filepath.Join(realRun, "s1.judged.json"), jr); err != nil {
+		t.Fatal(err)
+	}
+
+	launchesDir := filepath.Join(runsRoot, "launches")
+	if err := os.MkdirAll(launchesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(launchesDir, "l1.json"), []byte(`{"launch_id":"l1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := buildRunsIndexRows(runsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want exactly 1 row (the real run, launches/ excluded), got %d: %+v", len(rows), rows)
+	}
+	if rows[0].RunID != "2026-01-01_00-00-00-aaaa" {
+		t.Errorf("want the real run's row, got %+v", rows[0])
+	}
+}
+
 // TestWriteRunHTML_AlsoRegeneratesRunsIndex proves the wiring: calling writeRunHTML
 // for one run must rebuild the SIBLING runs/index.html too (step 6's whole point —
 // "regenerated wholesale on every run/html invocation").

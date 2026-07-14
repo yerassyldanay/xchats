@@ -173,6 +173,71 @@ answers, applied to the prompt itself before any model ever sees it.
   html -run <dir>`. Gitignored (regenerate rather than diff in review). Works on runs
   from before this existed too, degrading gracefully — no manifest section, and a
   captured-input image shows as "input not captured" rather than a reconstructed guess.
+- **`executions.json` / `runs.json`** — the same data as `index.html`, as dedicated
+  schema-versioned JSON instead of a rendered page: the eval viewer's (see below) one
+  data source. Written alongside `index.html` by the same commands; gitignored the
+  same way.
+
+## Comparing prompts and models (the eval viewer)
+
+The fastest way to see "which prompt and model wins" is the Vue page baked into the
+product frontend, not `SUMMARY.md`/`index.html` directly:
+
+```bash
+make up                          # from the repo root — builds + starts postgres/backend/frontend
+cd evals && ./harness/harness export -all   # regenerate executions.json + runs.json once
+```
+
+Then open `http://localhost:8081/evals` (log in first) — a launches list, each with a
+decision matrix (model × prompt/setup, pass rate + contract rate + cost + latency per
+cell) and a drill-down into every individual test: the customer message and history, the
+exact prompt version used, the model's raw reply next to the post-injection
+customer-facing text, and every check. Both eval families (WhatsApp responses and media
+extraction) show up as tabs within one launch.
+
+How the data gets there: `harness html` (auto-run at the end of `run`/`extract`/`report`,
+best-effort) and `harness export` (fatal-on-error — the one command a **fresh clone**
+needs before the viewer has anything to show, since the derived `executions.json`/
+`runs.json` are gitignored, same status as `index.html`) both write the SAME dedicated,
+schema-versioned JSON next to each run's `SUMMARY.md`. `frontend/nginx.conf` serves
+`evals/runs/` read-only at `/evals-data/` — mounted only in
+`docker-compose.override.yaml` (**local dev only**: this is raw model output, prompts,
+and KB material with no auth in front of it; the base compose file never mounts it, so
+an internet-facing deploy of the same image simply 404s there).
+
+### Grouping multiple families into one launch
+
+```bash
+./harness/harness launch -all -expect-calls 323
+```
+
+Mints one `launch_id`, writes `runs/launches/<id>.json` **before any billed call**
+(status, planned families, the COMBINED scenario+extract pre-flight count —
+`-expect-calls` gates the total, same discipline as `run`'s own gate), then runs both
+families under that id so the viewer groups them as one launch instead of two unrelated
+runs. A launch where one family fails and the other completes reports `partial`, not a
+flat success/failure — read `runs/launches/<id>.json` to see which. Running `run`/
+`extract` directly (not through `launch`) is still fully supported; each is simply its
+own singleton launch unless you pass its own `-launch <id>` flag.
+
+### Comparison metadata (`setup` / `prompt_ref` / `experiment`)
+
+Chat scenarios can optionally declare, in `scenario.yaml`:
+
+```yaml
+setup: lang-v4-routed        # the comparison COLUMN — a strategy, not necessarily one file
+prompt_ref: lang-kk@v4       # the ACTUAL frame used (ParsePromptSpec syntax: name@vN)
+experiment: lang-bakeoff     # the comparison GROUP — only same-experiment setups pool into one matrix
+```
+
+`setup` and `prompt_ref` can differ on purpose: the V4 language-routed strategy is ONE
+setup (`lang-v4-routed`) realized by TWO scenario dirs (`lang-canary-v4-kk` /
+`lang-canary-v4-ru`), each with its own `prompt_ref` — the viewer's matrix shows one
+column for the strategy, while the drill-down for any individual execution still shows
+exactly which frame it actually used. All three fields are optional; an unannotated
+scenario (e.g. `shop-*`) falls back to its own name for both `setup` and `prompt_ref`,
+and to an empty `experiment` (never auto-compared against anything — the safer default).
+See `lang-canary-v1..v4-*` and `escalation-canary-v1/v2` for worked examples.
 
 ## Extraction eval (Eval 1: file -> extracted information)
 

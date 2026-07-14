@@ -5,6 +5,9 @@ description: >
   separate axis from the Phase 2.1 language bake-off on purpose (experiment doctrine:
   "keep prompt quality separate ... attributable") — this tests ONLY the escalation
   wording, language rule untouched.
+setup: escalation-v1
+prompt_ref: escalation-control@v1
+experiment: escalation-bakeoff
 frame: ../lang-canary-v1/frame.txt
 data: ../shop-current/data.yaml
 tests: tests.yaml

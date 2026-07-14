@@ -15,5 +15,20 @@ runs/*/*.html
 runs/index.html
 runs/*/worktree.diff
 
+# The eval comparison UI's derived JSON exports (evals/harness/export.go) — same
+# regenerable status as runs/*/*.html and runs/index.html just above: reproducible
+# from the committed *.judged.json/manifest.json via `harness export -all`, never a
+# second source of truth. runs/launches/*.json is DIFFERENT and deliberately NOT
+# listed here — see the comment there.
+runs/*/executions.json
+runs/runs.json
+
+# Hand-authored SAMPLE/DEMO fixtures (not real model output) used to preview the eval
+# comparison UI without spending anything — must never be mistaken for real results,
+# so they're excluded from the runs/ commit policy above outright, not just their
+# derived files. See evals/harness/runs/README (if present) or any run whose manifest
+# command field says "SAMPLE FIXTURE".
+runs/demo-*/
+
 harness/harness
 harness/xchats-evals-harness
