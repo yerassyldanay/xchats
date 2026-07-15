@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { RunSummary, VExecution } from '../types'
+import type { RunSummary, VContractRow, VExecution } from '../types'
 import {
   buildComparisonMatrices,
+  caseLevelRequirements,
   cellFor,
   costLabel,
   deriveLaunchStatus,
@@ -317,6 +318,34 @@ describe('groupTestCases', () => {
     ]
     const groups = groupTestCases(reordered, { sort: 'failuresFirst' })
     expect(groups.map((g) => g.id)).toEqual(['t1', 't2'])
+  })
+})
+
+describe('caseLevelRequirements', () => {
+  const requirementRow: VContractRow = { key: 'requires', label: 'Обязательные факты', kind: 'requirement', expected: 'a', actual: 'a', pass: true }
+  const safetyRow: VContractRow = { key: 'valid_json', label: 'Валидный JSON', kind: 'safety', expected: 'x', actual: 'x', pass: true }
+
+  it('reads requirement rows from the FIRST execution only, dropping safety rows', () => {
+    const e1: VExecution = { ...scenarioExec({ testID: 't1', setup: 'v1', model: 'm1' }), contract: [requirementRow, safetyRow] }
+    // A second execution with DIFFERENT contract rows proves the group-level summary
+    // never merges across executions — Expected is defined by the test itself, so
+    // sampling the first execution is enough (and per-model differences, if any ever
+    // appeared, must never leak into this case-level summary).
+    const e2: VExecution = { ...scenarioExec({ testID: 't1', setup: 'v1', model: 'm2' }), contract: [{ ...requirementRow, actual: 'b', pass: false }] }
+    const group = { id: 't1', message: 'Hello', total: 2, passCount: 1, execs: [e1, e2] }
+
+    const rows = caseLevelRequirements(group)
+    expect(rows.map((r) => r.key)).toEqual(['requires'])
+    expect(rows[0].actual).toBe('a') // from e1, not e2
+  })
+
+  it('returns empty when the first execution has no contract data (legacy run, no snapshot)', () => {
+    const group = { id: 't1', message: 'Hello', total: 1, passCount: 1, execs: [scenarioExec({ testID: 't1', setup: 'v1', model: 'm1' })] }
+    expect(caseLevelRequirements(group)).toEqual([])
+  })
+
+  it('returns empty for a group with no executions', () => {
+    expect(caseLevelRequirements({ id: 't1', message: '', total: 0, passCount: 0, execs: [] })).toEqual([])
   })
 })
 

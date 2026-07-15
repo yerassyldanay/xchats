@@ -1,4 +1,4 @@
-import type { RunSummary, VExecution } from '../types'
+import type { RunSummary, VContractRow, VExecution } from '../types'
 
 // Pure decision logic for the eval comparison UI — NO Vue imports, so it's testable
 // in plain Vitest and components stay thin views over it. Mirrors the family-specific
@@ -285,6 +285,18 @@ export interface TestCaseGroup {
   execs: VExecution[]
   passCount: number
   total: number
+}
+
+// caseLevelRequirements reads the Requirements panel's "what does this test/case
+// expect" rows once per group, from the FIRST execution — Expected is defined by the
+// test/case itself (evals/harness/viewmodel.go's scenarioRequirementRows/
+// extractRequirementRows), never by which model or prompt answered it, so every
+// execution in one group carries an identical Expected column and sampling the first
+// is never lossy. Only "requirement" rows (never "safety") — those vary per model
+// (e.g. valid_json can differ call to call) and belong in the per-execution table, not
+// a case-level summary.
+export function caseLevelRequirements(group: TestCaseGroup): VContractRow[] {
+  return (group.execs[0]?.contract ?? []).filter((r) => r.kind === 'requirement')
 }
 
 export interface TestCaseFilter {

@@ -82,11 +82,16 @@ const (
 // html/template view models, e.g. runPageData/scenarioGroup, which carry no stability
 // contract and are free to change shape purely for template-rendering convenience).
 type ExecutionsFile struct {
-	SchemaVersion int          `json:"schema_version"`
-	RunID         string       `json:"run_id"`
-	LaunchID      string       `json:"launch_id,omitempty"`
-	GeneratedAt   string       `json:"generated_at"`
-	Executions    []VExecution `json:"executions"`
+	SchemaVersion int    `json:"schema_version"`
+	RunID         string `json:"run_id"`
+	LaunchID      string `json:"launch_id,omitempty"`
+	GeneratedAt   string `json:"generated_at"`
+	// GitSHA is this run's own manifest.GitSHA (the evaluator's version at run time) —
+	// surfaced here so the Requirements panel can show "оценщик: <sha>" next to the
+	// universal safety checks without a second file fetch. Empty for a run whose
+	// manifest predates GitSHA capture or has none (never guessed).
+	GitSHA     string       `json:"git_sha,omitempty"`
+	Executions []VExecution `json:"executions"`
 }
 
 // writeExecutionsJSON writes runDir/executions.json from execs. Called alongside the
@@ -94,16 +99,18 @@ type ExecutionsFile struct {
 // otherwise-successful eval run) and by `harness export` (fatal-on-error, for a
 // deterministic post-clone regen — see cmdExport).
 func writeExecutionsJSON(runDir string, execs []VExecution) error {
-	launchID := ""
+	launchID, gitSHA := "", ""
 	var m provenance.Manifest
 	if err := readJSON(filepath.Join(runDir, "manifest.json"), &m); err == nil {
 		launchID = m.LaunchID
+		gitSHA = m.GitSHA
 	}
 	file := ExecutionsFile{
 		SchemaVersion: ExecutionsFileSchemaVersion,
 		RunID:         filepath.Base(runDir),
 		LaunchID:      launchID,
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+		GitSHA:        gitSHA,
 		Executions:    execs,
 	}
 	b, err := json.MarshalIndent(file, "", "  ")

@@ -257,6 +257,17 @@ export interface VRollup {
   label: string
   pass: boolean
 }
+// The Requirements-panel projection of scores/rollups above — same pass/fail, never a
+// re-grade, just Expected/Actual display strings. pass is null (not omitted) when a row
+// is not applicable to this test (e.g. no escalate: expectation) rather than a real fail.
+export interface VContractRow {
+  key: string
+  label: string
+  kind: 'requirement' | 'safety'
+  expected?: string
+  actual?: string
+  pass?: boolean | null
+}
 export interface HistoryTurn {
   role: 'client' | 'assistant'
   text: string
@@ -325,6 +336,7 @@ export interface VExecution {
   output: VOutput
   scores: VScore[] | null
   rollups: VRollup[]
+  contract?: VContractRow[]
   cost: VCost
   latency_ms?: number
   scenario?: VScenarioDetails
@@ -335,6 +347,7 @@ export interface ExecutionsFile {
   run_id: string
   launch_id?: string
   generated_at: string
+  git_sha?: string
   executions: VExecution[]
 }
 
