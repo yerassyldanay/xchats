@@ -397,3 +397,67 @@ export interface LaunchManifest {
   started_at: string
   finished_at?: string
 }
+
+// --- Requirements catalog (runs/catalog.json, evals/harness/catalog.go) ---
+// The ONE repository-state (not run-snapshot) export: every scenario's and extraction
+// case's requirements, resolved to real current values, for review BEFORE any billed
+// run. See evalCatalog.ts for the display logic built on these types.
+export interface CatalogFact {
+  token: string
+  value: string
+}
+export interface CatalogMedia {
+  name: string
+  kind: string
+  description: string
+}
+export interface CatalogMediaExpect {
+  any_of_groups?: string[]
+  any_of_refs?: string[]
+}
+// escalate is `boolean | undefined` on the wire (omitempty on a Go *bool omits only
+// when nil) — undefined means "not checked by this test", false is an ACTIVE
+// "must not escalate" requirement. Never collapse the two.
+export interface CatalogTestCase {
+  id: string
+  message: string
+  history?: HistoryTurn[]
+  requires?: string[][]
+  language?: string
+  escalate?: boolean
+  must_not_contain?: string[]
+  media?: CatalogMediaExpect
+  source: string
+}
+export interface CatalogScenario {
+  name: string
+  description?: string
+  setup?: string
+  prompt_ref?: string
+  experiment?: string
+  contract: string
+  facts_source: string
+  facts: CatalogFact[]
+  media_refs?: string[]
+  media_groups?: string[]
+  media?: CatalogMedia[]
+  tests: CatalogTestCase[]
+}
+export interface CatalogExtractCase {
+  id: string
+  image: string
+  fields?: Record<string, string>
+  text_contains_all?: string[]
+  identify_contains_all?: string[]
+  identify_contains_any?: string[]
+  allowed_numbers?: string[]
+  required_numbers?: string[]
+  forbid_currency?: boolean
+  source: string
+}
+export interface CatalogFile {
+  schema_version: number
+  generated_at: string
+  scenarios: CatalogScenario[]
+  extract_cases: CatalogExtractCase[]
+}

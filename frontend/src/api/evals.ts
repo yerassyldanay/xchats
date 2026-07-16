@@ -1,5 +1,5 @@
 import { log } from '../lib/logfmt'
-import type { ExecutionsFile, LaunchManifest, RunsFile } from '../types'
+import type { CatalogFile, ExecutionsFile, LaunchManifest, RunsFile } from '../types'
 
 // Eval comparison UI's data client — deliberately SEPARATE from api/client.ts:
 // these are plain static JSON files served directly by nginx from evals/runs/
@@ -40,6 +40,21 @@ export const evalsApi = {
   // drill-down's one data source).
   fetchExecutions(runID: string): Promise<ExecutionsFile> {
     return getJSON<ExecutionsFile>(`/${encodeURIComponent(runID)}/executions.json`)
+  },
+
+  // fetchCatalog loads the requirements catalog (runs/catalog.json) — every
+  // scenario's and extraction case's requirements, resolved to real values, as of
+  // the last `harness export -all`. Throws EvalsUnavailableError on a checkout that
+  // predates this export or hasn't run it yet.
+  fetchCatalog(): Promise<CatalogFile> {
+    return getJSON<CatalogFile>('/catalog.json')
+  },
+
+  // catalogImageURL builds the served path for one extraction case's PROCESSED
+  // image (catalog.go copies it through the same preprocess() pipeline a real
+  // extraction call uses, so what's shown is exactly what a model would receive).
+  catalogImageURL(image: string): string {
+    return `${PREFIX}/${image}`
   },
 
   // fetchLaunch loads a launch's own manifest (status, planned families, expected

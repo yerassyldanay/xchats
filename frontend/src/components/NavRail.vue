@@ -40,7 +40,7 @@ const baseNav: { name: string; icon: Component; label: string; match: string[] }
 ]
 const nav = computed(() => [
   ...baseNav,
-  ...(evalsAvailable.value ? [{ name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch'] }] : []),
+  ...(evalsAvailable.value ? [{ name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch', 'eval-catalog'] }] : []),
 ])
 function isActive(match: string[]) {
   return match.includes(route.name as string)

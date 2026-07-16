@@ -88,5 +88,9 @@ commands:
                                        unlike the best-effort auto-write at the end of
                                        run/extract/report/html; the one command a fresh
                                        clone needs before the eval comparison UI has
-                                       anything to show`)
+                                       anything to show. -all also (re)writes
+                                       runs/catalog.json — every scenario's and
+                                       extraction case's requirements, resolved to real
+                                       values, no billed calls; the read-only
+                                       requirements review at /evals/catalog`)
 }

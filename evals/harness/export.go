@@ -18,6 +18,9 @@ import (
 // needs before the eval comparison UI has anything to show: evals/runs/*.judged.json
 // (and manifest.json, the *.md reports) are committed, but the derived JSON exports
 // are gitignored (see evals/.gitignore) — regenerable, not a second source of truth.
+// The -all path also (re)writes runs/catalog.json — a repository-state snapshot of
+// every scenario's and extraction case's requirements (see catalog.go), independent of
+// any run.
 func cmdExport(args []string) error {
 	fs := flag.NewFlagSet("export", flag.ExitOnError)
 	runDir := fs.String("run", "", "regenerate this one run dir's executions.json + index.html (default with neither flag: -all)")
@@ -64,7 +67,10 @@ func cmdExport(args []string) error {
 	if err := writeRunsIndex("runs"); err != nil {
 		return fmt.Errorf("export: runs.json: %w", err)
 	}
-	fmt.Printf("export: regenerated %d run(s) + runs/runs.json\n", n)
+	if err := writeCatalogJSON("runs"); err != nil {
+		return fmt.Errorf("export: catalog.json: %w", err)
+	}
+	fmt.Printf("export: regenerated %d run(s) + runs/runs.json + runs/catalog.json\n", n)
 	return nil
 }
 

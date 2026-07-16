@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch, type Ref } from 'vue'
 import { ChevronLeft, ChevronRight, CircleAlert, FlaskConical, Search } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { evalsApi, EvalsUnavailableError } from '../api/evals'
+import EvalsNavTabs from '../components/evals/EvalsNavTabs.vue'
 import {
   filterLaunches,
   formatDuration,
@@ -115,6 +116,7 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
       <p class="text-sm text-muted-foreground mt-0.5 max-w-2xl">
         Автоматические проверки качества ответов ассистента. Откройте запуск, чтобы сравнить промпты и модели и разобрать каждый ответ.
       </p>
+      <EvalsNavTabs />
     </header>
 
     <div v-if="loading" class="flex-1 grid place-items-center p-8">

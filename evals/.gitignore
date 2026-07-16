@@ -23,6 +23,12 @@ runs/*/worktree.diff
 runs/*/executions.json
 runs/runs.json
 
+# The requirements-catalog export (evals/harness/catalog.go) — same regenerable status:
+# reproducible from committed scenario.yaml/data.yaml/tests.yaml/extract/cases.yaml via
+# `harness export -all`, including its copied/preprocessed case images.
+runs/catalog.json
+runs/catalog/
+
 # Hand-authored SAMPLE/DEMO fixtures (not real model output) used to preview the eval
 # comparison UI without spending anything — must never be mistaken for real results,
 # so they're excluded from the runs/ commit policy above outright, not just their
