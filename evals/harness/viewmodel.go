@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"xchats-evals-harness/internal/evaltext"
 	"xchats-evals-harness/internal/provenance"
 )
 
@@ -45,29 +46,104 @@ type VRollup struct {
 	Pass  bool   `json:"pass"`
 }
 
+// VContractRow is one line of the Requirements panel: what a test/case expected, what
+// the model actually produced, and whether that passed — the human-readable projection
+// of the same pass/fail already carried by Scores/Rollups above, NEVER a re-grade. Kind
+// distinguishes a test-specific requirement (varies per test/case, from its own
+// tests.yaml/cases.yaml declaration) from a universal safety check (same expectation on
+// every execution in the family, regardless of what the test itself declares). Pass is a
+// pointer so "not applicable to this test" (nil — e.g. a test with no `escalate:`
+// expectation) is distinguishable from a real fail.
+type VContractRow struct {
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Kind     string `json:"kind"` // "requirement" | "safety"
+	Expected string `json:"expected,omitempty"`
+	Actual   string `json:"actual,omitempty"`
+	Pass     *bool  `json:"pass,omitempty"`
+}
+
+func scorePassPtr(st ScoreStatus) *bool {
+	if st == ScoreNotRun {
+		return nil
+	}
+	b := st == ScorePass
+	return &b
+}
+
+func scoreByName(scores []VScore, name string) (VScore, bool) {
+	for _, s := range scores {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return VScore{}, false
+}
+
 // VSubject identifies what was tested. Only the fields relevant to Family are set.
 type VSubject struct {
 	Scenario string `json:"scenario,omitempty"`
 	TestID   string `json:"test_id,omitempty"`
 	Message  string `json:"message,omitempty"`
-	CaseID   string `json:"case_id,omitempty"`
-	InputRef string `json:"input_ref,omitempty"` // run-dir-relative path to the captured input, if any
+	// History is the prior conversation turns this test's message was asked against
+	// (TestCase.History) — populated by enrichScenarioExecutions from the run's own
+	// snapshotted resolved_tests.json, keyed by TestID. Empty for extraction
+	// executions and for scenario runs with no snapshot (legacy runs).
+	History  []HistoryTurn `json:"history,omitempty"`
+	CaseID   string        `json:"case_id,omitempty"`
+	InputRef string        `json:"input_ref,omitempty"` // run-dir-relative path to the captured input, if any
 }
 
-// VVariant identifies how it was tested. Prompt/Preprocessor are zero-valued for the
-// scenario family for now — scenario prompt variants are not modeled yet.
+// VVariant identifies how it was tested.
 type VVariant struct {
-	Model        string               `json:"model"`
+	Model string `json:"model"`
+	// Setup is the comparison-matrix COLUMN (ScenarioConfig.Setup for the scenario
+	// family, Prompt.String() for extraction — set directly in
+	// extractExecutionFromResult below) — see ScenarioConfig.Setup's doc comment for
+	// why this can differ from Prompt (a routed strategy spanning two frames is ONE
+	// setup, realized by two different prompt refs). Falls back to the scenario name
+	// for an unannotated/legacy scenario execution (enrichScenarioExecutions).
+	Setup string `json:"setup,omitempty"`
+	// Experiment is the comparison GROUP (ScenarioConfig.Experiment) — only
+	// executions sharing one Experiment value may be pooled into one matrix. Empty
+	// for extraction (that family's comparison group is implicit: one case's own
+	// prompt set) and for an unannotated/legacy scenario execution — empty means
+	// "never auto-compared against anything," the safer default.
+	Experiment string `json:"experiment,omitempty"`
+	// Prompt is the ACTUAL prompt/frame used. Scenario executions populate it from
+	// ScenarioConfig.PromptRef when set (enrichScenarioExecutions), falling back to
+	// Name=scenario name/Version=0 (this field's pre-existing zero-value display);
+	// extraction already always sets it (SHA256 included, from provenance.LoadPrompt).
 	Prompt       provenance.PromptRef `json:"prompt,omitempty"`
 	Preprocessor string               `json:"preprocessor,omitempty"`
 }
 
 // VOutput carries the raw model output and its parse state.
 type VOutput struct {
-	Raw        string `json:"raw,omitempty"`
-	ParseOK    bool   `json:"parse_ok"`
+	Raw     string `json:"raw,omitempty"`
+	ParseOK bool   `json:"parse_ok"`
+	// ReplyText is the model's OWN, pre-injection reply_text field, extracted from Raw
+	// when it parses — the "LLM reply" column in the comparison UI, shown alongside
+	// VScenarioDetails.InjectedText ("after injection") so the two read as visibly
+	// different things: what the model wrote vs. what a customer would actually
+	// receive once fact tokens are substituted. Empty when Raw doesn't parse, or for
+	// the extraction family (no reply_text field there — Extract.Summary/
+	// ExtractedText play that role instead).
+	ReplyText  string `json:"reply_text,omitempty"`
 	ParseError string `json:"parse_error,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// RawHasReasoningMarkers flags Raw as containing a <think>/<thinking> tag marker —
+	// a visibility flag for the HTML viewer's raw-output panel, NOT a redaction: Raw's
+	// whole job is showing the unfiltered response for debugging in what is an internal
+	// eval-reviewer artifact, not a real customer-facing surface (the hard gate against
+	// reasoning leaking into an actual customer-facing field is judge.go's
+	// Verdict.ReasoningLeak / VScenarioDetails.ReasoningLeak, which scans reply_text).
+	RawHasReasoningMarkers bool `json:"raw_has_reasoning_markers,omitempty"`
+	// Reasoning is the model's separate reasoning/thinking content, captured
+	// independently of Raw (never concatenated into it) — surfaced here so a value
+	// that's actually captured (Verdict.Reasoning / extractRunResult.Reasoning) isn't
+	// silently invisible to every downstream report/viewer, same debug-only status as Raw.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // VCost mirrors the existing cost-basis discipline: EstimateUSD must never be read
@@ -91,6 +167,9 @@ type VScenarioDetails struct {
 	ForbiddenPhrase string   `json:"forbidden_phrase,omitempty"`
 	Blocked         bool     `json:"blocked"`
 	LeftoverBraces  bool     `json:"leftover_braces"`
+	FinishReason    string   `json:"finish_reason,omitempty"`
+	Truncated       bool     `json:"truncated"`
+	ReasoningLeak   bool     `json:"reasoning_leak"`
 }
 
 // VExtractDetails is the parsed ExtractionResult, carried alongside Scores so the
@@ -117,8 +196,16 @@ type VExecution struct {
 	Output    VOutput   `json:"output"`
 	Scores    []VScore  `json:"scores"`
 	Rollups   []VRollup `json:"rollups"`
-	Cost      VCost     `json:"cost"`
-	LatencyMs int       `json:"latency_ms,omitempty"`
+	// Contract is the Requirements-panel projection of Scores/Rollups above — see
+	// VContractRow's doc comment. Populated in two passes: family-general safety rows
+	// at build time (scenarioExecutionFromVerdict / extractExecutionFromResult, always
+	// available, no snapshot needed), then test/case-specific requirement rows
+	// PREPENDED by the enrich step once this run's own snapshot is loaded
+	// (enrichScenarioExecutions / enrichExtractExecutions) — absent entirely only when
+	// no snapshot exists at all (a run from before snapshotting existed).
+	Contract  []VContractRow `json:"contract,omitempty"`
+	Cost      VCost          `json:"cost"`
+	LatencyMs int            `json:"latency_ms,omitempty"`
 
 	Scenario *VScenarioDetails `json:"scenario,omitempty"`
 	Extract  *VExtractDetails  `json:"extract,omitempty"`
@@ -151,11 +238,25 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		parseDetail = ""
 	}
 
+	// finish_reason_ok is evaluated INDEPENDENTLY of parsing (row.Response.FinishReason
+	// is available regardless of whether the model's content parsed as JSON — and
+	// truncation is often the very CAUSE of a parse failure), so it deliberately does
+	// NOT go through the evaluated() gate above: routing it through evaluated() would
+	// wrongly report not_run on every parse failure, exactly the "reported not_run as
+	// if never evaluated" bug class evaluated() itself exists to prevent for every OTHER
+	// check. Follows parse_ok's own direct-status pattern instead.
+	finishReasonStatus := ScorePass
+	if v.Truncated {
+		finishReasonStatus = ScoreFail
+	}
+
 	scores := []VScore{
 		{Name: "parse_ok", Status: parseStatus, Detail: parseDetail},
+		{Name: "finish_reason_ok", Status: finishReasonStatus, Detail: v.FinishReason},
 		{Name: "contract_fields", Status: evaluated(v.ContractFields)},
 		{Name: "no_unknown_tokens", Status: evaluated(len(v.UnknownTokens) == 0), Detail: strings.Join(v.UnknownTokens, ", ")},
 		{Name: "no_leftover_braces", Status: evaluated(!v.LeftoverBraces)},
+		{Name: "no_reasoning_leak", Status: evaluated(!v.ReasoningLeak)},
 		{Name: "requires", Status: evaluated(v.RequiresPass)},
 		{Name: "media", Status: evaluated(v.MediaPass)},
 		{Name: "escalate", Status: evaluated(v.EscalatePass)},
@@ -177,16 +278,72 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Key: "model_behavior_pass", Label: "Model-behavior pass", Pass: v.ModelBehaviorPass},
 	}
 
+	// Universal safety rows — same expectation on every scenario execution regardless
+	// of what the test itself declares, so built here (unconditionally) rather than in
+	// the snapshot-dependent enrich step. Values are read back off `scores` above, not
+	// recomputed, so this can never disagree with the Scores list sitting right next to it.
+	placeholdersOK, _ := scoreByName(scores, "no_unknown_tokens")
+	bracesOK, _ := scoreByName(scores, "no_leftover_braces")
+	placeholderActual := "ок"
+	if placeholdersOK.Detail != "" {
+		placeholderActual = "неизвестные токены: " + placeholdersOK.Detail
+	} else if bracesOK.Status == ScoreFail {
+		placeholderActual = "в ответе осталась фигурная скобка после подстановки"
+	}
+	var placeholderPass *bool
+	if placeholdersOK.Status != ScoreNotRun {
+		b := placeholdersOK.Status == ScorePass && bracesOK.Status == ScorePass
+		placeholderPass = &b
+	}
+	jsonActual := "разобран корректно"
+	if !v.ParseOK {
+		jsonActual = v.Reason
+	}
+	mediaOK, _ := scoreByName(scores, "no_unknown_media")
+	mediaActual := "ок"
+	if mediaOK.Detail != "" {
+		mediaActual = "неизвестные ссылки: " + mediaOK.Detail
+	}
+	digitsOK, _ := scoreByName(scores, "no_invented_digits")
+	digitsActual := "не найдены"
+	if digitsOK.Detail != "" {
+		digitsActual = digitsOK.Detail
+	}
+	contractFieldsOK, _ := scoreByName(scores, "contract_fields")
+	contractFieldsActual := "ок"
+	if contractFieldsOK.Status == ScoreFail {
+		contractFieldsActual = "структура ответа не соответствует контракту"
+	}
+	safetyContract := []VContractRow{
+		{Key: "valid_json", Label: "Валидный JSON", Kind: "safety", Expected: "корректный JSON-объект", Actual: jsonActual, Pass: scorePassPtr(parseStatus)},
+		{Key: "contract_fields", Label: "Поля контракта", Kind: "safety", Expected: "все обязательные поля присутствуют", Actual: contractFieldsActual, Pass: scorePassPtr(contractFieldsOK.Status)},
+		{Key: "no_unresolved_placeholders", Label: "Без неразрешённых плейсхолдеров", Kind: "safety", Expected: "нет неизвестных токенов, ответ не заблокирован", Actual: placeholderActual, Pass: placeholderPass},
+		{Key: "no_unknown_media", Label: "Валидные ссылки на медиа", Kind: "safety", Expected: "все ссылки существуют в каталоге", Actual: mediaActual, Pass: scorePassPtr(mediaOK.Status)},
+		{Key: "no_invented_digits", Label: "Без выдуманных чисел", Kind: "safety", Expected: "нет чисел вне ответа модели", Actual: digitsActual, Pass: scorePassPtr(digitsOK.Status)},
+	}
+
+	// ReplyText re-parses RawOutput the same way judgeOne itself did — a second parse
+	// of already-validated JSON, not a new trust boundary; empty (not an error) when
+	// ParseOK is false, matching every other "not evaluated" field on this struct.
+	var replyText string
+	if obj, ok := parseModelJSON(v.RawOutput); ok {
+		replyText, _ = obj["reply_text"].(string)
+	}
+
 	return VExecution{
 		Family:  "scenario",
 		Subject: VSubject{Scenario: scenario, TestID: v.TestID, Message: v.Message},
 		Variant: VVariant{Model: v.Model},
 		Output: VOutput{
-			Raw:     v.RawOutput,
-			ParseOK: v.ParseOK,
+			Raw:                    v.RawOutput,
+			ParseOK:                v.ParseOK,
+			ReplyText:              replyText,
+			RawHasReasoningMarkers: evaltext.HasReasoningMarkers(v.RawOutput),
+			Reasoning:              v.Reasoning,
 		},
 		Scores:    scores,
 		Rollups:   rollups,
+		Contract:  safetyContract,
 		Cost:      VCost{TokensIn: v.TokensIn, TokensOut: v.TokensOut, EstimateUSD: v.CostEstimateUSD, Basis: v.CostBasis},
 		LatencyMs: v.LatencyMs,
 		Scenario: &VScenarioDetails{
@@ -198,6 +355,9 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 			ForbiddenPhrase: v.ForbiddenPhrase,
 			Blocked:         v.Blocked,
 			LeftoverBraces:  v.LeftoverBraces,
+			FinishReason:    v.FinishReason,
+			Truncated:       v.Truncated,
+			ReasoningLeak:   v.ReasoningLeak,
 		},
 	}
 }
@@ -246,42 +406,444 @@ func extractExecutionFromResult(r extractRunResult) VExecution {
 		}
 	}
 
+	// Universal safety rows — same expectation on every extraction execution regardless
+	// of what the case itself declares, so built here unconditionally (works even when
+	// Parsed is nil: an error/parse-failure execution still gets an honest "Валидный
+	// JSON" fail row instead of no Requirements panel at all). no_reasoning_leak
+	// always runs per extract_checks.go (never opt-in), so it's read straight off
+	// Checks here rather than duplicated by the case-specific row builder below.
+	jsonActual := "разобран корректно"
+	jsonPass := r.Parsed != nil
+	if r.Error != "" {
+		jsonActual = "ошибка вызова: " + r.Error
+	} else if r.ParseError != "" {
+		jsonActual = "не разобран: " + r.ParseError
+	}
+	safetyContract := []VContractRow{
+		{Key: "valid_json", Label: "Валидный JSON", Kind: "safety", Expected: "корректный JSON-объект", Actual: jsonActual, Pass: &jsonPass},
+	}
+	if leak, ok := scoreByName(toVScores(r.Checks), "no_reasoning_leak"); ok {
+		safetyContract = append(safetyContract, VContractRow{
+			Key: "no_reasoning_leak", Label: "Без утечки рассуждений", Kind: "safety",
+			Expected: "нет <think>/<thinking> меток в тексте", Actual: leakActual(leak), Pass: scorePassPtr(leak.Status),
+		})
+	}
+
 	return VExecution{
 		Family:  "extract",
 		Subject: VSubject{CaseID: r.CaseID, InputRef: filepath.Join("inputs", r.CaseID+".jpg")},
-		Variant: VVariant{Model: r.Model, Prompt: r.Prompt, Preprocessor: r.Preprocessor},
+		// Setup = the prompt ref string ("extract@v1") — extraction's comparison
+		// column IS its prompt version, unlike chat's setup/prompt split (there is no
+		// routed-strategy concept here). Experiment deliberately left empty: every
+		// case's own prompt set is its own implicit comparison group.
+		Variant: VVariant{Model: r.Model, Setup: r.Prompt.String(), Prompt: r.Prompt, Preprocessor: r.Preprocessor},
 		Output: VOutput{
-			Raw:        r.Raw,
-			ParseOK:    r.Parsed != nil,
-			ParseError: r.ParseError,
-			Error:      r.Error,
+			Raw:                    r.Raw,
+			ParseOK:                r.Parsed != nil,
+			ParseError:             r.ParseError,
+			Error:                  r.Error,
+			RawHasReasoningMarkers: evaltext.HasReasoningMarkers(r.Raw),
+			Reasoning:              r.Reasoning,
 		},
 		Scores: scores,
 		Rollups: []VRollup{
 			{Key: "all_checks_pass", Label: "All checks pass", Pass: allChecksPass(r.Checks)},
 		},
-		Cost:    VCost{TokensIn: r.Usage.PromptTokens, TokensOut: r.Usage.CompletionTokens, EstimateUSD: r.Cost, Basis: r.CostBasis},
-		Extract: extractDetails,
+		Contract: safetyContract,
+		Cost:     VCost{TokensIn: r.Usage.PromptTokens, TokensOut: r.Usage.CompletionTokens, EstimateUSD: r.Cost, Basis: r.CostBasis},
+		Extract:  extractDetails,
 	}
 }
 
-// loadScenarioExecutions reads every *.judged.json in runDir and adapts each verdict.
-// Absent entirely for an extraction-only run — that's fine, the caller combines both.
+// toVScores adapts extract_checks.go's CheckResult list to VScore, matching what
+// scores above already computed — a tiny local helper so safety-row lookups can reuse
+// scoreByName instead of a bespoke linear scan for one name.
+func toVScores(checks []CheckResult) []VScore {
+	out := make([]VScore, len(checks))
+	for i, c := range checks {
+		st := ScoreFail
+		if c.Pass {
+			st = ScorePass
+		}
+		out[i] = VScore{Name: c.Name, Status: st, Detail: c.Detail}
+	}
+	return out
+}
+
+func leakActual(s VScore) string {
+	if s.Status == ScorePass {
+		return "не найдено"
+	}
+	return s.Detail
+}
+
+// extractFieldLabel gives a Russian label to each extract_checks.go "field:<key>"
+// check name — key must stay in sync with fieldValue's own switch (extract_checks.go).
+func extractFieldLabel(key string) string {
+	switch key {
+	case "content_kind":
+		return "Тип контента"
+	case "summary":
+		return "Описание"
+	case "extracted_text":
+		return "Извлечённый текст"
+	case "language":
+		return "Язык"
+	case "visibility_suggestion":
+		return "Видимость"
+	case "media_role_hint":
+		return "Роль медиа"
+	case "relates_to_hint":
+		return "Связано с"
+	default:
+		return key
+	}
+}
+
+// extractFieldActual mirrors fieldValue (extract_checks.go) but reads off the already-
+// adapted VExtractDetails instead of the original ExtractionResult — same field set,
+// display-only.
+func extractFieldActual(ext *VExtractDetails, key string) string {
+	if ext == nil {
+		return "—"
+	}
+	switch key {
+	case "content_kind":
+		return ext.ContentKind
+	case "summary":
+		return ext.Summary
+	case "extracted_text":
+		return ext.ExtractedText
+	case "language":
+		return ext.Language
+	case "visibility_suggestion":
+		return ext.VisibilitySuggestion
+	case "media_role_hint":
+		return ext.MediaRoleHint
+	case "relates_to_hint":
+		return ext.RelatesToHint
+	default:
+		return "—"
+	}
+}
+
+func sortedFieldKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// extractListRow builds one row for a "does the text contain every/any of these
+// phrases" check — Detail already carries the exact miss/hit list runExtractChecks
+// computed (extract_checks.go's containsAllCheck/containsAnyCheck), reused verbatim as
+// Actual on failure so this can never disagree with the persisted verdict.
+func extractListRow(key, label string, scores []VScore, wants []string, passActual string) VContractRow {
+	score, _ := scoreByName(scores, key)
+	actual := passActual
+	if score.Detail != "" {
+		actual = score.Detail
+	}
+	return VContractRow{
+		Key: key, Label: label, Kind: "requirement",
+		Expected: strings.Join(wants, ", "), Actual: actual, Pass: scorePassPtr(score.Status),
+	}
+}
+
+// extractRequirementRows builds the case-specific Requirements-panel rows for one
+// extraction execution — one row per check the CASE ITSELF declares
+// (extract/cases.yaml), skipped entirely when the case doesn't declare it (matching
+// runExtractChecks's own "only run what's declared" gating, except no_invented_numbers
+// which — like in runExtractChecks — always runs). Pass values are read back from
+// exec's own already-computed Scores, never recomputed.
+func extractRequirementRows(exec VExecution, c ExtractCase) []VContractRow {
+	var rows []VContractRow
+	for _, key := range sortedFieldKeys(c.Fields) {
+		name := "field:" + key
+		score, ok := scoreByName(exec.Scores, name)
+		if !ok {
+			continue
+		}
+		rows = append(rows, VContractRow{
+			Key: name, Label: extractFieldLabel(key), Kind: "requirement",
+			Expected: c.Fields[key], Actual: extractFieldActual(exec.Extract, key), Pass: scorePassPtr(score.Status),
+		})
+	}
+	if len(c.TextContainsAll) > 0 {
+		rows = append(rows, extractListRow("text_contains_all", "Видимый текст (обязательные фразы)", exec.Scores, c.TextContainsAll, "все найдены"))
+	}
+	if len(c.IdentifyContainsAll) > 0 {
+		rows = append(rows, extractListRow("identify_contains_all", "Описание/тема (обязательно)", exec.Scores, c.IdentifyContainsAll, "все найдены"))
+	}
+	if len(c.IdentifyContainsAny) > 0 {
+		rows = append(rows, extractListRow("identify_contains_any", "Описание/тема (любое из)", exec.Scores, c.IdentifyContainsAny, "найдено"))
+	}
+	// Expected is genuinely case-specific (the allowed list), so — despite always
+	// running, same as no_reasoning_leak above — this is a requirement row, not a
+	// family-general safety row.
+	if score, ok := scoreByName(exec.Scores, "no_invented_numbers"); ok {
+		expected := "числа не ожидаются"
+		if len(c.AllowedNumbers) > 0 {
+			expected = strings.Join(c.AllowedNumbers, ", ")
+		}
+		actual := "нет посторонних чисел"
+		if score.Detail != "" {
+			actual = score.Detail
+		}
+		rows = append(rows, VContractRow{
+			Key: "no_invented_numbers", Label: "Разрешённые числа", Kind: "requirement",
+			Expected: expected, Actual: actual, Pass: scorePassPtr(score.Status),
+		})
+	}
+	if len(c.RequiredNumbers) > 0 {
+		rows = append(rows, extractListRow("required_numbers", "Обязательные числа", exec.Scores, c.RequiredNumbers, "все найдены"))
+	}
+	if c.ForbidCurrency {
+		if score, ok := scoreByName(exec.Scores, "forbid_currency"); ok {
+			actual := "нет"
+			if score.Detail != "" {
+				actual = score.Detail
+			}
+			rows = append(rows, VContractRow{
+				Key: "forbid_currency", Label: "Запрет валюты", Kind: "requirement",
+				Expected: "упоминаний валюты быть не должно", Actual: actual, Pass: scorePassPtr(score.Status),
+			})
+		}
+	}
+	return rows
+}
+
+// enrichExtractExecutions adds case-specific Requirements-panel rows sourced entirely
+// from this run's OWN snapshotted extract_cases.yaml (never the live, possibly-since-
+// edited evals/extract/cases.yaml) — same "read the run's own snapshot" discipline as
+// enrichScenarioExecutions. A run from before case-snapshotting existed, or whose
+// snapshot fails to load, keeps only the safety rows extractExecutionFromResult already
+// attached — not an error, just fewer rows than a fully-snapshotted run.
+func enrichExtractExecutions(runDir string, execs []VExecution) []VExecution {
+	cf, err := loadExtractCases(filepath.Join(runDir, "snapshots", "extract_cases.yaml"))
+	if err != nil {
+		return execs
+	}
+	caseByID := map[string]ExtractCase{}
+	for _, c := range cf.Cases {
+		caseByID[c.ID] = c
+	}
+	for i := range execs {
+		if c, ok := caseByID[execs[i].Subject.CaseID]; ok {
+			// Requirement rows go BEFORE the safety rows already attached — same
+			// "test-specific rows + universal safety rows" order as the scenario side.
+			execs[i].Contract = append(extractRequirementRows(execs[i], c), execs[i].Contract...)
+		}
+	}
+	return execs
+}
+
+// loadScenarioExecutions reads every *.judged.json in runDir, adapts each verdict, and
+// enriches the result with this run's own snapshotted scenario metadata (setup,
+// experiment, prompt ref, conversation history — see enrichScenarioExecutions). Absent
+// entirely for an extraction-only run — that's fine, the caller combines both.
 func loadScenarioExecutions(runDir string) ([]VExecution, error) {
 	files, err := filepath.Glob(filepath.Join(runDir, "*.judged.json"))
 	if err != nil {
 		return nil, err
 	}
 	sort.Strings(files)
+
+	// promptSHAByScenario reads this run's OWN manifest (never the live,
+	// possibly-since-changed generated/prompt.txt) for the exact rendered-prompt hash
+	// per scenario — best-effort: a run from before provenance snapshotting existed,
+	// or a standalone `judge` with no manifest, simply attaches no SHA, not an error.
+	promptSHAByScenario := map[string]string{}
+	var manifest provenance.Manifest
+	if err := readJSON(filepath.Join(runDir, "manifest.json"), &manifest); err == nil {
+		for _, sref := range manifest.Scenarios {
+			promptSHAByScenario[sref.Scenario] = sref.PromptSHA256
+		}
+	}
+
 	var out []VExecution
 	for _, f := range files {
 		var jr JudgedRun
 		if err := readJSON(f, &jr); err != nil {
 			return nil, fmt.Errorf("read %s: %w", f, err)
 		}
-		out = append(out, scenarioExecutionsFromJudgedRun(jr)...)
+		execs := scenarioExecutionsFromJudgedRun(jr)
+		execs = enrichScenarioExecutions(runDir, jr.Scenario, promptSHAByScenario[jr.Scenario], execs)
+		out = append(out, execs...)
 	}
 	return out, nil
+}
+
+// enrichScenarioExecutions adds setup/experiment/prompt-ref/history context that
+// scenarioExecutionFromVerdict alone can't know (it only sees one Verdict, not the
+// scenario's own config or the customer's simulated conversation history) — sourced
+// entirely from this run's OWN snapshot (provenance.SnapshotDirFor), never the live,
+// possibly-since-changed scenarios/*/generated/. Legacy runs / scenarios with no
+// snapshot, or a scenario.yaml with no setup/prompt_ref annotation, fall back to the
+// scenario name for both Setup and Prompt.Name — the same value shown before this
+// enrichment existed, so nothing regresses for unannotated data.
+func enrichScenarioExecutions(runDir, scenario, promptSHA256 string, execs []VExecution) []VExecution {
+	snapDir, ok := provenance.SnapshotDirFor(runDir, scenario)
+	if !ok {
+		return execs // legacy run — nothing to enrich with
+	}
+	sc, err := loadScenario(snapDir) // scenario.yaml is one of the 5 files SnapshotScenario copies
+	if err != nil {
+		return execs // snapshot dir exists but scenario.yaml is unreadable — fail soft
+	}
+
+	setup := sc.Setup
+	if setup == "" {
+		setup = scenario
+	}
+	promptRef := provenance.PromptRef{Name: scenario} // fallback: unversioned, scenario-named
+	if sc.PromptRef != "" {
+		if name, version, perr := provenance.ParsePromptSpec(sc.PromptRef); perr == nil {
+			promptRef = provenance.PromptRef{Name: name, Version: version, SHA256: promptSHA256}
+		}
+	}
+
+	historyByTestID := map[string][]HistoryTurn{}
+	testByID := map[string]TestCase{}
+	var resolved ResolvedTests
+	if err := readJSON(filepath.Join(snapDir, "resolved_tests.json"), &resolved); err == nil {
+		for _, tc := range resolved.Tests {
+			testByID[tc.ID] = tc
+			if len(tc.History) > 0 {
+				historyByTestID[tc.ID] = tc.History
+			}
+		}
+	}
+
+	for i := range execs {
+		execs[i].Variant.Setup = setup
+		execs[i].Variant.Experiment = sc.Experiment
+		execs[i].Variant.Prompt = promptRef
+		if h, ok := historyByTestID[execs[i].Subject.TestID]; ok {
+			execs[i].Subject.History = h
+		}
+		// Requirement rows go BEFORE the safety rows scenarioExecutionFromVerdict
+		// already attached — "test-specific rows + universal safety rows" order.
+		if tc, ok := testByID[execs[i].Subject.TestID]; ok {
+			execs[i].Contract = append(scenarioRequirementRows(execs[i], tc, sc.Contract), execs[i].Contract...)
+		}
+	}
+	return execs
+}
+
+// scenarioRequirementRows builds the test-specific Requirements-panel rows for one
+// execution — one row per requirement the TEST ITSELF declares (Requires/Media/
+// Escalate/Language/MustNotContain), omitted entirely when the test doesn't declare
+// it (a test with no `escalate:` field gets no Эскалация row, not a row showing
+// "n/a"). Pass values are read back from `exec`'s own already-computed Scores —
+// NEVER recomputed here — only Expected/Actual display strings and row presence are
+// new. Actual values for language/escalate/media are read from the model's own parsed
+// JSON (exec.Output.Raw) — the same raw output already persisted with this execution,
+// not a new trust boundary.
+func scenarioRequirementRows(exec VExecution, tc TestCase, mediaField string) []VContractRow {
+	obj, _ := parseModelJSON(exec.Output.Raw)
+	var rows []VContractRow
+
+	if len(tc.Requires) > 0 {
+		score, _ := scoreByName(exec.Scores, "requires")
+		rows = append(rows, VContractRow{
+			Key: "requires", Label: "Обязательные факты", Kind: "requirement",
+			Expected: requiresExpectedDisplay(tc.Requires),
+			Actual:   requiresActualDisplay(tc.Requires, exec.Output.ReplyText),
+			Pass:     scorePassPtr(score.Status),
+		})
+	}
+	if tc.Language == "kk" || tc.Language == "ru" {
+		score, _ := scoreByName(exec.Scores, "language")
+		actual := "—"
+		if replyLang, ok := obj["reply_language"].(string); ok && replyLang != "" {
+			actual = replyLang
+		}
+		rows = append(rows, VContractRow{
+			Key: "language", Label: "Язык ответа", Kind: "requirement",
+			Expected: tc.Language, Actual: actual, Pass: scorePassPtr(score.Status),
+		})
+	}
+	if tc.Escalate != nil {
+		score, _ := scoreByName(exec.Scores, "escalate")
+		expected := "нет"
+		if *tc.Escalate {
+			expected = "да"
+		}
+		actual := "—"
+		if b, ok := obj["escalate"].(bool); ok {
+			actual = "нет"
+			if b {
+				actual = "да"
+			}
+		}
+		rows = append(rows, VContractRow{
+			Key: "escalate", Label: "Эскалация", Kind: "requirement",
+			Expected: expected, Actual: actual, Pass: scorePassPtr(score.Status),
+		})
+	}
+	if tc.Media != nil {
+		score, _ := scoreByName(exec.Scores, "media")
+		expected := tc.Media.AnyOfGroups
+		if mediaField == "asset_refs" {
+			expected = tc.Media.AnyOfRefs
+		}
+		actual := mediaEntries(obj, mediaField)
+		actualDisplay := "нет"
+		if len(actual) > 0 {
+			actualDisplay = strings.Join(actual, ", ")
+		}
+		rows = append(rows, VContractRow{
+			Key: "media", Label: "Медиа", Kind: "requirement",
+			Expected: strings.Join(expected, " ИЛИ "), Actual: actualDisplay, Pass: scorePassPtr(score.Status),
+		})
+	}
+	if len(tc.MustNotContain) > 0 {
+		score, _ := scoreByName(exec.Scores, "must_not_contain")
+		actual := "нет"
+		if score.Detail != "" {
+			actual = score.Detail
+		}
+		rows = append(rows, VContractRow{
+			Key: "must_not_contain", Label: "Запрещённые фразы", Kind: "requirement",
+			Expected: strings.Join(tc.MustNotContain, ", "), Actual: actual, Pass: scorePassPtr(score.Status),
+		})
+	}
+	return rows
+}
+
+// requiresExpectedDisplay renders TestCase.Requires (an AND of OR-groups of alternative
+// token refs — see requiresSatisfied in judge.go) as one readable line.
+func requiresExpectedDisplay(groups [][]string) string {
+	parts := make([]string, len(groups))
+	for i, g := range groups {
+		parts[i] = strings.Join(g, " ИЛИ ")
+	}
+	return strings.Join(parts, "; ")
+}
+
+// requiresActualDisplay reports, per OR-group, which token (if any) the model's own
+// pre-injection reply actually used — a direct substring scan for the literal
+// "{{token}}" span, the same literal requiresSatisfied itself checks for.
+func requiresActualDisplay(groups [][]string, replyText string) string {
+	parts := make([]string, len(groups))
+	for i, g := range groups {
+		found := ""
+		for _, tok := range g {
+			if strings.Contains(replyText, "{{"+tok+"}}") {
+				found = tok
+				break
+			}
+		}
+		if found == "" {
+			parts[i] = "ни один из: " + strings.Join(g, " | ")
+		} else {
+			parts[i] = found
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // loadExtractExecutions reads every extract_outputs/*.json in runDir and adapts each.
@@ -299,7 +861,7 @@ func loadExtractExecutions(runDir string) ([]VExecution, error) {
 		}
 		out = append(out, extractExecutionFromResult(r))
 	}
-	return out, nil
+	return enrichExtractExecutions(runDir, out), nil
 }
 
 // loadRunExecutions loads every VExecution present in runDir, across both families —

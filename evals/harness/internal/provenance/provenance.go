@@ -60,6 +60,12 @@ type Manifest struct {
 	Family        string   `json:"family"` // "scenario" | "extract"
 	Command       string   `json:"command"`
 	Args          []string `json:"args"`
+	// LaunchID groups this run with sibling runs from one `harness launch` invocation
+	// (see launch.go) — empty for a run started directly via `run`/`extract` (no
+	// -launch flag passed) or from before this field existed. Readers must treat an
+	// empty LaunchID as "this run is its own singleton launch," never as an error —
+	// see index.go's buildRunsIndexRow for where that fallback is applied.
+	LaunchID string `json:"launch_id,omitempty"`
 
 	// Git provenance is best-effort: a missing git binary or a non-repo checkout must
 	// never fail an eval run, so every field here is the empty value on any git error.

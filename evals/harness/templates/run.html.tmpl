@@ -108,8 +108,15 @@
         <details>
           <summary>extracted_text / raw output</summary>
           {{if .Extract}}<pre>{{.Extract.ExtractedText}}</pre>{{end}}
+          {{if .Output.RawHasReasoningMarkers}}<p class="status-fail"><b>Raw output contains a reasoning/thinking tag marker</b> (&lt;think&gt;/&lt;thinking&gt;) &mdash; see no_reasoning_leak above for whether it reached a customer-facing field</p>{{end}}
           <pre>{{.Output.Raw}}</pre>
         </details>
+        {{if .Output.Reasoning}}
+        <details>
+          <summary>reasoning (separate from raw output above — never part of the graded content)</summary>
+          <pre>{{.Output.Reasoning}}</pre>
+        </details>
+        {{end}}
       </div>
       {{end}}
     </div>
@@ -152,6 +159,8 @@
     <p><b>Injected text:</b> {{.Scenario.InjectedText}}</p>
     {{if .Scenario.Blocked}}<p class="status-fail"><b>BLOCKED</b> (unknown token)</p>{{end}}
     {{if .Scenario.LeftoverBraces}}<p class="status-fail"><b>Leftover brace</b> survived injection</p>{{end}}
+    {{if .Scenario.Truncated}}<p class="status-fail"><b>TRUNCATED</b> (finish_reason={{.Scenario.FinishReason}}) &mdash; response was cut off before the model finished</p>{{end}}
+    {{if .Scenario.ReasoningLeak}}<p class="status-fail"><b>REASONING LEAK</b> &mdash; reply_text contains a &lt;think&gt;/&lt;thinking&gt; tag marker</p>{{end}}
     {{if .Scenario.UnknownTokens}}<p><b>Unknown tokens:</b> {{range .Scenario.UnknownTokens}}<code>{{.}}</code> {{end}}</p>{{end}}
     {{if .Scenario.UnknownMedia}}<p><b>Unknown media:</b> {{range .Scenario.UnknownMedia}}<code>{{.}}</code> {{end}}</p>{{end}}
     {{if .Scenario.InventedDigits}}<p><b>Invented digits:</b> {{range .Scenario.InventedDigits}}<code>{{.}}</code> {{end}}</p>{{end}}
@@ -162,8 +171,15 @@
   <p class="meta">{{costLabel .Cost}}{{if .LatencyMs}} &middot; {{.LatencyMs}}ms{{end}}</p>
   <details>
     <summary>raw output</summary>
+    {{if .Output.RawHasReasoningMarkers}}<p class="status-fail"><b>Raw output contains a reasoning/thinking tag marker</b> (&lt;think&gt;/&lt;thinking&gt;) &mdash; see no_reasoning_leak above for whether it reached reply_text</p>{{end}}
     <pre>{{.Output.Raw}}</pre>
   </details>
+  {{if .Output.Reasoning}}
+  <details>
+    <summary>reasoning (separate from raw output above — never part of the graded reply_text)</summary>
+    <pre>{{.Output.Reasoning}}</pre>
+  </details>
+  {{end}}
 </details>
 {{end}}
 {{end}}

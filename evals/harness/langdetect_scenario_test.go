@@ -21,7 +21,7 @@ func TestDetectLang_AgreesWithV4CanarySplit(t *testing.T) {
 		t.Fatal("expected at least one kk canary test")
 	}
 	for _, tc := range kkTests {
-		if got := detectLang(tc.Message); got != "kk" {
+		if got := detectLang(tc.Message, tc.History); got != "kk" {
 			t.Errorf("test %q (message %q): detectLang = %q, but it's placed in the KK canary scenario", tc.ID, tc.Message, got)
 		}
 	}
@@ -34,7 +34,7 @@ func TestDetectLang_AgreesWithV4CanarySplit(t *testing.T) {
 		t.Fatal("expected at least one ru canary test")
 	}
 	for _, tc := range ruTests {
-		if got := detectLang(tc.Message); got != "ru" {
+		if got := detectLang(tc.Message, tc.History); got != "ru" {
 			t.Errorf("test %q (message %q): detectLang = %q, but it's placed in the RU canary scenario", tc.ID, tc.Message, got)
 		}
 	}

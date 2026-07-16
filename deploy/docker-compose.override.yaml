@@ -13,7 +13,7 @@
 services:
   postgres:
     ports: !override
-      - "5433:5432"   # host 5432 is taken by another Postgres
+      - "5434:5432"   # host 5432 is taken by another Postgres, 5433 by an unrelated xlearn-postgres container
   backend:
     ports: !override
       - "8090:8080"   # host 8080 is taken
@@ -26,3 +26,10 @@ services:
   frontend:
     ports: !override
       - "8081:80"     # unchanged; 8081 is free
+    # Read-only bind mount for the eval comparison UI (frontend/nginx.conf's
+    # /evals-data/ location) — LOCAL-DEV ONLY, deliberately kept out of the base
+    # compose file: evals/runs/ holds raw model replies, prompts, and KB material
+    # with no auth in front of it. A deploy built from docker-compose.yaml alone
+    # never gets this mount, so /evals-data/ simply 404s there.
+    volumes:
+      - ../evals/runs:/evals-runs:ro

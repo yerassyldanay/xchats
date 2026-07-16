@@ -69,6 +69,14 @@ func runExtractChecks(c ExtractCase, r ExtractionResult) []CheckResult {
 	// cases.yaml is expected to declare it explicitly, even as an empty list.
 	out = append(out, inventedNumberCheck(c, r))
 
+	// Reasoning-leak check always runs, unconditionally — not opt-in per case, and not
+	// gated on whether this model/call ever requested reasoning (a model can emit inline
+	// <think> tags on its own). Higher stakes here than in judge.go's analogous check:
+	// -record freezes a fully-passing result straight into extract/fixtures/<case>.json,
+	// reused by every future run — a missed leak here doesn't just fail one run, it
+	// permanently corrupts a fixture.
+	out = append(out, reasoningLeakCheck(r))
+
 	// Required-number check is opt-in (a case with nothing recall-critical simply
 	// doesn't declare it) — the recall complement to the precision-only check above.
 	if len(c.RequiredNumbers) > 0 {
@@ -182,6 +190,19 @@ func inventedNumberCheck(c ExtractCase, r ExtractionResult) CheckResult {
 			Detail: "not in the allowed list: " + strings.Join(invented, ", ")}
 	}
 	return CheckResult{Name: "no_invented_numbers", Pass: true}
+}
+
+// reasoningLeakCheck scans every one of ExtractionResult's free-text fields for a
+// <think>/<thinking> tag marker (evaltext.HasReasoningMarkers) — the same real, observed
+// OpenRouter failure mode judge.go's analogous check guards against, applied here to the
+// extraction eval's own free-text fields instead of a chat reply_text.
+func reasoningLeakCheck(r ExtractionResult) CheckResult {
+	haystack := strings.Join([]string{r.Summary, r.ExtractedText, r.RelatesToHint}, " ")
+	if evaltext.HasReasoningMarkers(haystack) {
+		return CheckResult{Name: "no_reasoning_leak", Pass: false,
+			Detail: "reasoning/thinking content leaked into a customer-facing text field"}
+	}
+	return CheckResult{Name: "no_reasoning_leak", Pass: true}
 }
 
 // requiredNumberCheck is the RECALL complement to inventedNumberCheck's PRECISION-only

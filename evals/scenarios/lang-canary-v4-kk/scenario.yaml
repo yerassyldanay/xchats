@@ -9,6 +9,13 @@ description: >
   DRAFT translation — NOT yet reviewed by a native Kazakh speaker; the plan requires that
   review before this variant is used in any billed comparison (a mistranslated instruction
   would invalidate the whole experiment).
+# setup is shared with the sibling lang-canary-v4-ru scenario ON PURPOSE — the two
+# together realize ONE routed strategy (see the description above), so the eval
+# comparison UI must show one "lang-v4-routed" column, not two. prompt_ref is what
+# actually differs between the siblings, and is what the drill-down shows per execution.
+setup: lang-v4-routed
+prompt_ref: lang-kk@v4
+experiment: lang-bakeoff
 frame: frame.txt
 data: ../shop-current/data.yaml
 tests: tests.yaml

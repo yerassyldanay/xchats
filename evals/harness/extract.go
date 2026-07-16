@@ -21,7 +21,9 @@ import (
 // deliberately separate, smaller half of evaluating the playground design; Eval 2
 // (extracted information -> ai_* draft schema) is a later, separate command that
 // consumes this command's -record'd fixtures instead of calling vision models again.
-func cmdExtract(args []string) error {
+// cmdExtract returns the fresh run's id on success (empty on any error) — same
+// contract as cmdRun, so cmdLaunch can record either family's member run id uniformly.
+func cmdExtract(args []string) (runID string, err error) {
 	fs := flag.NewFlagSet("extract", flag.ExitOnError)
 	casesPath := fs.String("cases", "extract/cases.yaml", "path to the extraction cases file")
 	caseID := fs.String("case", "", "run only this case id (default: every case in cases.yaml)")
@@ -34,8 +36,9 @@ func cmdExtract(args []string) error {
 	baseURL := fs.String("base-url", "", "override the OpenRouter base URL (default: $EVAL_BASE_URL, else https://openrouter.ai/api/v1)")
 	envPath := fs.String("env", ".env", "path to a .env file to load (best-effort; missing file is fine)")
 	maxTokens := fs.Int("max-tokens", extractMaxTokens, "completion token budget per call (overrides models.yaml's max_tokens, which is tuned for short chat replies, not full-text transcription)")
+	launchID := fs.String("launch", "", "group this run under an existing launch id (see `harness launch`) — leave empty for a standalone run, which is then its own singleton launch")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return "", err
 	}
 	_ = all // accepted for symmetry with -case; running with neither already means "every case"
 
@@ -43,7 +46,7 @@ func cmdExtract(args []string) error {
 
 	apiKey := os.Getenv("OPENROUTER_API_KEY")
 	if apiKey == "" {
-		return fmt.Errorf("extract: OPENROUTER_API_KEY is not set (copy evals/.env.example to evals/.env and fill it in, or export it)")
+		return "", fmt.Errorf("extract: OPENROUTER_API_KEY is not set (copy evals/.env.example to evals/.env and fill it in, or export it)")
 	}
 	base := *baseURL
 	if base == "" {
@@ -52,25 +55,25 @@ func cmdExtract(args []string) error {
 
 	cf, err := loadExtractCases(*casesPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	cases := cf.Cases
 	if *caseID != "" {
 		cases = filterCases(cases, *caseID)
 		if len(cases) == 0 {
-			return fmt.Errorf("extract: no case %q in %s", *caseID, *casesPath)
+			return "", fmt.Errorf("extract: no case %q in %s", *caseID, *casesPath)
 		}
 	}
 	if len(cases) == 0 {
-		return fmt.Errorf("extract: %s has no cases", *casesPath)
+		return "", fmt.Errorf("extract: %s has no cases", *casesPath)
 	}
 
 	models, err := resolveVisionModels(*modelsFlag, *modelsPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if len(models) == 0 {
-		return fmt.Errorf("extract: no models to run (pass -models or set EVAL_VISION_MODELS)")
+		return "", fmt.Errorf("extract: no models to run (pass -models or set EVAL_VISION_MODELS)")
 	}
 	// models.yaml's max_tokens is tuned for Layer-1's short customer-chat replies;
 	// full-text transcription needs much more headroom, or the model gets cut off
@@ -82,39 +85,41 @@ func cmdExtract(args []string) error {
 
 	prompts, err := provenance.LoadPromptSpecs(*promptsDir, splitCSV(*promptsFlag))
 	if err != nil {
-		return err
+		return "", err
 	}
 	if len(prompts) == 0 {
-		return fmt.Errorf("extract: no prompts to run (pass -prompt <name>@v<N>[,...])")
+		return "", fmt.Errorf("extract: no prompts to run (pass -prompt <name>@v<N>[,...])")
 	}
 
 	client := newORClient(base, apiKey)
 	casesDir := filepath.Dir(*casesPath)
 
-	runID, runDir, err := provenance.NewRunDir("runs")
+	var runDir string
+	runID, runDir, err = provenance.NewRunDir("runs")
 	if err != nil {
-		return err
+		return "", err
 	}
 	outputsDir := filepath.Join(runDir, "extract_outputs")
 	if err := os.MkdirAll(outputsDir, 0o755); err != nil {
-		return err
+		return runID, err
 	}
 
 	manifest := provenance.NewManifest(runDir, runID, "extract", "extract", args)
 	manifest.ModelsPath = *modelsPath
+	manifest.LaunchID = *launchID
 	if sha, err := provenance.SnapshotFile(*modelsPath, filepath.Join(runDir, "snapshots", "models.yaml")); err != nil {
-		return fmt.Errorf("snapshot %s: %w", *modelsPath, err)
+		return runID, fmt.Errorf("snapshot %s: %w", *modelsPath, err)
 	} else {
 		manifest.ModelsSHA256 = sha
 	}
 	manifest.ExtractCasesPath = *casesPath
 	if sha, err := provenance.SnapshotFile(*casesPath, filepath.Join(runDir, "snapshots", "extract_cases.yaml")); err != nil {
-		return fmt.Errorf("snapshot %s: %w", *casesPath, err)
+		return runID, fmt.Errorf("snapshot %s: %w", *casesPath, err)
 	} else {
 		manifest.ExtractCasesSHA256 = sha
 	}
 	if err := provenance.WriteManifest(runDir, manifest); err != nil {
-		return err
+		return runID, err
 	}
 
 	var results []extractRunResult
@@ -122,19 +127,19 @@ func cmdExtract(args []string) error {
 		imgPath := filepath.Join(casesDir, c.File)
 		imgData, mimetype, preprocessorName, err := preprocess(c.Kind, imgPath)
 		if err != nil {
-			return fmt.Errorf("case %s: %w", c.ID, err)
+			return runID, fmt.Errorf("case %s: %w", c.ID, err)
 		}
 
 		originalSHA, err := provenance.SHA256File(imgPath)
 		if err != nil {
-			return fmt.Errorf("case %s: hash original input: %w", c.ID, err)
+			return runID, fmt.Errorf("case %s: hash original input: %w", c.ID, err)
 		}
 		inputDst := filepath.Join(runDir, "inputs", c.ID+".jpg")
 		if err := os.MkdirAll(filepath.Dir(inputDst), 0o755); err != nil {
-			return err
+			return runID, err
 		}
 		if err := provenance.AtomicWriteFile(inputDst, imgData, 0o644); err != nil {
-			return fmt.Errorf("case %s: save processed input: %w", c.ID, err)
+			return runID, fmt.Errorf("case %s: save processed input: %w", c.ID, err)
 		}
 		manifest.Inputs = append(manifest.Inputs, provenance.InputSnapshotRef{
 			CaseID:          c.ID,
@@ -142,7 +147,7 @@ func cmdExtract(args []string) error {
 			ProcessedSHA256: provenance.SHA256Bytes(imgData),
 		})
 		if err := provenance.WriteManifest(runDir, manifest); err != nil {
-			return err
+			return runID, err
 		}
 
 		recorded := false
@@ -154,7 +159,7 @@ func cmdExtract(args []string) error {
 
 				outPath := filepath.Join(outputsDir, extractOutputFilename(c.ID, m, p.Ref))
 				if werr := writeJSON(outPath, res); werr != nil {
-					return fmt.Errorf("write %s: %w", outPath, werr)
+					return runID, fmt.Errorf("write %s: %w", outPath, werr)
 				}
 
 				switch {
@@ -169,10 +174,10 @@ func cmdExtract(args []string) error {
 				if *record && !recorded && res.Parsed != nil && allChecksPass(res.Checks) {
 					fixturePath := filepath.Join(casesDir, "fixtures", c.ID+".json")
 					if err := os.MkdirAll(filepath.Dir(fixturePath), 0o755); err != nil {
-						return err
+						return runID, err
 					}
 					if err := writeJSON(fixturePath, res.Parsed); err != nil {
-						return err
+						return runID, err
 					}
 					provPath := filepath.Join(casesDir, "fixtures", c.ID+".provenance.json")
 					prov := fixtureProvenance{
@@ -182,7 +187,7 @@ func cmdExtract(args []string) error {
 						ProcessedInputSHA256: provenance.SHA256Bytes(imgData),
 					}
 					if err := writeJSON(provPath, prov); err != nil {
-						return err
+						return runID, err
 					}
 					fmt.Printf("  recorded fixture: %s (model=%s, prompt=%s)\n", fixturePath, orModelID(m.ID), p.Ref)
 					recorded = true
@@ -193,20 +198,20 @@ func cmdExtract(args []string) error {
 
 	reportPath := filepath.Join(runDir, "EXTRACT.md")
 	if err := writeExtractReport(reportPath, results); err != nil {
-		return err
+		return runID, err
 	}
 	fmt.Printf("\nwrote %s\n", reportPath)
 
 	manifest.Finish()
 	if err := provenance.WriteManifest(runDir, manifest); err != nil {
-		return err
+		return runID, err
 	}
 
 	// Best-effort: a broken HTML viewer must never turn a successful extraction run
 	// into a failed command.
 	writeRunHTMLBestEffort(runDir)
 
-	return appendExtractIndex(runDir, results)
+	return runID, appendExtractIndex(runDir, results)
 }
 
 // parseFailureRetries bounds retries for a parse failure specifically (never for a
@@ -221,13 +226,18 @@ const parseFailureRetries = 2
 func runOneExtraction(ctx context.Context, client *orClient, c ExtractCase, m ModelProvider, p provenance.LoadedPrompt, preprocessorName string, imgData []byte, mimetype string) extractRunResult {
 	var res extractRunResult
 	for attempt := 0; attempt <= parseFailureRetries; attempt++ {
-		res = extractRunResult{CaseID: c.ID, Model: orModelID(m.ID), Prompt: p.Ref, Preprocessor: preprocessorName}
-		raw, usage, err := client.describeImage(ctx, m, p.Content, imgData, mimetype)
+		// providerModelKey (judge.go), not the bare id: two provider entries can share
+		// an id with different Label values (e.g. a reasoning-on/off pair), and every
+		// downstream grouping here (buildExtractAggregate, the HTML viewer) keys purely
+		// off this Model string — an unlabeled key would silently merge them.
+		res = extractRunResult{CaseID: c.ID, Model: providerModelKey(orModelID(m.ID), m.Label), Prompt: p.Ref, Preprocessor: preprocessorName}
+		raw, reasoning, usage, err := client.describeImage(ctx, m, p.Content, imgData, mimetype)
 		if err != nil {
 			res.Error = err.Error()
 			return res // a real HTTP/network error is not retried here
 		}
 		res.Raw = raw
+		res.Reasoning = reasoning
 		res.Usage = usage
 		res.Cost, res.CostBasis = estimateCost(m, usage)
 

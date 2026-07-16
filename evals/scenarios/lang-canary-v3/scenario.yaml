@@ -6,6 +6,9 @@ description: >
   constraint against doubling KB tokens). Tests whether Kazakh instruction PRESENCE
   alone breaks the Russian-context pull, without any routing machinery. DRAFT Kazakh
   wording — needs native-speaker review before any billed run (see Phase 2.1 note).
+setup: lang-v3
+prompt_ref: lang-bilingual@v3
+experiment: lang-bakeoff
 frame: frame.txt
 data: ../shop-current/data.yaml
 tests: ../lang-canary-v1/tests.yaml

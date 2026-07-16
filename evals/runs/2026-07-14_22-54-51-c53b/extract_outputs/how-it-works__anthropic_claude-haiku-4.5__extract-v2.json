@@ -1,0 +1,62 @@
+{
+  "case_id": "how-it-works",
+  "model": "anthropic/claude-haiku-4.5",
+  "prompt": {
+    "name": "extract",
+    "version": 2,
+    "sha256": "da111bab5b37dca380a0381d58c15f76e47878c80b73c08f4efe4b8d10281461"
+  },
+  "preprocessor": "image_1024_jpeg85",
+  "raw": "```json\n{\n  \"content_kind\": \"infographic\",\n  \"summary\": \"A designed infographic explaining how xpayment works, showing the integration flow of Kaspi Pay for an e-commerce product, with 7 numbered steps from merchant setup through successful payment.\",\n  \"extracted_text\": \"xpayment\\nКак работает xpayment\\nФлоу интеграции Kaspi Pay для вашего продукта\\n1 Kaspi Pay кассир\\nУ вас есть Kaspi Pay кассир для приема платежей.\\n2 Виртуальный кассир xpayment\\nНомер кассира\\n123456789012\\nКод подтверждения\\n•••••••\\nKaspi Pay кассир теперь в купчете как виртуальный кассир\\n3 xpayment API\\nсоздание платежей\\nстатусум\\nуведомления\\n4 Ваш продукт\\nинтернет-магазин\\nTelegram бот\\nCRM\\nмобильное приложение\\n5 Клиент видит оплату в вашем продукте\\nQR\\nОформление заказа\\nК итогам\\n24 500 Т\\nОформление QR в приложении Kaspi.kz\\nDeeplink\\nЗаказ #А-2041\\nК итогам\\n24 500 Т\\nОплатить через Kaspi\\n6 Клиент видит оплату в Kaspi Pay\\n11:43\\nKaspi Pay\\nСканируйте QR-код\\nЗаказ #А-2041\\n24 500 Т\\nПродавец\\nТОО Онлайн Магазин\\nСумма\\n24 500 Т\\nПолучить Бонусы\\nНачисление 250 Т\\nК оплате\\n24 500 Т\\nСкрыть сумму\\nСпособы оплаты\\nKaspi Pay\\n•••• 1234\\n24 500 Т\\nKaspi Gold\\n•••• 5678\\n24 500 Т\\nОплатить 24 500 Т\\n7 Успешная оплата\\nплатеж оплачен\\nуведомление в ваш продукт\\nзаказ оплачен\",\n  \"language\": \"ru\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"instruction\",\n  \"relates_to_hint\": \"xpayment, Kaspi Pay integration, e-commerce payment flow\"\n}\n```",
+  "parsed": {
+    "content_kind": "infographic",
+    "summary": "A designed infographic explaining how xpayment works, showing the integration flow of Kaspi Pay for an e-commerce product, with 7 numbered steps from merchant setup through successful payment.",
+    "extracted_text": "xpayment\nКак работает xpayment\nФлоу интеграции Kaspi Pay для вашего продукта\n1 Kaspi Pay кассир\nУ вас есть Kaspi Pay кассир для приема платежей.\n2 Виртуальный кассир xpayment\nНомер кассира\n123456789012\nКод подтверждения\n•••••••\nKaspi Pay кассир теперь в купчете как виртуальный кассир\n3 xpayment API\nсоздание платежей\nстатусум\nуведомления\n4 Ваш продукт\nинтернет-магазин\nTelegram бот\nCRM\nмобильное приложение\n5 Клиент видит оплату в вашем продукте\nQR\nОформление заказа\nК итогам\n24 500 Т\nОформление QR в приложении Kaspi.kz\nDeeplink\nЗаказ #А-2041\nК итогам\n24 500 Т\nОплатить через Kaspi\n6 Клиент видит оплату в Kaspi Pay\n11:43\nKaspi Pay\nСканируйте QR-код\nЗаказ #А-2041\n24 500 Т\nПродавец\nТОО Онлайн Магазин\nСумма\n24 500 Т\nПолучить Бонусы\nНачисление 250 Т\nК оплате\n24 500 Т\nСкрыть сумму\nСпособы оплаты\nKaspi Pay\n•••• 1234\n24 500 Т\nKaspi Gold\n•••• 5678\n24 500 Т\nОплатить 24 500 Т\n7 Успешная оплата\nплатеж оплачен\nуведомление в ваш продукт\nзаказ оплачен",
+    "language": "ru",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "instruction",
+    "relates_to_hint": "xpayment, Kaspi Pay integration, e-commerce payment flow"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": false,
+      "detail": "missing: статусы, накоплено 320, green basket"
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": false,
+      "detail": "not in the allowed list: 11, 250"
+    },
+    {
+      "name": "no_reasoning_leak",
+      "pass": true
+    },
+    {
+      "name": "required_numbers",
+      "pass": false,
+      "detail": "missing required number(s): 320"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2096,
+    "completion_tokens": 698,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "cost_usd_estimate": 0.005586000000000001,
+  "cost_basis": "measured_split"
+}

@@ -32,12 +32,22 @@ type runsIndexPageData struct {
 // across enough real runs to design a meaningful comparison view around); this is
 // discoverability and filtering, not diffing.
 type runsIndexRow struct {
-	RunID       string
+	RunID string
+	// LaunchID groups this run with sibling runs from one `harness launch`
+	// invocation (provenance.Manifest.LaunchID) — falls back to the run's own
+	// RunID in buildRunsIndexRow when unset, so an unlaunched or legacy run is
+	// simply a launch of one member, never a special case downstream.
+	LaunchID    string
 	HasManifest bool
 	Family      string
 	Models      []string
 	Prompts     []string // "name@vN", extraction only
 	StartedAt   string
+	// FinishedAt is empty for an interrupted/still-running run (manifest.FinishedAt
+	// is only stamped by Manifest.Finish(), called after the run's own work
+	// completes) — never guessed from StartedAt, so a duration computed from the
+	// pair can honestly report "unknown" instead of zero.
+	FinishedAt string
 
 	ScenarioTotal        int
 	ScenarioBehaviorPass int
@@ -65,7 +75,10 @@ func writeRunsIndex(runsRoot string) error {
 	if err := runsIndexTemplate.Execute(&buf, data); err != nil {
 		return fmt.Errorf("render template: %w", err)
 	}
-	return provenance.AtomicWriteFile(filepath.Join(runsRoot, "index.html"), buf.Bytes(), 0o644)
+	if err := provenance.AtomicWriteFile(filepath.Join(runsRoot, "index.html"), buf.Bytes(), 0o644); err != nil {
+		return err
+	}
+	return writeRunsJSON(runsRoot, rows)
 }
 
 // writeRunsIndexBestEffort mirrors writeRunHTMLBestEffort's contract: the index is a
@@ -86,7 +99,13 @@ func buildRunsIndexRows(runsRoot string) ([]runsIndexRow, error) {
 	}
 	var rows []runsIndexRow
 	for _, e := range entries {
-		if !e.IsDir() {
+		// "launches" holds LaunchManifest files (see internal/provenance/launch.go),
+		// not a run dir — it has no *.judged.json/extract_outputs/manifest.json of
+		// its own, so treating it as one would produce a bogus, empty "unknown
+		// family" row. Same exclusion cmdExport's -all path already applies
+		// (export.go) — kept as two explicit checks rather than one shared helper,
+		// since this is the only other place runsRoot's entries are walked.
+		if !e.IsDir() || e.Name() == "launches" {
 			continue
 		}
 		row, err := buildRunsIndexRow(filepath.Join(runsRoot, e.Name()))
@@ -117,6 +136,11 @@ func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
 		row.HasManifest = true
 		row.Family = m.Family
 		row.StartedAt = m.StartedAt
+		row.FinishedAt = m.FinishedAt
+		row.LaunchID = m.LaunchID
+	}
+	if row.LaunchID == "" {
+		row.LaunchID = id // no -launch flag passed, or a legacy manifest — this run is its own singleton launch
 	}
 
 	if _, err := os.Stat(filepath.Join(runDir, "index.html")); err == nil {
@@ -156,8 +180,8 @@ func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
 			}
 		}
 	}
-	row.Models = sortedSetKeys(modelSet)
-	row.Prompts = sortedSetKeys(promptSet)
+	row.Models = sortedMapKeys(modelSet)
+	row.Prompts = sortedMapKeys(promptSet)
 
 	if row.Family == "" {
 		switch {
@@ -174,9 +198,12 @@ func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
 	return row, nil
 }
 
-func sortedSetKeys(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for k := range set {
+// sortedMapKeys returns a map's string keys, sorted — the value type is generic since
+// every caller so far only ever needs the keys (a set's bool, a tally's int); adding a
+// new value type never needs a new copy of this function.
+func sortedMapKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
 		out = append(out, k)
 	}
 	sort.Strings(out)

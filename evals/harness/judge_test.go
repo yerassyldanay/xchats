@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestJudgeOne_DeterministicChecks(t *testing.T) {
 	trueValue := true
@@ -274,5 +277,252 @@ func TestRenderFieldUsage(t *testing.T) {
 				t.Fatalf("renderFieldUsage() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsTruncatedFinish(t *testing.T) {
+	tests := []struct {
+		reason string
+		want   bool
+	}{
+		{"length", true},
+		{"stop", false},
+		{"content_filter", false}, // a real but different failure mode — not claimed here
+		{"tool_calls", false},
+		{"", false}, // "not reported" must never be treated as truncation
+	}
+	for _, tt := range tests {
+		if got := isTruncatedFinish(tt.reason); got != tt.want {
+			t.Errorf("isTruncatedFinish(%q) = %v, want %v", tt.reason, got, tt.want)
+		}
+	}
+}
+
+func TestProviderModelKey(t *testing.T) {
+	if got := providerModelKey("openrouter:google/gemini-2.5-flash", ""); got != "openrouter:google/gemini-2.5-flash" {
+		t.Errorf("empty label should leave the id unchanged, got %q", got)
+	}
+	if got := providerModelKey("openrouter:google/gemini-2.5-flash", "reasoning-on"); got != "openrouter:google/gemini-2.5-flash [reasoning-on]" {
+		t.Errorf("got %q", got)
+	}
+	offKey := providerModelKey("openrouter:google/gemini-2.5-flash", "reasoning-off")
+	onKey := providerModelKey("openrouter:google/gemini-2.5-flash", "reasoning-on")
+	if offKey == onKey {
+		t.Fatalf("two different labels on the same id must produce different keys, both got %q", offKey)
+	}
+}
+
+// TestJudgeOne_TruncatedFinishReasonFailsContract pins the one-line-addition premise:
+// a response that otherwise parses and satisfies every other check must still fail
+// ContractPass when finish_reason=length — a truncated response is a pipeline-safety
+// issue, the same category as an unknown token or a leftover brace, regardless of what
+// happened to parse successfully.
+func TestJudgeOne_TruncatedFinishReasonFailsContract(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+	row.Response.FinishReason = "length"
+
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if !v.Truncated {
+		t.Error("want Truncated=true")
+	}
+	if v.ContractPass {
+		t.Error("want ContractPass=false when finish_reason=length, regardless of otherwise-valid output")
+	}
+	if !strings.Contains(v.Reason, "truncated") {
+		t.Errorf("want Reason to mention truncation, got %q", v.Reason)
+	}
+}
+
+// TestJudgeOne_EmptyFinishReasonDoesNotFailContract guards backward compatibility: the
+// many existing PromptfooRow{} fixtures built before FinishReason existed leave it at
+// its zero value (""), and that must keep behaving exactly as before — never treated as
+// truncation.
+func TestJudgeOne_EmptyFinishReasonDoesNotFailContract(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if v.Truncated {
+		t.Error("want Truncated=false for an empty (unreported) finish_reason")
+	}
+	if !v.ContractPass {
+		t.Errorf("want ContractPass=true, got false with reason %q", v.Reason)
+	}
+}
+
+// TestJudgeOne_TruncatedAndUnparseableCombinesReasons proves the common real-world case
+// (truncation is often the CAUSE of a parse failure) still surfaces the truncation fact,
+// not just a generic "could not parse" message.
+func TestJudgeOne_TruncatedAndUnparseableCombinesReasons(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `{"reply_text":"Кофемашина сто` // cut off mid-string, invalid JSON
+	row.Response.FinishReason = "length"
+
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if v.ParseOK {
+		t.Fatal("want ParseOK=false for genuinely truncated JSON")
+	}
+	if !v.Truncated {
+		t.Error("want Truncated=true")
+	}
+	if v.ContractPass {
+		t.Error("want ContractPass=false")
+	}
+	if !strings.Contains(v.Reason, "could not parse") || !strings.Contains(v.Reason, "truncated") {
+		t.Errorf("want Reason to mention both parse failure and truncation, got %q", v.Reason)
+	}
+}
+
+// TestJudgeOne_ReasoningLeakInReplyTextFailsContractAndSuppressesInjectedText is the
+// concrete guarantee behind "reasoning/thinking payloads never leak into reply_text or
+// into any report meant to show customer-facing output": a model that embeds a <think>
+// block INSIDE an otherwise-valid reply_text string (a real, observed OpenRouter failure
+// mode, independent of whether reasoning was even requested) must fail ContractPass, AND
+// InjectedText — the one field documented and rendered everywhere as "the actual
+// customer-facing text" (CONTRACT.md, the HTML viewer) — must stay empty, exactly like a
+// Blocked response, even though every token in the leaked text would otherwise have
+// resolved cleanly.
+func TestJudgeOne_ReasoningLeakInReplyTextFailsContractAndSuppressesInjectedText(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups", Tokens: []CatalogFact{
+		{Token: "{{product.coffee-machine.price}}", Value: "129 900 ₸"},
+	}}
+	tokenValue := map[string]string{"{{product.coffee-machine.price}}": "129 900 ₸"}
+
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `{"reply_text":"<think>the customer wants the price, I should state it</think>Цена {{product.coffee-machine.price}}.","reply_language":"ru","attach_groups":[],"escalate":false}`
+
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, tokenValue, nil, map[string]bool{})
+	if !v.ParseOK {
+		t.Fatal("want ParseOK=true — the JSON itself is well-formed, only its content leaks")
+	}
+	if !v.ReasoningLeak {
+		t.Error("want ReasoningLeak=true")
+	}
+	if v.ContractPass {
+		t.Error("want ContractPass=false when reply_text contains a reasoning marker")
+	}
+	if v.InjectedText != "" {
+		t.Errorf("want InjectedText suppressed (empty) on a reasoning leak, got %q — this is the actual leak into a customer-facing field", v.InjectedText)
+	}
+	if !strings.Contains(v.Reason, "reasoning") {
+		t.Errorf("want Reason to mention the reasoning leak, got %q", v.Reason)
+	}
+}
+
+// TestJudgeOne_ReasonMentionsBothBlockedAndReasoningLeak is the regression test for a
+// bug review caught: Blocked's reason-set unconditionally overwrites v.Reason (existing,
+// pre-diff behavior — it already did this to ContractFields' message), so a verdict that
+// is BOTH blocked (unknown token) AND leaking reasoning used to silently lose the leak
+// fact from the one human-readable Reason string, even though v.ReasoningLeak itself
+// stayed correctly true and ContractPass still correctly failed either way.
+func TestJudgeOne_ReasonMentionsBothBlockedAndReasoningLeak(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `{"reply_text":"<think>let me check the unknown fact</think>{{product.unknown.field}}","reply_language":"ru","attach_groups":[],"escalate":false}`
+
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if !v.Blocked {
+		t.Fatal("precondition failed: want Blocked=true (unresolvable token)")
+	}
+	if !v.ReasoningLeak {
+		t.Fatal("precondition failed: want ReasoningLeak=true")
+	}
+	if !strings.Contains(v.Reason, "BLOCKED") {
+		t.Errorf("want Reason to still mention the block, got %q", v.Reason)
+	}
+	if !strings.Contains(v.Reason, "reasoning") {
+		t.Errorf("want Reason to ALSO mention the reasoning leak, not just the block, got %q", v.Reason)
+	}
+}
+
+// TestApplyCostEstimate_CachedRowNeverBorrowsAcrossLabels is the regression test for the
+// collision the Label plumbing exists to prevent: a cached row for one labeled variant
+// (e.g. reasoning-off) must never borrow a fresh token split recorded under a DIFFERENT
+// label sharing the same underlying provider ID (e.g. reasoning-on) — their token
+// profiles are expected to differ substantially (reasoning burns many more completion
+// tokens), so borrowing across labels would silently corrupt the cost estimate.
+func TestApplyCostEstimate_CachedRowNeverBorrowsAcrossLabels(t *testing.T) {
+	price := 1.0
+	priceByModel := map[string]ModelProvider{
+		"test/model [reasoning-off]": {ID: "test/model", Label: "reasoning-off", InputPerMTok: &price, OutputPerMTok: &price},
+		"test/model [reasoning-on]":  {ID: "test/model", Label: "reasoning-on", InputPerMTok: &price, OutputPerMTok: &price},
+	}
+	freshSplit := map[string]tokenSplit{
+		"test/model [reasoning-on]|t1": {in: 100, out: 900},
+	}
+
+	cachedOffRow := PromptfooRow{}
+	cachedOffRow.Provider.ID = "test/model"
+	cachedOffRow.Provider.Label = "reasoning-off"
+	cachedOffRow.TestCase.Description = "t1"
+	cachedOffRow.Response.Cached = true
+
+	var v Verdict
+	applyCostEstimate(&v, cachedOffRow, priceByModel, freshSplit)
+
+	if v.CostBasis != CostBasisCachedUnpriced {
+		t.Fatalf("want cached_replay_unpriceable (no reasoning-off fresh split exists to borrow — the reasoning-on split must NOT be used), got %s (tokens in=%d out=%d)", v.CostBasis, v.TokensIn, v.TokensOut)
+	}
+}
+
+// TestBuildContractReport_NeverEchoesReasoningLeakIntoInjectedTextLine proves the report
+// layer's side of the same guarantee: even when a verdict's RawOutput carries a leaked
+// <think> block, buildContractReport (CONTRACT.md) never prints it as injected/
+// customer-facing text — it only ever prints v.InjectedText, which judgeOne already
+// leaves empty on a reasoning leak (see the judgeOne test above).
+func TestBuildContractReport_NeverEchoesReasoningLeakIntoInjectedTextLine(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `{"reply_text":"<think>internal chain of thought, never meant for a customer</think>ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+
+	report := buildContractReport([]JudgedRun{{Scenario: "fixture", Verdicts: []Verdict{v}}})
+	if strings.Contains(report, "injected text:") {
+		t.Errorf("want no 'injected text:' line at all for a reasoning-leaking verdict (InjectedText must stay empty), got:\n%s", report)
+	}
+	if !strings.Contains(report, "REASONING LEAK") {
+		t.Error("want the report to flag the reasoning leak explicitly")
+	}
+}
+
+// TestJudgeOne_ReasonAccumulatesAcrossEveryCombinationNotJustBlocked is the regression
+// test for the gap left after the Blocked+ReasoningLeak fix above: that fix only taught
+// the Blocked branch to append onto a non-empty Reason, so a ContractFields failure for
+// a reason UNRELATED to reply_text (e.g. escalate wrong-typed) occurring alongside a
+// reasoning leak in reply_text itself still silently dropped the leak from Reason —
+// invisible from SUMMARY.md's "Failures (verbatim)" section, which prints Reason and
+// nothing else (CONTRACT.md/the HTML viewer read v.ReasoningLeak directly as its own
+// boolean and were never affected by this gap). appendReason (judge.go) fixes this
+// generally — every fact-setting site now accumulates — not just for Blocked.
+func TestJudgeOne_ReasonAccumulatesAcrossEveryCombinationNotJustBlocked(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	// escalate is a STRING, not a bool -> ContractFields fails for a reason having
+	// nothing to do with reply_text, which is itself present, valid, AND leaking.
+	row.Response.Output = `{"reply_text":"<think>internal</think>ok","reply_language":"ru","attach_groups":[],"escalate":"false"}`
+
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if v.ContractFields {
+		t.Fatal("precondition failed: want ContractFields=false (escalate is a string, not bool)")
+	}
+	if !v.ReasoningLeak {
+		t.Fatal("precondition failed: want ReasoningLeak=true")
+	}
+	if !strings.Contains(v.Reason, "missing or wrong-typed contract field") {
+		t.Errorf("want Reason to still mention the contract-fields failure, got %q", v.Reason)
+	}
+	if !strings.Contains(v.Reason, "reasoning") {
+		t.Errorf("want Reason to ALSO mention the reasoning leak, not just the contract-fields failure, got %q", v.Reason)
 	}
 }

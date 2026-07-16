@@ -2,7 +2,10 @@
 # escalate=true is expected AND a specific invented-claim phrase is known to be
 # observable (must_not_contain), plus the Kazakh escalation canary added in Phase 0.4.
 # Same source IDs as common/shop-questions.yaml 9, 10, 18, 19, 21 — kept in sync by
-# hand, same caveat as lang-canary-v1/tests.yaml.
+# hand, same caveat as lang-canary-v1/tests.yaml. Test 16 (non-escalating follow-up
+# with history) was added on top of the escalation-only selection specifically for
+# chat-history coverage in the bake-off run — it doesn't fit the "escalate=true" theme
+# above, kept anyway so both bake-offs exercise the same history-handling case.
 tests:
   - id: "9. off-KB city coverage"
     message: "А вы доставляете в Астану?"
@@ -39,3 +42,14 @@ tests:
     must_not_contain:
       - "жеткізбейміз"
       - "аймағымыздан тыс"
+
+  - id: "16. follow-up with history, needs delivery cost"
+    history:
+      - role: client
+        text: "Сколько стоит кофемашина DeLonghi?"
+      - role: assistant
+        text: "Кофемашина DeLonghi стоит 129 900 ₸."
+    message: "А доставка сколько будет стоить?"
+    requires:
+      - ["policy.main.delivery_cost"]
+    language: ru

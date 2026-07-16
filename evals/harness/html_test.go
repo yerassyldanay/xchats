@@ -133,3 +133,116 @@ func TestWriteRunHTML_EmptyRunDir(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestWriteRunHTML_ReasoningLeakWarningRenders proves the visibility flag added for a
+// raw response containing a <think> tag marker actually surfaces as a warning in the
+// rendered page, not just on the in-memory VOutput — the concrete guarantee behind
+// "never leaks into any report meant to show customer-facing output" for the debug raw
+// panel specifically (the hard gate against reply_text itself is judge_test.go's job).
+func TestWriteRunHTML_ReasoningLeakWarningRenders(t *testing.T) {
+	runDir := t.TempDir()
+
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test/model"
+	row.Response.Output = "<think>internal chain of thought, never meant for a customer</think>"
+	v := judgeOne(TestCase{ID: "leaky"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+
+	jr := JudgedRun{Scenario: "fixture-scenario", Verdicts: []Verdict{v}}
+	if err := writeJSON(filepath.Join(runDir, "fixture-scenario.judged.json"), jr); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeRunHTML(runDir); err != nil {
+		t.Fatalf("writeRunHTML: %v", err)
+	}
+	out, err := os.ReadFile(filepath.Join(runDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(out)
+
+	if !strings.Contains(page, "Raw output contains a reasoning/thinking tag marker") {
+		t.Error("expected the reasoning-marker warning to render for a raw output containing <think>")
+	}
+	if !strings.Contains(page, "no_reasoning_leak") {
+		t.Error("expected the no_reasoning_leak check name to render in the scores table")
+	}
+}
+
+// TestWriteRunHTML_EvidenceDivShowsTruncatedAndReasoningLeak proves the per-verdict
+// evidence block gives Truncated/ReasoningLeak the same dedicated, at-a-glance callout
+// Blocked/LeftoverBraces already got — a review caught that these were only visible
+// buried in the generic Scores table, unlike CONTRACT.md which already flagged them
+// prominently.
+func TestWriteRunHTML_EvidenceDivShowsTruncatedAndReasoningLeak(t *testing.T) {
+	runDir := t.TempDir()
+
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test/model"
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+	row.Response.FinishReason = "length"
+	v := judgeOne(TestCase{ID: "truncated-case"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if !v.Truncated {
+		t.Fatal("precondition failed: want Truncated=true")
+	}
+
+	jr := JudgedRun{Scenario: "fixture-scenario", Verdicts: []Verdict{v}}
+	if err := writeJSON(filepath.Join(runDir, "fixture-scenario.judged.json"), jr); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRunHTML(runDir); err != nil {
+		t.Fatalf("writeRunHTML: %v", err)
+	}
+	out, err := os.ReadFile(filepath.Join(runDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(out)
+
+	if !strings.Contains(page, "<b>TRUNCATED</b>") {
+		t.Error("expected a dedicated TRUNCATED evidence callout, not just a Scores table row")
+	}
+	if !strings.Contains(page, "finish_reason=length") {
+		t.Error("expected the evidence callout to name the actual finish_reason value")
+	}
+}
+
+// TestWriteRunHTML_ReasoningContentRendersSeparatelyFromRawOutput proves captured
+// reasoning content (Verdict.Reasoning) is actually visible in the viewer, not silently
+// dropped — a review caught that PromptfooRow.Response.Reasoning was parsed but never
+// forwarded anywhere downstream once captured.
+func TestWriteRunHTML_ReasoningContentRendersSeparatelyFromRawOutput(t *testing.T) {
+	runDir := t.TempDir()
+
+	catalog := &Catalog{Contract: "attach_groups"}
+	row := PromptfooRow{}
+	row.Provider.ID = "test/model"
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+	row.Response.Reasoning = "the customer wants the price, I should state it plainly"
+	v := judgeOne(TestCase{ID: "reasoning-case"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if v.Reasoning == "" {
+		t.Fatal("precondition failed: want Verdict.Reasoning populated from row.Response.Reasoning")
+	}
+
+	jr := JudgedRun{Scenario: "fixture-scenario", Verdicts: []Verdict{v}}
+	if err := writeJSON(filepath.Join(runDir, "fixture-scenario.judged.json"), jr); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRunHTML(runDir); err != nil {
+		t.Fatalf("writeRunHTML: %v", err)
+	}
+	out, err := os.ReadFile(filepath.Join(runDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(out)
+
+	if !strings.Contains(page, "the customer wants the price, I should state it plainly") {
+		t.Error("expected captured reasoning content to actually render in the viewer")
+	}
+	if !strings.Contains(page, "never part of the graded reply_text") {
+		t.Error("expected the reasoning block to be clearly labeled as separate from the graded output")
+	}
+}

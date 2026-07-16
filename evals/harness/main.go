@@ -25,11 +25,19 @@ func main() {
 	case "report":
 		err = cmdReport(os.Args[2:])
 	case "run":
-		err = cmdRun(os.Args[2:])
+		_, err = cmdRun(os.Args[2:])
 	case "extract":
-		err = cmdExtract(os.Args[2:])
+		_, err = cmdExtract(os.Args[2:])
 	case "html":
 		err = cmdHTML(os.Args[2:])
+	case "blind-export":
+		err = cmdBlindExport(os.Args[2:])
+	case "blind-report":
+		err = cmdBlindReport(os.Args[2:])
+	case "launch":
+		err = cmdLaunch(os.Args[2:])
+	case "export":
+		err = cmdExport(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -56,5 +64,33 @@ commands:
                                        Eval 1: file -> extracted information (direct
                                        OpenRouter calls, no promptfoo); writes EXTRACT.md
   html   -run <dir>                   write runs/<id>/index.html (also auto-written,
-                                       best-effort, at the end of run/extract/report)`)
+                                       best-effort, at the end of run/extract/report)
+  blind-export -run <dir> -out <dir> [-force] [-seed N]
+                                       finalist-stage language review: strip prompt-
+                                       variant/model identity from a judged run's
+                                       ContractPass answers, shuffle, and write a
+                                       reviewer-facing review.csv (blank kk/ru/mixed/
+                                       unclear label column) plus a withheld mapping
+                                       file; also writes ROUTING_ACCURACY.md immediately
+                                       (needs no human review)
+  blind-report -review <file> -mapping <file> [-out <file>]
+                                       ingest a filled-in review.csv + its mapping file
+                                       and write BLIND_REPORT.md: declared reply_language
+                                       vs. the blinded human label, reported separately
+  launch -all [-no-cache] [-models-file path] [-expect-calls N]
+                                       umbrella over run+extract: mints one launch id,
+                                       writes runs/launches/<id>.json BEFORE any billed
+                                       call (planned families, combined pre-flight call
+                                       count), then runs both families under that id so
+                                       the eval comparison UI groups them as one launch
+  export [-run <dir> | -all]          regenerate executions.json (per run) and runs.json
+                                       (the launches list) — fatal on the first error,
+                                       unlike the best-effort auto-write at the end of
+                                       run/extract/report/html; the one command a fresh
+                                       clone needs before the eval comparison UI has
+                                       anything to show. -all also (re)writes
+                                       runs/catalog.json — every scenario's and
+                                       extraction case's requirements, resolved to real
+                                       values, no billed calls; the read-only
+                                       requirements review at /evals/catalog`)
 }

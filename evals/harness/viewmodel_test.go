@@ -5,17 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"xchats-evals-harness/internal/provenance"
 )
-
-func scoreByName(scores []VScore, name string) (VScore, bool) {
-	for _, s := range scores {
-		if s.Name == name {
-			return s, true
-		}
-	}
-	return VScore{}, false
-}
 
 // TestScenarioExecutionFromVerdict_ParseFailure_EverythingDownstreamIsNotRun is the
 // golden test for the exact bug an earlier review caught: a hand-built Verdict where
@@ -42,9 +35,17 @@ func TestScenarioExecutionFromVerdict_ParseFailure_EverythingDownstreamIsNotRun(
 		t.Errorf("want parse_ok detail to carry the reason, got %q", parseOk.Detail)
 	}
 
+	// finish_reason_ok is evaluated independent of parsing (unlike everything in
+	// `downstream` below) — a parse failure with no truncation signal (v.Truncated is
+	// zero-value false here) must still report a REAL pass, not not_run.
+	finishOk, ok := scoreByName(exec.Scores, "finish_reason_ok")
+	if !ok || finishOk.Status != ScorePass {
+		t.Errorf("want finish_reason_ok=pass (evaluated independently of ParseOK), got %+v (found=%v)", finishOk, ok)
+	}
+
 	downstream := []string{
-		"contract_fields", "no_unknown_tokens", "no_leftover_braces", "requires",
-		"media", "escalate", "language", "language_text_ok", "language_field_ok",
+		"contract_fields", "no_unknown_tokens", "no_leftover_braces", "no_reasoning_leak",
+		"requires", "media", "escalate", "language", "language_text_ok", "language_field_ok",
 		"must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media",
 	}
 	for _, name := range downstream {
@@ -92,8 +93,8 @@ func TestScenarioExecutionFromVerdict_ParseOK_EveryScoreReflectsRealEvaluation(t
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
 
 	for _, name := range []string{"contract_fields", "no_unknown_tokens", "no_leftover_braces",
-		"requires", "media", "escalate", "language", "language_text_ok", "language_field_ok",
-		"must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media"} {
+		"no_reasoning_leak", "requires", "media", "escalate", "language", "language_text_ok",
+		"language_field_ok", "must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media"} {
 		s, ok := scoreByName(exec.Scores, name)
 		if !ok {
 			t.Fatalf("score %q missing", name)
@@ -277,5 +278,453 @@ func TestLoadRunExecutions_MissingFamilyIsFine(t *testing.T) {
 	}
 	if len(execs) != 0 {
 		t.Fatalf("want 0 executions for an empty run dir, got %d", len(execs))
+	}
+}
+
+// TestScenarioExecutionFromVerdict_ReplyTextExtractedFromRawOutput proves the eval
+// comparison UI's "LLM reply" column (Output.ReplyText) is populated from the SAME
+// parse RawOutput already went through in judgeOne — not left for the frontend to
+// re-implement JSON extraction — and stays empty (not an error) when RawOutput never
+// parsed, exactly like every other "not evaluated" field on this struct.
+func TestScenarioExecutionFromVerdict_ReplyTextExtractedFromRawOutput(t *testing.T) {
+	v := Verdict{
+		TestID:    "t1",
+		Model:     "test/model",
+		RawOutput: `{"reply_text":"Доставка 1500 тг.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+		ParseOK:   true,
+	}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
+	if exec.Output.ReplyText != "Доставка 1500 тг." {
+		t.Errorf("want ReplyText extracted from RawOutput, got %q", exec.Output.ReplyText)
+	}
+}
+
+func TestScenarioExecutionFromVerdict_ReplyTextEmptyOnParseFailure(t *testing.T) {
+	v := Verdict{TestID: "t1", Model: "test/model", RawOutput: "not json", ParseOK: false}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
+	if exec.Output.ReplyText != "" {
+		t.Errorf("want empty ReplyText when RawOutput doesn't parse, got %q", exec.Output.ReplyText)
+	}
+}
+
+// writeSnapshotScenario is the enrichScenarioExecutions test helper: hand-writes a
+// run dir's snapshots/<scenario>/{scenario.yaml,resolved_tests.json} exactly as
+// provenance.SnapshotScenario would, without needing a real render pipeline.
+func writeSnapshotScenario(t *testing.T, runDir, scenario string, sc ScenarioConfig, tests []TestCase) {
+	t.Helper()
+	sc.Name = scenario
+	snapDir := filepath.Join(runDir, "snapshots", scenario)
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scYAML, err := yaml.Marshal(sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, "scenario.yaml"), scYAML, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(snapDir, "resolved_tests.json"), ResolvedTests{Tests: tests}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestEnrichScenarioExecutions_SetupExperimentPromptRefAndHistory is the core proof
+// for the comparison-matrix metadata (review amendments 2 & 3): Setup/Experiment come
+// from the snapshotted scenario.yaml, Prompt is parsed from prompt_ref (not the
+// scenario name), and History is attached per-execution by matching TestID against
+// the snapshotted resolved_tests.json — none of which scenarioExecutionFromVerdict
+// alone could ever know from a bare Verdict.
+func TestEnrichScenarioExecutions_SetupExperimentPromptRefAndHistory(t *testing.T) {
+	runDir := t.TempDir()
+	writeSnapshotScenario(t, runDir, "lang-canary-v4-kk", ScenarioConfig{
+		Setup: "lang-v4-routed", PromptRef: "lang-kk@v4", Experiment: "lang-bakeoff",
+	}, []TestCase{
+		{ID: "t1", Message: "Жеткізу қанша тұрады?", History: []HistoryTurn{
+			{Role: "client", Text: "Сәлем!"}, {Role: "assistant", Text: "Сәлеметсіз бе!"},
+		}},
+		{ID: "t2", Message: "Рахмет"}, // no history
+	})
+
+	execs := []VExecution{
+		{Subject: VSubject{TestID: "t1"}, Variant: VVariant{Model: "m1"}},
+		{Subject: VSubject{TestID: "t2"}, Variant: VVariant{Model: "m1"}},
+	}
+	out := enrichScenarioExecutions(runDir, "lang-canary-v4-kk", "deadbeef", execs)
+
+	if out[0].Variant.Setup != "lang-v4-routed" {
+		t.Errorf("want Setup=lang-v4-routed, got %q", out[0].Variant.Setup)
+	}
+	if out[0].Variant.Experiment != "lang-bakeoff" {
+		t.Errorf("want Experiment=lang-bakeoff, got %q", out[0].Variant.Experiment)
+	}
+	if out[0].Variant.Prompt.Name != "lang-kk" || out[0].Variant.Prompt.Version != 4 {
+		t.Errorf("want Prompt=lang-kk@v4, got %+v", out[0].Variant.Prompt)
+	}
+	if out[0].Variant.Prompt.SHA256 != "deadbeef" {
+		t.Errorf("want the manifest-sourced SHA256 attached to Prompt, got %q", out[0].Variant.Prompt.SHA256)
+	}
+	if len(out[0].Subject.History) != 2 || out[0].Subject.History[0].Text != "Сәлем!" {
+		t.Errorf("want t1's history attached, got %+v", out[0].Subject.History)
+	}
+	if len(out[1].Subject.History) != 0 {
+		t.Errorf("want t2 (no history in its TestCase) to stay empty, got %+v", out[1].Subject.History)
+	}
+}
+
+// TestEnrichScenarioExecutions_RoutedStrategySharesOneSetupAcrossTwoPromptRefs is the
+// concrete V4-kk/V4-ru story ScenarioConfig.Setup's doc comment describes: two
+// DIFFERENT scenario dirs (two different prompt_refs, two different snapshots) must
+// still report the SAME Setup value, so the comparison matrix shows one "lang-v4-routed"
+// column, not two — while each execution still carries its OWN actual Prompt ref.
+func TestEnrichScenarioExecutions_RoutedStrategySharesOneSetupAcrossTwoPromptRefs(t *testing.T) {
+	runDir := t.TempDir()
+	writeSnapshotScenario(t, runDir, "lang-canary-v4-kk",
+		ScenarioConfig{Setup: "lang-v4-routed", PromptRef: "lang-kk@v4", Experiment: "lang-bakeoff"}, nil)
+	writeSnapshotScenario(t, runDir, "lang-canary-v4-ru",
+		ScenarioConfig{Setup: "lang-v4-routed", PromptRef: "lang-ru@v4", Experiment: "lang-bakeoff"}, nil)
+
+	kk := enrichScenarioExecutions(runDir, "lang-canary-v4-kk", "", []VExecution{{Variant: VVariant{Model: "m1"}}})
+	ru := enrichScenarioExecutions(runDir, "lang-canary-v4-ru", "", []VExecution{{Variant: VVariant{Model: "m1"}}})
+
+	if kk[0].Variant.Setup != ru[0].Variant.Setup {
+		t.Fatalf("want both scenarios to share one Setup column, got kk=%q ru=%q", kk[0].Variant.Setup, ru[0].Variant.Setup)
+	}
+	if kk[0].Variant.Prompt.Name == ru[0].Variant.Prompt.Name {
+		t.Errorf("want DIFFERENT prompt refs per execution (kk vs ru), both got %q", kk[0].Variant.Prompt.Name)
+	}
+}
+
+// TestEnrichScenarioExecutions_FallbacksForLegacyAndUnannotatedData proves nothing
+// regresses for data that predates this feature: no snapshot at all (a run from
+// before provenance snapshotting existed) leaves executions untouched; a snapshot
+// with an unannotated scenario.yaml (no setup/prompt_ref/experiment — e.g. shop-*)
+// falls back to the scenario name for both Setup and Prompt.Name, Experiment stays
+// empty (never auto-compared against anything).
+func TestEnrichScenarioExecutions_FallbacksForLegacyAndUnannotatedData(t *testing.T) {
+	execs := []VExecution{{Variant: VVariant{Model: "m1"}}}
+
+	t.Run("no snapshot at all (legacy run)", func(t *testing.T) {
+		runDir := t.TempDir()
+		out := enrichScenarioExecutions(runDir, "shop-current", "", execs)
+		if out[0].Variant.Setup != "" || out[0].Variant.Prompt.Name != "" {
+			t.Errorf("want untouched Variant with no snapshot, got %+v", out[0].Variant)
+		}
+	})
+
+	t.Run("snapshot present, scenario.yaml unannotated", func(t *testing.T) {
+		runDir := t.TempDir()
+		writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{}, nil)
+		out := enrichScenarioExecutions(runDir, "shop-current", "", execs)
+		if out[0].Variant.Setup != "shop-current" {
+			t.Errorf("want Setup to fall back to the scenario name, got %q", out[0].Variant.Setup)
+		}
+		if out[0].Variant.Prompt.Name != "shop-current" || out[0].Variant.Prompt.Version != 0 {
+			t.Errorf("want Prompt to fall back to (scenario name, v0), got %+v", out[0].Variant.Prompt)
+		}
+		if out[0].Variant.Experiment != "" {
+			t.Errorf("want Experiment to stay empty (never auto-compared), got %q", out[0].Variant.Experiment)
+		}
+	})
+
+	t.Run("malformed prompt_ref falls back rather than propagating garbage", func(t *testing.T) {
+		runDir := t.TempDir()
+		writeSnapshotScenario(t, runDir, "weird-scenario", ScenarioConfig{PromptRef: "not-a-valid-spec"}, nil)
+		out := enrichScenarioExecutions(runDir, "weird-scenario", "", execs)
+		if out[0].Variant.Prompt.Name != "weird-scenario" {
+			t.Errorf("want fallback to scenario name on an unparseable prompt_ref, got %+v", out[0].Variant.Prompt)
+		}
+	})
+}
+
+// TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail proves
+// the five universal safety rows attach unconditionally (no snapshot needed) and read
+// their Pass/Actual straight back off the Scores this same function just built — never
+// a second, independently-computed verdict.
+func TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail(t *testing.T) {
+	v := Verdict{
+		TestID: "t1", Model: "test/model", ParseOK: true, ContractFields: true,
+		UnknownMedia: []string{"bogus-ref"}, InventedDigits: []string{"999"},
+	}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
+
+	wantKeys := []string{"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits"}
+	if len(exec.Contract) != len(wantKeys) {
+		t.Fatalf("want exactly %d safety rows, got %d: %+v", len(wantKeys), len(exec.Contract), exec.Contract)
+	}
+	for i, k := range wantKeys {
+		if exec.Contract[i].Key != k || exec.Contract[i].Kind != "safety" {
+			t.Errorf("row %d: want key=%q kind=safety, got %+v", i, k, exec.Contract[i])
+		}
+	}
+	if p := contractRow(t, exec.Contract, "no_unknown_media"); p.Pass == nil || *p.Pass || p.Actual != "неизвестные ссылки: bogus-ref" {
+		t.Errorf("want no_unknown_media=fail with the offending ref in Actual, got %+v", p)
+	}
+	if p := contractRow(t, exec.Contract, "no_invented_digits"); p.Pass == nil || *p.Pass || p.Actual != "999" {
+		t.Errorf("want no_invented_digits=fail with the digit in Actual, got %+v", p)
+	}
+	if p := contractRow(t, exec.Contract, "valid_json"); p.Pass == nil || !*p.Pass || p.Actual != "разобран корректно" {
+		t.Errorf("want valid_json=pass, got %+v", p)
+	}
+}
+
+// TestScenarioExecutionFromVerdict_ContractSafetyRows_ParseFailureIsNotRun proves a
+// parse failure reports the placeholder-safety row as not-applicable (Pass=nil), not a
+// false "fail" — mirroring evaluated()'s own not_run semantics on the Scores list right
+// next to it.
+func TestScenarioExecutionFromVerdict_ContractSafetyRows_ParseFailureIsNotRun(t *testing.T) {
+	v := Verdict{TestID: "t1", Model: "test/model", ParseOK: false, Reason: "invalid JSON"}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
+
+	if p := contractRow(t, exec.Contract, "no_unresolved_placeholders"); p.Pass != nil {
+		t.Errorf("want no_unresolved_placeholders Pass=nil (not evaluated) on a parse failure, got %v", *p.Pass)
+	}
+	if p := contractRow(t, exec.Contract, "valid_json"); p.Pass == nil || *p.Pass || p.Actual != "invalid JSON" {
+		t.Errorf("want valid_json=fail with the parse reason as Actual, got %+v", p)
+	}
+}
+
+// contractRow finds one row by key, failing the test if absent.
+func contractRow(t *testing.T, rows []VContractRow, key string) VContractRow {
+	t.Helper()
+	for _, r := range rows {
+		if r.Key == key {
+			return r
+		}
+	}
+	t.Fatalf("contract row %q not found in %+v", key, rows)
+	return VContractRow{}
+}
+
+// TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown is the
+// core proof for the Requirements panel's scenario-family join: rows for
+// Requires/Language/Escalate/Media/MustNotContain appear ONLY when the test itself
+// declares that requirement, prepended before the five safety rows, with Expected read
+// from the snapshotted TestCase and Actual read from the model's own persisted RawOutput
+// — never a re-grade (Pass always matches the Verdict-derived Score already on Scores).
+func TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown(t *testing.T) {
+	runDir := t.TempDir()
+	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{Contract: "asset_refs"}, []TestCase{
+		{
+			ID:             "t1",
+			Message:        "Сколько стоит кофемашина?",
+			Requires:       [][]string{{"product.coffee-machine.price"}},
+			Language:       "ru",
+			Escalate:       boolPtr(false),
+			Media:          &MediaExpect{AnyOfRefs: []string{"coffee-photo-1"}},
+			MustNotContain: []string{"бесплатно"},
+		},
+		{ID: "t2", Message: "no requirements declared at all"},
+	})
+
+	raw := `{"reply_text":"Кофемашина стоит {{product.coffee-machine.price}}","reply_language":"ru","escalate":false,"asset_refs":["coffee-photo-1"]}`
+	v1 := Verdict{
+		TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: raw,
+		RequiresPass: true, LanguagePass: true, EscalatePass: true, MediaPass: true, MustNotContainPass: true,
+	}
+	v2 := Verdict{TestID: "t2", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: `{"reply_text":"ок"}`}
+	execs := []VExecution{scenarioExecutionFromVerdict("shop-current", v1), scenarioExecutionFromVerdict("shop-current", v2)}
+
+	out := enrichScenarioExecutions(runDir, "shop-current", "", execs)
+
+	t1 := out[0]
+	wantOrder := []string{"requires", "language", "escalate", "media", "must_not_contain",
+		"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits"}
+	if len(t1.Contract) != len(wantOrder) {
+		t.Fatalf("want %d rows (5 requirement + 5 safety), got %d: %+v", len(wantOrder), len(t1.Contract), t1.Contract)
+	}
+	for i, k := range wantOrder {
+		if t1.Contract[i].Key != k {
+			t.Errorf("row %d: want key=%q, got %q (requirement rows must come before safety rows)", i, k, t1.Contract[i].Key)
+		}
+	}
+
+	req := contractRow(t, t1.Contract, "requires")
+	if req.Expected != "product.coffee-machine.price" || req.Actual != "product.coffee-machine.price" || req.Pass == nil || !*req.Pass {
+		t.Errorf("want requires expected==actual==the resolved token, pass=true, got %+v", req)
+	}
+	lang := contractRow(t, t1.Contract, "language")
+	if lang.Expected != "ru" || lang.Actual != "ru" {
+		t.Errorf("want language expected=ru actual=ru (from reply_language), got %+v", lang)
+	}
+	esc := contractRow(t, t1.Contract, "escalate")
+	if esc.Expected != "нет" || esc.Actual != "нет" {
+		t.Errorf("want escalate expected=нет actual=нет, got %+v", esc)
+	}
+	media := contractRow(t, t1.Contract, "media")
+	if media.Expected != "coffee-photo-1" || media.Actual != "coffee-photo-1" {
+		t.Errorf("want media expected=actual=coffee-photo-1, got %+v", media)
+	}
+	mnc := contractRow(t, t1.Contract, "must_not_contain")
+	if mnc.Expected != "бесплатно" || mnc.Actual != "нет" {
+		t.Errorf("want must_not_contain expected=бесплатно actual=нет (nothing matched), got %+v", mnc)
+	}
+
+	t2 := out[1]
+	if len(t2.Contract) != 5 {
+		t.Fatalf("want t2 (no requirements declared) to carry ONLY the 5 safety rows, got %d: %+v", len(t2.Contract), t2.Contract)
+	}
+	for _, r := range t2.Contract {
+		if r.Kind != "safety" {
+			t.Errorf("want every t2 row to be kind=safety, got %+v", r)
+		}
+	}
+}
+
+// TestEnrichScenarioExecutions_ContractRequirementRows_FailedRequirementShowsMismatch
+// proves a genuinely failed requirement surfaces the ACTUAL wrong value, not just
+// pass=false — the whole point of the panel over a bare pass/fail badge.
+func TestEnrichScenarioExecutions_ContractRequirementRows_FailedRequirementShowsMismatch(t *testing.T) {
+	runDir := t.TempDir()
+	writeSnapshotScenario(t, runDir, "lang-canary-v1", ScenarioConfig{}, []TestCase{
+		{ID: "t1", Message: "Кофемашина қанша тұрады?", Language: "kk", Escalate: boolPtr(true)},
+	})
+	raw := `{"reply_text":"Кофемашина стоит 129900","reply_language":"ru","escalate":false}`
+	v := Verdict{
+		TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: raw,
+		LanguagePass: false, EscalatePass: false,
+	}
+	execs := enrichScenarioExecutions(runDir, "lang-canary-v1", "",
+		[]VExecution{scenarioExecutionFromVerdict("lang-canary-v1", v)})
+
+	lang := contractRow(t, execs[0].Contract, "language")
+	if lang.Expected != "kk" || lang.Actual != "ru" || lang.Pass == nil || *lang.Pass {
+		t.Errorf("want language expected=kk actual=ru (the model's real declared field) pass=false, got %+v", lang)
+	}
+	esc := contractRow(t, execs[0].Contract, "escalate")
+	if esc.Expected != "да" || esc.Actual != "нет" || esc.Pass == nil || *esc.Pass {
+		t.Errorf("want escalate expected=да actual=нет pass=false, got %+v", esc)
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// writeSnapshotExtractCases hand-writes a run dir's snapshots/extract_cases.yaml
+// exactly as cmdExtract's SnapshotFile call would, without needing a real extraction
+// run.
+func writeSnapshotExtractCases(t *testing.T, runDir string, cases []ExtractCase) {
+	t.Helper()
+	snapDir := filepath.Join(runDir, "snapshots")
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, err := yaml.Marshal(ExtractCasesFile{Cases: cases})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, "extract_cases.yaml"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestExtractExecutionFromResult_ContractSafetyRows proves the extract family's two
+// safety rows behave honestly across all three outcomes: a call error and a parse
+// failure both still get a fail valid_json row (Requirements panel never goes empty
+// just because nothing else could be graded), and no_reasoning_leak only ever appears
+// when runExtractChecks actually ran it (Checks non-empty) — never fabricated.
+func TestExtractExecutionFromResult_ContractSafetyRows(t *testing.T) {
+	t.Run("call error", func(t *testing.T) {
+		exec := extractExecutionFromResult(extractRunResult{CaseID: "c1", Error: "http 500"})
+		if len(exec.Contract) != 1 {
+			t.Fatalf("want exactly the valid_json row, got %+v", exec.Contract)
+		}
+		row := exec.Contract[0]
+		if row.Key != "valid_json" || row.Pass == nil || *row.Pass || row.Actual != "ошибка вызова: http 500" {
+			t.Errorf("want valid_json=fail with the call error as Actual, got %+v", row)
+		}
+	})
+
+	t.Run("parse failure", func(t *testing.T) {
+		exec := extractExecutionFromResult(extractRunResult{CaseID: "c1", ParseError: "unexpected EOF"})
+		row := contractRow(t, exec.Contract, "valid_json")
+		if row.Pass == nil || *row.Pass || row.Actual != "не разобран: unexpected EOF" {
+			t.Errorf("want valid_json=fail with the parse error as Actual, got %+v", row)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		exec := extractExecutionFromResult(extractRunResult{
+			CaseID: "c1", Parsed: &ExtractionResult{ContentKind: "product_photo"},
+			Checks: []CheckResult{{Name: "no_reasoning_leak", Pass: true}},
+		})
+		if len(exec.Contract) != 2 {
+			t.Fatalf("want valid_json + no_reasoning_leak, got %+v", exec.Contract)
+		}
+		vj := contractRow(t, exec.Contract, "valid_json")
+		if vj.Pass == nil || !*vj.Pass {
+			t.Errorf("want valid_json=pass, got %+v", vj)
+		}
+		leak := contractRow(t, exec.Contract, "no_reasoning_leak")
+		if leak.Pass == nil || !*leak.Pass || leak.Actual != "не найдено" {
+			t.Errorf("want no_reasoning_leak=pass, got %+v", leak)
+		}
+	})
+}
+
+// TestEnrichExtractExecutions_ContractRequirementRows is the core proof for the
+// Requirements panel's extract-family join: field/text/number checks become rows with
+// Expected from the snapshotted case and Actual from the persisted parsed output or the
+// check's own Detail, and a case absent from the snapshot (or no snapshot at all) is
+// left with only the safety rows already attached — never a crash, never a fabricated row.
+func TestEnrichExtractExecutions_ContractRequirementRows(t *testing.T) {
+	runDir := t.TempDir()
+	writeSnapshotExtractCases(t, runDir, []ExtractCase{
+		{
+			ID:              "infographic",
+			File:            "../assets/infographic.png",
+			Fields:          map[string]string{"content_kind": "infographic"},
+			TextContainsAll: []string{"старт", "рост"},
+			AllowedNumbers:  []string{"10 000", "25 000"},
+		},
+	})
+
+	passing := extractExecutionFromResult(extractRunResult{
+		CaseID: "infographic",
+		Parsed: &ExtractionResult{ContentKind: "infographic", ExtractedText: "старт 10 000, рост 25 000"},
+		Checks: []CheckResult{
+			{Name: "field:content_kind", Pass: true},
+			{Name: "text_contains_all", Pass: true},
+			{Name: "no_invented_numbers", Pass: true},
+		},
+	})
+	failing := extractExecutionFromResult(extractRunResult{
+		CaseID: "infographic",
+		Parsed: &ExtractionResult{ContentKind: "screenshot", ExtractedText: "старт"},
+		Checks: []CheckResult{
+			{Name: "field:content_kind", Pass: false, Detail: `want "infographic", got "screenshot"`},
+			{Name: "text_contains_all", Pass: false, Detail: "missing: рост"},
+			{Name: "no_invented_numbers", Pass: true},
+		},
+	})
+	unknownCase := extractExecutionFromResult(extractRunResult{
+		CaseID: "not-in-snapshot",
+		Parsed: &ExtractionResult{},
+		Checks: []CheckResult{{Name: "no_reasoning_leak", Pass: true}},
+	})
+
+	out := enrichExtractExecutions(runDir, []VExecution{passing, failing, unknownCase})
+
+	p := contractRow(t, out[0].Contract, "field:content_kind")
+	if p.Expected != "infographic" || p.Actual != "infographic" || p.Pass == nil || !*p.Pass {
+		t.Errorf("want field:content_kind pass with expected=actual=infographic, got %+v", p)
+	}
+	pNums := contractRow(t, out[0].Contract, "no_invented_numbers")
+	if pNums.Expected != "10 000, 25 000" {
+		t.Errorf("want no_invented_numbers Expected to be the allowed list, got %q", pNums.Expected)
+	}
+
+	f := contractRow(t, out[1].Contract, "field:content_kind")
+	if f.Expected != "infographic" || f.Actual != "screenshot" || f.Pass == nil || *f.Pass {
+		t.Errorf("want field:content_kind fail showing expected=infographic actual=screenshot, got %+v", f)
+	}
+	fText := contractRow(t, out[1].Contract, "text_contains_all")
+	if fText.Actual != "missing: рост" {
+		t.Errorf("want text_contains_all Actual to be the missing-phrase detail, got %q", fText.Actual)
+	}
+
+	for _, r := range out[2].Contract {
+		if r.Kind != "safety" {
+			t.Errorf("want a case absent from the snapshot to carry ONLY safety rows, got %+v", r)
+		}
 	}
 }
