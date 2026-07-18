@@ -60,32 +60,19 @@ providers:
   # added them before launching a big repeats/screening pass against all eight.
   - id: openrouter:google/gemini-3.5-flash
     temperature: 0.3
-    # A same-day partial run (2026-07-18) at max_tokens=500 showed 38/38 sampled calls
-    # truncated (finish_reason=length) at ~496 avg completion tokens — the model was
-    # cut off before finishing its JSON reply on essentially every call. Raised to 1500
-    # to give real headroom; re-check truncation on the next run before trusting a low
-    # contract-pass rate as a quality signal rather than a budget artifact.
-    max_tokens: 1500
+    max_tokens: 500
     # Verified against openrouter.ai/google/gemini-3.5-flash on 2026-07-18.
     input_per_mtok: 1.50
     output_per_mtok: 9.00
   - id: openrouter:moonshotai/kimi-k2.6
     temperature: 0.3
-    # Same 2026-07-18 partial run: 36/38 sampled calls truncated at ~602 avg completion
-    # tokens. Raised to 1500 for the same reason as gemini-3.5-flash above.
-    max_tokens: 1500
+    max_tokens: 500
     # Verified against openrouter.ai/moonshotai/kimi-k2.6 on 2026-07-18.
     input_per_mtok: 0.66
     output_per_mtok: 3.41
   - id: openrouter:qwen/qwen3.7-plus
     temperature: 0.3
-    # Same 2026-07-18 partial run: 0/37 sampled calls truncated, but avg completion was
-    # ~1572 tokens — over 3x the configured cap of 500, with finish_reason=stop. This
-    # provider does not appear to enforce max_tokens at all for this model; raised to
-    # 2000 to at least document the real ceiling rather than leave a number the API
-    # ignores. Re-verify this behavior on the next run — a provider silently ignoring a
-    # request parameter is worth confirming isn't a fluke before relying on it.
-    max_tokens: 2000
+    max_tokens: 500
     # Verified against openrouter.ai/qwen/qwen3.7-plus on 2026-07-18 — that page showed a
     # 20% promotional discount already applied to this price; re-check before trusting it
     # weeks from now, promos expire.
@@ -93,10 +80,7 @@ providers:
     output_per_mtok: 1.28
   - id: openrouter:qwen/qwen3.7-max
     temperature: 0.3
-    # Same 2026-07-18 partial run: 0/37 truncated, avg completion ~1187 tokens (over 2x
-    # the configured cap), finish_reason=stop — same "max_tokens not enforced" pattern
-    # as qwen3.7-plus above. Raised to 1800 for the same documentation reason.
-    max_tokens: 1800
+    max_tokens: 500
     # Verified against openrouter.ai/qwen/qwen3.7-max on 2026-07-18 — that page showed a
     # 41% promotional discount already applied to this price; re-check before trusting it
     # weeks from now, promos expire.

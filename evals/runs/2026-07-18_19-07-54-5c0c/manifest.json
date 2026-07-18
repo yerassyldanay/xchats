@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-07-18_19-07-54-5c0c",
+  "family": "scenario",
+  "command": "run",
+  "args": [
+    "-scenario",
+    "scenarios/shop-current,scenarios/shop-decisions-v1",
+    "-repeats",
+    "2",
+    "-no-cache",
+    "-expect-calls",
+    "928"
+  ],
+  "git_sha": "d6872a8f5d2953b24f1c148f142775d2a44e3d6d",
+  "git_dirty": true,
+  "git_status_porcelain": " M evals/models.yaml\n?? evals/runs/2026-07-18_18-56-13-e1af/\n",
+  "worktree_diff_path": "worktree.diff",
+  "models_path": "models.yaml",
+  "models_sha256": "ea81945ce4ab097173a00d86d49f406a3a5869216c41d7c0a93458354f1c8a2a",
+  "promptfoo_version": "0.121.18",
+  "started_at": "2026-07-18T14:07:54Z"
+}

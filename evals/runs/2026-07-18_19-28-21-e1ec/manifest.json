@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-07-18_19-28-21-e1ec",
+  "family": "scenario",
+  "command": "run",
+  "args": [
+    "-scenario",
+    "scenarios/shop-current,scenarios/shop-decisions-v1",
+    "-models",
+    "openai/gpt-4o-mini,anthropic/claude-haiku-4.5,google/gemini-2.5-flash,google/gemini-2.5-flash-lite",
+    "-repeats",
+    "2",
+    "-no-cache",
+    "-expect-calls",
+    "464"
+  ],
+  "git_sha": "d6872a8f5d2953b24f1c148f142775d2a44e3d6d",
+  "git_dirty": true,
+  "git_status_porcelain": " M evals/models.yaml\n?? evals/runs/2026-07-18_18-56-13-e1af/\n?? evals/runs/2026-07-18_19-07-54-5c0c/\n",
+  "worktree_diff_path": "worktree.diff",
+  "models_path": "models.yaml",
+  "models_sha256": "535255180d148c3f93e7d548133f490818515aded376a5c073c73544037d18cd",
+  "promptfoo_version": "0.121.18",
+  "scenarios": [
+    {
+      "scenario": "shop-current",
+      "scenario_yaml_sha256": "4774b51bef0b21aa6e9e1941f9d9de18335db1a4cecc39b6ac92d5ffb0fb2859",
+      "prompt_sha256": "2e41e337029c37de68582dff0a2bc8a7dd3cb8f1c00b0cc64c2d1daa74fd97ff",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "bb3637f7b842f8c2a3525a5c64a5746036c274833c0bd846870c16945a32c0b0",
+      "promptfooconfig_sha256": "2ab25d01b31254feef1ff2497cad124cd9c601eab8ca95774636e6bf9d8bd509",
+      "results_sha256": "e833ddc781b388a18a96b91a41e79ae05c3e0af9d1ed80fa80093b5706a98229"
+    }
+  ],
+  "started_at": "2026-07-18T14:28:21Z"
+}
