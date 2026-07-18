@@ -699,3 +699,175 @@ func TestJudgeOne_ReasonAccumulatesAcrossEveryCombinationNotJustBlocked(t *testi
 		t.Errorf("want Reason to ALSO mention the reasoning leak, not just the contract-fields failure, got %q", v.Reason)
 	}
 }
+
+// TestJudgeOne_KzAliasForKazakhFieldCheck covers the real c780 failure: minimax-m2.5
+// wrote proper Kazakh text but declared reply_language "kz" (the ISO COUNTRY code,
+// Kazakhstan) instead of "kk" (the ISO LANGUAGE code) — normalizeLangCode aliases the
+// field check only; a model that writes "kz" but replies in RUSSIAN must still fail on
+// the text heuristic.
+func TestJudgeOne_KzAliasForKazakhFieldCheck(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+
+	t.Run("kz accepted when text is genuinely Kazakh", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Кофемашина DeLonghi құны — 129 900 ₸. Ол қоймада бар.","reply_language":"kz","attach_groups":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		if !got.LanguageFieldOK {
+			t.Error("want LanguageFieldOK=true (kz aliases to kk)")
+		}
+		if !got.LanguagePass {
+			t.Errorf("want LanguagePass=true, got issue %q", got.LanguageIssue)
+		}
+		if !got.LanguageAliasUsed {
+			t.Error("want LanguageAliasUsed=true — the alias must stay a VISIBLE signal, not a silent pass")
+		}
+	})
+
+	t.Run("kz does not launder a Russian reply", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Кофемашина стоит 129900 тенге.","reply_language":"kz","attach_groups":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		// The FIELD alias still applies (kz -> kk, so LanguageFieldOK is true) — that's
+		// independent and expected. What must NOT happen is the overall LanguagePass
+		// going green: the TEXT is Russian, so the combined gate must still fail.
+		if got.LanguagePass {
+			t.Error("want LanguagePass=false — the text is Russian, the kz field alias must not launder that")
+		}
+		if got.LanguageTextOK {
+			t.Error("want LanguageTextOK=false — no Kazakh-specific letters in this reply")
+		}
+	})
+
+	t.Run("plain ru vs kk still fails, no alias involved", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Жеткізу қанша тұрады?","reply_language":"ru","attach_groups":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		if got.LanguageFieldOK {
+			t.Error("want LanguageFieldOK=false (ru != kk, no alias applies)")
+		}
+		if got.LanguageAliasUsed {
+			t.Error("want LanguageAliasUsed=false — no alias was involved in this failure")
+		}
+	})
+}
+
+// TestJudgeOne_InlineListMarkersDoNotCountAsInventedDigits is the regression test for
+// the real minimax-m2.5 case-11 failure: "Для оформления заказа: 1) укажите адрес
+// доставки; 2) подтвердите заказ" — numbered-list markers after ":"/";" on ONE
+// continuous line, which the line-start-only listMarkerRE didn't reach.
+func TestJudgeOne_InlineListMarkersDoNotCountAsInventedDigits(t *testing.T) {
+	catalog := &Catalog{Contract: "asset_refs"}
+
+	t.Run("real case-11 string passes", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		// No literal price digits here on purpose — this test isolates the list-marker
+		// fix; a literal, non-tokenized price number would ALSO be a genuine invented
+		// digit, unrelated to what's being tested (covered by other existing tests).
+		row.Response.Output = `{"reply_text":"Здравствуйте! Отлично, рады, что решили взять кофемашину DeLonghi — она в наличии. Для оформления заказа: 1) укажите адрес доставки; 2) подтвердите заказ — мы пришлём счёт.","reply_language":"ru","asset_refs":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		if len(got.InventedDigits) != 0 {
+			t.Errorf("want no invented digits (list markers after ':'/';' are legitimate), got %v", got.InventedDigits)
+		}
+	})
+
+	t.Run("inline digit+paren NOT preceded by a delimiter still flags", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Гарантийный талон код 7)х указан на коробке.","reply_language":"ru","asset_refs":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		if len(got.InventedDigits) == 0 {
+			t.Error("want the bare digit+')' in running prose (no preceding ':'/';') to still be flagged as a possible invented number")
+		}
+	})
+}
+
+// TestJudgeOne_ControlCharsFailsContract is the regression test for the real
+// minimax-m2.5 case-12 output containing a literal backspace character
+// ("...сейчас.\x08r\n\nУход за ней...") — a garbled byte a real product must never
+// forward to a customer, independent of whether the JSON otherwise parses cleanly.
+func TestJudgeOne_ControlCharsFailsContract(t *testing.T) {
+	catalog := &Catalog{Contract: "asset_refs"}
+
+	t.Run("backspace fails contract", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		// \\b here (not \b) is deliberate: this is the WIRE JSON text, and JSON requires
+		// control characters to be ESCAPED inside a string (a raw unescaped 0x08 byte is
+		// invalid JSON and would fail to parse at all, never reaching the control-char
+		// check). "\\b" in this Go source produces the two literal characters backslash+b
+		// in the string, i.e. JSON's own \b escape — decodes to rune 0x08 once
+		// json.Unmarshal parses it, exactly like the real minimax-m2.5 response did.
+		row.Response.Output = "{\"reply_text\":\"Всё готово.\\bУход простой.\",\"reply_language\":\"ru\",\"asset_refs\":[],\"escalate\":false}"
+		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		if !got.ControlChars {
+			t.Error("want ControlChars=true")
+		}
+		if got.ContractPass {
+			t.Error("want ContractPass=false — a control character must hard-fail the contract like ReasoningLeak/Truncated do")
+		}
+	})
+
+	t.Run("normal CRLF is not flagged", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = "{\"reply_text\":\"Строка один.\r\nСтрока два.\",\"reply_language\":\"ru\",\"asset_refs\":[],\"escalate\":false}"
+		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		if got.ControlChars {
+			t.Error("want ControlChars=false — \\r\\n is legitimate formatting, not a garbled byte")
+		}
+	})
+}
+
+// TestJudgeOne_MustContainAny covers the positive-evidence check added for test 4's
+// redesign (an availability yes/no question): at least one expected phrase must be
+// present in the injected text, and — the reason this exists alongside
+// must_not_contain rather than instead of it — a reply with the WRONG polarity phrase
+// must still fail even though it says nothing forbidden by an empty/absent blocklist.
+func TestJudgeOne_MustContainAny(t *testing.T) {
+	catalog := &Catalog{Contract: "asset_refs"}
+
+	t.Run("expected phrase present -> pass", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Да, кофемашина в наличии.","reply_language":"ru","asset_refs":[],"escalate":false}`
+		tc := TestCase{ID: "t", MustContainAny: []string{"в наличии"}}
+		got := judgeOne(tc, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		if !got.MustContainAnyPass {
+			t.Error("want MustContainAnyPass=true")
+		}
+		if !got.ModelBehaviorPass {
+			t.Errorf("want ModelBehaviorPass=true, got reason=%q", got.Reason)
+		}
+	})
+
+	t.Run("none of the expected phrases present -> fail, names the full expected set", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Уточню у коллеги и вернусь с ответом.","reply_language":"ru","asset_refs":[],"escalate":true}`
+		tc := TestCase{ID: "t", MustContainAny: []string{"в наличии"}}
+		got := judgeOne(tc, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		if got.MustContainAnyPass {
+			t.Error("want MustContainAnyPass=false")
+		}
+		if got.ModelBehaviorPass {
+			t.Error("want ModelBehaviorPass=false")
+		}
+		if !strings.Contains(got.Reason, "в наличии") {
+			t.Errorf("want Reason to name the expected phrase(s), got %q", got.Reason)
+		}
+	})
+
+	t.Run("no expectation declared -> vacuously true, same convention as must_not_contain", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"anything","reply_language":"ru","asset_refs":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		if !got.MustContainAnyPass {
+			t.Error("want MustContainAnyPass=true when the test declares no must_contain_any at all")
+		}
+	})
+}

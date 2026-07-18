@@ -1,0 +1,150 @@
+{
+  "tests": [
+    {
+      "ID": "13. tariff price + commission",
+      "Message": "Сколько стоит тариф Стандарт и какая у него комиссия?",
+      "Requires": [
+        [
+          "tariff.standard.price_monthly"
+        ],
+        [
+          "tariff.standard.commission_percent"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "14. payment limit, Kazakh",
+      "Message": "Бизнес тарифінің төлем лимиті қандай?",
+      "Requires": [
+        [
+          "tariff.business.payment_limit_monthly"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "15. off-KB crypto question",
+      "Message": "А вы принимаете оплату криптовалютой?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "не принимаем оплату криптовалют",
+        "работаем с традиционными методами"
+      ],
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "16. conversation start, bare greeting",
+      "Message": "Здравствуйте!",
+      "Requires": null,
+      "Media": {
+        "AnyOfGroups": null,
+        "AnyOfRefs": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "17. conversation close, customer is done",
+      "Message": "Спасибо, разобрался, буду подключаться!",
+      "Requires": null,
+      "Media": {
+        "AnyOfGroups": null,
+        "AnyOfRefs": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "18. wrong understanding, asks about a service we don't offer",
+      "Message": "А у вас есть аренда NFC-терминалов для оффлайн-магазина?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "19. history: tariff already discussed, commission follow-up",
+      "Message": "А комиссия у него какая?",
+      "Requires": [
+        [
+          "tariff.standard.commission_percent"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Сколько стоит тариф Стандарт?"
+        },
+        {
+          "role": "assistant",
+          "text": "Тариф «Стандарт» стоит 19 900 ₸ в месяц."
+        }
+      ]
+    },
+    {
+      "ID": "20. history: tariff switch mid-conversation, limit question",
+      "Message": "Хорошо, а какой у него лимит платежей в месяц?",
+      "Requires": [
+        [
+          "tariff.business.payment_limit_monthly"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Расскажите про тариф Старт."
+        },
+        {
+          "role": "assistant",
+          "text": "«Старт» — тариф для ИП и небольших магазинов, подключить его проще всего."
+        },
+        {
+          "role": "client",
+          "text": "А если объёмы вырастут?"
+        },
+        {
+          "role": "assistant",
+          "text": "Тогда лучше смотреть на «Бизнес» — там максимальный объём и приоритетная поддержка."
+        }
+      ]
+    }
+  ]
+}

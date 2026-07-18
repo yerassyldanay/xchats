@@ -454,7 +454,7 @@ func TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail
 	}
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
 
-	wantKeys := []string{"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count"}
+	wantKeys := []string{"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count", "no_control_chars"}
 	if len(exec.Contract) != len(wantKeys) {
 		t.Fatalf("want exactly %d safety rows, got %d: %+v", len(wantKeys), len(exec.Contract), exec.Contract)
 	}
@@ -562,9 +562,9 @@ func TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown(
 
 	t1 := out[0]
 	wantOrder := []string{"requires", "language", "escalate", "media", "must_not_contain",
-		"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count"}
+		"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count", "no_control_chars"}
 	if len(t1.Contract) != len(wantOrder) {
-		t.Fatalf("want %d rows (5 requirement + 6 safety), got %d: %+v", len(wantOrder), len(t1.Contract), t1.Contract)
+		t.Fatalf("want %d rows (5 requirement + 7 safety), got %d: %+v", len(wantOrder), len(t1.Contract), t1.Contract)
 	}
 	for i, k := range wantOrder {
 		if t1.Contract[i].Key != k {
@@ -594,8 +594,8 @@ func TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown(
 	}
 
 	t2 := out[1]
-	if len(t2.Contract) != 6 {
-		t.Fatalf("want t2 (no requirements declared) to carry ONLY the 6 safety rows, got %d: %+v", len(t2.Contract), t2.Contract)
+	if len(t2.Contract) != 7 {
+		t.Fatalf("want t2 (no requirements declared) to carry ONLY the 7 safety rows, got %d: %+v", len(t2.Contract), t2.Contract)
 	}
 	for _, r := range t2.Contract {
 		if r.Kind != "safety" {

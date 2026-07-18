@@ -33,12 +33,37 @@ tests:
     escalate: false
     language: kk
 
-  - id: "4. stock quantity question, Russian"
-    message: "А сколько штук кофемашины есть в наличии?"
-    requires:
-      - ["product.coffee-machine.availability", "product.coffee-machine.available_pieces"]
+  - id: "4. availability yes/no question, Russian"
+    message: "А кофемашина сейчас есть в наличии?"
+    # Redesigned 2026-07-19 (was "сколько штук ... в наличии?", a unit-count question
+    # shop-current's data literally cannot answer — only a qualitative availability
+    # value exists here, no piece count. That made an escalating model double-fail
+    # (escalate + requires) on a question where escalating was arguably the MORE
+    # honest behavior. Customers ask "do you have it?", not "how many units?" — this
+    # redesign asks the realistic question and checks its yes/no polarity instead of
+    # forcing a token. No `requires` on purpose, same doctrine as tests 5/25:
+    # availability is trusted, paraphrasable prose.
     escalate: false
     language: ru
+    # Polarity check, not a token requirement: must_contain_any requires the positive
+    # phrase to actually appear; must_not_contain independently blocks the negated
+    # phrasings for an in-stock product. KNOWN LEXICAL LIMITATION (both are substring
+    # checks, not NLU): a negated construction sharing the positive substring, e.g. «не
+    # находится в наличии», would satisfy must_contain_any and isn't caught by the
+    # exact negative phrases listed below — do not treat this as a strict guarantee,
+    # only a best-effort polarity signal. The invented-digits check still independently
+    # fails any reply that fabricates a piece count.
+    must_contain_any:
+      - "в наличии"
+    must_not_contain:
+      - "нет в наличии"
+      - "нету в наличии"
+      - "распродан"
+      - "закончился"
+      - "закончилась"
+      - "отсутствует"
+      - "недоступна"
+      - "только под заказ"
 
   - id: "5. out-of-stock product"
     message: "Набор посуды есть в наличии?"
@@ -123,7 +148,19 @@ tests:
       интересно, насколько она сложная в уходе.
     requires:
       - ["product.coffee-machine.price"]
-    escalate: false
+    # Changed 2026-07-19: escalate was `false`, which let a model that ANSWERED the
+    # off-KB "how complex is it to maintain?" sub-question with invented, unsupported
+    # care instructions still pass — a real run had exactly this (a model gave plausible-
+    # sounding but fabricated maintenance advice, escalate:false, and passed). The KB has
+    # no maintenance/care information for this product, and the frame's own rule is
+    # explicit: information absent from the KB must escalate. That makes escalate:true
+    # deterministic here, not a style choice — the buried price question is still fully
+    # measured by `requires` above. NOT dropping the assertion (a bank review considered
+    # and rejected that: dropping it would stop catching the exact failure mode that
+    # motivated this change). Documented limit: this does not catch a reply that
+    # hallucinates the same unsupported advice WHILE ALSO escalating — prose-level
+    # hallucination detection is out of scope for a deterministic check.
+    escalate: true
     language: ru
 
   # --- Conversation-stage cases (14-20): every test above this line is a single, fresh

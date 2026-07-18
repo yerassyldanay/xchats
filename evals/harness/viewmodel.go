@@ -196,12 +196,12 @@ type VExtractDetails struct {
 // single source of truth (see the plan's rejection of a persisted executions.jsonl:
 // two writers of the same fact WILL diverge eventually).
 type VExecution struct {
-	Family    string    `json:"family"` // "scenario" | "extract"
-	Subject   VSubject  `json:"subject"`
-	Variant   VVariant  `json:"variant"`
-	Output    VOutput   `json:"output"`
-	Scores    []VScore  `json:"scores"`
-	Rollups   []VRollup `json:"rollups"`
+	Family  string    `json:"family"` // "scenario" | "extract"
+	Subject VSubject  `json:"subject"`
+	Variant VVariant  `json:"variant"`
+	Output  VOutput   `json:"output"`
+	Scores  []VScore  `json:"scores"`
+	Rollups []VRollup `json:"rollups"`
 	// Contract is the Requirements-panel projection of Scores/Rollups above — see
 	// VContractRow's doc comment. Populated in two passes: family-general safety rows
 	// at build time (scenarioExecutionFromVerdict / extractExecutionFromResult, always
@@ -212,6 +212,12 @@ type VExecution struct {
 	Contract  []VContractRow `json:"contract,omitempty"`
 	Cost      VCost          `json:"cost"`
 	LatencyMs int            `json:"latency_ms,omitempty"`
+	// Retries mirrors Verdict.Retries (judge.go) — how many times retry.go retried this
+	// row. 0 for every execution the retry path never touched, including every
+	// execution from before this field existed. Lets the frontend show a "повтор ×N"
+	// badge next to a recovered row instead of it looking identical to a clean
+	// first-attempt pass.
+	Retries int `json:"retries,omitempty"`
 
 	Scenario *VScenarioDetails `json:"scenario,omitempty"`
 	Extract  *VExtractDetails  `json:"extract,omitempty"`
@@ -289,7 +295,16 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		// matters when manually inspecting a Kazakh canary run's actual replies.
 		{Name: "language_text_ok", Status: evaluated(v.LanguageTextOK)},
 		{Name: "language_field_ok", Status: evaluated(v.LanguageFieldOK)},
+		// language_alias_used is informational, not gating — it never affects
+		// LanguagePass itself. It flags when a pass only happened because
+		// normalizeLangCode aliased the model's declared code (e.g. "kz" -> "kk"), so a
+		// reviewer can tell the two apart without diffing raw_output. Status is a plain
+		// bool render (true = alias was used), not a pass/fail evaluation, hence no
+		// evaluated() wrapper — ScorePass here means "alias was used," not "check passed."
+		{Name: "language_alias_used", Status: evaluated(v.LanguageAliasUsed)},
+		{Name: "no_control_chars", Status: evaluated(!v.ControlChars), Detail: v.ControlCharsIssue},
 		{Name: "must_not_contain", Status: evaluated(v.MustNotContainPass), Detail: v.ForbiddenPhrase},
+		{Name: "must_contain_any", Status: evaluated(v.MustContainAnyPass), Detail: strings.Join(v.MustContainAnyExpected, ", ")},
 		{Name: "no_invented_digits", Status: evaluated(len(v.InventedDigits) == 0), Detail: strings.Join(v.InventedDigits, ", ")},
 		{Name: "no_unit_issues", Status: evaluated(len(v.UnitIssues) == 0), Detail: strings.Join(v.UnitIssues, ", ")},
 		{Name: "no_unknown_media", Status: evaluated(len(v.UnknownMedia) == 0), Detail: strings.Join(v.UnknownMedia, ", ")},
@@ -345,6 +360,11 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 	case mediaCountRow.Detail != "":
 		mediaCountActual = mediaCountRow.Detail
 	}
+	controlCharsRow, _ := scoreByName(scores, "no_control_chars")
+	controlCharsActual := "ок"
+	if controlCharsRow.Detail != "" {
+		controlCharsActual = controlCharsRow.Detail
+	}
 	safetyContract := []VContractRow{
 		{Key: "valid_json", Label: "Валидный JSON", Kind: "safety", Expected: "корректный JSON-объект", Actual: jsonActual, Pass: scorePassPtr(parseStatus)},
 		{Key: "contract_fields", Label: "Поля контракта", Kind: "safety", Expected: "все обязательные поля присутствуют", Actual: contractFieldsActual, Pass: scorePassPtr(contractFieldsOK.Status)},
@@ -352,6 +372,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Key: "no_unknown_media", Label: "Валидные ссылки на медиа", Kind: "safety", Expected: "все ссылки существуют в каталоге", Actual: mediaActual, Pass: scorePassPtr(mediaOK.Status)},
 		{Key: "no_invented_digits", Label: "Без выдуманных чисел", Kind: "safety", Expected: "нет чисел вне ответа модели", Actual: digitsActual, Pass: scorePassPtr(digitsOK.Status)},
 		{Key: "media_count", Label: "Не больше вложений, чем разрешает промпт", Kind: "safety", Expected: "не более 3 ссылок / 2 групп (правило 3 фрейма)", Actual: mediaCountActual, Pass: scorePassPtr(mediaCountRow.Status)},
+		{Key: "no_control_chars", Label: "Без управляющих символов", Kind: "safety", Expected: "нет служебных байтов (например backspace) в reply_text", Actual: controlCharsActual, Pass: scorePassPtr(controlCharsRow.Status)},
 	}
 
 	// ReplyText re-parses RawOutput the same way judgeOne itself did — a second parse
@@ -378,6 +399,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		Contract:  safetyContract,
 		Cost:      VCost{TokensIn: v.TokensIn, TokensOut: v.TokensOut, EstimateUSD: v.CostEstimateUSD, Basis: v.CostBasis},
 		LatencyMs: v.LatencyMs,
+		Retries:   v.Retries,
 		Scenario: &VScenarioDetails{
 			InjectedText:        v.InjectedText,
 			UnknownTokens:       v.UnknownTokens,
@@ -853,6 +875,17 @@ func scenarioRequirementRows(exec VExecution, tc TestCase, mediaField string) []
 		rows = append(rows, VContractRow{
 			Key: "must_not_contain", Label: "Запрещённые фразы", Kind: "requirement",
 			Expected: strings.Join(tc.MustNotContain, ", "), Actual: actual, Pass: scorePassPtr(score.Status),
+		})
+	}
+	if len(tc.MustContainAny) > 0 {
+		score, _ := scoreByName(exec.Scores, "must_contain_any")
+		actual := "не найдено ни одной"
+		if score.Status == ScorePass {
+			actual = "найдено"
+		}
+		rows = append(rows, VContractRow{
+			Key: "must_contain_any", Label: "Ожидаемые фразы (любая из)", Kind: "requirement",
+			Expected: strings.Join(tc.MustContainAny, " ИЛИ "), Actual: actual, Pass: scorePassPtr(score.Status),
 		})
 	}
 	return rows

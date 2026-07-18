@@ -33,6 +33,14 @@ type PromptfooRow struct {
 	TestCase struct {
 		Description string `json:"description"`
 	} `json:"testCase"`
+	// Prompt.Raw is promptfoo's own record of the EXACT rendered prompt string this
+	// row's call sent — confirmed present in real results.json (row.prompt.raw). This
+	// is the retry path's (retry.go) prompt source: reusing it means a retried call
+	// sends byte-identical input to the original, no Nunjucks/snapshot reconstruction
+	// needed.
+	Prompt struct {
+		Raw string `json:"raw"`
+	} `json:"prompt"`
 	Response struct {
 		Output string `json:"output"`
 		Cached bool   `json:"cached"`
@@ -65,6 +73,55 @@ type PromptfooRow struct {
 		Completion int `json:"completion"`
 		Cached     int `json:"cached"`
 	} `json:"tokenUsage"`
+	// Retries is how many retry attempts retry.go has already made for this row (0 for
+	// every row that has never gone through the retry path, including every row from
+	// before this field existed — legacy JSON simply lacks the key, which unmarshals as
+	// 0). retry.go's row predicate is `!parseModelJSON(...) && Retries == 0` — checking
+	// this field is what makes re-running `harness retry` against an already-repaired
+	// derivative a no-op instead of spending again.
+	Retries int `json:"retries,omitempty"`
+	// Attempts preserves EVERY attempt (original + each retry) for a row retry.go has
+	// touched — never overwritten, so first-attempt reliability stays inspectable even
+	// after a later attempt is selected as this row's reported output. Empty for every
+	// row retry.go has never touched.
+	Attempts []ResultAttempt `json:"attempts,omitempty"`
+	// SelectedAttempt indexes which entry in Attempts this row's top-level
+	// response.output/finishReason/tokenUsage were copied from — 0 means "the retry
+	// call failed, the ORIGINAL attempt stayed selected" (see retry.go's HTTP-error
+	// handling), not "no retry happened" (that case has Attempts entirely empty).
+	SelectedAttempt int `json:"selected_attempt,omitempty"`
+}
+
+// ResultAttempt is one attempt (the original promptfoo call, or a later retry.go
+// retry) at one results.json row — see PromptfooRow.Attempts. Every field the API
+// actually reports is captured here, not just output/tokens/latency, so an attempt
+// record is a complete account of what that specific call returned and under which
+// exact model config.
+type ResultAttempt struct {
+	Output             string  `json:"output"`
+	FinishReason       string  `json:"finishReason"`
+	NativeFinishReason string  `json:"nativeFinishReason,omitempty"`
+	ResponseID         string  `json:"responseId,omitempty"`
+	UpstreamProvider   string  `json:"upstreamProvider,omitempty"`
+	ReasoningTokens    int     `json:"reasoningTokens,omitempty"`
+	ReportedCostUSD    float64 `json:"reportedCostUsd,omitempty"`
+	TokenUsage         struct {
+		Total      int `json:"total"`
+		Prompt     int `json:"prompt"`
+		Completion int `json:"completion"`
+	} `json:"tokenUsage"`
+	LatencyMs int `json:"latencyMs"`
+	// ModelConfigSHA256 ties this SPECIFIC attempt to the exact models.yaml content
+	// that produced it — the original attempt's is the PARENT run's snapshotted
+	// models.yaml hash; a retry attempt's is the RETRY config's hash (see
+	// provenance.Manifest's ParentModelsSHA256/RetryModelsSHA256 for the run-level
+	// analogue of this same fact).
+	ModelConfigSHA256 string `json:"modelConfigSHA256"`
+	// Error is set instead of Output/FinishReason when this attempt's HTTP call itself
+	// failed (network error, non-200, unparseable response body) — retry.go's
+	// HTTP-error handling keeps the ORIGINAL attempt selected in that case, but still
+	// records the failed retry attempt here so it's visible one happened.
+	Error string `json:"error,omitempty"`
 }
 
 // Verdict is one judged answer — the harness's contribution on top of promptfoo's own
@@ -109,22 +166,51 @@ type Verdict struct {
 	// a whole-reply classifier, so telling "the text didn't look Kazakh" apart from "the
 	// model declared the wrong reply_language" matters when manually inspecting a Kazakh
 	// canary run, not just when reading the one combined boolean.
-	LanguagePass       bool     `json:"language_pass"`
-	LanguageTextOK     bool     `json:"language_text_ok"`
-	LanguageFieldOK    bool     `json:"language_field_ok"`
-	LanguageIssue      string   `json:"language_issue,omitempty"`
-	MustNotContainPass bool     `json:"must_not_contain_pass"`
-	ForbiddenPhrase    string   `json:"forbidden_phrase,omitempty"`
-	InventedDigits     []string `json:"invented_digits"`
-	UnitIssues         []string `json:"unit_issues"`
+	LanguagePass    bool   `json:"language_pass"`
+	LanguageTextOK  bool   `json:"language_text_ok"`
+	LanguageFieldOK bool   `json:"language_field_ok"`
+	LanguageIssue   string `json:"language_issue,omitempty"`
+	// LanguageAliasUsed flags a pass that only succeeded because normalizeLangCode
+	// mapped the model's declared reply_language onto the expected code (e.g. "kz" ->
+	// "kk") — a visible warning, not a silent free pass: production only benefits from
+	// the same leniency if its own reply_language consumer applies the identical
+	// normalization (see normalizeLangCode's doc comment).
+	LanguageAliasUsed  bool   `json:"language_alias_used,omitempty"`
+	MustNotContainPass bool   `json:"must_not_contain_pass"`
+	ForbiddenPhrase    string `json:"forbidden_phrase,omitempty"`
+	// MustContainAnyPass mirrors MustNotContainPass for the positive-evidence check (see
+	// TestCase.MustContainAny) — true when the test declares no such expectation at all
+	// (nothing to fail), same "vacuously true" convention as MustNotContainPass.
+	MustContainAnyPass bool `json:"must_contain_any_pass"`
+	// MustContainAnyExpected echoes TestCase.MustContainAny verbatim (not just on
+	// failure) — unlike MustNotContain's single ForbiddenPhrase (the one phrase that DID
+	// match), a MustContainAny failure has no single culprit to name; the useful fact to
+	// report is the whole expected set none of which matched.
+	MustContainAnyExpected []string `json:"must_contain_any_expected,omitempty"`
+	InventedDigits         []string `json:"invented_digits"`
+	UnitIssues             []string `json:"unit_issues"`
 
-	// FinishReason/Truncated and ReasoningLeak are both pipeline-safety facts, folded
-	// into ContractPass unconditionally — independent of model, prompt variant, or
-	// whether reasoning was even requested for this call (see their doc comments where
-	// computed, in judgeOne).
+	// FinishReason/Truncated, ReasoningLeak, and ControlChars are all pipeline-safety
+	// facts, folded into ContractPass unconditionally — independent of model, prompt
+	// variant, or whether reasoning was even requested for this call (see their doc
+	// comments where computed, in judgeOne).
 	FinishReason  string `json:"finish_reason,omitempty"`
 	Truncated     bool   `json:"truncated"`
 	ReasoningLeak bool   `json:"reasoning_leak"`
+	// ControlChars flags a C0 control character (other than \n/\t/\r) found in
+	// reply_text — a real product must never forward a byte like \x08 (backspace) to a
+	// customer. Confirmed as a real failure mode: a minimax-m2.5 response literally
+	// contained "...сейчас.\x08r\n\nУход за ней..." Independent of ReasoningLeak
+	// (different character class) and of Truncated (this reply parsed and finished
+	// cleanly — the garbage character is INSIDE an otherwise well-formed answer).
+	ControlChars      bool   `json:"control_chars"`
+	ControlCharsIssue string `json:"control_chars_issue,omitempty"`
+	// Retries/RetryRecovered mirror PromptfooRow.Retries — surfaced on the Verdict so
+	// report.go can show per-model retry stats and a recovered row never silently
+	// looks identical to a clean first-attempt pass. RetryRecovered = Retries>0 &&
+	// ParseOK — the row needed a retry AND the SELECTED attempt is now parseable.
+	Retries        int  `json:"retries,omitempty"`
+	RetryRecovered bool `json:"retry_recovered,omitempty"`
 	// Reasoning mirrors PromptfooRow.Response.Reasoning verbatim, IF promptfoo ever
 	// populates it — kept as its own field (never merged into RawOutput or any
 	// customer-facing text) so a captured value isn't silently dropped once something
@@ -250,7 +336,17 @@ var (
 	// a real run that models use BOTH "1." and "1)" for the same kind of list.
 	digitRunRE   = regexp.MustCompile(`\d+`)
 	listMarkerRE = regexp.MustCompile(`(?m)^\s*\d+[.)]\s`)
-	unitIssueREs = []unitIssuePattern{
+	// inlineListMarkerRE strips the SAME kind of numbered-list marker when it appears
+	// after a colon or semicolon on the same line, not just at true line/string start —
+	// confirmed against a real run: minimax-m2.5 wrote "Для оформления заказа: 1)
+	// укажите адрес доставки; 2) подтвердите заказ" as one continuous sentence, which
+	// listMarkerRE's line-start anchor alone doesn't reach. Deliberately narrow (only
+	// ":"/";" -immediately-preceded, not any digit+")"): a bare "код 7)х" in running
+	// prose must stay flagged as a possible invented number — RE2 has no lookbehind, so
+	// this captures the delimiter+whitespace in $1$2 and re-emits it, removing only the
+	// marker itself.
+	inlineListMarkerRE = regexp.MustCompile(`([:;])(\s*)\d+[.)]\s`)
+	unitIssueREs       = []unitIssuePattern{
 		{label: "duplicated tenge symbol", re: regexp.MustCompile(`₸\s*₸`)},
 		{label: "duplicated tenge word", re: regexp.MustCompile(`₸\s*тенге`)},
 		{label: "duplicated Алматы qualifier", re: regexp.MustCompile(`(?i)по\s+алматы\s+по\s+алматы`)},
@@ -260,6 +356,24 @@ var (
 )
 
 const kazakhOnlyLetters = "әғқңөұүһӘҒҚҢӨҰҮҺ"
+
+// normalizeLangCode maps a model's declared reply_language onto the code this harness
+// expects, tolerating the one confusion actually observed in real runs: a model writing
+// "kz" (Kazakhstan's ISO 3166-1 COUNTRY code) when it means "kk" (Kazakh's ISO 639-1
+// LANGUAGE code) — same intent, wrong standard. This is a FIELD-level alias only; the
+// text-content heuristic (looksKazakh) is never touched by it, so a model that writes
+// "kz" but replies in Russian still fails on textOK. Every other value passes through
+// unchanged — this is a targeted fix for one confirmed real confusion, not a general
+// language-code normalizer. See Verdict.LanguageAliasUsed for how a pass via this alias
+// stays visible rather than silent, and the production-parity note in models.yaml/README:
+// this alias must ALSO be applied wherever production actually consumes reply_language,
+// or the eval would green-light output production would misroute.
+func normalizeLangCode(code string) string {
+	if code == "kz" {
+		return "kk"
+	}
+	return code
+}
 
 // maxMediaRefs/maxMediaGroups mirror each frame's own attachment cap — rule 3 in every
 // frame.txt: asset_refs frames say "Maximum 3" (e.g. shop-current/frame.txt,
@@ -456,10 +570,12 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		FinishReason: row.Response.FinishReason,
 		Truncated:    isTruncatedFinish(row.Response.FinishReason),
 		Reasoning:    row.Response.Reasoning,
+		Retries:      row.Retries,
 	}
 
 	obj, ok := parseModelJSON(row.Response.Output)
 	v.ParseOK = ok
+	v.RetryRecovered = v.Retries > 0 && v.ParseOK
 	if !ok {
 		v.Reason = "could not parse JSON output"
 		if v.Truncated {
@@ -506,6 +622,12 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		v.appendReason("reasoning/thinking content leaked into reply_text")
 	}
 
+	if bad, ok := firstBadControlChar(replyText); ok {
+		v.ControlChars = true
+		v.ControlCharsIssue = fmt.Sprintf("reply_text contains control character %U", bad)
+		v.appendReason(v.ControlCharsIssue)
+	}
+
 	// Fail-closed: every token the model used must resolve, or the real product would
 	// block the whole draft rather than ship a half-rendered fact. escalation_reason is
 	// internal (never shown to the customer) but still scanned: an unknown token there
@@ -549,11 +671,12 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	if v.Truncated {
 		v.appendReason(truncationNote(v.FinishReason))
 	}
-	v.ContractPass = v.ParseOK && v.ContractFields && !v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak
+	v.ContractPass = v.ParseOK && v.ContractFields && !v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak && !v.ControlChars
 
 	// Model-behavior checks (only meaningful once we know the contract held).
 	stripped := tokenSpanRE.ReplaceAllString(replyText, "")
 	stripped = listMarkerRE.ReplaceAllString(stripped, "")
+	stripped = inlineListMarkerRE.ReplaceAllString(stripped, "$1$2")
 	// A digit run isn't an invented fact if it came from somewhere legitimate: the
 	// CUSTOMER's own message (e.g. "iPhone 15 Pro" — the model is just echoing it back),
 	// or a product's Description prose (this playground's own doctrine trusts that field
@@ -623,7 +746,9 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		case "ru":
 			textOK = !looksKazakh(checkText)
 		}
-		fieldOK := replyLang == tc.Language
+		normalizedReplyLang := normalizeLangCode(replyLang)
+		fieldOK := normalizedReplyLang == tc.Language
+		v.LanguageAliasUsed = fieldOK && replyLang != tc.Language
 		v.LanguageTextOK = textOK
 		v.LanguageFieldOK = fieldOK
 		v.LanguagePass = textOK && fieldOK
@@ -657,6 +782,19 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		}
 	}
 
+	v.MustContainAnyPass = true
+	if len(tc.MustContainAny) > 0 {
+		v.MustContainAnyExpected = tc.MustContainAny
+		lower := strings.ToLower(injected)
+		v.MustContainAnyPass = false
+		for _, phrase := range tc.MustContainAny {
+			if strings.Contains(lower, strings.ToLower(phrase)) {
+				v.MustContainAnyPass = true
+				break
+			}
+		}
+	}
+
 	for _, entry := range mediaEntries(obj, mediaField) {
 		if (mediaField == "asset_refs" && !validRef[entry]) || (mediaField == "attach_groups" && !validGroup[entry]) {
 			v.UnknownMedia = append(v.UnknownMedia, entry)
@@ -664,7 +802,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	}
 
 	v.ModelBehaviorPass = v.RequiresPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
-		v.MustNotContainPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 &&
+		v.MustNotContainPass && v.MustContainAnyPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 &&
 		!v.TooManyMedia
 
 	if v.Reason == "" && !v.ModelBehaviorPass {
@@ -694,6 +832,8 @@ func firstFailureReason(v Verdict) string {
 		// "don't claim to attach a video that doesn't exist" has no escalate expectation
 		// at all), so wording that assumes escalation would be wrong here.
 		return "reply_text contains forbidden phrase: \"" + v.ForbiddenPhrase + "\""
+	case !v.MustContainAnyPass:
+		return "reply_text contains none of the expected phrases: " + strings.Join(v.MustContainAnyExpected, ", ")
 	case len(v.InventedDigits) > 0:
 		return "invented digits outside any token: " + strings.Join(v.InventedDigits, ", ")
 	case len(v.UnitIssues) > 0:
@@ -843,6 +983,22 @@ func looksKazakh(text string) bool {
 		}
 	}
 	return count >= 2
+}
+
+// firstBadControlChar reports the first C0 control character in text that a real
+// product must never forward to a customer — every rune below 0x20 (plus DEL, 0x7F)
+// EXCEPT \n, \t, \r, which are legitimate formatting whitespace already handled
+// elsewhere (CRLF included, so a normal \r\n line ending is never flagged).
+func firstBadControlChar(text string) (rune, bool) {
+	for _, r := range text {
+		if r == '\n' || r == '\t' || r == '\r' {
+			continue
+		}
+		if r < 0x20 || r == 0x7f {
+			return r, true
+		}
+	}
+	return 0, false
 }
 
 func findUnitIssues(text string) []string {

@@ -71,6 +71,23 @@ type modelStats struct {
 	unknownPricingN                        int
 	tokensInSum, tokensOutSum              int
 	latencySum, tokensSum                  int
+	// retried/retryRecovered/firstAttemptParseOK track retry.go's per-row Retries/
+	// RetryRecovered/ParseOK — see formatRetryCell's doc comment for why these are
+	// reported as their OWN line rather than folded into modelBehaviorPass/contractPass:
+	// a recovered retry must never look identical to a clean first-attempt pass.
+	retried, retryRecovered, firstAttemptParseOK int
+}
+
+// formatRetryCell reports retry.go's effect on this model's rows, or "" when this run
+// never touched the retry path at all (every existing SUMMARY.md before this feature
+// existed had no such row — an all-zero ms.retried must not print a misleading "0
+// retried" line for a run that simply predates retries).
+func formatRetryCell(ms *modelStats) string {
+	if ms.retried == 0 {
+		return ""
+	}
+	return fmt.Sprintf("retried %d, recovered %d — first-attempt JSON parse success %d/%d (%.0f%%)",
+		ms.retried, ms.retryRecovered, ms.firstAttemptParseOK, ms.total, pct(ms.firstAttemptParseOK, ms.total))
 }
 
 // formatCostCell turns one model's cost-basis tally into a single honest table cell —
@@ -164,6 +181,14 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 			ms.tokensOutSum += v.TokensOut
 			ms.latencySum += v.LatencyMs
 			ms.tokensSum += v.Tokens
+			if v.Retries > 0 {
+				ms.retried++
+				if v.RetryRecovered {
+					ms.retryRecovered++
+				}
+			} else if v.ParseOK {
+				ms.firstAttemptParseOK++
+			}
 			if !v.ModelBehaviorPass || !v.ContractPass {
 				allFailures = append(allFailures, v)
 			}
@@ -194,6 +219,25 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 		// specific prompt+model combination stays the experimental unit throughout, here
 		// same as everywhere else in this report.
 		b.WriteString("\n")
+
+		// Retry line (only for models this run actually retried — see
+		// formatRetryCell's doc comment): printed SEPARATELY from the table above, not
+		// folded into model-behavior/contract pass, so a recovered retry never reads
+		// identically to a clean first-attempt pass in the headline numbers.
+		var retryLines []string
+		for _, m := range order {
+			if cell := formatRetryCell(byModel[m]); cell != "" {
+				retryLines = append(retryLines, fmt.Sprintf("- %s: %s", m, cell))
+			}
+		}
+		if len(retryLines) > 0 {
+			b.WriteString("Retries (retry.go — see each row's `attempts` in .judged.json for the full history):\n\n")
+			for _, line := range retryLines {
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+			b.WriteString("\n")
+		}
 
 		if strings.HasPrefix(run.Scenario, "shop-scale-") {
 			scaleStats[run.Scenario] = byModel

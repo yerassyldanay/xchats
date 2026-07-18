@@ -1,0 +1,131 @@
+{
+  "tests": [
+    {
+      "ID": "1. exact-name price question",
+      "Message": "Сколько стоит блендер Bosch?",
+      "Requires": [
+        [
+          "product.blender-bosch.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "2. product we don't sell",
+      "Message": "У вас есть посудомоечная машина Bosch?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "да, есть",
+        "да, в наличии"
+      ],
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "3. ambiguous name matches two products",
+      "Message": "Сколько стоит чайник?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": null,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "4. deep-list question is NOT this — Kazakh price question, in-pool product",
+      "Message": "Микротолқынды пеш Samsung қанша тұрады?",
+      "Requires": [
+        [
+          "product.microwave-samsung.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "5. media request for a non-first product",
+      "Message": "Пришлите фото тостера Philips",
+      "Requires": null,
+      "Media": {
+        "AnyOfGroups": [
+          "product.toaster-philips.images"
+        ],
+        "AnyOfRefs": null,
+        "Forbid": false,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "8. history follow-up, price of an in-pool product",
+      "Message": "Отлично, а сколько она стоит?",
+      "Requires": [
+        [
+          "product.multicooker-redmond.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Мультиварка Redmond есть в наличии?"
+        },
+        {
+          "role": "assistant",
+          "text": "Да, мультиварка Redmond есть в наличии, можно оформить заказ."
+        }
+      ]
+    },
+    {
+      "ID": "6. deep-list product (#15 of 30), price question",
+      "Message": "Кухонный комбайн Moulinex есть? Сколько стоит?",
+      "Requires": [
+        [
+          "product.food-processor-moulinex.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": null,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    },
+    {
+      "ID": "7. deep-list product (#25 of 30), Kazakh price question",
+      "Message": "Кофемолка Bosch қанша тұрады?",
+      "Requires": [
+        [
+          "product.coffee-grinder-bosch.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": null,
+      "Language": "kk",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null
+    }
+  ]
+}

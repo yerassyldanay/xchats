@@ -66,7 +66,7 @@ export function resolveMediaExpectation(
 
 // notCheckedRequirements lists, in Russian, which knobs a scenario test does NOT
 // declare — mirrors judge.go's own gating EXACTLY (requiresSatisfied/media/escalate/
-// language/must_not_contain all default to "trivially satisfied" when the test simply
+// language/must_not_contain/must_contain_any all default to "trivially satisfied" when the test simply
 // doesn't declare that check), so this list is never a guess about what's ungraded —
 // it's the direct complement of what judge.go actually skips. No separate branch is
 // needed for media.forbid: `!test.media` already treats ANY declared media block
@@ -79,6 +79,7 @@ export function notCheckedRequirements(test: CatalogTestCase): string[] {
   if (test.escalate === undefined) items.push('Эскалация')
   if (!test.media) items.push('Медиа')
   if (!test.must_not_contain || test.must_not_contain.length === 0) items.push('Запрещённые фразы')
+  if (!test.must_contain_any || test.must_contain_any.length === 0) items.push('Ожидаемые фразы (любая из)')
   return items
 }
 

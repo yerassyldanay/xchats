@@ -161,6 +161,18 @@ type TestCase struct {
 	// "{{policy.main.return_period}}" injecting to "14 дней" inside an otherwise-forbidden
 	// "в течение 14 дней").
 	MustNotContain []string `yaml:"must_not_contain"`
+	// MustContainAny is the positive-evidence mirror of MustNotContain: at least ONE of
+	// these case-insensitive substrings must appear in the token-injected reply text.
+	// Exists for tests where a blocklist alone can't distinguish a correct answer from a
+	// wrong one with the same polarity — e.g. "is it in stock?" answered with "нет в
+	// наличии" (an availability phrase, but the WRONG one) would satisfy an empty/absent
+	// must_not_contain list yet still be a wrong answer; MustContainAny requires the
+	// positive phrase to actually be present. Known lexical limitation (documented where
+	// used, e.g. common/shop-questions.yaml test 4): this is a substring check, not NLU —
+	// a negated construction containing the same substring (e.g. "не находится в
+	// наличии") can still satisfy it. Combine with MustNotContain for a real polarity
+	// check, not as a strict guarantee on its own.
+	MustContainAny []string `yaml:"must_contain_any"`
 	// History is prior conversation turns rendered above {{message}} in the prompt, so a
 	// test can check multi-turn behavior (a follow-up that only makes sense given
 	// context, or a model asked to re-state a fact it already gave — must re-use the

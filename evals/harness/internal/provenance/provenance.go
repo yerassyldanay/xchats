@@ -89,6 +89,22 @@ type Manifest struct {
 
 	StartedAt  string `json:"started_at"`
 	FinishedAt string `json:"finished_at,omitempty"`
+
+	// Retry-repair provenance — set ONLY on a derivative run created by `harness retry`
+	// (retry.go, package main). A derivative mixes rows produced under TWO different
+	// model configs (the parent run's original config, and whatever models.yaml was
+	// active when the retry ran), so a single ModelsSHA256/models.yaml snapshot cannot
+	// honestly describe it — these fields plus the dual snapshots/models.parent.yaml +
+	// snapshots/models.retry.yaml are what make that auditable. RepairKey is derived
+	// from (parent run id, retry models.yaml sha, harness git sha) — the mechanism
+	// `harness retry` uses to detect it already repaired this exact parent under this
+	// exact config, so re-running the command doesn't silently bill retries twice.
+	RepairedFrom         string `json:"repaired_from,omitempty"`
+	RepairKey            string `json:"repair_key,omitempty"`
+	ParentManifestSHA256 string `json:"parent_manifest_sha256,omitempty"`
+	ParentResultsSHA256  string `json:"parent_results_sha256,omitempty"`
+	ParentModelsSHA256   string `json:"parent_models_sha256,omitempty"`
+	RetryModelsSHA256    string `json:"retry_models_sha256,omitempty"`
 }
 
 // NewManifest builds a Manifest for a fresh run, capturing best-effort git provenance

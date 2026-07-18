@@ -72,6 +72,24 @@ func TestFormatCostCell(t *testing.T) {
 	}
 }
 
+// TestFormatRetryCell_EmptyWhenNothingRetried proves formatRetryCell never prints a
+// misleading "0 retried" line for a run that simply never exercised the retry path
+// (every SUMMARY.md before retry.go existed had no such line at all).
+func TestFormatRetryCell_EmptyWhenNothingRetried(t *testing.T) {
+	ms := modelStats{total: 29}
+	if got := formatRetryCell(&ms); got != "" {
+		t.Fatalf("want empty string when retried=0, got %q", got)
+	}
+}
+
+func TestFormatRetryCell_ReportsRetriedAndRecoveredSeparatelyFromPassRate(t *testing.T) {
+	ms := modelStats{total: 29, retried: 2, retryRecovered: 2, firstAttemptParseOK: 27}
+	want := "retried 2, recovered 2 — first-attempt JSON parse success 27/29 (93%)"
+	if got := formatRetryCell(&ms); got != want {
+		t.Fatalf("formatRetryCell() = %q, want %q", got, want)
+	}
+}
+
 // TestBuildSummary_WilsonIntervalIsPooledPerModelNeverAcrossModels proves both halves of
 // fix 3's sample-size reporting: the summary table carries a Wilson interval computed
 // from each model's OWN pooled total (not a per-intent number, and not shared across

@@ -26,6 +26,8 @@ func main() {
 		err = cmdReport(os.Args[2:])
 	case "run":
 		_, err = cmdRun(os.Args[2:])
+	case "retry":
+		err = cmdRetry(os.Args[2:])
 	case "extract":
 		_, err = cmdExtract(os.Args[2:])
 	case "html":
@@ -60,6 +62,15 @@ commands:
                                        render -> promptfoo eval -> judge -> report; prints the
                                        resolved (tests x models) call count before spending
                                        anything, and -expect-calls hard-fails if it doesn't match
+  retry  -scenario <dir> -run <parent-dir> -expect-retry-calls N [-models-file path]
+                                       repair a run's unparseable/empty rows by
+                                       retrying each once, as a NEW derivative run — the
+                                       parent is never modified; prints the resolved
+                                       retry-candidate row count before spending
+                                       anything, refuses if -expect-retry-calls doesn't
+                                       match, and refuses to create a SECOND derivative
+                                       for the same (parent, retry-config, code) unless
+                                       -force-new-derivative is passed
   extract -cases <file> [-case <id>] [-models m1,m2] [-prompt name@vN] [-record]
                                        Eval 1: file -> extracted information (direct
                                        OpenRouter calls, no promptfoo); writes EXTRACT.md

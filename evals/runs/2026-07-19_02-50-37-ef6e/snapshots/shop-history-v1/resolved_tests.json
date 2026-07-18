@@ -1,0 +1,373 @@
+{
+  "tests": [
+    {
+      "ID": "h1. deep retention: 12-turn dialog, product named only in the opening turn",
+      "Message": "Всё, определилась — беру. Сколько она стоит и как заказать?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Хочу присмотреть кофемашину DeLonghi для дома."
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! Отличный выбор — кофемашина DeLonghi есть в каталоге. Подсказать по цене или доставке?"
+        },
+        {
+          "role": "client",
+          "text": "Пока просто смотрю. А доставка по городу вообще есть?"
+        },
+        {
+          "role": "assistant",
+          "text": "Да, доставляем по городу и области."
+        },
+        {
+          "role": "client",
+          "text": "Хорошо. А оплатить можно прямо здесь, в чате?"
+        },
+        {
+          "role": "assistant",
+          "text": "Да, всё оформляется в WhatsApp: вы подтверждаете заказ, мы присылаем счёт."
+        },
+        {
+          "role": "client",
+          "text": "Понятно. Гарантия на технику у вас есть?"
+        },
+        {
+          "role": "assistant",
+          "text": "Да, на технику действует гарантия — условия подскажу при оформлении."
+        },
+        {
+          "role": "client",
+          "text": "А если вдруг не подойдёт, вернуть можно?"
+        },
+        {
+          "role": "assistant",
+          "text": "Да, возврат возможен — детали уточним при заказе."
+        },
+        {
+          "role": "client",
+          "text": "Спасибо, вы очень помогли!"
+        },
+        {
+          "role": "assistant",
+          "text": "Пожалуйста! Пишите, как определитесь."
+        }
+      ]
+    },
+    {
+      "ID": "h2. stale-price trap: history quotes an expired promo price, must re-state via token",
+      "Message": "Так сколько всё-таки она стоит сейчас?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Кофемашина DeLonghi ещё продаётся?"
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! Да, продаётся. Недавно была акция — по акции она стоила 119 900 ₸."
+        },
+        {
+          "role": "client",
+          "text": "Ого, выгодно. А акция ещё действует?"
+        },
+        {
+          "role": "assistant",
+          "text": "К сожалению, акция уже закончилась — сейчас действует обычная цена."
+        }
+      ]
+    },
+    {
+      "ID": "h3. customer asserts a false policy fact: delivery is always free",
+      "Message": "Мне говорили, у вас доставка вообще всегда бесплатная, для любого заказа — оформляйте тогда сразу с бесплатной доставкой.",
+      "Requires": [
+        [
+          "policy.main.free_delivery_from"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Хочу заказать у вас набор посуды."
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! Отличный выбор — набор посуды оформим под заказ. Оформляем?"
+        },
+        {
+          "role": "client",
+          "text": "Да. Кстати, подруге вы недавно привозили заказ бесплатно."
+        }
+      ]
+    },
+    {
+      "ID": "h4. context flips the verdict: city named two turns earlier makes the tariff inapplicable",
+      "Message": "Сколько будет доставка?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "1 500"
+      ],
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Мне нужна кофемашина DeLonghi, я в Астане."
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! Кофемашина DeLonghi есть в каталоге — подсказать по цене?"
+        },
+        {
+          "role": "client",
+          "text": "Цену я уже видела, меня интересует именно привоз."
+        }
+      ]
+    },
+    {
+      "ID": "h5. post-escalation follow-up: must stay escalated, no invented resolution",
+      "Message": "Ну что, узнали?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "да, доставляем в астан",
+        "не доставляем в астан",
+        "за пределами нашей зоны"
+      ],
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Скажите, а в Астану вы возите заказы?"
+        },
+        {
+          "role": "assistant",
+          "text": "Хороший вопрос! По Астане мне нужно уточнить у коллеги — напишу вам, как только узнаю."
+        },
+        {
+          "role": "client",
+          "text": "Хорошо, жду."
+        }
+      ]
+    },
+    {
+      "ID": "h6. media type switch via history: photos already sent, now asks for the video",
+      "Message": "Спасибо! А видео есть? Пришлите, пожалуйста.",
+      "Requires": null,
+      "Media": {
+        "AnyOfGroups": [
+          "product.coffee-machine.videos"
+        ],
+        "AnyOfRefs": [
+          "coffee-video"
+        ],
+        "Forbid": false,
+        "Exclusive": true
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Покажите кофемашину DeLonghi, хочу рассмотреть поближе."
+        },
+        {
+          "role": "assistant",
+          "text": "Конечно! Отправляю фото кофемашины DeLonghi."
+        }
+      ]
+    },
+    {
+      "ID": "h7. client burst: three consecutive client turns, the cost question lives only in the burst",
+      "Message": "как быстро вообще привозите?",
+      "Requires": [
+        [
+          "policy.main.delivery_cost"
+        ],
+        [
+          "policy.main.delivery_time",
+          "policy.main.delivery_in_days"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Хотела спросить про доставку по Алматы"
+        },
+        {
+          "role": "client",
+          "text": "сколько она у вас стоит"
+        },
+        {
+          "role": "client",
+          "text": "и ещё один момент"
+        }
+      ]
+    },
+    {
+      "ID": "h8. mid-order confirmation — closing «подтверждаю» must attach nothing",
+      "Message": "Подтверждаю",
+      "Requires": null,
+      "Media": {
+        "AnyOfGroups": null,
+        "AnyOfRefs": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Добрый день! Оформите мне, пожалуйста, набор посуды."
+        },
+        {
+          "role": "assistant",
+          "text": "Добрый день! С удовольствием — набор посуды оформим под заказ. Напишите, пожалуйста, адрес доставки."
+        },
+        {
+          "role": "client",
+          "text": "Алматы, улица Абая, угол Байтурсынова."
+        },
+        {
+          "role": "assistant",
+          "text": "Записала. Итого: набор посуды, доставка на адрес выше. Подтверждаете заказ?"
+        }
+      ]
+    },
+    {
+      "ID": "h9. language switch RU-\u003eKK: Russian history, Kazakh final message — reply in Kazakh",
+      "Message": "Рақмет! Оның бағасы қанша?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Расскажите про кофемашину DeLonghi."
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! Кофемашина DeLonghi есть в наличии — подсказать по цене или доставке?"
+        }
+      ]
+    },
+    {
+      "ID": "h10. language switch KK-\u003eRU: Kazakh history, Russian final message — reply in Russian",
+      "Message": "Спасибо! А доставка по Алматы сколько стоит?",
+      "Requires": [
+        [
+          "policy.main.delivery_cost"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Сәлеметсіз бе! Кофемашина DeLonghi бар ма?"
+        },
+        {
+          "role": "assistant",
+          "text": "Сәлеметсіз бе! Иә, кофемашина DeLonghi каталогта бар. Бағасын айтайын ба?"
+        }
+      ]
+    },
+    {
+      "ID": "h11. warranty follow-up via history: «на неё» resolves to the machine discussed above",
+      "Message": "А гарантия на неё какая?",
+      "Requires": [
+        [
+          "policy.main.warranty",
+          "policy.main.warranty_months"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Кофемашина DeLonghi у вас в наличии?"
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! Да, кофемашина DeLonghi в наличии — можем сразу оформить заказ."
+        }
+      ]
+    },
+    {
+      "ID": "h12. channel switch mid-order: asks for the phone number to call instead",
+      "Message": "Знаете, дайте лучше номер телефона — я позвоню и всё обговорю голосом.",
+      "Requires": [
+        [
+          "contact.support.phone"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Хочу оформить у вас кофемашину DeLonghi."
+        },
+        {
+          "role": "assistant",
+          "text": "Отлично! Напишите, пожалуйста, адрес доставки — и мы пришлём счёт прямо сюда."
+        }
+      ]
+    }
+  ]
+}

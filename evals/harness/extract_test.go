@@ -424,12 +424,7 @@ func TestDescribeImage_FakeServer(t *testing.T) {
 		resp := orResponse{
 			Usage: &orUsage{PromptTokens: 123, CompletionTokens: 45},
 		}
-		resp.Choices = []struct {
-			Message struct {
-				Content   string `json:"content"`
-				Reasoning string `json:"reasoning,omitempty"`
-			} `json:"message"`
-		}{{}}
+		resp.Choices = []orChoice{{}}
 		resp.Choices[0].Message.Content = `{"content_kind":"product_photo","summary":"a drill","extracted_text":"","language":"none","visibility_suggestion":"visible","media_role_hint":"gallery","relates_to_hint":""}`
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -483,12 +478,7 @@ func TestDescribeImage_ProviderAndReasoningPrefsRoundTrip(t *testing.T) {
 			t.Fatalf("server: decode request: %v", err)
 		}
 		resp := orResponse{Usage: &orUsage{PromptTokens: 10, CompletionTokens: 5}}
-		resp.Choices = []struct {
-			Message struct {
-				Content   string `json:"content"`
-				Reasoning string `json:"reasoning,omitempty"`
-			} `json:"message"`
-		}{{}}
+		resp.Choices = []orChoice{{}}
 		resp.Choices[0].Message.Content = `{"content_kind":"other","summary":"x","extracted_text":"","language":"none","visibility_suggestion":"visible","media_role_hint":"none","relates_to_hint":""}`
 		resp.Choices[0].Message.Reasoning = "internal chain of thought that must never reach the graded output"
 		w.Header().Set("Content-Type", "application/json")
@@ -542,12 +532,7 @@ func TestDescribeImage_NoProviderOrReasoningConfigOmitsFieldsEntirely(t *testing
 		b, _ := io.ReadAll(r.Body)
 		rawBody = b
 		resp := orResponse{Usage: &orUsage{PromptTokens: 1, CompletionTokens: 1}}
-		resp.Choices = []struct {
-			Message struct {
-				Content   string `json:"content"`
-				Reasoning string `json:"reasoning,omitempty"`
-			} `json:"message"`
-		}{{}}
+		resp.Choices = []orChoice{{}}
 		resp.Choices[0].Message.Content = `{"content_kind":"other","summary":"x","extracted_text":"","language":"none","visibility_suggestion":"visible","media_role_hint":"none","relates_to_hint":""}`
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -615,12 +600,7 @@ func TestDescribeImage_ReasoningEnabledFalseIsSentExplicitly(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		rawBody = b
 		resp := orResponse{Usage: &orUsage{PromptTokens: 1, CompletionTokens: 1}}
-		resp.Choices = []struct {
-			Message struct {
-				Content   string `json:"content"`
-				Reasoning string `json:"reasoning,omitempty"`
-			} `json:"message"`
-		}{{}}
+		resp.Choices = []orChoice{{}}
 		resp.Choices[0].Message.Content = `{"content_kind":"other","summary":"x","extracted_text":"","language":"none","visibility_suggestion":"visible","media_role_hint":"none","relates_to_hint":""}`
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -673,12 +653,7 @@ func TestRunOneExtraction_RetriesOnParseFailure(t *testing.T) {
 			content = goodJSON
 		}
 		resp := orResponse{}
-		resp.Choices = []struct {
-			Message struct {
-				Content   string `json:"content"`
-				Reasoning string `json:"reasoning,omitempty"`
-			} `json:"message"`
-		}{{}}
+		resp.Choices = []orChoice{{}}
 		resp.Choices[0].Message.Content = content
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
@@ -709,12 +684,7 @@ func TestRunOneExtraction_GivesUpAfterRetries(t *testing.T) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		resp := orResponse{}
-		resp.Choices = []struct {
-			Message struct {
-				Content   string `json:"content"`
-				Reasoning string `json:"reasoning,omitempty"`
-			} `json:"message"`
-		}{{}}
+		resp.Choices = []orChoice{{}}
 		resp.Choices[0].Message.Content = `{"content_kind": "always cut off`
 		_ = json.NewEncoder(w).Encode(resp)
 	}))

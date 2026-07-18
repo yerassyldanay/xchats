@@ -124,6 +124,7 @@ function onImgError(ev: Event) {
             <Badge v-if="e.family === 'scenario' && !e.rollups.find((r) => r.key === 'contract_pass')?.pass" variant="outline" class="text-[11px] border-amber-400 text-amber-700">контракт нарушен</Badge>
             <Badge v-if="e.scenario?.truncated" variant="outline" class="text-[11px] border-destructive text-destructive">обрезан ответ</Badge>
             <Badge v-if="e.scenario?.reasoning_leak" variant="outline" class="text-[11px] border-destructive text-destructive">утечка рассуждений</Badge>
+            <Badge v-if="e.retries" variant="outline" class="text-[11px] border-amber-400 text-amber-700">повтор ×{{ e.retries }}</Badge>
             <span v-if="e.variant.prompt?.name" class="text-xs text-muted-foreground font-mono">{{ e.variant.prompt.name }}@v{{ e.variant.prompt.version }}</span>
             <span class="ml-auto text-xs text-muted-foreground">{{ costLabel(e.cost.basis, e.cost.estimate_usd) }}<template v-if="e.latency_ms"> · {{ (e.latency_ms / 1000).toFixed(1) }}с</template></span>
           </div>

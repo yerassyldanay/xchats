@@ -346,6 +346,10 @@ export interface VExecution {
   contract?: VContractRow[]
   cost: VCost
   latency_ms?: number
+  // retries mirrors the harness's Verdict.Retries (evals/harness/judge.go) — how many
+  // times the retry mechanism (evals/harness/retry.go) retried this row. 0/undefined
+  // for every execution the retry path never touched.
+  retries?: number
   scenario?: VScenarioDetails
   extract?: VExtractDetails
 }
@@ -442,6 +446,7 @@ export interface CatalogTestCase {
   language?: string
   escalate?: boolean
   must_not_contain?: string[]
+  must_contain_any?: string[]
   media?: CatalogMediaExpect
   source: string
 }

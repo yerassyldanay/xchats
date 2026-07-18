@@ -99,6 +99,7 @@ type CatalogTestCase struct {
 	Language       string              `json:"language,omitempty"`
 	Escalate       *bool               `json:"escalate,omitempty"`
 	MustNotContain []string            `json:"must_not_contain,omitempty"`
+	MustContainAny []string            `json:"must_contain_any,omitempty"`
 	Media          *CatalogMediaExpect `json:"media,omitempty"`
 	Source         string              `json:"source"`
 }
@@ -175,6 +176,7 @@ func catalogTestCaseFrom(tc TestCase, source string) CatalogTestCase {
 		Language:       tc.Language,
 		Escalate:       tc.Escalate,
 		MustNotContain: tc.MustNotContain,
+		MustContainAny: tc.MustContainAny,
 		Media:          catalogMediaExpect(tc.Media),
 		Source:         source,
 	}
