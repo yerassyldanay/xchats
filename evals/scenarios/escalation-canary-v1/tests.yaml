@@ -52,4 +52,5 @@ tests:
     message: "А доставка сколько будет стоить?"
     requires:
       - ["policy.main.delivery_cost"]
+    escalate: false
     language: ru

@@ -55,6 +55,29 @@ describe('resolveMediaExpectation', () => {
   it('returns null when the test declares no media expectation at all', () => {
     expect(resolveMediaExpectation(undefined, ['coffee-photo-1'], [])).toBeNull()
   })
+
+  it('carries forbid:true through, with empty groups/refs', () => {
+    const m = resolveMediaExpectation({ forbid: true }, ['coffee-photo-1'], ['product.coffee-machine.images'])
+    expect(m?.forbid).toBe(true)
+    expect(m?.groups).toEqual([])
+    expect(m?.refs).toEqual([])
+  })
+
+  it('defaults forbid to false for an ordinary any_of expectation', () => {
+    const m = resolveMediaExpectation({ any_of_refs: ['coffee-photo-1'] }, ['coffee-photo-1'], [])
+    expect(m?.forbid).toBe(false)
+  })
+
+  it('carries exclusive:true through, alongside the resolved refs/groups', () => {
+    const m = resolveMediaExpectation({ any_of_refs: ['coffee-photo-1'], exclusive: true }, ['coffee-photo-1'], [])
+    expect(m?.exclusive).toBe(true)
+    expect(m?.refs).toEqual([{ name: 'coffee-photo-1', found: true }])
+  })
+
+  it('defaults exclusive to false for an ordinary any_of expectation', () => {
+    const m = resolveMediaExpectation({ any_of_refs: ['coffee-photo-1'] }, ['coffee-photo-1'], [])
+    expect(m?.exclusive).toBe(false)
+  })
 })
 
 function baseTest(over: Partial<CatalogTestCase> = {}): CatalogTestCase {
@@ -82,6 +105,11 @@ describe('notCheckedRequirements', () => {
   it('escalate:false is an ACTIVE requirement, not "not checked" — must not appear here', () => {
     const items = notCheckedRequirements(baseTest({ escalate: false }))
     expect(items).not.toContain('Эскалация')
+  })
+
+  it('a forbid-only media block counts as declared — "Медиа" must not appear here', () => {
+    const items = notCheckedRequirements(baseTest({ media: { forbid: true } }))
+    expect(items).not.toContain('Медиа')
   })
 })
 

@@ -6,6 +6,7 @@ tests:
     message: "Кофемашина DeLonghi қанша тұрады?"
     requires:
       - ["product.coffee-machine.price"]
+    escalate: false
     language: kk
 
   - id: "3. delivery cost + time, Kazakh"
@@ -13,6 +14,7 @@ tests:
     requires:
       - ["policy.main.delivery_cost"]
       - ["policy.main.delivery_time", "policy.main.delivery_in_days"]
+    escalate: false
     language: kk
 
   - id: "21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim"

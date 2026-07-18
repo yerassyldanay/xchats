@@ -68,13 +68,15 @@ type CatalogMedia struct {
 type CatalogMediaExpect struct {
 	AnyOfGroups []string `json:"any_of_groups,omitempty"`
 	AnyOfRefs   []string `json:"any_of_refs,omitempty"`
+	Forbid      bool     `json:"forbid,omitempty"`
+	Exclusive   bool     `json:"exclusive,omitempty"`
 }
 
 func catalogMediaExpect(m *MediaExpect) *CatalogMediaExpect {
 	if m == nil {
 		return nil
 	}
-	return &CatalogMediaExpect{AnyOfGroups: m.AnyOfGroups, AnyOfRefs: m.AnyOfRefs}
+	return &CatalogMediaExpect{AnyOfGroups: m.AnyOfGroups, AnyOfRefs: m.AnyOfRefs, Forbid: m.Forbid, Exclusive: m.Exclusive}
 }
 
 // CatalogTestCase is a catalog-specific projection of TestCase — deliberately NOT
@@ -123,7 +125,7 @@ type CatalogExtractCase struct {
 // last") but additionally records, per test, the evals/-relative path of the file
 // that declared it — resolveTests itself is untouched (judge.go's grading path must
 // keep reading the exact same resolved_tests.json shape it always has).
-func resolveCatalogTests(scenarioDir, testsRel string) ([]CatalogTestCase, error) {
+func resolveCatalogTests(scenarioName, scenarioDir, testsRel string) ([]CatalogTestCase, error) {
 	testsPath := filepath.Join(scenarioDir, testsRel)
 	b, err := os.ReadFile(testsPath)
 	if err != nil {
@@ -146,10 +148,19 @@ func resolveCatalogTests(scenarioDir, testsRel string) ([]CatalogTestCase, error
 			return nil, fmt.Errorf("include %s: %w", incPath, err)
 		}
 		for _, tc := range bank.Tests {
+			// Validated here too (not just render.go's resolveTests path) so a
+			// forbid+any_of conflict fails `export -all` as loudly as it fails `render` —
+			// see validateTestMedia's own comment for why both paths must agree.
+			if err := validateTestMedia(scenarioName, tc.ID, tc.Media); err != nil {
+				return nil, err
+			}
 			out = append(out, catalogTestCaseFrom(tc, incPath))
 		}
 	}
 	for _, tc := range tf.Tests {
+		if err := validateTestMedia(scenarioName, tc.ID, tc.Media); err != nil {
+			return nil, err
+		}
 		out = append(out, catalogTestCaseFrom(tc, testsPath))
 	}
 	return out, nil
@@ -229,7 +240,7 @@ func buildCatalogScenario(dir string) (*CatalogScenario, error) {
 	}
 
 	cat := buildCatalog(data, scenario.Contract)
-	tests, err := resolveCatalogTests(dir, scenario.Tests)
+	tests, err := resolveCatalogTests(scenario.Name, dir, scenario.Tests)
 	if err != nil {
 		return nil, fmt.Errorf("resolve tests: %w", err)
 	}

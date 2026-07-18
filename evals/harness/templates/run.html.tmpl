@@ -166,6 +166,7 @@
     {{if .Scenario.InventedDigits}}<p><b>Invented digits:</b> {{range .Scenario.InventedDigits}}<code>{{.}}</code> {{end}}</p>{{end}}
     {{if .Scenario.UnitIssues}}<p><b>Unit issues:</b> {{range .Scenario.UnitIssues}}{{.}}; {{end}}</p>{{end}}
     {{if .Scenario.ForbiddenPhrase}}<p><b>Forbidden phrase matched:</b> {{.Scenario.ForbiddenPhrase}}</p>{{end}}
+    {{if and .Scenario.MediaCountEvaluated .Scenario.TooManyMedia}}<p class="status-fail"><b>Too many attachments</b> &mdash; {{.Scenario.MediaCount}} entries, over the frame's cap</p>{{end}}
   </div>
   {{end}}
   <p class="meta">{{costLabel .Cost}}{{if .LatencyMs}} &middot; {{.LatencyMs}}ms{{end}}</p>

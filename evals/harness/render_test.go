@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -66,6 +67,84 @@ func TestValidatePrompt(t *testing.T) {
 	unfilledSlot := "%%FACTS%%\nКлиент пишет: {{message}}\n"
 	if err := validatePrompt(unfilledSlot, cat); err == nil {
 		t.Fatal("prompt with a leftover %%SLOT%% should fail validatePrompt")
+	}
+}
+
+// TestValidateTestMedia_ForbidWithAnyOfConflicts proves render's fail-closed gate against
+// a self-contradictory media expectation: Forbid (no attachment allowed) combined with
+// AnyOfGroups/AnyOfRefs (attach one of these) can never both be satisfied by one reply.
+func TestValidateTestMedia_ForbidWithAnyOfConflicts(t *testing.T) {
+	if err := validateTestMedia("s1", "t1", nil); err != nil {
+		t.Errorf("nil media should never conflict, got %v", err)
+	}
+	if err := validateTestMedia("s1", "t1", &MediaExpect{}); err != nil {
+		t.Errorf("Forbid=false with no any_of should never conflict, got %v", err)
+	}
+	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true}); err != nil {
+		t.Errorf("Forbid alone (no any_of) should never conflict, got %v", err)
+	}
+	if err := validateTestMedia("s1", "t1", &MediaExpect{AnyOfGroups: []string{"g"}}); err != nil {
+		t.Errorf("any_of alone (Forbid=false) should never conflict, got %v", err)
+	}
+
+	err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, AnyOfGroups: []string{"g"}})
+	if err == nil {
+		t.Fatal("want an error when Forbid is combined with any_of_groups")
+	}
+	if !strings.Contains(err.Error(), "s1") || !strings.Contains(err.Error(), "t1") {
+		t.Errorf("want the error to name the scenario and test, got %v", err)
+	}
+
+	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, AnyOfRefs: []string{"r"}}); err == nil {
+		t.Error("want an error when Forbid is combined with any_of_refs too")
+	}
+}
+
+// TestValidateTestMedia_ExclusiveConstraints proves the two invariants Exclusive adds:
+// it cannot stand alone without a non-empty any_of_* to narrow, and it cannot combine
+// with Forbid (which already means "nothing is allowed", leaving nothing for Exclusive
+// to scope).
+func TestValidateTestMedia_ExclusiveConstraints(t *testing.T) {
+	if err := validateTestMedia("s1", "t1", &MediaExpect{AnyOfGroups: []string{"g"}, Exclusive: true}); err != nil {
+		t.Errorf("Exclusive with a non-empty any_of_groups should never conflict, got %v", err)
+	}
+	if err := validateTestMedia("s1", "t1", &MediaExpect{AnyOfRefs: []string{"r"}, Exclusive: true}); err != nil {
+		t.Errorf("Exclusive with a non-empty any_of_refs should never conflict, got %v", err)
+	}
+
+	err := validateTestMedia("s1", "t1", &MediaExpect{Exclusive: true})
+	if err == nil {
+		t.Fatal("want an error when Exclusive is set with neither any_of_groups nor any_of_refs")
+	}
+	if !strings.Contains(err.Error(), "s1") || !strings.Contains(err.Error(), "t1") {
+		t.Errorf("want the error to name the scenario and test, got %v", err)
+	}
+
+	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, Exclusive: true}); err == nil {
+		t.Error("want an error when Forbid is combined with Exclusive, even with no any_of_* set")
+	}
+	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, Exclusive: true, AnyOfRefs: []string{"r"}}); err == nil {
+		t.Error("want an error when Forbid, Exclusive, and any_of_refs are all combined")
+	}
+}
+
+// TestValidateResolvedTests_RunsMediaValidationOverEveryTest proves the render-time gate
+// scans the WHOLE resolved list, not just the first test — and that a single valid test
+// among conflicted ones doesn't mask the failure.
+func TestValidateResolvedTests_RunsMediaValidationOverEveryTest(t *testing.T) {
+	valid := []TestCase{{ID: "ok", Media: &MediaExpect{Forbid: true}}}
+	if err := validateResolvedTests("s1", valid); err != nil {
+		t.Errorf("want no error for a valid test list, got %v", err)
+	}
+
+	conflicted := []TestCase{
+		{ID: "ok"},
+		{ID: "bad", Media: &MediaExpect{Forbid: true, AnyOfRefs: []string{"r"}}},
+	}
+	if err := validateResolvedTests("s1", conflicted); err == nil {
+		t.Fatal("want an error when ANY test in the list conflicts, not just the first")
+	} else if !strings.Contains(err.Error(), "bad") {
+		t.Errorf("want the error to name the conflicting test id, got %v", err)
 	}
 }
 

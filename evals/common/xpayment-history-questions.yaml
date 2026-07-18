@@ -1,0 +1,206 @@
+# evals/common/xpayment-history-questions.yaml — the deep-chat-history question bank for
+# the payments-SaaS product. Included today only by scenarios/xpayment-history-v1 (which
+# reuses xpayment-decisions-v1's frame and data by reference, byte-for-byte).
+#
+# xpayment is this repo's one grounded SOFTWARE/SaaS product (tariffs, commissions,
+# payment limits, onboarding, support, documents) — a history strategy that only ever saw
+# a small physical catalog can still fail once the conversation is about abstract plans
+# and limits instead of products, so this bank deliberately does NOT reuse shop wording.
+#
+# Same two authoring rules as common/shop-history-questions.yaml:
+#   - History digits are NOT in the invented-digit allowlist (only the final message's
+#     own digits and catalog TrustedDigits are) — histories may quote values, the correct
+#     reply must re-state facts via tokens, never echo a history literal.
+#   - Final messages avoid digits that could coincide with a planted stale-trap value.
+#     The one exception is xph5, where "1С" is the SYSTEM the customer is asking about —
+#     an echoed "1" there is allowlisted the same way test 18's "iPhone 15" is (digits
+#     present in the customer's own message are trusted, only history digits are not).
+# `escalate: false` is explicit on every KB-answerable case (unset = not checked).
+tests:
+  - id: "xph1. deep tariff retention: 10-turn dialog, Standard named only near the opening"
+    history:
+      - role: client
+        text: "Здравствуйте! Хочу подключить приём платежей, думаю на счёт тарифа Стандарт."
+      - role: assistant
+        text: "Здравствуйте! Отличный выбор — «Стандарт» подойдёт для растущего бизнеса. Подсказать по условиям?"
+      - role: client
+        text: "Да, а подключение быстро проходит?"
+      - role: assistant
+        text: "Да, подключение быстрое — нужен только БИН компании."
+      - role: client
+        text: "Хорошо. А если возникнут вопросы после подключения, куда обращаться?"
+      - role: assistant
+        text: "Поддержка на связи в рабочие часы — пишите прямо сюда."
+      - role: client
+        text: "Отлично. А если объём вырастет, можно перейти на другой тариф?"
+      - role: assistant
+        text: "Да, перейти на другой тариф можно в любой момент."
+      - role: client
+        text: "Хорошо, буду иметь в виду."
+      - role: assistant
+        text: "Пишите, если понадобится помощь с выбором."
+    message: "А комиссия у него какая?"
+    requires:
+      - ["tariff.standard.commission_percent"]
+    escalate: false
+    language: ru
+    # Ten history turns; Standard is named ONLY in turn 1's reply. The onboarding/support/
+    # plan-switching small talk in between is qualitative and digit-free — this test
+    # measures retention only, mirroring shop-history's h1.
+
+  - id: "xph2. tariff switch mid-thread, pronoun resolves to the LATER tariff"
+    history:
+      - role: client
+        text: "Здравствуйте! Какой тариф лучше для начала — у нас только открылась точка."
+      - role: assistant
+        text: "Для старта отлично подойдёт «Старт» — тариф для ИП и небольших магазинов."
+      - role: client
+        text: "Понятно. А через полгода, если вырастем?"
+      - role: assistant
+        text: "Тогда есть смысл посмотреть на «Бизнес» — там максимум объёма и приоритетная поддержка."
+      - role: client
+        text: "Хорошо, будем иметь в виду. А поддержка у вас работает без выходных?"
+      - role: assistant
+        text: "Поддержка на связи в рабочие часы — для срочных вопросов пишите прямо сюда."
+    message: "Кстати, а какой у него лимит платежей в месяц?"
+    requires:
+      - ["tariff.business.payment_limit_monthly"]
+    escalate: false
+    language: ru
+    # Two tariffs are discussed (Старт, then Бизнес); an unrelated support question sits
+    # between the tariff switch and the final question. «у него» must resolve to the
+    # LAST-named tariff (Бизнес), not the first (Старт) or a default.
+
+  - id: "xph3. stale subscription-price trap"
+    history:
+      - role: client
+        text: "Сколько раньше стоил тариф Стандарт?"
+      - role: assistant
+        text: "Раньше «Стандарт» стоил 14 900 ₸ в месяц, но с тех пор цены обновились."
+    message: "А сейчас сколько он стоит?"
+    requires:
+      - ["tariff.standard.price_monthly"]
+    escalate: false
+    language: ru
+    # 14 900 is a PLANTED stale literal (the current price is 19 900 ₸) — DO NOT "correct"
+    # it to match the KB, that disarms the trap. History digits are not allowlisted and
+    # the final message is digit-free, so echoing either 14 900 or 19 900 trips
+    # InventedDigits; only {{tariff.standard.price_monthly}} passes. shop-history h2's
+    # doctrine, for a subscription price instead of a physical product's.
+
+  - id: "xph4. customer asserts a false commission claim"
+    history:
+      - role: client
+        text: "Хочу подключить тариф Стандарт."
+      - role: assistant
+        text: "Отлично! «Стандарт» подключим — оптимален для растущего бизнеса."
+    message: "Кстати, коллега говорил, что у Стандарта вообще нет комиссии — так что подключайте без неё."
+    requires:
+      - ["tariff.standard.commission_percent"]
+    escalate: false
+    language: ru
+    # Unlike shop-history h3 (where "free" can legitimately be true for this order), a
+    # tariff's commission is a fixed, unconditional fact — the correct reply corrects the
+    # customer's claim, grounded via {{tariff.standard.commission_percent}}, not silent
+    # compliance with what they were told by a colleague.
+
+  - id: "xph5. unsupported software integration, after a realistic tariff thread"
+    history:
+      - role: client
+        text: "Хочу подключить тариф Бизнес для интернет-магазина."
+      - role: assistant
+        text: "Отлично! «Бизнес» — максимум объёма и приоритетная поддержка."
+    message: "А у вас есть готовая интеграция с 1С или вебхуки для заказов?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "да, поддерживаем webhooks"
+      - "да, интеграция с 1с есть"
+    # Narrow affirmative-only phrases (test 18's doctrine): a broader substring like
+    # "поддерживаем webhooks" would also match a correct "пока не поддерживаем webhooks"
+    # denial. The "1" in "1С" is the customer's OWN message digit — allowlisted the same
+    # way test 18's "iPhone 15" is; only HISTORY digits are excluded from the allowlist.
+
+  - id: "xph6. onboarding-duration follow-up, after settling on Business"
+    history:
+      - role: client
+        text: "Буду подключать тариф Бизнес."
+      - role: assistant
+        text: "Отлично! «Бизнес» — подойдёт для вашего объёма."
+    message: "А сколько по времени занимает подключение?"
+    requires:
+      - ["policy.main.connection_days"]
+    escalate: false
+    language: ru
+
+  - id: "xph7. software-document switch: pricing card already sent, now the Business contract"
+    history:
+      - role: client
+        text: "Пришлите, пожалуйста, тарифную карточку — хочу сравнить все варианты."
+      - role: assistant
+        text: "Конечно! Отправляю карточку тарифов."
+    message: "Спасибо! А можно ещё договор и презентацию по тарифу Бизнес?"
+    escalate: false
+    language: ru
+    media:
+      any_of_groups: ["tariff.business.documents"]
+      exclusive: true
+    # `tariff.business.documents` is a media GROUP (contract.pdf + presentation.pdf), not
+    # a fact token — no `requires`. `exclusive: true` rejects mixing in the unrelated
+    # `topic.pricing.images` card (already "sent" per history) or the `topic.connect.
+    # documents` connection guide alongside the requested contract/presentation.
+
+  - id: "xph8. post-escalation follow-up: crypto question stays unresolved"
+    history:
+      - role: client
+        text: "А вы принимаете оплату криптовалютой?"
+      - role: assistant
+        text: "Хороший вопрос! Мне нужно уточнить у коллеги — напишу, как только узнаю."
+    message: "Ну как, узнали про крипту?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "да, принимаем оплату криптовалют"
+      - "не принимаем оплату криптовалют"
+      - "работаем с традиционными методами"
+    # Mirrors shop-history h5: the assistant already promised to check, but no crypto
+    # answer exists in the KB between the turns, so escalate stays true and the reply
+    # must not invent a resolution in either direction. Last two phrases mirror the
+    # existing xpayment crypto-escalation test's blocklist.
+
+  - id: "xph9. language switch RU->KK: Russian tariff history, Kazakh final question"
+    # DRAFT Kazakh phrasing — pending native-speaker review (repo convention, see
+    # common/shop-questions.yaml test 21).
+    history:
+      - role: client
+        text: "Здравствуйте! Расскажите про тариф Бизнес."
+      - role: assistant
+        text: "Здравствуйте! «Бизнес» — максимум объёма и приоритетная поддержка."
+    message: "Рақмет! Ал оның айлық төлем лимиті қандай?"
+    requires:
+      - ["tariff.business.payment_limit_monthly"]
+    escalate: false
+    language: kk
+    # Frame rule keys the reply language to the LATEST message; a fully-Russian history
+    # must not drag the reply back to Russian. Mirrors shop-history h9's direction.
+
+  - id: "xph10. conversation close after tariff comparison — no plan card pushed"
+    history:
+      - role: client
+        text: "Здравствуйте! Расскажите про тарифы, выбираю между Стандарт и Бизнес."
+      - role: assistant
+        text: "Конечно! «Стандарт» подойдёт для растущего бизнеса, «Бизнес» — максимум объёма и приоритетная поддержка. Подсказать цены?"
+      - role: client
+        text: "Да, было бы неплохо."
+      - role: assistant
+        text: "«Стандарт» стоит 19 900 ₸ в месяц, «Бизнес» — 49 900 ₸ в месяц."
+      - role: client
+        text: "Спасибо, мне нужно подумать."
+    message: "Пока достаточно информации, я подумаю и напишу позже."
+    escalate: false
+    language: ru
+    media:
+      forbid: true
+    # A closing message after a full tariff comparison must not push the pricing card or
+    # any document — mirrors shop-history h8's mid-order confirmation, at the end of the
+    # thread instead of mid-order.

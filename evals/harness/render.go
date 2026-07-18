@@ -90,6 +90,9 @@ func renderScenario(scenarioDir, modelsPath, modelsFilter string) error {
 	if err != nil {
 		return fmt.Errorf("resolve tests: %w", err)
 	}
+	if err := validateResolvedTests(scenario.Name, tests); err != nil {
+		return err
+	}
 
 	models, err := loadModels(modelsPath)
 	if err != nil {
@@ -323,6 +326,48 @@ func validatePrompt(prompt string, cat *Catalog) error {
 			continue
 		}
 		return fmt.Errorf("prompt contains token %s not in this scenario's catalog (check frame.txt example tokens against data.yaml)", span)
+	}
+	return nil
+}
+
+// validateTestMedia rejects a test whose media expectation is self-contradictory:
+//   - Forbid (no attachment allowed) combined with AnyOfGroups/AnyOfRefs (attach one of
+//     these) can never both be satisfied by the same reply.
+//   - Forbid combined with Exclusive: Forbid already means "nothing may be attached",
+//     leaving Exclusive nothing to scope.
+//   - Exclusive without a non-empty AnyOfGroups/AnyOfRefs: Exclusive is a MODIFIER on an
+//     any_of_* declaration ("this set and nothing else"), not a standalone expectation —
+//     it has no set to narrow without one.
+//
+// Shared by both resolution paths — render's resolveTests/renderScenario and the catalog
+// export's resolveCatalogTests — so a conflicted test fails the free render gate AND
+// `export -all`, not just whichever a scenario author happens to run first.
+func validateTestMedia(scenarioName, testID string, m *MediaExpect) error {
+	if m == nil {
+		return nil
+	}
+	hasAnyOf := len(m.AnyOfGroups) > 0 || len(m.AnyOfRefs) > 0
+	if m.Forbid {
+		if hasAnyOf {
+			return fmt.Errorf("scenario %q: test %q: media.forbid is set together with any_of_groups/any_of_refs — a test cannot both require and forbid an attachment", scenarioName, testID)
+		}
+		if m.Exclusive {
+			return fmt.Errorf("scenario %q: test %q: media.forbid is set together with media.exclusive — forbid already means no attachment is allowed at all, exclusive has nothing left to scope", scenarioName, testID)
+		}
+	}
+	if m.Exclusive && !hasAnyOf {
+		return fmt.Errorf("scenario %q: test %q: media.exclusive is set without any_of_groups/any_of_refs — exclusive narrows an existing any_of_* declaration, it cannot stand alone", scenarioName, testID)
+	}
+	return nil
+}
+
+// validateResolvedTests runs validateTestMedia (and any future cross-test invariant) over
+// an already-resolved test list.
+func validateResolvedTests(scenarioName string, tests []TestCase) error {
+	for _, tc := range tests {
+		if err := validateTestMedia(scenarioName, tc.ID, tc.Media); err != nil {
+			return err
+		}
 	}
 	return nil
 }

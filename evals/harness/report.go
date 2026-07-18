@@ -311,6 +311,9 @@ func buildContractReport(runs []JudgedRun) string {
 			if len(v.UnknownMedia) > 0 {
 				fmt.Fprintf(&b, "- unknown media (dropped by the real product, not blocked — but still counted against model-behavior here): %s\n", strings.Join(v.UnknownMedia, ", "))
 			}
+			if v.MediaCountEvaluated && v.TooManyMedia {
+				fmt.Fprintf(&b, "- **too many attachments:** %d entries (frame cap: 3 refs / 2 groups)\n", v.MediaCount)
+			}
 			if v.Truncated {
 				fmt.Fprintf(&b, "- **TRUNCATED — finish_reason=%s** (response cut off before the model finished; contract fails regardless of what parsed)\n", v.FinishReason)
 			}
@@ -324,10 +327,17 @@ func buildContractReport(runs []JudgedRun) string {
 				fmt.Fprintf(&b, "- unit/currency issues: %s\n", strings.Join(v.UnitIssues, ", "))
 			}
 			if !v.MustNotContainPass {
-				fmt.Fprintf(&b, "- **escalated but still committed to an invented answer** (forbidden phrase: %q)\n", v.ForbiddenPhrase)
+				// Generic wording — this check is no longer escalation-only (e.g. a test
+				// forbidding "claim to attach a video that doesn't exist" has no escalate
+				// expectation at all).
+				fmt.Fprintf(&b, "- **reply_text contains a forbidden phrase:** %q\n", v.ForbiddenPhrase)
 			}
-			fmt.Fprintf(&b, "- requires met: %v · media met: %v · escalate met: %v · language met: %v · no-invented-answer met: %v · units ok: %v\n",
-				v.RequiresPass, v.MediaPass, v.EscalatePass, v.LanguagePass, v.MustNotContainPass, len(v.UnitIssues) == 0)
+			mediaCountCell := "n/a (verdict predates this check)"
+			if v.MediaCountEvaluated {
+				mediaCountCell = fmt.Sprintf("%v", !v.TooManyMedia)
+			}
+			fmt.Fprintf(&b, "- requires met: %v · media met: %v · escalate met: %v · language met: %v · no-invented-answer met: %v · units ok: %v · media count ok: %s\n",
+				v.RequiresPass, v.MediaPass, v.EscalatePass, v.LanguagePass, v.MustNotContainPass, len(v.UnitIssues) == 0, mediaCountCell)
 			if v.InjectedText != "" {
 				fmt.Fprintf(&b, "- injected text: %s\n", v.InjectedText)
 			}

@@ -7,6 +7,7 @@ tests:
     message: "Сколько стоит кофемашина?"
     requires:
       - ["product.coffee-machine.price"]
+    escalate: false
     language: ru
 
   - id: "9. off-KB city coverage"
@@ -21,6 +22,7 @@ tests:
     message: "Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?"
     requires:
       - ["product.coffee-machine.price"]
+    escalate: false
     language: ru
 
   - id: "16. follow-up with history, needs delivery cost"
@@ -32,4 +34,5 @@ tests:
     message: "А доставка сколько будет стоить?"
     requires:
       - ["policy.main.delivery_cost"]
+    escalate: false
     language: ru

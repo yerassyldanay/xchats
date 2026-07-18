@@ -35,7 +35,7 @@ provider in `models.yaml`; `-models-file` overrides the models.yaml path itself)
 deliberate confirmation gate for a run you want to cost-check first:
 
 ```bash
-./harness/harness run -scenario scenarios/shop-current -models google/gemini-2.5-flash -expect-calls 19
+./harness/harness run -scenario scenarios/shop-current -models google/gemini-2.5-flash -expect-calls 29
 ```
 
 Running two or more `shop-scale-N` scenarios together adds a "Scale comparison" table to
@@ -50,7 +50,7 @@ before anything is spent:
 - **Screening** (comparing frame/prompt variants, e.g. the language bake-off's V1-V4 or
   an escalation-wording V1/V2): 3 uncached repetitions per (test, model) pair.
   ```bash
-  ./harness/harness run -scenario scenarios/lang-canary-v1 -repeats 3 -no-cache -expect-calls 72
+  ./harness/harness run -scenario scenarios/lang-canary-v1 -repeats 3 -no-cache -expect-calls 84
   ```
 - **Survivor stage** (the 1-2 variants screening didn't eliminate): 15 unique Kazakh
   intents x 5 repetitions = 75 outputs per prompt+model pair, at production temperature.
@@ -208,7 +208,7 @@ an internet-facing deploy of the same image simply 404s there).
 ### Grouping multiple families into one launch
 
 ```bash
-./harness/harness launch -all -expect-calls 323
+./harness/harness launch -all -expect-calls 616
 ```
 
 Mints one `launch_id`, writes `runs/launches/<id>.json` **before any billed call**

@@ -87,7 +87,22 @@ type Verdict struct {
 
 	RequiresPass bool `json:"requires_pass"`
 	MediaPass    bool `json:"media_pass"`
-	EscalatePass bool `json:"escalate_pass"`
+	// MediaIssue is a human-readable detail for a MediaPass failure the generic "did not
+	// attach the expected media" wording doesn't fit — today only the Forbid case
+	// ("attached media, but this test forbids any attachment").
+	MediaIssue string `json:"media_issue,omitempty"`
+	// MediaCount/TooManyMedia are UNIVERSAL — checked on every test regardless of whether
+	// it declares a `media:` expectation, mirroring every frame's own rule-3 attachment
+	// cap (see maxMediaRefs/maxMediaGroups). MediaCountEvaluated is a CODE-VERSION marker,
+	// not derived from ParseOK: a verdict judged by pre-upgrade code has this field
+	// entirely absent from its JSON, which unmarshals as false. Without this marker,
+	// re-reading such a verdict would report TooManyMedia's zero value (false) as a
+	// fabricated PASS for a check that was never actually run — MediaCountEvaluated lets
+	// viewmodel.go render "not checked" instead.
+	MediaCount          int  `json:"media_count"`
+	TooManyMedia        bool `json:"too_many_media"`
+	MediaCountEvaluated bool `json:"media_count_evaluated,omitempty"`
+	EscalatePass        bool `json:"escalate_pass"`
 	// LanguagePass = LanguageTextOK && LanguageFieldOK — kept as the single pass/fail
 	// gate everything else already depends on. The two components are ALSO reported
 	// separately (Phase 0.4 of the language plan): looksKazakh is a cheap heuristic, not
@@ -245,6 +260,16 @@ var (
 )
 
 const kazakhOnlyLetters = "әғқңөұүһӘҒҚҢӨҰҮҺ"
+
+// maxMediaRefs/maxMediaGroups mirror each frame's own attachment cap — rule 3 in every
+// frame.txt: asset_refs frames say "Maximum 3" (e.g. shop-current/frame.txt,
+// lang-canary-v1/frame.txt), attach_groups frames say "Максимум 2 группы" (e.g.
+// shop-scale/frame.txt, shop-decisions-v1/frame.txt, xpayment-decisions-v1/frame.txt). If
+// either frame's stated cap ever changes, this constant must change with it.
+const (
+	maxMediaRefs   = 3
+	maxMediaGroups = 2
+)
 
 // providerModelKey is the ONE key every grouping of judged results (Verdict.Model,
 // priceByModel, freshSplit) must use once two provider entries can share the same
@@ -453,10 +478,20 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	if catalog.Contract == "attach_groups" {
 		mediaField = "attach_groups"
 	}
-	_, hasMediaField := obj[mediaField].([]any)
-	v.ContractFields = hasReplyText && replyText != "" && hasLang && hasEscalate && hasMediaField
+	// mediaRaw is the UNTYPED array — kept around (not just mediaEntries' string-filtered
+	// view) so MediaCount below counts every entry the model actually wrote, including a
+	// stray non-string one, instead of silently undercounting by dropping it first.
+	mediaRaw, hasMediaField := obj[mediaField].([]any)
+	mediaAllStrings := true
+	for _, e := range mediaRaw {
+		if _, ok := e.(string); !ok {
+			mediaAllStrings = false
+			break
+		}
+	}
+	v.ContractFields = hasReplyText && replyText != "" && hasLang && hasEscalate && hasMediaField && mediaAllStrings
 	if !v.ContractFields {
-		v.appendReason(fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array %s)", mediaField))
+		v.appendReason(fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array %s of strings)", mediaField))
 	}
 
 	// Reasoning/thinking content must never leak into reply_text — the one field the
@@ -532,8 +567,36 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 
 	v.MediaPass = true
 	if tc.Media != nil {
-		v.MediaPass = mediaExpectationMet(tc.Media, obj, mediaField)
+		if tc.Media.Forbid {
+			v.MediaPass = len(mediaRaw) == 0
+			if !v.MediaPass {
+				v.MediaIssue = "attached media, but this test forbids any attachment"
+			}
+		} else {
+			v.MediaPass = mediaExpectationMet(tc.Media, obj, mediaField)
+			if v.MediaPass && tc.Media.Exclusive {
+				if outsiders := mediaOutsideExpectation(tc.Media, obj, mediaField); len(outsiders) > 0 {
+					v.MediaPass = false
+					v.MediaIssue = "attached media outside the expected set: " + strings.Join(outsiders, ", ")
+				}
+			}
+		}
 	}
+
+	// MediaCount/TooManyMedia is UNIVERSAL — every frame's own rule 3 caps attachments, so
+	// this is checked regardless of whether the test declares a `media:` expectation at
+	// all, the same way UnknownMedia below is. Counts the RAW array length (mediaRaw, from
+	// the ContractFields check above), not mediaEntries' string-filtered view: a
+	// non-string element already fails ContractFields, but a response that's over the cap
+	// AND has a stray non-string entry must still be counted as over the cap, not
+	// undercounted by silently dropping the malformed entry first.
+	v.MediaCountEvaluated = true
+	v.MediaCount = len(mediaRaw)
+	mediaLimit := maxMediaRefs
+	if mediaField == "attach_groups" {
+		mediaLimit = maxMediaGroups
+	}
+	v.TooManyMedia = v.MediaCount > mediaLimit
 
 	v.EscalatePass = true
 	if tc.Escalate != nil {
@@ -577,7 +640,14 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 
 	v.MustNotContainPass = true
 	if len(tc.MustNotContain) > 0 {
-		lower := strings.ToLower(replyText)
+		// Scans the token-INJECTED text (not raw replyText): a forbidden phrase can
+		// materialize only after substitution — e.g. "{{policy.main.return_period}}"
+		// injects to "14 дней", so "в течение 14 дней" can appear in the text a customer
+		// would actually receive even though the model never wrote those digits itself.
+		// `injected` (computed above) is always populated, including when the response is
+		// Blocked or leaking reasoning — unlike v.InjectedText, which is intentionally
+		// left empty in both those cases.
+		lower := strings.ToLower(injected)
 		for _, phrase := range tc.MustNotContain {
 			if strings.Contains(lower, strings.ToLower(phrase)) {
 				v.MustNotContainPass = false
@@ -594,7 +664,8 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	}
 
 	v.ModelBehaviorPass = v.RequiresPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
-		v.MustNotContainPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0
+		v.MustNotContainPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 &&
+		!v.TooManyMedia
 
 	if v.Reason == "" && !v.ModelBehaviorPass {
 		v.Reason = firstFailureReason(v)
@@ -610,19 +681,27 @@ func firstFailureReason(v Verdict) string {
 	case !v.RequiresPass:
 		return "did not use the required fact token(s)"
 	case !v.MediaPass:
+		if v.MediaIssue != "" {
+			return v.MediaIssue
+		}
 		return "did not attach the expected media"
 	case !v.EscalatePass:
 		return "escalate did not match expectation"
 	case !v.LanguagePass:
 		return v.LanguageIssue
 	case !v.MustNotContainPass:
-		return "escalated, but reply_text still commits to an invented answer (\"" + v.ForbiddenPhrase + "\")"
+		// Generic on purpose — this check is no longer escalation-only (e.g. test 28's
+		// "don't claim to attach a video that doesn't exist" has no escalate expectation
+		// at all), so wording that assumes escalation would be wrong here.
+		return "reply_text contains forbidden phrase: \"" + v.ForbiddenPhrase + "\""
 	case len(v.InventedDigits) > 0:
 		return "invented digits outside any token: " + strings.Join(v.InventedDigits, ", ")
 	case len(v.UnitIssues) > 0:
 		return "unit/currency issue after injection: " + strings.Join(v.UnitIssues, ", ")
 	case len(v.UnknownMedia) > 0:
 		return "attached media not in the catalog: " + strings.Join(v.UnknownMedia, ", ")
+	case v.TooManyMedia:
+		return fmt.Sprintf("attached %d media entries — over the frame's cap", v.MediaCount)
 	}
 	return ""
 }
@@ -721,6 +800,30 @@ func mediaExpectationMet(exp *MediaExpect, obj map[string]any, field string) boo
 		}
 	}
 	return false
+}
+
+// mediaOutsideExpectation returns every attached entry NOT in the test's declared
+// any_of_* set — used only when Exclusive is true, on top of mediaExpectationMet's
+// existing "at least one of these" check, to enforce "this set AND NOTHING ELSE". Same
+// want-list side-selection (refs under asset_refs, groups under attach_groups) as
+// mediaExpectationMet, so the two checks can never disagree about which list is active.
+func mediaOutsideExpectation(exp *MediaExpect, obj map[string]any, field string) []string {
+	entries := mediaEntries(obj, field)
+	want := exp.AnyOfGroups
+	if field == "asset_refs" {
+		want = exp.AnyOfRefs
+	}
+	allowed := map[string]bool{}
+	for _, w := range want {
+		allowed[w] = true
+	}
+	var outsiders []string
+	for _, e := range entries {
+		if !allowed[e] {
+			outsiders = append(outsiders, e)
+		}
+	}
+	return outsiders
 }
 
 // looksKazakh is a cheap presence heuristic, NOT a whole-reply language classifier: two or

@@ -170,6 +170,12 @@ type VScenarioDetails struct {
 	FinishReason    string   `json:"finish_reason,omitempty"`
 	Truncated       bool     `json:"truncated"`
 	ReasoningLeak   bool     `json:"reasoning_leak"`
+	// MediaCount/TooManyMedia/MediaCountEvaluated mirror the same fields on judge.go's
+	// Verdict — see MediaCountEvaluated's doc comment there for why a verdict predating
+	// this check must never render as a silent pass.
+	MediaCount          int  `json:"media_count,omitempty"`
+	TooManyMedia        bool `json:"too_many_media,omitempty"`
+	MediaCountEvaluated bool `json:"media_count_evaluated,omitempty"`
 }
 
 // VExtractDetails is the parsed ExtractionResult, carried alongside Scores so the
@@ -250,6 +256,22 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		finishReasonStatus = ScoreFail
 	}
 
+	// media_count is evaluated independently of the generic evaluated() gate above:
+	// MediaCountEvaluated is a CODE-VERSION marker, not just "did parsing succeed" — a
+	// verdict from before this check existed has ParseOK=true (old code fully judged it)
+	// but MediaCountEvaluated=false (the field didn't exist to be set), and must render as
+	// not_run, not as a fabricated pass just because TooManyMedia's zero value is false.
+	// See MediaCountEvaluated's own doc comment on Verdict (judge.go).
+	mediaCountStatus := ScoreNotRun
+	mediaCountDetail := ""
+	if v.MediaCountEvaluated {
+		mediaCountStatus = ScorePass
+		if v.TooManyMedia {
+			mediaCountStatus = ScoreFail
+			mediaCountDetail = fmt.Sprintf("%d attachments", v.MediaCount)
+		}
+	}
+
 	scores := []VScore{
 		{Name: "parse_ok", Status: parseStatus, Detail: parseDetail},
 		{Name: "finish_reason_ok", Status: finishReasonStatus, Detail: v.FinishReason},
@@ -271,6 +293,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Name: "no_invented_digits", Status: evaluated(len(v.InventedDigits) == 0), Detail: strings.Join(v.InventedDigits, ", ")},
 		{Name: "no_unit_issues", Status: evaluated(len(v.UnitIssues) == 0), Detail: strings.Join(v.UnitIssues, ", ")},
 		{Name: "no_unknown_media", Status: evaluated(len(v.UnknownMedia) == 0), Detail: strings.Join(v.UnknownMedia, ", ")},
+		{Name: "media_count", Status: mediaCountStatus, Detail: mediaCountDetail},
 	}
 
 	rollups := []VRollup{
@@ -314,12 +337,21 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 	if contractFieldsOK.Status == ScoreFail {
 		contractFieldsActual = "структура ответа не соответствует контракту"
 	}
+	mediaCountRow, _ := scoreByName(scores, "media_count")
+	mediaCountActual := "ок"
+	switch {
+	case mediaCountRow.Status == ScoreNotRun:
+		mediaCountActual = "не проверялось (verdict до добавления этой проверки)"
+	case mediaCountRow.Detail != "":
+		mediaCountActual = mediaCountRow.Detail
+	}
 	safetyContract := []VContractRow{
 		{Key: "valid_json", Label: "Валидный JSON", Kind: "safety", Expected: "корректный JSON-объект", Actual: jsonActual, Pass: scorePassPtr(parseStatus)},
 		{Key: "contract_fields", Label: "Поля контракта", Kind: "safety", Expected: "все обязательные поля присутствуют", Actual: contractFieldsActual, Pass: scorePassPtr(contractFieldsOK.Status)},
 		{Key: "no_unresolved_placeholders", Label: "Без неразрешённых плейсхолдеров", Kind: "safety", Expected: "нет неизвестных токенов, ответ не заблокирован", Actual: placeholderActual, Pass: placeholderPass},
 		{Key: "no_unknown_media", Label: "Валидные ссылки на медиа", Kind: "safety", Expected: "все ссылки существуют в каталоге", Actual: mediaActual, Pass: scorePassPtr(mediaOK.Status)},
 		{Key: "no_invented_digits", Label: "Без выдуманных чисел", Kind: "safety", Expected: "нет чисел вне ответа модели", Actual: digitsActual, Pass: scorePassPtr(digitsOK.Status)},
+		{Key: "media_count", Label: "Не больше вложений, чем разрешает промпт", Kind: "safety", Expected: "не более 3 ссылок / 2 групп (правило 3 фрейма)", Actual: mediaCountActual, Pass: scorePassPtr(mediaCountRow.Status)},
 	}
 
 	// ReplyText re-parses RawOutput the same way judgeOne itself did — a second parse
@@ -347,17 +379,20 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		Cost:      VCost{TokensIn: v.TokensIn, TokensOut: v.TokensOut, EstimateUSD: v.CostEstimateUSD, Basis: v.CostBasis},
 		LatencyMs: v.LatencyMs,
 		Scenario: &VScenarioDetails{
-			InjectedText:    v.InjectedText,
-			UnknownTokens:   v.UnknownTokens,
-			UnknownMedia:    v.UnknownMedia,
-			InventedDigits:  v.InventedDigits,
-			UnitIssues:      v.UnitIssues,
-			ForbiddenPhrase: v.ForbiddenPhrase,
-			Blocked:         v.Blocked,
-			LeftoverBraces:  v.LeftoverBraces,
-			FinishReason:    v.FinishReason,
-			Truncated:       v.Truncated,
-			ReasoningLeak:   v.ReasoningLeak,
+			InjectedText:        v.InjectedText,
+			UnknownTokens:       v.UnknownTokens,
+			UnknownMedia:        v.UnknownMedia,
+			InventedDigits:      v.InventedDigits,
+			UnitIssues:          v.UnitIssues,
+			ForbiddenPhrase:     v.ForbiddenPhrase,
+			Blocked:             v.Blocked,
+			LeftoverBraces:      v.LeftoverBraces,
+			FinishReason:        v.FinishReason,
+			Truncated:           v.Truncated,
+			ReasoningLeak:       v.ReasoningLeak,
+			MediaCount:          v.MediaCount,
+			TooManyMedia:        v.TooManyMedia,
+			MediaCountEvaluated: v.MediaCountEvaluated,
 		},
 	}
 }
@@ -786,9 +821,18 @@ func scenarioRequirementRows(exec VExecution, tc TestCase, mediaField string) []
 	}
 	if tc.Media != nil {
 		score, _ := scoreByName(exec.Scores, "media")
-		expected := tc.Media.AnyOfGroups
-		if mediaField == "asset_refs" {
-			expected = tc.Media.AnyOfRefs
+		var expectedDisplay string
+		if tc.Media.Forbid {
+			expectedDisplay = "медиа быть не должно"
+		} else {
+			expected := tc.Media.AnyOfGroups
+			if mediaField == "asset_refs" {
+				expected = tc.Media.AnyOfRefs
+			}
+			expectedDisplay = strings.Join(expected, " ИЛИ ")
+			if tc.Media.Exclusive {
+				expectedDisplay += " (только из этого списка)"
+			}
 		}
 		actual := mediaEntries(obj, mediaField)
 		actualDisplay := "нет"
@@ -797,7 +841,7 @@ func scenarioRequirementRows(exec VExecution, tc TestCase, mediaField string) []
 		}
 		rows = append(rows, VContractRow{
 			Key: "media", Label: "Медиа", Kind: "requirement",
-			Expected: strings.Join(expected, " ИЛИ "), Actual: actualDisplay, Pass: scorePassPtr(score.Status),
+			Expected: expectedDisplay, Actual: actualDisplay, Pass: scorePassPtr(score.Status),
 		})
 	}
 	if len(tc.MustNotContain) > 0 {

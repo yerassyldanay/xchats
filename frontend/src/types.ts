@@ -319,6 +319,13 @@ export interface VScenarioDetails {
   finish_reason?: string
   truncated: boolean
   reasoning_leak: boolean
+  // media_count_evaluated is a CODE-VERSION marker, not derived from parse success — a
+  // verdict judged before this check existed omits it entirely (undefined), and must be
+  // rendered as "not checked", never a fabricated pass just because too_many_media's
+  // default is false. See judge.go's Verdict.MediaCountEvaluated doc comment.
+  media_count?: number
+  too_many_media?: boolean
+  media_count_evaluated?: boolean
 }
 export interface VExtractDetails {
   content_kind?: string
@@ -414,6 +421,15 @@ export interface CatalogMedia {
 export interface CatalogMediaExpect {
   any_of_groups?: string[]
   any_of_refs?: string[]
+  // forbid means this test's reply must attach NO media at all — the opposite
+  // expectation from any_of_groups/any_of_refs (mutually exclusive, enforced at render
+  // time). Omitted (undefined) when false.
+  forbid?: boolean
+  // exclusive narrows any_of_groups/any_of_refs from "attach at least one of these" to
+  // "attach at least one of these, and nothing else" — a modifier on the SAME
+  // declaration, not a separate allowed-list field. Requires a non-empty any_of_* and is
+  // mutually exclusive with forbid (both enforced at render time). Omitted when false.
+  exclusive?: boolean
 }
 // escalate is `boolean | undefined` on the wire (omitempty on a Go *bool omits only
 // when nil) — undefined means "not checked by this test", false is an ACTIVE

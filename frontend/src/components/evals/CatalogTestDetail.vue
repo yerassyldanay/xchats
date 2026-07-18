@@ -19,6 +19,7 @@ const universalChecks = [
   { label: 'Без неразрешённых плейсхолдеров', expected: 'нет неизвестных токенов, ответ не заблокирован' },
   { label: 'Валидные ссылки на медиа', expected: 'все ссылки существуют в каталоге' },
   { label: 'Без выдуманных чисел', expected: 'нет чисел вне ответа модели' },
+  { label: 'Не больше вложений, чем разрешает промпт', expected: 'не более 3 ссылок / 2 групп (правило 3 фрейма)' },
 ]
 </script>
 
@@ -68,8 +69,12 @@ const universalChecks = [
         </div>
 
         <div v-if="mediaExpectation">
-          <div class="text-xs font-medium mb-1">Медиа</div>
-          <ul class="space-y-0.5">
+          <div class="text-xs font-medium mb-1">
+            Медиа
+            <span v-if="mediaExpectation.exclusive" class="text-muted-foreground font-normal">(только из этого списка)</span>
+          </div>
+          <p v-if="mediaExpectation.forbid" class="text-xs">медиа быть не должно</p>
+          <ul v-else class="space-y-0.5">
             <li v-for="e in [...mediaExpectation.refs, ...mediaExpectation.groups]" :key="e.name" class="text-xs">
               <code class="font-mono">{{ e.name }}</code>
               <span v-if="!e.found" class="text-destructive font-medium"> → не найдено в каталоге</span>

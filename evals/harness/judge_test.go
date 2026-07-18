@@ -12,16 +12,19 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 		Tokens: []CatalogFact{
 			{Token: "{{product.coffee-machine.price}}", Value: "129 900 ₸"},
 			{Token: "{{policy.main.delivery_cost}}", Value: "1 500 ₸"},
+			{Token: "{{policy.main.return_period}}", Value: "14 дней"},
 		},
-		MediaGroups:   []string{"product.coffee-machine.images"},
+		MediaGroups:   []string{"product.coffee-machine.images", "product.cookware-set.images"},
 		TrustedDigits: []string{"1", "7"}, // as if a row's Description mentioned "1.7 л"
 	}
 	tokenValue := map[string]string{
 		"{{product.coffee-machine.price}}": "129 900 ₸",
 		"{{policy.main.delivery_cost}}":    "1 500 ₸",
+		"{{policy.main.return_period}}":    "14 дней",
 	}
 	validGroups := map[string]bool{
 		"product.coffee-machine.images": true,
+		"product.cookware-set.images":   true,
 	}
 
 	tests := []struct {
@@ -52,7 +55,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			output:           `{"reply_text":"ok","reply_language":7,"attach_groups":[],"escalate":"true"}`,
 			wantContractPass: false,
 			wantBehaviorPass: true,
-			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array attach_groups)",
+			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array attach_groups of strings)",
 		},
 		{
 			name: "unknown media fails behavior",
@@ -74,7 +77,121 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			output:           `{"reply_text":"К сожалению, мы не доставляем в Астану. Уточню у коллеги.","reply_language":"ru","attach_groups":[],"escalate":true}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
-			wantReason:       `escalated, but reply_text still commits to an invented answer ("не доставляем в астан")`,
+			wantReason:       `reply_text contains forbidden phrase: "не доставляем в астан"`,
+		},
+		{
+			// The regression test for the injection-hole fix: "в течение 14 дней" is not
+			// written by the model at all — it only exists because
+			// {{policy.main.return_period}} injects to "14 дней". Scanning replyText (the
+			// pre-injection bug) would have missed this entirely.
+			name: "must not contain catches a phrase that only materializes after token injection",
+			testCase: TestCase{
+				ID:             "refund-injected",
+				Escalate:       &trueValue,
+				MustNotContain: []string{"в течение 14 дней"},
+			},
+			output:           `{"reply_text":"Передам коллеге. Возврат обычно возможен в течение {{policy.main.return_period}}.","reply_language":"ru","attach_groups":[],"escalate":true}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       `reply_text contains forbidden phrase: "в течение 14 дней"`,
+		},
+		{
+			name: "media forbid passes when the reply attaches nothing",
+			testCase: TestCase{
+				ID:    "greeting-no-media",
+				Media: &MediaExpect{Forbid: true},
+			},
+			output:           `{"reply_text":"Здравствуйте! Чем помочь?","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: true,
+			wantReason:       "ok",
+		},
+		{
+			name: "media forbid fails when the reply attaches something anyway",
+			testCase: TestCase{
+				ID:    "greeting-with-media",
+				Media: &MediaExpect{Forbid: true},
+			},
+			output:           `{"reply_text":"Здравствуйте! Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images"],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       "attached media, but this test forbids any attachment",
+		},
+		{
+			name: "exclusive media passes when only the expected group is attached",
+			testCase: TestCase{
+				ID:    "cookware-photos-exclusive",
+				Media: &MediaExpect{AnyOfGroups: []string{"product.cookware-set.images"}, Exclusive: true},
+			},
+			output:           `{"reply_text":"Вот фото набора посуды.","reply_language":"ru","attach_groups":["product.cookware-set.images"],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: true,
+			wantReason:       "ok",
+		},
+		{
+			// The extra group is itself VALID (in validGroups) and normally would pass
+			// mediaExpectationMet's "at least one of these" check — Exclusive additionally
+			// requires nothing else be attached, so a real, catalog-known but unrequested
+			// group must still fail here, distinct from the UnknownMedia check.
+			name: "exclusive media fails when a valid but unrequested group is attached alongside the expected one",
+			testCase: TestCase{
+				ID:    "cookware-photos-exclusive-plus-extra",
+				Media: &MediaExpect{AnyOfGroups: []string{"product.cookware-set.images"}, Exclusive: true},
+			},
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.cookware-set.images","product.coffee-machine.images"],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       "attached media outside the expected set: product.coffee-machine.images",
+		},
+		{
+			name:             "media count within the attach_groups cap (2) passes",
+			testCase:         TestCase{ID: "media-count-groups-ok"},
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images","product.cookware-set.images"],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: true,
+			wantReason:       "ok",
+		},
+		{
+			name:             "media count over the attach_groups cap (2) fails",
+			testCase:         TestCase{ID: "media-count-groups-over"},
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images","product.cookware-set.images","product.coffee-machine.images"],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       "attached 3 media entries — over the frame's cap",
+		},
+		{
+			// Duplicates count toward the cap — the SAME ref repeated 4 times is still 4
+			// entries, not "1 distinct entry."
+			name:             "duplicated refs count toward the cap (same entry repeated is not 1 distinct entry)",
+			testCase:         TestCase{ID: "media-count-duplicates"},
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images","product.coffee-machine.images","product.coffee-machine.images","product.coffee-machine.images"],"escalate":false}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       "attached 4 media entries — over the frame's cap",
+		},
+		{
+			// A non-string element fails ContractFields on its own — isolated here with
+			// only 2 total entries (at the cap, not over it) so this case proves ONLY the
+			// type-check, without TooManyMedia also contributing to the failure.
+			name:             "non-string media element fails ContractFields",
+			testCase:         TestCase{ID: "media-malformed-element"},
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images",7],"escalate":false}`,
+			wantContractPass: false,
+			wantBehaviorPass: true,
+			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array attach_groups of strings)",
+		},
+		{
+			// Proves MediaCount counts the RAW array, not mediaEntries' string-filtered
+			// view: 2 valid refs + 1 malformed element is 3 raw entries — over the
+			// attach_groups cap of 2 — even though mediaEntries would only report 2
+			// (silently dropping the malformed one), which would have wrongly read as
+			// within the cap.
+			name:             "malformed element still counts toward the media cap, not silently dropped",
+			testCase:         TestCase{ID: "media-malformed-element-over-cap"},
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images","product.cookware-set.images",7],"escalate":false}`,
+			wantContractPass: false,
+			wantBehaviorPass: false,
+			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array attach_groups of strings)",
 		},
 		{
 			name: "duplicated currency fails behavior",
@@ -309,6 +426,62 @@ func TestProviderModelKey(t *testing.T) {
 	onKey := providerModelKey("openrouter:google/gemini-2.5-flash", "reasoning-on")
 	if offKey == onKey {
 		t.Fatalf("two different labels on the same id must produce different keys, both got %q", offKey)
+	}
+}
+
+// TestJudgeOne_MediaCountEvaluatedMirrorsParseOK pins the exact invariant the
+// MediaCountEvaluated marker depends on: for CODE PRODUCED BY THIS judgeOne, the field is
+// true whenever ParseOK is true (there is no code path between the parse succeeding and
+// MediaCountEvaluated being set), and false on the one early-return path (unparseable
+// JSON). This is what makes MediaCountEvaluated meaningful as a "judged by pre-upgrade
+// code" marker for OLD verdicts (viewmodel.go/judge_snapshot tests) — it only works
+// because a NEW verdict never has ParseOK=true with MediaCountEvaluated=false.
+func TestJudgeOne_MediaCountEvaluatedMirrorsParseOK(t *testing.T) {
+	catalog := &Catalog{Contract: "attach_groups"}
+
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	if !v.ParseOK || !v.MediaCountEvaluated {
+		t.Errorf("want ParseOK=true and MediaCountEvaluated=true together, got ParseOK=%v MediaCountEvaluated=%v", v.ParseOK, v.MediaCountEvaluated)
+	}
+
+	badRow := PromptfooRow{}
+	badRow.Provider.ID = "test-model"
+	badRow.Response.Output = "not json"
+	bad := judgeOne(TestCase{ID: "t"}, badRow, catalog, map[string]string{}, nil, map[string]bool{})
+	if bad.ParseOK || bad.MediaCountEvaluated {
+		t.Errorf("want ParseOK=false and MediaCountEvaluated=false together on the early-return path, got ParseOK=%v MediaCountEvaluated=%v", bad.ParseOK, bad.MediaCountEvaluated)
+	}
+}
+
+// TestJudgeOne_MediaCountCap_AssetRefsBoundary is the asset_refs-contract sibling of the
+// attach_groups cap cases in TestJudgeOne_DeterministicChecks: maxMediaRefs (3) is a
+// SEPARATE constant from maxMediaGroups (2), and the shared table above only ever
+// exercises an attach_groups catalog, so this pins the other contract branch and the
+// other constant directly.
+func TestJudgeOne_MediaCountCap_AssetRefsBoundary(t *testing.T) {
+	catalog := &Catalog{Contract: "asset_refs"}
+	validRef := map[string]bool{"photo-1": true, "photo-2": true, "photo-3": true, "photo-4": true}
+
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `{"reply_text":"Вот фото.","reply_language":"ru","asset_refs":["photo-1","photo-2","photo-3"],"escalate":false}`
+	within := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, validRef, nil)
+	if within.TooManyMedia || !within.ModelBehaviorPass {
+		t.Errorf("want 3 asset_refs (at the cap) to pass, got TooManyMedia=%v ModelBehaviorPass=%v reason=%q", within.TooManyMedia, within.ModelBehaviorPass, within.Reason)
+	}
+
+	overRow := PromptfooRow{}
+	overRow.Provider.ID = "test-model"
+	overRow.Response.Output = `{"reply_text":"Вот фото.","reply_language":"ru","asset_refs":["photo-1","photo-2","photo-3","photo-4"],"escalate":false}`
+	over := judgeOne(TestCase{ID: "t"}, overRow, catalog, map[string]string{}, validRef, nil)
+	if !over.TooManyMedia || over.ModelBehaviorPass {
+		t.Errorf("want 4 asset_refs (over the cap) to fail, got TooManyMedia=%v ModelBehaviorPass=%v", over.TooManyMedia, over.ModelBehaviorPass)
+	}
+	if over.Reason != "attached 4 media entries — over the frame's cap" {
+		t.Errorf("got Reason=%q", over.Reason)
 	}
 }
 

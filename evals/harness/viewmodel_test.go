@@ -46,7 +46,7 @@ func TestScenarioExecutionFromVerdict_ParseFailure_EverythingDownstreamIsNotRun(
 	downstream := []string{
 		"contract_fields", "no_unknown_tokens", "no_leftover_braces", "no_reasoning_leak",
 		"requires", "media", "escalate", "language", "language_text_ok", "language_field_ok",
-		"must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media",
+		"must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media", "media_count",
 	}
 	for _, name := range downstream {
 		s, ok := scoreByName(exec.Scores, name)
@@ -78,23 +78,25 @@ func TestScenarioExecutionFromVerdict_ParseFailure_EverythingDownstreamIsNotRun(
 // model-behavior checks that run after it.
 func TestScenarioExecutionFromVerdict_ParseOK_EveryScoreReflectsRealEvaluation(t *testing.T) {
 	v := Verdict{
-		TestID:             "t2",
-		Model:              "test/model",
-		ParseOK:            true,
-		ContractFields:     false, // e.g. missing reply_text — but judgeOne kept going anyway
-		RequiresPass:       false,
-		MediaPass:          true,
-		EscalatePass:       true,
-		LanguagePass:       true,
-		MustNotContainPass: true,
-		ModelBehaviorPass:  false,
-		ContractPass:       false,
+		TestID:              "t2",
+		Model:               "test/model",
+		ParseOK:             true,
+		ContractFields:      false, // e.g. missing reply_text — but judgeOne kept going anyway
+		RequiresPass:        false,
+		MediaPass:           true,
+		EscalatePass:        true,
+		LanguagePass:        true,
+		MustNotContainPass:  true,
+		ModelBehaviorPass:   false,
+		ContractPass:        false,
+		MediaCountEvaluated: true, // real judgeOne always sets this once ParseOK is true
 	}
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
 
 	for _, name := range []string{"contract_fields", "no_unknown_tokens", "no_leftover_braces",
 		"no_reasoning_leak", "requires", "media", "escalate", "language", "language_text_ok",
-		"language_field_ok", "must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media"} {
+		"language_field_ok", "must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media",
+		"media_count"} {
 		s, ok := scoreByName(exec.Scores, name)
 		if !ok {
 			t.Fatalf("score %q missing", name)
@@ -257,7 +259,8 @@ func TestScenarioExecutionFromVerdict_RealJudgeOne_ContractFieldsFailStillEvalua
 	// Every downstream behavior check must be a REAL evaluated result, not not_run —
 	// judgeOne kept going after contract_fields failed.
 	for _, name := range []string{"requires", "media", "escalate", "language", "language_text_ok",
-		"language_field_ok", "must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media"} {
+		"language_field_ok", "must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media",
+		"media_count"} {
 		s, ok := scoreByName(exec.Scores, name)
 		if !ok {
 			t.Fatalf("score %q missing", name)
@@ -438,9 +441,12 @@ func TestEnrichScenarioExecutions_FallbacksForLegacyAndUnannotatedData(t *testin
 }
 
 // TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail proves
-// the five universal safety rows attach unconditionally (no snapshot needed) and read
+// the six universal safety rows attach unconditionally (no snapshot needed) and read
 // their Pass/Actual straight back off the Scores this same function just built — never
-// a second, independently-computed verdict.
+// a second, independently-computed verdict. This fixture deliberately does NOT set
+// MediaCountEvaluated (simulating a verdict judged by pre-upgrade code, ParseOK=true
+// notwithstanding — see MediaCountEvaluated's own doc comment on Verdict) — the
+// media_count row must render as not-applicable (Pass=nil), never a fabricated pass.
 func TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail(t *testing.T) {
 	v := Verdict{
 		TestID: "t1", Model: "test/model", ParseOK: true, ContractFields: true,
@@ -448,7 +454,7 @@ func TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail
 	}
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
 
-	wantKeys := []string{"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits"}
+	wantKeys := []string{"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count"}
 	if len(exec.Contract) != len(wantKeys) {
 		t.Fatalf("want exactly %d safety rows, got %d: %+v", len(wantKeys), len(exec.Contract), exec.Contract)
 	}
@@ -466,6 +472,30 @@ func TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail
 	if p := contractRow(t, exec.Contract, "valid_json"); p.Pass == nil || !*p.Pass || p.Actual != "разобран корректно" {
 		t.Errorf("want valid_json=pass, got %+v", p)
 	}
+	// The core "no fabricated pass" guarantee: MediaCountEvaluated unset must render as
+	// Pass=nil (not applicable/not run), never a silent true just because TooManyMedia's
+	// zero value happens to be false.
+	if p := contractRow(t, exec.Contract, "media_count"); p.Pass != nil {
+		t.Errorf("want media_count Pass=nil for a verdict that never set MediaCountEvaluated, got %v (Actual=%q)", *p.Pass, p.Actual)
+	}
+}
+
+// TestScenarioExecutionFromVerdict_MediaCountEvaluated_RendersRealPassOrFail is the
+// complementary case: once MediaCountEvaluated is true (a verdict judged by CURRENT
+// code), the media_count row must show a REAL pass/fail, not the legacy not-applicable
+// state — both the within-cap and over-cap outcomes.
+func TestScenarioExecutionFromVerdict_MediaCountEvaluated_RendersRealPassOrFail(t *testing.T) {
+	within := Verdict{TestID: "t1", Model: "m", ParseOK: true, ContractFields: true, MediaCountEvaluated: true, MediaCount: 2, TooManyMedia: false}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", within)
+	if p := contractRow(t, exec.Contract, "media_count"); p.Pass == nil || !*p.Pass {
+		t.Errorf("want media_count=pass when evaluated and within the cap, got %+v", p)
+	}
+
+	over := Verdict{TestID: "t1", Model: "m", ParseOK: true, ContractFields: true, MediaCountEvaluated: true, MediaCount: 5, TooManyMedia: true}
+	exec2 := scenarioExecutionFromVerdict("fixture-scenario", over)
+	if p := contractRow(t, exec2.Contract, "media_count"); p.Pass == nil || *p.Pass || p.Actual != "5 attachments" {
+		t.Errorf("want media_count=fail with the count in Actual when over the cap, got %+v", p)
+	}
 }
 
 // TestScenarioExecutionFromVerdict_ContractSafetyRows_ParseFailureIsNotRun proves a
@@ -481,6 +511,9 @@ func TestScenarioExecutionFromVerdict_ContractSafetyRows_ParseFailureIsNotRun(t 
 	}
 	if p := contractRow(t, exec.Contract, "valid_json"); p.Pass == nil || *p.Pass || p.Actual != "invalid JSON" {
 		t.Errorf("want valid_json=fail with the parse reason as Actual, got %+v", p)
+	}
+	if p := contractRow(t, exec.Contract, "media_count"); p.Pass != nil {
+		t.Errorf("want media_count Pass=nil on a parse failure (MediaCountEvaluated never set), got %v", *p.Pass)
 	}
 }
 
@@ -529,9 +562,9 @@ func TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown(
 
 	t1 := out[0]
 	wantOrder := []string{"requires", "language", "escalate", "media", "must_not_contain",
-		"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits"}
+		"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count"}
 	if len(t1.Contract) != len(wantOrder) {
-		t.Fatalf("want %d rows (5 requirement + 5 safety), got %d: %+v", len(wantOrder), len(t1.Contract), t1.Contract)
+		t.Fatalf("want %d rows (5 requirement + 6 safety), got %d: %+v", len(wantOrder), len(t1.Contract), t1.Contract)
 	}
 	for i, k := range wantOrder {
 		if t1.Contract[i].Key != k {
@@ -561,8 +594,8 @@ func TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown(
 	}
 
 	t2 := out[1]
-	if len(t2.Contract) != 5 {
-		t.Fatalf("want t2 (no requirements declared) to carry ONLY the 5 safety rows, got %d: %+v", len(t2.Contract), t2.Contract)
+	if len(t2.Contract) != 6 {
+		t.Fatalf("want t2 (no requirements declared) to carry ONLY the 6 safety rows, got %d: %+v", len(t2.Contract), t2.Contract)
 	}
 	for _, r := range t2.Contract {
 		if r.Kind != "safety" {
@@ -594,6 +627,27 @@ func TestEnrichScenarioExecutions_ContractRequirementRows_FailedRequirementShows
 	esc := contractRow(t, execs[0].Contract, "escalate")
 	if esc.Expected != "да" || esc.Actual != "нет" || esc.Pass == nil || *esc.Pass {
 		t.Errorf("want escalate expected=да actual=нет pass=false, got %+v", esc)
+	}
+}
+
+// TestEnrichScenarioExecutions_ForbidMediaShowsDedicatedExpectedText proves the
+// Requirements panel's media row reads "медиа быть не должно" (not a joined empty-string
+// list) when the test declares Media.Forbid — distinguishing it from an ordinary
+// any_of_groups/any_of_refs expectation, which would render the allowed list instead.
+func TestEnrichScenarioExecutions_ForbidMediaShowsDedicatedExpectedText(t *testing.T) {
+	runDir := t.TempDir()
+	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{Contract: "asset_refs"}, []TestCase{
+		{ID: "t1", Message: "Здравствуйте!", Media: &MediaExpect{Forbid: true}},
+	})
+	v := Verdict{TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: `{"reply_text":"Здравствуйте!","reply_language":"ru","asset_refs":[],"escalate":false}`, MediaPass: true}
+	execs := enrichScenarioExecutions(runDir, "shop-current", "", []VExecution{scenarioExecutionFromVerdict("shop-current", v)})
+
+	media := contractRow(t, execs[0].Contract, "media")
+	if media.Expected != "медиа быть не должно" {
+		t.Errorf("want Expected=%q for a forbid expectation, got %+v", "медиа быть не должно", media)
+	}
+	if media.Actual != "нет" || media.Pass == nil || !*media.Pass {
+		t.Errorf("want Actual=нет pass=true (no media attached, correctly), got %+v", media)
 	}
 }
 

@@ -3,17 +3,26 @@
 #
 # `requires` is AND-of-OR: every inner list must have at least one of its tokens used.
 # Bare `table.ref.field` (no braces) — judge.go adds the {{ }} itself.
+#
+# `escalate: false` below on every KB-answerable question is a DETERMINISTIC assertion,
+# separate from the "is the prose itself good" quality some tests still leave to a
+# by-eye CONTRACT.md read: whether escalation is warranted at all is always decidable
+# from the KB, even when the exact wording isn't. A review caught that leaving it unset
+# on an answerable question let a model needlessly escalate a plain price/media/process
+# question and still pass every other check.
 tests:
   - id: "1. price question, Russian"
     message: "Сколько стоит кофемашина?"
     requires:
       - ["product.coffee-machine.price"]
+    escalate: false
     language: ru
 
   - id: "2. price question, Kazakh"
     message: "Кофемашина DeLonghi қанша тұрады?"
     requires:
       - ["product.coffee-machine.price"]
+    escalate: false
     language: kk
 
   - id: "3. delivery cost + time, Kazakh"
@@ -21,16 +30,19 @@ tests:
     requires:
       - ["policy.main.delivery_cost"]
       - ["policy.main.delivery_time", "policy.main.delivery_in_days"]
+    escalate: false
     language: kk
 
   - id: "4. stock quantity question, Russian"
     message: "А сколько штук кофемашины есть в наличии?"
     requires:
       - ["product.coffee-machine.availability", "product.coffee-machine.available_pieces"]
+    escalate: false
     language: ru
 
   - id: "5. out-of-stock product"
     message: "Набор посуды есть в наличии?"
+    escalate: false
     language: ru
     # No `requires` on purpose: our own doctrine says word-bearing availability meaning
     # is TRUSTED TEXT the model may paraphrase straight from the product description,
@@ -38,11 +50,14 @@ tests:
     # a token; shop-decisions-v1's is a pure count, `available_pieces`, so a prose-only
     # "под заказ" answer is equally valid there, arguably better than forcing a number
     # into a yes/no question). Forcing a token here would penalize a correct answer — a
-    # review caught this. The universal checks (no invented digits, contract pass) still
-    # apply; read the injected text in CONTRACT.md by eye for the rest.
+    # review caught this. `escalate: false` is added separately: whether to escalate is
+    # decidable even though the exact phrasing isn't. The universal checks (no invented
+    # digits, contract pass) still apply; read the injected text in CONTRACT.md by eye
+    # for the rest.
 
   - id: "6. request product photos"
     message: "Пришлите фото кофемашины, пожалуйста"
+    escalate: false
     language: ru
     media:
       any_of_groups: ["product.coffee-machine.images"]
@@ -50,6 +65,7 @@ tests:
 
   - id: "7. request certificate"
     message: "А сертификат качества на кофемашину есть? Пришлите."
+    escalate: false
     language: ru
     media:
       any_of_groups: ["product.coffee-machine.certificates"]
@@ -57,10 +73,13 @@ tests:
 
   - id: "8. delivery zones question"
     message: "Куда вы вообще доставляете, есть карта зон?"
+    escalate: false
     language: ru
     # No requires/media here on purpose — attaching the zones map is optional per the
     # product's own rules; the one hard requirement ("don't invent an attachment that
     # doesn't exist") is already covered by judge.go's universal unknown-media check.
+    # General delivery policy is covered by the KB's own delivery topic, so escalation
+    # is not warranted even though the exact wording is still read by eye.
 
   - id: "9. off-KB city coverage"
     message: "А вы доставляете в Астану?"
@@ -88,9 +107,12 @@ tests:
     message: >
       Здравствуйте! Ранее уже интересовался кофемашиной DeLonghi, вы говорили что она
       в наличии. Хорошо, беру её — как оформить заказ?
+    escalate: false
     language: ru
     # No deterministic check fits "gives concrete, grounded next steps" well; read the
-    # injected text in CONTRACT.md by eye for this one (documented limit, see PLAYGROUND.md).
+    # injected text in CONTRACT.md by eye for this one (documented limit, see
+    # PLAYGROUND.md). `escalate: false` is still asserted: the how-to-order process is
+    # fully covered by the KB, so escalating here would be a real bug, not a style choice.
 
   - id: "12. long rambling message with the price question buried inside"
     message: >
@@ -101,6 +123,7 @@ tests:
       интересно, насколько она сложная в уходе.
     requires:
       - ["product.coffee-machine.price"]
+    escalate: false
     language: ru
 
   # --- Conversation-stage cases (14-20): every test above this line is a single, fresh
@@ -109,17 +132,28 @@ tests:
 
   - id: "14. conversation start, bare greeting"
     message: "Здравствуйте!"
+    escalate: false
     language: ru
-    # No requires/escalate/media on purpose — a bare greeting has no fact to state. The
-    # universal checks (contract pass, no invented digits, no unknown media) still apply;
-    # "does it read as a warm opener" is read by eye in CONTRACT.md.
+    media:
+      forbid: true
+    # No `requires` on purpose — a bare greeting has no fact to state. `escalate: false`
+    # and `media: {forbid: true}` ARE asserted though: a greeting escalating or pushing a
+    # real catalog attachment would be a genuine bug, not a style choice — both used to
+    # pass silently because neither was checked. "Does it read as a warm opener" stays a
+    # by-eye CONTRACT.md read; the universal checks (contract pass, no invented digits)
+    # still apply too.
 
   - id: "15. conversation close, customer is done"
     message: "Спасибо, всё понятно, я подумаю!"
     escalate: false
     language: ru
+    media:
+      forbid: true
     # A closing message should not push new facts or attach media it wasn't asked for;
-    # the unknown-media and invented-digit checks already guard against that.
+    # the unknown-media and invented-digit checks already guarded against inventing
+    # something, but nothing enforced "attach nothing at all" until `media.forbid`
+    # existed — a model attaching a real, valid catalog photo to this reply used to pass
+    # everything.
 
   - id: "16. follow-up with history, needs delivery cost"
     history:
@@ -130,6 +164,7 @@ tests:
     message: "А доставка сколько будет стоить?"
     requires:
       - ["policy.main.delivery_cost"]
+    escalate: false
     language: ru
 
   - id: "17. history contradiction trap, must re-use token not copy history's literal number"
@@ -141,6 +176,7 @@ tests:
     message: "Извините, не расслышала, напомните цену?"
     requires:
       - ["product.coffee-machine.price"]
+    escalate: false
     language: ru
     # The literal "129 900 ₸" the model wrote earlier in History is not itself a
     # {{token}} usage in THIS answer — re-stating that literal number without the
@@ -167,6 +203,7 @@ tests:
     message: "Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?"
     requires:
       - ["product.coffee-machine.price"]
+    escalate: false
     language: ru
 
   - id: "21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim"
@@ -185,3 +222,148 @@ tests:
     must_not_contain:
       - "жеткізбейміз"
       - "аймағымыздан тыс"
+
+  # --- History-driven coverage (22-30): added to close three gaps a review of this
+  # methodology found — (a) history that carries CONTEXT the final question needs, not
+  # just a fact to re-state, (b) media/escalation interacting with history, (c) a media
+  # cap and media-absence case, plus first Kazakh media/history coverage. Kazakh wording
+  # below carries the same DRAFT caveat as test 21.
+
+  - id: "22. history gives distractor context, question switches to another product's price"
+    history:
+      - role: client
+        text: "Здравствуйте! Я из Алматы, интересует набор посуды."
+      - role: assistant
+        text: "Здравствуйте! Набор посуды сейчас под заказ, привезём за несколько дней. Подсказать что-то ещё?"
+    message: "Понятно. А кофемашина сколько стоит?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: ru
+    # The earlier turns (city, cookware set) are DISTRACTOR context: the final question
+    # switches product entirely — the model must answer with the coffee machine's price
+    # token, not re-answer the cookware question still sitting in history.
+
+  - id: "23. topic switch to media: history about the cookware set, then asks for photos"
+    history:
+      - role: client
+        text: "Набор посуды ещё можно заказать?"
+      - role: assistant
+        text: "Да, набор посуды можно оформить под заказ — привезём за несколько дней."
+    message: "А как он выглядит? Пришлите фото, пожалуйста."
+    escalate: false
+    language: ru
+    media:
+      any_of_groups: ["product.cookware-set.images"]
+      any_of_refs: ["cookware-photo-1", "cookware-photo-2"]
+      exclusive: true
+    # «он» resolves through history to the cookware set — the model must attach COOKWARE
+    # media, not the (more prominent, more often requested) coffee-machine media.
+    # `exclusive: true` makes this check reject the failure mode any_of_* alone cannot
+    # catch: a reply that attaches a cookware photo AND ALSO the (also-valid) coffee
+    # machine media — any_of_* alone only checks "at least one expected item present",
+    # which a mixed-in irrelevant attachment would still satisfy.
+
+  - id: "24. topic switch to escalation: coffee machine discussed, off-KB spare-parts follow-up"
+    history:
+      - role: client
+        text: "Сколько стоит кофемашина DeLonghi?"
+      - role: assistant
+        text: "Кофемашина DeLonghi стоит 129 900 ₸."
+    message: "А запасные части для неё у вас продаются?"
+    escalate: true
+    language: ru
+    # Same doctrine as tests 9/10/18: escalate=true alone doesn't stop a model from ALSO
+    # committing to an invented claim. A blocklist of plausible assertions, not an NLP
+    # guarantee (documented limit).
+    must_not_contain:
+      - "да, продаём"
+      - "да, есть"
+
+  - id: "25. pronoun resolution across history: availability of the cookware set"
+    history:
+      - role: client
+        text: "Здравствуйте! У вас есть набор посуды?"
+      - role: assistant
+        text: "Здравствуйте! Да, набор посуды есть в каталоге — оформляется под заказ."
+    message: "А он сейчас в наличии?"
+    escalate: false
+    language: ru
+    # «он» = набор посуды (masculine — the coffee machine would be «она»). No `requires`
+    # on purpose — same doctrine as test 5: availability meaning is trusted, paraphrasable
+    # text in both schemas, so forcing a token would penalize a correct prose answer.
+
+  - id: "26. long history, the deciding product is named only at the very top"
+    history:
+      - role: client
+        text: "Здравствуйте! Подбираю кофемашину DeLonghi в подарок маме."
+      - role: assistant
+        text: "Здравствуйте! Отличный выбор — кофемашина DeLonghi есть в каталоге. Подсказать по цене или доставке?"
+      - role: client
+        text: "Пока просто смотрю. А оплатить можно прямо в WhatsApp?"
+      - role: assistant
+        text: "Да, всё оформляется прямо здесь: вы подтверждаете заказ, мы присылаем счёт."
+      - role: client
+        text: "Удобно. А возврат у вас есть, если не подойдёт?"
+      - role: assistant
+        text: "Да, возврат возможен — условия подскажу при оформлении."
+    message: "Хорошо, я решилась. Сколько она стоит и как оформить заказ?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: ru
+    # Six history turns; the product is named ONLY in the first. «она» in the final
+    # message resolves to the machine named at the top — a model that lost the early
+    # context cannot pick the right price token.
+
+  - id: "27. asks for ALL photos — exercises the frame's own attachment cap"
+    message: "Пришлите, пожалуйста, все фото кофемашины"
+    escalate: false
+    language: ru
+    media:
+      any_of_groups: ["product.coffee-machine.images"]
+      any_of_refs: ["coffee-photo-1", "coffee-photo-2", "coffee-photo-3"]
+    # «все фото» tempts a model into attaching everything it sees. The cap itself is the
+    # judge's universal media-count check (3 refs / 2 groups, mirroring each frame's own
+    # rule 3); the expectation above only pins that at least one RIGHT item was attached.
+
+  - id: "28. asks for a media type that does not exist (cookware video)"
+    message: "Пришлите видео набора посуды, пожалуйста"
+    language: ru
+    # No cookware video exists in either schema (the only video is the coffee machine's).
+    # Deterministically checkable: an invented ref fails the universal unknown-media
+    # check, and the blocklist below catches CLAIMING a video is attached — narrower
+    # affirmative phrases only, to avoid the same negation false-positive test 18's
+    # doctrine documents ("отправляю видео" would wrongly match "не отправляю видео").
+    # Offering the cookware photos instead, or escalating, are both acceptable — read by
+    # eye in CONTRACT.md; no escalate expectation for the same reason. NOTE: this test has
+    # no `media` expectation at all (no required attachment), so `exclusive` — which only
+    # narrows an existing any_of_* declaration — is not applicable here; exclusive media
+    # routing is deliberately NOT verified for this test. Only the blocklist below and the
+    # universal unknown-media check apply; whether an offered cookware photo is
+    # accompanied by anything irrelevant is manual CONTRACT.md evidence, not an assertion.
+    must_not_contain:
+      - "вот видео"
+      - "видео во вложении"
+
+  - id: "29. media request, Kazakh"
+    # DRAFT Kazakh phrasing — pending native-speaker review (repo convention, see test 21).
+    message: "Кофемашинаның суреттерін жіберіңізші"
+    escalate: false
+    language: kk
+    media:
+      any_of_groups: ["product.coffee-machine.images"]
+      any_of_refs: ["coffee-photo-1", "coffee-photo-2", "coffee-photo-3"]
+
+  - id: "30. follow-up with history, Kazakh"
+    # DRAFT Kazakh phrasing — pending native-speaker review (repo convention, see test 21).
+    history:
+      - role: client
+        text: "Кофемашина DeLonghi қанша тұрады?"
+      - role: assistant
+        text: "Кофемашина DeLonghi 129 900 ₸ тұрады."
+    message: "Ал жеткізу қанша тұрады?"
+    requires:
+      - ["policy.main.delivery_cost"]
+    escalate: false
+    language: kk

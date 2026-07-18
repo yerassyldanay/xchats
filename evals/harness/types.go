@@ -151,10 +151,15 @@ type TestCase struct {
 	Media    *MediaExpect `yaml:"media"`    // expected media behavior, if this test checks media
 	Escalate *bool        `yaml:"escalate"` // expected escalate value, if this test checks escalation
 	Language string       `yaml:"language"` // expected reply language ("kk"), checked on the INJECTED text
-	// MustNotContain is a case-insensitive substring blocklist, checked against
-	// reply_text. Mainly for escalation traps: escalate=true alone doesn't stop a model
-	// from ALSO writing a confident, invented answer in the same reply (e.g. "we don't
-	// deliver to Astana" — a claim the KB never actually makes) — seen for real in a run.
+	// MustNotContain is a case-insensitive substring blocklist, checked against the
+	// TOKEN-INJECTED reply text (after {{fact}} placeholders are substituted with their
+	// real values) — not the model's raw reply_text. Mainly for escalation traps:
+	// escalate=true alone doesn't stop a model from ALSO writing a confident, invented
+	// answer in the same reply (e.g. "we don't deliver to Astana" — a claim the KB never
+	// actually makes) — seen for real in a run. Checking post-injection also catches a
+	// forbidden phrase that only materializes once a token resolves (e.g.
+	// "{{policy.main.return_period}}" injecting to "14 дней" inside an otherwise-forbidden
+	// "в течение 14 дней").
 	MustNotContain []string `yaml:"must_not_contain"`
 	// History is prior conversation turns rendered above {{message}} in the prompt, so a
 	// test can check multi-turn behavior (a follow-up that only makes sense given
@@ -173,10 +178,32 @@ type HistoryTurn struct {
 }
 
 // MediaExpect describes what a test's answer must attach, checked against whichever of
-// group/ref actually exists in the scenario's contract.
+// group/ref actually exists in the scenario's contract. Forbid and AnyOfGroups/AnyOfRefs
+// are mutually exclusive (validateTestMedia in render.go rejects the combination, at both
+// the render and catalog-export resolution paths) — Forbid means the reply's media array
+// must be EMPTY, the opposite expectation from "attach one of these".
 type MediaExpect struct {
 	AnyOfGroups []string `yaml:"any_of_groups"` // e.g. ["coffee-machine.images"]
 	AnyOfRefs   []string `yaml:"any_of_refs"`   // e.g. ["coffee-photo-1", "coffee-photo-2"]
+	// Forbid, when true, means this test's reply must attach NO media at all (e.g. a
+	// greeting or closing message that has no reason to push an attachment). Kept on
+	// MediaExpect (not a separate TestCase field) so a test only opts into the media check
+	// at all when it declares this block — same as AnyOfGroups/AnyOfRefs. resolved_tests.json
+	// is JSON-untagged by design (see ResolvedTests' doc comment); an old snapshot simply
+	// lacks this key, which unmarshals as false ("not forbidden") — never changing what an
+	// old run's Media pointer meant.
+	Forbid bool `yaml:"forbid"`
+	// Exclusive, when true, tightens AnyOfGroups/AnyOfRefs from "attach at least one of
+	// these" to "attach at least one of these, AND NOTHING ELSE" — every entry the model
+	// attaches must be inside the declared set. A deliberate single-mechanism design:
+	// rather than a separate allowed-list field, Exclusive is a modifier on the SAME
+	// any_of_* declaration, since "which one is required" and "which ones are allowed"
+	// are the same list here, not two independent facts. Requires a non-empty
+	// AnyOfGroups/AnyOfRefs (validateTestMedia rejects Exclusive with neither set) and is
+	// mutually exclusive with Forbid (validateTestMedia rejects that combination too — an
+	// empty-required-set exclusivity is what Forbid already means). Old snapshots simply
+	// lack this key, unmarshaling as false — today's any_of_* behavior, unchanged.
+	Exclusive bool `yaml:"exclusive"`
 }
 
 // ModelsFile is models.yaml — the provider list + params shared by every scenario run, plus

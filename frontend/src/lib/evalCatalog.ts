@@ -39,6 +39,13 @@ export interface MediaExpectationEntry {
 export interface MediaExpectation {
   groups: MediaExpectationEntry[]
   refs: MediaExpectationEntry[]
+  // forbid: true means the test requires an EMPTY media array — mutually exclusive with
+  // groups/refs being non-empty (render.go rejects the combination at the source).
+  forbid: boolean
+  // exclusive: true means groups/refs above is not just "attach at least one of these"
+  // but "attach at least one of these, and nothing else" — a modifier on the same list,
+  // never populated without a non-empty groups/refs (render.go enforces this).
+  exclusive: boolean
 }
 
 export function resolveMediaExpectation(
@@ -52,6 +59,8 @@ export function resolveMediaExpectation(
   return {
     groups: (media.any_of_groups ?? []).map((g) => ({ name: g, found: groupSet.has(g) })),
     refs: (media.any_of_refs ?? []).map((r) => ({ name: r, found: refSet.has(r) })),
+    forbid: media.forbid ?? false,
+    exclusive: media.exclusive ?? false,
   }
 }
 
@@ -59,7 +68,10 @@ export function resolveMediaExpectation(
 // declare — mirrors judge.go's own gating EXACTLY (requiresSatisfied/media/escalate/
 // language/must_not_contain all default to "trivially satisfied" when the test simply
 // doesn't declare that check), so this list is never a guess about what's ungraded —
-// it's the direct complement of what judge.go actually skips.
+// it's the direct complement of what judge.go actually skips. No separate branch is
+// needed for media.forbid: `!test.media` already treats ANY declared media block
+// (forbid-only or any_of-based) as "checked," matching judge.go's own gating on
+// `tc.Media != nil`.
 export function notCheckedRequirements(test: CatalogTestCase): string[] {
   const items: string[] = []
   if (!test.requires || test.requires.length === 0) items.push('Обязательные факты')

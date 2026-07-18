@@ -63,7 +63,7 @@ func TestResolveCatalogTests_IncludeOrderAndSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tests, err := resolveCatalogTests(scenarioDir, "tests.yaml")
+	tests, err := resolveCatalogTests("s1", scenarioDir, "tests.yaml")
 	if err != nil {
 		t.Fatalf("resolveCatalogTests: %v", err)
 	}
@@ -188,6 +188,99 @@ func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
 	noMedia := catalogTestCaseFrom(TestCase{ID: "t2", Message: "m"}, "tests.yaml")
 	if noMedia.Media != nil {
 		t.Errorf("want nil Media when the test declares none, got %+v", noMedia.Media)
+	}
+
+	forbid := catalogTestCaseFrom(TestCase{ID: "t3", Message: "m", Media: &MediaExpect{Forbid: true}}, "tests.yaml")
+	if forbid.Media == nil || !forbid.Media.Forbid {
+		t.Fatalf("want Forbid carried through, got %+v", forbid.Media)
+	}
+	fb, err := json.Marshal(forbid.Media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(fb), `"forbid":true`) {
+		t.Errorf("want forbid:true present when set, got %s", fb)
+	}
+	notForbidden := catalogTestCaseFrom(TestCase{ID: "t4", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}}}, "tests.yaml")
+	nfb, err := json.Marshal(notForbidden.Media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(nfb), "forbid") {
+		t.Errorf("want forbid key OMITTED (omitempty) when false, got %s", nfb)
+	}
+
+	exclusive := catalogTestCaseFrom(TestCase{ID: "t5", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}, Exclusive: true}}, "tests.yaml")
+	if exclusive.Media == nil || !exclusive.Media.Exclusive {
+		t.Fatalf("want Exclusive carried through, got %+v", exclusive.Media)
+	}
+	eb, err := json.Marshal(exclusive.Media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(eb), `"exclusive":true`) {
+		t.Errorf("want exclusive:true present when set, got %s", eb)
+	}
+	nonExclusive := catalogTestCaseFrom(TestCase{ID: "t6", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}}}, "tests.yaml")
+	neb, err := json.Marshal(nonExclusive.Media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(neb), "exclusive") {
+		t.Errorf("want exclusive key OMITTED (omitempty) when false, got %s", neb)
+	}
+}
+
+// TestResolveCatalogTests_RejectsConflictedMediaExpectation proves the catalog export
+// path (`export -all`, via resolveCatalogTests) enforces the same forbid+any_of
+// invariant as render's resolveTests — a conflicted test must fail loudly here too, not
+// just at render time, since a scenario could be exported without ever being rendered
+// first in the same invocation.
+func TestResolveCatalogTests_RejectsConflictedMediaExpectation(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	scenarioDir := filepath.Join(root, "scenarios", "s1")
+	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testsYAML := "tests:\n  - id: \"bad\"\n    message: \"hi\"\n    media:\n      forbid: true\n      any_of_refs: [\"r\"]\n"
+	if err := os.WriteFile(filepath.Join(scenarioDir, "tests.yaml"), []byte(testsYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := resolveCatalogTests("s1", scenarioDir, "tests.yaml")
+	if err == nil {
+		t.Fatal("want an error for a test declaring both media.forbid and any_of_refs")
+	}
+	if !strings.Contains(err.Error(), "bad") {
+		t.Errorf("want the error to name the conflicting test id, got %v", err)
+	}
+}
+
+// TestResolveCatalogTests_RejectsExclusiveWithoutAnyOf proves the export path enforces
+// Exclusive's own invariant too (it cannot stand alone without a non-empty any_of_* to
+// narrow) — the same "fails loudly on export, not just render" guarantee as the
+// forbid+any_of case above.
+func TestResolveCatalogTests_RejectsExclusiveWithoutAnyOf(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	scenarioDir := filepath.Join(root, "scenarios", "s1")
+	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testsYAML := "tests:\n  - id: \"bad\"\n    message: \"hi\"\n    media:\n      exclusive: true\n"
+	if err := os.WriteFile(filepath.Join(scenarioDir, "tests.yaml"), []byte(testsYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := resolveCatalogTests("s1", scenarioDir, "tests.yaml")
+	if err == nil {
+		t.Fatal("want an error for a test declaring media.exclusive with no any_of_groups/any_of_refs")
+	}
+	if !strings.Contains(err.Error(), "bad") {
+		t.Errorf("want the error to name the conflicting test id, got %v", err)
 	}
 }
 
