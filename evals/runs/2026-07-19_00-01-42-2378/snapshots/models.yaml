@@ -122,18 +122,6 @@ providers:
     # 205K context.
     input_per_mtok: 0.15
     output_per_mtok: 0.90
-    # Confirmed 2026-07-19 via a direct curl to OpenRouter's API (not promptfoo) that
-    # enabled+exclude actually routes the in-band "Thinking: ..." narration out of the
-    # visible content: with this config, message.content came back as PURE JSON, no prose
-    # attached, while usage.completion_tokens_details.reasoning_tokens (87) confirmed the
-    # model still reasoned internally and was billed for it — just not returned inline
-    # anymore. billed_separately: false because that same response's cost_details showed
-    # reasoning folded into the one upstream_inference_completions_cost bucket, same as
-    # gemini-2.5-flash's pair in models-reasoning.yaml — re-verify if this ever looks off.
-    reasoning:
-      enabled: true
-      exclude: true
-      billed_separately: false
   - id: openrouter:moonshotai/kimi-k2.5
     temperature: 0.3
     # Real run 2026-07-18 (runs/2026-07-18_23-25-59-9f56) at max_tokens=500 showed 27/29
@@ -151,15 +139,3 @@ providers:
     # of kimi-k2.6 above.
     input_per_mtok: 0.375
     output_per_mtok: 2.025
-    # Confirmed 2026-07-19 via a direct curl to OpenRouter's API (separately from the
-    # minimax-m2.5 test above — do not assume one model's result generalizes to another):
-    # enabled+exclude also fixed this model's in-band narration. message.content came back
-    # as PURE JSON, and usage.completion_tokens_details.reasoning_tokens (404 — even more
-    # than minimax-m2.5's 87, consistent with this model's much slower observed latency)
-    # confirmed real internal reasoning happened and was billed, just not returned inline.
-    # billed_separately: false for the same reason as minimax-m2.5 — cost_details folded
-    # it into the one upstream_inference_completions_cost bucket in this test too.
-    reasoning:
-      enabled: true
-      exclude: true
-      billed_separately: false

@@ -108,58 +108,20 @@ providers:
   # same caveat as every other un-run entry in this file.
   - id: openrouter:minimax/minimax-m2.5
     temperature: 0.3
-    # Real run 2026-07-18 (runs/2026-07-18_23-25-59-9f56) at max_tokens=500 showed 11/29
-    # calls truncated (finish_reason=length), completion tokens capping out at 500 on
-    # every one of them — the model consistently narrates a multi-paragraph "Thinking: ..."
-    # rule-by-rule analysis in-band before the JSON answer (not via OpenRouter's separate
-    # reasoning channel), so 500 wasn't enough room to reach the answer at all on over a
-    # third of calls. Raised to 2000. NOTE: this does not fix the separate problem that
-    # even a non-truncated reply still fails parseModelJSON — the "Thinking:" prose isn't
-    # fenced, so the whole raw string (prose + trailing JSON) isn't itself valid JSON. See
-    # that same run's SUMMARY.md/judged.json for verbatim examples of both failure modes.
-    max_tokens: 2000
+    max_tokens: 500
     # Verified against openrouter.ai/minimax/minimax-m2.5 on 2026-07-18 — non-thinking,
-    # 205K context.
+    # 205K context. Third-party (Artificial Analysis) benchmarks suggest ~2-5s typical
+    # latency for a short reply, but that's per-hosting-provider TTFT+throughput data, not
+    # an OpenRouter-routed measurement — treat as a rough signal, not a guarantee.
     input_per_mtok: 0.15
     output_per_mtok: 0.90
-    # Confirmed 2026-07-19 via a direct curl to OpenRouter's API (not promptfoo) that
-    # enabled+exclude actually routes the in-band "Thinking: ..." narration out of the
-    # visible content: with this config, message.content came back as PURE JSON, no prose
-    # attached, while usage.completion_tokens_details.reasoning_tokens (87) confirmed the
-    # model still reasoned internally and was billed for it — just not returned inline
-    # anymore. billed_separately: false because that same response's cost_details showed
-    # reasoning folded into the one upstream_inference_completions_cost bucket, same as
-    # gemini-2.5-flash's pair in models-reasoning.yaml — re-verify if this ever looks off.
-    reasoning:
-      enabled: true
-      exclude: true
-      billed_separately: false
   - id: openrouter:moonshotai/kimi-k2.5
     temperature: 0.3
-    # Real run 2026-07-18 (runs/2026-07-18_23-25-59-9f56) at max_tokens=500 showed 27/29
-    # calls truncated (finish_reason=length) — far worse than minimax-m2.5 above, same
-    # in-band "Thinking: ..." narration problem. One call reached 2896 completion tokens
-    # despite the 500 cap (finish_reason=stop for that one), meaning this provider does not
-    # strictly enforce max_tokens for this model either — same "provider ignores the cap"
-    # pattern already seen with qwen3.7-plus/max before they were removed. Raised to 3000 to
-    # give real headroom above that observed ceiling; re-verify truncation rate on the next
-    # run rather than assuming this is now sufficient. Same parseModelJSON caveat as
-    # minimax-m2.5 above applies here too — this fixes truncation, not the unfenced-prose
-    # parsing problem.
-    max_tokens: 3000
+    max_tokens: 500
     # Verified against openrouter.ai/moonshotai/kimi-k2.5 on 2026-07-18 — cheaper sibling
-    # of kimi-k2.6 above.
+    # of kimi-k2.6 above. Same caveat as kimi-k2.6 needed above: not thinking-branded but
+    # kimi-k2.6 still averaged 572 completion tokens and needed max_tokens raised, so
+    # "cheaper sibling" is not the same claim as "shorter replies" — re-check for
+    # truncation on the first real run before trusting this 500 cap.
     input_per_mtok: 0.375
     output_per_mtok: 2.025
-    # Confirmed 2026-07-19 via a direct curl to OpenRouter's API (separately from the
-    # minimax-m2.5 test above — do not assume one model's result generalizes to another):
-    # enabled+exclude also fixed this model's in-band narration. message.content came back
-    # as PURE JSON, and usage.completion_tokens_details.reasoning_tokens (404 — even more
-    # than minimax-m2.5's 87, consistent with this model's much slower observed latency)
-    # confirmed real internal reasoning happened and was billed, just not returned inline.
-    # billed_separately: false for the same reason as minimax-m2.5 — cost_details folded
-    # it into the one upstream_inference_completions_cost bucket in this test too.
-    reasoning:
-      enabled: true
-      exclude: true
-      billed_separately: false

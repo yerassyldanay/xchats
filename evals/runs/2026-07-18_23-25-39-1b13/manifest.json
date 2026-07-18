@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-07-18_23-25-39-1b13",
+  "family": "scenario",
+  "command": "run",
+  "args": [
+    "-scenario",
+    "scenarios/shop-current",
+    "-models",
+    "deepseek/deepseek-v3.2-exp,minimax/minimax-m2.5,moonshotai/kimi-k2.5",
+    "-expect-calls",
+    "87"
+  ],
+  "git_sha": "5ec881ee33f1738dd10b0fd3834ffe9f5378734c",
+  "git_dirty": false,
+  "models_path": "models.yaml",
+  "models_sha256": "42ce6c1139bb4af1f1a856101d3d497fa38e43712fc7dc47da37749ffb448d7e",
+  "promptfoo_version": "0.121.18",
+  "started_at": "2026-07-18T18:25:39Z"
+}
