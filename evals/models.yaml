@@ -8,9 +8,9 @@
 # "unknown_pricing" instead of showing a number that might be wrong. Check current prices at
 # pricing_source before filling one in, and update pricing_checked_at when you do.
 #
-# Three more optional per-provider fields exist (harness/types.go: ModelProvider) but are
-# deliberately left unset below, on every entry, for the same "mark unverified rather than
-# guess" reason as pricing:
+# Four more optional per-provider fields exist (harness/types.go: ModelProvider) but are
+# deliberately left unset below except where noted, for the same "mark unverified rather
+# than guess" reason as pricing:
 #   - label: disambiguates two entries that share one `id` but differ in config (e.g. a
 #     reasoning-on/reasoning-off comparison pair — see evals/models-reasoning.yaml for a
 #     worked example). Every entry below is the only one of its id, so none need it.
@@ -22,6 +22,11 @@
 #                                        # it is NOT verified for any entry below.
 #   - reasoning: {enabled, effort, max_tokens, exclude, billed_separately} opts a model
 #     into OpenRouter's reasoning API — see evals/models-reasoning.yaml.
+#   - default: true marks a provider as part of the no-flag baseline. Omitting -models on
+#     `run`/`render` now resolves to just the default:true providers below (gpt-4o-mini,
+#     gemini-2.5-flash-lite), not every provider in this file — added after a mixed
+#     fast/slow, cheap/expensive batch got launched by accident with no explicit -models.
+#     Pass `-models all` to explicitly run every provider in this file (the old behavior).
 pricing_source: "https://openrouter.ai/models"
 pricing_checked_at: "2026-07-11"
 providers:
@@ -33,6 +38,7 @@ providers:
     # budget decision, per the file-level note above.
     input_per_mtok: 0.15
     output_per_mtok: 0.60
+    default: true
   - id: openrouter:anthropic/claude-haiku-4.5
     temperature: 0.3
     max_tokens: 500
@@ -53,11 +59,12 @@ providers:
     # model for the extraction eval; compare its extraction quality, not just its price.
     input_per_mtok: 0.10
     output_per_mtok: 0.40
+    default: true
   # --- Comparison candidates added 2026-07-18, verified directly against each model's
   # own openrouter.ai page on that date (not yet re-checked at any later pricing_checked_at
-  # date above — re-verify before trusting these for a real budget decision). All four are
+  # date above — re-verify before trusting these for a real budget decision). Both are
   # meaningfully pricier than the "basic" four above; see the cost note in the run that
-  # added them before launching a big repeats/screening pass against all eight.
+  # added them before launching a big repeats/screening pass.
   - id: openrouter:google/gemini-3.5-flash
     temperature: 0.3
     # A same-day partial run (2026-07-18) at max_tokens=500 showed 38/38 sampled calls
@@ -77,28 +84,44 @@ providers:
     # Verified against openrouter.ai/moonshotai/kimi-k2.6 on 2026-07-18.
     input_per_mtok: 0.66
     output_per_mtok: 3.41
-  - id: openrouter:qwen/qwen3.7-plus
+  # --- Non-thinking comparison candidate added 2026-07-18, verified directly against its
+  # own openrouter.ai page on that date. A cheaper, faster-turnaround sibling of a
+  # thinking-mode model (deepseek-r1) rather than a variant of the two above — max_tokens
+  # starts at 500 to match the "basic" models since it isn't reasoning-native; re-check for
+  # truncation on the first real run, same as gemini-3.5-flash/kimi-k2.6 above, before
+  # trusting a low contract-pass rate as quality signal rather than a budget artifact.
+  - id: openrouter:deepseek/deepseek-v3.2-exp
     temperature: 0.3
-    # Same 2026-07-18 partial run: 0/37 sampled calls truncated, but avg completion was
-    # ~1572 tokens — over 3x the configured cap of 500, with finish_reason=stop. This
-    # provider does not appear to enforce max_tokens at all for this model; raised to
-    # 2000 to at least document the real ceiling rather than leave a number the API
-    # ignores. Re-verify this behavior on the next run — a provider silently ignoring a
-    # request parameter is worth confirming isn't a fluke before relying on it.
-    max_tokens: 2000
-    # Verified against openrouter.ai/qwen/qwen3.7-plus on 2026-07-18 — that page showed a
-    # 20% promotional discount already applied to this price; re-check before trusting it
-    # weeks from now, promos expire.
-    input_per_mtok: 0.32
-    output_per_mtok: 1.28
-  - id: openrouter:qwen/qwen3.7-max
+    max_tokens: 500
+    # Verified against openrouter.ai/deepseek/deepseek-v3.2-exp on 2026-07-18. Reasoning is
+    # toggleable via `reasoning_enabled` but left unset/off here (ReasoningConfig nil) —
+    # this entry is explicitly the non-thinking comparison point.
+    input_per_mtok: 0.27
+    output_per_mtok: 0.41
+  # --- Qwen replaced 2026-07-18: qwen/qwen3.7-plus and qwen/qwen3.7-max were removed after
+  # real measured data showed them by far the slowest models in this file (29.5s and 22.0s
+  # avg latency vs ~1-10s for everything else), driven by averaging 1150-1560 completion
+  # tokens per reply despite neither being thinking-branded; qwen/qwen3-max (the
+  # non-thinking sibling added alongside deepseek-v3.2-exp) was removed at the same time
+  # rather than kept half-orphaned. Replaced with two Chinese-provider alternatives neither
+  # yet run in this harness — re-check both for truncation/latency on the first real run,
+  # same caveat as every other un-run entry in this file.
+  - id: openrouter:minimax/minimax-m2.5
     temperature: 0.3
-    # Same 2026-07-18 partial run: 0/37 truncated, avg completion ~1187 tokens (over 2x
-    # the configured cap), finish_reason=stop — same "max_tokens not enforced" pattern
-    # as qwen3.7-plus above. Raised to 1800 for the same documentation reason.
-    max_tokens: 1800
-    # Verified against openrouter.ai/qwen/qwen3.7-max on 2026-07-18 — that page showed a
-    # 41% promotional discount already applied to this price; re-check before trusting it
-    # weeks from now, promos expire.
-    input_per_mtok: 1.475
-    output_per_mtok: 4.425
+    max_tokens: 500
+    # Verified against openrouter.ai/minimax/minimax-m2.5 on 2026-07-18 — non-thinking,
+    # 205K context. Third-party (Artificial Analysis) benchmarks suggest ~2-5s typical
+    # latency for a short reply, but that's per-hosting-provider TTFT+throughput data, not
+    # an OpenRouter-routed measurement — treat as a rough signal, not a guarantee.
+    input_per_mtok: 0.15
+    output_per_mtok: 0.90
+  - id: openrouter:moonshotai/kimi-k2.5
+    temperature: 0.3
+    max_tokens: 500
+    # Verified against openrouter.ai/moonshotai/kimi-k2.5 on 2026-07-18 — cheaper sibling
+    # of kimi-k2.6 above. Same caveat as kimi-k2.6 needed above: not thinking-branded but
+    # kimi-k2.6 still averaged 572 completion tokens and needed max_tokens raised, so
+    # "cheaper sibling" is not the same claim as "shorter replies" — re-check for
+    # truncation on the first real run before trusting this 500 cap.
+    input_per_mtok: 0.375
+    output_per_mtok: 2.025

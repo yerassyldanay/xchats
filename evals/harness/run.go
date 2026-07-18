@@ -21,7 +21,7 @@ func cmdRun(args []string) (runID string, err error) {
 	all := fs.Bool("all", false, "run every scenario under scenarios/")
 	noCache := fs.Bool("no-cache", false, "pass --no-cache to promptfoo (force fresh calls)")
 	modelsPath := fs.String("models-file", "models.yaml", "path to models.yaml")
-	modelsFilter := fs.String("models", "", "comma-separated model ids to run (default: every provider in models.yaml)")
+	modelsFilter := fs.String("models", "", "comma-separated model ids to run (default: providers marked default:true in models.yaml, or every provider if none are marked; pass \"all\" for every provider explicitly)")
 	expectCalls := fs.Int("expect-calls", 0, "if >0, hard-fail before spending anything unless the resolved (tests x models x repeats) call count matches exactly — a deliberate confirmation gate for billed runs")
 	repeats := fs.Int("repeats", 1, "run every (test, model) pair this many times (formalized sample sizes: 3 uncached repetitions for screening, 5 for a finalist's 15-intent bank) — requires -no-cache when >1")
 	launchID := fs.String("launch", "", "group this run under an existing launch id (see `harness launch`) — leave empty for a standalone run, which is then its own singleton launch")

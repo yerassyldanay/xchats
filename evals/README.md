@@ -29,8 +29,11 @@ tweaking one scenario and re-running only pays for what changed. Add `-no-cache`
 everything fresh.
 
 Before spending anything, `run` prints the resolved `(tests x models) = calls` count. Narrow
-which models run with `-models google/gemini-2.5-flash,openai/gpt-4o-mini` (default: every
-provider in `models.yaml`; `-models-file` overrides the models.yaml path itself). Pass
+which models run with `-models google/gemini-2.5-flash,openai/gpt-4o-mini`. Omitting `-models`
+no longer means "every provider" — it resolves to whichever providers are marked
+`default: true` in `models.yaml` (today: gpt-4o-mini, gemini-2.5-flash-lite), so a bare `run`
+can't accidentally fan out to every configured model. Pass `-models all` to explicitly run
+every provider in the file (`-models-file` overrides the models.yaml path itself). Pass
 `-expect-calls N` to hard-fail before any call if the resolved count doesn't match N — a
 deliberate confirmation gate for a run you want to cost-check first:
 

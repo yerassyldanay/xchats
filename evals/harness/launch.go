@@ -59,7 +59,12 @@ func cmdLaunch(args []string) error {
 	fmt.Printf("launch: %s (runs/launches/%s.json)\n", lm.LaunchID, lm.LaunchID)
 
 	fmt.Println("--- scenario member ---")
-	runArgs := []string{"-all", "-models-file", *modelsPath, "-launch", lm.LaunchID}
+	// -models all: launch's v1 scope is a full sweep (every scenario, every model) — its
+	// pre-flight count above already assumes every provider (len(models.Providers) in
+	// preflightScenarioCallCount). Without this, an empty -models on cmdRun would now
+	// resolve to just the default:true providers (see ModelProvider.Default), silently
+	// diverging from the count just printed and gated on -expect-calls.
+	runArgs := []string{"-all", "-models", "all", "-models-file", *modelsPath, "-launch", lm.LaunchID}
 	if *noCache {
 		runArgs = append(runArgs, "-no-cache")
 	}
@@ -125,7 +130,11 @@ func preflightScenarioCallCount(modelsPath string) (int, error) {
 	totalTests := 0
 	for _, m := range matches {
 		sd := filepath.Dir(m)
-		if err := renderScenario(sd, modelsPath, ""); err != nil {
+		// "all", not "": this pre-flight count assumes every provider (len below), and
+		// the render's generated promptfooconfig.yaml is what the scenario member run
+		// actually executes against — an empty filter here would render only the
+		// default:true subset (see ModelProvider.Default), contradicting the count.
+		if err := renderScenario(sd, modelsPath, "all"); err != nil {
 			return 0, fmt.Errorf("render %s: %w", sd, err)
 		}
 		var resolved ResolvedTests

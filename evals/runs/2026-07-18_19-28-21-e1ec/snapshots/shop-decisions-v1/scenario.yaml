@@ -1,7 +1,0 @@
-name: shop-decisions-v1
-description: "Shop schema per DECISIONS.md: language-neutral fact values, media as grouped columns (attach_groups)"
-frame: frame.txt
-data: data.yaml
-tests: tests.yaml
-contract: attach_groups
-topic_format: "# {ref} — {title} ({keywords})\n{body}"

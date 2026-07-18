@@ -183,6 +183,59 @@ func TestFilterProviders_SameIDDifferentLabelBothSelected(t *testing.T) {
 	}
 }
 
+// TestFilterProviders_DefaultFlag covers ModelProvider.Default: an empty -models filter
+// should narrow to the default-marked subset when any provider sets it, "all" should
+// always bypass it, and a models.yaml with no Default set anywhere (e.g.
+// models-reasoning.yaml, which predates this field) must keep returning every provider.
+func TestFilterProviders_DefaultFlag(t *testing.T) {
+	mf := &ModelsFile{Providers: []ModelProvider{
+		{ID: "openrouter:openai/gpt-4o-mini", Temperature: 0.3, MaxTokens: 500, Default: true},
+		{ID: "openrouter:google/gemini-2.5-flash-lite", Temperature: 0.3, MaxTokens: 500, Default: true},
+		{ID: "openrouter:google/gemini-3.5-flash", Temperature: 0.3, MaxTokens: 1500},
+	}}
+
+	defaults, err := filterProviders(mf, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defaults) != 2 {
+		t.Fatalf("want only the 2 default:true providers with no filter, got %d: %+v", len(defaults), defaults)
+	}
+	for _, p := range defaults {
+		if !p.Default {
+			t.Errorf("got a non-default provider in the unfiltered result: %+v", p)
+		}
+	}
+
+	all, err := filterProviders(mf, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("want every provider with -models all, got %d", len(all))
+	}
+
+	named, err := filterProviders(mf, "google/gemini-3.5-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(named) != 1 || named[0].ID != "openrouter:google/gemini-3.5-flash" {
+		t.Fatalf("want the explicitly named non-default provider, got %+v", named)
+	}
+
+	noDefaults := &ModelsFile{Providers: []ModelProvider{
+		{ID: "openrouter:google/gemini-2.5-flash", Label: "reasoning-off", Temperature: 0.3, MaxTokens: 500},
+		{ID: "openrouter:google/gemini-2.5-flash", Label: "reasoning-on", Temperature: 0.3, MaxTokens: 500},
+	}}
+	got, err := filterProviders(noDefaults, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want fallback to every provider when none set Default, got %d", len(got))
+	}
+}
+
 func TestBuildPassthrough(t *testing.T) {
 	if got := buildPassthrough(ModelProvider{ID: "m"}); got != nil {
 		t.Fatalf("want nil passthrough when neither Provider nor Reasoning is set, got %+v", got)

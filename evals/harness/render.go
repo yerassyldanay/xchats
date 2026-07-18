@@ -19,7 +19,7 @@ func cmdRender(args []string) error {
 	fs := flag.NewFlagSet("render", flag.ExitOnError)
 	scenarioDir := fs.String("scenario", "", "path to the scenario directory, e.g. scenarios/shop-current")
 	modelsPath := fs.String("models-file", "models.yaml", "path to models.yaml")
-	modelsFilter := fs.String("models", "", "comma-separated model ids to render for (default: every provider in models.yaml)")
+	modelsFilter := fs.String("models", "", "comma-separated model ids to render for (default: providers marked default:true in models.yaml, or every provider if none are marked; pass \"all\" for every provider explicitly)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -30,10 +30,17 @@ func cmdRender(args []string) error {
 }
 
 // filterProviders returns the providers from mf whose (de-prefixed) ID is named in the
-// comma-separated modelsFilter, in modelsFilter's order; an empty modelsFilter returns every
-// provider unchanged (today's default). Unlike extraction's resolveVisionModels, an unknown ID
-// is an error, not a one-off fallback — a chat run's providers must already be configured
-// (temperature/max_tokens/pricing) in models.yaml, not improvised at the command line.
+// comma-separated modelsFilter, in modelsFilter's order. Unlike extraction's
+// resolveVisionModels, an unknown ID is an error, not a one-off fallback — a chat run's
+// providers must already be configured (temperature/max_tokens/pricing) in models.yaml,
+// not improvised at the command line.
+//
+// An empty modelsFilter no longer always means "every provider" (see ModelProvider.Default
+// for why): it returns only the providers with Default true, if any exist in mf. If none do
+// — e.g. models-reasoning.yaml, which predates the Default field — it falls back to every
+// provider, so files that don't opt into this feature keep their old behavior unchanged.
+// `-models all` is a reserved keyword that always returns every provider regardless of
+// Default, for the times you deliberately want the full/expanded set.
 //
 // byID maps one id to ALL provider entries sharing it, not just one — two entries CAN
 // legitimately share an id with different Label values (e.g. models-reasoning.yaml's
@@ -43,7 +50,19 @@ func cmdRender(args []string) error {
 // silently return 1 provider instead of 2 — exactly the "collapse into one bucket"
 // failure providerModelKey (judge.go) exists to prevent everywhere else.
 func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, error) {
+	if modelsFilter == "all" {
+		return mf.Providers, nil
+	}
 	if modelsFilter == "" {
+		var defaults []ModelProvider
+		for _, p := range mf.Providers {
+			if p.Default {
+				defaults = append(defaults, p)
+			}
+		}
+		if len(defaults) > 0 {
+			return defaults, nil
+		}
 		return mf.Providers, nil
 	}
 	byID := map[string][]ModelProvider{}

@@ -243,6 +243,16 @@ type ModelProvider struct {
 	// nil means reasoning is left at the provider's own default (today, off for every
 	// existing models.yaml entry) — see ReasoningConfig's doc comment for the fields.
 	Reasoning *ReasoningConfig `yaml:"reasoning,omitempty"`
+	// Default marks a provider as part of the no-flag baseline: when -models is omitted,
+	// filterProviders returns only providers with Default true, instead of every provider
+	// in the file. This exists so an accidental bare `run`/`render` (no -models) can't
+	// silently fan out to every configured model — a real failure mode this repo hit
+	// (a mixed fast/slow, cheap/expensive batch launched with no explicit -models). Pass
+	// `-models all` to explicitly opt into every provider regardless of this flag. If NO
+	// provider in a models.yaml sets this (e.g. models-reasoning.yaml, which predates this
+	// field), filterProviders falls back to its old behavior — empty filter = every
+	// provider — so files that don't use this feature are unaffected.
+	Default bool `yaml:"default,omitempty"`
 }
 
 // ProviderRoute is OpenRouter's provider-routing preferences object — see
