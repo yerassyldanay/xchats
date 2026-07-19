@@ -12,7 +12,11 @@ import (
 // different job that happens to reuse the same letter set today. If either needs to
 // diverge later — detectLang gaining more signal, or judge.go's grading getting stricter —
 // this duplication means changing one on purpose, not drifting both via shared state).
-const kazakhOnlySpecificLetters = "әғқңөұүһӘҒҚҢӨҰҮҺ"
+// і (U+0456) was added to BOTH copies together, intentionally: it is Kazakh-specific
+// (absent from Russian since 1918) and its omission made і-only Kazakh — «білу», «сіз»,
+// «тіл» — invisible to routing and judging alike (see judge.go's const comment for the
+// observed false fail).
+const kazakhOnlySpecificLetters = "әғқңөұүһіӘҒҚҢӨҰҮҺІ"
 
 // minRussianClauseRunes: a Cyrillic clause needs at least this many letters, with zero
 // Kazakh-only letters, to count as its own competing "this part is Russian" signal — a
@@ -59,39 +63,100 @@ const minRussianClauseRunes = 4
 // proof of correctness.
 const shortMessageCyrillicThreshold = 8
 
-// scanClauses is detectLang's core per-clause read, factored out so it can be applied
-// identically to the live message and, via detectLangFromHistory, to a prior customer
-// turn. See detectLang's doc comment for the clause-splitting and letter-counting rules.
-func scanClauses(message string) (hasKazakhClause, hasRussianClause bool) {
-	clauses := strings.FieldsFunc(message, func(r rune) bool {
-		switch r {
-		case '!', '?', ',', '.', ';', '\n':
-			return true
-		default:
-			return false
-		}
-	})
+// clauseVote is one clause's language read: vote is "kk" (contains a Kazakh-only
+// letter), "ru" (at least minRussianClauseRunes Cyrillic letters, none Kazakh-only), or
+// "" (too little signal either way — never counted). question records whether the clause
+// was terminated by '?' — the dominant-language rule prefers the language the QUESTION
+// itself is asked in, so mixed-message resolution needs to know which clause that was.
+type clauseVote struct {
+	vote     string
+	question bool
+}
 
-	for _, clause := range clauses {
-		kazakhLetters := 0
-		cyrillicLetters := 0
-		for _, r := range clause {
-			if !unicode.Is(unicode.Cyrillic, r) {
-				continue
-			}
-			cyrillicLetters++
-			if strings.ContainsRune(kazakhOnlySpecificLetters, r) {
-				kazakhLetters++
-			}
-		}
+// scanClauseVotes is detectLang's core per-clause read, factored out so it can be applied
+// identically to the live message and, via detectLangFromHistory/classifyMessage, to a
+// prior customer turn. Splits on the same delimiter set FieldsFunc used before (! ? , . ;
+// newline) but walks runes directly, because the OLD split threw the terminating
+// delimiter away — and the dominant-language rule needs to know which clause ended in
+// '?'. A final unterminated clause counts as question=false. Empty clauses (consecutive
+// delimiters) produce neutral votes, which classifyMessage never counts — same effective
+// behavior as FieldsFunc's skip-empty splitting.
+func scanClauseVotes(message string) []clauseVote {
+	var votes []clauseVote
+	kazakhLetters, cyrillicLetters := 0, 0
+	flush := func(question bool) {
+		vote := ""
 		switch {
 		case kazakhLetters > 0:
-			hasKazakhClause = true
+			vote = "kk"
 		case cyrillicLetters >= minRussianClauseRunes:
-			hasRussianClause = true
+			vote = "ru"
+		}
+		votes = append(votes, clauseVote{vote: vote, question: question})
+		kazakhLetters, cyrillicLetters = 0, 0
+	}
+	for _, r := range message {
+		switch r {
+		case '!', '?', ',', '.', ';', '\n':
+			flush(r == '?')
+		default:
+			if unicode.Is(unicode.Cyrillic, r) {
+				cyrillicLetters++
+				if strings.ContainsRune(kazakhOnlySpecificLetters, r) {
+					kazakhLetters++
+				}
+			}
 		}
 	}
-	return hasKazakhClause, hasRussianClause
+	flush(false)
+	return votes
+}
+
+// classifyMessage reduces one message's clause votes to "kk", "ru", or "" (no usable
+// signal at all). Single-language messages behave exactly as before: any Kazakh-reading
+// clause with no competing Russian one is "kk" (a Kazakh-only letter is diagnostic
+// regardless of length), Russian-reading clauses alone are "ru".
+//
+// A GENUINELY MIXED message (at least one clause of each) resolves by the
+// dominant-language rule, matching the frames' own drafting rule ("reply in the language
+// the question itself is asked in" — this replaced the older blanket mixed→Russian rule):
+//  1. if any non-neutral clause ends in '?', the LAST such clause's language wins — the
+//     final question is what the reply will actually answer ("Сәлеметсіз бе! Скажите,
+//     пожалуйста, кофемашина DeLonghi қанша тұрады?" → the question clause is Kazakh →
+//     "kk"; the symmetric "Сәлеметсіз! Сколько стоит кофемашина?" → "ru");
+//  2. no question clause → majority of non-neutral votes;
+//  3. exact tie → "ru" (the KB's own language — the conservative prior default).
+func classifyMessage(message string) string {
+	kk, ru := 0, 0
+	lastQuestionVote := ""
+	for _, v := range scanClauseVotes(message) {
+		switch v.vote {
+		case "kk":
+			kk++
+		case "ru":
+			ru++
+		default:
+			continue
+		}
+		if v.question {
+			lastQuestionVote = v.vote
+		}
+	}
+	switch {
+	case kk == 0 && ru == 0:
+		return ""
+	case ru == 0:
+		return "kk"
+	case kk == 0:
+		return "ru"
+	}
+	if lastQuestionVote != "" {
+		return lastQuestionVote
+	}
+	if kk > ru {
+		return "kk"
+	}
+	return "ru"
 }
 
 // cyrillicLetterCount counts every Cyrillic letter in the WHOLE message, ignoring clause
@@ -114,25 +179,21 @@ func cyrillicLetterCount(message string) int {
 // mid-conversation — real subtlety this eval harness's actual motivating case (a short,
 // ambiguous message immediately following one Kazakh turn) doesn't need to take on.
 // Returns ok=false when there's no client turn in history, or that one turn is itself
-// too ambiguous to read either way (scanClauses finds neither signal) — the caller must
+// too ambiguous to read either way (classifyMessage finds no signal) — the caller must
 // fall through to its own default in that case, never invent a verdict from silence.
+// A genuinely-mixed prior turn contributes its own DOMINANT language (classifyMessage's
+// question-clause/majority resolution) — under the old blanket mixed→Russian rule it
+// contributed a hard "ru"; the dominant-language rule change applies here identically.
 func detectLangFromHistory(history []HistoryTurn) (lang string, ok bool) {
 	for i := len(history) - 1; i >= 0; i-- {
 		turn := history[i]
 		if turn.Role != "client" {
 			continue
 		}
-		hasKazakhClause, hasRussianClause := scanClauses(turn.Text)
-		switch {
-		case hasKazakhClause && hasRussianClause:
-			return "ru", true // that turn was itself genuinely mixed
-		case hasKazakhClause:
-			return "kk", true
-		case hasRussianClause:
-			return "ru", true
-		default:
-			return "", false // the most recent client turn is ALSO ambiguous
+		if l := classifyMessage(turn.Text); l != "" {
+			return l, true
 		}
+		return "", false // the most recent client turn is ALSO ambiguous
 	}
 	return "", false
 }
@@ -144,35 +205,40 @@ func detectLangFromHistory(history []HistoryTurn) (lang string, ok bool) {
 // model call, so — unlike judge.go's looksKazakh, which grades a reply already written —
 // it has no model output to lean on.
 //
-// Rule: split the message into clauses on ! ? , . ; and newlines. A clause "reads Kazakh"
-// if it contains a Kazakh-only letter — this keeps a Latin brand name or a short
-// shared-alphabet word riding inside an otherwise-Kazakh clause from flipping the verdict
-// (e.g. "Кофемашина DeLonghi қанша тұрады?" is ONE clause; "DeLonghi" being Latin and
-// "Кофемашина" sharing the Russian alphabet do not override "қанша"/"тұрады"). A clause
-// "reads Russian" if it has at least minRussianClauseRunes Cyrillic letters and NONE of
-// them are Kazakh-only.
+// Rule: classifyMessage splits the message into clauses on ! ? , . ; and newlines. A
+// clause "reads Kazakh" if it contains a Kazakh-only letter — this keeps a Latin brand
+// name or a short shared-alphabet word riding inside an otherwise-Kazakh clause from
+// flipping the verdict (e.g. "Кофемашина DeLonghi қанша тұрады?" is ONE clause;
+// "DeLonghi" being Latin and "Кофемашина" sharing the Russian alphabet do not override
+// "қанша"/"тұрады"). A clause "reads Russian" if it has at least minRussianClauseRunes
+// Cyrillic letters and NONE of them are Kazakh-only.
 //
-// If the message has at least one Kazakh-reading clause AND at least one Russian-reading
-// clause, it is genuinely mixed and routes "ru" — matching the frames' existing rule
-// ("mixed language -> reply in Russian"). Otherwise, if the message has a Kazakh-reading
-// clause (and no competing Russian one), it routes "kk" unconditionally — a Kazakh-only
-// letter is diagnostic regardless of message length, so history is never consulted here.
+// A message with Kazakh-reading clauses and no competing Russian ones routes "kk"
+// unconditionally — a Kazakh-only letter is diagnostic regardless of message length, so
+// history is never consulted there. A GENUINELY MIXED message resolves to its DOMINANT
+// language — the language the question itself is asked in, falling back to clause
+// majority, then to "ru" on an exact tie (see classifyMessage's doc comment). This
+// mirrors the frames' own drafting rule, which changed from the older blanket
+// "mixed → reply in Russian" to "mixed → reply in the dominant language"; router and
+// frame rule must always agree, or the routed variant would systematically send the
+// wrong frame for the exact messages the rule exists for.
 //
-// Every OTHER case (no Kazakh-reading clause at all — the common all-Russian message, a
-// mixed-but-short message, or pure Latin/digits/empty) would, on the message alone,
-// default to "ru". Before committing to that default, though: if the message's TOTAL
-// Cyrillic letter count is at or below shortMessageCyrillicThreshold, the message is too
-// short a sample to trust on its own — fall back to detectLangFromHistory and use
-// whatever verdict it finds, if any (see shortMessageCyrillicThreshold's doc comment for
-// why, and the Бар ма? example it's calibrated against). With no history, or history
-// that's itself ambiguous, or a message too long to qualify for the fallback at all: "ru"
-// — today's exact default, unchanged.
+// Every remaining case (no Kazakh-reading clause at all — the common all-Russian
+// message, or pure Latin/digits/empty — or a mixed message that resolved "ru") would, on
+// the message alone, default to "ru". Before committing to that default, though: if the
+// message's TOTAL Cyrillic letter count is at or below shortMessageCyrillicThreshold,
+// the message is too short a sample to trust on its own — fall back to
+// detectLangFromHistory and use whatever verdict it finds, if any (see
+// shortMessageCyrillicThreshold's doc comment for why, and the Бар ма? example it's
+// calibrated against). One deliberate edge of that ordering: a degenerate mixed message
+// that resolved "ru" by tie AND is at or under the threshold (e.g. «Иә, привет» — 8
+// Cyrillic letters) can now consult history, where the old early-return could not; the
+// fallback only ever fires when history has an unambiguous verdict, so this widens the
+// short-message safety net rather than changing any confident read. With no history, or
+// history that's itself ambiguous, or a message too long to qualify: "ru" — the same
+// default as always.
 func detectLang(message string, history []HistoryTurn) string {
-	hasKazakhClause, hasRussianClause := scanClauses(message)
-	if hasKazakhClause {
-		if hasRussianClause {
-			return "ru" // genuinely mixed -> existing policy: reply in Russian
-		}
+	if classifyMessage(message) == "kk" {
 		return "kk"
 	}
 

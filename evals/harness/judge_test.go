@@ -365,6 +365,69 @@ func TestJudgeOne_LanguageTextOKAndFieldOKAreIndependentSignals(t *testing.T) {
 	})
 }
 
+// TestLooksKazakh_DottedIIsKazakhSpecific locks і (U+0456) into kazakhOnlyLetters. The
+// motivating false fail (run 2026-07-19_02-50-37-ef6e, lang-canary-v2, test 2, deepseek)
+// was a fluent Kazakh sentence whose ONLY Kazakh-specific letter is і — every other
+// letter is shared with the Russian alphabet, so before the і addition looksKazakh
+// counted zero and judged it "does not look like Kazakh". A future revert of і from the
+// set fails here loudly.
+func TestLooksKazakh_DottedIIsKazakhSpecific(t *testing.T) {
+	if !strings.ContainsRune(kazakhOnlyLetters, 'і') || !strings.ContainsRune(kazakhOnlyLetters, 'І') {
+		t.Fatal("kazakhOnlyLetters must contain і and І (U+0456/U+0406) — see the const's doc comment before removing them")
+	}
+
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{
+			// The exact reply the old set falsely failed: і appears six times, no other
+			// Kazakh-only letter anywhere (injected fact values are Russian on purpose).
+			name: "observed false fail: Kazakh distinguished by і alone",
+			text: "Кофемашина DeLonghi 129 900 ₸. Ол В наличии. Сізге онымен бірге келетін суреттерді жіберейін бе?",
+			want: true,
+		},
+		{
+			name: "plain Russian, no Kazakh-specific letters",
+			text: "Обычный русский ответ без казахских букв.",
+			want: false,
+		},
+		{
+			// Threshold stays >=2: one lone і (a borrowed word, a typo) is not enough.
+			name: "single і stays below the two-letter threshold",
+			text: "білу",
+			want: false,
+		},
+		{
+			name: "uppercase І counts the same as lowercase",
+			text: "Іні ІРІ",
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := looksKazakh(tc.text); got != tc.want {
+				t.Errorf("looksKazakh(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("judgeOne passes LanguageTextOK for an і-only Kazakh reply", func(t *testing.T) {
+		catalog := &Catalog{Contract: "attach_groups"}
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Сізге онымен бірге келетін суреттерді жіберейін бе?","reply_language":"kk","attach_groups":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		if !got.LanguageTextOK {
+			t.Error("want LanguageTextOK=true — this exact sentence was the observed і-blind-spot false fail")
+		}
+		if !got.LanguagePass {
+			t.Errorf("want LanguagePass=true, got TextOK=%v FieldOK=%v", got.LanguageTextOK, got.LanguageFieldOK)
+		}
+	})
+}
+
 func TestRenderFieldUsage(t *testing.T) {
 	tests := []struct {
 		name string
@@ -868,6 +931,112 @@ func TestJudgeOne_MustContainAny(t *testing.T) {
 		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
 		if !got.MustContainAnyPass {
 			t.Error("want MustContainAnyPass=true when the test declares no must_contain_any at all")
+		}
+	})
+}
+
+// TestJudgeOne_Outcomes proves the alternative-outcome gate (TestCase.Outcomes): an OR
+// over the declared blocks, AND-ed into ModelBehaviorPass, each block evaluated with the
+// SAME helpers as the top-level checks. Shaped after the motivating xph2 case — an
+// ambiguous pronoun where "answer for the last-named tariff" and "ask which tariff is
+// meant" are both defensible, while a confident answer for the WRONG tariff (satisfying
+// neither block) is exactly as wrong as it was before this knob existed.
+func TestJudgeOne_Outcomes(t *testing.T) {
+	escalateFalse := false
+	catalog := &Catalog{Contract: "asset_refs"}
+	tokenValue := map[string]string{
+		"{{tariff.business.payment_limit_monthly}}": "10 000 000 ₸",
+		"{{tariff.start.payment_limit_monthly}}":    "1 000 000 ₸",
+	}
+	tc := TestCase{
+		ID: "t",
+		Outcomes: []OutcomeCase{
+			{
+				Label:    "states the Business tariff's monthly limit via its token",
+				Requires: [][]string{{"tariff.business.payment_limit_monthly"}},
+				Escalate: &escalateFalse,
+			},
+			{
+				Label:          "asks which tariff the customer means, without inventing an answer",
+				Escalate:       &escalateFalse,
+				MustContainAny: []string{"какого тарифа", "какой тариф", "уточните"},
+			},
+		},
+	}
+	run := func(output string) Verdict {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = output
+		return judgeOne(tc, row, catalog, tokenValue, map[string]bool{}, nil)
+	}
+
+	t.Run("first block satisfied -> pass, matched label is the first block's", func(t *testing.T) {
+		got := run(`{"reply_text":"Лимит по тарифу «Бизнес» — {{tariff.business.payment_limit_monthly}}.","reply_language":"ru","asset_refs":[],"escalate":false}`)
+		if !got.OutcomesDeclared || !got.OutcomesPass {
+			t.Fatalf("want OutcomesDeclared+OutcomesPass, got declared=%v pass=%v reason=%q", got.OutcomesDeclared, got.OutcomesPass, got.Reason)
+		}
+		if got.OutcomeMatched != tc.Outcomes[0].Label {
+			t.Errorf("want OutcomeMatched=%q, got %q", tc.Outcomes[0].Label, got.OutcomeMatched)
+		}
+		if !got.ModelBehaviorPass {
+			t.Errorf("want ModelBehaviorPass=true, got reason=%q", got.Reason)
+		}
+	})
+
+	t.Run("second block satisfied (clarifying question) -> pass via the alternative", func(t *testing.T) {
+		got := run(`{"reply_text":"Уточните, пожалуйста, для какого тарифа вас интересует лимит?","reply_language":"ru","asset_refs":[],"escalate":false}`)
+		if !got.OutcomesPass {
+			t.Fatalf("want OutcomesPass=true via the clarify block, got reason=%q", got.Reason)
+		}
+		if got.OutcomeMatched != tc.Outcomes[1].Label {
+			t.Errorf("want OutcomeMatched=%q (first PASSING block, declaration order), got %q", tc.Outcomes[1].Label, got.OutcomeMatched)
+		}
+	})
+
+	t.Run("neither block satisfied (confident wrong-tariff answer) -> fail, reason names every alternative", func(t *testing.T) {
+		got := run(`{"reply_text":"Лимит платежей — {{tariff.start.payment_limit_monthly}} в месяц.","reply_language":"ru","asset_refs":[],"escalate":false}`)
+		if got.OutcomesPass {
+			t.Fatal("want OutcomesPass=false — the wrong tariff's token satisfies neither block")
+		}
+		if got.OutcomeMatched != "" {
+			t.Errorf("want OutcomeMatched empty on a miss, got %q", got.OutcomeMatched)
+		}
+		if got.ModelBehaviorPass {
+			t.Error("want ModelBehaviorPass=false")
+		}
+		wantReason := "none of the acceptable outcomes was satisfied: " + tc.Outcomes[0].Label + " | " + tc.Outcomes[1].Label
+		if got.Reason != wantReason {
+			t.Errorf("want Reason=%q, got %q", wantReason, got.Reason)
+		}
+	})
+
+	t.Run("universal checks stay AND-ed alongside a passing outcome", func(t *testing.T) {
+		// Same passing clarify reply, but the test ALSO declares a top-level language
+		// expectation the reply violates — a matched outcome must not paper over it.
+		kkTC := tc
+		kkTC.Language = "kk"
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"Уточните, пожалуйста, для какого тарифа вас интересует лимит?","reply_language":"ru","asset_refs":[],"escalate":false}`
+		got := judgeOne(kkTC, row, catalog, tokenValue, map[string]bool{}, nil)
+		if !got.OutcomesPass {
+			t.Fatalf("want the outcome block itself to still pass, got reason=%q", got.Reason)
+		}
+		if got.ModelBehaviorPass {
+			t.Error("want ModelBehaviorPass=false — the universal language check failed and outcomes must not override it")
+		}
+	})
+
+	t.Run("no outcomes declared -> vacuously true, not marked declared", func(t *testing.T) {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = `{"reply_text":"anything","reply_language":"ru","asset_refs":[],"escalate":false}`
+		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		if got.OutcomesDeclared {
+			t.Error("want OutcomesDeclared=false when the test declares no outcomes")
+		}
+		if !got.OutcomesPass {
+			t.Error("want OutcomesPass vacuously true, same convention as MustNotContainPass")
 		}
 	})
 }

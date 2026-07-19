@@ -179,6 +179,34 @@ type TestCase struct {
 	// token, not copy the literal value it wrote earlier in History). Absent or empty
 	// means a fresh, no-history conversation, same as every test before this existed.
 	History []HistoryTurn `yaml:"history"`
+	// Outcomes, when non-empty, declares ALTERNATIVE acceptable behaviors: the answer
+	// passes this test's outcome gate if ANY ONE block's declared checks all pass.
+	// Checks declared at the TestCase top level stay universal (AND-ed exactly as
+	// today); Outcomes adds ONE more AND-ed gate — an OR over the blocks. Motivating
+	// case (xph2): a pronoun the customer left genuinely ambiguous — answering for the
+	// last-named tariff and asking which tariff is meant are BOTH defensible, while a
+	// confident answer for the WRONG tariff is not; before this knob, both the
+	// defensible clarification and the wrong answer failed identically. The list must
+	// have >= 2 blocks and every block must declare at least one check (enforced at
+	// render/catalog time, not judge time — a single alternative is just a plain test).
+	Outcomes []OutcomeCase `yaml:"outcomes"`
+}
+
+// OutcomeCase is one alternative expectation block inside TestCase.Outcomes — the same
+// per-test check knobs a TestCase itself has (minus History/Message, which describe the
+// input, not the expected behavior), evaluated with the same judge helpers so the two
+// paths can never drift. A knob left absent in a block is vacuously true, exactly like an
+// absent TestCase-level knob. Label is required: it names the behavior in failure reasons
+// and the UI ("states the Business limit" vs "asks which tariff"), so a red row says
+// which alternatives were on the table, not just "outcomes failed".
+type OutcomeCase struct {
+	Label          string       `yaml:"label"`
+	Requires       [][]string   `yaml:"requires"`
+	Media          *MediaExpect `yaml:"media"`
+	Escalate       *bool        `yaml:"escalate"`
+	Language       string       `yaml:"language"`
+	MustNotContain []string     `yaml:"must_not_contain"`
+	MustContainAny []string     `yaml:"must_contain_any"`
 }
 
 // HistoryTurn is one prior message in a test's simulated conversation. Text is authored

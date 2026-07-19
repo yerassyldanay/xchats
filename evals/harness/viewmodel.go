@@ -278,6 +278,23 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		}
 	}
 
+	// outcomes follows the media_count pattern (OutcomesDeclared is the same kind of
+	// marker as MediaCountEvaluated): a verdict judged before the check existed — or a
+	// test that declares no alternative outcomes — renders not_run, never a fabricated
+	// verdict from OutcomesPass's zero value. Detail names the matched alternative on a
+	// pass and the full declared set on a fail (MustContainAnyExpected's reasoning: a
+	// failed OR has no single culprit).
+	outcomesStatus := ScoreNotRun
+	outcomesDetail := ""
+	if v.OutcomesDeclared {
+		outcomesStatus = ScorePass
+		outcomesDetail = v.OutcomeMatched
+		if !v.OutcomesPass {
+			outcomesStatus = ScoreFail
+			outcomesDetail = strings.Join(v.OutcomeLabels, " | ")
+		}
+	}
+
 	scores := []VScore{
 		{Name: "parse_ok", Status: parseStatus, Detail: parseDetail},
 		{Name: "finish_reason_ok", Status: finishReasonStatus, Detail: v.FinishReason},
@@ -305,6 +322,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Name: "no_control_chars", Status: evaluated(!v.ControlChars), Detail: v.ControlCharsIssue},
 		{Name: "must_not_contain", Status: evaluated(v.MustNotContainPass), Detail: v.ForbiddenPhrase},
 		{Name: "must_contain_any", Status: evaluated(v.MustContainAnyPass), Detail: strings.Join(v.MustContainAnyExpected, ", ")},
+		{Name: "outcomes", Status: outcomesStatus, Detail: outcomesDetail},
 		{Name: "no_invented_digits", Status: evaluated(len(v.InventedDigits) == 0), Detail: strings.Join(v.InventedDigits, ", ")},
 		{Name: "no_unit_issues", Status: evaluated(len(v.UnitIssues) == 0), Detail: strings.Join(v.UnitIssues, ", ")},
 		{Name: "no_unknown_media", Status: evaluated(len(v.UnknownMedia) == 0), Detail: strings.Join(v.UnknownMedia, ", ")},
@@ -886,6 +904,24 @@ func scenarioRequirementRows(exec VExecution, tc TestCase, mediaField string) []
 		rows = append(rows, VContractRow{
 			Key: "must_contain_any", Label: "Ожидаемые фразы (любая из)", Kind: "requirement",
 			Expected: strings.Join(tc.MustContainAny, " ИЛИ "), Actual: actual, Pass: scorePassPtr(score.Status),
+		})
+	}
+	if len(tc.Outcomes) > 0 {
+		score, _ := scoreByName(exec.Scores, "outcomes")
+		labels := make([]string, len(tc.Outcomes))
+		for i, oc := range tc.Outcomes {
+			labels[i] = oc.Label
+		}
+		// On a pass the score's Detail carries the matched block's label (see the scores
+		// build); on a fail it carries the full declared set, but the row's Expected
+		// already lists that, so the Actual cell states the miss in words instead.
+		actual := "ни один исход не выполнен"
+		if score.Status == ScorePass && score.Detail != "" {
+			actual = score.Detail
+		}
+		rows = append(rows, VContractRow{
+			Key: "outcomes", Label: "Допустимые исходы (любой из)", Kind: "requirement",
+			Expected: strings.Join(labels, " ИЛИ "), Actual: actual, Pass: scorePassPtr(score.Status),
 		})
 	}
 	return rows

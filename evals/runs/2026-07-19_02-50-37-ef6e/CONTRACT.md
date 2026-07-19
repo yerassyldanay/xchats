@@ -491,21 +491,21 @@
 
 - parse ok: true
 - contract fields ok: true
-- requires met: true · media met: true · escalate met: true · language met: true · no-invented-answer met: true · units ok: true · media count ok: true
+- requires met: true · media met: true · escalate met: true · language met: false · no-invented-answer met: true · units ok: true · media count ok: true
 - injected text: Сәлеметсіз бе! Кофемашина DeLonghi стоит 129 900 ₸. Она В наличии. Хотите, я покажу несколько фото или расскажу подробнее?
 - injection clean (no brace survived, whether blocked or not): true
 - cost basis: cached_replay_unpriceable
-- contract pass: **true** · model-behavior pass: **true**
+- contract pass: **true** · model-behavior pass: **false**
 
 ### 20. mixed Kazakh/Russian message, rule says answer Russian when mixed — openrouter:google/gemini-2.5-flash
 
 - parse ok: true
 - contract fields ok: true
-- requires met: true · media met: true · escalate met: true · language met: true · no-invented-answer met: true · units ok: true · media count ok: true
+- requires met: true · media met: true · escalate met: true · language met: false · no-invented-answer met: true · units ok: true · media count ok: true
 - injected text: Сәлеметсіз бе! Кофемашина DeLonghi стоит 129 900 ₸. Она есть В наличии.
 - injection clean (no brace survived, whether blocked or not): true
 - cost basis: measured_split (1514 in / 107 out tokens, est. $0.000722)
-- contract pass: **true** · model-behavior pass: **true**
+- contract pass: **true** · model-behavior pass: **false**
 
 ### 20. mixed Kazakh/Russian message, rule says answer Russian when mixed — openrouter:google/gemini-2.5-flash-lite
 
@@ -633,11 +633,11 @@
 
 - parse ok: true
 - contract fields ok: true
-- requires met: true · media met: true · escalate met: true · language met: false · no-invented-answer met: true · units ok: true · media count ok: true
+- requires met: true · media met: true · escalate met: true · language met: true · no-invented-answer met: true · units ok: true · media count ok: true
 - injected text: Кофемашина DeLonghi 129 900 ₸. Ол В наличии. Сізге онымен бірге келетін суреттерді жіберейін бе?
 - injection clean (no brace survived, whether blocked or not): true
 - cost basis: measured_split (1817 in / 119 out tokens, est. $0.000539)
-- contract pass: **true** · model-behavior pass: **false**
+- contract pass: **true** · model-behavior pass: **true**
 
 ### 3. delivery cost + time, Kazakh — openrouter:google/gemini-2.5-flash-lite
 
@@ -1170,21 +1170,21 @@
 
 - parse ok: true
 - contract fields ok: true
-- requires met: true · media met: true · escalate met: true · language met: true · no-invented-answer met: true · units ok: true · media count ok: true
+- requires met: true · media met: true · escalate met: true · language met: false · no-invented-answer met: true · units ok: true · media count ok: true
 - injected text: Сәлеметсіз бе! Кофемашина DeLonghi стоит 129 900 ₸. Она есть В наличии.
 - injection clean (no brace survived, whether blocked or not): true
 - cost basis: cached_replay_unpriceable
-- contract pass: **true** · model-behavior pass: **true**
+- contract pass: **true** · model-behavior pass: **false**
 
 ### 20. mixed Kazakh/Russian message, rule says answer Russian when mixed — openrouter:deepseek/deepseek-v3.2-exp
 
 - parse ok: true
 - contract fields ok: true
-- requires met: true · media met: true · escalate met: true · language met: true · no-invented-answer met: true · units ok: true · media count ok: true
+- requires met: true · media met: true · escalate met: true · language met: false · no-invented-answer met: true · units ok: true · media count ok: true
 - injected text: Сәлеметсіз бе! Кофемашина DeLonghi стоит 129 900 ₸. Она В наличии. Хотите, я покажу несколько фото или расскажу подробнее?
 - injection clean (no brace survived, whether blocked or not): true
 - cost basis: cached_replay_unpriceable
-- contract pass: **true** · model-behavior pass: **true**
+- contract pass: **true** · model-behavior pass: **false**
 
 ### 16. follow-up with history, needs delivery cost — openrouter:google/gemini-2.5-flash-lite
 
@@ -1775,21 +1775,21 @@
 
 - parse ok: true
 - contract fields ok: true
-- requires met: true · media met: true · escalate met: true · language met: true · no-invented-answer met: true · units ok: true · media count ok: true
+- requires met: true · media met: true · escalate met: true · language met: false · no-invented-answer met: true · units ok: true · media count ok: true
 - injected text: Сәлеметсіз бе! Кофемашина DeLonghi стоит 129 900 ₸. Она есть В наличии.
 - injection clean (no brace survived, whether blocked or not): true
 - cost basis: cached_replay_unpriceable
-- contract pass: **true** · model-behavior pass: **true**
+- contract pass: **true** · model-behavior pass: **false**
 
 ### 20. mixed Kazakh/Russian message, rule says answer Russian when mixed — openrouter:deepseek/deepseek-v3.2-exp
 
 - parse ok: true
 - contract fields ok: true
-- requires met: true · media met: true · escalate met: true · language met: true · no-invented-answer met: true · units ok: true · media count ok: true
+- requires met: true · media met: true · escalate met: true · language met: false · no-invented-answer met: true · units ok: true · media count ok: true
 - injected text: Сәлеметсіз бе! Кофемашина DeLonghi стоит 129 900 ₸. Она В наличии. Хотите, я покажу несколько фото или расскажу подробнее?
 - injection clean (no brace survived, whether blocked or not): true
 - cost basis: cached_replay_unpriceable
-- contract pass: **true** · model-behavior pass: **true**
+- contract pass: **true** · model-behavior pass: **false**
 
 ### 21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim — openrouter:google/gemini-2.5-flash-lite
 
@@ -2653,11 +2653,11 @@
 
 - parse ok: true
 - contract fields ok: true
-- requires met: true · media met: true · escalate met: true · language met: true · no-invented-answer met: true · units ok: true · media count ok: true
+- requires met: true · media met: true · escalate met: true · language met: false · no-invented-answer met: true · units ok: true · media count ok: true
 - injected text: Сәлеметсіз бе! Кофемашина DeLonghi стоит 129 900 ₸. В наличии на складе в Алматы 5 штук. Хотите оформить заказ?
 - injection clean (no brace survived, whether blocked or not): true
 - cost basis: measured_split (1293 in / 127 out tokens, est. $0.000180)
-- contract pass: **true** · model-behavior pass: **true**
+- contract pass: **true** · model-behavior pass: **false**
 
 ### 20. mixed Kazakh/Russian message, rule says answer Russian when mixed — openrouter:google/gemini-2.5-flash
 

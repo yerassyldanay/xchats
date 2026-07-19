@@ -132,10 +132,16 @@ tests:
     message: "Ну что, узнали?"
     escalate: true
     language: ru
+    # «не осуществляется» added after run 2026-07-19_02-50-37-ef6e: flash-lite invented
+    # a resolution as «доставка в Астану пока не осуществляется» — different phrasing,
+    # same invented claim, straight past the original blocklist (the escalate check
+    # caught it; this substring makes the invention itself visible too). A correct
+    # holding reply says «уточню…»/«ещё уточняю» and contains none of these.
     must_not_contain:
       - "да, доставляем в астан"
       - "не доставляем в астан"
       - "за пределами нашей зоны"
+      - "не осуществляется"
     # The assistant already promised to check — but between the turns the KB gained no
     # Astana answer, so the honest state is STILL unresolved: escalate stays true and the
     # reply must not invent a resolution in either direction. Blocklist mirrors test 9's

@@ -38,13 +38,15 @@ tests:
     must_not_contain:
       - "не доставляем в астан"
       - "за пределами нашей зоны"
+      - "доставку только по"
+      - "доставляем только по"
 
-  - id: "20. mixed Kazakh/Russian message, rule says answer Russian when mixed"
+  - id: "20. mixed Kazakh/Russian message — reply in the dominant language (the question itself is Kazakh)"
     message: "Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?"
     requires:
       - ["product.coffee-machine.price"]
     escalate: false
-    language: ru
+    language: kk
 
   - id: "21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim"
     message: "Сіздер Астанаға жеткізесіздер ме?"

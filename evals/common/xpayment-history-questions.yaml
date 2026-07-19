@@ -63,13 +63,37 @@ tests:
       - role: assistant
         text: "Поддержка на связи в рабочие часы — для срочных вопросов пишите прямо сюда."
     message: "Кстати, а какой у него лимит платежей в месяц?"
-    requires:
-      - ["tariff.business.payment_limit_monthly"]
-    escalate: false
     language: ru
     # Two tariffs are discussed (Старт, then Бизнес); an unrelated support question sits
-    # between the tariff switch and the final question. «у него» must resolve to the
-    # LAST-named tariff (Бизнес), not the first (Старт) or a default.
+    # between the tariff switch and the final question. «у него» most plausibly resolves
+    # to the LAST-named tariff (Бизнес) — but the pronoun is genuinely ambiguous after
+    # the small-talk detour, so asking WHICH tariff is meant is also a defensible reply
+    # (observed for real in run 2026-07-19_02-50-37-ef6e: gemini-2.5-flash clarified and
+    # was scored identically to deepseek's confidently-WRONG Старт answer). What is NEVER
+    # acceptable is a confident limit quote for the wrong tariff — hence the universal
+    # must_not_contain below on the OTHER tariffs' injected limit values. Scans run on
+    # token-INJECTED text; "1 000 000" / "5 000 000" are unique to Старт/Стандарт in this
+    # schema's data.yaml — Бизнес's "10 000 000" contains NEITHER as a substring ('1' is
+    # followed by '0', not a space), so a correct Business answer can't trip them.
+    must_not_contain:
+      - "1 000 000"
+      - "5 000 000"
+    outcomes:
+      - label: "states the Business tariff's monthly limit via its token"
+        requires:
+          - ["tariff.business.payment_limit_monthly"]
+        escalate: false
+      - label: "asks which tariff the customer means, without inventing an answer"
+        escalate: false
+        # Known lexical limit (test-4 doctrine): substring evidence of a clarifying
+        # question, not NLU. A reply that clarifies AND quotes the Business token
+        # passes via the first block anyway; hand-written digits are still caught by
+        # the universal invented-digits check.
+        must_contain_any:
+          - "какого тарифа"
+          - "какой тариф"
+          - "каком тарифе"
+          - "уточните"
 
   - id: "xph3. stale subscription-price trap"
     history:

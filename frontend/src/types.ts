@@ -435,6 +435,18 @@ export interface CatalogMediaExpect {
   // mutually exclusive with forbid (both enforced at render time). Omitted when false.
   exclusive?: boolean
 }
+// One alternative acceptable-behavior block from a test's `outcomes:` list — the same
+// per-test knobs a CatalogTestCase itself has (label is the block's display name; the
+// test passes the outcomes gate when ANY one block's declared checks all hold).
+export interface CatalogOutcomeCase {
+  label: string
+  requires?: string[][]
+  media?: CatalogMediaExpect
+  escalate?: boolean
+  language?: string
+  must_not_contain?: string[]
+  must_contain_any?: string[]
+}
 // escalate is `boolean | undefined` on the wire (omitempty on a Go *bool omits only
 // when nil) — undefined means "not checked by this test", false is an ACTIVE
 // "must not escalate" requirement. Never collapse the two.
@@ -448,6 +460,7 @@ export interface CatalogTestCase {
   must_not_contain?: string[]
   must_contain_any?: string[]
   media?: CatalogMediaExpect
+  outcomes?: CatalogOutcomeCase[]
   source: string
 }
 export interface CatalogScenario {

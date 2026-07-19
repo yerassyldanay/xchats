@@ -380,11 +380,54 @@ func validateTestMedia(scenarioName, testID string, m *MediaExpect) error {
 	return nil
 }
 
-// validateResolvedTests runs validateTestMedia (and any future cross-test invariant) over
-// an already-resolved test list.
+// validateTestOutcomes rejects a malformed alternative-outcomes declaration
+// (TestCase.Outcomes) at authoring time, so the judge never has to interpret one:
+//   - exactly one block is meaningless — a single alternative is just a plain test; its
+//     checks belong at the TestCase top level, where they read as what they are.
+//   - a block with no Label can't be named in failure reasons or the UI ("which
+//     alternative failed?" must always be answerable).
+//   - a block declaring zero checks is vacuously true, which would silently make the
+//     whole OR pass for every reply — an authoring bug, never an intent.
+//   - Language outside ""/"kk"/"ru" would silently skip the language check (judgeOne
+//     gates on those two values), reading as an expectation while checking nothing.
+//   - each block's Media must satisfy the same self-consistency rules as a top-level
+//     media expectation (validateTestMedia).
+//
+// Shared by both resolution paths, same as validateTestMedia — see its comment.
+func validateTestOutcomes(scenarioName, testID string, ocs []OutcomeCase) error {
+	if len(ocs) == 0 {
+		return nil
+	}
+	if len(ocs) == 1 {
+		return fmt.Errorf("scenario %q: test %q: outcomes has a single block — one alternative is just a plain test; declare its checks at the test's top level instead", scenarioName, testID)
+	}
+	for i, oc := range ocs {
+		if strings.TrimSpace(oc.Label) == "" {
+			return fmt.Errorf("scenario %q: test %q: outcomes[%d] has no label — every alternative must be nameable in failure reasons", scenarioName, testID, i)
+		}
+		declares := len(oc.Requires) > 0 || oc.Media != nil || oc.Escalate != nil ||
+			oc.Language != "" || len(oc.MustNotContain) > 0 || len(oc.MustContainAny) > 0
+		if !declares {
+			return fmt.Errorf("scenario %q: test %q: outcomes[%d] (%q) declares no checks — a check-less block passes every reply, which can only be an authoring mistake", scenarioName, testID, i, oc.Label)
+		}
+		if oc.Language != "" && oc.Language != "kk" && oc.Language != "ru" {
+			return fmt.Errorf("scenario %q: test %q: outcomes[%d] (%q) has language %q — only \"kk\" or \"ru\" are checked", scenarioName, testID, i, oc.Label, oc.Language)
+		}
+		if err := validateTestMedia(scenarioName, testID, oc.Media); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateResolvedTests runs validateTestMedia + validateTestOutcomes (and any future
+// cross-test invariant) over an already-resolved test list.
 func validateResolvedTests(scenarioName string, tests []TestCase) error {
 	for _, tc := range tests {
 		if err := validateTestMedia(scenarioName, tc.ID, tc.Media); err != nil {
+			return err
+		}
+		if err := validateTestOutcomes(scenarioName, tc.ID, tc.Outcomes); err != nil {
 			return err
 		}
 	}

@@ -31,20 +31,40 @@ var canarySyncFiles = map[string][]string{
 		"2. price question, Kazakh",
 		"3. delivery cost + time, Kazakh",
 		"9. off-KB city coverage",
-		"20. mixed Kazakh/Russian message, rule says answer Russian when mixed",
+		"20. mixed Kazakh/Russian message — reply in the dominant language (the question itself is Kazakh)",
 		"21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim",
 		"16. follow-up with history, needs delivery cost",
 	},
+	// Test 20 sits in the KK sibling (not RU): its question clause is Kazakh, so the
+	// dominant-language rule — and detectLang, which mirrors it — routes it "kk". It
+	// lived in the RU sibling under the old blanket mixed→Russian rule.
 	filepath.Join("..", "scenarios", "lang-canary-v4-kk", "tests.yaml"): {
 		"2. price question, Kazakh",
 		"3. delivery cost + time, Kazakh",
+		"20. mixed Kazakh/Russian message — reply in the dominant language (the question itself is Kazakh)",
 		"21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim",
 	},
 	filepath.Join("..", "scenarios", "lang-canary-v4-ru", "tests.yaml"): {
 		"1. price question, Russian",
 		"9. off-KB city coverage",
-		"20. mixed Kazakh/Russian message, rule says answer Russian when mixed",
 		"16. follow-up with history, needs delivery cost",
+	},
+	// Phase 2.3 combo variant: the union of the lang + escalation canary sets, split by
+	// detectLang routing exactly like the v4 siblings (TestDetectLang_AgreesWithRoutedCanarySplits
+	// proves the split; this pins the membership).
+	filepath.Join("..", "scenarios", "combo-canary-v1-kk", "tests.yaml"): {
+		"2. price question, Kazakh",
+		"3. delivery cost + time, Kazakh",
+		"20. mixed Kazakh/Russian message — reply in the dominant language (the question itself is Kazakh)",
+		"21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim",
+	},
+	filepath.Join("..", "scenarios", "combo-canary-v1-ru", "tests.yaml"): {
+		"1. price question, Russian",
+		"9. off-KB city coverage",
+		"10. refund request",
+		"16. follow-up with history, needs delivery cost",
+		"18. wrong understanding, asks about a product we don't sell",
+		"19. wrong understanding, asks about a service we don't offer",
 	},
 }
 

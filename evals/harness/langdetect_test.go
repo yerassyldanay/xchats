@@ -1,6 +1,23 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// TestDetectLang_DottedIIsKazakhSpecific locks і (U+0456) into kazakhOnlySpecificLetters —
+// the same addition as judge.go's kazakhOnlyLetters, made to both independent copies on
+// purpose (see the const's doc comment). Kazakh written with і as its only distinctive
+// letter («Сіздерде кофемашина бар ма?») was invisible to routing before this: no clause
+// read as Kazakh, so a Kazakh customer got the Russian frame.
+func TestDetectLang_DottedIIsKazakhSpecific(t *testing.T) {
+	if !strings.ContainsRune(kazakhOnlySpecificLetters, 'і') || !strings.ContainsRune(kazakhOnlySpecificLetters, 'І') {
+		t.Fatal("kazakhOnlySpecificLetters must contain і and І (U+0456/U+0406) — see the const's doc comment before removing them")
+	}
+	if got := detectLang("Сіздерде кофемашина бар ма?", nil); got != "kk" {
+		t.Errorf("detectLang(і-only Kazakh question) = %q, want kk — і must count as a Kazakh-only letter", got)
+	}
+}
 
 // TestDetectLang_AgainstTestBankMessages calibrates detectLang against the ACTUAL messages
 // in common/shop-questions.yaml — not invented examples — so a future edit to that bank
@@ -16,10 +33,24 @@ func TestDetectLang_AgainstTestBankMessages(t *testing.T) {
 		{"kk price question with Latin brand", "Кофемашина DeLonghi қанша тұрады?", "kk"},
 		// "3. delivery cost + time, Kazakh" — pure Kazakh, no Latin/Russian at all.
 		{"kk delivery question", "Жеткізу қанша тұрады және қанша күнде жетеді?", "kk"},
-		// "20. mixed Kazakh/Russian message, rule says answer Russian when mixed" — a
-		// Kazakh greeting clause followed by independent Russian clauses ("Скажите",
-		// "пожалуйста") must route "ru", the core case this heuristic exists for.
-		{"genuinely mixed kk+ru message", "Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?", "ru"},
+		// "20. mixed Kazakh/Russian message — reply in the dominant language" — a Kazakh
+		// greeting, independent Russian clauses ("Скажите", "пожалуйста"), and a KAZAKH
+		// question clause. The dominant-language rule routes by the language the question
+		// itself is asked in, so this genuinely-mixed message resolves "kk" — the core
+		// case the clause-vote resolution exists for.
+		{"genuinely mixed message, question clause is Kazakh", "Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?", "kk"},
+		// The symmetric control: Kazakh greeting, RUSSIAN question — dominant language ru.
+		{"genuinely mixed message, question clause is Russian", "Сәлеметсіз! Сколько стоит кофемашина?", "ru"},
+		// Mixed with NO question clause at all — clause majority decides (1 kk vs 2 ru).
+		{"mixed without a question, Russian majority", "Сәлеметсіз бе. Хочу заказать кофемашину, привезите завтра вечером.", "ru"},
+		// Two question clauses in different languages — the LAST one wins (it is the
+		// question the reply will actually answer).
+		{"two questions, last one Kazakh", "Сколько стоит кофемашина? Жеткізу қанша тұрады?", "kk"},
+		{"two questions, last one Russian", "Жеткізу қанша тұрады? Сколько стоит доставка кофемашины?", "ru"},
+		// Exact one-one tie, no question clause — conservative default: "ru", the KB's
+		// own language. (Total Cyrillic is over the short-message threshold, so history
+		// is not consulted either.)
+		{"mixed tie without a question stays ru", "Сәлеметсіз бе. Хочу кофемашину домой.", "ru"},
 		// Plain Russian messages from the bank — zero Kazakh-only letters anywhere.
 		{"ru stock question", "Набор посуды есть в наличии?", "ru"},
 		{"ru photo request", "Пришлите фото кофемашины, пожалуйста", "ru"},
@@ -115,8 +146,10 @@ func TestDetectLang_HistoryFallback(t *testing.T) {
 			"Жеткізу қанша тұрады?", ruHistory, "kk"},
 		{"long confident-Russian current message ignores disagreeing kk history",
 			"Здравствуйте, подскажите пожалуйста стоимость доставки по городу.", kkHistory, "ru"},
-		{"genuinely mixed current message ignores kk history (still routes ru)",
-			"Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?", kkHistory, "ru"},
+		{"genuinely mixed current message resolves by its own question clause, history ignored",
+			"Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?", kkHistory, "kk"},
+		{"genuinely mixed current message with a Russian question ignores disagreeing kk history",
+			"Сәлеметсіз! Сколько стоит доставка кофемашины по городу?", kkHistory, "ru"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

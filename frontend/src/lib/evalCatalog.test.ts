@@ -92,6 +92,8 @@ describe('notCheckedRequirements', () => {
       'Эскалация',
       'Медиа',
       'Запрещённые фразы',
+      'Ожидаемые фразы (любая из)',
+      'Допустимые исходы (любой из)',
     ])
   })
 
@@ -100,6 +102,13 @@ describe('notCheckedRequirements', () => {
     expect(items).not.toContain('Обязательные факты')
     expect(items).not.toContain('Язык ответа')
     expect(items).toContain('Эскалация')
+  })
+
+  it('a declared outcomes list counts as checked — its label must not appear here', () => {
+    const items = notCheckedRequirements(
+      baseTest({ outcomes: [{ label: 'a', escalate: false }, { label: 'b', must_contain_any: ['x'] }] }),
+    )
+    expect(items).not.toContain('Допустимые исходы (любой из)')
   })
 
   it('escalate:false is an ACTIVE requirement, not "not checked" — must not appear here', () => {

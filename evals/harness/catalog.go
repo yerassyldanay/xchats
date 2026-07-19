@@ -79,6 +79,38 @@ func catalogMediaExpect(m *MediaExpect) *CatalogMediaExpect {
 	return &CatalogMediaExpect{AnyOfGroups: m.AnyOfGroups, AnyOfRefs: m.AnyOfRefs, Forbid: m.Forbid, Exclusive: m.Exclusive}
 }
 
+// CatalogOutcomeCase mirrors OutcomeCase with explicit JSON tags — a dedicated
+// projection for the same reason as CatalogMediaExpect (see its comment): the untagged
+// resolved_tests.json shape must never change as a side effect of catalog needs.
+type CatalogOutcomeCase struct {
+	Label          string              `json:"label"`
+	Requires       [][]string          `json:"requires,omitempty"`
+	Media          *CatalogMediaExpect `json:"media,omitempty"`
+	Escalate       *bool               `json:"escalate,omitempty"`
+	Language       string              `json:"language,omitempty"`
+	MustNotContain []string            `json:"must_not_contain,omitempty"`
+	MustContainAny []string            `json:"must_contain_any,omitempty"`
+}
+
+func catalogOutcomeCases(ocs []OutcomeCase) []CatalogOutcomeCase {
+	if len(ocs) == 0 {
+		return nil
+	}
+	out := make([]CatalogOutcomeCase, 0, len(ocs))
+	for _, oc := range ocs {
+		out = append(out, CatalogOutcomeCase{
+			Label:          oc.Label,
+			Requires:       oc.Requires,
+			Media:          catalogMediaExpect(oc.Media),
+			Escalate:       oc.Escalate,
+			Language:       oc.Language,
+			MustNotContain: oc.MustNotContain,
+			MustContainAny: oc.MustContainAny,
+		})
+	}
+	return out
+}
+
 // CatalogTestCase is a catalog-specific projection of TestCase — deliberately NOT
 // TestCase itself (see CatalogMediaExpect's comment; the same reasoning applies here:
 // resolved_tests.json's existing shape must never change). The one addition beyond
@@ -100,8 +132,9 @@ type CatalogTestCase struct {
 	Escalate       *bool               `json:"escalate,omitempty"`
 	MustNotContain []string            `json:"must_not_contain,omitempty"`
 	MustContainAny []string            `json:"must_contain_any,omitempty"`
-	Media          *CatalogMediaExpect `json:"media,omitempty"`
-	Source         string              `json:"source"`
+	Media          *CatalogMediaExpect  `json:"media,omitempty"`
+	Outcomes       []CatalogOutcomeCase `json:"outcomes,omitempty"`
+	Source         string               `json:"source"`
 }
 
 // CatalogExtractCase is one extract/cases.yaml entry with its ground truth carried
@@ -155,11 +188,17 @@ func resolveCatalogTests(scenarioName, scenarioDir, testsRel string) ([]CatalogT
 			if err := validateTestMedia(scenarioName, tc.ID, tc.Media); err != nil {
 				return nil, err
 			}
+			if err := validateTestOutcomes(scenarioName, tc.ID, tc.Outcomes); err != nil {
+				return nil, err
+			}
 			out = append(out, catalogTestCaseFrom(tc, incPath))
 		}
 	}
 	for _, tc := range tf.Tests {
 		if err := validateTestMedia(scenarioName, tc.ID, tc.Media); err != nil {
+			return nil, err
+		}
+		if err := validateTestOutcomes(scenarioName, tc.ID, tc.Outcomes); err != nil {
 			return nil, err
 		}
 		out = append(out, catalogTestCaseFrom(tc, testsPath))
@@ -178,6 +217,7 @@ func catalogTestCaseFrom(tc TestCase, source string) CatalogTestCase {
 		MustNotContain: tc.MustNotContain,
 		MustContainAny: tc.MustContainAny,
 		Media:          catalogMediaExpect(tc.Media),
+		Outcomes:       catalogOutcomeCases(tc.Outcomes),
 		Source:         source,
 	}
 }

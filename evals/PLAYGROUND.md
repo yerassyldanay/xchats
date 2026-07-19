@@ -110,7 +110,11 @@ free-standing on purpose, since it exists to try out ideas the product hasn't bu
    so it has to be caught this way instead), invented digits (any digit run, not just
    multi-digit — numbered-list markers like "1." / "1)" are allow-listed first), and correct
    media groups/refs. It also enforces the model's declared `reply_language` field matches
-   what a test expects, not just a Kazakh-letter heuristic on the text. This is the part
+   what a test expects, not just a Kazakh-letter heuristic on the text. A test can also
+   declare `outcomes:` — >=2 labeled alternative expectation blocks; the answer passes
+   that gate if ANY one block's declared checks all hold (for genuinely ambiguous
+   questions where two different behaviors are both right — see xph2 in
+   `common/xpayment-history-questions.yaml`). This is the part
    that didn't exist before promptfoo alone and is the actual reason this playground
    exists — it tests the injection idea, not just "did the model try." It also computes an
    **estimated** cost per answer (see `models.yaml`'s pricing fields and README's "Known

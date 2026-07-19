@@ -80,6 +80,7 @@ export function notCheckedRequirements(test: CatalogTestCase): string[] {
   if (!test.media) items.push('Медиа')
   if (!test.must_not_contain || test.must_not_contain.length === 0) items.push('Запрещённые фразы')
   if (!test.must_contain_any || test.must_contain_any.length === 0) items.push('Ожидаемые фразы (любая из)')
+  if (!test.outcomes || test.outcomes.length === 0) items.push('Допустимые исходы (любой из)')
   return items
 }
 

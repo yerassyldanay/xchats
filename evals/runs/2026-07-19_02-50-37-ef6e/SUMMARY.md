@@ -1,6 +1,6 @@
 # Run 2026-07-19_02-50-37-ef6e
 
-Generated 2026-07-19 02:59. One table per scenario; a scenario's own README/PLAYGROUND.md
+Generated 2026-07-19 04:29. One table per scenario; a scenario's own README/PLAYGROUND.md
 explains what "model-behavior" vs "contract" pass rate means.
 
 **Cost is an ESTIMATE, not real spend.** Computed from models.yaml's hand-maintained prices (source: https://openrouter.ai/models, checked 2026-07-11) × token counts from the API response. promptfoo has no pricing table of its own for generic `openrouter:` provider IDs — this report fills that gap, at the accuracy of whoever last updated models.yaml. Check OpenRouter's own dashboard for real spend. A cached row (repeat run, same question) reports zero prompt/completion tokens from promptfoo, so its cost is estimated by BORROWING the split from a fresh row in the same run for the same (model, test) if one exists — otherwise it's marked unpriceable, not free. Every model/cost cell below says which of these applied.
@@ -25,15 +25,15 @@ explains what "model-behavior" vs "contract" pass rate means.
 
 | model | model-behavior pass | 95% CI (Wilson, pooled) | contract pass | est. cost | avg latency | avg tokens | prompt share |
 |---|---|---|---|---|---|---|---|
-| openrouter:deepseek/deepseek-v3.2-exp | 4/7 (57%) | [25%, 84%] | 7/7 (100%) | unpriceable (cached, no split to borrow) | 9ms (cached — not meaningful) | 1735 | n/a |
-| openrouter:google/gemini-2.5-flash | 4/7 (57%) | [25%, 84%] | 7/7 (100%) | $0.0028 est. (4 measured, 3 unpriceable) | 1102ms | 1618 | 94% |
+| openrouter:deepseek/deepseek-v3.2-exp | 3/7 (43%) | [16%, 75%] | 7/7 (100%) | unpriceable (cached, no split to borrow) | 9ms (cached — not meaningful) | 1735 | n/a |
+| openrouter:google/gemini-2.5-flash | 3/7 (43%) | [16%, 75%] | 7/7 (100%) | $0.0028 est. (4 measured, 3 unpriceable) | 1102ms | 1618 | 94% |
 | openrouter:google/gemini-2.5-flash-lite | 3/7 (43%) | [16%, 75%] | 7/7 (100%) | $0.0008 est. (4 measured, 3 unpriceable) | 1221ms | 1612 | 93% |
 
 ## lang-canary-v2
 
 | model | model-behavior pass | 95% CI (Wilson, pooled) | contract pass | est. cost | avg latency | avg tokens | prompt share |
 |---|---|---|---|---|---|---|---|
-| openrouter:deepseek/deepseek-v3.2-exp | 3/7 (43%) | [16%, 75%] | 7/7 (100%) | $0.0040 est. (7 measured) | 5193ms | 2041 | 94% |
+| openrouter:deepseek/deepseek-v3.2-exp | 4/7 (57%) | [25%, 84%] | 7/7 (100%) | $0.0040 est. (7 measured) | 5193ms | 2041 | 94% |
 | openrouter:google/gemini-2.5-flash | 4/7 (57%) | [25%, 84%] | 7/7 (100%) | $0.0056 est. (7 measured) | 1856ms | 1821 | 94% |
 | openrouter:google/gemini-2.5-flash-lite | 4/7 (57%) | [25%, 84%] | 7/7 (100%) | $0.0015 est. (7 measured) | 1793ms | 1830 | 93% |
 
@@ -57,16 +57,16 @@ explains what "model-behavior" vs "contract" pass rate means.
 
 | model | model-behavior pass | 95% CI (Wilson, pooled) | contract pass | est. cost | avg latency | avg tokens | prompt share |
 |---|---|---|---|---|---|---|---|
-| openrouter:deepseek/deepseek-v3.2-exp | 3/4 (75%) | [30%, 95%] | 4/4 (100%) | unpriceable (cached, no split to borrow) | 19ms (cached — not meaningful) | 1703 | n/a |
-| openrouter:google/gemini-2.5-flash | 4/4 (100%) | [51%, 100%] | 4/4 (100%) | unpriceable (cached, no split to borrow) | 19ms (cached — not meaningful) | 1617 | n/a |
+| openrouter:deepseek/deepseek-v3.2-exp | 2/4 (50%) | [15%, 85%] | 4/4 (100%) | unpriceable (cached, no split to borrow) | 19ms (cached — not meaningful) | 1703 | n/a |
+| openrouter:google/gemini-2.5-flash | 3/4 (75%) | [30%, 95%] | 4/4 (100%) | unpriceable (cached, no split to borrow) | 19ms (cached — not meaningful) | 1617 | n/a |
 | openrouter:google/gemini-2.5-flash-lite | 3/4 (75%) | [30%, 95%] | 4/4 (100%) | unpriceable (cached, no split to borrow) | 28ms (cached — not meaningful) | 1610 | n/a |
 
 ## shop-current
 
 | model | model-behavior pass | 95% CI (Wilson, pooled) | contract pass | est. cost | avg latency | avg tokens | prompt share |
 |---|---|---|---|---|---|---|---|
-| openrouter:deepseek/deepseek-v3.2-exp | 22/29 (76%) | [58%, 88%] | 29/29 (100%) | $0.0005 est. (1 measured, 28 unpriceable) | 215ms | 1754 | 94% |
-| openrouter:google/gemini-2.5-flash | 21/29 (72%) | [54%, 85%] | 29/29 (100%) | $0.0135 est. (19 measured, 10 unpriceable) | 646ms | 1621 | 94% |
+| openrouter:deepseek/deepseek-v3.2-exp | 21/29 (72%) | [54%, 85%] | 29/29 (100%) | $0.0005 est. (1 measured, 28 unpriceable) | 215ms | 1754 | 94% |
+| openrouter:google/gemini-2.5-flash | 20/29 (69%) | [51%, 83%] | 29/29 (100%) | $0.0135 est. (19 measured, 10 unpriceable) | 646ms | 1621 | 94% |
 | openrouter:google/gemini-2.5-flash-lite | 14/29 (48%) | [31%, 66%] | 27/29 (93%) | $0.0037 est. (19 measured, 10 unpriceable) | 709ms | 1623 | 93% |
 
 ## shop-decisions-v1
@@ -75,7 +75,7 @@ explains what "model-behavior" vs "contract" pass rate means.
 |---|---|---|---|---|---|---|---|
 | openrouter:deepseek/deepseek-v3.2-exp | 25/29 (86%) | [69%, 95%] | 29/29 (100%) | $0.0125 est. (29 measured) | 4987ms | 1512 | 90% |
 | openrouter:google/gemini-2.5-flash | 25/29 (86%) | [69%, 95%] | 29/29 (100%) | $0.0190 est. (29 measured) | 1104ms | 1400 | 92% |
-| openrouter:google/gemini-2.5-flash-lite | 18/29 (62%) | [44%, 77%] | 27/29 (93%) | $0.0052 est. (29 measured) | 1050ms | 1416 | 91% |
+| openrouter:google/gemini-2.5-flash-lite | 17/29 (59%) | [41%, 74%] | 27/29 (93%) | $0.0052 est. (29 measured) | 1050ms | 1416 | 91% |
 
 ## shop-history-v1
 
@@ -400,6 +400,32 @@ cost column above).
   "escalate": false,
   "escalat…`
 
+**20. mixed Kazakh/Russian message, rule says answer Russian when mixed** | openrouter:deepseek/deepseek-v3.2-exp
+- message: Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?
+- reason: reply looks like Kazakh but a Russian reply was expected
+- raw output: `{
+  "reply_text": "Сәлеметсіз бе! Кофемашина DeLonghi стоит {{product.coffee-machine.price}}. Она {{product.coffee-machine.availability}}. Хотите, я покажу несколько фото или расскажу подробнее?",
+  "reply_language": "ru",
+  "asset_refs": ["coffee-photo-1", "coffee-photo-2"],
+  "escalate": false,
+  …`
+
+**20. mixed Kazakh/Russian message, rule says answer Russian when mixed** | openrouter:google/gemini-2.5-flash
+- message: Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?
+- reason: reply looks like Kazakh but a Russian reply was expected
+- raw output: ````json
+{
+  "reply_text": "Сәлеметсіз бе! Кофемашина DeLonghi стоит {{product.coffee-machine.price}}. Она есть {{product.coffee-machine.availability}}.",
+  "reply_language": "ru",
+  "asset_refs": [
+    "coffee-photo-1"
+  ],
+  "escalate": false,
+  "escalation_reason": "",
+  "confidence": 1
+}
+````
+
 **21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim** | openrouter:google/gemini-2.5-flash-lite
 - message: Сіздер Астанаға жеткізесіздер ме?
 - reason: escalate did not match expectation
@@ -424,17 +450,6 @@ cost column above).
 - raw output: `{
   "reply_text": "Здравствуйте! Да, мы доставляем в Астану. Стоимость доставки — {{policy.main.delivery_cost}}. Срок доставки — {{policy.main.delivery_time}}. Если сумма заказа превысит {{policy.main.free_delivery_from}}, доставка будет бесплатной. Какой товар вас интересует?",
   "reply_language": …`
-
-**2. price question, Kazakh** | openrouter:deepseek/deepseek-v3.2-exp
-- message: Кофемашина DeLonghi қанша тұрады?
-- reason: reply does not look like Kazakh (too few Kazakh-specific letters)
-- raw output: ````json
-{
-  "reply_text": "Кофемашина DeLonghi {{product.coffee-machine.price}}. Ол {{product.coffee-machine.availability}}. Сізге онымен бірге келетін суреттерді жіберейін бе?",
-  "reply_language": "kk",
-  "asset_refs": ["coffee-photo-1", "coffee-photo-2"],
-  "escalate": false,
-  "escalation_reason…`
 
 **9. off-KB city coverage** | openrouter:google/gemini-2.5-flash-lite
 - message: А вы доставляете в Астану?
@@ -690,6 +705,32 @@ cost column above).
   "escalate": false,
   "escalat…`
 
+**20. mixed Kazakh/Russian message, rule says answer Russian when mixed** | openrouter:google/gemini-2.5-flash
+- message: Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?
+- reason: reply looks like Kazakh but a Russian reply was expected
+- raw output: ````json
+{
+  "reply_text": "Сәлеметсіз бе! Кофемашина DeLonghi стоит {{product.coffee-machine.price}}. Она есть {{product.coffee-machine.availability}}.",
+  "reply_language": "ru",
+  "asset_refs": [
+    "coffee-photo-1"
+  ],
+  "escalate": false,
+  "escalation_reason": "",
+  "confidence": 1
+}
+````
+
+**20. mixed Kazakh/Russian message, rule says answer Russian when mixed** | openrouter:deepseek/deepseek-v3.2-exp
+- message: Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?
+- reason: reply looks like Kazakh but a Russian reply was expected
+- raw output: `{
+  "reply_text": "Сәлеметсіз бе! Кофемашина DeLonghi стоит {{product.coffee-machine.price}}. Она {{product.coffee-machine.availability}}. Хотите, я покажу несколько фото или расскажу подробнее?",
+  "reply_language": "ru",
+  "asset_refs": ["coffee-photo-1", "coffee-photo-2"],
+  "escalate": false,
+  …`
+
 **2. price question, Kazakh** | openrouter:google/gemini-2.5-flash-lite
 - message: Кофемашина DeLonghi қанша тұрады?
 - reason: reply does not look like Kazakh (too few Kazakh-specific letters)
@@ -919,6 +960,32 @@ cost column above).
   "asset_refs": [],
   "escalate": false,
   "escalation_reason…`
+
+**20. mixed Kazakh/Russian message, rule says answer Russian when mixed** | openrouter:google/gemini-2.5-flash
+- message: Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?
+- reason: reply looks like Kazakh but a Russian reply was expected
+- raw output: ````json
+{
+  "reply_text": "Сәлеметсіз бе! Кофемашина DeLonghi стоит {{product.coffee-machine.price}}. Она есть {{product.coffee-machine.availability}}.",
+  "reply_language": "ru",
+  "asset_refs": [
+    "coffee-photo-1"
+  ],
+  "escalate": false,
+  "escalation_reason": "",
+  "confidence": 1
+}
+````
+
+**20. mixed Kazakh/Russian message, rule says answer Russian when mixed** | openrouter:deepseek/deepseek-v3.2-exp
+- message: Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?
+- reason: reply looks like Kazakh but a Russian reply was expected
+- raw output: `{
+  "reply_text": "Сәлеметсіз бе! Кофемашина DeLonghi стоит {{product.coffee-machine.price}}. Она {{product.coffee-machine.availability}}. Хотите, я покажу несколько фото или расскажу подробнее?",
+  "reply_language": "ru",
+  "asset_refs": ["coffee-photo-1", "coffee-photo-2"],
+  "escalate": false,
+  …`
 
 **21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim** | openrouter:google/gemini-2.5-flash-lite
 - message: Сіздер Астанаға жеткізесіздер ме?
@@ -1190,6 +1257,18 @@ cost column above).
   "reply_text": "Здравствуйте! Мы не занимаемся ремонтом кофемашин. Мы продаем автоматические кофемашины DeLonghi. Возможно, вас заинтересует новая кофемашина? У нас есть {{product.coffee-machine.available_pieces}} штук в наличии на складе в Алматы.",
   "reply_language": "ru",
   "attach_gr…`
+
+**20. mixed Kazakh/Russian message, rule says answer Russian when mixed** | openrouter:google/gemini-2.5-flash-lite
+- message: Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?
+- reason: reply looks like Kazakh but a Russian reply was expected
+- raw output: ````json
+{
+  "reply_text": "Сәлеметсіз бе! Кофемашина DeLonghi стоит {{product.coffee-machine.price}}. В наличии на складе в Алматы {{product.coffee-machine.available_pieces}} штук. Хотите оформить заказ?",
+  "reply_language": "ru",
+  "attach_groups": [
+    "product.coffee-machine.images"
+  ],
+  "esc…`
 
 **20. mixed Kazakh/Russian message, rule says answer Russian when mixed** | openrouter:google/gemini-2.5-flash
 - message: Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?

@@ -114,10 +114,16 @@ tests:
     # a confident, invented claim in the same breath — a real run had models say exactly
     # these two phrases while still setting escalate=true. Not exhaustive (this is a
     # blocklist of observed phrasings, not an NLP check for "did it invent anything") —
-    # documented as a known limit, not a false guarantee.
+    # documented as a known limit, not a false guarantee. The «только по» pair was added
+    # after run 2026-07-19_02-50-37-ef6e, where deepseek evaded the original two with
+    # «мы осуществляем доставку только по городу Алматы и области» — an invented "only"
+    # restriction the KB never states. A correct holding reply («уточню информацию по
+    # доставке в Астану и вернусь») contains none of these substrings.
     must_not_contain:
       - "не доставляем в астан"
       - "за пределами нашей зоны"
+      - "доставку только по"
+      - "доставляем только по"
 
   - id: "10. refund request"
     message: "Верните мне, пожалуйста, деньги за прошлый заказ"
@@ -236,12 +242,21 @@ tests:
     escalate: true
     language: ru
 
-  - id: "20. mixed Kazakh/Russian message, rule says answer Russian when mixed"
+  - id: "20. mixed Kazakh/Russian message — reply in the dominant language (the question itself is Kazakh)"
+    # The frames' rule changed from the older blanket "mixed → reply in Russian" to
+    # "mixed → reply in the DOMINANT language, the one the question itself is asked in"
+    # (run 2026-07-19_02-50-37-ef6e: all three models kept answering this message in
+    # Kazakh — the language of its actual question — under the old rule, and real
+    # customers who ask in Kazakh expect Kazakh back). Here the greeting is Kazakh, two
+    # short connective clauses are Russian, and the QUESTION is Kazakh → expect kk.
+    # detectLang (langdetect.go) resolves mixed messages the same way, so the v4 routed
+    # variant sends this message to its KK frame — router, frame rule, and this
+    # expectation must always agree.
     message: "Сәлеметсіз бе! Скажите, пожалуйста, кофемашина DeLonghi қанша тұрады?"
     requires:
       - ["product.coffee-machine.price"]
     escalate: false
-    language: ru
+    language: kk
 
   - id: "21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim"
     # The Kazakh mirror of test 9, and the case the original suite had no coverage for at

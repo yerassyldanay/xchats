@@ -46,7 +46,7 @@ func TestScenarioExecutionFromVerdict_ParseFailure_EverythingDownstreamIsNotRun(
 	downstream := []string{
 		"contract_fields", "no_unknown_tokens", "no_leftover_braces", "no_reasoning_leak",
 		"requires", "media", "escalate", "language", "language_text_ok", "language_field_ok",
-		"must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media", "media_count",
+		"must_not_contain", "outcomes", "no_invented_digits", "no_unit_issues", "no_unknown_media", "media_count",
 	}
 	for _, name := range downstream {
 		s, ok := scoreByName(exec.Scores, name)
@@ -780,5 +780,91 @@ func TestEnrichExtractExecutions_ContractRequirementRows(t *testing.T) {
 		if r.Kind != "safety" {
 			t.Errorf("want a case absent from the snapshot to carry ONLY safety rows, got %+v", r)
 		}
+	}
+}
+
+// TestScenarioExecutionFromVerdict_OutcomesScore pins the outcomes score's three-way
+// rendering: not_run unless the verdict says the check was declared (OutcomesDeclared is
+// a code-version + test-shape marker, the MediaCountEvaluated pattern — an old judged.json
+// or an outcomes-less test must never fabricate a pass/fail from OutcomesPass's zero
+// value), fail with the full declared label set, pass with the matched block's label.
+func TestScenarioExecutionFromVerdict_OutcomesScore(t *testing.T) {
+	t.Run("old verdict shape / no outcomes declared -> not_run", func(t *testing.T) {
+		v := Verdict{TestID: "t", Model: "m", ParseOK: true, ContractFields: true}
+		exec := scenarioExecutionFromVerdict("s", v)
+		s, ok := scoreByName(exec.Scores, "outcomes")
+		if !ok || s.Status != ScoreNotRun {
+			t.Errorf("want outcomes=not_run without the OutcomesDeclared marker, got %+v (found=%v)", s, ok)
+		}
+	})
+
+	t.Run("declared and failed -> fail, detail lists every alternative", func(t *testing.T) {
+		v := Verdict{
+			TestID: "t", Model: "m", ParseOK: true, ContractFields: true,
+			OutcomesDeclared: true, OutcomesPass: false,
+			OutcomeLabels: []string{"answers with the token", "asks which tariff"},
+		}
+		exec := scenarioExecutionFromVerdict("s", v)
+		s, _ := scoreByName(exec.Scores, "outcomes")
+		if s.Status != ScoreFail {
+			t.Errorf("want outcomes=fail, got %s", s.Status)
+		}
+		if s.Detail != "answers with the token | asks which tariff" {
+			t.Errorf("want detail to list the full declared set, got %q", s.Detail)
+		}
+	})
+
+	t.Run("declared and passed -> pass, detail names the matched block", func(t *testing.T) {
+		v := Verdict{
+			TestID: "t", Model: "m", ParseOK: true, ContractFields: true,
+			OutcomesDeclared: true, OutcomesPass: true,
+			OutcomeMatched: "asks which tariff",
+			OutcomeLabels:  []string{"answers with the token", "asks which tariff"},
+		}
+		exec := scenarioExecutionFromVerdict("s", v)
+		s, _ := scoreByName(exec.Scores, "outcomes")
+		if s.Status != ScorePass {
+			t.Errorf("want outcomes=pass, got %s", s.Status)
+		}
+		if s.Detail != "asks which tariff" {
+			t.Errorf("want detail to name the matched block, got %q", s.Detail)
+		}
+	})
+}
+
+// TestEnrichScenarioExecutions_OutcomesRequirementRow proves the Requirements panel gets
+// an outcomes row ONLY when the snapshotted test declares alternatives, with Expected
+// listing every block's label and Actual naming the matched one (or stating the miss).
+func TestEnrichScenarioExecutions_OutcomesRequirementRow(t *testing.T) {
+	runDir := t.TempDir()
+	escalateFalse := false
+	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{Contract: "asset_refs"}, []TestCase{
+		{
+			ID:      "t1",
+			Message: "Кстати, а какой у него лимит платежей в месяц?",
+			Outcomes: []OutcomeCase{
+				{Label: "answers with the token", Requires: [][]string{{"tariff.business.payment_limit_monthly"}}, Escalate: &escalateFalse},
+				{Label: "asks which tariff", Escalate: &escalateFalse, MustContainAny: []string{"уточните"}},
+			},
+		},
+	})
+
+	v := Verdict{
+		TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true,
+		RawOutput:        `{"reply_text":"Уточните, пожалуйста, какой тариф вас интересует?","reply_language":"ru","escalate":false,"asset_refs":[]}`,
+		OutcomesDeclared: true, OutcomesPass: true, OutcomeMatched: "asks which tariff",
+		OutcomeLabels: []string{"answers with the token", "asks which tariff"},
+	}
+	out := enrichScenarioExecutions(runDir, "shop-current", "", []VExecution{scenarioExecutionFromVerdict("shop-current", v)})
+
+	row := contractRow(t, out[0].Contract, "outcomes")
+	if row.Expected != "answers with the token ИЛИ asks which tariff" {
+		t.Errorf("want Expected to join the declared labels, got %q", row.Expected)
+	}
+	if row.Actual != "asks which tariff" {
+		t.Errorf("want Actual to name the matched block, got %q", row.Actual)
+	}
+	if row.Pass == nil || !*row.Pass {
+		t.Errorf("want the outcomes row to pass, got %+v", row)
 	}
 }

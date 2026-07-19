@@ -148,7 +148,20 @@ Copy the closest existing scenario folder, then edit:
   questions under `tests:` if this version needs one a shared bank doesn't have. A test can
   set `history: [{role: client, text: ...}, {role: assistant, text: ...}]` to simulate a
   multi-turn conversation instead of a single fresh message — see
-  `common/shop-questions.yaml`'s "16. follow-up with history" for the pattern.
+  `common/shop-questions.yaml`'s "16. follow-up with history" for the pattern. When two
+  different behaviors are BOTH acceptable (e.g. an ambiguous pronoun: answer for the
+  last-named tariff OR ask which one is meant), declare `outcomes:` — a list of >=2
+  labeled alternative expectation blocks, each with the same knobs a test has
+  (requires/escalate/language/media/must_not_contain/must_contain_any); the answer passes
+  the gate if ANY one block fully holds, while top-level checks stay universal. See
+  `common/xpayment-history-questions.yaml`'s xph2 for the pattern.
+
+Language rule note: since the Phase 2.3 combo variants, every frame's mixed-language rule
+is "reply in the DOMINANT language — the one the question itself is asked in" (it used to
+be a blanket "mixed → Russian"). `detectLang` (langdetect.go) resolves mixed messages the
+same way (last question clause, then clause majority, tie → ru), so the routed variants'
+kk/ru test splits and the frames' own rule can never disagree —
+`TestDetectLang_AgreesWithRoutedCanarySplits` enforces it.
 
 Then `render` it (free) before you `run` it (costs money). `render` also now FAILS if the
 rendered prompt references a `{{token}}` not in this exact render's catalog, or if a

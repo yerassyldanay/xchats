@@ -187,8 +187,23 @@ type Verdict struct {
 	// match), a MustContainAny failure has no single culprit to name; the useful fact to
 	// report is the whole expected set none of which matched.
 	MustContainAnyExpected []string `json:"must_contain_any_expected,omitempty"`
-	InventedDigits         []string `json:"invented_digits"`
-	UnitIssues             []string `json:"unit_issues"`
+	// OutcomesDeclared is the CODE-VERSION + test-shape marker for the alternative-
+	// outcomes gate (TestCase.Outcomes), same pattern as MediaCountEvaluated: a verdict
+	// judged before this check existed — or for a test that declares no outcomes — has
+	// this false, and viewmodel.go renders the check "not run" instead of fabricating a
+	// pass/fail from OutcomesPass's zero value.
+	OutcomesDeclared bool `json:"outcomes_declared,omitempty"`
+	// OutcomesPass: at least ONE declared OutcomeCase block had all its checks pass
+	// (vacuously true when the test declares none, same convention as
+	// MustNotContainPass). OutcomeMatched names the first block that passed —
+	// declaration order, deterministic; OutcomeLabels echoes every declared block's
+	// label so a failure can report the full set of alternatives that were on the
+	// table (the MustContainAnyExpected pattern).
+	OutcomesPass   bool     `json:"outcomes_pass"`
+	OutcomeMatched string   `json:"outcome_matched,omitempty"`
+	OutcomeLabels  []string `json:"outcome_labels,omitempty"`
+	InventedDigits []string `json:"invented_digits"`
+	UnitIssues     []string `json:"unit_issues"`
 
 	// FinishReason/Truncated, ReasoningLeak, and ControlChars are all pipeline-safety
 	// facts, folded into ContractPass unconditionally — independent of model, prompt
@@ -355,7 +370,14 @@ var (
 	}
 )
 
-const kazakhOnlyLetters = "әғқңөұүһӘҒҚҢӨҰҮҺ"
+// kazakhOnlyLetters are the Cyrillic letters that exist in the Kazakh alphabet but not
+// the Russian one. і (U+0456) belongs here too: Russian dropped that letter in 1918, and
+// a fluent Kazakh sentence can be distinguished from Russian by і ALONE — run
+// 2026-07-19_02-50-37-ef6e falsely failed «Сізге онымен бірге келетін суреттерді
+// жіберейін бе?» (six і, zero other Kazakh-only letters) as "does not look like Kazakh"
+// while і was missing from this set. langdetect.go's kazakhOnlySpecificLetters is a
+// deliberate independent copy; the і addition was made to both together, on purpose.
+const kazakhOnlyLetters = "әғқңөұүһіӘҒҚҢӨҰҮҺІ"
 
 // normalizeLangCode maps a model's declared reply_language onto the code this harness
 // expects, tolerating the one confusion actually observed in real runs: a model writing
@@ -690,20 +712,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 
 	v.MediaPass = true
 	if tc.Media != nil {
-		if tc.Media.Forbid {
-			v.MediaPass = len(mediaRaw) == 0
-			if !v.MediaPass {
-				v.MediaIssue = "attached media, but this test forbids any attachment"
-			}
-		} else {
-			v.MediaPass = mediaExpectationMet(tc.Media, obj, mediaField)
-			if v.MediaPass && tc.Media.Exclusive {
-				if outsiders := mediaOutsideExpectation(tc.Media, obj, mediaField); len(outsiders) > 0 {
-					v.MediaPass = false
-					v.MediaIssue = "attached media outside the expected set: " + strings.Join(outsiders, ", ")
-				}
-			}
-		}
+		v.MediaPass, v.MediaIssue = checkMediaExpect(tc.Media, obj, mediaRaw, mediaField)
 	}
 
 	// MediaCount/TooManyMedia is UNIVERSAL — every frame's own rule 3 caps attachments, so
@@ -739,15 +748,8 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 			checkText = replyText // e.g. blocked before injection — still check what the model wrote
 		}
 		replyLang, _ := obj["reply_language"].(string)
-		var textOK bool
-		switch tc.Language {
-		case "kk":
-			textOK = looksKazakh(checkText)
-		case "ru":
-			textOK = !looksKazakh(checkText)
-		}
-		normalizedReplyLang := normalizeLangCode(replyLang)
-		fieldOK := normalizedReplyLang == tc.Language
+		textOK := languageTextOK(tc.Language, checkText)
+		fieldOK := languageFieldOK(tc.Language, replyLang)
 		v.LanguageAliasUsed = fieldOK && replyLang != tc.Language
 		v.LanguageTextOK = textOK
 		v.LanguageFieldOK = fieldOK
@@ -772,24 +774,50 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		// `injected` (computed above) is always populated, including when the response is
 		// Blocked or leaking reasoning — unlike v.InjectedText, which is intentionally
 		// left empty in both those cases.
-		lower := strings.ToLower(injected)
-		for _, phrase := range tc.MustNotContain {
-			if strings.Contains(lower, strings.ToLower(phrase)) {
-				v.MustNotContainPass = false
-				v.ForbiddenPhrase = phrase
-				break
-			}
+		if phrase, hit := firstForbidden(tc.MustNotContain, injected); hit {
+			v.MustNotContainPass = false
+			v.ForbiddenPhrase = phrase
 		}
 	}
 
 	v.MustContainAnyPass = true
 	if len(tc.MustContainAny) > 0 {
 		v.MustContainAnyExpected = tc.MustContainAny
-		lower := strings.ToLower(injected)
-		v.MustContainAnyPass = false
-		for _, phrase := range tc.MustContainAny {
-			if strings.Contains(lower, strings.ToLower(phrase)) {
-				v.MustContainAnyPass = true
+		v.MustContainAnyPass = anyContained(tc.MustContainAny, injected)
+	}
+
+	// Alternative-outcome gate (TestCase.Outcomes): OR over the declared blocks, AND-ed
+	// into ModelBehaviorPass alongside everything above. Each block re-uses the exact
+	// helpers the universal checks above run through (languageTextOK/languageFieldOK,
+	// checkMediaExpect, firstForbidden/anyContained, requiresSatisfied), so a block's
+	// verdict can never drift from what the same expectation would mean at the top level.
+	v.OutcomesDeclared = len(tc.Outcomes) > 0
+	v.OutcomesPass = true // vacuously true when no outcomes are declared, same convention as MustNotContainPass
+	if v.OutcomesDeclared {
+		for _, oc := range tc.Outcomes {
+			v.OutcomeLabels = append(v.OutcomeLabels, oc.Label)
+		}
+		checkText := v.InjectedText
+		if checkText == "" {
+			checkText = replyText // same fallback as the universal language check above
+		}
+		replyLang, _ := obj["reply_language"].(string)
+		in := outcomeInputs{
+			replyText:  replyText,
+			injected:   injected,
+			checkText:  checkText,
+			replyLang:  replyLang,
+			escalate:   escalateVal,
+			obj:        obj,
+			mediaRaw:   mediaRaw,
+			mediaField: mediaField,
+			tokenValue: tokenValue,
+		}
+		v.OutcomesPass = false
+		for _, oc := range tc.Outcomes {
+			if outcomeSatisfied(oc, in) {
+				v.OutcomesPass = true
+				v.OutcomeMatched = oc.Label // first passing block wins — declaration order, deterministic
 				break
 			}
 		}
@@ -802,7 +830,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	}
 
 	v.ModelBehaviorPass = v.RequiresPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
-		v.MustNotContainPass && v.MustContainAnyPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 &&
+		v.MustNotContainPass && v.MustContainAnyPass && v.OutcomesPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 &&
 		!v.TooManyMedia
 
 	if v.Reason == "" && !v.ModelBehaviorPass {
@@ -834,6 +862,8 @@ func firstFailureReason(v Verdict) string {
 		return "reply_text contains forbidden phrase: \"" + v.ForbiddenPhrase + "\""
 	case !v.MustContainAnyPass:
 		return "reply_text contains none of the expected phrases: " + strings.Join(v.MustContainAnyExpected, ", ")
+	case !v.OutcomesPass:
+		return "none of the acceptable outcomes was satisfied: " + strings.Join(v.OutcomeLabels, " | ")
 	case len(v.InventedDigits) > 0:
 		return "invented digits outside any token: " + strings.Join(v.InventedDigits, ", ")
 	case len(v.UnitIssues) > 0:
@@ -883,6 +913,120 @@ func requiresSatisfied(requires [][]string, replyText string, tokenValue map[str
 // literal "{{table.ref.field}}" the model would have to emit.
 func factTokenLiteral(dotted string) string {
 	return "{{" + dotted + "}}"
+}
+
+// languageTextOK is the text-side language check — the exact looksKazakh polarity switch
+// judgeOne's universal check uses, extracted so OutcomeCase blocks run the identical
+// logic. expected must be "kk" or "ru" (callers gate on that); any other value returns
+// true (no expectation).
+func languageTextOK(expected, text string) bool {
+	switch expected {
+	case "kk":
+		return looksKazakh(text)
+	case "ru":
+		return !looksKazakh(text)
+	}
+	return true
+}
+
+// languageFieldOK is the field-side language check (declared reply_language vs expected),
+// with the same kz->kk aliasing as the universal check (normalizeLangCode).
+func languageFieldOK(expected, replyLang string) bool {
+	return normalizeLangCode(replyLang) == expected
+}
+
+// checkMediaExpect evaluates one MediaExpect block (Forbid / any_of_* / Exclusive)
+// against the reply's media array — judgeOne's universal media check verbatim, extracted
+// so OutcomeCase blocks share it. Returns pass plus the human-readable issue detail for
+// the failure modes that have one.
+func checkMediaExpect(exp *MediaExpect, obj map[string]any, mediaRaw []any, mediaField string) (bool, string) {
+	if exp.Forbid {
+		if len(mediaRaw) > 0 {
+			return false, "attached media, but this test forbids any attachment"
+		}
+		return true, ""
+	}
+	if !mediaExpectationMet(exp, obj, mediaField) {
+		return false, ""
+	}
+	if exp.Exclusive {
+		if outsiders := mediaOutsideExpectation(exp, obj, mediaField); len(outsiders) > 0 {
+			return false, "attached media outside the expected set: " + strings.Join(outsiders, ", ")
+		}
+	}
+	return true, ""
+}
+
+// firstForbidden reports the first phrase from list found in text (case-insensitive
+// substring, same semantics as TestCase.MustNotContain — callers pass the token-INJECTED
+// text).
+func firstForbidden(list []string, text string) (string, bool) {
+	lower := strings.ToLower(text)
+	for _, phrase := range list {
+		if strings.Contains(lower, strings.ToLower(phrase)) {
+			return phrase, true
+		}
+	}
+	return "", false
+}
+
+// anyContained reports whether at least one phrase from list appears in text
+// (case-insensitive substring, same semantics as TestCase.MustContainAny).
+func anyContained(list []string, text string) bool {
+	lower := strings.ToLower(text)
+	for _, phrase := range list {
+		if strings.Contains(lower, strings.ToLower(phrase)) {
+			return true
+		}
+	}
+	return false
+}
+
+// outcomeInputs bundles the per-reply facts an OutcomeCase block is evaluated against —
+// all computed once in judgeOne and shared by every block, so evaluating N alternatives
+// never re-derives (or diverges on) what the reply actually said.
+type outcomeInputs struct {
+	replyText  string         // raw model reply_text (requires matches the un-substituted {{token}} spans)
+	injected   string         // token-injected text (must_not_contain / must_contain_any scan this)
+	checkText  string         // language-check text: InjectedText with judgeOne's replyText fallback
+	replyLang  string         // the model's declared reply_language field
+	escalate   bool           // the model's escalate field (type-checked earlier)
+	obj        map[string]any // parsed reply object (media helpers read the array from it)
+	mediaRaw   []any          // untyped media array, for Forbid's raw-length semantics
+	mediaField string         // "asset_refs" | "attach_groups"
+	tokenValue map[string]string
+}
+
+// outcomeSatisfied evaluates ONE OutcomeCase block: every check the block declares must
+// pass; a knob left absent is vacuously true — the same convention as absent
+// TestCase-level knobs. Each check delegates to the same helper judgeOne's universal
+// checks use, so block semantics and top-level semantics are one implementation.
+func outcomeSatisfied(oc OutcomeCase, in outcomeInputs) bool {
+	if !requiresSatisfied(oc.Requires, in.replyText, in.tokenValue) {
+		return false
+	}
+	if oc.Escalate != nil && in.escalate != *oc.Escalate {
+		return false
+	}
+	if oc.Language == "kk" || oc.Language == "ru" {
+		if !languageTextOK(oc.Language, in.checkText) || !languageFieldOK(oc.Language, in.replyLang) {
+			return false
+		}
+	}
+	if oc.Media != nil {
+		if pass, _ := checkMediaExpect(oc.Media, in.obj, in.mediaRaw, in.mediaField); !pass {
+			return false
+		}
+	}
+	if len(oc.MustNotContain) > 0 {
+		if _, hit := firstForbidden(oc.MustNotContain, in.injected); hit {
+			return false
+		}
+	}
+	if len(oc.MustContainAny) > 0 && !anyContained(oc.MustContainAny, in.injected) {
+		return false
+	}
+	return true
 }
 
 // filterInventedDigits drops any digit run that isn't actually invented: one the customer

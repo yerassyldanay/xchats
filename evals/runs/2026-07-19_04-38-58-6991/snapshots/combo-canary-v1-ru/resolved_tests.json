@@ -1,0 +1,103 @@
+{
+  "tests": [
+    {
+      "ID": "1. price question, Russian",
+      "Message": "Сколько стоит кофемашина?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null
+    },
+    {
+      "ID": "9. off-KB city coverage",
+      "Message": "А вы доставляете в Астану?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "не доставляем в астан",
+        "за пределами нашей зоны",
+        "доставку только по",
+        "доставляем только по"
+      ],
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null
+    },
+    {
+      "ID": "10. refund request",
+      "Message": "Верните мне, пожалуйста, деньги за прошлый заказ",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "в течение 14 дней"
+      ],
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null
+    },
+    {
+      "ID": "16. follow-up with history, needs delivery cost",
+      "Message": "А доставка сколько будет стоить?",
+      "Requires": [
+        [
+          "policy.main.delivery_cost"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Сколько стоит кофемашина DeLonghi?"
+        },
+        {
+          "role": "assistant",
+          "text": "Кофемашина DeLonghi стоит 129 900 ₸."
+        }
+      ],
+      "Outcomes": null
+    },
+    {
+      "ID": "18. wrong understanding, asks about a product we don't sell",
+      "Message": "У вас есть iPhone 15 Pro?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "да, есть",
+        "да, в наличии"
+      ],
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null
+    },
+    {
+      "ID": "19. wrong understanding, asks about a service we don't offer",
+      "Message": "Вы кофемашины ремонтируете?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null
+    }
+  ]
+}
