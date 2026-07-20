@@ -211,7 +211,7 @@ func cmdExtract(args []string) (runID string, err error) {
 	// into a failed command.
 	writeRunHTMLBestEffort(runDir)
 
-	return runID, appendExtractIndex(runDir, results)
+	return runID, nil
 }
 
 // parseFailureRetries bounds retries for a parse failure specifically (never for a
@@ -545,28 +545,4 @@ func formatCost(cost float64, basis string) string {
 
 func escapeMD(s string) string {
 	return strings.ReplaceAll(s, "|", "\\|")
-}
-
-// appendExtractIndex appends one line to runs/INDEX.md, matching the existing Layer-1
-// convention of keeping every run discoverable from a single file.
-func appendExtractIndex(runDir string, results []extractRunResult) error {
-	pass, total := 0, 0
-	for _, r := range results {
-		if r.Error != "" || r.ParseError != "" {
-			total++
-			continue
-		}
-		total++
-		if allChecksPass(r.Checks) {
-			pass++
-		}
-	}
-	line := fmt.Sprintf("- %s — extract: %d/%d attempts fully passed\n", filepath.Base(runDir), pass, total)
-	f, err := os.OpenFile(filepath.Join("runs", "INDEX.md"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(line)
-	return err
 }

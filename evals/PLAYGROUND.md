@@ -59,12 +59,18 @@ evals/
 │   │                                     its own; shared by the three below via `limits:`
 │   └── shop-scale-{10,20,30}/         ← same pool, capped to N products each
 └── runs/
-    ├── INDEX.md                       ← one line per run: what, when, headline numbers
-    └── 2026-07-06_shop-compare/       ← one folder per run
+    ├── INDEX.md                       ← deliberately retained evidence only
+    └── 2026-07-06_shop-compare/       ← one local folder per run
         ├── SUMMARY.md                 ← the human report — read this first
         ├── CONTRACT.md                ← token/injection/media verdicts per answer
         └── results.json               ← promptfoo's raw data (not committed)
 ```
+
+Generated scenario files and run directories are local by default. Keep source scenarios,
+prompts, cases, and harness code in Git. Force-add only the reviewed manifest, snapshots,
+judged output, and reports from a run that supports a durable decision, then list it
+manually in `runs/INDEX.md`; generated viewer files and raw provider output remain
+uncommitted.
 
 **To imitate a new version:** copy a scenario folder, change its `data.yaml` (add a
 column, remove a table, add 50 more products, whatever you're testing), change `frame.txt`
@@ -123,8 +129,7 @@ free-standing on purpose, since it exists to try out ideas the product hasn't bu
    `SUMMARY.md` per run: a stats table per scenario × model (model-behavior pass %,
    contract pass %, an honestly-labeled cost estimate, latency, tokens, prompt/completion
    share), a scale-comparison table when 2+ `shop-scale-N` scenarios ran together, the
-   answers that failed quoted in full, and one line appended to `runs/INDEX.md` so old runs
-   stay easy to find and compare.
+   answers that failed quoted in full. It does not modify the curated `runs/INDEX.md`.
 5. **`run`** — ties the four steps together: render → promptfoo → judge → report, for
    one scenario or all of them, against whichever models you name.
 
@@ -155,7 +160,7 @@ A schema idea is not ready to build until both pass.
 - **The harness is a playground twin of the real renderer, not the real renderer.** It
   proves the *design* can work. The product's own Go code that does this today is tested
   separately, in Go:
-  [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L86).
+  [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L160).
   A green run here is evidence a design is worth building — it is not a replacement for
   testing the shipped pipeline once it exists.
 - **A scenario can describe a response format the product doesn't have yet** (e.g.

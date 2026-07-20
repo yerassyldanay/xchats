@@ -108,7 +108,7 @@ providers:
   # same caveat as every other un-run entry in this file.
   - id: openrouter:minimax/minimax-m2.5
     temperature: 0.3
-    # Real run 2026-07-18 (runs/2026-07-18_23-25-59-9f56) at max_tokens=500 showed 11/29
+    # A 2026-07-18 diagnostic run at max_tokens=500 showed 11/29
     # calls truncated (finish_reason=length), completion tokens capping out at 500 on
     # every one of them — the model consistently narrates a multi-paragraph "Thinking: ..."
     # rule-by-rule analysis in-band before the JSON answer (not via OpenRouter's separate
@@ -116,7 +116,7 @@ providers:
     # third of calls. Raised to 2000. NOTE: this does not fix the separate problem that
     # even a non-truncated reply still fails parseModelJSON — the "Thinking:" prose isn't
     # fenced, so the whole raw string (prose + trailing JSON) isn't itself valid JSON. See
-    # that same run's SUMMARY.md/judged.json for verbatim examples of both failure modes.
+    # retained evaluation notes for examples of both failure modes.
     max_tokens: 2000
     # Verified against openrouter.ai/minimax/minimax-m2.5 on 2026-07-18 — non-thinking,
     # 205K context.
@@ -136,7 +136,7 @@ providers:
       billed_separately: false
   - id: openrouter:moonshotai/kimi-k2.5
     temperature: 0.3
-    # Real run 2026-07-18 (runs/2026-07-18_23-25-59-9f56) at max_tokens=500 showed 27/29
+    # A 2026-07-18 diagnostic run at max_tokens=500 showed 27/29
     # calls truncated (finish_reason=length) — far worse than minimax-m2.5 above, same
     # in-band "Thinking: ..." narration problem. One call reached 2896 completion tokens
     # despite the 500 cap (finish_reason=stop for that one), meaning this provider does not

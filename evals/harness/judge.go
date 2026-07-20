@@ -45,8 +45,8 @@ type PromptfooRow struct {
 		Output string `json:"output"`
 		Cached bool   `json:"cached"`
 		// FinishReason mirrors promptfoo's own response.finishReason (confirmed present
-		// in real promptfoo output, sibling to Output/Cached — see evals/results/results.json,
-		// a committed real run). "length" (OpenAI/OpenRouter's canonical truncation
+		// in retained real promptfoo run evidence, sibling to Output/Cached). "length"
+		// (OpenAI/OpenRouter's canonical truncation
 		// signal) is normalized into a hard ContractPass failure by isTruncatedFinish —
 		// a truncated response is a pipeline-safety issue, the same category as an
 		// unknown token or a leftover brace, regardless of what the model said. Empty

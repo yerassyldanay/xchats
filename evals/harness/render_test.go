@@ -327,8 +327,8 @@ func TestWritePromptfooConfig_PassthroughOmittedWhenUnset(t *testing.T) {
 
 // TestWritePromptfooConfig_PassthroughAndLabelPresentWhenSet proves the opposite side:
 // a provider entry with Label/Provider/Reasoning all set produces the real promptfoo
-// wire shape (confirmed against evals/results/results.json — passthrough is a real,
-// recognized config key promptfoo's OpenRouter provider forwards upstream).
+// wire shape: passthrough is a real, recognized config key promptfoo's OpenRouter
+// provider forwards upstream.
 func TestWritePromptfooConfig_PassthroughAndLabelPresentWhenSet(t *testing.T) {
 	dir := t.TempDir()
 	scenario := &ScenarioConfig{Name: "fixture", Contract: "asset_refs"}

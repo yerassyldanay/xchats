@@ -28,6 +28,12 @@ model calls cost real money; unchanged answers are cached by promptfoo on repeat
 tweaking one scenario and re-running only pays for what changed. Add `-no-cache` to force
 everything fresh.
 
+Run directories are local and gitignored by default. If a run becomes durable project
+evidence, review its manifest, snapshots, judged output, and reports, then deliberately
+force-add only those reviewed evidence files and add one line to `runs/INDEX.md`. Never
+force-add the entire run directory: raw provider results, viewer exports, processed
+inputs, and HTML remain reproducible local artifacts and must not be committed.
+
 Before spending anything, `run` prints the resolved `(tests x models) = calls` count. Narrow
 which models run with `-models google/gemini-2.5-flash,openai/gpt-4o-mini`. Omitting `-models`
 no longer means "every provider" — it resolves to whichever providers are marked
@@ -179,7 +185,8 @@ answers, applied to the prompt itself before any model ever sees it.
   the draft would be BLOCKED (an unknown/malformed token — the real product's fail-closed
   behavior), whether injection came out brace-clean, the actual injected customer-facing
   text, cost basis for that one answer, and every check's pass/fail.
-- **`runs/INDEX.md`** — one line per run, so past attempts stay easy to find and compare.
+- **`runs/INDEX.md`** — one line per deliberately retained evidence run; ordinary local
+  attempts are discovered through the generated viewer export instead.
 - **`index.html`** — one self-contained page per run covering BOTH families: for scenario
   runs, the same model × pass-rate table as SUMMARY.md plus a collapsible per-verdict
   detail (scores, injected text, evidence); for extraction runs, each case's captured
@@ -285,6 +292,12 @@ extract@v1,extract@v2`) to compare prompt versions in one run; cut a new
 `prompts/extract/v2.txt` rather than editing `v1.txt` in place, since existing runs'
 results are tied to `v1`'s exact hash.
 
+The asset directory intentionally contains only the five images referenced by these
+cases and `xpayment_caledar_ads_kz.mp3`. The MP3 is reserved for a future audio or
+transcription evaluation and is not used by the current image-only extraction harness.
+Full-size video fixtures are excluded until an active video case justifies a small,
+deliberately committed sample.
+
 Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
 
 ## Known limits
@@ -303,7 +316,7 @@ Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
   inline rather than presenting it as a real number.
 - **The harness is a playground twin of the real renderer, not the real renderer.** It
   proves the *design* can work; the product's own Go code that does this today is tested
-  separately: [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L86).
+  separately: [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L160).
 - **A scenario's response contract may not be the shipping one.** `attach_groups`
   (grouped media) is a DECISIONS.md proposal; the product today returns `asset_refs`
   (individual file refs) — see [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212).
@@ -318,19 +331,9 @@ Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
   a Kazakh-letter heuristic/reply_language field). A few real questions (e.g. "does this
   read as a natural next step") have no automated check — read the injected text in
   `CONTRACT.md` by eye.
-- **A committed run is inspectable, not re-judgeable from a fresh clone.** Each run's
-  `manifest.json` and `snapshots/` (scenario.yaml, prompt.txt, catalog.json,
-  resolved_tests.json, promptfooconfig.yaml, models.yaml, extract cases — all small text)
-  are committed, so you can see exactly what a run graded against. But the raw
-  `*.results.json` (promptfoo's answers) and, for extraction, the processed input images
-  under `inputs/`, are gitignored — large and reproducible by re-running, not durable
-  history. `manifest.json` records their sha256 so you can tell if a local copy still
-  matches, but a fresh clone alone can't re-run `judge`/`report` end to end without
-  re-generating those first.
-
-## The one earlier eval this replaced
-
-Before the playground, `evals/` was 3 hand-written prompt files (`schemas/current.sql` +
-`schemas/decisions-v1.sql` + a flat `promptfooconfig.yaml`). That comparison's numbers are
-preserved in `results/REPORT.md` as a historical record — it is not re-run or updated by
-anything here.
+- **A retained run is inspectable, not re-judgeable from a fresh clone.** Selected
+  evidence bundles keep their manifest, snapshots, judged output, and human reports so
+  the decision remains reviewable. Raw `*.results.json`, processed inputs, viewer JSON,
+  and HTML are gitignored because they are large or reproducible. A manifest records the
+  raw output hashes, but re-judging still requires regenerating or restoring those raw
+  provider results.

@@ -50,9 +50,6 @@ func reportRun(runDir, modelsPath string) error {
 	if err := os.WriteFile(filepath.Join(runDir, "CONTRACT.md"), []byte(contract), 0o644); err != nil {
 		return err
 	}
-	if err := appendIndexLine(filepath.Dir(runDir), filepath.Base(runDir), runs); err != nil {
-		return err
-	}
 	fmt.Printf("report written: %s/SUMMARY.md, %s/CONTRACT.md\n", runDir, runDir)
 
 	// Best-effort: a broken HTML viewer must never turn a successful report into a
@@ -395,47 +392,6 @@ func buildContractReport(runs []JudgedRun) string {
 		}
 	}
 	return b.String()
-}
-
-func appendIndexLine(runsDir, runID string, runs []JudgedRun) error {
-	indexPath := filepath.Join(runsDir, "INDEX.md")
-	var scenarios []string
-	total, modelBehaviorPass, contractPass := 0, 0, 0
-	for _, run := range runs {
-		scenarios = append(scenarios, run.Scenario)
-		for _, v := range run.Verdicts {
-			total++
-			if v.ModelBehaviorPass {
-				modelBehaviorPass++
-			}
-			if v.ContractPass {
-				contractPass++
-			}
-		}
-	}
-	line := fmt.Sprintf("- `%s` — %s — model-behavior %d/%d (%.0f%%), contract %d/%d (%.0f%%)\n",
-		runID, strings.Join(scenarios, ", "),
-		modelBehaviorPass, total, pct(modelBehaviorPass, total),
-		contractPass, total, pct(contractPass, total))
-
-	existing, _ := os.ReadFile(indexPath)
-	if len(existing) == 0 {
-		existing = []byte("# Run index\n\nMost recent first.\n\n")
-	}
-	// Replace any existing line(s) for this exact run ID rather than appending
-	// alongside them — `report` is safe to re-run after re-judging (e.g. once new
-	// checks land), and INDEX.md should reflect the latest verdict for a run, not
-	// accumulate one stale line per re-run.
-	marker := fmt.Sprintf("- `%s`", runID)
-	var kept []string
-	for _, l := range strings.Split(string(existing), "\n") {
-		if strings.HasPrefix(l, marker) {
-			continue
-		}
-		kept = append(kept, l)
-	}
-	out := strings.TrimRight(strings.Join(kept, "\n"), "\n") + "\n" + line
-	return os.WriteFile(indexPath, []byte(out), 0o644)
 }
 
 func pct(n, total int) float64 {
