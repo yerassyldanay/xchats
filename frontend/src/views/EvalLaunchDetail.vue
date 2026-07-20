@@ -15,10 +15,9 @@ import DecisionMatrix from '@/components/evals/DecisionMatrix.vue'
 import StrategyDialog from '@/components/evals/StrategyDialog.vue'
 import TestCaseCard from '@/components/evals/TestCaseCard.vue'
 
-// The launch detail page: matrix ALWAYS visible (plan/ui/ui_20_evals_specific.md —
-// "I would like to see it as matrix always"), guiding summary -> comparison ->
-// investigation. See evals/README.md's "Comparing prompts and models" for the data
-// flow this reads from.
+// The launch detail page keeps the matrix visible, guiding summary -> comparison
+// -> investigation. See evals/README.md's "Comparing prompts and models" for the
+// data flow this reads from.
 const route = useRoute()
 const launchId = computed(() => String(route.params.launchId))
 

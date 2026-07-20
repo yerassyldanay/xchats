@@ -1,5 +1,5 @@
 // Package evolution is the REST client for the Evolution WhatsApp gateway,
-// ported from plan/scripts/evolution_client.py (tested vs evolution-api v2.3.7).
+// tested against evolution-api v2.3.7.
 package evolution
 
 import (

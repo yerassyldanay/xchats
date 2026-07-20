@@ -4,9 +4,8 @@ import { CircleAlert, Star } from 'lucide-vue-next'
 import { cellFor, pct, recommendedSetup, setupFrames, type MatrixGroup } from '@/lib/evalMatrix'
 import type { VExecution } from '@/types'
 
-// One experiment group's decision matrix — the launch detail page's permanent
-// centerpiece ("I would like to see it as matrix always," plan/ui/
-// ui_20_evals_specific.md). Rows = models, columns = setups (comparison
+// One experiment group's decision matrix—the launch detail page's permanent
+// centerpiece. Rows = models, columns = setups (comparison
 // strategies — a routed strategy spanning multiple frames is still ONE column,
 // see evalMatrix.ts's setupKey). Purely a view over MatrixGroup; every number is
 // already computed by evalMatrix.ts, this component only lays it out.

@@ -8,9 +8,8 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import ContractTable from './ContractTable.vue'
 
-// One evaluation question, collapsed by default — the "supporting evidence"
-// layer under the decision matrix (plan/ui/ui_20_evals_specific.md's navigation
-// doctrine: matrix first, cards only when a user chooses to inspect one). Expanded,
+// One evaluation question, collapsed by default—the supporting-evidence layer
+// under the decision matrix. The matrix comes first; cards open for inspection. Expanded,
 // each execution reads as three sections: Вход (the case itself — message/history or
 // source image, plus a case-level "what's expected" summary), Требования (the full
 // per-execution contract table — expected/actual/pass for every check), Результат
