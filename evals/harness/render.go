@@ -86,6 +86,9 @@ func renderScenario(scenarioDir, modelsPath, modelsFilter string) error {
 	if err != nil {
 		return fmt.Errorf("load scenario.yaml: %w", err)
 	}
+	if scenario.Pipeline == "schema_kb_v1" {
+		return renderSchemaKBScenario(scenarioDir, scenario, modelsPath, modelsFilter)
+	}
 	if scenario.Contract != "asset_refs" && scenario.Contract != "attach_groups" {
 		return fmt.Errorf("scenario %q: contract must be \"asset_refs\" or \"attach_groups\", got %q", scenario.Name, scenario.Contract)
 	}
@@ -447,9 +450,8 @@ func mediaGroupToken(ownerType, ref, field string) string {
 	return ownerType + "." + ref + "." + field
 }
 
-// buildPrompt fills frame.txt's %%SLOTS%% from data.yaml, then wraps the result in
-// {% raw %}/{% endraw %} + the {{message}} tail — the ONE place that wrapping happens, so
-// no scenario author needs to remember the promptfoo-templating-safety trick by hand.
+// buildPrompt fills frame.txt's %%SLOTS%% from data.yaml, then wraps the result via
+// wrapPromptfooTemplate.
 func buildPrompt(frame string, scenario *ScenarioConfig, data *Data, cat *Catalog) string {
 	mediaField := "asset_refs"
 	if scenario.Contract == "attach_groups" {
@@ -461,7 +463,18 @@ func buildPrompt(frame string, scenario *ScenarioConfig, data *Data, cat *Catalo
 	filled = strings.ReplaceAll(filled, "%%MEDIA%%", renderMedia(data, scenario.Contract))
 	filled = strings.ReplaceAll(filled, "%%FACTS%%", renderFacts(data.FactTables))
 	filled = strings.ReplaceAll(filled, "%%DESCRIPTIONS%%", renderDescriptions(data.FactTables))
+	return wrapPromptfooTemplate(filled)
+}
 
+// wrapPromptfooTemplate wraps an already-fully-rendered stable prefix in
+// {% raw %}/{% endraw %} (so promptfoo's own Nunjucks-style templating never
+// interprets a literal {{token}} span meant for OUR later substitution step,
+// whether that span is a legacy {{table.ref.field}} fact placeholder or an
+// aiprompt one) and appends the {{history}}/{{message}} tail every scenario's
+// prompt needs. The ONE place this wrapping happens, shared by every
+// pipeline, so no scenario author or pipeline implementation needs to
+// remember the promptfoo-templating-safety trick by hand.
+func wrapPromptfooTemplate(filled string) string {
 	var b strings.Builder
 	b.WriteString("{% raw %}\n")
 	b.WriteString(strings.TrimRight(filled, "\n"))

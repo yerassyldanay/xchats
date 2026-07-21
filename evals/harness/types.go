@@ -15,6 +15,17 @@ type ScenarioConfig struct {
 	Data        string `yaml:"data"`     // path to data.yaml (may point into another scenario dir)
 	Tests       string `yaml:"tests"`    // path to tests.yaml
 	Contract    string `yaml:"contract"` // "asset_refs" | "attach_groups" — which media field the model must return
+	// Pipeline selects which loader/renderer builds this scenario's prompt. Empty (the
+	// default) is the original fact_tables/Data path in this file, driven by Contract.
+	// "schema_kb_v1" selects the shop-kb-v1 family's path instead: Data points at a
+	// database-schema-shaped fixture (internal/kbfixture's exact ai_*/kbd_materials table
+	// and column names — no fact_tables, no Contract, no generic values/media/files
+	// bag), built into a prompt through the SAME backend/aiprompt package production
+	// will use, instead of this file's buildCatalog/buildPrompt. See
+	// render_schema_kb.go. A scenario using this pipeline leaves Contract empty —
+	// schema_kb_v1 has exactly one response contract (media_files_to_send), so there is
+	// nothing for Contract to select.
+	Pipeline    string `yaml:"pipeline,omitempty"`
 	TopicFormat string `yaml:"topic_format"`
 	// Limits caps how many rows of a named fact_tables table (keyed by Table, e.g.
 	// "product") this scenario renders — everything else about data.yaml is used as-is.
