@@ -121,7 +121,10 @@ type Policies struct {
 }
 
 // KB is one organization's complete approved live knowledge base plus the
-// material registry rows its media columns reference.
+// kbd_materials registry rows its media columns reference. KB is the input to
+// BuildCatalog, which is the only place kbd_materials data is read. KB is
+// never passed to RenderPrompt — call PromptInput to derive the model-visible
+// projection first.
 type KB struct {
 	OrganizationID string
 	Assistant      *Assistant
@@ -141,4 +144,33 @@ func (kb *KB) MaterialByID(id string) *Material {
 		}
 	}
 	return nil
+}
+
+// PromptInput is exactly what the model-facing prompt renderer may read:
+// approved ai_* content. It deliberately has no Materials field — kbd_materials
+// is a private lookup table used only by BuildCatalog (to validate and resolve
+// media references) and by ResolveSend (to deliver a chosen token); it is
+// never a prompt source. Keeping RenderPrompt's input type free of Materials
+// makes the no-kbd_materials-in-the-prompt boundary a property of the API
+// signature, not just a runtime discipline.
+type PromptInput struct {
+	Assistant *Assistant
+	Topics    []Topic
+	Products  []Product
+	Tariffs   []Tariff
+	Contacts  *Contacts
+	Policies  *Policies
+}
+
+// PromptInput derives the model-visible projection of kb: approved ai_*
+// content only, with no route back to kbd_materials.
+func (kb *KB) PromptInput() *PromptInput {
+	return &PromptInput{
+		Assistant: kb.Assistant,
+		Topics:    kb.Topics,
+		Products:  kb.Products,
+		Tariffs:   kb.Tariffs,
+		Contacts:  kb.Contacts,
+		Policies:  kb.Policies,
+	}
 }

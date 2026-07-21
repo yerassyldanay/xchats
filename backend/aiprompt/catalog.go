@@ -20,16 +20,19 @@ type FactEntry struct {
 	stockValue bool // parsed in_stock value, valid when Kind == KindStockFlag
 }
 
-// MediaEntry is one row of the semantic media catalog.
+// MediaEntry is one row of the PUBLIC semantic media catalog: the exact token
+// the model must copy, its purpose label, kind, and count. This is the only
+// media shape ever passed to RenderPrompt or serialized as catalog.json — it
+// has no route to a material record or ID, so the renderer cannot leak one
+// even by accident.
 type MediaEntry struct {
-	Token       string    `json:"token"` // table.ref.column, domain table segment
-	Table       string    `json:"table"`
-	Ref         string    `json:"ref"`
-	Column      string    `json:"column"`
-	Label       string    `json:"label"`
-	Kind        MediaKind `json:"kind"`
-	Count       int       `json:"count"`
-	MaterialIDs []string  `json:"-"` // backend-only; never rendered or exported
+	Token  string    `json:"token"` // table.ref.column, domain table segment
+	Table  string    `json:"table"`
+	Ref    string    `json:"ref"`
+	Column string    `json:"column"`
+	Label  string    `json:"label"`
+	Kind   MediaKind `json:"kind"`
+	Count  int       `json:"count"`
 }
 
 // AbsentEntry names an approved record whose media columns are ALL empty.
@@ -39,12 +42,25 @@ type AbsentEntry struct {
 	DisplayName string `json:"display_name"`
 }
 
+// mediaResolution is the private token → material-IDs lookup built alongside
+// the public catalog. It exists solely for ResolveSend's post-response
+// delivery resolution and fail-closed re-validation. MaterialIDs carries
+// json:"-" as defense in depth; more importantly the map that holds it is an
+// unexported Catalog field, so nothing outside this package — including
+// RenderPrompt and any exported catalog projection — has a route to read it.
+type mediaResolution struct {
+	MaterialIDs []string `json:"-"`
+}
+
 // Catalog is everything derived from one approved KB for prompt building and
-// response validation.
+// response validation. Facts, Media, and Absent are the public projection:
+// safe to serialize as catalog.json and safe to hand to RenderPrompt.
 type Catalog struct {
-	Facts  []FactEntry
-	Media  []MediaEntry
-	Absent []AbsentEntry
+	Facts  []FactEntry   `json:"facts"`
+	Media  []MediaEntry  `json:"media"`
+	Absent []AbsentEntry `json:"absent"`
+
+	resolution map[string]mediaResolution // token -> material IDs; ResolveSend only
 }
 
 var refPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
@@ -54,7 +70,7 @@ var refPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // Any invalid or stale material reference in a non-empty media column is a
 // hard error — rendering fails, it is never silently treated as empty.
 func BuildCatalog(kb *KB) (*Catalog, error) {
-	cat := &Catalog{}
+	cat := &Catalog{resolution: map[string]mediaResolution{}}
 	if err := buildFacts(kb, cat); err != nil {
 		return nil, err
 	}
@@ -80,8 +96,8 @@ func addFact(cat *Catalog, table, ref string, col FactColumn, value string) {
 		return
 	}
 	cat.Facts = append(cat.Facts, FactEntry{
-		Token:     "{{" + table + "." + ref + "." + col.Column + "}}",
-		Table:     table, Ref: ref, Column: col.Column,
+		Token: "{{" + table + "." + ref + "." + col.Column + "}}",
+		Table: table, Ref: ref, Column: col.Column,
 		Label: col.Label, Value: value, Kind: col.Kind, UsageNote: usageNote(col),
 	})
 }
@@ -92,8 +108,8 @@ func addStockFact(cat *Catalog, ref string, col FactColumn, inStock bool) {
 		display = "нет"
 	}
 	e := FactEntry{
-		Token:     "{{product." + ref + "." + col.Column + "}}",
-		Table:     "product", Ref: ref, Column: col.Column,
+		Token: "{{product." + ref + "." + col.Column + "}}",
+		Table: "product", Ref: ref, Column: col.Column,
 		Label: col.Label, Value: display, Kind: col.Kind, UsageNote: usageNote(col),
 		stockValue: inStock,
 	}
@@ -182,10 +198,10 @@ func productMedia(p *Product) map[string][]string {
 
 func tariffMedia(t *Tariff) map[string][]string {
 	return map[string][]string{
-		"featured_image":  singular(t.FeaturedImage),
-		"pricing_images":  t.PricingImages,
+		"featured_image":   singular(t.FeaturedImage),
+		"pricing_images":   t.PricingImages,
 		"explainer_videos": t.ExplainerVideos,
-		"terms_documents": t.TermsDocuments,
+		"terms_documents":  t.TermsDocuments,
 	}
 }
 
@@ -260,11 +276,13 @@ func buildMedia(kb *KB, cat *Catalog) error {
 				}
 			}
 			hasAny = true
+			token := o.table + "." + o.ref + "." + spec.Column
 			cat.Media = append(cat.Media, MediaEntry{
-				Token: o.table + "." + o.ref + "." + spec.Column,
+				Token: token,
 				Table: o.table, Ref: o.ref, Column: spec.Column,
-				Label: spec.Label, Kind: spec.Kind, Count: len(ids), MaterialIDs: ids,
+				Label: spec.Label, Kind: spec.Kind, Count: len(ids),
 			})
+			cat.resolution[token] = mediaResolution{MaterialIDs: ids}
 		}
 		if !hasAny {
 			cat.Absent = append(cat.Absent, AbsentEntry{Table: o.table, Ref: o.ref, DisplayName: o.display})
@@ -295,7 +313,7 @@ func validateMaterialRef(kb *KB, id string, spec MediaColumn, table, ref string)
 	if m.SizeBytes <= 0 {
 		return fmt.Errorf("aiprompt: %s references zero-size material %s", at, id)
 	}
-	if m.CustomerVisibility != "visible" {
+	if m.CustomerVisibility != "visible" && m.CustomerVisibility != "auto" {
 		return fmt.Errorf("aiprompt: %s references non-customer-sendable material %s (customer_visibility=%s)", at, id, m.CustomerVisibility)
 	}
 	if !mimeMatches(spec.Kind, m.MimeType) {

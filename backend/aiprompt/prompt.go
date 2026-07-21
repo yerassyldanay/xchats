@@ -19,27 +19,52 @@ const (
 	SlotResponseSchema = "%%RESPONSE_SCHEMA%%"
 )
 
-// BuildPrompt renders the stable prompt prefix: frame + assistant config +
-// approved prose + fact-placeholder catalog + semantic media catalog +
-// media-absence list + response schema. It returns the catalog alongside so
-// callers validate responses against exactly what the model saw.
+// BuildPrompt is the explicit two-step orchestration: BuildCatalog validates
+// and resolves kbd_materials (private, KB-only), then RenderPrompt renders
+// from the material-free PromptInput plus the resulting public Catalog
+// projection, and finally the rendered text is checked against kbd_materials
+// once more for defense in depth. It returns the catalog alongside so callers
+// validate responses against exactly what the model saw.
+//
+// Callers that already hold a built Catalog (for example to validate a
+// response against exactly what an earlier render produced) call RenderPrompt
+// directly; production and the eval harness are expected to call BuildCatalog
+// and RenderPrompt as the same explicit sequence this function runs.
 func BuildPrompt(frame string, kb *KB) (string, *Catalog, error) {
 	cat, err := BuildCatalog(kb)
 	if err != nil {
 		return "", nil, err
 	}
+	out, err := RenderPrompt(frame, kb.PromptInput(), cat)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := ValidateNoMaterialLeak(out, kb.Materials); err != nil {
+		return "", nil, err
+	}
+	return out, cat, nil
+}
+
+// RenderPrompt renders the stable prompt prefix — frame + assistant config +
+// approved prose + fact-placeholder catalog + semantic media catalog +
+// media-absence list + response schema — from approved ai_* content (input)
+// and an already-built public catalog (cat). It deliberately does not accept
+// a KB or []Material: kbd_materials must already have been validated and
+// reduced to a Catalog by BuildCatalog before this is called, so the renderer
+// itself has no route to read a material record or ID.
+func RenderPrompt(frame string, input *PromptInput, cat *Catalog) (string, error) {
 	out := frame
-	out = strings.ReplaceAll(out, SlotAssistant, renderAssistant(kb.Assistant))
-	out = strings.ReplaceAll(out, SlotKnowledgeBase, renderTopics(kb.Topics))
-	out = strings.ReplaceAll(out, SlotDescriptions, renderDescriptions(kb))
+	out = strings.ReplaceAll(out, SlotAssistant, renderAssistant(input.Assistant))
+	out = strings.ReplaceAll(out, SlotKnowledgeBase, renderTopics(input.Topics))
+	out = strings.ReplaceAll(out, SlotDescriptions, renderDescriptions(input))
 	out = strings.ReplaceAll(out, SlotFacts, renderFacts(cat.Facts))
 	out = strings.ReplaceAll(out, SlotMedia, renderMediaCatalog(cat.Media))
 	out = strings.ReplaceAll(out, SlotMediaAbsent, renderMediaAbsent(cat.Absent))
 	out = strings.ReplaceAll(out, SlotResponseSchema, RenderResponseSchema())
-	if err := ValidatePrompt(out, kb, cat); err != nil {
-		return "", nil, err
+	if err := ValidatePrompt(out, cat); err != nil {
+		return "", err
 	}
-	return out, cat, nil
+	return out, nil
 }
 
 // renderAssistant renders ai_assistants config; missing prose is omitted —
@@ -84,14 +109,14 @@ func renderTopics(topics []Topic) string {
 
 // renderDescriptions renders entity trusted prose (product descriptions,
 // tariff summaries, contact/policy prose). Empty fields are omitted entirely.
-func renderDescriptions(kb *KB) string {
+func renderDescriptions(input *PromptInput) string {
 	var lines []string
 	add := func(name, text string) {
 		if s := strings.TrimSpace(text); s != "" {
 			lines = append(lines, "- "+name+": "+s)
 		}
 	}
-	for _, p := range kb.Products {
+	for _, p := range input.Products {
 		if !active(p.SalesStatus) {
 			continue
 		}
@@ -101,7 +126,7 @@ func renderDescriptions(kb *KB) string {
 		}
 		add(name, p.Description)
 	}
-	for _, t := range kb.Tariffs {
+	for _, t := range input.Tariffs {
 		if !active(t.SalesStatus) {
 			continue
 		}
@@ -115,12 +140,12 @@ func renderDescriptions(kb *KB) string {
 			add("Тариф "+t.Name, strings.Join(parts, " "))
 		}
 	}
-	if c := kb.Contacts; c != nil {
+	if c := input.Contacts; c != nil {
 		add("Адрес", c.Address)
 		add("Реквизиты", c.LegalInformation)
 		add("Обратный звонок", c.CallbackTime)
 	}
-	if p := kb.Policies; p != nil {
+	if p := input.Policies; p != nil {
 		add("Предоплата", p.Prepayment)
 		add("Рассрочка", p.Installment)
 		add("Гарантия", p.Warranty)
@@ -181,11 +206,14 @@ var (
 	uuidPattern         = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 )
 
-// ValidatePrompt is the trust-boundary gate: no leftover slots, no unresolved
-// placeholders outside the catalog, and no leakage of anything from
-// kbd_materials — UUIDs, filenames, extensions, storage backends or keys.
+// ValidatePrompt is the structural trust-boundary gate applied while
+// rendering: no leftover %%SLOT%% markers, no placeholder outside the fact
+// catalog, and no UUID- or file-extension-shaped substring anywhere in the
+// text (defense in depth against a catalog or registry bug). It needs only
+// the rendered text and the catalog the model was shown — never
+// kbd_materials — because RenderPrompt itself never receives kbd_materials.
 // A violation is a hard render failure.
-func ValidatePrompt(prompt string, kb *KB, cat *Catalog) error {
+func ValidatePrompt(prompt string, cat *Catalog) error {
 	if m := leftoverSlotPattern.FindString(prompt); m != "" {
 		return fmt.Errorf("aiprompt: unfilled prompt slot %s", m)
 	}
@@ -200,9 +228,26 @@ func ValidatePrompt(prompt string, kb *KB, cat *Catalog) error {
 	if m := fileExtPattern.FindString(prompt); m != "" {
 		return fmt.Errorf("aiprompt: prompt leaks a filename extension: %s", m)
 	}
-	for _, mat := range kb.Materials {
-		for _, secret := range []string{mat.ID, mat.Filename, mat.StorageKey} {
-			if secret != "" && strings.Contains(prompt, secret) {
+	return nil
+}
+
+// ValidateNoMaterialLeak re-checks a rendered prompt against the actual
+// kbd_materials rows behind it: every distinguishing identifying field (id,
+// source ref, filename, storage backend, storage key, MIME type) must be
+// absent from the text verbatim. Short values (len < 6) are skipped because a
+// short generic token cannot be reliably distinguished from ordinary prompt
+// vocabulary — real material identifiers, filenames, and storage keys are
+// always longer than that in practice, and tests use deliberately distinctive
+// sentinel values. BuildPrompt runs this automatically; callers that render
+// via the split BuildCatalog+RenderPrompt sequence should call it explicitly
+// with the same materials passed to BuildCatalog.
+func ValidateNoMaterialLeak(prompt string, materials []Material) error {
+	for _, mat := range materials {
+		for _, secret := range []string{mat.ID, mat.SourceRef, mat.Filename, mat.StorageBackend, mat.StorageKey, mat.MimeType} {
+			if len(secret) < 6 {
+				continue
+			}
+			if strings.Contains(prompt, secret) {
 				return fmt.Errorf("aiprompt: prompt leaks kbd_materials value %q", secret)
 			}
 		}

@@ -195,7 +195,7 @@ func ResolveSend(tokens []string, kb *KB, cat *Catalog) ([]ResolvedMaterial, err
 		if err != nil {
 			return nil, err
 		}
-		for _, id := range entry.MaterialIDs {
+		for _, id := range cat.resolution[tok].MaterialIDs {
 			if err := validateMaterialRef(kb, id, spec, entry.Table, entry.Ref); err != nil {
 				return nil, err
 			}
