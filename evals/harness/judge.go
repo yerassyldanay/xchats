@@ -164,7 +164,7 @@ type Verdict struct {
 	MediaIssue string `json:"media_issue,omitempty"`
 	// MediaCount/TooManyMedia are UNIVERSAL — checked on every test regardless of whether
 	// it declares a `media:` expectation, mirroring every frame's own rule-3 attachment
-	// cap (see maxMediaRefs/maxMediaGroups). MediaCountEvaluated is a CODE-VERSION marker,
+	// cap (see maxMediaGroups). MediaCountEvaluated is a CODE-VERSION marker,
 	// not derived from ParseOK: a verdict judged by pre-upgrade code has this field
 	// entirely absent from its JSON, which unmarshals as false. Without this marker,
 	// re-reading such a verdict would report TooManyMedia's zero value (false) as a
@@ -421,15 +421,13 @@ func normalizeLangCode(code string) string {
 	return code
 }
 
-// maxMediaRefs/maxMediaGroups mirror each frame's own attachment cap — rule 3 in every
-// frame.txt: asset_refs frames say "Maximum 3" (e.g. shop-current/frame.txt,
-// lang-canary-v1/frame.txt), attach_groups frames say "Максимум 2 группы" (e.g.
-// shop-scale/frame.txt, shop-decisions-v1/frame.txt, xpayment-decisions-v1/frame.txt). If
-// either frame's stated cap ever changes, this constant must change with it.
-const (
-	maxMediaRefs   = 3
-	maxMediaGroups = 2
-)
+// maxMediaGroups mirrors every frame's own attachment cap — rule 3 in every frame.txt,
+// "Максимум 2" (e.g. shop-scale/frame.txt, shop-decisions-v1/frame.txt,
+// xpayment-decisions-v1/frame.txt, shop-current/frame.txt, frame-ru.txt). Every scenario
+// shares this one cap now — the historical separate asset_refs cap of 3 no longer
+// exists now that every scenario returns media_files_to_send. If a frame's stated cap
+// ever changes, this constant must change with it.
+const maxMediaGroups = 2
 
 // providerModelKey is the ONE key every grouping of judged results (Verdict.Model,
 // priceByModel, freshSplit) must use once two provider entries can share the same

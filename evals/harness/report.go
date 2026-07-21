@@ -400,7 +400,7 @@ func buildContractReport(runs []JudgedRun) string {
 				fmt.Fprintf(&b, "- unknown media (dropped by the real product, not blocked — but still counted against model-behavior here): %s\n", strings.Join(v.UnknownMedia, ", "))
 			}
 			if v.MediaCountEvaluated && v.TooManyMedia {
-				fmt.Fprintf(&b, "- **too many attachments:** %d entries (frame cap: 3 refs / 2 groups)\n", v.MediaCount)
+				fmt.Fprintf(&b, "- **too many attachments:** %d entries (frame cap: 2)\n", v.MediaCount)
 			}
 			if v.Truncated {
 				fmt.Fprintf(&b, "- **TRUNCATED — finish_reason=%s** (response cut off before the model finished; contract fails regardless of what parsed)\n", v.FinishReason)
