@@ -51,7 +51,7 @@ type CatalogScenario struct {
 	// scenario, the fixture file) every Fact below and every test's `requires` token is
 	// resolved against (may point into another scenario dir — several scenarios
 	// deliberately share one data.yaml).
-	FactsSource string `json:"facts_source"`
+	FactsSource string        `json:"facts_source"`
 	Facts       []CatalogFact `json:"facts"`
 	// MediaTokens is every valid media_files_to_send token for this scenario.
 	MediaTokens []string          `json:"media_tokens,omitempty"`
@@ -130,14 +130,14 @@ func catalogOutcomeCases(ocs []OutcomeCase) []CatalogOutcomeCase {
 // differently from an explicit `escalate: false` (an ACTIVE requirement that the model
 // must NOT escalate) — collapsing the two would silently hide a real requirement.
 type CatalogTestCase struct {
-	ID             string              `json:"id"`
-	Message        string              `json:"message"`
-	History        []HistoryTurn       `json:"history,omitempty"`
-	Requires       [][]string          `json:"requires,omitempty"`
-	Language       string              `json:"language,omitempty"`
-	Escalate       *bool               `json:"escalate,omitempty"`
-	MustNotContain []string            `json:"must_not_contain,omitempty"`
-	MustContainAny []string            `json:"must_contain_any,omitempty"`
+	ID             string               `json:"id"`
+	Message        string               `json:"message"`
+	History        []HistoryTurn        `json:"history,omitempty"`
+	Requires       [][]string           `json:"requires,omitempty"`
+	Language       string               `json:"language,omitempty"`
+	Escalate       *bool                `json:"escalate,omitempty"`
+	MustNotContain []string             `json:"must_not_contain,omitempty"`
+	MustContainAny []string             `json:"must_contain_any,omitempty"`
 	Media          *CatalogMediaExpect  `json:"media,omitempty"`
 	Outcomes       []CatalogOutcomeCase `json:"outcomes,omitempty"`
 	Source         string               `json:"source"`

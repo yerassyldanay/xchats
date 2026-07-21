@@ -3,7 +3,6 @@ description: "Same shop-scale product pool as shop-scale-20/30, capped to the fi
 frame: ../shop-scale/frame.txt
 data: ../shop-scale/data.yaml
 tests: tests.yaml
-contract: attach_groups
 topic_format: "# {ref} — {title} ({keywords})\n{body}"
 limits:
   product: 10

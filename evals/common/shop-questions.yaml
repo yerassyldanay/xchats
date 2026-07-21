@@ -85,16 +85,14 @@ tests:
     escalate: false
     language: ru
     media:
-      any_of_groups: ["product.coffee-machine.images"]
-      any_of_refs: ["coffee-photo-1", "coffee-photo-2", "coffee-photo-3"]
+      any_of: ["products.coffee-machine.gallery_images"]
 
   - id: "7. request certificate"
     message: "А сертификат качества на кофемашину есть? Пришлите."
     escalate: false
     language: ru
     media:
-      any_of_groups: ["product.coffee-machine.certificates"]
-      any_of_refs: ["coffee-cert"]
+      any_of: ["products.coffee-machine.certificate_documents"]
 
   - id: "8. delivery zones question"
     message: "Куда вы вообще доставляете, есть карта зон?"
@@ -306,8 +304,7 @@ tests:
     escalate: false
     language: ru
     media:
-      any_of_groups: ["product.cookware-set.images"]
-      any_of_refs: ["cookware-photo-1", "cookware-photo-2"]
+      any_of: ["products.cookware-set.gallery_images"]
       exclusive: true
     # «он» resolves through history to the cookware set — the model must attach COOKWARE
     # media, not the (more prominent, more often requested) coffee-machine media.
@@ -373,11 +370,10 @@ tests:
     escalate: false
     language: ru
     media:
-      any_of_groups: ["product.coffee-machine.images"]
-      any_of_refs: ["coffee-photo-1", "coffee-photo-2", "coffee-photo-3"]
+      any_of: ["products.coffee-machine.gallery_images"]
     # «все фото» tempts a model into attaching everything it sees. The cap itself is the
-    # judge's universal media-count check (3 refs / 2 groups, mirroring each frame's own
-    # rule 3); the expectation above only pins that at least one RIGHT item was attached.
+    # judge's universal media-count check (2 groups, mirroring each frame's own rule 3);
+    # the expectation above only pins that at least one RIGHT item was attached.
 
   - id: "28. asks for a media type that does not exist (cookware video)"
     message: "Пришлите видео набора посуды, пожалуйста"
@@ -404,8 +400,7 @@ tests:
     escalate: false
     language: kk
     media:
-      any_of_groups: ["product.coffee-machine.images"]
-      any_of_refs: ["coffee-photo-1", "coffee-photo-2", "coffee-photo-3"]
+      any_of: ["products.coffee-machine.gallery_images"]
 
   - id: "30. follow-up with history, Kazakh"
     # DRAFT Kazakh phrasing — pending native-speaker review (repo convention, see test 21).

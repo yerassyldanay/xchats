@@ -1,7 +1,6 @@
 name: shop-current
-description: "Today's shop schema: word-bearing fact values, per-file media table (asset_refs)"
+description: "Today's shop schema: word-bearing fact values, grouped media columns"
 frame: frame.txt
 data: data.yaml
 tests: tests.yaml
-contract: asset_refs
 topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

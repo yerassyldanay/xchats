@@ -47,7 +47,7 @@ tests:
     escalate: false
     language: ru
     media:
-      any_of_groups: ["product.toaster-philips.images"]
+      any_of: ["products.toaster-philips.gallery_images"]
 
   - id: "8. history follow-up, price of an in-pool product"
     # ID starts at 8 on purpose: "6."/"7." are taken by shop-scale-20/30's own deep-list

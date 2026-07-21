@@ -1,7 +1,6 @@
 name: xpayment-decisions-v1
-description: "Payments-SaaS schema per DECISIONS.md: tariffs instead of products, media as grouped columns (attach_groups)"
+description: "Payments-SaaS schema per DECISIONS.md: tariffs instead of products, grouped media columns"
 frame: frame.txt
 data: data.yaml
 tests: tests.yaml
-contract: attach_groups
 topic_format: "# {ref} — {title} ({keywords})\n{body}"

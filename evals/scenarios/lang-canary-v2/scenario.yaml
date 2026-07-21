@@ -11,5 +11,4 @@ experiment: lang-bakeoff
 frame: frame.txt
 data: ../shop-current/data.yaml
 tests: ../lang-canary-v1/tests.yaml
-contract: asset_refs
 topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

@@ -3,7 +3,7 @@
 # file and applies a `limits: { product: N }` cap (see types.go/render.go's applyLimits) —
 # there is no separate data.yaml per size, so the three sizes can never drift apart except
 # by row count. Same fact_tables schema as shop-decisions-v1 (language-neutral values,
-# attach_groups media) so frame.txt is a straight copy of that scenario's.
+# grouped media) so frame.txt is a straight copy of that scenario's.
 #
 # Rows 1-10 are referenced by common/shop-scale-questions.yaml (shared across all three
 # sizes — anything there must exist at every size). Rows 11-20 are only referenced by
@@ -18,7 +18,7 @@ topics:
       Доставляем по городу и области; при крупном заказе доставка бесплатна.
       Точные суммы и сроки называй только из FACTS.
     media:
-      - field: images
+      - field: illustration_images
         files: ["delivery-zones.png"]
         description: "карта зон доставки"
 
@@ -93,63 +93,63 @@ fact_tables:
         description: "автоматическая кофемашина для дома. В наличии на складе в Алматы."
         values: { price: "129 900 ₸", available_pieces: "5" }
         media:
-          - { field: images, files: ["coffee-machine-delonghi-1.jpg"], description: "фото кофемашины DeLonghi" }
-          - { field: videos, files: ["coffee-machine-delonghi-demo.mp4"], description: "видео-обзор кофемашины DeLonghi" }
+          - { field: gallery_images, files: ["coffee-machine-delonghi-1.jpg"], description: "фото кофемашины DeLonghi" }
+          - { field: demo_videos, files: ["coffee-machine-delonghi-demo.mp4"], description: "видео-обзор кофемашины DeLonghi" }
       - ref: cookware-set-12
         display_name: "Набор посуды (12 предметов)"
         description: "набор из 12 предметов. Под заказ, привозим за несколько дней."
         values: { price: "24 900 ₸", available_pieces: "0" }
         media:
-          - { field: images, files: ["cookware-set-12-1.jpg"], description: "фото набора посуды" }
+          - { field: gallery_images, files: ["cookware-set-12-1.jpg"], description: "фото набора посуды" }
       - ref: blender-bosch
         display_name: "Блендер Bosch"
         description: "погружной блендер, для смузи и супов-пюре."
         values: { price: "18 500 ₸", available_pieces: "12" }
         media:
-          - { field: images, files: ["blender-bosch-1.jpg"], description: "фото блендера Bosch" }
+          - { field: gallery_images, files: ["blender-bosch-1.jpg"], description: "фото блендера Bosch" }
       - ref: kettle-tefal
         display_name: "Чайник электрический Tefal"
         description: "электрочайник, 1.7 л, быстрое закипание."
         values: { price: "12 900 ₸", available_pieces: "20" }
         media:
-          - { field: images, files: ["kettle-tefal-1.jpg"], description: "фото чайника Tefal" }
+          - { field: gallery_images, files: ["kettle-tefal-1.jpg"], description: "фото чайника Tefal" }
       - ref: toaster-philips
         display_name: "Тостер Philips"
         description: "тостер на 2 тоста, 7 режимов поджарки."
         values: { price: "15 400 ₸", available_pieces: "8" }
         media:
-          - { field: images, files: ["toaster-philips-1.jpg"], description: "фото тостера Philips" }
+          - { field: gallery_images, files: ["toaster-philips-1.jpg"], description: "фото тостера Philips" }
       - ref: multicooker-redmond
         display_name: "Мультиварка Redmond"
         description: "мультиварка на 5 литров, 12 программ."
         values: { price: "32 900 ₸", available_pieces: "6" }
         media:
-          - { field: images, files: ["multicooker-redmond-1.jpg"], description: "фото мультиварки Redmond" }
+          - { field: gallery_images, files: ["multicooker-redmond-1.jpg"], description: "фото мультиварки Redmond" }
       - ref: microwave-samsung
         display_name: "Микроволновая печь Samsung"
         description: "микроволновая печь, 23 литра, гриль."
         values: { price: "45 000 ₸", available_pieces: "4" }
         media:
-          - { field: images, files: ["microwave-samsung-1.jpg"], description: "фото микроволновой печи Samsung" }
+          - { field: gallery_images, files: ["microwave-samsung-1.jpg"], description: "фото микроволновой печи Samsung" }
       - ref: kettle-bosch
         display_name: "Чайник электрический Bosch"
         description: "электрочайник, 1.7 л, корпус из нержавеющей стали."
         values: { price: "13 900 ₸", available_pieces: "14" }
         media:
-          - { field: images, files: ["kettle-bosch-1.jpg"], description: "фото чайника Bosch" }
+          - { field: gallery_images, files: ["kettle-bosch-1.jpg"], description: "фото чайника Bosch" }
       - ref: vacuum-dyson
         display_name: "Пылесос Dyson"
         description: "беспроводной пылесос, для дома с животными."
         values: { price: "89 900 ₸", available_pieces: "3" }
         media:
-          - { field: images, files: ["vacuum-dyson-1.jpg"], description: "фото пылесоса Dyson" }
-          - { field: certificates, files: ["vacuum-dyson-cert.pdf"], description: "сертификат качества (PDF)" }
+          - { field: gallery_images, files: ["vacuum-dyson-1.jpg"], description: "фото пылесоса Dyson" }
+          - { field: certificate_documents, files: ["vacuum-dyson-cert.pdf"], description: "сертификат качества (PDF)" }
       - ref: iron-philips
         display_name: "Утюг Philips"
         description: "паровой утюг, керамическая подошва."
         values: { price: "9 800 ₸", available_pieces: "15" }
         media:
-          - { field: images, files: ["iron-philips-1.jpg"], description: "фото утюга Philips" }
+          - { field: gallery_images, files: ["iron-philips-1.jpg"], description: "фото утюга Philips" }
 
       # --- 11-20: only referenced by shop-scale-20 and shop-scale-30's own deep-list tests ---
       - ref: fan-mitsubishi
@@ -157,61 +157,61 @@ fact_tables:
         description: "напольный вентилятор, 3 скорости."
         values: { price: "14 200 ₸", available_pieces: "10" }
         media:
-          - { field: images, files: ["fan-mitsubishi-1.jpg"], description: "фото вентилятора Mitsubishi" }
+          - { field: gallery_images, files: ["fan-mitsubishi-1.jpg"], description: "фото вентилятора Mitsubishi" }
       - ref: heater-ballu
         display_name: "Обогреватель Ballu"
         description: "керамический обогреватель, 2 кВт."
         values: { price: "19 900 ₸", available_pieces: "7" }
         media:
-          - { field: images, files: ["heater-ballu-1.jpg"], description: "фото обогревателя Ballu" }
+          - { field: gallery_images, files: ["heater-ballu-1.jpg"], description: "фото обогревателя Ballu" }
       - ref: air-purifier-xiaomi
         display_name: "Очиститель воздуха Xiaomi"
         description: "очиститель воздуха с HEPA-фильтром."
         values: { price: "34 500 ₸", available_pieces: "5" }
         media:
-          - { field: images, files: ["air-purifier-xiaomi-1.jpg"], description: "фото очистителя воздуха Xiaomi" }
+          - { field: gallery_images, files: ["air-purifier-xiaomi-1.jpg"], description: "фото очистителя воздуха Xiaomi" }
       - ref: juicer-bork
         display_name: "Соковыжималка Bork"
         description: "шнековая соковыжималка."
         values: { price: "27 800 ₸", available_pieces: "6" }
         media:
-          - { field: images, files: ["juicer-bork-1.jpg"], description: "фото соковыжималки Bork" }
+          - { field: gallery_images, files: ["juicer-bork-1.jpg"], description: "фото соковыжималки Bork" }
       - ref: food-processor-moulinex
         display_name: "Кухонный комбайн Moulinex"
         description: "кухонный комбайн, набор насадок для нарезки и измельчения."
         values: { price: "39 900 ₸", available_pieces: "4" }
         media:
-          - { field: images, files: ["food-processor-moulinex-1.jpg"], description: "фото кухонного комбайна Moulinex" }
+          - { field: gallery_images, files: ["food-processor-moulinex-1.jpg"], description: "фото кухонного комбайна Moulinex" }
       - ref: waffle-maker-tefal
         display_name: "Вафельница Tefal"
         description: "вафельница для бельгийских вафель."
         values: { price: "13 500 ₸", available_pieces: "8" }
         media:
-          - { field: images, files: ["waffle-maker-tefal-1.jpg"], description: "фото вафельницы Tefal" }
+          - { field: gallery_images, files: ["waffle-maker-tefal-1.jpg"], description: "фото вафельницы Tefal" }
       - ref: sandwich-maker-philips
         display_name: "Сэндвичница Philips"
         description: "сэндвичница на 2 тоста."
         values: { price: "11 200 ₸", available_pieces: "11" }
         media:
-          - { field: images, files: ["sandwich-maker-philips-1.jpg"], description: "фото сэндвичницы Philips" }
+          - { field: gallery_images, files: ["sandwich-maker-philips-1.jpg"], description: "фото сэндвичницы Philips" }
       - ref: electric-grill-tefal
         display_name: "Электрогриль Tefal"
         description: "прижимной электрогриль, антипригарные пластины."
         values: { price: "22 400 ₸", available_pieces: "5" }
         media:
-          - { field: images, files: ["electric-grill-tefal-1.jpg"], description: "фото электрогриля Tefal" }
+          - { field: gallery_images, files: ["electric-grill-tefal-1.jpg"], description: "фото электрогриля Tefal" }
       - ref: rice-cooker-panasonic
         display_name: "Рисоварка Panasonic"
         description: "рисоварка на 1.8 литра."
         values: { price: "17 600 ₸", available_pieces: "9" }
         media:
-          - { field: images, files: ["rice-cooker-panasonic-1.jpg"], description: "фото рисоварки Panasonic" }
+          - { field: gallery_images, files: ["rice-cooker-panasonic-1.jpg"], description: "фото рисоварки Panasonic" }
       - ref: bread-maker-redmond
         display_name: "Хлебопечка Redmond"
         description: "хлебопечка, 19 программ выпечки."
         values: { price: "28 900 ₸", available_pieces: "3" }
         media:
-          - { field: images, files: ["bread-maker-redmond-1.jpg"], description: "фото хлебопечки Redmond" }
+          - { field: gallery_images, files: ["bread-maker-redmond-1.jpg"], description: "фото хлебопечки Redmond" }
 
       # --- 21-30: only referenced by shop-scale-30's own deep-list tests ---
       - ref: induction-cooker-midea
@@ -219,61 +219,61 @@ fact_tables:
         description: "настольная индукционная плита, 1 конфорка."
         values: { price: "31 200 ₸", available_pieces: "6" }
         media:
-          - { field: images, files: ["induction-cooker-midea-1.jpg"], description: "фото индукционной плиты Midea" }
+          - { field: gallery_images, files: ["induction-cooker-midea-1.jpg"], description: "фото индукционной плиты Midea" }
       - ref: steam-mop-kitfort
         display_name: "Пароочиститель Kitfort"
         description: "паровая швабра для влажной уборки."
         values: { price: "16 700 ₸", available_pieces: "7" }
         media:
-          - { field: images, files: ["steam-mop-kitfort-1.jpg"], description: "фото пароочистителя Kitfort" }
+          - { field: gallery_images, files: ["steam-mop-kitfort-1.jpg"], description: "фото пароочистителя Kitfort" }
       - ref: hair-dryer-dyson
         display_name: "Фен Dyson"
         description: "фен с контролем температуры воздуха."
         values: { price: "54 900 ₸", available_pieces: "4" }
         media:
-          - { field: images, files: ["hair-dryer-dyson-1.jpg"], description: "фото фена Dyson" }
+          - { field: gallery_images, files: ["hair-dryer-dyson-1.jpg"], description: "фото фена Dyson" }
       - ref: straightener-philips
         display_name: "Выпрямитель Philips"
         description: "выпрямитель для волос, керамические пластины."
         values: { price: "13 900 ₸", available_pieces: "10" }
         media:
-          - { field: images, files: ["straightener-philips-1.jpg"], description: "фото выпрямителя Philips" }
+          - { field: gallery_images, files: ["straightener-philips-1.jpg"], description: "фото выпрямителя Philips" }
       - ref: coffee-grinder-bosch
         display_name: "Кофемолка Bosch"
         description: "электрическая кофемолка, жерновая."
         values: { price: "9 400 ₸", available_pieces: "12" }
         media:
-          - { field: images, files: ["coffee-grinder-bosch-1.jpg"], description: "фото кофемолки Bosch" }
+          - { field: gallery_images, files: ["coffee-grinder-bosch-1.jpg"], description: "фото кофемолки Bosch" }
       - ref: electric-kettle-xiaomi
         display_name: "Чайник Xiaomi Smart"
         description: "электрочайник с управлением через приложение."
         values: { price: "8 900 ₸", available_pieces: "15" }
         media:
-          - { field: images, files: ["electric-kettle-xiaomi-1.jpg"], description: "фото чайника Xiaomi Smart" }
+          - { field: gallery_images, files: ["electric-kettle-xiaomi-1.jpg"], description: "фото чайника Xiaomi Smart" }
       - ref: yogurt-maker-tefal
         display_name: "Йогуртница Tefal"
         description: "йогуртница на 6 порционных баночек."
         values: { price: "10 500 ₸", available_pieces: "8" }
         media:
-          - { field: images, files: ["yogurt-maker-tefal-1.jpg"], description: "фото йогуртницы Tefal" }
+          - { field: gallery_images, files: ["yogurt-maker-tefal-1.jpg"], description: "фото йогуртницы Tefal" }
       - ref: slow-cooker-crockpot
         display_name: "Мультиварка Crock-Pot"
         description: "мультиварка медленного приготовления."
         values: { price: "26 300 ₸", available_pieces: "5" }
         media:
-          - { field: images, files: ["slow-cooker-crockpot-1.jpg"], description: "фото мультиварки Crock-Pot" }
+          - { field: gallery_images, files: ["slow-cooker-crockpot-1.jpg"], description: "фото мультиварки Crock-Pot" }
       - ref: deep-fryer-tefal
         display_name: "Фритюрница Tefal"
         description: "фритюрница с фильтром запаха."
         values: { price: "18 900 ₸", available_pieces: "6" }
         media:
-          - { field: images, files: ["deep-fryer-tefal-1.jpg"], description: "фото фритюрницы Tefal" }
+          - { field: gallery_images, files: ["deep-fryer-tefal-1.jpg"], description: "фото фритюрницы Tefal" }
       - ref: vacuum-sealer-kitfort
         display_name: "Вакууматор Kitfort"
         description: "вакуумный упаковщик для продуктов."
         values: { price: "15 800 ₸", available_pieces: "4" }
         media:
-          - { field: images, files: ["vacuum-sealer-kitfort-1.jpg"], description: "фото вакууматора Kitfort" }
+          - { field: gallery_images, files: ["vacuum-sealer-kitfort-1.jpg"], description: "фото вакууматора Kitfort" }
 
   - table: policy
     label_format: "{field_label}"

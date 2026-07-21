@@ -10,5 +10,4 @@ description: >
 frame: ../xpayment-decisions-v1/frame.txt
 data: ../xpayment-decisions-v1/data.yaml
 tests: tests.yaml
-contract: attach_groups
 topic_format: "# {ref} — {title} ({keywords})\n{body}"

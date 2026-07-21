@@ -59,7 +59,7 @@ func TestJudgeScenario_FallsBackToLiveGeneratedWhenNoSnapshot(t *testing.T) {
 	// {{x}} injects to the live catalog's value; requires "x" is satisfied only if the
 	// resolved value flows through — this doubles as the fallback-source proof AND a
 	// sanity check that judging still works end to end.
-	writeMinimalResults(t, runDir, "fixture-scenario", `{"reply_text":"val={{x}}","reply_language":"ru","attach_groups":[],"escalate":false}`)
+	writeMinimalResults(t, runDir, "fixture-scenario", `{"reply_text":"val={{x}}","reply_language":"ru","media_files_to_send":[],"escalate":false}`)
 
 	if err := judgeScenario(scenarioDir, runDir, "../models.yaml"); err != nil {
 		t.Fatalf("judgeScenario: %v", err)
@@ -108,7 +108,7 @@ func TestJudgeScenario_PrefersRunSnapshotOverLiveGenerated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeMinimalResults(t, runDir, "fixture-scenario", `{"reply_text":"val={{x}}","reply_language":"ru","attach_groups":[],"escalate":false}`)
+	writeMinimalResults(t, runDir, "fixture-scenario", `{"reply_text":"val={{x}}","reply_language":"ru","media_files_to_send":[],"escalate":false}`)
 
 	if err := judgeScenario(scenarioDir, runDir, "../models.yaml"); err != nil {
 		t.Fatalf("judgeScenario: %v", err)

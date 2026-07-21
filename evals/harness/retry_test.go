@@ -69,7 +69,7 @@ func TestMergeRowPatch_PreservesUnknownFields(t *testing.T) {
 	}`)
 
 	patch := rowPatch{Retries: 1, SelectedAttempt: 1}
-	patch.Response.Output = `{"reply_text":"fixed","reply_language":"ru","asset_refs":[],"escalate":false}`
+	patch.Response.Output = `{"reply_text":"fixed","reply_language":"ru","media_files_to_send":[],"escalate":false}`
 	patch.Response.FinishReason = "stop"
 	patch.TokenUsage.Total = 900
 	patch.TokenUsage.Prompt = 400
@@ -139,7 +139,7 @@ func TestRetryOneRow_SuccessAppendsAttemptAndSelectsIt(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := orResponse{ID: "gen-test-1", Provider: "TestProvider"}
 		resp.Choices = []orChoice{{FinishReason: "stop", NativeFinishReason: "stop"}}
-		resp.Choices[0].Message.Content = `{"reply_text":"fixed on retry","reply_language":"ru","asset_refs":[],"escalate":false}`
+		resp.Choices[0].Message.Content = `{"reply_text":"fixed on retry","reply_language":"ru","media_files_to_send":[],"escalate":false}`
 		reasoningTokens := 42
 		resp.Usage = &orUsage{
 			PromptTokens: 100, CompletionTokens: 60,
@@ -178,7 +178,7 @@ func TestRetryOneRow_SuccessAppendsAttemptAndSelectsIt(t *testing.T) {
 	if patch.Attempts[1].ModelConfigSHA256 != "retry-sha" || patch.Attempts[1].ReasoningTokens != 42 {
 		t.Errorf("want attempt 1 to be the retry under the retry config with reasoning tokens captured, got %+v", patch.Attempts[1])
 	}
-	if patch.Response.Output != `{"reply_text":"fixed on retry","reply_language":"ru","asset_refs":[],"escalate":false}` {
+	if patch.Response.Output != `{"reply_text":"fixed on retry","reply_language":"ru","media_files_to_send":[],"escalate":false}` {
 		t.Errorf("want response.output = the retry's content, got %q", patch.Response.Output)
 	}
 	// Real spend, real wall time: summed across BOTH attempts, not just the selected one.
@@ -241,7 +241,7 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := orResponse{}
 		resp.Choices = []orChoice{{FinishReason: "stop"}}
-		resp.Choices[0].Message.Content = `{"reply_text":"fixed","reply_language":"ru","asset_refs":[],"escalate":false}`
+		resp.Choices[0].Message.Content = `{"reply_text":"fixed","reply_language":"ru","media_files_to_send":[],"escalate":false}`
 		resp.Usage = &orUsage{PromptTokens: 400, CompletionTokens: 50}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -287,7 +287,7 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 		t.Fatal(err)
 	}
 	response, _ := patchedRow["response"].(map[string]any)
-	if response["output"] != `{"reply_text":"fixed","reply_language":"ru","asset_refs":[],"escalate":false}` {
+	if response["output"] != `{"reply_text":"fixed","reply_language":"ru","media_files_to_send":[],"escalate":false}` {
 		t.Errorf("want retried row's response.output patched, got %v", response["output"])
 	}
 	if patchedRow["retries"] != float64(1) {
@@ -389,7 +389,7 @@ func TestCmdRetry_EndToEnd_RepairsAndIsIdempotentOnSecondInvocation(t *testing.T
 		calls++
 		resp := orResponse{}
 		resp.Choices = []orChoice{{FinishReason: "stop"}}
-		resp.Choices[0].Message.Content = `{"reply_text":"fixed t2","reply_language":"ru","asset_refs":[],"escalate":false}`
+		resp.Choices[0].Message.Content = `{"reply_text":"fixed t2","reply_language":"ru","media_files_to_send":[],"escalate":false}`
 		resp.Usage = &orUsage{PromptTokens: 50, CompletionTokens: 20}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
