@@ -1,0 +1,12 @@
+# Fail-closed rule under test: a media column references a material id with
+# no corresponding kbd_materials row at all. aiprompt.BuildCatalog must fail
+# the whole render, not silently treat the column as empty.
+organization_id: "33333333-3333-3333-3333-333333333333"
+ai_products:
+  - ref: probe
+    name: "Тестовый товар"
+    price: "1 000 ₸"
+    in_stock: true
+    sales_status: active
+    featured_image: "44444444-4444-4444-4444-444444444444"
+# kbd_materials deliberately omitted: the id above resolves to nothing.

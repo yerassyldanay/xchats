@@ -1,0 +1,21 @@
+# Fail-closed rule under test: the referenced material's source_type is not
+# "file" (e.g. authored as plain text/url/instruction, never uploaded) — it
+# can never be sent as an attachment, so it must never become a media token.
+organization_id: "33333333-3333-3333-3333-333333333333"
+ai_products:
+  - ref: probe
+    name: "Тестовый товар"
+    price: "1 000 ₸"
+    in_stock: true
+    sales_status: active
+    featured_image: "44444444-4444-4444-4444-444444444444"
+kbd_materials:
+  - id: "44444444-4444-4444-4444-444444444444"
+    source_type: text
+    filename: "probe.jpg"
+    mime_type: "image/jpeg"
+    size_bytes: 1000
+    storage_backend: fake
+    storage_key: "fake://probe"
+    processing_status: built
+    customer_visibility: visible

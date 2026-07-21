@@ -1,0 +1,3240 @@
+# evals/scenarios/shop-kb-v1/data-ru.yaml — GENERATED, do not hand-edit.
+#
+# Produced by running: cd evals/harness && go run ./cmd/genkbfixture
+# from internal/kbfixture/generate.go. To change this fixture, edit the
+# generator and regenerate — hand edits desync from generate_test.go's
+# byte-for-byte drift check and will be silently overwritten by the next run.
+#
+# Schema-shaped Russian fixture for the shop-kb-v1 eval family: every
+# top-level key is an exact ai_*/kbd_materials table name and every nested
+# key is an exact business column name (see this package's doc comment for
+# the fixture-projection rules). 100 products — two pinned (coffee-machine:
+# in stock, full media; cookware-set: out of stock, gallery only) plus 98
+# generated across a 14-kind x 7-brand matrix, in_stock false at index%3==0,
+# roughly half carrying purpose-named media in a rotating mix of full/
+# partial/none coverage so every size band (30/60/100) sees all three. Nine
+# topics, including number-free warranty prose and delivery's illustration
+# image. ai_policies.main.return_period_in_days is deliberately empty — the
+# missing-exact-value escalation case. kbd_materials holds one metadata row
+# per referenced file (deterministic UUIDv5 ids, a mix of "visible" and
+# "auto" customer_visibility) plus a couple of deliberately unreferenced
+# rows, proving an unreferenced material never affects rendering.
+organization_id: 22222222-2222-2222-2222-222222222222
+ai_assistants:
+    persona: Ты — ассистент по подготовке ответов клиентам интернет-магазина «Demo Shop» в WhatsApp. Ты готовишь ОДИН черновик ответа, который проверит и отправит человек — ты никогда не отправляешь сообщения сам.
+    mission: Помогай клиентам выбрать товар, узнать актуальную цену и наличие, и оформить заказ.
+    guardrails: Никогда не выдумывай цены, наличие, сроки или контактные данные — используй только подтверждённые значения. Никогда не обещай медиафайл, которого нет в каталоге.
+    language_policy: Отвечай только на русском языке.
+    reply_max_words: 120
+ai_topics:
+    - slug: catalog
+      title: Каталог
+      keywords:
+        - каталог
+        - ассортимент
+        - что есть
+        - товары
+      body_md: В каталоге бытовая техника для дома и кухни — от кофемашин и мелкой техники до пылесосов и обогревателей. Актуальные позиции, цены и наличие — только из FACTS и каталога, не перечисляй товары по памяти.
+      featured_image: ""
+      illustration_images: []
+      explainer_videos: []
+      narration_audio_files: []
+      reference_documents: []
+    - slug: delivery
+      title: Доставка
+      keywords:
+        - доставка
+        - привезти
+        - сроки
+        - стоимость доставки
+      body_md: Доставляем по Алматы и области; срок и стоимость зависят от адреса, а при заказе на крупную сумму доставка становится бесплатной. Называй точные значения только из FACTS.
+      featured_image: ""
+      illustration_images:
+        - 3495594b-d3cc-5696-9149-fe4ecc377447
+      explainer_videos: []
+      narration_audio_files: []
+      reference_documents: []
+    - slug: payment
+      title: Оплата
+      keywords:
+        - оплата
+        - kaspi
+        - рассрочка
+        - карта
+      body_md: Принимаем оплату картой, через Kaspi и наличными при получении. Оформление — прямо в WhatsApp.
+      featured_image: ""
+      illustration_images: []
+      explainer_videos: []
+      narration_audio_files: []
+      reference_documents: []
+    - slug: how_to_order
+      title: Как заказать
+      keywords:
+        - заказ
+        - оформить
+        - купить
+        - как купить
+      body_md: 'Оформить заказ просто: напишите, какой товар интересует, укажите адрес доставки и подтвердите заказ — мы пришлём счёт и оформим доставку.'
+      featured_image: ""
+      illustration_images: []
+      explainer_videos: []
+      narration_audio_files: []
+      reference_documents: []
+    - slug: warranty
+      title: Гарантия
+      keywords:
+        - гарантия
+        - поломка
+        - ремонт
+        - сервис
+      body_md: На технику действует гарантия производителя — она покрывает заводской брак и оформляется чеком или подтверждением заказа. Точный срок гарантии уточняйте у менеджера.
+      featured_image: ""
+      illustration_images: []
+      explainer_videos: []
+      narration_audio_files: []
+      reference_documents: []
+    - slug: returns
+      title: Возврат
+      keywords:
+        - возврат
+        - вернуть
+        - не подошло
+        - обмен
+      body_md: Возврат и обмен возможны, если товар не был в использовании и сохранена упаковка. Уточняйте условия у менеджера при оформлении.
+      featured_image: ""
+      illustration_images: []
+      explainer_videos: []
+      narration_audio_files: []
+      reference_documents: []
+    - slug: promo
+      title: Акции
+      keywords:
+        - акция
+        - скидка
+        - промокод
+        - распродажа
+      body_md: Актуальные акции и промокоды уточняйте у менеджера — здесь фиксированного списка нет.
+      featured_image: ""
+      illustration_images: []
+      explainer_videos: []
+      narration_audio_files: []
+      reference_documents: []
+    - slug: support
+      title: Поддержка
+      keywords:
+        - поддержка
+        - помощь
+        - вопрос
+        - менеджер
+      body_md: Поддержка на связи в рабочее время — контакты для связи смотрите в разделе контактов.
+      featured_image: ""
+      illustration_images: []
+      explainer_videos: []
+      narration_audio_files: []
+      reference_documents: []
+    - slug: pickup
+      title: Самовывоз
+      keywords:
+        - самовывоз
+        - забрать
+        - склад
+      body_md: Самовывоз возможен со склада в Алматы по предварительной договорённости с менеджером.
+      featured_image: ""
+      illustration_images: []
+      explainer_videos: []
+      narration_audio_files: []
+      reference_documents: []
+ai_products:
+    - ref: coffee-machine
+      name: Кофемашина DeLonghi
+      price: 129 900 ₸
+      description: Автоматическая кофемашина для дома с капучинатором и жерновковой кофемолкой.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: 5dca16d3-926b-5c30-8e16-75297f4faed4
+      gallery_images:
+        - cf4736da-0f74-52d5-934e-e99fd6fb90bb
+        - d24e9df7-6c9b-5ef9-b0e7-25a31088ec26
+        - 780c212c-155f-508a-9385-ba92810b9203
+      demo_videos:
+        - f7601811-55db-5216-bc74-99108b0dc034
+      audio_description_files: []
+      certificate_documents:
+        - 06a1a46b-089b-57a1-8e73-e8624cc77c8c
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: cookware-set
+      name: Набор посуды
+      price: 24 900 ₸
+      description: 'Набор посуды из нержавеющей стали: кастрюли, сковороды и крышки, 12 предметов.'
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - a898396d-bb87-5f2f-b471-6a0d5d225620
+        - 6f8f97dd-8954-5214-b9c6-441fdc6d2ebd
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: blender-bosch
+      name: Блендер Bosch
+      price: 11 200 ₸
+      description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: blender-philips
+      name: Блендер Philips
+      price: 15 400 ₸
+      description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 4950a261-d666-553a-af54-4b51e0f2bdf0
+        - cb88fdec-1322-57a4-9df6-8fc4fa2e131b
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: blender-xiaomi
+      name: Блендер Xiaomi
+      price: 19 500 ₸
+      description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: blender-tefal
+      name: Блендер Tefal
+      price: 23 600 ₸
+      description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - e6a5db9a-a5aa-5c95-b6f2-b8ddffaa1d95
+        - 83e71492-d8b6-516a-8cbe-01bcf95a62ca
+      demo_videos:
+        - dafe8281-9766-535f-8257-cc9d9f8cd6f8
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: blender-redmond
+      name: Блендер Redmond
+      price: 27 800 ₸
+      description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: blender-panasonic
+      name: Блендер Panasonic
+      price: 31 900 ₸
+      description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: d0f8f533-6f13-5356-877b-7cc5a57f8d68
+      gallery_images:
+        - d0d2236b-585a-5e77-a259-e82e7d7421d3
+        - 346e6eb1-ddc6-580d-bf7d-5ed863b7ed12
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - 71775776-3b31-5ff8-9e75-7c832f592060
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: blender-samsung
+      name: Блендер Samsung
+      price: 36 000 ₸
+      description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: kettle-bosch
+      name: Чайник Bosch
+      price: 40 200 ₸
+      description: Электрический чайник с быстрым закипанием и автоматическим отключением.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: 51455145-7ec4-5ba0-873a-613167eccc60
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: kettle-philips
+      name: Чайник Philips
+      price: 44 300 ₸
+      description: Электрический чайник с быстрым закипанием и автоматическим отключением.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: kettle-xiaomi
+      name: Чайник Xiaomi
+      price: 48 500 ₸
+      description: Электрический чайник с быстрым закипанием и автоматическим отключением.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 4dedf7d5-bba3-51a1-8409-799eb9b75a4e
+        - cdd15261-64fa-5c8c-97da-5d7f7d827ab7
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: kettle-tefal
+      name: Чайник Tefal
+      price: 52 600 ₸
+      description: Электрический чайник с быстрым закипанием и автоматическим отключением.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: kettle-redmond
+      name: Чайник Redmond
+      price: 56 700 ₸
+      description: Электрический чайник с быстрым закипанием и автоматическим отключением.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 830807c6-b7cc-591b-a93a-38c3a3116f26
+        - 1aa0aa5f-beb9-5c91-931f-eba652a85756
+      demo_videos:
+        - 7d1aa04e-28eb-5fcd-b533-21349040da27
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: kettle-panasonic
+      name: Чайник Panasonic
+      price: 60 900 ₸
+      description: Электрический чайник с быстрым закипанием и автоматическим отключением.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: kettle-samsung
+      name: Чайник Samsung
+      price: 65 000 ₸
+      description: Электрический чайник с быстрым закипанием и автоматическим отключением.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: 519112ae-8b22-5338-8a07-ea1de3560d90
+      gallery_images:
+        - 8b74f47f-4010-5fc9-8b6f-5fd1804d314d
+        - 6b0965fe-c489-5337-a90d-2b91e1a2dd1c
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - 806a283c-f084-50a6-9469-8375b221b09c
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: toaster-bosch
+      name: Тостер Bosch
+      price: 69 100 ₸
+      description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: toaster-philips
+      name: Тостер Philips
+      price: 73 300 ₸
+      description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: f565f409-7250-5d7b-b2dc-792b7397fbe7
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: toaster-xiaomi
+      name: Тостер Xiaomi
+      price: 77 400 ₸
+      description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: toaster-tefal
+      name: Тостер Tefal
+      price: 81 600 ₸
+      description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 107d9574-c9f5-5a25-8623-d75954f2b0d0
+        - d9d7a1ea-f605-5417-9dd7-39753afdbd42
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: toaster-redmond
+      name: Тостер Redmond
+      price: 85 700 ₸
+      description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: toaster-panasonic
+      name: Тостер Panasonic
+      price: 89 800 ₸
+      description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - afa2dfbd-88c5-5256-9e1e-44a574aae815
+        - d5d3beb2-c164-5a97-931c-197bce882339
+      demo_videos:
+        - faafa91e-4986-5b77-8f61-d6fc6f55cd1f
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: toaster-samsung
+      name: Тостер Samsung
+      price: 94 000 ₸
+      description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: multicooker-bosch
+      name: Мультиварка Bosch
+      price: 98 100 ₸
+      description: Мультиварка с несколькими программами приготовления и отложенным стартом.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: b0529039-1582-569c-8069-ca715b8caf16
+      gallery_images:
+        - b59ffae7-3d91-5d56-a475-d82efeefd6bb
+        - ee1d9b88-7e97-5119-887b-9a9c90231874
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - 97029a0b-99b8-56e6-8888-366ac7bd965d
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: multicooker-philips
+      name: Мультиварка Philips
+      price: 5 200 ₸
+      description: Мультиварка с несколькими программами приготовления и отложенным стартом.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: multicooker-xiaomi
+      name: Мультиварка Xiaomi
+      price: 9 400 ₸
+      description: Мультиварка с несколькими программами приготовления и отложенным стартом.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: a9e5b6a7-47f7-5bc7-b8e8-ea98beb7e752
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: multicooker-tefal
+      name: Мультиварка Tefal
+      price: 13 500 ₸
+      description: Мультиварка с несколькими программами приготовления и отложенным стартом.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: multicooker-redmond
+      name: Мультиварка Redmond
+      price: 17 600 ₸
+      description: Мультиварка с несколькими программами приготовления и отложенным стартом.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 22e24780-c831-5abd-90ca-224b23c87dad
+        - 710898e4-33e9-54cf-a602-a8c812fe3a48
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: multicooker-panasonic
+      name: Мультиварка Panasonic
+      price: 21 800 ₸
+      description: Мультиварка с несколькими программами приготовления и отложенным стартом.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: multicooker-samsung
+      name: Мультиварка Samsung
+      price: 25 900 ₸
+      description: Мультиварка с несколькими программами приготовления и отложенным стартом.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - ae5784fc-01db-59bd-8a28-a8d47c658dd5
+        - 89a92723-7ea9-5d1f-90b9-845a29a3d47f
+      demo_videos:
+        - 1f64ea69-f851-5b0d-b0e1-9ef3b8b84f0c
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: microwave-bosch
+      name: Микроволновая печь Bosch
+      price: 30 100 ₸
+      description: Микроволновая печь с грилем и несколькими режимами мощности.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: microwave-philips
+      name: Микроволновая печь Philips
+      price: 34 200 ₸
+      description: Микроволновая печь с грилем и несколькими режимами мощности.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: a94462b0-f50f-521d-b707-ed29aa4a3eb2
+      gallery_images:
+        - 23636bfb-48f8-570e-931b-d705f09d44b8
+        - f4488dbc-965e-50c1-9fa8-ca13d70e1ee5
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - 21f7c2fc-9ea2-5d7d-a6bd-36a19c6276c9
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: microwave-xiaomi
+      name: Микроволновая печь Xiaomi
+      price: 38 300 ₸
+      description: Микроволновая печь с грилем и несколькими режимами мощности.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: microwave-tefal
+      name: Микроволновая печь Tefal
+      price: 42 500 ₸
+      description: Микроволновая печь с грилем и несколькими режимами мощности.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: 0becd3a9-a2ac-52cd-877d-f634d257fb61
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: microwave-redmond
+      name: Микроволновая печь Redmond
+      price: 46 600 ₸
+      description: Микроволновая печь с грилем и несколькими режимами мощности.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: microwave-panasonic
+      name: Микроволновая печь Panasonic
+      price: 50 700 ₸
+      description: Микроволновая печь с грилем и несколькими режимами мощности.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 9b0974c5-a223-5a1b-af19-83c3e3b7c101
+        - e1ae43f2-360c-595a-933c-0e8cb194de9a
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: microwave-samsung
+      name: Микроволновая печь Samsung
+      price: 54 900 ₸
+      description: Микроволновая печь с грилем и несколькими режимами мощности.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: vacuum-bosch
+      name: Пылесос Bosch
+      price: 59 000 ₸
+      description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 2f9e0817-f61e-52a6-8905-d6d154459cbd
+        - 9babeed6-ae8b-575c-885c-4581eb8d9abd
+      demo_videos:
+        - ce143c84-8459-5c6e-8ea7-a84e876b5a2b
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: vacuum-philips
+      name: Пылесос Philips
+      price: 63 200 ₸
+      description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: vacuum-xiaomi
+      name: Пылесос Xiaomi
+      price: 67 300 ₸
+      description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: d68ba890-aec0-53b1-affc-8ff32d4079c9
+      gallery_images:
+        - fc7d5e3a-2f22-553d-aaf4-6521bdf17aab
+        - 54ebb200-5e73-5818-a603-149cd2bf9885
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - d36a17c4-80ac-5b3c-bb7c-832886d6303a
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: vacuum-tefal
+      name: Пылесос Tefal
+      price: 71 400 ₸
+      description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: vacuum-redmond
+      name: Пылесос Redmond
+      price: 75 600 ₸
+      description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: cddf2010-a849-5b59-ade9-e28359a5af12
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: vacuum-panasonic
+      name: Пылесос Panasonic
+      price: 79 700 ₸
+      description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: vacuum-samsung
+      name: Пылесос Samsung
+      price: 83 800 ₸
+      description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - a090db12-c5c7-515e-9330-468675b28c46
+        - b6a191d5-92e2-500a-8e90-0efb09994ce3
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: iron-bosch
+      name: Утюг Bosch
+      price: 88 000 ₸
+      description: Утюг с функцией отпаривания и керамической подошвой.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: iron-philips
+      name: Утюг Philips
+      price: 92 100 ₸
+      description: Утюг с функцией отпаривания и керамической подошвой.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 53b47789-fc4b-5853-9c5e-fce5630bcdf3
+        - 9539056b-4e63-5aac-bb03-fab65194aa8f
+      demo_videos:
+        - 1f683369-32d7-50a1-a52a-e4af0a9c96b8
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: iron-xiaomi
+      name: Утюг Xiaomi
+      price: 96 300 ₸
+      description: Утюг с функцией отпаривания и керамической подошвой.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: iron-tefal
+      name: Утюг Tefal
+      price: 3 400 ₸
+      description: Утюг с функцией отпаривания и керамической подошвой.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: e5202ca7-658f-5933-b3ad-fe7b2e8065be
+      gallery_images:
+        - 27af1b83-fe28-5e90-8d34-2318cc1118d7
+        - bc53da3c-47d9-5450-a5f9-6f6b6d220555
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - d8b427a8-a716-53b2-8c70-221dd01fa534
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: iron-redmond
+      name: Утюг Redmond
+      price: 7 500 ₸
+      description: Утюг с функцией отпаривания и керамической подошвой.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: iron-panasonic
+      name: Утюг Panasonic
+      price: 11 700 ₸
+      description: Утюг с функцией отпаривания и керамической подошвой.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ff3d71fd-6c44-5e17-a576-1f5044666ce8
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: iron-samsung
+      name: Утюг Samsung
+      price: 15 800 ₸
+      description: Утюг с функцией отпаривания и керамической подошвой.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: fan-bosch
+      name: Вентилятор Bosch
+      price: 19 900 ₸
+      description: Напольный вентилятор с несколькими скоростями обдува и таймером.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 1be2c01d-c6e0-5263-86e0-a24e1c553aa9
+        - 7e565429-c089-5c07-9c54-5e47af15cc3c
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: fan-philips
+      name: Вентилятор Philips
+      price: 24 100 ₸
+      description: Напольный вентилятор с несколькими скоростями обдува и таймером.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: fan-xiaomi
+      name: Вентилятор Xiaomi
+      price: 28 200 ₸
+      description: Напольный вентилятор с несколькими скоростями обдува и таймером.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 7ca35698-2cf2-529a-9074-c49529d5c36e
+        - e52f1c32-06ca-55ca-a8f1-b53acb9afe22
+      demo_videos:
+        - e9d3dcf2-9c00-5804-9fd4-0287688dbf8b
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: fan-tefal
+      name: Вентилятор Tefal
+      price: 32 300 ₸
+      description: Напольный вентилятор с несколькими скоростями обдува и таймером.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: fan-redmond
+      name: Вентилятор Redmond
+      price: 36 500 ₸
+      description: Напольный вентилятор с несколькими скоростями обдува и таймером.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: 3caefb56-6536-5593-95d4-a60cf97f2ae3
+      gallery_images:
+        - 9331ced7-403d-5559-9a14-05817ca9cc79
+        - 94ca6cdd-7a93-5101-948a-fd931f1609e7
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - 64bbb22e-94e7-5816-a233-a6c4d1ce50ad
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: fan-panasonic
+      name: Вентилятор Panasonic
+      price: 40 600 ₸
+      description: Напольный вентилятор с несколькими скоростями обдува и таймером.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: fan-samsung
+      name: Вентилятор Samsung
+      price: 44 800 ₸
+      description: Напольный вентилятор с несколькими скоростями обдува и таймером.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: 3d87f274-3166-531d-a769-c994cba2ac5c
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: heater-bosch
+      name: Обогреватель Bosch
+      price: 48 900 ₸
+      description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: heater-philips
+      name: Обогреватель Philips
+      price: 53 000 ₸
+      description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 31f285d7-973e-50d4-a9af-fded2e0a4b32
+        - e03de3e7-ea4b-511a-8e4d-05181fc8866e
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: heater-xiaomi
+      name: Обогреватель Xiaomi
+      price: 57 200 ₸
+      description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: heater-tefal
+      name: Обогреватель Tefal
+      price: 61 300 ₸
+      description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 51e7f1c4-2ae5-5936-973b-318ede2ee572
+        - 610cfdda-9d02-5ec6-8021-85b04e09fe09
+      demo_videos:
+        - 06d91d6f-9d61-504e-88cb-20e37063f41f
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: heater-redmond
+      name: Обогреватель Redmond
+      price: 65 400 ₸
+      description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: heater-panasonic
+      name: Обогреватель Panasonic
+      price: 69 600 ₸
+      description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: 5d0d6424-d04f-5200-bc08-204610bfdc30
+      gallery_images:
+        - 8578cfa5-cd52-59eb-99cd-d7969ef00485
+        - 66297042-9d9b-53a1-83c2-71c908ae6cd9
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - 2619d234-aa78-5918-845b-3226aefb1d81
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: heater-samsung
+      name: Обогреватель Samsung
+      price: 73 700 ₸
+      description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: air-purifier-bosch
+      name: Очиститель воздуха Bosch
+      price: 77 900 ₸
+      description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: 7a77be63-c832-5c9c-8a41-fe3cdb76f3e1
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: air-purifier-philips
+      name: Очиститель воздуха Philips
+      price: 82 000 ₸
+      description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: air-purifier-xiaomi
+      name: Очиститель воздуха Xiaomi
+      price: 86 100 ₸
+      description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - e9bd1ba2-287b-5f41-a353-1aa09c1e47dd
+        - d43f3022-fc7f-5883-a168-03910b99426a
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: air-purifier-tefal
+      name: Очиститель воздуха Tefal
+      price: 90 300 ₸
+      description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: air-purifier-redmond
+      name: Очиститель воздуха Redmond
+      price: 94 400 ₸
+      description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - f4ccb70d-d2e6-5344-be2e-73a20fddb818
+        - 9357cd93-3799-57ed-a25f-585a801cee5b
+      demo_videos:
+        - 8e463fe4-5d60-54b2-b2eb-c8e3fa62a226
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: air-purifier-panasonic
+      name: Очиститель воздуха Panasonic
+      price: 98 500 ₸
+      description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: air-purifier-samsung
+      name: Очиститель воздуха Samsung
+      price: 5 700 ₸
+      description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: 4c117e3e-d49a-574c-88f4-35dce623b52d
+      gallery_images:
+        - e2bdb016-5fad-57e1-a261-6806f4e8c367
+        - 5cb191c9-fefa-5a8e-af4a-9120c44cb73a
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - 3ecb1066-f3ed-530e-93ca-ffeff60bc2bc
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: juicer-bosch
+      name: Соковыжималка Bosch
+      price: 9 800 ₸
+      description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: juicer-philips
+      name: Соковыжималка Philips
+      price: 14 000 ₸
+      description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: 8cd02f03-bce7-5148-9ec8-6ecf885913a2
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: juicer-xiaomi
+      name: Соковыжималка Xiaomi
+      price: 18 100 ₸
+      description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: juicer-tefal
+      name: Соковыжималка Tefal
+      price: 22 200 ₸
+      description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - d73281d1-c877-5ad7-8492-d609cef7af90
+        - b4b6a2e3-b218-52dc-af00-96e10637a6bd
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: juicer-redmond
+      name: Соковыжималка Redmond
+      price: 26 400 ₸
+      description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: juicer-panasonic
+      name: Соковыжималка Panasonic
+      price: 30 500 ₸
+      description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 2fabceaf-f904-57ef-b312-8ea82608020f
+        - 552e9b8d-aa20-57cd-b729-f251824b3ded
+      demo_videos:
+        - 7b6a67e6-0548-511e-baee-c1e1e2116124
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: juicer-samsung
+      name: Соковыжималка Samsung
+      price: 34 600 ₸
+      description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: food-processor-bosch
+      name: Кухонный комбайн Bosch
+      price: 38 800 ₸
+      description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: 60c5e075-0355-5132-a16a-b5fad9e9226e
+      gallery_images:
+        - 65e6cb45-1a2a-5786-ad1e-54e3f1853437
+        - 4e066d8c-d31d-5b0e-a396-03be8a16d1ad
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - bc952f6a-5199-5f61-b48b-11d38c095cc2
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: food-processor-philips
+      name: Кухонный комбайн Philips
+      price: 42 900 ₸
+      description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: food-processor-xiaomi
+      name: Кухонный комбайн Xiaomi
+      price: 47 000 ₸
+      description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: a2c7af23-6b67-5559-a43c-5baea19904cb
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: food-processor-tefal
+      name: Кухонный комбайн Tefal
+      price: 51 200 ₸
+      description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: food-processor-redmond
+      name: Кухонный комбайн Redmond
+      price: 55 300 ₸
+      description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 7127bef7-d675-53e0-ab39-18c6d4feb6d3
+        - 1550d98b-023c-5941-ab8d-95b1a9be014e
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: food-processor-panasonic
+      name: Кухонный комбайн Panasonic
+      price: 59 500 ₸
+      description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: food-processor-samsung
+      name: Кухонный комбайн Samsung
+      price: 63 600 ₸
+      description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - f7e03ecc-4a00-5d2e-91a4-6ae1c96d9589
+        - 91d7e6be-3f7c-52a5-b12c-e8825e19e3aa
+      demo_videos:
+        - a48d87d5-a87e-5c81-99cf-25928a84c5ec
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: waffle-maker-bosch
+      name: Вафельница Bosch
+      price: 67 700 ₸
+      description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: waffle-maker-philips
+      name: Вафельница Philips
+      price: 71 900 ₸
+      description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: a9358bce-dd69-5ed8-867b-6a872868a770
+      gallery_images:
+        - 5d414a3e-a3ea-5fa4-a3ef-8893804e026c
+        - 44ca68ec-abea-5e7a-9eed-b667da19a571
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - 8d6cc8e4-6aec-502f-bcf2-fbc5e1750134
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: waffle-maker-xiaomi
+      name: Вафельница Xiaomi
+      price: 76 000 ₸
+      description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: waffle-maker-tefal
+      name: Вафельница Tefal
+      price: 80 100 ₸
+      description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: aa255089-7a06-57da-894a-a98fd6275204
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: waffle-maker-redmond
+      name: Вафельница Redmond
+      price: 84 300 ₸
+      description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: waffle-maker-panasonic
+      name: Вафельница Panasonic
+      price: 88 400 ₸
+      description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 0456a6ee-4982-524d-a50f-562f8ceecde5
+        - c8c3ed8e-0fbe-5fa9-83d6-50dc41076c31
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: waffle-maker-samsung
+      name: Вафельница Samsung
+      price: 92 600 ₸
+      description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: sandwich-maker-bosch
+      name: Сэндвичница Bosch
+      price: 96 700 ₸
+      description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 41094b9f-89e2-596d-ad04-d57bdf87b09d
+        - 531ec4fc-234f-562e-ae39-7624cdcf417d
+      demo_videos:
+        - 93ede760-23dd-5d4e-89cd-7dea8be4fe02
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: sandwich-maker-philips
+      name: Сэндвичница Philips
+      price: 3 800 ₸
+      description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: sandwich-maker-xiaomi
+      name: Сэндвичница Xiaomi
+      price: 8 000 ₸
+      description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: 7f018c0b-09d0-5945-b441-20d6c439c202
+      gallery_images:
+        - 6d497526-54c2-5555-8c53-c13591794d23
+        - c8aa4d07-3dbf-59d4-ba0e-f2bdbde6f73e
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents:
+        - ec878baf-a6a6-535a-b6d4-9f485b6fad6c
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: sandwich-maker-tefal
+      name: Сэндвичница Tefal
+      price: 12 100 ₸
+      description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: sandwich-maker-redmond
+      name: Сэндвичница Redmond
+      price: 16 200 ₸
+      description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: 3f05ea68-501e-5996-8ae2-e8a50cccfe46
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: sandwich-maker-panasonic
+      name: Сэндвичница Panasonic
+      price: 20 400 ₸
+      description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
+      category: ""
+      in_stock: true
+      sales_status: active
+      featured_image: ""
+      gallery_images: []
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+    - ref: sandwich-maker-samsung
+      name: Сэндвичница Samsung
+      price: 24 500 ₸
+      description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
+      category: ""
+      in_stock: false
+      sales_status: active
+      featured_image: ""
+      gallery_images:
+        - 90b58f02-b9e9-5c82-949a-9398a4f3f82f
+        - b7d73cac-92bc-5255-92ca-7a4e86ad0199
+      demo_videos: []
+      audio_description_files: []
+      certificate_documents: []
+      manual_documents: []
+      guarantee_documents: []
+      specification_documents: []
+ai_tariffs: []
+ai_contacts:
+    whatsapp: ""
+    email: ""
+    address: ""
+    legal_information: ""
+    callback_time: ""
+    working_hours: Пн–Сб, 9:00–19:00
+    phone: +7 727 300 00 00
+    website: ""
+    instagram: '@demoshop.kz'
+    contact_card_image: ""
+    location_map_image: ""
+    company_legal_documents: []
+ai_policies:
+    delivery_cost: 1 500 ₸
+    delivery_in_days: 1–3
+    free_delivery_from: 20 000 ₸
+    min_order: 5 000 ₸
+    prepayment: ""
+    installment: ""
+    return_period_in_days: ""
+    warranty: ""
+    commerce_policy_documents: []
+kbd_materials:
+    - id: 3495594b-d3cc-5696-9149-fe4ecc377447
+      organization_id: ""
+      source_type: file
+      source_ref: generated://topics/delivery/illustration_images/0
+      filename: topics-delivery-illustration_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 305559
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/topics/delivery/illustration_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 5dca16d3-926b-5c30-8e16-75297f4faed4
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/coffee-machine/featured_image
+      filename: products-coffee-machine-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/coffee-machine/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: cf4736da-0f74-52d5-934e-e99fd6fb90bb
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/coffee-machine/gallery_images/0
+      filename: products-coffee-machine-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/coffee-machine/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: d24e9df7-6c9b-5ef9-b0e7-25a31088ec26
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/coffee-machine/gallery_images/1
+      filename: products-coffee-machine-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/coffee-machine/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 780c212c-155f-508a-9385-ba92810b9203
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/coffee-machine/gallery_images/2
+      filename: products-coffee-machine-gallery_images-2.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/coffee-machine/gallery_images/2
+      processing_status: built
+      customer_visibility: auto
+    - id: f7601811-55db-5216-bc74-99108b0dc034
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/coffee-machine/demo_videos/0
+      filename: products-coffee-machine-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 305559
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/coffee-machine/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 06a1a46b-089b-57a1-8e73-e8624cc77c8c
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/coffee-machine/certificate_documents/0
+      filename: products-coffee-machine-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 374629
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/coffee-machine/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: a898396d-bb87-5f2f-b471-6a0d5d225620
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/cookware-set/gallery_images/0
+      filename: products-cookware-set-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/cookware-set/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 6f8f97dd-8954-5214-b9c6-441fdc6d2ebd
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/cookware-set/gallery_images/1
+      filename: products-cookware-set-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/cookware-set/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 4950a261-d666-553a-af54-4b51e0f2bdf0
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/blender-philips/gallery_images/0
+      filename: products-blender-philips-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 333187
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/blender-philips/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: cb88fdec-1322-57a4-9df6-8fc4fa2e131b
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/blender-philips/gallery_images/1
+      filename: products-blender-philips-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 333187
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/blender-philips/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: e6a5db9a-a5aa-5c95-b6f2-b8ddffaa1d95
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/blender-tefal/gallery_images/0
+      filename: products-blender-tefal-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/blender-tefal/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 83e71492-d8b6-516a-8cbe-01bcf95a62ca
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/blender-tefal/gallery_images/1
+      filename: products-blender-tefal-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/blender-tefal/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: dafe8281-9766-535f-8257-cc9d9f8cd6f8
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/blender-tefal/demo_videos/0
+      filename: products-blender-tefal-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 298652
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/blender-tefal/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: d0f8f533-6f13-5356-877b-7cc5a57f8d68
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/blender-panasonic/featured_image
+      filename: products-blender-panasonic-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 333187
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/blender-panasonic/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: d0d2236b-585a-5e77-a259-e82e7d7421d3
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/blender-panasonic/gallery_images/0
+      filename: products-blender-panasonic-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/blender-panasonic/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 346e6eb1-ddc6-580d-bf7d-5ed863b7ed12
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/blender-panasonic/gallery_images/1
+      filename: products-blender-panasonic-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/blender-panasonic/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 71775776-3b31-5ff8-9e75-7c832f592060
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/blender-panasonic/certificate_documents/0
+      filename: products-blender-panasonic-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 395350
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/blender-panasonic/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 51455145-7ec4-5ba0-873a-613167eccc60
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-bosch/featured_image
+      filename: products-kettle-bosch-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 298652
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-bosch/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: 4dedf7d5-bba3-51a1-8409-799eb9b75a4e
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-xiaomi/gallery_images/0
+      filename: products-kettle-xiaomi-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-xiaomi/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: cdd15261-64fa-5c8c-97da-5d7f7d827ab7
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-xiaomi/gallery_images/1
+      filename: products-kettle-xiaomi-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-xiaomi/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 830807c6-b7cc-591b-a93a-38c3a3116f26
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-redmond/gallery_images/0
+      filename: products-kettle-redmond-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-redmond/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 1aa0aa5f-beb9-5c91-931f-eba652a85756
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-redmond/gallery_images/1
+      filename: products-kettle-redmond-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-redmond/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 7d1aa04e-28eb-5fcd-b533-21349040da27
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-redmond/demo_videos/0
+      filename: products-kettle-redmond-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 305559
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-redmond/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 519112ae-8b22-5338-8a07-ea1de3560d90
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-samsung/featured_image
+      filename: products-kettle-samsung-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-samsung/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: 8b74f47f-4010-5fc9-8b6f-5fd1804d314d
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-samsung/gallery_images/0
+      filename: products-kettle-samsung-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-samsung/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 6b0965fe-c489-5337-a90d-2b91e1a2dd1c
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-samsung/gallery_images/1
+      filename: products-kettle-samsung-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-samsung/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 806a283c-f084-50a6-9469-8375b221b09c
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/kettle-samsung/certificate_documents/0
+      filename: products-kettle-samsung-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 374629
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/kettle-samsung/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: f565f409-7250-5d7b-b2dc-792b7397fbe7
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/toaster-philips/featured_image
+      filename: products-toaster-philips-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/toaster-philips/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: 107d9574-c9f5-5a25-8623-d75954f2b0d0
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/toaster-tefal/gallery_images/0
+      filename: products-toaster-tefal-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/toaster-tefal/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: d9d7a1ea-f605-5417-9dd7-39753afdbd42
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/toaster-tefal/gallery_images/1
+      filename: products-toaster-tefal-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/toaster-tefal/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: afa2dfbd-88c5-5256-9e1e-44a574aae815
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/toaster-panasonic/gallery_images/0
+      filename: products-toaster-panasonic-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/toaster-panasonic/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: d5d3beb2-c164-5a97-931c-197bce882339
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/toaster-panasonic/gallery_images/1
+      filename: products-toaster-panasonic-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/toaster-panasonic/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: faafa91e-4986-5b77-8f61-d6fc6f55cd1f
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/toaster-panasonic/demo_videos/0
+      filename: products-toaster-panasonic-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/toaster-panasonic/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: b0529039-1582-569c-8069-ca715b8caf16
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-bosch/featured_image
+      filename: products-multicooker-bosch-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 333187
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-bosch/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: b59ffae7-3d91-5d56-a475-d82efeefd6bb
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-bosch/gallery_images/0
+      filename: products-multicooker-bosch-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-bosch/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: ee1d9b88-7e97-5119-887b-9a9c90231874
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-bosch/gallery_images/1
+      filename: products-multicooker-bosch-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-bosch/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 97029a0b-99b8-56e6-8888-366ac7bd965d
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-bosch/certificate_documents/0
+      filename: products-multicooker-bosch-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 395350
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-bosch/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: a9e5b6a7-47f7-5bc7-b8e8-ea98beb7e752
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-xiaomi/featured_image
+      filename: products-multicooker-xiaomi-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 340094
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-xiaomi/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: 22e24780-c831-5abd-90ca-224b23c87dad
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-redmond/gallery_images/0
+      filename: products-multicooker-redmond-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-redmond/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: 710898e4-33e9-54cf-a602-a8c812fe3a48
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-redmond/gallery_images/1
+      filename: products-multicooker-redmond-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-redmond/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: ae5784fc-01db-59bd-8a28-a8d47c658dd5
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-samsung/gallery_images/0
+      filename: products-multicooker-samsung-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-samsung/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 89a92723-7ea9-5d1f-90b9-845a29a3d47f
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-samsung/gallery_images/1
+      filename: products-multicooker-samsung-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-samsung/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 1f64ea69-f851-5b0d-b0e1-9ef3b8b84f0c
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/multicooker-samsung/demo_videos/0
+      filename: products-multicooker-samsung-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 340094
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/multicooker-samsung/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: a94462b0-f50f-521d-b707-ed29aa4a3eb2
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/microwave-philips/featured_image
+      filename: products-microwave-philips-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 333187
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/microwave-philips/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: 23636bfb-48f8-570e-931b-d705f09d44b8
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/microwave-philips/gallery_images/0
+      filename: products-microwave-philips-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/microwave-philips/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: f4488dbc-965e-50c1-9fa8-ca13d70e1ee5
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/microwave-philips/gallery_images/1
+      filename: products-microwave-philips-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/microwave-philips/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 21f7c2fc-9ea2-5d7d-a6bd-36a19c6276c9
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/microwave-philips/certificate_documents/0
+      filename: products-microwave-philips-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 395350
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/microwave-philips/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 0becd3a9-a2ac-52cd-877d-f634d257fb61
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/microwave-tefal/featured_image
+      filename: products-microwave-tefal-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/microwave-tefal/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: 9b0974c5-a223-5a1b-af19-83c3e3b7c101
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/microwave-panasonic/gallery_images/0
+      filename: products-microwave-panasonic-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/microwave-panasonic/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: e1ae43f2-360c-595a-933c-0e8cb194de9a
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/microwave-panasonic/gallery_images/1
+      filename: products-microwave-panasonic-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/microwave-panasonic/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 2f9e0817-f61e-52a6-8905-d6d154459cbd
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-bosch/gallery_images/0
+      filename: products-vacuum-bosch-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-bosch/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 9babeed6-ae8b-575c-885c-4581eb8d9abd
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-bosch/gallery_images/1
+      filename: products-vacuum-bosch-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-bosch/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: ce143c84-8459-5c6e-8ea7-a84e876b5a2b
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-bosch/demo_videos/0
+      filename: products-vacuum-bosch-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 291745
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-bosch/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: d68ba890-aec0-53b1-affc-8ff32d4079c9
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-xiaomi/featured_image
+      filename: products-vacuum-xiaomi-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 305559
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-xiaomi/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: fc7d5e3a-2f22-553d-aaf4-6521bdf17aab
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-xiaomi/gallery_images/0
+      filename: products-vacuum-xiaomi-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-xiaomi/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 54ebb200-5e73-5818-a603-149cd2bf9885
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-xiaomi/gallery_images/1
+      filename: products-vacuum-xiaomi-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-xiaomi/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: d36a17c4-80ac-5b3c-bb7c-832886d6303a
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-xiaomi/certificate_documents/0
+      filename: products-vacuum-xiaomi-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-xiaomi/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: cddf2010-a849-5b59-ade9-e28359a5af12
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-redmond/featured_image
+      filename: products-vacuum-redmond-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-redmond/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: a090db12-c5c7-515e-9330-468675b28c46
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-samsung/gallery_images/0
+      filename: products-vacuum-samsung-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-samsung/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: b6a191d5-92e2-500a-8e90-0efb09994ce3
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/vacuum-samsung/gallery_images/1
+      filename: products-vacuum-samsung-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/vacuum-samsung/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 53b47789-fc4b-5853-9c5e-fce5630bcdf3
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/iron-philips/gallery_images/0
+      filename: products-iron-philips-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/iron-philips/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 9539056b-4e63-5aac-bb03-fab65194aa8f
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/iron-philips/gallery_images/1
+      filename: products-iron-philips-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/iron-philips/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 1f683369-32d7-50a1-a52a-e4af0a9c96b8
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/iron-philips/demo_videos/0
+      filename: products-iron-philips-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 291745
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/iron-philips/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: e5202ca7-658f-5933-b3ad-fe7b2e8065be
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/iron-tefal/featured_image
+      filename: products-iron-tefal-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 284838
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/iron-tefal/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: 27af1b83-fe28-5e90-8d34-2318cc1118d7
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/iron-tefal/gallery_images/0
+      filename: products-iron-tefal-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 298652
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/iron-tefal/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: bc53da3c-47d9-5450-a5f9-6f6b6d220555
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/iron-tefal/gallery_images/1
+      filename: products-iron-tefal-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 298652
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/iron-tefal/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: d8b427a8-a716-53b2-8c70-221dd01fa534
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/iron-tefal/certificate_documents/0
+      filename: products-iron-tefal-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/iron-tefal/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: ff3d71fd-6c44-5e17-a576-1f5044666ce8
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/iron-panasonic/featured_image
+      filename: products-iron-panasonic-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/iron-panasonic/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: 1be2c01d-c6e0-5263-86e0-a24e1c553aa9
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-bosch/gallery_images/0
+      filename: products-fan-bosch-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 291745
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-bosch/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: 7e565429-c089-5c07-9c54-5e47af15cc3c
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-bosch/gallery_images/1
+      filename: products-fan-bosch-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 291745
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-bosch/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 7ca35698-2cf2-529a-9074-c49529d5c36e
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-xiaomi/gallery_images/0
+      filename: products-fan-xiaomi-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 298652
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-xiaomi/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: e52f1c32-06ca-55ca-a8f1-b53acb9afe22
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-xiaomi/gallery_images/1
+      filename: products-fan-xiaomi-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 298652
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-xiaomi/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: e9d3dcf2-9c00-5804-9fd4-0287688dbf8b
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-xiaomi/demo_videos/0
+      filename: products-fan-xiaomi-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 277931
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-xiaomi/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 3caefb56-6536-5593-95d4-a60cf97f2ae3
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-redmond/featured_image
+      filename: products-fan-redmond-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 291745
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-redmond/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: 9331ced7-403d-5559-9a14-05817ca9cc79
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-redmond/gallery_images/0
+      filename: products-fan-redmond-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 305559
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-redmond/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 94ca6cdd-7a93-5101-948a-fd931f1609e7
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-redmond/gallery_images/1
+      filename: products-fan-redmond-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 305559
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-redmond/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 64bbb22e-94e7-5816-a233-a6c4d1ce50ad
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-redmond/certificate_documents/0
+      filename: products-fan-redmond-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 353908
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-redmond/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 3d87f274-3166-531d-a769-c994cba2ac5c
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/fan-samsung/featured_image
+      filename: products-fan-samsung-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 291745
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/fan-samsung/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: 31f285d7-973e-50d4-a9af-fded2e0a4b32
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/heater-philips/gallery_images/0
+      filename: products-heater-philips-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/heater-philips/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: e03de3e7-ea4b-511a-8e4d-05181fc8866e
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/heater-philips/gallery_images/1
+      filename: products-heater-philips-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/heater-philips/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 51e7f1c4-2ae5-5936-973b-318ede2ee572
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/heater-tefal/gallery_images/0
+      filename: products-heater-tefal-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/heater-tefal/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 610cfdda-9d02-5ec6-8021-85b04e09fe09
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/heater-tefal/gallery_images/1
+      filename: products-heater-tefal-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/heater-tefal/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 06d91d6f-9d61-504e-88cb-20e37063f41f
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/heater-tefal/demo_videos/0
+      filename: products-heater-tefal-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 291745
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/heater-tefal/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 5d0d6424-d04f-5200-bc08-204610bfdc30
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/heater-panasonic/featured_image
+      filename: products-heater-panasonic-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 326280
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/heater-panasonic/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: 8578cfa5-cd52-59eb-99cd-d7969ef00485
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/heater-panasonic/gallery_images/0
+      filename: products-heater-panasonic-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 340094
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/heater-panasonic/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 66297042-9d9b-53a1-83c2-71c908ae6cd9
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/heater-panasonic/gallery_images/1
+      filename: products-heater-panasonic-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 340094
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/heater-panasonic/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 2619d234-aa78-5918-845b-3226aefb1d81
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/heater-panasonic/certificate_documents/0
+      filename: products-heater-panasonic-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 388443
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/heater-panasonic/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 7a77be63-c832-5c9c-8a41-fe3cdb76f3e1
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-bosch/featured_image
+      filename: products-air-purifier-bosch-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 340094
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-bosch/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: e9bd1ba2-287b-5f41-a353-1aa09c1e47dd
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-xiaomi/gallery_images/0
+      filename: products-air-purifier-xiaomi-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-xiaomi/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: d43f3022-fc7f-5883-a168-03910b99426a
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-xiaomi/gallery_images/1
+      filename: products-air-purifier-xiaomi-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-xiaomi/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: f4ccb70d-d2e6-5344-be2e-73a20fddb818
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-redmond/gallery_images/0
+      filename: products-air-purifier-redmond-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-redmond/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 9357cd93-3799-57ed-a25f-585a801cee5b
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-redmond/gallery_images/1
+      filename: products-air-purifier-redmond-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-redmond/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 8e463fe4-5d60-54b2-b2eb-c8e3fa62a226
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-redmond/demo_videos/0
+      filename: products-air-purifier-redmond-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-redmond/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 4c117e3e-d49a-574c-88f4-35dce623b52d
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-samsung/featured_image
+      filename: products-air-purifier-samsung-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 353908
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-samsung/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: e2bdb016-5fad-57e1-a261-6806f4e8c367
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-samsung/gallery_images/0
+      filename: products-air-purifier-samsung-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-samsung/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 5cb191c9-fefa-5a8e-af4a-9120c44cb73a
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-samsung/gallery_images/1
+      filename: products-air-purifier-samsung-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-samsung/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 3ecb1066-f3ed-530e-93ca-ffeff60bc2bc
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/air-purifier-samsung/certificate_documents/0
+      filename: products-air-purifier-samsung-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 416071
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/air-purifier-samsung/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 8cd02f03-bce7-5148-9ec8-6ecf885913a2
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/juicer-philips/featured_image
+      filename: products-juicer-philips-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/juicer-philips/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: d73281d1-c877-5ad7-8492-d609cef7af90
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/juicer-tefal/gallery_images/0
+      filename: products-juicer-tefal-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/juicer-tefal/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: b4b6a2e3-b218-52dc-af00-96e10637a6bd
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/juicer-tefal/gallery_images/1
+      filename: products-juicer-tefal-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 312466
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/juicer-tefal/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 2fabceaf-f904-57ef-b312-8ea82608020f
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/juicer-panasonic/gallery_images/0
+      filename: products-juicer-panasonic-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 340094
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/juicer-panasonic/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 552e9b8d-aa20-57cd-b729-f251824b3ded
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/juicer-panasonic/gallery_images/1
+      filename: products-juicer-panasonic-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 340094
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/juicer-panasonic/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 7b6a67e6-0548-511e-baee-c1e1e2116124
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/juicer-panasonic/demo_videos/0
+      filename: products-juicer-panasonic-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 319373
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/juicer-panasonic/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 60c5e075-0355-5132-a16a-b5fad9e9226e
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-bosch/featured_image
+      filename: products-food-processor-bosch-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 353908
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-bosch/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: 65e6cb45-1a2a-5786-ad1e-54e3f1853437
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-bosch/gallery_images/0
+      filename: products-food-processor-bosch-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-bosch/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 4e066d8c-d31d-5b0e-a396-03be8a16d1ad
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-bosch/gallery_images/1
+      filename: products-food-processor-bosch-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-bosch/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: bc952f6a-5199-5f61-b48b-11d38c095cc2
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-bosch/certificate_documents/0
+      filename: products-food-processor-bosch-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 416071
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-bosch/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: a2c7af23-6b67-5559-a43c-5baea19904cb
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-xiaomi/featured_image
+      filename: products-food-processor-xiaomi-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-xiaomi/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: 7127bef7-d675-53e0-ab39-18c6d4feb6d3
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-redmond/gallery_images/0
+      filename: products-food-processor-redmond-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 381536
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-redmond/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: 1550d98b-023c-5941-ab8d-95b1a9be014e
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-redmond/gallery_images/1
+      filename: products-food-processor-redmond-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 381536
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-redmond/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: f7e03ecc-4a00-5d2e-91a4-6ae1c96d9589
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-samsung/gallery_images/0
+      filename: products-food-processor-samsung-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 381536
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-samsung/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 91d7e6be-3f7c-52a5-b12c-e8825e19e3aa
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-samsung/gallery_images/1
+      filename: products-food-processor-samsung-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 381536
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-samsung/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: a48d87d5-a87e-5c81-99cf-25928a84c5ec
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/food-processor-samsung/demo_videos/0
+      filename: products-food-processor-samsung-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/food-processor-samsung/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: a9358bce-dd69-5ed8-867b-6a872868a770
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/waffle-maker-philips/featured_image
+      filename: products-waffle-maker-philips-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 353908
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/waffle-maker-philips/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: 5d414a3e-a3ea-5fa4-a3ef-8893804e026c
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/waffle-maker-philips/gallery_images/0
+      filename: products-waffle-maker-philips-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/waffle-maker-philips/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 44ca68ec-abea-5e7a-9eed-b667da19a571
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/waffle-maker-philips/gallery_images/1
+      filename: products-waffle-maker-philips-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/waffle-maker-philips/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 8d6cc8e4-6aec-502f-bcf2-fbc5e1750134
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/waffle-maker-philips/certificate_documents/0
+      filename: products-waffle-maker-philips-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 416071
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/waffle-maker-philips/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: aa255089-7a06-57da-894a-a98fd6275204
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/waffle-maker-tefal/featured_image
+      filename: products-waffle-maker-tefal-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 340094
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/waffle-maker-tefal/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: 0456a6ee-4982-524d-a50f-562f8ceecde5
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/waffle-maker-panasonic/gallery_images/0
+      filename: products-waffle-maker-panasonic-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 381536
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/waffle-maker-panasonic/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: c8c3ed8e-0fbe-5fa9-83d6-50dc41076c31
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/waffle-maker-panasonic/gallery_images/1
+      filename: products-waffle-maker-panasonic-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 381536
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/waffle-maker-panasonic/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 41094b9f-89e2-596d-ad04-d57bdf87b09d
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-bosch/gallery_images/0
+      filename: products-sandwich-maker-bosch-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-bosch/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 531ec4fc-234f-562e-ae39-7624cdcf417d
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-bosch/gallery_images/1
+      filename: products-sandwich-maker-bosch-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-bosch/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 93ede760-23dd-5d4e-89cd-7dea8be4fe02
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-bosch/demo_videos/0
+      filename: products-sandwich-maker-bosch-demo_videos-0.mp4
+      mime_type: video/mp4
+      size_bytes: 347001
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-bosch/demo_videos/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 7f018c0b-09d0-5945-b441-20d6c439c202
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-xiaomi/featured_image
+      filename: products-sandwich-maker-xiaomi-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 360815
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-xiaomi/featured_image
+      processing_status: built
+      customer_visibility: auto
+    - id: 6d497526-54c2-5555-8c53-c13591794d23
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-xiaomi/gallery_images/0
+      filename: products-sandwich-maker-xiaomi-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 374629
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-xiaomi/gallery_images/0
+      processing_status: built
+      customer_visibility: visible
+    - id: c8aa4d07-3dbf-59d4-ba0e-f2bdbde6f73e
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-xiaomi/gallery_images/1
+      filename: products-sandwich-maker-xiaomi-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 374629
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-xiaomi/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: ec878baf-a6a6-535a-b6d4-9f485b6fad6c
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-xiaomi/certificate_documents/0
+      filename: products-sandwich-maker-xiaomi-certificate_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 422978
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-xiaomi/certificate_documents/0
+      processing_status: built
+      customer_visibility: visible
+    - id: 3f05ea68-501e-5996-8ae2-e8a50cccfe46
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-redmond/featured_image
+      filename: products-sandwich-maker-redmond-featured_image.jpg
+      mime_type: image/jpeg
+      size_bytes: 367722
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-redmond/featured_image
+      processing_status: built
+      customer_visibility: visible
+    - id: 90b58f02-b9e9-5c82-949a-9398a4f3f82f
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-samsung/gallery_images/0
+      filename: products-sandwich-maker-samsung-gallery_images-0.jpg
+      mime_type: image/jpeg
+      size_bytes: 381536
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-samsung/gallery_images/0
+      processing_status: built
+      customer_visibility: auto
+    - id: b7d73cac-92bc-5255-92ca-7a4e86ad0199
+      organization_id: ""
+      source_type: file
+      source_ref: generated://products/sandwich-maker-samsung/gallery_images/1
+      filename: products-sandwich-maker-samsung-gallery_images-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 381536
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/products/sandwich-maker-samsung/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: baedad4a-d974-503c-b312-b0053a4c2f6e
+      organization_id: ""
+      source_type: file
+      source_ref: generated://spare/unreferenced-1
+      filename: spare-unreferenced-1.jpg
+      mime_type: image/jpeg
+      size_bytes: 188140
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/spare/unreferenced-1
+      processing_status: built
+      customer_visibility: visible
+    - id: 8daf7402-4c68-5439-83a8-7a80bb0bf75f
+      organization_id: ""
+      source_type: file
+      source_ref: generated://spare/unreferenced-2
+      filename: spare-unreferenced-2.pdf
+      mime_type: application/pdf
+      size_bytes: 188140
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/spare/unreferenced-2
+      processing_status: built
+      customer_visibility: visible
