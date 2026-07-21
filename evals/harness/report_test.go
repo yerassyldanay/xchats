@@ -41,6 +41,29 @@ func TestScaleSizeOf(t *testing.T) {
 	}
 }
 
+// TestScaleSizeOf_IgnoresEarlierDigits is the regression test for the trailing-digit
+// fix: a naive left-to-right digit-concatenation over the whole scenario name corrupts
+// the result the moment ANY earlier digit exists in the name (e.g. a "-v1-" version
+// marker) by shifting it in ahead of the real size digits. Only the TRAILING run of
+// digits is the size.
+func TestScaleSizeOf_IgnoresEarlierDigits(t *testing.T) {
+	cases := []struct {
+		name string
+		want int
+	}{
+		{"shop-kb-v1-scale-100", 100},
+		{"shop-kb-v1-scale-60", 60},
+		{"shop-kb-v1-30", 30},
+		{"shop-kb-v1-canary", 0}, // no trailing digits at all
+		{"shop-scale-2-v1-10", 10},
+	}
+	for _, tc := range cases {
+		if got := scaleSizeOf(tc.name); got != tc.want {
+			t.Errorf("scaleSizeOf(%q) = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestFormatCostCell(t *testing.T) {
 	tests := []struct {
 		name string
@@ -83,10 +106,30 @@ func TestFormatRetryCell_EmptyWhenNothingRetried(t *testing.T) {
 }
 
 func TestFormatRetryCell_ReportsRetriedAndRecoveredSeparatelyFromPassRate(t *testing.T) {
-	ms := modelStats{total: 29, retried: 2, retryRecovered: 2, firstAttemptParseOK: 27}
-	want := "retried 2, recovered 2 — first-attempt JSON parse success 27/29 (93%)"
+	ms := modelStats{total: 29, retried: 2, retryRecovered: 2}
+	want := "retried 2, recovered 2"
 	if got := formatRetryCell(&ms); got != want {
 		t.Fatalf("formatRetryCell() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatRetryCell_EmptyWhenNeverRetried(t *testing.T) {
+	ms := modelStats{total: 10}
+	if got := formatRetryCell(&ms); got != "" {
+		t.Fatalf("formatRetryCell() = %q, want empty string for a run that never touched retry", got)
+	}
+}
+
+// TestFormatFirstShotCell_ReflectsAttempt0EvenWhenRetried is the split-reporting
+// guarantee: firstAttemptContractPass pools Verdict.FirstAttemptContractPass — attempt
+// 0's own outcome — across every row, so a model that needed retry.go's correction on
+// most rows shows a LOWER first-shot number than its final contract-pass rate, never
+// the same number twice under two different labels.
+func TestFormatFirstShotCell_ReflectsAttempt0EvenWhenRetried(t *testing.T) {
+	ms := modelStats{total: 10, contractPass: 9, firstAttemptContractPass: 6}
+	want := "6/10 (60%)"
+	if got := formatFirstShotCell(&ms); got != want {
+		t.Fatalf("formatFirstShotCell() = %q, want %q", got, want)
 	}
 }
 

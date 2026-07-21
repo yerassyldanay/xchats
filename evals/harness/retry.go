@@ -11,7 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"xchats-evals-harness/internal/kbfixture"
 	"xchats-evals-harness/internal/provenance"
+
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 )
 
 // retryTimeout is the HTTP timeout for a single retry call — kimi-k2.5 has been
@@ -20,21 +23,82 @@ import (
 const retryTimeout = 180 * time.Second
 
 // retryCandidateIndexes returns the indexes (into rows, order preserved) of every row
-// this run should retry: unparseable model output, AND not already retried once. Reuses
-// judge.go's own parseModelJSON so the retry trigger can never diverge from what the
-// judge itself considers a parse failure — including the empty-output case (json.Unmarshal
-// on "" is itself a parse error, so no separate empty check is needed).
-func retryCandidateIndexes(rows []PromptfooRow) []int {
+// this run should retry — unparseable JSON, JSON that fails the strict six-field
+// contract schema (missing/wrong-typed field), or a media_files_to_send token outside
+// validMedia — AND not already retried once. Delegates the actual determination to
+// judgeOne against an empty TestCase{} (no Requires/Media/Escalate/Language
+// expectations to evaluate — those judge MODEL BEHAVIOR on a specific test, a different
+// question from "is the contract itself well-formed") so candidacy can never drift from
+// what judgeScenario itself considers ParseOK/ContractFields/UnknownMedia. A row whose
+// contract is well-formed but whose model behavior is simply wrong (bad requires, wrong
+// escalate, forbidden phrase, ...) is deliberately NOT retried: a second roll of the
+// same prompt cannot fix a genuine behavior problem, only a pipeline-shape one, and
+// retrying it would spend money without addressing anything a retry can actually help
+// with.
+func retryCandidateIndexes(rows []PromptfooRow, validMedia map[string]bool) []int {
 	var out []int
 	for i, row := range rows {
 		if row.Retries > 0 {
 			continue
 		}
-		if _, ok := parseModelJSON(row.Response.Output); !ok {
+		v := judgeOne(TestCase{}, row, map[string]string{}, validMedia, nil)
+		if !v.ParseOK || !v.ContractFields || len(v.UnknownMedia) > 0 {
 			out = append(out, i)
 		}
 	}
 	return out
+}
+
+// retryCandidateIndexesSchemaKB is retryCandidateIndexes' counterpart for
+// pipeline:schema_kb_v1 rows — delegates to judgeOneSchemaKB (aiprompt.ValidateResponse)
+// instead, which additionally catches an unknown JSON property (additionalProperties:
+// false) the legacy hand-rolled check in judgeOne has no equivalent for.
+func retryCandidateIndexesSchemaKB(rows []PromptfooRow, kb *aiprompt.KB, cat *aiprompt.Catalog) []int {
+	var out []int
+	for i, row := range rows {
+		if row.Retries > 0 {
+			continue
+		}
+		v := judgeOneSchemaKB(TestCase{}, row, kb, cat, map[string]string{}, nil)
+		if !v.ParseOK || !v.ContractFields || len(v.UnknownMedia) > 0 {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// correctiveFeedbackText returns Russian feedback appended to a retry's prompt when the
+// original response's specific problem is one the model can act on — right now, only
+// "you named a media_files_to_send token that doesn't exist in the catalog," naming
+// exactly which tokens were invalid and instructing the model to copy tokens verbatim
+// from the prompt's own MEDIA catalog rather than paraphrasing or inventing one. Empty
+// for every other retry-candidate reason (unparseable JSON, a missing/wrong-typed
+// field): there is no specific named problem to point at the way there is for an
+// identifiable bad token, so the same repeated prompt is sent unchanged and left to
+// self-correct on the second attempt.
+func correctiveFeedbackText(raw string, validMedia map[string]bool) string {
+	obj, ok := parseModelJSON(raw)
+	if !ok {
+		return ""
+	}
+	rawMedia, _ := obj[mediaFilesField].([]any)
+	var badTokens []string
+	for _, e := range rawMedia {
+		s, ok := e.(string)
+		if !ok || validMedia[s] {
+			continue
+		}
+		badTokens = append(badTokens, s)
+	}
+	if len(badTokens) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"\n\nВАЖНО — исправь и попробуй снова: в предыдущем ответе поле %q содержало значения, "+
+			"которых нет в каталоге MEDIA выше: %s. Скопируй нужный токен ТОЧНО из каталога — "+
+			"не изменяй, не сокращай и не придумывай новый.",
+		mediaFilesField, strings.Join(badTokens, ", "),
+	)
 }
 
 // providerByIDLabel indexes a ModelsFile the same way judge.go's providerModelKey
@@ -149,7 +213,7 @@ type resultsEnvelope struct {
 // a single HTTP failure on one row does NOT abort the whole batch (see the
 // per-row error handling below); it's recorded as a failed attempt on that row only.
 func patchResultsFile(srcPath, dstPath string, candidateIdx []int, typedRows []PromptfooRow,
-	client *orClient, provider ModelProvider, parentModelsSHA, retryModelsSHA string) (retried int, err error) {
+	client *orClient, provider ModelProvider, parentModelsSHA, retryModelsSHA string, validMedia map[string]bool) (retried int, err error) {
 
 	raw, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -170,7 +234,7 @@ func patchResultsFile(srcPath, dstPath string, candidateIdx []int, typedRows []P
 			continue // byte-identical raw message, untouched
 		}
 		row := typedRows[i]
-		patched, callErr := retryOneRow(client, provider, row, parentModelsSHA, retryModelsSHA)
+		patched, callErr := retryOneRow(client, provider, row, parentModelsSHA, retryModelsSHA, validMedia)
 		if callErr != nil {
 			return retried, fmt.Errorf("retry row %d (%s / %s): %w", i, row.Provider.ID, row.TestCase.Description, callErr)
 		}
@@ -222,7 +286,7 @@ type rowPatch struct {
 // original stays selected (SelectedAttempt: 0) and the failed attempt is recorded with
 // its own Error — retries is still incremented to 1 so a second `harness retry`
 // invocation is a no-op (idempotent row predicate), never a repeated spend.
-func retryOneRow(client *orClient, provider ModelProvider, row PromptfooRow, parentModelsSHA, retryModelsSHA string) (rowPatch, error) {
+func retryOneRow(client *orClient, provider ModelProvider, row PromptfooRow, parentModelsSHA, retryModelsSHA string, validMedia map[string]bool) (rowPatch, error) {
 	original := ResultAttempt{
 		Output:            row.Response.Output,
 		FinishReason:      row.Response.FinishReason,
@@ -236,9 +300,11 @@ func retryOneRow(client *orClient, provider ModelProvider, row PromptfooRow, par
 	var p rowPatch
 	p.Attempts = []ResultAttempt{original}
 
+	promptToSend := row.Prompt.Raw + correctiveFeedbackText(row.Response.Output, validMedia)
+
 	ctx, cancel := context.WithTimeout(context.Background(), retryTimeout)
 	defer cancel()
-	result, callErr := client.chatText(ctx, provider, row.Prompt.Raw)
+	result, callErr := client.chatText(ctx, provider, promptToSend)
 
 	if callErr != nil {
 		failed := ResultAttempt{ModelConfigSHA256: retryModelsSHA, Error: callErr.Error()}
@@ -356,7 +422,45 @@ func cmdRetry(args []string) error {
 		return fmt.Errorf("read %s: %w", parentResultsPath, err)
 	}
 	rows := typedResults.Results.Results
-	candidateIdx := retryCandidateIndexes(rows)
+
+	// Candidacy is judged against exactly what THIS parent run graded against — the
+	// same snapshot-preference judgeScenario itself uses — not whatever the live
+	// scenario looks like today.
+	var kb *aiprompt.KB
+	var cat *aiprompt.Catalog
+	validMedia := map[string]bool{}
+	var candidateIdx []int
+	if scenario.Pipeline == "schema_kb_v1" {
+		fixturePath := filepath.Join(*scenarioDir, scenario.Data)
+		kb, err = kbfixture.Load(fixturePath)
+		if err != nil {
+			return fmt.Errorf("load fixture %s: %w", fixturePath, err)
+		}
+		if kb, err = kbfixture.ApplyLimits(kb, scenario.Limits); err != nil {
+			return fmt.Errorf("scenario %q: %w", scenario.Name, err)
+		}
+		cat, err = aiprompt.BuildCatalog(kb)
+		if err != nil {
+			return fmt.Errorf("scenario %q: build catalog: %w", scenario.Name, err)
+		}
+		for _, m := range cat.Media {
+			validMedia[m.Token] = true
+		}
+		candidateIdx = retryCandidateIndexesSchemaKB(rows, kb, cat)
+	} else {
+		genDir := filepath.Join(*scenarioDir, "generated")
+		if snapDir, ok := provenance.SnapshotDirFor(*parentRunDir, scenario.Name); ok {
+			genDir = snapDir
+		}
+		var catalog Catalog
+		if err := readJSON(filepath.Join(genDir, "catalog.json"), &catalog); err != nil {
+			return fmt.Errorf("read catalog.json (did you run render first?): %w", err)
+		}
+		for _, tok := range catalog.MediaTokens {
+			validMedia[tok] = true
+		}
+		candidateIdx = retryCandidateIndexes(rows, validMedia)
+	}
 	fmt.Printf("retry: %d retry-candidate row(s) in %s (parent %s)\n", len(candidateIdx), scenario.Name, filepath.Base(*parentRunDir))
 	if *expectRetryCalls > 0 && len(candidateIdx) != *expectRetryCalls {
 		return fmt.Errorf("retry: resolved %d candidate rows, -expect-retry-calls wanted %d — refusing to spend anything; adjust -run/-expect-retry-calls if this is intentional", len(candidateIdx), *expectRetryCalls)
@@ -455,7 +559,7 @@ func cmdRetry(args []string) error {
 
 	client := newORClientWithTimeout(base, apiKey, retryTimeout)
 	dstResultsPath := filepath.Join(runDir, scenario.Name+".results.json")
-	retried, err := patchResultsFile(parentResultsPath, dstResultsPath, candidateIdx, rows, client, provider, parentModelsSHA, retryModelsSHA)
+	retried, err := patchResultsFile(parentResultsPath, dstResultsPath, candidateIdx, rows, client, provider, parentModelsSHA, retryModelsSHA, validMedia)
 	if err != nil {
 		return fmt.Errorf("retry: %w (partial results, if any, were not written)", err)
 	}

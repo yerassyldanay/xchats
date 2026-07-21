@@ -41,6 +41,9 @@ func judgeSchemaKBRows(scenarioDir string, scenario *ScenarioConfig, results Pro
 			continue
 		}
 		v := judgeOneSchemaKB(tc, row, kb, cat, tokenValue, trustedDigits)
+		v.FirstAttemptParseOK, v.FirstAttemptContractPass = firstAttemptOutcome(row, v, func(r PromptfooRow) Verdict {
+			return judgeOneSchemaKB(TestCase{}, r, kb, cat, tokenValue, trustedDigits)
+		})
 		applyCostEstimate(&v, row, priceByModel, freshSplit)
 		verdicts = append(verdicts, v)
 	}

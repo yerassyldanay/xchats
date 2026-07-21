@@ -20,12 +20,12 @@ func TestRetryCandidateIndexes(t *testing.T) {
 		{}, // index 3: unparseable, never retried -> candidate
 	}
 	rows[0].Response.Output = ""
-	rows[1].Response.Output = `{"reply_text":"ok","reply_language":"ru","asset_refs":[],"escalate":false}`
+	rows[1].Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 	rows[2].Response.Output = "Thinking: still broken"
 	rows[2].Retries = 1
 	rows[3].Response.Output = "not json at all"
 
-	got := retryCandidateIndexes(rows)
+	got := retryCandidateIndexes(rows, map[string]bool{})
 	want := []int{0, 3}
 	if len(got) != len(want) {
 		t.Fatalf("want candidates %v, got %v", want, got)
@@ -45,7 +45,7 @@ func TestRetryCandidateIndexes_RunTwiceIsANoOp(t *testing.T) {
 	rows := []PromptfooRow{{}}
 	rows[0].Response.Output = ""
 	rows[0].Retries = 1 // already retried once, and the retry itself still failed
-	got := retryCandidateIndexes(rows)
+	got := retryCandidateIndexes(rows, map[string]bool{})
 	if len(got) != 0 {
 		t.Fatalf("want no candidates (already retried once), got %v", got)
 	}
@@ -159,7 +159,7 @@ func TestRetryOneRow_SuccessAppendsAttemptAndSelectsIt(t *testing.T) {
 	row.LatencyMs = 30000
 	row.Prompt.Raw = "the exact rendered prompt"
 
-	patch, err := retryOneRow(client, provider, row, "parent-sha", "retry-sha")
+	patch, err := retryOneRow(client, provider, row, "parent-sha", "retry-sha", map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestRetryOneRow_HTTPFailureKeepsOriginalSelected(t *testing.T) {
 	row.LatencyMs = 30000
 	row.Prompt.Raw = "the exact rendered prompt"
 
-	patch, err := retryOneRow(client, provider, row, "parent-sha", "retry-sha")
+	patch, err := retryOneRow(client, provider, row, "parent-sha", "retry-sha", map[string]bool{})
 	// An HTTP failure on the retry call itself is NOT a fatal error for the batch —
 	// it's recorded as a failed attempt, original stays selected.
 	if err != nil {
@@ -230,7 +230,7 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 	srcPath := dir + "/src.results.json"
 	dstPath := dir + "/dst.results.json"
 
-	untouchedRow := `{"id":"row-untouched","zzz_last_field":"should survive in this exact position","response":{"output":"{\"reply_text\":\"ok\",\"reply_language\":\"ru\",\"asset_refs\":[],\"escalate\":false}","cached":false,"finishReason":"stop"},"tokenUsage":{"total":100,"prompt":80,"completion":20},"testCase":{"description":"ok test"},"provider":{"id":"openrouter:minimax/minimax-m2.5","label":""}}`
+	untouchedRow := `{"id":"row-untouched","zzz_last_field":"should survive in this exact position","response":{"output":"{\"reply_text\":\"ok\",\"reply_language\":\"ru\",\"media_files_to_send\":[],\"escalate\":false,\"escalation_reason\":\"\",\"confidence\":0.9}","cached":false,"finishReason":"stop"},"tokenUsage":{"total":100,"prompt":80,"completion":20},"testCase":{"description":"ok test"},"provider":{"id":"openrouter:minimax/minimax-m2.5","label":""}}`
 	brokenRow := `{"id":"row-broken","response":{"output":"Thinking: broken","cached":false,"finishReason":"length"},"tokenUsage":{"total":500,"prompt":400,"completion":100},"testCase":{"description":"broken test"},"provider":{"id":"openrouter:minimax/minimax-m2.5","label":""},"prompt":{"raw":"the prompt"}}`
 
 	srcJSON := `{"results":{"results":[` + untouchedRow + `,` + brokenRow + `]}}`
@@ -255,12 +255,12 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := typedResults.Results.Results
-	candidateIdx := retryCandidateIndexes(rows)
+	candidateIdx := retryCandidateIndexes(rows, map[string]bool{})
 	if len(candidateIdx) != 1 || candidateIdx[0] != 1 {
 		t.Fatalf("want exactly row 1 (the broken one) as a candidate, got %v", candidateIdx)
 	}
 
-	retried, err := patchResultsFile(srcPath, dstPath, candidateIdx, rows, client, provider, "parent-sha", "retry-sha")
+	retried, err := patchResultsFile(srcPath, dstPath, candidateIdx, rows, client, provider, "parent-sha", "retry-sha", map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(scenarioDir, "scenario.yaml"), []byte("name: fixture-scenario\ncontract: asset_refs\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(scenarioDir, "scenario.yaml"), []byte("name: fixture-scenario\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -324,7 +324,7 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 	if err := os.MkdirAll(snapDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(snapDir, "scenario.yaml"), []byte("name: fixture-scenario\ncontract: asset_refs\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(snapDir, "scenario.yaml"), []byte("name: fixture-scenario\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cat := Catalog{}
@@ -348,7 +348,7 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 	okRow := PromptfooRow{}
 	okRow.Provider.ID = "openrouter:test/model"
 	okRow.TestCase.Description = "t1"
-	okRow.Response.Output = `{"reply_text":"ok","reply_language":"ru","asset_refs":[],"escalate":false}`
+	okRow.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 	brokenRow := PromptfooRow{}
 	brokenRow.Provider.ID = "openrouter:test/model"
 	brokenRow.TestCase.Description = "t2"

@@ -68,11 +68,17 @@ type modelStats struct {
 	unknownPricingN                        int
 	tokensInSum, tokensOutSum              int
 	latencySum, tokensSum                  int
-	// retried/retryRecovered/firstAttemptParseOK track retry.go's per-row Retries/
-	// RetryRecovered/ParseOK — see formatRetryCell's doc comment for why these are
-	// reported as their OWN line rather than folded into modelBehaviorPass/contractPass:
-	// a recovered retry must never look identical to a clean first-attempt pass.
-	retried, retryRecovered, firstAttemptParseOK int
+	// retried/retryRecovered track retry.go's per-row Retries/RetryRecovered — see
+	// formatRetryCell's doc comment for why these are reported as their OWN line rather
+	// than folded into modelBehaviorPass/contractPass: a recovered retry must never look
+	// identical to a clean first-attempt pass.
+	retried, retryRecovered int
+	// firstAttemptParseOK/firstAttemptContractPass pool Verdict.FirstAttemptParseOK/
+	// FirstAttemptContractPass across EVERY row (whether or not it was ever retried —
+	// unlike the old firstAttemptParseOK counter this replaces, which only counted rows
+	// that never needed a retry at all). This is the true first-shot rate: for a row
+	// that WAS retried, it reflects attempt 0's own outcome, not the final/selected one.
+	firstAttemptParseOK, firstAttemptContractPass int
 }
 
 // formatRetryCell reports retry.go's effect on this model's rows, or "" when this run
@@ -83,8 +89,18 @@ func formatRetryCell(ms *modelStats) string {
 	if ms.retried == 0 {
 		return ""
 	}
-	return fmt.Sprintf("retried %d, recovered %d — first-attempt JSON parse success %d/%d (%.0f%%)",
-		ms.retried, ms.retryRecovered, ms.firstAttemptParseOK, ms.total, pct(ms.firstAttemptParseOK, ms.total))
+	return fmt.Sprintf("retried %d, recovered %d", ms.retried, ms.retryRecovered)
+}
+
+// formatFirstShotCell reports the true first-shot contract-pass rate — pooled from
+// Verdict.FirstAttemptContractPass across every row, so a retried row's ORIGINAL
+// attempt counts on its own terms, not the outcome after retry.go's correction.
+// Printed next to (never instead of) the main table's post-retry "contract pass"
+// column, per the plan's split-reporting requirement: strict-schema families may show a
+// materially lower first-shot number than their final one, and that gap is signal (how
+// often retry.go's correction was actually needed), not noise to hide.
+func formatFirstShotCell(ms *modelStats) string {
+	return fmt.Sprintf("%d/%d (%.0f%%)", ms.firstAttemptContractPass, ms.total, pct(ms.firstAttemptContractPass, ms.total))
 }
 
 // formatCostCell turns one model's cost-basis tally into a single honest table cell —
@@ -183,8 +199,12 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 				if v.RetryRecovered {
 					ms.retryRecovered++
 				}
-			} else if v.ParseOK {
+			}
+			if v.FirstAttemptParseOK {
 				ms.firstAttemptParseOK++
+			}
+			if v.FirstAttemptContractPass {
+				ms.firstAttemptContractPass++
 			}
 			if !v.ModelBehaviorPass || !v.ContractPass {
 				allFailures = append(allFailures, v)
@@ -192,8 +212,8 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 		}
 		sort.Strings(order)
 
-		b.WriteString("| model | model-behavior pass | 95% CI (Wilson, pooled) | contract pass | est. cost | avg latency | avg tokens | prompt share |\n")
-		b.WriteString("|---|---|---|---|---|---|---|---|\n")
+		b.WriteString("| model | model-behavior pass | 95% CI (Wilson, pooled) | contract pass (final) | contract pass (first shot) | est. cost | avg latency | avg tokens | prompt share |\n")
+		b.WriteString("|---|---|---|---|---|---|---|---|---|\n")
 		for _, m := range order {
 			ms := byModel[m]
 			promptShare := "n/a"
@@ -201,10 +221,11 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 				promptShare = fmt.Sprintf("%.0f%%", 100*float64(ms.tokensInSum)/float64(total))
 			}
 			ciLo, ciHi := wilsonInterval(ms.modelBehaviorPass, ms.total)
-			fmt.Fprintf(&b, "| %s | %d/%d (%.0f%%) | [%.0f%%, %.0f%%] | %d/%d (%.0f%%) | %s | %s | %d | %s |\n",
+			fmt.Fprintf(&b, "| %s | %d/%d (%.0f%%) | [%.0f%%, %.0f%%] | %d/%d (%.0f%%) | %s | %s | %s | %d | %s |\n",
 				m, ms.modelBehaviorPass, ms.total, pct(ms.modelBehaviorPass, ms.total),
 				ciLo*100, ciHi*100,
 				ms.contractPass, ms.total, pct(ms.contractPass, ms.total),
+				formatFirstShotCell(ms),
 				formatCostCell(ms), formatLatencyCell(avg(ms.latencySum, ms.total)), avg(ms.tokensSum, ms.total),
 				promptShare)
 		}
@@ -236,7 +257,7 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 			b.WriteString("\n")
 		}
 
-		if strings.HasPrefix(run.Scenario, "shop-scale-") {
+		if isScaleScenario(run.Scenario) {
 			scaleStats[run.Scenario] = byModel
 		}
 	}
@@ -287,7 +308,7 @@ func buildScaleComparison(scaleStats map[string]map[string]*modelStats) string {
 	sort.Strings(modelOrder)
 
 	var b strings.Builder
-	b.WriteString("## Scale comparison (shop-scale-N)\n\n")
+	b.WriteString("## Scale comparison\n\n")
 	b.WriteString("Model-behavior pass % and avg total tokens per answer at each catalog size — the\n")
 	b.WriteString("direct answer to \"does answer quality hold up as the product list grows\" and what\n")
 	b.WriteString("that growth costs in tokens (avg tokens here is the raw API count, always\n")
@@ -318,15 +339,41 @@ func buildScaleComparison(scaleStats map[string]map[string]*modelStats) string {
 	return b.String()
 }
 
-// scaleSizeOf pulls the trailing number off a "shop-scale-N" scenario name for sort order
-// (plain string sort would put "shop-scale-10" before "shop-scale-20" only by luck of
-// digit count matching — this makes it correct regardless of how many sizes exist).
-func scaleSizeOf(scenario string) int {
-	n := 0
-	for _, r := range scenario {
-		if r >= '0' && r <= '9' {
-			n = n*10 + int(r-'0')
+// scaleScenarioPrefixes are the scenario-name families whose per-model stats feed
+// buildScaleComparison — the original shop-scale-N family and the shop-kb-v1 family's
+// size variants (shop-kb-v1-30, shop-kb-v1-scale-60, shop-kb-v1-scale-100). Naming is
+// data, not a hardcoded single prefix, so a later family can opt in by adding its own
+// prefix here without another shape change.
+var scaleScenarioPrefixes = []string{"shop-scale-", "shop-kb-v1-"}
+
+func isScaleScenario(name string) bool {
+	for _, p := range scaleScenarioPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
 		}
+	}
+	return false
+}
+
+// scaleSizeOf pulls the TRAILING number off a scenario name for sort order (plain
+// string sort would put "shop-scale-10" before "shop-scale-20" only by luck of digit
+// count matching — this makes it correct regardless of how many sizes exist).
+// Deliberately walks from the END and stops at the first non-digit: a naive
+// left-to-right digit-concatenation over the WHOLE string (the previous
+// implementation) corrupts the moment any earlier digit exists anywhere in the name —
+// e.g. a "-v1-" version marker — by shifting it in ahead of the real size digits
+// ("shop-kb-v1-scale-100" must parse as 100, not 1100).
+func scaleSizeOf(scenario string) int {
+	runes := []rune(scenario)
+	end := len(runes)
+	for end > 0 && runes[end-1] >= '0' && runes[end-1] <= '9' {
+		end--
+	}
+	n := 0
+	place := 1
+	for i := len(runes) - 1; i >= end; i-- {
+		n += int(runes[i]-'0') * place
+		place *= 10
 	}
 	return n
 }

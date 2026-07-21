@@ -240,6 +240,16 @@ type Verdict struct {
 	// ParseOK — the row needed a retry AND the SELECTED attempt is now parseable.
 	Retries        int  `json:"retries,omitempty"`
 	RetryRecovered bool `json:"retry_recovered,omitempty"`
+	// FirstAttemptParseOK/FirstAttemptContractPass judge the ORIGINAL (attempt 0) output
+	// independently of whichever attempt ended up selected — every other field on this
+	// Verdict reflects the FINAL/selected attempt, so these are the only place a
+	// report can recover "would the first try alone have passed" once a retry has
+	// happened. Equal to this Verdict's own ParseOK/ContractPass when the row was never
+	// retried (Attempts empty) — attempt 0 IS this verdict in that case. Computed by
+	// judgeScenario/judgeSchemaKBRows, not judgeOne itself (judgeOne only ever sees one
+	// output at a time).
+	FirstAttemptParseOK      bool `json:"first_attempt_parse_ok"`
+	FirstAttemptContractPass bool `json:"first_attempt_contract_pass"`
 	// Reasoning mirrors PromptfooRow.Response.Reasoning verbatim, IF promptfoo ever
 	// populates it — kept as its own field (never merged into RawOutput or any
 	// customer-facing text) so a captured value isn't silently dropped once something
@@ -561,6 +571,9 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 				continue // belongs to a different scenario's tests, if results were ever merged
 			}
 			v := judgeOne(tc, row, tokenValue, validMedia, catalog.TrustedDigits)
+			v.FirstAttemptParseOK, v.FirstAttemptContractPass = firstAttemptOutcome(row, v, func(r PromptfooRow) Verdict {
+				return judgeOne(TestCase{}, r, tokenValue, validMedia, catalog.TrustedDigits)
+			})
 			applyCostEstimate(&v, row, priceByModel, freshSplit)
 			verdicts = append(verdicts, v)
 		}
@@ -573,6 +586,25 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	}
 	fmt.Printf("judged %s: %d verdicts -> %s\n", scenario.Name, len(verdicts), outPath)
 	return nil
+}
+
+// firstAttemptOutcome reports whether row's ORIGINAL (attempt 0) output would itself
+// have parsed and passed the strict contract, independent of whichever attempt ended up
+// selected. A row never retried (Attempts empty) has attempt 0 already reflected in v,
+// so its own ParseOK/ContractPass is returned directly rather than re-judging identical
+// input. Otherwise judgeOneOnAttempt0 re-judges a copy of row with Response.Output
+// swapped to Attempts[0].Output, against an empty TestCase{} — only contract shape
+// matters here, not any test's specific requires/media/escalate/language expectations
+// (those are about MODEL BEHAVIOR on the ultimately-selected attempt, a different
+// question from "did the pipeline itself hold up on the first try").
+func firstAttemptOutcome(row PromptfooRow, v Verdict, judgeOneOnAttempt0 func(PromptfooRow) Verdict) (parseOK, contractPass bool) {
+	if len(row.Attempts) == 0 {
+		return v.ParseOK, v.ContractPass
+	}
+	synthetic := row
+	synthetic.Response.Output = row.Attempts[0].Output
+	fv := judgeOneOnAttempt0(synthetic)
+	return fv.ParseOK, fv.ContractPass
 }
 
 // buildFreshSplit lets a cached row (promptfoo reports prompt:0, completion:0 on a cache
