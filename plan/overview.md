@@ -20,7 +20,7 @@ customer channel → normalized conversation → suggestion → operator/policy 
 operator material → kbd_materials → extract → synthesize → kbd_draft
                                                         → human approval → ai_*
 
-approved ai_* → cached prompt prefix → {text template, semantic send tokens}
+approved ai_* → cached prompt prefix → {reply_text, media_files_to_send}
               → deterministic validation/substitution → channel adapter
 ```
 
@@ -47,21 +47,25 @@ storage adapter; `kbd_materials` is their only registry.
 3. Exact business values live in purpose-named columns and are language-neutral.
    The customer model receives placeholders for those values, not the stored
    numbers. Code substitutes from live rows; an unknown placeholder blocks the
-   entire suggestion for manual review.
+   entire suggestion for manual review. `in_stock` is the deliberate boolean
+   exception, and code renders it as reviewed Russian wording.
 4. Every operator input is one `kbd_materials` row. Uploaded bytes are durable
    before extraction starts, and extraction failure never deletes them.
 5. Files become customer-sendable only through purpose-named media columns on
    approved `ai_*` rows. There is no generic attachment table or relationship.
 6. Builder models use short, request-scoped handles. Customer-response models
-   use only generated semantic send tokens. Neither model sees or emits database
-   IDs, storage keys, paths, or public object URLs.
+   use only generated semantic media tokens in `media_files_to_send`. Neither
+   model sees or emits database IDs, storage keys, paths, or public object URLs.
 7. Knowledge building has two model passes and one human gate: per-material
    extraction, batch synthesis directly into the single accumulated draft, then
    draft-to-live approval. There are no per-job mini-drafts or attachment-linking
    approval steps.
 8. Models propose; backend code validates all tables, fields, natural keys,
-   values, handles, material ownership, visibility, MIME compatibility, and send
-   tokens. Unknown or stale control data fails closed.
+   values, handles, material ownership, `customer_visibility`, MIME
+   compatibility, and semantic media tokens. Unknown or stale control data
+   fails closed.
+9. V1 trusted KB prose and customer replies are Russian-only. There are no
+   per-language live rows or `lang` columns.
 
 ## Shared vocabulary
 
@@ -76,9 +80,9 @@ storage adapter; `kbd_materials` is their only registry.
 - **Draft entry:** one complete pending create/update row or delete marker.
 - **Live KB** / **approved KB:** rows in `ai_*`, and the only customer-model
   knowledge source.
-- **Semantic send token:** an allowlisted reference such as
-  `products.sofa-loft.images`; it selects a complete approved media column, not
-  an individual file or storage location.
+- **Semantic media token:** an allowlisted `media_files_to_send` reference such
+  as `products.sofa-loft.gallery_images`; it selects a complete approved media
+  column, not an individual file or storage location.
 
 ## Document ownership
 
@@ -89,7 +93,7 @@ storage adapter; `kbd_materials` is their only registry.
 - [`playground.md`](playground.md): ingestion, two-pass building, failures,
   draft merge, review, and approval.
 - [`knowledge-base.md`](knowledge-base.md): live prompt construction, exact-value
-  placeholders, media send tokens, and response validation.
+  placeholders, semantic media tokens, and response validation.
 
 ## Explicit v1 trade-offs and unresolved decisions
 

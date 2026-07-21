@@ -47,13 +47,13 @@ The Go backend authenticates users, enforces organization membership, serves the
 frontend API, persists state, and owns every deterministic validator. Webhook
 handlers authenticate, normalize, enqueue, and return quickly. Workers perform
 idempotent upserts, downloads, extraction, synthesis, response generation, and
-status transitions.
+processing-status transitions.
 
 The queue is an interface. Go channels are acceptable initially, but durable
 workflow state stays in PostgreSQL. On process start, the backend must find
-`kbd_materials` stuck in `uploaded` or timed-out `extracting` and re-enqueue the
-same rows. Moving to a durable broker must not change producers or worker
-contracts.
+`kbd_materials` whose `processing_status` is `uploaded` or timed-out
+`extracting` and re-enqueue the same rows. Moving to a durable broker must not
+change producers or worker contracts.
 
 ### Data and integration adapters
 
@@ -76,8 +76,9 @@ contracts.
 3. persist/enqueue idempotently; return to provider
 4. worker loads organization policy, conversation context, and approved ai_* only
 5. PromptBuilder emits cached live prefix + dynamic conversation suffix
-6. ModelGateway returns channel-neutral {text, send}
-7. ResponseValidator validates placeholders and semantic send-token allowlist
+6. ModelGateway returns the canonical JSON contract: reply_text, reply_language,
+   media_files_to_send, escalate, escalation_reason, and confidence
+7. ResponseValidator validates placeholders and the semantic media-token allowlist
 8. code substitutes exact live values and resolves approved media through
    kbd_materials
 9. rp_suggestions stores suggestion/approval state
@@ -86,8 +87,9 @@ contracts.
 ```
 
 The response model has no authority over exact numbers, internal material IDs,
-or storage. An unknown placeholder or send token rejects the whole response; it
-is never partially sent. Details of prompt and token construction live in
+or storage. An unknown placeholder or `media_files_to_send` token rejects the
+whole response; it is never partially sent. V1 trusted KB prose and replies are
+Russian-only. Details of prompt and token construction live in
 [`knowledge-base.md`](knowledge-base.md).
 
 ## Knowledge-authoring flow

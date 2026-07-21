@@ -55,10 +55,14 @@ authoring, or suggestion tables.
 
 ## Approved live knowledge (`ai_*`)
 
-Live rows are one language-neutral business record per natural key. Exact values
-are stored once and can serve Russian, Kazakh, or another reply language. Prose
-columns are trusted meaning that the model may phrase or translate; exact facts
-must not be hidden inside a prose field or a generic JSON object.
+`DECISIONS.md` §"Canonical knowledge-base schema" is the authoritative
+column-by-column contract; this section mirrors it and must never drift from it.
+V1 trusted prose is Russian-only and there are no `lang` columns; exact values
+are stored once in purpose-named columns. Aliases are rejected everywhere
+(`delivery_in_days`, never `delivery_time`; `working_hours`, never `work_hours`;
+`gallery_images`, never generic `images`). Prose columns are trusted meaning the
+model phrases itself; exact facts must not be hidden inside a prose field or a
+generic JSON object.
 
 ```text
 ai_assistants — singleton per organization
@@ -68,32 +72,35 @@ ai_assistants — singleton per organization
 
 ai_topics — explanatory trusted prose
   id, organization_id, slug, title, keywords, body_md,
-  featured_image, images, videos, audio, documents,
+  featured_image, illustration_images, explainer_videos,
+  narration_audio_files, reference_documents,
   created_at, updated_at
   UNIQUE (organization_id, slug)
 
 ai_products — products plus purpose-named exact/prose fields
-  id, organization_id, ref, name, price, description, category, availability,
-  status, featured_image, images, demo_videos, audio, certificates, manuals,
-  guarantee_documents, documents, created_at, updated_at
+  id, organization_id, ref, name, price, description, category, in_stock,
+  sales_status, featured_image, gallery_images, demo_videos,
+  audio_description_files, certificate_documents, manual_documents,
+  guarantee_documents, specification_documents, created_at, updated_at
   UNIQUE (organization_id, ref)
 
 ai_tariffs — plans plus purpose-named exact/prose fields
   id, organization_id, ref, name, price, limit_text, fee, summary,
-  pricing_type, advantages, disadvantages, status, featured_image,
-  pricing_images, explainer_videos, documents, created_at, updated_at
+  pricing_type, advantages, disadvantages, sales_status, featured_image,
+  pricing_images, explainer_videos, terms_documents, created_at, updated_at
   UNIQUE (organization_id, ref)
 
 ai_contacts — singleton approved organization contact facts/prose
-  id, organization_id, whatsapp, email, address, legal, callback_time,
-  working_hours, phone, website, instagram,
-  contact_card_image, map_image, documents, created_at, updated_at
+  id, organization_id, whatsapp, email, address, legal_information,
+  callback_time, working_hours, phone, website, instagram,
+  contact_card_image, location_map_image, company_legal_documents,
+  created_at, updated_at
   UNIQUE (organization_id)
 
 ai_policies — singleton approved commerce policy facts/prose
   id, organization_id, delivery_cost, delivery_in_days, free_delivery_from,
   min_order, prepayment, installment, return_period_in_days, warranty,
-  documents, created_at, updated_at
+  commerce_policy_documents, created_at, updated_at
   UNIQUE (organization_id)
 
 ai_audit_log — append-only approval history
@@ -104,9 +111,14 @@ ai_audit_log — append-only approval history
 `min_order`, `return_period_in_days`, `whatsapp`, `phone`, `email`, `website`,
 and language-neutral `working_hours` are examples of semantic exact-value
 columns. They are stored as text because approved values may contain symbols and
-ranges (`25 000 ₸`, `от 5 000`, `1–3`), but their meaning/unit comes from the
-column name. Word-bearing information belongs in a named trusted-prose column.
-`address`, `legal`, `callback_time`, `limit_text`, `availability`, `prepayment`,
+ranges (`25 000 ₸`, `≈ 5 000 ₸`, `1–3`), but their meaning/unit comes from the
+column name. `in_stock` is the deliberate `boolean` exception: code renders
+`true`/`false` as reviewed Russian wording and the model never writes the
+boolean literal to the customer. A missing scalar is SQL `NULL`, never an empty
+or whitespace-only string; an empty exact value generates no placeholder, so a
+question that needs it must escalate. Word-bearing information belongs in a
+named trusted-prose column. `address`, `legal_information`, `callback_time`,
+`limit_text`, `summary`, `advantages`, `disadvantages`, `prepayment`,
 `installment`, and `warranty` are prose and must not be used to smuggle exact
 numeric facts past the placeholder system. A new kind of exact fact requires an
 explicit column migration and placeholder-validator support; there is no
@@ -114,29 +126,32 @@ generic `data` fact bag.
 
 For model-facing singleton references, code uses the fixed natural ref `main`
 (for example `{{policy.main.delivery_cost}}` and
-`policies.main.documents`). `main` is code-owned and does not require a mutable
-database slug.
+`policies.main.commerce_policy_documents`). `main` is code-owned and does not
+require a mutable database slug.
 
 ### Concrete media columns
 
-The closed v1 media schema is:
+The closed v1 media schema (purpose-named; generic `image/images/videos/audio/
+documents/media/files/assets/attachments` are forbidden as column names):
 
 ```text
 ai_topics:
-  featured_image; images; videos; audio; documents
+  featured_image; illustration_images; explainer_videos;
+  narration_audio_files; reference_documents
 
 ai_products:
-  featured_image; images; demo_videos; audio; certificates; manuals;
-  guarantee_documents; documents
+  featured_image; gallery_images; demo_videos; audio_description_files;
+  certificate_documents; manual_documents; guarantee_documents;
+  specification_documents
 
 ai_tariffs:
-  featured_image; pricing_images; explainer_videos; documents
+  featured_image; pricing_images; explainer_videos; terms_documents
 
 ai_contacts:
-  contact_card_image; map_image; documents
+  contact_card_image; location_map_image; company_legal_documents
 
 ai_policies:
-  documents
+  commerce_policy_documents
 
 ai_assistants:
   no media columns in v1
@@ -147,7 +162,8 @@ Singular media columns are nullable UUIDs with a normal foreign key to
 PostgreSQL cannot enforce a foreign key on each array element, so code validates
 every element before draft write, approval, and runtime delivery. Every
 reference must resolve to a same-organization, file-backed material with a
-storage locator, compatible MIME type, and customer-sendable visibility.
+storage locator, compatible MIME type, and customer-sendable
+`customer_visibility`.
 
 No live row stores paths, storage keys, public object URLs, model handles, or
 generic attachments. Adding a media purpose requires a migration plus builder,
@@ -175,20 +191,21 @@ The JSON document is delta-only:
 
 ```json
 {
-  "config": {},
+  "assistant": null,
   "topics": [],
   "products": [],
   "tariffs": [],
-  "contacts": [],
-  "policies": [],
+  "contacts": null,
+  "policies": null,
   "deletes": []
 }
 ```
 
 Sections map exhaustively to physical tables:
-`config → ai_assistants`, `topics → ai_topics`, `products → ai_products`,
+`assistant → ai_assistants`, `topics → ai_topics`, `products → ai_products`,
 `tariffs → ai_tariffs`, `contacts → ai_contacts`, and
-`policies → ai_policies`. Every create/update is a complete business row (no
+`policies → ai_policies`; `contacts` and `policies` are nullable singleton
+objects, not arrays. Every create/update is a complete business row (no
 database ID, tenant ID, or timestamps inside the entry); delete markers name a
 mapped table and natural key. Media fields already contain resolved internal
 `kbd_materials.id` values when stored. There is no attachment section.
@@ -200,7 +217,7 @@ entry = published. Field diffs are computed, not stored. There are no
 columns. An entry identical to live is removed from the delta.
 
 Field/source provenance needed by review and “reject this upload” remains
-backend-only merge metadata tied to material rows in `extraction_json`, using
+backend-only merge metadata tied to material rows in `extraction_metadata`, using
 natural table/ref/field targets. It is not a model-visible ID, a live KB column,
 or a second approval lifecycle.
 
@@ -209,31 +226,33 @@ or a second approval lifecycle.
 This is the only material and uploaded-file registry:
 
 ```text
-id                 uuid primary key
-organization_id    uuid not null references organizations(id)
-source_type        text not null  -- text | url | instruction | file
-source_ref         text
-source_text        text
-operator_note      text
-storage_backend    text null      -- required only for file
-storage_key        text null      -- required only for file
-filename           text null      -- file only
-mime_type          text null      -- file only
-size               bigint null
-checksum           text null
-extracted_text     text
-visual_summary     text
-transcript_text    text
-extraction_json    jsonb
-status             text not null  -- uploaded | extracting | parsed | built |
-                                 -- needs_human | failed
-visibility         text null      -- auto | invisible | visible; file only
-created_at         timestamptz not null
-updated_at         timestamptz not null
+id                  uuid primary key
+organization_id     uuid not null references organizations(id)
+source_type         text not null  -- text | url | instruction | file
+source_ref          text
+source_text         text
+operator_note       text
+storage_backend     text null      -- required only for file
+storage_key         text null      -- required only for file
+filename            text null      -- file only
+mime_type           text null      -- file only
+size_bytes          bigint null    -- > 0 for files
+sha256_checksum     text null
+extracted_text      text
+visual_summary      text
+transcript_text     text
+extraction_metadata jsonb not null default '{}'
+processing_status   text not null default 'uploaded'
+                                  -- uploaded | extracting | parsed | built |
+                                  -- needs_human | failed
+customer_visibility text null      -- auto | invisible | visible; file only
+created_at          timestamptz not null
+updated_at          timestamptz not null
 ```
 
-Checks enforce the closed source/status/visibility enums and file/non-file
-storage shapes. For URLs, `source_ref` is the URL and `extracted_text` is the
+Checks enforce the closed `source_type`, `processing_status`, and
+`customer_visibility` values and file/non-file storage shapes. For URLs,
+`source_ref` is the URL and `extracted_text` is the
 guarded readable snapshot. For text/instructions, `source_text` preserves the
 input. For files, storage and extraction fields describe the already-durable
 bytes. `built` means pass 2 consumed the evidence; it never implies that a
@@ -242,23 +261,23 @@ referenced row or blob may be deleted.
 ### `kbd_requests`
 
 ```text
-id              uuid primary key
-organization_id uuid not null references organizations(id)
-material_id     uuid null references kbd_materials(id)
-req_type        text not null  -- confirm_value | describe_file |
-                              -- choose_media_column | resolve_duplicate |
-                              -- conflict
-prompt          text not null
-context         jsonb not null
-target          jsonb not null
-state           text not null  -- open | resolved
-resolution      jsonb null
-created_at      timestamptz not null
-resolved_at     timestamptz null
+id               uuid primary key
+organization_id  uuid not null references organizations(id)
+material_id      uuid null references kbd_materials(id)
+request_type     text not null  -- confirm_value | describe_file |
+                               -- choose_media_column | resolve_duplicate |
+                               -- resolve_conflict
+question_text    text not null
+question_context jsonb not null default '{}'
+target_field     jsonb not null
+request_status   text not null default 'open'  -- open | resolved
+resolution       jsonb null
+created_at       timestamptz not null
+resolved_at      timestamptz null
 ```
 
-`target` addresses live/draft data by mapped table + natural ref + field, or a
-material by backend UUID. Editing, deleting, or resolving the target
+`target_field` addresses live/draft data by mapped table + natural ref + field,
+or a material by backend UUID. Editing, deleting, or resolving the target
 automatically resolves the request. Approval queries open requests only for the
 selected entries; unrelated requests do not block.
 
@@ -272,8 +291,13 @@ rp_suggestions — channel-neutral response suggestions and approval state
   chosen_ordinal, sent_message_id, context_state, created_at, updated_at
 ```
 
-Each option stores the validated channel-neutral `{text, send}` contract; send
-tokens are control data, never customer prose. At most one active suggestion is
+Each option stores the validated channel-neutral customer-response contract
+(`reply_text`, `reply_language`, `media_files_to_send`, `escalate`,
+`escalation_reason`, `confidence` — see DECISIONS.md §"Customer-response JSON
+contract"). `media_files_to_send` entries are semantic media-catalog tokens —
+control data, never customer prose, and never UUIDs, filenames, paths, or
+storage keys. The legacy field names `asset_refs`, `attach_groups`, and `send`
+are not aliases and must not appear anywhere. At most one active suggestion is
 allowed per `(organization_id, channel, conversation_id)` (normally a partial
 unique index over active states).
 
@@ -282,7 +306,8 @@ unique index over active states).
 - Natural-key unique constraints listed above drive idempotent draft/live
   upserts.
 - Index all foreign keys and primary access paths: tenant membership, account
-  chats/messages by time, open `kbd_requests`, `kbd_materials` by org/status,
+  chats/messages by time, open `kbd_requests`, `kbd_materials` by
+  org/`processing_status`,
   suggestions by conversation/state, and audit rows by org/time.
 - Approval and draft merge use transactions and row locks/version checks.
 - Cleanup may remove a material/blob only after checking every live singular

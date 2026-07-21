@@ -14,7 +14,8 @@ only the explicit draft-to-live approval transaction writes `ai_*`.
 5. pass 2: synthesize one KB-shaped candidate patch plus workflow requests
 6. validate schema, natural keys, exact values, and request-scoped handles
 7. atomically merge valid complete entries into the one organization kbd_draft
-8. operator reviews field diffs, provenance, visibility, and open requests
+8. operator reviews field diffs, provenance, customer visibility, and open
+   requests
 9. approve all or selected entries into ai_*; clear those entries and reload brain
 ```
 
@@ -29,14 +30,14 @@ Every operator input becomes its own `kbd_materials` row:
 - pasted text or instruction keeps the original in `source_text`;
 - a URL keeps the URL in `source_ref` and later stores a guarded readable
   snapshot in `extracted_text`;
-- a file row owns its filename, MIME type, checksum, storage adapter locator,
-  extraction output, status, and visibility.
+- a file row owns its `filename`, `mime_type`, `sha256_checksum`, storage adapter
+  locator, extraction output, `processing_status`, and `customer_visibility`.
 
 File upload succeeds only after bytes and the material row are durable. Parsing
 starts afterward. A parse retry updates the same material row and never
 re-uploads or duplicates it. No other file registry is introduced.
 
-Statuses follow this lifecycle:
+`processing_status` follows this lifecycle:
 
 ```text
 uploaded → extracting → parsed | needs_human | failed
@@ -46,8 +47,8 @@ uploaded → extracting → parsed | needs_human | failed
 
 `built` means synthesis consumed the evidence. It does not make the material or
 blob disposable: live and draft media references keep it durable. Materials
-answered through a request return to `parsed` and join the next normal synthesis
-turn.
+answered through a request have `processing_status` reset to `parsed` and join
+the next normal synthesis turn.
 
 ## Pass 1: understand one material at a time
 
@@ -57,8 +58,8 @@ allowed media columns. It never receives database IDs or storage locators.
 
 Pass 1 emits a common evidence shape on the material row: normalized extracted
 text, detected facts with provenance, a “relates to” hint, and, where relevant,
-visual/audio summary plus a visibility suggestion. It describes evidence and
-does not choose KB tables or produce live/draft entities.
+visual/audio summary plus a `customer_visibility` suggestion. It describes
+evidence and does not choose KB tables or produce live/draft entities.
 
 | Input | V1 extraction | Visible fallback |
 |---|---|---|
@@ -74,7 +75,9 @@ does not choose KB tables or produce live/draft entities.
 All model calls use the single configured OpenAI-compatible aggregator. Model
 selection is configuration, and relative/absolute parsing cost assumptions live
 in [`evals/parsing-costs.md`](../evals/parsing-costs.md) rather than this
-contract.
+contract. In v1, model-facing authoring instructions, trusted KB prose, and
+generated customer replies are Russian; exact values are stored once and are
+not translated.
 
 ## Pass 2: synthesize the batch into the real draft schema
 
@@ -84,7 +87,7 @@ It receives:
 - the operator instruction;
 - the content of every parsed material selected for this turn;
 - a short handle for each material, with attachable `upload.*` handles available
-  only to files currently eligible for customer visibility;
+  only to files currently eligible through `customer_visibility`;
 - non-attachable `evidence.*` handles for invisible evidence/provenance;
 - model-safe views of the full accumulated draft and full live KB, preserving
   business values and semantic media fields but replacing all internal material
@@ -105,10 +108,20 @@ business column:
   "draft_patch": {
     "products": [{
       "ref": "drill-zt40h",
-      "name": "ZT-40H magnetic drill",
-      "price": "",
+      "name": "Магнитный сверлильный станок ZT-40H",
+      "price": "180 000 ₸",
+      "description": "Магнитный сверлильный станок для монтажных работ.",
+      "category": "Сверлильные станки",
+      "in_stock": true,
+      "sales_status": "active",
       "featured_image": "upload.1",
-      "images": ["upload.2"]
+      "gallery_images": ["upload.2"],
+      "demo_videos": [],
+      "audio_description_files": [],
+      "certificate_documents": [],
+      "manual_documents": [],
+      "guarantee_documents": [],
+      "specification_documents": []
     }]
   },
   "requests": []
@@ -119,9 +132,10 @@ Creates and updates are complete business rows; removals are `deletes[]`
 markers. There is no separate media operation. The candidate is side-effect-free
 while the model runs and is neither stored knowledge nor shown as approved.
 
-## Visibility and attachability
+## Customer visibility and attachability
 
-Every file has `auto | invisible | visible` visibility, defaulting to `auto`.
+Every file has `customer_visibility = auto | invisible | visible`, defaulting
+to `auto`.
 The operator always outranks the model:
 
 - explicit `invisible`: evidence may inform synthesis, but the backend never
@@ -135,12 +149,12 @@ The operator always outranks the model:
 An invisible file still contributes its extracted content through an
 `evidence.*` provenance handle. Evidence handles are never accepted in media
 columns. A file becomes sendable at runtime only when its internal material ID
-is in a purpose-named media column on an approved live row and all visibility,
-ownership, storage, and MIME checks still pass.
+is in a purpose-named media column on an approved live row and its
+`customer_visibility`, ownership, storage, and MIME checks all pass.
 
-The review UI states the result plainly, for example “used as evidence; never
-sent to customers” or `products.sofa-loft.featured_image`. Changing visibility
-does not alter live knowledge until approval.
+The review UI states the result plainly, for example «использован как источник;
+клиентам не отправляется» or `products.sofa-loft.featured_image`. Changing
+`customer_visibility` does not alter live knowledge until approval.
 
 ## Deterministic validation before draft write
 
@@ -153,7 +167,8 @@ For each proposed complete entry, backend code verifies:
    a generic data bag.
 4. Every handle exists in the request sidecar and belongs to this organization.
 5. Every media handle resolves to a file with a storage locator, compatible MIME
-   type, customer-sendable visibility, and permission for that exact column.
+   type, a `customer_visibility` value that permits sending, and permission for
+   that exact column.
 6. Evidence, expired, invented, cross-org, non-file, path, URL, and UUID-shaped
    media values are rejected.
 7. Duplicate natural refs are deterministically merged or produce a
@@ -177,7 +192,7 @@ pending entry, not the older live row:
 - empty field plus new value: fill it and record provenance;
 - same value: keep it and add provenance;
 - conflicting exact value: retain a safe pending value and create
-  `confirm_value`/`conflict`; never overwrite silently;
+  `confirm_value`/`resolve_conflict`; never overwrite silently;
 - changed trusted prose: update it and expose the field-level diff;
 - result identical to live: remove it from the delta to avoid false change
   badges.
@@ -191,9 +206,10 @@ provenance, not a separate mini-draft or approval status.
 
 `kbd_requests` is workflow sidecar state, never part of the KB or a customer
 prompt. Allowed request types are `confirm_value`, `describe_file`,
-`choose_media_column`, `resolve_duplicate`, and `conflict`. Targets use table +
-natural ref + field, or a backend material ID. Editing/removing/resolving a
-target auto-resolves its request so stale questions cannot survive.
+`choose_media_column`, `resolve_duplicate`, and `resolve_conflict`. Targets use
+table + natural ref + field, or a backend material ID.
+Editing/removing/resolving a target auto-resolves its request so stale questions
+cannot survive.
 
 Mixed intent or an unclear instruction is asked directly in chat; it is not a
 stored request. Only open requests attached to selected approval entries block
@@ -202,9 +218,11 @@ that approval.
 Per-material failure does not abort a batch:
 
 - transient extraction errors receive two or three retries;
-- permanent or exhausted failures become `needs_human` with a `describe_file`
-  request; timed-out extraction is force-failed into the same visible path;
-- pass 2 runs over parsed materials and is told each skipped name/reason;
+- permanent or exhausted failures set `processing_status = needs_human` and
+  create a `describe_file` request; timed-out extraction is force-failed into
+  the same visible path;
+- pass 2 runs over materials with `processing_status = parsed` and is told each
+  skipped name/reason;
 - if all files fail, synthesis is skipped unless submitted text alone is enough;
 - the chat accounts for every input (for example, “processed 8 of 10; 2 need
   attention”).
@@ -220,8 +238,8 @@ blocking requests. The operator can edit, reject, or approve the whole draft or
 selected entities.
 
 Approval locks the draft and revalidates selected complete rows, required
-fields, every media reference, current file existence/visibility/ownership, and
-only the open requests targeting those rows. In one transaction it upserts by
-natural key, applies delete markers, removes the approved entries from the blob,
-and appends `ai_audit_log`. After commit the backend reloads the live prompt
-prefix. V1 deliberately has no KB version history or rollback.
+fields, every media reference, current file existence, `customer_visibility`,
+ownership, and only the open requests targeting those rows. In one transaction,
+it upserts by natural key, applies delete markers, removes the approved entries
+from the blob, and appends `ai_audit_log`. After commit the backend reloads the
+live prompt prefix. V1 deliberately has no KB version history or rollback.
