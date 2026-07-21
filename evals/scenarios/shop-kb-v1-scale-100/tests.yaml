@@ -1,0 +1,18 @@
+include:
+  - common/kb-questions-ru.yaml
+
+tests:
+  - id: "17. deep-list product (#100 of 100), out-of-stock honesty"
+    message: "Сэндвичница Samsung есть в наличии?"
+    requires:
+      - ["product.sandwich-maker-samsung.in_stock"]
+    must_contain_any: ["нет в наличии"]
+    escalate: false
+    language: ru
+
+  - id: "18. deep-list product (#96 of 100), photo and certificate combined (all_of)"
+    message: "Пришлите, пожалуйста, фото сэндвичницы Xiaomi и сертификат качества."
+    media:
+      all_of: ["products.sandwich-maker-xiaomi.gallery_images", "products.sandwich-maker-xiaomi.certificate_documents"]
+    escalate: false
+    language: ru

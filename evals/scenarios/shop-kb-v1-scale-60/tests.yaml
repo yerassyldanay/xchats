@@ -1,0 +1,20 @@
+include:
+  - common/kb-questions-ru.yaml
+
+tests:
+  - id: "17. deep-list product (#60 of 60), price and photo"
+    message: "Обогреватель Philips есть? Сколько стоит и пришлите фото."
+    requires:
+      - ["product.heater-philips.price"]
+    media:
+      any_of: ["products.heater-philips.gallery_images"]
+    escalate: false
+    language: ru
+
+  - id: "18. deep-list product (#59 of 60), media-less honesty"
+    message: "Пришлите фото обогревателя Bosch, пожалуйста."
+    media:
+      forbid: true
+    must_not_contain: ["вот фото", "прикрепляю фото", "фото во вложении"]
+    escalate: false
+    language: ru

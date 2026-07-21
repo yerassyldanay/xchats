@@ -1,0 +1,8 @@
+name: shop-kb-v1-30
+description: "Schema-driven Russian shop family (pipeline: schema_kb_v1), capped to the first 30 products — the baseline size."
+pipeline: schema_kb_v1
+frame: ../shop-kb-v1/frame-ru.txt
+data: ../shop-kb-v1/data-ru.yaml
+tests: tests.yaml
+limits:
+  ai_products: 30
