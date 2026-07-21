@@ -19,8 +19,7 @@ func writeMinimalScenarioFiles(t *testing.T, dir, tokenValue string) {
 		t.Fatal(err)
 	}
 	cat := Catalog{
-		Contract: "attach_groups",
-		Tokens:   []CatalogFact{{Token: "{{x}}", Value: tokenValue}},
+		Tokens: []CatalogFact{{Token: "{{x}}", Value: tokenValue}},
 	}
 	if err := writeJSON(filepath.Join(genDir, "catalog.json"), cat); err != nil {
 		t.Fatal(err)
@@ -100,7 +99,7 @@ func TestJudgeScenario_PrefersRunSnapshotOverLiveGenerated(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(snapDir, "scenario.yaml"), []byte("name: fixture-scenario\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cat := Catalog{Contract: "attach_groups", Tokens: []CatalogFact{{Token: "{{x}}", Value: "SNAPSHOT-VALUE"}}}
+	cat := Catalog{Tokens: []CatalogFact{{Token: "{{x}}", Value: "SNAPSHOT-VALUE"}}}
 	if err := writeJSON(filepath.Join(snapDir, "catalog.json"), cat); err != nil {
 		t.Fatal(err)
 	}

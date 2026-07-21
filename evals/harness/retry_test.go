@@ -327,7 +327,7 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 	if err := os.WriteFile(filepath.Join(snapDir, "scenario.yaml"), []byte("name: fixture-scenario\ncontract: asset_refs\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cat := Catalog{Contract: "asset_refs"}
+	cat := Catalog{}
 	if err := writeJSON(filepath.Join(snapDir, "catalog.json"), cat); err != nil {
 		t.Fatal(err)
 	}

@@ -141,6 +141,20 @@ type Verdict struct {
 	Blocked        bool     `json:"blocked"`
 	LeftoverBraces bool     `json:"leftover_braces"`
 	UnknownMedia   []string `json:"unknown_media"` // -> the real product drops these (logged), does NOT block
+	// EscalationReasonOK: escalation_reason must be empty when escalate is false
+	// (DECISIONS.md §"Customer-response JSON contract"). A pipeline-shape rule, folded
+	// into ContractPass like LeftoverBraces — not a model-behavior judgment call.
+	EscalationReasonOK bool `json:"escalation_reason_ok"`
+	// MediaResolveOK/MediaResolveIssue: schema_kb_v1 verdicts only (always true, no
+	// issue, for a legacy verdict — there is nothing to resolve). True when every
+	// media_files_to_send token that passed the catalog-membership check ALSO resolves
+	// through aiprompt.ResolveSend against the live kbd_materials rows right now — i.e.
+	// it isn't merely a name the catalog recognizes but a reference that would actually
+	// still send. Folded into ContractPass: a token valid at catalog-build time but
+	// stale at send time is a pipeline-safety issue, the same category as an unknown
+	// token.
+	MediaResolveOK    bool   `json:"media_resolve_ok"`
+	MediaResolveIssue string `json:"media_resolve_issue,omitempty"`
 
 	RequiresPass bool `json:"requires_pass"`
 	MediaPass    bool `json:"media_pass"`
@@ -496,23 +510,6 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 		priceByModel[providerModelKey(p.ID, p.Label)] = p
 	}
 
-	var catalog Catalog
-	if err := readJSON(filepath.Join(genDir, "catalog.json"), &catalog); err != nil {
-		return fmt.Errorf("read catalog.json (did you run render first?): %w", err)
-	}
-	tokenValue := map[string]string{}
-	for _, f := range catalog.Tokens {
-		tokenValue[f.Token] = f.Value
-	}
-	validMediaRef := map[string]bool{}
-	for _, r := range catalog.MediaRefs {
-		validMediaRef[r] = true
-	}
-	validMediaGroup := map[string]bool{}
-	for _, g := range catalog.MediaGroups {
-		validMediaGroup[g] = true
-	}
-
 	var resolved ResolvedTests
 	if err := readJSON(filepath.Join(genDir, "resolved_tests.json"), &resolved); err != nil {
 		return fmt.Errorf("read resolved_tests.json: %w", err)
@@ -528,28 +525,45 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 		return fmt.Errorf("read %s: %w", resultsPath, err)
 	}
 
-	// freshSplit lets a cached row (promptfoo reports prompt:0, completion:0 on a cache
-	// hit) borrow the real in/out split from another row in THIS SAME run that made a
-	// fresh call for the identical (model, test) — a cache hit means an identical request
-	// would have cost the same, so the split is still a valid estimate, just not this
-	// row's own measurement.
-	freshSplit := map[string]tokenSplit{}
-	for _, row := range results.Results.Results {
-		if !row.Response.Cached && row.TokenUsage.Prompt > 0 {
-			key := providerModelKey(row.Provider.ID, row.Provider.Label) + "|" + row.TestCase.Description
-			freshSplit[key] = tokenSplit{row.TokenUsage.Prompt, row.TokenUsage.Completion}
-		}
-	}
+	freshSplit := buildFreshSplit(results)
 
 	var verdicts []Verdict
-	for _, row := range results.Results.Results {
-		tc, ok := testByID[row.TestCase.Description]
-		if !ok {
-			continue // belongs to a different scenario's tests, if results were ever merged
+	if scenario.Pipeline == "schema_kb_v1" {
+		// schema_kb_v1 rebuilds its catalog fresh from the fixture (kbfixture+aiprompt)
+		// rather than reading genDir/catalog.json: the PUBLIC catalog export deliberately
+		// has no route to kbd_materials (see aiprompt/catalog.go), but judgeOneSchemaKB's
+		// aiprompt.ResolveSend re-validation needs exactly that private data. This is a
+		// known, narrow provenance gap versus the legacy path (which grades a re-judge
+		// against genDir/catalog.json's SNAPSHOT, not today's live data.yaml): a re-judge
+		// of an old run reads today's live fixture file, not a snapshot of the one that
+		// run actually saw. Low risk in practice — shop-kb-v1 fixtures are generated
+		// deterministically and are not expected to change without a full re-render.
+		verdicts, err = judgeSchemaKBRows(scenarioDir, scenario, results, testByID, priceByModel, freshSplit)
+		if err != nil {
+			return err
 		}
-		v := judgeOne(tc, row, &catalog, tokenValue, validMediaRef, validMediaGroup)
-		applyCostEstimate(&v, row, priceByModel, freshSplit)
-		verdicts = append(verdicts, v)
+	} else {
+		var catalog Catalog
+		if err := readJSON(filepath.Join(genDir, "catalog.json"), &catalog); err != nil {
+			return fmt.Errorf("read catalog.json (did you run render first?): %w", err)
+		}
+		tokenValue := map[string]string{}
+		for _, f := range catalog.Tokens {
+			tokenValue[f.Token] = f.Value
+		}
+		validMedia := map[string]bool{}
+		for _, tok := range catalog.MediaTokens {
+			validMedia[tok] = true
+		}
+		for _, row := range results.Results.Results {
+			tc, ok := testByID[row.TestCase.Description]
+			if !ok {
+				continue // belongs to a different scenario's tests, if results were ever merged
+			}
+			v := judgeOne(tc, row, tokenValue, validMedia, catalog.TrustedDigits)
+			applyCostEstimate(&v, row, priceByModel, freshSplit)
+			verdicts = append(verdicts, v)
+		}
 	}
 
 	out := JudgedRun{Scenario: scenario.Name, Verdicts: verdicts}
@@ -559,6 +573,22 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	}
 	fmt.Printf("judged %s: %d verdicts -> %s\n", scenario.Name, len(verdicts), outPath)
 	return nil
+}
+
+// buildFreshSplit lets a cached row (promptfoo reports prompt:0, completion:0 on a cache
+// hit) borrow the real in/out split from another row in THIS SAME run that made a fresh
+// call for the identical (model, test) — a cache hit means an identical request would
+// have cost the same, so the split is still a valid estimate, just not this row's own
+// measurement. Shared by both the legacy and schema_kb_v1 judging paths.
+func buildFreshSplit(results PromptfooResults) map[string]tokenSplit {
+	freshSplit := map[string]tokenSplit{}
+	for _, row := range results.Results.Results {
+		if !row.Response.Cached && row.TokenUsage.Prompt > 0 {
+			key := providerModelKey(row.Provider.ID, row.Provider.Label) + "|" + row.TestCase.Description
+			freshSplit[key] = tokenSplit{row.TokenUsage.Prompt, row.TokenUsage.Completion}
+		}
+	}
+	return freshSplit
 }
 
 // appendReason accumulates fact onto v.Reason, joined with "; " when something is
@@ -580,7 +610,7 @@ func (v *Verdict) appendReason(fact string) {
 	}
 }
 
-func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[string]string, validRef, validGroup map[string]bool) Verdict {
+func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, validMedia map[string]bool, trustedDigits []string) Verdict {
 	v := Verdict{
 		TestID:       tc.ID,
 		Model:        providerModelKey(row.Provider.ID, row.Provider.Label),
@@ -593,6 +623,11 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		Truncated:    isTruncatedFinish(row.Response.FinishReason),
 		Reasoning:    row.Response.Reasoning,
 		Retries:      row.Retries,
+		// MediaResolveOK has no meaning on the legacy pipeline (nothing to resolve — its
+		// data.yaml never had a kbd_materials-shaped registry to re-validate against), so
+		// it is fixed true here rather than left at bool's false zero value, which would
+		// otherwise misreport as a failure.
+		MediaResolveOK: true,
 	}
 
 	obj, ok := parseModelJSON(row.Response.Output)
@@ -608,18 +643,20 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 
 	// Type-checked, not just presence-checked: a model can return the right KEYS with
 	// the wrong shape (escalate: "true" as a string, reply_language: 7) and the older
-	// presence-only check would have let that through as a valid contract.
+	// presence-only check would have let that through as a valid contract. All six
+	// canonical fields are checked (DECISIONS.md §"Customer-response JSON contract") —
+	// escalation_reason and confidence included, not just the four this check used to
+	// look at.
 	replyText, hasReplyText := obj["reply_text"].(string)
 	_, hasLang := obj["reply_language"].(string)
 	escalateVal, hasEscalate := obj["escalate"].(bool)
-	mediaField := "asset_refs"
-	if catalog.Contract == "attach_groups" {
-		mediaField = "attach_groups"
-	}
+	escalationReason, hasEscalationReason := obj["escalation_reason"].(string)
+	confidenceVal, hasConfidence := obj["confidence"].(float64)
+	confidenceInRange := hasConfidence && confidenceVal >= 0 && confidenceVal <= 1
 	// mediaRaw is the UNTYPED array — kept around (not just mediaEntries' string-filtered
 	// view) so MediaCount below counts every entry the model actually wrote, including a
 	// stray non-string one, instead of silently undercounting by dropping it first.
-	mediaRaw, hasMediaField := obj[mediaField].([]any)
+	mediaRaw, hasMediaField := obj[mediaFilesField].([]any)
 	mediaAllStrings := true
 	for _, e := range mediaRaw {
 		if _, ok := e.(string); !ok {
@@ -627,9 +664,15 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 			break
 		}
 	}
-	v.ContractFields = hasReplyText && replyText != "" && hasLang && hasEscalate && hasMediaField && mediaAllStrings
+	v.ContractFields = hasReplyText && replyText != "" && hasLang && hasEscalate &&
+		hasMediaField && mediaAllStrings && hasEscalationReason && confidenceInRange
 	if !v.ContractFields {
-		v.appendReason(fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array %s of strings)", mediaField))
+		v.appendReason(fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, string escalation_reason, number confidence in [0,1], array %s of strings)", mediaFilesField))
+	}
+	v.EscalationReasonOK = true
+	if hasEscalate && hasEscalationReason && !escalateVal && strings.TrimSpace(escalationReason) != "" {
+		v.EscalationReasonOK = false
+		v.appendReason("escalation_reason must be empty when escalate is false")
 	}
 
 	// Reasoning/thinking content must never leak into reply_text — the one field the
@@ -654,7 +697,6 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	// block the whole draft rather than ship a half-rendered fact. escalation_reason is
 	// internal (never shown to the customer) but still scanned: an unknown token there
 	// means the model referenced a fact that doesn't exist, the same underlying bug.
-	escalationReason, _ := obj["escalation_reason"].(string)
 	spans := tokenSpanRE.FindAllString(replyText, -1)
 	reasonSpans := tokenSpanRE.FindAllString(escalationReason, -1)
 	injected := replyText
@@ -693,7 +735,8 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	if v.Truncated {
 		v.appendReason(truncationNote(v.FinishReason))
 	}
-	v.ContractPass = v.ParseOK && v.ContractFields && !v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak && !v.ControlChars
+	v.ContractPass = v.ParseOK && v.ContractFields && v.EscalationReasonOK &&
+		!v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak && !v.ControlChars
 
 	// Model-behavior checks (only meaningful once we know the contract held).
 	stripped := tokenSpanRE.ReplaceAllString(replyText, "")
@@ -706,13 +749,14 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	// against real runs: a model repeating a customer-named off-catalog product's model
 	// number, or correctly quoting a description's "1.7 л" / "7 режимов" spec, both got
 	// wrongly flagged here before these exclusions existed.
-	v.InventedDigits = filterInventedDigits(digitRunRE.FindAllString(stripped, -1), tc.Message, catalog.TrustedDigits)
+	v.InventedDigits = filterInventedDigits(digitRunRE.FindAllString(stripped, -1), tc.Message, trustedDigits)
 
 	v.RequiresPass = requiresSatisfied(tc.Requires, replyText, tokenValue)
 
+	entries := mediaEntries(obj)
 	v.MediaPass = true
 	if tc.Media != nil {
-		v.MediaPass, v.MediaIssue = checkMediaExpect(tc.Media, obj, mediaRaw, mediaField)
+		v.MediaPass, v.MediaIssue = checkMediaExpect(tc.Media, entries)
 	}
 
 	// MediaCount/TooManyMedia is UNIVERSAL — every frame's own rule 3 caps attachments, so
@@ -724,11 +768,7 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	// undercounted by silently dropping the malformed entry first.
 	v.MediaCountEvaluated = true
 	v.MediaCount = len(mediaRaw)
-	mediaLimit := maxMediaRefs
-	if mediaField == "attach_groups" {
-		mediaLimit = maxMediaGroups
-	}
-	v.TooManyMedia = v.MediaCount > mediaLimit
+	v.TooManyMedia = v.MediaCount > maxMediaGroups
 
 	v.EscalatePass = true
 	if tc.Escalate != nil {
@@ -803,15 +843,13 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		}
 		replyLang, _ := obj["reply_language"].(string)
 		in := outcomeInputs{
-			replyText:  replyText,
-			injected:   injected,
-			checkText:  checkText,
-			replyLang:  replyLang,
-			escalate:   escalateVal,
-			obj:        obj,
-			mediaRaw:   mediaRaw,
-			mediaField: mediaField,
-			tokenValue: tokenValue,
+			replyText:    replyText,
+			injected:     injected,
+			checkText:    checkText,
+			replyLang:    replyLang,
+			escalate:     escalateVal,
+			mediaEntries: entries,
+			tokenValue:   tokenValue,
 		}
 		v.OutcomesPass = false
 		for _, oc := range tc.Outcomes {
@@ -823,8 +861,8 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		}
 	}
 
-	for _, entry := range mediaEntries(obj, mediaField) {
-		if (mediaField == "asset_refs" && !validRef[entry]) || (mediaField == "attach_groups" && !validGroup[entry]) {
+	for _, entry := range entries {
+		if !validMedia[entry] {
 			v.UnknownMedia = append(v.UnknownMedia, entry)
 		}
 	}
@@ -935,22 +973,22 @@ func languageFieldOK(expected, replyLang string) bool {
 	return normalizeLangCode(replyLang) == expected
 }
 
-// checkMediaExpect evaluates one MediaExpect block (Forbid / any_of_* / Exclusive)
-// against the reply's media array — judgeOne's universal media check verbatim, extracted
-// so OutcomeCase blocks share it. Returns pass plus the human-readable issue detail for
-// the failure modes that have one.
-func checkMediaExpect(exp *MediaExpect, obj map[string]any, mediaRaw []any, mediaField string) (bool, string) {
+// checkMediaExpect evaluates one MediaExpect block (Forbid / any_of / all_of / Exclusive)
+// against the reply's already-extracted media_files_to_send entries — judgeOne's
+// universal media check verbatim, extracted so OutcomeCase blocks share it. Returns pass
+// plus the human-readable issue detail for the failure modes that have one.
+func checkMediaExpect(exp *MediaExpect, entries []string) (bool, string) {
 	if exp.Forbid {
-		if len(mediaRaw) > 0 {
+		if len(entries) > 0 {
 			return false, "attached media, but this test forbids any attachment"
 		}
 		return true, ""
 	}
-	if !mediaExpectationMet(exp, obj, mediaField) {
+	if !mediaExpectationMet(exp, entries) {
 		return false, ""
 	}
 	if exp.Exclusive {
-		if outsiders := mediaOutsideExpectation(exp, obj, mediaField); len(outsiders) > 0 {
+		if outsiders := mediaOutsideExpectation(exp, entries); len(outsiders) > 0 {
 			return false, "attached media outside the expected set: " + strings.Join(outsiders, ", ")
 		}
 	}
@@ -983,18 +1021,17 @@ func anyContained(list []string, text string) bool {
 }
 
 // outcomeInputs bundles the per-reply facts an OutcomeCase block is evaluated against —
-// all computed once in judgeOne and shared by every block, so evaluating N alternatives
-// never re-derives (or diverges on) what the reply actually said.
+// all computed once by the caller (judgeOne or judgeOneSchemaKB) and shared by every
+// block, so evaluating N alternatives never re-derives (or diverges on) what the reply
+// actually said.
 type outcomeInputs struct {
-	replyText  string         // raw model reply_text (requires matches the un-substituted {{token}} spans)
-	injected   string         // token-injected text (must_not_contain / must_contain_any scan this)
-	checkText  string         // language-check text: InjectedText with judgeOne's replyText fallback
-	replyLang  string         // the model's declared reply_language field
-	escalate   bool           // the model's escalate field (type-checked earlier)
-	obj        map[string]any // parsed reply object (media helpers read the array from it)
-	mediaRaw   []any          // untyped media array, for Forbid's raw-length semantics
-	mediaField string         // "asset_refs" | "attach_groups"
-	tokenValue map[string]string
+	replyText    string // raw model reply_text (requires matches the un-substituted {{token}} spans)
+	injected     string // token-injected text (must_not_contain / must_contain_any scan this)
+	checkText    string // language-check text: InjectedText with the caller's replyText fallback
+	replyLang    string // the model's declared reply_language field
+	escalate     bool   // the model's escalate field (type-checked earlier)
+	mediaEntries []string
+	tokenValue   map[string]string
 }
 
 // outcomeSatisfied evaluates ONE OutcomeCase block: every check the block declares must
@@ -1014,7 +1051,7 @@ func outcomeSatisfied(oc OutcomeCase, in outcomeInputs) bool {
 		}
 	}
 	if oc.Media != nil {
-		if pass, _ := checkMediaExpect(oc.Media, in.obj, in.mediaRaw, in.mediaField); !pass {
+		if pass, _ := checkMediaExpect(oc.Media, in.mediaEntries); !pass {
 			return false
 		}
 	}
@@ -1053,8 +1090,13 @@ func filterInventedDigits(found []string, message string, trustedDigits []string
 	return out
 }
 
-func mediaEntries(obj map[string]any, field string) []string {
-	raw, ok := obj[field].([]any)
+// mediaFilesField is the ONE canonical response property every scenario returns media
+// selections in, regardless of pipeline or which token vocabulary this scenario's own
+// catalog happens to populate it with (DECISIONS.md §"Customer-response JSON contract").
+const mediaFilesField = "media_files_to_send"
+
+func mediaEntries(obj map[string]any) []string {
+	raw, ok := obj[mediaFilesField].([]any)
 	if !ok {
 		return nil
 	}
@@ -1067,38 +1109,49 @@ func mediaEntries(obj map[string]any, field string) []string {
 	return out
 }
 
-func mediaExpectationMet(exp *MediaExpect, obj map[string]any, field string) bool {
-	entries := mediaEntries(obj, field)
-	want := exp.AnyOfGroups
-	if field == "asset_refs" {
-		want = exp.AnyOfRefs
-	}
-	if len(want) == 0 {
-		return true
-	}
-	for _, w := range want {
-		for _, e := range entries {
-			if e == w {
-				return true
-			}
+func hasEntry(entries []string, want string) bool {
+	for _, e := range entries {
+		if e == want {
+			return true
 		}
 	}
 	return false
 }
 
-// mediaOutsideExpectation returns every attached entry NOT in the test's declared
-// any_of_* set — used only when Exclusive is true, on top of mediaExpectationMet's
-// existing "at least one of these" check, to enforce "this set AND NOTHING ELSE". Same
-// want-list side-selection (refs under asset_refs, groups under attach_groups) as
-// mediaExpectationMet, so the two checks can never disagree about which list is active.
-func mediaOutsideExpectation(exp *MediaExpect, obj map[string]any, field string) []string {
-	entries := mediaEntries(obj, field)
-	want := exp.AnyOfGroups
-	if field == "asset_refs" {
-		want = exp.AnyOfRefs
+// mediaExpectationMet checks entries against exp's AnyOf (at least one present) and
+// AllOf (every one present) declarations — both vacuously true when empty, same
+// "nothing declared, nothing to fail" convention as every other optional TestCase knob.
+func mediaExpectationMet(exp *MediaExpect, entries []string) bool {
+	for _, w := range exp.AllOf {
+		if !hasEntry(entries, w) {
+			return false
+		}
 	}
+	if len(exp.AnyOf) > 0 {
+		met := false
+		for _, w := range exp.AnyOf {
+			if hasEntry(entries, w) {
+				met = true
+				break
+			}
+		}
+		if !met {
+			return false
+		}
+	}
+	return true
+}
+
+// mediaOutsideExpectation returns every attached entry NOT in the test's declared
+// any_of/all_of union — used only when Exclusive is true, on top of
+// mediaExpectationMet's existing "these must be present" check, to enforce "this set AND
+// NOTHING ELSE".
+func mediaOutsideExpectation(exp *MediaExpect, entries []string) []string {
 	allowed := map[string]bool{}
-	for _, w := range want {
+	for _, w := range exp.AnyOf {
+		allowed[w] = true
+	}
+	for _, w := range exp.AllOf {
 		allowed[w] = true
 	}
 	var outsiders []string

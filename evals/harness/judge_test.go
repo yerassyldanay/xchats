@@ -8,13 +8,12 @@ import (
 func TestJudgeOne_DeterministicChecks(t *testing.T) {
 	trueValue := true
 	catalog := &Catalog{
-		Contract: "attach_groups",
 		Tokens: []CatalogFact{
 			{Token: "{{product.coffee-machine.price}}", Value: "129 900 ₸"},
 			{Token: "{{policy.main.delivery_cost}}", Value: "1 500 ₸"},
 			{Token: "{{policy.main.return_period}}", Value: "14 дней"},
 		},
-		MediaGroups:   []string{"product.coffee-machine.images", "product.cookware-set.images"},
+		MediaTokens:   []string{"product.coffee-machine.images", "product.cookware-set.images"},
 		TrustedDigits: []string{"1", "7"}, // as if a row's Description mentioned "1.7 л"
 	}
 	tokenValue := map[string]string{
@@ -22,7 +21,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 		"{{policy.main.delivery_cost}}":    "1 500 ₸",
 		"{{policy.main.return_period}}":    "14 дней",
 	}
-	validGroups := map[string]bool{
+	validMedia := map[string]bool{
 		"product.coffee-machine.images": true,
 		"product.cookware-set.images":   true,
 	}
@@ -40,9 +39,9 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			testCase: TestCase{
 				ID:       "price",
 				Requires: [][]string{{"product.coffee-machine.price"}},
-				Media:    &MediaExpect{AnyOfGroups: []string{"product.coffee-machine.images"}},
+				Media:    &MediaExpect{AnyOf: []string{"product.coffee-machine.images"}},
 			},
-			output:           `{"reply_text":"Цена {{product.coffee-machine.price}}.","reply_language":"ru","attach_groups":["product.coffee-machine.images"],"escalate":false}`,
+			output:           `{"reply_text":"Цена {{product.coffee-machine.price}}.","reply_language":"ru","media_files_to_send":["product.coffee-machine.images"],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: true,
 			wantReason:       "ok",
@@ -52,17 +51,17 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			testCase: TestCase{
 				ID: "bad-contract",
 			},
-			output:           `{"reply_text":"ok","reply_language":7,"attach_groups":[],"escalate":"true"}`,
+			output:           `{"reply_text":"ok","reply_language":7,"media_files_to_send":[],"escalate":"true"}`,
 			wantContractPass: false,
 			wantBehaviorPass: true,
-			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array attach_groups of strings)",
+			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, string escalation_reason, number confidence in [0,1], array media_files_to_send of strings)",
 		},
 		{
 			name: "unknown media fails behavior",
 			testCase: TestCase{
 				ID: "unknown-media",
 			},
-			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.fake.images"],"escalate":false}`,
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["product.fake.images"],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       "attached media not in the catalog: product.fake.images",
@@ -74,7 +73,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 				Escalate:       &trueValue,
 				MustNotContain: []string{"не доставляем в астан"},
 			},
-			output:           `{"reply_text":"К сожалению, мы не доставляем в Астану. Уточню у коллеги.","reply_language":"ru","attach_groups":[],"escalate":true}`,
+			output:           `{"reply_text":"К сожалению, мы не доставляем в Астану. Уточню у коллеги.","reply_language":"ru","media_files_to_send":[],"escalate":true,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       `reply_text contains forbidden phrase: "не доставляем в астан"`,
@@ -90,7 +89,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 				Escalate:       &trueValue,
 				MustNotContain: []string{"в течение 14 дней"},
 			},
-			output:           `{"reply_text":"Передам коллеге. Возврат обычно возможен в течение {{policy.main.return_period}}.","reply_language":"ru","attach_groups":[],"escalate":true}`,
+			output:           `{"reply_text":"Передам коллеге. Возврат обычно возможен в течение {{policy.main.return_period}}.","reply_language":"ru","media_files_to_send":[],"escalate":true,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       `reply_text contains forbidden phrase: "в течение 14 дней"`,
@@ -101,7 +100,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 				ID:    "greeting-no-media",
 				Media: &MediaExpect{Forbid: true},
 			},
-			output:           `{"reply_text":"Здравствуйте! Чем помочь?","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			output:           `{"reply_text":"Здравствуйте! Чем помочь?","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: true,
 			wantReason:       "ok",
@@ -112,7 +111,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 				ID:    "greeting-with-media",
 				Media: &MediaExpect{Forbid: true},
 			},
-			output:           `{"reply_text":"Здравствуйте! Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images"],"escalate":false}`,
+			output:           `{"reply_text":"Здравствуйте! Вот фото.","reply_language":"ru","media_files_to_send":["product.coffee-machine.images"],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       "attached media, but this test forbids any attachment",
@@ -121,9 +120,9 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			name: "exclusive media passes when only the expected group is attached",
 			testCase: TestCase{
 				ID:    "cookware-photos-exclusive",
-				Media: &MediaExpect{AnyOfGroups: []string{"product.cookware-set.images"}, Exclusive: true},
+				Media: &MediaExpect{AnyOf: []string{"product.cookware-set.images"}, Exclusive: true},
 			},
-			output:           `{"reply_text":"Вот фото набора посуды.","reply_language":"ru","attach_groups":["product.cookware-set.images"],"escalate":false}`,
+			output:           `{"reply_text":"Вот фото набора посуды.","reply_language":"ru","media_files_to_send":["product.cookware-set.images"],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: true,
 			wantReason:       "ok",
@@ -136,25 +135,25 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			name: "exclusive media fails when a valid but unrequested group is attached alongside the expected one",
 			testCase: TestCase{
 				ID:    "cookware-photos-exclusive-plus-extra",
-				Media: &MediaExpect{AnyOfGroups: []string{"product.cookware-set.images"}, Exclusive: true},
+				Media: &MediaExpect{AnyOf: []string{"product.cookware-set.images"}, Exclusive: true},
 			},
-			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.cookware-set.images","product.coffee-machine.images"],"escalate":false}`,
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["product.cookware-set.images","product.coffee-machine.images"],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       "attached media outside the expected set: product.coffee-machine.images",
 		},
 		{
-			name:             "media count within the attach_groups cap (2) passes",
+			name:             "media count within the media_files_to_send cap (2) passes",
 			testCase:         TestCase{ID: "media-count-groups-ok"},
-			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images","product.cookware-set.images"],"escalate":false}`,
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["product.coffee-machine.images","product.cookware-set.images"],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: true,
 			wantReason:       "ok",
 		},
 		{
-			name:             "media count over the attach_groups cap (2) fails",
+			name:             "media count over the media_files_to_send cap (2) fails",
 			testCase:         TestCase{ID: "media-count-groups-over"},
-			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images","product.cookware-set.images","product.coffee-machine.images"],"escalate":false}`,
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["product.coffee-machine.images","product.cookware-set.images","product.coffee-machine.images"],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       "attached 3 media entries — over the frame's cap",
@@ -164,7 +163,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			// entries, not "1 distinct entry."
 			name:             "duplicated refs count toward the cap (same entry repeated is not 1 distinct entry)",
 			testCase:         TestCase{ID: "media-count-duplicates"},
-			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images","product.coffee-machine.images","product.coffee-machine.images","product.coffee-machine.images"],"escalate":false}`,
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["product.coffee-machine.images","product.coffee-machine.images","product.coffee-machine.images","product.coffee-machine.images"],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       "attached 4 media entries — over the frame's cap",
@@ -175,23 +174,23 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			// type-check, without TooManyMedia also contributing to the failure.
 			name:             "non-string media element fails ContractFields",
 			testCase:         TestCase{ID: "media-malformed-element"},
-			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images",7],"escalate":false}`,
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["product.coffee-machine.images",7],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: false,
 			wantBehaviorPass: true,
-			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array attach_groups of strings)",
+			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, string escalation_reason, number confidence in [0,1], array media_files_to_send of strings)",
 		},
 		{
 			// Proves MediaCount counts the RAW array, not mediaEntries' string-filtered
 			// view: 2 valid refs + 1 malformed element is 3 raw entries — over the
-			// attach_groups cap of 2 — even though mediaEntries would only report 2
+			// media_files_to_send cap of 2 — even though mediaEntries would only report 2
 			// (silently dropping the malformed one), which would have wrongly read as
 			// within the cap.
 			name:             "malformed element still counts toward the media cap, not silently dropped",
 			testCase:         TestCase{ID: "media-malformed-element-over-cap"},
-			output:           `{"reply_text":"Вот фото.","reply_language":"ru","attach_groups":["product.coffee-machine.images","product.cookware-set.images",7],"escalate":false}`,
+			output:           `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["product.coffee-machine.images","product.cookware-set.images",7],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: false,
 			wantBehaviorPass: false,
-			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array attach_groups of strings)",
+			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, string escalation_reason, number confidence in [0,1], array media_files_to_send of strings)",
 		},
 		{
 			name: "duplicated currency fails behavior",
@@ -199,7 +198,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 				ID:       "delivery-cost",
 				Requires: [][]string{{"policy.main.delivery_cost"}},
 			},
-			output:           `{"reply_text":"Доставка стоит {{policy.main.delivery_cost}} ₸.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			output:           `{"reply_text":"Доставка стоит {{policy.main.delivery_cost}} ₸.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       "unit/currency issue after injection: duplicated tenge symbol",
@@ -207,7 +206,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 		{
 			name:             "single-digit invented number fails behavior",
 			testCase:         TestCase{ID: "single-digit-invented"},
-			output:           `{"reply_text":"Осталось 5 штук.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			output:           `{"reply_text":"Осталось 5 штук.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       "invented digits outside any token: 5",
@@ -215,7 +214,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 		{
 			name:             "digit from a trusted product description is not invented",
 			testCase:         TestCase{ID: "description-digit-ok"},
-			output:           `{"reply_text":"Это чайник на 1.7 л.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			output:           `{"reply_text":"Это чайник на 1.7 л.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: true,
 			wantReason:       "ok",
@@ -226,7 +225,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 				ID:      "echoed-digit-ok",
 				Message: "У вас есть iPhone 15 Pro?",
 			},
-			output:           `{"reply_text":"К сожалению, iPhone 15 Pro у нас нет в наличии.","reply_language":"ru","attach_groups":[],"escalate":true}`,
+			output:           `{"reply_text":"К сожалению, iPhone 15 Pro у нас нет в наличии.","reply_language":"ru","media_files_to_send":[],"escalate":true,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: true,
 			wantReason:       "ok",
@@ -234,7 +233,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 		{
 			name:             "numbered list markers (dot style) are not invented digits",
 			testCase:         TestCase{ID: "numbered-list-ok"},
-			output:           `{"reply_text":"Как оформить:\n1. Напишите адрес.\n2. Подтвердите заказ.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			output:           `{"reply_text":"Как оформить:\n1. Напишите адрес.\n2. Подтвердите заказ.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: true,
 			wantReason:       "ok",
@@ -242,7 +241,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 		{
 			name:             "numbered list markers (paren style) are not invented digits",
 			testCase:         TestCase{ID: "numbered-list-paren-ok"},
-			output:           `{"reply_text":"Нужно:\n1) Подтвердить\n2) Указать адрес\n3) Мы пришлём счёт","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			output:           `{"reply_text":"Нужно:\n1) Подтвердить\n2) Указать адрес\n3) Мы пришлём счёт","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: true,
 			wantReason:       "ok",
@@ -250,7 +249,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 		{
 			name:             "mangled single-brace token fails contract",
 			testCase:         TestCase{ID: "mangled-token"},
-			output:           `{"reply_text":"Цена {product.coffee-machine.price}.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			output:           `{"reply_text":"Цена {product.coffee-machine.price}.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: false,
 			wantBehaviorPass: true,
 			wantReason:       "leftover brace survived injection",
@@ -258,7 +257,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 		{
 			name:             "unknown token in escalation_reason blocks the draft",
 			testCase:         TestCase{ID: "escalation-reason-unknown-token"},
-			output:           `{"reply_text":"Хорошо.","reply_language":"ru","attach_groups":[],"escalate":true,"escalation_reason":"Нужно уточнить {{product.unknown.field}}"}`,
+			output:           `{"reply_text":"Хорошо.","reply_language":"ru","media_files_to_send":[],"escalate":true,"escalation_reason":"Нужно уточнить {{product.unknown.field}}","confidence":0.5}`,
 			wantContractPass: false,
 			wantBehaviorPass: true,
 			wantReason:       "unknown token(s), draft would be BLOCKED: {{product.unknown.field}}",
@@ -269,7 +268,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 				ID:       "kk-field-mismatch",
 				Language: "kk",
 			},
-			output:           `{"reply_text":"Бұл сөйлем қазақша және қазақ әріптері бар: ә ғ қ.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			output:           `{"reply_text":"Бұл сөйлем қазақша және қазақ әріптері бар: ә ғ қ.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       `reply_language field is "ru", expected "kk"`,
@@ -280,7 +279,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 				ID:       "ru-text-is-kazakh",
 				Language: "ru",
 			},
-			output:           `{"reply_text":"Бұл сөйлем қазақша ә ғ қ.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+			output:           `{"reply_text":"Бұл сөйлем қазақша ә ғ қ.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: true,
 			wantBehaviorPass: false,
 			wantReason:       "reply looks like Kazakh but a Russian reply was expected",
@@ -296,10 +295,9 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			got := judgeOne(
 				tt.testCase,
 				row,
-				catalog,
 				tokenValue,
-				nil,
-				validGroups,
+				validMedia,
+				catalog.TrustedDigits,
 			)
 			if got.ContractPass != tt.wantContractPass {
 				t.Fatalf("ContractPass = %v, want %v; reason=%s", got.ContractPass, tt.wantContractPass, got.Reason)
@@ -320,13 +318,13 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 // distinct ways a language check can fail, and a Kazakh canary run needs to tell them
 // apart when someone is manually inspecting results, not just see one combined boolean.
 func TestJudgeOne_LanguageTextOKAndFieldOKAreIndependentSignals(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 
 	t.Run("text looks Kazakh, field wrongly says ru", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Бұл сөйлем қазақша және қазақ әріптері бар: ә ғ қ.","reply_language":"ru","attach_groups":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		row.Response.Output = `{"reply_text":"Бұл сөйлем қазақша және қазақ әріптері бар: ә ғ қ.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if !got.LanguageTextOK {
 			t.Error("want LanguageTextOK=true (the text does read as Kazakh)")
 		}
@@ -341,8 +339,8 @@ func TestJudgeOne_LanguageTextOKAndFieldOKAreIndependentSignals(t *testing.T) {
 	t.Run("field correctly says kk, text does not look Kazakh", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Здравствуйте, чем могу помочь?","reply_language":"kk","attach_groups":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		row.Response.Output = `{"reply_text":"Здравствуйте, чем могу помочь?","reply_language":"kk","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if got.LanguageTextOK {
 			t.Error("want LanguageTextOK=false (the text is plain Russian, no Kazakh-specific letters)")
 		}
@@ -357,8 +355,8 @@ func TestJudgeOne_LanguageTextOKAndFieldOKAreIndependentSignals(t *testing.T) {
 	t.Run("both correct", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Жеткізу қанша тұрады?","reply_language":"kk","attach_groups":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		row.Response.Output = `{"reply_text":"Жеткізу қанша тұрады?","reply_language":"kk","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if !got.LanguageTextOK || !got.LanguageFieldOK || !got.LanguagePass {
 			t.Errorf("want all three true, got TextOK=%v FieldOK=%v Pass=%v", got.LanguageTextOK, got.LanguageFieldOK, got.LanguagePass)
 		}
@@ -414,11 +412,11 @@ func TestLooksKazakh_DottedIIsKazakhSpecific(t *testing.T) {
 	}
 
 	t.Run("judgeOne passes LanguageTextOK for an і-only Kazakh reply", func(t *testing.T) {
-		catalog := &Catalog{Contract: "attach_groups"}
+		catalog := &Catalog{}
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Сізге онымен бірге келетін суреттерді жіберейін бе?","reply_language":"kk","attach_groups":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		row.Response.Output = `{"reply_text":"Сізге онымен бірге келетін суреттерді жіберейін бе?","reply_language":"kk","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if !got.LanguageTextOK {
 			t.Error("want LanguageTextOK=true — this exact sentence was the observed і-blind-spot false fail")
 		}
@@ -500,12 +498,12 @@ func TestProviderModelKey(t *testing.T) {
 // code" marker for OLD verdicts (viewmodel.go/judge_snapshot tests) — it only works
 // because a NEW verdict never has ParseOK=true with MediaCountEvaluated=false.
 func TestJudgeOne_MediaCountEvaluatedMirrorsParseOK(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
-	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
-	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	v := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if !v.ParseOK || !v.MediaCountEvaluated {
 		t.Errorf("want ParseOK=true and MediaCountEvaluated=true together, got ParseOK=%v MediaCountEvaluated=%v", v.ParseOK, v.MediaCountEvaluated)
 	}
@@ -513,37 +511,36 @@ func TestJudgeOne_MediaCountEvaluatedMirrorsParseOK(t *testing.T) {
 	badRow := PromptfooRow{}
 	badRow.Provider.ID = "test-model"
 	badRow.Response.Output = "not json"
-	bad := judgeOne(TestCase{ID: "t"}, badRow, catalog, map[string]string{}, nil, map[string]bool{})
+	bad := judgeOne(TestCase{ID: "t"}, badRow, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if bad.ParseOK || bad.MediaCountEvaluated {
 		t.Errorf("want ParseOK=false and MediaCountEvaluated=false together on the early-return path, got ParseOK=%v MediaCountEvaluated=%v", bad.ParseOK, bad.MediaCountEvaluated)
 	}
 }
 
-// TestJudgeOne_MediaCountCap_AssetRefsBoundary is the asset_refs-contract sibling of the
-// attach_groups cap cases in TestJudgeOne_DeterministicChecks: maxMediaRefs (3) is a
-// SEPARATE constant from maxMediaGroups (2), and the shared table above only ever
-// exercises an attach_groups catalog, so this pins the other contract branch and the
-// other constant directly.
-func TestJudgeOne_MediaCountCap_AssetRefsBoundary(t *testing.T) {
-	catalog := &Catalog{Contract: "asset_refs"}
-	validRef := map[string]bool{"photo-1": true, "photo-2": true, "photo-3": true, "photo-4": true}
+// TestJudgeOne_MediaCountCap_Boundary pins the media_files_to_send attachment cap
+// (maxMediaGroups, 2) at its exact boundary — every scenario shares this one cap now
+// (see judge.go's TooManyMedia comment; the historical separate asset_refs cap of 3 no
+// longer exists now that every scenario returns media_files_to_send).
+func TestJudgeOne_MediaCountCap_Boundary(t *testing.T) {
+	catalog := &Catalog{}
+	validMedia := map[string]bool{"photo-1": true, "photo-2": true, "photo-3": true}
 
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
-	row.Response.Output = `{"reply_text":"Вот фото.","reply_language":"ru","asset_refs":["photo-1","photo-2","photo-3"],"escalate":false}`
-	within := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, validRef, nil)
+	row.Response.Output = `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["photo-1","photo-2"],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	within := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, validMedia, catalog.TrustedDigits)
 	if within.TooManyMedia || !within.ModelBehaviorPass {
-		t.Errorf("want 3 asset_refs (at the cap) to pass, got TooManyMedia=%v ModelBehaviorPass=%v reason=%q", within.TooManyMedia, within.ModelBehaviorPass, within.Reason)
+		t.Errorf("want 2 media_files_to_send (at the cap) to pass, got TooManyMedia=%v ModelBehaviorPass=%v reason=%q", within.TooManyMedia, within.ModelBehaviorPass, within.Reason)
 	}
 
 	overRow := PromptfooRow{}
 	overRow.Provider.ID = "test-model"
-	overRow.Response.Output = `{"reply_text":"Вот фото.","reply_language":"ru","asset_refs":["photo-1","photo-2","photo-3","photo-4"],"escalate":false}`
-	over := judgeOne(TestCase{ID: "t"}, overRow, catalog, map[string]string{}, validRef, nil)
+	overRow.Response.Output = `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["photo-1","photo-2","photo-3"],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	over := judgeOne(TestCase{ID: "t"}, overRow, map[string]string{}, validMedia, catalog.TrustedDigits)
 	if !over.TooManyMedia || over.ModelBehaviorPass {
-		t.Errorf("want 4 asset_refs (over the cap) to fail, got TooManyMedia=%v ModelBehaviorPass=%v", over.TooManyMedia, over.ModelBehaviorPass)
+		t.Errorf("want 3 media_files_to_send (over the cap) to fail, got TooManyMedia=%v ModelBehaviorPass=%v", over.TooManyMedia, over.ModelBehaviorPass)
 	}
-	if over.Reason != "attached 4 media entries — over the frame's cap" {
+	if over.Reason != "attached 3 media entries — over the frame's cap" {
 		t.Errorf("got Reason=%q", over.Reason)
 	}
 }
@@ -554,13 +551,13 @@ func TestJudgeOne_MediaCountCap_AssetRefsBoundary(t *testing.T) {
 // issue, the same category as an unknown token or a leftover brace, regardless of what
 // happened to parse successfully.
 func TestJudgeOne_TruncatedFinishReasonFailsContract(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
-	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 	row.Response.FinishReason = "length"
 
-	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if !v.Truncated {
 		t.Error("want Truncated=true")
 	}
@@ -577,12 +574,12 @@ func TestJudgeOne_TruncatedFinishReasonFailsContract(t *testing.T) {
 // its zero value (""), and that must keep behaving exactly as before — never treated as
 // truncation.
 func TestJudgeOne_EmptyFinishReasonDoesNotFailContract(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
-	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 
-	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if v.Truncated {
 		t.Error("want Truncated=false for an empty (unreported) finish_reason")
 	}
@@ -595,13 +592,13 @@ func TestJudgeOne_EmptyFinishReasonDoesNotFailContract(t *testing.T) {
 // (truncation is often the CAUSE of a parse failure) still surfaces the truncation fact,
 // not just a generic "could not parse" message.
 func TestJudgeOne_TruncatedAndUnparseableCombinesReasons(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
 	row.Response.Output = `{"reply_text":"Кофемашина сто` // cut off mid-string, invalid JSON
 	row.Response.FinishReason = "length"
 
-	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if v.ParseOK {
 		t.Fatal("want ParseOK=false for genuinely truncated JSON")
 	}
@@ -626,16 +623,16 @@ func TestJudgeOne_TruncatedAndUnparseableCombinesReasons(t *testing.T) {
 // Blocked response, even though every token in the leaked text would otherwise have
 // resolved cleanly.
 func TestJudgeOne_ReasoningLeakInReplyTextFailsContractAndSuppressesInjectedText(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups", Tokens: []CatalogFact{
+	catalog := &Catalog{Tokens: []CatalogFact{
 		{Token: "{{product.coffee-machine.price}}", Value: "129 900 ₸"},
 	}}
 	tokenValue := map[string]string{"{{product.coffee-machine.price}}": "129 900 ₸"}
 
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
-	row.Response.Output = `{"reply_text":"<think>the customer wants the price, I should state it</think>Цена {{product.coffee-machine.price}}.","reply_language":"ru","attach_groups":[],"escalate":false}`
+	row.Response.Output = `{"reply_text":"<think>the customer wants the price, I should state it</think>Цена {{product.coffee-machine.price}}.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 
-	v := judgeOne(TestCase{ID: "t"}, row, catalog, tokenValue, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "t"}, row, tokenValue, map[string]bool{}, catalog.TrustedDigits)
 	if !v.ParseOK {
 		t.Fatal("want ParseOK=true — the JSON itself is well-formed, only its content leaks")
 	}
@@ -660,12 +657,12 @@ func TestJudgeOne_ReasoningLeakInReplyTextFailsContractAndSuppressesInjectedText
 // fact from the one human-readable Reason string, even though v.ReasoningLeak itself
 // stayed correctly true and ContractPass still correctly failed either way.
 func TestJudgeOne_ReasonMentionsBothBlockedAndReasoningLeak(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
-	row.Response.Output = `{"reply_text":"<think>let me check the unknown fact</think>{{product.unknown.field}}","reply_language":"ru","attach_groups":[],"escalate":false}`
+	row.Response.Output = `{"reply_text":"<think>let me check the unknown fact</think>{{product.unknown.field}}","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 
-	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if !v.Blocked {
 		t.Fatal("precondition failed: want Blocked=true (unresolvable token)")
 	}
@@ -716,11 +713,11 @@ func TestApplyCostEstimate_CachedRowNeverBorrowsAcrossLabels(t *testing.T) {
 // customer-facing text — it only ever prints v.InjectedText, which judgeOne already
 // leaves empty on a reasoning leak (see the judgeOne test above).
 func TestBuildContractReport_NeverEchoesReasoningLeakIntoInjectedTextLine(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
-	row.Response.Output = `{"reply_text":"<think>internal chain of thought, never meant for a customer</think>ok","reply_language":"ru","attach_groups":[],"escalate":false}`
-	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	row.Response.Output = `{"reply_text":"<think>internal chain of thought, never meant for a customer</think>ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	v := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 
 	report := buildContractReport([]JudgedRun{{Scenario: "fixture", Verdicts: []Verdict{v}}})
 	if strings.Contains(report, "injected text:") {
@@ -741,14 +738,14 @@ func TestBuildContractReport_NeverEchoesReasoningLeakIntoInjectedTextLine(t *tes
 // boolean and were never affected by this gap). appendReason (judge.go) fixes this
 // generally — every fact-setting site now accumulates — not just for Blocked.
 func TestJudgeOne_ReasonAccumulatesAcrossEveryCombinationNotJustBlocked(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
 	// escalate is a STRING, not a bool -> ContractFields fails for a reason having
 	// nothing to do with reply_text, which is itself present, valid, AND leaking.
-	row.Response.Output = `{"reply_text":"<think>internal</think>ok","reply_language":"ru","attach_groups":[],"escalate":"false"}`
+	row.Response.Output = `{"reply_text":"<think>internal</think>ok","reply_language":"ru","media_files_to_send":[],"escalate":"false"}`
 
-	v := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if v.ContractFields {
 		t.Fatal("precondition failed: want ContractFields=false (escalate is a string, not bool)")
 	}
@@ -769,13 +766,13 @@ func TestJudgeOne_ReasonAccumulatesAcrossEveryCombinationNotJustBlocked(t *testi
 // field check only; a model that writes "kz" but replies in RUSSIAN must still fail on
 // the text heuristic.
 func TestJudgeOne_KzAliasForKazakhFieldCheck(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 
 	t.Run("kz accepted when text is genuinely Kazakh", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Кофемашина DeLonghi құны — 129 900 ₸. Ол қоймада бар.","reply_language":"kz","attach_groups":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		row.Response.Output = `{"reply_text":"Кофемашина DeLonghi құны — 129 900 ₸. Ол қоймада бар.","reply_language":"kz","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if !got.LanguageFieldOK {
 			t.Error("want LanguageFieldOK=true (kz aliases to kk)")
 		}
@@ -790,8 +787,8 @@ func TestJudgeOne_KzAliasForKazakhFieldCheck(t *testing.T) {
 	t.Run("kz does not launder a Russian reply", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Кофемашина стоит 129900 тенге.","reply_language":"kz","attach_groups":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		row.Response.Output = `{"reply_text":"Кофемашина стоит 129900 тенге.","reply_language":"kz","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		// The FIELD alias still applies (kz -> kk, so LanguageFieldOK is true) — that's
 		// independent and expected. What must NOT happen is the overall LanguagePass
 		// going green: the TEXT is Russian, so the combined gate must still fail.
@@ -806,8 +803,8 @@ func TestJudgeOne_KzAliasForKazakhFieldCheck(t *testing.T) {
 	t.Run("plain ru vs kk still fails, no alias involved", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Жеткізу қанша тұрады?","reply_language":"ru","attach_groups":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+		row.Response.Output = `{"reply_text":"Жеткізу қанша тұрады?","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t", Language: "kk"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if got.LanguageFieldOK {
 			t.Error("want LanguageFieldOK=false (ru != kk, no alias applies)")
 		}
@@ -822,7 +819,7 @@ func TestJudgeOne_KzAliasForKazakhFieldCheck(t *testing.T) {
 // доставки; 2) подтвердите заказ" — numbered-list markers after ":"/";" on ONE
 // continuous line, which the line-start-only listMarkerRE didn't reach.
 func TestJudgeOne_InlineListMarkersDoNotCountAsInventedDigits(t *testing.T) {
-	catalog := &Catalog{Contract: "asset_refs"}
+	catalog := &Catalog{}
 
 	t.Run("real case-11 string passes", func(t *testing.T) {
 		row := PromptfooRow{}
@@ -830,8 +827,8 @@ func TestJudgeOne_InlineListMarkersDoNotCountAsInventedDigits(t *testing.T) {
 		// No literal price digits here on purpose — this test isolates the list-marker
 		// fix; a literal, non-tokenized price number would ALSO be a genuine invented
 		// digit, unrelated to what's being tested (covered by other existing tests).
-		row.Response.Output = `{"reply_text":"Здравствуйте! Отлично, рады, что решили взять кофемашину DeLonghi — она в наличии. Для оформления заказа: 1) укажите адрес доставки; 2) подтвердите заказ — мы пришлём счёт.","reply_language":"ru","asset_refs":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		row.Response.Output = `{"reply_text":"Здравствуйте! Отлично, рады, что решили взять кофемашину DeLonghi — она в наличии. Для оформления заказа: 1) укажите адрес доставки; 2) подтвердите заказ — мы пришлём счёт.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if len(got.InventedDigits) != 0 {
 			t.Errorf("want no invented digits (list markers after ':'/';' are legitimate), got %v", got.InventedDigits)
 		}
@@ -840,8 +837,8 @@ func TestJudgeOne_InlineListMarkersDoNotCountAsInventedDigits(t *testing.T) {
 	t.Run("inline digit+paren NOT preceded by a delimiter still flags", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Гарантийный талон код 7)х указан на коробке.","reply_language":"ru","asset_refs":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		row.Response.Output = `{"reply_text":"Гарантийный талон код 7)х указан на коробке.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if len(got.InventedDigits) == 0 {
 			t.Error("want the bare digit+')' in running prose (no preceding ':'/';') to still be flagged as a possible invented number")
 		}
@@ -853,7 +850,7 @@ func TestJudgeOne_InlineListMarkersDoNotCountAsInventedDigits(t *testing.T) {
 // ("...сейчас.\x08r\n\nУход за ней...") — a garbled byte a real product must never
 // forward to a customer, independent of whether the JSON otherwise parses cleanly.
 func TestJudgeOne_ControlCharsFailsContract(t *testing.T) {
-	catalog := &Catalog{Contract: "asset_refs"}
+	catalog := &Catalog{}
 
 	t.Run("backspace fails contract", func(t *testing.T) {
 		row := PromptfooRow{}
@@ -864,8 +861,8 @@ func TestJudgeOne_ControlCharsFailsContract(t *testing.T) {
 		// check). "\\b" in this Go source produces the two literal characters backslash+b
 		// in the string, i.e. JSON's own \b escape — decodes to rune 0x08 once
 		// json.Unmarshal parses it, exactly like the real minimax-m2.5 response did.
-		row.Response.Output = "{\"reply_text\":\"Всё готово.\\bУход простой.\",\"reply_language\":\"ru\",\"asset_refs\":[],\"escalate\":false}"
-		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		row.Response.Output = "{\"reply_text\":\"Всё готово.\\bУход простой.\",\"reply_language\":\"ru\",\"media_files_to_send\":[],\"escalate\":false,\"escalation_reason\":\"\",\"confidence\":0.9}"
+		got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if !got.ControlChars {
 			t.Error("want ControlChars=true")
 		}
@@ -877,8 +874,8 @@ func TestJudgeOne_ControlCharsFailsContract(t *testing.T) {
 	t.Run("normal CRLF is not flagged", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = "{\"reply_text\":\"Строка один.\r\nСтрока два.\",\"reply_language\":\"ru\",\"asset_refs\":[],\"escalate\":false}"
-		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		row.Response.Output = "{\"reply_text\":\"Строка один.\r\nСтрока два.\",\"reply_language\":\"ru\",\"media_files_to_send\":[],\"escalate\":false,\"escalation_reason\":\"\",\"confidence\":0.9}"
+		got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if got.ControlChars {
 			t.Error("want ControlChars=false — \\r\\n is legitimate formatting, not a garbled byte")
 		}
@@ -891,14 +888,14 @@ func TestJudgeOne_ControlCharsFailsContract(t *testing.T) {
 // must_not_contain rather than instead of it — a reply with the WRONG polarity phrase
 // must still fail even though it says nothing forbidden by an empty/absent blocklist.
 func TestJudgeOne_MustContainAny(t *testing.T) {
-	catalog := &Catalog{Contract: "asset_refs"}
+	catalog := &Catalog{}
 
 	t.Run("expected phrase present -> pass", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Да, кофемашина в наличии.","reply_language":"ru","asset_refs":[],"escalate":false}`
+		row.Response.Output = `{"reply_text":"Да, кофемашина в наличии.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 		tc := TestCase{ID: "t", MustContainAny: []string{"в наличии"}}
-		got := judgeOne(tc, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		got := judgeOne(tc, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if !got.MustContainAnyPass {
 			t.Error("want MustContainAnyPass=true")
 		}
@@ -910,9 +907,9 @@ func TestJudgeOne_MustContainAny(t *testing.T) {
 	t.Run("none of the expected phrases present -> fail, names the full expected set", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Уточню у коллеги и вернусь с ответом.","reply_language":"ru","asset_refs":[],"escalate":true}`
+		row.Response.Output = `{"reply_text":"Уточню у коллеги и вернусь с ответом.","reply_language":"ru","media_files_to_send":[],"escalate":true,"escalation_reason":"","confidence":0.9}`
 		tc := TestCase{ID: "t", MustContainAny: []string{"в наличии"}}
-		got := judgeOne(tc, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		got := judgeOne(tc, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if got.MustContainAnyPass {
 			t.Error("want MustContainAnyPass=false")
 		}
@@ -927,8 +924,8 @@ func TestJudgeOne_MustContainAny(t *testing.T) {
 	t.Run("no expectation declared -> vacuously true, same convention as must_not_contain", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"anything","reply_language":"ru","asset_refs":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		row.Response.Output = `{"reply_text":"anything","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if !got.MustContainAnyPass {
 			t.Error("want MustContainAnyPass=true when the test declares no must_contain_any at all")
 		}
@@ -943,7 +940,7 @@ func TestJudgeOne_MustContainAny(t *testing.T) {
 // neither block) is exactly as wrong as it was before this knob existed.
 func TestJudgeOne_Outcomes(t *testing.T) {
 	escalateFalse := false
-	catalog := &Catalog{Contract: "asset_refs"}
+	catalog := &Catalog{}
 	tokenValue := map[string]string{
 		"{{tariff.business.payment_limit_monthly}}": "10 000 000 ₸",
 		"{{tariff.start.payment_limit_monthly}}":    "1 000 000 ₸",
@@ -967,11 +964,11 @@ func TestJudgeOne_Outcomes(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
 		row.Response.Output = output
-		return judgeOne(tc, row, catalog, tokenValue, map[string]bool{}, nil)
+		return judgeOne(tc, row, tokenValue, map[string]bool{}, catalog.TrustedDigits)
 	}
 
 	t.Run("first block satisfied -> pass, matched label is the first block's", func(t *testing.T) {
-		got := run(`{"reply_text":"Лимит по тарифу «Бизнес» — {{tariff.business.payment_limit_monthly}}.","reply_language":"ru","asset_refs":[],"escalate":false}`)
+		got := run(`{"reply_text":"Лимит по тарифу «Бизнес» — {{tariff.business.payment_limit_monthly}}.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`)
 		if !got.OutcomesDeclared || !got.OutcomesPass {
 			t.Fatalf("want OutcomesDeclared+OutcomesPass, got declared=%v pass=%v reason=%q", got.OutcomesDeclared, got.OutcomesPass, got.Reason)
 		}
@@ -984,7 +981,7 @@ func TestJudgeOne_Outcomes(t *testing.T) {
 	})
 
 	t.Run("second block satisfied (clarifying question) -> pass via the alternative", func(t *testing.T) {
-		got := run(`{"reply_text":"Уточните, пожалуйста, для какого тарифа вас интересует лимит?","reply_language":"ru","asset_refs":[],"escalate":false}`)
+		got := run(`{"reply_text":"Уточните, пожалуйста, для какого тарифа вас интересует лимит?","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`)
 		if !got.OutcomesPass {
 			t.Fatalf("want OutcomesPass=true via the clarify block, got reason=%q", got.Reason)
 		}
@@ -994,7 +991,7 @@ func TestJudgeOne_Outcomes(t *testing.T) {
 	})
 
 	t.Run("neither block satisfied (confident wrong-tariff answer) -> fail, reason names every alternative", func(t *testing.T) {
-		got := run(`{"reply_text":"Лимит платежей — {{tariff.start.payment_limit_monthly}} в месяц.","reply_language":"ru","asset_refs":[],"escalate":false}`)
+		got := run(`{"reply_text":"Лимит платежей — {{tariff.start.payment_limit_monthly}} в месяц.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`)
 		if got.OutcomesPass {
 			t.Fatal("want OutcomesPass=false — the wrong tariff's token satisfies neither block")
 		}
@@ -1017,8 +1014,8 @@ func TestJudgeOne_Outcomes(t *testing.T) {
 		kkTC.Language = "kk"
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"Уточните, пожалуйста, для какого тарифа вас интересует лимит?","reply_language":"ru","asset_refs":[],"escalate":false}`
-		got := judgeOne(kkTC, row, catalog, tokenValue, map[string]bool{}, nil)
+		row.Response.Output = `{"reply_text":"Уточните, пожалуйста, для какого тарифа вас интересует лимит?","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(kkTC, row, tokenValue, map[string]bool{}, catalog.TrustedDigits)
 		if !got.OutcomesPass {
 			t.Fatalf("want the outcome block itself to still pass, got reason=%q", got.Reason)
 		}
@@ -1030,8 +1027,8 @@ func TestJudgeOne_Outcomes(t *testing.T) {
 	t.Run("no outcomes declared -> vacuously true, not marked declared", func(t *testing.T) {
 		row := PromptfooRow{}
 		row.Provider.ID = "test-model"
-		row.Response.Output = `{"reply_text":"anything","reply_language":"ru","asset_refs":[],"escalate":false}`
-		got := judgeOne(TestCase{ID: "t"}, row, catalog, map[string]string{}, map[string]bool{}, nil)
+		row.Response.Output = `{"reply_text":"anything","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if got.OutcomesDeclared {
 			t.Error("want OutcomesDeclared=false when the test declares no outcomes")
 		}

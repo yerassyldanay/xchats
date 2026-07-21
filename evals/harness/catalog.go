@@ -10,7 +10,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"xchats-evals-harness/internal/kbfixture"
 	"xchats-evals-harness/internal/provenance"
+
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 )
 
 // CatalogFileSchemaVersion follows export.go's own per-artifact versioning
@@ -41,14 +44,17 @@ type CatalogScenario struct {
 	Setup       string `json:"setup,omitempty"`
 	PromptRef   string `json:"prompt_ref,omitempty"`
 	Experiment  string `json:"experiment,omitempty"`
-	Contract    string `json:"contract"`
-	// FactsSource is the evals/-relative path of the data.yaml every Fact below and
-	// every test's `requires` token is resolved against (may point into another
-	// scenario dir — several scenarios deliberately share one data.yaml).
-	FactsSource string            `json:"facts_source"`
-	Facts       []CatalogFact     `json:"facts"`
-	MediaRefs   []string          `json:"media_refs,omitempty"`
-	MediaGroups []string          `json:"media_groups,omitempty"`
+	// Pipeline mirrors ScenarioConfig.Pipeline — empty for the legacy fact_tables path,
+	// "schema_kb_v1" for the shop-kb-v1 family (see buildCatalogScenarioSchemaKB).
+	Pipeline string `json:"pipeline,omitempty"`
+	// FactsSource is the evals/-relative path of the data.yaml (or, for a schema_kb_v1
+	// scenario, the fixture file) every Fact below and every test's `requires` token is
+	// resolved against (may point into another scenario dir — several scenarios
+	// deliberately share one data.yaml).
+	FactsSource string `json:"facts_source"`
+	Facts       []CatalogFact `json:"facts"`
+	// MediaTokens is every valid media_files_to_send token for this scenario.
+	MediaTokens []string          `json:"media_tokens,omitempty"`
 	Media       []CatalogMedia    `json:"media,omitempty"`
 	Tests       []CatalogTestCase `json:"tests"`
 }
@@ -66,17 +72,17 @@ type CatalogMedia struct {
 // resolved_tests.json's untagged, capitalized-key shape via TestCase), and existing run
 // snapshots depend on that exact shape. Adding tags here can never affect it.
 type CatalogMediaExpect struct {
-	AnyOfGroups []string `json:"any_of_groups,omitempty"`
-	AnyOfRefs   []string `json:"any_of_refs,omitempty"`
-	Forbid      bool     `json:"forbid,omitempty"`
-	Exclusive   bool     `json:"exclusive,omitempty"`
+	AnyOf     []string `json:"any_of,omitempty"`
+	AllOf     []string `json:"all_of,omitempty"`
+	Forbid    bool     `json:"forbid,omitempty"`
+	Exclusive bool     `json:"exclusive,omitempty"`
 }
 
 func catalogMediaExpect(m *MediaExpect) *CatalogMediaExpect {
 	if m == nil {
 		return nil
 	}
-	return &CatalogMediaExpect{AnyOfGroups: m.AnyOfGroups, AnyOfRefs: m.AnyOfRefs, Forbid: m.Forbid, Exclusive: m.Exclusive}
+	return &CatalogMediaExpect{AnyOf: m.AnyOf, AllOf: m.AllOf, Forbid: m.Forbid, Exclusive: m.Exclusive}
 }
 
 // CatalogOutcomeCase mirrors OutcomeCase with explicit JSON tags — a dedicated
@@ -222,41 +228,37 @@ func catalogTestCaseFrom(tc TestCase, source string) CatalogTestCase {
 	}
 }
 
-// buildCatalogMedia mirrors buildCatalog's (render.go) exact media traversal and
-// contract gating — same rows, same "only what this scenario's OWN contract actually
-// uses" filter — but keeps each entry's Description (buildCatalog only needs the
-// token/ref names, since Description is a prompt-rendering concern the model reads
-// directly out of MEDIA%%, not something the grading catalog itself carries).
-func buildCatalogMedia(data *Data, contract string) []CatalogMedia {
+// buildCatalogMedia mirrors buildCatalog's (render.go) exact media traversal — same
+// rows, same union of both media shapes a data.yaml can use — but keeps each entry's
+// Description (buildCatalog only needs the token/ref names, since Description is a
+// prompt-rendering concern the model reads directly out of MEDIA%%, not something the
+// grading catalog itself carries).
+func buildCatalogMedia(data *Data) []CatalogMedia {
 	var out []CatalogMedia
-	if contract == "attach_groups" {
-		for _, ft := range data.FactTables {
-			for _, row := range ft.Rows {
-				for _, m := range row.Media {
-					if len(m.Files) == 0 {
-						continue
-					}
-					out = append(out, CatalogMedia{
-						Name: mediaGroupToken(ft.Table, row.Ref, m.Field), Kind: "group", Description: m.Description,
-					})
-				}
-			}
-		}
-		for _, t := range data.Topics {
-			for _, m := range t.Media {
+	for _, ft := range data.FactTables {
+		for _, row := range ft.Rows {
+			for _, m := range row.Media {
 				if len(m.Files) == 0 {
 					continue
 				}
 				out = append(out, CatalogMedia{
-					Name: mediaGroupToken("topic", t.Ref, m.Field), Kind: "group", Description: m.Description,
+					Name: mediaGroupToken(ft.Table, row.Ref, m.Field), Kind: "group", Description: m.Description,
 				})
 			}
 		}
 	}
-	if contract == "asset_refs" {
-		for _, a := range data.Assets {
-			out = append(out, CatalogMedia{Name: a.Ref, Kind: a.Kind, Description: a.Description})
+	for _, t := range data.Topics {
+		for _, m := range t.Media {
+			if len(m.Files) == 0 {
+				continue
+			}
+			out = append(out, CatalogMedia{
+				Name: mediaGroupToken("topic", t.Ref, m.Field), Kind: "group", Description: m.Description,
+			})
 		}
+	}
+	for _, a := range data.Assets {
+		out = append(out, CatalogMedia{Name: a.Ref, Kind: a.Kind, Description: a.Description})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -272,6 +274,9 @@ func buildCatalogScenario(dir string) (*CatalogScenario, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load scenario.yaml: %w", err)
 	}
+	if scenario.Pipeline == "schema_kb_v1" {
+		return buildCatalogScenarioSchemaKB(dir, scenario)
+	}
 	dataPath := filepath.Join(dir, scenario.Data)
 	data, err := loadData(dataPath)
 	if err != nil {
@@ -281,7 +286,7 @@ func buildCatalogScenario(dir string) (*CatalogScenario, error) {
 		return nil, fmt.Errorf("scenario %q: %w", scenario.Name, err)
 	}
 
-	cat := buildCatalog(data, scenario.Contract)
+	cat := buildCatalog(data)
 	tests, err := resolveCatalogTests(scenario.Name, dir, scenario.Tests)
 	if err != nil {
 		return nil, fmt.Errorf("resolve tests: %w", err)
@@ -293,12 +298,63 @@ func buildCatalogScenario(dir string) (*CatalogScenario, error) {
 		Setup:       scenario.Setup,
 		PromptRef:   scenario.PromptRef,
 		Experiment:  scenario.Experiment,
-		Contract:    scenario.Contract,
 		FactsSource: dataPath,
 		Facts:       cat.Tokens,
-		MediaRefs:   cat.MediaRefs,
-		MediaGroups: cat.MediaGroups,
-		Media:       buildCatalogMedia(data, scenario.Contract),
+		MediaTokens: cat.MediaTokens,
+		Media:       buildCatalogMedia(data),
+		Tests:       tests,
+	}, nil
+}
+
+// buildCatalogScenarioSchemaKB is buildCatalogScenario's counterpart for the
+// pipeline:schema_kb_v1 family — same "zero billed calls, real resolved values, same
+// order render itself uses" contract, but loading via kbfixture and building the
+// catalog via aiprompt.BuildCatalog instead of this file's legacy loadData/buildCatalog.
+// The exported Facts/Media/MediaTokens are the PUBLIC aiprompt.Catalog projection only
+// (see aiprompt/catalog.go's doc comments) — no material ID or other kbd_materials
+// metadata ever reaches runs/catalog.json for these scenarios either.
+func buildCatalogScenarioSchemaKB(dir string, scenario *ScenarioConfig) (*CatalogScenario, error) {
+	fixturePath := filepath.Join(dir, scenario.Data)
+	kb, err := kbfixture.Load(fixturePath)
+	if err != nil {
+		return nil, fmt.Errorf("load fixture %s: %w", fixturePath, err)
+	}
+	if kb, err = kbfixture.ApplyLimits(kb, scenario.Limits); err != nil {
+		return nil, fmt.Errorf("scenario %q: %w", scenario.Name, err)
+	}
+	cat, err := aiprompt.BuildCatalog(kb)
+	if err != nil {
+		return nil, fmt.Errorf("scenario %q: build catalog: %w", scenario.Name, err)
+	}
+	tests, err := resolveCatalogTests(scenario.Name, dir, scenario.Tests)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tests: %w", err)
+	}
+
+	facts := make([]CatalogFact, 0, len(cat.Facts))
+	for _, f := range cat.Facts {
+		facts = append(facts, CatalogFact{Token: f.Token, Value: f.Value})
+	}
+	var mediaTokens []string
+	media := make([]CatalogMedia, 0, len(cat.Media))
+	for _, m := range cat.Media {
+		mediaTokens = append(mediaTokens, m.Token)
+		media = append(media, CatalogMedia{Name: m.Token, Kind: string(m.Kind), Description: m.Label})
+	}
+	sort.Strings(mediaTokens)
+	sort.Slice(media, func(i, j int) bool { return media[i].Name < media[j].Name })
+
+	return &CatalogScenario{
+		Name:        scenario.Name,
+		Description: scenario.Description,
+		Setup:       scenario.Setup,
+		PromptRef:   scenario.PromptRef,
+		Experiment:  scenario.Experiment,
+		Pipeline:    scenario.Pipeline,
+		FactsSource: fixturePath,
+		Facts:       facts,
+		MediaTokens: mediaTokens,
+		Media:       media,
 		Tests:       tests,
 	}, nil
 }

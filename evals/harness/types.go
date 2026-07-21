@@ -1,7 +1,13 @@
 package main
 
 // ScenarioConfig is scenario.yaml — the meta file naming which other files make up one
-// imitated product version and which real response contract (if any) it matches.
+// imitated product version. Every scenario returns the same canonical response contract
+// (reply_text, reply_language, media_files_to_send, escalate, escalation_reason,
+// confidence — DECISIONS.md §"Customer-response JSON contract"); there is no
+// per-scenario contract selector any more (the historical "asset_refs" vs
+// "attach_groups" media-field choice is gone — every scenario's media field is named
+// media_files_to_send, whatever token vocabulary its own catalog happens to populate it
+// with).
 //
 // TopicFormat controls how each KNOWLEDGE BASE entry is written; substituted placeholders
 // are {ref} {lang} {title} {keywords} {body} — e.g. "# topic: {ref} ({lang})\nkeywords:
@@ -11,20 +17,16 @@ package main
 type ScenarioConfig struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
-	Frame       string `yaml:"frame"`    // path to frame.txt, relative to the scenario dir
-	Data        string `yaml:"data"`     // path to data.yaml (may point into another scenario dir)
-	Tests       string `yaml:"tests"`    // path to tests.yaml
-	Contract    string `yaml:"contract"` // "asset_refs" | "attach_groups" — which media field the model must return
+	Frame       string `yaml:"frame"` // path to frame.txt, relative to the scenario dir
+	Data        string `yaml:"data"`  // path to data.yaml (may point into another scenario dir)
+	Tests       string `yaml:"tests"` // path to tests.yaml
 	// Pipeline selects which loader/renderer builds this scenario's prompt. Empty (the
-	// default) is the original fact_tables/Data path in this file, driven by Contract.
-	// "schema_kb_v1" selects the shop-kb-v1 family's path instead: Data points at a
-	// database-schema-shaped fixture (internal/kbfixture's exact ai_*/kbd_materials table
-	// and column names — no fact_tables, no Contract, no generic values/media/files
-	// bag), built into a prompt through the SAME backend/aiprompt package production
-	// will use, instead of this file's buildCatalog/buildPrompt. See
-	// render_schema_kb.go. A scenario using this pipeline leaves Contract empty —
-	// schema_kb_v1 has exactly one response contract (media_files_to_send), so there is
-	// nothing for Contract to select.
+	// default) is the original fact_tables/Data path in this file. "schema_kb_v1" selects
+	// the shop-kb-v1 family's path instead: Data points at a database-schema-shaped
+	// fixture (internal/kbfixture's exact ai_*/kbd_materials table and column names — no
+	// fact_tables, no generic values/media/files bag), built into a prompt through the
+	// SAME backend/aiprompt package production will use, instead of this file's
+	// buildCatalog/buildPrompt. See render_schema_kb.go.
 	Pipeline    string `yaml:"pipeline,omitempty"`
 	TopicFormat string `yaml:"topic_format"`
 	// Limits caps how many rows of a named fact_tables table (keyed by Table, e.g.
@@ -228,32 +230,40 @@ type HistoryTurn struct {
 	Text string `yaml:"text" json:"text"`
 }
 
-// MediaExpect describes what a test's answer must attach, checked against whichever of
-// group/ref actually exists in the scenario's contract. Forbid and AnyOfGroups/AnyOfRefs
-// are mutually exclusive (validateTestMedia in render.go rejects the combination, at both
-// the render and catalog-export resolution paths) — Forbid means the reply's media array
-// must be EMPTY, the opposite expectation from "attach one of these".
+// MediaExpect describes what a test's answer must attach to media_files_to_send — the
+// one canonical media response field every scenario now returns, regardless of pipeline
+// or which token vocabulary this scenario's own catalog happens to use (a legacy
+// fact_tables scenario's tokens might be bare per-file refs or "{owner}.{ref}.{field}"
+// group names; a schema_kb_v1 scenario's tokens are always the exact
+// "<table>.<ref>.<column>" semantic shape backend/aiprompt generates — MediaExpect itself
+// is agnostic to which). Forbid and AnyOf/AllOf are mutually exclusive (validateTestMedia
+// in render.go rejects the combination, at both the render and catalog-export resolution
+// paths) — Forbid means the reply's media array must be EMPTY, the opposite expectation
+// from "attach these".
 type MediaExpect struct {
-	AnyOfGroups []string `yaml:"any_of_groups"` // e.g. ["coffee-machine.images"]
-	AnyOfRefs   []string `yaml:"any_of_refs"`   // e.g. ["coffee-photo-1", "coffee-photo-2"]
+	// AnyOf lists tokens where AT LEAST ONE must be attached — e.g.
+	// ["products.coffee-machine.gallery_images"]. May be combined with AllOf (both
+	// conditions then apply) or left empty when only AllOf/Forbid matters.
+	AnyOf []string `yaml:"any_of"`
+	// AllOf lists tokens that must ALL be attached together — e.g. a test expecting both
+	// a product photo AND its certificate: ["products.x.gallery_images",
+	// "products.x.certificate_documents"]. Empty means no such requirement.
+	AllOf []string `yaml:"all_of"`
 	// Forbid, when true, means this test's reply must attach NO media at all (e.g. a
 	// greeting or closing message that has no reason to push an attachment). Kept on
 	// MediaExpect (not a separate TestCase field) so a test only opts into the media check
-	// at all when it declares this block — same as AnyOfGroups/AnyOfRefs. resolved_tests.json
+	// at all when it declares this block — same as AnyOf/AllOf. resolved_tests.json
 	// is JSON-untagged by design (see ResolvedTests' doc comment); an old snapshot simply
 	// lacks this key, which unmarshals as false ("not forbidden") — never changing what an
 	// old run's Media pointer meant.
 	Forbid bool `yaml:"forbid"`
-	// Exclusive, when true, tightens AnyOfGroups/AnyOfRefs from "attach at least one of
-	// these" to "attach at least one of these, AND NOTHING ELSE" — every entry the model
-	// attaches must be inside the declared set. A deliberate single-mechanism design:
-	// rather than a separate allowed-list field, Exclusive is a modifier on the SAME
-	// any_of_* declaration, since "which one is required" and "which ones are allowed"
-	// are the same list here, not two independent facts. Requires a non-empty
-	// AnyOfGroups/AnyOfRefs (validateTestMedia rejects Exclusive with neither set) and is
-	// mutually exclusive with Forbid (validateTestMedia rejects that combination too — an
-	// empty-required-set exclusivity is what Forbid already means). Old snapshots simply
-	// lack this key, unmarshaling as false — today's any_of_* behavior, unchanged.
+	// Exclusive, when true, tightens AnyOf/AllOf from "attach these" to "attach these, AND
+	// NOTHING ELSE" — every entry the model attaches must be inside the union of the
+	// declared AnyOf and AllOf sets. Requires at least one of AnyOf/AllOf to be non-empty
+	// (validateTestMedia rejects Exclusive with neither set) and is mutually exclusive with
+	// Forbid (validateTestMedia rejects that combination too — an empty-required-set
+	// exclusivity is what Forbid already means). Old snapshots simply lack this key,
+	// unmarshaling as false — today's any_of/all_of behavior, unchanged.
 	Exclusive bool `yaml:"exclusive"`
 }
 
@@ -349,13 +359,18 @@ type ReasoningConfig struct {
 }
 
 // Catalog is generated/catalog.json — the ground truth judge.go validates answers
-// against. Tokens is ordered (not a map) so two renders of unchanged data produce a
-// byte-identical file, which makes diffing runs meaningful.
+// against, for the legacy fact_tables pipeline (a schema_kb_v1 scenario's catalog.json is
+// aiprompt.Catalog's own JSON instead — see render_schema_kb.go). Tokens is ordered (not
+// a map) so two renders of unchanged data produce a byte-identical file, which makes
+// diffing runs meaningful.
 type Catalog struct {
-	Contract    string        `json:"contract"` // "asset_refs" | "attach_groups"
-	Tokens      []CatalogFact `json:"tokens"`
-	MediaRefs   []string      `json:"media_refs"`   // valid individual refs (asset_refs contract)
-	MediaGroups []string      `json:"media_groups"` // valid group names (attach_groups contract)
+	Tokens []CatalogFact `json:"tokens"`
+	// MediaTokens is every valid media_files_to_send token this scenario's catalog
+	// resolves — regardless of whether its underlying data.yaml used the old per-file
+	// Assets style or the grouped MediaGroup style (buildCatalog unions both; a real
+	// data.yaml only ever populates one of the two in practice, so this never mixes token
+	// shapes within one scenario).
+	MediaTokens []string `json:"media_tokens"`
 	// TrustedDigits is every digit run found in a FactRow's Description — the ONE field
 	// this playground's own doctrine says is trusted prose a model may paraphrase, not a
 	// tokenized fact (see FactRow.Description's comment). A model repeating "1.7 л" or "7

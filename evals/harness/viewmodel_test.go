@@ -240,12 +240,12 @@ func TestLoadRunExecutions_CombinesBothFamilies(t *testing.T) {
 // ModelBehaviorPass=true). Confirms the adapter's not_run logic agrees with actual
 // production code, not just a model of it.
 func TestScenarioExecutionFromVerdict_RealJudgeOne_ContractFieldsFailStillEvaluatesBehavior(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
-	row.Response.Output = `{"reply_text":"ok","reply_language":7,"attach_groups":[],"escalate":"true"}`
+	row.Response.Output = `{"reply_text":"ok","reply_language":7,"media_files_to_send":[],"escalate":"true"}`
 
-	v := judgeOne(TestCase{ID: "bad-contract"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "bad-contract"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if v.ContractPass || !v.ModelBehaviorPass {
 		t.Fatalf("precondition failed: got ContractPass=%v ModelBehaviorPass=%v, want false/true", v.ContractPass, v.ModelBehaviorPass)
 	}
@@ -293,7 +293,7 @@ func TestScenarioExecutionFromVerdict_ReplyTextExtractedFromRawOutput(t *testing
 	v := Verdict{
 		TestID:    "t1",
 		Model:     "test/model",
-		RawOutput: `{"reply_text":"Доставка 1500 тг.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+		RawOutput: `{"reply_text":"Доставка 1500 тг.","reply_language":"ru","media_files_to_send":[],"escalate":false}`,
 		ParseOK:   true,
 	}
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
@@ -537,20 +537,20 @@ func contractRow(t *testing.T, rows []VContractRow, key string) VContractRow {
 // — never a re-grade (Pass always matches the Verdict-derived Score already on Scores).
 func TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown(t *testing.T) {
 	runDir := t.TempDir()
-	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{Contract: "asset_refs"}, []TestCase{
+	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{}, []TestCase{
 		{
 			ID:             "t1",
 			Message:        "Сколько стоит кофемашина?",
 			Requires:       [][]string{{"product.coffee-machine.price"}},
 			Language:       "ru",
 			Escalate:       boolPtr(false),
-			Media:          &MediaExpect{AnyOfRefs: []string{"coffee-photo-1"}},
+			Media:          &MediaExpect{AnyOf: []string{"coffee-photo-1"}},
 			MustNotContain: []string{"бесплатно"},
 		},
 		{ID: "t2", Message: "no requirements declared at all"},
 	})
 
-	raw := `{"reply_text":"Кофемашина стоит {{product.coffee-machine.price}}","reply_language":"ru","escalate":false,"asset_refs":["coffee-photo-1"]}`
+	raw := `{"reply_text":"Кофемашина стоит {{product.coffee-machine.price}}","reply_language":"ru","escalate":false,"media_files_to_send":["coffee-photo-1"]}`
 	v1 := Verdict{
 		TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: raw,
 		RequiresPass: true, LanguagePass: true, EscalatePass: true, MediaPass: true, MustNotContainPass: true,
@@ -636,10 +636,10 @@ func TestEnrichScenarioExecutions_ContractRequirementRows_FailedRequirementShows
 // any_of_groups/any_of_refs expectation, which would render the allowed list instead.
 func TestEnrichScenarioExecutions_ForbidMediaShowsDedicatedExpectedText(t *testing.T) {
 	runDir := t.TempDir()
-	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{Contract: "asset_refs"}, []TestCase{
+	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{}, []TestCase{
 		{ID: "t1", Message: "Здравствуйте!", Media: &MediaExpect{Forbid: true}},
 	})
-	v := Verdict{TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: `{"reply_text":"Здравствуйте!","reply_language":"ru","asset_refs":[],"escalate":false}`, MediaPass: true}
+	v := Verdict{TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: `{"reply_text":"Здравствуйте!","reply_language":"ru","media_files_to_send":[],"escalate":false}`, MediaPass: true}
 	execs := enrichScenarioExecutions(runDir, "shop-current", "", []VExecution{scenarioExecutionFromVerdict("shop-current", v)})
 
 	media := contractRow(t, execs[0].Contract, "media")
@@ -838,7 +838,7 @@ func TestScenarioExecutionFromVerdict_OutcomesScore(t *testing.T) {
 func TestEnrichScenarioExecutions_OutcomesRequirementRow(t *testing.T) {
 	runDir := t.TempDir()
 	escalateFalse := false
-	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{Contract: "asset_refs"}, []TestCase{
+	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{}, []TestCase{
 		{
 			ID:      "t1",
 			Message: "Кстати, а какой у него лимит платежей в месяц?",
@@ -851,7 +851,7 @@ func TestEnrichScenarioExecutions_OutcomesRequirementRow(t *testing.T) {
 
 	v := Verdict{
 		TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true,
-		RawOutput:        `{"reply_text":"Уточните, пожалуйста, какой тариф вас интересует?","reply_language":"ru","escalate":false,"asset_refs":[]}`,
+		RawOutput:        `{"reply_text":"Уточните, пожалуйста, какой тариф вас интересует?","reply_language":"ru","escalate":false,"media_files_to_send":[]}`,
 		OutcomesDeclared: true, OutcomesPass: true, OutcomeMatched: "asks which tariff",
 		OutcomeLabels: []string{"answers with the token", "asks which tariff"},
 	}

@@ -102,7 +102,7 @@ func buildBlindFixtureRun(t *testing.T) (runDir string) {
 	t.Helper()
 	runDir = t.TempDir()
 
-	catalog := &Catalog{Contract: "attach_groups", Tokens: []CatalogFact{
+	catalog := &Catalog{Tokens: []CatalogFact{
 		{Token: "{{product.coffee-machine.price}}", Value: "129 900 ₸"},
 	}}
 	tokenValue := map[string]string{"{{product.coffee-machine.price}}": "129 900 ₸"}
@@ -112,20 +112,22 @@ func buildBlindFixtureRun(t *testing.T) (runDir string) {
 	ruTC := TestCase{ID: "ru-price", Message: "Сколько стоит кофемашина?", Language: "ru",
 		Requires: [][]string{{"product.coffee-machine.price"}}}
 
+	validMedia := map[string]bool{}
+
 	rowA1 := PromptfooRow{}
 	rowA1.Provider.ID = "openrouter:model-a"
-	rowA1.Response.Output = `{"reply_text":"Кофемашина {{product.coffee-machine.price}}.","reply_language":"kk","attach_groups":[],"escalate":false}`
-	vA1 := judgeOne(kkTC, rowA1, catalog, tokenValue, nil, map[string]bool{})
+	rowA1.Response.Output = `{"reply_text":"Кофемашина {{product.coffee-machine.price}}.","reply_language":"kk","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	vA1 := judgeOne(kkTC, rowA1, tokenValue, validMedia, catalog.TrustedDigits)
 
 	rowA2 := PromptfooRow{}
 	rowA2.Provider.ID = "openrouter:model-a"
 	rowA2.Response.Output = `not json` // -> ContractPass=false, must be excluded from export
-	vA2 := judgeOne(ruTC, rowA2, catalog, tokenValue, nil, map[string]bool{})
+	vA2 := judgeOne(ruTC, rowA2, tokenValue, validMedia, catalog.TrustedDigits)
 
 	rowB1 := PromptfooRow{}
 	rowB1.Provider.ID = "openrouter:model-b"
-	rowB1.Response.Output = `{"reply_text":"Кофемашина {{product.coffee-machine.price}}.","reply_language":"ru","attach_groups":[],"escalate":false}`
-	vB1 := judgeOne(ruTC, rowB1, catalog, tokenValue, nil, map[string]bool{})
+	rowB1.Response.Output = `{"reply_text":"Кофемашина {{product.coffee-machine.price}}.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	vB1 := judgeOne(ruTC, rowB1, tokenValue, validMedia, catalog.TrustedDigits)
 
 	if !vA1.ContractPass || vA2.ContractPass || !vB1.ContractPass {
 		t.Fatalf("fixture precondition failed: vA1.ContractPass=%v vA2.ContractPass=%v vB1.ContractPass=%v", vA1.ContractPass, vA2.ContractPass, vB1.ContractPass)

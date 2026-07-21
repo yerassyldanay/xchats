@@ -94,7 +94,7 @@ func TestBuildCatalogScenario_LimitsAppliedBeforeFactsAreBuilt(t *testing.T) {
 		}},
 	}
 	writeCatalogFixtureScenario(t, root, "capped", ScenarioConfig{
-		Data: "data.yaml", Tests: "tests.yaml", Contract: "asset_refs",
+		Data: "data.yaml", Tests: "tests.yaml",
 		Limits: map[string]int{"product": 1},
 	}, data, "tests:\n")
 
@@ -122,7 +122,7 @@ func TestBuildCatalogScenario_FactsResolvedToRealValuesAndSourceRecorded(t *test
 		}},
 	}
 	writeCatalogFixtureScenario(t, root, "shop", ScenarioConfig{
-		Data: "data.yaml", Tests: "tests.yaml", Contract: "asset_refs",
+		Data: "data.yaml", Tests: "tests.yaml",
 		Description: "Test shop", Setup: "shop-v1", Experiment: "shop-bakeoff",
 	}, data, "tests:\n")
 
@@ -171,15 +171,15 @@ func TestCatalogTestCaseFrom_EscalateNilVsFalse(t *testing.T) {
 }
 
 func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
-	tc := catalogTestCaseFrom(TestCase{ID: "t1", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}}}, "tests.yaml")
-	if tc.Media == nil || len(tc.Media.AnyOfRefs) != 1 || tc.Media.AnyOfRefs[0] != "photo-1" {
+	tc := catalogTestCaseFrom(TestCase{ID: "t1", Message: "m", Media: &MediaExpect{AnyOf: []string{"photo-1"}}}, "tests.yaml")
+	if tc.Media == nil || len(tc.Media.AnyOf) != 1 || tc.Media.AnyOf[0] != "photo-1" {
 		t.Fatalf("want media carried through, got %+v", tc.Media)
 	}
 	b, err := json.Marshal(tc.Media)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"any_of_refs"`) {
+	if !strings.Contains(string(b), `"any_of"`) {
 		t.Errorf("want snake_case json tags on CatalogMediaExpect, got %s", b)
 	}
 
@@ -201,7 +201,7 @@ func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
 	if !strings.Contains(string(fb), `"forbid":true`) {
 		t.Errorf("want forbid:true present when set, got %s", fb)
 	}
-	notForbidden := catalogTestCaseFrom(TestCase{ID: "t4", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}}}, "tests.yaml")
+	notForbidden := catalogTestCaseFrom(TestCase{ID: "t4", Message: "m", Media: &MediaExpect{AnyOf: []string{"photo-1"}}}, "tests.yaml")
 	nfb, err := json.Marshal(notForbidden.Media)
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
 		t.Errorf("want forbid key OMITTED (omitempty) when false, got %s", nfb)
 	}
 
-	exclusive := catalogTestCaseFrom(TestCase{ID: "t5", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}, Exclusive: true}}, "tests.yaml")
+	exclusive := catalogTestCaseFrom(TestCase{ID: "t5", Message: "m", Media: &MediaExpect{AnyOf: []string{"photo-1"}, Exclusive: true}}, "tests.yaml")
 	if exclusive.Media == nil || !exclusive.Media.Exclusive {
 		t.Fatalf("want Exclusive carried through, got %+v", exclusive.Media)
 	}
@@ -221,7 +221,7 @@ func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
 	if !strings.Contains(string(eb), `"exclusive":true`) {
 		t.Errorf("want exclusive:true present when set, got %s", eb)
 	}
-	nonExclusive := catalogTestCaseFrom(TestCase{ID: "t6", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}}}, "tests.yaml")
+	nonExclusive := catalogTestCaseFrom(TestCase{ID: "t6", Message: "m", Media: &MediaExpect{AnyOf: []string{"photo-1"}}}, "tests.yaml")
 	neb, err := json.Marshal(nonExclusive.Media)
 	if err != nil {
 		t.Fatal(err)
@@ -244,14 +244,14 @@ func TestResolveCatalogTests_RejectsConflictedMediaExpectation(t *testing.T) {
 	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	testsYAML := "tests:\n  - id: \"bad\"\n    message: \"hi\"\n    media:\n      forbid: true\n      any_of_refs: [\"r\"]\n"
+	testsYAML := "tests:\n  - id: \"bad\"\n    message: \"hi\"\n    media:\n      forbid: true\n      any_of: [\"r\"]\n"
 	if err := os.WriteFile(filepath.Join(scenarioDir, "tests.yaml"), []byte(testsYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	_, err := resolveCatalogTests("s1", scenarioDir, "tests.yaml")
 	if err == nil {
-		t.Fatal("want an error for a test declaring both media.forbid and any_of_refs")
+		t.Fatal("want an error for a test declaring both media.forbid and any_of")
 	}
 	if !strings.Contains(err.Error(), "bad") {
 		t.Errorf("want the error to name the conflicting test id, got %v", err)
@@ -351,7 +351,7 @@ func TestWriteCatalogJSON_SkipsScenarioDirsWithoutScenarioYAML(t *testing.T) {
 	t.Chdir(root)
 
 	data := Data{FactTables: []FactTable{{Table: "product", Fields: []FieldSpec{{Name: "price"}}, Rows: []FactRow{{Ref: "p1", Values: map[string]string{"price": "1"}}}}}}
-	writeCatalogFixtureScenario(t, root, "real-scenario", ScenarioConfig{Data: "data.yaml", Tests: "tests.yaml", Contract: "asset_refs"}, data, "tests:\n")
+	writeCatalogFixtureScenario(t, root, "real-scenario", ScenarioConfig{Data: "data.yaml", Tests: "tests.yaml"}, data, "tests:\n")
 
 	// A dir with data but NO scenario.yaml (mirrors shop-scale's real shape) must be
 	// silently skipped, never an error.

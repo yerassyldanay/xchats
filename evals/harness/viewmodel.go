@@ -802,7 +802,7 @@ func enrichScenarioExecutions(runDir, scenario, promptSHA256 string, execs []VEx
 		// Requirement rows go BEFORE the safety rows scenarioExecutionFromVerdict
 		// already attached — "test-specific rows + universal safety rows" order.
 		if tc, ok := testByID[execs[i].Subject.TestID]; ok {
-			execs[i].Contract = append(scenarioRequirementRows(execs[i], tc, sc.Contract), execs[i].Contract...)
+			execs[i].Contract = append(scenarioRequirementRows(execs[i], tc), execs[i].Contract...)
 		}
 	}
 	return execs
@@ -817,7 +817,7 @@ func enrichScenarioExecutions(runDir, scenario, promptSHA256 string, execs []VEx
 // new. Actual values for language/escalate/media are read from the model's own parsed
 // JSON (exec.Output.Raw) — the same raw output already persisted with this execution,
 // not a new trust boundary.
-func scenarioRequirementRows(exec VExecution, tc TestCase, mediaField string) []VContractRow {
+func scenarioRequirementRows(exec VExecution, tc TestCase) []VContractRow {
 	obj, _ := parseModelJSON(exec.Output.Raw)
 	var rows []VContractRow
 
@@ -865,16 +865,19 @@ func scenarioRequirementRows(exec VExecution, tc TestCase, mediaField string) []
 		if tc.Media.Forbid {
 			expectedDisplay = "медиа быть не должно"
 		} else {
-			expected := tc.Media.AnyOfGroups
-			if mediaField == "asset_refs" {
-				expected = tc.Media.AnyOfRefs
+			var parts []string
+			if len(tc.Media.AllOf) > 0 {
+				parts = append(parts, strings.Join(tc.Media.AllOf, " И "))
 			}
-			expectedDisplay = strings.Join(expected, " ИЛИ ")
+			if len(tc.Media.AnyOf) > 0 {
+				parts = append(parts, strings.Join(tc.Media.AnyOf, " ИЛИ "))
+			}
+			expectedDisplay = strings.Join(parts, " + ")
 			if tc.Media.Exclusive {
 				expectedDisplay += " (только из этого списка)"
 			}
 		}
-		actual := mediaEntries(obj, mediaField)
+		actual := mediaEntries(obj)
 		actualDisplay := "нет"
 		if len(actual) > 0 {
 			actualDisplay = strings.Join(actual, ", ")
