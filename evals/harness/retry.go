@@ -213,7 +213,7 @@ type resultsEnvelope struct {
 // a single HTTP failure on one row does NOT abort the whole batch (see the
 // per-row error handling below); it's recorded as a failed attempt on that row only.
 func patchResultsFile(srcPath, dstPath string, candidateIdx []int, typedRows []PromptfooRow,
-	client *orClient, provider ModelProvider, parentModelsSHA, retryModelsSHA string, validMedia map[string]bool) (retried int, err error) {
+	client *orClient, providersByCandidate map[int]ModelProvider, parentModelsSHA, retryModelsSHA string, validMedia map[string]bool) (retried int, err error) {
 
 	raw, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -234,6 +234,10 @@ func patchResultsFile(srcPath, dstPath string, candidateIdx []int, typedRows []P
 			continue // byte-identical raw message, untouched
 		}
 		row := typedRows[i]
+		provider, ok := providersByCandidate[i]
+		if !ok {
+			return retried, fmt.Errorf("retry row %d (%s / %s): no preflighted provider", i, row.Provider.ID, row.TestCase.Description)
+		}
 		patched, callErr := retryOneRow(client, provider, row, parentModelsSHA, retryModelsSHA, validMedia)
 		if callErr != nil {
 			return retried, fmt.Errorf("retry row %d (%s / %s): %w", i, row.Provider.ID, row.TestCase.Description, callErr)
@@ -405,10 +409,11 @@ func cmdRetry(args []string) error {
 		base = envOrDefault("EVAL_BASE_URL", "https://openrouter.ai/api/v1")
 	}
 
-	scenario, err := loadScenario(*scenarioDir)
+	inputs, err := resolveScenarioRunInputs(*scenarioDir, *parentRunDir)
 	if err != nil {
-		return fmt.Errorf("load scenario.yaml: %w", err)
+		return err
 	}
+	scenario := inputs.Scenario
 
 	var parentManifest provenance.Manifest
 	parentManifestPath := filepath.Join(*parentRunDir, "manifest.json")
@@ -431,10 +436,9 @@ func cmdRetry(args []string) error {
 	validMedia := map[string]bool{}
 	var candidateIdx []int
 	if scenario.Pipeline == "schema_kb_v1" {
-		fixturePath := filepath.Join(*scenarioDir, scenario.Data)
-		kb, err = kbfixture.Load(fixturePath)
+		kb, err = kbfixture.Load(inputs.FixturePath)
 		if err != nil {
-			return fmt.Errorf("load fixture %s: %w", fixturePath, err)
+			return fmt.Errorf("load fixture %s: %w", inputs.FixturePath, err)
 		}
 		if kb, err = kbfixture.ApplyLimits(kb, scenario.Limits); err != nil {
 			return fmt.Errorf("scenario %q: %w", scenario.Name, err)
@@ -448,12 +452,8 @@ func cmdRetry(args []string) error {
 		}
 		candidateIdx = retryCandidateIndexesSchemaKB(rows, kb, cat)
 	} else {
-		genDir := filepath.Join(*scenarioDir, "generated")
-		if snapDir, ok := provenance.SnapshotDirFor(*parentRunDir, scenario.Name); ok {
-			genDir = snapDir
-		}
 		var catalog Catalog
-		if err := readJSON(filepath.Join(genDir, "catalog.json"), &catalog); err != nil {
+		if err := readJSON(filepath.Join(inputs.GeneratedDir, "catalog.json"), &catalog); err != nil {
 			return fmt.Errorf("read catalog.json (did you run render first?): %w", err)
 		}
 		for _, tok := range catalog.MediaTokens {
@@ -508,14 +508,14 @@ func cmdRetry(args []string) error {
 	// Every candidate row must resolve to a provider in the RETRY config — resolved
 	// once, up front, so a misconfigured -models-file fails before any call, not
 	// partway through the batch.
-	var provider ModelProvider
+	providersByCandidate := make(map[int]ModelProvider, len(candidateIdx))
 	for _, i := range candidateIdx {
 		row := rows[i]
 		p, ok := retryProviders[providerModelKey(row.Provider.ID, row.Provider.Label)]
 		if !ok {
 			return fmt.Errorf("retry: row %d's provider %s (label %q) has no matching entry in %s", i, row.Provider.ID, row.Provider.Label, *modelsPath)
 		}
-		provider = p // today every candidate in one scenario run shares one model; last-write is fine since they must all match
+		providersByCandidate[i] = p
 	}
 
 	runID, runDir, err := provenance.NewRunDir(runsRoot)
@@ -559,7 +559,17 @@ func cmdRetry(args []string) error {
 
 	client := newORClientWithTimeout(base, apiKey, retryTimeout)
 	dstResultsPath := filepath.Join(runDir, scenario.Name+".results.json")
-	retried, err := patchResultsFile(parentResultsPath, dstResultsPath, candidateIdx, rows, client, provider, parentModelsSHA, retryModelsSHA, validMedia)
+	retried, err := patchResultsFile(
+		parentResultsPath,
+		dstResultsPath,
+		candidateIdx,
+		rows,
+		client,
+		providersByCandidate,
+		parentModelsSHA,
+		retryModelsSHA,
+		validMedia,
+	)
 	if err != nil {
 		return fmt.Errorf("retry: %w (partial results, if any, were not written)", err)
 	}
@@ -569,10 +579,15 @@ func cmdRetry(args []string) error {
 	if err != nil {
 		return err
 	}
-	manifest.Scenarios = append(manifest.Scenarios, provenance.ScenarioSnapshotRef{
-		Scenario:      scenario.Name,
-		ResultsSHA256: resultsSHA,
-	})
+	ref := provenance.ScenarioSnapshotRef{Scenario: scenario.Name}
+	for _, parentRef := range parentManifest.Scenarios {
+		if parentRef.Scenario == scenario.Name {
+			ref = parentRef
+			break
+		}
+	}
+	ref.ResultsSHA256 = resultsSHA
+	manifest.Scenarios = append(manifest.Scenarios, ref)
 	manifest.Finish()
 	if err := provenance.WriteManifest(runDir, manifest); err != nil {
 		return err

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"xchats-evals-harness/internal/evaltext"
@@ -17,8 +16,7 @@ import (
 // uses (control-char/reasoning-leak/unit/digit checks, language checks, must-contain
 // checks, outcome checks) — only contract-shape parsing and media-token validation
 // differ, via aiprompt instead of judge.go's own hand-rolled map checks.
-func judgeSchemaKBRows(scenarioDir string, scenario *ScenarioConfig, results PromptfooResults, testByID map[string]TestCase, priceByModel map[string]ModelProvider, freshSplit map[string]tokenSplit) ([]Verdict, error) {
-	fixturePath := filepath.Join(scenarioDir, scenario.Data)
+func judgeSchemaKBRows(fixturePath string, scenario *ScenarioConfig, results PromptfooResults, testByID map[string]TestCase, priceByModel map[string]ModelProvider, freshSplit map[string]tokenSplit) ([]Verdict, error) {
 	kb, err := kbfixture.Load(fixturePath)
 	if err != nil {
 		return nil, fmt.Errorf("scenario %q: load fixture %s: %w", scenario.Name, fixturePath, err)
@@ -50,16 +48,14 @@ func judgeSchemaKBRows(scenarioDir string, scenario *ScenarioConfig, results Pro
 	return verdicts, nil
 }
 
-// aipromptTokenValues projects an aiprompt.Catalog's facts into the flat token->value
-// map requiresSatisfied/outcomeSatisfied need for their membership checks (they only
-// ever ask "is this token known", never read the value) — deliberately NOT used for
-// customer-facing text injection, which must go through aiprompt.SubstituteFacts instead
-// so the in_stock flag gets the reviewed Russian wording rather than its raw catalog
-// display value ("да"/"нет", meant for the model's own reasoning, not a customer reply).
+// aipromptTokenValues projects an aiprompt.Catalog's facts into the membership map
+// requiresSatisfied/outcomeSatisfied need. Values stay empty because exact facts are
+// intentionally absent from the model-facing catalog and customer-facing injection
+// always goes through aiprompt.SubstituteFacts.
 func aipromptTokenValues(cat *aiprompt.Catalog) map[string]string {
 	m := make(map[string]string, len(cat.Facts))
 	for _, f := range cat.Facts {
-		m[f.Token] = f.Value
+		m[f.Token] = ""
 	}
 	return m
 }
@@ -141,7 +137,6 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 		Retries:      row.Retries,
 	}
 
-	cleaned := evaltext.StripFences(row.Response.Output)
 	_, syntaxOK := parseModelJSON(row.Response.Output)
 	v.ParseOK = syntaxOK
 	if !syntaxOK {
@@ -152,7 +147,7 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 		return v
 	}
 
-	resp, issues := aiprompt.ValidateResponse(cleaned, cat)
+	resp, issues := aiprompt.ValidateResponse(row.Response.Output, kb, cat)
 	v.RetryRecovered = v.Retries > 0 && resp != nil
 	if resp == nil {
 		// Valid JSON, but it failed the strict six-field contract schema (wrong type,
@@ -184,7 +179,7 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 	var unknownMediaFromCatalog []string
 	for _, is := range issues {
 		switch is.Code {
-		case "missing_property", "unknown_property":
+		case "missing_property", "unknown_property", "validation_context":
 			contractFieldsOK = false
 			v.appendReason(fmt.Sprintf("contract shape issue (%s): %s", is.Code, is.Detail))
 		case "bad_language":
@@ -195,6 +190,13 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 			v.appendReason("confidence out of range: " + is.Detail)
 		case "unknown_media_token":
 			unknownMediaFromCatalog = append(unknownMediaFromCatalog, is.Detail)
+		case "unknown_fact_placeholder":
+			v.UnknownTokens = append(v.UnknownTokens, is.Detail)
+			v.Blocked = true
+			v.appendReason("unknown fact placeholder, draft would be BLOCKED: " + is.Detail)
+		case "stale_fact_placeholder", "malformed_fact_placeholder", "placeholder_outside_reply", "exact_value_literal":
+			v.Blocked = true
+			v.appendReason(is.Code + ": " + is.Detail)
 		}
 	}
 	v.ContractFields = contractFieldsOK
@@ -207,35 +209,11 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 		}
 	}
 
-	// Fail-closed token substitution: scan first so EVERY unknown token is reported (not
-	// just the first — aiprompt.SubstituteFacts itself fails fast on the first one), then
-	// substitute via aiprompt.SubstituteFacts once every token is confirmed known, so
-	// in_stock gets the reviewed Russian wording rather than its raw "да"/"нет" display
-	// value.
-	spans := tokenSpanRE.FindAllString(replyText, -1)
-	reasonSpans := tokenSpanRE.FindAllString(resp.EscalationReason, -1)
-	var unknownTokens []string
-	for _, tok := range spans {
-		if cat.FactByToken(tok) == nil {
-			unknownTokens = append(unknownTokens, tok)
-		}
-	}
-	for _, tok := range reasonSpans {
-		if cat.FactByToken(tok) == nil {
-			unknownTokens = append(unknownTokens, tok)
-		}
-	}
-	v.UnknownTokens = unknownTokens
-	v.Blocked = len(unknownTokens) > 0
+	// Fail-closed token substitution uses the current KB, not catalog-cached values.
 	injected := replyText
-	if v.Blocked {
-		v.appendReason("unknown token(s), draft would be BLOCKED: " + strings.Join(v.UnknownTokens, ", "))
-	} else if !v.ReasoningLeak {
-		out, err := aiprompt.SubstituteFacts(replyText, cat)
+	if !v.Blocked && !v.ReasoningLeak {
+		out, err := aiprompt.SubstituteFacts(replyText, kb, cat)
 		if err != nil {
-			// Should be unreachable — every span was just confirmed known above — but
-			// fail safe rather than silently ship un-substituted text if aiprompt's
-			// placeholder regex and judge.go's tokenSpanRE ever drift apart.
 			v.Blocked = true
 			v.appendReason("fact substitution failed unexpectedly: " + err.Error())
 		} else {
@@ -265,7 +243,8 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 	}
 
 	v.ContractPass = v.ParseOK && resp != nil && v.ContractFields && v.EscalationReasonOK &&
-		!v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak && !v.ControlChars && v.MediaResolveOK
+		!v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak && !v.ControlChars &&
+		v.MediaResolveOK && len(unknownMediaFromCatalog) == 0
 
 	// Model-behavior checks — identical helpers to judgeOne.
 	stripped := tokenSpanRE.ReplaceAllString(replyText, "")

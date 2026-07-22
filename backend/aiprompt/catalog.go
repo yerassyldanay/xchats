@@ -6,18 +6,18 @@ import (
 	"strings"
 )
 
-// FactEntry is one row of the fact-placeholder catalog.
+// FactEntry is one model-facing row of the fact-placeholder catalog. It carries
+// selection metadata and, for stock only, a semantic reasoning state; exact customer
+// values remain private in KB and are available only through ResolveFact.
 type FactEntry struct {
-	Token     string    `json:"token"` // {{table.ref.column}}, singular table segment
-	Table     string    `json:"table"`
-	Ref       string    `json:"ref"`
-	Column    string    `json:"column"`
-	Label     string    `json:"label"`
-	Value     string    `json:"value"` // display value; for in_stock: "да"/"нет"
-	Kind      ValueKind `json:"value_kind"`
-	UsageNote string    `json:"usage_note,omitempty"`
-
-	stockValue bool // parsed in_stock value, valid when Kind == KindStockFlag
+	Token          string    `json:"token"` // {{table.ref.column}}, singular table segment
+	Table          string    `json:"table"`
+	Ref            string    `json:"ref"`
+	Column         string    `json:"column"`
+	Label          string    `json:"label"`
+	Kind           ValueKind `json:"value_kind"`
+	ReasoningState string    `json:"reasoning_state,omitempty"` // in_stock | out_of_stock; stock facts only
+	UsageNote      string    `json:"usage_note,omitempty"`
 }
 
 // MediaEntry is one row of the PUBLIC semantic media catalog: the exact token
@@ -42,16 +42,6 @@ type AbsentEntry struct {
 	DisplayName string `json:"display_name"`
 }
 
-// mediaResolution is the private token → material-IDs lookup built alongside
-// the public catalog. It exists solely for ResolveSend's post-response
-// delivery resolution and fail-closed re-validation. MaterialIDs carries
-// json:"-" as defense in depth; more importantly the map that holds it is an
-// unexported Catalog field, so nothing outside this package — including
-// RenderPrompt and any exported catalog projection — has a route to read it.
-type mediaResolution struct {
-	MaterialIDs []string `json:"-"`
-}
-
 // Catalog is everything derived from one approved KB for prompt building and
 // response validation. Facts, Media, and Absent are the public projection:
 // safe to serialize as catalog.json and safe to hand to RenderPrompt.
@@ -59,8 +49,6 @@ type Catalog struct {
 	Facts  []FactEntry   `json:"facts"`
 	Media  []MediaEntry  `json:"media"`
 	Absent []AbsentEntry `json:"absent"`
-
-	resolution map[string]mediaResolution // token -> material IDs; ResolveSend only
 }
 
 var refPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
@@ -70,7 +58,11 @@ var refPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // Any invalid or stale material reference in a non-empty media column is a
 // hard error — rendering fails, it is never silently treated as empty.
 func BuildCatalog(kb *KB) (*Catalog, error) {
-	cat := &Catalog{resolution: map[string]mediaResolution{}}
+	cat := &Catalog{
+		Facts:  []FactEntry{},
+		Media:  []MediaEntry{},
+		Absent: []AbsentEntry{},
+	}
 	if err := buildFacts(kb, cat); err != nil {
 		return nil, err
 	}
@@ -80,7 +72,7 @@ func BuildCatalog(kb *KB) (*Catalog, error) {
 	return cat, nil
 }
 
-func active(salesStatus string) bool { return salesStatus == "" || salesStatus == "active" }
+func active(salesStatus string) bool { return salesStatus == "active" }
 
 func validRef(ref string) error {
 	if !refPattern.MatchString(ref) || strings.Contains(ref, ".") {
@@ -98,20 +90,19 @@ func addFact(cat *Catalog, table, ref string, col FactColumn, value string) {
 	cat.Facts = append(cat.Facts, FactEntry{
 		Token: "{{" + table + "." + ref + "." + col.Column + "}}",
 		Table: table, Ref: ref, Column: col.Column,
-		Label: col.Label, Value: value, Kind: col.Kind, UsageNote: usageNote(col),
+		Label: col.Label, Kind: col.Kind, UsageNote: usageNote(col),
 	})
 }
 
 func addStockFact(cat *Catalog, ref string, col FactColumn, inStock bool) {
-	display := "да"
+	state := "in_stock"
 	if !inStock {
-		display = "нет"
+		state = "out_of_stock"
 	}
 	e := FactEntry{
 		Token: "{{product." + ref + "." + col.Column + "}}",
 		Table: "product", Ref: ref, Column: col.Column,
-		Label: col.Label, Value: display, Kind: col.Kind, UsageNote: usageNote(col),
-		stockValue: inStock,
+		Label: col.Label, Kind: col.Kind, ReasoningState: state, UsageNote: usageNote(col),
 	}
 	cat.Facts = append(cat.Facts, e)
 }
@@ -282,7 +273,6 @@ func buildMedia(kb *KB, cat *Catalog) error {
 				Table: o.table, Ref: o.ref, Column: spec.Column,
 				Label: spec.Label, Kind: spec.Kind, Count: len(ids),
 			})
-			cat.resolution[token] = mediaResolution{MaterialIDs: ids}
 		}
 		if !hasAny {
 			cat.Absent = append(cat.Absent, AbsentEntry{Table: o.table, Ref: o.ref, DisplayName: o.display})

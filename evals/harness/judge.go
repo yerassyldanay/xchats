@@ -492,20 +492,20 @@ func cmdJudge(args []string) error {
 }
 
 func judgeScenario(scenarioDir, runDir, modelsPath string) error {
-	scenario, err := loadScenario(scenarioDir)
+	inputs, err := resolveScenarioRunInputs(scenarioDir, runDir)
 	if err != nil {
-		return fmt.Errorf("load scenario.yaml: %w", err)
+		return err
 	}
+	scenario := inputs.Scenario
 
 	// Prefer this run's own snapshot of what render produced over the live, mutable
 	// scenarios/*/generated/ — the whole point of snapshotting: re-judging an old run
 	// must grade against the requirements THAT RUN saw, not whatever the scenario looks
 	// like today. Legacy runs (no snapshot) and a standalone `judge` right after a fresh
 	// `render` fall back to genDir/modelsPath exactly as before this existed.
-	genDir := filepath.Join(scenarioDir, "generated")
+	genDir := inputs.GeneratedDir
 	resolvedModelsPath := modelsPath
-	if snapDir, ok := provenance.SnapshotDirFor(runDir, scenario.Name); ok {
-		genDir = snapDir
+	if inputs.SnapshotDir != "" {
 		resolvedModelsPath = provenance.SnapshotModelsPath(runDir, modelsPath)
 	}
 
@@ -537,16 +537,10 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 
 	var verdicts []Verdict
 	if scenario.Pipeline == "schema_kb_v1" {
-		// schema_kb_v1 rebuilds its catalog fresh from the fixture (kbfixture+aiprompt)
-		// rather than reading genDir/catalog.json: the PUBLIC catalog export deliberately
-		// has no route to kbd_materials (see aiprompt/catalog.go), but judgeOneSchemaKB's
-		// aiprompt.ResolveSend re-validation needs exactly that private data. This is a
-		// known, narrow provenance gap versus the legacy path (which grades a re-judge
-		// against genDir/catalog.json's SNAPSHOT, not today's live data.yaml): a re-judge
-		// of an old run reads today's live fixture file, not a snapshot of the one that
-		// run actually saw. Low risk in practice — shop-kb-v1 fixtures are generated
-		// deterministically and are not expected to change without a full re-render.
-		verdicts, err = judgeSchemaKBRows(scenarioDir, scenario, results, testByID, priceByModel, freshSplit)
+		// The public catalog deliberately excludes exact values and kbd_materials, so
+		// schema judging rebuilds its private resolution context from the snapshotted
+		// fixture selected by resolveScenarioRunInputs.
+		verdicts, err = judgeSchemaKBRows(inputs.FixturePath, scenario, results, testByID, priceByModel, freshSplit)
 		if err != nil {
 			return err
 		}

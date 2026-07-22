@@ -1,14 +1,18 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-// kbQuestionsRUBankPath is common/kb-questions-ru.yaml, relative to this package dir —
-// the shop-kb-v1 family's sole question bank (pipeline: schema_kb_v1).
+// These are the core and 30-only one-shot history banks for pipeline:schema_kb_v1.
 var kbQuestionsRUBankPath = filepath.Join("..", "common", "kb-questions-ru.yaml")
+var kbHistoryRUBankPath = filepath.Join("..", "common", "kb-history-ru.yaml")
 
 // kbQuestionsRUPinnedIDs is the bank's exact, ordered ID list. Pinning the full list (not
 // just checking membership) means an accidental deletion or truncation during a future
@@ -30,7 +34,14 @@ var kbQuestionsRUPinnedIDs = []string{
 	"13. missing exact value — return period escalates",
 	"14. warranty duration escalates (prose-only, no fact column)",
 	"15. off-KB city escalates",
-	"16. history follow-up — coffee machine price",
+}
+
+var kbHistoryRUPinnedIDs = []string{
+	"h1. pronoun price follow-up",
+	"h2. purchase intent resolves discussed product",
+	"h3. repeat prior literal through placeholder",
+	"h4. pronoun photo request",
+	"h5. out-of-stock purchase intent stays honest",
 }
 
 func TestKBQuestionsRUBank_PinnedIDList(t *testing.T) {
@@ -44,6 +55,17 @@ func TestKBQuestionsRUBank_PinnedIDList(t *testing.T) {
 	}
 }
 
+func TestKBHistoryRUBank_PinnedIDList(t *testing.T) {
+	tests := loadTestCases(t, kbHistoryRUBankPath)
+	gotIDs := make([]string, len(tests))
+	for i, tc := range tests {
+		gotIDs[i] = tc.ID
+	}
+	if !reflect.DeepEqual(gotIDs, kbHistoryRUPinnedIDs) {
+		t.Fatalf("%s: want exactly these IDs in order:\n%v\ngot:\n%v", kbHistoryRUBankPath, kbHistoryRUPinnedIDs, gotIDs)
+	}
+}
+
 // TestDetectLang_KBQuestionsRUBankIsAllRussian confirms the shop-kb-v1 family's own bank
 // never accidentally drifts into Kazakh-looking text. The schema_kb_v1 render path never
 // calls detectLang itself (frame-ru.txt is the only frame this family ever renders — there
@@ -52,14 +74,56 @@ func TestKBQuestionsRUBank_PinnedIDList(t *testing.T) {
 // Russian-only by contract (aiprompt.ValidateResponse rejects any reply_language other
 // than "ru") — a message that reads as Kazakh here would be a silent contradiction.
 func TestDetectLang_KBQuestionsRUBankIsAllRussian(t *testing.T) {
-	for _, tc := range loadTestCases(t, kbQuestionsRUBankPath) {
-		if got := detectLang(tc.Message, tc.History); got != "ru" {
-			t.Errorf("test %q: detectLang(message)=%q, want ru — message: %q", tc.ID, got, tc.Message)
-		}
-		for _, turn := range tc.History {
-			if got := detectLang(turn.Text, nil); got != "ru" {
-				t.Errorf("test %q: detectLang(history turn)=%q, want ru — text: %q", tc.ID, got, turn.Text)
+	for _, bankPath := range []string{kbQuestionsRUBankPath, kbHistoryRUBankPath} {
+		for _, tc := range loadTestCases(t, bankPath) {
+			if got := detectLang(tc.Message, tc.History); got != "ru" {
+				t.Errorf("test %q: detectLang(message)=%q, want ru — message: %q", tc.ID, got, tc.Message)
+			}
+			for _, turn := range tc.History {
+				if got := detectLang(turn.Text, nil); got != "ru" {
+					t.Errorf("test %q: detectLang(history turn)=%q, want ru — text: %q", tc.ID, got, turn.Text)
+				}
 			}
 		}
+	}
+}
+
+func TestKBHistoryRUBank_RendersAsOneShotPromptfooVariables(t *testing.T) {
+	tests := loadTestCases(t, kbHistoryRUBankPath)
+	dir := t.TempDir()
+	scenario := &ScenarioConfig{Name: "history-one-shot", Description: "test"}
+	models := &ModelsFile{Providers: []ModelProvider{{ID: "openrouter:test/model"}}}
+	if err := writePromptfooConfig(dir, scenario, tests, models); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "promptfooconfig.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Tests []struct {
+			Description string            `yaml:"description"`
+			Vars        map[string]string `yaml:"vars"`
+		} `yaml:"tests"`
+	}
+	if err := yaml.Unmarshal(b, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Tests) != len(tests) {
+		t.Fatalf("rendered tests = %d, want %d", len(cfg.Tests), len(tests))
+	}
+	for i, tc := range tests {
+		if cfg.Tests[i].Description != tc.ID || cfg.Tests[i].Vars["message"] != tc.Message {
+			t.Fatalf("rendered test %d does not carry its final message: %+v", i, cfg.Tests[i])
+		}
+		if cfg.Tests[i].Vars["history"] != renderHistory(tc.History) {
+			t.Fatalf("rendered test %q does not carry its complete history", tc.ID)
+		}
+	}
+	prompt := wrapPromptfooTemplate("stable prefix")
+	historyAt := strings.Index(prompt, "{{history}}")
+	messageAt := strings.Index(prompt, "{{message}}")
+	if historyAt < 0 || messageAt <= historyAt {
+		t.Fatalf("one-shot template must contain history before final message:\n%s", prompt)
 	}
 }

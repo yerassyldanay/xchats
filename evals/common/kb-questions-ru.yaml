@@ -136,15 +136,3 @@ tests:
     escalate: true
     must_not_contain: ["не доставля", "доставляем в караганд", "да, доставляем"]
     language: ru
-
-  - id: "16. history follow-up — coffee machine price"
-    history:
-      - role: client
-        text: "Здравствуйте! Смотрю кофемашину DeLonghi."
-      - role: assistant
-        text: "Здравствуйте! Кофемашина DeLonghi есть в каталоге — подсказать по цене?"
-    message: "Да, сколько она стоит?"
-    requires:
-      - ["product.coffee-machine.price"]
-    escalate: false
-    language: ru

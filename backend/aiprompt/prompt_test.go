@@ -29,6 +29,41 @@ func TestBuildPrompt_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_HidesExactFactValues(t *testing.T) {
+	kb := baseKB()
+	prompt, cat, err := BuildPrompt(basicFrame, kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{
+		kb.Products[0].Price,
+		kb.Contacts.Phone,
+		kb.Contacts.WorkingHours,
+		kb.Policies.DeliveryCost,
+		kb.Policies.DeliveryInDays,
+	} {
+		if strings.Contains(prompt, value) {
+			t.Errorf("model-facing prompt leaks exact fact value %q", value)
+		}
+	}
+	catJSON, err := json.Marshal(cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{kb.Products[0].Price, kb.Contacts.Phone, kb.Policies.DeliveryCost} {
+		if strings.Contains(string(catJSON), value) {
+			t.Errorf("model-facing catalog leaks exact fact value %q", value)
+		}
+	}
+	if strings.Contains(string(catJSON), `"value":`) {
+		t.Fatalf("model-facing catalog still exposes a value property: %s", catJSON)
+	}
+	stock := cat.FactByToken("{{product.coffee-machine.in_stock}}")
+	if stock == nil || stock.ReasoningState != "in_stock" {
+		t.Fatalf("stock fact = %+v, want semantic in_stock reasoning state", stock)
+	}
+}
+
 // TestRenderPrompt_BlankProseOmitted: an empty topic body produces no rendered
 // entry (not a blank line), and an empty product description is likewise
 // omitted from DESCRIPTIONS.

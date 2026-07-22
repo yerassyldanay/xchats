@@ -260,7 +260,17 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 		t.Fatalf("want exactly row 1 (the broken one) as a candidate, got %v", candidateIdx)
 	}
 
-	retried, err := patchResultsFile(srcPath, dstPath, candidateIdx, rows, client, provider, "parent-sha", "retry-sha", map[string]bool{})
+	retried, err := patchResultsFile(
+		srcPath,
+		dstPath,
+		candidateIdx,
+		rows,
+		client,
+		map[int]ModelProvider{1: provider},
+		"parent-sha",
+		"retry-sha",
+		map[string]bool{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,6 +302,70 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 	}
 	if patchedRow["retries"] != float64(1) {
 		t.Errorf("want retried row's retries=1, got %v", patchedRow["retries"])
+	}
+}
+
+func TestPatchResultsFile_UsesEachCandidatesProvider(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "src.results.json")
+	dstPath := filepath.Join(dir, "dst.results.json")
+	rowA := `{"response":{"output":"broken a","finishReason":"length"},"testCase":{"description":"a"},"provider":{"id":"openrouter:vendor/model-a","label":"fast"},"prompt":{"raw":"prompt a"}}`
+	rowB := `{"response":{"output":"broken b","finishReason":"length"},"testCase":{"description":"b"},"provider":{"id":"openrouter:vendor/model-b","label":"accurate"},"prompt":{"raw":"prompt b"}}`
+	if err := os.WriteFile(srcPath, []byte(`{"results":{"results":[`+rowA+`,`+rowB+`]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	modelsSeen := []string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req orRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		modelsSeen = append(modelsSeen, req.Model)
+		resp := orResponse{}
+		resp.Choices = []orChoice{{FinishReason: "stop"}}
+		resp.Choices[0].Message.Content = `{"reply_text":"fixed","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		resp.Usage = &orUsage{PromptTokens: 10, CompletionTokens: 5}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	var typedResults PromptfooResults
+	if err := readJSON(srcPath, &typedResults); err != nil {
+		t.Fatal(err)
+	}
+	providers := map[int]ModelProvider{
+		0: {ID: "openrouter:vendor/model-a", Label: "fast", MaxTokens: 100},
+		1: {ID: "openrouter:vendor/model-b", Label: "accurate", MaxTokens: 200},
+	}
+	retried, err := patchResultsFile(
+		srcPath,
+		dstPath,
+		[]int{0, 1},
+		typedResults.Results.Results,
+		newORClientWithTimeout(srv.URL, "test-key", 5*time.Second),
+		providers,
+		"parent-sha",
+		"retry-sha",
+		map[string]bool{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried != 2 {
+		t.Fatalf("retried = %d, want 2", retried)
+	}
+	want := []string{"vendor/model-a", "vendor/model-b"}
+	if len(modelsSeen) != len(want) {
+		t.Fatalf("models seen = %v, want %v", modelsSeen, want)
+	}
+	for i := range want {
+		if modelsSeen[i] != want[i] {
+			t.Fatalf("models seen = %v, want %v", modelsSeen, want)
+		}
 	}
 }
 
@@ -362,6 +436,11 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 
 	parentManifest := provenance.NewManifest(parentRunDir, "2026-01-01_00-00-00-par1", "scenario", "run", nil)
 	parentManifest.ModelsPath = "models.yaml"
+	parentManifest.Scenarios = []provenance.ScenarioSnapshotRef{{
+		Scenario:      "fixture-scenario",
+		FixtureSHA256: "parent-fixture-sha",
+		PromptSHA256:  "parent-prompt-sha",
+	}}
 	if sha, err := provenance.SHA256File(filepath.Join(parentRunDir, "snapshots", "models.yaml")); err == nil {
 		parentManifest.ModelsSHA256 = sha
 	}
@@ -438,6 +517,12 @@ func TestCmdRetry_EndToEnd_RepairsAndIsIdempotentOnSecondInvocation(t *testing.T
 	}
 	if derivManifest.RepairKey == "" {
 		t.Error("want a non-empty repair key recorded")
+	}
+	if len(derivManifest.Scenarios) != 1 ||
+		derivManifest.Scenarios[0].FixtureSHA256 != "parent-fixture-sha" ||
+		derivManifest.Scenarios[0].PromptSHA256 != "parent-prompt-sha" ||
+		derivManifest.Scenarios[0].ResultsSHA256 == "" {
+		t.Fatalf("derivative scenario provenance was not copied and updated: %+v", derivManifest.Scenarios)
 	}
 	for _, name := range []string{"models.parent.yaml", "models.retry.yaml", "models.yaml"} {
 		if _, err := os.Stat(filepath.Join(derivDir, "snapshots", name)); err != nil {

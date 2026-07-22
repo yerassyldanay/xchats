@@ -163,7 +163,7 @@ func TestRenderSchemaKBScenario_EndToEnd(t *testing.T) {
 	// "sentinel" substrings above) so this check is unambiguous.
 	for _, leak := range []string{
 		"22222222-2222-2222-2222-222222222222", "coffee-front-sentinel.jpg",
-		"fake://bucket/sentinel-2222",
+		"fake://bucket/sentinel-2222", "129 900 ₸", "2 000 ₸",
 	} {
 		if strings.Contains(prompt, leak) {
 			t.Errorf("prompt leaks kbd_materials value %q", leak)
@@ -184,10 +184,17 @@ func TestRenderSchemaKBScenario_EndToEnd(t *testing.T) {
 	if len(cat.Media) == 0 {
 		t.Error("expected at least one media entry in the exported catalog")
 	}
-	for _, leak := range []string{"22222222-2222-2222-2222-222222222222", "MaterialIDs", "material_ids"} {
+	for _, leak := range []string{
+		"22222222-2222-2222-2222-222222222222", "MaterialIDs", "material_ids",
+		"129 900 ₸", "2 000 ₸", `"value":`,
+	} {
 		if strings.Contains(string(catBytes), leak) {
 			t.Errorf("exported catalog.json leaks %q", leak)
 		}
+	}
+	stock := cat.FactByToken("{{product.coffee-machine.in_stock}}")
+	if stock == nil || stock.ReasoningState != "in_stock" {
+		t.Fatalf("stock fact = %+v, want semantic reasoning state", stock)
 	}
 
 	if _, err := os.Stat(filepath.Join(genDir, "resolved_tests.json")); err != nil {

@@ -26,7 +26,7 @@ const validResponseJSON = `{
 
 func TestValidateResponse_Valid(t *testing.T) {
 	cat := validCatalog(t)
-	resp, issues := ValidateResponse(validResponseJSON, cat)
+	resp, issues := ValidateResponse(validResponseJSON, baseKB(), cat)
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %+v", issues)
 	}
@@ -47,7 +47,7 @@ func TestValidateResponse_MissingField(t *testing.T) {
   "escalate": false,
   "escalation_reason": ""
 }` // confidence omitted
-	_, issues := ValidateResponse(raw, cat)
+	_, issues := ValidateResponse(raw, baseKB(), cat)
 	if !containsCode(issues, "missing_property") {
 		t.Fatalf("expected missing_property issue, got %+v", issues)
 	}
@@ -66,7 +66,7 @@ func TestValidateResponse_WrongType(t *testing.T) {
   "escalation_reason": "",
   "confidence": "high"
 }`
-	resp, issues := ValidateResponse(raw, cat)
+	resp, issues := ValidateResponse(raw, baseKB(), cat)
 	if resp != nil {
 		t.Fatalf("expected nil response on type error, got %+v", resp)
 	}
@@ -89,7 +89,7 @@ func TestValidateResponse_UnknownProperty(t *testing.T) {
   "confidence": 0.5,
   "` + alias + `": []
 }`
-			_, issues := ValidateResponse(raw, cat)
+			_, issues := ValidateResponse(raw, baseKB(), cat)
 			if !containsCode(issues, "unknown_property") {
 				t.Fatalf("expected unknown_property issue for alias %q, got %+v", alias, issues)
 			}
@@ -111,7 +111,7 @@ func TestValidateResponse_BadLanguage(t *testing.T) {
   "escalation_reason": "",
   "confidence": 0.5
 }`
-		_, issues := ValidateResponse(raw, cat)
+		_, issues := ValidateResponse(raw, baseKB(), cat)
 		if !containsCode(issues, "bad_language") {
 			t.Errorf("lang %q: expected bad_language issue, got %+v", lang, issues)
 		}
@@ -129,7 +129,7 @@ func TestValidateResponse_BadConfidence(t *testing.T) {
   "escalation_reason": "",
   "confidence": ` + jsonNum(conf) + `
 }`
-		_, issues := ValidateResponse(raw, cat)
+		_, issues := ValidateResponse(raw, baseKB(), cat)
 		if !containsCode(issues, "bad_confidence") {
 			t.Errorf("confidence %v: expected bad_confidence issue, got %+v", conf, issues)
 		}
@@ -151,7 +151,7 @@ func TestValidateResponse_EscalationReasonMismatch(t *testing.T) {
   "escalation_reason": "клиент спрашивает о том, чего нет в базе",
   "confidence": 0.5
 }`
-	_, issues := ValidateResponse(raw, cat)
+	_, issues := ValidateResponse(raw, baseKB(), cat)
 	if !containsCode(issues, "escalation_reason_mismatch") {
 		t.Fatalf("expected escalation_reason_mismatch issue, got %+v", issues)
 	}
@@ -169,7 +169,7 @@ func TestValidateResponse_InventedMediaToken(t *testing.T) {
 }`
 	// demo_videos was never populated on coffee-machine in baseKB, so it must
 	// not exist in the catalog.
-	_, issues := ValidateResponse(raw, cat)
+	_, issues := ValidateResponse(raw, baseKB(), cat)
 	if !containsCode(issues, "unknown_media_token") {
 		t.Fatalf("expected unknown_media_token issue, got %+v", issues)
 	}
@@ -187,7 +187,7 @@ func TestValidateResponse_NilCatalogSkipsMediaCheck(t *testing.T) {
   "escalation_reason": "",
   "confidence": 0.5
 }`
-	resp, issues := ValidateResponse(raw, nil)
+	resp, issues := ValidateResponse(raw, baseKB(), nil)
 	if resp == nil {
 		t.Fatal("expected a parsed response even with nil catalog")
 	}
@@ -198,7 +198,7 @@ func TestValidateResponse_NilCatalogSkipsMediaCheck(t *testing.T) {
 
 func TestSubstituteFacts_InStockWording(t *testing.T) {
 	cat := validCatalog(t)
-	out, err := SubstituteFacts("Наличие: {{product.coffee-machine.in_stock}}.", cat)
+	out, err := SubstituteFacts("Наличие: {{product.coffee-machine.in_stock}}.", baseKB(), cat)
 	if err != nil {
 		t.Fatalf("SubstituteFacts: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestSubstituteFacts_InStockWording(t *testing.T) {
 		t.Errorf("in_stock=true should render «в наличии», got %q", out)
 	}
 
-	out2, err := SubstituteFacts("Наличие: {{product.cookware-set.in_stock}}.", cat)
+	out2, err := SubstituteFacts("Наличие: {{product.cookware-set.in_stock}}.", baseKB(), cat)
 	if err != nil {
 		t.Fatalf("SubstituteFacts: %v", err)
 	}
@@ -217,18 +217,203 @@ func TestSubstituteFacts_InStockWording(t *testing.T) {
 
 func TestSubstituteFacts_UnknownPlaceholder(t *testing.T) {
 	cat := validCatalog(t)
-	_, err := SubstituteFacts("Цена: {{product.does-not-exist.price}}.", cat)
+	_, err := SubstituteFacts("Цена: {{product.does-not-exist.price}}.", baseKB(), cat)
 	if err == nil {
 		t.Fatal("expected an error for an unknown placeholder")
 	}
-	if !strings.Contains(err.Error(), "unknown placeholder") {
+	if !strings.Contains(err.Error(), "not in the request catalog") {
 		t.Errorf("error message should name the problem, got %q", err.Error())
+	}
+}
+
+func responseWithText(t *testing.T, text string) string {
+	t.Helper()
+	b, err := json.Marshal(Response{
+		ReplyText:        text,
+		ReplyLanguage:    "ru",
+		MediaFilesToSend: []string{},
+		Escalate:         false,
+		EscalationReason: "",
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestValidateResponse_RejectsAnythingExceptOneJSONObject(t *testing.T) {
+	kb := baseKB()
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := responseWithText(t, "Готово.")
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "top-level null", raw: "null"},
+		{name: "leading prose", raw: "Ответ: " + valid},
+		{name: "trailing prose", raw: valid + " готово"},
+		{name: "markdown fence", raw: "```json\n" + valid + "\n```"},
+		{name: "second object", raw: valid + " {}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, issues := ValidateResponse(tt.raw, kb, cat)
+			if resp != nil || !containsCode(issues, "parse") {
+				t.Fatalf("ValidateResponse() = (%+v, %+v), want parse failure", resp, issues)
+			}
+		})
+	}
+}
+
+func TestValidateResponse_RejectsNullContractProperties(t *testing.T) {
+	kb := baseKB()
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	properties := []string{
+		"reply_text",
+		"reply_language",
+		"media_files_to_send",
+		"escalate",
+		"escalation_reason",
+		"confidence",
+	}
+	for _, property := range properties {
+		t.Run(property, func(t *testing.T) {
+			var object map[string]any
+			if err := json.Unmarshal([]byte(validResponseJSON), &object); err != nil {
+				t.Fatal(err)
+			}
+			object[property] = nil
+			raw, err := json.Marshal(object)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, issues := ValidateResponse(string(raw), kb, cat)
+			if resp != nil || !containsCode(issues, "wrong_property_type") {
+				t.Fatalf("ValidateResponse() = (%+v, %+v), want wrong_property_type", resp, issues)
+			}
+			if detail := issueDetail(issues, "wrong_property_type"); detail != property {
+				t.Fatalf("wrong_property_type detail = %q, want %q", detail, property)
+			}
+		})
+	}
+}
+
+func TestValidateResponse_FactPlaceholderFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		mutate func(*KB)
+		code   string
+	}{
+		{
+			name: "unknown placeholder",
+			text: "Цена {{product.unknown.price}}.",
+			code: "unknown_fact_placeholder",
+		},
+		{
+			name: "malformed placeholder",
+			text: "Цена {product.coffee-machine.price}.",
+			code: "malformed_fact_placeholder",
+		},
+		{
+			name: "stale inactive row",
+			text: "Цена {{product.coffee-machine.price}}.",
+			mutate: func(kb *KB) {
+				kb.Products[0].SalesStatus = "inactive"
+			},
+			code: "stale_fact_placeholder",
+		},
+		{
+			name: "stale empty value",
+			text: "Цена {{product.coffee-machine.price}}.",
+			mutate: func(kb *KB) {
+				kb.Products[0].Price = " "
+			},
+			code: "stale_fact_placeholder",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kb := baseKB()
+			cat, err := BuildCatalog(kb)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.mutate != nil {
+				tt.mutate(kb)
+			}
+			_, issues := ValidateResponse(responseWithText(t, tt.text), kb, cat)
+			if !containsCode(issues, tt.code) {
+				t.Fatalf("issues = %+v, want %s", issues, tt.code)
+			}
+		})
+	}
+}
+
+func TestValidateResponse_RejectsPlaceholderOutsideReply(t *testing.T) {
+	kb := baseKB()
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := `{
+  "reply_text": "Уточню цену.",
+  "reply_language": "ru",
+  "media_files_to_send": [],
+  "escalate": true,
+  "escalation_reason": "Нужен {{product.coffee-machine.price}}",
+  "confidence": 0.5
+}`
+	_, issues := ValidateResponse(raw, kb, cat)
+	if !containsCode(issues, "placeholder_outside_reply") {
+		t.Fatalf("issues = %+v, want placeholder_outside_reply", issues)
+	}
+}
+
+func TestValidateResponse_RejectsModelAuthoredExactValues(t *testing.T) {
+	kb := baseKB()
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{
+		"Цена кофемашины — 129 900 ₸.",
+		"Кофемашина в наличии.",
+		"Набор посуды нет в наличии.",
+	} {
+		_, issues := ValidateResponse(responseWithText(t, text), kb, cat)
+		if !containsCode(issues, "exact_value_literal") {
+			t.Errorf("text %q: issues = %+v, want exact_value_literal", text, issues)
+		}
+	}
+}
+
+func TestSubstituteFacts_UsesLatestApprovedValue(t *testing.T) {
+	kb := baseKB()
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb.Products[0].Price = "130 500 ₸"
+	out, err := SubstituteFacts("Цена: {{product.coffee-machine.price}}.", kb, cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "Цена: 130 500 ₸." {
+		t.Fatalf("SubstituteFacts() = %q, want latest approved value", out)
 	}
 }
 
 func TestSubstituteFacts_ExactValueVerbatim(t *testing.T) {
 	cat := validCatalog(t)
-	out, err := SubstituteFacts("Цена: {{product.coffee-machine.price}}.", cat)
+	out, err := SubstituteFacts("Цена: {{product.coffee-machine.price}}.", baseKB(), cat)
 	if err != nil {
 		t.Fatalf("SubstituteFacts: %v", err)
 	}
@@ -318,5 +503,60 @@ func TestResolveSend_PartialGroupFailureBlocksWholeSend(t *testing.T) {
 	_, err := ResolveSend([]string{"products.coffee-machine.gallery_images"}, kb, cat)
 	if err == nil {
 		t.Fatal("expected the whole gallery_images group to fail when one member is invalid")
+	}
+}
+
+func TestResolveSend_RereadsCurrentMediaColumn(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*KB)
+		wantID  string
+		wantErr bool
+	}{
+		{
+			name: "cleared column is stale",
+			mutate: func(kb *KB) {
+				kb.Products[0].FeaturedImage = ""
+			},
+			wantErr: true,
+		},
+		{
+			name: "inactive owner is stale",
+			mutate: func(kb *KB) {
+				kb.Products[0].SalesStatus = "inactive"
+			},
+			wantErr: true,
+		},
+		{
+			name: "changed approved column resolves latest material",
+			mutate: func(kb *KB) {
+				kb.Products[0].FeaturedImage = "m-new-featured"
+				kb.Materials = append(kb.Materials, testMaterial("m-new-featured"))
+			},
+			wantID: "m-new-featured",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kb := baseKB()
+			cat, err := BuildCatalog(kb)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.mutate(kb)
+			got, err := ResolveSend([]string{"products.coffee-machine.featured_image"}, kb, cat)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ResolveSend() = %+v, want error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0].Material.ID != tt.wantID {
+				t.Fatalf("ResolveSend() = %+v, want material %q", got, tt.wantID)
+			}
+		})
 	}
 }

@@ -156,10 +156,15 @@ func renderDescriptions(input *PromptInput) string {
 func renderFacts(facts []FactEntry) string {
 	var lines []string
 	for _, f := range facts {
-		line := f.Token + " | " + factLabel(f) + " | " + f.Value
-		if f.UsageNote != "" {
-			line += " | " + f.UsageNote
+		state := "—"
+		if f.ReasoningState != "" {
+			state = f.ReasoningState
 		}
+		note := "—"
+		if f.UsageNote != "" {
+			note = f.UsageNote
+		}
+		line := strings.Join([]string{f.Token, factLabel(f), string(f.Kind), state, note}, " | ")
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")

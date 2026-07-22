@@ -138,6 +138,20 @@ func mediaColumnSpec(table, column string) (MediaColumn, error) {
 	return MediaColumn{}, fmt.Errorf("aiprompt: unknown media column %q.%q", table, column)
 }
 
+// factColumnSpec returns the closed registry entry for table.column.
+func factColumnSpec(table, column string) (FactColumn, error) {
+	cols, ok := factColumns[table]
+	if !ok {
+		return FactColumn{}, fmt.Errorf("aiprompt: unknown fact table %q", table)
+	}
+	for _, col := range cols {
+		if col.Column == column {
+			return col, nil
+		}
+	}
+	return FactColumn{}, fmt.Errorf("aiprompt: unknown fact column %q.%q", table, column)
+}
+
 // usageNote renders the FACTS usage-note text for a fact column.
 func usageNote(f FactColumn) string {
 	switch f.Kind {
@@ -153,7 +167,7 @@ func usageNote(f FactColumn) string {
 		}
 		return "только число; добавь слово «" + f.Unit + "» после токена"
 	case KindStockFlag:
-		return "флаг наличия; называя наличие, вставляй сам токен — код подставит правильную формулировку; значение да/нет показано только для твоих рассуждений: товар «нет» не предлагай активно, предложи альтернативу в наличии"
+		return "флаг наличия; называя наличие, вставляй сам токен — код подставит правильную формулировку; состояние out_of_stock не предлагай активно, предложи альтернативу in_stock"
 	default:
 		return ""
 	}

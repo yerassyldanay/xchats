@@ -26,7 +26,7 @@ relate.
 
 | Scenario                | ai_products limit | Question bank                                          |
 | ------------------------ | ------------------ | ------------------------------------------------------- |
-| `shop-kb-v1-30`          | 30                 | `common/kb-questions-ru.yaml` + 1 deep-boundary test    |
+| `shop-kb-v1-30`          | 30                 | core + one-shot history banks + 1 boundary test         |
 | `shop-kb-v1-scale-60`    | 60                 | `common/kb-questions-ru.yaml` + 2 deep-boundary tests   |
 | `shop-kb-v1-scale-100`   | (none — full pool) | `common/kb-questions-ru.yaml` + 2 deep-boundary tests   |
 
@@ -35,7 +35,11 @@ row-count boundary (e.g. the ~30th product for `shop-kb-v1-30`), so scaling
 is actually exercised at the edge of the visible catalog, not just on the
 same first few rows every size would trivially pass.
 
-## Prompt sizes (recorded 2026-07-21, free `render` only — no model calls)
+The five history cases run only in the 30-product baseline. Every case is one
+independent provider call containing its complete history plus final message;
+the 60/100 variants stay focused on catalog-size boundaries.
+
+## Prompt sizes (recorded 2026-07-22, free `render` only — no model calls)
 
 Measured directly on `generated/prompt.txt` after `harness render`; word/char
 counts are a size proxy, not a token count — actual token usage is model-
@@ -44,9 +48,9 @@ specific and is recorded per real call in a billed run's `SUMMARY.md`
 
 | Scenario                | Fact tokens | Media entries | Tests | Prompt chars | Prompt words |
 | ------------------------ | ----------- | -------------- | ----- | ------------- | ------------- |
-| `shop-kb-v1-30`          | 67          | 30              | 17    | 40,036        | 1,235         |
-| `shop-kb-v1-scale-60`    | 127         | 56              | 18    | 67,061        | 2,021         |
-| `shop-kb-v1-scale-100`   | 207         | 91              | 18    | 105,040       | 3,078         |
+| `shop-kb-v1-30`          | 67          | 30              | 21    | 38,037        | 3,159         |
+| `shop-kb-v1-scale-60`    | 127         | 56              | 17    | 62,864        | 5,223         |
+| `shop-kb-v1-scale-100`   | 207         | 91              | 17    | 97,915        | 7,972         |
 
 Growth from 30 to 100 products is roughly linear (~2.6x the products, ~2.6x
 the prompt size) — no unexpected super-linear blowup from the fact/media

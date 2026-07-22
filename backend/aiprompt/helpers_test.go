@@ -69,7 +69,7 @@ func baseKB() *KB {
 			},
 		},
 		Tariffs: []Tariff{
-			{Ref: "basic", Name: "Базовый", Price: "5 000 ₸", PricingType: "fixed"},
+			{Ref: "basic", Name: "Базовый", Price: "5 000 ₸", PricingType: "fixed", SalesStatus: "active"},
 		},
 		Contacts: &Contacts{
 			Phone: "+7 700 000 00 00", WorkingHours: "9:00–18:00",

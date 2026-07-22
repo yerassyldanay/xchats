@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Response is the canonical customer-response JSON contract
@@ -78,21 +80,23 @@ func RenderResponseSchema() string {
 
 // ContractIssue is one validation failure; an empty slice means valid.
 type ContractIssue struct {
-	Code   string // parse | unknown_property | missing_property | bad_language | bad_confidence | unknown_media_token | escalation_reason_mismatch
+	// Code is a stable machine-readable category. Shape codes are parse,
+	// validation_context, unknown_property, missing_property, and
+	// wrong_property_type; remaining codes describe semantic contract failures.
+	Code   string
 	Detail string
 }
 
-var jsonExtract = regexp.MustCompile(`(?s)\{.*\}`)
+var placeholderPattern = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 
-// ValidateResponse strictly parses raw model output against the contract and
-// the catalog. Unknown JSON properties are rejected. Media tokens must be
-// exact media-catalog tokens. Returns the parsed response (when parseable)
-// plus every issue found.
-func ValidateResponse(raw string, cat *Catalog) (*Response, []ContractIssue) {
-	var issues []ContractIssue
-	blob := jsonExtract.FindString(raw)
+// ValidateResponse strictly parses one JSON object and validates every semantic token
+// against both the catalog supplied to the model and the current approved KB. Exact
+// business values must remain placeholders until code-side substitution.
+func ValidateResponse(raw string, kb *KB, cat *Catalog) (*Response, []ContractIssue) {
+	issues := []ContractIssue{}
+	blob := strings.TrimSpace(raw)
 	if blob == "" {
-		return nil, []ContractIssue{{Code: "parse", Detail: "no JSON object found in output"}}
+		return nil, []ContractIssue{{Code: "parse", Detail: "empty model output"}}
 	}
 
 	// Pass 1: generic map to detect unknown/missing properties explicitly.
@@ -100,11 +104,21 @@ func ValidateResponse(raw string, cat *Catalog) (*Response, []ContractIssue) {
 	if err := json.Unmarshal([]byte(blob), &m); err != nil {
 		return nil, []ContractIssue{{Code: "parse", Detail: err.Error()}}
 	}
+	if m == nil {
+		return nil, []ContractIssue{{Code: "parse", Detail: "top-level JSON value must be an object"}}
+	}
 	known := map[string]bool{}
+	wrongType := false
 	for _, p := range propertyDescriptions {
 		known[p.Name] = true
-		if _, ok := m[p.Name]; !ok {
+		rawProperty, ok := m[p.Name]
+		if !ok {
 			issues = append(issues, ContractIssue{Code: "missing_property", Detail: p.Name})
+			continue
+		}
+		if !responsePropertyTypeOK(p.Name, rawProperty) {
+			wrongType = true
+			issues = append(issues, ContractIssue{Code: "wrong_property_type", Detail: p.Name})
 		}
 	}
 	for k := range m {
@@ -119,6 +133,9 @@ func ValidateResponse(raw string, cat *Catalog) (*Response, []ContractIssue) {
 	var resp Response
 	if err := dec.Decode(&resp); err != nil {
 		issues = append(issues, ContractIssue{Code: "parse", Detail: err.Error()})
+		return nil, issues
+	}
+	if wrongType {
 		return nil, issues
 	}
 
@@ -138,32 +155,261 @@ func ValidateResponse(raw string, cat *Catalog) (*Response, []ContractIssue) {
 			}
 		}
 	}
+	if kb == nil || cat == nil {
+		issues = append(issues, ContractIssue{
+			Code:   "validation_context",
+			Detail: "current KB and request catalog are required",
+		})
+		return &resp, issues
+	}
+	issues = append(issues, validateFactContract(resp, kb, cat)...)
 	return &resp, issues
 }
 
-var placeholderPattern = regexp.MustCompile(`\{\{[^{}]*\}\}`)
-
-// SubstituteFacts replaces every {{…}} placeholder in text with its stored
-// value; the in_stock flag substitutes the reviewed Russian wording, never the
-// boolean literal. An unknown placeholder is a hard error — a made-up
-// placeholder fails loudly, blocking the whole reply.
-func SubstituteFacts(text string, cat *Catalog) (string, error) {
-	var badTok string
-	out := placeholderPattern.ReplaceAllStringFunc(text, func(tok string) string {
-		f := cat.FactByToken(tok)
-		if f == nil {
-			if badTok == "" {
-				badTok = tok
+func responsePropertyTypeOK(name string, raw json.RawMessage) bool {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		return false
+	}
+	switch name {
+	case "media_files_to_send":
+		items, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, item := range items {
+			if _, ok := item.(string); !ok {
+				return false
 			}
+		}
+		return true
+	case "escalate":
+		_, ok := value.(bool)
+		return ok
+	case "confidence":
+		_, ok := value.(float64)
+		return ok
+	default:
+		_, ok := value.(string)
+		return ok
+	}
+}
+
+func validateFactContract(resp Response, kb *KB, cat *Catalog) []ContractIssue {
+	issues := []ContractIssue{}
+	seenTokens := map[string]bool{}
+	for _, tok := range placeholderPattern.FindAllString(resp.ReplyText, -1) {
+		if seenTokens[tok] {
+			continue
+		}
+		seenTokens[tok] = true
+		if cat.FactByToken(tok) == nil {
+			issues = append(issues, ContractIssue{Code: "unknown_fact_placeholder", Detail: tok})
+			continue
+		}
+		if _, err := ResolveFact(tok, kb, cat); err != nil {
+			issues = append(issues, ContractIssue{Code: "stale_fact_placeholder", Detail: err.Error()})
+		}
+	}
+
+	withoutPlaceholders := placeholderPattern.ReplaceAllString(resp.ReplyText, "")
+	if strings.ContainsAny(withoutPlaceholders, "{}") {
+		issues = append(issues, ContractIssue{
+			Code:   "malformed_fact_placeholder",
+			Detail: "reply_text contains unmatched or malformed braces",
+		})
+	}
+	if strings.ContainsAny(resp.EscalationReason, "{}") {
+		issues = append(issues, ContractIssue{
+			Code:   "placeholder_outside_reply",
+			Detail: "escalation_reason must not contain fact placeholders or braces",
+		})
+	}
+
+	seenValues := map[string]bool{}
+	for _, fact := range cat.Facts {
+		value, err := ResolveFact(fact.Token, kb, cat)
+		if err != nil {
+			continue // an unrelated stale fact does not invalidate this response
+		}
+		normalizedValue := normalizeLiteral(value)
+		if normalizedValue == "" || seenValues[normalizedValue] {
+			continue
+		}
+		seenValues[normalizedValue] = true
+		if containsLiteral(withoutPlaceholders, value) {
+			issues = append(issues, ContractIssue{
+				Code:   "exact_value_literal",
+				Detail: "reply_text contains a model-authored exact value represented by " + fact.Token,
+			})
+		}
+	}
+	return issues
+}
+
+func normalizeLiteral(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
+
+func containsLiteral(text, value string) bool {
+	haystack := normalizeLiteral(text)
+	needle := normalizeLiteral(value)
+	if needle == "" {
+		return false
+	}
+	for offset := 0; offset <= len(haystack)-len(needle); {
+		relative := strings.Index(haystack[offset:], needle)
+		if relative < 0 {
+			return false
+		}
+		start := offset + relative
+		end := start + len(needle)
+		if literalBoundariesOK(haystack, needle, start, end) {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+func literalBoundariesOK(haystack, needle string, start, end int) bool {
+	first, _ := utf8.DecodeRuneInString(needle)
+	if isWordRune(first) && start > 0 {
+		before, _ := utf8.DecodeLastRuneInString(haystack[:start])
+		if isWordRune(before) {
+			return false
+		}
+	}
+	last, _ := utf8.DecodeLastRuneInString(needle)
+	if isWordRune(last) && end < len(haystack) {
+		after, _ := utf8.DecodeRuneInString(haystack[end:])
+		if isWordRune(after) {
+			return false
+		}
+	}
+	return true
+}
+
+func isWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsNumber(r)
+}
+
+// ResolveFact resolves one request-catalog token against the current approved row and
+// column. The returned value is final customer wording and is never model-facing.
+func ResolveFact(token string, kb *KB, cat *Catalog) (string, error) {
+	if kb == nil || cat == nil {
+		return "", fmt.Errorf("aiprompt: current KB and request catalog are required")
+	}
+	fact := cat.FactByToken(token)
+	if fact == nil {
+		return "", fmt.Errorf("aiprompt: fact token %q is not in the request catalog", token)
+	}
+	canonical := "{{" + fact.Table + "." + fact.Ref + "." + fact.Column + "}}"
+	if fact.Token != canonical {
+		return "", fmt.Errorf("aiprompt: fact token %q has inconsistent catalog metadata", token)
+	}
+	spec, err := factColumnSpec(fact.Table, fact.Column)
+	if err != nil {
+		return "", err
+	}
+	if fact.Kind != spec.Kind {
+		return "", fmt.Errorf("aiprompt: fact token %q has value kind %q, want %q", token, fact.Kind, spec.Kind)
+	}
+	return currentFactValue(kb, fact)
+}
+
+func currentFactValue(kb *KB, fact *FactEntry) (string, error) {
+	var value string
+	switch fact.Table {
+	case "product":
+		product := currentProduct(kb, fact.Ref)
+		if product == nil {
+			return "", fmt.Errorf("aiprompt: fact token %q no longer has an active product row", fact.Token)
+		}
+		switch fact.Column {
+		case "price":
+			value = product.Price
+		case "in_stock":
+			return StockWordingRU[product.InStock], nil
+		}
+	case "tariff":
+		tariff := currentTariff(kb, fact.Ref)
+		if tariff == nil {
+			return "", fmt.Errorf("aiprompt: fact token %q no longer has an active tariff row", fact.Token)
+		}
+		switch fact.Column {
+		case "price":
+			value = tariff.Price
+		case "fee":
+			value = tariff.Fee
+		}
+	case "contact":
+		if fact.Ref != SingletonRef || kb.Contacts == nil {
+			return "", fmt.Errorf("aiprompt: fact token %q no longer has a contacts row", fact.Token)
+		}
+		values := map[string]string{
+			"phone": kb.Contacts.Phone, "whatsapp": kb.Contacts.WhatsApp,
+			"email": kb.Contacts.Email, "website": kb.Contacts.Website,
+			"instagram": kb.Contacts.Instagram, "working_hours": kb.Contacts.WorkingHours,
+		}
+		value = values[fact.Column]
+	case "policy":
+		if fact.Ref != SingletonRef || kb.Policies == nil {
+			return "", fmt.Errorf("aiprompt: fact token %q no longer has a policies row", fact.Token)
+		}
+		values := map[string]string{
+			"delivery_cost":         kb.Policies.DeliveryCost,
+			"delivery_in_days":      kb.Policies.DeliveryInDays,
+			"free_delivery_from":    kb.Policies.FreeDeliveryFrom,
+			"min_order":             kb.Policies.MinOrder,
+			"return_period_in_days": kb.Policies.ReturnPeriodInDays,
+		}
+		value = values[fact.Column]
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("aiprompt: fact token %q now resolves to an empty value", fact.Token)
+	}
+	return value, nil
+}
+
+func currentProduct(kb *KB, ref string) *Product {
+	for i := range kb.Products {
+		if kb.Products[i].Ref == ref && active(kb.Products[i].SalesStatus) {
+			return &kb.Products[i]
+		}
+	}
+	return nil
+}
+
+func currentTariff(kb *KB, ref string) *Tariff {
+	for i := range kb.Tariffs {
+		if kb.Tariffs[i].Ref == ref && active(kb.Tariffs[i].SalesStatus) {
+			return &kb.Tariffs[i]
+		}
+	}
+	return nil
+}
+
+// SubstituteFacts replaces every approved placeholder with the latest current value.
+// Unknown, malformed, inactive, or now-empty facts fail the complete substitution.
+func SubstituteFacts(text string, kb *KB, cat *Catalog) (string, error) {
+	var resolveErr error
+	out := placeholderPattern.ReplaceAllStringFunc(text, func(tok string) string {
+		if resolveErr != nil {
 			return tok
 		}
-		if f.Kind == KindStockFlag {
-			return StockWordingRU[f.stockValue]
+		value, err := ResolveFact(tok, kb, cat)
+		if err != nil {
+			resolveErr = err
+			return tok
 		}
-		return f.Value
+		return value
 	})
-	if badTok != "" {
-		return "", fmt.Errorf("aiprompt: unknown placeholder %s", badTok)
+	if resolveErr != nil {
+		return "", resolveErr
+	}
+	if strings.ContainsAny(out, "{}") {
+		return "", fmt.Errorf("aiprompt: malformed fact placeholder in reply_text")
 	}
 	return out, nil
 }
@@ -180,8 +426,11 @@ type ResolvedMaterial struct {
 // that exactly the right material records would have been sent — without any
 // file bytes existing anywhere.
 func ResolveSend(tokens []string, kb *KB, cat *Catalog) ([]ResolvedMaterial, error) {
+	if kb == nil || cat == nil {
+		return nil, fmt.Errorf("aiprompt: current KB and request catalog are required")
+	}
 	seen := map[string]bool{}
-	var out []ResolvedMaterial
+	out := []ResolvedMaterial{}
 	for _, tok := range tokens {
 		if seen[tok] {
 			continue // deduplicate while preserving order
@@ -191,11 +440,22 @@ func ResolveSend(tokens []string, kb *KB, cat *Catalog) ([]ResolvedMaterial, err
 		if entry == nil {
 			return nil, fmt.Errorf("aiprompt: media token %q is not in the catalog", tok)
 		}
+		canonical := entry.Table + "." + entry.Ref + "." + entry.Column
+		if entry.Token != canonical {
+			return nil, fmt.Errorf("aiprompt: media token %q has inconsistent catalog metadata", tok)
+		}
 		spec, err := mediaColumnSpec(entry.Table, entry.Column)
 		if err != nil {
 			return nil, err
 		}
-		for _, id := range cat.resolution[tok].MaterialIDs {
+		ids, err := currentMediaIDs(kb, entry)
+		if err != nil {
+			return nil, err
+		}
+		if spec.Singular && len(ids) > 1 {
+			return nil, fmt.Errorf("aiprompt: singular media token %q now holds %d references", tok, len(ids))
+		}
+		for _, id := range ids {
 			if err := validateMaterialRef(kb, id, spec, entry.Table, entry.Ref); err != nil {
 				return nil, err
 			}
@@ -203,4 +463,37 @@ func ResolveSend(tokens []string, kb *KB, cat *Catalog) ([]ResolvedMaterial, err
 		}
 	}
 	return out, nil
+}
+
+func currentMediaIDs(kb *KB, entry *MediaEntry) ([]string, error) {
+	ids := []string{}
+	switch entry.Table {
+	case "topics":
+		for i := range kb.Topics {
+			if kb.Topics[i].Slug == entry.Ref {
+				ids = topicMedia(&kb.Topics[i])[entry.Column]
+				break
+			}
+		}
+	case "products":
+		if product := currentProduct(kb, entry.Ref); product != nil {
+			ids = productMedia(product)[entry.Column]
+		}
+	case "tariffs":
+		if tariff := currentTariff(kb, entry.Ref); tariff != nil {
+			ids = tariffMedia(tariff)[entry.Column]
+		}
+	case "contacts":
+		if entry.Ref == SingletonRef && kb.Contacts != nil {
+			ids = contactsMedia(kb.Contacts)[entry.Column]
+		}
+	case "policies":
+		if entry.Ref == SingletonRef && kb.Policies != nil {
+			ids = policiesMedia(kb.Policies)[entry.Column]
+		}
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("aiprompt: media token %q no longer has an approved non-empty row and column", entry.Token)
+	}
+	return ids, nil
 }

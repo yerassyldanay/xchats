@@ -221,29 +221,58 @@ func TestBuildCatalog_InStockSubstitution(t *testing.T) {
 	if outOfStock == nil {
 		t.Fatal("expected in_stock fact for cookware-set")
 	}
-	if inStock.Value == outOfStock.Value {
-		t.Errorf("in_stock display value must differ between true/false, both were %q", inStock.Value)
+	if inStock.ReasoningState != "in_stock" {
+		t.Errorf("in-stock product ReasoningState = %q, want in_stock", inStock.ReasoningState)
+	}
+	if outOfStock.ReasoningState != "out_of_stock" {
+		t.Errorf("out-of-stock product ReasoningState = %q, want out_of_stock", outOfStock.ReasoningState)
 	}
 }
 
 // TestBuildCatalog_InactiveSalesStatusExcluded confirms inactive rows produce
 // neither facts nor media/absence entries.
 func TestBuildCatalog_InactiveSalesStatusExcluded(t *testing.T) {
-	kb := baseKB()
-	kb.Products[0].SalesStatus = "inactive"
-	cat, err := BuildCatalog(kb)
-	if err != nil {
-		t.Fatalf("BuildCatalog: %v", err)
+	statuses := []struct {
+		name   string
+		status string
+	}{
+		{name: "empty", status: ""},
+		{name: "inactive", status: "inactive"},
+		{name: "pending", status: "pending"},
+		{name: "wrong case", status: "ACTIVE"},
 	}
-	if f := cat.FactByToken("{{product.coffee-machine.price}}"); f != nil {
-		t.Error("inactive product must not produce fact entries")
+	for _, tt := range statuses {
+		t.Run(tt.name, func(t *testing.T) {
+			kb := baseKB()
+			kb.Products[0].SalesStatus = tt.status
+			cat, err := BuildCatalog(kb)
+			if err != nil {
+				t.Fatalf("BuildCatalog: %v", err)
+			}
+			if f := cat.FactByToken("{{product.coffee-machine.price}}"); f != nil {
+				t.Error("non-active product must not produce fact entries")
+			}
+			if m := cat.MediaByToken("products.coffee-machine.featured_image"); m != nil {
+				t.Error("non-active product must not produce media entries")
+			}
+			for _, a := range cat.Absent {
+				if a.Ref == "coffee-machine" {
+					t.Error("non-active product must not appear in Absent")
+				}
+			}
+		})
 	}
-	if m := cat.MediaByToken("products.coffee-machine.featured_image"); m != nil {
-		t.Error("inactive product must not produce media entries")
-	}
-	for _, a := range cat.Absent {
-		if a.Ref == "coffee-machine" {
-			t.Error("inactive product must not appear in Absent either — it is excluded entirely")
+
+	t.Run("active", func(t *testing.T) {
+		cat, err := BuildCatalog(baseKB())
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
+		if cat.FactByToken("{{product.coffee-machine.price}}") == nil {
+			t.Error("active product must produce fact entries")
+		}
+		if cat.MediaByToken("products.coffee-machine.featured_image") == nil {
+			t.Error("active product must produce media entries")
+		}
+	})
 }

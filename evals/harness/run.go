@@ -127,7 +127,11 @@ func cmdRun(args []string) (runID string, err error) {
 			return runID, err
 		}
 
-		ref, err := provenance.SnapshotScenario(sd, runDir, scenario.Name)
+		fixturePath := ""
+		if scenario.Pipeline == "schema_kb_v1" {
+			fixturePath = filepath.Join(sd, scenario.Data)
+		}
+		ref, err := provenance.SnapshotScenario(sd, runDir, scenario.Name, fixturePath)
 		if err != nil {
 			return runID, fmt.Errorf("snapshot %s: %w", scenario.Name, err)
 		}
