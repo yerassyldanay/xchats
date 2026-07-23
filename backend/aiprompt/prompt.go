@@ -9,14 +9,32 @@ import (
 // Prompt slots a frame may carry. The frame authors all human wording
 // (headers, rules); the renderers emit content rows only. Slots present in a
 // frame are always filled; a leftover %%…%% marker fails validation.
+//
+// SlotKnowledgeBase/SlotDescriptions/SlotFacts/SlotMedia/SlotMediaAbsent are the
+// v1 (flat) rendering: one shared topic list, one shared prose list, one flat
+// FACTS table (all tables, including products), one global media catalog, one
+// global media-absence list. Kept for legacy frame compatibility.
+//
+// SlotProductsInStock/SlotProductsOutOfStock/SlotTopics/SlotBusinessFacts are the
+// v2 (canonical-block) rendering (2026-07): one block per in-stock product
+// (name/description/fact placeholders/every populated media reference, each
+// appearing exactly once), a name-only list for out-of-stock products (no facts,
+// no media), one block per topic, and BUSINESS_FACTS carrying only policy/
+// contact/delivery-zone placeholders (product facts moved into the per-product
+// blocks). A frame uses EITHER the v1 slots OR the v2 slots for a given concept,
+// never both — RenderPrompt fills whichever slots the frame actually contains.
 const (
-	SlotAssistant      = "%%ASSISTANT%%"
-	SlotKnowledgeBase  = "%%KNOWLEDGE_BASE%%"
-	SlotDescriptions   = "%%DESCRIPTIONS%%"
-	SlotFacts          = "%%FACTS%%"
-	SlotMedia          = "%%MEDIA%%"
-	SlotMediaAbsent    = "%%MEDIA_ABSENT%%"
-	SlotResponseSchema = "%%RESPONSE_SCHEMA%%"
+	SlotAssistant          = "%%ASSISTANT%%"
+	SlotKnowledgeBase      = "%%KNOWLEDGE_BASE%%"
+	SlotDescriptions       = "%%DESCRIPTIONS%%"
+	SlotFacts              = "%%FACTS%%"
+	SlotMedia              = "%%MEDIA%%"
+	SlotMediaAbsent        = "%%MEDIA_ABSENT%%"
+	SlotProductsInStock    = "%%PRODUCTS_IN_STOCK%%"
+	SlotProductsOutOfStock = "%%PRODUCTS_OUT_OF_STOCK%%"
+	SlotTopics             = "%%TOPICS%%"
+	SlotBusinessFacts      = "%%BUSINESS_FACTS%%"
+	SlotResponseSchema     = "%%RESPONSE_SCHEMA%%"
 )
 
 // BuildPrompt is the explicit two-step orchestration: BuildCatalog validates
@@ -60,6 +78,10 @@ func RenderPrompt(frame string, input *PromptInput, cat *Catalog) (string, error
 	out = strings.ReplaceAll(out, SlotFacts, renderFacts(cat.Facts))
 	out = strings.ReplaceAll(out, SlotMedia, renderMediaCatalog(cat.Media))
 	out = strings.ReplaceAll(out, SlotMediaAbsent, renderMediaAbsent(cat.Absent))
+	out = strings.ReplaceAll(out, SlotProductsInStock, renderProductsInStock(input, cat))
+	out = strings.ReplaceAll(out, SlotProductsOutOfStock, renderProductsOutOfStock(input))
+	out = strings.ReplaceAll(out, SlotTopics, renderTopicBlocks(input, cat))
+	out = strings.ReplaceAll(out, SlotBusinessFacts, renderBusinessFacts(cat.Facts))
 	out = strings.ReplaceAll(out, SlotResponseSchema, RenderResponseSchema())
 	if err := ValidatePrompt(out, cat); err != nil {
 		return "", err
@@ -209,6 +231,124 @@ func renderMediaAbsent(absent []AbsentEntry) string {
 		lines = append(lines, a.Table+"."+a.Ref+" — "+a.DisplayName)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// mediaRefLines returns one "<column>_ref: <table>.<ref>.<column>" line per
+// POPULATED media column an owner (table.ref) has — read from cat.Media (the
+// already-validated public projection), in registry column order, so a v2 block
+// can never list a column BuildCatalog didn't also approve. The field name is
+// deliberately the full registry column name plus "_ref" (not an abbreviation)
+// so every block's field name maps 1:1 onto the exact token segment a model
+// must copy — no second naming layer to keep in sync.
+func mediaRefLines(cat *Catalog, table, ref string) []string {
+	var lines []string
+	for _, spec := range mediaColumns[table] {
+		token := table + "." + ref + "." + spec.Column
+		if cat.MediaByToken(token) == nil {
+			continue // empty column: omitted entirely, never an "unavailable:" line
+		}
+		lines = append(lines, spec.Column+"_ref: "+token)
+	}
+	return lines
+}
+
+// renderProductsInStock renders the v2 canonical-block frame's in-stock product
+// list (%%PRODUCTS_IN_STOCK%%): one block per in-stock, active product with its
+// name, description, fact placeholders, and every populated media reference —
+// each appearing exactly once, empty fields simply omitted. This is the v2
+// replacement for the flat FACTS/DESCRIPTIONS/MEDIA rendering of product rows
+// (see renderFacts/renderDescriptions/renderMediaCatalog, kept for legacy frame
+// compatibility) — an out-of-stock product never appears here at all (see
+// renderProductsOutOfStock).
+func renderProductsInStock(input *PromptInput, cat *Catalog) string {
+	var blocks []string
+	for _, p := range input.Products {
+		if !active(p.SalesStatus) || !p.InStock {
+			continue
+		}
+		lines := []string{"product: " + p.Ref, "name: " + p.Name}
+		if s := strings.TrimSpace(p.Description); s != "" {
+			lines = append(lines, "description: "+s)
+		}
+		if cat.FactByToken("{{product."+p.Ref+".price}}") != nil {
+			lines = append(lines, "price_placeholder: {{product."+p.Ref+".price}}")
+		}
+		if cat.FactByToken("{{product."+p.Ref+".in_stock}}") != nil {
+			lines = append(lines, "stock_placeholder: {{product."+p.Ref+".in_stock}}")
+		}
+		lines = append(lines, mediaRefLines(cat, "products", p.Ref)...)
+		blocks = append(blocks, strings.Join(lines, "\n"))
+	}
+	if len(blocks) == 0 {
+		return "—"
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+// renderProductsOutOfStock renders the v2 canonical-block frame's out-of-stock
+// list (%%PRODUCTS_OUT_OF_STOCK%%): NAME ONLY, one line per out-of-stock, active
+// product — no ref, no description, no fact placeholders, no media references.
+// The frame's own instruction text (not this renderer) tells the model these are
+// known-but-unavailable products it must not quote facts, prices, or media for.
+func renderProductsOutOfStock(input *PromptInput) string {
+	var lines []string
+	for _, p := range input.Products {
+		if !active(p.SalesStatus) || p.InStock {
+			continue
+		}
+		lines = append(lines, "- "+p.Name)
+	}
+	if len(lines) == 0 {
+		return "—"
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderTopicBlocks renders the v2 canonical-block frame's topic list
+// (%%TOPICS%%): one block per topic with prose (slug/title/keywords/body plus
+// every populated media reference), each field appearing exactly once. This is
+// the v2 replacement for renderTopics (SlotKnowledgeBase, kept for legacy frame
+// compatibility) — topic prose appears ONLY here in a v2 frame, never repeated
+// in a separate knowledge-base section.
+func renderTopicBlocks(input *PromptInput, cat *Catalog) string {
+	var blocks []string
+	for _, t := range input.Topics {
+		if strings.TrimSpace(t.BodyMD) == "" {
+			continue // missing prose is omitted, not a blank entry
+		}
+		lines := []string{"topic: " + t.Slug}
+		if s := strings.TrimSpace(t.Title); s != "" {
+			lines = append(lines, "title: "+s)
+		}
+		if len(t.Keywords) > 0 {
+			lines = append(lines, "keywords: "+strings.Join(t.Keywords, ", "))
+		}
+		lines = append(lines, "body: "+strings.TrimSpace(t.BodyMD))
+		lines = append(lines, mediaRefLines(cat, "topics", t.Slug)...)
+		blocks = append(blocks, strings.Join(lines, "\n"))
+	}
+	if len(blocks) == 0 {
+		return "—"
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+// renderBusinessFacts renders the v2 canonical-block frame's %%BUSINESS_FACTS%%
+// slot — the same renderFacts line format, filtered to policy/contact/delivery-
+// zone facts ONLY; product facts moved into the per-product blocks above so no
+// fact ever appears in two places. Tariff facts are deliberately NOT included:
+// shop-kb-v1 (the only schema_kb_v1 family today) has no tariffs; a future
+// tariff-bearing v2 frame would need its own canonical tariff block (mirroring
+// renderProductsInStock) before this slot could safely carry them too.
+func renderBusinessFacts(facts []FactEntry) string {
+	var kept []FactEntry
+	for _, f := range facts {
+		switch f.Table {
+		case "policy", "contact", "delivery":
+			kept = append(kept, f)
+		}
+	}
+	return renderFacts(kept)
 }
 
 var (

@@ -149,3 +149,16 @@ providers:
   # above. Its probe history — reasoning.max_tokens unenforced; reasoning.enabled:
   # false was the reliable fix — remains in git history and in the snapshots of the
   # runs that used it.)
+
+# archived_models refuses the listed ids for NEW runs (see types.go ArchivedModel) —
+# filterProviders excludes them from every selection path, including "-models all", and
+# errors loudly if one is named explicitly. Historical run artifacts referencing these
+# ids are never touched; the harness/HTML UI badges those rows as archived by looking
+# this stanza up at DISPLAY time, not by mutating the stored run.
+archived_models:
+  - id: openrouter:moonshotai/kimi-k2.5
+    reason: "removed 2026-07-23 — expensive relative to remaining candidates, no longer an evaluation candidate"
+  - id: openrouter:moonshotai/kimi-k2.6
+    reason: "removed 2026-07-23 — 31/31 responses truncated mid-reasoning at finish_reason=length, slowest model in the file"
+  - id: openrouter:google/gemini-3.5-flash
+    reason: "reasoning.enabled+exclude config added 2026-07-23 is NOT yet probe-verified for this model — entry stays for its config notes but is refused for new spend until verified"

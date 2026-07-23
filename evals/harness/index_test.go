@@ -169,6 +169,60 @@ func TestBuildRunsIndexRows_SkipsSupportAndZeroExecutionDirs(t *testing.T) {
 	}
 }
 
+// TestBuildRunsIndexRow_ArchivedScenarioAndModel confirms a run row surfaces which of
+// its OWN scenarios/models are currently archived — resolved at display time against
+// the CURRENT scenarios/*/scenario.yaml + models.yaml (loadArchivedScenarios/
+// loadArchivedModels), never mutating the run's own judged.json. A scenario/model NOT
+// in this run must never appear in the archived subset even if it happens to be
+// archived elsewhere.
+func TestBuildRunsIndexRow_ArchivedScenarioAndModel(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	writeCatalogFixtureScenario(t, root, "retired-scenario", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml", Archived: true, ArchivedReason: "superseded",
+	}, Data{}, "tests:\n")
+	writeCatalogFixtureScenario(t, root, "active-scenario", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml",
+	}, Data{}, "tests:\n")
+
+	modelsYAML := "providers:\n  - id: openrouter:archived/model\narchived_models:\n  - id: openrouter:archived/model\n    reason: retired\n"
+	if err := os.WriteFile(filepath.Join(root, "models.yaml"), []byte(modelsYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runDir := filepath.Join(root, "runs", "2026-01-01_00-00-00-aaaa")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// One judged.json per scenario name — buildRunsIndexRow reads every
+	// *.judged.json in the run dir, so mixing an archived and an active scenario in
+	// the SAME run proves only the archived one is flagged.
+	jrRetired := JudgedRun{Scenario: "retired-scenario", Verdicts: []Verdict{
+		{TestID: "t1", Model: "openrouter:archived/model", ParseOK: true},
+	}}
+	if err := writeJSON(filepath.Join(runDir, "retired-scenario.judged.json"), jrRetired); err != nil {
+		t.Fatal(err)
+	}
+	jrActive := JudgedRun{Scenario: "active-scenario", Verdicts: []Verdict{
+		{TestID: "t2", Model: "openrouter:active/model", ParseOK: true},
+	}}
+	if err := writeJSON(filepath.Join(runDir, "active-scenario.judged.json"), jrActive); err != nil {
+		t.Fatal(err)
+	}
+
+	row, err := buildRunsIndexRow(runDir)
+	if err != nil {
+		t.Fatalf("buildRunsIndexRow: %v", err)
+	}
+	if len(row.ArchivedScenarios) != 1 || row.ArchivedScenarios[0] != "retired-scenario" {
+		t.Errorf("want ArchivedScenarios=[retired-scenario], got %v", row.ArchivedScenarios)
+	}
+	if len(row.ArchivedModels) != 1 || row.ArchivedModels[0] != "openrouter:archived/model" {
+		t.Errorf("want ArchivedModels=[openrouter:archived/model], got %v", row.ArchivedModels)
+	}
+}
+
 // TestWriteRunHTML_AlsoRegeneratesRunsIndex proves the wiring: calling writeRunHTML
 // for one run must rebuild the SIBLING runs/index.html too (step 6's whole point —
 // "regenerated wholesale on every run/html invocation").

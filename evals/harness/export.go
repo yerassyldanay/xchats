@@ -81,9 +81,14 @@ func cmdExport(args []string) error {
 // Export schema versions — bump on any breaking shape change so a stale frontend
 // build can detect a mismatch rather than silently misrender. Independent of each
 // other: executions.json and runs.json can evolve on separate timelines.
+//
+// v2 (2026-07): RunsFile rows gained ArchivedScenarios/ArchivedModels (the 2026-07
+// schema_kb_v1 consolidation's archival mechanism). ExecutionsFile's own shape did not
+// change this round — bumped anyway so both artifacts stay on the same version number
+// for this harness's lifetime, matching CatalogFileSchemaVersion's bump alongside it.
 const (
-	ExecutionsFileSchemaVersion = 1
-	RunsFileSchemaVersion       = 1
+	ExecutionsFileSchemaVersion = 2
+	RunsFileSchemaVersion       = 2
 )
 
 // ExecutionsFile is runs/<id>/executions.json — the eval comparison UI's per-run data
@@ -149,6 +154,12 @@ type RunSummary struct {
 	ExtractTotal         int `json:"extract_total"`
 	ExtractChecksPass    int `json:"extract_checks_pass"`
 
+	// ArchivedScenarios/ArchivedModels mirror runsIndexRow's own fields — see its doc
+	// comment: resolved at display/export time against the CURRENT scenario and model
+	// rosters, never baked into the run itself.
+	ArchivedScenarios []string `json:"archived_scenarios,omitempty"`
+	ArchivedModels    []string `json:"archived_models,omitempty"`
+
 	HasIndexHTML bool   `json:"has_index_html"`
 	LoadError    string `json:"load_error,omitempty"`
 }
@@ -179,6 +190,8 @@ func runSummaryFromIndexRow(row runsIndexRow) RunSummary {
 		ScenarioContractPass: row.ScenarioContractPass,
 		ExtractTotal:         row.ExtractTotal,
 		ExtractChecksPass:    row.ExtractChecksPass,
+		ArchivedScenarios:    row.ArchivedScenarios,
+		ArchivedModels:       row.ArchivedModels,
 		HasIndexHTML:         row.IndexHref != "",
 		LoadError:            row.LoadError,
 	}

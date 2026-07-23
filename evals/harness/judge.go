@@ -92,6 +92,11 @@ type PromptfooRow struct {
 	// call failed, the ORIGINAL attempt stayed selected" (see retry.go's HTTP-error
 	// handling), not "no retry happened" (that case has Attempts entirely empty).
 	SelectedAttempt int `json:"selected_attempt,omitempty"`
+	// RetryReason labels WHY retry.go retried this row — "contract_shape" (unparseable
+	// JSON or a missing/wrong-typed field) or "media_not_found" (a hallucinated media
+	// token, or one that no longer resolves through kbd_materials) — see retryReason's
+	// doc comment. Empty for every row retry.go has never touched.
+	RetryReason string `json:"retry_reason,omitempty"`
 }
 
 // ResultAttempt is one attempt (the original promptfoo call, or a later retry.go
@@ -124,6 +129,9 @@ type ResultAttempt struct {
 	// HTTP-error handling keeps the ORIGINAL attempt selected in that case, but still
 	// records the failed retry attempt here so it's visible one happened.
 	Error string `json:"error,omitempty"`
+	// RetryReason mirrors PromptfooRow.RetryReason — set on the RETRY attempt only
+	// (the original attempt was never itself a retry, so it carries no reason).
+	RetryReason string `json:"retry_reason,omitempty"`
 }
 
 // Verdict is one judged answer — the harness's contribution on top of promptfoo's own
@@ -265,8 +273,9 @@ type Verdict struct {
 	// report.go can show per-model retry stats and a recovered row never silently
 	// looks identical to a clean first-attempt pass. RetryRecovered = Retries>0 &&
 	// ParseOK — the row needed a retry AND the SELECTED attempt is now parseable.
-	Retries        int  `json:"retries,omitempty"`
-	RetryRecovered bool `json:"retry_recovered,omitempty"`
+	Retries        int    `json:"retries,omitempty"`
+	RetryRecovered bool   `json:"retry_recovered,omitempty"`
+	RetryReason    string `json:"retry_reason,omitempty"`
 	// FirstAttemptParseOK/FirstAttemptContractPass judge the ORIGINAL (attempt 0) output
 	// independently of whichever attempt ended up selected — every other field on this
 	// Verdict reflects the FINAL/selected attempt, so these are the only place a
@@ -331,6 +340,23 @@ type Verdict struct {
 	// LLMChecks — a run that reuses every claim from cache reports 0 here, honestly: no
 	// new API call means no new spend, not a stale total carried forward.
 	LLMJudgeCostUSD float64 `json:"llm_judge_cost_usd,omitempty"`
+
+	// StockLLMEvaluated/LLMStockPass/StockLLMChecks/LLMStockModel/LLMStockCostUSD are
+	// the auto-generated semantic stock-correctness dimension (2026-07 consolidation),
+	// evaluated by the SAME opt-in `judge-llm` command as LLMChecks above but kept as a
+	// wholly SEPARATE dimension: unlike LLMChecks (hand-declared per test), these are
+	// synthesized from TestCase.StockCheckRef + the catalog's own ground-truth stock
+	// state, never hand-authored, so they can never drift from the fixture. Never folds
+	// into ContractPass/ModelBehaviorPass/LLMJudgePass — schema_kb_v1 only (a stock
+	// classification needs a product ref to look up ground truth against).
+	StockLLMEvaluated bool `json:"stock_llm_evaluated,omitempty"`
+	// LLMStockPass is nil when not evaluated (StockLLMEvaluated false, e.g. the test
+	// declares no StockCheckRef), else true only if the judge's classification matched
+	// the catalog's ground-truth state AND the call was not Unverified.
+	LLMStockPass    *bool                 `json:"llm_stock_pass,omitempty"`
+	StockLLMChecks  []StockLLMCheckResult `json:"stock_llm_checks,omitempty"`
+	LLMStockModel   string                `json:"llm_stock_model,omitempty"`
+	LLMStockCostUSD float64               `json:"llm_stock_cost_usd,omitempty"`
 }
 
 // LLMCheckResult is one TestCase.LLMChecks claim's judged outcome — see judge_llm.go.
@@ -348,6 +374,23 @@ type LLMCheckResult struct {
 	// run reuses this exact entry (no API call) when the key still matches; see
 	// llmCheckCacheKey.
 	CacheKey string `json:"cache_key"`
+}
+
+// StockLLMCheckResult is one auto-generated stock-correctness classification's judged
+// outcome — see judge_llm.go's autoStockChecks/judgeStockClaim. Classification is one
+// of "in_stock" | "out_of_stock" | "unclear" | "contradictory" (never a binary yes/no —
+// this is the 4-way semantic classification the LLM judge produces, distinct from a
+// plain LLMCheckResult).
+type StockLLMCheckResult struct {
+	ProductRef     string `json:"product_ref"`
+	ExpectedState  string `json:"expected_state"` // "in_stock" | "out_of_stock" — from the catalog, never hand-authored
+	Classification string `json:"classification"`
+	Pass           bool   `json:"pass"`
+	// Unverified is true when the judge call failed outright or its response could not
+	// be parsed into a recognized classification — Classification/Pass are meaningless
+	// zero values in that case (Pass left false: fail-closed).
+	Unverified bool   `json:"unverified"`
+	CacheKey   string `json:"cache_key"`
 }
 
 // CostBasis values — what CostEstimateUSD is actually computed from, so a report can never
@@ -715,6 +758,7 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 		Truncated:    isTruncatedFinish(row.Response.FinishReason),
 		Reasoning:    row.Response.Reasoning,
 		Retries:      row.Retries,
+		RetryReason:  row.RetryReason,
 		// MediaResolveOK has no meaning on the legacy pipeline (nothing to resolve — its
 		// data.yaml never had a kbd_materials-shaped registry to re-validate against), so
 		// it is fixed true here rather than left at bool's false zero value, which would

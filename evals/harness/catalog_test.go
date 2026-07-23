@@ -110,6 +110,39 @@ func TestBuildCatalogScenario_LimitsAppliedBeforeFactsAreBuilt(t *testing.T) {
 	}
 }
 
+// TestBuildCatalogScenario_ArchivedFieldsCarried confirms the catalog's Archived/
+// ArchivedReason are a direct copy of ScenarioConfig's own fields (writeCatalogJSON's
+// doc comment: the catalog is a repository-state snapshot, never a re-derivation) —
+// both for an archived scenario and for the (default) non-archived case, so a
+// forgotten `archived: true` never silently defaults to "archived" for every scenario.
+func TestBuildCatalogScenario_ArchivedFieldsCarried(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	writeCatalogFixtureScenario(t, root, "retired", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml", Archived: true, ArchivedReason: "superseded by v2",
+	}, Data{}, "tests:\n")
+	writeCatalogFixtureScenario(t, root, "active", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml",
+	}, Data{}, "tests:\n")
+
+	retired, err := buildCatalogScenario(filepath.Join(root, "scenarios", "retired"))
+	if err != nil {
+		t.Fatalf("buildCatalogScenario(retired): %v", err)
+	}
+	if !retired.Archived || retired.ArchivedReason != "superseded by v2" {
+		t.Errorf("want Archived=true with the reason carried through, got Archived=%v Reason=%q", retired.Archived, retired.ArchivedReason)
+	}
+
+	active, err := buildCatalogScenario(filepath.Join(root, "scenarios", "active"))
+	if err != nil {
+		t.Fatalf("buildCatalogScenario(active): %v", err)
+	}
+	if active.Archived || active.ArchivedReason != "" {
+		t.Errorf("want Archived=false with no reason for an unannotated scenario, got Archived=%v Reason=%q", active.Archived, active.ArchivedReason)
+	}
+}
+
 func TestBuildCatalogScenario_FactsResolvedToRealValuesAndSourceRecorded(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)

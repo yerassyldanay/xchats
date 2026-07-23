@@ -39,12 +39,54 @@ var DeliveryWordingRU = map[bool]string{
 	false: "не доставляем",
 }
 
+// StockWordingKK/DeliveryWordingKK are the Kazakh counterparts, selected when a
+// response declares reply_language "kk" (2026-07 Kazakh customer-message
+// testing — see ResolveFactLang/SubstituteFactsLang). The prompt and knowledge
+// base stay Russian-only; only the CUSTOMER-facing reply may be Kazakh, so
+// these wordings exist purely for that substitution path.
+//
+// DRAFT — machine-translated, pending native Kazakh speaker review before any
+// billed comparison treats Kazakh output as production-quality (same doctrine
+// already applied to every other Kazakh frame in this repo's history).
+var StockWordingKK = map[bool]string{
+	true:  "бар",
+	false: "жоқ",
+}
+
+var DeliveryWordingKK = map[bool]string{
+	true:  "жеткіземіз",
+	false: "жеткізбейміз",
+}
+
+// stockWording/deliveryWording select the reviewed wording table for a
+// response's declared reply language — "kk" selects the DRAFT Kazakh table,
+// anything else (including "" and "ru") selects the native-reviewed Russian
+// table, the always-safe default.
+func stockWording(lang string) map[bool]string {
+	if lang == "kk" {
+		return StockWordingKK
+	}
+	return StockWordingRU
+}
+
+func deliveryWording(lang string) map[bool]string {
+	if lang == "kk" {
+		return DeliveryWordingKK
+	}
+	return DeliveryWordingRU
+}
+
 // FactColumn describes one exact-value column.
 type FactColumn struct {
 	Column string
 	Label  string // Russian meaning shown in the FACTS catalog
 	Kind   ValueKind
 	Unit   string // Russian unit word for number/number_range kinds
+	// UnitKK is Unit's Kazakh counterpart, told to the model alongside Unit
+	// (usageNote renders both) so a Kazakh-language reply appends the correct
+	// word instead of the Russian one — empty when Unit itself is empty. DRAFT,
+	// pending native Kazakh review (see StockWordingKK's doc comment).
+	UnitKK string
 }
 
 // MediaKind is the MIME class a media column accepts.
@@ -86,10 +128,10 @@ var factColumns = map[string][]FactColumn{
 	},
 	"policy": {
 		{Column: "delivery_cost", Label: "стоимость доставки", Kind: KindMoneyDisplay},
-		{Column: "delivery_in_days", Label: "срок доставки, в днях", Kind: KindNumberRange, Unit: "дня"},
+		{Column: "delivery_in_days", Label: "срок доставки, в днях", Kind: KindNumberRange, Unit: "дня", UnitKK: "күн"},
 		{Column: "free_delivery_from", Label: "бесплатная доставка от", Kind: KindMoneyDisplay},
 		{Column: "min_order", Label: "минимальный заказ", Kind: KindMoneyDisplay},
-		{Column: "return_period_in_days", Label: "срок возврата, в днях", Kind: KindNumber, Unit: "дней"},
+		{Column: "return_period_in_days", Label: "срок возврата, в днях", Kind: KindNumber, Unit: "дней", UnitKK: "күн"},
 		{Column: "outside_zones_note", Label: "доставка вне списка зон", Kind: KindTextComplete},
 	},
 	// "delivery" is a multi-row fact table (one row per ai_delivery_zones
@@ -97,7 +139,7 @@ var factColumns = map[string][]FactColumn{
 	// singleton — see DeliveryZone's doc comment for the containment model.
 	"delivery": {
 		{Column: "delivery_cost", Label: "стоимость доставки", Kind: KindMoneyDisplay},
-		{Column: "delivery_in_days", Label: "срок доставки, в днях", Kind: KindNumberRange, Unit: "дня"},
+		{Column: "delivery_in_days", Label: "срок доставки, в днях", Kind: KindNumberRange, Unit: "дня", UnitKK: "күн"},
 		{Column: "delivery_available", Label: "доступность доставки", Kind: KindDeliveryFlag},
 	},
 }
@@ -182,6 +224,9 @@ func usageNote(f FactColumn) string {
 	case KindNumber, KindNumberRange:
 		if f.Unit == "" {
 			return "только число"
+		}
+		if f.UnitKK != "" {
+			return "только число; в русском ответе добавь слово «" + f.Unit + "» после токена, в казахском — «" + f.UnitKK + "»"
 		}
 		return "только число; добавь слово «" + f.Unit + "» после токена"
 	case KindStockFlag:

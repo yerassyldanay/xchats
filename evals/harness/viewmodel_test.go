@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -495,6 +496,46 @@ func TestScenarioExecutionFromVerdict_MediaCountEvaluated_RendersRealPassOrFail(
 	exec2 := scenarioExecutionFromVerdict("fixture-scenario", over)
 	if p := contractRow(t, exec2.Contract, "media_count"); p.Pass == nil || *p.Pass || p.Actual != "5 attachments" {
 		t.Errorf("want media_count=fail with the count in Actual when over the cap, got %+v", p)
+	}
+}
+
+// TestScenarioExecutionFromVerdict_StockLLMCheck_NotRunThenRealPassOrFail mirrors
+// TestScenarioExecutionFromVerdict_MediaCountEvaluated_RendersRealPassOrFail for the
+// auto-generated stock-correctness dimension (2026-07 consolidation): not_run when
+// StockLLMEvaluated is false (the test declared no StockCheckRef, or judge-llm never
+// ran), a real pass/fail once it's true — never a fabricated pass from LLMStockPass's
+// nil/zero value.
+func TestScenarioExecutionFromVerdict_StockLLMCheck_NotRunThenRealPassOrFail(t *testing.T) {
+	untouched := Verdict{TestID: "t1", Model: "m", ParseOK: true, ContractFields: true}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", untouched)
+	if s, ok := scoreByName(exec.Scores, "stock_llm_check"); !ok || s.Status != ScoreNotRun {
+		t.Errorf("want stock_llm_check=not_run when StockLLMEvaluated is false, got %+v (ok=%v)", s, ok)
+	}
+
+	passTrue := true
+	passed := Verdict{
+		TestID: "t1", Model: "m", ParseOK: true, ContractFields: true,
+		StockLLMEvaluated: true, LLMStockPass: &passTrue,
+		StockLLMChecks: []StockLLMCheckResult{{ProductRef: "coffee-machine", ExpectedState: "in_stock", Classification: "in_stock", Pass: true}},
+	}
+	exec2 := scenarioExecutionFromVerdict("fixture-scenario", passed)
+	if s, ok := scoreByName(exec2.Scores, "stock_llm_check"); !ok || s.Status != ScorePass {
+		t.Errorf("want stock_llm_check=pass, got %+v (ok=%v)", s, ok)
+	}
+
+	passFalse := false
+	failed := Verdict{
+		TestID: "t1", Model: "m", ParseOK: true, ContractFields: true,
+		StockLLMEvaluated: true, LLMStockPass: &passFalse,
+		StockLLMChecks: []StockLLMCheckResult{{ProductRef: "blender-philips", ExpectedState: "out_of_stock", Classification: "unclear", Pass: false}},
+	}
+	exec3 := scenarioExecutionFromVerdict("fixture-scenario", failed)
+	s, ok := scoreByName(exec3.Scores, "stock_llm_check")
+	if !ok || s.Status != ScoreFail {
+		t.Errorf("want stock_llm_check=fail, got %+v (ok=%v)", s, ok)
+	}
+	if !strings.Contains(s.Detail, "blender-philips") || !strings.Contains(s.Detail, "unclear") {
+		t.Errorf("want Detail to name the product ref and classification, got %q", s.Detail)
 	}
 }
 

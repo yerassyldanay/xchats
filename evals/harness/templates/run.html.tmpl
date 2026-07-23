@@ -17,6 +17,7 @@
   .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 0.3rem; font-size: 0.82rem; font-weight: 600; }
   .badge-pass { background: #1a7f371a; color: #1a7f37; border: 1px solid #1a7f3755; }
   .badge-fail { background: #cf222e1a; color: #cf222e; border: 1px solid #cf222e55; }
+  .badge-archived { background: #6e768133; color: #6e7681; border: 1px solid #6e768166; }
   .status-pass { color: #1a7f37; font-weight: 600; }
   .status-fail { color: #cf222e; font-weight: 600; }
   .status-not_run { color: #888; font-style: italic; }
@@ -128,12 +129,13 @@
 {{if .ScenarioGroups}}
 <h2>WhatsApp response scenarios</h2>
 {{range .ScenarioGroups}}
-<h3>{{.Scenario}}</h3>
+<h3>{{.Scenario}}{{if .Archived}} <span class="badge badge-archived" title="{{.ArchivedReason}}">ARCHIVED</span>{{end}}</h3>
+{{if .Archived}}<p class="meta">Archived: {{.ArchivedReason}} — excluded from new runs/comparisons; this historical data is unaffected.</p>{{end}}
 <table>
   <tr><th>model</th><th>model-behavior pass</th><th>contract pass</th><th>est. cost</th></tr>
   {{range .Stats}}
   <tr>
-    <td>{{.Model}}</td>
+    <td>{{.Model}}{{if .Archived}} <span class="badge badge-archived" title="{{.ArchivedReason}}">ARCHIVED</span>{{end}}</td>
     <td>{{pct .BehaviorPass .Total}}</td>
     <td>{{pct .ContractPass .Total}}</td>
     <td>{{.CostLabel}}</td>

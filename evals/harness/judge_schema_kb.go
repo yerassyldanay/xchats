@@ -117,7 +117,8 @@ func issueSummary(issues []aiprompt.ContractIssue) string {
 // fields, bad reply_language, and unknown media tokens are ALL rejected by the same
 // strict decode judge.go's own hand-rolled map checks only partially covered — while
 // the diagnostic fields escalation_reason/confidence never gate anything), fact
-// substitution via aiprompt.SubstituteFacts (gets in_stock's Russian wording right), and
+// substitution via aiprompt.SubstituteFactsLang (gets in_stock's wording right in
+// whichever language — ru or kk — the response itself declares), and
 // a media_files_to_send re-resolution check via aiprompt.ResolveSend that the legacy
 // pipeline has no equivalent of (it has no kbd_materials to resolve against). Every
 // other check — reasoning leak, control chars, invented digits, unit issues, requires,
@@ -136,6 +137,7 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 		Truncated:    isTruncatedFinish(row.Response.FinishReason),
 		Reasoning:    row.Response.Reasoning,
 		Retries:      row.Retries,
+		RetryReason:  row.RetryReason,
 	}
 
 	// Final-answer extraction first (aiprompt.ExtractFinalOutput): reasoning text a
@@ -200,7 +202,7 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 			v.UnknownTokens = append(v.UnknownTokens, is.Detail)
 			v.Blocked = true
 			v.appendReason("unknown fact placeholder, draft would be BLOCKED: " + is.Detail)
-		case "stale_fact_placeholder", "malformed_fact_placeholder", "exact_value_literal":
+		case "stale_fact_placeholder", "malformed_fact_placeholder", "exact_value_literal", "media_token_in_reply_text":
 			v.Blocked = true
 			v.appendReason(is.Code + ": " + is.Detail)
 		}
@@ -213,9 +215,12 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 	v.EscalationReasonOK = true
 
 	// Fail-closed token substitution uses the current KB, not catalog-cached values.
+	// Language-aware (2026-07 Kazakh customer-message testing): a response declaring
+	// reply_language "kk" gets Kazakh stock/delivery-availability wording, never the
+	// Russian table — see aiprompt.SubstituteFactsLang.
 	injected := replyText
 	if !v.Blocked && !v.ReasoningLeak {
-		out, err := aiprompt.SubstituteFacts(replyText, kb, cat)
+		out, err := aiprompt.SubstituteFactsLang(replyText, kb, cat, resp.ReplyLanguage)
 		if err != nil {
 			v.Blocked = true
 			v.appendReason("fact substitution failed unexpectedly: " + err.Error())

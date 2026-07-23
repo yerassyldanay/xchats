@@ -236,6 +236,65 @@ func TestFilterProviders_DefaultFlag(t *testing.T) {
 	}
 }
 
+// TestFilterProviders_ExcludesArchivedModels is the archival counterpart to
+// TestFilterProviders_DefaultFlag: an archived model must vanish from the default
+// selection and from "-models all", but naming it EXPLICITLY must error loudly rather
+// than silently drop it — a deliberate request against a retired/unverified model is a
+// mistake worth surfacing before any spend, not a request to quietly honor.
+func TestFilterProviders_ExcludesArchivedModels(t *testing.T) {
+	mf := &ModelsFile{
+		Providers: []ModelProvider{
+			{ID: "openrouter:openai/gpt-4o-mini", Default: true},
+			{ID: "openrouter:google/gemini-3.5-flash", Default: true},
+			{ID: "openrouter:deepseek/deepseek-v3.2-exp"},
+		},
+		ArchivedModels: []ArchivedModel{
+			{ID: "openrouter:google/gemini-3.5-flash", Reason: "not yet probe-verified"},
+		},
+	}
+
+	defaults, err := filterProviders(mf, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range defaults {
+		if orModelID(p.ID) == "google/gemini-3.5-flash" {
+			t.Fatalf("archived model must be excluded from the default selection, got %+v", defaults)
+		}
+	}
+	if len(defaults) != 1 {
+		t.Fatalf("want only the one non-archived default provider, got %d: %+v", len(defaults), defaults)
+	}
+
+	all, err := filterProviders(mf, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range all {
+		if orModelID(p.ID) == "google/gemini-3.5-flash" {
+			t.Fatalf("archived model must be excluded even from -models all, got %+v", all)
+		}
+	}
+	if len(all) != 2 {
+		t.Fatalf("want every non-archived provider under -models all, got %d: %+v", len(all), all)
+	}
+
+	if _, err := filterProviders(mf, "google/gemini-3.5-flash"); err == nil {
+		t.Fatal("want an error when an archived model is named EXPLICITLY via -models, got nil")
+	} else if !strings.Contains(err.Error(), "archived") {
+		t.Errorf("want the error to mention archival, got: %v", err)
+	}
+
+	// A non-archived model named explicitly is unaffected.
+	named, err := filterProviders(mf, "deepseek/deepseek-v3.2-exp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(named) != 1 {
+		t.Fatalf("want the explicitly named non-archived provider, got %+v", named)
+	}
+}
+
 func TestBuildPassthrough(t *testing.T) {
 	if got := buildPassthrough(ModelProvider{ID: "m"}); got != nil {
 		t.Fatalf("want nil passthrough when neither Provider nor Reasoning is set, got %+v", got)

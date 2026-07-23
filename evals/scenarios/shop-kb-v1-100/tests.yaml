@@ -1,0 +1,11 @@
+# Deliberately IDENTICAL across shop-kb-v1-10/-50/-100 (byte-for-byte, no per-size
+# probe appended) — the catalog-size sweep controls for every variable except product
+# count, so the question set itself must never differ between sizes. See each
+# scenario.yaml's description and evals/SHOP_KB_V1_30_POSTMORTEM.md. kb-messages-kk.yaml
+# is a separate axis (Kazakh customer input against the same Russian prompt/KB, DRAFT
+# pending native review — see its own header comment), included identically too.
+include:
+  - common/kb-questions-ru.yaml
+  - common/kb-history-ru.yaml
+  - common/kb-delivery-ru.yaml
+  - common/kb-messages-kk.yaml

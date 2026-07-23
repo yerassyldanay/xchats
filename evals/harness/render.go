@@ -49,9 +49,16 @@ func cmdRender(args []string) error {
 // earlier single-value byID map made `-models <id>` against a labeled-pair models file
 // silently return 1 provider instead of 2 — exactly the "collapse into one bucket"
 // failure providerModelKey (judge.go) exists to prevent everywhere else.
+//
+// mf.ArchivedModels is excluded from every path below (default, explicit list, and
+// "all") — a deliberately-named archived id errors loudly instead of silently
+// vanishing, since asking for one by name is a mistake worth surfacing before any
+// spend; the default/"all" paths simply omit it, the same way an unconfigured model
+// would never appear either.
 func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, error) {
+	archived := archivedModelIDs(mf)
 	if modelsFilter == "all" {
-		return mf.Providers, nil
+		return excludeArchivedProviders(mf.Providers, archived), nil
 	}
 	if modelsFilter == "" {
 		var defaults []ModelProvider
@@ -60,10 +67,11 @@ func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, erro
 				defaults = append(defaults, p)
 			}
 		}
+		defaults = excludeArchivedProviders(defaults, archived)
 		if len(defaults) > 0 {
 			return defaults, nil
 		}
-		return mf.Providers, nil
+		return excludeArchivedProviders(mf.Providers, archived), nil
 	}
 	byID := map[string][]ModelProvider{}
 	for _, p := range mf.Providers {
@@ -72,13 +80,31 @@ func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, erro
 	}
 	out := make([]ModelProvider, 0, len(mf.Providers))
 	for _, id := range splitCSV(modelsFilter) {
-		ps, ok := byID[orModelID(id)]
+		key := orModelID(id)
+		if reason, ok := archived[key]; ok {
+			return nil, fmt.Errorf("model %q is archived (%s) — refusing to run it; remove it from -models, or from models.yaml's archived_models stanza, if this is intentional", id, reason)
+		}
+		ps, ok := byID[key]
 		if !ok {
 			return nil, fmt.Errorf("model %q not found in models.yaml", id)
 		}
 		out = append(out, ps...)
 	}
 	return out, nil
+}
+
+// excludeArchivedProviders filters ps down to entries whose (de-prefixed) id is not in
+// archived — used by filterProviders' default/"all" paths, which silently omit an
+// archived model rather than erroring (only an EXPLICIT -models request for one errors).
+func excludeArchivedProviders(ps []ModelProvider, archived map[string]string) []ModelProvider {
+	out := make([]ModelProvider, 0, len(ps))
+	for _, p := range ps {
+		if _, ok := archived[orModelID(p.ID)]; ok {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func renderScenario(scenarioDir, modelsPath, modelsFilter string) error {

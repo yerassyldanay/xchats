@@ -127,13 +127,29 @@ func preflightScenarioCallCount(modelsPath string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("load %s: %w", modelsPath, err)
 	}
+	// "all", not "": this pre-flight count assumes every (non-archived) provider, and
+	// the render's generated promptfooconfig.yaml is what the scenario member run
+	// actually executes against — an empty filter here would render only the
+	// default:true subset (see ModelProvider.Default), contradicting the count.
+	// filterProviders (not raw len(models.Providers)) so an archived model is excluded
+	// from the count exactly as it is from the actual render/run.
+	filteredModels, err := filterProviders(models, "all")
+	if err != nil {
+		return 0, fmt.Errorf("load %s: %w", modelsPath, err)
+	}
 	totalTests := 0
 	for _, m := range matches {
 		sd := filepath.Dir(m)
-		// "all", not "": this pre-flight count assumes every provider (len below), and
-		// the render's generated promptfooconfig.yaml is what the scenario member run
-		// actually executes against — an empty filter here would render only the
-		// default:true subset (see ModelProvider.Default), contradicting the count.
+		sc, err := loadScenario(sd)
+		if err != nil {
+			return 0, fmt.Errorf("load %s: %w", sd, err)
+		}
+		// Same silent skip as cmdRun's own -all expansion (run.go) — a launch's v1 scope
+		// is "-all" too, so it must honor the same zero-new-spend archival guarantee.
+		if sc.Archived {
+			fmt.Printf("launch: skipping archived scenario %s (%s)\n", sd, sc.ArchivedReason)
+			continue
+		}
 		if err := renderScenario(sd, modelsPath, "all"); err != nil {
 			return 0, fmt.Errorf("render %s: %w", sd, err)
 		}
@@ -143,7 +159,7 @@ func preflightScenarioCallCount(modelsPath string) (int, error) {
 		}
 		totalTests += len(resolved.Tests)
 	}
-	return resolveExpectedCalls(totalTests, len(models.Providers), 1), nil
+	return resolveExpectedCalls(totalTests, len(filteredModels), 1), nil
 }
 
 // preflightExtractCallCount mirrors cmdExtract's own case/model/prompt resolution

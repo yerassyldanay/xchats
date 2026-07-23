@@ -25,24 +25,35 @@ tests:
 
   - id: "2. in-stock availability — coffee machine"
     message: "Кофемашина DeLonghi сейчас в наличии?"
+    # must_contain_any on the stock wording was removed (2026-07 consolidation): it was
+    # redundant with `requires` (which already proves the model referenced the correct
+    # in_stock token; the substituted text then contains the wording by construction)
+    # and a duplicate of the same brittle-phrase-matching class the postmortem's #7
+    # literal-detector bug came from. Stock correctness is now judged semantically by
+    # the auto-generated LLM stock check (judge_llm.go), keyed by stock_check below.
     requires:
       - ["product.coffee-machine.in_stock"]
-    must_contain_any: ["в наличии"]
     escalate: false
     language: ru
+    stock_check: "coffee-machine"
 
-  - id: "3. out-of-stock honesty with in-stock alternative"
+  - id: "3. out-of-stock honesty — no facts or media for an unavailable product"
     message: "Блендер Philips есть в наличии?"
-    # blender-philips is deliberately out of stock (index%3==0). The OR-group accepts
-    # EITHER the honest direct answer (its own in_stock token) OR a pivot to any other
-    # in-stock blender's in_stock token — both are honest, KB-grounded behaviors, and
-    # this bank does not force which one a model picks (documented relaxation: "did you
-    # recommend THIS SPECIFIC alternative" is a judgment call, not a KB fact lookup).
-    requires:
-      - ["product.blender-philips.in_stock", "product.blender-bosch.in_stock",
-         "product.blender-tefal.in_stock", "product.blender-panasonic.in_stock"]
+    # blender-philips is deliberately out of stock (index 3, i%3==0). Reworked for the
+    # 2026-07 canonical-block prompt (out-of-stock products are name-only — no facts,
+    # no media): the model must not quote a price/in_stock value for it (those tokens
+    # no longer exist in its catalog once out-of-stock) and must not attach media for
+    # it. Semantic "did it clearly say unavailable" is judged by the auto-generated LLM
+    # stock check (stock_check below), which also fails an alternative-only reply that
+    # never actually states blender-philips itself is unavailable — see
+    # judge_llm.go/autoStockChecks. Whether the model additionally names an in-stock
+    # alternative is a judgment call this bank does not force either way.
+    forbid_tokens: ["product.blender-philips.price", "product.blender-philips.in_stock"]
+    media:
+      forbid: true
     escalate: false
     language: ru
+    stock_check: "blender-philips"
 
   - id: "4. photo request — media-ful product"
     message: "Пришлите фото кофемашины DeLonghi, пожалуйста."
@@ -68,9 +79,17 @@ tests:
     escalate: false
     language: ru
 
-  - id: "7. video request — product with no video"
+  - id: "7. media request for an out-of-stock product — no media at all"
     message: "Пришлите видео набора посуды, пожалуйста."
-    # cookware-set carries gallery_images only — never-promise-media applies to demo_videos.
+    # cookware-set is out of stock (index 1) — reworked for the 2026-07 canonical-block
+    # prompt: an unavailable product gets NO media at all regardless of which kind was
+    # asked for, a stock-driven refusal rather than "this specific kind happens to be
+    # missing" (contrast with tests 6/8 below, which probe a genuinely missing media
+    # KIND on an in-stock, media-bearing product). Excluded from the LLM stock check
+    # (no stock_check field) — this test's point is media/facts, not stock-language
+    # classification; segmentation analysis treats it as an out-of-stock confound, not
+    # a media-absence signal (see evals/SHOP_KB_V1_30_POSTMORTEM.md follow-up).
+    forbid_tokens: ["product.cookware-set.price"]
     media:
       forbid: true
     must_not_contain: ["вот видео", "прикрепляю видео", "видео во вложении"]

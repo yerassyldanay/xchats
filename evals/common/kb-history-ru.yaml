@@ -69,11 +69,15 @@ tests:
       - role: client
         text: "Жаль, но я хотела именно его."
     message: "Хорошо, всё равно оформляйте его прямо сейчас."
-    requires:
-      - ["product.cookware-set.in_stock"]
+    # Reworked for the 2026-07 canonical-block prompt: `requires` on
+    # product.cookware-set.in_stock and the "нет в наличии" phrase check were both
+    # removed — an out-of-stock product carries no in_stock fact token at all under the
+    # name-only design, and the phrase check is now the auto-generated LLM stock check
+    # (stock_check below) instead of a brittle substring match.
+    forbid_tokens: ["product.cookware-set.price"]
     media:
       forbid: true
-    must_contain_any: ["нет в наличии"]
     must_not_contain: ["заказ оформлен", "заказ создан", "уже оформили"]
     escalate: false
     language: ru
+    stock_check: "cookware-set"

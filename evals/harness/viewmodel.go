@@ -327,6 +327,29 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		llmChecksDetail = strings.Join(issues, " | ")
 	}
 
+	// stock_llm_check follows the exact same not_run-by-default pattern as llm_checks
+	// above, for the SEPARATE auto-generated stock-correctness dimension (2026-07
+	// consolidation) — StockLLMEvaluated is judge-llm's own opt-in marker (only set for
+	// a TestCase declaring StockCheckRef), so a verdict never touched by that dimension
+	// renders not_run, never a fabricated pass from LLMStockPass's nil/zero value.
+	stockLLMStatus := ScoreNotRun
+	stockLLMDetail := ""
+	if v.StockLLMEvaluated {
+		stockLLMStatus = ScorePass
+		if v.LLMStockPass == nil || !*v.LLMStockPass {
+			stockLLMStatus = ScoreFail
+		}
+		if len(v.StockLLMChecks) > 0 {
+			r := v.StockLLMChecks[0]
+			switch {
+			case r.Unverified:
+				stockLLMDetail = r.ProductRef + ": unverified"
+			default:
+				stockLLMDetail = fmt.Sprintf("%s: classified %q, expected %q", r.ProductRef, r.Classification, r.ExpectedState)
+			}
+		}
+	}
+
 	scores := []VScore{
 		{Name: "parse_ok", Status: parseStatus, Detail: parseDetail},
 		{Name: "finish_reason_ok", Status: finishReasonStatus, Detail: v.FinishReason},
@@ -357,6 +380,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Name: "must_contain_any", Status: evaluated(v.MustContainAnyPass), Detail: strings.Join(v.MustContainAnyExpected, ", ")},
 		{Name: "outcomes", Status: outcomesStatus, Detail: outcomesDetail},
 		{Name: "llm_checks", Status: llmChecksStatus, Detail: llmChecksDetail},
+		{Name: "stock_llm_check", Status: stockLLMStatus, Detail: stockLLMDetail},
 		{Name: "no_invented_digits", Status: evaluated(len(v.InventedDigits) == 0), Detail: strings.Join(v.InventedDigits, ", ")},
 		{Name: "no_unit_issues", Status: evaluated(len(v.UnitIssues) == 0), Detail: strings.Join(v.UnitIssues, ", ")},
 		{Name: "no_unknown_media", Status: evaluated(len(v.UnknownMedia) == 0), Detail: strings.Join(v.UnknownMedia, ", ")},

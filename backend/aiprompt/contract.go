@@ -40,8 +40,8 @@ var propertyDescriptions = []struct {
 	Name, Type, Description string
 	Diagnostic              bool
 }{
-	{"reply_text", "string", "Russian customer-facing reply. Exact business values must be represented by approved placeholders, never model-written literals.", false},
-	{"reply_language", "string", "Language of reply_text; the only allowed v1 value is \"ru\".", false},
+	{"reply_text", "string", "Customer-facing reply (Russian, or Kazakh when the customer wrote Kazakh). Exact business values must be represented by approved placeholders, never model-written literals.", false},
+	{"reply_language", "string", "Language of reply_text: \"ru\" or \"kk\".", false},
 	{"media_files_to_send", "array of strings", "Ordered semantic tokens copied exactly from the media catalog. An empty array means no media.", false},
 	{"escalate", "boolean", "true when approved live knowledge is insufficient and human review is required.", false},
 	{"escalation_reason", "string", "Optional internal Russian reason for escalation; diagnostic only, never shown to the customer.", true},
@@ -72,7 +72,7 @@ func ResponseJSONSchema() map[string]any {
 			schema["maximum"] = 1
 		case "reply_language":
 			schema["type"] = "string"
-			schema["enum"] = []string{"ru"}
+			schema["enum"] = []string{"ru", "kk"}
 		default:
 			schema["type"] = "string"
 		}
@@ -176,8 +176,8 @@ func ValidateResponse(raw string, kb *KB, cat *Catalog) (*Response, []ContractIs
 		return nil, issues
 	}
 
-	if resp.ReplyLanguage != "ru" {
-		issues = append(issues, ContractIssue{Code: "bad_language", Detail: fmt.Sprintf("reply_language %q; only \"ru\" is allowed in v1", resp.ReplyLanguage)})
+	if resp.ReplyLanguage != "ru" && resp.ReplyLanguage != "kk" {
+		issues = append(issues, ContractIssue{Code: "bad_language", Detail: fmt.Sprintf("reply_language %q; only \"ru\" or \"kk\" is allowed", resp.ReplyLanguage)})
 	}
 	if cat != nil {
 		for _, tok := range resp.MediaFilesToSend {
@@ -251,6 +251,22 @@ func responsePropertyTypeOK(name string, raw json.RawMessage) bool {
 
 func validateFactContract(resp Response, kb *KB, cat *Catalog) []ContractIssue {
 	issues := []ContractIssue{}
+
+	// Media references belong ONLY in media_files_to_send, never as literal text
+	// inside reply_text (the v2 canonical-block frame states this explicitly as an
+	// omission-semantics rule) — a valid token written into customer-facing prose is
+	// still a leak of an internal reference string, exactly the same class of mistake
+	// as a model-authored exact value (see the literal-leak check below), just for
+	// media instead of facts.
+	for _, m := range cat.Media {
+		if strings.Contains(resp.ReplyText, m.Token) {
+			issues = append(issues, ContractIssue{
+				Code:   "media_token_in_reply_text",
+				Detail: "reply_text contains media reference " + m.Token + " as literal text",
+			})
+		}
+	}
+
 	seenTokens := map[string]bool{}
 	for _, tok := range placeholderPattern.FindAllString(resp.ReplyText, -1) {
 		if seenTokens[tok] {
@@ -261,7 +277,7 @@ func validateFactContract(resp Response, kb *KB, cat *Catalog) []ContractIssue {
 			issues = append(issues, ContractIssue{Code: "unknown_fact_placeholder", Detail: tok})
 			continue
 		}
-		if _, err := ResolveFact(tok, kb, cat); err != nil {
+		if _, err := ResolveFactLang(tok, kb, cat, resp.ReplyLanguage); err != nil {
 			issues = append(issues, ContractIssue{Code: "stale_fact_placeholder", Detail: err.Error()})
 		}
 	}
@@ -276,21 +292,47 @@ func validateFactContract(resp Response, kb *KB, cat *Catalog) []ContractIssue {
 	// escalation_reason is diagnostic-only: placeholders or braces inside it are never
 	// an issue, are never substituted, and the field is never shown to the customer.
 
-	seenValues := map[string]bool{}
+	// Literal-value leak detection only fires for a value that UNIQUELY identifies one
+	// fact across the whole catalog. A resolved value shared by two or more distinct
+	// fact tokens (the fixed, small-vocabulary stock/delivery-availability wording is
+	// identical for every entity in that state, e.g. every in-stock product resolves
+	// to the same "в наличии") cannot be attributed to any specific fact if it appears
+	// in the reply — the model may simply have described that shared state honestly in
+	// its own words, not leaked one entity's specific business value. Confirmed false
+	// positive: evals/SHOP_KB_V1_30_POSTMORTEM.md #7 ("в наличии" collided across
+	// unrelated products once the catalog held enough of them). Checking only unique
+	// values is deliberately conservative — it can miss a genuine coincidental
+	// collision (two products priced identically) — but under-flagging a rare
+	// coincidence is the safer tradeoff against a confirmed, repeated failure mode.
+	type resolvedFact struct{ token, value string }
+	var resolved []resolvedFact
+	valueTokens := map[string][]string{} // normalized value -> every distinct token producing it
 	for _, fact := range cat.Facts {
-		value, err := ResolveFact(fact.Token, kb, cat)
+		value, err := ResolveFactLang(fact.Token, kb, cat, resp.ReplyLanguage)
 		if err != nil {
 			continue // an unrelated stale fact does not invalidate this response
 		}
 		normalizedValue := normalizeLiteral(value)
-		if normalizedValue == "" || seenValues[normalizedValue] {
+		if normalizedValue == "" {
 			continue
 		}
-		seenValues[normalizedValue] = true
-		if containsLiteral(withoutPlaceholders, value) {
+		resolved = append(resolved, resolvedFact{token: fact.Token, value: value})
+		valueTokens[normalizedValue] = append(valueTokens[normalizedValue], fact.Token)
+	}
+	checked := map[string]bool{}
+	for _, rf := range resolved {
+		normalizedValue := normalizeLiteral(rf.value)
+		if checked[normalizedValue] {
+			continue
+		}
+		checked[normalizedValue] = true
+		if len(valueTokens[normalizedValue]) > 1 {
+			continue // shared/non-distinguishing value — cannot attribute a leak to one fact
+		}
+		if containsLiteral(withoutPlaceholders, rf.value) {
 			issues = append(issues, ContractIssue{
 				Code:   "exact_value_literal",
-				Detail: "reply_text contains a model-authored exact value represented by " + fact.Token,
+				Detail: "reply_text contains a model-authored exact value represented by " + rf.token,
 			})
 		}
 	}
@@ -345,8 +387,20 @@ func isWordRune(r rune) bool {
 }
 
 // ResolveFact resolves one request-catalog token against the current approved row and
-// column. The returned value is final customer wording and is never model-facing.
+// column, using the native-reviewed Russian wording for stock/delivery-availability
+// booleans. The returned value is final customer wording and is never model-facing.
+// ResolveFactLang is the language-aware counterpart (2026-07 Kazakh customer-message
+// testing) — every other exact value (price, a number, a complete string) is
+// language-neutral, so only the categorical wording lookup differs between the two.
 func ResolveFact(token string, kb *KB, cat *Catalog) (string, error) {
+	return ResolveFactLang(token, kb, cat, "ru")
+}
+
+// ResolveFactLang is ResolveFact's language-aware counterpart: lang selects the
+// stock/delivery-availability wording table ("kk" selects the DRAFT Kazakh table,
+// anything else selects the native-reviewed Russian one — see stockWording/
+// deliveryWording in registry.go). Every other resolved value is unaffected by lang.
+func ResolveFactLang(token string, kb *KB, cat *Catalog, lang string) (string, error) {
 	if kb == nil || cat == nil {
 		return "", fmt.Errorf("aiprompt: current KB and request catalog are required")
 	}
@@ -365,10 +419,10 @@ func ResolveFact(token string, kb *KB, cat *Catalog) (string, error) {
 	if fact.Kind != spec.Kind {
 		return "", fmt.Errorf("aiprompt: fact token %q has value kind %q, want %q", token, fact.Kind, spec.Kind)
 	}
-	return currentFactValue(kb, fact)
+	return currentFactValue(kb, fact, lang)
 }
 
-func currentFactValue(kb *KB, fact *FactEntry) (string, error) {
+func currentFactValue(kb *KB, fact *FactEntry, lang string) (string, error) {
 	var value string
 	switch fact.Table {
 	case "product":
@@ -380,7 +434,7 @@ func currentFactValue(kb *KB, fact *FactEntry) (string, error) {
 		case "price":
 			value = product.Price
 		case "in_stock":
-			return StockWordingRU[product.InStock], nil
+			return stockWording(lang)[product.InStock], nil
 		}
 	case "tariff":
 		tariff := currentTariff(kb, fact.Ref)
@@ -427,7 +481,7 @@ func currentFactValue(kb *KB, fact *FactEntry) (string, error) {
 		case "delivery_in_days":
 			value = zone.DeliveryInDays
 		case "delivery_available":
-			return DeliveryWordingRU[zone.DeliveryAvailable], nil
+			return deliveryWording(lang)[zone.DeliveryAvailable], nil
 		}
 	}
 	if strings.TrimSpace(value) == "" {
@@ -463,15 +517,25 @@ func currentDeliveryZone(kb *KB, ref string) *DeliveryZone {
 	return nil
 }
 
-// SubstituteFacts replaces every approved placeholder with the latest current value.
+// SubstituteFacts replaces every approved placeholder with the latest current value,
+// using the native-reviewed Russian wording for stock/delivery-availability booleans.
 // Unknown, malformed, inactive, or now-empty facts fail the complete substitution.
+// SubstituteFactsLang is the language-aware counterpart (2026-07 Kazakh customer-
+// message testing) — see ResolveFactLang.
 func SubstituteFacts(text string, kb *KB, cat *Catalog) (string, error) {
+	return SubstituteFactsLang(text, kb, cat, "ru")
+}
+
+// SubstituteFactsLang is SubstituteFacts' language-aware counterpart: lang selects
+// which wording table a stock/delivery-availability placeholder resolves through
+// (see ResolveFactLang); every other value is unaffected.
+func SubstituteFactsLang(text string, kb *KB, cat *Catalog, lang string) (string, error) {
 	var resolveErr error
 	out := placeholderPattern.ReplaceAllStringFunc(text, func(tok string) string {
 		if resolveErr != nil {
 			return tok
 		}
-		value, err := ResolveFact(tok, kb, cat)
+		value, err := ResolveFactLang(tok, kb, cat, lang)
 		if err != nil {
 			resolveErr = err
 			return tok

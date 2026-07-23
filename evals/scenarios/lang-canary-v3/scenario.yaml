@@ -9,6 +9,8 @@ description: >
 setup: lang-v3
 prompt_ref: lang-bilingual@v3
 experiment: lang-bakeoff
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged."
 frame: frame.txt
 data: ../shop-current/data.yaml
 tests: ../lang-canary-v1/tests.yaml

@@ -61,6 +61,18 @@ type ScenarioConfig struct {
 	// auto-compared against anything (safer default than accidentally merging an
 	// unrelated shop-scale run into a language bake-off's matrix).
 	Experiment string `yaml:"experiment,omitempty"`
+
+	// Archived marks this scenario as retired from active use (2026-07 schema_kb_v1
+	// consolidation): `run`/`launch` skip it during `-all` glob expansion (logged, not
+	// an error — -all must keep working forever with archived dirs present) and
+	// hard-error if it is named explicitly via -scenario or `retry` (a deliberate user
+	// request against a retired scenario is a mistake, not silently-excluded spend).
+	// Historical runs that already judged this scenario are NEVER affected — archival
+	// is resolved fresh from THIS file at display time (catalog/index/html), never
+	// baked into a stored run. ArchivedReason is shown alongside the badge everywhere
+	// Archived is.
+	Archived       bool   `yaml:"archived,omitempty"`
+	ArchivedReason string `yaml:"archived_reason,omitempty"`
 }
 
 // Data is data.yaml — the single source of truth a scenario's prompt is rendered from.
@@ -224,6 +236,15 @@ type TestCase struct {
 	// identically whether or not judge-llm ever runs. A test with no LLMChecks is
 	// unaffected either way.
 	LLMChecks []LLMCheck `yaml:"llm_checks"`
+	// StockCheckRef names the product ref (e.g. "blender-philips") this test's reply
+	// should be judged for stock-language correctness against, via the auto-generated
+	// LLM stock check (judge_llm.go's autoStockChecks — a separate, always-opt-in-via-
+	// judge-llm dimension from LLMChecks above). Ground truth (in_stock/out_of_stock)
+	// is read from the catalog at judge time, never duplicated here, so the check can
+	// never drift from the fixture as it would if a bank hand-authored the expected
+	// stock wording itself. Empty means this test declares no stock-language
+	// expectation. schema_kb_v1 only (the ref is looked up against aiprompt.Catalog).
+	StockCheckRef string `yaml:"stock_check,omitempty"`
 }
 
 // LLMCheck is one binary semantic claim about a reply, judged by a pinned cheap model
@@ -309,6 +330,23 @@ type ModelsFile struct {
 	PricingSource    string          `yaml:"pricing_source"`
 	PricingCheckedAt string          `yaml:"pricing_checked_at"`
 	Providers        []ModelProvider `yaml:"providers"`
+	// ArchivedModels lists model ids refused for NEW runs (2026-07 schema_kb_v1
+	// consolidation) — filterProviders excludes them from every selection path
+	// (default, explicit -models, and "-models all"), and errors loudly if one is
+	// named explicitly rather than silently dropping a deliberate request. Covers two
+	// distinct cases with one mechanism: a model already deleted from Providers
+	// (historical runs still reference its id — this stanza lets display-time code
+	// badge those rows without the entry existing any more) and a model whose entry
+	// deliberately stays in Providers for its config notes but is not yet trusted for
+	// new spend (e.g. an unverified reasoning-exclude config).
+	ArchivedModels []ArchivedModel `yaml:"archived_models,omitempty"`
+}
+
+// ArchivedModel is one entry in ModelsFile.ArchivedModels — a model id refused for new
+// runs, with the reason shown alongside its badge wherever archival is displayed.
+type ArchivedModel struct {
+	ID     string `yaml:"id"`
+	Reason string `yaml:"reason"`
 }
 
 // ModelProvider is one provider entry. InputPerMTok/OutputPerMTok are pointers, not plain

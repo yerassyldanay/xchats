@@ -139,6 +139,27 @@ const basicFrame = `# ASSISTANT
 %%RESPONSE_SCHEMA%%
 `
 
+// v2Frame is a minimal frame exercising every v2 canonical-block slot once —
+// the counterpart to basicFrame for the 2026-07 canonical-block prompt.
+const v2Frame = `# ASSISTANT
+%%ASSISTANT%%
+
+# PRODUCTS IN STOCK
+%%PRODUCTS_IN_STOCK%%
+
+# PRODUCTS OUT OF STOCK
+%%PRODUCTS_OUT_OF_STOCK%%
+
+# TOPICS
+%%TOPICS%%
+
+# BUSINESS FACTS
+%%BUSINESS_FACTS%%
+
+# RESPONSE SCHEMA
+%%RESPONSE_SCHEMA%%
+`
+
 func issueCodes(issues []ContractIssue) []string {
 	codes := make([]string, len(issues))
 	for i, is := range issues {

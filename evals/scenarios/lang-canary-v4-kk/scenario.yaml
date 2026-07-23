@@ -16,6 +16,8 @@ description: >
 setup: lang-v4-routed
 prompt_ref: lang-kk@v4
 experiment: lang-bakeoff
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged. (Its Kazakh frame was also never natively reviewed.)"
 frame: frame.txt
 data: ../shop-current/data.yaml
 tests: tests.yaml

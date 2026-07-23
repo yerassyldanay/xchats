@@ -19,7 +19,10 @@ import (
 // CatalogFileSchemaVersion follows export.go's own per-artifact versioning
 // (ExecutionsFileSchemaVersion / RunsFileSchemaVersion) — independent of both, since
 // the catalog's shape can evolve on its own timeline.
-const CatalogFileSchemaVersion = 1
+//
+// v2 (2026-07): added CatalogScenario.Archived/ArchivedReason (the 2026-07
+// schema_kb_v1 consolidation's archival mechanism — see ScenarioConfig.Archived).
+const CatalogFileSchemaVersion = 2
 
 // CatalogFile is runs/catalog.json — the ONE deliberately repository-state (not a run
 // snapshot) artifact this harness exports: every scenario's and every extraction
@@ -44,6 +47,11 @@ type CatalogScenario struct {
 	Setup       string `json:"setup,omitempty"`
 	PromptRef   string `json:"prompt_ref,omitempty"`
 	Experiment  string `json:"experiment,omitempty"`
+	// Archived/ArchivedReason mirror ScenarioConfig's own fields verbatim — the
+	// catalog is a repository-state snapshot (writeCatalogJSON's own doc comment), so
+	// this is a direct copy, never a separate re-derivation.
+	Archived       bool   `json:"archived,omitempty"`
+	ArchivedReason string `json:"archived_reason,omitempty"`
 	// Pipeline mirrors ScenarioConfig.Pipeline — empty for the legacy fact_tables path,
 	// "schema_kb_v1" for the shop-kb-v1 family (see buildCatalogScenarioSchemaKB).
 	Pipeline string `json:"pipeline,omitempty"`
@@ -140,6 +148,7 @@ type CatalogTestCase struct {
 	MustContainAny []string             `json:"must_contain_any,omitempty"`
 	Media          *CatalogMediaExpect  `json:"media,omitempty"`
 	Outcomes       []CatalogOutcomeCase `json:"outcomes,omitempty"`
+	StockCheckRef  string               `json:"stock_check_ref,omitempty"`
 	Source         string               `json:"source"`
 }
 
@@ -224,6 +233,7 @@ func catalogTestCaseFrom(tc TestCase, source string) CatalogTestCase {
 		MustContainAny: tc.MustContainAny,
 		Media:          catalogMediaExpect(tc.Media),
 		Outcomes:       catalogOutcomeCases(tc.Outcomes),
+		StockCheckRef:  tc.StockCheckRef,
 		Source:         source,
 	}
 }
@@ -293,16 +303,18 @@ func buildCatalogScenario(dir string) (*CatalogScenario, error) {
 	}
 
 	return &CatalogScenario{
-		Name:        scenario.Name,
-		Description: scenario.Description,
-		Setup:       scenario.Setup,
-		PromptRef:   scenario.PromptRef,
-		Experiment:  scenario.Experiment,
-		FactsSource: dataPath,
-		Facts:       cat.Tokens,
-		MediaTokens: cat.MediaTokens,
-		Media:       buildCatalogMedia(data),
-		Tests:       tests,
+		Name:           scenario.Name,
+		Description:    scenario.Description,
+		Setup:          scenario.Setup,
+		PromptRef:      scenario.PromptRef,
+		Experiment:     scenario.Experiment,
+		Archived:       scenario.Archived,
+		ArchivedReason: scenario.ArchivedReason,
+		FactsSource:    dataPath,
+		Facts:          cat.Tokens,
+		MediaTokens:    cat.MediaTokens,
+		Media:          buildCatalogMedia(data),
+		Tests:          tests,
 	}, nil
 }
 
@@ -349,17 +361,19 @@ func buildCatalogScenarioSchemaKB(dir string, scenario *ScenarioConfig) (*Catalo
 	sort.Slice(media, func(i, j int) bool { return media[i].Name < media[j].Name })
 
 	return &CatalogScenario{
-		Name:        scenario.Name,
-		Description: scenario.Description,
-		Setup:       scenario.Setup,
-		PromptRef:   scenario.PromptRef,
-		Experiment:  scenario.Experiment,
-		Pipeline:    scenario.Pipeline,
-		FactsSource: fixturePath,
-		Facts:       facts,
-		MediaTokens: mediaTokens,
-		Media:       media,
-		Tests:       tests,
+		Name:           scenario.Name,
+		Description:    scenario.Description,
+		Setup:          scenario.Setup,
+		PromptRef:      scenario.PromptRef,
+		Experiment:     scenario.Experiment,
+		Archived:       scenario.Archived,
+		ArchivedReason: scenario.ArchivedReason,
+		Pipeline:       scenario.Pipeline,
+		FactsSource:    fixturePath,
+		Facts:          facts,
+		MediaTokens:    mediaTokens,
+		Media:          media,
+		Tests:          tests,
 	}, nil
 }
 

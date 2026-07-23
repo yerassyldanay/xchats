@@ -120,6 +120,24 @@ func TestFormatRetryCell_EmptyWhenNeverRetried(t *testing.T) {
 	}
 }
 
+// TestFormatMediaNotFoundRetryCell_EmptyWhenNeverRetried mirrors
+// TestFormatRetryCell_EmptyWhenNeverRetried for the media-not-found-specific SUBSET
+// (2026-07 consolidation).
+func TestFormatMediaNotFoundRetryCell_EmptyWhenNeverRetried(t *testing.T) {
+	ms := modelStats{total: 10, retried: 3, retryRecovered: 3} // general retries happened, but none media_not_found
+	if got := formatMediaNotFoundRetryCell(&ms); got != "" {
+		t.Fatalf("formatMediaNotFoundRetryCell() = %q, want empty string when mediaNotFoundRetried=0", got)
+	}
+}
+
+func TestFormatMediaNotFoundRetryCell_ReportsRetriedAndRecovered(t *testing.T) {
+	ms := modelStats{total: 10, retried: 2, retryRecovered: 1, mediaNotFoundRetried: 2, mediaNotFoundRecovered: 1}
+	want := "2 retried for missing media, 1 recovered (first-shot failed, selected succeeded after retry)"
+	if got := formatMediaNotFoundRetryCell(&ms); got != want {
+		t.Fatalf("formatMediaNotFoundRetryCell() = %q, want %q", got, want)
+	}
+}
+
 // TestFormatLLMCheckCell_EmptyWhenNeverEvaluated proves judge-llm's optional column never
 // prints for a run that never ran judge-llm — every SUMMARY.md before this feature
 // existed must render identically.
@@ -143,6 +161,39 @@ func TestFormatLLMCheckCell_OmitsUnverifiedClauseWhenZero(t *testing.T) {
 	want := "2/2 pass (100%), ~$0.0005"
 	if got := formatLLMCheckCell(&ms); got != want {
 		t.Fatalf("formatLLMCheckCell() = %q, want %q", got, want)
+	}
+}
+
+// TestFormatStockCheckCell_EmptyWhenNeverEvaluated mirrors
+// TestFormatLLMCheckCell_EmptyWhenNeverEvaluated for the auto-generated stock
+// dimension: absent, never a fabricated 0%, for a run that never evaluated any
+// StockCheckRef test.
+func TestFormatStockCheckCell_EmptyWhenNeverEvaluated(t *testing.T) {
+	ms := modelStats{total: 10}
+	if got := formatStockCheckCell(&ms); got != "" {
+		t.Fatalf("formatStockCheckCell() = %q, want empty string when stockChecked=0", got)
+	}
+}
+
+func TestFormatStockCheckCell_ReportsPassRateUnverifiedAndClassDistribution(t *testing.T) {
+	ms := modelStats{
+		total: 5, stockChecked: 4, stockPass: 3, stockUnverified: 1, stockCost: 0.0021,
+		stockClassCount: map[string]int{"in_stock": 2, "out_of_stock": 1, "unclear": 1},
+	}
+	want := "3/4 pass (75%), 1 unverified (in_stock=2, out_of_stock=1, unclear=1), ~$0.0021"
+	if got := formatStockCheckCell(&ms); got != want {
+		t.Fatalf("formatStockCheckCell() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatStockCheckCell_OmitsUnverifiedClauseWhenZero(t *testing.T) {
+	ms := modelStats{
+		total: 5, stockChecked: 2, stockPass: 2, stockCost: 0.0005,
+		stockClassCount: map[string]int{"in_stock": 2},
+	}
+	want := "2/2 pass (100%) (in_stock=2), ~$0.0005"
+	if got := formatStockCheckCell(&ms); got != want {
+		t.Fatalf("formatStockCheckCell() = %q, want %q", got, want)
 	}
 }
 

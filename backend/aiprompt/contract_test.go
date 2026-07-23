@@ -194,9 +194,11 @@ func TestValidateResponse_UnknownProperty(t *testing.T) {
 	}
 }
 
+// TestValidateResponse_BadLanguage: "kk" is now a valid reply_language (2026-07
+// Kazakh customer-message testing) — only something outside {"ru","kk"} is rejected.
 func TestValidateResponse_BadLanguage(t *testing.T) {
 	cat := validCatalog(t)
-	for _, lang := range []string{"kk", "en", ""} {
+	for _, lang := range []string{"en", "kz", ""} {
 		raw := `{
   "reply_text": "ok",
   "reply_language": "` + lang + `",
@@ -209,6 +211,42 @@ func TestValidateResponse_BadLanguage(t *testing.T) {
 		if !containsCode(issues, "bad_language") {
 			t.Errorf("lang %q: expected bad_language issue, got %+v", lang, issues)
 		}
+	}
+}
+
+// TestValidateResponse_KazakhLanguageAccepted confirms "kk" is accepted with no
+// bad_language issue, and that stock/delivery-availability wording resolves through
+// the Kazakh table when the response declares it.
+func TestValidateResponse_KazakhLanguageAccepted(t *testing.T) {
+	kb := baseKB()
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := `{
+  "reply_text": "Иә, {{product.coffee-machine.in_stock}}.",
+  "reply_language": "kk",
+  "media_files_to_send": [],
+  "escalate": false,
+  "escalation_reason": "",
+  "confidence": 0.9
+}`
+	resp, issues := ValidateResponse(raw, kb, cat)
+	if containsCode(issues, "bad_language") {
+		t.Fatalf("want \"kk\" accepted with no bad_language issue, got %+v", issues)
+	}
+	if resp == nil {
+		t.Fatal("want a parsed response")
+	}
+	out, err := SubstituteFactsLang(resp.ReplyText, kb, cat, resp.ReplyLanguage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, StockWordingKK[true]) {
+		t.Errorf("want Kazakh stock wording %q substituted, got %q", StockWordingKK[true], out)
+	}
+	if strings.Contains(out, StockWordingRU[true]) {
+		t.Errorf("want Russian stock wording NOT substituted for a Kazakh reply, got %q", out)
 	}
 }
 
@@ -275,6 +313,27 @@ func TestValidateResponse_InventedMediaToken(t *testing.T) {
 	}
 	if issueDetail(issues, "unknown_media_token") != "products.coffee-machine.demo_videos" {
 		t.Fatalf("unexpected detail: %+v", issues)
+	}
+}
+
+// TestValidateResponse_MediaTokenInReplyText_Blocked is media regression case 2
+// (2026-07 Phase 2/3 postmortem follow-up): a valid media token written as literal
+// text inside reply_text — instead of listed in media_files_to_send — is a leak of an
+// internal reference string, the same severity class as a model-authored exact value,
+// even though the token itself is spelled correctly and does exist in the catalog.
+func TestValidateResponse_MediaTokenInReplyText_Blocked(t *testing.T) {
+	cat := validCatalog(t)
+	raw := `{
+  "reply_text": "Вот фото: products.coffee-machine.featured_image",
+  "reply_language": "ru",
+  "media_files_to_send": [],
+  "escalate": false,
+  "escalation_reason": "",
+  "confidence": 0.5
+}`
+	_, issues := ValidateResponse(raw, baseKB(), cat)
+	if !containsCode(issues, "media_token_in_reply_text") {
+		t.Fatalf("want media_token_in_reply_text issue, got %+v", issues)
 	}
 }
 
@@ -516,6 +575,36 @@ func TestValidateResponse_RejectsModelAuthoredExactValues(t *testing.T) {
 		if !containsCode(issues, "exact_value_literal") {
 			t.Errorf("text %q: issues = %+v, want exact_value_literal", text, issues)
 		}
+	}
+}
+
+// TestValidateResponse_SharedWordingNeverFlaggedAsLiteralLeak is the negative-control
+// regression test for evals/SHOP_KB_V1_30_POSTMORTEM.md #7: once a catalog holds
+// several products in the SAME stock state, their identical wording ("в наличии") no
+// longer uniquely identifies any one of them, so a reply describing that shared state
+// in its own words must NOT be flagged — the check can never attribute the phrase to a
+// specific fact when several facts produce it. A genuinely unique value (this
+// product's own price) in the SAME reply must still be flagged, proving the fix didn't
+// just disable the check wholesale.
+func TestValidateResponse_SharedWordingNeverFlaggedAsLiteralLeak(t *testing.T) {
+	kb := baseKB()
+	kb.Products = append(kb.Products,
+		Product{Ref: "blender-a", Name: "Блендер A", Price: "9 900 ₸", InStock: true, SalesStatus: "active"},
+		Product{Ref: "blender-b", Name: "Блендер B", Price: "10 900 ₸", InStock: true, SalesStatus: "active"},
+	)
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, issues := ValidateResponse(responseWithText(t, "Кофемашина в наличии."), kb, cat)
+	if containsCode(issues, "exact_value_literal") {
+		t.Errorf("shared stock wording across 3 in-stock products must not be flagged, got issues = %+v", issues)
+	}
+
+	_, issues = ValidateResponse(responseWithText(t, "Цена кофемашины — 129 900 ₸."), kb, cat)
+	if !containsCode(issues, "exact_value_literal") {
+		t.Errorf("a genuinely unique price literal must still be flagged even in a larger catalog, got issues = %+v", issues)
 	}
 }
 

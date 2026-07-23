@@ -106,8 +106,13 @@ type reportLink struct {
 
 type scenarioGroup struct {
 	Scenario string
-	Stats    []scenarioModelStat
-	Verdicts []VExecution
+	// Archived/ArchivedReason are resolved at DISPLAY time from the CURRENT
+	// scenarios/*/scenario.yaml (loadArchivedScenarios), never from this run's own
+	// snapshot — see ScenarioConfig.Archived's doc comment for why.
+	Archived       bool
+	ArchivedReason string
+	Stats          []scenarioModelStat
+	Verdicts       []VExecution
 }
 
 type scenarioModelStat struct {
@@ -116,6 +121,12 @@ type scenarioModelStat struct {
 	ContractPass int
 	Total        int
 	CostLabel    string
+	// Archived/ArchivedReason mirror scenarioGroup's own fields, resolved from the
+	// CURRENT models.yaml's archived_models stanza (loadArchivedModels) — a model can
+	// be archived independently of its scenario (e.g. every scenario in a run stays
+	// active, but one model in it was later archived).
+	Archived       bool
+	ArchivedReason string
 }
 
 type extractGroup struct {
@@ -191,6 +202,9 @@ func groupExtraction(execs []VExecution, runDir string) []extractGroup {
 // groupScenarios groups scenario executions by scenario name, in first-appearance
 // order, and computes the per-model summary table shown above the per-verdict detail.
 func groupScenarios(execs []VExecution) []scenarioGroup {
+	archivedScenarios := loadArchivedScenarios()
+	archivedModels := loadArchivedModels()
+
 	var order []string
 	byScenario := map[string]*scenarioGroup{}
 	for _, e := range execs {
@@ -201,6 +215,10 @@ func groupScenarios(execs []VExecution) []scenarioGroup {
 		g, ok := byScenario[name]
 		if !ok {
 			g = &scenarioGroup{Scenario: name}
+			if info, ok := archivedScenarios[name]; ok {
+				g.Archived = true
+				g.ArchivedReason = info.Reason
+			}
 			byScenario[name] = g
 			order = append(order, name)
 		}
@@ -209,13 +227,13 @@ func groupScenarios(execs []VExecution) []scenarioGroup {
 	out := make([]scenarioGroup, 0, len(order))
 	for _, name := range order {
 		g := byScenario[name]
-		g.Stats = aggregateScenarioModelStats(g.Verdicts)
+		g.Stats = aggregateScenarioModelStats(g.Verdicts, archivedModels)
 		out = append(out, *g)
 	}
 	return out
 }
 
-func aggregateScenarioModelStats(verdicts []VExecution) []scenarioModelStat {
+func aggregateScenarioModelStats(verdicts []VExecution, archivedModels map[string]string) []scenarioModelStat {
 	type acc struct {
 		total, behaviorPass, contractPass int
 		costSum                           float64
@@ -257,6 +275,10 @@ func aggregateScenarioModelStats(verdicts []VExecution) []scenarioModelStat {
 	for _, m := range order {
 		a := byModel[m]
 		stat := scenarioModelStat{Model: m, BehaviorPass: a.behaviorPass, ContractPass: a.contractPass, Total: a.total}
+		if reason, ok := archivedModels[orModelID(m)]; ok {
+			stat.Archived = true
+			stat.ArchivedReason = reason
+		}
 		switch {
 		case a.costPricedCount == 0:
 			stat.CostLabel = "no estimate"

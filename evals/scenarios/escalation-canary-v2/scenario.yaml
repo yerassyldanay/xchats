@@ -8,6 +8,8 @@ description: >
 setup: escalation-v2
 prompt_ref: escalation-strengthened@v2
 experiment: escalation-bakeoff
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — strengthened escalation rules now live in the shop-kb-v1 frame; this scenario's historical runs are preserved unchanged."
 frame: frame.txt
 data: ../shop-current/data.yaml
 tests: ../escalation-canary-v1/tests.yaml

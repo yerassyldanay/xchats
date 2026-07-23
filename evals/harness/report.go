@@ -78,6 +78,11 @@ type modelStats struct {
 	// than folded into modelBehaviorPass/contractPass: a recovered retry must never look
 	// identical to a clean first-attempt pass.
 	retried, retryRecovered int
+	// mediaNotFoundRetried/mediaNotFoundRecovered pool the SUBSET of retried/
+	// retryRecovered above whose RetryReason is specifically "media_not_found" (2026-07
+	// consolidation) — see formatMediaNotFoundRetryCell's doc comment for why this is
+	// reported as its own line rather than folded into the general retry line.
+	mediaNotFoundRetried, mediaNotFoundRecovered int
 	// firstAttemptParseOK/firstAttemptContractPass pool Verdict.FirstAttemptParseOK/
 	// FirstAttemptContractPass across EVERY row (whether or not it was ever retried —
 	// unlike the old firstAttemptParseOK counter this replaces, which only counted rows
@@ -89,6 +94,15 @@ type modelStats struct {
 	// touched, same "absent means never run, not zero" discipline as retried above.
 	llmChecked, llmPass, llmUnverified int
 	llmCost                            float64
+	// stockChecked/stockPass/stockUnverified/stockCost pool the auto-generated
+	// stock-correctness dimension (2026-07 consolidation) — see
+	// formatStockCheckCell's doc comment. stockClassCount tallies each
+	// classification the judge actually returned (in_stock/out_of_stock/unclear/
+	// contradictory), independent of whether it matched ground truth, so a report
+	// can show the classification DISTRIBUTION, not just a pass/fail rate.
+	stockChecked, stockPass, stockUnverified int
+	stockCost                                float64
+	stockClassCount                          map[string]int
 }
 
 // formatRetryCell reports retry.go's effect on this model's rows, or "" when this run
@@ -100,6 +114,21 @@ func formatRetryCell(ms *modelStats) string {
 		return ""
 	}
 	return fmt.Sprintf("retried %d, recovered %d", ms.retried, ms.retryRecovered)
+}
+
+// formatMediaNotFoundRetryCell reports the media-not-found-specific SUBSET of
+// retry.go's effect (see formatRetryCell for the general line) — "" when this run
+// never retried a row for that specific reason (opt-in: retry-media is off by default
+// for cmdRun, see run.go's -retry-media flag; `harness retry` always retries whatever
+// candidates it finds, labeled the same way). "recovered" here means first-shot failed
+// and the SELECTED (post-retry) attempt succeeded — spelled out since a row can be
+// retried without being recovered (the retry call may fail, or still not resolve).
+func formatMediaNotFoundRetryCell(ms *modelStats) string {
+	if ms.mediaNotFoundRetried == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d retried for missing media, %d recovered (first-shot failed, selected succeeded after retry)",
+		ms.mediaNotFoundRetried, ms.mediaNotFoundRecovered)
 }
 
 // formatFirstShotCell reports the true first-shot contract-pass rate — pooled from
@@ -124,6 +153,33 @@ func formatLLMCheckCell(ms *modelStats) string {
 		cell += fmt.Sprintf(", %d unverified", ms.llmUnverified)
 	}
 	cell += fmt.Sprintf(", ~$%.4f", ms.llmCost)
+	return cell
+}
+
+// formatStockCheckCell reports the auto-generated stock-correctness dimension's effect
+// on this model's rows, or "" when this run never evaluated any StockCheckRef test at
+// all — same "absent, not zero" doctrine as formatRetryCell/formatLLMCheckCell. Shows
+// the classification distribution alongside the pass rate so a report can distinguish
+// "the judge is unsure" (many unclear/contradictory) from "the judge is confident but
+// wrong" (confident classifications that still miss ground truth).
+func formatStockCheckCell(ms *modelStats) string {
+	if ms.stockChecked == 0 {
+		return ""
+	}
+	cell := fmt.Sprintf("%d/%d pass (%.0f%%)", ms.stockPass, ms.stockChecked, pct(ms.stockPass, ms.stockChecked))
+	if ms.stockUnverified > 0 {
+		cell += fmt.Sprintf(", %d unverified", ms.stockUnverified)
+	}
+	var classParts []string
+	for _, class := range []string{"in_stock", "out_of_stock", "unclear", "contradictory"} {
+		if n := ms.stockClassCount[class]; n > 0 {
+			classParts = append(classParts, fmt.Sprintf("%s=%d", class, n))
+		}
+	}
+	if len(classParts) > 0 {
+		cell += " (" + strings.Join(classParts, ", ") + ")"
+	}
+	cell += fmt.Sprintf(", ~$%.4f", ms.stockCost)
 	return cell
 }
 
@@ -235,6 +291,12 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 				if v.RetryRecovered {
 					ms.retryRecovered++
 				}
+				if v.RetryReason == string(retryReasonMediaNotFound) {
+					ms.mediaNotFoundRetried++
+					if v.RetryRecovered {
+						ms.mediaNotFoundRecovered++
+					}
+				}
 			}
 			if v.FirstAttemptParseOK {
 				ms.firstAttemptParseOK++
@@ -251,6 +313,24 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 						ms.llmUnverified++
 					case r.Pass:
 						ms.llmPass++
+					}
+				}
+			}
+			if v.StockLLMEvaluated {
+				ms.stockCost += v.LLMStockCostUSD
+				if ms.stockClassCount == nil {
+					ms.stockClassCount = map[string]int{}
+				}
+				for _, r := range v.StockLLMChecks {
+					ms.stockChecked++
+					if r.Classification != "" {
+						ms.stockClassCount[r.Classification]++
+					}
+					switch {
+					case r.Unverified:
+						ms.stockUnverified++
+					case r.Pass:
+						ms.stockPass++
 					}
 				}
 			}
@@ -312,6 +392,25 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 			b.WriteString("\n")
 		}
 
+		// Media-not-found retry line (opt-in — see run.go's -retry-media flag and
+		// retry.go's retryReasonMediaNotFound): a SUBSET of the general retry line
+		// above, printed separately so "how many retries were specifically about
+		// missing media" is visible without cross-referencing judged.json by hand.
+		var mediaRetryLines []string
+		for _, m := range order {
+			if cell := formatMediaNotFoundRetryCell(byModel[m]); cell != "" {
+				mediaRetryLines = append(mediaRetryLines, fmt.Sprintf("- %s: %s", m, cell))
+			}
+		}
+		if len(mediaRetryLines) > 0 {
+			b.WriteString("Media-not-found retries (retry.go's media_not_found reason — see each row's `retry_reason` in .judged.json):\n\n")
+			for _, line := range mediaRetryLines {
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+			b.WriteString("\n")
+		}
+
 		// LLM checks line (only for models this run actually ran judge-llm against — see
 		// formatLLMCheckCell's doc comment): an OPTIONAL, separately-reported dimension,
 		// never folded into model-behavior/contract pass above.
@@ -332,6 +431,28 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 			// Explicit "not run", never an implied 0%: every number in the table above
 			// is deterministic code-based checking; no LLM judged anything in this run.
 			b.WriteString("LLM-as-judge (judge-llm): not run. All pass rates above are deterministic code-based checks.\n\n")
+		}
+
+		// LLM stock line (only for models this run actually evaluated a StockCheckRef
+		// test for — see formatStockCheckCell's doc comment): the auto-generated
+		// semantic stock-correctness dimension, kept SEPARATE from both the
+		// deterministic table above and the hand-declared LLM checks line — never
+		// folded into ContractPass/ModelBehaviorPass/LLMJudgePass.
+		var stockLines []string
+		for _, m := range order {
+			if cell := formatStockCheckCell(byModel[m]); cell != "" {
+				stockLines = append(stockLines, fmt.Sprintf("- %s: %s", m, cell))
+			}
+		}
+		if len(stockLines) > 0 {
+			b.WriteString("LLM stock check (judge-llm — auto-generated semantic classification, see each row's `stock_llm_checks` in .judged.json):\n\n")
+			for _, line := range stockLines {
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+			b.WriteString("\n")
+		} else {
+			b.WriteString("LLM stock check (judge-llm): not run.\n\n")
 		}
 
 		if isScaleScenario(run.Scenario) {

@@ -10,7 +10,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"xchats-evals-harness/internal/kbfixture"
 	"xchats-evals-harness/internal/provenance"
+
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 )
 
 // defaultLLMJudgeModel is the pinned judge model for the opt-in judge-llm command — see
@@ -99,15 +102,37 @@ func cmdJudgeLLM(args []string) error {
 		return fmt.Errorf("read %s (run `harness judge` first): %w", judgedPath, err)
 	}
 
+	// Ground truth for the auto-generated stock-correctness dimension (StockCheckRef)
+	// comes from the catalog, schema_kb_v1 only — a legacy fact_tables scenario has no
+	// per-product InStock signal this command knows how to read, so kb stays nil and
+	// every stockChecksFor call below is a no-op for it.
+	var kb *aiprompt.KB
+	if scenario.Pipeline == "schema_kb_v1" && inputs.FixturePath != "" {
+		loaded, err := kbfixture.Load(inputs.FixturePath)
+		if err != nil {
+			return fmt.Errorf("load fixture %s: %w", inputs.FixturePath, err)
+		}
+		if loaded, err = kbfixture.ApplyLimits(loaded, scenario.Limits); err != nil {
+			return fmt.Errorf("scenario %q: %w", scenario.Name, err)
+		}
+		kb = loaded
+	}
+
 	client := newORClientWithTimeout(base, apiKey, llmJudgeTimeout)
 	ctx := context.Background()
 
 	evaluated, contractFailedSkips, calls := 0, 0, 0
-	var totalCost float64
+	stockEvaluated, stockCalls := 0, 0
+	var totalCost, totalStockCost float64
 	for i := range judged.Verdicts {
 		v := &judged.Verdicts[i]
 		tc, ok := testByID[v.TestID]
-		if !ok || len(tc.LLMChecks) == 0 {
+		if !ok {
+			continue
+		}
+		hasLLMChecks := len(tc.LLMChecks) > 0
+		hasStockCheck := kb != nil && tc.StockCheckRef != ""
+		if !hasLLMChecks && !hasStockCheck {
 			continue
 		}
 		if !v.ContractPass {
@@ -116,48 +141,79 @@ func cmdJudgeLLM(args []string) error {
 			continue
 		}
 
-		cached := map[string]LLMCheckResult{}
-		for _, r := range v.LLMChecks {
-			cached[r.CacheKey] = r
-		}
+		if hasLLMChecks {
+			cached := map[string]LLMCheckResult{}
+			for _, r := range v.LLMChecks {
+				cached[r.CacheKey] = r
+			}
 
-		results := make([]LLMCheckResult, 0, len(tc.LLMChecks))
-		passAll := true
-		var verdictCost float64
-		for _, check := range tc.LLMChecks {
-			key := llmCheckCacheKey(tc.Message, v.InjectedText, check.Claim, *judgeModelID)
-			if !*force {
-				if hit, ok := cached[key]; ok {
-					results = append(results, hit)
-					if !hit.Pass {
-						passAll = false
+			results := make([]LLMCheckResult, 0, len(tc.LLMChecks))
+			passAll := true
+			var verdictCost float64
+			for _, check := range tc.LLMChecks {
+				key := llmCheckCacheKey(tc.Message, v.InjectedText, check.Claim, *judgeModelID)
+				if !*force {
+					if hit, ok := cached[key]; ok {
+						results = append(results, hit)
+						if !hit.Pass {
+							passAll = false
+						}
+						continue
 					}
-					continue
+				}
+				result, cost := judgeLLMClaim(ctx, client, judgeModel, *judgeModelID, tc.Message, v.InjectedText, check)
+				calls++
+				verdictCost += cost
+				results = append(results, result)
+				if !result.Pass {
+					passAll = false
 				}
 			}
-			result, cost := judgeLLMClaim(ctx, client, judgeModel, *judgeModelID, tc.Message, v.InjectedText, check)
-			calls++
-			verdictCost += cost
-			results = append(results, result)
-			if !result.Pass {
-				passAll = false
-			}
+
+			v.LLMChecks = results
+			v.LLMCheckEvaluated = true
+			v.LLMJudgeModel = *judgeModelID
+			v.LLMJudgePass = &passAll
+			v.LLMJudgeCostUSD = verdictCost
+			totalCost += verdictCost
+			evaluated++
 		}
 
-		v.LLMChecks = results
-		v.LLMCheckEvaluated = true
-		v.LLMJudgeModel = *judgeModelID
-		v.LLMJudgePass = &passAll
-		v.LLMJudgeCostUSD = verdictCost
-		totalCost += verdictCost
-		evaluated++
+		if hasStockCheck {
+			expected, productName, ok := stockGroundTruth(kb, tc.StockCheckRef)
+			if !ok {
+				// StockCheckRef names a ref this (possibly size-limited) catalog no
+				// longer carries — nothing to judge against, not an error.
+				continue
+			}
+			cachedStock := map[string]StockLLMCheckResult{}
+			for _, r := range v.StockLLMChecks {
+				cachedStock[r.CacheKey] = r
+			}
+			key := stockCheckCacheKey(tc.Message, v.InjectedText, tc.StockCheckRef, *judgeModelID)
+			var result StockLLMCheckResult
+			var cost float64
+			if hit, ok := cachedStock[key]; ok && !*force {
+				result = hit
+			} else {
+				result, cost = judgeStockClaim(ctx, client, judgeModel, *judgeModelID, tc.Message, v.InjectedText, tc.StockCheckRef, productName, expected)
+				stockCalls++
+				totalStockCost += cost
+			}
+			v.StockLLMChecks = []StockLLMCheckResult{result}
+			v.StockLLMEvaluated = true
+			v.LLMStockModel = *judgeModelID
+			v.LLMStockPass = &result.Pass
+			v.LLMStockCostUSD = cost
+			stockEvaluated++
+		}
 	}
 
 	if err := writeJSON(judgedPath, judged); err != nil {
 		return err
 	}
-	fmt.Printf("judge-llm %s: %d verdict(s) evaluated, %d contract-failed skip(s), %d API call(s), est. cost $%.4f -> %s\n",
-		scenario.Name, evaluated, contractFailedSkips, calls, totalCost, judgedPath)
+	fmt.Printf("judge-llm %s: %d verdict(s) evaluated, %d contract-failed skip(s), %d API call(s), est. cost $%.4f; stock: %d evaluated, %d API call(s), est. cost $%.4f -> %s\n",
+		scenario.Name, evaluated, contractFailedSkips, calls, totalCost, stockEvaluated, stockCalls, totalStockCost, judgedPath)
 	return nil
 }
 
@@ -247,4 +303,109 @@ func parseLLMVerdict(raw string) (bool, bool) {
 	}
 	v, ok := obj["verdict"].(bool)
 	return v, ok
+}
+
+// stockGroundTruth looks up ref's current stock state directly from the KB (never
+// hand-authored — see TestCase.StockCheckRef's doc comment) — "in_stock" or
+// "out_of_stock", plus the product's display name for the judge prompt. ok is false
+// when ref names no active product in THIS (possibly size-limited) catalog, e.g. a
+// StockCheckRef the current -limits truncation no longer includes.
+func stockGroundTruth(kb *aiprompt.KB, ref string) (expected, displayName string, ok bool) {
+	for _, p := range kb.Products {
+		if p.Ref != ref || p.SalesStatus != "active" {
+			continue
+		}
+		if p.InStock {
+			return "in_stock", p.Name, true
+		}
+		return "out_of_stock", p.Name, true
+	}
+	return "", "", false
+}
+
+// stockCheckCacheKey mirrors llmCheckCacheKey's doctrine for the stock dimension: a
+// re-run with all four unchanged reuses the cached StockLLMCheckResult instead of
+// re-billing. expected is deliberately NOT part of the key (same reasoning as
+// llmCheckCacheKey's expect) — it only affects the LOCAL pass comparison after the
+// judge classifies, never what gets sent to the API.
+func stockCheckCacheKey(message, replyText, productRef, judgeModelID string) string {
+	sum := sha256.Sum256([]byte(message + "\x00" + replyText + "\x00" + productRef + "\x00" + judgeModelID))
+	return hex.EncodeToString(sum[:])
+}
+
+// judgeStockClaim asks the judge model to classify what the reply says about ONE
+// product's stock status — a 4-way classification ("in_stock" | "out_of_stock" |
+// "unclear" | "contradictory"), not a binary yes/no — and compares it against the
+// catalog's ground truth. Every failure mode (HTTP/network error, unparseable
+// response, a response whose "classification" isn't one of the four recognized
+// values) becomes Unverified=true with Pass left false — fail closed, same doctrine as
+// judgeLLMClaim.
+func judgeStockClaim(ctx context.Context, client *orClient, judgeModel ModelProvider, judgeModelID, message, replyText, productRef, productName, expected string) (StockLLMCheckResult, float64) {
+	result := StockLLMCheckResult{
+		ProductRef:    productRef,
+		ExpectedState: expected,
+		CacheKey:      stockCheckCacheKey(message, replyText, productRef, judgeModelID),
+	}
+	res, err := client.chatText(ctx, judgeModel, buildStockJudgePrompt(message, replyText, productName))
+	if err != nil {
+		result.Unverified = true
+		return result, 0
+	}
+	classification, ok := parseStockClassification(res.Raw)
+	if !ok {
+		result.Unverified = true
+		return result, 0
+	}
+	result.Classification = classification
+	result.Pass = classification == expected
+	cost, _ := estimateCost(judgeModel, res.Usage)
+	return result, cost
+}
+
+// buildStockJudgePrompt is the one Russian judge prompt every stock classification
+// uses. Explicitly notes the reply may be Russian OR Kazakh (2026-07 Kazakh customer-
+// message testing) — the judge model must read either. "unclear" — not a forced
+// binary — is what makes an alternative-only reply (never actually addressing THIS
+// product's own status) fail rather than accidentally pass: an alternative-only reply
+// classifies "unclear", which then fails the ground-truth comparison, since "unclear"
+// can never equal "in_stock"/"out_of_stock".
+func buildStockJudgePrompt(message, replyText, productName string) string {
+	return fmt.Sprintf(`Ты — независимый проверяющий качества ответов ассистента интернет-магазина. Тебе даны сообщение клиента и черновик ответа ассистента. Ответ может быть на русском ИЛИ на казахском языке — читай оба варианта одинаково внимательно.
+
+Определи, что ЧЕРНОВИК ОТВЕТА сообщает о наличии товара «%s» — именно ЭТОГО товара, а не альтернативы или другого товара.
+
+Классифицируй строго в одну из четырёх категорий:
+- "in_stock" — ответ ясно утверждает или подразумевает, что этот товар есть в наличии.
+- "out_of_stock" — ответ ясно утверждает или подразумевает, что этого товара сейчас нет в наличии.
+- "unclear" — ответ не сообщает о наличии именно ЭТОГО товара (например, предлагает только альтернативу, задаёт встречный вопрос или эскалирует без ответа по существу).
+- "contradictory" — ответ одновременно и утверждает, и отрицает наличие одного и того же товара.
+
+Сообщение клиента:
+%s
+
+Черновик ответа:
+%s
+
+Ответь СТРОГО одним JSON-объектом без какого-либо текста до или после него, ровно в этом виде: {"classification": "in_stock"} — используй одно из четырёх значений: in_stock, out_of_stock, unclear, contradictory.`, productName, message, replyText)
+}
+
+var validStockClassifications = map[string]bool{
+	"in_stock": true, "out_of_stock": true, "unclear": true, "contradictory": true,
+}
+
+// parseStockClassification extracts the "classification" field from the judge
+// model's raw output (fence-tolerant, same as parseLLMVerdict). The second return is
+// false for anything that isn't valid JSON, isn't an object, or whose value isn't one
+// of the four recognized classifications — an unrecognized string is treated as
+// unparseable, never silently coerced to "unclear".
+func parseStockClassification(raw string) (string, bool) {
+	obj, ok := parseModelJSON(raw)
+	if !ok {
+		return "", false
+	}
+	c, ok := obj["classification"].(string)
+	if !ok || !validStockClassifications[c] {
+		return "", false
+	}
+	return c, true
 }

@@ -124,6 +124,48 @@ func TestWriteRunHTML_BothFamilies(t *testing.T) {
 
 // TestWriteRunHTML_EmptyRunDir proves a directory with nothing gradeable is rejected
 // rather than being published as a misleading 0/0 evaluation.
+// TestWriteRunHTML_ArchivedScenarioAndModelBadged confirms the per-run page badges an
+// archived scenario/model — resolved at RENDER time against the CURRENT
+// scenarios/*/scenario.yaml + models.yaml (loadArchivedScenarios/loadArchivedModels),
+// not baked into the judged.json being rendered.
+func TestWriteRunHTML_ArchivedScenarioAndModelBadged(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	writeCatalogFixtureScenario(t, root, "retired-scenario", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml", Archived: true, ArchivedReason: "superseded by v2",
+	}, Data{}, "tests:\n")
+	modelsYAML := "providers:\n  - id: openrouter:archived/model\narchived_models:\n  - id: openrouter:archived/model\n    reason: retired\n"
+	if err := os.WriteFile(filepath.Join(root, "models.yaml"), []byte(modelsYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runDir := filepath.Join(root, "runs", "2026-01-01_00-00-00-aaaa")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jr := JudgedRun{Scenario: "retired-scenario", Verdicts: []Verdict{
+		{TestID: "t1", Model: "openrouter:archived/model", ParseOK: true, ContractPass: true},
+	}}
+	if err := writeJSON(filepath.Join(runDir, "retired-scenario.judged.json"), jr); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeRunHTML(runDir); err != nil {
+		t.Fatalf("writeRunHTML: %v", err)
+	}
+	page, err := os.ReadFile(filepath.Join(runDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), "superseded by v2") {
+		t.Error("want the archived scenario's reason to appear on the page")
+	}
+	if !strings.Contains(string(page), "ARCHIVED") {
+		t.Error("want an ARCHIVED badge to render")
+	}
+}
+
 func TestWriteRunHTML_EmptyRunDir(t *testing.T) {
 	runDir := t.TempDir()
 	if err := writeRunHTML(runDir); err == nil {

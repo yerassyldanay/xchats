@@ -1,0 +1,17 @@
+name: shop-kb-v1-50
+description: >
+  Catalog-size sweep (2026-07 consolidation), size 50 — the schema-driven Russian shop
+  family (pipeline: schema_kb_v1) capped to the first 50 products. Shares the exact same
+  frame, model roster, and common question banks as shop-kb-v1-10/-100 — product COUNT
+  is the only thing this scenario varies, so a cross-size comparison isolates the effect
+  of catalog size from every other variable. Prompt v2 (canonical blocks, name-only
+  out-of-stock products, no per-entity media-absence marker) — see
+  ../shop-kb-v1/frame-ru.txt and evals/SHOP_KB_V1_30_POSTMORTEM.md.
+pipeline: schema_kb_v1
+frame: ../shop-kb-v1/frame-ru.txt
+data: ../shop-kb-v1/data-ru.yaml
+tests: tests.yaml
+prompt_ref: "shop-kb@v2"
+experiment: kb-size-sweep
+limits:
+  ai_products: 50

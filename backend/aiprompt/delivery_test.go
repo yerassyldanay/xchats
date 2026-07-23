@@ -308,21 +308,34 @@ func TestValidateResponse_Valid_DeliveryZoneTokens(t *testing.T) {
 // TestValidateResponse_RejectsModelAuthoredDeliveryWording: the model must
 // never phrase delivery availability or a zone's exact value itself — only
 // copy the token — exactly the same fail-closed rule already proven for
-// prices and stock wording, applied to the new delivery vocabulary.
+// prices and stock wording, applied to the new delivery vocabulary. This is
+// only checkable when the wording/value in question UNIQUELY identifies one
+// zone's fact: zonesKB's kazakhstan and astana zones both have
+// delivery_available=true, so their shared "доставляем" wording cannot be
+// attributed to either one specifically (same ambiguous-collision rule as
+// TestValidateResponse_SharedWordingNeverFlaggedAsLiteralLeak, and the exact
+// postmortem #7 failure mode) and must NOT be flagged; baikonur is the only
+// no_delivery zone and astana's own price is unique, so those two stay
+// checkable and must still be flagged.
 func TestValidateResponse_RejectsModelAuthoredDeliveryWording(t *testing.T) {
 	kb := zonesKB()
 	cat, err := BuildCatalog(kb)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	_, issues := ValidateResponse(responseWithText(t, "Да, доставляем в Астану."), kb, cat)
+	if containsCode(issues, "exact_value_literal") {
+		t.Errorf("wording shared by two delivers=true zones (kazakhstan, astana) must not be flagged, got issues = %+v", issues)
+	}
+
 	for _, text := range []string{
-		"Да, доставляем в Астану.",
 		"К сожалению, в Байконур не доставляем.",
 		"Стоимость доставки в Астану — 4 000 ₸.",
 	} {
 		_, issues := ValidateResponse(responseWithText(t, text), kb, cat)
 		if !containsCode(issues, "exact_value_literal") {
-			t.Errorf("text %q: issues = %+v, want exact_value_literal", text, issues)
+			t.Errorf("text %q: issues = %+v, want exact_value_literal (uniquely identifies one zone's fact)", text, issues)
 		}
 	}
 }
