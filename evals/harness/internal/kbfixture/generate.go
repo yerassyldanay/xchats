@@ -42,6 +42,16 @@ const generatedFileHeader = `# evals/scenarios/shop-kb-v1/data-ru.yaml — GENER
 # per referenced file (deterministic UUIDv5 ids, a mix of "visible" and
 # "auto" customer_visibility) plus a couple of deliberately unreferenced
 # rows, proving an unreferenced material never affects rendering.
+#
+# ai_delivery_zones holds four rows exercising the closed-world delivery
+# model: "kazakhstan" (country-level fallback), "astana" and "almaty" (cities
+# nested under it, each with its own cheaper/faster price), and "baikonur"
+# (an explicit deny row nested under the same country — proves a deny row
+# beats its parent's allow). Because zones are present, ai_policies.main's
+# flat delivery_cost/delivery_in_days are blank (aiprompt.BuildCatalog
+# requires this — a flat answer would contradict per-zone pricing) and
+# outside_zones_note carries the seller-authored refusal for every
+# unlisted direction.
 `
 
 // Generate returns the deterministic shop-kb-v1 fixture.
@@ -67,14 +77,17 @@ func Generate() *Fixture {
 			WorkingHours: "Пн–Сб, 9:00–19:00",
 		},
 		AIPolicies: &AIPolicies{
-			DeliveryCost:     "1 500 ₸",
-			DeliveryInDays:   "1–3",
+			// DeliveryCost/DeliveryInDays are deliberately blank: ai_delivery_zones
+			// below is non-empty, and a flat KB-wide delivery answer would
+			// contradict per-zone pricing (aiprompt.BuildCatalog enforces this).
 			FreeDeliveryFrom: "20 000 ₸",
 			MinOrder:         "5 000 ₸",
+			OutsideZonesNote: "В другие города, регионы и страны за пределами Казахстана мы не доставляем.",
 			// ReturnPeriodInDays deliberately left empty: no placeholder is
 			// generated for it, so a return-period question must escalate
 			// instead of inventing a value.
 		},
+		AIDeliveryZones: generateDeliveryZones(),
 	}
 
 	// A couple of materials nothing references — proves an unreferenced row
@@ -157,6 +170,39 @@ func generateTopics(mb *materialBuilder) []AITopic {
 			Slug: "pickup", Title: "Самовывоз",
 			Keywords: []string{"самовывоз", "забрать", "склад"},
 			BodyMD:   "Самовывоз возможен со склада в Алматы по предварительной договорённости с менеджером.",
+		},
+	}
+}
+
+// generateDeliveryZones returns the family's four delivery zones: a country-
+// level fallback ("kazakhstan"), two cities nested under it with their own
+// cheaper/faster pricing ("astana", "almaty"), and one city nested under the
+// same country that explicitly denies delivery ("baikonur" — proving a deny
+// row beats its parent's allow). None carry media or notes beyond baikonur's,
+// which explains the denial instead of leaving it silently unremarkable.
+func generateDeliveryZones() []AIDeliveryZone {
+	yes, no := StrictBool(true), StrictBool(false)
+	return []AIDeliveryZone{
+		{
+			Ref: "kazakhstan", Name: "Казахстан (остальные города)", ZoneLevel: "country",
+			DeliveryAvailable: &yes, DeliveryCost: "10 000 ₸", DeliveryInDays: "3–4",
+			SalesStatus: "active",
+		},
+		{
+			Ref: "astana", Name: "Астана", ZoneLevel: "city", ParentRef: "kazakhstan",
+			DeliveryAvailable: &yes, DeliveryCost: "4 000 ₸", DeliveryInDays: "1",
+			SalesStatus: "active",
+		},
+		{
+			Ref: "almaty", Name: "Алматы", ZoneLevel: "city", ParentRef: "kazakhstan",
+			DeliveryAvailable: &yes, DeliveryCost: "5 000 ₸", DeliveryInDays: "1",
+			SalesStatus: "active",
+		},
+		{
+			Ref: "baikonur", Name: "Байконур", ZoneLevel: "city", ParentRef: "kazakhstan",
+			DeliveryAvailable: &no,
+			Notes:             "Особый административный статус города — курьерская доставка туда не осуществляется.",
+			SalesStatus:       "active",
 		},
 	}
 }

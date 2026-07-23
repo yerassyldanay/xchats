@@ -1,6 +1,7 @@
 include:
   - common/kb-questions-ru.yaml
   - common/kb-history-ru.yaml
+  - common/kb-delivery-ru.yaml
 
 tests:
   - id: "17. deep-list product (#30 of 30), price and photo"

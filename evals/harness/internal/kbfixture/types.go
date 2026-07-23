@@ -49,16 +49,18 @@ import (
 
 // Fixture is the top-level schema-shaped YAML document. Its keys are exactly
 // organization_id, ai_assistants, ai_topics, ai_products, ai_tariffs,
-// ai_contacts, ai_policies, and kbd_materials — nothing else.
+// ai_contacts, ai_policies, ai_delivery_zones, and kbd_materials — nothing
+// else.
 type Fixture struct {
-	OrganizationID string        `yaml:"organization_id"`
-	AIAssistants   *AIAssistant  `yaml:"ai_assistants"`
-	AITopics       []AITopic     `yaml:"ai_topics"`
-	AIProducts     []AIProduct   `yaml:"ai_products"`
-	AITariffs      []AITariff    `yaml:"ai_tariffs"`
-	AIContacts     *AIContacts   `yaml:"ai_contacts"`
-	AIPolicies     *AIPolicies   `yaml:"ai_policies"`
-	KBDMaterials   []KBDMaterial `yaml:"kbd_materials"`
+	OrganizationID  string           `yaml:"organization_id"`
+	AIAssistants    *AIAssistant     `yaml:"ai_assistants"`
+	AITopics        []AITopic        `yaml:"ai_topics"`
+	AIProducts      []AIProduct      `yaml:"ai_products"`
+	AITariffs       []AITariff       `yaml:"ai_tariffs"`
+	AIContacts      *AIContacts      `yaml:"ai_contacts"`
+	AIPolicies      *AIPolicies      `yaml:"ai_policies"`
+	AIDeliveryZones []AIDeliveryZone `yaml:"ai_delivery_zones"`
+	KBDMaterials    []KBDMaterial    `yaml:"kbd_materials"`
 }
 
 // AIAssistant mirrors ai_assistants (singleton per organization_id).
@@ -162,6 +164,12 @@ type AIContacts struct {
 }
 
 // AIPolicies mirrors the ai_policies singleton (natural ref "main").
+//
+// DeliveryCost/DeliveryInDays are the KB-wide delivery answer used only when
+// ai_delivery_zones is empty; they must be blank once any zone row exists
+// (aiprompt.BuildCatalog enforces this — see AIDeliveryZone). OutsideZonesNote
+// is the seller-authored closed-world refusal for a direction matching no
+// zone; required (non-blank) whenever ai_delivery_zones is non-empty.
 type AIPolicies struct {
 	DeliveryCost            string   `yaml:"delivery_cost"`
 	DeliveryInDays          string   `yaml:"delivery_in_days"`
@@ -171,7 +179,27 @@ type AIPolicies struct {
 	Installment             string   `yaml:"installment"`
 	ReturnPeriodInDays      string   `yaml:"return_period_in_days"`
 	Warranty                string   `yaml:"warranty"`
+	OutsideZonesNote        string   `yaml:"outside_zones_note"`
 	CommercePolicyDocuments []string `yaml:"commerce_policy_documents"`
+}
+
+// AIDeliveryZone mirrors one ai_delivery_zones row — see
+// aiprompt.DeliveryZone's doc comment for the full containment-hierarchy and
+// fail-closed-consistency model this loader converts 1:1 into.
+// DeliveryAvailable is a *StrictBool for the same reason AIProduct.InStock
+// is: the pointer distinguishes "key omitted" (rejected — NOT NULL, no
+// default) from "explicitly false", and StrictBool itself rejects every
+// non-canonical boolean spelling.
+type AIDeliveryZone struct {
+	Ref               string      `yaml:"ref"`
+	Name              string      `yaml:"name"`
+	ZoneLevel         string      `yaml:"zone_level"`
+	ParentRef         string      `yaml:"parent_ref"`
+	DeliveryAvailable *StrictBool `yaml:"delivery_available"`
+	DeliveryCost      string      `yaml:"delivery_cost"`
+	DeliveryInDays    string      `yaml:"delivery_in_days"`
+	Notes             string      `yaml:"notes"`
+	SalesStatus       string      `yaml:"sales_status"`
 }
 
 // KBDMaterial mirrors the subset of kbd_materials columns the customer

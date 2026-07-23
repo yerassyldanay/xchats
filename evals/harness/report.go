@@ -79,6 +79,11 @@ type modelStats struct {
 	// that never needed a retry at all). This is the true first-shot rate: for a row
 	// that WAS retried, it reflects attempt 0's own outcome, not the final/selected one.
 	firstAttemptParseOK, firstAttemptContractPass int
+	// llmChecked/llmPass/llmUnverified/llmCost pool the OPTIONAL judge-llm dimension
+	// (see formatLLMCheckCell's doc comment) — zero for every run judge-llm never
+	// touched, same "absent means never run, not zero" discipline as retried above.
+	llmChecked, llmPass, llmUnverified int
+	llmCost                            float64
 }
 
 // formatRetryCell reports retry.go's effect on this model's rows, or "" when this run
@@ -99,6 +104,24 @@ func formatRetryCell(ms *modelStats) string {
 // column, per the plan's split-reporting requirement: strict-schema families may show a
 // materially lower first-shot number than their final one, and that gap is signal (how
 // often retry.go's correction was actually needed), not noise to hide.
+// formatLLMCheckCell reports the OPTIONAL judge-llm dimension's effect on this model's
+// rows, or "" when this run never ran judge-llm at all — same "absent, not zero" doctrine
+// as formatRetryCell. Unverified rows are called out separately from the pass count
+// because an unverified claim is neither a confirmed pass nor a confirmed fail (the judge
+// call itself failed or was unparseable) — folding it silently into either would misreport
+// what judge-llm actually established.
+func formatLLMCheckCell(ms *modelStats) string {
+	if ms.llmChecked == 0 {
+		return ""
+	}
+	cell := fmt.Sprintf("%d/%d pass (%.0f%%)", ms.llmPass, ms.llmChecked, pct(ms.llmPass, ms.llmChecked))
+	if ms.llmUnverified > 0 {
+		cell += fmt.Sprintf(", %d unverified", ms.llmUnverified)
+	}
+	cell += fmt.Sprintf(", ~$%.4f", ms.llmCost)
+	return cell
+}
+
 func formatFirstShotCell(ms *modelStats) string {
 	return fmt.Sprintf("%d/%d (%.0f%%)", ms.firstAttemptContractPass, ms.total, pct(ms.firstAttemptContractPass, ms.total))
 }
@@ -206,6 +229,18 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 			if v.FirstAttemptContractPass {
 				ms.firstAttemptContractPass++
 			}
+			if v.LLMCheckEvaluated {
+				ms.llmCost += v.LLMJudgeCostUSD
+				for _, r := range v.LLMChecks {
+					ms.llmChecked++
+					switch {
+					case r.Unverified:
+						ms.llmUnverified++
+					case r.Pass:
+						ms.llmPass++
+					}
+				}
+			}
 			if !v.ModelBehaviorPass || !v.ContractPass {
 				allFailures = append(allFailures, v)
 			}
@@ -251,6 +286,24 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 		if len(retryLines) > 0 {
 			b.WriteString("Retries (retry.go — see each row's `attempts` in .judged.json for the full history):\n\n")
 			for _, line := range retryLines {
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+			b.WriteString("\n")
+		}
+
+		// LLM checks line (only for models this run actually ran judge-llm against — see
+		// formatLLMCheckCell's doc comment): an OPTIONAL, separately-reported dimension,
+		// never folded into model-behavior/contract pass above.
+		var llmLines []string
+		for _, m := range order {
+			if cell := formatLLMCheckCell(byModel[m]); cell != "" {
+				llmLines = append(llmLines, fmt.Sprintf("- %s: %s", m, cell))
+			}
+		}
+		if len(llmLines) > 0 {
+			b.WriteString("LLM checks (judge-llm — optional semantic claims, see each row's `llm_checks` in .judged.json):\n\n")
+			for _, line := range llmLines {
 				b.WriteString(line)
 				b.WriteString("\n")
 			}

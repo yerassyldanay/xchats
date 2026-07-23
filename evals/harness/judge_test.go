@@ -95,6 +95,40 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			wantReason:       `reply_text contains forbidden phrase: "в течение 14 дней"`,
 		},
 		{
+			name: "forbid_tokens exact match fails behavior",
+			testCase: TestCase{
+				ID:           "forbid-exact",
+				ForbidTokens: []string{"policy.main.delivery_cost"},
+			},
+			output:           `{"reply_text":"Стоимость доставки {{policy.main.delivery_cost}}.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       "reply_text cites a forbidden fact token: {{policy.main.delivery_cost}}",
+		},
+		{
+			name: "forbid_tokens dotted-prefix match fails behavior",
+			testCase: TestCase{
+				ID:           "forbid-prefix",
+				ForbidTokens: []string{"policy."},
+			},
+			output:           `{"reply_text":"Срок возврата {{policy.main.return_period}}.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
+			wantContractPass: true,
+			wantBehaviorPass: false,
+			wantReason:       "reply_text cites a forbidden fact token: {{policy.main.return_period}}",
+		},
+		{
+			name: "forbid_tokens passes when a different token is used",
+			testCase: TestCase{
+				ID:           "forbid-ok",
+				Requires:     [][]string{{"product.coffee-machine.price"}},
+				ForbidTokens: []string{"policy."},
+			},
+			output:           `{"reply_text":"Цена {{product.coffee-machine.price}}.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
+			wantContractPass: true,
+			wantBehaviorPass: true,
+			wantReason:       "ok",
+		},
+		{
 			name: "media forbid passes when the reply attaches nothing",
 			testCase: TestCase{
 				ID:    "greeting-no-media",
@@ -928,6 +962,71 @@ func TestJudgeOne_MustContainAny(t *testing.T) {
 		got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 		if !got.MustContainAnyPass {
 			t.Error("want MustContainAnyPass=true when the test declares no must_contain_any at all")
+		}
+	})
+}
+
+// TestJudgeOne_Outcomes_ForbidTokens proves OutcomeCase.ForbidTokens gates a block the
+// same way TestCase.ForbidTokens gates the top level — shaped after the real "generic
+// delivery-cost question, zones present" case: a clarifying question (no zone token at
+// all) and a per-zone breakdown (a zone token, but never the wrong one) are both
+// acceptable; a reply that names a zone's price while pretending to still ask which city
+// is neither.
+func TestJudgeOne_Outcomes_ForbidTokens(t *testing.T) {
+	escalateFalse := false
+	catalog := &Catalog{}
+	tokenValue := map[string]string{
+		"{{delivery.astana.delivery_cost}}":     "4 000 ₸",
+		"{{delivery.kazakhstan.delivery_cost}}": "10 000 ₸",
+	}
+	tc := TestCase{
+		ID: "t",
+		Outcomes: []OutcomeCase{
+			{
+				Label:        "asks which city, without citing any zone's price",
+				Escalate:     &escalateFalse,
+				ForbidTokens: []string{"delivery."},
+			},
+			{
+				Label:    "answers with a zone's price directly",
+				Requires: [][]string{{"delivery.astana.delivery_cost", "delivery.kazakhstan.delivery_cost"}},
+				Escalate: &escalateFalse,
+			},
+		},
+	}
+	run := func(output string) Verdict {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = output
+		return judgeOne(tc, row, tokenValue, map[string]bool{}, catalog.TrustedDigits)
+	}
+
+	t.Run("clarifying question with no zone token satisfies the first block", func(t *testing.T) {
+		got := run(`{"reply_text":"Подскажите, в какой город нужна доставка?","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`)
+		if !got.OutcomesPass || got.OutcomeMatched != tc.Outcomes[0].Label {
+			t.Fatalf("want the clarifying block to match, got pass=%v matched=%q reason=%q", got.OutcomesPass, got.OutcomeMatched, got.Reason)
+		}
+	})
+
+	t.Run("a zone price satisfies the second block", func(t *testing.T) {
+		got := run(`{"reply_text":"По Казахстану {{delivery.kazakhstan.delivery_cost}}.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`)
+		if !got.OutcomesPass || got.OutcomeMatched != tc.Outcomes[1].Label {
+			t.Fatalf("want the price block to match, got pass=%v matched=%q reason=%q", got.OutcomesPass, got.OutcomeMatched, got.Reason)
+		}
+	})
+
+	t.Run("citing a zone price while also escalating satisfies neither block", func(t *testing.T) {
+		// Block 1 (forbid_tokens) rejects this for citing delivery.kazakhstan.delivery_cost;
+		// block 2 (Requires the same token) rejects it separately for escalate=true — a
+		// reply that fails each block for a DIFFERENT declared reason, not the ambiguous
+		// "answers plus asks" shape (which is a legitimate match for block 2, by design —
+		// see kb-delivery-ru.yaml's outcome comment for that call).
+		got := run(`{"reply_text":"По Казахстану {{delivery.kazakhstan.delivery_cost}}.","reply_language":"ru","media_files_to_send":[],"escalate":true,"escalation_reason":"уточню детали","confidence":0.9}`)
+		if got.OutcomesPass {
+			t.Fatalf("want neither block to match, got pass=%v matched=%q", got.OutcomesPass, got.OutcomeMatched)
+		}
+		if got.ModelBehaviorPass {
+			t.Error("want ModelBehaviorPass=false when no outcome block is satisfied")
 		}
 	})
 }

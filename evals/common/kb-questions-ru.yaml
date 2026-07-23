@@ -88,19 +88,36 @@ tests:
     escalate: false
     language: ru
 
-  - id: "9. delivery cost"
+  - id: "9. delivery cost (general, zones present)"
     message: "Сколько стоит доставка?"
-    requires:
-      - ["policy.main.delivery_cost"]
+    # ai_delivery_zones is non-empty in the fixture, so the flat policy.main.delivery_cost
+    # fact does not exist (aiprompt.BuildCatalog requires it blank once zones exist — see
+    # DECISIONS.md §"Canonical knowledge-base schema"). A bare "how much is delivery" has
+    # no single answer any more: two shapes are acceptable — asking which direction, or
+    # answering with a concrete zone's price. A reply doing BOTH at once (states one
+    # zone's price, then also asks which city) satisfies the second shape, not neither —
+    # naming a real, non-fabricated price is the behavior under test, not the absence of
+    # a follow-up question.
     escalate: false
     language: ru
+    outcomes:
+      - label: "asks which direction, without citing any zone's price"
+        forbid_tokens: ["delivery."]
+      - label: "answers with at least one zone's price"
+        requires:
+          - ["delivery.almaty.delivery_cost", "delivery.astana.delivery_cost", "delivery.kazakhstan.delivery_cost"]
 
-  - id: "10. delivery days"
+  - id: "10. delivery days (general, zones present)"
     message: "А сколько по времени займёт доставка?"
-    requires:
-      - ["policy.main.delivery_in_days"]
+    # Same shape as test 9, for delivery_in_days.
     escalate: false
     language: ru
+    outcomes:
+      - label: "asks which direction, without citing any zone's timeline"
+        forbid_tokens: ["delivery."]
+      - label: "answers with at least one zone's delivery time"
+        requires:
+          - ["delivery.almaty.delivery_in_days", "delivery.astana.delivery_in_days", "delivery.kazakhstan.delivery_in_days"]
 
   - id: "11. minimum order amount"
     message: "Какая у вас минимальная сумма заказа?"
@@ -131,8 +148,18 @@ tests:
     escalate: true
     language: ru
 
-  - id: "15. off-KB city escalates"
+  - id: "15. off-KB city resolves via country zone fallback"
     message: "А в Караганду доставляете?"
-    escalate: true
-    must_not_contain: ["не доставля", "доставляем в караганд", "да, доставляем"]
+    # Караганда has no city-level zone of its own in the fixture — it must resolve
+    # through the "kazakhstan" country-level fallback zone (most-specific-wins: no exact
+    # match -> the containing region/country zone answers instead), not escalate. This is
+    # the ONE case in this bank graded on the model's own geography knowledge (Караганда
+    # is a real city in Kazakhstan) rather than KB content alone — deliberate: it proves
+    # the country fallback actually fires. A cautious model that escalates instead is a
+    # real, informative failure signal, not a false negative in this test.
+    requires:
+      - ["delivery.kazakhstan.delivery_available", "delivery.kazakhstan.delivery_cost", "delivery.kazakhstan.delivery_in_days"]
+    forbid_tokens: ["delivery.almaty.", "delivery.astana.", "delivery.baikonur."]
+    escalate: false
+    must_not_contain: ["не доставля", "доставляем только по"]
     language: ru

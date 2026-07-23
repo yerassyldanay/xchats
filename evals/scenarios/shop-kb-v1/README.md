@@ -10,7 +10,10 @@ caps, not a runnable scenario by itself.
   ./cmd/genkbfixture` to regenerate; never hand-edit (see the file's own
   header and `internal/kbfixture/generate.go`). 100 products, ~9 topics, one
   contacts row, one policies row (`return_period_in_days` deliberately
-  empty), and one `kbd_materials` row per referenced file.
+  empty; `delivery_cost`/`delivery_in_days` blank and `outside_zones_note`
+  set — see `ai_delivery_zones` below), four `ai_delivery_zones` rows (a
+  country-level fallback, two cheaper/faster cities nested under it, and one
+  explicit deny city), and one `kbd_materials` row per referenced file.
 - `frame-ru.txt` — the only frame this family ever renders. No language-
   routing rule: every reply is Russian (`reply_language: "ru"`), enforced by
   `aiprompt.ValidateResponse`, not by frame wording alone.
@@ -24,20 +27,25 @@ relate.
 
 ## The three size variants
 
-| Scenario                | ai_products limit | Question bank                                          |
-| ------------------------ | ------------------ | ------------------------------------------------------- |
-| `shop-kb-v1-30`          | 30                 | core + one-shot history banks + 1 boundary test         |
-| `shop-kb-v1-scale-60`    | 60                 | `common/kb-questions-ru.yaml` + 2 deep-boundary tests   |
-| `shop-kb-v1-scale-100`   | (none — full pool) | `common/kb-questions-ru.yaml` + 2 deep-boundary tests   |
+| Scenario                | ai_products limit | Question bank                                                          |
+| ------------------------ | ------------------ | ----------------------------------------------------------------------- |
+| `shop-kb-v1-30`          | 30                 | core + one-shot history + delivery-zones banks + 1 boundary test        |
+| `shop-kb-v1-scale-60`    | 60                 | core + delivery-zones banks + 2 deep-boundary tests                     |
+| `shop-kb-v1-scale-100`   | (none — full pool) | core + delivery-zones banks + 2 deep-boundary tests                     |
 
 Each deep-boundary test targets a specific product near that scenario's own
 row-count boundary (e.g. the ~30th product for `shop-kb-v1-30`), so scaling
 is actually exercised at the edge of the visible catalog, not just on the
 same first few rows every size would trivially pass.
 
-The five history cases run only in the 30-product baseline. Every case is one
-independent provider call containing its complete history plus final message;
-the 60/100 variants stay focused on catalog-size boundaries.
+The five history cases (`common/kb-history-ru.yaml`) run only in the
+30-product baseline: every case is one independent provider call containing
+its complete history plus final message; the 60/100 variants stay focused on
+catalog-size boundaries. The ten delivery-zones cases
+(`common/kb-delivery-ru.yaml`) run in ALL THREE sizes — delivery/escalation
+behavior is verified at every scale, not just the smallest one — and
+`ai_delivery_zones` is unaffected by `limits.ai_products`, so the same four
+zones are present regardless of scenario size.
 
 ## Prompt sizes (recorded 2026-07-22, free `render` only — no model calls)
 
@@ -48,9 +56,9 @@ specific and is recorded per real call in a billed run's `SUMMARY.md`
 
 | Scenario                | Fact tokens | Media entries | Tests | Prompt chars | Prompt words |
 | ------------------------ | ----------- | -------------- | ----- | ------------- | ------------- |
-| `shop-kb-v1-30`          | 67          | 30              | 21    | 38,037        | 3,159         |
-| `shop-kb-v1-scale-60`    | 127         | 56              | 17    | 62,864        | 5,223         |
-| `shop-kb-v1-scale-100`   | 207         | 91              | 17    | 97,915        | 7,972         |
+| `shop-kb-v1-30`          | 76          | 30              | 31    | 44,303        | 3,675         |
+| `shop-kb-v1-scale-60`    | 136         | 56              | 27    | 69,130        | 5,739         |
+| `shop-kb-v1-scale-100`   | 216         | 91              | 27    | 104,181       | 8,488         |
 
 Growth from 30 to 100 products is roughly linear (~2.6x the products, ~2.6x
 the prompt size) — no unexpected super-linear blowup from the fact/media

@@ -89,12 +89,28 @@ type ContractIssue struct {
 
 var placeholderPattern = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 
+// Markdown code fences around the JSON object are transport noise, not contract
+// content: most models emit ```json fences even when the prompt says "strictly
+// JSON", and both prod and the eval harness must grade the same object the model
+// produced. Same semantics as the harness's evaltext.StripFences (which cannot be
+// imported here: dependency direction is harness -> backend).
+var (
+	fenceOpenPattern  = regexp.MustCompile("^\\s*```[a-zA-Z]*\\s*")
+	fenceClosePattern = regexp.MustCompile("\\s*```\\s*$")
+)
+
+func stripMarkdownFences(raw string) string {
+	cleaned := fenceOpenPattern.ReplaceAllString(raw, "")
+	return fenceClosePattern.ReplaceAllString(cleaned, "")
+}
+
 // ValidateResponse strictly parses one JSON object and validates every semantic token
 // against both the catalog supplied to the model and the current approved KB. Exact
-// business values must remain placeholders until code-side substitution.
+// business values must remain placeholders until code-side substitution. A markdown
+// code fence around the object is tolerated; everything inside remains strict.
 func ValidateResponse(raw string, kb *KB, cat *Catalog) (*Response, []ContractIssue) {
 	issues := []ContractIssue{}
-	blob := strings.TrimSpace(raw)
+	blob := strings.TrimSpace(stripMarkdownFences(raw))
 	if blob == "" {
 		return nil, []ContractIssue{{Code: "parse", Detail: "empty model output"}}
 	}
@@ -363,8 +379,22 @@ func currentFactValue(kb *KB, fact *FactEntry) (string, error) {
 			"free_delivery_from":    kb.Policies.FreeDeliveryFrom,
 			"min_order":             kb.Policies.MinOrder,
 			"return_period_in_days": kb.Policies.ReturnPeriodInDays,
+			"outside_zones_note":    kb.Policies.OutsideZonesNote,
 		}
 		value = values[fact.Column]
+	case "delivery":
+		zone := currentDeliveryZone(kb, fact.Ref)
+		if zone == nil {
+			return "", fmt.Errorf("aiprompt: fact token %q no longer has an active delivery zone row", fact.Token)
+		}
+		switch fact.Column {
+		case "delivery_cost":
+			value = zone.DeliveryCost
+		case "delivery_in_days":
+			value = zone.DeliveryInDays
+		case "delivery_available":
+			return DeliveryWordingRU[zone.DeliveryAvailable], nil
+		}
 	}
 	if strings.TrimSpace(value) == "" {
 		return "", fmt.Errorf("aiprompt: fact token %q now resolves to an empty value", fact.Token)
@@ -385,6 +415,15 @@ func currentTariff(kb *KB, ref string) *Tariff {
 	for i := range kb.Tariffs {
 		if kb.Tariffs[i].Ref == ref && active(kb.Tariffs[i].SalesStatus) {
 			return &kb.Tariffs[i]
+		}
+	}
+	return nil
+}
+
+func currentDeliveryZone(kb *KB, ref string) *DeliveryZone {
+	for i := range kb.DeliveryZones {
+		if kb.DeliveryZones[i].Ref == ref && active(kb.DeliveryZones[i].SalesStatus) {
+			return &kb.DeliveryZones[i]
 		}
 	}
 	return nil

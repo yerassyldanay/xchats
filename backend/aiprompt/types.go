@@ -108,6 +108,15 @@ type Contacts struct {
 }
 
 // Policies mirrors the ai_policies singleton (natural ref "main").
+//
+// DeliveryCost and DeliveryInDays are the KB-wide delivery answer used when
+// ai_delivery_zones is empty (the zones feature is unused). The moment any
+// DeliveryZone row exists, these two fields must be blank — BuildCatalog
+// enforces this fail-closed, because a flat delivery answer would contradict
+// per-zone pricing. OutsideZonesNote is the seller-authored closed-world
+// refusal ("we don't deliver there") for a direction that matches no zone;
+// it is required (non-blank) whenever ai_delivery_zones is non-empty, so the
+// refusal is always backed by a real token, never invented model prose.
 type Policies struct {
 	DeliveryCost            string
 	DeliveryInDays          string
@@ -117,7 +126,32 @@ type Policies struct {
 	Installment             string
 	ReturnPeriodInDays      string
 	Warranty                string
+	OutsideZonesNote        string
 	CommercePolicyDocuments []string
+}
+
+// DeliveryZone mirrors one ai_delivery_zones row: an explicit, seller-authored
+// statement of where the shop delivers (with cost and days) or explicitly
+// does not (DeliveryAvailable false). Zones form a shallow containment
+// hierarchy via ParentRef (city -> region -> country); resolution to a
+// specific zone is left to the model choosing the right FACTS token, not to
+// code walking the hierarchy — the hierarchy only has to exist so a fixture
+// author can give a country-level fallback without repeating it per city.
+//
+// A zone with DeliveryAvailable true must carry non-blank DeliveryCost and
+// DeliveryInDays; one with DeliveryAvailable false must carry neither —
+// BuildCatalog rejects a contradictory row rather than guessing which side
+// of the flag is authoritative.
+type DeliveryZone struct {
+	Ref               string
+	Name              string
+	ZoneLevel         string // city | region | country
+	ParentRef         string // empty for a top-level zone
+	DeliveryAvailable bool
+	DeliveryCost      string // required iff DeliveryAvailable; blank otherwise
+	DeliveryInDays    string // required iff DeliveryAvailable; blank otherwise
+	Notes             string
+	SalesStatus       string // active | inactive
 }
 
 // KB is one organization's complete approved live knowledge base plus the
@@ -133,6 +167,7 @@ type KB struct {
 	Tariffs        []Tariff
 	Contacts       *Contacts
 	Policies       *Policies
+	DeliveryZones  []DeliveryZone
 	Materials      []Material
 }
 
@@ -154,23 +189,25 @@ func (kb *KB) MaterialByID(id string) *Material {
 // makes the no-kbd_materials-in-the-prompt boundary a property of the API
 // signature, not just a runtime discipline.
 type PromptInput struct {
-	Assistant *Assistant
-	Topics    []Topic
-	Products  []Product
-	Tariffs   []Tariff
-	Contacts  *Contacts
-	Policies  *Policies
+	Assistant     *Assistant
+	Topics        []Topic
+	Products      []Product
+	Tariffs       []Tariff
+	Contacts      *Contacts
+	Policies      *Policies
+	DeliveryZones []DeliveryZone
 }
 
 // PromptInput derives the model-visible projection of kb: approved ai_*
 // content only, with no route back to kbd_materials.
 func (kb *KB) PromptInput() *PromptInput {
 	return &PromptInput{
-		Assistant: kb.Assistant,
-		Topics:    kb.Topics,
-		Products:  kb.Products,
-		Tariffs:   kb.Tariffs,
-		Contacts:  kb.Contacts,
-		Policies:  kb.Policies,
+		Assistant:     kb.Assistant,
+		Topics:        kb.Topics,
+		Products:      kb.Products,
+		Tariffs:       kb.Tariffs,
+		Contacts:      kb.Contacts,
+		Policies:      kb.Policies,
+		DeliveryZones: kb.DeliveryZones,
 	}
 }

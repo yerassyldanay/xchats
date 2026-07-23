@@ -164,6 +164,18 @@ type TestCase struct {
 	Media    *MediaExpect `yaml:"media"`    // expected media behavior, if this test checks media
 	Escalate *bool        `yaml:"escalate"` // expected escalate value, if this test checks escalation
 	Language string       `yaml:"language"` // expected reply language ("kk"), checked on the INJECTED text
+	// ForbidTokens lists fact/media tokens (bare "table.ref.column", no braces — same
+	// dotted form as Requires) the reply must NOT reference at all, scanned against the
+	// RAW reply_text token spans (requiresSatisfied's surface, before substitution — a
+	// forbidden token is about which FACT the model picked, not what the injected text
+	// says). An entry ending in "." is a PREFIX, forbidding every token under it in one
+	// line (e.g. "delivery." forbids every zone's cost/days/availability token at once —
+	// the shape a "this direction matches no zone" case needs: proving the model didn't
+	// fall back to citing some OTHER zone's price). Exists because MustNotContain alone
+	// can't express this: a substring blocklist has no way to say "any token from this
+	// whole family", and after substitution a zone's price is just digits indistinguishable
+	// from any other number.
+	ForbidTokens []string `yaml:"forbid_tokens"`
 	// MustNotContain is a case-insensitive substring blocklist, checked against the
 	// TOKEN-INJECTED reply text (after {{fact}} placeholders are substituted with their
 	// real values) — not the model's raw reply_text. Mainly for escalation traps:
@@ -203,6 +215,28 @@ type TestCase struct {
 	// have >= 2 blocks and every block must declare at least one check (enforced at
 	// render/catalog time, not judge time — a single alternative is just a plain test).
 	Outcomes []OutcomeCase `yaml:"outcomes"`
+	// LLMChecks declares OPTIONAL semantic claims judged by a cheap model, for the one
+	// class of case the deterministic checks above cannot express: a free-text reply that
+	// must communicate an intent (e.g. "this reply clearly says we don't deliver there")
+	// rather than reference a specific token or substring. Evaluated ONLY by the separate
+	// `judge-llm` command (see judge_llm.go) — the free `judge` command never calls an
+	// API, never reads this field, and ContractPass/ModelBehaviorPass are computed
+	// identically whether or not judge-llm ever runs. A test with no LLMChecks is
+	// unaffected either way.
+	LLMChecks []LLMCheck `yaml:"llm_checks"`
+}
+
+// LLMCheck is one binary semantic claim about a reply, judged by a pinned cheap model
+// (see judge_llm.go) rather than by exact-match code — reserved for intent that can only
+// be read from free text, e.g. proving a token-less refusal ("К сожалению, туда не
+// доставляем.") actually communicates "no delivery" without adding invented promises,
+// which no token or substring list can express (a paraphrase-proof negative like "не
+// доставим" has no fixed spelling to blocklist). Claim is a short Russian yes/no
+// question about the reply; Expect is the required answer. Judged independently of every
+// deterministic check — a test can declare both and both must pass.
+type LLMCheck struct {
+	Claim  string `yaml:"claim"`
+	Expect bool   `yaml:"expect"`
 }
 
 // OutcomeCase is one alternative expectation block inside TestCase.Outcomes — the same
@@ -220,6 +254,7 @@ type OutcomeCase struct {
 	Language       string       `yaml:"language"`
 	MustNotContain []string     `yaml:"must_not_contain"`
 	MustContainAny []string     `yaml:"must_contain_any"`
+	ForbidTokens   []string     `yaml:"forbid_tokens"`
 }
 
 // HistoryTurn is one prior message in a test's simulated conversation. Text is authored

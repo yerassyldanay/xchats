@@ -295,6 +295,30 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		}
 	}
 
+	// llm_checks follows the same not_run-by-default pattern as media_count/outcomes:
+	// LLMCheckEvaluated is an opt-in marker (only the separate judge-llm command ever
+	// sets it), so a verdict never touched by judge-llm renders not_run, never a
+	// fabricated pass from LLMJudgePass's nil/zero value. Detail lists the claim(s) that
+	// failed or came back unverified, mirroring OutcomesPass's "name what went wrong"
+	// convention.
+	llmChecksStatus := ScoreNotRun
+	llmChecksDetail := ""
+	if v.LLMCheckEvaluated {
+		llmChecksStatus = ScorePass
+		if v.LLMJudgePass == nil || !*v.LLMJudgePass {
+			llmChecksStatus = ScoreFail
+		}
+		var issues []string
+		for _, r := range v.LLMChecks {
+			if r.Unverified {
+				issues = append(issues, r.Claim+" (unverified)")
+			} else if !r.Pass {
+				issues = append(issues, r.Claim)
+			}
+		}
+		llmChecksDetail = strings.Join(issues, " | ")
+	}
+
 	scores := []VScore{
 		{Name: "parse_ok", Status: parseStatus, Detail: parseDetail},
 		{Name: "finish_reason_ok", Status: finishReasonStatus, Detail: v.FinishReason},
@@ -303,6 +327,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Name: "no_leftover_braces", Status: evaluated(!v.LeftoverBraces)},
 		{Name: "no_reasoning_leak", Status: evaluated(!v.ReasoningLeak)},
 		{Name: "requires", Status: evaluated(v.RequiresPass)},
+		{Name: "forbid_tokens", Status: evaluated(v.ForbidTokensPass), Detail: strings.Join(v.ForbiddenTokensHit, ", ")},
 		{Name: "media", Status: evaluated(v.MediaPass)},
 		{Name: "escalate", Status: evaluated(v.EscalatePass)},
 		{Name: "language", Status: evaluated(v.LanguagePass), Detail: v.LanguageIssue},
@@ -323,6 +348,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Name: "must_not_contain", Status: evaluated(v.MustNotContainPass), Detail: v.ForbiddenPhrase},
 		{Name: "must_contain_any", Status: evaluated(v.MustContainAnyPass), Detail: strings.Join(v.MustContainAnyExpected, ", ")},
 		{Name: "outcomes", Status: outcomesStatus, Detail: outcomesDetail},
+		{Name: "llm_checks", Status: llmChecksStatus, Detail: llmChecksDetail},
 		{Name: "no_invented_digits", Status: evaluated(len(v.InventedDigits) == 0), Detail: strings.Join(v.InventedDigits, ", ")},
 		{Name: "no_unit_issues", Status: evaluated(len(v.UnitIssues) == 0), Detail: strings.Join(v.UnitIssues, ", ")},
 		{Name: "no_unknown_media", Status: evaluated(len(v.UnknownMedia) == 0), Detail: strings.Join(v.UnknownMedia, ", ")},

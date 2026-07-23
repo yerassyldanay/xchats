@@ -157,7 +157,16 @@ type Verdict struct {
 	MediaResolveIssue string `json:"media_resolve_issue,omitempty"`
 
 	RequiresPass bool `json:"requires_pass"`
-	MediaPass    bool `json:"media_pass"`
+	// ForbidTokensPass mirrors MustNotContainPass but checks fact/media TOKENS rather
+	// than free text, on the raw (pre-substitution) reply — vacuously true when the test
+	// declares no forbid_tokens, same convention as MustNotContainPass. Built for cases
+	// that must prove the model picked a DIFFERENT fact than the one it's tempted to
+	// reuse — e.g. an unlisted-delivery-direction reply must never cite ANY zone's
+	// cost/days token, which a text-only blocklist can't express (see
+	// TestCase.ForbidTokens).
+	ForbidTokensPass   bool     `json:"forbid_tokens_pass"`
+	ForbiddenTokensHit []string `json:"forbidden_tokens_hit,omitempty"`
+	MediaPass          bool     `json:"media_pass"`
 	// MediaIssue is a human-readable detail for a MediaPass failure the generic "did not
 	// attach the expected media" wording doesn't fit — today only the Forbid case
 	// ("attached media, but this test forbids any attachment").
@@ -280,6 +289,47 @@ type Verdict struct {
 	TokensOut       int     `json:"tokens_out"`
 	CostEstimateUSD float64 `json:"cost_estimate_usd"`
 	CostBasis       string  `json:"cost_basis"`
+
+	// LLMCheckEvaluated is the CODE-VERSION + opt-in marker for TestCase.LLMChecks (same
+	// convention as OutcomesDeclared/MediaCountEvaluated): false for every verdict the
+	// plain `judge` command writes (it never reads or writes any LLMCheck field at all),
+	// and false for a verdict whose test declares no llm_checks or whose ContractPass is
+	// false (nothing sensible to judge). Only a run through the separate, opt-in
+	// `judge-llm` command against a ContractPass row with llm_checks declared ever sets
+	// this true — report.go/viewmodel.go must treat false as "not run," never as a
+	// fabricated pass.
+	LLMCheckEvaluated bool `json:"llm_check_evaluated,omitempty"`
+	// LLMJudgePass is nil when not evaluated, else true only if EVERY declared claim's
+	// judged verdict matched its Expect value (and none was Unverified). A *bool (not
+	// bool) so "not evaluated" and "evaluated, failed" are never confused on
+	// re-serialization — the same reasoning as every other nilable pass field here.
+	// Deliberately NOT folded into ModelBehaviorPass or ContractPass: this is reported as
+	// its own dimension, so the two core metrics stay identical whether or not judge-llm
+	// ever runs (see judge_llm.go's doc comment).
+	LLMJudgePass  *bool            `json:"llm_judge_pass,omitempty"`
+	LLMJudgeModel string           `json:"llm_judge_model,omitempty"`
+	LLMChecks     []LLMCheckResult `json:"llm_checks,omitempty"`
+	// LLMJudgeCostUSD is this verdict's OWN spend from the run that last wrote its
+	// LLMChecks — a run that reuses every claim from cache reports 0 here, honestly: no
+	// new API call means no new spend, not a stale total carried forward.
+	LLMJudgeCostUSD float64 `json:"llm_judge_cost_usd,omitempty"`
+}
+
+// LLMCheckResult is one TestCase.LLMChecks claim's judged outcome — see judge_llm.go.
+type LLMCheckResult struct {
+	Claim   string `json:"claim"`
+	Expect  bool   `json:"expect"`
+	Verdict bool   `json:"verdict"`
+	Pass    bool   `json:"pass"`
+	// Unverified is true when the judge call failed outright or its response could not
+	// be parsed into a boolean verdict — Verdict/Pass are meaningless zero values in that
+	// case (Pass is left false: fail-closed, an unverified claim is never silently
+	// treated as passed).
+	Unverified bool `json:"unverified"`
+	// CacheKey is sha256(message, reply text, claim, judge model id) — a later judge-llm
+	// run reuses this exact entry (no API call) when the key still matches; see
+	// llmCheckCacheKey.
+	CacheKey string `json:"cache_key"`
 }
 
 // CostBasis values — what CostEstimateUSD is actually computed from, so a report can never
@@ -776,6 +826,8 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 	v.InventedDigits = filterInventedDigits(digitRunRE.FindAllString(stripped, -1), tc.Message, trustedDigits)
 
 	v.RequiresPass = requiresSatisfied(tc.Requires, replyText, tokenValue)
+	v.ForbiddenTokensHit = forbiddenTokensHit(tc.ForbidTokens, replyText)
+	v.ForbidTokensPass = len(v.ForbiddenTokensHit) == 0
 
 	entries := mediaEntries(obj)
 	v.MediaPass = true
@@ -891,7 +943,7 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 		}
 	}
 
-	v.ModelBehaviorPass = v.RequiresPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
+	v.ModelBehaviorPass = v.RequiresPass && v.ForbidTokensPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
 		v.MustNotContainPass && v.MustContainAnyPass && v.OutcomesPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 &&
 		!v.TooManyMedia
 
@@ -908,6 +960,8 @@ func firstFailureReason(v Verdict) string {
 	switch {
 	case !v.RequiresPass:
 		return "did not use the required fact token(s)"
+	case !v.ForbidTokensPass:
+		return "reply_text cites a forbidden fact token: " + strings.Join(v.ForbiddenTokensHit, ", ")
 	case !v.MediaPass:
 		if v.MediaIssue != "" {
 			return v.MediaIssue
@@ -975,6 +1029,35 @@ func requiresSatisfied(requires [][]string, replyText string, tokenValue map[str
 // literal "{{table.ref.field}}" the model would have to emit.
 func factTokenLiteral(dotted string) string {
 	return "{{" + dotted + "}}"
+}
+
+// forbiddenTokensHit scans every {{table.ref.column}} span in replyText (the RAW,
+// pre-substitution reply — forbid_tokens is about which fact the model picked, not what
+// the injected text reads) and returns the spans matching one of forbid's entries. An
+// entry ending in "." is a dotted PREFIX (e.g. "delivery." matches every
+// "delivery.<zone>.*" token); any other entry must match the span's dotted form exactly.
+// Returns nil (not just empty) when forbid is empty, so callers can treat a nil result as
+// "no forbid_tokens declared" the same way MustNotContain's absence is vacuously true.
+func forbiddenTokensHit(forbid []string, replyText string) []string {
+	if len(forbid) == 0 {
+		return nil
+	}
+	var hits []string
+	for _, span := range tokenSpanRE.FindAllString(replyText, -1) {
+		dotted := strings.TrimSuffix(strings.TrimPrefix(span, "{{"), "}}")
+		for _, f := range forbid {
+			if strings.HasSuffix(f, ".") {
+				if strings.HasPrefix(dotted, f) {
+					hits = append(hits, span)
+					break
+				}
+			} else if dotted == f {
+				hits = append(hits, span)
+				break
+			}
+		}
+	}
+	return hits
 }
 
 // languageTextOK is the text-side language check — the exact looksKazakh polarity switch
@@ -1064,6 +1147,9 @@ type outcomeInputs struct {
 // checks use, so block semantics and top-level semantics are one implementation.
 func outcomeSatisfied(oc OutcomeCase, in outcomeInputs) bool {
 	if !requiresSatisfied(oc.Requires, in.replyText, in.tokenValue) {
+		return false
+	}
+	if len(forbiddenTokensHit(oc.ForbidTokens, in.replyText)) > 0 {
 		return false
 	}
 	if oc.Escalate != nil && in.escalate != *oc.Escalate {

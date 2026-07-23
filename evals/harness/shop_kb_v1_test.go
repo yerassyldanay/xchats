@@ -10,9 +10,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// These are the core and 30-only one-shot history banks for pipeline:schema_kb_v1.
+// These are the core, one-shot-history, and delivery-zones banks for pipeline:schema_kb_v1.
 var kbQuestionsRUBankPath = filepath.Join("..", "common", "kb-questions-ru.yaml")
 var kbHistoryRUBankPath = filepath.Join("..", "common", "kb-history-ru.yaml")
+var kbDeliveryRUBankPath = filepath.Join("..", "common", "kb-delivery-ru.yaml")
 
 // kbQuestionsRUPinnedIDs is the bank's exact, ordered ID list. Pinning the full list (not
 // just checking membership) means an accidental deletion or truncation during a future
@@ -27,13 +28,13 @@ var kbQuestionsRUPinnedIDs = []string{
 	"6. photo request — media-less product",
 	"7. video request — product with no video",
 	"8. partial-media probe — asks for the one missing kind",
-	"9. delivery cost",
-	"10. delivery days",
+	"9. delivery cost (general, zones present)",
+	"10. delivery days (general, zones present)",
 	"11. minimum order amount",
 	"12. working hours and phone",
 	"13. missing exact value — return period escalates",
 	"14. warranty duration escalates (prose-only, no fact column)",
-	"15. off-KB city escalates",
+	"15. off-KB city resolves via country zone fallback",
 }
 
 var kbHistoryRUPinnedIDs = []string{
@@ -42,6 +43,19 @@ var kbHistoryRUPinnedIDs = []string{
 	"h3. repeat prior literal through placeholder",
 	"h4. pronoun photo request",
 	"h5. out-of-stock purchase intent stays honest",
+}
+
+var kbDeliveryRUPinnedIDs = []string{
+	"d1. listed city — Astana",
+	"d2. listed city, different declension — Astane (dative)",
+	"d3. explicit deny zone — Baikonur beats its parent's allow",
+	"d4. unlisted country — China refuses via outside_zones_note",
+	"d5. unplaceable location escalates",
+	"d6. negotiation for an excluded direction escalates",
+	"d7. refund demand escalates",
+	"d8. repair service question escalates",
+	"d9. off-catalog product escalates",
+	"d10. history follow-up resolves the zone already discussed",
 }
 
 func TestKBQuestionsRUBank_PinnedIDList(t *testing.T) {
@@ -66,6 +80,17 @@ func TestKBHistoryRUBank_PinnedIDList(t *testing.T) {
 	}
 }
 
+func TestKBDeliveryRUBank_PinnedIDList(t *testing.T) {
+	tests := loadTestCases(t, kbDeliveryRUBankPath)
+	gotIDs := make([]string, len(tests))
+	for i, tc := range tests {
+		gotIDs[i] = tc.ID
+	}
+	if !reflect.DeepEqual(gotIDs, kbDeliveryRUPinnedIDs) {
+		t.Fatalf("%s: want exactly these IDs in order:\n%v\ngot:\n%v", kbDeliveryRUBankPath, kbDeliveryRUPinnedIDs, gotIDs)
+	}
+}
+
 // TestDetectLang_KBQuestionsRUBankIsAllRussian confirms the shop-kb-v1 family's own bank
 // never accidentally drifts into Kazakh-looking text. The schema_kb_v1 render path never
 // calls detectLang itself (frame-ru.txt is the only frame this family ever renders — there
@@ -74,7 +99,7 @@ func TestKBHistoryRUBank_PinnedIDList(t *testing.T) {
 // Russian-only by contract (aiprompt.ValidateResponse rejects any reply_language other
 // than "ru") — a message that reads as Kazakh here would be a silent contradiction.
 func TestDetectLang_KBQuestionsRUBankIsAllRussian(t *testing.T) {
-	for _, bankPath := range []string{kbQuestionsRUBankPath, kbHistoryRUBankPath} {
+	for _, bankPath := range []string{kbQuestionsRUBankPath, kbHistoryRUBankPath, kbDeliveryRUBankPath} {
 		for _, tc := range loadTestCases(t, bankPath) {
 			if got := detectLang(tc.Message, tc.History); got != "ru" {
 				t.Errorf("test %q: detectLang(message)=%q, want ru — message: %q", tc.ID, got, tc.Message)

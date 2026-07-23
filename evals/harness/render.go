@@ -405,7 +405,8 @@ func validateTestOutcomes(scenarioName, testID string, ocs []OutcomeCase) error 
 			return fmt.Errorf("scenario %q: test %q: outcomes[%d] has no label — every alternative must be nameable in failure reasons", scenarioName, testID, i)
 		}
 		declares := len(oc.Requires) > 0 || oc.Media != nil || oc.Escalate != nil ||
-			oc.Language != "" || len(oc.MustNotContain) > 0 || len(oc.MustContainAny) > 0
+			oc.Language != "" || len(oc.MustNotContain) > 0 || len(oc.MustContainAny) > 0 ||
+			len(oc.ForbidTokens) > 0
 		if !declares {
 			return fmt.Errorf("scenario %q: test %q: outcomes[%d] (%q) declares no checks — a check-less block passes every reply, which can only be an authoring mistake", scenarioName, testID, i, oc.Label)
 		}

@@ -46,6 +46,35 @@ func TestGenerate_StructuralShape(t *testing.T) {
 	if fx.AIPolicies == nil || fx.AIPolicies.ReturnPeriodInDays != "" {
 		t.Errorf("want ai_policies.return_period_in_days deliberately empty, got %+v", fx.AIPolicies)
 	}
+	if fx.AIPolicies.DeliveryCost != "" || fx.AIPolicies.DeliveryInDays != "" {
+		t.Errorf("want the flat delivery_cost/delivery_in_days blank once ai_delivery_zones is non-empty, got %+v", fx.AIPolicies)
+	}
+	if fx.AIPolicies.OutsideZonesNote == "" {
+		t.Error("want a non-blank outside_zones_note once ai_delivery_zones is non-empty")
+	}
+
+	if len(fx.AIDeliveryZones) != 4 {
+		t.Fatalf("want 4 delivery zones, got %d", len(fx.AIDeliveryZones))
+	}
+	zoneByRef := map[string]AIDeliveryZone{}
+	for _, z := range fx.AIDeliveryZones {
+		zoneByRef[z.Ref] = z
+	}
+	kz, ok := zoneByRef["kazakhstan"]
+	if !ok || kz.ZoneLevel != "country" || kz.ParentRef != "" || kz.DeliveryAvailable == nil || !bool(*kz.DeliveryAvailable) {
+		t.Errorf("want kazakhstan = available country-level fallback with no parent, got %+v", kz)
+	}
+	astana, ok := zoneByRef["astana"]
+	if !ok || astana.ZoneLevel != "city" || astana.ParentRef != "kazakhstan" || astana.DeliveryAvailable == nil || !bool(*astana.DeliveryAvailable) {
+		t.Errorf("want astana = available city nested under kazakhstan, got %+v", astana)
+	}
+	baikonur, ok := zoneByRef["baikonur"]
+	if !ok || baikonur.ParentRef != "kazakhstan" || baikonur.DeliveryAvailable == nil || bool(*baikonur.DeliveryAvailable) {
+		t.Errorf("want baikonur = an explicit deny city nested under kazakhstan, got %+v", baikonur)
+	}
+	if baikonur.DeliveryCost != "" || baikonur.DeliveryInDays != "" {
+		t.Errorf("want a deny zone to carry no cost/days, got %+v", baikonur)
+	}
 
 	seenRef := map[string]bool{}
 	inStockTrue, withMedia := 0, 0

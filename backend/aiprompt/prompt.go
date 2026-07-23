@@ -150,6 +150,12 @@ func renderDescriptions(input *PromptInput) string {
 		add("Рассрочка", p.Installment)
 		add("Гарантия", p.Warranty)
 	}
+	for _, z := range input.DeliveryZones {
+		if !active(z.SalesStatus) {
+			continue
+		}
+		add("Доставка — "+z.Name, z.Notes)
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -172,7 +178,7 @@ func renderFacts(facts []FactEntry) string {
 
 func factLabel(f FactEntry) string {
 	switch f.Table {
-	case "product", "tariff":
+	case "product", "tariff", "delivery":
 		return f.Ref + " — " + f.Label
 	default:
 		return f.Label

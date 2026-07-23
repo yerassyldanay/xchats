@@ -38,6 +38,34 @@ func TestValidateResponse_Valid(t *testing.T) {
 	}
 }
 
+func TestValidateResponse_MarkdownFencedJSON(t *testing.T) {
+	cat := validCatalog(t)
+	for name, raw := range map[string]string{
+		"json fence": "```json\n" + validResponseJSON + "\n```",
+		"bare fence": "```\n" + validResponseJSON + "\n```",
+		"padded":     "  ```json  \n" + validResponseJSON + "\n```  \n",
+	} {
+		resp, issues := ValidateResponse(raw, baseKB(), cat)
+		if len(issues) != 0 {
+			t.Errorf("%s: unexpected issues: %+v", name, issues)
+		}
+		if resp == nil {
+			t.Errorf("%s: expected a parsed response", name)
+		}
+	}
+}
+
+func TestValidateResponse_FenceOnlyOutput(t *testing.T) {
+	cat := validCatalog(t)
+	resp, issues := ValidateResponse("```json\n```", baseKB(), cat)
+	if resp != nil {
+		t.Fatal("fence with no body must not parse")
+	}
+	if !containsCode(issues, "parse") {
+		t.Fatalf("expected parse issue, got %+v", issues)
+	}
+}
+
 func TestValidateResponse_MissingField(t *testing.T) {
 	cat := validCatalog(t)
 	raw := `{
@@ -256,7 +284,10 @@ func TestValidateResponse_RejectsAnythingExceptOneJSONObject(t *testing.T) {
 		{name: "top-level null", raw: "null"},
 		{name: "leading prose", raw: "Ответ: " + valid},
 		{name: "trailing prose", raw: valid + " готово"},
-		{name: "markdown fence", raw: "```json\n" + valid + "\n```"},
+		// A bare markdown fence around the object is NOT here: it is stripped as
+		// transport noise (see TestValidateResponse_MarkdownFencedJSON). Prose
+		// outside a fence still fails.
+		{name: "prose before fence", raw: "Ответ:\n```json\n" + valid + "\n```"},
 		{name: "second object", raw: valid + " {}"},
 	}
 	for _, tt := range tests {

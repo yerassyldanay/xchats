@@ -136,6 +136,36 @@ func TestJudgeOneSchemaKB_UnknownMediaFailsContractAndRetries(t *testing.T) {
 	}
 }
 
+// TestJudgeOneSchemaKB_ForbidTokens proves TestCase.ForbidTokens gates
+// ModelBehaviorPass on the schema_kb_v1 path exactly as it does on judgeOne — the same
+// mechanism a "this direction matches no delivery zone" case needs to prove the model
+// didn't fall back to citing some OTHER zone's price.
+func TestJudgeOneSchemaKB_ForbidTokens(t *testing.T) {
+	kb, cat := loadSchemaKBJudgeContext(t)
+	tc := TestCase{ID: "t", ForbidTokens: []string{"policy."}}
+	tokenValue := aipromptTokenValues(cat)
+	trustedDigits := trustedDigitsFromKB(kb)
+
+	t.Run("citing a forbidden-prefix token fails behavior", func(t *testing.T) {
+		output := schemaKBResponse(t, "Доставка — {{policy.main.delivery_cost}}.", []string{}, "")
+		v := judgeOneSchemaKB(tc, schemaKBPromptfooRow(output), kb, cat, tokenValue, trustedDigits)
+		if v.ForbidTokensPass || v.ModelBehaviorPass {
+			t.Fatalf("ForbidTokensPass=%v ModelBehaviorPass=%v reason=%q", v.ForbidTokensPass, v.ModelBehaviorPass, v.Reason)
+		}
+		if len(v.ForbiddenTokensHit) != 1 || v.ForbiddenTokensHit[0] != "{{policy.main.delivery_cost}}" {
+			t.Fatalf("ForbiddenTokensHit = %v", v.ForbiddenTokensHit)
+		}
+	})
+
+	t.Run("citing a different token passes", func(t *testing.T) {
+		output := schemaKBResponse(t, "Цена — {{product.coffee-machine.price}}.", []string{}, "")
+		v := judgeOneSchemaKB(tc, schemaKBPromptfooRow(output), kb, cat, tokenValue, trustedDigits)
+		if !v.ForbidTokensPass {
+			t.Fatalf("want ForbidTokensPass=true, reason=%q", v.Reason)
+		}
+	})
+}
+
 func TestJudgeOneSchemaKB_RereadsMediaColumn(t *testing.T) {
 	kb, cat := loadSchemaKBJudgeContext(t)
 	kb.Products[0].FeaturedImage = ""

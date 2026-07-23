@@ -120,6 +120,32 @@ func TestFormatRetryCell_EmptyWhenNeverRetried(t *testing.T) {
 	}
 }
 
+// TestFormatLLMCheckCell_EmptyWhenNeverEvaluated proves judge-llm's optional column never
+// prints for a run that never ran judge-llm — every SUMMARY.md before this feature
+// existed must render identically.
+func TestFormatLLMCheckCell_EmptyWhenNeverEvaluated(t *testing.T) {
+	ms := modelStats{total: 10}
+	if got := formatLLMCheckCell(&ms); got != "" {
+		t.Fatalf("formatLLMCheckCell() = %q, want empty string when llmChecked=0", got)
+	}
+}
+
+func TestFormatLLMCheckCell_ReportsPassRateAndUnverifiedSeparately(t *testing.T) {
+	ms := modelStats{total: 5, llmChecked: 4, llmPass: 3, llmUnverified: 1, llmCost: 0.0021}
+	want := "3/4 pass (75%), 1 unverified, ~$0.0021"
+	if got := formatLLMCheckCell(&ms); got != want {
+		t.Fatalf("formatLLMCheckCell() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatLLMCheckCell_OmitsUnverifiedClauseWhenZero(t *testing.T) {
+	ms := modelStats{total: 5, llmChecked: 2, llmPass: 2, llmCost: 0.0005}
+	want := "2/2 pass (100%), ~$0.0005"
+	if got := formatLLMCheckCell(&ms); got != want {
+		t.Fatalf("formatLLMCheckCell() = %q, want %q", got, want)
+	}
+}
+
 // TestFormatFirstShotCell_ReflectsAttempt0EvenWhenRetried is the split-reporting
 // guarantee: firstAttemptContractPass pools Verdict.FirstAttemptContractPass — attempt
 // 0's own outcome — across every row, so a model that needed retry.go's correction on

@@ -107,6 +107,18 @@ func addStockFact(cat *Catalog, ref string, col FactColumn, inStock bool) {
 	cat.Facts = append(cat.Facts, e)
 }
 
+func addDeliveryFlagFact(cat *Catalog, ref string, col FactColumn, available bool) {
+	state := "delivers"
+	if !available {
+		state = "no_delivery"
+	}
+	cat.Facts = append(cat.Facts, FactEntry{
+		Token: "{{delivery." + ref + "." + col.Column + "}}",
+		Table: "delivery", Ref: ref, Column: col.Column,
+		Label: col.Label, Kind: col.Kind, ReasoningState: state, UsageNote: usageNote(col),
+	})
+}
+
 func buildFacts(kb *KB, cat *Catalog) error {
 	for _, p := range kb.Products {
 		if !active(p.SalesStatus) {
@@ -154,9 +166,99 @@ func buildFacts(kb *KB, cat *Catalog) error {
 			"delivery_cost": p.DeliveryCost, "delivery_in_days": p.DeliveryInDays,
 			"free_delivery_from": p.FreeDeliveryFrom, "min_order": p.MinOrder,
 			"return_period_in_days": p.ReturnPeriodInDays,
+			"outside_zones_note":    p.OutsideZonesNote,
 		}
 		for _, col := range factColumns["policy"] {
 			addFact(cat, "policy", SingletonRef, col, vals[col.Column])
+		}
+	}
+	if err := buildDeliveryZoneFacts(kb, cat); err != nil {
+		return err
+	}
+	return nil
+}
+
+var validZoneLevels = map[string]bool{"city": true, "region": true, "country": true}
+
+// buildDeliveryZoneFacts derives per-zone delivery facts and enforces every
+// zones-specific fail-closed rule. An empty DeliveryZones means the feature
+// is unused: no rule below applies, and delivery questions fall back to the
+// flat ai_policies.delivery_cost/delivery_in_days facts already added above.
+//
+// Once any zone exists, three invariants are enforced (any violation is a
+// hard BuildCatalog error, never a silent drop):
+//  1. each row is internally consistent — DeliveryAvailable true requires a
+//     non-blank cost and days; false requires both blank. A contradictory row
+//     could otherwise be read either way at substitution time.
+//  2. ParentRef chains resolve to an existing zone with no cycle, so a model
+//     token referencing a parent zone is always resolvable.
+//  3. the flat ai_policies delivery facts are blank (they would contradict
+//     per-zone pricing) and OutsideZonesNote is non-blank (every unlisted
+//     direction must have a real refusal token, never invented prose).
+func buildDeliveryZoneFacts(kb *KB, cat *Catalog) error {
+	if len(kb.DeliveryZones) == 0 {
+		return nil
+	}
+
+	byRef := make(map[string]*DeliveryZone, len(kb.DeliveryZones))
+	for i := range kb.DeliveryZones {
+		z := &kb.DeliveryZones[i]
+		if err := validRef(z.Ref); err != nil {
+			return err
+		}
+		if byRef[z.Ref] != nil {
+			return fmt.Errorf("aiprompt: duplicate delivery zone ref %q", z.Ref)
+		}
+		byRef[z.Ref] = z
+		if !validZoneLevels[z.ZoneLevel] {
+			return fmt.Errorf("aiprompt: delivery zone %q has invalid zone_level %q (want city, region, or country)", z.Ref, z.ZoneLevel)
+		}
+		if z.DeliveryAvailable {
+			if strings.TrimSpace(z.DeliveryCost) == "" || strings.TrimSpace(z.DeliveryInDays) == "" {
+				return fmt.Errorf("aiprompt: delivery zone %q is available but delivery_cost or delivery_in_days is blank", z.Ref)
+			}
+		} else if strings.TrimSpace(z.DeliveryCost) != "" || strings.TrimSpace(z.DeliveryInDays) != "" {
+			return fmt.Errorf("aiprompt: delivery zone %q is unavailable but delivery_cost or delivery_in_days is set", z.Ref)
+		}
+	}
+	for ref, z := range byRef {
+		seen := map[string]bool{ref: true}
+		for parent := z.ParentRef; parent != ""; {
+			if seen[parent] {
+				return fmt.Errorf("aiprompt: delivery zone %q has a cyclic parent_ref chain", ref)
+			}
+			seen[parent] = true
+			next, ok := byRef[parent]
+			if !ok {
+				return fmt.Errorf("aiprompt: delivery zone %q references unknown parent_ref %q", ref, parent)
+			}
+			parent = next.ParentRef
+		}
+	}
+
+	if kb.Policies == nil {
+		return fmt.Errorf("aiprompt: ai_policies is required when ai_delivery_zones is non-empty")
+	}
+	if strings.TrimSpace(kb.Policies.DeliveryCost) != "" || strings.TrimSpace(kb.Policies.DeliveryInDays) != "" {
+		return fmt.Errorf("aiprompt: ai_policies.delivery_cost and delivery_in_days must be blank when ai_delivery_zones is non-empty — use per-zone facts instead")
+	}
+	if strings.TrimSpace(kb.Policies.OutsideZonesNote) == "" {
+		return fmt.Errorf("aiprompt: ai_policies.outside_zones_note is required when ai_delivery_zones is non-empty")
+	}
+
+	for _, z := range kb.DeliveryZones {
+		if !active(z.SalesStatus) {
+			continue
+		}
+		for _, col := range factColumns["delivery"] {
+			switch col.Column {
+			case "delivery_cost":
+				addFact(cat, "delivery", z.Ref, col, z.DeliveryCost)
+			case "delivery_in_days":
+				addFact(cat, "delivery", z.Ref, col, z.DeliveryInDays)
+			case "delivery_available":
+				addDeliveryFlagFact(cat, z.Ref, col, z.DeliveryAvailable)
+			}
 		}
 	}
 	return nil

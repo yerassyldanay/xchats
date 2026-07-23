@@ -253,6 +253,8 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 	v.InventedDigits = filterInventedDigits(digitRunRE.FindAllString(stripped, -1), tc.Message, trustedDigits)
 
 	v.RequiresPass = requiresSatisfied(tc.Requires, replyText, tokenValue)
+	v.ForbiddenTokensHit = forbiddenTokensHit(tc.ForbidTokens, replyText)
+	v.ForbidTokensPass = len(v.ForbiddenTokensHit) == 0
 
 	v.MediaPass = true
 	if tc.Media != nil {
@@ -338,7 +340,7 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 
 	v.UnknownMedia = unknownMediaFromCatalog
 
-	v.ModelBehaviorPass = v.RequiresPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
+	v.ModelBehaviorPass = v.RequiresPass && v.ForbidTokensPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
 		v.MustNotContainPass && v.MustContainAnyPass && v.OutcomesPass && len(v.InventedDigits) == 0 &&
 		len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 && !v.TooManyMedia
 

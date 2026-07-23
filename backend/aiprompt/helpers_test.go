@@ -85,6 +85,37 @@ func baseKB() *KB {
 	}
 }
 
+// zonesKB returns a valid KB with ai_delivery_zones populated: one country
+// fallback ("kazakhstan"), one available city inside it ("astana"), and one
+// explicit deny city inside it ("baikonur") — enough to exercise most-
+// specific-wins resolution, the deny-beats-parent case, and the flat/zone
+// mutual-exclusion invariant. Callers copy and mutate only the field under
+// test, same discipline as baseKB.
+func zonesKB() *KB {
+	kb := baseKB()
+	kb.Policies.DeliveryCost = ""
+	kb.Policies.DeliveryInDays = ""
+	kb.Policies.OutsideZonesNote = "В другие страны и регионы не доставляем."
+	kb.DeliveryZones = []DeliveryZone{
+		{
+			Ref: "kazakhstan", Name: "Казахстан (остальные города)", ZoneLevel: "country",
+			DeliveryAvailable: true, DeliveryCost: "10 000 ₸", DeliveryInDays: "3–4",
+			SalesStatus: "active",
+		},
+		{
+			Ref: "astana", Name: "Астана", ZoneLevel: "city", ParentRef: "kazakhstan",
+			DeliveryAvailable: true, DeliveryCost: "4 000 ₸", DeliveryInDays: "1",
+			SalesStatus: "active",
+		},
+		{
+			Ref: "baikonur", Name: "Байконур", ZoneLevel: "city", ParentRef: "kazakhstan",
+			DeliveryAvailable: false, Notes: "Закрытый административный статус — доставка недоступна.",
+			SalesStatus: "active",
+		},
+	}
+	return kb
+}
+
 // basicFrame is a minimal frame exercising every prompt slot once.
 const basicFrame = `# ASSISTANT
 %%ASSISTANT%%

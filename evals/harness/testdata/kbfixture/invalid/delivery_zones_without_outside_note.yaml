@@ -1,0 +1,14 @@
+# Fail-closed rule under test: once any delivery zone exists,
+# ai_policies.outside_zones_note must be non-blank — every direction that
+# matches no zone still needs a real seller-authored refusal token, never
+# invented model prose.
+organization_id: "33333333-3333-3333-3333-333333333333"
+ai_policies: {}
+ai_delivery_zones:
+  - ref: probe
+    name: "Тестовая зона"
+    zone_level: city
+    delivery_available: true
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active

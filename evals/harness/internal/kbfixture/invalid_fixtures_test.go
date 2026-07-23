@@ -30,6 +30,11 @@ func TestInvalidFixtures_FailClosed(t *testing.T) {
 		{"invisible_customer.yaml", "referenced material's customer_visibility is \"invisible\""},
 		{"mime_mismatch.yaml", "referenced material's MIME type doesn't match the column's kind"},
 		{"singular_column_multiple_refs.yaml", "a singular media column is given two refs instead of one"},
+		{"delivery_zone_contradictory_row.yaml", "an available delivery zone has a blank cost or delivery days"},
+		{"delivery_zone_bad_level.yaml", "a delivery zone's zone_level is outside city|region|country"},
+		{"delivery_zone_missing_parent.yaml", "a delivery zone's parent_ref names a zone that does not exist"},
+		{"delivery_zones_without_outside_note.yaml", "delivery zones exist but ai_policies.outside_zones_note is blank"},
+		{"delivery_zones_with_flat_cost.yaml", "delivery zones exist but the flat ai_policies.delivery_cost is still set"},
 	}
 
 	entries, err := os.ReadDir(invalidFixtureDir)

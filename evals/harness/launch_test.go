@@ -4,9 +4,9 @@ import "testing"
 
 func TestResolveExpectedExtractCalls(t *testing.T) {
 	tests := []struct {
-		name                              string
-		numCases, numModels, numPrompts   int
-		want                              int
+		name                            string
+		numCases, numModels, numPrompts int
+		want                            int
 	}{
 		{"one case, one model, default prompt", 1, 1, 1, 1},
 		{"5 cases x 3 models x 2 prompts (v1/v2 comparison)", 5, 3, 2, 30},

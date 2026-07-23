@@ -454,6 +454,166 @@ kbd_materials:
 	}
 }
 
+// TestDecode_DeliveryZones covers the loader's own shape validation for
+// ai_delivery_zones — required fields, the closed zone_level/sales_status
+// enums, delivery_available as a required StrictBool (same NOT-NULL
+// discipline as in_stock), and duplicate refs. Cross-row business rules
+// (available/cost consistency, parent_ref existence, the flat/zone
+// mutual-exclusion invariant) are aiprompt.BuildCatalog's job, not the
+// loader's — see delivery_test.go in backend/aiprompt and this package's
+// testdata/invalid fixtures.
+func TestDecode_DeliveryZones(t *testing.T) {
+	cases := []struct {
+		name    string
+		yaml    string
+		wantErr bool
+	}{
+		{"missing ref", `
+organization_id: "org-1"
+ai_delivery_zones:
+  - name: "Zone"
+    zone_level: city
+    delivery_available: true
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active
+`, true},
+		{"missing name", `
+organization_id: "org-1"
+ai_delivery_zones:
+  - ref: z1
+    zone_level: city
+    delivery_available: true
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active
+`, true},
+		{"bad zone_level", `
+organization_id: "org-1"
+ai_delivery_zones:
+  - ref: z1
+    name: "Zone"
+    zone_level: planet
+    delivery_available: true
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active
+`, true},
+		{"delivery_available omitted", `
+organization_id: "org-1"
+ai_delivery_zones:
+  - ref: z1
+    name: "Zone"
+    zone_level: city
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active
+`, true},
+		{"delivery_available non-canonical spelling", `
+organization_id: "org-1"
+ai_delivery_zones:
+  - ref: z1
+    name: "Zone"
+    zone_level: city
+    delivery_available: "yes"
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active
+`, true},
+		{"bad sales_status", `
+organization_id: "org-1"
+ai_delivery_zones:
+  - ref: z1
+    name: "Zone"
+    zone_level: city
+    delivery_available: true
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: discontinued
+`, true},
+		{"duplicate zone ref", `
+organization_id: "org-1"
+ai_delivery_zones:
+  - {ref: z1, name: "A", zone_level: city, delivery_available: false, sales_status: active}
+  - {ref: z1, name: "B", zone_level: city, delivery_available: false, sales_status: active}
+`, true},
+		{"valid deny zone with no parent_ref", `
+organization_id: "org-1"
+ai_delivery_zones:
+  - ref: z1
+    name: "Zone"
+    zone_level: city
+    delivery_available: false
+    sales_status: active
+`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Decode([]byte(tc.yaml))
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected a decode error for %s", tc.name)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected decode error for %s: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestDecode_DeliveryZoneFieldsRoundTrip proves every AIDeliveryZone field —
+// including the optional parent_ref and notes — decodes into the matching
+// aiprompt.DeliveryZone field.
+func TestDecode_DeliveryZoneFieldsRoundTrip(t *testing.T) {
+	yamlSrc := `
+organization_id: "org-1"
+ai_policies:
+  outside_zones_note: "Не доставляем за пределы зоны."
+ai_delivery_zones:
+  - ref: astana
+    name: "Астана"
+    zone_level: city
+    parent_ref: kazakhstan
+    delivery_available: true
+    delivery_cost: "4 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active
+  - ref: kazakhstan
+    name: "Казахстан"
+    zone_level: country
+    delivery_available: true
+    delivery_cost: "10 000 ₸"
+    delivery_in_days: "3–4"
+    sales_status: active
+  - ref: baikonur
+    name: "Байконур"
+    zone_level: city
+    parent_ref: kazakhstan
+    delivery_available: false
+    notes: "Особый статус."
+    sales_status: active
+`
+	kb, err := Decode([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if len(kb.DeliveryZones) != 3 {
+		t.Fatalf("expected 3 delivery zones, got %d", len(kb.DeliveryZones))
+	}
+	astana := kb.DeliveryZones[0]
+	if astana.Ref != "astana" || astana.Name != "Астана" || astana.ZoneLevel != "city" ||
+		astana.ParentRef != "kazakhstan" || !astana.DeliveryAvailable ||
+		astana.DeliveryCost != "4 000 ₸" || astana.DeliveryInDays != "1" || astana.SalesStatus != "active" {
+		t.Errorf("astana = %+v", astana)
+	}
+	baikonur := kb.DeliveryZones[2]
+	if baikonur.DeliveryAvailable || baikonur.Notes != "Особый статус." {
+		t.Errorf("baikonur = %+v", baikonur)
+	}
+	if kb.Policies == nil || kb.Policies.OutsideZonesNote == "" {
+		t.Error("expected outside_zones_note to round-trip onto Policies")
+	}
+}
+
 func TestApplyLimits(t *testing.T) {
 	kb, err := Decode([]byte(validFixtureYAML))
 	if err != nil {

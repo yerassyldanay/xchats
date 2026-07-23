@@ -50,6 +50,7 @@ var (
 	validCustomerVisibility = set("", "auto", "invisible", "visible")
 	validSalesStatus        = set("active", "inactive")
 	validPricingType        = set("fixed", "percentage", "tiered", "hybrid")
+	validZoneLevel          = set("city", "region", "country")
 )
 
 func set(vals ...string) map[string]bool {
@@ -179,8 +180,37 @@ func toKB(fx *Fixture) (*aiprompt.KB, error) {
 			FreeDeliveryFrom: p.FreeDeliveryFrom, MinOrder: p.MinOrder,
 			Prepayment: p.Prepayment, Installment: p.Installment,
 			ReturnPeriodInDays: p.ReturnPeriodInDays, Warranty: p.Warranty,
+			OutsideZonesNote:        p.OutsideZonesNote,
 			CommercePolicyDocuments: p.CommercePolicyDocuments,
 		}
+	}
+
+	seenZoneRef := map[string]bool{}
+	for i, z := range fx.AIDeliveryZones {
+		if strings.TrimSpace(z.Ref) == "" {
+			return nil, fmt.Errorf("ai_delivery_zones[%d]: ref is required", i)
+		}
+		if seenZoneRef[z.Ref] {
+			return nil, fmt.Errorf("ai_delivery_zones: duplicate ref %q", z.Ref)
+		}
+		seenZoneRef[z.Ref] = true
+		if strings.TrimSpace(z.Name) == "" {
+			return nil, fmt.Errorf("ai_delivery_zones[%s]: name is required", z.Ref)
+		}
+		if !validZoneLevel[z.ZoneLevel] {
+			return nil, fmt.Errorf("ai_delivery_zones[%s]: zone_level must be one of city|region|country, got %q", z.Ref, z.ZoneLevel)
+		}
+		if z.DeliveryAvailable == nil {
+			return nil, fmt.Errorf("ai_delivery_zones[%s]: delivery_available is required (NOT NULL, no default)", z.Ref)
+		}
+		if !validSalesStatus[z.SalesStatus] {
+			return nil, fmt.Errorf("ai_delivery_zones[%s]: sales_status must be \"active\" or \"inactive\", got %q", z.Ref, z.SalesStatus)
+		}
+		kb.DeliveryZones = append(kb.DeliveryZones, aiprompt.DeliveryZone{
+			Ref: z.Ref, Name: z.Name, ZoneLevel: z.ZoneLevel, ParentRef: z.ParentRef,
+			DeliveryAvailable: bool(*z.DeliveryAvailable), DeliveryCost: z.DeliveryCost,
+			DeliveryInDays: z.DeliveryInDays, Notes: z.Notes, SalesStatus: z.SalesStatus,
+		})
 	}
 
 	seenMaterialID := map[string]bool{}

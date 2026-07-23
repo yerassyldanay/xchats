@@ -21,6 +21,7 @@ const (
 	KindNumber       ValueKind = "number"        // bare number; unit word comes from the column meaning
 	KindNumberRange  ValueKind = "number_range"  // bare number or range like 1–3
 	KindStockFlag    ValueKind = "stock_flag"    // boolean; code substitutes reviewed Russian wording
+	KindDeliveryFlag ValueKind = "delivery_flag" // boolean; code substitutes reviewed Russian wording
 )
 
 // StockWordingRU is the reviewed Russian wording code substitutes for the
@@ -28,6 +29,14 @@ const (
 var StockWordingRU = map[bool]string{
 	true:  "в наличии",
 	false: "нет в наличии",
+}
+
+// DeliveryWordingRU is the reviewed Russian wording code substitutes for the
+// delivery_available boolean. The model never writes the boolean literal, and
+// never phrases delivery availability itself — it only ever copies the token.
+var DeliveryWordingRU = map[bool]string{
+	true:  "доставляем",
+	false: "не доставляем",
 }
 
 // FactColumn describes one exact-value column.
@@ -81,6 +90,15 @@ var factColumns = map[string][]FactColumn{
 		{Column: "free_delivery_from", Label: "бесплатная доставка от", Kind: KindMoneyDisplay},
 		{Column: "min_order", Label: "минимальный заказ", Kind: KindMoneyDisplay},
 		{Column: "return_period_in_days", Label: "срок возврата, в днях", Kind: KindNumber, Unit: "дней"},
+		{Column: "outside_zones_note", Label: "доставка вне списка зон", Kind: KindTextComplete},
+	},
+	// "delivery" is a multi-row fact table (one row per ai_delivery_zones
+	// entry, keyed by its own ref), unlike "policy" which is the fixed "main"
+	// singleton — see DeliveryZone's doc comment for the containment model.
+	"delivery": {
+		{Column: "delivery_cost", Label: "стоимость доставки", Kind: KindMoneyDisplay},
+		{Column: "delivery_in_days", Label: "срок доставки, в днях", Kind: KindNumberRange, Unit: "дня"},
+		{Column: "delivery_available", Label: "доступность доставки", Kind: KindDeliveryFlag},
 	},
 }
 
@@ -168,6 +186,8 @@ func usageNote(f FactColumn) string {
 		return "только число; добавь слово «" + f.Unit + "» после токена"
 	case KindStockFlag:
 		return "флаг наличия; называя наличие, вставляй сам токен — код подставит правильную формулировку; состояние out_of_stock не предлагай активно, предложи альтернативу in_stock"
+	case KindDeliveryFlag:
+		return "флаг доступности доставки в это направление; называя доступность, вставляй сам токен — код подставит правильную формулировку. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
 	default:
 		return ""
 	}

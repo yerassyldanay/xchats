@@ -330,15 +330,52 @@ Exactly one row exists per organization. Its model-facing natural ref is `main`.
 |---|---|---|---|
 | `id` | `uuid` | primary key | — |
 | `organization_id` | `uuid` | not null, unique, FK `organizations(id)` | — |
-| `delivery_cost` | `text` | null | Exact approved delivery price |
-| `delivery_in_days` | `text` | null | Exact delivery duration/range in days |
+| `delivery_cost` | `text` | null | Exact approved delivery price; MUST be `NULL` whenever `ai_delivery_zones` has any row for this organization (see that table) |
+| `delivery_in_days` | `text` | null | Exact delivery duration/range in days; same mutual-exclusion rule as `delivery_cost` |
 | `free_delivery_from` | `text` | null | Exact order value that qualifies for free delivery |
 | `min_order` | `text` | null | Exact minimum order value |
 | `prepayment` | `text` | null | Trusted Russian prepayment policy |
 | `installment` | `text` | null | Trusted Russian installment policy |
 | `return_period_in_days` | `text` | null | Exact return duration in days |
 | `warranty` | `text` | null | Trusted Russian warranty policy; not an exact-duration fact |
+| `outside_zones_note` | `text` | null | Exact approved refusal shown for a direction matching no `ai_delivery_zones` row; required (non-null) whenever `ai_delivery_zones` has any row for this organization |
 | `commerce_policy_documents` | `uuid[]` | not null, default `{}` | Customer-sendable commerce-policy documents |
+| `created_at` | `timestamptz` | not null, default `now()` | — |
+| `updated_at` | `timestamptz` | not null, default `now()` | — |
+
+#### `ai_delivery_zones` — approved delivery-coverage zones
+
+Zero or more rows per organization; empty means the organization has not opted
+into per-zone delivery and `ai_policies.delivery_cost`/`delivery_in_days`
+answer every delivery-cost question instead (the pre-existing, still-supported
+behavior). The moment any row exists for an organization, the flat
+`ai_policies.delivery_cost`/`delivery_in_days` fields must both be `NULL` for
+that organization (a flat answer would contradict per-zone pricing) and
+`ai_policies.outside_zones_note` must be non-null (every direction that
+matches no zone still needs a real, seller-approved refusal — never invented
+by the model). Zones form a shallow containment hierarchy via `parent_ref`
+(city → region → country); which zone answers a given customer message is
+resolved by the model choosing the most specific matching FACTS token, not by
+code walking the hierarchy at answer time. A row with `delivery_available =
+true` must carry non-null `delivery_cost` and `delivery_in_days`; one with
+`delivery_available = false` (an explicit "we do not deliver here" row, e.g.
+a city excluded from an otherwise-covered region) must carry neither — a
+contradictory row is rejected at write time, never guessed at read time. No
+media columns exist on this table in v1.
+
+| Column | Type | Null/default | Short description |
+|---|---|---|---|
+| `id` | `uuid` | primary key | — |
+| `organization_id` | `uuid` | not null, FK `organizations(id)` | — |
+| `ref` | `text` | not null, unique per organization | Stable zone natural key |
+| `name` | `text` | not null | Approved Russian zone display name |
+| `zone_level` | `text` | not null | `city`, `region`, or `country` |
+| `parent_ref` | `text` | null | This organization's own `ai_delivery_zones.ref` this zone is nested under; null for a top-level zone |
+| `delivery_available` | `boolean` | not null | Whether this zone is served at all; code localizes it into Russian wording, the same discipline as `ai_products.in_stock` |
+| `delivery_cost` | `text` | null | Exact approved delivery price for this zone; required iff `delivery_available`, otherwise must be null |
+| `delivery_in_days` | `text` | null | Exact delivery duration/range in days for this zone; same requirement as `delivery_cost` |
+| `notes` | `text` | null | Trusted Russian prose about this zone (e.g. why an excluded city is excluded) |
+| `sales_status` | `text` | not null, default `active` | `active` or `inactive`; an inactive zone produces no facts but remains a valid `parent_ref` target |
 | `created_at` | `timestamptz` | not null, default `now()` | — |
 | `updated_at` | `timestamptz` | not null, default `now()` | — |
 
@@ -734,6 +771,13 @@ rejects unknown or stale placeholders and media tokens, re-reads the approved
 row and semantic column, validates every material again, substitutes exact
 values, and resolves the storage records. Any invalid placeholder or requested
 media file blocks the complete suggestion; partial rendering is forbidden.
+
+A markdown code fence (` ```json … ``` `) wrapping the object is stripped as
+transport noise before validation — run 2026-07-22_23-37-42-94b6 showed 5 of 7
+models fence by default even when told «строго JSON», so rejecting fences
+measured formatting luck, not contract compliance. Everything else stays
+strict: prose outside the fence, a second object, or any content deviation
+still fails the parse.
 
 ### `customer_visibility`: `auto | invisible | visible`
 

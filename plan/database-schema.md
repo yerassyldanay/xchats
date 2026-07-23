@@ -100,8 +100,23 @@ ai_contacts — singleton approved organization contact facts/prose
 ai_policies — singleton approved commerce policy facts/prose
   id, organization_id, delivery_cost, delivery_in_days, free_delivery_from,
   min_order, prepayment, installment, return_period_in_days, warranty,
-  commerce_policy_documents, created_at, updated_at
+  outside_zones_note, commerce_policy_documents, created_at, updated_at
   UNIQUE (organization_id)
+  -- delivery_cost/delivery_in_days must be NULL, and outside_zones_note must
+  -- be non-null, whenever this organization has any ai_delivery_zones row.
+
+ai_delivery_zones — zero or more approved delivery-coverage zones per org
+  id, organization_id, ref, name, zone_level, parent_ref, delivery_available,
+  delivery_cost, delivery_in_days, notes, sales_status, created_at, updated_at
+  UNIQUE (organization_id, ref)
+  -- delivery_available=true requires non-null delivery_cost/delivery_in_days;
+  -- delivery_available=false requires both null. parent_ref (nullable) names
+  -- another row's ref in the SAME organization, forming a shallow city ->
+  -- region -> country containment hierarchy; no media columns in v1. Empty
+  -- table means the organization has not opted into per-zone delivery, and
+  -- ai_policies.delivery_cost/delivery_in_days answer every delivery-cost
+  -- question instead (see DECISIONS.md's ai_delivery_zones section for the
+  -- full closed-world resolution rule).
 
 ai_audit_log — append-only approval history
   id, organization_id, action, actor_user_id, note, created_at
@@ -109,14 +124,14 @@ ai_audit_log — append-only approval history
 
 `price`, `fee`, `delivery_cost`, `delivery_in_days`, `free_delivery_from`,
 `min_order`, `return_period_in_days`, `whatsapp`, `phone`, `email`, `website`,
-and language-neutral `working_hours` are examples of semantic exact-value
-columns. They are stored as text because approved values may contain symbols and
-ranges (`25 000 ₸`, `≈ 5 000 ₸`, `1–3`), but their meaning/unit comes from the
-column name. `in_stock` is the deliberate `boolean` exception: code renders
-`true`/`false` as reviewed Russian wording and the model never writes the
-boolean literal to the customer. A missing scalar is SQL `NULL`, never an empty
-or whitespace-only string; an empty exact value generates no placeholder, so a
-question that needs it must escalate. Word-bearing information belongs in a
+`outside_zones_note`, and language-neutral `working_hours` are examples of
+semantic exact-value columns. They are stored as text because approved values may
+contain symbols and ranges (`25 000 ₸`, `≈ 5 000 ₸`, `1–3`), but their meaning/unit
+comes from the column name. `in_stock` and `ai_delivery_zones.delivery_available`
+are the deliberate `boolean` exceptions: code renders `true`/`false` as reviewed
+Russian wording and the model never writes the boolean literal to the customer. A
+missing scalar is SQL `NULL`, never an empty or whitespace-only string; an empty
+exact value generates no placeholder, so a question that needs it must escalate. Word-bearing information belongs in a
 named trusted-prose column. `address`, `legal_information`, `callback_time`,
 `limit_text`, `summary`, `advantages`, `disadvantages`, `prepayment`,
 `installment`, and `warranty` are prose and must not be used to smuggle exact
@@ -154,6 +169,9 @@ ai_policies:
   commerce_policy_documents
 
 ai_assistants:
+  no media columns in v1
+
+ai_delivery_zones:
   no media columns in v1
 ```
 
