@@ -55,6 +55,9 @@ func writeRunHTML(runDir string) error {
 	if err != nil {
 		return err
 	}
+	if len(data.ScenarioGroups) == 0 && len(data.ExtractGroups) == 0 {
+		return fmt.Errorf("no evaluated executions in %s; refusing to publish an empty 0/0 report", runDir)
+	}
 	var buf bytes.Buffer
 	if err := runHTMLTemplate.Execute(&buf, data); err != nil {
 		return fmt.Errorf("render template: %w", err)

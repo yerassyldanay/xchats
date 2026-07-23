@@ -138,6 +138,37 @@ func TestBuildRunsIndexRows_SkipsLaunchesDir(t *testing.T) {
 	}
 }
 
+func TestBuildRunsIndexRows_SkipsSupportAndZeroExecutionDirs(t *testing.T) {
+	runsRoot := t.TempDir()
+
+	for _, name := range []string{"catalog", provenance.IncompleteRunsDirName, "empty-run"} {
+		dir := filepath.Join(runsRoot, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(`{"family":"scenario"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	complete := filepath.Join(runsRoot, "2026-01-01_00-00-00-complete")
+	if err := os.MkdirAll(complete, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jr := JudgedRun{Scenario: "s1", Verdicts: []Verdict{{TestID: "t1", Model: "m1", ParseOK: true}}}
+	if err := writeJSON(filepath.Join(complete, "s1.judged.json"), jr); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := buildRunsIndexRows(runsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].RunID != filepath.Base(complete) {
+		t.Fatalf("want only the evaluated run, got %+v", rows)
+	}
+}
+
 // TestWriteRunHTML_AlsoRegeneratesRunsIndex proves the wiring: calling writeRunHTML
 // for one run must rebuild the SIBLING runs/index.html too (step 6's whole point —
 // "regenerated wholesale on every run/html invocation").
@@ -145,6 +176,10 @@ func TestWriteRunHTML_AlsoRegeneratesRunsIndex(t *testing.T) {
 	runsRoot := t.TempDir()
 	runDir := filepath.Join(runsRoot, "2026-01-01_00-00-00-cccc")
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jr := JudgedRun{Scenario: "s1", Verdicts: []Verdict{{TestID: "t1", Model: "m1", ParseOK: true}}}
+	if err := writeJSON(filepath.Join(runDir, "s1.judged.json"), jr); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeRunHTML(runDir); err != nil {

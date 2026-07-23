@@ -66,40 +66,106 @@ func TestValidateResponse_FenceOnlyOutput(t *testing.T) {
 	}
 }
 
-func TestValidateResponse_MissingField(t *testing.T) {
+func TestValidateResponse_MissingOperationalField(t *testing.T) {
 	cat := validCatalog(t)
 	raw := `{
   "reply_text": "ok",
   "reply_language": "ru",
   "media_files_to_send": [],
-  "escalate": false,
-  "escalation_reason": ""
-}` // confidence omitted
+  "escalation_reason": "",
+  "confidence": 0.9
+}` // escalate omitted
 	_, issues := ValidateResponse(raw, baseKB(), cat)
 	if !containsCode(issues, "missing_property") {
 		t.Fatalf("expected missing_property issue, got %+v", issues)
 	}
-	if issueDetail(issues, "missing_property") != "confidence" {
-		t.Fatalf("expected missing property 'confidence', got issues %+v", issues)
+	if issueDetail(issues, "missing_property") != "escalate" {
+		t.Fatalf("expected missing property 'escalate', got issues %+v", issues)
 	}
 }
 
-func TestValidateResponse_WrongType(t *testing.T) {
+// Diagnostic fields (confidence, escalation_reason) are optional telemetry: their
+// absence must never produce an issue.
+func TestValidateResponse_MissingDiagnosticFieldsOK(t *testing.T) {
+	cat := validCatalog(t)
+	for name, raw := range map[string]string{
+		"confidence omitted": `{
+  "reply_text": "ok",
+  "reply_language": "ru",
+  "media_files_to_send": [],
+  "escalate": false,
+  "escalation_reason": ""
+}`,
+		"escalation_reason omitted": `{
+  "reply_text": "ok",
+  "reply_language": "ru",
+  "media_files_to_send": [],
+  "escalate": false,
+  "confidence": 0.9
+}`,
+		"both diagnostics omitted": `{
+  "reply_text": "ok",
+  "reply_language": "ru",
+  "media_files_to_send": [],
+  "escalate": false
+}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp, issues := ValidateResponse(raw, baseKB(), cat)
+			if resp == nil || len(issues) != 0 {
+				t.Fatalf("ValidateResponse() = (%+v, %+v), want valid with no issues", resp, issues)
+			}
+		})
+	}
+}
+
+func TestValidateResponse_WrongTypeOperational(t *testing.T) {
 	cat := validCatalog(t)
 	raw := `{
+  "reply_text": "ok",
+  "reply_language": "ru",
+  "media_files_to_send": [],
+  "escalate": "false",
+  "escalation_reason": "",
+  "confidence": 0.9
+}`
+	resp, issues := ValidateResponse(raw, baseKB(), cat)
+	if resp != nil {
+		t.Fatalf("expected nil response on operational type error, got %+v", resp)
+	}
+	if !containsCode(issues, "wrong_property_type") || issueDetail(issues, "wrong_property_type") != "escalate" {
+		t.Fatalf("expected wrong_property_type for escalate, got %+v", issues)
+	}
+}
+
+// A wrong-typed DIAGNOSTIC value must not reject an otherwise valid operational
+// response — the malformed value stays visible in the caller's preserved raw output.
+func TestValidateResponse_WrongTypeDiagnosticTolerated(t *testing.T) {
+	cat := validCatalog(t)
+	for name, raw := range map[string]string{
+		"confidence string": `{
   "reply_text": "ok",
   "reply_language": "ru",
   "media_files_to_send": [],
   "escalate": false,
   "escalation_reason": "",
   "confidence": "high"
-}`
-	resp, issues := ValidateResponse(raw, baseKB(), cat)
-	if resp != nil {
-		t.Fatalf("expected nil response on type error, got %+v", resp)
-	}
-	if !containsCode(issues, "parse") {
-		t.Fatalf("expected a parse issue for wrong-typed confidence, got %+v", issues)
+}`,
+		"escalation_reason number": `{
+  "reply_text": "ok",
+  "reply_language": "ru",
+  "media_files_to_send": [],
+  "escalate": false,
+  "escalation_reason": 7,
+  "confidence": 0.9
+}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp, issues := ValidateResponse(raw, baseKB(), cat)
+			if resp == nil || len(issues) != 0 {
+				t.Fatalf("ValidateResponse() = (%+v, %+v), want valid with no issues", resp, issues)
+			}
+		})
 	}
 }
 
@@ -146,7 +212,8 @@ func TestValidateResponse_BadLanguage(t *testing.T) {
 	}
 }
 
-func TestValidateResponse_BadConfidence(t *testing.T) {
+// Out-of-range confidence is diagnostic noise, never a failure.
+func TestValidateResponse_OutOfRangeConfidenceTolerated(t *testing.T) {
 	cat := validCatalog(t)
 	for _, conf := range []float64{-0.01, 1.01, 2.0} {
 		raw := `{
@@ -157,9 +224,9 @@ func TestValidateResponse_BadConfidence(t *testing.T) {
   "escalation_reason": "",
   "confidence": ` + jsonNum(conf) + `
 }`
-		_, issues := ValidateResponse(raw, baseKB(), cat)
-		if !containsCode(issues, "bad_confidence") {
-			t.Errorf("confidence %v: expected bad_confidence issue, got %+v", conf, issues)
+		resp, issues := ValidateResponse(raw, baseKB(), cat)
+		if resp == nil || len(issues) != 0 {
+			t.Errorf("confidence %v: ValidateResponse() = (%+v, %+v), want valid with no issues", conf, resp, issues)
 		}
 	}
 }
@@ -169,7 +236,9 @@ func jsonNum(f float64) string {
 	return string(b)
 }
 
-func TestValidateResponse_EscalationReasonMismatch(t *testing.T) {
+// A nonempty escalation_reason with escalate=false is a diagnostic observation, not a
+// contract failure — the field is telemetry, never customer-facing.
+func TestValidateResponse_EscalationReasonWithoutEscalateTolerated(t *testing.T) {
 	cat := validCatalog(t)
 	raw := `{
   "reply_text": "ok",
@@ -179,9 +248,12 @@ func TestValidateResponse_EscalationReasonMismatch(t *testing.T) {
   "escalation_reason": "клиент спрашивает о том, чего нет в базе",
   "confidence": 0.5
 }`
-	_, issues := ValidateResponse(raw, baseKB(), cat)
-	if !containsCode(issues, "escalation_reason_mismatch") {
-		t.Fatalf("expected escalation_reason_mismatch issue, got %+v", issues)
+	resp, issues := ValidateResponse(raw, baseKB(), cat)
+	if resp == nil || len(issues) != 0 {
+		t.Fatalf("ValidateResponse() = (%+v, %+v), want valid with no issues", resp, issues)
+	}
+	if resp.EscalationReason == "" {
+		t.Fatal("escalation_reason should still be decoded for logging")
 	}
 }
 
@@ -300,7 +372,7 @@ func TestValidateResponse_RejectsAnythingExceptOneJSONObject(t *testing.T) {
 	}
 }
 
-func TestValidateResponse_RejectsNullContractProperties(t *testing.T) {
+func TestValidateResponse_RejectsNullOperationalProperties(t *testing.T) {
 	kb := baseKB()
 	cat, err := BuildCatalog(kb)
 	if err != nil {
@@ -311,8 +383,6 @@ func TestValidateResponse_RejectsNullContractProperties(t *testing.T) {
 		"reply_language",
 		"media_files_to_send",
 		"escalate",
-		"escalation_reason",
-		"confidence",
 	}
 	for _, property := range properties {
 		t.Run(property, func(t *testing.T) {
@@ -331,6 +401,24 @@ func TestValidateResponse_RejectsNullContractProperties(t *testing.T) {
 			}
 			if detail := issueDetail(issues, "wrong_property_type"); detail != property {
 				t.Fatalf("wrong_property_type detail = %q, want %q", detail, property)
+			}
+		})
+	}
+	// Null DIAGNOSTIC properties are tolerated — best-effort decode, never a gate.
+	for _, property := range []string{"escalation_reason", "confidence"} {
+		t.Run(property+" null tolerated", func(t *testing.T) {
+			var object map[string]any
+			if err := json.Unmarshal([]byte(validResponseJSON), &object); err != nil {
+				t.Fatal(err)
+			}
+			object[property] = nil
+			raw, err := json.Marshal(object)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, issues := ValidateResponse(string(raw), kb, cat)
+			if resp == nil || len(issues) != 0 {
+				t.Fatalf("ValidateResponse() = (%+v, %+v), want valid with no issues", resp, issues)
 			}
 		})
 	}
@@ -388,7 +476,9 @@ func TestValidateResponse_FactPlaceholderFailures(t *testing.T) {
 	}
 }
 
-func TestValidateResponse_RejectsPlaceholderOutsideReply(t *testing.T) {
+// Placeholders or braces inside escalation_reason are tolerated (diagnostic-only
+// field) and are NEVER substituted — the value is preserved exactly as written.
+func TestValidateResponse_PlaceholderInEscalationReasonTolerated(t *testing.T) {
 	kb := baseKB()
 	cat, err := BuildCatalog(kb)
 	if err != nil {
@@ -402,9 +492,12 @@ func TestValidateResponse_RejectsPlaceholderOutsideReply(t *testing.T) {
   "escalation_reason": "Нужен {{product.coffee-machine.price}}",
   "confidence": 0.5
 }`
-	_, issues := ValidateResponse(raw, kb, cat)
-	if !containsCode(issues, "placeholder_outside_reply") {
-		t.Fatalf("issues = %+v, want placeholder_outside_reply", issues)
+	resp, issues := ValidateResponse(raw, kb, cat)
+	if resp == nil || len(issues) != 0 {
+		t.Fatalf("ValidateResponse() = (%+v, %+v), want valid with no issues", resp, issues)
+	}
+	if resp.EscalationReason != "Нужен {{product.coffee-machine.price}}" {
+		t.Fatalf("escalation_reason must be preserved verbatim (never substituted), got %q", resp.EscalationReason)
 	}
 }
 

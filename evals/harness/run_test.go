@@ -22,6 +22,29 @@ func TestResolveExpectedCalls(t *testing.T) {
 	}
 }
 
+func TestValidateResolvedRunSize(t *testing.T) {
+	tests := []struct {
+		name                   string
+		totalTests, totalCalls int
+		wantErr                bool
+	}{
+		{"normal run", 31, 93, false},
+		{"zero tests", 0, 0, true},
+		{"zero calls", 31, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateResolvedRunSize(tt.totalTests, tt.totalCalls)
+			if tt.wantErr && err == nil {
+				t.Fatal("want error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("want no error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateRepeats(t *testing.T) {
 	tests := []struct {
 		name    string

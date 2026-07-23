@@ -99,13 +99,11 @@ func buildRunsIndexRows(runsRoot string) ([]runsIndexRow, error) {
 	}
 	var rows []runsIndexRow
 	for _, e := range entries {
-		// "launches" holds LaunchManifest files (see internal/provenance/launch.go),
-		// not a run dir — it has no *.judged.json/extract_outputs/manifest.json of
-		// its own, so treating it as one would produce a bogus, empty "unknown
-		// family" row. Same exclusion cmdExport's -all path already applies
-		// (export.go) — kept as two explicit checks rather than one shared helper,
-		// since this is the only other place runsRoot's entries are walked.
-		if !e.IsDir() || e.Name() == "launches" {
+		// These are support directories, not published runs. In particular,
+		// .incomplete retains interrupted raw responses for debugging, while catalog
+		// holds image assets used by catalog.json. Scanning either one used to create
+		// bogus 0/0 rows.
+		if !e.IsDir() || isRunSupportDir(e.Name()) {
 			continue
 		}
 		row, err := buildRunsIndexRow(filepath.Join(runsRoot, e.Name()))
@@ -115,10 +113,19 @@ func buildRunsIndexRows(runsRoot string) ([]runsIndexRow, error) {
 			// skipping it or failing the whole index.
 			row = runsIndexRow{RunID: e.Name(), LoadError: err.Error()}
 		}
+		// A directory with no judged scenario rows and no extraction outputs is not
+		// an evaluation result. Do not publish a meaningless 0/0 entry.
+		if row.LoadError == "" && row.ScenarioTotal == 0 && row.ExtractTotal == 0 {
+			continue
+		}
 		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].RunID > rows[j].RunID }) // newest first
 	return rows, nil
+}
+
+func isRunSupportDir(name string) bool {
+	return name == "launches" || name == "catalog" || name == provenance.IncompleteRunsDirName
 }
 
 func buildRunsIndexRow(runDir string) (runsIndexRow, error) {

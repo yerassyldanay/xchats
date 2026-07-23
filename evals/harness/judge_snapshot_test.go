@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -123,5 +124,77 @@ func TestJudgeScenario_PrefersRunSnapshotOverLiveGenerated(t *testing.T) {
 	v := jr.Verdicts[0]
 	if v.InjectedText != "val=SNAPSHOT-VALUE" {
 		t.Fatalf("want injected text from the RUN'S OWN SNAPSHOT (SNAPSHOT-VALUE), got %q — judge read the live (changed) scenario dir instead", v.InjectedText)
+	}
+}
+
+// TestJudgeScenario_OfflineRejudgeNeverModifiesStoredRawResponses is the harness-level
+// proof for the plan's immutability requirement: re-judging a stored run — including
+// one whose provider output combines reasoning text with the final answer — into a
+// brand NEW run directory (a) makes no model calls (judgeScenario has no HTTP client
+// at all, only local file reads/writes) and (b) never mutates the parent's stored
+// results.json bytes. The re-judge picks up the extracted final answer exactly like a
+// live judge would.
+func TestJudgeScenario_OfflineRejudgeNeverModifiesStoredRawResponses(t *testing.T) {
+	scenarioDir := t.TempDir()
+	writeMinimalScenarioFiles(t, scenarioDir, "129900")
+
+	parentRunDir := t.TempDir()
+	combined := "Thinking: let me check the value before answering.\n\n" +
+		`{"reply_text":"val={{x}}","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+	writeMinimalResults(t, parentRunDir, "fixture-scenario", combined)
+
+	resultsPath := filepath.Join(parentRunDir, "fixture-scenario.results.json")
+	before, err := os.ReadFile(resultsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-judge into a SEPARATE, brand-new run directory — never the parent's own dir —
+	// mirroring how an offline re-judge of an already-collected run is done.
+	rejudgedDir := t.TempDir()
+	rejudgedResultsPath := filepath.Join(rejudgedDir, "fixture-scenario.results.json")
+	rejudgedBytes, err := os.ReadFile(resultsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rejudgedResultsPath, rejudgedBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := judgeScenario(scenarioDir, rejudgedDir, "../models.yaml"); err != nil {
+		t.Fatalf("judgeScenario (offline re-judge): %v", err)
+	}
+
+	after, err := os.ReadFile(resultsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("re-judging must never modify the parent run's stored results.json")
+	}
+	rejudgedAfter, err := os.ReadFile(rejudgedResultsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(rejudgedBytes, rejudgedAfter) {
+		t.Fatal("judgeScenario must never rewrite the results.json it judges from")
+	}
+
+	var jr JudgedRun
+	if err := readJSON(filepath.Join(rejudgedDir, "fixture-scenario.judged.json"), &jr); err != nil {
+		t.Fatal(err)
+	}
+	if len(jr.Verdicts) != 1 {
+		t.Fatalf("want 1 verdict, got %d", len(jr.Verdicts))
+	}
+	v := jr.Verdicts[0]
+	if !v.ParseOK {
+		t.Fatalf("want the combined reasoning+answer output to still parse via extraction, reason=%q", v.Reason)
+	}
+	if v.RawOutput != combined {
+		t.Fatalf("RawOutput = %q, want the untouched original combined output %q", v.RawOutput, combined)
+	}
+	if v.InjectedText != "val=129900" {
+		t.Fatalf("InjectedText = %q, want the extracted final answer's substitution to have run", v.InjectedText)
 	}
 }

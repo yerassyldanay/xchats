@@ -218,6 +218,26 @@ func TestCmdExport_AllSkipsLaunchesDirAndWritesRunsJSON(t *testing.T) {
 	}
 }
 
+func TestCmdExport_AllSkipsSupportAndZeroExecutionDirs(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	for _, name := range []string{"catalog", provenance.IncompleteRunsDirName, "empty-run"} {
+		if err := os.MkdirAll(filepath.Join("runs", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := cmdExport([]string{"-all"}); err != nil {
+		t.Fatalf("cmdExport -all: %v", err)
+	}
+	for _, name := range []string{"catalog", provenance.IncompleteRunsDirName, "empty-run"} {
+		if _, err := os.Stat(filepath.Join("runs", name, "index.html")); !os.IsNotExist(err) {
+			t.Errorf("%s must not receive a bogus 0/0 index.html, stat err = %v", name, err)
+		}
+	}
+}
+
 // TestCmdExport_RunAndAllAreMutuallyExclusive guards the flag contract.
 func TestCmdExport_RunAndAllAreMutuallyExclusive(t *testing.T) {
 	if err := cmdExport([]string{"-run", "x", "-all"}); err == nil {

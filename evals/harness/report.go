@@ -61,9 +61,14 @@ func reportRun(runDir, modelsPath string) error {
 }
 
 type modelStats struct {
-	model                                  string
-	total, modelBehaviorPass, contractPass int
-	costEstimate                           float64
+	model string
+	// The four SEPARATE result dimensions (never averaged together): parseOK is the
+	// final-JSON extraction/parse result, contractPass the full operational contract,
+	// modelBehaviorPass the deterministic code-based behavior checks, and the llm*
+	// fields below the optional LLM-as-judge dimension (reported "not run" when
+	// judge-llm never executed — never as 0%).
+	total, parseOK, modelBehaviorPass, contractPass int
+	costEstimate                                    float64
 	measuredN, borrowedN, unpricedN        int
 	unknownPricingN                        int
 	tokensInSum, tokensOutSum              int
@@ -164,7 +169,12 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Run %s\n\n", runID)
 	fmt.Fprintf(&b, "Generated %s. One table per scenario; a scenario's own README/PLAYGROUND.md\n", time.Now().Format("2006-01-02 15:04"))
-	b.WriteString("explains what \"model-behavior\" vs \"contract\" pass rate means.\n\n")
+	b.WriteString("explains what \"model-behavior\" vs \"contract\" pass rate means.\n")
+	b.WriteString("Four result types are reported separately and never averaged together:\n")
+	b.WriteString("final-JSON parse/extraction, operational contract, deterministic code-based\n")
+	b.WriteString("behavior checks (the \"model-behavior\" column — computed by harness code, not by\n")
+	b.WriteString("an LLM), and the optional LLM-as-judge dimension (its own line per scenario;\n")
+	b.WriteString("\"not run\" when judge-llm never executed).\n\n")
 
 	fmt.Fprintf(&b, "**Cost is an ESTIMATE, not real spend.** Computed from models.yaml's "+
 		"hand-maintained prices (source: %s, checked %s) × token counts from the API "+
@@ -195,6 +205,9 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 				order = append(order, v.Model)
 			}
 			ms.total++
+			if v.ParseOK {
+				ms.parseOK++
+			}
 			if v.ModelBehaviorPass {
 				ms.modelBehaviorPass++
 			}
@@ -247,8 +260,14 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 		}
 		sort.Strings(order)
 
-		b.WriteString("| model | model-behavior pass | 95% CI (Wilson, pooled) | contract pass (final) | contract pass (first shot) | est. cost | avg latency | avg tokens | prompt share |\n")
-		b.WriteString("|---|---|---|---|---|---|---|---|---|\n")
+		// Column semantics, kept deliberately separate (never averaged into one
+		// number): "parse" is the final-JSON extraction/parse result alone;
+		// "contract pass" the full operational contract; "model-behavior pass" the
+		// DETERMINISTIC code-based checks (requires/media/escalate/language/...),
+		// computed by this harness's own code — never an LLM judgment. The optional
+		// LLM-as-judge dimension is reported in its own line below the table.
+		b.WriteString("| model | parse | model-behavior pass (deterministic) | 95% CI (Wilson, pooled) | contract pass (final) | contract pass (first shot) | est. cost | avg latency | avg tokens | prompt share |\n")
+		b.WriteString("|---|---|---|---|---|---|---|---|---|---|\n")
 		for _, m := range order {
 			ms := byModel[m]
 			promptShare := "n/a"
@@ -256,8 +275,9 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 				promptShare = fmt.Sprintf("%.0f%%", 100*float64(ms.tokensInSum)/float64(total))
 			}
 			ciLo, ciHi := wilsonInterval(ms.modelBehaviorPass, ms.total)
-			fmt.Fprintf(&b, "| %s | %d/%d (%.0f%%) | [%.0f%%, %.0f%%] | %d/%d (%.0f%%) | %s | %s | %s | %d | %s |\n",
-				m, ms.modelBehaviorPass, ms.total, pct(ms.modelBehaviorPass, ms.total),
+			fmt.Fprintf(&b, "| %s | %d/%d (%.0f%%) | %d/%d (%.0f%%) | [%.0f%%, %.0f%%] | %d/%d (%.0f%%) | %s | %s | %s | %d | %s |\n",
+				m, ms.parseOK, ms.total, pct(ms.parseOK, ms.total),
+				ms.modelBehaviorPass, ms.total, pct(ms.modelBehaviorPass, ms.total),
 				ciLo*100, ciHi*100,
 				ms.contractPass, ms.total, pct(ms.contractPass, ms.total),
 				formatFirstShotCell(ms),
@@ -308,6 +328,10 @@ func buildSummary(runID string, runs []JudgedRun, models *ModelsFile) string {
 				b.WriteString("\n")
 			}
 			b.WriteString("\n")
+		} else {
+			// Explicit "not run", never an implied 0%: every number in the table above
+			// is deterministic code-based checking; no LLM judged anything in this run.
+			b.WriteString("LLM-as-judge (judge-llm): not run. All pass rates above are deterministic code-based checks.\n\n")
 		}
 
 		if isScaleScenario(run.Scenario) {
@@ -442,6 +466,13 @@ func buildContractReport(runs []JudgedRun) string {
 		for _, v := range run.Verdicts {
 			fmt.Fprintf(&b, "### %s — %s\n\n", v.TestID, v.Model)
 			fmt.Fprintf(&b, "- parse ok: %v\n", v.ParseOK)
+			if v.ExtractionMethod != "" {
+				fmt.Fprintf(&b, "- final answer extraction: %s", v.ExtractionMethod)
+				if v.NonFinalOutput != "" {
+					b.WriteString(" (non-final reasoning/preamble text stored separately, not scored)")
+				}
+				b.WriteString("\n")
+			}
 			fmt.Fprintf(&b, "- contract fields ok: %v\n", v.ContractFields)
 			if len(v.UnknownTokens) > 0 {
 				fmt.Fprintf(&b, "- **BLOCKED — unknown token(s):** %s\n", strings.Join(v.UnknownTokens, ", "))
@@ -488,7 +519,14 @@ func buildContractReport(runs []JudgedRun) string {
 				fmt.Fprintf(&b, " (%d in / %d out tokens, est. $%.6f)", v.TokensIn, v.TokensOut, v.CostEstimateUSD)
 			}
 			b.WriteString("\n")
-			fmt.Fprintf(&b, "- contract pass: **%v** · model-behavior pass: **%v**\n\n", v.ContractPass, v.ModelBehaviorPass)
+			llmCell := "not run"
+			if v.LLMCheckEvaluated {
+				llmCell = "fail"
+				if v.LLMJudgePass != nil && *v.LLMJudgePass {
+					llmCell = "pass"
+				}
+			}
+			fmt.Fprintf(&b, "- contract pass: **%v** · model-behavior pass (deterministic): **%v** · llm judge: %s\n\n", v.ContractPass, v.ModelBehaviorPass, llmCell)
 		}
 	}
 	return b.String()

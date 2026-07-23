@@ -77,7 +77,7 @@ func retryCandidateIndexesSchemaKB(rows []PromptfooRow, kb *aiprompt.KB, cat *ai
 // identifiable bad token, so the same repeated prompt is sent unchanged and left to
 // self-correct on the second attempt.
 func correctiveFeedbackText(raw string, validMedia map[string]bool) string {
-	obj, ok := parseModelJSON(raw)
+	obj, ok := extractModelJSON(raw, nil)
 	if !ok {
 		return ""
 	}
@@ -518,7 +518,7 @@ func cmdRetry(args []string) error {
 		providersByCandidate[i] = p
 	}
 
-	runID, runDir, err := provenance.NewRunDir(runsRoot)
+	runID, runDir, err := provenance.NewStagedRunDir(runsRoot)
 	if err != nil {
 		return err
 	}
@@ -588,13 +588,16 @@ func cmdRetry(args []string) error {
 	}
 	ref.ResultsSHA256 = resultsSHA
 	manifest.Scenarios = append(manifest.Scenarios, ref)
+	if err := judgeScenario(*scenarioDir, runDir, *modelsPath); err != nil {
+		return fmt.Errorf("judge %s: %w", scenario.Name, err)
+	}
 	manifest.Finish()
 	if err := provenance.WriteManifest(runDir, manifest); err != nil {
 		return err
 	}
-
-	if err := judgeScenario(*scenarioDir, runDir, *modelsPath); err != nil {
-		return fmt.Errorf("judge %s: %w", scenario.Name, err)
+	publishedRunDir, err := provenance.PublishStagedRun(runsRoot, runID, runDir)
+	if err != nil {
+		return err
 	}
-	return reportRun(runDir, *modelsPath)
+	return reportRun(publishedRunDir, *modelsPath)
 }

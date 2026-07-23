@@ -12,6 +12,8 @@ import (
 
 	"xchats-evals-harness/internal/evaltext"
 	"xchats-evals-harness/internal/provenance"
+
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 )
 
 // PromptfooResults mirrors the shape of promptfoo's -o results.json — only the fields
@@ -132,8 +134,23 @@ type Verdict struct {
 	Model   string `json:"model"`
 	Message string `json:"message"`
 
+	// RawOutput is the provider's complete response, byte-for-byte — the immutable
+	// audit record. It is never rewritten by validation or re-judging; everything
+	// judged is judged from a COPY (FinalOutput) selected out of it.
 	RawOutput    string `json:"raw_output"`
 	InjectedText string `json:"injected_text"`
+
+	// FinalOutput/NonFinalOutput/ExtractionMethod record how the model's FINAL
+	// customer-response JSON was separated from any reasoning text the provider
+	// returned combined with it (aiprompt.ExtractFinalOutput). FinalOutput is the
+	// exact span that was validated and scored; NonFinalOutput is the surrounding
+	// reasoning/diagnostic text — kept for debugging, never scored and never
+	// customer-facing; ExtractionMethod is one of aiprompt's Extract* constants.
+	// All empty when ParseOK is false (no complete final answer existed) and for
+	// verdicts judged before these fields existed.
+	FinalOutput      string `json:"final_output,omitempty"`
+	NonFinalOutput   string `json:"non_final_output,omitempty"`
+	ExtractionMethod string `json:"extraction_method,omitempty"`
 
 	ParseOK        bool     `json:"parse_ok"`
 	ContractFields bool     `json:"contract_fields_ok"`
@@ -141,9 +158,10 @@ type Verdict struct {
 	Blocked        bool     `json:"blocked"`
 	LeftoverBraces bool     `json:"leftover_braces"`
 	UnknownMedia   []string `json:"unknown_media"` // -> the real product drops these (logged), does NOT block
-	// EscalationReasonOK: escalation_reason must be empty when escalate is false
-	// (DECISIONS.md §"Customer-response JSON contract"). A pipeline-shape rule, folded
-	// into ContractPass like LeftoverBraces — not a model-behavior judgment call.
+	// EscalationReasonOK is retained for old judged.json compatibility but is now
+	// ALWAYS true: escalation_reason is diagnostic-only telemetry (never shown to the
+	// customer), so a nonempty value with escalate=false — or placeholders/braces
+	// inside it — is no longer a failure of any kind and never gates ContractPass.
 	EscalationReasonOK bool `json:"escalation_reason_ok"`
 	// MediaResolveOK/MediaResolveIssue: schema_kb_v1 verdicts only (always true, no
 	// issue, for a legacy verdict — there is nothing to resolve). True when every
@@ -704,7 +722,7 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 		MediaResolveOK: true,
 	}
 
-	obj, ok := parseModelJSON(row.Response.Output)
+	obj, ok := extractModelJSON(row.Response.Output, &v)
 	v.ParseOK = ok
 	v.RetryRecovered = v.Retries > 0 && v.ParseOK
 	if !ok {
@@ -717,16 +735,14 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 
 	// Type-checked, not just presence-checked: a model can return the right KEYS with
 	// the wrong shape (escalate: "true" as a string, reply_language: 7) and the older
-	// presence-only check would have let that through as a valid contract. All six
-	// canonical fields are checked (DECISIONS.md §"Customer-response JSON contract") —
-	// escalation_reason and confidence included, not just the four this check used to
-	// look at.
+	// presence-only check would have let that through as a valid contract. The four
+	// OPERATIONAL fields are checked (DECISIONS.md §"Customer-response JSON contract");
+	// escalation_reason and confidence are diagnostic-only telemetry — absent,
+	// mistyped, or out-of-range diagnostics never fail an otherwise valid reply (the
+	// raw output preserves whatever the model actually wrote there).
 	replyText, hasReplyText := obj["reply_text"].(string)
 	_, hasLang := obj["reply_language"].(string)
 	escalateVal, hasEscalate := obj["escalate"].(bool)
-	escalationReason, hasEscalationReason := obj["escalation_reason"].(string)
-	confidenceVal, hasConfidence := obj["confidence"].(float64)
-	confidenceInRange := hasConfidence && confidenceVal >= 0 && confidenceVal <= 1
 	// mediaRaw is the UNTYPED array — kept around (not just mediaEntries' string-filtered
 	// view) so MediaCount below counts every entry the model actually wrote, including a
 	// stray non-string one, instead of silently undercounting by dropping it first.
@@ -739,15 +755,14 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 		}
 	}
 	v.ContractFields = hasReplyText && replyText != "" && hasLang && hasEscalate &&
-		hasMediaField && mediaAllStrings && hasEscalationReason && confidenceInRange
+		hasMediaField && mediaAllStrings
 	if !v.ContractFields {
-		v.appendReason(fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, string escalation_reason, number confidence in [0,1], array %s of strings)", mediaFilesField))
+		v.appendReason(fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array %s of strings)", mediaFilesField))
 	}
+	// escalation_reason/escalate consistency is a diagnostic observation, not a
+	// contract gate — EscalationReasonOK stays true unconditionally (field kept so
+	// old judged.json rows keep their meaning on re-read).
 	v.EscalationReasonOK = true
-	if hasEscalate && hasEscalationReason && !escalateVal && strings.TrimSpace(escalationReason) != "" {
-		v.EscalationReasonOK = false
-		v.appendReason("escalation_reason must be empty when escalate is false")
-	}
 
 	// Reasoning/thinking content must never leak into reply_text — the one field the
 	// real product would forward to a customer after human review. Scans replyText
@@ -768,11 +783,10 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 	}
 
 	// Fail-closed: every token the model used must resolve, or the real product would
-	// block the whole draft rather than ship a half-rendered fact. escalation_reason is
-	// internal (never shown to the customer) but still scanned: an unknown token there
-	// means the model referenced a fact that doesn't exist, the same underlying bug.
+	// block the whole draft rather than ship a half-rendered fact. Only reply_text is
+	// scanned: escalation_reason is diagnostic-only — placeholders or braces there are
+	// never substituted and never a failure (the field is never shown to the customer).
 	spans := tokenSpanRE.FindAllString(replyText, -1)
-	reasonSpans := tokenSpanRE.FindAllString(escalationReason, -1)
 	injected := replyText
 	for _, tok := range spans {
 		val, known := tokenValue[tok]
@@ -781,11 +795,6 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 			continue
 		}
 		injected = strings.ReplaceAll(injected, tok, val)
-	}
-	for _, tok := range reasonSpans {
-		if _, known := tokenValue[tok]; !known {
-			v.UnknownTokens = append(v.UnknownTokens, tok)
-		}
 	}
 	v.Blocked = len(v.UnknownTokens) > 0
 	if v.Blocked {
@@ -809,7 +818,7 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 	if v.Truncated {
 		v.appendReason(truncationNote(v.FinishReason))
 	}
-	v.ContractPass = v.ParseOK && v.ContractFields && v.EscalationReasonOK &&
+	v.ContractPass = v.ParseOK && v.ContractFields &&
 		!v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak && !v.ControlChars
 
 	// Model-behavior checks (only meaningful once we know the contract held).
@@ -997,6 +1006,33 @@ func parseModelJSON(raw string) (map[string]any, bool) {
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(cleaned), &obj); err != nil {
 		return nil, false
+	}
+	return obj, true
+}
+
+// extractModelJSON locates the model's FINAL customer-response JSON in raw provider
+// output that may combine reasoning text with the answer (aiprompt.ExtractFinalOutput —
+// direct JSON, one outer fence, or the last complete operational object inside combined
+// text; a truncated/incomplete object is never repaired and fails). On success the
+// extraction record (final span, non-final remainder, method) is written onto v; raw
+// itself is never modified — v.RawOutput keeps the provider response byte-for-byte.
+// Distinct from parseModelJSON on purpose: that one stays a plain fence-tolerant syntax
+// parse for outputs that are NOT customer-response objects (e.g. the judge-llm verdict
+// {"verdict": true}, which extraction would rightly refuse for having no operational
+// fields).
+func extractModelJSON(raw string, v *Verdict) (map[string]any, bool) {
+	ex, ok := aiprompt.ExtractFinalOutput(raw)
+	if !ok {
+		return nil, false
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(ex.Final), &obj); err != nil {
+		return nil, false // unreachable in practice: ex.Final is a validated JSON object
+	}
+	if v != nil {
+		v.FinalOutput = ex.Final
+		v.NonFinalOutput = ex.NonFinal
+		v.ExtractionMethod = ex.Method
 	}
 	return obj, true
 }

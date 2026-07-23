@@ -51,14 +51,18 @@ func cmdExport(args []string) error {
 	}
 	n := 0
 	for _, e := range entries {
-		// "launches" holds LaunchManifest files, not run dirs — writeRunHTML would
-		// fail loudly on it (no *.judged.json / extract_outputs there), which is
-		// exactly the fatal-on-error behavior this command promises, but for the
-		// wrong reason; skip it explicitly instead of relying on that accident.
-		if !e.IsDir() || e.Name() == "launches" {
+		// Support/staging directories are not completed evaluation runs.
+		if !e.IsDir() || isRunSupportDir(e.Name()) {
 			continue
 		}
 		dir := filepath.Join("runs", e.Name())
+		execs, err := loadRunExecutions(dir)
+		if err != nil {
+			return fmt.Errorf("export %s: %w", dir, err)
+		}
+		if len(execs) == 0 {
+			continue
+		}
 		if err := writeRunHTML(dir); err != nil {
 			return fmt.Errorf("export %s: %w", dir, err)
 		}

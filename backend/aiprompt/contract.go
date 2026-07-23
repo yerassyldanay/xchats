@@ -1,7 +1,6 @@
 package aiprompt
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -14,33 +13,52 @@ import (
 // (DECISIONS.md §"Customer-response JSON contract"). There is exactly one
 // media field, media_files_to_send; the legacy names asset_refs,
 // attach_groups, and send are not aliases and must not appear anywhere.
+//
+// The four OPERATIONAL fields (reply_text, reply_language, media_files_to_send,
+// escalate) are the contract: they decide what the customer sees and whether a
+// human takes over, and they are validated strictly. escalation_reason and
+// confidence are DIAGNOSTIC-only telemetry — optional, best-effort decoded,
+// never shown to the customer, never substituted into, and never a reason to
+// reject an otherwise valid operational response (a malformed diagnostic value
+// stays visible in the preserved raw output).
 type Response struct {
 	ReplyText        string   `json:"reply_text"`
 	ReplyLanguage    string   `json:"reply_language"`
 	MediaFilesToSend []string `json:"media_files_to_send"`
 	Escalate         bool     `json:"escalate"`
-	EscalationReason string   `json:"escalation_reason"`
-	Confidence       float64  `json:"confidence"`
+	// EscalationReason and Confidence are diagnostics: zero values mean
+	// "absent or unparseable", which is fine — logging only, never a gate.
+	EscalationReason string  `json:"escalation_reason"`
+	Confidence       float64 `json:"confidence"`
 }
 
 // propertyDescriptions are part of the contract, not optional comments; they
-// are rendered verbatim into the JSON Schema the model sees.
-var propertyDescriptions = []struct{ Name, Type, Description string }{
-	{"reply_text", "string", "Russian customer-facing reply. Exact business values must be represented by approved placeholders, never model-written literals."},
-	{"reply_language", "string", "Language of reply_text; the only allowed v1 value is \"ru\"."},
-	{"media_files_to_send", "array of strings", "Ordered semantic tokens copied exactly from the media catalog. An empty array means no media."},
-	{"escalate", "boolean", "true when approved live knowledge is insufficient and human review is required."},
-	{"escalation_reason", "string", "Internal Russian reason for escalation; empty when escalate is false and never shown to the customer."},
-	{"confidence", "number", "Model confidence from 0 to 1; informational only and never a safety gate."},
+// are rendered verbatim into the JSON Schema the model sees. Diagnostic
+// properties may still be requested from the model (useful for debugging) but
+// are optional and never affect whether a response is accepted.
+var propertyDescriptions = []struct {
+	Name, Type, Description string
+	Diagnostic              bool
+}{
+	{"reply_text", "string", "Russian customer-facing reply. Exact business values must be represented by approved placeholders, never model-written literals.", false},
+	{"reply_language", "string", "Language of reply_text; the only allowed v1 value is \"ru\".", false},
+	{"media_files_to_send", "array of strings", "Ordered semantic tokens copied exactly from the media catalog. An empty array means no media.", false},
+	{"escalate", "boolean", "true when approved live knowledge is insufficient and human review is required.", false},
+	{"escalation_reason", "string", "Optional internal Russian reason for escalation; diagnostic only, never shown to the customer.", true},
+	{"confidence", "number", "Optional model confidence from 0 to 1; diagnostic only and never a safety gate.", true},
 }
 
-// ResponseJSONSchema returns the strict JSON Schema for the contract
-// (additionalProperties rejected, every property required and described).
+// ResponseJSONSchema returns the JSON Schema for the contract
+// (additionalProperties rejected, every property described). Only the four
+// operational properties are required; the diagnostic properties
+// (escalation_reason, confidence) may still be returned for debugging.
 func ResponseJSONSchema() map[string]any {
 	props := map[string]any{}
 	required := make([]string, 0, len(propertyDescriptions))
 	for _, p := range propertyDescriptions {
-		required = append(required, p.Name)
+		if !p.Diagnostic {
+			required = append(required, p.Name)
+		}
 		schema := map[string]any{"description": p.Description}
 		switch p.Name {
 		case "media_files_to_send":
@@ -108,6 +126,12 @@ func stripMarkdownFences(raw string) string {
 // against both the catalog supplied to the model and the current approved KB. Exact
 // business values must remain placeholders until code-side substitution. A markdown
 // code fence around the object is tolerated; everything inside remains strict.
+//
+// Strictness applies to the OPERATIONAL fields only. The diagnostic fields
+// (escalation_reason, confidence) are decoded best-effort and never produce an
+// issue: absent, out-of-range, mistyped, or placeholder-bearing diagnostic
+// values must not make an otherwise valid customer reply unusable — the
+// caller's preserved raw output is the audit trail for malformed diagnostics.
 func ValidateResponse(raw string, kb *KB, cat *Catalog) (*Response, []ContractIssue) {
 	issues := []ContractIssue{}
 	blob := strings.TrimSpace(stripMarkdownFences(raw))
@@ -115,7 +139,8 @@ func ValidateResponse(raw string, kb *KB, cat *Catalog) (*Response, []ContractIs
 		return nil, []ContractIssue{{Code: "parse", Detail: "empty model output"}}
 	}
 
-	// Pass 1: generic map to detect unknown/missing properties explicitly.
+	// Generic map decode: detects unknown/missing properties explicitly and (like any
+	// single json.Unmarshal of the whole blob) rejects trailing content after the object.
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(blob), &m); err != nil {
 		return nil, []ContractIssue{{Code: "parse", Detail: err.Error()}}
@@ -127,6 +152,9 @@ func ValidateResponse(raw string, kb *KB, cat *Catalog) (*Response, []ContractIs
 	wrongType := false
 	for _, p := range propertyDescriptions {
 		known[p.Name] = true
+		if p.Diagnostic {
+			continue // optional, best-effort — never missing_property/wrong_property_type
+		}
 		rawProperty, ok := m[p.Name]
 		if !ok {
 			issues = append(issues, ContractIssue{Code: "missing_property", Detail: p.Name})
@@ -143,26 +171,13 @@ func ValidateResponse(raw string, kb *KB, cat *Catalog) (*Response, []ContractIs
 		}
 	}
 
-	// Pass 2: typed strict decode.
-	dec := json.NewDecoder(bytes.NewReader([]byte(blob)))
-	dec.DisallowUnknownFields()
-	var resp Response
-	if err := dec.Decode(&resp); err != nil {
-		issues = append(issues, ContractIssue{Code: "parse", Detail: err.Error()})
-		return nil, issues
-	}
+	resp := decodeResponse(m)
 	if wrongType {
 		return nil, issues
 	}
 
 	if resp.ReplyLanguage != "ru" {
 		issues = append(issues, ContractIssue{Code: "bad_language", Detail: fmt.Sprintf("reply_language %q; only \"ru\" is allowed in v1", resp.ReplyLanguage)})
-	}
-	if resp.Confidence < 0 || resp.Confidence > 1 {
-		issues = append(issues, ContractIssue{Code: "bad_confidence", Detail: fmt.Sprintf("%v", resp.Confidence)})
-	}
-	if !resp.Escalate && strings.TrimSpace(resp.EscalationReason) != "" {
-		issues = append(issues, ContractIssue{Code: "escalation_reason_mismatch", Detail: "escalation_reason must be empty when escalate is false"})
 	}
 	if cat != nil {
 		for _, tok := range resp.MediaFilesToSend {
@@ -176,10 +191,33 @@ func ValidateResponse(raw string, kb *KB, cat *Catalog) (*Response, []ContractIs
 			Code:   "validation_context",
 			Detail: "current KB and request catalog are required",
 		})
-		return &resp, issues
+		return resp, issues
 	}
-	issues = append(issues, validateFactContract(resp, kb, cat)...)
-	return &resp, issues
+	issues = append(issues, validateFactContract(*resp, kb, cat)...)
+	return resp, issues
+}
+
+// decodeResponse builds a Response from the already-parsed property map. The
+// operational fields' types were verified by the caller (responsePropertyTypeOK),
+// so their unmarshals cannot fail; the diagnostic fields are decoded best-effort —
+// a mistyped escalation_reason or confidence simply leaves the zero value, and the
+// original bytes stay available in the caller's preserved raw output.
+func decodeResponse(m map[string]json.RawMessage) *Response {
+	resp := &Response{}
+	targets := map[string]any{
+		"reply_text":          &resp.ReplyText,
+		"reply_language":      &resp.ReplyLanguage,
+		"media_files_to_send": &resp.MediaFilesToSend,
+		"escalate":            &resp.Escalate,
+		"escalation_reason":   &resp.EscalationReason,
+		"confidence":          &resp.Confidence,
+	}
+	for name, target := range targets {
+		if rawProperty, ok := m[name]; ok {
+			_ = json.Unmarshal(rawProperty, target)
+		}
+	}
+	return resp
 }
 
 func responsePropertyTypeOK(name string, raw json.RawMessage) bool {
@@ -235,12 +273,8 @@ func validateFactContract(resp Response, kb *KB, cat *Catalog) []ContractIssue {
 			Detail: "reply_text contains unmatched or malformed braces",
 		})
 	}
-	if strings.ContainsAny(resp.EscalationReason, "{}") {
-		issues = append(issues, ContractIssue{
-			Code:   "placeholder_outside_reply",
-			Detail: "escalation_reason must not contain fact placeholders or braces",
-		})
-	}
+	// escalation_reason is diagnostic-only: placeholders or braces inside it are never
+	// an issue, are never substituted, and the field is never shown to the customer.
 
 	seenValues := map[string]bool{}
 	for _, fact := range cat.Facts {

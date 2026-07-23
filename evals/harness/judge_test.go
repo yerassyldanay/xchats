@@ -54,7 +54,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			output:           `{"reply_text":"ok","reply_language":7,"media_files_to_send":[],"escalate":"true"}`,
 			wantContractPass: false,
 			wantBehaviorPass: true,
-			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, string escalation_reason, number confidence in [0,1], array media_files_to_send of strings)",
+			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array media_files_to_send of strings)",
 		},
 		{
 			name: "unknown media fails behavior",
@@ -211,7 +211,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			output:           `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["product.coffee-machine.images",7],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: false,
 			wantBehaviorPass: true,
-			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, string escalation_reason, number confidence in [0,1], array media_files_to_send of strings)",
+			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array media_files_to_send of strings)",
 		},
 		{
 			// Proves MediaCount counts the RAW array, not mediaEntries' string-filtered
@@ -224,7 +224,7 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			output:           `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["product.coffee-machine.images","product.cookware-set.images",7],"escalate":false,"escalation_reason":"","confidence":0.9}`,
 			wantContractPass: false,
 			wantBehaviorPass: false,
-			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, string escalation_reason, number confidence in [0,1], array media_files_to_send of strings)",
+			wantReason:       "missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array media_files_to_send of strings)",
 		},
 		{
 			name: "duplicated currency fails behavior",
@@ -289,12 +289,14 @@ func TestJudgeOne_DeterministicChecks(t *testing.T) {
 			wantReason:       "leftover brace survived injection",
 		},
 		{
-			name:             "unknown token in escalation_reason blocks the draft",
+			// escalation_reason is diagnostic-only: an unknown token inside it is never
+			// scanned and never blocks the draft (unlike the same token in reply_text).
+			name:             "unknown token in escalation_reason does not block the draft",
 			testCase:         TestCase{ID: "escalation-reason-unknown-token"},
 			output:           `{"reply_text":"Хорошо.","reply_language":"ru","media_files_to_send":[],"escalate":true,"escalation_reason":"Нужно уточнить {{product.unknown.field}}","confidence":0.5}`,
-			wantContractPass: false,
+			wantContractPass: true,
 			wantBehaviorPass: true,
-			wantReason:       "unknown token(s), draft would be BLOCKED: {{product.unknown.field}}",
+			wantReason:       "ok",
 		},
 		{
 			name: "reply_language field mismatch fails language check even if text looks right",
@@ -1135,4 +1137,79 @@ func TestJudgeOne_Outcomes(t *testing.T) {
 			t.Error("want OutcomesPass vacuously true, same convention as MustNotContainPass")
 		}
 	})
+}
+
+// TestJudgeOne_ExtractsFinalAnswerFromCombinedReasoning proves judgeOne recovers the
+// final customer-response JSON when a provider returns reasoning text combined with
+// the answer in one string — the exact case that made gemini-3.5-flash/kimi-k2.6
+// unparseable before extraction existed. FinalOutput/NonFinalOutput/ExtractionMethod
+// are populated and RawOutput stays the untouched original.
+func TestJudgeOne_ExtractsFinalAnswerFromCombinedReasoning(t *testing.T) {
+	final := `{"reply_text":"Кофемашина в наличии.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	reasoning := "Thinking: I need to check the knowledge base for the coffee machine's stock status before replying to the customer."
+	raw := reasoning + "\n\n" + final
+
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = raw
+
+	got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, nil)
+
+	if !got.ParseOK {
+		t.Fatalf("ParseOK = false, want true; reason=%s", got.Reason)
+	}
+	if got.RawOutput != raw {
+		t.Errorf("RawOutput = %q, want the untouched original %q", got.RawOutput, raw)
+	}
+	if got.FinalOutput != final {
+		t.Errorf("FinalOutput = %q, want %q", got.FinalOutput, final)
+	}
+	if !strings.Contains(got.NonFinalOutput, "Thinking:") {
+		t.Errorf("NonFinalOutput = %q, want it to retain the reasoning prose", got.NonFinalOutput)
+	}
+	if got.ExtractionMethod == "" {
+		t.Error("ExtractionMethod must be recorded when extraction ran")
+	}
+}
+
+// TestJudgeOne_TruncatedReasoningWithNoFinalAnswerStaysAFailure: reasoning consumed
+// the whole completion budget and the model never produced a complete final JSON
+// object — this must remain a parse failure, never repaired/reconstructed.
+func TestJudgeOne_TruncatedReasoningWithNoFinalAnswerStaysAFailure(t *testing.T) {
+	row := PromptfooRow{}
+	row.Provider.ID = "test-model"
+	row.Response.Output = `Thinking: let me carefully check the price of the coffee machine in the knowledge base before I answer, considering all the delivery`
+	row.Response.FinishReason = "length"
+
+	got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, nil)
+	if got.ParseOK {
+		t.Fatal("ParseOK = true, want false — no complete final answer existed")
+	}
+	if got.ContractPass {
+		t.Fatal("ContractPass = true, want false")
+	}
+	if got.FinalOutput != "" {
+		t.Errorf("FinalOutput = %q, want empty on a failed extraction", got.FinalOutput)
+	}
+}
+
+// TestJudgeOne_RawOutputNeverRewrittenByJudging: RawOutput must always equal exactly
+// what the provider returned, regardless of how judging extracted/scored it — the
+// immutable audit record every re-judge relies on.
+func TestJudgeOne_RawOutputNeverRewrittenByJudging(t *testing.T) {
+	tests := []string{
+		`{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`,
+		"Thinking: ...\n\n" + `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false}`,
+		"not json at all, unparseable",
+		"",
+	}
+	for _, raw := range tests {
+		row := PromptfooRow{}
+		row.Provider.ID = "test-model"
+		row.Response.Output = raw
+		got := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, nil)
+		if got.RawOutput != raw {
+			t.Errorf("RawOutput = %q, want untouched original %q", got.RawOutput, raw)
+		}
+	}
 }

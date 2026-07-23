@@ -144,6 +144,14 @@ type VOutput struct {
 	// that's actually captured (Verdict.Reasoning / extractRunResult.Reasoning) isn't
 	// silently invisible to every downstream report/viewer, same debug-only status as Raw.
 	Reasoning string `json:"reasoning,omitempty"`
+	// Final/NonFinal/ExtractionMethod mirror Verdict.FinalOutput/NonFinalOutput/
+	// ExtractionMethod: the exact final customer-response JSON that was judged, the
+	// reasoning/preamble text separated off it (debug-only, never scored), and how the
+	// final answer was located. All empty when the row never parsed or predates
+	// extraction-aware judging — Raw stays the complete provider response either way.
+	Final            string `json:"final,omitempty"`
+	NonFinal         string `json:"non_final,omitempty"`
+	ExtractionMethod string `json:"extraction_method,omitempty"`
 }
 
 // VCost mirrors the existing cost-basis discipline: EstimateUSD must never be read
@@ -419,11 +427,13 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Key: "no_control_chars", Label: "Без управляющих символов", Kind: "safety", Expected: "нет служебных байтов (например backspace) в reply_text", Actual: controlCharsActual, Pass: scorePassPtr(controlCharsRow.Status)},
 	}
 
-	// ReplyText re-parses RawOutput the same way judgeOne itself did — a second parse
-	// of already-validated JSON, not a new trust boundary; empty (not an error) when
-	// ParseOK is false, matching every other "not evaluated" field on this struct.
+	// ReplyText re-parses the judged output the same way judgeOne itself did — a second
+	// parse of already-validated JSON, not a new trust boundary; empty (not an error)
+	// when ParseOK is false, matching every other "not evaluated" field on this struct.
+	// FinalOutput (the extracted final answer) is preferred when set; RawOutput remains
+	// the fallback for verdicts judged before extraction existed.
 	var replyText string
-	if obj, ok := parseModelJSON(v.RawOutput); ok {
+	if obj, ok := parseModelJSON(judgedOutput(v)); ok {
 		replyText, _ = obj["reply_text"].(string)
 	}
 
@@ -437,6 +447,9 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 			ReplyText:              replyText,
 			RawHasReasoningMarkers: evaltext.HasReasoningMarkers(v.RawOutput),
 			Reasoning:              v.Reasoning,
+			Final:                  v.FinalOutput,
+			NonFinal:               v.NonFinalOutput,
+			ExtractionMethod:       v.ExtractionMethod,
 		},
 		Scores:    scores,
 		Rollups:   rollups,
@@ -461,6 +474,16 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 			MediaCountEvaluated: v.MediaCountEvaluated,
 		},
 	}
+}
+
+// judgedOutput returns the output text a verdict was actually judged from: the
+// extracted final answer when extraction ran, else the raw provider response
+// (legacy verdicts and rows that never parsed).
+func judgedOutput(v Verdict) string {
+	if v.FinalOutput != "" {
+		return v.FinalOutput
+	}
+	return v.RawOutput
 }
 
 func scenarioExecutionsFromJudgedRun(jr JudgedRun) []VExecution {
@@ -841,10 +864,14 @@ func enrichScenarioExecutions(runDir, scenario, promptSHA256 string, execs []VEx
 // "n/a"). Pass values are read back from `exec`'s own already-computed Scores —
 // NEVER recomputed here — only Expected/Actual display strings and row presence are
 // new. Actual values for language/escalate/media are read from the model's own parsed
-// JSON (exec.Output.Raw) — the same raw output already persisted with this execution,
-// not a new trust boundary.
+// JSON (the extracted final answer when set, else exec.Output.Raw) — the same judged
+// output already persisted with this execution, not a new trust boundary.
 func scenarioRequirementRows(exec VExecution, tc TestCase) []VContractRow {
-	obj, _ := parseModelJSON(exec.Output.Raw)
+	parseSrc := exec.Output.Raw
+	if exec.Output.Final != "" {
+		parseSrc = exec.Output.Final
+	}
+	obj, _ := parseModelJSON(parseSrc)
 	var rows []VContractRow
 
 	if len(tc.Requires) > 0 {

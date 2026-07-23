@@ -76,14 +76,25 @@ providers:
     # Verified against openrouter.ai/google/gemini-3.5-flash on 2026-07-18.
     input_per_mtok: 1.50
     output_per_mtok: 9.00
-  - id: openrouter:moonshotai/kimi-k2.6
-    temperature: 0.3
-    # Same 2026-07-18 partial run: 36/38 sampled calls truncated at ~602 avg completion
-    # tokens. Raised to 1500 for the same reason as gemini-3.5-flash above.
-    max_tokens: 1500
-    # Verified against openrouter.ai/moonshotai/kimi-k2.6 on 2026-07-18.
-    input_per_mtok: 0.66
-    output_per_mtok: 3.41
+    # Added 2026-07-23 (plan linear-noodling-quail): run 2026-07-22_23-37-42-94b6 showed
+    # 31/31 responses carrying in-band "Thinking: ..." narration in message.content —
+    # the exact failure mode minimax-m2.5's verified enabled+exclude config fixed.
+    # NOT yet probe-verified for THIS model (no billed calls were approved for this
+    # change; this file's own doctrine says verify before trusting) — run the ~$0.02
+    # curl probe from the plan before the next real run, and fall back to
+    # {enabled: false} (the kimi-k2.5 precedent, see git history) if exclude
+    # misbehaves. The harness's final-answer extraction now recovers combined
+    # reasoning+JSON output regardless, so this is an optimization, not the safety net.
+    reasoning:
+      enabled: true
+      exclude: true
+  # --- Kimi models removed 2026-07-23 (both moonshotai/kimi-k2.6 and
+  # moonshotai/kimi-k2.5): expensive relative to the remaining candidates and no
+  # longer evaluation candidates. kimi-k2.6 additionally truncated 31/31 responses
+  # mid-reasoning at finish_reason=length in run 2026-07-22_23-37-42-94b6 (slowest
+  # model in the file at ~63s avg). Historical run artifacts containing Kimi
+  # responses are kept unchanged under evals/runs/ — raw results stay available for
+  # investigation; only the FUTURE active roster changed here.
   # --- Non-thinking comparison candidate added 2026-07-18, verified directly against its
   # own openrouter.ai page on that date. A cheaper, faster-turnaround sibling of a
   # thinking-mode model (deepseek-r1) rather than a variant of the two above — max_tokens
@@ -134,40 +145,7 @@ providers:
       enabled: true
       exclude: true
       billed_separately: false
-  - id: openrouter:moonshotai/kimi-k2.5
-    temperature: 0.3
-    # A 2026-07-18 diagnostic run at max_tokens=500 showed 27/29
-    # calls truncated (finish_reason=length) — far worse than minimax-m2.5 above, same
-    # in-band "Thinking: ..." narration problem. One call reached 2896 completion tokens
-    # despite the 500 cap (finish_reason=stop for that one), meaning this provider does not
-    # strictly enforce max_tokens for this model either — same "provider ignores the cap"
-    # pattern already seen with qwen3.7-plus/max before they were removed. Raised to 3000 to
-    # give real headroom above that observed ceiling; re-verify truncation rate on the next
-    # run rather than assuming this is now sufficient. Same parseModelJSON caveat as
-    # minimax-m2.5 above applies here too — this fixes truncation, not the unfenced-prose
-    # parsing problem.
-    max_tokens: 3000
-    # Verified against openrouter.ai/moonshotai/kimi-k2.5 on 2026-07-18 — cheaper sibling
-    # of kimi-k2.6 above.
-    input_per_mtok: 0.375
-    output_per_mtok: 2.025
-    # Confirmed 2026-07-19 via a direct curl to OpenRouter's API (separately from the
-    # minimax-m2.5 test above — do not assume one model's result generalizes to another):
-    # enabled+exclude also fixed this model's in-band narration, but a real run
-    # (2026-07-19 00-38-54-c780) then showed 2/29 calls with COMPLETELY EMPTY output —
-    # unbounded reasoning consumed the whole 3000-token completion budget before any
-    # visible answer. Two follow-up probes, both against the SAME real failing prompt
-    # from that run (case 28's exact prompt.raw, not a toy prompt):
-    #   1. reasoning.max_tokens: 1000 — NOT enforced. reasoning_tokens came back 1944,
-    #      almost double the requested cap (OpenRouter's own metadata for this model
-    #      doesn't advertise supports_max_tokens for reasoning — this matches that).
-    #      Still finished (finish_reason=stop), but only by luck of this call's length,
-    #      not because the cap did anything.
-    #   2. reasoning.enabled: false — clean, reliable win. reasoning_tokens=0,
-    #      completion_tokens=137 (vs 1880 capped), cost $0.00043 vs $0.00497 (~11x
-    #      cheaper), valid fenced JSON, finish_reason=stop. This model treats reasoning
-    #      as non-mandatory, so turning it off entirely beats trying to cap an
-    #      unenforced budget. Switched to this config; max_tokens stays 3000 as a
-    #      backstop, but should rarely if ever be needed now.
-    reasoning:
-      enabled: false
+  # (moonshotai/kimi-k2.5 removed 2026-07-23 together with kimi-k2.6 — see the note
+  # above. Its probe history — reasoning.max_tokens unenforced; reasoning.enabled:
+  # false was the reliable fix — remains in git history and in the snapshots of the
+  # runs that used it.)

@@ -85,6 +85,9 @@ func TestCmdExtract_WritesManifestSnapshotsAndInputs(t *testing.T) {
 	}
 	var runDirs []string
 	for _, d := range allRuns {
+		if filepath.Base(d) == provenance.IncompleteRunsDirName {
+			continue
+		}
 		if info, err := os.Stat(d); err == nil && info.IsDir() {
 			runDirs = append(runDirs, d)
 		}

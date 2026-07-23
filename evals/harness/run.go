@@ -82,6 +82,9 @@ func cmdRun(args []string) (runID string, err error) {
 		totalTests += len(resolved.Tests)
 	}
 	totalCalls := resolveExpectedCalls(totalTests, len(filteredModels), *repeats)
+	if err := validateResolvedRunSize(totalTests, totalCalls); err != nil {
+		return "", err
+	}
 	if *repeats > 1 {
 		fmt.Printf("run: %d scenario(s), %d test(s) total, %d model(s), %d repeat(s) => %d billed calls (uncached — every repeat is a fresh call)\n",
 			len(scenarioDirs), totalTests, len(filteredModels), *repeats, totalCalls)
@@ -94,7 +97,7 @@ func cmdRun(args []string) (runID string, err error) {
 	}
 
 	var runDir string
-	runID, runDir, err = provenance.NewRunDir("runs")
+	runID, runDir, err = provenance.NewStagedRunDir("runs")
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +160,11 @@ func cmdRun(args []string) (runID string, err error) {
 		return runID, err
 	}
 
-	return runID, reportRun(runDir, *modelsPath)
+	publishedRunDir, err := provenance.PublishStagedRun("runs", runID, runDir)
+	if err != nil {
+		return runID, err
+	}
+	return runID, reportRun(publishedRunDir, *modelsPath)
 }
 
 func runPromptfoo(scenarioDir, scenarioName, absRunDir string, noCache bool, repeats int) error {
@@ -182,6 +189,18 @@ func runPromptfoo(scenarioDir, scenarioName, absRunDir string, noCache bool, rep
 // testable (run_test.go) rather than only exercised inline inside cmdRun.
 func resolveExpectedCalls(totalTests, numModels, repeats int) int {
 	return totalTests * numModels * repeats
+}
+
+// validateResolvedRunSize rejects an empty scenario selection before a run directory
+// is minted. An empty test set is a configuration error, not a meaningful 0/0 result.
+func validateResolvedRunSize(totalTests, totalCalls int) error {
+	if totalTests < 1 {
+		return fmt.Errorf("run: resolved zero tests — refusing to create an empty 0/0 run")
+	}
+	if totalCalls < 1 {
+		return fmt.Errorf("run: resolved zero model calls — refusing to create an empty 0/0 run")
+	}
+	return nil
 }
 
 // validateRepeats hard-requires -no-cache whenever -repeats requests more than one call

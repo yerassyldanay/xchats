@@ -95,7 +95,7 @@ func cmdExtract(args []string) (runID string, err error) {
 	casesDir := filepath.Dir(*casesPath)
 
 	var runDir string
-	runID, runDir, err = provenance.NewRunDir("runs")
+	runID, runDir, err = provenance.NewStagedRunDir("runs")
 	if err != nil {
 		return "", err
 	}
@@ -200,16 +200,20 @@ func cmdExtract(args []string) (runID string, err error) {
 	if err := writeExtractReport(reportPath, results); err != nil {
 		return runID, err
 	}
-	fmt.Printf("\nwrote %s\n", reportPath)
-
 	manifest.Finish()
 	if err := provenance.WriteManifest(runDir, manifest); err != nil {
 		return runID, err
 	}
 
+	publishedRunDir, err := provenance.PublishStagedRun("runs", runID, runDir)
+	if err != nil {
+		return runID, err
+	}
+	fmt.Printf("\nwrote %s\n", filepath.Join(publishedRunDir, "EXTRACT.md"))
+
 	// Best-effort: a broken HTML viewer must never turn a successful extraction run
 	// into a failed command.
-	writeRunHTMLBestEffort(runDir)
+	writeRunHTMLBestEffort(publishedRunDir)
 
 	return runID, nil
 }

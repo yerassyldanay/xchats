@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"xchats-evals-harness/internal/kbfixture"
@@ -92,11 +93,6 @@ func TestJudgeOneSchemaKB_BlocksFactContractIssues(t *testing.T) {
 		{name: "malformed placeholder", text: "{product.coffee-machine.price}"},
 		{name: "literal exact value", text: "Цена — 129 900 ₸."},
 		{
-			name:             "placeholder outside reply",
-			text:             "Уточню.",
-			escalationReason: "Нужен {{product.coffee-machine.price}}",
-		},
-		{
 			name: "stale placeholder",
 			text: "{{product.coffee-machine.price}}",
 			mutate: func(kb *aiprompt.KB) {
@@ -119,6 +115,18 @@ func TestJudgeOneSchemaKB_BlocksFactContractIssues(t *testing.T) {
 				t.Fatalf("fact behavior failure must not auto-retry, got candidates %v", candidates)
 			}
 		})
+	}
+}
+
+// TestJudgeOneSchemaKB_PlaceholderInEscalationReasonDoesNotBlock: escalation_reason is
+// diagnostic-only telemetry — a fact placeholder inside it is never substituted and
+// must never block the draft (unlike the same placeholder inside reply_text).
+func TestJudgeOneSchemaKB_PlaceholderInEscalationReasonDoesNotBlock(t *testing.T) {
+	kb, cat := loadSchemaKBJudgeContext(t)
+	output := schemaKBResponse(t, "Уточню.", []string{}, "Нужен {{product.coffee-machine.price}}")
+	v := judgeSchemaKBOutput(t, kb, cat, output)
+	if v.Blocked || !v.ContractPass {
+		t.Fatalf("Blocked=%v ContractPass=%v reason=%q, want unblocked/contract-pass", v.Blocked, v.ContractPass, v.Reason)
 	}
 }
 
@@ -164,6 +172,54 @@ func TestJudgeOneSchemaKB_ForbidTokens(t *testing.T) {
 			t.Fatalf("want ForbidTokensPass=true, reason=%q", v.Reason)
 		}
 	})
+}
+
+// TestJudgeOneSchemaKB_ExtractsFinalAnswerFromCombinedReasoning mirrors
+// TestJudgeOne_ExtractsFinalAnswerFromCombinedReasoning for the schema_kb_v1 path —
+// aiprompt.ExtractFinalOutput must recover the final answer here too, and RawOutput
+// must stay byte-for-byte the provider's original combined output.
+func TestJudgeOneSchemaKB_ExtractsFinalAnswerFromCombinedReasoning(t *testing.T) {
+	kb, cat := loadSchemaKBJudgeContext(t)
+	final := schemaKBResponse(t, "Цена — {{product.coffee-machine.price}}.", []string{}, "")
+	reasoning := "Thinking: checking the knowledge base for the coffee machine price before replying."
+	raw := reasoning + "\n\n" + final
+
+	v := judgeSchemaKBOutput(t, kb, cat, raw)
+	if !v.ParseOK {
+		t.Fatalf("ParseOK=false: %s", v.Reason)
+	}
+	if v.RawOutput != raw {
+		t.Errorf("RawOutput = %q, want untouched original %q", v.RawOutput, raw)
+	}
+	if v.FinalOutput != final {
+		t.Errorf("FinalOutput = %q, want %q", v.FinalOutput, final)
+	}
+	if !strings.Contains(v.NonFinalOutput, "Thinking:") {
+		t.Errorf("NonFinalOutput = %q, want reasoning prose retained", v.NonFinalOutput)
+	}
+	if !v.ContractPass {
+		t.Errorf("ContractPass=false: %s", v.Reason)
+	}
+	if v.InjectedText != "Цена — 129 900 ₸." {
+		t.Errorf("InjectedText = %q", v.InjectedText)
+	}
+}
+
+// TestJudgeOneSchemaKB_TruncatedFinalAnswerStaysAFailure: a final JSON object that
+// never completes (reasoning consumed the budget) must remain a parse failure — never
+// repaired or reconstructed.
+func TestJudgeOneSchemaKB_TruncatedFinalAnswerStaysAFailure(t *testing.T) {
+	kb, cat := loadSchemaKBJudgeContext(t)
+	final := schemaKBResponse(t, "Цена — {{product.coffee-machine.price}}.", []string{}, "")
+	raw := "Thinking: checking the price.\n\n" + final[:len(final)-10]
+
+	v := judgeSchemaKBOutput(t, kb, cat, raw)
+	if v.ParseOK {
+		t.Fatal("ParseOK=true, want false — the final object was never complete")
+	}
+	if v.ContractPass {
+		t.Fatal("ContractPass=true, want false")
+	}
 }
 
 func TestJudgeOneSchemaKB_RereadsMediaColumn(t *testing.T) {

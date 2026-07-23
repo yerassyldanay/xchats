@@ -122,15 +122,15 @@ func TestWriteRunHTML_BothFamilies(t *testing.T) {
 	}
 }
 
-// TestWriteRunHTML_EmptyRunDir proves the viewer degrades gracefully (no panic, no
-// error) for a run dir with nothing gradeable in it yet.
+// TestWriteRunHTML_EmptyRunDir proves a directory with nothing gradeable is rejected
+// rather than being published as a misleading 0/0 evaluation.
 func TestWriteRunHTML_EmptyRunDir(t *testing.T) {
 	runDir := t.TempDir()
-	if err := writeRunHTML(runDir); err != nil {
-		t.Fatalf("writeRunHTML on empty dir: %v", err)
+	if err := writeRunHTML(runDir); err == nil {
+		t.Fatal("want empty run rejected, got nil error")
 	}
-	if _, err := os.Stat(filepath.Join(runDir, "index.html")); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(runDir, "index.html")); !os.IsNotExist(err) {
+		t.Fatalf("empty run must not receive index.html, stat err = %v", err)
 	}
 }
 

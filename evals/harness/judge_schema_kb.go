@@ -113,9 +113,10 @@ func issueSummary(issues []aiprompt.ContractIssue) string {
 }
 
 // judgeOneSchemaKB is judgeOne's counterpart for the shop-kb-v1 family: strict contract
-// parsing via aiprompt.ValidateResponse (unknown properties, wrong types, bad
-// reply_language/confidence, and unknown media tokens are ALL rejected by the same
-// strict decode judge.go's own hand-rolled map checks only partially covered), fact
+// parsing via aiprompt.ValidateResponse (unknown properties, wrong-typed operational
+// fields, bad reply_language, and unknown media tokens are ALL rejected by the same
+// strict decode judge.go's own hand-rolled map checks only partially covered — while
+// the diagnostic fields escalation_reason/confidence never gate anything), fact
 // substitution via aiprompt.SubstituteFacts (gets in_stock's Russian wording right), and
 // a media_files_to_send re-resolution check via aiprompt.ResolveSend that the legacy
 // pipeline has no equivalent of (it has no kbd_materials to resolve against). Every
@@ -137,7 +138,12 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 		Retries:      row.Retries,
 	}
 
-	_, syntaxOK := parseModelJSON(row.Response.Output)
+	// Final-answer extraction first (aiprompt.ExtractFinalOutput): reasoning text a
+	// provider returns combined with the answer is separated off into NonFinalOutput
+	// and only the FINAL customer-response JSON is validated and scored. RawOutput
+	// above keeps the provider response byte-for-byte regardless. No complete
+	// operational object (including a truncated one — never repaired) = parse failure.
+	ex, syntaxOK := aiprompt.ExtractFinalOutput(row.Response.Output)
 	v.ParseOK = syntaxOK
 	if !syntaxOK {
 		v.Reason = "could not parse JSON output"
@@ -146,8 +152,11 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 		}
 		return v
 	}
+	v.FinalOutput = ex.Final
+	v.NonFinalOutput = ex.NonFinal
+	v.ExtractionMethod = ex.Method
 
-	resp, issues := aiprompt.ValidateResponse(row.Response.Output, kb, cat)
+	resp, issues := aiprompt.ValidateResponse(ex.Final, kb, cat)
 	v.RetryRecovered = v.Retries > 0 && resp != nil
 	if resp == nil {
 		// Valid JSON, but it failed the strict six-field contract schema (wrong type,
@@ -185,29 +194,23 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 		case "bad_language":
 			contractFieldsOK = false
 			v.appendReason("bad reply_language: " + is.Detail)
-		case "bad_confidence":
-			contractFieldsOK = false
-			v.appendReason("confidence out of range: " + is.Detail)
 		case "unknown_media_token":
 			unknownMediaFromCatalog = append(unknownMediaFromCatalog, is.Detail)
 		case "unknown_fact_placeholder":
 			v.UnknownTokens = append(v.UnknownTokens, is.Detail)
 			v.Blocked = true
 			v.appendReason("unknown fact placeholder, draft would be BLOCKED: " + is.Detail)
-		case "stale_fact_placeholder", "malformed_fact_placeholder", "placeholder_outside_reply", "exact_value_literal":
+		case "stale_fact_placeholder", "malformed_fact_placeholder", "exact_value_literal":
 			v.Blocked = true
 			v.appendReason(is.Code + ": " + is.Detail)
 		}
 	}
 	v.ContractFields = contractFieldsOK
 
+	// escalation_reason and confidence are diagnostic-only: aiprompt no longer emits
+	// issues for them, and EscalationReasonOK stays unconditionally true (see the
+	// Verdict field's doc comment).
 	v.EscalationReasonOK = true
-	for _, is := range issues {
-		if is.Code == "escalation_reason_mismatch" {
-			v.EscalationReasonOK = false
-			v.appendReason("escalation_reason must be empty when escalate is false")
-		}
-	}
 
 	// Fail-closed token substitution uses the current KB, not catalog-cached values.
 	injected := replyText
@@ -242,7 +245,7 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 		}
 	}
 
-	v.ContractPass = v.ParseOK && resp != nil && v.ContractFields && v.EscalationReasonOK &&
+	v.ContractPass = v.ParseOK && resp != nil && v.ContractFields &&
 		!v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak && !v.ControlChars &&
 		v.MediaResolveOK && len(unknownMediaFromCatalog) == 0
 
