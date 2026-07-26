@@ -48,7 +48,6 @@ func TestRenderProductsInStock_FullMediaBlockListsEveryPopulatedColumnOnce(t *te
 		"name: " + kb.Products[0].Name,
 		"description: " + kb.Products[0].Description,
 		"price_placeholder: {{product.coffee-machine.price}}",
-		"stock_placeholder: {{product.coffee-machine.in_stock}}",
 		"featured_image_ref: products.coffee-machine.featured_image",
 		"gallery_images_ref: products.coffee-machine.gallery_images",
 	} {
@@ -60,8 +59,10 @@ func TestRenderProductsInStock_FullMediaBlockListsEveryPopulatedColumnOnce(t *te
 		}
 	}
 	// coffee-machine has no demo_videos/certificate_documents/etc. populated —
-	// none of those _ref lines may appear for it.
-	for _, absent := range []string{"demo_videos_ref: products.coffee-machine", "certificate_documents_ref: products.coffee-machine"} {
+	// none of those _ref lines may appear for it. stock_placeholder must never
+	// appear at all (2026-07-26: in_stock is no longer a fact token — see
+	// registry.go).
+	for _, absent := range []string{"demo_videos_ref: products.coffee-machine", "certificate_documents_ref: products.coffee-machine", "stock_placeholder"} {
 		if strings.Contains(out, absent) {
 			t.Errorf("did not want %q, an unpopulated column, got:\n%s", absent, out)
 		}
@@ -182,10 +183,10 @@ func TestRenderBusinessFacts_ExcludesProductFactsIncludesRest(t *testing.T) {
 // the way the v1 flat rendering could in principle repeat a concept across
 // sections), and no %%SLOT%% marker survives. cat.Facts/cat.Media themselves
 // still carry entries the v2 frame deliberately never renders — an out-of-stock
-// product's price/in_stock facts (BuildCatalog is shared with the legacy v1
-// rendering, which still shows them, so it is NOT changed to drop them) and
-// tariff facts (no v2 tariff block yet, see renderBusinessFacts) — those are
-// correctly EXCLUDED from this check, not a violation of the invariant.
+// product's price fact (BuildCatalog is shared with the legacy v1 rendering,
+// which still shows it, so it is NOT changed to drop it) and tariff facts (no
+// v2 tariff block yet, see renderBusinessFacts) — those are correctly EXCLUDED
+// from this check, not a violation of the invariant.
 func TestRenderPrompt_V2Frame_EveryTokenExactlyOnceNoLeftoverSlots(t *testing.T) {
 	kb := v2KB()
 	prompt, cat, err := BuildPrompt(v2Frame, kb)
@@ -244,28 +245,6 @@ func TestRenderPrompt_V2Frame_NoUnavailablePlaceholderAnywhere(t *testing.T) {
 	}
 	if strings.Contains(prompt, "media_refs: []") {
 		t.Errorf("v2 prompt must never render a media_refs: [] absence marker, got:\n%s", prompt)
-	}
-}
-
-// TestRenderPrompt_StockWordingNoteSlot confirms %%STOCK_WORDING_NOTE%% is
-// filled with guidance carrying both reviewed stock wordings, and that the
-// whole render still passes ValidatePrompt — guarding the no-brace-pair rule
-// (a literal "{{...}}" example inside a slot's rendered text would otherwise
-// be mistaken for a placeholder outside the fact catalog and hard-fail the
-// render, exactly as the frame's own uncommitted rule-4 edit once did).
-func TestRenderPrompt_StockWordingNoteSlot(t *testing.T) {
-	kb := v2KB()
-	prompt, cat, err := BuildPrompt(v2Frame, kb)
-	if err != nil {
-		t.Fatalf("BuildPrompt: %v", err)
-	}
-	for _, want := range []string{StockWordingRU[true], StockWordingRU[false]} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("want the stock wording note to mention %q, got:\n%s", want, prompt)
-		}
-	}
-	if err := ValidatePrompt(prompt, cat); err != nil {
-		t.Errorf("ValidatePrompt: %v", err)
 	}
 }
 

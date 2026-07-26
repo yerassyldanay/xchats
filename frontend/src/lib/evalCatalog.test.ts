@@ -6,6 +6,7 @@ import {
   groupScenariosByExperiment,
   notCheckedExtractRequirements,
   notCheckedRequirements,
+  partitionScenariosByArchived,
   resolveRequires,
   scenarioNavLabel,
 } from './evalCatalog'
@@ -220,5 +221,44 @@ describe('scenarioNavLabel', () => {
     expect(scenarioNavLabel({ name: 'lang-canary-v2', tests_path: 'scenarios/lang-canary-v1/tests.yaml' })).toBe(
       'lang-canary-v2 → lang-canary-v1/tests.yaml',
     )
+  })
+})
+
+describe('partitionScenariosByArchived', () => {
+  function scenario(name: string, archived?: boolean): CatalogScenario {
+    return { name, facts_source: 'data.yaml', facts: [], tests: [], archived }
+  }
+
+  it('splits active and archived scenarios, preserving order within each bucket', () => {
+    const { active, archived } = partitionScenariosByArchived([
+      scenario('a1'),
+      scenario('old1', true),
+      scenario('a2'),
+      scenario('old2', true),
+    ])
+    expect(active.map((s) => s.name)).toEqual(['a1', 'a2'])
+    expect(archived.map((s) => s.name)).toEqual(['old1', 'old2'])
+  })
+
+  it('treats a missing archived field (stale v2 catalog.json) as active, never archived', () => {
+    const { active, archived } = partitionScenariosByArchived([scenario('legacy')])
+    expect(active.map((s) => s.name)).toEqual(['legacy'])
+    expect(archived).toEqual([])
+  })
+
+  it('handles an all-active list', () => {
+    const { active, archived } = partitionScenariosByArchived([scenario('a1'), scenario('a2')])
+    expect(active).toHaveLength(2)
+    expect(archived).toEqual([])
+  })
+
+  it('handles an all-archived list', () => {
+    const { active, archived } = partitionScenariosByArchived([scenario('old1', true), scenario('old2', true)])
+    expect(active).toEqual([])
+    expect(archived).toHaveLength(2)
+  })
+
+  it('handles an empty list', () => {
+    expect(partitionScenariosByArchived([])).toEqual({ active: [], archived: [] })
   })
 })

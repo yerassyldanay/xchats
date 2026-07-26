@@ -8,6 +8,7 @@ export default {
       aria: 'Язык подсказок к полям',
     },
     legendTitle: 'Поля',
+    archiveSection: 'Архив',
     notDeclared: 'Не объявлено (проверка пропускается):',
     valueNotFound: 'значение не найдено в фактах сценария',
     mediaNotFound: 'нет в media_tokens сценария',

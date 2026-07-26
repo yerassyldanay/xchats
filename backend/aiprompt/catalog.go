@@ -7,8 +7,8 @@ import (
 )
 
 // FactEntry is one model-facing row of the fact-placeholder catalog. It carries
-// selection metadata and, for stock only, a semantic reasoning state; exact customer
-// values remain private in KB and are available only through ResolveFact.
+// selection metadata and, for delivery availability only, a semantic reasoning state;
+// exact customer values remain private in KB and are available only through ResolveFact.
 type FactEntry struct {
 	Token          string    `json:"token"` // {{table.ref.column}}, singular table segment
 	Table          string    `json:"table"`
@@ -16,7 +16,7 @@ type FactEntry struct {
 	Column         string    `json:"column"`
 	Label          string    `json:"label"`
 	Kind           ValueKind `json:"value_kind"`
-	ReasoningState string    `json:"reasoning_state,omitempty"` // in_stock | out_of_stock; stock facts only
+	ReasoningState string    `json:"reasoning_state,omitempty"` // delivers | no_delivery; delivery-availability facts only
 	UsageNote      string    `json:"usage_note,omitempty"`
 }
 
@@ -94,19 +94,6 @@ func addFact(cat *Catalog, table, ref string, col FactColumn, value string) {
 	})
 }
 
-func addStockFact(cat *Catalog, ref string, col FactColumn, inStock bool) {
-	state := "in_stock"
-	if !inStock {
-		state = "out_of_stock"
-	}
-	e := FactEntry{
-		Token: "{{product." + ref + "." + col.Column + "}}",
-		Table: "product", Ref: ref, Column: col.Column,
-		Label: col.Label, Kind: col.Kind, ReasoningState: state, UsageNote: usageNote(col),
-	}
-	cat.Facts = append(cat.Facts, e)
-}
-
 func addDeliveryFlagFact(cat *Catalog, ref string, col FactColumn, available bool) {
 	state := "delivers"
 	if !available {
@@ -131,8 +118,6 @@ func buildFacts(kb *KB, cat *Catalog) error {
 			switch col.Column {
 			case "price":
 				addFact(cat, "product", p.Ref, col, p.Price)
-			case "in_stock":
-				addStockFact(cat, p.Ref, col, p.InStock)
 			}
 		}
 	}

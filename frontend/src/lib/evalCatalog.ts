@@ -113,6 +113,26 @@ export function groupScenariosByExperiment(scenarios: CatalogScenario[]): Scenar
   return order.map((experiment) => ({ experiment, scenarios: byExperiment.get(experiment) ?? [] }))
 }
 
+export interface ArchivedPartition {
+  active: CatalogScenario[]
+  archived: CatalogScenario[]
+}
+
+// partitionScenariosByArchived splits scenarios so the tree can hide archived ones
+// behind a toggle by default — the Go harness already excludes archived scenarios from
+// every run path (run.go/launch.go), this brings the sidebar in line. Preserves
+// first-appearance order within each bucket (same discipline as
+// groupScenariosByExperiment). A missing `archived` field (stale v2 catalog.json) is
+// treated as active, never archived.
+export function partitionScenariosByArchived(scenarios: CatalogScenario[]): ArchivedPartition {
+  const active: CatalogScenario[] = []
+  const archived: CatalogScenario[] = []
+  for (const s of scenarios) {
+    ;(s.archived === true ? archived : active).push(s)
+  }
+  return { active, archived }
+}
+
 function formatYamlScalarOrFlow(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(formatYamlScalarOrFlow).join(', ')}]`
   if (v === null || v === undefined) return 'null'

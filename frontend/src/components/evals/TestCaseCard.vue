@@ -136,6 +136,26 @@ function onImgError(ev: Event) {
             <ContractTable :rows="e.contract ?? []" />
           </div>
 
+          <details>
+            <summary class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground cursor-pointer select-none hover:text-foreground">
+              Все проверки ({{ e.scores?.length ?? 0 }})
+            </summary>
+            <table class="w-full text-xs mt-1.5">
+              <tbody>
+                <tr v-for="s in e.scores ?? []" :key="s.name" class="border-b border-border/60 align-top last:border-0">
+                  <td class="py-1 pr-3 whitespace-nowrap"><code class="font-mono">{{ s.name }}</code></td>
+                  <td class="py-1 pr-3">
+                    <Badge v-if="s.status === 'pass'" class="border-transparent bg-emerald-100 text-[11px] text-emerald-700 hover:bg-emerald-100">PASS</Badge>
+                    <Badge v-else-if="s.status === 'fail'" variant="destructive" class="text-[11px]">FAIL</Badge>
+                    <Badge v-else-if="s.status === 'error'" variant="destructive" class="text-[11px]">ERROR</Badge>
+                    <span v-else class="text-[11px] italic text-muted-foreground">не проверялось</span>
+                  </td>
+                  <td class="py-1 max-w-[320px] whitespace-pre-wrap break-words text-muted-foreground">{{ s.detail || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </details>
+
           <div>
             <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">Результат модели</div>
             <div class="grid gap-3 sm:grid-cols-2">

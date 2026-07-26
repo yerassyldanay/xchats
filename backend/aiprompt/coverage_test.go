@@ -135,33 +135,12 @@ func TestBuildCatalog_ReturnPeriodUsageNote(t *testing.T) {
 	}
 }
 
-// TestUsageNote_StockFlagDerivedFromWordingMap locks the KB-driven property
-// of stockUsageGuidance: the note must be built FROM StockWordingRU's map
-// values (via lookup), never a wording retyped as a separate string literal
-// — a value the eval-design principles require ("prompts are built from KB
-// records, never an eval-only representation," applied here to the code-
-// owned wording registry instead of a fixture). Also confirms the note names
-// the observed "в наличии: в наличии" duplication anti-pattern and contains
-// no literal brace pair (a brace pair here would fail ValidatePrompt).
-func TestUsageNote_StockFlagDerivedFromWordingMap(t *testing.T) {
-	note := usageNote(FactColumn{Kind: KindStockFlag})
-	for _, want := range []string{StockWordingRU[true], StockWordingRU[false]} {
-		if !strings.Contains(note, want) {
-			t.Errorf("stock usage note = %q, want it to contain wording-map value %q", note, want)
-		}
-	}
-	dup := StockWordingRU[true] + ": " + StockWordingRU[true]
-	if !strings.Contains(note, dup) {
-		t.Errorf("stock usage note = %q, want it to name the duplication anti-pattern %q", note, dup)
-	}
-	if strings.Contains(note, "{{") {
-		t.Errorf("stock usage note must contain no literal brace pair, got: %q", note)
-	}
-}
-
-// TestUsageNote_DeliveryFlagDerivedFromWordingMap is
-// TestUsageNote_StockFlagDerivedFromWordingMap's counterpart for
-// delivery_available: the note must still carry the real
+// TestUsageNote_DeliveryFlagDerivedFromWordingMap locks the KB-driven property
+// of deliveryUsageGuidance: the note must be built FROM DeliveryWordingRU's map
+// values (via lookup), never a wording retyped as a separate string literal —
+// a value the eval-design principles require ("prompts are built from KB
+// records, never an eval-only representation," applied here to the code-owned
+// wording registry instead of a fixture). The note must still carry the real
 // outside_zones_note token (the one legitimate brace pair) and both
 // DeliveryWordingRU values, via map lookup.
 func TestUsageNote_DeliveryFlagDerivedFromWordingMap(t *testing.T) {

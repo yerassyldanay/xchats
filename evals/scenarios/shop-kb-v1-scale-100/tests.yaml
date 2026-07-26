@@ -5,9 +5,10 @@ include:
 tests:
   - id: "17. deep-list product (#100 of 100), out-of-stock honesty"
     message: "Сэндвичница Samsung есть в наличии?"
-    requires:
-      - ["product.sandwich-maker-samsung.in_stock"]
-    must_contain_any: ["нет в наличии"]
+    # Archived scenario — this test was already broken by the v2 name-only design
+    # (an out-of-stock product renders no facts at all, so `requires` here never
+    # resolved). requires/must_contain_any removed for consistency with the 2026-07-26
+    # in_stock removal (see kb-questions-ru.yaml test 3); never re-run for real.
     escalate: false
     language: ru
 

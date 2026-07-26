@@ -192,11 +192,6 @@ func TestRenderSchemaKBScenario_EndToEnd(t *testing.T) {
 			t.Errorf("exported catalog.json leaks %q", leak)
 		}
 	}
-	stock := cat.FactByToken("{{product.coffee-machine.in_stock}}")
-	if stock == nil || stock.ReasoningState != "in_stock" {
-		t.Fatalf("stock fact = %+v, want semantic reasoning state", stock)
-	}
-
 	if _, err := os.Stat(filepath.Join(genDir, "resolved_tests.json")); err != nil {
 		t.Errorf("expected resolved_tests.json to be written: %v", err)
 	}

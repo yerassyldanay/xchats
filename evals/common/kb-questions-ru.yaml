@@ -25,14 +25,10 @@ tests:
 
   - id: "2. in-stock availability — coffee machine"
     message: "Кофемашина DeLonghi сейчас в наличии?"
-    # must_contain_any on the stock wording was removed (2026-07 consolidation): it was
-    # redundant with `requires` (which already proves the model referenced the correct
-    # in_stock token; the substituted text then contains the wording by construction)
-    # and a duplicate of the same brittle-phrase-matching class the postmortem's #7
-    # literal-detector bug came from. Stock correctness is now judged semantically by
-    # the auto-generated LLM stock check (judge_llm.go), keyed by stock_check below.
-    requires:
-      - ["product.coffee-machine.in_stock"]
+    # `requires` on product.coffee-machine.in_stock was removed (2026-07-26): in_stock
+    # is no longer a fact token at all — a token can't carry a value whole sentences
+    # grammatically depend on (see backend/aiprompt/registry.go). Stock correctness is
+    # judged entirely semantically by the auto-generated LLM stock check below.
     escalate: false
     language: ru
     stock_check: "coffee-machine"
@@ -41,14 +37,17 @@ tests:
     message: "Блендер Philips есть в наличии?"
     # blender-philips is deliberately out of stock (index 3, i%3==0). Reworked for the
     # 2026-07 canonical-block prompt (out-of-stock products are name-only — no facts,
-    # no media): the model must not quote a price/in_stock value for it (those tokens
-    # no longer exist in its catalog once out-of-stock) and must not attach media for
-    # it. Semantic "did it clearly say unavailable" is judged by the auto-generated LLM
-    # stock check (stock_check below), which also fails an alternative-only reply that
-    # never actually states blender-philips itself is unavailable — see
-    # judge_llm.go/autoStockChecks. Whether the model additionally names an in-stock
-    # alternative is a judgment call this bank does not force either way.
-    forbid_tokens: ["product.blender-philips.price", "product.blender-philips.in_stock"]
+    # no media): the model must not quote a price for it (that token no longer exists
+    # in its catalog once out-of-stock) and must not attach media for it. in_stock is
+    # no longer a fact token at all (2026-07-26 removal — a token can't carry a value
+    # whole sentences grammatically depend on); quoting a fabricated in_stock token now
+    # fails structurally via no_unknown_tokens instead of needing a hand-maintained
+    # forbid_tokens entry. Semantic "did it clearly say unavailable" is judged by the
+    # auto-generated LLM stock check (stock_check below), which also fails an
+    # alternative-only reply that never actually states blender-philips itself is
+    # unavailable — see judge_llm.go/autoStockChecks. Whether the model additionally
+    # names an in-stock alternative is a judgment call this bank does not force either way.
+    forbid_tokens: ["product.blender-philips.price"]
     media:
       forbid: true
     escalate: false
@@ -65,17 +64,27 @@ tests:
 
   - id: "5. photo and certificate combined (all_of)"
     message: "Пришлите, пожалуйста, фото блендера Panasonic и сертификат качества."
+    # "фото" is satisfied by EITHER photo-shaped token this product has — a customer
+    # asking for a photo doesn't care whether it's the featured image or the gallery,
+    # and requiring one specific kind was an authoring bug (both gemini and deepseek
+    # independently chose featured_image and were wrongly failed for it). The
+    # certificate remains mandatory via all_of; any_of narrows only the photo choice.
     media:
-      all_of: ["products.blender-panasonic.gallery_images", "products.blender-panasonic.certificate_documents"]
+      all_of: ["products.blender-panasonic.certificate_documents"]
+      any_of: ["products.blender-panasonic.gallery_images", "products.blender-panasonic.featured_image"]
     escalate: false
     language: ru
 
   - id: "6. photo request — media-less product"
     message: "Пришлите фото блендера Bosch, пожалуйста."
-    # blender-bosch carries no media in any column at all — a "БЕЗ МЕДИА" record.
+    # blender-bosch carries no media in any column at all — a "БЕЗ МЕДИА" record. The
+    # must_not_contain phrase ban on "вот фото"/etc. was removed (2026-07-26, deliberate
+    # decision): those phrases are ordinary customer-service wording when media IS
+    # attached elsewhere, and banning them here punished the WORDS rather than the
+    # behavior. media.forbid still enforces that no attachment is actually sent; this
+    # test no longer separately checks whether the reply's phrasing implies one was.
     media:
       forbid: true
-    must_not_contain: ["вот фото", "прикрепляю фото", "фото во вложении"]
     escalate: false
     language: ru
 
@@ -84,28 +93,37 @@ tests:
     # cookware-set is out of stock (index 1) — reworked for the 2026-07 canonical-block
     # prompt: an unavailable product gets NO media at all regardless of which kind was
     # asked for, a stock-driven refusal rather than "this specific kind happens to be
-    # missing" (contrast with tests 6/8 below, which probe a genuinely missing media
-    # KIND on an in-stock, media-bearing product). Excluded from the LLM stock check
-    # (no stock_check field) — this test's point is media/facts, not stock-language
+    # missing" (contrast with test 8 below, which probes a genuinely missing media KIND
+    # on an in-stock, media-bearing product). Excluded from the LLM stock check (no
+    # stock_check field) — this test's point is media/facts, not stock-language
     # classification; segmentation analysis treats it as an out-of-stock confound, not
-    # a media-absence signal (see evals/SHOP_KB_V1_30_POSTMORTEM.md follow-up).
+    # a media-absence signal (see evals/SHOP_KB_V1_30_POSTMORTEM.md follow-up). The
+    # must_not_contain phrase ban was replaced (2026-07-26) with a semantic llm_check —
+    # same reasoning as test 6: the words aren't the failure, an actual false claim is,
+    # and a paraphrased false claim has no fixed spelling a substring list could catch.
     forbid_tokens: ["product.cookware-set.price"]
     media:
       forbid: true
-    must_not_contain: ["вот видео", "прикрепляю видео", "видео во вложении"]
     escalate: false
     language: ru
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что этого товара сейчас нет в наличии"
+        expect: true
 
   - id: "8. partial-media probe — asks for the one missing kind"
     message: "А сертификат качества на блендер Tefal есть? Пришлите, если есть."
     # blender-tefal has gallery_images + demo_videos but NO certificate_documents — a
     # partially-populated record, not a media-less one. The missing column must still
     # forbid attaching anything and answer honestly, exactly like a fully media-less row.
+    # The must_not_contain phrase ban was replaced (2026-07-26) with a semantic
+    # llm_check — same reasoning as tests 6/7.
     media:
       forbid: true
-    must_not_contain: ["вот сертификат", "прикрепляю сертификат", "сертификат во вложении"]
     escalate: false
     language: ru
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что сертификата качества на этот блендер нет"
+        expect: true
 
   - id: "9. delivery cost (general, zones present)"
     message: "Сколько стоит доставка?"

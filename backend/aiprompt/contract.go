@@ -294,13 +294,15 @@ func validateFactContract(resp Response, kb *KB, cat *Catalog) []ContractIssue {
 
 	// Literal-value leak detection only fires for a value that UNIQUELY identifies one
 	// fact across the whole catalog. A resolved value shared by two or more distinct
-	// fact tokens (the fixed, small-vocabulary stock/delivery-availability wording is
-	// identical for every entity in that state, e.g. every in-stock product resolves
-	// to the same "в наличии") cannot be attributed to any specific fact if it appears
+	// fact tokens (the fixed, small-vocabulary delivery-availability wording is
+	// identical for every zone in that state, e.g. every delivering zone resolves to
+	// the same "доставляем") cannot be attributed to any specific fact if it appears
 	// in the reply — the model may simply have described that shared state honestly in
 	// its own words, not leaked one entity's specific business value. Confirmed false
-	// positive: evals/SHOP_KB_V1_30_POSTMORTEM.md #7 ("в наличии" collided across
-	// unrelated products once the catalog held enough of them). Checking only unique
+	// positive (originally observed on in_stock wording, before it was removed as a
+	// fact token entirely — see registry.go): evals/SHOP_KB_V1_30_POSTMORTEM.md #7
+	// ("в наличии" collided across unrelated products once the catalog held enough of
+	// them). Checking only unique
 	// values is deliberately conservative — it can miss a genuine coincidental
 	// collision (two products priced identically) — but under-flagging a rare
 	// coincidence is the safer tradeoff against a confirmed, repeated failure mode.
@@ -387,7 +389,7 @@ func isWordRune(r rune) bool {
 }
 
 // ResolveFact resolves one request-catalog token against the current approved row and
-// column, using the native-reviewed Russian wording for stock/delivery-availability
+// column, using the native-reviewed Russian wording for delivery-availability
 // booleans. The returned value is final customer wording and is never model-facing.
 // ResolveFactLang is the language-aware counterpart (2026-07 Kazakh customer-message
 // testing) — every other exact value (price, a number, a complete string) is
@@ -397,9 +399,9 @@ func ResolveFact(token string, kb *KB, cat *Catalog) (string, error) {
 }
 
 // ResolveFactLang is ResolveFact's language-aware counterpart: lang selects the
-// stock/delivery-availability wording table ("kk" selects the DRAFT Kazakh table,
-// anything else selects the native-reviewed Russian one — see stockWording/
-// deliveryWording in registry.go). Every other resolved value is unaffected by lang.
+// delivery-availability wording table ("kk" selects the DRAFT Kazakh table, anything
+// else selects the native-reviewed Russian one — see deliveryWording in registry.go).
+// Every other resolved value is unaffected by lang.
 func ResolveFactLang(token string, kb *KB, cat *Catalog, lang string) (string, error) {
 	if kb == nil || cat == nil {
 		return "", fmt.Errorf("aiprompt: current KB and request catalog are required")
@@ -433,8 +435,6 @@ func currentFactValue(kb *KB, fact *FactEntry, lang string) (string, error) {
 		switch fact.Column {
 		case "price":
 			value = product.Price
-		case "in_stock":
-			return stockWording(lang)[product.InStock], nil
 		}
 	case "tariff":
 		tariff := currentTariff(kb, fact.Ref)

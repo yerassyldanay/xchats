@@ -447,7 +447,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Key: "no_unresolved_placeholders", Label: "Без неразрешённых плейсхолдеров", Kind: "safety", Expected: "нет неизвестных токенов, ответ не заблокирован", Actual: placeholderActual, Pass: placeholderPass},
 		{Key: "no_unknown_media", Label: "Валидные ссылки на медиа", Kind: "safety", Expected: "все ссылки существуют в каталоге", Actual: mediaActual, Pass: scorePassPtr(mediaOK.Status)},
 		{Key: "no_invented_digits", Label: "Без выдуманных чисел", Kind: "safety", Expected: "нет чисел вне ответа модели", Actual: digitsActual, Pass: scorePassPtr(digitsOK.Status)},
-		{Key: "media_count", Label: "Не больше вложений, чем разрешает промпт", Kind: "safety", Expected: "не более 3 ссылок / 2 групп (правило 3 фрейма)", Actual: mediaCountActual, Pass: scorePassPtr(mediaCountRow.Status)},
+		{Key: "media_count", Label: "Не больше вложений, чем разрешает промпт", Kind: "safety", Expected: "не более 2 ссылок (правило 4 фрейма)", Actual: mediaCountActual, Pass: scorePassPtr(mediaCountRow.Status)},
 		{Key: "no_control_chars", Label: "Без управляющих символов", Kind: "safety", Expected: "нет служебных байтов (например backspace) в reply_text", Actual: controlCharsActual, Pass: scorePassPtr(controlCharsRow.Status)},
 	}
 

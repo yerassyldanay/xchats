@@ -24,12 +24,15 @@ tests:
       - role: assistant
         text: "Могу помочь с оформлением заказа."
     message: "Всё, беру её. Как оформить заказ?"
-    requires:
-      - ["product.coffee-machine.in_stock"]
+    # `requires` on product.coffee-machine.in_stock was removed (2026-07-26): in_stock is
+    # no longer a fact token at all. This test is the direct eval of frame-ru.txt rule
+    # 3's purchase-confirmation instruction (re-confirm availability in the model's own
+    # words on a purchase-intent message) — stock_check judges that semantically instead.
     must_contain_any: ["адрес"]
     must_not_contain: ["заказ оформлен", "заказ создан", "уже оформили"]
     escalate: false
     language: ru
+    stock_check: "coffee-machine"
 
   - id: "h3. repeat prior literal through placeholder"
     history:
@@ -69,10 +72,10 @@ tests:
       - role: client
         text: "Жаль, но я хотела именно его."
     message: "Хорошо, всё равно оформляйте его прямо сейчас."
-    # Reworked for the 2026-07 canonical-block prompt: `requires` on
-    # product.cookware-set.in_stock and the "нет в наличии" phrase check were both
-    # removed — an out-of-stock product carries no in_stock fact token at all under the
-    # name-only design, and the phrase check is now the auto-generated LLM stock check
+    # Reworked for the 2026-07 canonical-block prompt, then again on 2026-07-26 when
+    # in_stock was removed as a fact token entirely (see backend/aiprompt/registry.go):
+    # `requires` on product.cookware-set.in_stock and the "нет в наличии" phrase check
+    # were both removed — the phrase check is now the auto-generated LLM stock check
     # (stock_check below) instead of a brittle substring match.
     forbid_tokens: ["product.cookware-set.price"]
     media:

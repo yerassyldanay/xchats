@@ -132,6 +132,6 @@ const presentKeys = computed(() => TEST_FIELD_KEYS.filter((k) => presentPredicat
       </div>
     </div>
 
-    <FieldLegend :keys="presentKeys" class="hidden xl:block w-64 shrink-0 sticky top-0" />
+    <FieldLegend :declared-keys="presentKeys" class="hidden xl:block w-64 shrink-0 sticky top-0" />
   </div>
 </template>

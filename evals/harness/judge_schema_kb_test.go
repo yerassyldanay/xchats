@@ -382,25 +382,66 @@ func TestJudgeOneSchemaKB_MediaRequestedWhenFieldAbsent_HonestWithholdingPasses(
 	}
 }
 
+// testSchemaKBFixtureDeliveryZone is a minimal fixture carrying one delivery zone —
+// used only by the Kazakh-substitution test below, which needs a boolean fact
+// (delivery_available is the only one left since in_stock stopped being a fact
+// token, 2026-07-26, registry.go) to prove language-aware wording substitution.
+const testSchemaKBFixtureDeliveryZone = `
+organization_id: "11111111-1111-1111-1111-111111111111"
+
+ai_assistants:
+  persona: "Ты — ассистент интернет-магазина «Demo Shop»."
+  guardrails: "Никогда не выдумывай цены и факты."
+  language_policy: "Отвечай только на русском языке."
+
+ai_policies:
+  outside_zones_note: "В другие города не доставляем."
+
+ai_delivery_zones:
+  - ref: almaty
+    name: "Алматы"
+    zone_level: city
+    delivery_available: true
+    delivery_cost: "1 500 ₸"
+    delivery_in_days: "1-2"
+    sales_status: active
+`
+
+func loadSchemaKBJudgeContextDeliveryZone(t *testing.T) (*aiprompt.KB, *aiprompt.Catalog) {
+	t.Helper()
+	dir := t.TempDir()
+	fixturePath := filepath.Join(dir, "data-ru.yaml")
+	mustWrite(t, fixturePath, testSchemaKBFixtureDeliveryZone)
+	kb, err := kbfixture.Load(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := aiprompt.BuildCatalog(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kb, cat
+}
+
 // TestJudgeOneSchemaKB_KazakhResponse_LanguageAwareSubstitution confirms a response
 // declaring reply_language "kk" is accepted (not rejected as bad_language), passes
-// contract, and injects the KAZAKH stock wording — not the Russian one — into
-// InjectedText. End-to-end proof (through the same judgeOneSchemaKB the real judge
-// pipeline uses) that aiprompt.SubstituteFactsLang is wired correctly for the schema_kb_v1
-// judging path (2026-07 Kazakh customer-message testing).
+// contract, and injects the KAZAKH delivery-availability wording — not the Russian
+// one — into InjectedText. End-to-end proof (through the same judgeOneSchemaKB the
+// real judge pipeline uses) that aiprompt.SubstituteFactsLang is wired correctly for
+// the schema_kb_v1 judging path (2026-07 Kazakh customer-message testing).
 func TestJudgeOneSchemaKB_KazakhResponse_LanguageAwareSubstitution(t *testing.T) {
-	kb, cat := loadSchemaKBJudgeContext(t)
-	output := schemaKBResponseLang(t, "Иә, {{product.coffee-machine.in_stock}}.", []string{}, "", "kk")
-	tc := TestCase{ID: "kk-test", Requires: [][]string{{"product.coffee-machine.in_stock"}}, Language: "kk"}
+	kb, cat := loadSchemaKBJudgeContextDeliveryZone(t)
+	output := schemaKBResponseLang(t, "Иә, {{delivery.almaty.delivery_available}}.", []string{}, "", "kk")
+	tc := TestCase{ID: "kk-test", Requires: [][]string{{"delivery.almaty.delivery_available"}}, Language: "kk"}
 	v := judgeOneSchemaKB(tc, schemaKBPromptfooRow(output), kb, cat, aipromptTokenValues(cat), trustedDigitsFromKB(kb))
 	if !v.ContractPass {
 		t.Fatalf("ContractPass=false: %s", v.Reason)
 	}
-	if !strings.Contains(v.InjectedText, aiprompt.StockWordingKK[true]) {
-		t.Errorf("want Kazakh stock wording %q injected, got %q", aiprompt.StockWordingKK[true], v.InjectedText)
+	if !strings.Contains(v.InjectedText, aiprompt.DeliveryWordingKK[true]) {
+		t.Errorf("want Kazakh delivery wording %q injected, got %q", aiprompt.DeliveryWordingKK[true], v.InjectedText)
 	}
-	if strings.Contains(v.InjectedText, aiprompt.StockWordingRU[true]) {
-		t.Errorf("want Russian stock wording NOT injected for a Kazakh reply, got %q", v.InjectedText)
+	if strings.Contains(v.InjectedText, aiprompt.DeliveryWordingRU[true]) {
+		t.Errorf("want Russian delivery wording NOT injected for a Kazakh reply, got %q", v.InjectedText)
 	}
 	if !v.RequiresPass {
 		t.Errorf("RequiresPass=false, want true")

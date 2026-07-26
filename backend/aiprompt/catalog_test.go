@@ -200,32 +200,26 @@ func TestBuildCatalog_BlankExactFactsProduceNoPlaceholder(t *testing.T) {
 	}
 }
 
-// TestBuildCatalog_InStockSubstitution verifies both true and false produce a
-// fact entry, and that the boolean itself (never a raw literal) drives the
-// eventual Russian wording via SubstituteFacts (contract_test.go covers the
-// substitution path itself; here we check the catalog-level representation).
-func TestBuildCatalog_InStockSubstitution(t *testing.T) {
+// TestBuildCatalog_NoInStockFactToken is the invariant established by removing
+// in_stock as a fact column entirely (2026-07-26, registry.go): a token can't
+// carry a value whole sentences grammatically depend on (the negation breaks
+// "Товар {{...}}", and follow-on sentences like "Могу оформить заказ" are only
+// valid in one state). BuildCatalog must never produce an in_stock fact for any
+// product, in-stock or out-of-stock — availability is now expressed only via
+// which of PRODUCTS IN STOCK / PRODUCTS OUT OF STOCK a product appears in
+// (prompt.go's renderProductsInStock/renderProductsOutOfStock), never a
+// citable placeholder.
+func TestBuildCatalog_NoInStockFactToken(t *testing.T) {
 	kb := baseKB() // coffee-machine InStock=true, cookware-set InStock=false
 	cat, err := BuildCatalog(kb)
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)
 	}
-	inStock := cat.FactByToken("{{product.coffee-machine.in_stock}}")
-	if inStock == nil {
-		t.Fatal("expected in_stock fact for coffee-machine")
+	if f := cat.FactByToken("{{product.coffee-machine.in_stock}}"); f != nil {
+		t.Errorf("expected no in_stock fact for an in-stock product, got %+v", f)
 	}
-	if inStock.Kind != KindStockFlag {
-		t.Errorf("in_stock Kind = %v, want KindStockFlag", inStock.Kind)
-	}
-	outOfStock := cat.FactByToken("{{product.cookware-set.in_stock}}")
-	if outOfStock == nil {
-		t.Fatal("expected in_stock fact for cookware-set")
-	}
-	if inStock.ReasoningState != "in_stock" {
-		t.Errorf("in-stock product ReasoningState = %q, want in_stock", inStock.ReasoningState)
-	}
-	if outOfStock.ReasoningState != "out_of_stock" {
-		t.Errorf("out-of-stock product ReasoningState = %q, want out_of_stock", outOfStock.ReasoningState)
+	if f := cat.FactByToken("{{product.cookware-set.in_stock}}"); f != nil {
+		t.Errorf("expected no in_stock fact for an out-of-stock product, got %+v", f)
 	}
 }
 

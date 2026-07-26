@@ -20,16 +20,8 @@ const (
 	KindTextComplete ValueKind = "text_complete" // value is complete as written (links, handles)
 	KindNumber       ValueKind = "number"        // bare number; unit word comes from the column meaning
 	KindNumberRange  ValueKind = "number_range"  // bare number or range like 1–3
-	KindStockFlag    ValueKind = "stock_flag"    // boolean; code substitutes reviewed Russian wording
 	KindDeliveryFlag ValueKind = "delivery_flag" // boolean; code substitutes reviewed Russian wording
 )
-
-// StockWordingRU is the reviewed Russian wording code substitutes for the
-// in_stock boolean. The model never writes the boolean literal to a customer.
-var StockWordingRU = map[bool]string{
-	true:  "в наличии",
-	false: "нет в наличии",
-}
 
 // DeliveryWordingRU is the reviewed Russian wording code substitutes for the
 // delivery_available boolean. The model never writes the boolean literal, and
@@ -39,36 +31,24 @@ var DeliveryWordingRU = map[bool]string{
 	false: "не доставляем",
 }
 
-// StockWordingKK/DeliveryWordingKK are the Kazakh counterparts, selected when a
-// response declares reply_language "kk" (2026-07 Kazakh customer-message
-// testing — see ResolveFactLang/SubstituteFactsLang). The prompt and knowledge
-// base stay Russian-only; only the CUSTOMER-facing reply may be Kazakh, so
-// these wordings exist purely for that substitution path.
+// DeliveryWordingKK is the Kazakh counterpart, selected when a response
+// declares reply_language "kk" (2026-07 Kazakh customer-message testing — see
+// ResolveFactLang/SubstituteFactsLang). The prompt and knowledge base stay
+// Russian-only; only the CUSTOMER-facing reply may be Kazakh, so this wording
+// exists purely for that substitution path.
 //
 // DRAFT — machine-translated, pending native Kazakh speaker review before any
 // billed comparison treats Kazakh output as production-quality (same doctrine
 // already applied to every other Kazakh frame in this repo's history).
-var StockWordingKK = map[bool]string{
-	true:  "бар",
-	false: "жоқ",
-}
-
 var DeliveryWordingKK = map[bool]string{
 	true:  "жеткіземіз",
 	false: "жеткізбейміз",
 }
 
-// stockWording/deliveryWording select the reviewed wording table for a
-// response's declared reply language — "kk" selects the DRAFT Kazakh table,
-// anything else (including "" and "ru") selects the native-reviewed Russian
-// table, the always-safe default.
-func stockWording(lang string) map[bool]string {
-	if lang == "kk" {
-		return StockWordingKK
-	}
-	return StockWordingRU
-}
-
+// deliveryWording selects the reviewed wording table for a response's
+// declared reply language — "kk" selects the DRAFT Kazakh table, anything
+// else (including "" and "ru") selects the native-reviewed Russian table, the
+// always-safe default.
 func deliveryWording(lang string) map[bool]string {
 	if lang == "kk" {
 		return DeliveryWordingKK
@@ -85,7 +65,7 @@ type FactColumn struct {
 	// UnitKK is Unit's Kazakh counterpart, told to the model alongside Unit
 	// (usageNote renders both) so a Kazakh-language reply appends the correct
 	// word instead of the Russian one — empty when Unit itself is empty. DRAFT,
-	// pending native Kazakh review (see StockWordingKK's doc comment).
+	// pending native Kazakh review (see DeliveryWordingKK's doc comment).
 	UnitKK string
 }
 
@@ -112,7 +92,6 @@ type MediaColumn struct {
 var factColumns = map[string][]FactColumn{
 	"product": {
 		{Column: "price", Label: "цена", Kind: KindMoneyDisplay},
-		{Column: "in_stock", Label: "наличие", Kind: KindStockFlag},
 	},
 	"tariff": {
 		{Column: "price", Label: "цена", Kind: KindMoneyDisplay},
@@ -229,8 +208,6 @@ func usageNote(f FactColumn) string {
 			return "только число; в русском ответе добавь слово «" + f.Unit + "» после токена, в казахском — «" + f.UnitKK + "»"
 		}
 		return "только число; добавь слово «" + f.Unit + "» после токена"
-	case KindStockFlag:
-		return "флаг наличия; " + stockUsageGuidance() + "; состояние out_of_stock не предлагай активно, предложи альтернативу in_stock"
 	case KindDeliveryFlag:
 		return "флаг доступности доставки в это направление; " + deliveryUsageGuidance() +
 			". Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
@@ -239,26 +216,10 @@ func usageNote(f FactColumn) string {
 	}
 }
 
-// stockUsageGuidance is the shared, wording-map-derived phrasing rule for the
-// in_stock placeholder — used by usageNote (the FACTS-table path) and by the
-// v2 %%STOCK_WORDING_NOTE%% slot renderer (prompt.go), so the reviewed
-// wordings are interpolated from StockWordingRU exactly once, never retyped
-// into a frame file. Names the observed duplication failure directly (a
-// model writing its own availability word right next to the placeholder
-// produces "в наличии: в наличии" once substitution runs) because the July
-// 2026 eval run showed models avoiding the token specifically to escape that
-// visible stutter — the guidance has to name the anti-pattern, not just ban
-// paraphrasing in the abstract.
-func stockUsageGuidance() string {
-	yes, no := StockWordingRU[true], StockWordingRU[false]
-	return "код заменит токен на ГОТОВУЮ фразу целиком — «" + yes + "» или «" + no +
-		"» (в казахском ответе — казахский эквивалент); ставь токен туда, где по смыслу должна стоять эта фраза, " +
-		"и НЕ добавляй рядом собственных слов о наличии («да, товар есть», «" + yes + "» и т.п.) — иначе получится " +
-		"дублирование вида «" + yes + ": " + yes + "»; вместо этого пиши, например: «Да, товар <ТОКЕН>.»"
-}
-
-// deliveryUsageGuidance is stockUsageGuidance's counterpart for
-// delivery_available, interpolated from DeliveryWordingRU the same way.
+// deliveryUsageGuidance is the wording-map-derived phrasing rule for
+// delivery_available, interpolated from DeliveryWordingRU — used by usageNote
+// (the FACTS-table path) so the reviewed wording is typed exactly once, never
+// retyped into a frame file.
 func deliveryUsageGuidance() string {
 	yes, no := DeliveryWordingRU[true], DeliveryWordingRU[false]
 	return "код заменит токен на готовую фразу «" + yes + "» или «" + no +

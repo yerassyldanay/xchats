@@ -58,10 +58,6 @@ func TestBuildPrompt_HidesExactFactValues(t *testing.T) {
 	if strings.Contains(string(catJSON), `"value":`) {
 		t.Fatalf("model-facing catalog still exposes a value property: %s", catJSON)
 	}
-	stock := cat.FactByToken("{{product.coffee-machine.in_stock}}")
-	if stock == nil || stock.ReasoningState != "in_stock" {
-		t.Fatalf("stock fact = %+v, want semantic in_stock reasoning state", stock)
-	}
 }
 
 // TestRenderPrompt_BlankProseOmitted: an empty topic body produces no rendered

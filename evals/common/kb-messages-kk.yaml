@@ -27,8 +27,8 @@ tests:
 
   - id: "kk2. in-stock availability — coffee machine"
     message: "Кофемашина DeLonghi қоймада бар ма?"
-    requires:
-      - ["product.coffee-machine.in_stock"]
+    # `requires` on product.coffee-machine.in_stock was removed (2026-07-26): in_stock
+    # is no longer a fact token at all — see kb-questions-ru.yaml test 2's comment.
     escalate: false
     language: kk
     stock_check: "coffee-machine"
@@ -37,8 +37,9 @@ tests:
     message: "Philips блендері бар ма?"
     # blender-philips is deliberately out of stock (index 3, i%3==0) — same product
     # kb-questions-ru.yaml's own test 3 targets, so the two are directly comparable
-    # across languages.
-    forbid_tokens: ["product.blender-philips.price", "product.blender-philips.in_stock"]
+    # across languages. in_stock dropped from forbid_tokens (2026-07-26): the token no
+    # longer exists at all, so quoting it now fails structurally via no_unknown_tokens.
+    forbid_tokens: ["product.blender-philips.price"]
     media:
       forbid: true
     escalate: false

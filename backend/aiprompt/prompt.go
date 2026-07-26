@@ -24,14 +24,10 @@ import (
 // blocks). A frame uses EITHER the v1 slots OR the v2 slots for a given concept,
 // never both — RenderPrompt fills whichever slots the frame actually contains.
 //
-// SlotDeliveryZones/SlotStockWordingNote are v2 additions (2026-07-24, eval-run
-// follow-up): SlotDeliveryZones exposes the zone containment hierarchy
-// (zone_level/parent_ref) that BUSINESS_FACTS's per-zone fact lines never
-// carried, so the frame's "most precise zone wins" rule has actual hierarchy
-// data to reason over instead of only a flat list of zone refs.
-// SlotStockWordingNote surfaces the stock_flag usage note ONCE per prompt —
-// renderBusinessFacts filters out the product table entirely, so without this
-// slot no v2 prompt ever showed that guidance at all.
+// SlotDeliveryZones is a v2 addition (2026-07-24, eval-run follow-up): it exposes
+// the zone containment hierarchy (zone_level/parent_ref) that BUSINESS_FACTS's
+// per-zone fact lines never carried, so the frame's "most precise zone wins" rule
+// has actual hierarchy data to reason over instead of only a flat list of zone refs.
 const (
 	SlotAssistant          = "%%ASSISTANT%%"
 	SlotKnowledgeBase      = "%%KNOWLEDGE_BASE%%"
@@ -44,7 +40,6 @@ const (
 	SlotTopics             = "%%TOPICS%%"
 	SlotBusinessFacts      = "%%BUSINESS_FACTS%%"
 	SlotDeliveryZones      = "%%DELIVERY_ZONES%%"
-	SlotStockWordingNote   = "%%STOCK_WORDING_NOTE%%"
 	SlotResponseSchema     = "%%RESPONSE_SCHEMA%%"
 )
 
@@ -94,7 +89,6 @@ func RenderPrompt(frame string, input *PromptInput, cat *Catalog) (string, error
 	out = strings.ReplaceAll(out, SlotTopics, renderTopicBlocks(input, cat))
 	out = strings.ReplaceAll(out, SlotBusinessFacts, renderBusinessFacts(cat.Facts))
 	out = strings.ReplaceAll(out, SlotDeliveryZones, renderDeliveryZones(input.DeliveryZones))
-	out = strings.ReplaceAll(out, SlotStockWordingNote, renderStockWordingNote())
 	out = strings.ReplaceAll(out, SlotResponseSchema, RenderResponseSchema())
 	if err := ValidatePrompt(out, cat); err != nil {
 		return "", err
@@ -286,9 +280,6 @@ func renderProductsInStock(input *PromptInput, cat *Catalog) string {
 		if cat.FactByToken("{{product."+p.Ref+".price}}") != nil {
 			lines = append(lines, "price_placeholder: {{product."+p.Ref+".price}}")
 		}
-		if cat.FactByToken("{{product."+p.Ref+".in_stock}}") != nil {
-			lines = append(lines, "stock_placeholder: {{product."+p.Ref+".in_stock}}")
-		}
 		lines = append(lines, mediaRefLines(cat, "products", p.Ref)...)
 		blocks = append(blocks, strings.Join(lines, "\n"))
 	}
@@ -422,18 +413,6 @@ func renderDeliveryZones(zones []DeliveryZone) string {
 // separator in renderDeliveryZones's pipe-delimited line format.
 func sanitizeZoneField(s string) string {
 	return strings.ReplaceAll(s, "|", "／")
-}
-
-// renderStockWordingNote renders the v2 %%STOCK_WORDING_NOTE%% slot: the
-// stock_flag usage guidance stated once for the whole prompt. renderFacts
-// already attaches this same guidance (via usageNote) to every individual
-// fact line, but renderBusinessFacts excludes the product table entirely, and
-// renderProductsInStock's stock_placeholder line carries no note at all — so
-// without this slot, a v2 prompt never surfaced this guidance anywhere. A
-// dedicated once-per-prompt slot is far cheaper than repeating the note on
-// every in-stock product block (up to 100 times at the largest catalog size).
-func renderStockWordingNote() string {
-	return "Про stock_placeholder: " + stockUsageGuidance() + "."
 }
 
 var (

@@ -7,6 +7,7 @@ export default {
       aria: 'Field description language',
     },
     legendTitle: 'Fields',
+    archiveSection: 'Archived',
     notDeclared: 'Not declared (check skipped):',
     valueNotFound: 'value not found in the scenario\'s facts',
     mediaNotFound: 'not in the scenario\'s media_tokens',

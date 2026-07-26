@@ -215,16 +215,16 @@ func TestValidateResponse_BadLanguage(t *testing.T) {
 }
 
 // TestValidateResponse_KazakhLanguageAccepted confirms "kk" is accepted with no
-// bad_language issue, and that stock/delivery-availability wording resolves through
-// the Kazakh table when the response declares it.
+// bad_language issue, and that delivery-availability wording resolves through the
+// Kazakh table when the response declares it.
 func TestValidateResponse_KazakhLanguageAccepted(t *testing.T) {
-	kb := baseKB()
+	kb := zonesKB() // has an active astana zone with DeliveryAvailable: true
 	cat, err := BuildCatalog(kb)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw := `{
-  "reply_text": "Иә, {{product.coffee-machine.in_stock}}.",
+  "reply_text": "Иә, {{delivery.astana.delivery_available}}.",
   "reply_language": "kk",
   "media_files_to_send": [],
   "escalate": false,
@@ -242,11 +242,11 @@ func TestValidateResponse_KazakhLanguageAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, StockWordingKK[true]) {
-		t.Errorf("want Kazakh stock wording %q substituted, got %q", StockWordingKK[true], out)
+	if !strings.Contains(out, DeliveryWordingKK[true]) {
+		t.Errorf("want Kazakh delivery wording %q substituted, got %q", DeliveryWordingKK[true], out)
 	}
-	if strings.Contains(out, StockWordingRU[true]) {
-		t.Errorf("want Russian stock wording NOT substituted for a Kazakh reply, got %q", out)
+	if strings.Contains(out, DeliveryWordingRU[true]) {
+		t.Errorf("want Russian delivery wording NOT substituted for a Kazakh reply, got %q", out)
 	}
 }
 
@@ -355,22 +355,30 @@ func TestValidateResponse_NilCatalogSkipsMediaCheck(t *testing.T) {
 	}
 }
 
-func TestSubstituteFacts_InStockWording(t *testing.T) {
-	cat := validCatalog(t)
-	out, err := SubstituteFacts("Наличие: {{product.coffee-machine.in_stock}}.", baseKB(), cat)
+// TestSubstituteFacts_DeliveryAvailableWording covers the boolean-fact ->
+// reviewed-wording substitution mechanism (previously covered by
+// TestSubstituteFacts_InStockWording, removed 2026-07-26 along with in_stock as a
+// fact token — delivery_available is now the only substituted boolean).
+func TestSubstituteFacts_DeliveryAvailableWording(t *testing.T) {
+	kb := zonesKB()
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	out, err := SubstituteFacts("Доставка: {{delivery.astana.delivery_available}}.", kb, cat)
 	if err != nil {
 		t.Fatalf("SubstituteFacts: %v", err)
 	}
-	if !strings.Contains(out, "в наличии") || strings.Contains(out, "нет в наличии") {
-		t.Errorf("in_stock=true should render «в наличии», got %q", out)
+	if !strings.Contains(out, "доставляем") || strings.Contains(out, "не доставляем") {
+		t.Errorf("delivery_available=true should render «доставляем», got %q", out)
 	}
 
-	out2, err := SubstituteFacts("Наличие: {{product.cookware-set.in_stock}}.", baseKB(), cat)
+	out2, err := SubstituteFacts("Доставка: {{delivery.baikonur.delivery_available}}.", kb, cat)
 	if err != nil {
 		t.Fatalf("SubstituteFacts: %v", err)
 	}
-	if !strings.Contains(out2, "нет в наличии") {
-		t.Errorf("in_stock=false should render «нет в наличии», got %q", out2)
+	if !strings.Contains(out2, "не доставляем") {
+		t.Errorf("delivery_available=false should render «не доставляем», got %q", out2)
 	}
 }
 
@@ -560,6 +568,10 @@ func TestValidateResponse_PlaceholderInEscalationReasonTolerated(t *testing.T) {
 	}
 }
 
+// Availability wording ("в наличии"/"нет в наличии") is deliberately NOT covered
+// here — since in_stock stopped being a fact token (2026-07-26, registry.go), writing
+// that phrase in the model's own words is the required, honest behavior (frame-ru.txt
+// rules 1a/3), not a literal-value leak.
 func TestValidateResponse_RejectsModelAuthoredExactValues(t *testing.T) {
 	kb := baseKB()
 	cat, err := BuildCatalog(kb)
@@ -568,8 +580,6 @@ func TestValidateResponse_RejectsModelAuthoredExactValues(t *testing.T) {
 	}
 	for _, text := range []string{
 		"Цена кофемашины — 129 900 ₸.",
-		"Кофемашина в наличии.",
-		"Набор посуды нет в наличии.",
 	} {
 		_, issues := ValidateResponse(responseWithText(t, text), kb, cat)
 		if !containsCode(issues, "exact_value_literal") {
