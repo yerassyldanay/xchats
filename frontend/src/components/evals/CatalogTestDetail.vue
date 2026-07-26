@@ -1,111 +1,137 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { notCheckedRequirements, resolveMediaExpectation, resolveRequires } from '@/lib/evalCatalog'
+import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
+import { annotateMediaExpect, formatYamlValue, notCheckedRequirements, resolveRequires } from '@/lib/evalCatalog'
+import { TEST_FIELD_KEYS, type TestFieldKey } from '@/lib/evalFieldDocs'
 import type { CatalogScenario, CatalogTestCase } from '@/types'
-import { Badge } from '@/components/ui/badge'
+import CatalogFieldRow from './CatalogFieldRow.vue'
+import FieldLegend from './FieldLegend.vue'
+import CopyButton from './CopyButton.vue'
 
-// The Requirements centerpiece — every expectation as a resolved, sourced sentence.
-// Read-only review, never a run/results view (no pass/fail here — this is BEFORE any
-// model is ever called).
+// The requirements centerpiece — every tests.yaml key shown RAW, in its authored
+// order, with a (?) tooltip explaining what it evaluates (see MEMORY.md "Frontend
+// direction": developer audience, exact schema over friendly renamed abstractions).
+// Resolved fact values / broken-ref flags are ANNOTATIONS beneath the raw value, never
+// a replacement for it. Read-only review, never a run/results view.
 const props = defineProps<{ test: CatalogTestCase; scenario: CatalogScenario }>()
+const { t } = useI18n()
+const route = useRoute()
 
 const requireGroups = computed(() => resolveRequires(props.test.requires, props.scenario.facts))
-const mediaExpectation = computed(() => resolveMediaExpectation(props.test.media, props.scenario.media_refs, props.scenario.media_groups))
+const mediaAnnotations = computed(() => annotateMediaExpect(props.test.media, props.scenario.media_tokens))
 const notChecked = computed(() => notCheckedRequirements(props.test))
+const deepLink = computed(() => `${window.location.origin}${route.fullPath}`)
 
-const universalChecks = [
-  { label: 'Валидный JSON', expected: 'корректный JSON-объект' },
-  { label: 'Поля контракта', expected: 'все обязательные поля присутствуют' },
-  { label: 'Без неразрешённых плейсхолдеров', expected: 'нет неизвестных токенов, ответ не заблокирован' },
-  { label: 'Валидные ссылки на медиа', expected: 'все ссылки существуют в каталоге' },
-  { label: 'Без выдуманных чисел', expected: 'нет чисел вне ответа модели' },
-  { label: 'Не больше вложений, чем разрешает промпт', expected: 'не более 3 ссылок / 2 групп (правило 3 фрейма)' },
-]
+// Presence predicates in TEST_FIELD_KEYS' own canonical order — presentKeys drives
+// BOTH the side legend and, indirectly (via the v-if guards below), which rows the
+// main column actually renders. Keeping this as a single source of truth means the
+// legend can never list a field the main column doesn't also show, or vice versa.
+const presentPredicates: Record<TestFieldKey, (t: CatalogTestCase) => boolean> = {
+  id: () => true,
+  source: () => true,
+  message: () => true,
+  history: (t) => !!t.history?.length,
+  requires: (t) => !!t.requires?.length,
+  escalate: (t) => t.escalate !== undefined,
+  language: (t) => !!t.language,
+  must_not_contain: (t) => !!t.must_not_contain?.length,
+  must_contain_any: (t) => !!t.must_contain_any?.length,
+  forbid_tokens: (t) => !!t.forbid_tokens?.length,
+  media: (t) => !!t.media,
+  outcomes: (t) => !!t.outcomes?.length,
+  stock_check: (t) => !!t.stock_check,
+  llm_checks: (t) => !!t.llm_checks?.length,
+}
+const presentKeys = computed(() => TEST_FIELD_KEYS.filter((k) => presentPredicates[k](props.test)))
 </script>
 
 <template>
-  <div class="max-w-3xl space-y-5">
-    <div>
-      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">Вход</div>
-      <p class="text-xs text-muted-foreground font-mono mb-1">{{ test.id }}</p>
-      <p class="text-sm whitespace-pre-wrap">{{ test.message }}</p>
-      <div v-if="test.history?.length" class="mt-2 space-y-1 rounded-lg bg-muted/40 p-2.5">
-        <div v-for="(h, i) in test.history" :key="i" class="text-xs text-muted-foreground">
-          <span class="font-medium">{{ h.role === 'client' ? 'Клиент' : 'Ассистент' }}:</span> {{ h.text }}
+  <div class="flex gap-6 items-start">
+    <div class="max-w-3xl min-w-0 flex-1 space-y-4">
+      <div>
+        <div class="flex items-center gap-1.5">
+          <code class="font-mono text-sm font-semibold break-words">{{ test.id }}</code>
+          <CopyButton :text="test.id" label-key="id" />
+          <CopyButton :text="deepLink" label-key="link" />
         </div>
+        <p class="text-[11px] text-muted-foreground mt-1">
+          {{ t('evalCatalog.fields.source') }} → <code class="font-mono">{{ test.source }}</code>
+        </p>
       </div>
-      <p class="text-[11px] text-muted-foreground mt-1.5">источник: <code>{{ test.source }}</code></p>
-    </div>
 
-    <div>
-      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-2">Требования</div>
-      <div class="space-y-3">
-        <div v-if="requireGroups.length">
-          <div class="text-xs font-medium mb-1">Обязательные факты</div>
-          <ol class="space-y-1.5">
-            <li v-for="(g, i) in requireGroups" :key="i" class="text-xs">
-              <span class="text-muted-foreground mr-1">{{ i + 1 }}.</span>
-              <span v-if="g.alternatives.length > 1" class="text-muted-foreground">Одно из:</span>
-              <ul :class="g.alternatives.length > 1 ? 'ml-4 mt-0.5 space-y-0.5' : 'inline'">
-                <li v-for="alt in g.alternatives" :key="alt.token" :class="g.alternatives.length > 1 ? '' : 'inline'">
-                  <code class="font-mono">{{ alt.token }}</code>
-                  <template v-if="alt.value !== null">
-                    → <span class="font-medium">«{{ alt.value }}»</span>
-                  </template>
-                  <span v-else class="text-destructive font-medium">→ значение не найдено</span>
-                </li>
-              </ul>
-            </li>
-          </ol>
-        </div>
+      <CatalogFieldRow field-key="message">
+        <p class="text-sm whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ test.message }}</p>
+      </CatalogFieldRow>
 
-        <div v-if="test.language" class="text-xs">
-          <span class="font-medium">Язык ответа:</span> {{ test.language }}
-        </div>
+      <CatalogFieldRow v-if="test.history?.length" field-key="history">
+        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.history) }}</pre>
+      </CatalogFieldRow>
 
-        <div v-if="test.escalate !== undefined" class="text-xs">
-          <span class="font-medium">Эскалация:</span>
-          {{ test.escalate ? 'обязательна' : 'эскалации быть не должно' }}
-        </div>
-
-        <div v-if="mediaExpectation">
-          <div class="text-xs font-medium mb-1">
-            Медиа
-            <span v-if="mediaExpectation.exclusive" class="text-muted-foreground font-normal">(только из этого списка)</span>
+      <CatalogFieldRow v-if="test.requires?.length" field-key="requires">
+        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.requires) }}</pre>
+        <div class="pl-3 mt-1 space-y-0.5">
+          <div v-for="(g, i) in requireGroups" :key="i" class="text-[11px]">
+            <template v-for="(alt, j) in g.alternatives" :key="alt.token">
+              <code class="font-mono text-muted-foreground">{{ alt.token }}</code>
+              <template v-if="alt.value !== null"> → «{{ alt.value }}»</template>
+              <span v-else class="text-destructive font-medium"> → {{ t('evalCatalog.valueNotFound') }}</span>
+              <span v-if="j < g.alternatives.length - 1" class="text-muted-foreground"> / </span>
+            </template>
           </div>
-          <p v-if="mediaExpectation.forbid" class="text-xs">медиа быть не должно</p>
-          <ul v-else class="space-y-0.5">
-            <li v-for="e in [...mediaExpectation.refs, ...mediaExpectation.groups]" :key="e.name" class="text-xs">
-              <code class="font-mono">{{ e.name }}</code>
-              <span v-if="!e.found" class="text-destructive font-medium"> → не найдено в каталоге</span>
-            </li>
-          </ul>
         </div>
+      </CatalogFieldRow>
 
-        <div v-if="test.must_not_contain?.length" class="text-xs">
-          <div class="font-medium mb-1">Запрещённые фразы</div>
-          <ul class="space-y-0.5">
-            <li v-for="p in test.must_not_contain" :key="p"><code class="font-mono">{{ p }}</code></li>
-          </ul>
+      <CatalogFieldRow v-if="test.escalate !== undefined" field-key="escalate">
+        <p class="text-xs">{{ test.escalate ? 'обязательна' : 'эскалации быть не должно' }}</p>
+      </CatalogFieldRow>
+
+      <CatalogFieldRow v-if="test.language" field-key="language">
+        <p class="text-xs font-mono">{{ test.language }}</p>
+      </CatalogFieldRow>
+
+      <CatalogFieldRow v-if="test.media" field-key="media">
+        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.media) }}</pre>
+        <div v-if="mediaAnnotations.length" class="pl-3 mt-1 space-y-0.5">
+          <div v-for="a in mediaAnnotations" :key="`${a.key}:${a.name}`" class="text-[11px]">
+            <code class="font-mono text-muted-foreground">{{ a.name }}</code>
+            <span v-if="!a.found" class="text-destructive font-medium"> → {{ t('evalCatalog.mediaNotFound') }}</span>
+          </div>
         </div>
+      </CatalogFieldRow>
+
+      <CatalogFieldRow v-if="test.must_not_contain?.length" field-key="must_not_contain">
+        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.must_not_contain) }}</pre>
+      </CatalogFieldRow>
+
+      <CatalogFieldRow v-if="test.must_contain_any?.length" field-key="must_contain_any">
+        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.must_contain_any) }}</pre>
+      </CatalogFieldRow>
+
+      <CatalogFieldRow v-if="test.forbid_tokens?.length" field-key="forbid_tokens">
+        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.forbid_tokens) }}</pre>
+      </CatalogFieldRow>
+
+      <CatalogFieldRow v-if="test.outcomes?.length" field-key="outcomes">
+        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.outcomes) }}</pre>
+      </CatalogFieldRow>
+
+      <CatalogFieldRow v-if="test.stock_check" field-key="stock_check">
+        <p class="text-xs font-mono rounded-lg bg-muted/40 p-2.5 w-fit">{{ test.stock_check }}</p>
+      </CatalogFieldRow>
+
+      <CatalogFieldRow v-if="test.llm_checks?.length" field-key="llm_checks">
+        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.llm_checks) }}</pre>
+      </CatalogFieldRow>
+
+      <div v-if="notChecked.length" class="text-[11px] text-muted-foreground border-t border-border pt-3">
+        {{ t('evalCatalog.notDeclared') }}
+        <template v-for="(k, i) in notChecked" :key="k">
+          <code class="font-mono">{{ k }}</code><span v-if="i < notChecked.length - 1"> · </span>
+        </template>
       </div>
     </div>
 
-    <div v-if="notChecked.length">
-      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">Не проверяется этим тестом</div>
-      <div class="flex flex-wrap gap-1.5">
-        <Badge v-for="item in notChecked" :key="item" variant="outline" class="text-[11px] text-muted-foreground">{{ item }}</Badge>
-      </div>
-    </div>
-
-    <div>
-      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">Всегда применяемые проверки</div>
-      <div class="grid grid-cols-2 gap-1.5">
-        <div v-for="c in universalChecks" :key="c.label" class="text-[11px] rounded-lg border border-border px-2 py-1.5">
-          <div class="font-medium">{{ c.label }}</div>
-          <div class="text-muted-foreground">{{ c.expected }}</div>
-        </div>
-      </div>
-    </div>
+    <FieldLegend :keys="presentKeys" class="hidden xl:block w-64 shrink-0 sticky top-0" />
   </div>
 </template>

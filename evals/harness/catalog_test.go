@@ -143,6 +143,60 @@ func TestBuildCatalogScenario_ArchivedFieldsCarried(t *testing.T) {
 	}
 }
 
+// TestBuildCatalogScenario_TestsPathRecorded proves TestsPath names the actual
+// tests.yaml a scenario resolves against — both for a scenario that owns its own file
+// and for a "borrow case" (ScenarioConfig.Tests pointing at another scenario's dir via
+// "../"), where filepath.Join must clean the traversal into a normal scenarios/-rooted
+// path rather than leaking the borrower's own dir.
+func TestBuildCatalogScenario_TestsPathRecorded(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	writeCatalogFixtureScenario(t, root, "owner", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml",
+	}, Data{}, "tests:\n")
+
+	borrowerDir := filepath.Join(root, "scenarios", "borrower")
+	if err := os.MkdirAll(borrowerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sc := ScenarioConfig{Name: "borrower", Data: "data.yaml", Tests: "../owner/tests.yaml"}
+	scB, err := yaml.Marshal(sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(borrowerDir, "scenario.yaml"), scB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dataB, err := yaml.Marshal(Data{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(borrowerDir, "data.yaml"), dataB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// buildCatalogScenario is called here the same way writeCatalogJSON actually calls
+	// it — with a dir RELATIVE to the evals/ CWD (filepath.Glob's own matches are
+	// relative) — since TestsPath's exact shape depends on that: an absolute dir would
+	// make TestsPath absolute too, which is not what production ever produces.
+	owner, err := buildCatalogScenario(filepath.Join("scenarios", "owner"))
+	if err != nil {
+		t.Fatalf("buildCatalogScenario(owner): %v", err)
+	}
+	if owner.TestsPath != filepath.ToSlash(filepath.Join("scenarios", "owner", "tests.yaml")) {
+		t.Errorf("want TestsPath=scenarios/owner/tests.yaml, got %s", owner.TestsPath)
+	}
+
+	borrower, err := buildCatalogScenario(filepath.Join("scenarios", "borrower"))
+	if err != nil {
+		t.Fatalf("buildCatalogScenario(borrower): %v", err)
+	}
+	if borrower.TestsPath != filepath.ToSlash(filepath.Join("scenarios", "owner", "tests.yaml")) {
+		t.Errorf("want the '../' borrow cleaned into scenarios/owner/tests.yaml, got %s", borrower.TestsPath)
+	}
+}
+
 func TestBuildCatalogScenario_FactsResolvedToRealValuesAndSourceRecorded(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
@@ -261,6 +315,50 @@ func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
 	}
 	if strings.Contains(string(neb), "exclusive") {
 		t.Errorf("want exclusive key OMITTED (omitempty) when false, got %s", neb)
+	}
+}
+
+// TestCatalogTestCaseFrom_StockCheckForbidTokensAndLLMChecks proves the v3 fields
+// export under the yaml key names, not the Go field names — stock_check (not
+// stock_check_ref: TestCase.StockCheckRef's yaml tag is "stock_check", and the JSON
+// projection must match it), and that forbid_tokens/llm_checks are present when set,
+// omitted (not empty arrays) when the test declares neither.
+func TestCatalogTestCaseFrom_StockCheckForbidTokensAndLLMChecks(t *testing.T) {
+	full := catalogTestCaseFrom(TestCase{
+		ID: "t1", Message: "m",
+		ForbidTokens:  []string{"product.blender-philips."},
+		StockCheckRef: "blender-philips",
+		LLMChecks:     []LLMCheck{{Claim: "no delivery date promised", Expect: true}},
+	}, "tests.yaml")
+
+	b, err := json.Marshal(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"stock_check":"blender-philips"`) {
+		t.Errorf("want stock_check key (matching the yaml key), got %s", s)
+	}
+	if strings.Contains(s, "stock_check_ref") {
+		t.Errorf("want stock_check_ref NOT present (renamed to stock_check), got %s", s)
+	}
+	if !strings.Contains(s, `"forbid_tokens":["product.blender-philips."]`) {
+		t.Errorf("want forbid_tokens carried through, got %s", s)
+	}
+	if !strings.Contains(s, `"llm_checks":[{"claim":"no delivery date promised","expect":true}]`) {
+		t.Errorf("want llm_checks carried through with claim/expect tags, got %s", s)
+	}
+
+	bare := catalogTestCaseFrom(TestCase{ID: "t2", Message: "m"}, "tests.yaml")
+	bb, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := string(bb)
+	for _, key := range []string{"stock_check", "forbid_tokens", "llm_checks"} {
+		if strings.Contains(bs, key) {
+			t.Errorf("want %q OMITTED (omitempty) when the test declares none, got %s", key, bs)
+		}
 	}
 }
 

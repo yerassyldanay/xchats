@@ -157,10 +157,31 @@ type CatalogTestCase struct {
 	Escalate       *bool                `json:"escalate,omitempty"`
 	MustNotContain []string             `json:"must_not_contain,omitempty"`
 	MustContainAny []string             `json:"must_contain_any,omitempty"`
+	ForbidTokens   []string             `json:"forbid_tokens,omitempty"`
 	Media          *CatalogMediaExpect  `json:"media,omitempty"`
 	Outcomes       []CatalogOutcomeCase `json:"outcomes,omitempty"`
-	StockCheckRef  string               `json:"stock_check_ref,omitempty"`
+	StockCheckRef  string               `json:"stock_check,omitempty"`
+	LLMChecks      []CatalogLLMCheck    `json:"llm_checks,omitempty"`
 	Source         string               `json:"source"`
+}
+
+// CatalogLLMCheck mirrors LLMCheck with explicit JSON tags — a dedicated projection for
+// the same reason as CatalogMediaExpect (see its comment): the untagged
+// resolved_tests.json shape must never change as a side effect of catalog needs.
+type CatalogLLMCheck struct {
+	Claim  string `json:"claim"`
+	Expect bool   `json:"expect"`
+}
+
+func catalogLLMChecks(checks []LLMCheck) []CatalogLLMCheck {
+	if len(checks) == 0 {
+		return nil
+	}
+	out := make([]CatalogLLMCheck, 0, len(checks))
+	for _, c := range checks {
+		out = append(out, CatalogLLMCheck{Claim: c.Claim, Expect: c.Expect})
+	}
+	return out
 }
 
 // CatalogExtractCase is one extract/cases.yaml entry with its ground truth carried
@@ -242,9 +263,11 @@ func catalogTestCaseFrom(tc TestCase, source string) CatalogTestCase {
 		Escalate:       tc.Escalate,
 		MustNotContain: tc.MustNotContain,
 		MustContainAny: tc.MustContainAny,
+		ForbidTokens:   tc.ForbidTokens,
 		Media:          catalogMediaExpect(tc.Media),
 		Outcomes:       catalogOutcomeCases(tc.Outcomes),
 		StockCheckRef:  tc.StockCheckRef,
+		LLMChecks:      catalogLLMChecks(tc.LLMChecks),
 		Source:         source,
 	}
 }
@@ -321,6 +344,7 @@ func buildCatalogScenario(dir string) (*CatalogScenario, error) {
 		Experiment:     scenario.Experiment,
 		Archived:       scenario.Archived,
 		ArchivedReason: scenario.ArchivedReason,
+		TestsPath:      filepath.ToSlash(filepath.Join(dir, scenario.Tests)),
 		FactsSource:    dataPath,
 		Facts:          cat.Tokens,
 		MediaTokens:    cat.MediaTokens,
@@ -380,6 +404,7 @@ func buildCatalogScenarioSchemaKB(dir string, scenario *ScenarioConfig) (*Catalo
 		Archived:       scenario.Archived,
 		ArchivedReason: scenario.ArchivedReason,
 		Pipeline:       scenario.Pipeline,
+		TestsPath:      filepath.ToSlash(filepath.Join(dir, scenario.Tests)),
 		FactsSource:    fixturePath,
 		Facts:          facts,
 		MediaTokens:    mediaTokens,

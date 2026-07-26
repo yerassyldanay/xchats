@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import type { CatalogScenario } from '@/types'
 import { Badge } from '@/components/ui/badge'
+import CopyButton from './CopyButton.vue'
 
 defineProps<{ scenario: CatalogScenario }>()
 const emit = defineEmits<{ (e: 'select-test', testId: string): void }>()
+const { t } = useI18n()
 </script>
 
 <template>
@@ -13,11 +16,17 @@ const emit = defineEmits<{ (e: 'select-test', testId: string): void }>()
       <p v-if="scenario.description" class="text-sm text-muted-foreground mt-1 whitespace-pre-wrap">{{ scenario.description }}</p>
     </div>
 
-    <div class="flex flex-wrap gap-1.5">
+    <div class="flex flex-wrap items-center gap-1.5">
       <Badge variant="outline" class="text-[11px] font-mono">{{ scenario.name }}</Badge>
       <Badge v-if="scenario.prompt_ref" variant="outline" class="text-[11px] font-mono">{{ scenario.prompt_ref }}</Badge>
       <Badge v-if="scenario.experiment" variant="outline" class="text-[11px]">{{ scenario.experiment }}</Badge>
-      <Badge variant="outline" class="text-[11px]">контракт: {{ scenario.contract }}</Badge>
+      <Badge v-if="scenario.archived" variant="outline" class="text-[11px] text-muted-foreground" :title="scenario.archived_reason">
+        {{ t('evalCatalog.archived') }}
+      </Badge>
+      <Badge v-if="scenario.tests_path" variant="outline" class="text-[11px] font-mono inline-flex items-center gap-1">
+        {{ scenario.tests_path }}
+        <CopyButton :text="scenario.tests_path" label-key="path" />
+      </Badge>
     </div>
 
     <div>

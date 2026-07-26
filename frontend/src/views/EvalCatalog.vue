@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { BookOpen, CircleAlert } from 'lucide-vue-next'
 import { evalsApi, EvalsUnavailableError } from '@/api/evals'
 import { formatStartedAt } from '@/lib/evalMatrix'
 import type { CatalogFile } from '@/types'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import EvalsNavTabs from '@/components/evals/EvalsNavTabs.vue'
 import CatalogTree from '@/components/evals/CatalogTree.vue'
 import CatalogScenarioOverview from '@/components/evals/CatalogScenarioOverview.vue'
 import CatalogTestDetail from '@/components/evals/CatalogTestDetail.vue'
 import CatalogExtractCaseDetail from '@/components/evals/CatalogExtractCaseDetail.vue'
+import CatalogHelpDialog from '@/components/evals/CatalogHelpDialog.vue'
 
 // A read-only requirements REVIEW page — what input a model will receive, what's
 // required, what's NOT checked, and where every requirement comes from. Deliberately
@@ -17,6 +20,7 @@ import CatalogExtractCaseDetail from '@/components/evals/CatalogExtractCaseDetai
 // this is what you check BEFORE running or improving a model, not after.
 const route = useRoute()
 const router = useRouter()
+const { t, locale } = useI18n()
 
 const loading = ref(true)
 const unavailable = ref(false)
@@ -50,6 +54,17 @@ const selectionIsInvalid = computed(
   () => (selectedScenario.value && !scenario.value) || (selectedCase.value && !extractCase.value),
 )
 
+// activePane encodes the same branch order the right pane's v-if chain already used,
+// ONCE, so both the detail switch and the always-applied-checks bar (only shown for
+// test/extract) read off a single source instead of re-deriving the same conditions.
+const activePane = computed<'invalid' | 'test' | 'scenario' | 'extract' | 'empty'>(() => {
+  if (selectionIsInvalid.value) return 'invalid'
+  if (scenario.value && test.value) return 'test'
+  if (scenario.value) return 'scenario'
+  if (extractCase.value) return 'extract'
+  return 'empty'
+})
+
 function selectScenario(name: string) {
   router.push({ query: { s: name } })
 }
@@ -64,10 +79,35 @@ function selectCase(caseId: string) {
 <template>
   <div class="flex flex-col h-full bg-background">
     <header class="px-8 py-5 border-b border-border bg-card shrink-0">
-      <h1 class="text-lg font-bold tracking-tight">Каталог тестов</h1>
-      <p class="text-sm text-muted-foreground mt-0.5 max-w-2xl">
-        Требования из репозитория — что получит модель, что именно требуется, что не проверяется и откуда взято каждое требование. Не отчёт о результатах.
-      </p>
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h1 class="text-lg font-bold tracking-tight">Каталог тестов</h1>
+          <p class="text-sm text-muted-foreground mt-0.5 max-w-2xl">
+            Требования из репозитория — что получит модель, что именно требуется, что не проверяется и откуда взято каждое требование. Не отчёт о результатах.
+          </p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <CatalogHelpDialog />
+          <div class="flex items-center rounded-lg border border-border p-0.5" role="group" :aria-label="t('evalCatalog.langToggle.aria')">
+            <button
+              type="button"
+              class="px-2 py-1 rounded-md text-xs font-medium transition"
+              :class="locale === 'ru' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'"
+              @click="locale = 'ru'"
+            >
+              RU
+            </button>
+            <button
+              type="button"
+              class="px-2 py-1 rounded-md text-xs font-medium transition"
+              :class="locale === 'en' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'"
+              @click="locale = 'en'"
+            >
+              EN
+            </button>
+          </div>
+        </div>
+      </div>
       <EvalsNavTabs />
     </header>
 
@@ -95,9 +135,10 @@ function selectCase(caseId: string) {
       </div>
     </div>
 
-    <template v-else-if="catalog">
+    <TooltipProvider v-else-if="catalog" :delay-duration="200">
       <div class="px-8 py-2 border-b border-border bg-muted/30 text-[11px] text-muted-foreground shrink-0">
         Требования из репозитория, экспортированы {{ formatStartedAt(catalog.generated_at) || catalog.generated_at }} — не снапшот запуска, не результаты.
+        <template v-if="catalog.schema_version < 3"> · формат v2 — выполните harness export -all для полных данных</template>
       </div>
       <div class="flex flex-1 min-h-0">
         <CatalogTree
@@ -110,15 +151,15 @@ function selectCase(caseId: string) {
           @select-case="selectCase"
         />
         <div class="flex-1 overflow-y-auto p-6">
-          <div v-if="selectionIsInvalid" class="text-sm text-muted-foreground">
+          <div v-if="activePane === 'invalid'" class="text-sm text-muted-foreground">
             Ничего не найдено по этой ссылке — возможно, тест был переименован или удалён. Выберите тест слева.
           </div>
-          <CatalogTestDetail v-else-if="scenario && test" :test="test" :scenario="scenario" />
-          <CatalogScenarioOverview v-else-if="scenario" :scenario="scenario" @select-test="(id) => selectTest(scenario!.name, id)" />
-          <CatalogExtractCaseDetail v-else-if="extractCase" :extract-case="extractCase" />
+          <CatalogTestDetail v-else-if="activePane === 'test'" :test="test!" :scenario="scenario!" />
+          <CatalogScenarioOverview v-else-if="activePane === 'scenario'" :scenario="scenario!" @select-test="(id) => selectTest(scenario!.name, id)" />
+          <CatalogExtractCaseDetail v-else-if="activePane === 'extract'" :extract-case="extractCase!" />
           <div v-else class="text-sm text-muted-foreground">Выберите сценарий, тест или файл слева, чтобы увидеть требования.</div>
         </div>
       </div>
-    </template>
+    </TooltipProvider>
   </div>
 </template>
