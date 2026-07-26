@@ -247,6 +247,28 @@ func TestRenderPrompt_V2Frame_NoUnavailablePlaceholderAnywhere(t *testing.T) {
 	}
 }
 
+// TestRenderPrompt_StockWordingNoteSlot confirms %%STOCK_WORDING_NOTE%% is
+// filled with guidance carrying both reviewed stock wordings, and that the
+// whole render still passes ValidatePrompt — guarding the no-brace-pair rule
+// (a literal "{{...}}" example inside a slot's rendered text would otherwise
+// be mistaken for a placeholder outside the fact catalog and hard-fail the
+// render, exactly as the frame's own uncommitted rule-4 edit once did).
+func TestRenderPrompt_StockWordingNoteSlot(t *testing.T) {
+	kb := v2KB()
+	prompt, cat, err := BuildPrompt(v2Frame, kb)
+	if err != nil {
+		t.Fatalf("BuildPrompt: %v", err)
+	}
+	for _, want := range []string{StockWordingRU[true], StockWordingRU[false]} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("want the stock wording note to mention %q, got:\n%s", want, prompt)
+		}
+	}
+	if err := ValidatePrompt(prompt, cat); err != nil {
+		t.Errorf("ValidatePrompt: %v", err)
+	}
+}
+
 // TestRenderPrompt_V2Frame_RenderFailStopOnInvalidMaterial confirms the v2 path
 // inherits BuildCatalog's existing fail-closed material validation unchanged —
 // the new renderers read ONLY from the already-validated Catalog (cat.Media),

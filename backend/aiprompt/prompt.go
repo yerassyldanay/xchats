@@ -23,6 +23,15 @@ import (
 // contact/delivery-zone placeholders (product facts moved into the per-product
 // blocks). A frame uses EITHER the v1 slots OR the v2 slots for a given concept,
 // never both — RenderPrompt fills whichever slots the frame actually contains.
+//
+// SlotDeliveryZones/SlotStockWordingNote are v2 additions (2026-07-24, eval-run
+// follow-up): SlotDeliveryZones exposes the zone containment hierarchy
+// (zone_level/parent_ref) that BUSINESS_FACTS's per-zone fact lines never
+// carried, so the frame's "most precise zone wins" rule has actual hierarchy
+// data to reason over instead of only a flat list of zone refs.
+// SlotStockWordingNote surfaces the stock_flag usage note ONCE per prompt —
+// renderBusinessFacts filters out the product table entirely, so without this
+// slot no v2 prompt ever showed that guidance at all.
 const (
 	SlotAssistant          = "%%ASSISTANT%%"
 	SlotKnowledgeBase      = "%%KNOWLEDGE_BASE%%"
@@ -34,6 +43,8 @@ const (
 	SlotProductsOutOfStock = "%%PRODUCTS_OUT_OF_STOCK%%"
 	SlotTopics             = "%%TOPICS%%"
 	SlotBusinessFacts      = "%%BUSINESS_FACTS%%"
+	SlotDeliveryZones      = "%%DELIVERY_ZONES%%"
+	SlotStockWordingNote   = "%%STOCK_WORDING_NOTE%%"
 	SlotResponseSchema     = "%%RESPONSE_SCHEMA%%"
 )
 
@@ -82,6 +93,8 @@ func RenderPrompt(frame string, input *PromptInput, cat *Catalog) (string, error
 	out = strings.ReplaceAll(out, SlotProductsOutOfStock, renderProductsOutOfStock(input))
 	out = strings.ReplaceAll(out, SlotTopics, renderTopicBlocks(input, cat))
 	out = strings.ReplaceAll(out, SlotBusinessFacts, renderBusinessFacts(cat.Facts))
+	out = strings.ReplaceAll(out, SlotDeliveryZones, renderDeliveryZones(input.DeliveryZones))
+	out = strings.ReplaceAll(out, SlotStockWordingNote, renderStockWordingNote())
 	out = strings.ReplaceAll(out, SlotResponseSchema, RenderResponseSchema())
 	if err := ValidatePrompt(out, cat); err != nil {
 		return "", err
@@ -349,6 +362,78 @@ func renderBusinessFacts(facts []FactEntry) string {
 		}
 	}
 	return renderFacts(kept)
+}
+
+// renderDeliveryZones renders the v2 %%DELIVERY_ZONES%% slot: one token-free
+// reference line per active zone (ref, name, zone_level, parent_ref, and any
+// seller notes), in fixture order. Each zone's actual FACT placeholders
+// (delivery_cost/delivery_in_days/delivery_available) still live only in
+// BUSINESS_FACTS, keyed by the same ref — this block exists solely to make the
+// containment hierarchy (city -> region -> country) visible, since neither
+// ZoneLevel nor ParentRef appears anywhere else in a v2 prompt. Without it the
+// frame's "use the most precise matching zone" rule had no hierarchy data to
+// apply it to, so an unlisted city (e.g. one belonging to a country that DOES
+// have a zone) could not be distinguished from a direction outside every zone.
+//
+// Zones are never subject to ApplyLimits (unlike products/topics), so this
+// block is byte-identical across every shop-kb-v1-* catalog-size scenario —
+// it does not compromise the "catalog size is the only swept variable"
+// invariant those scenarios rely on.
+//
+// Known limitation, accepted: mapping an unnamed place to its containing zone
+// (e.g. recognizing a city belongs to a listed country) relies on the model's
+// own world knowledge — this block supplies the KB's zone structure, not a
+// gazetteer. The frame's existing "not sure which zone -> escalate" rule
+// (never guess) is the fail-safe for a place the model cannot confidently
+// place: it degrades to escalation, not a wrong answer.
+//
+// Name and Notes are seller-authored free text; any literal "|" in them is
+// sanitized so it can never be mistaken for a field separator in this
+// pipe-delimited line format.
+func renderDeliveryZones(zones []DeliveryZone) string {
+	var lines []string
+	for _, z := range zones {
+		if !active(z.SalesStatus) {
+			continue
+		}
+		parent := "—"
+		if s := strings.TrimSpace(z.ParentRef); s != "" {
+			parent = s
+		}
+		line := strings.Join([]string{
+			z.Ref,
+			sanitizeZoneField(z.Name),
+			"zone_level: " + z.ZoneLevel,
+			"parent_ref: " + parent,
+		}, " | ")
+		if s := strings.TrimSpace(z.Notes); s != "" {
+			line += " | " + sanitizeZoneField(s)
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return "—"
+	}
+	return strings.Join(lines, "\n")
+}
+
+// sanitizeZoneField replaces a literal "|" in seller-authored zone text with a
+// visually similar character so it can never be mistaken for a field
+// separator in renderDeliveryZones's pipe-delimited line format.
+func sanitizeZoneField(s string) string {
+	return strings.ReplaceAll(s, "|", "／")
+}
+
+// renderStockWordingNote renders the v2 %%STOCK_WORDING_NOTE%% slot: the
+// stock_flag usage guidance stated once for the whole prompt. renderFacts
+// already attaches this same guidance (via usageNote) to every individual
+// fact line, but renderBusinessFacts excludes the product table entirely, and
+// renderProductsInStock's stock_placeholder line carries no note at all — so
+// without this slot, a v2 prompt never surfaced this guidance anywhere. A
+// dedicated once-per-prompt slot is far cheaper than repeating the note on
+// every in-stock product block (up to 100 times at the largest catalog size).
+func renderStockWordingNote() string {
+	return "Про stock_placeholder: " + stockUsageGuidance() + "."
 }
 
 var (

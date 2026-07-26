@@ -11,5 +11,5 @@ pipeline: schema_kb_v1
 frame: ../shop-kb-v1/frame-ru.txt
 data: ../shop-kb-v1/data-ru.yaml
 tests: tests.yaml
-prompt_ref: "shop-kb@v2"
+prompt_ref: "shop-kb@v3"
 experiment: kb-size-sweep

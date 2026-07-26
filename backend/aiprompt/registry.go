@@ -230,10 +230,38 @@ func usageNote(f FactColumn) string {
 		}
 		return "только число; добавь слово «" + f.Unit + "» после токена"
 	case KindStockFlag:
-		return "флаг наличия; называя наличие, вставляй сам токен — код подставит правильную формулировку; состояние out_of_stock не предлагай активно, предложи альтернативу in_stock"
+		return "флаг наличия; " + stockUsageGuidance() + "; состояние out_of_stock не предлагай активно, предложи альтернативу in_stock"
 	case KindDeliveryFlag:
-		return "флаг доступности доставки в это направление; называя доступность, вставляй сам токен — код подставит правильную формулировку. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
+		return "флаг доступности доставки в это направление; " + deliveryUsageGuidance() +
+			". Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
 	default:
 		return ""
 	}
+}
+
+// stockUsageGuidance is the shared, wording-map-derived phrasing rule for the
+// in_stock placeholder — used by usageNote (the FACTS-table path) and by the
+// v2 %%STOCK_WORDING_NOTE%% slot renderer (prompt.go), so the reviewed
+// wordings are interpolated from StockWordingRU exactly once, never retyped
+// into a frame file. Names the observed duplication failure directly (a
+// model writing its own availability word right next to the placeholder
+// produces "в наличии: в наличии" once substitution runs) because the July
+// 2026 eval run showed models avoiding the token specifically to escape that
+// visible stutter — the guidance has to name the anti-pattern, not just ban
+// paraphrasing in the abstract.
+func stockUsageGuidance() string {
+	yes, no := StockWordingRU[true], StockWordingRU[false]
+	return "код заменит токен на ГОТОВУЮ фразу целиком — «" + yes + "» или «" + no +
+		"» (в казахском ответе — казахский эквивалент); ставь токен туда, где по смыслу должна стоять эта фраза, " +
+		"и НЕ добавляй рядом собственных слов о наличии («да, товар есть», «" + yes + "» и т.п.) — иначе получится " +
+		"дублирование вида «" + yes + ": " + yes + "»; вместо этого пиши, например: «Да, товар <ТОКЕН>.»"
+}
+
+// deliveryUsageGuidance is stockUsageGuidance's counterpart for
+// delivery_available, interpolated from DeliveryWordingRU the same way.
+func deliveryUsageGuidance() string {
+	yes, no := DeliveryWordingRU[true], DeliveryWordingRU[false]
+	return "код заменит токен на готовую фразу «" + yes + "» или «" + no +
+		"» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — " +
+		"никогда не пиши «" + yes + "»/«" + no + "» от себя, даже пересказывая своими словами"
 }

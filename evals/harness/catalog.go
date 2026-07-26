@@ -22,7 +22,12 @@ import (
 //
 // v2 (2026-07): added CatalogScenario.Archived/ArchivedReason (the 2026-07
 // schema_kb_v1 consolidation's archival mechanism — see ScenarioConfig.Archived).
-const CatalogFileSchemaVersion = 2
+//
+// v3 (2026-07): added CatalogScenario.TestsPath; added CatalogTestCase.ForbidTokens
+// and CatalogTestCase.LLMChecks (both previously silently dropped from the export);
+// renamed the `stock_check_ref` JSON key to `stock_check` to match the yaml key it
+// mirrors (StockCheckRef's Go field name is unchanged — only the tag moved).
+const CatalogFileSchemaVersion = 3
 
 // CatalogFile is runs/catalog.json — the ONE deliberately repository-state (not a run
 // snapshot) artifact this harness exports: every scenario's and every extraction
@@ -55,6 +60,12 @@ type CatalogScenario struct {
 	// Pipeline mirrors ScenarioConfig.Pipeline — empty for the legacy fact_tables path,
 	// "schema_kb_v1" for the shop-kb-v1 family (see buildCatalogScenarioSchemaKB).
 	Pipeline string `json:"pipeline,omitempty"`
+	// TestsPath is the evals/-relative path of the tests.yaml this scenario's own
+	// ScenarioConfig.Tests points at — filepath.Join(dir, scenario.Tests) cleans a
+	// borrow case's "../other-scenario/tests.yaml" into
+	// "scenarios/other-scenario/tests.yaml", so this always names the actual file, never
+	// the scenario's own dir when it borrows another's tests.
+	TestsPath string `json:"tests_path"`
 	// FactsSource is the evals/-relative path of the data.yaml (or, for a schema_kb_v1
 	// scenario, the fixture file) every Fact below and every test's `requires` token is
 	// resolved against (may point into another scenario dir — several scenarios

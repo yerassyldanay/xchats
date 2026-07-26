@@ -401,3 +401,70 @@ func TestBuildPrompt_DeliveryZones_EndToEnd(t *testing.T) {
 		t.Errorf("prompt still contains an unfilled slot marker:\n%s", prompt)
 	}
 }
+
+// TestRenderDeliveryZones_HierarchyLines confirms %%DELIVERY_ZONES%% surfaces
+// the containment hierarchy (zone_level/parent_ref) that renderFacts/
+// renderBusinessFacts never show — the gap identified as the root cause of
+// zone-fallback misapplication in the 2026-07-24 eval run (an unlisted city
+// belonging to a listed country was answered via outside_zones_note instead
+// of the country zone, because the model had no way to see that containment).
+func TestRenderDeliveryZones_HierarchyLines(t *testing.T) {
+	kb := zonesKB()
+	out := renderDeliveryZones(kb.PromptInput().DeliveryZones)
+
+	if !strings.Contains(out, "kazakhstan | Казахстан (остальные города) | zone_level: country | parent_ref: —") {
+		t.Errorf("want the root zone's line with no parent, got:\n%s", out)
+	}
+	if !strings.Contains(out, "astana | Астана | zone_level: city | parent_ref: kazakhstan") {
+		t.Errorf("want astana's line naming kazakhstan as parent, got:\n%s", out)
+	}
+	if !strings.Contains(out, "baikonur | Байконур | zone_level: city | parent_ref: kazakhstan | Закрытый административный статус — доставка недоступна.") {
+		t.Errorf("want baikonur's line to also carry its Notes, got:\n%s", out)
+	}
+	if strings.Contains(out, "{{") {
+		t.Errorf("the zones block must contain no fact placeholders — those live only in BUSINESS FACTS, got:\n%s", out)
+	}
+}
+
+// TestRenderDeliveryZones_InactiveExcluded confirms an inactive zone produces
+// no line — the same active-only discipline as every other v2 renderer.
+func TestRenderDeliveryZones_InactiveExcluded(t *testing.T) {
+	kb := zonesKB()
+	kb.DeliveryZones[1].SalesStatus = "inactive" // astana
+	out := renderDeliveryZones(kb.PromptInput().DeliveryZones)
+	if strings.Contains(out, "Астана") {
+		t.Errorf("inactive zone must not appear, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Байконур") {
+		t.Errorf("sibling zones must be unaffected by an inactive zone, got:\n%s", out)
+	}
+}
+
+// TestRenderDeliveryZones_EmptyRendersDash confirms the "feature unused"
+// default (zero delivery zones, e.g. baseKB) renders the same "—" placeholder
+// every other v2 block uses instead of an empty string.
+func TestRenderDeliveryZones_EmptyRendersDash(t *testing.T) {
+	if out := renderDeliveryZones(nil); out != "—" {
+		t.Errorf("renderDeliveryZones(nil) = %q, want %q", out, "—")
+	}
+}
+
+// TestRenderDeliveryZones_PipeInSellerTextSanitized confirms a literal "|" in
+// seller-authored Name/Notes can never be mistaken for this line format's own
+// field separator.
+func TestRenderDeliveryZones_PipeInSellerTextSanitized(t *testing.T) {
+	kb := zonesKB()
+	kb.DeliveryZones[2].Notes = "Курьер | не выезжает в этот город." // baikonur
+	out := renderDeliveryZones(kb.PromptInput().DeliveryZones)
+	if strings.Contains(out, "Курьер | не выезжает") {
+		t.Errorf("a literal pipe in Notes must be sanitized, got:\n%s", out)
+	}
+	// Exactly 4 pipe-delimited fields survive: ref | name | zone_level | parent_ref | notes.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "baikonur") {
+			if n := strings.Count(line, " | "); n != 4 {
+				t.Errorf("want exactly 4 field separators in baikonur's line, got %d:\n%s", n, line)
+			}
+		}
+	}
+}

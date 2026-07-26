@@ -23,9 +23,11 @@
 #   - reasoning: {enabled, effort, max_tokens, exclude, billed_separately} opts a model
 #     into OpenRouter's reasoning API — see evals/models-reasoning.yaml.
 #   - default: true marks a provider as part of the no-flag baseline. Omitting -models on
-#     `run`/`render` now resolves to just the default:true providers below (gpt-4o-mini,
-#     gemini-2.5-flash-lite), not every provider in this file — added after a mixed
-#     fast/slow, cheap/expensive batch got launched by accident with no explicit -models.
+#     `run`/`render` now resolves to just the default:true providers below (deepseek-v3.2-exp,
+#     gemini-2.5-flash — changed 2026-07-24 from the original gpt-4o-mini/gemini-2.5-flash-lite
+#     pair to match the pair actually used for the shop-kb-v1 comparison runs), not every
+#     provider in this file — added after a mixed fast/slow, cheap/expensive batch got
+#     launched by accident with no explicit -models.
 #     Pass `-models all` to explicitly run every provider in this file (the old behavior).
 pricing_source: "https://openrouter.ai/models"
 pricing_checked_at: "2026-07-11"
@@ -38,7 +40,6 @@ providers:
     # budget decision, per the file-level note above.
     input_per_mtok: 0.15
     output_per_mtok: 0.60
-    default: true
   - id: openrouter:anthropic/claude-haiku-4.5
     temperature: 0.3
     max_tokens: 500
@@ -51,6 +52,7 @@ providers:
     # Verified against pricing_source on pricing_checked_at.
     input_per_mtok: 0.30
     output_per_mtok: 2.50
+    default: true
   - id: openrouter:google/gemini-2.5-flash-lite
     temperature: 0.3
     max_tokens: 500
@@ -59,7 +61,6 @@ providers:
     # model for the extraction eval; compare its extraction quality, not just its price.
     input_per_mtok: 0.10
     output_per_mtok: 0.40
-    default: true
   # --- Comparison candidates added 2026-07-18, verified directly against each model's
   # own openrouter.ai page on that date (not yet re-checked at any later pricing_checked_at
   # date above — re-verify before trusting these for a real budget decision). Both are
@@ -109,6 +110,7 @@ providers:
     # this entry is explicitly the non-thinking comparison point.
     input_per_mtok: 0.27
     output_per_mtok: 0.41
+    default: true
   # --- Qwen replaced 2026-07-18: qwen/qwen3.7-plus and qwen/qwen3.7-max were removed after
   # real measured data showed them by far the slowest models in this file (29.5s and 22.0s
   # avg latency vs ~1-10s for everything else), driven by averaging 1150-1560 completion
