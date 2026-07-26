@@ -67,10 +67,19 @@ tests:
     message: "Bosch блендерінің суретін жіберіңізші"
     # blender-bosch (in stock) carries no media in any column at all — contrast with
     # kk3 above, where the refusal is stock-driven rather than media-driven.
+    # Media doctrine (2026-07-26): when a product HAS the requested media, sending it or
+    # not are both acceptable and this bank asserts neither; only when it has NONE does
+    # `forbid` apply. What must always hold is the honesty claim below — the 07-24 run
+    # had deepseek claim "суреттері мен бейнелері бар" and attach the TEFAL blender's
+    # gallery instead, which `forbid` caught by luck; the false claim itself was
+    # unchecked.
     media:
       forbid: true
     escalate: false
     language: kk
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что фото именно этого блендера (Bosch) у нас нет"
+        expect: true
 
   - id: "kk7. off-catalog product escalates"
     message: "Сіздерде iPhone 15 Pro бар ма?"

@@ -78,11 +78,19 @@ tests:
 
   - id: "d5. unplaceable location escalates"
     message: "А в Верхние Васюки доставляете?"
-    # A deliberately unplaceable town name (no real, identifiable location) — the model
-    # must not guess which zone it might belong to, and must not apply the closed-world
-    # refusal either (that's for a location it COULD place but that matches no zone).
-    escalate: true
+    # A deliberately unplaceable town name (no real, identifiable location).
+    # `escalate: true` was removed (2026-07-26): the KB already answers this — no zone
+    # matches, so outside_zones_note ("за пределы Казахстана не доставляем") is a
+    # confirmed seller answer, exactly as in d4. Whether the model additionally
+    # escalates on top of that isn't a boundary this bank can draw, so it's no longer
+    # graded either way; what must hold is that the customer is told there's no
+    # delivery there. (Id kept as-is on purpose, despite no longer asserting escalation,
+    # so this case stays comparable across historic runs — it's pinned in
+    # shop_kb_v1_test.go's kbDeliveryRUPinnedIDs.)
     language: ru
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что доставки в этот город нет"
+        expect: true
 
   - id: "d6. negotiation for an excluded direction escalates"
     message: "А если я сам найму курьера и оплачу, довезёте товар до Китая?"

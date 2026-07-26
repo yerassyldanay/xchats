@@ -77,10 +77,14 @@ tests:
     # `requires` on product.cookware-set.in_stock and the "нет в наличии" phrase check
     # were both removed — the phrase check is now the auto-generated LLM stock check
     # (stock_check below) instead of a brittle substring match.
+    # `escalate: false` also removed (2026-07-26): on an out-of-stock purchase
+    # insistence, answering honestly under rule 1a and handing the pre-order question to
+    # a human are both defensible, and no rule draws that boundary — so the flag isn't
+    # graded here. The honesty bar is unchanged and still enforced below: no price
+    # token, no attachment, no "заказ оформлен", plus the semantic stock check.
     forbid_tokens: ["product.cookware-set.price"]
     media:
       forbid: true
     must_not_contain: ["заказ оформлен", "заказ создан", "уже оформили"]
-    escalate: false
     language: ru
     stock_check: "cookware-set"
