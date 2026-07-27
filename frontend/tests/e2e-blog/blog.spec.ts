@@ -115,3 +115,16 @@ test('blog pages carry the xchats favicon and full public-site chrome', async ({
   await expect(footer.locator('a[href^="mailto:"]')).toBeVisible()
   await expect(footer.locator('a[href^="https://wa.me/"]')).toBeVisible()
 })
+
+test('public navigation, hero, and footer keep their mobile gutters', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/blog/')
+
+  const heroBox = await page.locator('.hero__text').boundingBox()
+  const footerBrandBox = await page.locator('.site-footer__brand').boundingBox()
+  const emailBox = await page.locator('.site-footer__contact a[href^="mailto:"]').boundingBox()
+
+  expect(heroBox?.x).toBeGreaterThanOrEqual(20)
+  expect(footerBrandBox?.x).toBeGreaterThanOrEqual(20)
+  expect((emailBox?.x ?? 0) + (emailBox?.width ?? 0)).toBeLessThanOrEqual(370)
+})
