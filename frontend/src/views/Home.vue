@@ -327,6 +327,45 @@ import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
         </div>
       </section>
 
+      <!-- Engineering & Evals Section -->
+      <section class="py-24 px-6">
+        <div class="max-w-6xl mx-auto">
+          <div class="text-center mb-16">
+            <h2 class="text-3xl font-bold">Открытая разработка и тестирование</h2>
+            <p class="text-slate-500 mt-4">Мы строим надежный AI-продукт и открыто делимся нашими процессами.</p>
+          </div>
+          
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="bg-white p-10 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-start hover:shadow-md transition-shadow">
+              <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-6">
+                <FileText class="w-6 h-6" />
+              </div>
+              <h3 class="text-xl font-bold mb-3">Инженерный блог</h3>
+              <p class="text-slate-600 mb-8 flex-1">
+                Читайте о том, как мы решаем сложные задачи, проектируем архитектуру и создаем надежные AI-инструменты без галлюцинаций.
+              </p>
+              <RouterLink :to="{ name: 'blog' }" class="inline-flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-700 transition-colors">
+                Читать статьи <ArrowRight class="w-4 h-4" />
+              </RouterLink>
+            </div>
+
+            <div class="bg-white p-10 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-start hover:shadow-md transition-shadow">
+              <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-6">
+                <CheckCircle2 class="w-6 h-6" />
+              </div>
+              <h3 class="text-xl font-bold mb-3">Открытые эвалы (Evals)</h3>
+              <p class="text-slate-600 mb-8 flex-1">
+                Мы регулярно тестируем нашего бота на реальных сценариях. Посмотрите метрики качества и убедитесь в надежности ответов.
+              </p>
+              <RouterLink :to="{ name: 'evals' }" class="inline-flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-700 transition-colors">
+                Смотреть результаты <ArrowRight class="w-4 h-4" />
+              </RouterLink>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
       <!-- CTA Section -->
       <section class="py-20 px-6">
         <div class="max-w-5xl mx-auto bg-slate-950 rounded-3xl p-10 md:p-16 flex flex-col md:flex-row items-center justify-between gap-10 text-white shadow-2xl relative overflow-hidden">
