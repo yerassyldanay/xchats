@@ -24,11 +24,31 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
+	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
+	"github.com/yerassyldanay/xchats/backend/llm"
+	"github.com/yerassyldanay/xchats/backend/messaging"
 	"github.com/yerassyldanay/xchats/backend/migrations"
+	"github.com/yerassyldanay/xchats/backend/response"
 	"log/slog"
 )
+
+// fakeLLMClient/fakeLLMRegistry stand in for a real provider in this harness:
+// no test here asserts on generated draft CONTENT, and the seeded org has no
+// ai_assistants row (KnowledgeBaseRepo.Load always fails "not configured"
+// before ever reaching the LLM), so a scripted escalation-shaped response is
+// enough to let handleAIDraft/handleOutboundSend run to completion instead of
+// hitting a nil dependency.
+type fakeLLMClient struct{}
+
+func (fakeLLMClient) Complete(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{Text: `{"reply_text":"Секунду, уточню и вернусь.","reply_language":"ru","media_files_to_send":[],"escalate":false}`}, nil
+}
+
+type fakeLLMRegistry struct{}
+
+func (fakeLLMRegistry) Client(ref llm.ModelRef) (llm.ChatClient, error) { return fakeLLMClient{}, nil }
 
 const (
 	ownerJID     = "77011111111@s.whatsapp.net"
@@ -117,13 +137,30 @@ func newHarness(t *testing.T) *harness {
 	extractor := playground.NewExtractor(nil, log)
 	builder := playground.NewBuilder(nil, hub)
 
+	// A minimal, real (fake-LLM-backed) response.Service — the seeded org has no
+	// ai_assistants row, so every Respond call degrades to the holding draft;
+	// that's fine, no test here asserts on generated draft content, only that
+	// the async ai_draft/outbound_send tasks complete instead of panicking on
+	// a nil dependency.
+	responseService := &response.Service{
+		Conversations: &responsestore.ConversationRepo{Store: st},
+		KnowledgeBase: &responsestore.KnowledgeBaseRepo{Pool: st.Pool()},
+		Drafts:        &responsestore.DraftRepo{Store: st},
+		Engine: &response.Engine{
+			LLMs: fakeLLMRegistry{}, DefaultModel: llm.ModelRef{Provider: "fake", Model: "fake"},
+			MaxTokens: 500, Temperature: 0.3, RetryEnabled: true,
+		},
+	}
+	senders := messaging.NewSenderRegistry()
+	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(fake))
+
 	w := &worker.Worker{Store: st, Queue: q, Evo: fake, Blob: blobStore, Hub: hub,
-		Drafter: drafter, KB: kb, Extract: extractor, Log: log}
+		Response: responseService, Senders: senders, KB: kb, Extract: extractor, Log: log}
 	q.Start(context.Background(), w.Handle)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Evo: fake, KB: kb, Builder: builder, OrgID: org.ID, Log: log,
+		Drafter: drafter, Response: responseService, Evo: fake, KB: kb, Builder: builder, OrgID: org.ID, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)

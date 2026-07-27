@@ -138,31 +138,6 @@ func (c *Config) LLMProviderKey(provider string) string {
 	}
 }
 
-// LLMProviderBaseURL returns the configured base-URL override for the named
-// response-service LLM provider, or its standard OpenAI-compatible default.
-func (c *Config) LLMProviderBaseURL(provider string) string {
-	var override string
-	switch strings.ToLower(provider) {
-	case "openai":
-		override = c.OpenAIBaseURL
-	case "gemini":
-		override = c.GeminiBaseURL
-	default:
-		override = c.OpenRouterBaseURL
-	}
-	if override != "" {
-		return strings.TrimRight(override, "/")
-	}
-	switch strings.ToLower(provider) {
-	case "openai":
-		return "https://api.openai.com/v1"
-	case "gemini":
-		return "https://generativelanguage.googleapis.com/v1beta/openai"
-	default:
-		return "https://openrouter.ai/api/v1"
-	}
-}
-
 // LLMResolvedBaseURL returns the OpenAI-compatible base URL for the configured
 // provider. An explicit LLMBaseURL always wins (self-hosted / in-region model).
 func (c *Config) LLMResolvedBaseURL() string {

@@ -18,6 +18,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
+	"github.com/yerassyldanay/xchats/backend/messaging"
 )
 
 func (s *Server) handleListChats(c *gin.Context) {
@@ -137,12 +138,14 @@ func (s *Server) handleSendMessage(c *gin.Context) {
 // (sender_kind=user) and AI approve (sender_kind=ai).
 func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, senderUserID uuid.NullUUID, text string, mediaIDs []string) ([]dto.Message, error) {
 	var out []dto.Message
-	// Resolve the chat's account once → its Evolution instance, so the send goes
-	// out from the right number (multi-account). Empty falls back to the client's
-	// default instance in the worker.
-	instance := ""
+	// Resolve the chat's account once → its Evolution instance and channel, so
+	// the send goes out from the right number (multi-account) through the right
+	// messaging.ChannelSender. Empty instance falls back to the client's default
+	// instance in the worker; an empty channel fails the sender lookup explicitly.
+	instance, channel := "", ""
 	if acct, err := s.store.AccountByID(ctx(c), chat.AccountID); err == nil {
 		instance = acct.InstanceName
+		channel = acct.Channel
 	} else {
 		// No account row → the worker falls back to the default Evolution instance.
 		// If that default is wrong, sends go nowhere; make the fallback visible.
@@ -161,7 +164,8 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		msg, _ := s.store.MessageByID(ctx(c), msgID)
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
 		_ = s.queue.Publish(queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
-			MessageID: msgID, AccountID: chat.AccountID, Instance: instance, PhoneJID: chat.RemoteJID, Text: text,
+			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
+			Instance: instance, PhoneJID: chat.RemoteJID, Text: text,
 		}})
 		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "instance", instance,
 			"sender_kind", senderKind, "kind", "text")
@@ -205,7 +209,8 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		msg, _ := s.store.MessageByID(ctx(c), msgID)
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
 		_ = s.queue.Publish(queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
-			MessageID: msgID, AccountID: chat.AccountID, Instance: instance, PhoneJID: chat.RemoteJID, MediaID: mid, Caption: caption,
+			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
+			Instance: instance, PhoneJID: chat.RemoteJID, MediaID: mid, Caption: caption,
 		}})
 		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "instance", instance,
 			"sender_kind", senderKind, "kind", kind, "media_id", mid)

@@ -35,14 +35,14 @@ type Contact struct {
 
 // Chat is the API chat shape.
 type Chat struct {
-	ID                 string   `json:"id"`
-	WaAccountID        string   `json:"wa_account_id"`
-	Contact            Contact  `json:"contact"`
-	Status             string   `json:"status"`
-	AssigneeUserID     *string  `json:"assignee_user_id"`
-	UnreadCount        int      `json:"unread_count"`
-	LastMessageAt      *string  `json:"last_message_at"`
-	LastMessagePreview string   `json:"last_message_preview"`
+	ID                 string  `json:"id"`
+	WaAccountID        string  `json:"wa_account_id"`
+	Contact            Contact `json:"contact"`
+	Status             string  `json:"status"`
+	AssigneeUserID     *string `json:"assignee_user_id"`
+	UnreadCount        int     `json:"unread_count"`
+	LastMessageAt      *string `json:"last_message_at"`
+	LastMessagePreview string  `json:"last_message_preview"`
 }
 
 // Media is one media item on a message (a "list of URLs", each enriched).
