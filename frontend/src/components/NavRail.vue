@@ -37,11 +37,11 @@ const baseNav: { name: string; icon: Component; label: string; match: string[] }
   { name: 'accounts', icon: WhatsappIcon, label: 'Номера WhatsApp', match: ['accounts', 'instances'] },
   { name: 'playground', icon: Blocks, label: 'Конструктор', match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
+  { name: 'blog', icon: BookOpen, label: 'Блог', match: ['blog', 'blog-post'] },
 ]
 // Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
 // and rendered in its own bottom cluster (separated by a divider, above the avatar)
 // so it never reads as one more product feature.
-const blogItem = { name: 'blog', icon: BookOpen, label: 'Блог', match: ['blog', 'blog-post'] }
 const evalsItem = { name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch', 'eval-catalog'] }
 function isActive(match: string[]) {
   return match.includes(route.name as string)
@@ -76,20 +76,6 @@ async function logout() {
       </div>
 
       <div class="mt-auto flex flex-col items-center gap-3">
-          <div class="h-px w-8 bg-white/10" aria-hidden="true" />
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <!-- We assume 'blog' is the route name for the blog -->
-              <RouterLink
-                :to="{ name: blogItem.name }"
-                class="w-11 h-11 rounded-lg grid place-items-center transition"
-                :class="isActive(blogItem.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
-              >
-                <component :is="blogItem.icon" class="w-5 h-5" />
-              </RouterLink>
-            </TooltipTrigger>
-            <TooltipContent side="right">{{ blogItem.label }}</TooltipContent>
-          </Tooltip>
 
         <template v-if="evalsAvailable">
           <div class="h-px w-8 bg-white/10" aria-hidden="true" />
