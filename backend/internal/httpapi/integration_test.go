@@ -49,13 +49,13 @@ func (fakeLLMClient) Complete(ctx context.Context, req llm.ChatRequest) (llm.Cha
 	return llm.ChatResponse{Text: `{"reply_text":"Секунду, уточню и вернусь.","reply_language":"ru","media_files_to_send":[],"escalate":false}`}, nil
 }
 
-type fakeLLMRegistry struct{}
+type fakeLLMRegistry struct{ client llm.ChatClient }
 
-func (fakeLLMRegistry) Client(ref llm.ModelRef) (llm.ChatClient, error) {
+func (r fakeLLMRegistry) Client(ref llm.ModelRef) (llm.ChatClient, error) {
 	if ref.Provider != fakeLLMProvider {
 		return nil, fmt.Errorf("fakeLLMRegistry: no client configured for provider %q", ref.Provider)
 	}
-	return fakeLLMClient{}, nil
+	return r.client, nil
 }
 
 const (
@@ -78,6 +78,17 @@ type harness struct {
 }
 
 func newHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessWithLLM(t, fakeLLMClient{})
+}
+
+// newHarnessWithLLM is newHarness parameterized on the scripted LLM client the
+// org's response.Service reaches. Most tests don't care what the model
+// "says" beyond a fixed, valid response (newHarness's fakeLLMClient); one
+// (TestWhatsAppInboundProducesGroundedDraftAndApprovalDelivers) needs a
+// scripted reply that names a real KB fact placeholder, to assert on
+// grounding/substitution end to end rather than just plumbing.
+func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -157,7 +168,7 @@ func newHarness(t *testing.T) *harness {
 		KnowledgeBase: &responsestore.KnowledgeBaseRepo{Pool: st.Pool()},
 		Drafts:        &responsestore.DraftRepo{Store: st},
 		Engine: &response.Engine{
-			LLMs: fakeLLMRegistry{}, DefaultModel: llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
+			LLMs: fakeLLMRegistry{client: llmClient}, DefaultModel: llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
 			MaxTokens: 500, Temperature: 0.3, RetryEnabled: true,
 		},
 	}
