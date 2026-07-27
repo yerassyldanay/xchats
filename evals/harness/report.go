@@ -625,12 +625,19 @@ func buildContractReport(runs []JudgedRun) string {
 				// expectation at all).
 				fmt.Fprintf(&b, "- **reply_text contains a forbidden phrase:** %q\n", v.ForbiddenPhrase)
 			}
+			if v.EscalateTextConsistencyEvaluated && !v.EscalateTextConsistencyPass {
+				fmt.Fprintf(&b, "- **reply deflects to a manager while escalate=false:** %q\n", v.DeflectionPhrase)
+			}
 			mediaCountCell := "n/a (verdict predates this check)"
 			if v.MediaCountEvaluated {
 				mediaCountCell = fmt.Sprintf("%v", !v.TooManyMedia)
 			}
-			fmt.Fprintf(&b, "- requires met: %v · media met: %v · escalate met: %v · language met: %v · no-invented-answer met: %v · units ok: %v · media count ok: %s\n",
-				v.RequiresPass, v.MediaPass, v.EscalatePass, v.LanguagePass, v.MustNotContainPass, len(v.UnitIssues) == 0, mediaCountCell)
+			escalateTextCell := "n/a (verdict predates this check)"
+			if v.EscalateTextConsistencyEvaluated {
+				escalateTextCell = fmt.Sprintf("%v", v.EscalateTextConsistencyPass)
+			}
+			fmt.Fprintf(&b, "- requires met: %v · media met: %v · escalate met: %v · escalate/text consistent: %s · language met: %v · no-invented-answer met: %v · units ok: %v · media count ok: %s\n",
+				v.RequiresPass, v.MediaPass, v.EscalatePass, escalateTextCell, v.LanguagePass, v.MustNotContainPass, len(v.UnitIssues) == 0, mediaCountCell)
 			if v.InjectedText != "" {
 				fmt.Fprintf(&b, "- injected text: %s\n", v.InjectedText)
 			}

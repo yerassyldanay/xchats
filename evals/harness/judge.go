@@ -209,6 +209,22 @@ type Verdict struct {
 	TooManyMedia        bool `json:"too_many_media"`
 	MediaCountEvaluated bool `json:"media_count_evaluated,omitempty"`
 	EscalatePass        bool `json:"escalate_pass"`
+	// EscalateTextConsistencyPass fails a row whose escalate is false while the
+	// INJECTED reply text still hands the customer off to / deflects them to a manager
+	// (see managerDeflectionPatterns) — the text-vs-flag contradiction observed
+	// 2026-07-26: a model writing "I'll pass this to the manager" or "check the exact
+	// terms with the manager" while leaving escalate=false, so the promise reaches the
+	// customer but nothing downstream is ever told to act on it. Universal (every test,
+	// no opt-in) and gates ModelBehaviorPass only — never ContractPass, never retry
+	// candidacy (retry.go judges candidacy against an empty TestCase{}, which never sets
+	// Escalate, so this check never even runs there). EscalateTextConsistencyEvaluated
+	// is the CODE-VERSION + field-presence marker (MediaCountEvaluated pattern): a
+	// verdict judged before this check existed, or a row whose ContractFields didn't
+	// even include a parseable escalate value, renders "not run" rather than a
+	// fabricated pass from the zero value.
+	EscalateTextConsistencyPass      bool   `json:"escalate_text_consistency_pass"`
+	EscalateTextConsistencyEvaluated bool   `json:"escalate_text_consistency_evaluated,omitempty"`
+	DeflectionPhrase                 string `json:"deflection_phrase,omitempty"`
 	// LanguagePass = LanguageTextOK && LanguageFieldOK — kept as the single pass/fail
 	// gate everything else already depends on. The two components are ALSO reported
 	// separately (Phase 0.4 of the language plan): looksKazakh is a cheap heuristic, not
@@ -357,6 +373,54 @@ type Verdict struct {
 	StockLLMChecks  []StockLLMCheckResult `json:"stock_llm_checks,omitempty"`
 	LLMStockModel   string                `json:"llm_stock_model,omitempty"`
 	LLMStockCostUSD float64               `json:"llm_stock_cost_usd,omitempty"`
+
+	// LanguageRewriteEvaluated..LanguageRewriteCostUSD are the language safety net
+	// (2026-07-27 design note; see rewrite_lang.go), the SEPARATE, opt-in `rewrite-lang`
+	// command's own dimension — same doctrine as LLMCheckEvaluated/StockLLMEvaluated
+	// above: false for every verdict the plain `judge` command writes, and every field
+	// below stays at its zero value until `rewrite-lang` actually runs. On the happy
+	// path (the target and the reply's own language already agree) rewrite-lang costs
+	// nothing and sets only LanguageRewriteEvaluated + TargetLanguage — there is no
+	// mismatch to record. See LanguageRewriteApplied's doc comment for what changes when
+	// a rewrite IS applied.
+	LanguageRewriteEvaluated bool `json:"language_rewrite_evaluated,omitempty"`
+	// TargetLanguage is detectLang(customer message, history)'s verdict — the language
+	// the reply SHOULD be in — recorded whenever LanguageRewriteEvaluated is true,
+	// independent of whether a mismatch was ever found.
+	TargetLanguage string `json:"target_language,omitempty"`
+	// PreRewriteLanguage/PreRewriteInjectedText are set ONLY when a mismatch was
+	// detected (TargetLanguage disagreed with classifyText's read of the pre-rewrite
+	// InjectedText, or that text was too short/unclear to classify at all — an empty
+	// PreRewriteLanguage means the latter). PreRewriteInjectedText is the discarded
+	// original customer-facing text, kept for audit — the same role RawOutput plays for
+	// the raw provider response, one level up the pipeline.
+	PreRewriteLanguage     string `json:"pre_rewrite_language,omitempty"`
+	PreRewriteInjectedText string `json:"pre_rewrite_injected_text,omitempty"`
+	// LanguageRewriteApplied is true only when a mismatch was found AND the rewrite
+	// model's replacement reply_text passed the full re-judge (judgeOne/judgeOneSchemaKB
+	// against a synthetic row carrying the rewritten template) — at that point EVERY
+	// other field on this Verdict (ParseOK, ContractPass, InjectedText,
+	// ModelBehaviorPass, every requirement/behavior check, Reason, ...) already reflects
+	// the REWRITTEN text, re-graded from scratch exactly as if the model had drafted it
+	// that way originally. Only the fields that describe the ORIGINAL provider call
+	// itself (RawOutput, Cost, LatencyMs, Tokens, TokensIn/Out, CostEstimateUSD,
+	// CostBasis, Retries, Reasoning) are preserved from before the rewrite — the rewrite
+	// model's own spend is tracked separately, in LanguageRewriteCostUSD. False with
+	// PreRewriteLanguage non-empty means a mismatch WAS found but the rewrite was
+	// discarded (LanguageRewriteFailReason explains why) — the verdict is then
+	// COMPLETELY UNCHANGED from what plain `judge` produced, mismatch and all.
+	LanguageRewriteApplied bool `json:"language_rewrite_applied,omitempty"`
+	// LanguageRewriteFailReason is set only when a mismatch was found and the rewrite
+	// attempt was discarded: the rewrite call itself failed (network/parse error), or
+	// the rewritten template failed its re-judge (a corrupted/dropped placeholder is the
+	// expected failure mode — judgeOne/judgeOneSchemaKB catch that exactly like they
+	// would for any model's own mistake).
+	LanguageRewriteFailReason string `json:"language_rewrite_fail_reason,omitempty"`
+	// LanguageRewriteModel/LanguageRewriteCostUSD are set only when a rewrite call was
+	// actually made (i.e. a mismatch was found) — the happy path never touches these,
+	// which is the entire cost claim: $0 unless a mismatch is real.
+	LanguageRewriteModel   string  `json:"language_rewrite_model,omitempty"`
+	LanguageRewriteCostUSD float64 `json:"language_rewrite_cost_usd,omitempty"`
 }
 
 // LLMCheckResult is one TestCase.LLMChecks claim's judged outcome — see judge_llm.go.
@@ -503,7 +567,40 @@ var (
 		{label: "duplicated day unit", re: regexp.MustCompile(`(?i)(дня|дней)\s+(дня|дней)`)},
 		{label: "mixed Russian/Kazakh day-unit hint", re: regexp.MustCompile(`(?i)дня\s*/\s*күнде`)},
 	}
+	// managerDeflectionPatterns catch a reply that hands the customer off to / deflects
+	// them to a manager — used by managerDeflection to fail escalate=false rows that
+	// contradict their own text (see Verdict.EscalateTextConsistencyPass). Regexes, not a
+	// fixed substring list: the observed real failure «Уточняйте условия у менеджера при
+	// оформлении заказа» (bd13, 2026-07-26) defeats any substring check anchored on
+	// "уточняйте у менеджера" alone. The [^.!?\n]{0,40} window keeps every match inside
+	// roughly one clause/sentence, so an unrelated later mention of "менеджер" elsewhere
+	// in a long reply can't retroactively pair with an earlier verb. Deliberately NARROW
+	// verb lists (not a bare "менеджер" anywhere in the text): the pickup topic's honest,
+	// correctly non-escalating «...по предварительной договорённости с менеджером» must
+	// NOT match (see judge_test.go's pinned negative control) — broadening these lists
+	// must re-check that sentence.
+	managerDeflectionPatterns = []unitIssuePattern{
+		{label: "clarify-with-manager", re: regexp.MustCompile(`(?i)уточн[а-яё]*[^.!?\n]{0,40}менеджер`)},
+		{label: "contact-the-manager", re: regexp.MustCompile(`(?i)(свяжитесь|связаться|обратитесь|обращайтесь|обратиться|напишите|позвоните|спросите|спросить|узнайте|узнать)[^.!?\n]{0,40}менеджер`)},
+		{label: "handoff-promise", re: regexp.MustCompile(`(?i)переда(ю|м|ём|ем|дим|ст)[^.!?\n]{0,40}менеджер`)},
+		{label: "manager-will-follow-up", re: regexp.MustCompile(`(?i)менеджер[^.!?\n]{0,40}(свяжется|ответит|перезвонит|напишет|уточнит|подскажет)`)},
+		{label: "kk-forward-to-manager", re: regexp.MustCompile(`(?i)менеджерге[^.!?\n]{0,40}(жолда|жібер|бер|тапсыр|хабарла)`)},
+		{label: "kk-ask-the-manager", re: regexp.MustCompile(`(?i)менеджер(ден|ге|мен)[^.!?\n]{0,40}(сұра|хабарлас|байланыс|жүгін)`)},
+		{label: "kk-manager-will-contact", re: regexp.MustCompile(`(?i)менеджер[^.!?\n]{0,40}(хабарласады|жауап береді|байланысады)`)},
+	}
 )
+
+// managerDeflection reports the first managerDeflectionPatterns match in text (the
+// INJECTED reply, same convention as MustNotContain/firstForbidden) — matched is the
+// literal substring matched, for DeflectionPhrase's failure detail.
+func managerDeflection(text string) (matched string, hit bool) {
+	for _, p := range managerDeflectionPatterns {
+		if m := p.re.FindString(text); m != "" {
+			return m, true
+		}
+	}
+	return "", false
+}
 
 // kazakhOnlyLetters are the Cyrillic letters that exist in the Kazakh alphabet but not
 // the Russian one. і (U+0456) belongs here too: Russian dropped that letter in 1918, and
@@ -904,6 +1001,22 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 		v.EscalatePass = escalateVal == *tc.Escalate
 	}
 
+	// Universal, independent of whether the test declares an `escalate:` expectation at
+	// all (unlike EscalatePass above) — gated only on the contract actually having a
+	// parseable escalate value to check against (hasEscalate; a missing/mistyped field is
+	// already a ContractFields failure, no need to stack a second, noisier complaint on
+	// top of it). See Verdict.EscalateTextConsistencyPass's doc comment.
+	v.EscalateTextConsistencyPass = true
+	if hasEscalate {
+		v.EscalateTextConsistencyEvaluated = true
+		if !escalateVal {
+			if m, hit := managerDeflection(injected); hit {
+				v.EscalateTextConsistencyPass = false
+				v.DeflectionPhrase = m
+			}
+		}
+	}
+
 	// Two independent checks: does the TEXT read as the expected language (a Kazakh-letter
 	// heuristic for kk, its absence for ru), and does the model's own declared
 	// reply_language FIELD match — a model can write Russian prose while claiming
@@ -996,7 +1109,7 @@ func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, valid
 		}
 	}
 
-	v.ModelBehaviorPass = v.RequiresPass && v.ForbidTokensPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
+	v.ModelBehaviorPass = v.RequiresPass && v.ForbidTokensPass && v.MediaPass && v.EscalatePass && v.EscalateTextConsistencyPass && v.LanguagePass &&
 		v.MustNotContainPass && v.MustContainAnyPass && v.OutcomesPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 &&
 		!v.TooManyMedia
 
@@ -1022,6 +1135,8 @@ func firstFailureReason(v Verdict) string {
 		return "did not attach the expected media"
 	case !v.EscalatePass:
 		return "escalate did not match expectation"
+	case v.EscalateTextConsistencyEvaluated && !v.EscalateTextConsistencyPass:
+		return "reply hands the customer off to a manager while escalate=false: \"" + v.DeflectionPhrase + "\""
 	case !v.LanguagePass:
 		return v.LanguageIssue
 	case !v.MustNotContainPass:

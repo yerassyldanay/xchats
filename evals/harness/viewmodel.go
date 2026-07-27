@@ -286,6 +286,21 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		}
 	}
 
+	// escalate_text_consistency follows the media_count pattern
+	// (EscalateTextConsistencyEvaluated is the same kind of marker): a verdict judged
+	// before this check existed, or one whose contract never even produced a parseable
+	// escalate value, renders not_run rather than a fabricated pass from
+	// EscalateTextConsistencyPass's zero value.
+	escalateTextStatus := ScoreNotRun
+	escalateTextDetail := ""
+	if v.EscalateTextConsistencyEvaluated {
+		escalateTextStatus = ScorePass
+		if !v.EscalateTextConsistencyPass {
+			escalateTextStatus = ScoreFail
+			escalateTextDetail = v.DeflectionPhrase
+		}
+	}
+
 	// outcomes follows the media_count pattern (OutcomesDeclared is the same kind of
 	// marker as MediaCountEvaluated): a verdict judged before the check existed — or a
 	// test that declares no alternative outcomes — renders not_run, never a fabricated
@@ -361,6 +376,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Name: "forbid_tokens", Status: evaluated(v.ForbidTokensPass), Detail: strings.Join(v.ForbiddenTokensHit, ", ")},
 		{Name: "media", Status: evaluated(v.MediaPass)},
 		{Name: "escalate", Status: evaluated(v.EscalatePass)},
+		{Name: "escalate_text_consistency", Status: escalateTextStatus, Detail: escalateTextDetail},
 		{Name: "language", Status: evaluated(v.LanguagePass), Detail: v.LanguageIssue},
 		// Reported separately from the combined "language" row above (Phase 0.4): looksKazakh
 		// is a cheap presence heuristic, not a whole-reply classifier — telling "the text
@@ -441,6 +457,14 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 	if controlCharsRow.Detail != "" {
 		controlCharsActual = controlCharsRow.Detail
 	}
+	escalateTextRow, _ := scoreByName(scores, "escalate_text_consistency")
+	escalateTextActual := "ок"
+	switch {
+	case escalateTextRow.Status == ScoreNotRun:
+		escalateTextActual = "не проверялось (verdict до добавления этой проверки)"
+	case escalateTextRow.Detail != "":
+		escalateTextActual = "отсылает клиента к менеджеру: \"" + escalateTextRow.Detail + "\""
+	}
 	safetyContract := []VContractRow{
 		{Key: "valid_json", Label: "Валидный JSON", Kind: "safety", Expected: "корректный JSON-объект", Actual: jsonActual, Pass: scorePassPtr(parseStatus)},
 		{Key: "contract_fields", Label: "Поля контракта", Kind: "safety", Expected: "все обязательные поля присутствуют", Actual: contractFieldsActual, Pass: scorePassPtr(contractFieldsOK.Status)},
@@ -449,6 +473,7 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Key: "no_invented_digits", Label: "Без выдуманных чисел", Kind: "safety", Expected: "нет чисел вне ответа модели", Actual: digitsActual, Pass: scorePassPtr(digitsOK.Status)},
 		{Key: "media_count", Label: "Не больше вложений, чем разрешает промпт", Kind: "safety", Expected: "не более 2 ссылок (правило 4 фрейма)", Actual: mediaCountActual, Pass: scorePassPtr(mediaCountRow.Status)},
 		{Key: "no_control_chars", Label: "Без управляющих символов", Kind: "safety", Expected: "нет служебных байтов (например backspace) в reply_text", Actual: controlCharsActual, Pass: scorePassPtr(controlCharsRow.Status)},
+		{Key: "escalate_text_consistency", Label: "Текст согласован с флагом эскалации", Kind: "safety", Expected: "нет отсылки клиента к менеджеру и нет обещания передать вопрос при escalate=false", Actual: escalateTextActual, Pass: scorePassPtr(escalateTextRow.Status)},
 	}
 
 	// ReplyText re-parses the judged output the same way judgeOne itself did — a second

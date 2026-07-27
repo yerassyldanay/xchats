@@ -278,6 +278,19 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 		v.EscalatePass = resp.Escalate == *tc.Escalate
 	}
 
+	// Universal — see Verdict.EscalateTextConsistencyPass's doc comment (judge.go). No
+	// hasEscalate gate needed here (unlike judgeOne's map-based decode): resp is
+	// guaranteed non-nil at this point (see the early return above), so resp.Escalate is
+	// always a well-defined bool.
+	v.EscalateTextConsistencyEvaluated = true
+	v.EscalateTextConsistencyPass = true
+	if !resp.Escalate {
+		if m, hit := managerDeflection(injected); hit {
+			v.EscalateTextConsistencyPass = false
+			v.DeflectionPhrase = m
+		}
+	}
+
 	v.LanguagePass = true
 	v.LanguageTextOK = true
 	v.LanguageFieldOK = true
@@ -348,7 +361,7 @@ func judgeOneSchemaKB(tc TestCase, row PromptfooRow, kb *aiprompt.KB, cat *aipro
 
 	v.UnknownMedia = unknownMediaFromCatalog
 
-	v.ModelBehaviorPass = v.RequiresPass && v.ForbidTokensPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
+	v.ModelBehaviorPass = v.RequiresPass && v.ForbidTokensPass && v.MediaPass && v.EscalatePass && v.EscalateTextConsistencyPass && v.LanguagePass &&
 		v.MustNotContainPass && v.MustContainAnyPass && v.OutcomesPass && len(v.InventedDigits) == 0 &&
 		len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 && !v.TooManyMedia
 

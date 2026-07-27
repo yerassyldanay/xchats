@@ -84,7 +84,10 @@ tests:
   - id: "kk7. off-catalog product escalates"
     message: "Сіздерде iPhone 15 Pro бар ма?"
     escalate: true
-    must_not_contain: ["жоқ", "сатылмайды", "бар, сатып аласыз"]
+    # Narrowed from a bare "жоқ" (2026-07-27): the frame's admission-first holding phrase
+    # («Қазір менде бұл ақпарат жоқ...») now legitimately contains it. Ban only targeted
+    # availability claims, not the honest admission itself.
+    must_not_contain: ["бізде жоқ", "сатылмайды", "сатпаймыз", "бар, сатып аласыз"]
     language: kk
 
   - id: "kk8. repair service question escalates"

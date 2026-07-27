@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -550,6 +551,126 @@ func TestJudgeOne_MediaCountEvaluatedMirrorsParseOK(t *testing.T) {
 	bad := judgeOne(TestCase{ID: "t"}, badRow, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if bad.ParseOK || bad.MediaCountEvaluated {
 		t.Errorf("want ParseOK=false and MediaCountEvaluated=false together on the early-return path, got ParseOK=%v MediaCountEvaluated=%v", bad.ParseOK, bad.MediaCountEvaluated)
+	}
+}
+
+// TestJudgeOne_EscalateTextConsistency pins the 2026-07-27 grader addition: a reply that
+// hands the customer off to / deflects them to a manager while escalate=false is a
+// behavior failure regardless of whether the test itself declares an `escalate:`
+// expectation — the whole point is to catch this on tests that never thought to check
+// for it. Includes bd13's own verbatim failures (test 13, size-100) and the pickup-topic
+// pinned negative control: an honest, correctly non-escalating mention of a manager
+// ("by prior arrangement with the manager") must never trip this check, or every reply
+// that legitimately mentions a human would start failing.
+func TestJudgeOne_EscalateTextConsistency(t *testing.T) {
+	catalog := &Catalog{}
+
+	tests := []struct {
+		name             string
+		replyText        string
+		escalate         bool
+		wantBehaviorPass bool
+		wantDeflection   string
+	}{
+		{
+			name:             "canonical RU holding phrase with escalate=false contradicts itself",
+			replyText:        "Сейчас у меня нет этой информации — передаю ваш вопрос менеджеру и вернусь с точным ответом.",
+			escalate:         false,
+			wantBehaviorPass: false,
+			wantDeflection:   "передаю ваш вопрос менеджер",
+		},
+		{
+			name:             "same text with escalate=true is consistent",
+			replyText:        "Сейчас у меня нет этой информации — передаю ваш вопрос менеджеру и вернусь с точным ответом.",
+			escalate:         true,
+			wantBehaviorPass: true,
+		},
+		{
+			name:             "bd13 test-13 size-100 verbatim failure",
+			replyText:        "Возврат и обмен товара возможны, если он не был в использовании и сохранена упаковка. Уточняйте условия у менеджера при оформлении заказа.",
+			escalate:         false,
+			wantBehaviorPass: false,
+			wantDeflection:   "Уточняйте условия у менеджер",
+		},
+		{
+			name:             "svyazhites-s-menedzherom phrasing",
+			replyText:        "Для уточнения условий возврата при оформлении заказа, пожалуйста, свяжитесь с менеджером.",
+			escalate:         false,
+			wantBehaviorPass: false,
+		},
+		{
+			name:             "pickup topic honestly mentions a manager without deflecting — must NOT trip",
+			replyText:        "Самовывоз возможен со склада в Алматы по предварительной договорённости с менеджером.",
+			escalate:         false,
+			wantBehaviorPass: true,
+		},
+		{
+			name:             "kk: forwarding to the manager",
+			replyText:        "Қазір менде бұл ақпарат жоқ — сұрағыңызды менеджерге жолдаймын және нақты жауаппен ораламын.",
+			escalate:         false,
+			wantBehaviorPass: false,
+		},
+		{
+			name:             "kk: ask the manager",
+			replyText:        "Бұл сұрақ бойынша менеджерден сұраңыз.",
+			escalate:         false,
+			wantBehaviorPass: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			row := PromptfooRow{}
+			row.Provider.ID = "test-model"
+			row.Response.Output = fmt.Sprintf(`{"reply_text":%q,"reply_language":"ru","media_files_to_send":[],"escalate":%v,"escalation_reason":"","confidence":0.9}`, tt.replyText, tt.escalate)
+
+			v := judgeOne(TestCase{ID: "t"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
+			if !v.ContractPass {
+				t.Fatalf("precondition failed: ContractPass=false, reason=%s", v.Reason)
+			}
+			if !v.EscalateTextConsistencyEvaluated {
+				t.Fatalf("want EscalateTextConsistencyEvaluated=true (escalate parsed fine), got false")
+			}
+			if v.EscalateTextConsistencyPass != tt.wantBehaviorPass {
+				t.Errorf("EscalateTextConsistencyPass = %v, want %v (DeflectionPhrase=%q)", v.EscalateTextConsistencyPass, tt.wantBehaviorPass, v.DeflectionPhrase)
+			}
+			if v.ModelBehaviorPass != tt.wantBehaviorPass {
+				t.Errorf("ModelBehaviorPass = %v, want %v; reason=%s", v.ModelBehaviorPass, tt.wantBehaviorPass, v.Reason)
+			}
+			if tt.wantDeflection != "" && v.DeflectionPhrase != tt.wantDeflection {
+				t.Errorf("DeflectionPhrase = %q, want %q", v.DeflectionPhrase, tt.wantDeflection)
+			}
+		})
+	}
+}
+
+// TestJudgeOne_EscalateTextConsistencyEvaluatedMirrorsEscalateField proves the marker's
+// gating condition directly (mirrors TestJudgeOne_MediaCountEvaluatedMirrorsParseOK's
+// pattern): a response whose escalate field failed to decode as a bool at all (already a
+// ContractFields failure on its own) must never be graded for text/flag consistency
+// either — there is no known escalate value to check the text against. ContractPass
+// itself must stay UNTOUCHED by this check either way (Verdict.EscalateTextConsistencyPass's
+// doc comment: gates ModelBehaviorPass only).
+func TestJudgeOne_EscalateTextConsistencyEvaluatedMirrorsEscalateField(t *testing.T) {
+	catalog := &Catalog{}
+
+	goodRow := PromptfooRow{}
+	goodRow.Provider.ID = "test-model"
+	goodRow.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	good := judgeOne(TestCase{ID: "t"}, goodRow, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
+	if !good.EscalateTextConsistencyEvaluated {
+		t.Errorf("want EscalateTextConsistencyEvaluated=true for a well-typed escalate field, got false")
+	}
+
+	badRow := PromptfooRow{}
+	badRow.Provider.ID = "test-model"
+	badRow.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":"true"}`
+	bad := judgeOne(TestCase{ID: "t"}, badRow, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
+	if bad.EscalateTextConsistencyEvaluated {
+		t.Errorf("want EscalateTextConsistencyEvaluated=false when escalate did not decode as a bool, got true")
+	}
+	if bad.ContractPass {
+		t.Errorf("precondition failed: want ContractPass=false for a malformed escalate field (unrelated to this check), got true")
 	}
 }
 

@@ -462,3 +462,75 @@ func TestJudgeOneSchemaKB_RereadsMediaColumn(t *testing.T) {
 		t.Fatalf("MediaResolveOK=%v ContractPass=%v reason=%q", v.MediaResolveOK, v.ContractPass, v.Reason)
 	}
 }
+
+// schemaKBResponseEscalate builds a Response with explicit, independent control over
+// Escalate and ReplyText — schemaKBResponse/schemaKBResponseLang always couple Escalate
+// to "was an escalation_reason given," which the escalate/text-consistency check
+// specifically needs to pull apart: a reply can deflect to a manager in its TEXT while
+// its Escalate field says false.
+func schemaKBResponseEscalate(t *testing.T, text string, escalate bool) string {
+	t.Helper()
+	b, err := json.Marshal(aiprompt.Response{
+		ReplyText:        text,
+		ReplyLanguage:    "ru",
+		MediaFilesToSend: []string{},
+		Escalate:         escalate,
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestJudgeOneSchemaKB_EscalateTextConsistency mirrors judge_test.go's
+// TestJudgeOne_EscalateTextConsistency for the schema_kb_v1 pipeline — same regexes
+// (managerDeflectionPatterns, judge.go), same pinned pickup-topic negative control.
+func TestJudgeOneSchemaKB_EscalateTextConsistency(t *testing.T) {
+	kb, cat := loadSchemaKBJudgeContext(t)
+
+	tests := []struct {
+		name             string
+		replyText        string
+		escalate         bool
+		wantBehaviorPass bool
+	}{
+		{
+			name:             "canonical RU holding phrase with escalate=false contradicts itself",
+			replyText:        "Сейчас у меня нет этой информации — передаю ваш вопрос менеджеру и вернусь с точным ответом.",
+			escalate:         false,
+			wantBehaviorPass: false,
+		},
+		{
+			name:             "same text with escalate=true is consistent",
+			replyText:        "Сейчас у меня нет этой информации — передаю ваш вопрос менеджеру и вернусь с точным ответом.",
+			escalate:         true,
+			wantBehaviorPass: true,
+		},
+		{
+			name:             "pickup topic honestly mentions a manager without deflecting — must NOT trip",
+			replyText:        "Самовывоз возможен со склада в Алматы по предварительной договорённости с менеджером.",
+			escalate:         false,
+			wantBehaviorPass: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := schemaKBResponseEscalate(t, tt.replyText, tt.escalate)
+			v := judgeSchemaKBOutput(t, kb, cat, output)
+			if !v.ContractPass {
+				t.Fatalf("precondition failed: ContractPass=false, reason=%s", v.Reason)
+			}
+			if !v.EscalateTextConsistencyEvaluated {
+				t.Fatalf("want EscalateTextConsistencyEvaluated=true, got false")
+			}
+			if v.EscalateTextConsistencyPass != tt.wantBehaviorPass {
+				t.Errorf("EscalateTextConsistencyPass = %v, want %v (DeflectionPhrase=%q)", v.EscalateTextConsistencyPass, tt.wantBehaviorPass, v.DeflectionPhrase)
+			}
+			if v.ModelBehaviorPass != tt.wantBehaviorPass {
+				t.Errorf("ModelBehaviorPass = %v, want %v; reason=%s", v.ModelBehaviorPass, tt.wantBehaviorPass, v.Reason)
+			}
+		})
+	}
+}

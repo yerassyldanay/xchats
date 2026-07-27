@@ -19,6 +19,7 @@ var kbQuestionsRUBankPath = filepath.Join("..", "common", "kb-questions-ru.yaml"
 var kbHistoryRUBankPath = filepath.Join("..", "common", "kb-history-ru.yaml")
 var kbDeliveryRUBankPath = filepath.Join("..", "common", "kb-delivery-ru.yaml")
 var kbMessagesKKBankPath = filepath.Join("..", "common", "kb-messages-kk.yaml")
+var kbMessagesKKAmbiguousBankPath = filepath.Join("..", "common", "kb-messages-kk-ambiguous.yaml")
 
 // kbQuestionsRUPinnedIDs is the bank's exact, ordered ID list. Pinning the full list (not
 // just checking membership) means an accidental deletion or truncation during a future
@@ -72,6 +73,15 @@ var kbMessagesKKPinnedIDs = []string{
 	"kk6. photo request — media-less product",
 	"kk7. off-catalog product escalates",
 	"kk8. repair service question escalates",
+}
+
+var kbMessagesKKAmbiguousPinnedIDs = []string{
+	"kka1. shared-alphabet Kazakh — out-of-stock honesty",
+	"kka2. shared-alphabet Kazakh — exact price",
+	"kka3. mixed RU greeting + shared-alphabet KK question clause — delivery cost",
+	"kka4. bare short follow-up — history carries the language",
+	"kka5. code-switching within one message — exact price",
+	"kka6. mid-conversation language switch — delivery cost",
 }
 
 func TestKBQuestionsRUBank_PinnedIDList(t *testing.T) {
@@ -144,27 +154,47 @@ func TestKBMessagesKKBank_PinnedIDList(t *testing.T) {
 	}
 }
 
+func TestKBMessagesKKAmbiguousBank_PinnedIDList(t *testing.T) {
+	tests := loadTestCases(t, kbMessagesKKAmbiguousBankPath)
+	gotIDs := make([]string, len(tests))
+	for i, tc := range tests {
+		gotIDs[i] = tc.ID
+	}
+	if !reflect.DeepEqual(gotIDs, kbMessagesKKAmbiguousPinnedIDs) {
+		t.Fatalf("%s: want exactly these IDs in order:\n%v\ngot:\n%v", kbMessagesKKAmbiguousBankPath, kbMessagesKKAmbiguousPinnedIDs, gotIDs)
+	}
+}
+
 // TestDetectLang_KBMessagesKKBankIsAllKazakh is TestDetectLang_KBQuestionsRUBankIsAllRussian's
-// mirror image: kb-messages-kk.yaml exists SPECIFICALLY to exercise Kazakh customer
-// input, so every one of its messages must actually read as Kazakh — a message that
-// silently reads as Russian here would defeat the whole bank's purpose without any
-// other test noticing (every per-test check is about the REPLY, not the message).
+// mirror image: kb-messages-kk.yaml and kb-messages-kk-ambiguous.yaml exist SPECIFICALLY
+// to exercise Kazakh customer input, so every one of their messages must actually read as
+// Kazakh (message + history together, exactly as detectLang is actually called) — a
+// message that silently reads as Russian here would defeat the whole bank's purpose
+// without any other test noticing (every per-test check is about the REPLY, not the
+// message). This doubles as the acceptance gate for langdetect.go's lingua-go-based
+// classifyText: every shared-alphabet, mixed-clause, and history-dependent case in the
+// -ambiguous bank must classify correctly here, or that bank silently stops testing what
+// it says it tests.
 func TestDetectLang_KBMessagesKKBankIsAllKazakh(t *testing.T) {
-	for _, tc := range loadTestCases(t, kbMessagesKKBankPath) {
-		if got := detectLang(tc.Message, tc.History); got != "kk" {
-			t.Errorf("test %q: detectLang(message)=%q, want kk — message: %q", tc.ID, got, tc.Message)
+	for _, bankPath := range []string{kbMessagesKKBankPath, kbMessagesKKAmbiguousBankPath} {
+		for _, tc := range loadTestCases(t, bankPath) {
+			if got := detectLang(tc.Message, tc.History); got != "kk" {
+				t.Errorf("%s: test %q: detectLang(message, history)=%q, want kk — message: %q", bankPath, tc.ID, got, tc.Message)
+			}
 		}
 	}
 }
 
-// TestKBMessagesKKBank_EveryTestExpectsKazakhReply confirms every test in the Kazakh
-// customer-message bank actually declares language: kk — a test that forgot this would
+// TestKBMessagesKKBank_EveryTestExpectsKazakhReply confirms every test in both Kazakh
+// customer-message banks actually declares language: kk — a test that forgot this would
 // silently fall back to no language check at all (TestCase.Language's zero value),
 // defeating the bank's entire point without any other test catching it.
 func TestKBMessagesKKBank_EveryTestExpectsKazakhReply(t *testing.T) {
-	for _, tc := range loadTestCases(t, kbMessagesKKBankPath) {
-		if tc.Language != "kk" {
-			t.Errorf("test %q: language=%q, want \"kk\"", tc.ID, tc.Language)
+	for _, bankPath := range []string{kbMessagesKKBankPath, kbMessagesKKAmbiguousBankPath} {
+		for _, tc := range loadTestCases(t, bankPath) {
+			if tc.Language != "kk" {
+				t.Errorf("%s: test %q: language=%q, want \"kk\"", bankPath, tc.ID, tc.Language)
+			}
 		}
 	}
 }
@@ -192,7 +222,7 @@ func TestKBCommonBanks_ValidAtSizeTen(t *testing.T) {
 		t.Fatalf("BuildCatalog: %v", err)
 	}
 
-	for _, bankPath := range []string{kbQuestionsRUBankPath, kbHistoryRUBankPath, kbDeliveryRUBankPath, kbMessagesKKBankPath} {
+	for _, bankPath := range []string{kbQuestionsRUBankPath, kbHistoryRUBankPath, kbDeliveryRUBankPath, kbMessagesKKBankPath, kbMessagesKKAmbiguousBankPath} {
 		for _, tc := range loadTestCases(t, bankPath) {
 			for _, group := range tc.Requires {
 				resolved := false

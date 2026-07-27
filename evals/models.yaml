@@ -68,26 +68,22 @@ providers:
   # added them before launching a big repeats/screening pass.
   - id: openrouter:google/gemini-3.5-flash
     temperature: 0.3
-    # A same-day partial run (2026-07-18) at max_tokens=500 showed 38/38 sampled calls
-    # truncated (finish_reason=length) at ~496 avg completion tokens — the model was
-    # cut off before finishing its JSON reply on essentially every call. Raised to 1500
-    # to give real headroom; re-check truncation on the next run before trusting a low
-    # contract-pass rate as a quality signal rather than a budget artifact.
-    max_tokens: 1500
+    # Probe-verified 2026-07-26 (3 direct curls, ~$0.03 total, real shop-kb-v1-10 h5
+    # prompt): (1) reasoning.enabled+exclude at default/medium effort, max_tokens=1500 —
+    # 1438/1496 completion tokens burned on hidden reasoning, finish_reason=length,
+    # content led with a leaked "thought" fragment before the JSON fence; (2)
+    # reasoning.enabled:false (the kimi-k2.5 fallback) — hard-rejected by the API:
+    # "Reasoning is mandatory for this endpoint and cannot be disabled." There is no way
+    # to fully disable thinking for this model; (3) effort:"minimal" + exclude:true,
+    # max_tokens=3000 — finish_reason=stop, reasoning_tokens=0, content was a clean
+    # ```json fence, cost $0.0094. Config below is (3).
+    max_tokens: 3000
     # Verified against openrouter.ai/google/gemini-3.5-flash on 2026-07-18.
     input_per_mtok: 1.50
     output_per_mtok: 9.00
-    # Added 2026-07-23 (plan linear-noodling-quail): run 2026-07-22_23-37-42-94b6 showed
-    # 31/31 responses carrying in-band "Thinking: ..." narration in message.content —
-    # the exact failure mode minimax-m2.5's verified enabled+exclude config fixed.
-    # NOT yet probe-verified for THIS model (no billed calls were approved for this
-    # change; this file's own doctrine says verify before trusting) — run the ~$0.02
-    # curl probe from the plan before the next real run, and fall back to
-    # {enabled: false} (the kimi-k2.5 precedent, see git history) if exclude
-    # misbehaves. The harness's final-answer extraction now recovers combined
-    # reasoning+JSON output regardless, so this is an optimization, not the safety net.
     reasoning:
       enabled: true
+      effort: minimal
       exclude: true
   # --- Kimi models removed 2026-07-23 (both moonshotai/kimi-k2.6 and
   # moonshotai/kimi-k2.5): expensive relative to the remaining candidates and no
@@ -162,5 +158,3 @@ archived_models:
     reason: "removed 2026-07-23 — expensive relative to remaining candidates, no longer an evaluation candidate"
   - id: openrouter:moonshotai/kimi-k2.6
     reason: "removed 2026-07-23 — 31/31 responses truncated mid-reasoning at finish_reason=length, slowest model in the file"
-  - id: openrouter:google/gemini-3.5-flash
-    reason: "reasoning.enabled+exclude config added 2026-07-23 is NOT yet probe-verified for this model — entry stays for its config notes but is refused for new spend until verified"
