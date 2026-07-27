@@ -100,3 +100,18 @@ test('the shipped stylesheet defines an automatic (prefers-color-scheme) dark mo
   const css = await (await request.get(cssHref!)).text()
   expect(css).toMatch(/prefers-color-scheme:\s*dark/)
 })
+
+test('blog pages carry the xchats favicon and full public-site chrome', async ({ page }) => {
+  await page.goto('/blog/')
+
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/logo.png')
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', '/logo.png')
+  await expect(page.locator('.site-nav__mark')).toHaveText('x')
+
+  const footer = page.locator('.site-footer')
+  await expect(footer.locator('.site-footer__brand')).toContainText('xchats')
+  await expect(footer.locator('a[href="/#features"]')).toHaveCount(1)
+  await expect(footer.locator('a[href="/blog/"][aria-current="page"]')).toHaveCount(1)
+  await expect(footer.locator('a[href^="mailto:"]')).toBeVisible()
+  await expect(footer.locator('a[href^="https://wa.me/"]')).toBeVisible()
+})

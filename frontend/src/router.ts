@@ -9,6 +9,7 @@ import KnowledgeBase from './views/KnowledgeBase.vue'
 import EvalRuns from './views/EvalRuns.vue'
 import EvalLaunchDetail from './views/EvalLaunchDetail.vue'
 import EvalCatalog from './views/EvalCatalog.vue'
+import Blog from './views/Blog.vue'
 import { useAuth } from './stores/auth'
 
 const router = createRouter({
@@ -26,6 +27,7 @@ const router = createRouter({
     // swallow this path with launchId === "catalog".
     { path: '/evals/catalog', name: 'eval-catalog', component: EvalCatalog, meta: { requiresAuth: true } },
     { path: '/evals/:launchId', name: 'eval-launch', component: EvalLaunchDetail, meta: { requiresAuth: true } },
+    { path: '/blog', name: 'blog', component: Blog },
   ],
 })
 

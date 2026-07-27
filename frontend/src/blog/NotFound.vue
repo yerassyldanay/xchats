@@ -42,6 +42,8 @@ defineProps<NotFoundProps>()
 
     <SiteFooter
       :site-title="siteTitle"
+      :index-href="indexHref"
+      :current-locale="currentLocale"
       :year="year"
       :github-url="githubUrl"
       :github-label="githubLabel"

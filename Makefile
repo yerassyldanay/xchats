@@ -22,7 +22,7 @@ help: ## Show this help
 		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 up: ## Rebuild + run the whole stack detached (Postgres + backend + frontend)
-	$(COMPOSE) up -d
+	$(COMPOSE) up -d --build
 	@echo "✅ up — frontend: http://localhost:8081 · backend: http://localhost:8090 · logs: make logs"
 
 up-fg: ## Same as up but foreground (Ctrl-C to stop, attached logs)

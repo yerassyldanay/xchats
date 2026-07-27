@@ -80,9 +80,9 @@ const END_OF_LIST_DESCRIPTION: Record<Locale, string> = {
   kk: 'Біз қызықты мәселелерді тапқан сайын жаңа мақалалар жариялап отырамыз.',
 }
 const COPYRIGHT_SUFFIX: Record<Locale, string> = {
-  ru: 'Все права защищены.',
-  en: 'All rights reserved.',
-  kk: 'Барлық құқықтар қорғалған.',
+  ru: 'MIT License.',
+  en: 'MIT License.',
+  kk: 'MIT License.',
 }
 const NOT_FOUND_TITLE: Record<Locale, string> = {
   ru: 'Страница не найдена',
@@ -270,6 +270,10 @@ function renderHead(input: HeadInput, cssHref: string): string {
   const tags: string[] = []
   tags.push('<meta charset="UTF-8" />')
   tags.push('<meta name="viewport" content="width=device-width, initial-scale=1.0" />')
+  tags.push('<meta name="theme-color" content="#ffffff" />')
+  tags.push('<link rel="icon" type="image/png" href="/logo.png" />')
+  tags.push('<link rel="shortcut icon" type="image/png" href="/logo.png" />')
+  tags.push('<link rel="apple-touch-icon" href="/logo.png" />')
   // The site-name suffix belongs in <title> only — og:title/JSON-LD headline
   // use the bare title, since og:site_name already carries the site name.
   tags.push(`<title>${escapeHtml(input.title)} — ${SITE_TITLE}</title>`)

@@ -18,6 +18,8 @@ import {
   Bot
 } from 'lucide-vue-next'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
+
+const currentYear = new Date().getFullYear()
 </script>
 
 <template>
@@ -35,7 +37,7 @@ import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
           <a href="#features" class="hover:text-indigo-600 transition-colors">Возможности</a>
           <a href="#how-it-works" class="hover:text-indigo-600 transition-colors">Как это работает</a>
           <a href="#architecture" class="hover:text-indigo-600 transition-colors">Архитектура</a>
-          <RouterLink :to="{ name: 'blog' }" class="hover:text-indigo-600 transition-colors">Блог</RouterLink>
+          <a href="/blog/" class="hover:text-indigo-600 transition-colors">Блог</a>
         </nav>
         <div class="flex items-center gap-4">
           <a href="https://github.com/yerassyldanay/xchats" target="_blank" class="hidden sm:flex text-slate-600 hover:text-slate-900 transition-colors items-center gap-2 text-sm font-medium">
@@ -344,9 +346,9 @@ import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
               <p class="text-slate-600 mb-8 flex-1">
                 Читайте о том, как мы решаем сложные задачи, проектируем архитектуру и создаем надежные AI-инструменты без галлюцинаций.
               </p>
-              <RouterLink :to="{ name: 'blog' }" class="inline-flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-700 transition-colors">
+              <a href="/blog/" class="inline-flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-700 transition-colors">
                 Читать статьи <ArrowRight class="w-4 h-4" />
-              </RouterLink>
+              </a>
             </div>
 
             <div class="bg-white p-10 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-start hover:shadow-md transition-shadow">
@@ -409,7 +411,7 @@ import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
             Open-source платформа для создания умных чат-ботов на основе ваших данных.
           </p>
           <p class="text-xs text-slate-400 pt-4">
-            © 2024 xchats. MIT License.
+            © {{ currentYear }} xchats. MIT License.
           </p>
         </div>
         
@@ -419,7 +421,7 @@ import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
             <li><a href="#features" class="hover:text-indigo-600 transition-colors">Возможности</a></li>
             <li><a href="#how-it-works" class="hover:text-indigo-600 transition-colors">Как это работает</a></li>
             <li><a href="#architecture" class="hover:text-indigo-600 transition-colors">Архитектура</a></li>
-            <li><RouterLink :to="{ name: 'blog' }" class="hover:text-indigo-600 transition-colors">Блог</RouterLink></li>
+            <li><a href="/blog/" class="hover:text-indigo-600 transition-colors">Блог</a></li>
           </ul>
         </div>
         
