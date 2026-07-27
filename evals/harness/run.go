@@ -33,6 +33,7 @@ func cmdRun(args []string) (runID string, err error) {
 	if err := validateRepeats(*repeats, *noCache); err != nil {
 		return "", err
 	}
+	loadDotEnv(".env")
 	if os.Getenv("OPENROUTER_API_KEY") == "" {
 		return "", fmt.Errorf("run: OPENROUTER_API_KEY is not set (this makes real, billed model calls)")
 	}

@@ -1,0 +1,1085 @@
+{
+  "tests": [
+    {
+      "ID": "1. exact price — coffee machine",
+      "Message": "Сколько стоит кофемашина DeLonghi?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "2. in-stock availability — coffee machine",
+      "Message": "Кофемашина DeLonghi сейчас в наличии?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": "coffee-machine"
+    },
+    {
+      "ID": "3. out-of-stock honesty — no facts or media for an unavailable product",
+      "Message": "Блендер Philips есть в наличии?",
+      "Requires": null,
+      "Media": {
+        "AnyOf": null,
+        "AllOf": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": [
+        "product.blender-philips.price"
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": "blender-philips"
+    },
+    {
+      "ID": "4. photo request — media-ful product",
+      "Message": "Пришлите фото кофемашины DeLonghi, пожалуйста.",
+      "Requires": null,
+      "Media": {
+        "AnyOf": [
+          "products.coffee-machine.featured_image",
+          "products.coffee-machine.gallery_images"
+        ],
+        "AllOf": null,
+        "Forbid": false,
+        "Exclusive": true
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "5. photo and certificate combined (all_of)",
+      "Message": "Пришлите, пожалуйста, фото блендера Panasonic и сертификат качества.",
+      "Requires": null,
+      "Media": {
+        "AnyOf": [
+          "products.blender-panasonic.gallery_images",
+          "products.blender-panasonic.featured_image"
+        ],
+        "AllOf": [
+          "products.blender-panasonic.certificate_documents"
+        ],
+        "Forbid": false,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "6. photo request — media-less product",
+      "Message": "Пришлите фото блендера Bosch, пожалуйста.",
+      "Requires": null,
+      "Media": {
+        "AnyOf": null,
+        "AllOf": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "7. media request for an out-of-stock product — no media at all",
+      "Message": "Пришлите видео набора посуды, пожалуйста.",
+      "Requires": null,
+      "Media": {
+        "AnyOf": null,
+        "AllOf": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": [
+        "product.cookware-set.price"
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": [
+        {
+          "Claim": "Ответ ясно сообщает клиенту, что этого товара сейчас нет в наличии",
+          "Expect": true
+        }
+      ],
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "8. partial-media probe — asks for the one missing kind",
+      "Message": "А сертификат качества на блендер Tefal есть? Пришлите, если есть.",
+      "Requires": null,
+      "Media": {
+        "AnyOf": null,
+        "AllOf": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": [
+        {
+          "Claim": "Ответ ясно сообщает клиенту, что сертификата качества на этот блендер нет",
+          "Expect": true
+        }
+      ],
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "9. delivery cost (general, zones present)",
+      "Message": "Сколько стоит доставка?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": [
+        {
+          "Label": "asks which direction, without citing any zone's price",
+          "Requires": null,
+          "Media": null,
+          "Escalate": null,
+          "Language": "",
+          "MustNotContain": null,
+          "MustContainAny": null,
+          "ForbidTokens": [
+            "delivery."
+          ]
+        },
+        {
+          "Label": "answers with at least one zone's price",
+          "Requires": [
+            [
+              "delivery.almaty.delivery_cost",
+              "delivery.astana.delivery_cost",
+              "delivery.kazakhstan.delivery_cost"
+            ]
+          ],
+          "Media": null,
+          "Escalate": null,
+          "Language": "",
+          "MustNotContain": null,
+          "MustContainAny": null,
+          "ForbidTokens": null
+        }
+      ],
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "10. delivery days (general, zones present)",
+      "Message": "А сколько по времени займёт доставка?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": [
+        {
+          "Label": "asks which direction, without citing any zone's timeline",
+          "Requires": null,
+          "Media": null,
+          "Escalate": null,
+          "Language": "",
+          "MustNotContain": null,
+          "MustContainAny": null,
+          "ForbidTokens": [
+            "delivery."
+          ]
+        },
+        {
+          "Label": "answers with at least one zone's delivery time",
+          "Requires": [
+            [
+              "delivery.almaty.delivery_in_days",
+              "delivery.astana.delivery_in_days",
+              "delivery.kazakhstan.delivery_in_days"
+            ]
+          ],
+          "Media": null,
+          "Escalate": null,
+          "Language": "",
+          "MustNotContain": null,
+          "MustContainAny": null,
+          "ForbidTokens": null
+        }
+      ],
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "11. minimum order amount",
+      "Message": "Какая у вас минимальная сумма заказа?",
+      "Requires": [
+        [
+          "policy.main.min_order"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "12. working hours and phone",
+      "Message": "Подскажите часы работы и номер телефона для связи.",
+      "Requires": [
+        [
+          "contact.main.working_hours"
+        ],
+        [
+          "contact.main.phone"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "13. missing exact value — return period escalates",
+      "Message": "Какой у вас срок возврата товара?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "14. warranty duration escalates (prose-only, no fact column)",
+      "Message": "На сколько месяцев у вас гарантия на кофемашину?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "15. off-KB city resolves via country zone fallback",
+      "Message": "А в Караганду доставляете?",
+      "Requires": [
+        [
+          "delivery.kazakhstan.delivery_available",
+          "delivery.kazakhstan.delivery_cost",
+          "delivery.kazakhstan.delivery_in_days"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": [
+        "delivery.almaty.",
+        "delivery.astana.",
+        "delivery.baikonur."
+      ],
+      "MustNotContain": [
+        "не доставля",
+        "доставляем только по"
+      ],
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "h1. pronoun price follow-up",
+      "Message": "Да, сколько она стоит?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Смотрю кофемашину DeLonghi."
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! Кофемашина DeLonghi есть в каталоге — подсказать по цене?"
+        }
+      ],
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "h2. purchase intent resolves discussed product",
+      "Message": "Всё, беру её. Как оформить заказ?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": [
+        "заказ оформлен",
+        "заказ создан",
+        "уже оформили"
+      ],
+      "MustContainAny": [
+        "адрес"
+      ],
+      "History": [
+        {
+          "role": "client",
+          "text": "Хочу кофемашину для дома, смотрю DeLonghi."
+        },
+        {
+          "role": "assistant",
+          "text": "Это автоматическая кофемашина с капучинатором и жерновковой кофемолкой."
+        },
+        {
+          "role": "client",
+          "text": "Отлично, мне подходит."
+        },
+        {
+          "role": "assistant",
+          "text": "Могу помочь с оформлением заказа."
+        }
+      ],
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": "coffee-machine"
+    },
+    {
+      "ID": "h3. repeat prior literal through placeholder",
+      "Message": "Напомните, сколько она стоит?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Сколько стоит кофемашина DeLonghi?"
+        },
+        {
+          "role": "assistant",
+          "text": "Кофемашина DeLonghi стоит 129 900 ₸."
+        },
+        {
+          "role": "client",
+          "text": "Хорошо, я ещё подумаю."
+        }
+      ],
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "h4. pronoun photo request",
+      "Message": "Пришлите, пожалуйста, её фото.",
+      "Requires": null,
+      "Media": {
+        "AnyOf": [
+          "products.coffee-machine.featured_image",
+          "products.coffee-machine.gallery_images"
+        ],
+        "AllOf": null,
+        "Forbid": false,
+        "Exclusive": true
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Покажите кофемашину DeLonghi."
+        },
+        {
+          "role": "assistant",
+          "text": "Это автоматическая кофемашина для дома."
+        },
+        {
+          "role": "client",
+          "text": "Выглядит интересно."
+        }
+      ],
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "h5. out-of-stock purchase intent stays honest",
+      "Message": "Хорошо, всё равно оформляйте его прямо сейчас.",
+      "Requires": null,
+      "Media": {
+        "AnyOf": null,
+        "AllOf": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": null,
+      "Language": "ru",
+      "ForbidTokens": [
+        "product.cookware-set.price"
+      ],
+      "MustNotContain": [
+        "заказ оформлен",
+        "заказ создан",
+        "уже оформили"
+      ],
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Мне понравился набор посуды."
+        },
+        {
+          "role": "assistant",
+          "text": "Набор посуды сейчас нет в наличии."
+        },
+        {
+          "role": "client",
+          "text": "Жаль, но я хотела именно его."
+        }
+      ],
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": "cookware-set"
+    },
+    {
+      "ID": "d1. listed city — Astana",
+      "Message": "Сколько будет стоить доставка в Астану?",
+      "Requires": [
+        [
+          "delivery.astana.delivery_cost"
+        ],
+        [
+          "delivery.astana.delivery_in_days"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": [
+        "delivery.kazakhstan.",
+        "delivery.almaty.",
+        "delivery.baikonur."
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "d2. listed city, different declension — Astane (dative)",
+      "Message": "Уточните, пожалуйста, сколько стоит доставка по Астане?",
+      "Requires": [
+        [
+          "delivery.astana.delivery_cost"
+        ],
+        [
+          "delivery.astana.delivery_in_days"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": [
+        "delivery.kazakhstan.",
+        "delivery.almaty.",
+        "delivery.baikonur."
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "d3. explicit deny zone — Baikonur beats its parent's allow",
+      "Message": "А в Байконур доставляете?",
+      "Requires": [
+        [
+          "delivery.baikonur.delivery_available"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": [
+        "delivery.kazakhstan.",
+        "delivery.astana.",
+        "delivery.almaty."
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": [
+        {
+          "Claim": "Ответ ясно сообщает клиенту, что доставки в Байконур нет",
+          "Expect": true
+        },
+        {
+          "Claim": "Ответ добавляет что-то сверх отказа — обещания, альтернативы, особые условия или контакты партнёров",
+          "Expect": false
+        }
+      ],
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "d4. unlisted country — China refuses via outside_zones_note",
+      "Message": "А в Китай доставляете?",
+      "Requires": [
+        [
+          "policy.main.outside_zones_note"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": [
+        "delivery."
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": [
+        {
+          "Claim": "Ответ ясно сообщает клиенту, что доставки в Китай нет",
+          "Expect": true
+        },
+        {
+          "Claim": "Ответ добавляет что-то сверх отказа — обещания, альтернативы, особые условия или контакты партнёров",
+          "Expect": false
+        }
+      ],
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "d5. unplaceable location escalates",
+      "Message": "А в Верхние Васюки доставляете?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": null,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": [
+        {
+          "Claim": "Ответ ясно сообщает клиенту, что доставки в этот город нет",
+          "Expect": true
+        }
+      ],
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "d6. negotiation for an excluded direction escalates",
+      "Message": "А если я сам найму курьера и оплачу, довезёте товар до Китая?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "d7. refund demand escalates",
+      "Message": "Верните мне, пожалуйста, деньги за прошлый заказ.",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": [
+        "в течение 14 дней",
+        "оформите возврат"
+      ],
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "d8. repair service question escalates",
+      "Message": "Вы ремонтируете кофемашины?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": [
+        "не ремонтируем",
+        "не занимаемся ремонтом",
+        "да, ремонтируем"
+      ],
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "d9. off-catalog product escalates",
+      "Message": "У вас есть iPhone 15 Pro?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "ForbidTokens": null,
+      "MustNotContain": [
+        "нет в продаже",
+        "не продаём",
+        "да, есть",
+        "да, в наличии"
+      ],
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "d10. history follow-up resolves the zone already discussed",
+      "Message": "А по времени сколько это займёт?",
+      "Requires": [
+        [
+          "delivery.astana.delivery_in_days"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "ForbidTokens": [
+        "delivery.kazakhstan.",
+        "delivery.almaty.",
+        "delivery.baikonur."
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Хочу заказать кофемашину DeLonghi с доставкой в Астану."
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! Кофемашина DeLonghi есть в наличии. Уточню детали доставки в Астану."
+        }
+      ],
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kk1. exact price — coffee machine",
+      "Message": "Кофемашина DeLonghi қанша тұрады?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kk2. in-stock availability — coffee machine",
+      "Message": "Кофемашина DeLonghi қоймада бар ма?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": "coffee-machine"
+    },
+    {
+      "ID": "kk3. out-of-stock honesty — no facts or media for an unavailable product",
+      "Message": "Philips блендері бар ма?",
+      "Requires": null,
+      "Media": {
+        "AnyOf": null,
+        "AllOf": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": [
+        "product.blender-philips.price"
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": "blender-philips"
+    },
+    {
+      "ID": "kk4. listed city — Astana delivery cost and time",
+      "Message": "Астанаға жеткізу қанша тұрады және қанша күнде жетеді?",
+      "Requires": [
+        [
+          "delivery.astana.delivery_cost"
+        ],
+        [
+          "delivery.astana.delivery_in_days"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": [
+        "delivery.kazakhstan.",
+        "delivery.almaty.",
+        "delivery.baikonur."
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kk5. photo request — media-ful product",
+      "Message": "Кофемашинаның суреттерін жіберіңізші",
+      "Requires": null,
+      "Media": {
+        "AnyOf": [
+          "products.coffee-machine.featured_image",
+          "products.coffee-machine.gallery_images"
+        ],
+        "AllOf": null,
+        "Forbid": false,
+        "Exclusive": true
+      },
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kk6. photo request — media-less product",
+      "Message": "Bosch блендерінің суретін жіберіңізші",
+      "Requires": null,
+      "Media": {
+        "AnyOf": null,
+        "AllOf": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": [
+        {
+          "Claim": "Ответ ясно сообщает клиенту, что фото именно этого блендера (Bosch) у нас нет",
+          "Expect": true
+        }
+      ],
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kk7. off-catalog product escalates",
+      "Message": "Сіздерде iPhone 15 Pro бар ма?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "kk",
+      "ForbidTokens": null,
+      "MustNotContain": [
+        "бізде жоқ",
+        "сатылмайды",
+        "сатпаймыз",
+        "бар, сатып аласыз"
+      ],
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kk8. repair service question escalates",
+      "Message": "Сіздер кофемашиналарды жөндейсіздер ме?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "kk",
+      "ForbidTokens": null,
+      "MustNotContain": [
+        "жөндейміз",
+        "жөндемейміз"
+      ],
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kka1. shared-alphabet Kazakh — out-of-stock honesty",
+      "Message": "Сиздерде Филипс блендери бар ма? Билейин деген едим.",
+      "Requires": null,
+      "Media": {
+        "AnyOf": null,
+        "AllOf": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": [
+        "product.blender-philips.price"
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": "blender-philips"
+    },
+    {
+      "ID": "kka2. shared-alphabet Kazakh — exact price",
+      "Message": "Кофемашина DeLonghi канша турады?",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kka3. mixed RU greeting + shared-alphabet KK question clause — delivery cost",
+      "Message": "Здравствуйте! Астанага жеткизу канша турады?",
+      "Requires": [
+        [
+          "delivery.astana.delivery_cost"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": [
+        "delivery.kazakhstan.",
+        "delivery.almaty.",
+        "delivery.baikonur."
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kka4. bare short follow-up — history carries the language",
+      "Message": "Бар ма?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Кофемашина DeLonghi канша турады?"
+        },
+        {
+          "role": "assistant",
+          "text": "Қазір бағасын жіберемін."
+        }
+      ],
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": "coffee-machine"
+    },
+    {
+      "ID": "kka5. code-switching within one message — exact price",
+      "Message": "Сәлеметсіз бе! Подскажите бағасын кофемашины DeLonghi",
+      "Requires": [
+        [
+          "product.coffee-machine.price"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": null,
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": null,
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    },
+    {
+      "ID": "kka6. mid-conversation language switch — delivery cost",
+      "Message": "Астанаға жеткізу қанша тұрады?",
+      "Requires": [
+        [
+          "delivery.astana.delivery_cost"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "ForbidTokens": [
+        "delivery.kazakhstan.",
+        "delivery.almaty.",
+        "delivery.baikonur."
+      ],
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте, что есть из кофемашин?"
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! У нас есть кофемашина DeLonghi — автоматическая, с капучинатором."
+        }
+      ],
+      "Outcomes": null,
+      "LLMChecks": null,
+      "StockCheckRef": ""
+    }
+  ]
+}

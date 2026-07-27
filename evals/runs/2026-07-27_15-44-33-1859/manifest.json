@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-07-27_15-44-33-1859",
+  "family": "scenario",
+  "command": "run",
+  "args": [
+    "-all",
+    "-models",
+    "all",
+    "-models-file",
+    "models.launch-gemini-2.5.yaml",
+    "-expect-calls",
+    "264"
+  ],
+  "git_sha": "2219f6b1fe267a30010280df6ff0d556754eae58",
+  "git_dirty": true,
+  "git_status_porcelain": "M  evals/harness/run.go\nA  evals/models.launch-gemini-2.5.yaml\nA  evals/runs/launches/2026-07-27_15-39-01-4230.json\n",
+  "worktree_diff_path": "worktree.diff",
+  "models_path": "models.launch-gemini-2.5.yaml",
+  "models_sha256": "68846afde9ef79f10f9728b86d4a82acb159499b063f22de00e4687e42247ad8",
+  "promptfoo_version": "0.121.18",
+  "scenarios": [
+    {
+      "scenario": "shop-kb-v1-10",
+      "scenario_yaml_sha256": "a9faafe4bdbc264e04992aec5d280f67edbe6026ef8a8db6dac15018f6da35a6",
+      "fixture_sha256": "467a172190559cd304e72f3bedb991034620dff813ca1849c94d8009668891cb",
+      "prompt_sha256": "87cc920603abc76b87966dd923006f73843b3d9e57192edc24cd640315fedcca",
+      "catalog_sha256": "b9cd04be164298fb9ab4a859609b72917d29389361a3aedef6878da30703ba87",
+      "resolved_tests_sha256": "851bc6cc12f97c24078c8dc98adfe41b76c47abce69cf2e0ab5ca9f3f9e20c0d",
+      "promptfooconfig_sha256": "9f33f7bc2e5b0ba5e53b0b9b556369b7b6899c6fea1ae8d576ff0fc379631edc",
+      "results_sha256": "7e06b8e88c81ed49758e975c91c68574d4a6d83c2cd6b72a5cb954295612fa3a"
+    },
+    {
+      "scenario": "shop-kb-v1-100",
+      "scenario_yaml_sha256": "8d8dee317b13a7a72df62fc5854adaef4362896d607c086ead06c7b5a7a19b7f",
+      "fixture_sha256": "467a172190559cd304e72f3bedb991034620dff813ca1849c94d8009668891cb",
+      "prompt_sha256": "8d95deeae3f7659304ee24065368a2adf58fd3d2e59a68a655650c51a3d85798",
+      "catalog_sha256": "d44ade7b7592af8ace6e7d1ce093b1883b1994100381dcba2d440da62d6d122e",
+      "resolved_tests_sha256": "851bc6cc12f97c24078c8dc98adfe41b76c47abce69cf2e0ab5ca9f3f9e20c0d",
+      "promptfooconfig_sha256": "3094f2c3d09ee5188ef7e804e0055822f37a11dcd827fc9e997e609fd95f3006",
+      "results_sha256": "56ff76705c60dc5f6d60e8e413181a6dcaf8391eec4e39aa60272f8f68457f4f"
+    },
+    {
+      "scenario": "shop-kb-v1-50",
+      "scenario_yaml_sha256": "2c108fc2fe20e7e3fbff73b7d479ea184c60e33c7d54c4b167f7b9123b420256",
+      "fixture_sha256": "467a172190559cd304e72f3bedb991034620dff813ca1849c94d8009668891cb",
+      "prompt_sha256": "8dbfaaa7a4d107b297d966d0383390786984ebef762e7316a87a6980e6831e90",
+      "catalog_sha256": "276dff75acb5193e9a0c009ac83789b1f6b8b114b203f7919dbd439519d58053",
+      "resolved_tests_sha256": "851bc6cc12f97c24078c8dc98adfe41b76c47abce69cf2e0ab5ca9f3f9e20c0d",
+      "promptfooconfig_sha256": "e3c38425a63251ffae510893bbd404fda9f866cea993d4204285f8bdcb3f7d1a",
+      "results_sha256": "86d81c4fa8f8d70c98b49ab053414ab9c2e1cb92d636fea35081332bb8cfbe8d"
+    }
+  ],
+  "started_at": "2026-07-27T10:44:33Z",
+  "finished_at": "2026-07-27T10:46:15Z"
+}

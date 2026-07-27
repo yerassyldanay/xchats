@@ -1,0 +1,2170 @@
+{
+  "facts": [
+    {
+      "token": "{{product.coffee-machine.price}}",
+      "table": "product",
+      "ref": "coffee-machine",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.cookware-set.price}}",
+      "table": "product",
+      "ref": "cookware-set",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-bosch.price}}",
+      "table": "product",
+      "ref": "blender-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-philips.price}}",
+      "table": "product",
+      "ref": "blender-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-xiaomi.price}}",
+      "table": "product",
+      "ref": "blender-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-tefal.price}}",
+      "table": "product",
+      "ref": "blender-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-redmond.price}}",
+      "table": "product",
+      "ref": "blender-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-panasonic.price}}",
+      "table": "product",
+      "ref": "blender-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-samsung.price}}",
+      "table": "product",
+      "ref": "blender-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.kettle-bosch.price}}",
+      "table": "product",
+      "ref": "kettle-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.kettle-philips.price}}",
+      "table": "product",
+      "ref": "kettle-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.kettle-xiaomi.price}}",
+      "table": "product",
+      "ref": "kettle-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.kettle-tefal.price}}",
+      "table": "product",
+      "ref": "kettle-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.kettle-redmond.price}}",
+      "table": "product",
+      "ref": "kettle-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.kettle-panasonic.price}}",
+      "table": "product",
+      "ref": "kettle-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.kettle-samsung.price}}",
+      "table": "product",
+      "ref": "kettle-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.toaster-bosch.price}}",
+      "table": "product",
+      "ref": "toaster-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.toaster-philips.price}}",
+      "table": "product",
+      "ref": "toaster-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.toaster-xiaomi.price}}",
+      "table": "product",
+      "ref": "toaster-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.toaster-tefal.price}}",
+      "table": "product",
+      "ref": "toaster-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.toaster-redmond.price}}",
+      "table": "product",
+      "ref": "toaster-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.toaster-panasonic.price}}",
+      "table": "product",
+      "ref": "toaster-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.toaster-samsung.price}}",
+      "table": "product",
+      "ref": "toaster-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.multicooker-bosch.price}}",
+      "table": "product",
+      "ref": "multicooker-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.multicooker-philips.price}}",
+      "table": "product",
+      "ref": "multicooker-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.multicooker-xiaomi.price}}",
+      "table": "product",
+      "ref": "multicooker-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.multicooker-tefal.price}}",
+      "table": "product",
+      "ref": "multicooker-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.multicooker-redmond.price}}",
+      "table": "product",
+      "ref": "multicooker-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.multicooker-panasonic.price}}",
+      "table": "product",
+      "ref": "multicooker-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.multicooker-samsung.price}}",
+      "table": "product",
+      "ref": "multicooker-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.microwave-bosch.price}}",
+      "table": "product",
+      "ref": "microwave-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.microwave-philips.price}}",
+      "table": "product",
+      "ref": "microwave-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.microwave-xiaomi.price}}",
+      "table": "product",
+      "ref": "microwave-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.microwave-tefal.price}}",
+      "table": "product",
+      "ref": "microwave-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.microwave-redmond.price}}",
+      "table": "product",
+      "ref": "microwave-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.microwave-panasonic.price}}",
+      "table": "product",
+      "ref": "microwave-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.microwave-samsung.price}}",
+      "table": "product",
+      "ref": "microwave-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.vacuum-bosch.price}}",
+      "table": "product",
+      "ref": "vacuum-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.vacuum-philips.price}}",
+      "table": "product",
+      "ref": "vacuum-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.vacuum-xiaomi.price}}",
+      "table": "product",
+      "ref": "vacuum-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.vacuum-tefal.price}}",
+      "table": "product",
+      "ref": "vacuum-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.vacuum-redmond.price}}",
+      "table": "product",
+      "ref": "vacuum-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.vacuum-panasonic.price}}",
+      "table": "product",
+      "ref": "vacuum-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.vacuum-samsung.price}}",
+      "table": "product",
+      "ref": "vacuum-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.iron-bosch.price}}",
+      "table": "product",
+      "ref": "iron-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.iron-philips.price}}",
+      "table": "product",
+      "ref": "iron-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.iron-xiaomi.price}}",
+      "table": "product",
+      "ref": "iron-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.iron-tefal.price}}",
+      "table": "product",
+      "ref": "iron-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.iron-redmond.price}}",
+      "table": "product",
+      "ref": "iron-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.iron-panasonic.price}}",
+      "table": "product",
+      "ref": "iron-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.iron-samsung.price}}",
+      "table": "product",
+      "ref": "iron-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.fan-bosch.price}}",
+      "table": "product",
+      "ref": "fan-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.fan-philips.price}}",
+      "table": "product",
+      "ref": "fan-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.fan-xiaomi.price}}",
+      "table": "product",
+      "ref": "fan-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.fan-tefal.price}}",
+      "table": "product",
+      "ref": "fan-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.fan-redmond.price}}",
+      "table": "product",
+      "ref": "fan-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.fan-panasonic.price}}",
+      "table": "product",
+      "ref": "fan-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.fan-samsung.price}}",
+      "table": "product",
+      "ref": "fan-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.heater-bosch.price}}",
+      "table": "product",
+      "ref": "heater-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.heater-philips.price}}",
+      "table": "product",
+      "ref": "heater-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.heater-xiaomi.price}}",
+      "table": "product",
+      "ref": "heater-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.heater-tefal.price}}",
+      "table": "product",
+      "ref": "heater-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.heater-redmond.price}}",
+      "table": "product",
+      "ref": "heater-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.heater-panasonic.price}}",
+      "table": "product",
+      "ref": "heater-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.heater-samsung.price}}",
+      "table": "product",
+      "ref": "heater-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.air-purifier-bosch.price}}",
+      "table": "product",
+      "ref": "air-purifier-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.air-purifier-philips.price}}",
+      "table": "product",
+      "ref": "air-purifier-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.air-purifier-xiaomi.price}}",
+      "table": "product",
+      "ref": "air-purifier-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.air-purifier-tefal.price}}",
+      "table": "product",
+      "ref": "air-purifier-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.air-purifier-redmond.price}}",
+      "table": "product",
+      "ref": "air-purifier-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.air-purifier-panasonic.price}}",
+      "table": "product",
+      "ref": "air-purifier-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.air-purifier-samsung.price}}",
+      "table": "product",
+      "ref": "air-purifier-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.juicer-bosch.price}}",
+      "table": "product",
+      "ref": "juicer-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.juicer-philips.price}}",
+      "table": "product",
+      "ref": "juicer-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.juicer-xiaomi.price}}",
+      "table": "product",
+      "ref": "juicer-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.juicer-tefal.price}}",
+      "table": "product",
+      "ref": "juicer-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.juicer-redmond.price}}",
+      "table": "product",
+      "ref": "juicer-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.juicer-panasonic.price}}",
+      "table": "product",
+      "ref": "juicer-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.juicer-samsung.price}}",
+      "table": "product",
+      "ref": "juicer-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.food-processor-bosch.price}}",
+      "table": "product",
+      "ref": "food-processor-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.food-processor-philips.price}}",
+      "table": "product",
+      "ref": "food-processor-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.food-processor-xiaomi.price}}",
+      "table": "product",
+      "ref": "food-processor-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.food-processor-tefal.price}}",
+      "table": "product",
+      "ref": "food-processor-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.food-processor-redmond.price}}",
+      "table": "product",
+      "ref": "food-processor-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.food-processor-panasonic.price}}",
+      "table": "product",
+      "ref": "food-processor-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.food-processor-samsung.price}}",
+      "table": "product",
+      "ref": "food-processor-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.waffle-maker-bosch.price}}",
+      "table": "product",
+      "ref": "waffle-maker-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.waffle-maker-philips.price}}",
+      "table": "product",
+      "ref": "waffle-maker-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.waffle-maker-xiaomi.price}}",
+      "table": "product",
+      "ref": "waffle-maker-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.waffle-maker-tefal.price}}",
+      "table": "product",
+      "ref": "waffle-maker-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.waffle-maker-redmond.price}}",
+      "table": "product",
+      "ref": "waffle-maker-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.waffle-maker-panasonic.price}}",
+      "table": "product",
+      "ref": "waffle-maker-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.waffle-maker-samsung.price}}",
+      "table": "product",
+      "ref": "waffle-maker-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.sandwich-maker-bosch.price}}",
+      "table": "product",
+      "ref": "sandwich-maker-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.sandwich-maker-philips.price}}",
+      "table": "product",
+      "ref": "sandwich-maker-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.sandwich-maker-xiaomi.price}}",
+      "table": "product",
+      "ref": "sandwich-maker-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.sandwich-maker-tefal.price}}",
+      "table": "product",
+      "ref": "sandwich-maker-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.sandwich-maker-redmond.price}}",
+      "table": "product",
+      "ref": "sandwich-maker-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.sandwich-maker-panasonic.price}}",
+      "table": "product",
+      "ref": "sandwich-maker-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.sandwich-maker-samsung.price}}",
+      "table": "product",
+      "ref": "sandwich-maker-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{contact.main.phone}}",
+      "table": "contact",
+      "ref": "main",
+      "column": "phone",
+      "label": "телефон",
+      "value_kind": "text_complete",
+      "usage_note": "значение полное; вставляй токен как есть"
+    },
+    {
+      "token": "{{contact.main.instagram}}",
+      "table": "contact",
+      "ref": "main",
+      "column": "instagram",
+      "label": "Instagram",
+      "value_kind": "text_complete",
+      "usage_note": "значение полное; вставляй токен как есть"
+    },
+    {
+      "token": "{{contact.main.working_hours}}",
+      "table": "contact",
+      "ref": "main",
+      "column": "working_hours",
+      "label": "часы работы",
+      "value_kind": "time_display",
+      "usage_note": "значение уже содержит полное время; не добавляй лишних слов о времени"
+    },
+    {
+      "token": "{{policy.main.free_delivery_from}}",
+      "table": "policy",
+      "ref": "main",
+      "column": "free_delivery_from",
+      "label": "бесплатная доставка от",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{policy.main.min_order}}",
+      "table": "policy",
+      "ref": "main",
+      "column": "min_order",
+      "label": "минимальный заказ",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{policy.main.outside_zones_note}}",
+      "table": "policy",
+      "ref": "main",
+      "column": "outside_zones_note",
+      "label": "доставка вне списка зон",
+      "value_kind": "text_complete",
+      "usage_note": "значение полное; вставляй токен как есть"
+    },
+    {
+      "token": "{{delivery.kazakhstan.delivery_cost}}",
+      "table": "delivery",
+      "ref": "kazakhstan",
+      "column": "delivery_cost",
+      "label": "стоимость доставки",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{delivery.kazakhstan.delivery_in_days}}",
+      "table": "delivery",
+      "ref": "kazakhstan",
+      "column": "delivery_in_days",
+      "label": "срок доставки, в днях",
+      "value_kind": "number_range",
+      "usage_note": "только число; в русском ответе добавь слово «дня» после токена, в казахском — «күн»"
+    },
+    {
+      "token": "{{delivery.kazakhstan.delivery_available}}",
+      "table": "delivery",
+      "ref": "kazakhstan",
+      "column": "delivery_available",
+      "label": "доступность доставки",
+      "value_kind": "delivery_flag",
+      "reasoning_state": "delivers",
+      "usage_note": "флаг доступности доставки в это направление; код заменит токен на готовую фразу «доставляем» или «не доставляем» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — никогда не пиши «доставляем»/«не доставляем» от себя, даже пересказывая своими словами. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
+    },
+    {
+      "token": "{{delivery.astana.delivery_cost}}",
+      "table": "delivery",
+      "ref": "astana",
+      "column": "delivery_cost",
+      "label": "стоимость доставки",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{delivery.astana.delivery_in_days}}",
+      "table": "delivery",
+      "ref": "astana",
+      "column": "delivery_in_days",
+      "label": "срок доставки, в днях",
+      "value_kind": "number_range",
+      "usage_note": "только число; в русском ответе добавь слово «дня» после токена, в казахском — «күн»"
+    },
+    {
+      "token": "{{delivery.astana.delivery_available}}",
+      "table": "delivery",
+      "ref": "astana",
+      "column": "delivery_available",
+      "label": "доступность доставки",
+      "value_kind": "delivery_flag",
+      "reasoning_state": "delivers",
+      "usage_note": "флаг доступности доставки в это направление; код заменит токен на готовую фразу «доставляем» или «не доставляем» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — никогда не пиши «доставляем»/«не доставляем» от себя, даже пересказывая своими словами. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
+    },
+    {
+      "token": "{{delivery.almaty.delivery_cost}}",
+      "table": "delivery",
+      "ref": "almaty",
+      "column": "delivery_cost",
+      "label": "стоимость доставки",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{delivery.almaty.delivery_in_days}}",
+      "table": "delivery",
+      "ref": "almaty",
+      "column": "delivery_in_days",
+      "label": "срок доставки, в днях",
+      "value_kind": "number_range",
+      "usage_note": "только число; в русском ответе добавь слово «дня» после токена, в казахском — «күн»"
+    },
+    {
+      "token": "{{delivery.almaty.delivery_available}}",
+      "table": "delivery",
+      "ref": "almaty",
+      "column": "delivery_available",
+      "label": "доступность доставки",
+      "value_kind": "delivery_flag",
+      "reasoning_state": "delivers",
+      "usage_note": "флаг доступности доставки в это направление; код заменит токен на готовую фразу «доставляем» или «не доставляем» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — никогда не пиши «доставляем»/«не доставляем» от себя, даже пересказывая своими словами. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
+    },
+    {
+      "token": "{{delivery.baikonur.delivery_available}}",
+      "table": "delivery",
+      "ref": "baikonur",
+      "column": "delivery_available",
+      "label": "доступность доставки",
+      "value_kind": "delivery_flag",
+      "reasoning_state": "no_delivery",
+      "usage_note": "флаг доступности доставки в это направление; код заменит токен на готовую фразу «доставляем» или «не доставляем» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — никогда не пиши «доставляем»/«не доставляем» от себя, даже пересказывая своими словами. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
+    }
+  ],
+  "media": [
+    {
+      "token": "topics.delivery.illustration_images",
+      "table": "topics",
+      "ref": "delivery",
+      "column": "illustration_images",
+      "label": "иллюстрации",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.coffee-machine.featured_image",
+      "table": "products",
+      "ref": "coffee-machine",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.coffee-machine.gallery_images",
+      "table": "products",
+      "ref": "coffee-machine",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 3
+    },
+    {
+      "token": "products.coffee-machine.demo_videos",
+      "table": "products",
+      "ref": "coffee-machine",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.coffee-machine.certificate_documents",
+      "table": "products",
+      "ref": "coffee-machine",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.cookware-set.gallery_images",
+      "table": "products",
+      "ref": "cookware-set",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.blender-philips.gallery_images",
+      "table": "products",
+      "ref": "blender-philips",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.blender-tefal.gallery_images",
+      "table": "products",
+      "ref": "blender-tefal",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.blender-tefal.demo_videos",
+      "table": "products",
+      "ref": "blender-tefal",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.blender-panasonic.featured_image",
+      "table": "products",
+      "ref": "blender-panasonic",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.blender-panasonic.gallery_images",
+      "table": "products",
+      "ref": "blender-panasonic",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.blender-panasonic.certificate_documents",
+      "table": "products",
+      "ref": "blender-panasonic",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.kettle-bosch.featured_image",
+      "table": "products",
+      "ref": "kettle-bosch",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.kettle-xiaomi.gallery_images",
+      "table": "products",
+      "ref": "kettle-xiaomi",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.kettle-redmond.gallery_images",
+      "table": "products",
+      "ref": "kettle-redmond",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.kettle-redmond.demo_videos",
+      "table": "products",
+      "ref": "kettle-redmond",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.kettle-samsung.featured_image",
+      "table": "products",
+      "ref": "kettle-samsung",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.kettle-samsung.gallery_images",
+      "table": "products",
+      "ref": "kettle-samsung",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.kettle-samsung.certificate_documents",
+      "table": "products",
+      "ref": "kettle-samsung",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.toaster-philips.featured_image",
+      "table": "products",
+      "ref": "toaster-philips",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.toaster-tefal.gallery_images",
+      "table": "products",
+      "ref": "toaster-tefal",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.toaster-panasonic.gallery_images",
+      "table": "products",
+      "ref": "toaster-panasonic",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.toaster-panasonic.demo_videos",
+      "table": "products",
+      "ref": "toaster-panasonic",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.multicooker-bosch.featured_image",
+      "table": "products",
+      "ref": "multicooker-bosch",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.multicooker-bosch.gallery_images",
+      "table": "products",
+      "ref": "multicooker-bosch",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.multicooker-bosch.certificate_documents",
+      "table": "products",
+      "ref": "multicooker-bosch",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.multicooker-xiaomi.featured_image",
+      "table": "products",
+      "ref": "multicooker-xiaomi",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.multicooker-redmond.gallery_images",
+      "table": "products",
+      "ref": "multicooker-redmond",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.multicooker-samsung.gallery_images",
+      "table": "products",
+      "ref": "multicooker-samsung",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.multicooker-samsung.demo_videos",
+      "table": "products",
+      "ref": "multicooker-samsung",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.microwave-philips.featured_image",
+      "table": "products",
+      "ref": "microwave-philips",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.microwave-philips.gallery_images",
+      "table": "products",
+      "ref": "microwave-philips",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.microwave-philips.certificate_documents",
+      "table": "products",
+      "ref": "microwave-philips",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.microwave-tefal.featured_image",
+      "table": "products",
+      "ref": "microwave-tefal",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.microwave-panasonic.gallery_images",
+      "table": "products",
+      "ref": "microwave-panasonic",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.vacuum-bosch.gallery_images",
+      "table": "products",
+      "ref": "vacuum-bosch",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.vacuum-bosch.demo_videos",
+      "table": "products",
+      "ref": "vacuum-bosch",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.vacuum-xiaomi.featured_image",
+      "table": "products",
+      "ref": "vacuum-xiaomi",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.vacuum-xiaomi.gallery_images",
+      "table": "products",
+      "ref": "vacuum-xiaomi",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.vacuum-xiaomi.certificate_documents",
+      "table": "products",
+      "ref": "vacuum-xiaomi",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.vacuum-redmond.featured_image",
+      "table": "products",
+      "ref": "vacuum-redmond",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.vacuum-samsung.gallery_images",
+      "table": "products",
+      "ref": "vacuum-samsung",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.iron-philips.gallery_images",
+      "table": "products",
+      "ref": "iron-philips",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.iron-philips.demo_videos",
+      "table": "products",
+      "ref": "iron-philips",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.iron-tefal.featured_image",
+      "table": "products",
+      "ref": "iron-tefal",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.iron-tefal.gallery_images",
+      "table": "products",
+      "ref": "iron-tefal",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.iron-tefal.certificate_documents",
+      "table": "products",
+      "ref": "iron-tefal",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.iron-panasonic.featured_image",
+      "table": "products",
+      "ref": "iron-panasonic",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.fan-bosch.gallery_images",
+      "table": "products",
+      "ref": "fan-bosch",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.fan-xiaomi.gallery_images",
+      "table": "products",
+      "ref": "fan-xiaomi",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.fan-xiaomi.demo_videos",
+      "table": "products",
+      "ref": "fan-xiaomi",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.fan-redmond.featured_image",
+      "table": "products",
+      "ref": "fan-redmond",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.fan-redmond.gallery_images",
+      "table": "products",
+      "ref": "fan-redmond",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.fan-redmond.certificate_documents",
+      "table": "products",
+      "ref": "fan-redmond",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.fan-samsung.featured_image",
+      "table": "products",
+      "ref": "fan-samsung",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.heater-philips.gallery_images",
+      "table": "products",
+      "ref": "heater-philips",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.heater-tefal.gallery_images",
+      "table": "products",
+      "ref": "heater-tefal",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.heater-tefal.demo_videos",
+      "table": "products",
+      "ref": "heater-tefal",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.heater-panasonic.featured_image",
+      "table": "products",
+      "ref": "heater-panasonic",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.heater-panasonic.gallery_images",
+      "table": "products",
+      "ref": "heater-panasonic",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.heater-panasonic.certificate_documents",
+      "table": "products",
+      "ref": "heater-panasonic",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.air-purifier-bosch.featured_image",
+      "table": "products",
+      "ref": "air-purifier-bosch",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.air-purifier-xiaomi.gallery_images",
+      "table": "products",
+      "ref": "air-purifier-xiaomi",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.air-purifier-redmond.gallery_images",
+      "table": "products",
+      "ref": "air-purifier-redmond",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.air-purifier-redmond.demo_videos",
+      "table": "products",
+      "ref": "air-purifier-redmond",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.air-purifier-samsung.featured_image",
+      "table": "products",
+      "ref": "air-purifier-samsung",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.air-purifier-samsung.gallery_images",
+      "table": "products",
+      "ref": "air-purifier-samsung",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.air-purifier-samsung.certificate_documents",
+      "table": "products",
+      "ref": "air-purifier-samsung",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.juicer-philips.featured_image",
+      "table": "products",
+      "ref": "juicer-philips",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.juicer-tefal.gallery_images",
+      "table": "products",
+      "ref": "juicer-tefal",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.juicer-panasonic.gallery_images",
+      "table": "products",
+      "ref": "juicer-panasonic",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.juicer-panasonic.demo_videos",
+      "table": "products",
+      "ref": "juicer-panasonic",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.food-processor-bosch.featured_image",
+      "table": "products",
+      "ref": "food-processor-bosch",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.food-processor-bosch.gallery_images",
+      "table": "products",
+      "ref": "food-processor-bosch",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.food-processor-bosch.certificate_documents",
+      "table": "products",
+      "ref": "food-processor-bosch",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.food-processor-xiaomi.featured_image",
+      "table": "products",
+      "ref": "food-processor-xiaomi",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.food-processor-redmond.gallery_images",
+      "table": "products",
+      "ref": "food-processor-redmond",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.food-processor-samsung.gallery_images",
+      "table": "products",
+      "ref": "food-processor-samsung",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.food-processor-samsung.demo_videos",
+      "table": "products",
+      "ref": "food-processor-samsung",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.waffle-maker-philips.featured_image",
+      "table": "products",
+      "ref": "waffle-maker-philips",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.waffle-maker-philips.gallery_images",
+      "table": "products",
+      "ref": "waffle-maker-philips",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.waffle-maker-philips.certificate_documents",
+      "table": "products",
+      "ref": "waffle-maker-philips",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.waffle-maker-tefal.featured_image",
+      "table": "products",
+      "ref": "waffle-maker-tefal",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.waffle-maker-panasonic.gallery_images",
+      "table": "products",
+      "ref": "waffle-maker-panasonic",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.sandwich-maker-bosch.gallery_images",
+      "table": "products",
+      "ref": "sandwich-maker-bosch",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.sandwich-maker-bosch.demo_videos",
+      "table": "products",
+      "ref": "sandwich-maker-bosch",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.sandwich-maker-xiaomi.featured_image",
+      "table": "products",
+      "ref": "sandwich-maker-xiaomi",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.sandwich-maker-xiaomi.gallery_images",
+      "table": "products",
+      "ref": "sandwich-maker-xiaomi",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.sandwich-maker-xiaomi.certificate_documents",
+      "table": "products",
+      "ref": "sandwich-maker-xiaomi",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.sandwich-maker-redmond.featured_image",
+      "table": "products",
+      "ref": "sandwich-maker-redmond",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.sandwich-maker-samsung.gallery_images",
+      "table": "products",
+      "ref": "sandwich-maker-samsung",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    }
+  ],
+  "absent": [
+    {
+      "table": "topics",
+      "ref": "catalog",
+      "display_name": "Каталог"
+    },
+    {
+      "table": "topics",
+      "ref": "payment",
+      "display_name": "Оплата"
+    },
+    {
+      "table": "topics",
+      "ref": "how_to_order",
+      "display_name": "Как заказать"
+    },
+    {
+      "table": "topics",
+      "ref": "warranty",
+      "display_name": "Гарантия"
+    },
+    {
+      "table": "topics",
+      "ref": "returns",
+      "display_name": "Возврат"
+    },
+    {
+      "table": "topics",
+      "ref": "promo",
+      "display_name": "Акции"
+    },
+    {
+      "table": "topics",
+      "ref": "support",
+      "display_name": "Поддержка"
+    },
+    {
+      "table": "topics",
+      "ref": "pickup",
+      "display_name": "Самовывоз"
+    },
+    {
+      "table": "products",
+      "ref": "blender-bosch",
+      "display_name": "Блендер Bosch"
+    },
+    {
+      "table": "products",
+      "ref": "blender-xiaomi",
+      "display_name": "Блендер Xiaomi"
+    },
+    {
+      "table": "products",
+      "ref": "blender-redmond",
+      "display_name": "Блендер Redmond"
+    },
+    {
+      "table": "products",
+      "ref": "blender-samsung",
+      "display_name": "Блендер Samsung"
+    },
+    {
+      "table": "products",
+      "ref": "kettle-philips",
+      "display_name": "Чайник Philips"
+    },
+    {
+      "table": "products",
+      "ref": "kettle-tefal",
+      "display_name": "Чайник Tefal"
+    },
+    {
+      "table": "products",
+      "ref": "kettle-panasonic",
+      "display_name": "Чайник Panasonic"
+    },
+    {
+      "table": "products",
+      "ref": "toaster-bosch",
+      "display_name": "Тостер Bosch"
+    },
+    {
+      "table": "products",
+      "ref": "toaster-xiaomi",
+      "display_name": "Тостер Xiaomi"
+    },
+    {
+      "table": "products",
+      "ref": "toaster-redmond",
+      "display_name": "Тостер Redmond"
+    },
+    {
+      "table": "products",
+      "ref": "toaster-samsung",
+      "display_name": "Тостер Samsung"
+    },
+    {
+      "table": "products",
+      "ref": "multicooker-philips",
+      "display_name": "Мультиварка Philips"
+    },
+    {
+      "table": "products",
+      "ref": "multicooker-tefal",
+      "display_name": "Мультиварка Tefal"
+    },
+    {
+      "table": "products",
+      "ref": "multicooker-panasonic",
+      "display_name": "Мультиварка Panasonic"
+    },
+    {
+      "table": "products",
+      "ref": "microwave-bosch",
+      "display_name": "Микроволновая печь Bosch"
+    },
+    {
+      "table": "products",
+      "ref": "microwave-xiaomi",
+      "display_name": "Микроволновая печь Xiaomi"
+    },
+    {
+      "table": "products",
+      "ref": "microwave-redmond",
+      "display_name": "Микроволновая печь Redmond"
+    },
+    {
+      "table": "products",
+      "ref": "microwave-samsung",
+      "display_name": "Микроволновая печь Samsung"
+    },
+    {
+      "table": "products",
+      "ref": "vacuum-philips",
+      "display_name": "Пылесос Philips"
+    },
+    {
+      "table": "products",
+      "ref": "vacuum-tefal",
+      "display_name": "Пылесос Tefal"
+    },
+    {
+      "table": "products",
+      "ref": "vacuum-panasonic",
+      "display_name": "Пылесос Panasonic"
+    },
+    {
+      "table": "products",
+      "ref": "iron-bosch",
+      "display_name": "Утюг Bosch"
+    },
+    {
+      "table": "products",
+      "ref": "iron-xiaomi",
+      "display_name": "Утюг Xiaomi"
+    },
+    {
+      "table": "products",
+      "ref": "iron-redmond",
+      "display_name": "Утюг Redmond"
+    },
+    {
+      "table": "products",
+      "ref": "iron-samsung",
+      "display_name": "Утюг Samsung"
+    },
+    {
+      "table": "products",
+      "ref": "fan-philips",
+      "display_name": "Вентилятор Philips"
+    },
+    {
+      "table": "products",
+      "ref": "fan-tefal",
+      "display_name": "Вентилятор Tefal"
+    },
+    {
+      "table": "products",
+      "ref": "fan-panasonic",
+      "display_name": "Вентилятор Panasonic"
+    },
+    {
+      "table": "products",
+      "ref": "heater-bosch",
+      "display_name": "Обогреватель Bosch"
+    },
+    {
+      "table": "products",
+      "ref": "heater-xiaomi",
+      "display_name": "Обогреватель Xiaomi"
+    },
+    {
+      "table": "products",
+      "ref": "heater-redmond",
+      "display_name": "Обогреватель Redmond"
+    },
+    {
+      "table": "products",
+      "ref": "heater-samsung",
+      "display_name": "Обогреватель Samsung"
+    },
+    {
+      "table": "products",
+      "ref": "air-purifier-philips",
+      "display_name": "Очиститель воздуха Philips"
+    },
+    {
+      "table": "products",
+      "ref": "air-purifier-tefal",
+      "display_name": "Очиститель воздуха Tefal"
+    },
+    {
+      "table": "products",
+      "ref": "air-purifier-panasonic",
+      "display_name": "Очиститель воздуха Panasonic"
+    },
+    {
+      "table": "products",
+      "ref": "juicer-bosch",
+      "display_name": "Соковыжималка Bosch"
+    },
+    {
+      "table": "products",
+      "ref": "juicer-xiaomi",
+      "display_name": "Соковыжималка Xiaomi"
+    },
+    {
+      "table": "products",
+      "ref": "juicer-redmond",
+      "display_name": "Соковыжималка Redmond"
+    },
+    {
+      "table": "products",
+      "ref": "juicer-samsung",
+      "display_name": "Соковыжималка Samsung"
+    },
+    {
+      "table": "products",
+      "ref": "food-processor-philips",
+      "display_name": "Кухонный комбайн Philips"
+    },
+    {
+      "table": "products",
+      "ref": "food-processor-tefal",
+      "display_name": "Кухонный комбайн Tefal"
+    },
+    {
+      "table": "products",
+      "ref": "food-processor-panasonic",
+      "display_name": "Кухонный комбайн Panasonic"
+    },
+    {
+      "table": "products",
+      "ref": "waffle-maker-bosch",
+      "display_name": "Вафельница Bosch"
+    },
+    {
+      "table": "products",
+      "ref": "waffle-maker-xiaomi",
+      "display_name": "Вафельница Xiaomi"
+    },
+    {
+      "table": "products",
+      "ref": "waffle-maker-redmond",
+      "display_name": "Вафельница Redmond"
+    },
+    {
+      "table": "products",
+      "ref": "waffle-maker-samsung",
+      "display_name": "Вафельница Samsung"
+    },
+    {
+      "table": "products",
+      "ref": "sandwich-maker-philips",
+      "display_name": "Сэндвичница Philips"
+    },
+    {
+      "table": "products",
+      "ref": "sandwich-maker-tefal",
+      "display_name": "Сэндвичница Tefal"
+    },
+    {
+      "table": "products",
+      "ref": "sandwich-maker-panasonic",
+      "display_name": "Сэндвичница Panasonic"
+    },
+    {
+      "table": "contacts",
+      "ref": "main",
+      "display_name": "Контакты"
+    },
+    {
+      "table": "policies",
+      "ref": "main",
+      "display_name": "Условия"
+    }
+  ]
+}

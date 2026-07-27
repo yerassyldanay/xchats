@@ -1,0 +1,66 @@
+diff --git a/evals/harness/run.go b/evals/harness/run.go
+index 52d350d..e7b28a3 100644
+--- a/evals/harness/run.go
++++ b/evals/harness/run.go
+@@ -33,6 +33,7 @@ func cmdRun(args []string) (runID string, err error) {
+ 	if err := validateRepeats(*repeats, *noCache); err != nil {
+ 		return "", err
+ 	}
++	loadDotEnv(".env")
+ 	if os.Getenv("OPENROUTER_API_KEY") == "" {
+ 		return "", fmt.Errorf("run: OPENROUTER_API_KEY is not set (this makes real, billed model calls)")
+ 	}
+diff --git a/evals/models.launch-gemini-2.5.yaml b/evals/models.launch-gemini-2.5.yaml
+new file mode 100644
+index 0000000..10b2605
+--- /dev/null
++++ b/evals/models.launch-gemini-2.5.yaml
+@@ -0,0 +1,13 @@
++pricing_source: "https://openrouter.ai/models"
++pricing_checked_at: "2026-07-27"
++providers:
++  - id: openrouter:google/gemini-2.5-flash
++    temperature: 0.3
++    max_tokens: 500
++    input_per_mtok: 0.30
++    output_per_mtok: 2.50
++  - id: openrouter:google/gemini-2.5-flash-lite
++    temperature: 0.3
++    max_tokens: 500
++    input_per_mtok: 0.10
++    output_per_mtok: 0.40
+diff --git a/evals/runs/launches/2026-07-27_15-39-01-4230.json b/evals/runs/launches/2026-07-27_15-39-01-4230.json
+new file mode 100644
+index 0000000..4db3ae8
+--- /dev/null
++++ b/evals/runs/launches/2026-07-27_15-39-01-4230.json
+@@ -0,0 +1,28 @@
++{
++  "schema_version": 1,
++  "launch_id": "2026-07-27_15-39-01-4230",
++  "status": "partial",
++  "planned_families": [
++    "scenario",
++    "extract"
++  ],
++  "expected_calls": {
++    "scenario": 264,
++    "extract": 10,
++    "total": 274
++  },
++  "members": [
++    {
++      "family": "scenario",
++      "status": "failed",
++      "error": "run: OPENROUTER_API_KEY is not set (this makes real, billed model calls)"
++    },
++    {
++      "family": "extract",
++      "run_id": "2026-07-27_15-39-01-43a0",
++      "status": "complete"
++    }
++  ],
++  "started_at": "2026-07-27T10:39:01Z",
++  "finished_at": "2026-07-27T10:39:40Z"
++}
+\ No newline at end of file

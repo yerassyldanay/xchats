@@ -1,0 +1,433 @@
+{
+  "facts": [
+    {
+      "token": "{{product.coffee-machine.price}}",
+      "table": "product",
+      "ref": "coffee-machine",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.cookware-set.price}}",
+      "table": "product",
+      "ref": "cookware-set",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-bosch.price}}",
+      "table": "product",
+      "ref": "blender-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-philips.price}}",
+      "table": "product",
+      "ref": "blender-philips",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-xiaomi.price}}",
+      "table": "product",
+      "ref": "blender-xiaomi",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-tefal.price}}",
+      "table": "product",
+      "ref": "blender-tefal",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-redmond.price}}",
+      "table": "product",
+      "ref": "blender-redmond",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-panasonic.price}}",
+      "table": "product",
+      "ref": "blender-panasonic",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.blender-samsung.price}}",
+      "table": "product",
+      "ref": "blender-samsung",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{product.kettle-bosch.price}}",
+      "table": "product",
+      "ref": "kettle-bosch",
+      "column": "price",
+      "label": "цена",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{contact.main.phone}}",
+      "table": "contact",
+      "ref": "main",
+      "column": "phone",
+      "label": "телефон",
+      "value_kind": "text_complete",
+      "usage_note": "значение полное; вставляй токен как есть"
+    },
+    {
+      "token": "{{contact.main.instagram}}",
+      "table": "contact",
+      "ref": "main",
+      "column": "instagram",
+      "label": "Instagram",
+      "value_kind": "text_complete",
+      "usage_note": "значение полное; вставляй токен как есть"
+    },
+    {
+      "token": "{{contact.main.working_hours}}",
+      "table": "contact",
+      "ref": "main",
+      "column": "working_hours",
+      "label": "часы работы",
+      "value_kind": "time_display",
+      "usage_note": "значение уже содержит полное время; не добавляй лишних слов о времени"
+    },
+    {
+      "token": "{{policy.main.free_delivery_from}}",
+      "table": "policy",
+      "ref": "main",
+      "column": "free_delivery_from",
+      "label": "бесплатная доставка от",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{policy.main.min_order}}",
+      "table": "policy",
+      "ref": "main",
+      "column": "min_order",
+      "label": "минимальный заказ",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{policy.main.outside_zones_note}}",
+      "table": "policy",
+      "ref": "main",
+      "column": "outside_zones_note",
+      "label": "доставка вне списка зон",
+      "value_kind": "text_complete",
+      "usage_note": "значение полное; вставляй токен как есть"
+    },
+    {
+      "token": "{{delivery.kazakhstan.delivery_cost}}",
+      "table": "delivery",
+      "ref": "kazakhstan",
+      "column": "delivery_cost",
+      "label": "стоимость доставки",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{delivery.kazakhstan.delivery_in_days}}",
+      "table": "delivery",
+      "ref": "kazakhstan",
+      "column": "delivery_in_days",
+      "label": "срок доставки, в днях",
+      "value_kind": "number_range",
+      "usage_note": "только число; в русском ответе добавь слово «дня» после токена, в казахском — «күн»"
+    },
+    {
+      "token": "{{delivery.kazakhstan.delivery_available}}",
+      "table": "delivery",
+      "ref": "kazakhstan",
+      "column": "delivery_available",
+      "label": "доступность доставки",
+      "value_kind": "delivery_flag",
+      "reasoning_state": "delivers",
+      "usage_note": "флаг доступности доставки в это направление; код заменит токен на готовую фразу «доставляем» или «не доставляем» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — никогда не пиши «доставляем»/«не доставляем» от себя, даже пересказывая своими словами. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
+    },
+    {
+      "token": "{{delivery.astana.delivery_cost}}",
+      "table": "delivery",
+      "ref": "astana",
+      "column": "delivery_cost",
+      "label": "стоимость доставки",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{delivery.astana.delivery_in_days}}",
+      "table": "delivery",
+      "ref": "astana",
+      "column": "delivery_in_days",
+      "label": "срок доставки, в днях",
+      "value_kind": "number_range",
+      "usage_note": "только число; в русском ответе добавь слово «дня» после токена, в казахском — «күн»"
+    },
+    {
+      "token": "{{delivery.astana.delivery_available}}",
+      "table": "delivery",
+      "ref": "astana",
+      "column": "delivery_available",
+      "label": "доступность доставки",
+      "value_kind": "delivery_flag",
+      "reasoning_state": "delivers",
+      "usage_note": "флаг доступности доставки в это направление; код заменит токен на готовую фразу «доставляем» или «не доставляем» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — никогда не пиши «доставляем»/«не доставляем» от себя, даже пересказывая своими словами. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
+    },
+    {
+      "token": "{{delivery.almaty.delivery_cost}}",
+      "table": "delivery",
+      "ref": "almaty",
+      "column": "delivery_cost",
+      "label": "стоимость доставки",
+      "value_kind": "money_display",
+      "usage_note": "значение уже содержит валюту; не добавляй ₸/тенге ещё раз"
+    },
+    {
+      "token": "{{delivery.almaty.delivery_in_days}}",
+      "table": "delivery",
+      "ref": "almaty",
+      "column": "delivery_in_days",
+      "label": "срок доставки, в днях",
+      "value_kind": "number_range",
+      "usage_note": "только число; в русском ответе добавь слово «дня» после токена, в казахском — «күн»"
+    },
+    {
+      "token": "{{delivery.almaty.delivery_available}}",
+      "table": "delivery",
+      "ref": "almaty",
+      "column": "delivery_available",
+      "label": "доступность доставки",
+      "value_kind": "delivery_flag",
+      "reasoning_state": "delivers",
+      "usage_note": "флаг доступности доставки в это направление; код заменит токен на готовую фразу «доставляем» или «не доставляем» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — никогда не пиши «доставляем»/«не доставляем» от себя, даже пересказывая своими словами. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
+    },
+    {
+      "token": "{{delivery.baikonur.delivery_available}}",
+      "table": "delivery",
+      "ref": "baikonur",
+      "column": "delivery_available",
+      "label": "доступность доставки",
+      "value_kind": "delivery_flag",
+      "reasoning_state": "no_delivery",
+      "usage_note": "флаг доступности доставки в это направление; код заменит токен на готовую фразу «доставляем» или «не доставляем» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — никогда не пиши «доставляем»/«не доставляем» от себя, даже пересказывая своими словами. Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
+    }
+  ],
+  "media": [
+    {
+      "token": "topics.delivery.illustration_images",
+      "table": "topics",
+      "ref": "delivery",
+      "column": "illustration_images",
+      "label": "иллюстрации",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.coffee-machine.featured_image",
+      "table": "products",
+      "ref": "coffee-machine",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.coffee-machine.gallery_images",
+      "table": "products",
+      "ref": "coffee-machine",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 3
+    },
+    {
+      "token": "products.coffee-machine.demo_videos",
+      "table": "products",
+      "ref": "coffee-machine",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.coffee-machine.certificate_documents",
+      "table": "products",
+      "ref": "coffee-machine",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.cookware-set.gallery_images",
+      "table": "products",
+      "ref": "cookware-set",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.blender-philips.gallery_images",
+      "table": "products",
+      "ref": "blender-philips",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.blender-tefal.gallery_images",
+      "table": "products",
+      "ref": "blender-tefal",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.blender-tefal.demo_videos",
+      "table": "products",
+      "ref": "blender-tefal",
+      "column": "demo_videos",
+      "label": "видео-демонстрации",
+      "kind": "video",
+      "count": 1
+    },
+    {
+      "token": "products.blender-panasonic.featured_image",
+      "table": "products",
+      "ref": "blender-panasonic",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "token": "products.blender-panasonic.gallery_images",
+      "table": "products",
+      "ref": "blender-panasonic",
+      "column": "gallery_images",
+      "label": "фото товара (галерея)",
+      "kind": "image",
+      "count": 2
+    },
+    {
+      "token": "products.blender-panasonic.certificate_documents",
+      "table": "products",
+      "ref": "blender-panasonic",
+      "column": "certificate_documents",
+      "label": "сертификаты",
+      "kind": "document",
+      "count": 1
+    },
+    {
+      "token": "products.kettle-bosch.featured_image",
+      "table": "products",
+      "ref": "kettle-bosch",
+      "column": "featured_image",
+      "label": "главное фото товара",
+      "kind": "image",
+      "count": 1
+    }
+  ],
+  "absent": [
+    {
+      "table": "topics",
+      "ref": "catalog",
+      "display_name": "Каталог"
+    },
+    {
+      "table": "topics",
+      "ref": "payment",
+      "display_name": "Оплата"
+    },
+    {
+      "table": "topics",
+      "ref": "how_to_order",
+      "display_name": "Как заказать"
+    },
+    {
+      "table": "topics",
+      "ref": "warranty",
+      "display_name": "Гарантия"
+    },
+    {
+      "table": "topics",
+      "ref": "returns",
+      "display_name": "Возврат"
+    },
+    {
+      "table": "topics",
+      "ref": "promo",
+      "display_name": "Акции"
+    },
+    {
+      "table": "topics",
+      "ref": "support",
+      "display_name": "Поддержка"
+    },
+    {
+      "table": "topics",
+      "ref": "pickup",
+      "display_name": "Самовывоз"
+    },
+    {
+      "table": "products",
+      "ref": "blender-bosch",
+      "display_name": "Блендер Bosch"
+    },
+    {
+      "table": "products",
+      "ref": "blender-xiaomi",
+      "display_name": "Блендер Xiaomi"
+    },
+    {
+      "table": "products",
+      "ref": "blender-redmond",
+      "display_name": "Блендер Redmond"
+    },
+    {
+      "table": "products",
+      "ref": "blender-samsung",
+      "display_name": "Блендер Samsung"
+    },
+    {
+      "table": "contacts",
+      "ref": "main",
+      "display_name": "Контакты"
+    },
+    {
+      "table": "policies",
+      "ref": "main",
+      "display_name": "Условия"
+    }
+  ]
+}

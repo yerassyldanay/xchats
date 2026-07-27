@@ -1,0 +1,13 @@
+pricing_source: "https://openrouter.ai/models"
+pricing_checked_at: "2026-07-27"
+providers:
+  - id: openrouter:google/gemini-2.5-flash
+    temperature: 0.3
+    max_tokens: 500
+    input_per_mtok: 0.30
+    output_per_mtok: 2.50
+  - id: openrouter:google/gemini-2.5-flash-lite
+    temperature: 0.3
+    max_tokens: 500
+    input_per_mtok: 0.10
+    output_per_mtok: 0.40
