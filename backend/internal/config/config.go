@@ -14,9 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// XchatsWaNS is the fixed namespace for deriving wa_accounts.id from owner_jid.
-// It must never change — the account id is uuidv5(XchatsWaNS, canonical(owner_jid)).
-var XchatsWaNS = uuid.MustParse("a3f1d2c4-5e6b-47a8-9c0d-1e2f3a4b5c6d")
+// xchatsWaNS is the fixed namespace for deriving wa_accounts.id from owner_jid.
+// It must never change — the account id is uuidv5(xchatsWaNS, canonical(owner_jid)).
+var xchatsWaNS = uuid.MustParse("a3f1d2c4-5e6b-47a8-9c0d-1e2f3a4b5c6d")
 
 // Config is the merged application configuration.
 type Config struct {
@@ -95,7 +95,7 @@ func defaults() Config {
 		LLMFastModel:    "openai/gpt-4o-mini",
 		LLMMaxTokens:    1024,
 		LLMTemperature:  0.3,
-		OrgName:         "XChats",
+		OrgName:         "xchats",
 		PageSize:        50,
 	}
 }
@@ -192,7 +192,7 @@ func CanonicalJID(jid string) string {
 
 // AccountID derives the deterministic wa_accounts.id from an owner JID.
 func AccountID(ownerJID string) uuid.UUID {
-	return uuid.NewSHA1(XchatsWaNS, []byte(CanonicalJID(ownerJID)))
+	return uuid.NewSHA1(xchatsWaNS, []byte(CanonicalJID(ownerJID)))
 }
 
 // PhoneFromJID returns the numeric phone part of a phone JID ("7700@s.whatsapp.net" → "7700").

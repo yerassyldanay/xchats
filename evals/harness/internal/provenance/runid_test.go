@@ -68,6 +68,51 @@ func TestNewRunDir_ConcurrentCallsNeverCollide(t *testing.T) {
 	}
 }
 
+func TestStagedRun_IsHiddenUntilPublished(t *testing.T) {
+	root := t.TempDir()
+
+	id, stagedDir, err := NewStagedRunDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantStaged := filepath.Join(root, IncompleteRunsDirName, id)
+	if stagedDir != wantStaged {
+		t.Fatalf("staged dir = %s, want %s", stagedDir, wantStaged)
+	}
+	if _, err := os.Stat(filepath.Join(root, id)); !os.IsNotExist(err) {
+		t.Fatalf("top-level run must not exist before publication, stat err = %v", err)
+	}
+
+	finalDir, err := PublishStagedRun(root, id, stagedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalDir != filepath.Join(root, id) {
+		t.Fatalf("final dir = %s, want %s", finalDir, filepath.Join(root, id))
+	}
+	if info, err := os.Stat(finalDir); err != nil || !info.IsDir() {
+		t.Fatalf("published run not found at %s: %v", finalDir, err)
+	}
+	if _, err := os.Stat(stagedDir); !os.IsNotExist(err) {
+		t.Fatalf("staged dir must be gone after publication, stat err = %v", err)
+	}
+}
+
+func TestPublishStagedRun_RejectsUnrelatedDirectory(t *testing.T) {
+	root := t.TempDir()
+	unrelated := filepath.Join(root, "do-not-move")
+	if err := os.Mkdir(unrelated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := PublishStagedRun(root, "run-id", unrelated); err == nil {
+		t.Fatal("want unrelated source path rejected")
+	}
+	if info, err := os.Stat(unrelated); err != nil || !info.IsDir() {
+		t.Fatalf("unrelated directory was changed: %v", err)
+	}
+}
+
 func TestAtomicWriteFile_WritesCompleteFileNoLeftoverTemp(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "out.json")

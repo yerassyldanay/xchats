@@ -95,7 +95,7 @@ func cmdExtract(args []string) (runID string, err error) {
 	casesDir := filepath.Dir(*casesPath)
 
 	var runDir string
-	runID, runDir, err = provenance.NewRunDir("runs")
+	runID, runDir, err = provenance.NewStagedRunDir("runs")
 	if err != nil {
 		return "", err
 	}
@@ -200,18 +200,22 @@ func cmdExtract(args []string) (runID string, err error) {
 	if err := writeExtractReport(reportPath, results); err != nil {
 		return runID, err
 	}
-	fmt.Printf("\nwrote %s\n", reportPath)
-
 	manifest.Finish()
 	if err := provenance.WriteManifest(runDir, manifest); err != nil {
 		return runID, err
 	}
 
+	publishedRunDir, err := provenance.PublishStagedRun("runs", runID, runDir)
+	if err != nil {
+		return runID, err
+	}
+	fmt.Printf("\nwrote %s\n", filepath.Join(publishedRunDir, "EXTRACT.md"))
+
 	// Best-effort: a broken HTML viewer must never turn a successful extraction run
 	// into a failed command.
-	writeRunHTMLBestEffort(runDir)
+	writeRunHTMLBestEffort(publishedRunDir)
 
-	return runID, appendExtractIndex(runDir, results)
+	return runID, nil
 }
 
 // parseFailureRetries bounds retries for a parse failure specifically (never for a
@@ -545,28 +549,4 @@ func formatCost(cost float64, basis string) string {
 
 func escapeMD(s string) string {
 	return strings.ReplaceAll(s, "|", "\\|")
-}
-
-// appendExtractIndex appends one line to runs/INDEX.md, matching the existing Layer-1
-// convention of keeping every run discoverable from a single file.
-func appendExtractIndex(runDir string, results []extractRunResult) error {
-	pass, total := 0, 0
-	for _, r := range results {
-		if r.Error != "" || r.ParseError != "" {
-			total++
-			continue
-		}
-		total++
-		if allChecksPass(r.Checks) {
-			pass++
-		}
-	}
-	line := fmt.Sprintf("- %s — extract: %d/%d attempts fully passed\n", filepath.Base(runDir), pass, total)
-	f, err := os.OpenFile(filepath.Join("runs", "INDEX.md"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(line)
-	return err
 }

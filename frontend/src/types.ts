@@ -319,6 +319,13 @@ export interface VScenarioDetails {
   finish_reason?: string
   truncated: boolean
   reasoning_leak: boolean
+  // media_count_evaluated is a CODE-VERSION marker, not derived from parse success — a
+  // verdict judged before this check existed omits it entirely (undefined), and must be
+  // rendered as "not checked", never a fabricated pass just because too_many_media's
+  // default is false. See judge.go's Verdict.MediaCountEvaluated doc comment.
+  media_count?: number
+  too_many_media?: boolean
+  media_count_evaluated?: boolean
 }
 export interface VExtractDetails {
   content_kind?: string
@@ -339,6 +346,10 @@ export interface VExecution {
   contract?: VContractRow[]
   cost: VCost
   latency_ms?: number
+  // retries mirrors the harness's Verdict.Retries (evals/harness/judge.go) — how many
+  // times the retry mechanism (evals/harness/retry.go) retried this row. 0/undefined
+  // for every execution the retry path never touched.
+  retries?: number
   scenario?: VScenarioDetails
   extract?: VExtractDetails
 }
@@ -412,8 +423,35 @@ export interface CatalogMedia {
   description: string
 }
 export interface CatalogMediaExpect {
-  any_of_groups?: string[]
-  any_of_refs?: string[]
+  any_of?: string[]
+  all_of?: string[]
+  // forbid means this test's reply must attach NO media at all — the opposite
+  // expectation from any_of/all_of (mutually exclusive, enforced at render
+  // time). Omitted (undefined) when false.
+  forbid?: boolean
+  // exclusive narrows any_of/all_of from "attach at least one/all of these" to
+  // "attach these, and nothing else" — a modifier on the SAME declaration, not a
+  // separate allowed-list field. Requires a non-empty any_of and is mutually exclusive
+  // with forbid (both enforced at render time). Omitted when false.
+  exclusive?: boolean
+}
+// One alternative acceptable-behavior block from a test's `outcomes:` list — the same
+// per-test knobs a CatalogTestCase itself has (label is the block's display name; the
+// test passes the outcomes gate when ANY one block's declared checks all hold).
+export interface CatalogOutcomeCase {
+  label: string
+  requires?: string[][]
+  media?: CatalogMediaExpect
+  escalate?: boolean
+  language?: string
+  must_not_contain?: string[]
+  must_contain_any?: string[]
+}
+// One binary semantic claim judged by a pinned cheap model — an OPTIONAL dimension,
+// only evaluated when the separate `judge-llm` command runs (never the plain `judge`).
+export interface CatalogLLMCheck {
+  claim: string
+  expect: boolean
 }
 // escalate is `boolean | undefined` on the wire (omitempty on a Go *bool omits only
 // when nil) — undefined means "not checked by this test", false is an ACTIVE
@@ -426,7 +464,13 @@ export interface CatalogTestCase {
   language?: string
   escalate?: boolean
   must_not_contain?: string[]
+  must_contain_any?: string[]
+  forbid_tokens?: string[]
   media?: CatalogMediaExpect
+  outcomes?: CatalogOutcomeCase[]
+  // stock_check names a product ref; judge-llm-only (see CatalogLLMCheck).
+  stock_check?: string
+  llm_checks?: CatalogLLMCheck[]
   source: string
 }
 export interface CatalogScenario {
@@ -435,11 +479,16 @@ export interface CatalogScenario {
   setup?: string
   prompt_ref?: string
   experiment?: string
-  contract: string
+  // archived/archived_reason/pipeline/tests_path are optional: a stale v2 catalog.json
+  // (schema_version < 3, or generated before the 2026-07 archival mechanism) simply
+  // omits them — never a parse error, just a display fallback (see scenarioNavLabel).
+  archived?: boolean
+  archived_reason?: string
+  pipeline?: string
+  tests_path?: string
   facts_source: string
   facts: CatalogFact[]
-  media_refs?: string[]
-  media_groups?: string[]
+  media_tokens?: string[]
   media?: CatalogMedia[]
   tests: CatalogTestCase[]
 }

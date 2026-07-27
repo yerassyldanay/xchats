@@ -123,9 +123,10 @@ func cmdBlindExport(args []string) error {
 // declared string, not just whether it matched an expectation (judge.go's Verdict only
 // keeps the latter, LanguageFieldOK). Re-parsing here (rather than adding a redundant
 // field to every Verdict, multiplied across every -repeats copy) reuses judge.go's own
-// parseModelJSON so the two can never disagree about what "parses" means.
+// extractModelJSON so the two can never disagree about what "parses" means — including
+// for a response whose final JSON sits after provider-combined reasoning text.
 func declaredReplyLanguage(raw string) (string, error) {
-	obj, ok := parseModelJSON(raw)
+	obj, ok := extractModelJSON(raw, nil)
 	if !ok {
 		return "", fmt.Errorf("could not parse JSON output")
 	}

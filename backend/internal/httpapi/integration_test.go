@@ -75,7 +75,7 @@ func newHarness(t *testing.T) *harness {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	// seed org + admin + account
-	org, err := st.SeedOrganization(ctx, "XChats")
+	org, err := st.SeedOrganization(ctx, "xchats")
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
 	}

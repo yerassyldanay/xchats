@@ -15,6 +15,12 @@ import (
 	"time"
 )
 
+// IncompleteRunsDirName is the private staging area for runs that have not reached
+// Manifest.Finish yet. Keeping work-in-progress artifacts below this directory means
+// an interrupted command can preserve raw provider responses for debugging without
+// publishing a misleading 0/0 run alongside completed evidence.
+const IncompleteRunsDirName = ".incomplete"
+
 // NewRunDir creates a fresh run directory under runsRoot with a collision-safe ID:
 // <timestamp>-<4 hex chars>. Two harness processes started in the same second (a real
 // risk — extraction and scenario runs are both sub-second fast) must never share a run
@@ -35,6 +41,53 @@ func NewRunDir(runsRoot string) (id, dir string, err error) {
 		}
 	}
 	return "", "", fmt.Errorf("NewRunDir: could not create a unique run dir under %s after %d attempts", runsRoot, maxAttempts)
+}
+
+// NewStagedRunDir creates a collision-safe run below runsRoot/.incomplete. The caller
+// writes every raw response, snapshot, verdict, and manifest update there, then calls
+// PublishStagedRun only after the manifest is finished. A crash therefore leaves
+// debuggable evidence, but never a top-level directory that viewers can mistake for a
+// completed 0/0 evaluation.
+func NewStagedRunDir(runsRoot string) (id, dir string, err error) {
+	pendingRoot := filepath.Join(runsRoot, IncompleteRunsDirName)
+	if err := os.MkdirAll(pendingRoot, 0o755); err != nil {
+		return "", "", err
+	}
+
+	const maxAttempts = 10
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		candidateID := time.Now().Format("2006-01-02_15-04-05") + "-" + randSuffix(4)
+		finalDir := filepath.Join(runsRoot, candidateID)
+		if _, statErr := os.Stat(finalDir); statErr == nil {
+			continue
+		} else if !os.IsNotExist(statErr) {
+			return "", "", statErr
+		}
+
+		candidateDir := filepath.Join(pendingRoot, candidateID)
+		if mkErr := os.Mkdir(candidateDir, 0o755); mkErr == nil {
+			return candidateID, candidateDir, nil
+		} else if !os.IsExist(mkErr) {
+			return "", "", mkErr
+		}
+	}
+	return "", "", fmt.Errorf("NewStagedRunDir: could not create a unique run dir under %s after %d attempts", runsRoot, maxAttempts)
+}
+
+// PublishStagedRun atomically moves a finished run from the private staging area to
+// runsRoot/<id>. Exact path validation prevents a caller bug from renaming an
+// unrelated directory.
+func PublishStagedRun(runsRoot, id, stagedDir string) (string, error) {
+	wantStaged := filepath.Clean(filepath.Join(runsRoot, IncompleteRunsDirName, id))
+	if filepath.Clean(stagedDir) != wantStaged {
+		return "", fmt.Errorf("PublishStagedRun: staged dir %s does not match expected %s", stagedDir, wantStaged)
+	}
+
+	finalDir := filepath.Join(runsRoot, id)
+	if err := os.Rename(wantStaged, finalDir); err != nil {
+		return "", fmt.Errorf("PublishStagedRun: %w", err)
+	}
+	return finalDir, nil
 }
 
 // randSuffix returns n lowercase hex characters. crypto/rand failure is effectively

@@ -12,11 +12,6 @@ const imageURL = computed(() => evalsApi.catalogImageURL(props.extractCase.image
 const notChecked = computed(() => notCheckedExtractRequirements(props.extractCase))
 const fieldEntries = computed(() => Object.entries(props.extractCase.fields ?? {}))
 const zoomed = ref(false)
-
-const universalChecks = [
-  { label: 'Валидный JSON', expected: 'корректный JSON-объект' },
-  { label: 'Без утечки рассуждений', expected: 'нет <think>/<thinking> меток в тексте' },
-]
 </script>
 
 <template>
@@ -81,16 +76,6 @@ const universalChecks = [
       <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">Не проверяется в этом случае</div>
       <div class="flex flex-wrap gap-1.5">
         <Badge v-for="item in notChecked" :key="item" variant="outline" class="text-[11px] text-muted-foreground">{{ item }}</Badge>
-      </div>
-    </div>
-
-    <div>
-      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">Всегда применяемые проверки</div>
-      <div class="grid grid-cols-2 gap-1.5">
-        <div v-for="c in universalChecks" :key="c.label" class="text-[11px] rounded-lg border border-border px-2 py-1.5">
-          <div class="font-medium">{{ c.label }}</div>
-          <div class="text-muted-foreground">{{ c.expected }}</div>
-        </div>
       </div>
     </div>
 

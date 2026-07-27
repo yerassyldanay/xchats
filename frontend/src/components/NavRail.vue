@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, type Component } from 'vue'
+import { onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
-import { Blocks, FlaskConical, Inbox, Library, LogOut } from 'lucide-vue-next'
+import { Blocks, FlaskConical, Inbox, Library, LogOut, BookOpen } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
 import { evalsApi } from '../api/evals'
@@ -38,10 +38,11 @@ const baseNav: { name: string; icon: Component; label: string; match: string[] }
   { name: 'playground', icon: Blocks, label: 'Конструктор', match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
 ]
-const nav = computed(() => [
-  ...baseNav,
-  ...(evalsAvailable.value ? [{ name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch', 'eval-catalog'] }] : []),
-])
+// Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
+// and rendered in its own bottom cluster (separated by a divider, above the avatar)
+// so it never reads as one more product feature.
+const blogItem = { name: 'blog', icon: BookOpen, label: 'Блог', match: ['blog', 'blog-post'] }
+const evalsItem = { name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch', 'eval-catalog'] }
 function isActive(match: string[]) {
   return match.includes(route.name as string)
 }
@@ -54,13 +55,13 @@ async function logout() {
 
 <template>
   <nav class="w-[68px] bg-slate-900 flex flex-col items-center py-4 shrink-0">
-    <div class="w-10 h-10 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold text-lg">
-      X
-    </div>
-
     <TooltipProvider :delay-duration="300">
+      <RouterLink :to="{ name: 'home' }" class="w-10 h-10 rounded-lg bg-transparent overflow-hidden grid place-items-center hover:opacity-80 transition">
+        <img src="/logo.png" alt="xchats logo" class="w-full h-full object-contain" />
+      </RouterLink>
+
       <div class="mt-6 flex flex-col gap-2">
-        <Tooltip v-for="item in nav" :key="item.name">
+        <Tooltip v-for="item in baseNav" :key="item.name">
           <TooltipTrigger as-child>
             <RouterLink
               :to="{ name: item.name }"
@@ -73,43 +74,72 @@ async function logout() {
           <TooltipContent side="right">{{ item.label }}</TooltipContent>
         </Tooltip>
       </div>
-    </TooltipProvider>
 
-    <div class="mt-auto">
-      <DropdownMenu>
-        <DropdownMenuTrigger as-child>
-          <button
-            class="rounded-full ring-2 ring-white/15 transition hover:ring-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-          >
-            <Avatar size="base" class="text-white" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
-              <AvatarFallback class="bg-transparent text-xs font-semibold">
-                {{ initials(auth.user?.name || auth.user?.email || '?') }}
-              </AvatarFallback>
-            </Avatar>
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="end" class="w-60">
-          <div class="flex items-center gap-3 px-1 py-1">
-            <Avatar size="base" class="text-white shrink-0" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
-              <AvatarFallback class="bg-transparent text-sm font-semibold">
-                {{ initials(auth.user?.name || auth.user?.email || '?') }}
-              </AvatarFallback>
-            </Avatar>
-            <div class="min-w-0">
-              <div class="text-sm font-semibold truncate">{{ auth.user?.name || '—' }}</div>
-              <div class="text-xs text-muted-foreground truncate">{{ auth.user?.email }}</div>
+      <div class="mt-auto flex flex-col items-center gap-3">
+        <div class="h-px w-8 bg-white/10" aria-hidden="true" />
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <a
+              href="/blog/"
+              class="w-11 h-11 rounded-lg grid place-items-center transition text-slate-400 hover:text-white hover:bg-white/10"
+            >
+              <component :is="blogItem.icon" class="w-5 h-5" />
+            </a>
+          </TooltipTrigger>
+          <TooltipContent side="right">{{ blogItem.label }}</TooltipContent>
+        </Tooltip>
+
+        <template v-if="evalsAvailable">
+          <div class="h-px w-8 bg-white/10" aria-hidden="true" />
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <RouterLink
+                :to="{ name: evalsItem.name }"
+                class="w-11 h-11 rounded-lg grid place-items-center transition"
+                :class="isActive(evalsItem.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
+              >
+                <component :is="evalsItem.icon" class="w-5 h-5" />
+              </RouterLink>
+            </TooltipTrigger>
+            <TooltipContent side="right">{{ evalsItem.label }}</TooltipContent>
+          </Tooltip>
+        </template>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <button
+              class="rounded-full ring-2 ring-white/15 transition hover:ring-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            >
+              <Avatar size="base" class="text-white" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
+                <AvatarFallback class="bg-transparent text-xs font-semibold">
+                  {{ initials(auth.user?.name || auth.user?.email || '?') }}
+                </AvatarFallback>
+              </Avatar>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="right" align="end" class="w-60">
+            <div class="flex items-center gap-3 px-1 py-1">
+              <Avatar size="base" class="text-white shrink-0" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
+                <AvatarFallback class="bg-transparent text-sm font-semibold">
+                  {{ initials(auth.user?.name || auth.user?.email || '?') }}
+                </AvatarFallback>
+              </Avatar>
+              <div class="min-w-0">
+                <div class="text-sm font-semibold truncate">{{ auth.user?.name || '—' }}</div>
+                <div class="text-xs text-muted-foreground truncate">{{ auth.user?.email }}</div>
+              </div>
             </div>
-          </div>
-          <div class="text-xs text-muted-foreground mt-1 mb-1 px-1 truncate">{{ auth.org?.name }}</div>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            class="text-destructive focus:bg-destructive/10 focus:text-destructive font-medium"
-            @select="logout"
-          >
-            <LogOut class="w-4 h-4" /> Выйти
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+            <div class="text-xs text-muted-foreground mt-1 mb-1 px-1 truncate">{{ auth.org?.name }}</div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              class="text-destructive focus:bg-destructive/10 focus:text-destructive font-medium"
+              @select="logout"
+            >
+              <LogOut class="w-4 h-4" /> Выйти
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </TooltipProvider>
   </nav>
 </template>

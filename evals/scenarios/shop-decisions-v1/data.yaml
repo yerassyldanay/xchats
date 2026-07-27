@@ -11,7 +11,7 @@ topics:
       Доставляем по городу и области; при крупном заказе доставка бесплатна.
       Точные суммы и сроки называй только из FACTS.
     media:
-      - field: images
+      - field: illustration_images
         files: ["delivery-zones.png"]
         description: "карта зон доставки"
 
@@ -40,15 +40,15 @@ fact_tables:
         description: "автоматическая кофемашина для дома. В наличии на складе в Алматы."
         values: { price: "129 900 ₸", available_pieces: "5" }
         media:
-          - { field: images, files: ["cm-1.jpg", "cm-2.jpg", "cm-3.jpg"], description: "фото кофемашины" }
-          - { field: videos, files: ["cm-demo.mp4"], description: "видео-обзор" }
-          - { field: certificates, files: ["cm-cert.pdf"], description: "сертификат качества (PDF)" }
+          - { field: gallery_images, files: ["cm-1.jpg", "cm-2.jpg", "cm-3.jpg"], description: "фото кофемашины" }
+          - { field: demo_videos, files: ["cm-demo.mp4"], description: "видео-обзор" }
+          - { field: certificate_documents, files: ["cm-cert.pdf"], description: "сертификат качества (PDF)" }
       - ref: cookware-set
         display_name: "Набор посуды"
         description: "набор из 12 предметов. Под заказ, привозим за несколько дней."
         values: { price: "24 900 ₸", available_pieces: "0" }
         media:
-          - { field: images, files: ["set-1.jpg", "set-2.jpg"], description: "фото набора посуды" }
+          - { field: gallery_images, files: ["set-1.jpg", "set-2.jpg"], description: "фото набора посуды" }
 
   - table: policy
     label_format: "{field_label}"

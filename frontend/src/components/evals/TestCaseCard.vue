@@ -8,9 +8,8 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import ContractTable from './ContractTable.vue'
 
-// One evaluation question, collapsed by default — the "supporting evidence"
-// layer under the decision matrix (plan/ui/ui_20_evals_specific.md's navigation
-// doctrine: matrix first, cards only when a user chooses to inspect one). Expanded,
+// One evaluation question, collapsed by default—the supporting-evidence layer
+// under the decision matrix. The matrix comes first; cards open for inspection. Expanded,
 // each execution reads as three sections: Вход (the case itself — message/history or
 // source image, plus a case-level "what's expected" summary), Требования (the full
 // per-execution contract table — expected/actual/pass for every check), Результат
@@ -124,6 +123,7 @@ function onImgError(ev: Event) {
             <Badge v-if="e.family === 'scenario' && !e.rollups.find((r) => r.key === 'contract_pass')?.pass" variant="outline" class="text-[11px] border-amber-400 text-amber-700">контракт нарушен</Badge>
             <Badge v-if="e.scenario?.truncated" variant="outline" class="text-[11px] border-destructive text-destructive">обрезан ответ</Badge>
             <Badge v-if="e.scenario?.reasoning_leak" variant="outline" class="text-[11px] border-destructive text-destructive">утечка рассуждений</Badge>
+            <Badge v-if="e.retries" variant="outline" class="text-[11px] border-amber-400 text-amber-700">повтор ×{{ e.retries }}</Badge>
             <span v-if="e.variant.prompt?.name" class="text-xs text-muted-foreground font-mono">{{ e.variant.prompt.name }}@v{{ e.variant.prompt.version }}</span>
             <span class="ml-auto text-xs text-muted-foreground">{{ costLabel(e.cost.basis, e.cost.estimate_usd) }}<template v-if="e.latency_ms"> · {{ (e.latency_ms / 1000).toFixed(1) }}с</template></span>
           </div>
@@ -135,6 +135,26 @@ function onImgError(ev: Event) {
             <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">Требования</div>
             <ContractTable :rows="e.contract ?? []" />
           </div>
+
+          <details>
+            <summary class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground cursor-pointer select-none hover:text-foreground">
+              Все проверки ({{ e.scores?.length ?? 0 }})
+            </summary>
+            <table class="w-full text-xs mt-1.5">
+              <tbody>
+                <tr v-for="s in e.scores ?? []" :key="s.name" class="border-b border-border/60 align-top last:border-0">
+                  <td class="py-1 pr-3 whitespace-nowrap"><code class="font-mono">{{ s.name }}</code></td>
+                  <td class="py-1 pr-3">
+                    <Badge v-if="s.status === 'pass'" class="border-transparent bg-emerald-100 text-[11px] text-emerald-700 hover:bg-emerald-100">PASS</Badge>
+                    <Badge v-else-if="s.status === 'fail'" variant="destructive" class="text-[11px]">FAIL</Badge>
+                    <Badge v-else-if="s.status === 'error'" variant="destructive" class="text-[11px]">ERROR</Badge>
+                    <span v-else class="text-[11px] italic text-muted-foreground">не проверялось</span>
+                  </td>
+                  <td class="py-1 max-w-[320px] whitespace-pre-wrap break-words text-muted-foreground">{{ s.detail || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </details>
 
           <div>
             <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">Результат модели</div>

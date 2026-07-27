@@ -1,9 +1,10 @@
 name: shop-scale-20
 description: "Same shop-scale product pool as shop-scale-10/30, capped to the first 20 products."
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — the catalog-size sweep now lives at shop-kb-v1-10/-50/-100; this scenario's historical runs are preserved unchanged."
 frame: ../shop-scale/frame.txt
 data: ../shop-scale/data.yaml
 tests: tests.yaml
-contract: attach_groups
 topic_format: "# {ref} — {title} ({keywords})\n{body}"
 limits:
   product: 20

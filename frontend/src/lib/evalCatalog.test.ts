@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { CatalogExtractCase, CatalogFact, CatalogScenario, CatalogTestCase } from '../types'
 import {
+  annotateMediaExpect,
+  formatYamlValue,
   groupScenariosByExperiment,
   notCheckedExtractRequirements,
   notCheckedRequirements,
-  resolveMediaExpectation,
+  partitionScenariosByArchived,
   resolveRequires,
+  scenarioNavLabel,
 } from './evalCatalog'
 
 const facts: CatalogFact[] = [
@@ -41,19 +44,31 @@ describe('resolveRequires', () => {
   })
 })
 
-describe('resolveMediaExpectation', () => {
-  it('flags a ref that exists in the catalog as found', () => {
-    const m = resolveMediaExpectation({ any_of_refs: ['coffee-photo-1'] }, ['coffee-photo-1', 'coffee-photo-2'], [])
-    expect(m?.refs).toEqual([{ name: 'coffee-photo-1', found: true }])
+describe('annotateMediaExpect', () => {
+  it('flags a token that exists in the scenario as found', () => {
+    const a = annotateMediaExpect({ any_of: ['coffee-photo-1'] }, ['coffee-photo-1', 'coffee-photo-2'])
+    expect(a).toEqual([{ key: 'any_of', name: 'coffee-photo-1', found: true }])
   })
 
-  it('flags an unknown ref as NOT found — the page must surface this, never hide it', () => {
-    const m = resolveMediaExpectation({ any_of_refs: ['coffee-photo-999'] }, ['coffee-photo-1'], [])
-    expect(m?.refs).toEqual([{ name: 'coffee-photo-999', found: false }])
+  it('flags an unknown token as NOT found — a broken reference must be surfaced, never hidden', () => {
+    const a = annotateMediaExpect({ any_of: ['coffee-photo-999'] }, ['coffee-photo-1'])
+    expect(a).toEqual([{ key: 'any_of', name: 'coffee-photo-999', found: false }])
   })
 
-  it('returns null when the test declares no media expectation at all', () => {
-    expect(resolveMediaExpectation(undefined, ['coffee-photo-1'], [])).toBeNull()
+  it('returns [] when the test declares no media expectation at all (undefined)', () => {
+    expect(annotateMediaExpect(undefined, ['coffee-photo-1'])).toEqual([])
+  })
+
+  it('returns [] for a forbid-only expectation — nothing to audit', () => {
+    expect(annotateMediaExpect({ forbid: true }, ['coffee-photo-1'])).toEqual([])
+  })
+
+  it('annotates all_of tokens with the all_of key', () => {
+    const a = annotateMediaExpect({ all_of: ['a', 'b'] }, ['a'])
+    expect(a).toEqual([
+      { key: 'all_of', name: 'a', found: true },
+      { key: 'all_of', name: 'b', found: false },
+    ])
   })
 })
 
@@ -62,26 +77,46 @@ function baseTest(over: Partial<CatalogTestCase> = {}): CatalogTestCase {
 }
 
 describe('notCheckedRequirements', () => {
-  it('lists every knob a bare test omits', () => {
+  it('lists every knob a bare test omits, by schema key name', () => {
     expect(notCheckedRequirements(baseTest())).toEqual([
-      'Обязательные факты',
-      'Язык ответа',
-      'Эскалация',
-      'Медиа',
-      'Запрещённые фразы',
+      'requires',
+      'language',
+      'escalate',
+      'media',
+      'must_not_contain',
+      'must_contain_any',
+      'forbid_tokens',
+      'outcomes',
     ])
   })
 
   it('drops a knob once it is declared', () => {
     const items = notCheckedRequirements(baseTest({ requires: [['x']], language: 'ru' }))
-    expect(items).not.toContain('Обязательные факты')
-    expect(items).not.toContain('Язык ответа')
-    expect(items).toContain('Эскалация')
+    expect(items).not.toContain('requires')
+    expect(items).not.toContain('language')
+    expect(items).toContain('escalate')
+  })
+
+  it('a declared outcomes list counts as checked — must not appear here', () => {
+    const items = notCheckedRequirements(
+      baseTest({ outcomes: [{ label: 'a', escalate: false }, { label: 'b', must_contain_any: ['x'] }] }),
+    )
+    expect(items).not.toContain('outcomes')
   })
 
   it('escalate:false is an ACTIVE requirement, not "not checked" — must not appear here', () => {
     const items = notCheckedRequirements(baseTest({ escalate: false }))
-    expect(items).not.toContain('Эскалация')
+    expect(items).not.toContain('escalate')
+  })
+
+  it('a forbid-only media block counts as declared — "media" must not appear here', () => {
+    const items = notCheckedRequirements(baseTest({ media: { forbid: true } }))
+    expect(items).not.toContain('media')
+  })
+
+  it('a declared forbid_tokens list counts as checked', () => {
+    const items = notCheckedRequirements(baseTest({ forbid_tokens: ['product.x.'] }))
+    expect(items).not.toContain('forbid_tokens')
   })
 })
 
@@ -110,7 +145,7 @@ describe('notCheckedExtractRequirements', () => {
 
 describe('groupScenariosByExperiment', () => {
   function scenario(name: string, experiment?: string): CatalogScenario {
-    return { name, contract: 'asset_refs', facts_source: 'data.yaml', facts: [], tests: [], experiment }
+    return { name, facts_source: 'data.yaml', facts: [], tests: [], experiment }
   }
 
   it('groups by experiment, preserving first-appearance order', () => {
@@ -123,5 +158,107 @@ describe('groupScenariosByExperiment', () => {
     expect(groups.map((g) => g.experiment)).toEqual(['lang-bakeoff', 'escalation-bakeoff', ''])
     expect(groups[0].scenarios.map((s) => s.name)).toEqual(['lang-v1', 'lang-v2'])
     expect(groups[2].scenarios.map((s) => s.name)).toEqual(['legacy'])
+  })
+})
+
+describe('formatYamlValue', () => {
+  it('renders a scalar as-is, unquoted', () => {
+    expect(formatYamlValue('hello')).toBe('hello')
+    expect(formatYamlValue(42)).toBe('42')
+  })
+
+  it('renders false as the literal string "false", never dropped/blank', () => {
+    expect(formatYamlValue(false)).toBe('false')
+  })
+
+  it('renders a string[] as dash-prefixed lines', () => {
+    expect(formatYamlValue(['a', 'b'])).toBe('- a\n- b')
+  })
+
+  it('renders a string[][] as flow-style dash lines, never flattened', () => {
+    expect(formatYamlValue([['a', 'b'], ['c']])).toBe('- [a, b]\n- [c]')
+  })
+
+  it('renders history (object array) with the first key inline and the rest indented', () => {
+    const history = [
+      { role: 'client', text: 'привет' },
+      { role: 'assistant', text: 'здравствуйте' },
+    ]
+    expect(formatYamlValue(history)).toBe('- role: client\n  text: привет\n- role: assistant\n  text: здравствуйте')
+  })
+
+  it('renders a media map with flow-style arrays and plain scalars', () => {
+    expect(formatYamlValue({ any_of: ['a', 'b'], exclusive: true })).toBe('any_of: [a, b]\nexclusive: true')
+  })
+
+  it('renders outcomes (object array with nested requires) via the same object-array rule', () => {
+    const outcomes = [{ label: 'asks', forbid_tokens: ['delivery.'] }, { label: 'answers', escalate: false }]
+    expect(formatYamlValue(outcomes)).toBe('- label: asks\n  forbid_tokens: [delivery.]\n- label: answers\n  escalate: false')
+  })
+
+  it('renders llm_checks (object array) with claim/expect', () => {
+    const llmChecks = [{ claim: 'no date promised', expect: true }]
+    expect(formatYamlValue(llmChecks)).toBe('- claim: no date promised\n  expect: true')
+  })
+
+  it('applies the indent parameter to every line', () => {
+    expect(formatYamlValue(['a', 'b'], 1)).toBe('  - a\n  - b')
+  })
+})
+
+describe('scenarioNavLabel', () => {
+  it('falls back to name/tests.yaml when tests_path is absent (stale v2 catalog.json)', () => {
+    expect(scenarioNavLabel({ name: 'combo-canary-v1-ru' })).toBe('combo-canary-v1-ru/tests.yaml')
+  })
+
+  it("shows the plain relative path for a scenario that owns its tests.yaml", () => {
+    expect(scenarioNavLabel({ name: 'combo-canary-v1-ru', tests_path: 'scenarios/combo-canary-v1-ru/tests.yaml' })).toBe(
+      'combo-canary-v1-ru/tests.yaml',
+    )
+  })
+
+  it('shows a borrow arrow when the scenario points at another scenario\'s tests.yaml', () => {
+    expect(scenarioNavLabel({ name: 'lang-canary-v2', tests_path: 'scenarios/lang-canary-v1/tests.yaml' })).toBe(
+      'lang-canary-v2 → lang-canary-v1/tests.yaml',
+    )
+  })
+})
+
+describe('partitionScenariosByArchived', () => {
+  function scenario(name: string, archived?: boolean): CatalogScenario {
+    return { name, facts_source: 'data.yaml', facts: [], tests: [], archived }
+  }
+
+  it('splits active and archived scenarios, preserving order within each bucket', () => {
+    const { active, archived } = partitionScenariosByArchived([
+      scenario('a1'),
+      scenario('old1', true),
+      scenario('a2'),
+      scenario('old2', true),
+    ])
+    expect(active.map((s) => s.name)).toEqual(['a1', 'a2'])
+    expect(archived.map((s) => s.name)).toEqual(['old1', 'old2'])
+  })
+
+  it('treats a missing archived field (stale v2 catalog.json) as active, never archived', () => {
+    const { active, archived } = partitionScenariosByArchived([scenario('legacy')])
+    expect(active.map((s) => s.name)).toEqual(['legacy'])
+    expect(archived).toEqual([])
+  })
+
+  it('handles an all-active list', () => {
+    const { active, archived } = partitionScenariosByArchived([scenario('a1'), scenario('a2')])
+    expect(active).toHaveLength(2)
+    expect(archived).toEqual([])
+  })
+
+  it('handles an all-archived list', () => {
+    const { active, archived } = partitionScenariosByArchived([scenario('old1', true), scenario('old2', true)])
+    expect(active).toEqual([])
+    expect(archived).toHaveLength(2)
+  })
+
+  it('handles an empty list', () => {
+    expect(partitionScenariosByArchived([])).toEqual({ active: [], archived: [] })
   })
 })

@@ -1,0 +1,97 @@
+# evals/common/kb-messages-kk.yaml — Kazakh CUSTOMER MESSAGES against the shop-kb-v1
+# family's Russian-only prompt and knowledge base (pipeline: schema_kb_v1). Included by
+# all three kb-size-sweep scenarios (shop-kb-v1-10/-50/-100) identically — this is a
+# separate axis from the sweep itself (which stays Russian-only for the controlled
+# 10/50/100 comparison), testing whether the model can read a Russian knowledge base
+# and answer honestly and FULLY in Kazakh when the customer wrote Kazakh.
+#
+# DRAFT — every Kazakh phrase below is machine-drafted, pending native Kazakh speaker
+# review before any billed comparison treats Kazakh output as production-quality (same
+# doctrine already applied to every other Kazakh frame in this repo's history — see the
+# archived lang-canary-v4-kk/combo-canary-v1-kk scenarios). Vocabulary reuses phrasing
+# already used elsewhere in this repo (common/shop-questions.yaml) where the same
+# concept appears, for consistency.
+#
+# `requires`/`forbid_tokens`/`media` follow the exact same doctrine as
+# common/kb-questions-ru.yaml (bare `table.ref.field` tokens, no braces). Every test
+# sets `language: kk` — the strong instruction in shop-kb-v1/frame-ru.txt (rule 1's
+# lead-in plus the language line in # ЯЗЫК) requires a FULLY Kazakh reply, not just a
+# Kazakh-flavored one, when the customer's own message is Kazakh.
+tests:
+  - id: "kk1. exact price — coffee machine"
+    message: "Кофемашина DeLonghi қанша тұрады?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: kk
+
+  - id: "kk2. in-stock availability — coffee machine"
+    message: "Кофемашина DeLonghi қоймада бар ма?"
+    # `requires` on product.coffee-machine.in_stock was removed (2026-07-26): in_stock
+    # is no longer a fact token at all — see kb-questions-ru.yaml test 2's comment.
+    escalate: false
+    language: kk
+    stock_check: "coffee-machine"
+
+  - id: "kk3. out-of-stock honesty — no facts or media for an unavailable product"
+    message: "Philips блендері бар ма?"
+    # blender-philips is deliberately out of stock (index 3, i%3==0) — same product
+    # kb-questions-ru.yaml's own test 3 targets, so the two are directly comparable
+    # across languages. in_stock dropped from forbid_tokens (2026-07-26): the token no
+    # longer exists at all, so quoting it now fails structurally via no_unknown_tokens.
+    forbid_tokens: ["product.blender-philips.price"]
+    media:
+      forbid: true
+    escalate: false
+    language: kk
+    stock_check: "blender-philips"
+
+  - id: "kk4. listed city — Astana delivery cost and time"
+    message: "Астанаға жеткізу қанша тұрады және қанша күнде жетеді?"
+    requires:
+      - ["delivery.astana.delivery_cost"]
+      - ["delivery.astana.delivery_in_days"]
+    forbid_tokens: ["delivery.kazakhstan.", "delivery.almaty.", "delivery.baikonur."]
+    escalate: false
+    language: kk
+
+  - id: "kk5. photo request — media-ful product"
+    message: "Кофемашинаның суреттерін жіберіңізші"
+    media:
+      any_of: ["products.coffee-machine.featured_image", "products.coffee-machine.gallery_images"]
+      exclusive: true
+    escalate: false
+    language: kk
+
+  - id: "kk6. photo request — media-less product"
+    message: "Bosch блендерінің суретін жіберіңізші"
+    # blender-bosch (in stock) carries no media in any column at all — contrast with
+    # kk3 above, where the refusal is stock-driven rather than media-driven.
+    # Media doctrine (2026-07-26): when a product HAS the requested media, sending it or
+    # not are both acceptable and this bank asserts neither; only when it has NONE does
+    # `forbid` apply. What must always hold is the honesty claim below — the 07-24 run
+    # had deepseek claim "суреттері мен бейнелері бар" and attach the TEFAL blender's
+    # gallery instead, which `forbid` caught by luck; the false claim itself was
+    # unchecked.
+    media:
+      forbid: true
+    escalate: false
+    language: kk
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что фото именно этого блендера (Bosch) у нас нет"
+        expect: true
+
+  - id: "kk7. off-catalog product escalates"
+    message: "Сіздерде iPhone 15 Pro бар ма?"
+    escalate: true
+    # Narrowed from a bare "жоқ" (2026-07-27): the frame's admission-first holding phrase
+    # («Қазір менде бұл ақпарат жоқ...») now legitimately contains it. Ban only targeted
+    # availability claims, not the honest admission itself.
+    must_not_contain: ["бізде жоқ", "сатылмайды", "сатпаймыз", "бар, сатып аласыз"]
+    language: kk
+
+  - id: "kk8. repair service question escalates"
+    message: "Сіздер кофемашиналарды жөндейсіздер ме?"
+    escalate: true
+    must_not_contain: ["жөндейміз", "жөндемейміз"]
+    language: kk

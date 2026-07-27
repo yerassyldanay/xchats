@@ -1,0 +1,15 @@
+name: shop-history-v1
+description: >
+  Deep chat-history coverage for an online shop: shop-current's frame and data are
+  referenced byte-for-byte, never copied, and exercised against a dedicated history bank
+  (common/shop-history-questions.yaml) — retention across 10+ turns, stale-literal
+  traps, context that flips the escalation verdict, client-turn bursts, and
+  history-driven media/language switches. A coverage axis for the current production
+  frame, not a prompt bake-off: setup/prompt_ref/experiment are left unset on purpose
+  (empty experiment = never auto-compared into any matrix — the safer default per
+  types.go), same as shop-current itself.
+frame: ../shop-current/frame.txt
+data: ../shop-current/data.yaml
+tests: tests.yaml
+contract: asset_refs
+topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

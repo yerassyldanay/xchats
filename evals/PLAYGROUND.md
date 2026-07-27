@@ -59,12 +59,18 @@ evals/
 │   │                                     its own; shared by the three below via `limits:`
 │   └── shop-scale-{10,20,30}/         ← same pool, capped to N products each
 └── runs/
-    ├── INDEX.md                       ← one line per run: what, when, headline numbers
-    └── 2026-07-06_shop-compare/       ← one folder per run
+    ├── INDEX.md                       ← deliberately retained evidence only
+    └── 2026-07-06_shop-compare/       ← one local folder per run
         ├── SUMMARY.md                 ← the human report — read this first
         ├── CONTRACT.md                ← token/injection/media verdicts per answer
         └── results.json               ← promptfoo's raw data (not committed)
 ```
+
+Generated scenario files and run directories are local by default. Keep source scenarios,
+prompts, cases, and harness code in Git. Force-add only the reviewed manifest, snapshots,
+judged output, and reports from a run that supports a durable decision, then list it
+manually in `runs/INDEX.md`; generated viewer files and raw provider output remain
+uncommitted.
 
 **To imitate a new version:** copy a scenario folder, change its `data.yaml` (add a
 column, remove a table, add 50 more products, whatever you're testing), change `frame.txt`
@@ -84,8 +90,15 @@ different wording" without duplicating the data file.
 
 ## The harness — what it actually runs
 
-Five small Go programs (no dependency on the product's `backend/` code — the harness is
-free-standing on purpose, since it exists to try out ideas the product hasn't built yet):
+Five small Go programs. Most scenarios are free-standing on purpose, since they exist to
+try out ideas the product hasn't built yet — no dependency on the product's `backend/`
+code. One pipeline is the exception: a scenario with `pipeline: schema_kb_v1` in its
+`scenario.yaml` loads a schema-shaped fixture (`internal/kbfixture`, matching the
+product's actual DB columns) and renders it through `backend/aiprompt` directly — the
+exact prompt/catalog/response code the production backend will eventually call, not a
+harness-side reimplementation of it. Both pipelines produce the same
+`prompt.txt`/`catalog.json`/`promptfooconfig.yaml` outputs and go through the same
+`judge`/`report` steps below.
 
 1. **`render`** — reads `data.yaml`, fills `frame.txt`'s slots with the generated
    KNOWLEDGE BASE / MEDIA / FACTS text, writes `generated/prompt.txt` +
@@ -110,7 +123,11 @@ free-standing on purpose, since it exists to try out ideas the product hasn't bu
    so it has to be caught this way instead), invented digits (any digit run, not just
    multi-digit — numbered-list markers like "1." / "1)" are allow-listed first), and correct
    media groups/refs. It also enforces the model's declared `reply_language` field matches
-   what a test expects, not just a Kazakh-letter heuristic on the text. This is the part
+   what a test expects, not just a Kazakh-letter heuristic on the text. A test can also
+   declare `outcomes:` — >=2 labeled alternative expectation blocks; the answer passes
+   that gate if ANY one block's declared checks all hold (for genuinely ambiguous
+   questions where two different behaviors are both right — see xph2 in
+   `common/xpayment-history-questions.yaml`). This is the part
    that didn't exist before promptfoo alone and is the actual reason this playground
    exists — it tests the injection idea, not just "did the model try." It also computes an
    **estimated** cost per answer (see `models.yaml`'s pricing fields and README's "Known
@@ -119,8 +136,7 @@ free-standing on purpose, since it exists to try out ideas the product hasn't bu
    `SUMMARY.md` per run: a stats table per scenario × model (model-behavior pass %,
    contract pass %, an honestly-labeled cost estimate, latency, tokens, prompt/completion
    share), a scale-comparison table when 2+ `shop-scale-N` scenarios ran together, the
-   answers that failed quoted in full, and one line appended to `runs/INDEX.md` so old runs
-   stay easy to find and compare.
+   answers that failed quoted in full. It does not modify the curated `runs/INDEX.md`.
 5. **`run`** — ties the four steps together: render → promptfoo → judge → report, for
    one scenario or all of them, against whichever models you name.
 
@@ -151,17 +167,18 @@ A schema idea is not ready to build until both pass.
 - **The harness is a playground twin of the real renderer, not the real renderer.** It
   proves the *design* can work. The product's own Go code that does this today is tested
   separately, in Go:
-  [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L86).
+  [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L160).
   A green run here is evidence a design is worth building — it is not a replacement for
   testing the shipped pipeline once it exists.
-- **A scenario can describe a response format the product doesn't have yet** (e.g.
-  `attach_groups` — grouped media — is a proposal; the product today returns
-  `asset_refs`, individual file refs; see
-  [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212)). That's the whole
+- **Every scenario describes a response format the product doesn't have yet.** All of
+  them return the unified `media_files_to_send` shape (grouped media); the product today
+  still returns `asset_refs`, individual file refs capped at 3 — see
+  [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212). That's the whole
   point of a playground — but it means a scenario's pass rate is never migration proof by
-  itself. Say in `scenario.yaml` which real contract (if any) a scenario matches.
-  `schema.sql` files are the same kind of thing: documentation of an idea, never executed,
-  never a real database.
+  itself, even for the `schema_kb_v1` scenarios that render through `backend/aiprompt`
+  directly: that package is not wired into the production backend yet. `schema.sql`
+  files are the same kind of thing: documentation of an idea, never executed, never a
+  real database.
 
 ## One rule this reverses, on purpose
 

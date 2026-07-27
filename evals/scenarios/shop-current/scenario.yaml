@@ -1,7 +1,8 @@
 name: shop-current
-description: "Today's shop schema: word-bearing fact values, per-file media table (asset_refs)"
+description: "Today's shop schema: word-bearing fact values, grouped media columns"
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged."
 frame: frame.txt
 data: data.yaml
 tests: tests.yaml
-contract: asset_refs
 topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

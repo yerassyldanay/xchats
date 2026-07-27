@@ -10,8 +10,9 @@ description: >
 setup: lang-v4-routed
 prompt_ref: lang-ru@v4
 experiment: lang-bakeoff
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged."
 frame: ../lang-canary-v1/frame.txt
 data: ../shop-current/data.yaml
 tests: tests.yaml
-contract: asset_refs
 topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

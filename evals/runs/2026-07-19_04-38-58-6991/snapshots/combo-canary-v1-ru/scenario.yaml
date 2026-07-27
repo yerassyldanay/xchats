@@ -1,0 +1,23 @@
+name: combo-canary-v1-ru
+description: >
+  Phase 2.3 combined-variant bake-off, V1 — the RU branch: merges the two prior winners
+  (lang-canary-v4's routed frames, Phase 2.1; escalation-canary-v2's strengthened rule 1,
+  Phase 2.2) and adds a NEW "the KNOWLEDGE BASE may be INCOMPLETE — never claim we
+  do/don't have something that isn't in it; escalate instead" rule. Targets the
+  deny-instead-of-escalate pattern (tests 18/19 here; run 2026-07-19_02-50-37-ef6e saw
+  models answer "iPhone нет"/"не ремонтируем" — claims the KB never makes) and the
+  language x escalation interaction (test 21, KK branch), which no single earlier variant
+  could pass because no frame carried both fixes at once. Reuses shop-current's real
+  knowledge base, same as every canary variant.
+# setup is shared with the sibling combo-canary-v1-kk scenario ON PURPOSE — the two
+# together realize ONE routed strategy (v4's convention): the eval comparison UI must
+# show one "combo-v1-routed" column, not two. prompt_ref is what actually differs
+# between the siblings.
+setup: combo-v1-routed
+prompt_ref: combo-ru@v1
+experiment: combo-bakeoff
+frame: frame.txt
+data: ../shop-current/data.yaml
+tests: tests.yaml
+contract: asset_refs
+topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

@@ -1,0 +1,15 @@
+# Fail-closed rule under test: a delivery zone marked delivery_available:
+# true must carry a non-blank delivery_cost AND delivery_in_days —
+# aiprompt.BuildCatalog must reject a contradictory row rather than guess
+# which side of the flag is authoritative.
+organization_id: "33333333-3333-3333-3333-333333333333"
+ai_policies:
+  outside_zones_note: "Не доставляем за пределы зоны."
+ai_delivery_zones:
+  - ref: probe
+    name: "Тестовая зона"
+    zone_level: city
+    delivery_available: true
+    delivery_in_days: "1"
+    sales_status: active
+    # delivery_cost deliberately omitted while delivery_available is true.

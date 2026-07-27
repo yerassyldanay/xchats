@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { ChevronDown, ChevronRight, FileImage, MessageSquare } from 'lucide-vue-next'
-import { groupScenariosByExperiment } from '@/lib/evalCatalog'
+import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { ChevronDown, ChevronRight, FileImage } from 'lucide-vue-next'
+import { groupScenariosByExperiment, partitionScenariosByArchived } from '@/lib/evalCatalog'
 import { evalsApi } from '@/api/evals'
 import type { CatalogExtractCase, CatalogFile } from '@/types'
+import CatalogTreeScenarios from './CatalogTreeScenarios.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   catalog: CatalogFile
@@ -17,7 +21,17 @@ const emit = defineEmits<{
   (e: 'select-case', caseId: string): void
 }>()
 
-const scenarioGroups = groupScenariosByExperiment(props.catalog.scenarios)
+// 20 of 23 scenarios are archived (superseded by the 2026-07-23 schema_kb_v1
+// consolidation) — the Go harness already excludes them from every run path
+// (run.go/launch.go); the tree hides them behind a toggle by default so the 3 active
+// ones aren't buried.
+const partition = partitionScenariosByArchived(props.catalog.scenarios)
+const activeGroups = groupScenariosByExperiment(partition.active)
+const archivedGroups = groupScenariosByExperiment(partition.archived)
+const archivedNames = new Set(partition.archived.map((s) => s.name))
+
+const showArchived = ref(false)
+
 const expanded = ref<Set<string>>(new Set(props.selectedScenario ? [props.selectedScenario] : []))
 function toggle(name: string) {
   const next = new Set(expanded.value)
@@ -27,15 +41,18 @@ function toggle(name: string) {
 }
 // A deep link (query params on mount, or a later navigation) must auto-expand the
 // scenario it points into — otherwise the selected test would be selected but
-// invisible in a collapsed tree.
+// invisible in a collapsed tree. If it points into an archived scenario, the archive
+// section itself must also auto-open, or the selection is invisible behind the toggle.
 watch(
   () => props.selectedScenario,
   (name) => {
-    if (name && !expanded.value.has(name)) {
+    if (!name) return
+    if (!expanded.value.has(name)) {
       const next = new Set(expanded.value)
       next.add(name)
       expanded.value = next
     }
+    if (archivedNames.has(name)) showArchived.value = true
   },
   { immediate: true },
 )
@@ -43,50 +60,56 @@ watch(
 function extractThumb(c: CatalogExtractCase): string {
   return evalsApi.catalogImageURL(c.image)
 }
+
+const archivedCount = computed(() => partition.archived.length)
 </script>
 
 <template>
-  <div class="w-72 shrink-0 border-r border-border overflow-y-auto py-3">
+  <div class="w-80 shrink-0 border-r border-border overflow-y-auto py-3">
     <div class="px-3 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">WhatsApp-чат</div>
-    <div v-for="group in scenarioGroups" :key="group.experiment || '__none__'" class="mb-1">
-      <div v-if="group.experiment" class="px-3 py-1 text-[11px] font-medium text-muted-foreground">{{ group.experiment }}</div>
-      <div v-else class="px-3 py-1 text-[11px] italic text-muted-foreground">Без эксперимента</div>
-      <div v-for="s in group.scenarios" :key="s.name">
-        <button
-          class="w-full flex items-center gap-1.5 px-3 py-1.5 text-left text-sm hover:bg-muted/60 transition"
-          :class="selectedScenario === s.name && !selectedTest ? 'bg-primary/10 text-primary font-medium' : ''"
-          @click="toggle(s.name); emit('select-scenario', s.name)"
-        >
-          <component :is="expanded.has(s.name) ? ChevronDown : ChevronRight" class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-          <span class="truncate font-mono text-xs">{{ s.setup || s.name }}</span>
-          <span class="ml-auto shrink-0 text-[10px] text-muted-foreground">{{ s.tests.length }}</span>
-        </button>
-        <div v-if="expanded.has(s.name)" class="pl-8">
-          <button
-            v-for="t in s.tests"
-            :key="t.id"
-            class="w-full flex items-center gap-1.5 px-2 py-1 text-left text-xs rounded hover:bg-muted/60 transition"
-            :class="selectedScenario === s.name && selectedTest === t.id ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground'"
-            @click="emit('select-test', s.name, t.id)"
-          >
-            <MessageSquare class="w-3 h-3 shrink-0" />
-            <span class="truncate">{{ t.id }}</span>
-          </button>
-        </div>
-      </div>
-    </div>
+    <CatalogTreeScenarios
+      :groups="activeGroups"
+      :selected-scenario="selectedScenario"
+      :selected-test="selectedTest"
+      :expanded="expanded"
+      @toggle-scenario="toggle"
+      @select-scenario="(name) => emit('select-scenario', name)"
+      @select-test="(scenario, testId) => emit('select-test', scenario, testId)"
+    />
 
-    <div class="px-3 pt-3 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Разбор файлов</div>
+    <button
+      v-if="archivedCount > 0"
+      class="w-full flex items-center gap-1 px-3 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted/60 transition"
+      @click="showArchived = !showArchived"
+    >
+      <component :is="showArchived ? ChevronDown : ChevronRight" class="w-3 h-3 shrink-0" />
+      {{ t('evalCatalog.archiveSection') }} · {{ archivedCount }}
+    </button>
+    <CatalogTreeScenarios
+      v-if="showArchived"
+      :groups="archivedGroups"
+      :selected-scenario="selectedScenario"
+      :selected-test="selectedTest"
+      :expanded="expanded"
+      @toggle-scenario="toggle"
+      @select-scenario="(name) => emit('select-scenario', name)"
+      @select-test="(scenario, testId) => emit('select-test', scenario, testId)"
+    />
+
+    <div class="px-3 pt-3 pb-1.5">
+      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Разбор файлов</div>
+      <div class="text-[10px] font-mono text-muted-foreground/70">{{ t('evalCatalog.extractSubtitle') }}</div>
+    </div>
     <button
       v-for="c in catalog.extract_cases"
       :key="c.id"
-      class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted/60 transition"
+      class="w-full flex items-start gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted/60 transition"
       :class="selectedCase === c.id ? 'bg-primary/10 text-primary font-medium' : ''"
       @click="emit('select-case', c.id)"
     >
       <img :src="extractThumb(c)" class="w-6 h-6 rounded object-cover border border-border shrink-0" alt="" />
-      <FileImage class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-      <span class="truncate font-mono text-xs">{{ c.id }}</span>
+      <FileImage class="w-3.5 h-3.5 shrink-0 mt-0.5 text-muted-foreground" />
+      <span class="min-w-0 whitespace-normal break-words leading-snug font-mono text-xs">{{ c.id }}</span>
     </button>
   </div>
 </template>

@@ -375,10 +375,9 @@ export function groupRunsByLaunch(runs: RunSummary[]): LaunchGroup[] {
   return groups
 }
 
-// --- /evals dashboard row logic — plan/ui/ui_20_evals_history.md's doctrine: this
-// page is a directory ("find the launch, see what was tested, see if it passed, open
-// it"), not a report. No cross-launch aggregate lives here on purpose; everything
-// below is per-row.
+// --- /evals dashboard row logic. This page is a directory: find a launch, see
+// what was tested, see if it passed, and open it. No cross-launch aggregate lives
+// here; everything below is per-row.
 
 export type PassBucket = 'green' | 'amber' | 'red' | 'none'
 
@@ -457,8 +456,8 @@ export interface LaunchListRow {
   durationMs: number | null // null when any member run is missing started_at/finished_at — never a partial guess
 }
 
-// launchListRow computes the ONE row plan/ui/ui_20_evals_history.md's table wants —
-// pass/total sums the SAME way EvalRuns.vue's original passSummary did (never a
+// launchListRow computes one launch-directory row. Pass/total sums the same way
+// EvalRuns.vue's original passSummary did (never a
 // second, different aggregation for the same fact). Duration is the outer span
 // across every member run (earliest start to latest finish), not a sum of member
 // durations — a launch's two members ran concurrently, not back to back.

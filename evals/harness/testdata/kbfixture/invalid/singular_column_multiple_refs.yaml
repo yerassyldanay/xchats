@@ -1,0 +1,35 @@
+# Fail-closed rule under test: featured_image is a SINGULAR column (nullable
+# uuid, not an array) — giving it a list of two ids is a shape violation.
+# Caught earlier than the other cases here: featured_image decodes into a
+# plain Go string, so a YAML sequence in that position is a strict-decode
+# type error, not an aiprompt.BuildCatalog validation failure. Fail-closed
+# either way — this fixture is never expected to render, full stop.
+organization_id: "33333333-3333-3333-3333-333333333333"
+ai_products:
+  - ref: probe
+    name: "Тестовый товар"
+    price: "1 000 ₸"
+    in_stock: true
+    sales_status: active
+    featured_image:
+      - "44444444-4444-4444-4444-444444444444"
+      - "55555555-5555-5555-5555-555555555555"
+kbd_materials:
+  - id: "44444444-4444-4444-4444-444444444444"
+    source_type: file
+    filename: "probe-1.jpg"
+    mime_type: "image/jpeg"
+    size_bytes: 1000
+    storage_backend: fake
+    storage_key: "fake://probe-1"
+    processing_status: built
+    customer_visibility: visible
+  - id: "55555555-5555-5555-5555-555555555555"
+    source_type: file
+    filename: "probe-2.jpg"
+    mime_type: "image/jpeg"
+    size_bytes: 1000
+    storage_backend: fake
+    storage_key: "fake://probe-2"
+    processing_status: built
+    customer_visibility: visible

@@ -34,7 +34,7 @@ func newTestKB(t *testing.T) (*kbstore.Store, uuid.UUID, *store.Store) {
 	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	org, err := st.SeedOrganization(ctx, "XChats")
+	org, err := st.SeedOrganization(ctx, "xchats")
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
 	}

@@ -21,7 +21,10 @@ export class EvalsUnavailableError extends Error {
 }
 
 async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(PREFIX + path)
+  // Exported eval files are mutable even though nginx serves them as static
+  // files. Never let an already-open browser tab reuse an older runs/catalog
+  // snapshot after the harness rewrites it.
+  const res = await fetch(PREFIX + path, { cache: 'no-store' })
   log.info('evals fetch', { path, status: res.status })
   if (res.status === 404) throw new EvalsUnavailableError(path)
   if (!res.ok) throw new Error(`eval data fetch failed: ${path} (${res.status})`)
@@ -85,7 +88,7 @@ export const evalsApi = {
   // Markdown reports at all) must not offer a link that only ever 404s.
   async probeFile(url: string): Promise<boolean> {
     try {
-      const res = await fetch(url, { method: 'HEAD' })
+      const res = await fetch(url, { method: 'HEAD', cache: 'no-store' })
       return res.ok
     } catch {
       return false
@@ -117,7 +120,7 @@ export const evalsApi = {
   // the frontend's point of view they're indistinguishable.
   async fetchPromptText(runID: string, scenario: string): Promise<string> {
     const url = evalsApi.promptFileURL(runID, scenario)
-    const res = await fetch(url)
+    const res = await fetch(url, { cache: 'no-store' })
     log.info('evals fetch', { path: url, status: res.status })
     if (res.status === 404) throw new EvalsUnavailableError(url)
     if (!res.ok) throw new Error(`prompt fetch failed: ${url} (${res.status})`)

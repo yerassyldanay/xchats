@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-07-19_04-38-58-6991",
+  "family": "scenario",
+  "command": "run",
+  "args": [
+    "-scenario",
+    "scenarios/lang-canary-v1,scenarios/lang-canary-v2,scenarios/lang-canary-v3,scenarios/lang-canary-v4-kk,scenarios/lang-canary-v4-ru,scenarios/escalation-canary-v1,scenarios/escalation-canary-v2,scenarios/combo-canary-v1-kk,scenarios/combo-canary-v1-ru",
+    "-models",
+    "deepseek/deepseek-v3.2-exp,google/gemini-2.5-flash,google/gemini-2.5-flash-lite",
+    "-no-cache",
+    "-expect-calls",
+    "150"
+  ],
+  "git_sha": "8778dda9492ce14408bc60bc26217412650069b8",
+  "git_dirty": true,
+  "git_status_porcelain": " M evals/PLAYGROUND.md\n M evals/README.md\n M evals/common/shop-history-questions.yaml\n M evals/common/shop-questions.yaml\n M evals/common/xpayment-history-questions.yaml\n M evals/harness/canary_sync_test.go\n M evals/harness/catalog.go\n M evals/harness/judge.go\n M evals/harness/judge_test.go\n M evals/harness/langdetect.go\n M evals/harness/langdetect_scenario_test.go\n M evals/harness/langdetect_test.go\n M evals/harness/render.go\n M evals/harness/types.go\n M evals/harness/viewmodel.go\n M evals/harness/viewmodel_test.go\n M evals/runs/2026-07-19_02-50-37-ef6e/CONTRACT.md\n M evals/runs/2026-07-19_02-50-37-ef6e/SUMMARY.md\n M evals/runs/2026-07-19_02-50-37-ef6e/escalation-canary-v1.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/escalation-canary-v2.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/lang-canary-v1.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/lang-canary-v2.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/lang-canary-v3.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/lang-canary-v4-kk.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/lang-canary-v4-ru.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/shop-current.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/shop-decisions-v1.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/shop-history-v1.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/shop-scale-10.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/shop-scale-20.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/shop-scale-30.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/xpayment-decisions-v1.judged.json\n M evals/runs/2026-07-19_02-50-37-ef6e/xpayment-history-v1.judged.json\n M evals/runs/INDEX.md\n M evals/scenarios/escalation-canary-v1/tests.yaml\n M evals/scenarios/escalation-canary-v2/frame.txt\n M evals/scenarios/lang-canary-v1/frame.txt\n M evals/scenarios/lang-canary-v1/tests.yaml\n M evals/scenarios/lang-canary-v2/frame.txt\n M evals/scenarios/lang-canary-v3/frame.txt\n M evals/scenarios/lang-canary-v4-kk/tests.yaml\n M evals/scenarios/lang-canary-v4-ru/tests.yaml\n M evals/scenarios/shop-current/frame.txt\n M evals/scenarios/shop-decisions-v1/frame.txt\n M evals/scenarios/shop-scale/frame.txt\n M evals/scenarios/xpayment-decisions-v1/frame.txt\n M frontend/src/lib/evalCatalog.test.ts\n M frontend/src/lib/evalCatalog.ts\n M frontend/src/types.ts\n?? evals/scenarios/combo-canary-v1-kk/\n?? evals/scenarios/combo-canary-v1-ru/\n",
+  "worktree_diff_path": "worktree.diff",
+  "models_path": "models.yaml",
+  "models_sha256": "d74534413bcb5391c05bee4a989d87d20d4e90b3b5a50f56e2e616a3e5fb57bc",
+  "promptfoo_version": "0.121.18",
+  "scenarios": [
+    {
+      "scenario": "lang-canary-v1",
+      "scenario_yaml_sha256": "3ee8469d5bc61bc59b0502db2645f32739bd04dac5224bf5dd998021f31a89cd",
+      "prompt_sha256": "e03dc2d6970f2a3d4a56503a1e565ce014cf7e37227be27325331d1d5fb3dbaf",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "b7d62540baf8d76cc638db7697721a0529e272516b0015f7c43de5bf86493434",
+      "promptfooconfig_sha256": "d19b76cf7342fc64bf0c54f49b599fcc774ab0a0583573c632d0de9ea1fef262",
+      "results_sha256": "49fd46f2fa4bdb788f53f8f45e183da6d15e6a53e2475b34e007da7990f7d3eb"
+    },
+    {
+      "scenario": "lang-canary-v2",
+      "scenario_yaml_sha256": "a888f17e593584c1e7c3bde4340ae6f45d3f59d0c8ea48cddbe0c11fa21550ad",
+      "prompt_sha256": "9baaf98f89704e8b39dc555b0b9ca29f482872fcc33d282d56fb6d6f338261aa",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "b7d62540baf8d76cc638db7697721a0529e272516b0015f7c43de5bf86493434",
+      "promptfooconfig_sha256": "f515dfc3448b5a01220c5670988c9da8716cf403fe95843b2794054367e3a7ad",
+      "results_sha256": "a4c1cdcc066bd93ce26c364a23e6f0f0eda1222f8a335fb59ae52c6cc3290713"
+    },
+    {
+      "scenario": "lang-canary-v3",
+      "scenario_yaml_sha256": "1fc1b6c8ee912e900af7fdf82ebb9640300986722d8865532c0434e0e314bdc1",
+      "prompt_sha256": "c4fffb426bae8d8d302b2113670e3af629a41bf545fa7e83a775887c34c4f49e",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "b7d62540baf8d76cc638db7697721a0529e272516b0015f7c43de5bf86493434",
+      "promptfooconfig_sha256": "69e513ec484db36f637775752e08b759fd6e4ea4366c05514fa8431969df0ae0",
+      "results_sha256": "8ce8a33acd4aab1974c1ee390eca9f8d85a0e15cb4325cd33d093bb23e50a514"
+    },
+    {
+      "scenario": "lang-canary-v4-kk",
+      "scenario_yaml_sha256": "d3fc23905a496a544239d7a0ea057956402257b61bc76a35cf8af96a261395a0",
+      "prompt_sha256": "d0d7412e0af2a2ccdc853a014e92c4ffbf65495f3abb216e785482400e2d0af3",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "c6b5aaf060682bbfea9b62d4d905e3f1a7b5cda5060dfed8cb34d5c7e873fd03",
+      "promptfooconfig_sha256": "3f9d07ee6f6a8e4e1efddb0739d8b88ad72a8a703713e2d23d4d45dfb276bca5",
+      "results_sha256": "0006fd6e8c3498143b000eb069f90a4f084cbc66b388ed6d399f6b5e5271c203"
+    },
+    {
+      "scenario": "lang-canary-v4-ru",
+      "scenario_yaml_sha256": "6bca1b05adc7fef9267f19672edaa56a54f5964b44bdb0374ff25262f813046a",
+      "prompt_sha256": "e03dc2d6970f2a3d4a56503a1e565ce014cf7e37227be27325331d1d5fb3dbaf",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "8e06a36358946fe9092bf6f0ae241ae0aa155224a213f04ea86f4d6961753700",
+      "promptfooconfig_sha256": "f2f457df35dd1bd77cfc0cce0ce9717912e17daa1577666f8e26a59ab8dd2bae",
+      "results_sha256": "9092ef96d1376fc01b1f0025939e955d5a467a891698fddca32257e2d450fcbc"
+    },
+    {
+      "scenario": "escalation-canary-v1",
+      "scenario_yaml_sha256": "0e3ad2ba01a9546f1b2d7a74bcda63dd0097641b870ec386b50d7ada3e88788e",
+      "prompt_sha256": "e03dc2d6970f2a3d4a56503a1e565ce014cf7e37227be27325331d1d5fb3dbaf",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "3df42bd4ada6d4c88212792cf742f3830df6c0b0cdb9899bb511def31c2192d7",
+      "promptfooconfig_sha256": "6db545a871e544fdb3cc15f888a5eff7df7871f33983e28fbc4b8d502eba1b99",
+      "results_sha256": "94a114eac737e4c012e051b9de3f8e1a43dd72dc7f28c54e785baf2cccb6a3b5"
+    },
+    {
+      "scenario": "escalation-canary-v2",
+      "scenario_yaml_sha256": "b0eae795d88650fae9b915a4aad077b7fa50ef33b6faa3d39189ce7f885faeaf",
+      "prompt_sha256": "e7ccc78102d235599dcd86e1cec3e5d93e6f8eea9c018515c5522cd63e8522b0",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "3df42bd4ada6d4c88212792cf742f3830df6c0b0cdb9899bb511def31c2192d7",
+      "promptfooconfig_sha256": "a37540cd18e242db1f3e925bc58effde1213b7a8eec44bb747912bbf9e349049",
+      "results_sha256": "8a8f77697cb669f4d192d0c1d3d4692e7398005344fbba0379a746e5464ca82b"
+    },
+    {
+      "scenario": "combo-canary-v1-kk",
+      "scenario_yaml_sha256": "86838a8260d27dd5b0d6888e02577806aa9cd1ec4cf377cbc1068853433af801",
+      "prompt_sha256": "8303c628ee60fa29438223666edb6a524ba8fa6f330ba32dd550f1cec8e81832",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "c6b5aaf060682bbfea9b62d4d905e3f1a7b5cda5060dfed8cb34d5c7e873fd03",
+      "promptfooconfig_sha256": "df5fe1c1ad38f9615e29002f10edbf10c5398f4740df6871d342dde6c6fb8192",
+      "results_sha256": "7a3336dd46da20216644b2d4321e525fd073efbfd4f706172b92bb47a09e6230"
+    },
+    {
+      "scenario": "combo-canary-v1-ru",
+      "scenario_yaml_sha256": "661513482e85b9a4a2a77f4243f27b8137cef084c9a6029d2db43bfef458c59a",
+      "prompt_sha256": "a069e6b0aae1246fd4f6a84b4f2fe445a94452b1ad32dc8fa69a877547dd7e32",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "658ed485dbcd223fe842fb77bf31f587904927dc853aae036eea26409f33334b",
+      "promptfooconfig_sha256": "20278bd581ce12922feb1ca18453d32f12e2bb86838fde15d5a09ce8434b6029",
+      "results_sha256": "bbd7561ec2c347fcf763335929cb2e8d27554af1884fc5bd6bb4fa94555171e3"
+    }
+  ],
+  "started_at": "2026-07-18T23:38:58Z",
+  "finished_at": "2026-07-18T23:41:41Z"
+}

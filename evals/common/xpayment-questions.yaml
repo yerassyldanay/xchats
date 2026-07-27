@@ -5,12 +5,14 @@ tests:
     requires:
       - ["tariff.standard.price_monthly"]
       - ["tariff.standard.commission_percent"]
+    escalate: false
     language: ru
 
   - id: "14. payment limit, Kazakh"
     message: "Бизнес тарифінің төлем лимиті қандай?"
     requires:
       - ["tariff.business.payment_limit_monthly"]
+    escalate: false
     language: kk
 
   - id: "15. off-KB crypto question"
@@ -23,14 +25,53 @@ tests:
 
   - id: "16. conversation start, bare greeting"
     message: "Здравствуйте!"
+    escalate: false
     language: ru
+    media:
+      forbid: true
 
   - id: "17. conversation close, customer is done"
     message: "Спасибо, разобрался, буду подключаться!"
     escalate: false
     language: ru
+    media:
+      forbid: true
 
   - id: "18. wrong understanding, asks about a service we don't offer"
     message: "А у вас есть аренда NFC-терминалов для оффлайн-магазина?"
     escalate: true
     language: ru
+
+  - id: "19. history: tariff already discussed, commission follow-up"
+    history:
+      - role: client
+        text: "Сколько стоит тариф Стандарт?"
+      - role: assistant
+        text: "Тариф «Стандарт» стоит 19 900 ₸ в месяц."
+    message: "А комиссия у него какая?"
+    requires:
+      - ["tariff.standard.commission_percent"]
+    escalate: false
+    language: ru
+    # «у него» resolves through history to «Стандарт» — the model must use THAT tariff's
+    # commission token, not «Старт»'s or «Бизнес»'s.
+
+  - id: "20. history: tariff switch mid-conversation, limit question"
+    history:
+      - role: client
+        text: "Расскажите про тариф Старт."
+      - role: assistant
+        text: "«Старт» — тариф для ИП и небольших магазинов, подключить его проще всего."
+      - role: client
+        text: "А если объёмы вырастут?"
+      - role: assistant
+        text: "Тогда лучше смотреть на «Бизнес» — там максимальный объём и приоритетная поддержка."
+    message: "Хорошо, а какой у него лимит платежей в месяц?"
+    requires:
+      - ["tariff.business.payment_limit_monthly"]
+    escalate: false
+    language: ru
+    # «у него» (not «у Бизнеса») is deliberate: Business is named only in the PRIOR
+    # assistant turn, so resolving the pronoun through history is the actual behavior
+    # under test — a final message that names the tariff explicitly would let the model
+    # answer correctly from the last turn alone, without needing history at all.

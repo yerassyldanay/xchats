@@ -59,12 +59,7 @@ func TestCmdExtract_WritesManifestSnapshotsAndInputs(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := orResponse{Usage: &orUsage{PromptTokens: 10, CompletionTokens: 5}}
-		resp.Choices = []struct {
-			Message struct {
-				Content   string `json:"content"`
-				Reasoning string `json:"reasoning,omitempty"`
-			} `json:"message"`
-		}{{}}
+		resp.Choices = []orChoice{{}}
 		resp.Choices[0].Message.Content = `{"content_kind":"other","summary":"x","extracted_text":"","language":"none","visibility_suggestion":"visible","media_role_hint":"none","relates_to_hint":""}`
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -90,6 +85,9 @@ func TestCmdExtract_WritesManifestSnapshotsAndInputs(t *testing.T) {
 	}
 	var runDirs []string
 	for _, d := range allRuns {
+		if filepath.Base(d) == provenance.IncompleteRunsDirName {
+			continue
+		}
 		if info, err := os.Stat(d); err == nil && info.IsDir() {
 			runDirs = append(runDirs, d)
 		}

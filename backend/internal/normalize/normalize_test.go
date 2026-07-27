@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// capturesDir points at the real Evolution v2.3.7 fixtures committed under plan/captures.
-const capturesDir = "../../../plan/captures/samples/webhook_bodies"
+// capturesDir points at the package-owned Evolution v2.3.7 webhook fixtures.
+const capturesDir = "testdata/evolution/webhook_bodies"
 
 func loadCapture(t *testing.T, name string) Envelope {
 	t.Helper()

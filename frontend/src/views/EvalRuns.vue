@@ -18,8 +18,8 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 
-// Launches list — a DIRECTORY, not a report (see plan/ui/ui_20_evals_history.md):
-// find the launch, see what was tested, see if it passed, open it. No cross-launch
+// Launches list—a directory, not a report: find the launch, see what was tested,
+// see if it passed, and open it. No cross-launch
 // stats bar on purpose — an aggregate across unrelated launches is meaningless
 // before you've picked one.
 const loading = ref(true)

@@ -18,8 +18,7 @@
 # Each pair shares one model ID with a DIFFERENT `label` (reasoning-off / reasoning-on)
 # — the harness's providerModelKey (judge.go) uses id+label together so the two never
 # collapse into one bucket downstream (report.go, viewmodel.go), and promptfoo's own
-# provider.label field (confirmed in evals/results/results.json) is what keeps them
-# distinguishable in the raw results too.
+# provider.label field keeps them distinguishable in the raw results too.
 pricing_source: "https://openrouter.ai/models"
 pricing_checked_at: "2026-07-11"
 providers:

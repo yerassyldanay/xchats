@@ -28,14 +28,23 @@ model calls cost real money; unchanged answers are cached by promptfoo on repeat
 tweaking one scenario and re-running only pays for what changed. Add `-no-cache` to force
 everything fresh.
 
+Run directories are local and gitignored by default. If a run becomes durable project
+evidence, review its manifest, snapshots, judged output, and reports, then deliberately
+force-add only those reviewed evidence files and add one line to `runs/INDEX.md`. Never
+force-add the entire run directory: raw provider results, viewer exports, processed
+inputs, and HTML remain reproducible local artifacts and must not be committed.
+
 Before spending anything, `run` prints the resolved `(tests x models) = calls` count. Narrow
-which models run with `-models google/gemini-2.5-flash,openai/gpt-4o-mini` (default: every
-provider in `models.yaml`; `-models-file` overrides the models.yaml path itself). Pass
+which models run with `-models google/gemini-2.5-flash,openai/gpt-4o-mini`. Omitting `-models`
+no longer means "every provider" — it resolves to whichever providers are marked
+`default: true` in `models.yaml` (today: gpt-4o-mini, gemini-2.5-flash-lite), so a bare `run`
+can't accidentally fan out to every configured model. Pass `-models all` to explicitly run
+every provider in the file (`-models-file` overrides the models.yaml path itself). Pass
 `-expect-calls N` to hard-fail before any call if the resolved count doesn't match N — a
 deliberate confirmation gate for a run you want to cost-check first:
 
 ```bash
-./harness/harness run -scenario scenarios/shop-current -models google/gemini-2.5-flash -expect-calls 19
+./harness/harness run -scenario scenarios/shop-current -models google/gemini-2.5-flash -expect-calls 29
 ```
 
 Running two or more `shop-scale-N` scenarios together adds a "Scale comparison" table to
@@ -50,7 +59,7 @@ before anything is spent:
 - **Screening** (comparing frame/prompt variants, e.g. the language bake-off's V1-V4 or
   an escalation-wording V1/V2): 3 uncached repetitions per (test, model) pair.
   ```bash
-  ./harness/harness run -scenario scenarios/lang-canary-v1 -repeats 3 -no-cache -expect-calls 72
+  ./harness/harness run -scenario scenarios/lang-canary-v1 -repeats 3 -no-cache -expect-calls 84
   ```
 - **Survivor stage** (the 1-2 variants screening didn't eliminate): 15 unique Kazakh
   intents x 5 repetitions = 75 outputs per prompt+model pair, at production temperature.
@@ -135,17 +144,36 @@ Copy the closest existing scenario folder, then edit:
   named; the prompt and the grading catalog are both generated from it, so they can never
   disagree with each other.
 - `frame.txt` — the rules/persona wording, with `%%KNOWLEDGE_BASE%%` / `%%MEDIA%%` /
-  `%%FACTS%%` / `%%DESCRIPTIONS%%` / `%%MEDIA_FIELD%%` slots the renderer fills in.
-- `scenario.yaml` — points at the two files above plus `tests.yaml`, and says which
-  response contract (`asset_refs` or `attach_groups`) this version's frame expects back.
-  Optionally caps a fact table's row count with `limits: { <table>: N }` (see
+  `%%FACTS%%` / `%%DESCRIPTIONS%%` slots the renderer fills in. Every frame's response
+  contract is the same fixed shape: `reply_text`, `reply_language`,
+  `media_files_to_send`, `escalate`, `escalation_reason`, `confidence` — there is no
+  per-scenario contract choice any more.
+- `scenario.yaml` — points at the two files above plus `tests.yaml`. Optionally caps a
+  fact table's row count with `limits: { <table>: N }` (see
   `scenarios/shop-scale-10/scenario.yaml`) — lets several scenarios share ONE larger
-  `data.yaml` while each imitating a different catalog size.
+  `data.yaml` while each imitating a different catalog size. Setting `pipeline:
+  schema_kb_v1` instead renders through `backend/aiprompt` (see `internal/kbfixture`) —
+  a schema-shaped fixture (matching the product's actual DB columns) in place of
+  `data.yaml`, using the exact prompt/catalog/response code the production backend will
+  eventually call, instead of the harness's own free-standing renderer.
 - `tests.yaml` — usually just `include: [common/shop-questions.yaml]`; add scenario-only
   questions under `tests:` if this version needs one a shared bank doesn't have. A test can
   set `history: [{role: client, text: ...}, {role: assistant, text: ...}]` to simulate a
   multi-turn conversation instead of a single fresh message — see
-  `common/shop-questions.yaml`'s "16. follow-up with history" for the pattern.
+  `common/shop-questions.yaml`'s "16. follow-up with history" for the pattern. When two
+  different behaviors are BOTH acceptable (e.g. an ambiguous pronoun: answer for the
+  last-named tariff OR ask which one is meant), declare `outcomes:` — a list of >=2
+  labeled alternative expectation blocks, each with the same knobs a test has
+  (requires/escalate/language/media/must_not_contain/must_contain_any); the answer passes
+  the gate if ANY one block fully holds, while top-level checks stay universal. See
+  `common/xpayment-history-questions.yaml`'s xph2 for the pattern.
+
+Language rule note: since the Phase 2.3 combo variants, every frame's mixed-language rule
+is "reply in the DOMINANT language — the one the question itself is asked in" (it used to
+be a blanket "mixed → Russian"). `detectLang` (langdetect.go) resolves mixed messages the
+same way (last question clause, then clause majority, tie → ru), so the routed variants'
+kk/ru test splits and the frames' own rule can never disagree —
+`TestDetectLang_AgreesWithRoutedCanarySplits` enforces it.
 
 Then `render` it (free) before you `run` it (costs money). `render` also now FAILS if the
 rendered prompt references a `{{token}}` not in this exact render's catalog, or if a
@@ -163,7 +191,8 @@ answers, applied to the prompt itself before any model ever sees it.
   the draft would be BLOCKED (an unknown/malformed token — the real product's fail-closed
   behavior), whether injection came out brace-clean, the actual injected customer-facing
   text, cost basis for that one answer, and every check's pass/fail.
-- **`runs/INDEX.md`** — one line per run, so past attempts stay easy to find and compare.
+- **`runs/INDEX.md`** — one line per deliberately retained evidence run; ordinary local
+  attempts are discovered through the generated viewer export instead.
 - **`index.html`** — one self-contained page per run covering BOTH families: for scenario
   runs, the same model × pass-rate table as SUMMARY.md plus a collapsible per-verdict
   detail (scores, injected text, evidence); for extraction runs, each case's captured
@@ -208,7 +237,7 @@ an internet-facing deploy of the same image simply 404s there).
 ### Grouping multiple families into one launch
 
 ```bash
-./harness/harness launch -all -expect-calls 323
+./harness/harness launch -all -expect-calls 616
 ```
 
 Mints one `launch_id`, writes `runs/launches/<id>.json` **before any billed call**
@@ -269,6 +298,12 @@ extract@v1,extract@v2`) to compare prompt versions in one run; cut a new
 `prompts/extract/v2.txt` rather than editing `v1.txt` in place, since existing runs'
 results are tied to `v1`'s exact hash.
 
+The asset directory intentionally contains only the five images referenced by these
+cases and `xpayment_caledar_ads_kz.mp3`. The MP3 is reserved for a future audio or
+transcription evaluation and is not used by the current image-only extraction harness.
+Full-size video fixtures are excluded until an active video case justifies a small,
+deliberately committed sample.
+
 Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
 
 ## Known limits
@@ -287,11 +322,13 @@ Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
   inline rather than presenting it as a real number.
 - **The harness is a playground twin of the real renderer, not the real renderer.** It
   proves the *design* can work; the product's own Go code that does this today is tested
-  separately: [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L86).
-- **A scenario's response contract may not be the shipping one.** `attach_groups`
-  (grouped media) is a DECISIONS.md proposal; the product today returns `asset_refs`
-  (individual file refs) — see [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212).
-  Check `scenario.yaml`'s `contract:` field before treating a pass rate as migration proof.
+  separately: [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L160).
+- **The eval suite's response contract is not the shipping one yet.** Every scenario
+  returns the unified `media_files_to_send` shape (grouped media, via `backend/aiprompt`);
+  the product today still returns `asset_refs` (individual file refs, capped at 3) — see
+  [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212). A green run here is
+  evidence the new contract design works, not proof the shipped pipeline already speaks
+  it — wiring the production backend to `backend/aiprompt` is separate, later work.
 - **`schema.sql` files are documentation, not a database.** Nothing runs or enforces them.
 - **Media is validated by NAME, not by file existence.** `data.yaml`'s media filenames
   (e.g. `cm-1.jpg`) are fictional — judge.go checks a model attached a group/ref that
@@ -302,19 +339,9 @@ Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
   a Kazakh-letter heuristic/reply_language field). A few real questions (e.g. "does this
   read as a natural next step") have no automated check — read the injected text in
   `CONTRACT.md` by eye.
-- **A committed run is inspectable, not re-judgeable from a fresh clone.** Each run's
-  `manifest.json` and `snapshots/` (scenario.yaml, prompt.txt, catalog.json,
-  resolved_tests.json, promptfooconfig.yaml, models.yaml, extract cases — all small text)
-  are committed, so you can see exactly what a run graded against. But the raw
-  `*.results.json` (promptfoo's answers) and, for extraction, the processed input images
-  under `inputs/`, are gitignored — large and reproducible by re-running, not durable
-  history. `manifest.json` records their sha256 so you can tell if a local copy still
-  matches, but a fresh clone alone can't re-run `judge`/`report` end to end without
-  re-generating those first.
-
-## The one earlier eval this replaced
-
-Before the playground, `evals/` was 3 hand-written prompt files (`schemas/current.sql` +
-`schemas/decisions-v1.sql` + a flat `promptfooconfig.yaml`). That comparison's numbers are
-preserved in `results/REPORT.md` as a historical record — it is not re-run or updated by
-anything here.
+- **A retained run is inspectable, not re-judgeable from a fresh clone.** Selected
+  evidence bundles keep their manifest, snapshots, judged output, and human reports so
+  the decision remains reviewable. Raw `*.results.json`, processed inputs, viewer JSON,
+  and HTML are gitignored because they are large or reproducible. A manifest records the
+  raw output hashes, but re-judging still requires regenerating or restoring those raw
+  provider results.

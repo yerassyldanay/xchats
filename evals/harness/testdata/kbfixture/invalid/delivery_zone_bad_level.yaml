@@ -1,0 +1,14 @@
+# Fail-closed rule under test: zone_level must be one of city|region|country.
+# Caught at kbfixture.Load (decode-time closed-enum check, same discipline as
+# sales_status/pricing_type) — never reaches aiprompt.BuildCatalog.
+organization_id: "33333333-3333-3333-3333-333333333333"
+ai_policies:
+  outside_zones_note: "Не доставляем за пределы зоны."
+ai_delivery_zones:
+  - ref: probe
+    name: "Тестовая зона"
+    zone_level: planet
+    delivery_available: true
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active

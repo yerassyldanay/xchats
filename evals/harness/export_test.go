@@ -84,6 +84,7 @@ func TestRunSummaryFromIndexRow_IsAPureFieldCopy(t *testing.T) {
 		Models: []string{"m1", "m2"}, Prompts: []string{"p@v1"},
 		StartedAt: "2026-01-01T00:00:00Z", FinishedAt: "2026-01-01T00:24:18Z",
 		ScenarioTotal: 10, ScenarioBehaviorPass: 8, ScenarioContractPass: 10,
+		ArchivedScenarios: []string{"retired-scenario"}, ArchivedModels: []string{"m1"},
 		IndexHref: "r1/index.html",
 	}
 	s := runSummaryFromIndexRow(row)
@@ -98,6 +99,12 @@ func TestRunSummaryFromIndexRow_IsAPureFieldCopy(t *testing.T) {
 	}
 	if !s.HasIndexHTML {
 		t.Error("want HasIndexHTML=true when IndexHref is non-empty")
+	}
+	if len(s.ArchivedScenarios) != 1 || s.ArchivedScenarios[0] != "retired-scenario" {
+		t.Errorf("want ArchivedScenarios copied verbatim, got %v", s.ArchivedScenarios)
+	}
+	if len(s.ArchivedModels) != 1 || s.ArchivedModels[0] != "m1" {
+		t.Errorf("want ArchivedModels copied verbatim, got %v", s.ArchivedModels)
 	}
 
 	// An interrupted/still-running run has no FinishedAt — must stay empty, never
@@ -215,6 +222,26 @@ func TestCmdExport_AllSkipsLaunchesDirAndWritesRunsJSON(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join("runs", "runs.json")); err != nil {
 		t.Errorf("want runs/runs.json written: %v", err)
+	}
+}
+
+func TestCmdExport_AllSkipsSupportAndZeroExecutionDirs(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	for _, name := range []string{"catalog", provenance.IncompleteRunsDirName, "empty-run"} {
+		if err := os.MkdirAll(filepath.Join("runs", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := cmdExport([]string{"-all"}); err != nil {
+		t.Fatalf("cmdExport -all: %v", err)
+	}
+	for _, name := range []string{"catalog", provenance.IncompleteRunsDirName, "empty-run"} {
+		if _, err := os.Stat(filepath.Join("runs", name, "index.html")); !os.IsNotExist(err) {
+			t.Errorf("%s must not receive a bogus 0/0 index.html, stat err = %v", name, err)
+		}
 	}
 }
 

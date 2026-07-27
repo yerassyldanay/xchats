@@ -30,8 +30,18 @@ type orClient struct {
 }
 
 func newORClient(baseURL, apiKey string) *orClient {
+	return newORClientWithTimeout(baseURL, apiKey, 90*time.Second)
+}
+
+// newORClientWithTimeout is newORClient with a caller-chosen HTTP timeout — used by the
+// retry path (retry.go), whose calls have been observed taking up to ~124s (kimi-k2.5,
+// heavy reasoning) — the describeImage path's default 90s would cut a retry off before
+// it ever finishes. Kept as a separate constructor rather than changing newORClient's
+// signature so the many existing describeImage call sites (extract.go, extract_test.go)
+// are untouched.
+func newORClientWithTimeout(baseURL, apiKey string, timeout time.Duration) *orClient {
 	return &orClient{
-		httpc:   &http.Client{Timeout: 90 * time.Second},
+		httpc:   &http.Client{Timeout: timeout},
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
 	}
@@ -147,22 +157,37 @@ func buildReasoningPrefs(p ModelProvider) *orReasoningPrefs {
 }
 
 type orResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-			// Reasoning is OpenRouter's own reasoning-content response field —
-			// confirmed via OpenRouter's docs, captured SEPARATELY from Content and
-			// returned via describeImage's own `reasoning` return value, never
-			// concatenated into `raw`. See judge.go's ReasoningLeak / this harness's
-			// ReasoningMarkerRE for the (different) concern of a model inlining
-			// reasoning INSIDE Content instead of using this field.
-			Reasoning string `json:"reasoning,omitempty"`
-		} `json:"message"`
-	} `json:"choices"`
-	Usage *orUsage `json:"usage"`
-	Error *struct {
+	ID       string     `json:"id,omitempty"`
+	Provider string     `json:"provider,omitempty"`
+	Choices  []orChoice `json:"choices"`
+	Usage    *orUsage   `json:"usage"`
+	Error    *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// orChoice is a NAMED type (not inlined into orResponse.Choices) specifically so
+// existing test fixtures (extract_test.go, extract_provenance_test.go) that construct
+// []orChoice{...} literals don't need updating every time a new field is added here —
+// confirmed necessary: adding FinishReason/NativeFinishReason inline broke 7 existing
+// anonymous-struct-literal call sites before this type was extracted.
+type orChoice struct {
+	Message struct {
+		Content string `json:"content"`
+		// Reasoning is OpenRouter's own reasoning-content response field — confirmed
+		// via OpenRouter's docs, captured SEPARATELY from Content and returned via
+		// describeImage's own `reasoning` return value, never concatenated into `raw`.
+		// See judge.go's ReasoningLeak / this harness's ReasoningMarkerRE for the
+		// (different) concern of a model inlining reasoning INSIDE Content instead of
+		// using this field.
+		Reasoning string `json:"reasoning,omitempty"`
+	} `json:"message"`
+	// FinishReason/NativeFinishReason are only populated by chatText's callers today
+	// (describeImage never read them) — confirmed present on the wire via a direct
+	// curl (both "stop" on success; "length" on the truncated-before-answer case that
+	// motivated the retry mechanism in the first place).
+	FinishReason       string `json:"finish_reason,omitempty"`
+	NativeFinishReason string `json:"native_finish_reason,omitempty"`
 }
 
 // describeImage sends one system-prompt + image turn and asks for a JSON-object reply.
@@ -226,6 +251,88 @@ func (c *orClient) describeImage(ctx context.Context, model ModelProvider, syste
 		usage = *out.Usage
 	}
 	return strings.TrimSpace(out.Choices[0].Message.Content), strings.TrimSpace(out.Choices[0].Message.Reasoning), usage, nil
+}
+
+// chatTextResult is one direct chat-completion call's outcome — used by the retry path
+// (retry.go) to rebuild a per-attempt record (see ResultAttempt in retry.go) with
+// everything the API actually reported, not just output/tokens/latency.
+type chatTextResult struct {
+	Raw                string
+	Reasoning          string
+	FinishReason       string
+	NativeFinishReason string
+	ResponseID         string
+	UpstreamProvider   string
+	Usage              orUsage
+}
+
+// chatText sends ONE text-only user turn and returns the raw (still-unparsed) model
+// text, exactly mirroring what promptfoo itself sends for a scenario test (render.go's
+// buildPrompt produces ONE self-contained rendered string — history and the customer
+// message are already substituted into it — so no multi-message array is needed here).
+// Sibling to describeImage, reusing the same request-building helpers
+// (buildProviderPrefs/buildReasoningPrefs) and HTTP+parse block, but deliberately
+// WITHOUT describeImage's FrequencyPenalty/ResponseFormat — those are specific to the
+// extraction eval's own calling convention, and a retry should match what promptfoo's
+// plain call sent as closely as possible, not add extra params of its own.
+func (c *orClient) chatText(ctx context.Context, model ModelProvider, prompt string) (chatTextResult, error) {
+	req := orRequest{
+		Model:       orModelID(model.ID),
+		Temperature: model.Temperature,
+		MaxTokens:   model.MaxTokens,
+		Messages: []orMessage{{
+			Role:    "user",
+			Content: []orContentPart{{Type: "text", Text: prompt}},
+		}},
+		Provider:  buildProviderPrefs(model),
+		Reasoning: buildReasoningPrefs(model),
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return chatTextResult{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return chatTextResult{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpc.Do(httpReq)
+	if err != nil {
+		return chatTextResult{}, err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return chatTextResult{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return chatTextResult{}, fmt.Errorf("openrouter: http %d: %s", resp.StatusCode, string(respBody))
+	}
+	var out orResponse
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return chatTextResult{}, fmt.Errorf("openrouter: unparseable response: %w (%s)", err, string(respBody))
+	}
+	if out.Error != nil {
+		return chatTextResult{}, fmt.Errorf("openrouter: %s", out.Error.Message)
+	}
+	if len(out.Choices) == 0 {
+		return chatTextResult{}, fmt.Errorf("openrouter: empty choices")
+	}
+	var usage orUsage
+	if out.Usage != nil {
+		usage = *out.Usage
+	}
+	return chatTextResult{
+		Raw:                out.Choices[0].Message.Content,
+		Reasoning:          out.Choices[0].Message.Reasoning,
+		FinishReason:       out.Choices[0].FinishReason,
+		NativeFinishReason: out.Choices[0].NativeFinishReason,
+		ResponseID:         out.ID,
+		UpstreamProvider:   out.Provider,
+		Usage:              usage,
+	}, nil
 }
 
 // estimateCost mirrors the harness's existing cost-basis discipline (judge.go

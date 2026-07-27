@@ -1,6 +1,5 @@
 // Package normalize flattens raw Evolution v2.3.7 webhook events into the fields
-// xchats actually persists. It is the Go port of plan/scripts/evolution_client.py's
-// normalize() and is asserted against the real payloads in plan/captures/.
+// xchats persists. Package-owned webhook fixtures verify the contract.
 package normalize
 
 import (

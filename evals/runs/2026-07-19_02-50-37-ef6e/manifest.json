@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-07-19_02-50-37-ef6e",
+  "family": "scenario",
+  "command": "run",
+  "args": [
+    "-all",
+    "-models",
+    "google/gemini-2.5-flash-lite,google/gemini-2.5-flash,deepseek/deepseek-v3.2-exp",
+    "-expect-calls",
+    "447"
+  ],
+  "git_sha": "85e1f8338434416aa0c36fb2ec149ae9877768b3",
+  "git_dirty": true,
+  "git_status_porcelain": " M evals/common/shop-questions.yaml\n M evals/harness/catalog.go\n M evals/harness/extract_provenance_test.go\n M evals/harness/extract_test.go\n M evals/harness/internal/provenance/provenance.go\n M evals/harness/judge.go\n M evals/harness/judge_test.go\n M evals/harness/main.go\n M evals/harness/openrouter.go\n M evals/harness/report.go\n M evals/harness/report_test.go\n M evals/harness/types.go\n M evals/harness/viewmodel.go\n M evals/harness/viewmodel_test.go\n M evals/models.yaml\n M evals/runs/INDEX.md\n M frontend/src/components/evals/TestCaseCard.vue\n M frontend/src/lib/evalCatalog.ts\n M frontend/src/types.ts\n?? evals/harness/retry.go\n?? evals/harness/retry_test.go\n?? evals/runs/2026-07-19_02-44-27-436a/\n",
+  "worktree_diff_path": "worktree.diff",
+  "models_path": "models.yaml",
+  "models_sha256": "d74534413bcb5391c05bee4a989d87d20d4e90b3b5a50f56e2e616a3e5fb57bc",
+  "promptfoo_version": "0.121.18",
+  "scenarios": [
+    {
+      "scenario": "escalation-canary-v1",
+      "scenario_yaml_sha256": "0e3ad2ba01a9546f1b2d7a74bcda63dd0097641b870ec386b50d7ada3e88788e",
+      "prompt_sha256": "2e41e337029c37de68582dff0a2bc8a7dd3cb8f1c00b0cc64c2d1daa74fd97ff",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "9d77b5a09e02a3936a47b7966a8c9b57ae7f06bfd34569b3a143d12165fedf2f",
+      "promptfooconfig_sha256": "d9782d16a6d452a4792c188cef0da82d5d0eddd92b1b8322ebbbb7a92c8dc8aa",
+      "results_sha256": "90061d43258ceeb3d69fde299a308379f273bd1ec52e022ee914a04eb32fb41f"
+    },
+    {
+      "scenario": "escalation-canary-v2",
+      "scenario_yaml_sha256": "b0eae795d88650fae9b915a4aad077b7fa50ef33b6faa3d39189ce7f885faeaf",
+      "prompt_sha256": "0225de56f453ef74571ff545460c2ca938f2129e1aa1316b437846699e43b883",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "9d77b5a09e02a3936a47b7966a8c9b57ae7f06bfd34569b3a143d12165fedf2f",
+      "promptfooconfig_sha256": "6ce9c70932bb8ffaa941614589d7f88d85a3d484572010bd5074c9636fd94321",
+      "results_sha256": "648c884664bd7fa65d3d2c8ac550de7fe6daad261e763d2dbe255460177a80a7"
+    },
+    {
+      "scenario": "lang-canary-v1",
+      "scenario_yaml_sha256": "3ee8469d5bc61bc59b0502db2645f32739bd04dac5224bf5dd998021f31a89cd",
+      "prompt_sha256": "2e41e337029c37de68582dff0a2bc8a7dd3cb8f1c00b0cc64c2d1daa74fd97ff",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "095aab978bbf2c482b5b9d38e5b5795b7de6dbc677da1483a1a6db4ee898c899",
+      "promptfooconfig_sha256": "b7902d18fa1d4b230a4da91270a5c82f8d1635f803006fa8205ccf09a1f7d3ad",
+      "results_sha256": "2fc7d1a6ce88788625f6a11e2240bca1edb0e74b55b3b4c5f3b6855e2bc2fec1"
+    },
+    {
+      "scenario": "lang-canary-v2",
+      "scenario_yaml_sha256": "a888f17e593584c1e7c3bde4340ae6f45d3f59d0c8ea48cddbe0c11fa21550ad",
+      "prompt_sha256": "ef496c350f7324a27acffc7575a0287dccfd0197f1a8489bc6849e094e690786",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "095aab978bbf2c482b5b9d38e5b5795b7de6dbc677da1483a1a6db4ee898c899",
+      "promptfooconfig_sha256": "9301b9fd5ebccf58ac18c30fd193ba723221cbf4fa8df9e518e10812e81e597a",
+      "results_sha256": "d43bcbd41207ed4c5c01c6c8cfe494d576e43118ebc1c7089b1a03873b9a3776"
+    },
+    {
+      "scenario": "lang-canary-v3",
+      "scenario_yaml_sha256": "1fc1b6c8ee912e900af7fdf82ebb9640300986722d8865532c0434e0e314bdc1",
+      "prompt_sha256": "7b4a61fa8647c11beacc0789ab2954243aa5a10d6921f424d41ef1cb0bffe1ee",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "095aab978bbf2c482b5b9d38e5b5795b7de6dbc677da1483a1a6db4ee898c899",
+      "promptfooconfig_sha256": "dcca47d67f9ccfb929054b83fb96d3d29328b1c8069e422e26a5fa4364451ea9",
+      "results_sha256": "0a8e7e659b69d430fa32b84f0e1ebeb212e5a1f534f40442d4703a3188c922f7"
+    },
+    {
+      "scenario": "lang-canary-v4-kk",
+      "scenario_yaml_sha256": "d3fc23905a496a544239d7a0ea057956402257b61bc76a35cf8af96a261395a0",
+      "prompt_sha256": "d0d7412e0af2a2ccdc853a014e92c4ffbf65495f3abb216e785482400e2d0af3",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "0c9f0e919e08575c5ab20dba5e8c065e3656807ad08aea810aa627ac4ad48513",
+      "promptfooconfig_sha256": "e945a0f0b7b88c5cd56c5e087d7d6c6e98a7becd4102b980ca681af110bf2bd7",
+      "results_sha256": "87a36364c1f0228e8782f3860b60d70a767b5905fcd74aedd93051392105b217"
+    },
+    {
+      "scenario": "lang-canary-v4-ru",
+      "scenario_yaml_sha256": "6bca1b05adc7fef9267f19672edaa56a54f5964b44bdb0374ff25262f813046a",
+      "prompt_sha256": "2e41e337029c37de68582dff0a2bc8a7dd3cb8f1c00b0cc64c2d1daa74fd97ff",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "0576814190d5e9156ae5593f4fb64bac170858629d2a970603fdc995632da5a6",
+      "promptfooconfig_sha256": "2be26e55e8a4c1cbc1b23d07ac39732b64d964193dbdee2b0fb56623e5957d75",
+      "results_sha256": "d7fcab571a36749cbce7b5ba6d5d89a4568918722fd27bbbda18d2a3ab79619e"
+    },
+    {
+      "scenario": "shop-current",
+      "scenario_yaml_sha256": "4774b51bef0b21aa6e9e1941f9d9de18335db1a4cecc39b6ac92d5ffb0fb2859",
+      "prompt_sha256": "2e41e337029c37de68582dff0a2bc8a7dd3cb8f1c00b0cc64c2d1daa74fd97ff",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "8decca252a50aace5f0b5c312bfa5c4fd099db5359203ff9e692af092e7337af",
+      "promptfooconfig_sha256": "4faf683b3a91abdf4cc10cd5efa12b395624916e820887dfb3ce381ef37daa53",
+      "results_sha256": "0debaa1b3bb7bf0174b47bb00b6c5b6bc772c48248f0baa9e9ce8d2b2f1a7754"
+    },
+    {
+      "scenario": "shop-decisions-v1",
+      "scenario_yaml_sha256": "578fa69ed7e9168827a91645729364e0e583800bd164f7b61345f33bcbcda861",
+      "prompt_sha256": "32bf7496b3275fd2ba193adcc3565e31a04988feaa0102df3379349a04c39fea",
+      "catalog_sha256": "167ddc07144ef8d44d8f3ad417b04256228afb704fb2fcdb5691c46d780d5d5e",
+      "resolved_tests_sha256": "8decca252a50aace5f0b5c312bfa5c4fd099db5359203ff9e692af092e7337af",
+      "promptfooconfig_sha256": "e1445c1cb43a008459c8e916efa0b43964cecf17e7131a00f86dd956e9a74c11",
+      "results_sha256": "f1d9cd37d9d24901b058923031f22d56430121ba8b73ebeb559dc1042c378db7"
+    },
+    {
+      "scenario": "shop-history-v1",
+      "scenario_yaml_sha256": "326f4218b9a4908f51c86154d47acb943d6351fd9c5dbb350e31d4b799fcc324",
+      "prompt_sha256": "2e41e337029c37de68582dff0a2bc8a7dd3cb8f1c00b0cc64c2d1daa74fd97ff",
+      "catalog_sha256": "ee1df3da53ca347f03b0850c6b88fa72260b7ce1c8234a877ff8ac2ba9b7e89e",
+      "resolved_tests_sha256": "18efe408ff1e3750911680ffa257dbcb1b5dc69cd2d0bb8cee632125bbd7df81",
+      "promptfooconfig_sha256": "61d416f42617f837d92460865a9f57a873426e0f5e9fc679715ef3e7a756bc60",
+      "results_sha256": "8abdff0aec65072b8bbdbf57eb17d7b21ef30860776af4ca140ba0c3d8df992e"
+    },
+    {
+      "scenario": "shop-scale-10",
+      "scenario_yaml_sha256": "797bc7aebba9e248425608c59e69374fff44473fba550de63d52df1d9d55814e",
+      "prompt_sha256": "8741a27ebdee45ca86661e7c2d8a40047eec965739560a67f2ce10d33c20ee3d",
+      "catalog_sha256": "56a533aede788ff430486d30a5edf523da7279280cd49cb253127e7b53fc5624",
+      "resolved_tests_sha256": "ca7ea8179e2f362cb17147d2c2376d477faae1b8b4dcb02fe4127c9ee587c23d",
+      "promptfooconfig_sha256": "f8186d63ce418445af769565939153efb8eb990bb6b1ca1c581f3ea6d25bd2fa",
+      "results_sha256": "db173f479a8d269cf39e18829d750cf428a69cf6e2edff467c9a440d5c3fc8fe"
+    },
+    {
+      "scenario": "shop-scale-20",
+      "scenario_yaml_sha256": "d08f00ed14bdc48b9c8ff5f19a4a986a9aed7de09da7bbbd6e2315f856173da9",
+      "prompt_sha256": "1f92885a46a3b115d3edfffb3785e081fc1b2227969da2e90cd826474990eed7",
+      "catalog_sha256": "7e000b1b381bebcb4fb22303992ac1d876553f398ab44bf19dff3aaef9753d8e",
+      "resolved_tests_sha256": "40640dcdd7d005e39667e04e43c4da618570dc5c9952e892e4f047cb6b4b4490",
+      "promptfooconfig_sha256": "d3849df132f21d223b36dcb784337d650f8044f8b4ef6abf4ac6eb795c658c6b",
+      "results_sha256": "4bf2657add2c51e51bd31d3f79698fcbbcdd5fc475cc86ce4086574474363cde"
+    },
+    {
+      "scenario": "shop-scale-30",
+      "scenario_yaml_sha256": "1d800942c2169de8445e2ed061a06c8cbe0bc35e31ff35037799dc1efc50cf31",
+      "prompt_sha256": "bdbc94e19d2c79920be098ab47e319b80e03c49032eab794d0d4e70d16f1c101",
+      "catalog_sha256": "9f3785bf65dd769091b69b533d24ff6eaf6d98d05dde4a679ed69bd8c187717e",
+      "resolved_tests_sha256": "66b2461849d1f926ef5a9638fc35bf3fb453dfeb2da06e5acdeb5a5bff153010",
+      "promptfooconfig_sha256": "621da7a1aec793133bf7f20bcdbb4f74af2d24963efdc66f8157cf9a2ffa511b",
+      "results_sha256": "e5b8e832e4a7f7e874aa7fb7e256e2b5fc5474507b805d2c3fc5f39237745959"
+    },
+    {
+      "scenario": "xpayment-decisions-v1",
+      "scenario_yaml_sha256": "b7e05d6de4b070ce07c252eff28fdebf9dc346fcd6add48c65a54cc5c684dae1",
+      "prompt_sha256": "d68e7fb8ae6c2a3f163462003a7c7187f7b3017dca98ca82a54b375e5c1d5260",
+      "catalog_sha256": "41321b5faabe21430bde1b0e275e39543d79aa0d47da8caabda77400ace75c93",
+      "resolved_tests_sha256": "6087072e44a080f04a376a8ac600068d02c43890897218452548961f9ec370ce",
+      "promptfooconfig_sha256": "8dc879c1b7baa1295282c0a27387f185d0adc40736273c354f2d88b55a08a042",
+      "results_sha256": "5c68b1d51087552a8185097473abea990bea75f1a0ee8ab26bbeca6e14c9663e"
+    },
+    {
+      "scenario": "xpayment-history-v1",
+      "scenario_yaml_sha256": "af4f73c24fc2ff1c76d1848a92850d34bcf0a349dfd2131a934f258cedf7554b",
+      "prompt_sha256": "d68e7fb8ae6c2a3f163462003a7c7187f7b3017dca98ca82a54b375e5c1d5260",
+      "catalog_sha256": "41321b5faabe21430bde1b0e275e39543d79aa0d47da8caabda77400ace75c93",
+      "resolved_tests_sha256": "3ccedcb2ef706ba95e2f11d0b6ec1ac18d4af02af4d7d20f317cb40b05f1af21",
+      "promptfooconfig_sha256": "9913316b35562c6360210ed3f5b32fa443becd15715fbc9c70dfb47de193be3a",
+      "results_sha256": "7e1d9df0400fc31130b9e4479205d75fa6675f4da7ef800b365cd4e7219e79fe"
+    }
+  ],
+  "started_at": "2026-07-18T21:50:37Z",
+  "finished_at": "2026-07-18T21:59:27Z"
+}
