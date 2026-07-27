@@ -1,0 +1,9 @@
+name: shop-scale-30
+description: "Same shop-scale product pool as shop-scale-10/20, using the full 30-product pool."
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — the catalog-size sweep now lives at shop-kb-v1-10/-50/-100; this scenario's historical runs are preserved unchanged."
+frame: ../shop-scale/frame.txt
+data: ../shop-scale/data.yaml
+tests: tests.yaml
+topic_format: "# {ref} — {title} ({keywords})\n{body}"
+# No `limits` — the full pool (all 30 rows of `product`) renders as-is.

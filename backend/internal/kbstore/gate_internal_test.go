@@ -7,20 +7,27 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 )
 
-func gateReasons(topicBody string, values ...domain.Value) []string {
+func gateReasons(topicBody string) []string {
 	snap := &domain.Snapshot{
-		Values: domain.NewValueBook(values...),
 		Topics: []domain.Topic{{Slug: "t", Language: "ru", BodyMD: topicBody}},
 	}
 	return gate(snap, 0, nil)
 }
 
-// A tokenized price body passes: the amount lives in ai_values, the body holds a token.
-func TestGate_TokenizedPriceOK(t *testing.T) {
-	r := gateReasons("Цена — {{price.x}} в месяц.",
-		domain.Value{Token: "price.x", Lang: "ru", Text: "25 000 ₸/мес"})
+// A pure-prose body passes: facts live in typed columns, quoted only in replies.
+func TestGate_PureProseOK(t *testing.T) {
+	r := gateReasons("Тариф покрывает основные нужды и включает поддержку.")
 	if len(r) != 0 {
-		t.Fatalf("tokenized body should pass, got %v", r)
+		t.Fatalf("pure-prose body should pass, got %v", r)
+	}
+}
+
+// A fact token in a body is now BLOCKED — bodies must be pure prose (14 D3): a
+// token in stored knowledge means a value is living where only prose belongs.
+func TestGate_TokenInBodyBlocked(t *testing.T) {
+	r := gateReasons("Цена — {{tariff.x.price}} в месяц.")
+	if len(r) == 0 || !strings.Contains(strings.Join(r, "; "), "pure prose") {
+		t.Fatalf("token-in-body should be blocked, got %v", r)
 	}
 }
 

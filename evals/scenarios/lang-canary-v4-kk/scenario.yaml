@@ -1,0 +1,24 @@
+name: lang-canary-v4-kk
+description: >
+  Phase 2.1 language architecture bake-off, variant V4 (language-routed frame) — the KK
+  branch: a full Kazakh translation of the frame, sent only when detectLang (langdetect.go)
+  classifies the customer's message as Kazakh. KB/FACTS injected data stays Russian (no
+  knowledge-base duplication, per the plan's explicit constraint) — this frame tests
+  whether the MODEL can read a Russian KB and answer in Kazakh when its entire active
+  instruction set is unambiguously Kazakh, with zero competing Russian instructions.
+  DRAFT translation — NOT yet reviewed by a native Kazakh speaker; the plan requires that
+  review before this variant is used in any billed comparison (a mistranslated instruction
+  would invalidate the whole experiment).
+# setup is shared with the sibling lang-canary-v4-ru scenario ON PURPOSE — the two
+# together realize ONE routed strategy (see the description above), so the eval
+# comparison UI must show one "lang-v4-routed" column, not two. prompt_ref is what
+# actually differs between the siblings, and is what the drill-down shows per execution.
+setup: lang-v4-routed
+prompt_ref: lang-kk@v4
+experiment: lang-bakeoff
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged. (Its Kazakh frame was also never natively reviewed.)"
+frame: frame.txt
+data: ../shop-current/data.yaml
+tests: tests.yaml
+topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

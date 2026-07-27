@@ -1,0 +1,4 @@
+include:
+  - common/shop-scale-questions.yaml
+# No scenario-only tests: at 10 products, there is no "deep in the list" product beyond
+# what the shared bank already covers.

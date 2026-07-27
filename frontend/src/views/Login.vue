@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { CircleAlert, LoaderCircle, Lock, Mail, ShieldCheck, WandSparkles } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { ApiError } from '../api/client'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 
 const auth = useAuth()
 const router = useRouter()
@@ -30,27 +34,25 @@ async function submit() {
 
 <template>
   <div class="flex min-h-full">
-    <!-- brand panel -->
-    <div class="hidden md:flex w-1/2 bg-rail text-white flex-col justify-center px-16 relative overflow-hidden">
-      <div class="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-brand/20 blur-3xl"></div>
-      <div class="absolute -bottom-24 -left-10 w-72 h-72 rounded-full bg-wa/10 blur-3xl"></div>
-      <div class="relative">
-        <div class="flex items-center gap-3 text-2xl font-extrabold tracking-tight">
-          <span class="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 grid place-items-center shadow-rail">X</span>
-          XChats
+    <!-- brand panel (flat dark; no gradients/orbs) -->
+    <div class="hidden md:flex w-1/2 bg-slate-900 text-slate-100 flex-col justify-center px-16">
+      <div>
+        <div class="flex items-center gap-3 text-2xl font-bold tracking-tight">
+          <span class="w-11 h-11 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold">X</span>
+          xchats
         </div>
-        <h1 class="mt-8 text-3xl font-bold leading-snug">Командный инбокс<br />и ИИ-ассистент</h1>
+        <h1 class="mt-8 text-3xl font-semibold leading-snug tracking-tight">Командный инбокс<br />и ИИ-ассистент</h1>
         <ul class="mt-10 space-y-4 text-slate-300">
           <li class="flex items-center gap-3">
-            <span class="w-7 h-7 rounded-lg bg-white/10 grid place-items-center text-wa"><i class="fa-brands fa-whatsapp"></i></span>
+            <span class="w-7 h-7 rounded-md bg-white/5 grid place-items-center text-wa"><WhatsappIcon class="w-4 h-4" /></span>
             Единый инбокс WhatsApp
           </li>
           <li class="flex items-center gap-3">
-            <span class="w-7 h-7 rounded-lg bg-white/10 grid place-items-center text-brand"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+            <span class="w-7 h-7 rounded-md bg-white/5 grid place-items-center text-indigo-300"><WandSparkles class="w-4 h-4" /></span>
             ИИ-ответы (предложить и отправить)
           </li>
           <li class="flex items-center gap-3">
-            <span class="w-7 h-7 rounded-lg bg-white/10 grid place-items-center text-emerald-300"><i class="fa-solid fa-shield-halved"></i></span>
+            <span class="w-7 h-7 rounded-md bg-white/5 grid place-items-center text-emerald-300"><ShieldCheck class="w-4 h-4" /></span>
             Безопасность и контроль
           </li>
         </ul>
@@ -58,51 +60,51 @@ async function submit() {
     </div>
 
     <!-- form -->
-    <div class="flex w-full md:w-1/2 items-center justify-center bg-white px-6">
+    <div class="flex w-full md:w-1/2 items-center justify-center bg-card px-6">
       <form class="w-full max-w-sm" @submit.prevent="submit">
-        <div class="md:hidden flex items-center gap-2 text-2xl font-extrabold mb-6">
-          <span class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white grid place-items-center">X</span>
-          XChats
+        <div class="md:hidden flex items-center gap-2 text-2xl font-bold mb-6">
+          <span class="w-9 h-9 rounded-md bg-primary text-primary-foreground grid place-items-center">X</span>
+          xchats
         </div>
-        <h2 class="text-2xl font-bold mb-1">Вход в аккаунт</h2>
-        <p class="text-sm text-muted mb-7">Войдите, чтобы открыть инбокс</p>
+        <h2 class="text-2xl font-semibold tracking-tight mb-1">Вход в аккаунт</h2>
+        <p class="text-sm text-muted-foreground mb-7">Войдите, чтобы открыть инбокс</p>
 
         <label class="block text-sm font-medium mb-1.5">Email</label>
         <div class="relative mb-4">
-          <i class="fa-regular fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-          <input
+          <Mail class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
             v-model="email"
             type="email"
             autocomplete="username"
             required
             placeholder="you@example.com"
-            class="field pl-9"
+            class="pl-9"
           />
         </div>
 
         <label class="block text-sm font-medium mb-1.5">Пароль</label>
         <div class="relative mb-5">
-          <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-          <input
+          <Lock class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
             v-model="password"
             type="password"
             autocomplete="current-password"
             required
             placeholder="••••••••"
-            class="field pl-9"
+            class="pl-9"
           />
         </div>
 
-        <p v-if="error" class="flex items-center gap-2 text-sm text-red-600 mb-3">
-          <i class="fa-solid fa-circle-exclamation"></i> {{ error }}
+        <p v-if="error" class="flex items-center gap-2 text-sm text-destructive mb-3">
+          <CircleAlert class="w-4 h-4 shrink-0" /> {{ error }}
         </p>
 
-        <button type="submit" :disabled="busy" class="w-full btn-brand h-11">
-          <i v-if="busy" class="fa-solid fa-spinner fa-spin"></i>
+        <Button type="submit" :disabled="busy" class="w-full h-11">
+          <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
           {{ busy ? 'Вход…' : 'Войти' }}
-        </button>
+        </Button>
 
-        <p class="mt-6 text-center text-xs text-slate-500">Нет аккаунта? Свяжитесь с администратором</p>
+        <p class="mt-6 text-center text-xs text-muted-foreground">Нет аккаунта? Свяжитесь с администратором</p>
       </form>
     </div>
   </div>

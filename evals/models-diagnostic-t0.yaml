@@ -1,0 +1,53 @@
+# evals/models-diagnostic-t0.yaml — temperature=0 diagnostic twins.
+#
+# Sibling to models.yaml, NOT a replacement. Run this as its OWN separate `harness run
+# -models-file models-diagnostic-t0.yaml` invocation, into its OWN run dir — never as
+# part of the same run as models.yaml's production-temperature entries, and never pooled
+# into the same SUMMARY.md/Wilson-interval numbers. That's a deliberate scope cut, not an
+# oversight: segregating temp-0 from production-temperature results INSIDE one report.go
+# run would need every stats path (modelStats, allFailures, appendIndexLine,
+# aggregateScenarioModelStats) to correctly partition on it, and any one path left
+# unpartitioned would silently re-create exactly the "collapsed metric" failure mode this
+# whole methodology pass exists to eliminate. Two separate SUMMARY.md files to read side
+# by side is a small cost for a much smaller blast radius.
+#
+# Formalized sample sizes (see the task this file was created for): once 1-2 finalists
+# are chosen from screening and run at PRODUCTION temperature — 15 unique Kazakh intents
+# x 5 repetitions, 75 outputs per prompt+model pair — run the SAME 75-intent set through
+# that finalist's temp-0 twin below, for information only. Temp-0 is a determinism/
+# variance diagnostic (does the model's answer even change across repeats when nothing
+# else does?), not a second production candidate — its numbers are never a substitute for
+# the production-temperature Wilson interval, and never mixed into it.
+#
+# This file is a WORKED EXAMPLE, not a prescribed finalist — no finalist has been chosen
+# yet as of this file's creation (that is a separate, later step). It clones all 4 of
+# models.yaml's current screening candidates at temp=0; once a real finalist is chosen,
+# copy just that one entry into a fresh file (or trim this one) rather than running all 4
+# temp-0 twins by default.
+pricing_source: "https://openrouter.ai/models"
+pricing_checked_at: "2026-07-11"
+providers:
+  - id: openrouter:openai/gpt-4o-mini
+    label: temp0-diagnostic
+    temperature: 0
+    max_tokens: 500
+    input_per_mtok: 0.15
+    output_per_mtok: 0.60
+  - id: openrouter:anthropic/claude-haiku-4.5
+    label: temp0-diagnostic
+    temperature: 0
+    max_tokens: 500
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
+  - id: openrouter:google/gemini-2.5-flash
+    label: temp0-diagnostic
+    temperature: 0
+    max_tokens: 500
+    input_per_mtok: 0.30
+    output_per_mtok: 2.50
+  - id: openrouter:google/gemini-2.5-flash-lite
+    label: temp0-diagnostic
+    temperature: 0
+    max_tokens: 500
+    input_per_mtok: 0.10
+    output_per_mtok: 0.40

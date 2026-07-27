@@ -28,6 +28,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/migrations"
 )
@@ -71,6 +72,21 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Langfuse LLM tracing (best-effort): install a global OTel TracerProvider so
+	// the LLM clients export each call as a generation. Never fatal.
+	if cfg.LangfuseTracingEnabled() {
+		if tp, err := telemetry.NewLangfuseProvider(ctx, cfg, "xchats"); err != nil {
+			log.Warn("langfuse tracing init failed; continuing without it", "err", err)
+		} else {
+			log.Info("langfuse tracing enabled", "host", cfg.LangfuseHost)
+			defer func() {
+				shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = tp.Shutdown(shutCtx)
+			}()
+		}
+	}
+
 	st := mustStore(cfg, log)
 	defer st.Close()
 	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
@@ -78,12 +94,13 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	}
 	accountID := seed(ctx, cfg, st, log)
 
-	// The KB lives in the DB now: seed the published snapshot from the literal on
-	// first boot, then the brain reads the DB snapshot (literal kept as fallback).
+	// The KB lives in the DB now: seed the org's LIVE KB from the literal on first
+	// boot, then the brain reads the DB's live rows directly (literal kept as
+	// fallback — no version, no snapshot, no publish step).
 	kb := kbstore.New(st.Pool())
 	orgID := seededOrgID(ctx, cfg, st, log)
 	if orgID != uuid.Nil {
-		if err := kb.SeedIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
+		if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 			log.Warn("kb seed failed; using literal fallback", "err", err)
 		}
 	}
@@ -95,14 +112,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	drafter := buildDrafter(ctx, cfg, st, kb, orgID, blobStore, log)
 	q := queue.NewInMem(2048, cfg.QueueWorkers, log)
 	hub := realtime.NewHub()
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
+	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
 
 	// Playground engine: Stage-1 ingest adapters + the Stage-2 builder. A
 	// multimodal model (LLM_VISION_MODEL) enables image auto-captioning; without
 	// one, media falls back to describe_media popups (fully chat-driven).
 	var vision playground.VisionClient
 	if cfg.LLMAPIKey != "" && cfg.LLMVisionModel != "" {
-		vision = llm.NewVision(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMVisionModel, cfg.LLMMaxTokens)
+		vision = llm.NewVision(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMProvider, cfg.LLMVisionModel, cfg.LLMMaxTokens)
 		log.Info("playground vision extractor active", "model", cfg.LLMVisionModel)
 	}
 	extractor := playground.NewExtractor(vision, log)
@@ -143,9 +160,9 @@ func buildDrafter(ctx context.Context, cfg *config.Config, st *store.Store, kb *
 		if err := brain.LoadMedia(blobStore); err != nil {
 			fatal("kb media", err)
 		}
-		lc := llm.New(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMFastModel, "", cfg.LLMMaxTokens, cfg.LLMTemperature)
+		lc := llm.New(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMProvider, cfg.LLMFastModel, "", cfg.LLMMaxTokens, cfg.LLMTemperature)
 		log.Info("assistant drafter active", "mode", "real", "provider", cfg.LLMProvider, "model", cfg.LLMFastModel)
-		return assistant.NewReal(st, lc, publishedOrSeed(ctx, kb, orgID, log), log)
+		return assistant.NewReal(st, lc, liveOrSeed(ctx, kb, orgID, log), log)
 	}
 	d, err := assistant.NewStub(blobStore, "")
 	if err != nil {
@@ -155,15 +172,15 @@ func buildDrafter(ctx context.Context, cfg *config.Config, st *store.Store, kb *
 	return d
 }
 
-// publishedOrSeed loads the org's published KB snapshot from the DB, falling back
-// to the embedded literal if the DB is empty/unreachable (so the brain always boots).
-func publishedOrSeed(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, log *slog.Logger) *domain.Snapshot {
+// liveOrSeed loads the org's live KB from the DB, falling back to the embedded
+// literal if the DB is empty/unreachable (so the brain always boots).
+func liveOrSeed(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, log *slog.Logger) *domain.Snapshot {
 	if orgID != uuid.Nil {
-		if snap, err := kb.LoadPublished(ctx, orgID); err == nil {
-			log.Info("brain KB source", "source", "db", "version", snap.Config.Version)
+		if snap, err := kb.LoadLive(ctx, orgID); err == nil {
+			log.Info("brain KB source", "source", "db", "topics", len(snap.Topics))
 			return snap
 		} else {
-			log.Warn("load published KB failed; using literal", "err", err)
+			log.Warn("load live KB failed; using literal", "err", err)
 		}
 	}
 	return brain.SeedSnapshot()
@@ -197,7 +214,7 @@ func runWebhookSet(cfg *config.Config, log *slog.Logger) {
 	}
 	accountID := config.AccountID(ownerJID)
 	url := strings.TrimRight(cfg.WebhookPublicBaseURL, "/") + "/evolution/api/v1/webhook/" + accountID.String()
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
+	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
 	if err := evo.SetWebhook(ctx, cfg.EvolutionInstance, url, webhookTokenHeader, cfg.WebhookToken, evolution.WebhookEvents); err != nil {
 		fatal("set webhook", err)
 	}
@@ -250,7 +267,7 @@ func resolveOwnerJID(ctx context.Context, cfg *config.Config, log *slog.Logger) 
 	if cfg.EvolutionBaseURL == "" || cfg.EvolutionAPIKey == "" {
 		return ""
 	}
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance)
+	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	insts, err := evo.FetchInstances(cctx)

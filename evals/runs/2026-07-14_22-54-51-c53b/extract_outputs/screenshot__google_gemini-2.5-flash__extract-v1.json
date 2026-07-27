@@ -1,0 +1,55 @@
+{
+  "case_id": "screenshot",
+  "model": "google/gemini-2.5-flash",
+  "prompt": {
+    "name": "extract",
+    "version": 1,
+    "sha256": "dcad0020679babe7928f721af04a451b570bbafb6fe0179d5967c593cb21aa44"
+  },
+  "preprocessor": "image_1024_jpeg85",
+  "raw": "{\n  \"content_kind\": \"screenshot\",\n  \"summary\": \"This is a screenshot of a website offering an online payment automation service for businesses in Kazakhstan, called xPayment. It provides contact information and links to legal documents.\",\n  \"extracted_text\": \"Сложно разобраться, или не хотите тратить время? Оставьте номер телефона. Мы перезвоним, уточним ваш сценарий и подскажем, как подключить Kaspi Pay API без лишней ручной работы. Оставить номер → WhatsApp В Перезвоним в течение 1 часа xPayment Сервис автоматизации онлайн-платежей для бизнеса в Казахстане. Не банк, не платёжная организация, не партнёр Кaspi. РЕКВИЗИТЫ ИП «XGroup» Республика Казахстан г. Шымкент, ул. Аргынбеков, 29/4 ПОДДЕРЖКА WhatsApp: +7702 976-65-09 support@xpayment.kz ДОКУМЕНТЫ Публичная оферта Пользовательское соглашение Политика конфиденциальности Согласие на обработку ПДн Политика сookie © 2026 ИП «XGroup». Все права защищены. xPayment - это веб-сервис автоматизации онлайн-платежей для предпринимателей. Мы не являемся банком, платёжной организацией или официальным партнёром АО «Каспи Банк». Денежные средства покупателей никогда не поступают на счета или карты хPayment - оплата уходит напрямую на торговую точку Пользователя в инфраструктуре Kaspi.\",\n  \"language\": \"ru\",\n  \"visibility_suggestion\": \"invisible\",\n  \"media_role_hint\": \"none\",\n  \"relates_to_hint\": \"xPayment online payment service\"\n}",
+  "parsed": {
+    "content_kind": "screenshot",
+    "summary": "This is a screenshot of a website offering an online payment automation service for businesses in Kazakhstan, called xPayment. It provides contact information and links to legal documents.",
+    "extracted_text": "Сложно разобраться, или не хотите тратить время? Оставьте номер телефона. Мы перезвоним, уточним ваш сценарий и подскажем, как подключить Kaspi Pay API без лишней ручной работы. Оставить номер → WhatsApp В Перезвоним в течение 1 часа xPayment Сервис автоматизации онлайн-платежей для бизнеса в Казахстане. Не банк, не платёжная организация, не партнёр Кaspi. РЕКВИЗИТЫ ИП «XGroup» Республика Казахстан г. Шымкент, ул. Аргынбеков, 29/4 ПОДДЕРЖКА WhatsApp: +7702 976-65-09 support@xpayment.kz ДОКУМЕНТЫ Публичная оферта Пользовательское соглашение Политика конфиденциальности Согласие на обработку ПДн Политика сookie © 2026 ИП «XGroup». Все права защищены. xPayment - это веб-сервис автоматизации онлайн-платежей для предпринимателей. Мы не являемся банком, платёжной организацией или официальным партнёром АО «Каспи Банк». Денежные средства покупателей никогда не поступают на счета или карты хPayment - оплата уходит напрямую на торговую точку Пользователя в инфраструктуре Kaspi.",
+    "language": "ru",
+    "visibility_suggestion": "invisible",
+    "media_role_hint": "none",
+    "relates_to_hint": "xPayment online payment service"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": true
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": true
+    },
+    {
+      "name": "no_reasoning_leak",
+      "pass": true
+    },
+    {
+      "name": "required_numbers",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2050,
+    "completion_tokens": 393,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "cost_usd_estimate": 0.0015975,
+  "cost_basis": "measured_split"
+}

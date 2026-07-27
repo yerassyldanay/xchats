@@ -1,0 +1,91 @@
+# One-shot WhatsApp histories for the shop-kb-v1 family (shop-kb-v1-10/-50/-100). Each
+# test is one independent provider call: the complete authored history and final message
+# are rendered together.
+tests:
+  - id: "h1. pronoun price follow-up"
+    history:
+      - role: client
+        text: "Здравствуйте! Смотрю кофемашину DeLonghi."
+      - role: assistant
+        text: "Здравствуйте! Кофемашина DeLonghi есть в каталоге — подсказать по цене?"
+    message: "Да, сколько она стоит?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: ru
+
+  - id: "h2. purchase intent resolves discussed product"
+    history:
+      - role: client
+        text: "Хочу кофемашину для дома, смотрю DeLonghi."
+      - role: assistant
+        text: "Это автоматическая кофемашина с капучинатором и жерновковой кофемолкой."
+      - role: client
+        text: "Отлично, мне подходит."
+      - role: assistant
+        text: "Могу помочь с оформлением заказа."
+    message: "Всё, беру её. Как оформить заказ?"
+    # `requires` on product.coffee-machine.in_stock was removed (2026-07-26): in_stock is
+    # no longer a fact token at all. This test is the direct eval of frame-ru.txt rule
+    # 3's purchase-confirmation instruction (re-confirm availability in the model's own
+    # words on a purchase-intent message) — stock_check judges that semantically instead.
+    must_contain_any: ["адрес"]
+    must_not_contain: ["заказ оформлен", "заказ создан", "уже оформили"]
+    escalate: false
+    language: ru
+    stock_check: "coffee-machine"
+
+  - id: "h3. repeat prior literal through placeholder"
+    history:
+      - role: client
+        text: "Сколько стоит кофемашина DeLonghi?"
+      - role: assistant
+        text: "Кофемашина DeLonghi стоит 129 900 ₸."
+      - role: client
+        text: "Хорошо, я ещё подумаю."
+    message: "Напомните, сколько она стоит?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: ru
+
+  - id: "h4. pronoun photo request"
+    history:
+      - role: client
+        text: "Покажите кофемашину DeLonghi."
+      - role: assistant
+        text: "Это автоматическая кофемашина для дома."
+      - role: client
+        text: "Выглядит интересно."
+    message: "Пришлите, пожалуйста, её фото."
+    media:
+      any_of: ["products.coffee-machine.featured_image", "products.coffee-machine.gallery_images"]
+      exclusive: true
+    escalate: false
+    language: ru
+
+  - id: "h5. out-of-stock purchase intent stays honest"
+    history:
+      - role: client
+        text: "Мне понравился набор посуды."
+      - role: assistant
+        text: "Набор посуды сейчас нет в наличии."
+      - role: client
+        text: "Жаль, но я хотела именно его."
+    message: "Хорошо, всё равно оформляйте его прямо сейчас."
+    # Reworked for the 2026-07 canonical-block prompt, then again on 2026-07-26 when
+    # in_stock was removed as a fact token entirely (see backend/aiprompt/registry.go):
+    # `requires` on product.cookware-set.in_stock and the "нет в наличии" phrase check
+    # were both removed — the phrase check is now the auto-generated LLM stock check
+    # (stock_check below) instead of a brittle substring match.
+    # `escalate: false` also removed (2026-07-26): on an out-of-stock purchase
+    # insistence, answering honestly under rule 1a and handing the pre-order question to
+    # a human are both defensible, and no rule draws that boundary — so the flag isn't
+    # graded here. The honesty bar is unchanged and still enforced below: no price
+    # token, no attachment, no "заказ оформлен", plus the semantic stock check.
+    forbid_tokens: ["product.cookware-set.price"]
+    media:
+      forbid: true
+    must_not_contain: ["заказ оформлен", "заказ создан", "уже оформили"]
+    language: ru
+    stock_check: "cookware-set"

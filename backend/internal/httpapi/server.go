@@ -5,10 +5,12 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -128,51 +130,90 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/media/:id", s.handleServeMedia)
 	auth.GET("/realtime", s.handleRealtime)
 
-	// Playground — the KB builder (chat → materials → draft KB → publish).
+	// Playground — the KB builder (chat → materials → draft blob → approve into
+	// the live KB, 15 Decisions 3–4). No more open/publish/rollback: GET always
+	// returns the merged view; approve is the only write path to live.
 	pg := auth.Group("/playground")
 	pg.GET("/draft", s.handlePlaygroundDraft)
-	pg.POST("/draft", s.handlePlaygroundOpenDraft)
 	pg.DELETE("/draft", s.handlePlaygroundDiscardDraft)
 	pg.POST("/draft/topics", s.handlePlaygroundUpsertTopic)
 	pg.DELETE("/draft/topics/:slug", s.handlePlaygroundDeleteTopic)
 	pg.POST("/draft/assets", s.handlePlaygroundUploadAsset)
 	pg.PATCH("/draft/assets/:ref", s.handlePlaygroundPatchAsset)
 	pg.DELETE("/draft/assets/:ref", s.handlePlaygroundDeleteAsset)
-	pg.POST("/draft/values", s.handlePlaygroundUpsertValue)
-	pg.DELETE("/draft/values/:token", s.handlePlaygroundDeleteValue)
+	pg.POST("/draft/tariffs", s.handlePlaygroundUpsertTariff)
+	pg.DELETE("/draft/tariffs/:ref", s.handlePlaygroundDeleteTariff)
+	pg.POST("/draft/products", s.handlePlaygroundUpsertProduct)
+	pg.DELETE("/draft/products/:ref", s.handlePlaygroundDeleteProduct)
+	pg.PATCH("/draft/contacts", s.handlePlaygroundPatchContacts)
+	pg.PATCH("/draft/policies", s.handlePlaygroundPatchPolicies)
 	pg.PATCH("/draft/config", s.handlePlaygroundPatchConfig)
-	pg.POST("/draft/review/:kind/:id", s.handlePlaygroundReview)
 	pg.POST("/draft/materials", s.handlePlaygroundCreateMaterial)
 	pg.GET("/draft/materials", s.handlePlaygroundListMaterials)
 	pg.POST("/chat", s.handlePlaygroundChat)
 	pg.GET("/requests", s.handlePlaygroundListRequests)
 	pg.POST("/requests/:id/resolve", s.handlePlaygroundResolveRequest)
-	pg.POST("/publish", s.handlePlaygroundPublish)
-	pg.POST("/rollback", s.handlePlaygroundRollback)
+	pg.POST("/draft/approve", s.handlePlaygroundApprove)
+	pg.POST("/draft/approve/:kind/:id", s.handlePlaygroundApproveEntity)
+
+	// KB — the live-only editor (/knowledge-base). Every write here lands
+	// directly in the live ai_ tables: no draft blob, no approve step, so it
+	// can never mix with Playground's pending work (see plan "Playground
+	// redesign").
+	auth.GET("/kb", s.handleKBGet)
+	kb := auth.Group("/kb")
+	kb.POST("/topics", s.handleKBUpsertTopic)
+	kb.DELETE("/topics/:slug", s.handleKBDeleteTopic)
+	kb.POST("/assets", s.handleKBUploadAsset)
+	kb.PATCH("/assets/:ref", s.handleKBPatchAsset)
+	kb.DELETE("/assets/:ref", s.handleKBDeleteAsset)
+	kb.POST("/tariffs", s.handleKBUpsertTariff)
+	kb.DELETE("/tariffs/:ref", s.handleKBDeleteTariff)
+	kb.POST("/products", s.handleKBUpsertProduct)
+	kb.DELETE("/products/:ref", s.handleKBDeleteProduct)
+	kb.PATCH("/contacts", s.handleKBPatchContacts)
+	kb.PATCH("/policies", s.handleKBPatchPolicies)
+	kb.PATCH("/config", s.handleKBPatchConfig)
 	return r
 }
 
 // handleWebhook verifies the shared token (header only), enqueues the raw event,
 // and returns 200 fast — no DB write at the edge.
 func (s *Server) handleWebhook(c *gin.Context) {
+	accountID := c.Param("account_id")
 	if s.cfg.WebhookToken != "" {
 		tok := c.GetHeader(webhookTokenHeader)
 		if tok == "" {
 			tok = c.GetHeader("apikey")
 		}
 		if tok != s.cfg.WebhookToken {
+			s.log.Warn("webhook auth rejected", "account_id", accountID, "reason", "bad token")
 			fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook token")
 			return
 		}
 	}
 	raw, err := c.GetRawData()
 	if err != nil {
+		s.log.Warn("webhook unreadable body", "account_id", accountID, "err", err)
 		fail(c, http.StatusBadRequest, ErrValidation, "unreadable body")
 		return
 	}
 	cp := make([]byte, len(raw))
 	copy(cp, raw)
 	_ = s.queue.Publish(queue.Message{Kind: queue.KindWaEvent, Payload: cp})
+
+	// Cheap top-level peek for the event type + instance (no full parse). The full
+	// body is only logged at debug to keep customer PII out of info logs.
+	var peek struct {
+		Event    string `json:"event"`
+		Instance string `json:"instance"`
+	}
+	_ = json.Unmarshal(raw, &peek)
+	s.log.Info("webhook received",
+		"account_id", accountID, "event", peek.Event, "instance", peek.Instance,
+		"bytes", len(raw), "queued", true)
+	s.log.Debug("webhook body", "account_id", accountID, "body", string(raw))
+
 	ok(c, nil)
 }
 
@@ -202,10 +243,12 @@ func (s *Server) cors() gin.HandlerFunc {
 
 func (s *Server) requestLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		start := time.Now()
 		c.Next()
 		s.log.Info("http request",
 			"method", c.Request.Method, "path", c.Request.URL.Path,
-			"status", c.Writer.Status())
+			"status", c.Writer.Status(),
+			"latency_ms", time.Since(start).Milliseconds())
 	}
 }
 

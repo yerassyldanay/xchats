@@ -1,16 +1,18 @@
-// Package kbstore is the writable Knowledge Base data layer: it loads the
-// PUBLISHED snapshot the brain reasons from, and owns the Playground's draft
-// lifecycle (open = clone published → single draft, CRUD, publish = atomic swap +
-// version, rollback, discard) over the ai_* tables from migration 0003.
+// Package kbstore is the writable Knowledge Base data layer: it loads the LIVE
+// KB the brain reasons from (ai_assistants/ai_topics/ai_assets/ai_values, each
+// keyed DIRECTLY on organization_id — 15 Decision 1), and owns the Playground's
+// single draft blob (kbd_draft) + Approve (validate → materialize → clear — 15
+// Decisions 3–4). There is no version, no snapshot clone, no publish/rollback:
+// live tables hold live rows only; a pending edit lives in the blob until
+// approved.
 //
 // The brain's read contract (*domain.Snapshot) is unchanged — only its SOURCE
-// moves from the Go literal (internal/brain/seed.go) to these tables. Writes live
-// entirely here; the brain never sees the draft columns (review_state/provenance).
+// moves from the Go literal (internal/brain/seed.go) to these tables. The brain
+// never touches the draft blob (see draft.go).
 package kbstore
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -19,34 +21,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 )
 
-// jsonObj marshals a small map to a compact JSON string for a jsonb column —
-// safer than fmt formatting, which only produces valid JSON for safe-charset input.
-func jsonObj(m map[string]any) string {
-	b, err := json.Marshal(m)
-	if err != nil {
-		return "{}"
-	}
-	return string(b)
-}
-
-// ErrNoDraft is returned when an operation needs an open draft but none exists.
-var ErrNoDraft = errors.New("kbstore: no open draft")
-
-// ErrNoPublished is returned when no published snapshot exists for an org.
-var ErrNoPublished = errors.New("kbstore: no published snapshot")
-
 // ErrStale is returned when an optimistic-concurrency check (If-Match) fails: the
-// draft moved since the client loaded it.
+// draft blob moved since the client loaded it.
 var ErrStale = errors.New("kbstore: stale draft write")
 
-// draftVersion is the sentinel version of the single open draft; publishing
-// stamps it with the next real (monotonic, >0) version.
-const draftVersion = 0
+// ErrUnknownKind is returned for an unrecognized entity kind (topics|assets|values).
+var ErrUnknownKind = errors.New("kbstore: unknown row kind")
 
 // Store wraps the pgx pool with KB operations.
 type Store struct {
@@ -57,45 +43,31 @@ type Store struct {
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 // ---------------------------------------------------------------------------
-// Published load (the brain's source) + seed
+// Live load (the brain's source) + seed
 // ---------------------------------------------------------------------------
 
-// LoadPublished returns the highest-version published snapshot for an org as a
-// brain-ready *domain.Snapshot (only approved rows ever reach a published
-// snapshot, so no review filter is needed here).
-func (s *Store) LoadPublished(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot, error) {
-	var snapID uuid.UUID
+// LoadLive returns the org's live KB as a brain-ready *domain.Snapshot. Live
+// tables hold live rows only, so there is no review/version filter to apply.
+func (s *Store) LoadLive(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot, error) {
 	snap := &domain.Snapshot{Loaded: time.Now()}
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, version, persona, mission, guardrails, language_policy, reply_max_words
-		FROM xchats.ai_snapshots
-		WHERE organization_id = $1 AND snapshot_state = 'published'
-		ORDER BY version DESC LIMIT 1`, orgID).
-		Scan(&snapID, &snap.Config.Version, &snap.Config.Persona, &snap.Config.Mission,
-			&snap.Config.Guardrails, &snap.Config.LanguagePolicy, &snap.Config.ReplyMaxWords)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNoPublished
-	}
-	if err != nil {
+		SELECT persona, mission, guardrails, language_policy, reply_max_words
+		FROM xchats.ai_assistants WHERE organization_id = $1`, orgID).
+		Scan(&snap.Config.Persona, &snap.Config.Mission, &snap.Config.Guardrails,
+			&snap.Config.LanguagePolicy, &snap.Config.ReplyMaxWords)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if err := s.loadSnapshotContent(ctx, snapID, snap, false); err != nil {
+	if err := s.loadLiveContent(ctx, orgID, snap); err != nil {
 		return nil, err
 	}
 	return snap, nil
 }
 
-// loadSnapshotContent fills Topics/Assets/Values for a snapshot. When
-// approvedOnly is set, rejected/proposed rows are excluded (used by the publish
-// copy); a published snapshot already holds only approved rows.
-func (s *Store) loadSnapshotContent(ctx context.Context, snapID uuid.UUID, snap *domain.Snapshot, approvedOnly bool) error {
-	filter := ""
-	if approvedOnly {
-		filter = ` AND review_state = 'approved'`
-	}
-
+// loadLiveContent fills Topics/Assets/Values from the live ai_ tables for an org.
+func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *domain.Snapshot) error {
 	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, keywords, body_md
-		FROM xchats.ai_topics WHERE snapshot_id = $1`+filter+` ORDER BY created_at`, snapID)
+		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
@@ -112,16 +84,23 @@ func (s *Store) loadSnapshotContent(ctx context.Context, snapID uuid.UUID, snap 
 		return err
 	}
 
-	arows, err := s.pool.Query(ctx, `SELECT ref, asset_kind, topic_slug, title, description, asset_url, lang
-		FROM xchats.ai_assets WHERE snapshot_id = $1`+filter+` ORDER BY created_at`, snapID)
+	arows, err := s.pool.Query(ctx, `SELECT ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang
+		FROM xchats.ai_assets WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for arows.Next() {
 		var a domain.Asset
-		if err := arows.Scan(&a.Ref, &a.Kind, &a.TopicSlug, &a.Title, &a.Description, &a.URL, &a.Language); err != nil {
+		var ownerKind, ownerRef string
+		if err := arows.Scan(&a.Ref, &a.Kind, &ownerKind, &ownerRef, &a.Title, &a.Description, &a.URL, &a.Language); err != nil {
 			arows.Close()
 			return err
+		}
+		// domain.Asset.TopicSlug is the only owner the v1 prompt renders; a
+		// non-topic owner (product/tariff, added with the typed facts) simply
+		// leaves it empty for now.
+		if ownerKind == "" || ownerKind == "topic" {
+			a.TopicSlug = ownerRef
 		}
 		snap.Assets = append(snap.Assets, a)
 	}
@@ -130,35 +109,92 @@ func (s *Store) loadSnapshotContent(ctx context.Context, snapID uuid.UUID, snap 
 		return err
 	}
 
-	vrows, err := s.pool.Query(ctx, `SELECT token, lang, value_text, description
-		FROM xchats.ai_values WHERE snapshot_id = $1`+filter+` ORDER BY created_at`, snapID)
+	trows2, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages
+		FROM xchats.ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
-	vb := domain.NewValueBook()
-	for vrows.Next() {
-		var v domain.Value
-		if err := vrows.Scan(&v.Token, &v.Lang, &v.Text, &v.Description); err != nil {
-			vrows.Close()
+	for trows2.Next() {
+		var t domain.Tariff
+		if err := trows2.Scan(&t.Ref, &t.Lang, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages, &t.Disadvantages); err != nil {
+			trows2.Close()
 			return err
 		}
-		vb.Add(v)
+		snap.Tariffs = append(snap.Tariffs, t)
 	}
-	vrows.Close()
-	if err := vrows.Err(); err != nil {
+	trows2.Close()
+	if err := trows2.Err(); err != nil {
 		return err
 	}
-	snap.Values = vb
+
+	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category, availability
+		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return err
+	}
+	for prows.Next() {
+		var p domain.Product
+		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category, &p.Availability); err != nil {
+			prows.Close()
+			return err
+		}
+		snap.Products = append(snap.Products, p)
+	}
+	prows.Close()
+	if err := prows.Err(); err != nil {
+		return err
+	}
+
+	crows, err := s.pool.Query(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time,
+		working_hours, phone, website, instagram
+		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return err
+	}
+	for crows.Next() {
+		var c domain.Contact
+		if err := crows.Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime,
+			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram); err != nil {
+			crows.Close()
+			return err
+		}
+		snap.Contacts = append(snap.Contacts, c)
+	}
+	crows.Close()
+	if err := crows.Err(); err != nil {
+		return err
+	}
+
+	polrows, err := s.pool.Query(ctx, `SELECT lang, delivery_cost, delivery_time, free_delivery_from, min_order,
+		prepayment, installment, return_period, warranty
+		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return err
+	}
+	for polrows.Next() {
+		var p domain.Policy
+		if err := polrows.Scan(&p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.FreeDeliveryFrom, &p.MinOrder,
+			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty); err != nil {
+			polrows.Close()
+			return err
+		}
+		snap.Policies = append(snap.Policies, p)
+	}
+	polrows.Close()
+	if err := polrows.Err(); err != nil {
+		return err
+	}
+
+	snap.Facts = domain.NewFactBook(snap.Tariffs, snap.Products, snap.Contacts, snap.Policies)
 	return nil
 }
 
-// SeedIfEmpty inserts the given snapshot as version 1, published, when the org has
-// no published snapshot yet — so the brain keeps answering from the DB on first
-// boot. It is idempotent: a no-op once a published snapshot exists.
-func (s *Store) SeedIfEmpty(ctx context.Context, orgID uuid.UUID, seed *domain.Snapshot) error {
+// SeedLiveIfEmpty inserts the given snapshot as the org's live KB when it has no
+// topics yet — so the brain keeps answering from the DB on first boot. Idempotent:
+// a no-op once the org has any live topic.
+func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *domain.Snapshot) error {
 	var exists bool
-	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(
-		SELECT 1 FROM xchats.ai_snapshots WHERE organization_id = $1 AND snapshot_state = 'published')`,
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM xchats.ai_topics WHERE organization_id = $1)`,
 		orgID).Scan(&exists); err != nil {
 		return err
 	}
@@ -171,211 +207,172 @@ func (s *Store) SeedIfEmpty(ctx context.Context, orgID uuid.UUID, seed *domain.S
 	}
 	defer tx.Rollback(ctx)
 
-	var snapID uuid.UUID
-	if err := tx.QueryRow(ctx, `
-		INSERT INTO xchats.ai_snapshots
-			(organization_id, version, snapshot_state, persona, mission, guardrails, language_policy, reply_max_words, published_at)
-		VALUES ($1, 1, 'published', $2, $3, $4, $5, $6, now())
-		RETURNING id`,
+	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_assistants
+		(organization_id, persona, mission, guardrails, language_policy, reply_max_words)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (organization_id) DO UPDATE SET
+			persona = EXCLUDED.persona, mission = EXCLUDED.mission, guardrails = EXCLUDED.guardrails,
+			language_policy = EXCLUDED.language_policy, reply_max_words = EXCLUDED.reply_max_words, updated_at = now()`,
 		orgID, seed.Config.Persona, seed.Config.Mission, seed.Config.Guardrails,
-		seed.Config.LanguagePolicy, orDefaultInt(seed.Config.ReplyMaxWords, 120)).Scan(&snapID); err != nil {
+		seed.Config.LanguagePolicy, orDefaultInt(seed.Config.ReplyMaxWords, 120)); err != nil {
 		return err
 	}
-	if err := insertContent(ctx, tx, snapID, seed, "approved", `{"source":"seed"}`); err != nil {
+	if err := insertLiveContent(ctx, tx, orgID, seed); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-// insertContent writes a snapshot's topics/assets/values with a fixed review_state
-// + provenance. Used by seed, draft-clone, publish-copy and rollback.
-func insertContent(ctx context.Context, tx pgx.Tx, snapID uuid.UUID, snap *domain.Snapshot, review, provenance string) error {
+// insertLiveContent upserts a snapshot's topics/assets/typed-facts as live rows.
+// Shared by SeedLiveIfEmpty and Approve (both write the same live shape).
+func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *domain.Snapshot) error {
 	for _, t := range snap.Topics {
 		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-			(snapshot_id, slug, lang, title, keywords, body_md, review_state, provenance)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
-			snapID, t.Slug, t.Language, t.Title, t.Keywords, t.BodyMD, review, provenance); err != nil {
+			(organization_id, slug, lang, title, keywords, body_md)
+			VALUES ($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (organization_id, slug) DO UPDATE SET
+				lang = EXCLUDED.lang, title = EXCLUDED.title, keywords = EXCLUDED.keywords,
+				body_md = EXCLUDED.body_md, updated_at = now()`,
+			orgID, t.Slug, t.Language, t.Title, t.Keywords, t.BodyMD); err != nil {
 			return fmt.Errorf("insert topic %s: %w", t.Slug, err)
 		}
 	}
 	for _, a := range snap.Assets {
+		ownerKind, ownerRef := "", ""
+		if a.TopicSlug != "" {
+			ownerKind, ownerRef = "topic", a.TopicSlug
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_assets
-			(snapshot_id, ref, asset_kind, topic_slug, title, description, asset_url, lang, review_state, provenance)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
-			snapID, a.Ref, a.Kind, a.TopicSlug, a.Title, a.Description, a.URL, a.Language, review, provenance); err != nil {
+			(organization_id, ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			ON CONFLICT (organization_id, ref) DO UPDATE SET
+				asset_kind = EXCLUDED.asset_kind, owner_kind = EXCLUDED.owner_kind, owner_ref = EXCLUDED.owner_ref,
+				title = EXCLUDED.title, description = EXCLUDED.description, asset_url = EXCLUDED.asset_url,
+				lang = EXCLUDED.lang, updated_at = now()`,
+			orgID, a.Ref, a.Kind, ownerKind, ownerRef, a.Title, a.Description, a.URL, a.Language); err != nil {
 			return fmt.Errorf("insert asset %s: %w", a.Ref, err)
 		}
 	}
-	for _, v := range snap.Values.List() {
-		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_values
-			(snapshot_id, token, lang, value_text, description, review_state, provenance)
-			VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
-			snapID, v.Token, v.Lang, v.Text, v.Description, review, provenance); err != nil {
-			return fmt.Errorf("insert value %s/%s: %w", v.Token, v.Lang, err)
+	for _, t := range snap.Tariffs {
+		if err := upsertTariffRow(ctx, tx, orgID, t); err != nil {
+			return err
+		}
+	}
+	for _, p := range snap.Products {
+		if err := upsertProductRow(ctx, tx, orgID, p); err != nil {
+			return err
+		}
+	}
+	for _, c := range snap.Contacts {
+		if err := upsertContactRow(ctx, tx, orgID, c); err != nil {
+			return err
+		}
+	}
+	for _, p := range snap.Policies {
+		if err := upsertPolicyRow(ctx, tx, orgID, p); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Draft lifecycle
-// ---------------------------------------------------------------------------
-
-// OpenDraft returns the org's open draft snapshot id, cloning the published
-// snapshot into a fresh draft if none is open. Idempotent (one draft per org,
-// enforced by the partial unique index).
-func (s *Store) OpenDraft(ctx context.Context, orgID uuid.UUID) (uuid.UUID, error) {
-	var draftID uuid.UUID
-	err := s.pool.QueryRow(ctx, `SELECT id FROM xchats.ai_snapshots
-		WHERE organization_id = $1 AND snapshot_state = 'draft'`, orgID).Scan(&draftID)
-	if err == nil {
-		return draftID, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, err
-	}
-
-	published, perr := s.LoadPublished(ctx, orgID)
-	if perr != nil && !errors.Is(perr, ErrNoPublished) {
-		return uuid.Nil, perr
-	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	defer tx.Rollback(ctx)
-
-	cfg := domain.AssistantConfig{ReplyMaxWords: 120}
-	if published != nil {
-		cfg = published.Config
-	}
-	if err := tx.QueryRow(ctx, `
-		INSERT INTO xchats.ai_snapshots
-			(organization_id, version, snapshot_state, persona, mission, guardrails, language_policy, reply_max_words)
-		VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7)
-		RETURNING id`,
-		orgID, draftVersion, cfg.Persona, cfg.Mission, cfg.Guardrails, cfg.LanguagePolicy,
-		orDefaultInt(cfg.ReplyMaxWords, 120)).Scan(&draftID); err != nil {
-		return uuid.Nil, err
-	}
-	if published != nil {
-		// Clone the published baseline as approved rows (the draft starts from live).
-		if err := insertContent(ctx, tx, draftID, published, "approved", `{"source":"clone"}`); err != nil {
-			return uuid.Nil, err
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return uuid.Nil, err
-	}
-	return draftID, nil
+// execer is satisfied by both *pgxpool.Pool and pgx.Tx (same Exec shape), so the
+// row-upsert helpers below run identically inside a multi-statement transaction
+// (Approve, SeedLiveIfEmpty) or directly on the pool (the /kb/* live-write path,
+// where each call is its own single-statement write — no cross-row atomicity to
+// preserve).
+type execer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
-// draftID resolves the org's open draft id or ErrNoDraft.
-func (s *Store) draftID(ctx context.Context, orgID uuid.UUID) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := s.pool.QueryRow(ctx, `SELECT id FROM xchats.ai_snapshots
-		WHERE organization_id = $1 AND snapshot_state = 'draft'`, orgID).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, ErrNoDraft
+// upsertTariffRow / upsertProductRow / upsertContactRow write one typed fact row
+// (verbatim columns). Shared by insertLiveContent (seed), Approve (materialize),
+// and the /kb/* live-write path (live.go).
+func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t domain.Tariff) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_tariffs
+		(organization_id, ref, lang, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		ON CONFLICT (organization_id, ref, lang) DO UPDATE SET
+			name=EXCLUDED.name, price=EXCLUDED.price, limit_text=EXCLUDED.limit_text, fee=EXCLUDED.fee,
+			summary=EXCLUDED.summary, pricing_type=EXCLUDED.pricing_type, advantages=EXCLUDED.advantages,
+			disadvantages=EXCLUDED.disadvantages, updated_at=now()`,
+		orgID, t.Ref, orDefault(t.Lang, "ru"), t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
+		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages); err != nil {
+		return fmt.Errorf("insert tariff %s/%s: %w", t.Ref, t.Lang, err)
 	}
-	return id, err
+	return nil
 }
 
-// DiscardDraft deletes the open draft (cascade removes its rows/materials/requests).
-func (s *Store) DiscardDraft(ctx context.Context, orgID uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM xchats.ai_snapshots
-		WHERE organization_id = $1 AND snapshot_state = 'draft'`, orgID)
-	return err
+func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Product) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_products
+		(organization_id, ref, lang, name, price, description, category, availability)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (organization_id, ref, lang) DO UPDATE SET
+			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
+			category=EXCLUDED.category, availability=EXCLUDED.availability, updated_at=now()`,
+		orgID, p.Ref, orDefault(p.Lang, "ru"), p.Name, p.Price, p.Description, p.Category, p.Availability); err != nil {
+		return fmt.Errorf("insert product %s/%s: %w", p.Ref, p.Lang, err)
+	}
+	return nil
+}
+
+func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c domain.Contact) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_contacts
+		(organization_id, slug, lang, whatsapp, email, address, legal, callback_time,
+		 working_hours, phone, website, instagram)
+		VALUES ($1,'support',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		ON CONFLICT (organization_id, lang) DO UPDATE SET
+			whatsapp=EXCLUDED.whatsapp, email=EXCLUDED.email, address=EXCLUDED.address,
+			legal=EXCLUDED.legal, callback_time=EXCLUDED.callback_time,
+			working_hours=EXCLUDED.working_hours, phone=EXCLUDED.phone,
+			website=EXCLUDED.website, instagram=EXCLUDED.instagram, updated_at=now()`,
+		orgID, orDefault(c.Lang, "*"), c.WhatsApp, c.Email, c.Address, c.Legal, c.CallbackTime,
+		c.WorkingHours, c.Phone, c.Website, c.Instagram); err != nil {
+		return fmt.Errorf("insert contact %s: %w", c.Lang, err)
+	}
+	return nil
+}
+
+// upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow
+// (singleton slug 'main', keyed by lang).
+func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Policy) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_policies
+		(organization_id, slug, lang, delivery_cost, delivery_time, free_delivery_from, min_order,
+		 prepayment, installment, return_period, warranty)
+		VALUES ($1,'main',$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (organization_id, lang) DO UPDATE SET
+			delivery_cost=EXCLUDED.delivery_cost, delivery_time=EXCLUDED.delivery_time,
+			free_delivery_from=EXCLUDED.free_delivery_from, min_order=EXCLUDED.min_order,
+			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
+			return_period=EXCLUDED.return_period, warranty=EXCLUDED.warranty, updated_at=now()`,
+		orgID, orDefault(p.Lang, "*"), p.DeliveryCost, p.DeliveryTime, p.FreeDeliveryFrom, p.MinOrder,
+		p.Prepayment, p.Installment, p.ReturnPeriod, p.Warranty); err != nil {
+		return fmt.Errorf("insert policy %s: %w", p.Lang, err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
-// Publish + rollback
+// Deterministic gate (the Approve safety boundary — see draft.go · Approve)
 // ---------------------------------------------------------------------------
 
-// GateError reports the deterministic publish-gate violations (plan/12 · gate).
+// GateError reports the deterministic approve-gate violations (plan/12 · gate).
 type GateError struct{ Reasons []string }
 
 func (e *GateError) Error() string { return "publish gate failed: " + strings.Join(e.Reasons, "; ") }
 
-// Publish runs the deterministic gate over the draft's APPROVED rows and, on pass,
-// atomically promotes the draft to a new published version (dropping non-approved
-// rows). blobExists reports whether an asset's bytes are present (nil skips the
-// dangling-blob check). Returns the new version.
-func (s *Store) Publish(ctx context.Context, orgID uuid.UUID, blobExists func(ref string) bool) (int, error) {
-	draftID, err := s.draftID(ctx, orgID)
-	if err != nil {
-		return 0, err
-	}
-
-	// Build a snapshot of the APPROVED draft content to gate + publish.
-	approved := &domain.Snapshot{}
-	if err := s.loadSnapshotContent(ctx, draftID, approved, true); err != nil {
-		return 0, err
-	}
-	// The gate is a safety boundary, so a failed pending-request count fails closed
-	// (block the publish) rather than silently treating it as zero.
-	pending, err := s.pendingRequestCount(ctx, draftID)
-	if err != nil {
-		return 0, err
-	}
-	if reasons := gate(approved, pending, blobExists); len(reasons) > 0 {
-		return 0, &GateError{Reasons: reasons}
-	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback(ctx)
-
-	var nextVersion int
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(version),0)+1
-		FROM xchats.ai_snapshots WHERE organization_id = $1`, orgID).Scan(&nextVersion); err != nil {
-		return 0, err
-	}
-	// Drop non-approved rows, then promote the draft snapshot in place.
-	for _, tbl := range []string{"ai_topics", "ai_assets", "ai_values"} {
-		if _, err := tx.Exec(ctx, `DELETE FROM xchats.`+tbl+
-			` WHERE snapshot_id = $1 AND review_state <> 'approved'`, draftID); err != nil {
-			return 0, err
-		}
-	}
-	if _, err := tx.Exec(ctx, `UPDATE xchats.ai_snapshots
-		SET version = $2, snapshot_state = 'published', published_at = now(), updated_at = now()
-		WHERE id = $1`, draftID, nextVersion); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, err
-	}
-	return nextVersion, nil
-}
-
-// gate is the deterministic publish gate (pure, testable): over approved rows,
-// every asset is described, every token in a body resolves, no blob dangles, no
-// request pends.
+// gate is the deterministic approve gate (pure, testable): over the resulting
+// LIVE set (live ∪ approved, minus deletes), every asset is described, every topic
+// body is pure prose (no fact tokens, no literal currency), no blob dangles, no
+// request pends. Facts are typed columns (validated at reply-render time, fail
+// closed), so the gate does not touch them.
 func gate(snap *domain.Snapshot, pendingRequests int, blobExists func(ref string) bool) []string {
 	var reasons []string
 	for _, a := range snap.Assets {
-		if strings.TrimSpace(a.Description) == "" {
-			reasons = append(reasons, fmt.Sprintf("asset %q has no description", a.Ref))
-		}
-		if blobExists != nil && a.Ref != "" && !blobExists(a.Ref) {
-			reasons = append(reasons, fmt.Sprintf("asset %q has no stored bytes", a.Ref))
-		}
+		reasons = append(reasons, gateAsset(a, blobExists)...)
 	}
 	for _, t := range snap.Topics {
-		if _, err := snap.Values.Render(t.BodyMD, t.Language); err != nil {
-			reasons = append(reasons, fmt.Sprintf("topic %q: %v", t.Slug, err))
-		}
-		// A literal price/currency amount in a body is an unconfirmed number shipping
-		// to customers — it must be a value token instead. (This enforces the subset
-		// of the "no digits in bodies" rule that is safety-critical; broader numeric
-		// tokenization is the LLM synthesizer's job.)
-		if lit := rawCurrencyRE.FindString(t.BodyMD); lit != "" {
-			reasons = append(reasons, fmt.Sprintf("topic %q has a literal amount %q — use a value token", t.Slug, strings.TrimSpace(lit)))
-		}
+		reasons = append(reasons, gateTopicBody(t.Slug, t.BodyMD)...)
 	}
 	if pendingRequests > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d unresolved request(s)", pendingRequests))
@@ -383,67 +380,49 @@ func gate(snap *domain.Snapshot, pendingRequests int, blobExists func(ref string
 	return reasons
 }
 
+// gateAsset is the per-asset half of the gate — also reused stand-alone by the
+// /kb/* live-write path (live.go), so a single asset write is held to the exact
+// same bar as an approve.
+func gateAsset(a domain.Asset, blobExists func(ref string) bool) []string {
+	var reasons []string
+	if strings.TrimSpace(a.Description) == "" {
+		reasons = append(reasons, fmt.Sprintf("asset %q has no description", a.Ref))
+	}
+	if blobExists != nil && a.Ref != "" && !blobExists(a.Ref) {
+		reasons = append(reasons, fmt.Sprintf("asset %q has no stored bytes", a.Ref))
+	}
+	return reasons
+}
+
+// gateTopicBody is the per-topic half of the gate — also reused stand-alone by
+// the /kb/* live-write path (live.go).
+func gateTopicBody(slug, bodyMD string) []string {
+	var reasons []string
+	// Topic bodies are pure prose (14 Decision 3): a fact token in a body means
+	// stored knowledge is carrying a value — it belongs in a typed column, quoted
+	// only in replies.
+	if strings.Contains(bodyMD, "{{") {
+		reasons = append(reasons, fmt.Sprintf("topic %q body must be pure prose — no {{...}} tokens", slug))
+	}
+	// A literal price/currency amount in a body is an unconfirmed number shipping
+	// to customers — the fact belongs in a typed tariff/product column.
+	if lit := rawCurrencyRE.FindString(bodyMD); lit != "" {
+		reasons = append(reasons, fmt.Sprintf("topic %q has a literal amount %q — put the fact in a typed column", slug, strings.TrimSpace(lit)))
+	}
+	return reasons
+}
+
 // rawCurrencyRE matches a number immediately followed by a currency marker
 // ("25 000 ₸", "9900тг", "$50"): the class of unconfirmed amount that must live in
-// ai_values as a token, never as a literal in a rendered reply body. Step numbers
+// a typed fact column, never as a literal in a rendered reply body. Step numbers
 // ("1) 2) 3)") and bare counts are intentionally NOT matched.
 var rawCurrencyRE = regexp.MustCompile(`(?:[0-9][0-9 \x{00a0}.,]*\s*(?:₸|₽|€|£|тг|тенге|руб)|[$€£]\s*[0-9])`)
 
-func (s *Store) pendingRequestCount(ctx context.Context, snapID uuid.UUID) (int, error) {
+func (s *Store) pendingRequestCount(ctx context.Context, orgID uuid.UUID) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM xchats.ai_builder_requests
-		WHERE snapshot_id = $1 AND state = 'pending'`, snapID).Scan(&n)
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM xchats.kbd_requests
+		WHERE organization_id = $1 AND state = 'pending'`, orgID).Scan(&n)
 	return n, err
-}
-
-// Rollback re-publishes a prior version's content as a new highest version, making
-// it live again (LoadPublished reads the highest version).
-func (s *Store) Rollback(ctx context.Context, orgID uuid.UUID, version int) (int, error) {
-	var srcID uuid.UUID
-	prior := &domain.Snapshot{}
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, persona, mission, guardrails, language_policy, reply_max_words
-		FROM xchats.ai_snapshots
-		WHERE organization_id = $1 AND snapshot_state = 'published' AND version = $2`,
-		orgID, version).Scan(&srcID, &prior.Config.Persona, &prior.Config.Mission,
-		&prior.Config.Guardrails, &prior.Config.LanguagePolicy, &prior.Config.ReplyMaxWords)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, ErrNoPublished
-	}
-	if err != nil {
-		return 0, err
-	}
-	if err := s.loadSnapshotContent(ctx, srcID, prior, false); err != nil {
-		return 0, err
-	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback(ctx)
-
-	var nextVersion int
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(version),0)+1
-		FROM xchats.ai_snapshots WHERE organization_id = $1`, orgID).Scan(&nextVersion); err != nil {
-		return 0, err
-	}
-	var newID uuid.UUID
-	if err := tx.QueryRow(ctx, `
-		INSERT INTO xchats.ai_snapshots
-			(organization_id, version, snapshot_state, persona, mission, guardrails, language_policy, reply_max_words, published_at)
-		VALUES ($1,$2,'published',$3,$4,$5,$6,$7, now()) RETURNING id`,
-		orgID, nextVersion, prior.Config.Persona, prior.Config.Mission, prior.Config.Guardrails,
-		prior.Config.LanguagePolicy, orDefaultInt(prior.Config.ReplyMaxWords, 120)).Scan(&newID); err != nil {
-		return 0, err
-	}
-	if err := insertContent(ctx, tx, newID, prior, "approved", jsonObj(map[string]any{"source": "rollback", "from_version": version})); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, err
-	}
-	return nextVersion, nil
 }
 
 func orDefaultInt(v, def int) int {

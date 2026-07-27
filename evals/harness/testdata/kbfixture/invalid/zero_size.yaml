@@ -1,0 +1,20 @@
+# Fail-closed rule under test: the referenced material has size_bytes: 0 —
+# an empty/never-finished upload masquerading as a real file.
+organization_id: "33333333-3333-3333-3333-333333333333"
+ai_products:
+  - ref: probe
+    name: "Тестовый товар"
+    price: "1 000 ₸"
+    in_stock: true
+    sales_status: active
+    featured_image: "44444444-4444-4444-4444-444444444444"
+kbd_materials:
+  - id: "44444444-4444-4444-4444-444444444444"
+    source_type: file
+    filename: "probe.jpg"
+    mime_type: "image/jpeg"
+    size_bytes: 0
+    storage_backend: fake
+    storage_key: "fake://probe"
+    processing_status: built
+    customer_visibility: visible

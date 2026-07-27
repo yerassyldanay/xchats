@@ -1,17 +1,51 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
+import { Blocks, FlaskConical, Inbox, Library, LogOut, BookOpen } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
+import { evalsApi } from '../api/evals'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 
-// Persistent left navigation rail — always present on authed pages (inbox,
-// accounts, instances). Rendered once by App.vue so it never disappears.
+// Persistent left navigation rail — always present on authed pages. Rendered once
+// by App.vue so it never disappears.
 const auth = useAuth()
 const router = useRouter()
 const route = useRoute()
-const menuOpen = ref(false)
 
-const onAccounts = computed(() => route.name === 'accounts' || route.name === 'instances')
+// The "Эвалы" item only appears once /evals-data/ actually resolves — the local-dev
+// -only volume mount (deploy/docker-compose.override.yaml) is deliberately absent
+// from an internet-facing deploy, so that build should never show a nav item that
+// only ever 404s (review amendment 7). Probed once; a link that 404s later (mount
+// removed mid-session) is an edge case the "no data" state on the page itself covers.
+const evalsAvailable = ref(false)
+onMounted(async () => {
+  evalsAvailable.value = await evalsApi.probeAvailable()
+})
+
+const baseNav: { name: string; icon: Component; label: string; match: string[] }[] = [
+  { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
+  { name: 'accounts', icon: WhatsappIcon, label: 'Номера WhatsApp', match: ['accounts', 'instances'] },
+  { name: 'playground', icon: Blocks, label: 'Конструктор', match: ['playground'] },
+  { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
+]
+// Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
+// and rendered in its own bottom cluster (separated by a divider, above the avatar)
+// so it never reads as one more product feature.
+const blogItem = { name: 'blog', icon: BookOpen, label: 'Блог', match: ['blog', 'blog-post'] }
+const evalsItem = { name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch', 'eval-catalog'] }
+function isActive(match: string[]) {
+  return match.includes(route.name as string)
+}
 
 async function logout() {
   await auth.logout()
@@ -20,64 +54,92 @@ async function logout() {
 </script>
 
 <template>
-  <nav class="w-[68px] bg-rail flex flex-col items-center py-4 shrink-0">
-    <div
-      class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white grid place-items-center font-extrabold text-lg shadow-rail"
-    >
-      X
-    </div>
-
-    <div class="mt-6 flex flex-col gap-2">
-      <RouterLink
-        :to="{ name: 'chatboard' }"
-        class="w-11 h-11 rounded-xl grid place-items-center text-[19px] transition"
-        :class="!onAccounts ? 'bg-brand text-white shadow-rail' : 'text-white/55 hover:text-white hover:bg-white/10'"
-        title="Инбокс"
-      >
-        <i class="fa-solid fa-comment-dots"></i>
+  <nav class="w-[68px] bg-slate-900 flex flex-col items-center py-4 shrink-0">
+    <TooltipProvider :delay-duration="300">
+      <RouterLink :to="{ name: 'home' }" class="w-10 h-10 rounded-lg bg-transparent overflow-hidden grid place-items-center hover:opacity-80 transition">
+        <img src="/logo.png" alt="xchats logo" class="w-full h-full object-contain" />
       </RouterLink>
-      <RouterLink
-        :to="{ name: 'accounts' }"
-        class="w-11 h-11 rounded-xl grid place-items-center text-[19px] transition"
-        :class="onAccounts ? 'bg-brand text-white shadow-rail' : 'text-white/55 hover:text-white hover:bg-white/10'"
-        title="Номера WhatsApp"
-      >
-        <i class="fa-brands fa-whatsapp"></i>
-      </RouterLink>
-    </div>
 
-    <div class="mt-auto relative">
-      <button
-        class="w-10 h-10 rounded-full grid place-items-center text-white text-xs font-semibold ring-2 ring-white/15 hover:ring-white/30 transition"
-        :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }"
-        @click="menuOpen = !menuOpen"
-      >
-        {{ initials(auth.user?.name || auth.user?.email || '?') }}
-      </button>
-      <div
-        v-if="menuOpen"
-        class="absolute bottom-0 left-14 w-60 rounded-2xl border border-hair bg-white shadow-pop p-3 z-30"
-      >
-        <div class="flex items-center gap-3 px-1">
-          <div
-            class="w-10 h-10 rounded-full grid place-items-center text-white text-sm font-semibold shrink-0"
-            :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }"
-          >
-            {{ initials(auth.user?.name || auth.user?.email || '?') }}
-          </div>
-          <div class="min-w-0">
-            <div class="text-sm font-semibold truncate">{{ auth.user?.name || '—' }}</div>
-            <div class="text-xs text-muted truncate">{{ auth.user?.email }}</div>
-          </div>
-        </div>
-        <div class="text-xs text-slate-400 mt-2 px-1">{{ auth.org?.name }}</div>
-        <button
-          class="mt-3 w-full flex items-center gap-2 text-left text-sm text-red-600 hover:bg-red-50 rounded-lg px-2 py-2 font-medium transition"
-          @click="logout"
-        >
-          <i class="fa-solid fa-arrow-right-from-bracket"></i> Выйти
-        </button>
+      <div class="mt-6 flex flex-col gap-2">
+        <Tooltip v-for="item in baseNav" :key="item.name">
+          <TooltipTrigger as-child>
+            <RouterLink
+              :to="{ name: item.name }"
+              class="w-11 h-11 rounded-lg grid place-items-center transition"
+              :class="isActive(item.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
+            >
+              <component :is="item.icon" class="w-5 h-5" />
+            </RouterLink>
+          </TooltipTrigger>
+          <TooltipContent side="right">{{ item.label }}</TooltipContent>
+        </Tooltip>
       </div>
-    </div>
+
+      <div class="mt-auto flex flex-col items-center gap-3">
+        <div class="h-px w-8 bg-white/10" aria-hidden="true" />
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <a
+              href="/blog/"
+              class="w-11 h-11 rounded-lg grid place-items-center transition text-slate-400 hover:text-white hover:bg-white/10"
+            >
+              <component :is="blogItem.icon" class="w-5 h-5" />
+            </a>
+          </TooltipTrigger>
+          <TooltipContent side="right">{{ blogItem.label }}</TooltipContent>
+        </Tooltip>
+
+        <template v-if="evalsAvailable">
+          <div class="h-px w-8 bg-white/10" aria-hidden="true" />
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <RouterLink
+                :to="{ name: evalsItem.name }"
+                class="w-11 h-11 rounded-lg grid place-items-center transition"
+                :class="isActive(evalsItem.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
+              >
+                <component :is="evalsItem.icon" class="w-5 h-5" />
+              </RouterLink>
+            </TooltipTrigger>
+            <TooltipContent side="right">{{ evalsItem.label }}</TooltipContent>
+          </Tooltip>
+        </template>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <button
+              class="rounded-full ring-2 ring-white/15 transition hover:ring-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            >
+              <Avatar size="base" class="text-white" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
+                <AvatarFallback class="bg-transparent text-xs font-semibold">
+                  {{ initials(auth.user?.name || auth.user?.email || '?') }}
+                </AvatarFallback>
+              </Avatar>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="right" align="end" class="w-60">
+            <div class="flex items-center gap-3 px-1 py-1">
+              <Avatar size="base" class="text-white shrink-0" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
+                <AvatarFallback class="bg-transparent text-sm font-semibold">
+                  {{ initials(auth.user?.name || auth.user?.email || '?') }}
+                </AvatarFallback>
+              </Avatar>
+              <div class="min-w-0">
+                <div class="text-sm font-semibold truncate">{{ auth.user?.name || '—' }}</div>
+                <div class="text-xs text-muted-foreground truncate">{{ auth.user?.email }}</div>
+              </div>
+            </div>
+            <div class="text-xs text-muted-foreground mt-1 mb-1 px-1 truncate">{{ auth.org?.name }}</div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              class="text-destructive focus:bg-destructive/10 focus:text-destructive font-medium"
+              @select="logout"
+            >
+              <LogOut class="w-4 h-4" /> Выйти
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </TooltipProvider>
   </nav>
 </template>

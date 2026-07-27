@@ -1,0 +1,35 @@
+# V4's RU branch — exactly the tests detectLang (langdetect.go) would route to the RU
+# frame: the plain-Russian controls. Test 20 (the genuinely-mixed message) moved to the
+# KK sibling when the mixed rule changed to dominant-language — its question clause is
+# Kazakh, so detectLang now routes it "kk" (see TestDetectLang_AgainstTestBankMessages).
+# Same source IDs as lang-canary-v1/tests.yaml's tests 1, 9, 16 — kept in sync by hand,
+# same caveat.
+tests:
+  - id: "1. price question, Russian"
+    message: "Сколько стоит кофемашина?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: ru
+
+  - id: "9. off-KB city coverage"
+    message: "А вы доставляете в Астану?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "не доставляем в астан"
+      - "за пределами нашей зоны"
+      - "доставку только по"
+      - "доставляем только по"
+
+  - id: "16. follow-up with history, needs delivery cost"
+    history:
+      - role: client
+        text: "Сколько стоит кофемашина DeLonghi?"
+      - role: assistant
+        text: "Кофемашина DeLonghi стоит 129 900 ₸."
+    message: "А доставка сколько будет стоить?"
+    requires:
+      - ["policy.main.delivery_cost"]
+    escalate: false
+    language: ru

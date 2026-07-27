@@ -14,9 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// XchatsWaNS is the fixed namespace for deriving wa_accounts.id from owner_jid.
-// It must never change — the account id is uuidv5(XchatsWaNS, canonical(owner_jid)).
-var XchatsWaNS = uuid.MustParse("a3f1d2c4-5e6b-47a8-9c0d-1e2f3a4b5c6d")
+// xchatsWaNS is the fixed namespace for deriving wa_accounts.id from owner_jid.
+// It must never change — the account id is uuidv5(xchatsWaNS, canonical(owner_jid)).
+var xchatsWaNS = uuid.MustParse("a3f1d2c4-5e6b-47a8-9c0d-1e2f3a4b5c6d")
 
 // Config is the merged application configuration.
 type Config struct {
@@ -59,6 +59,15 @@ type Config struct {
 	// hosts. Default false (SSRF-safe); enable only for trusted self-hosted setups.
 	KBAllowPrivateFetch bool `yaml:"kb_allow_private_fetch" env:"KB_ALLOW_PRIVATE_FETCH"`
 
+	// --- Langfuse (LLM observability; secrets via .env) ---
+	// Tracing is best-effort: when disabled or keys are missing the LLM clients
+	// emit to OTel's no-op tracer (≈ free). See internal/telemetry.NewLangfuseProvider.
+	LangfuseEnabled         bool   `env:"LANGFUSE_ENABLED"`
+	LangfuseHost            string `env:"LANGFUSE_HOST"` // e.g. https://cloud.langfuse.com
+	LangfusePublicKey       string `env:"LANGFUSE_PUBLIC_KEY"`
+	LangfuseSecretKey       string `env:"LANGFUSE_SECRET_KEY"`
+	LangfuseFlushIntervalMS int    `env:"LANGFUSE_FLUSH_INTERVAL_MS"` // span batch timeout; 0 → OTel default
+
 	// --- seed + account identity (config.yaml, secrets via env) ---
 	OrgName              string `yaml:"org_name" env:"ORG_NAME"`
 	WaAccountDisplayName string `yaml:"wa_account_display_name"`
@@ -86,7 +95,7 @@ func defaults() Config {
 		LLMFastModel:    "openai/gpt-4o-mini",
 		LLMMaxTokens:    1024,
 		LLMTemperature:  0.3,
-		OrgName:         "XChats",
+		OrgName:         "xchats",
 		PageSize:        50,
 	}
 }
@@ -105,6 +114,13 @@ func (c *Config) LLMResolvedBaseURL() string {
 	default: // openrouter
 		return "https://openrouter.ai/api/v1"
 	}
+}
+
+// LangfuseTracingEnabled reports whether LLM calls should export traces to
+// Langfuse. It requires the explicit toggle plus both keys (a host falls back to
+// the public cloud default in the telemetry provider).
+func (c *Config) LangfuseTracingEnabled() bool {
+	return c.LangfuseEnabled && c.LangfusePublicKey != "" && c.LangfuseSecretKey != ""
 }
 
 // Load reads optional .env then config.yaml, then applies env overrides.
@@ -176,7 +192,7 @@ func CanonicalJID(jid string) string {
 
 // AccountID derives the deterministic wa_accounts.id from an owner JID.
 func AccountID(ownerJID string) uuid.UUID {
-	return uuid.NewSHA1(XchatsWaNS, []byte(CanonicalJID(ownerJID)))
+	return uuid.NewSHA1(xchatsWaNS, []byte(CanonicalJID(ownerJID)))
 }
 
 // PhoneFromJID returns the numeric phone part of a phone JID ("7700@s.whatsapp.net" → "7700").

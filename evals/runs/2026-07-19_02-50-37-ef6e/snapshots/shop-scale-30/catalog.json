@@ -1,0 +1,325 @@
+{
+  "contract": "attach_groups",
+  "tokens": [
+    {
+      "token": "{{contact.support.instagram}}",
+      "value": "@demoshop.kz"
+    },
+    {
+      "token": "{{contact.support.phone}}",
+      "value": "+7 727 300 00 00"
+    },
+    {
+      "token": "{{contact.support.work_hours}}",
+      "value": "9:00–19:00"
+    },
+    {
+      "token": "{{policy.main.delivery_cost}}",
+      "value": "1 500 ₸"
+    },
+    {
+      "token": "{{policy.main.delivery_in_days}}",
+      "value": "1–3"
+    },
+    {
+      "token": "{{policy.main.free_delivery_from}}",
+      "value": "20 000 ₸"
+    },
+    {
+      "token": "{{policy.main.return_period_days}}",
+      "value": "14"
+    },
+    {
+      "token": "{{policy.main.warranty_months}}",
+      "value": "12"
+    },
+    {
+      "token": "{{product.air-purifier-xiaomi.available_pieces}}",
+      "value": "5"
+    },
+    {
+      "token": "{{product.air-purifier-xiaomi.price}}",
+      "value": "34 500 ₸"
+    },
+    {
+      "token": "{{product.blender-bosch.available_pieces}}",
+      "value": "12"
+    },
+    {
+      "token": "{{product.blender-bosch.price}}",
+      "value": "18 500 ₸"
+    },
+    {
+      "token": "{{product.bread-maker-redmond.available_pieces}}",
+      "value": "3"
+    },
+    {
+      "token": "{{product.bread-maker-redmond.price}}",
+      "value": "28 900 ₸"
+    },
+    {
+      "token": "{{product.coffee-grinder-bosch.available_pieces}}",
+      "value": "12"
+    },
+    {
+      "token": "{{product.coffee-grinder-bosch.price}}",
+      "value": "9 400 ₸"
+    },
+    {
+      "token": "{{product.coffee-machine-delonghi.available_pieces}}",
+      "value": "5"
+    },
+    {
+      "token": "{{product.coffee-machine-delonghi.price}}",
+      "value": "129 900 ₸"
+    },
+    {
+      "token": "{{product.cookware-set-12.available_pieces}}",
+      "value": "0"
+    },
+    {
+      "token": "{{product.cookware-set-12.price}}",
+      "value": "24 900 ₸"
+    },
+    {
+      "token": "{{product.deep-fryer-tefal.available_pieces}}",
+      "value": "6"
+    },
+    {
+      "token": "{{product.deep-fryer-tefal.price}}",
+      "value": "18 900 ₸"
+    },
+    {
+      "token": "{{product.electric-grill-tefal.available_pieces}}",
+      "value": "5"
+    },
+    {
+      "token": "{{product.electric-grill-tefal.price}}",
+      "value": "22 400 ₸"
+    },
+    {
+      "token": "{{product.electric-kettle-xiaomi.available_pieces}}",
+      "value": "15"
+    },
+    {
+      "token": "{{product.electric-kettle-xiaomi.price}}",
+      "value": "8 900 ₸"
+    },
+    {
+      "token": "{{product.fan-mitsubishi.available_pieces}}",
+      "value": "10"
+    },
+    {
+      "token": "{{product.fan-mitsubishi.price}}",
+      "value": "14 200 ₸"
+    },
+    {
+      "token": "{{product.food-processor-moulinex.available_pieces}}",
+      "value": "4"
+    },
+    {
+      "token": "{{product.food-processor-moulinex.price}}",
+      "value": "39 900 ₸"
+    },
+    {
+      "token": "{{product.hair-dryer-dyson.available_pieces}}",
+      "value": "4"
+    },
+    {
+      "token": "{{product.hair-dryer-dyson.price}}",
+      "value": "54 900 ₸"
+    },
+    {
+      "token": "{{product.heater-ballu.available_pieces}}",
+      "value": "7"
+    },
+    {
+      "token": "{{product.heater-ballu.price}}",
+      "value": "19 900 ₸"
+    },
+    {
+      "token": "{{product.induction-cooker-midea.available_pieces}}",
+      "value": "6"
+    },
+    {
+      "token": "{{product.induction-cooker-midea.price}}",
+      "value": "31 200 ₸"
+    },
+    {
+      "token": "{{product.iron-philips.available_pieces}}",
+      "value": "15"
+    },
+    {
+      "token": "{{product.iron-philips.price}}",
+      "value": "9 800 ₸"
+    },
+    {
+      "token": "{{product.juicer-bork.available_pieces}}",
+      "value": "6"
+    },
+    {
+      "token": "{{product.juicer-bork.price}}",
+      "value": "27 800 ₸"
+    },
+    {
+      "token": "{{product.kettle-bosch.available_pieces}}",
+      "value": "14"
+    },
+    {
+      "token": "{{product.kettle-bosch.price}}",
+      "value": "13 900 ₸"
+    },
+    {
+      "token": "{{product.kettle-tefal.available_pieces}}",
+      "value": "20"
+    },
+    {
+      "token": "{{product.kettle-tefal.price}}",
+      "value": "12 900 ₸"
+    },
+    {
+      "token": "{{product.microwave-samsung.available_pieces}}",
+      "value": "4"
+    },
+    {
+      "token": "{{product.microwave-samsung.price}}",
+      "value": "45 000 ₸"
+    },
+    {
+      "token": "{{product.multicooker-redmond.available_pieces}}",
+      "value": "6"
+    },
+    {
+      "token": "{{product.multicooker-redmond.price}}",
+      "value": "32 900 ₸"
+    },
+    {
+      "token": "{{product.rice-cooker-panasonic.available_pieces}}",
+      "value": "9"
+    },
+    {
+      "token": "{{product.rice-cooker-panasonic.price}}",
+      "value": "17 600 ₸"
+    },
+    {
+      "token": "{{product.sandwich-maker-philips.available_pieces}}",
+      "value": "11"
+    },
+    {
+      "token": "{{product.sandwich-maker-philips.price}}",
+      "value": "11 200 ₸"
+    },
+    {
+      "token": "{{product.slow-cooker-crockpot.available_pieces}}",
+      "value": "5"
+    },
+    {
+      "token": "{{product.slow-cooker-crockpot.price}}",
+      "value": "26 300 ₸"
+    },
+    {
+      "token": "{{product.steam-mop-kitfort.available_pieces}}",
+      "value": "7"
+    },
+    {
+      "token": "{{product.steam-mop-kitfort.price}}",
+      "value": "16 700 ₸"
+    },
+    {
+      "token": "{{product.straightener-philips.available_pieces}}",
+      "value": "10"
+    },
+    {
+      "token": "{{product.straightener-philips.price}}",
+      "value": "13 900 ₸"
+    },
+    {
+      "token": "{{product.toaster-philips.available_pieces}}",
+      "value": "8"
+    },
+    {
+      "token": "{{product.toaster-philips.price}}",
+      "value": "15 400 ₸"
+    },
+    {
+      "token": "{{product.vacuum-dyson.available_pieces}}",
+      "value": "3"
+    },
+    {
+      "token": "{{product.vacuum-dyson.price}}",
+      "value": "89 900 ₸"
+    },
+    {
+      "token": "{{product.vacuum-sealer-kitfort.available_pieces}}",
+      "value": "4"
+    },
+    {
+      "token": "{{product.vacuum-sealer-kitfort.price}}",
+      "value": "15 800 ₸"
+    },
+    {
+      "token": "{{product.waffle-maker-tefal.available_pieces}}",
+      "value": "8"
+    },
+    {
+      "token": "{{product.waffle-maker-tefal.price}}",
+      "value": "13 500 ₸"
+    },
+    {
+      "token": "{{product.yogurt-maker-tefal.available_pieces}}",
+      "value": "8"
+    },
+    {
+      "token": "{{product.yogurt-maker-tefal.price}}",
+      "value": "10 500 ₸"
+    }
+  ],
+  "media_refs": null,
+  "media_groups": [
+    "product.air-purifier-xiaomi.images",
+    "product.blender-bosch.images",
+    "product.bread-maker-redmond.images",
+    "product.coffee-grinder-bosch.images",
+    "product.coffee-machine-delonghi.images",
+    "product.coffee-machine-delonghi.videos",
+    "product.cookware-set-12.images",
+    "product.deep-fryer-tefal.images",
+    "product.electric-grill-tefal.images",
+    "product.electric-kettle-xiaomi.images",
+    "product.fan-mitsubishi.images",
+    "product.food-processor-moulinex.images",
+    "product.hair-dryer-dyson.images",
+    "product.heater-ballu.images",
+    "product.induction-cooker-midea.images",
+    "product.iron-philips.images",
+    "product.juicer-bork.images",
+    "product.kettle-bosch.images",
+    "product.kettle-tefal.images",
+    "product.microwave-samsung.images",
+    "product.multicooker-redmond.images",
+    "product.rice-cooker-panasonic.images",
+    "product.sandwich-maker-philips.images",
+    "product.slow-cooker-crockpot.images",
+    "product.steam-mop-kitfort.images",
+    "product.straightener-philips.images",
+    "product.toaster-philips.images",
+    "product.vacuum-dyson.certificates",
+    "product.vacuum-dyson.images",
+    "product.vacuum-sealer-kitfort.images",
+    "product.waffle-maker-tefal.images",
+    "product.yogurt-maker-tefal.images",
+    "topic.delivery.images"
+  ],
+  "trusted_digits": [
+    "1",
+    "12",
+    "19",
+    "2",
+    "23",
+    "3",
+    "5",
+    "6",
+    "7",
+    "8"
+  ]
+}

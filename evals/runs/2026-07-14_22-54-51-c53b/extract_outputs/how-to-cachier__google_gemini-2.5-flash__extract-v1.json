@@ -1,0 +1,60 @@
+{
+  "case_id": "how-to-cachier",
+  "model": "google/gemini-2.5-flash",
+  "prompt": {
+    "name": "extract",
+    "version": 1,
+    "sha256": "dcad0020679babe7928f721af04a451b570bbafb6fe0179d5967c593cb21aa44"
+  },
+  "preprocessor": "image_1024_jpeg85",
+  "raw": "{\n  \"content_kind\": \"tutorial\",\n  \"summary\": \"This is a step-by-step tutorial showing how to add a cashier in the Kaspi Pay application. It illustrates the process from selecting a sales point to confirming the cashier has been added.\",\n  \"extracted_text\": \"Откройте «Точки продаж и кассиры»\\nНа главном экране Kaspi Рау нажмите\\nна блок «Точки продаж и кассиры».\\nВыберите точку продаж\\nВыберите точку продаж из списка,\\nв которой вы хотите добавить кассира.\\n9:41\\nKaspi Pay\\nИП «Мой магазин»\u003e\\nПродажи за сек\\n245 600 т\\nLatk\\nKaspi QR\\nПринимать\\nплатени\\n♡\\nМагазин\\nна Kaspi.kz\\nМоментальные\\nна Казрі Gold\\nG\\nСчета на\\nоплату\\nСсылки\\nна оплату\\nТочки продаж\\nи кассиры\\nОтчёты\\nG\\n9:41\\n\u003c Точки продаж и кассиры\\nМой магазин\\nул. Абая, 132\\n21 кассир\\nМагазин №№2\\nпр. Аль-Фараби, 77/7\\n12 кассира\\nМагазин №3\\nул. Толе би, 15\\n11 кассир\\n+ Добавить точку продаж\\nГлавном Платежи Сообщения Сервисы\\n3 Добавьте кассира\\nВведите ФИО кассира\\nУкажите номер телефона\\nРоль: Кассир (по умолчанию)\\nНажмите «Сохранить»\\n9:41\\n\u003c Добавьте кассира\\nФИО кассира\\nИванов Иван Иванович\\nНомер телефона\\n+7 777 123-45-67\\nРоль\\nКассир\\n• Кассир сможет принимать платежи\\nи работать с продажами.\\n0\\nКассир добавлен\\nНовый кассир появился в списке.\\nОн получит SMS-приглашение\\nи сможет войти в Kaspi Pay.\\n9:41\\n\u003c Точки продаж и кассиры\\nМой магазин\\nул. Абая, 132\\n• Иванов Иван Иванович\\n+7 777 123-45-67\\n• Петров Петр Петрович\\n+7777 000-11-22\\n+ Добавить кассира\\nМагазин №№2\\nпр. Аль-Фараби, 77/7\\n1 2 кассира\\nМагазин №3\\nул. Толе би, 15\\n11 кассир\\nСохранить\\nОтменить\\n• Кассир добавлен\\nКассиру отправлено SMS-приглашение\\n\u003e\\n\u003e\\n\u003e\\n\u003e\",\n  \"language\": \"ru\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"instruction\",\n  \"relates_to_hint\": \"Kaspi Pay cashier management\"\n}",
+  "parsed": {
+    "content_kind": "tutorial",
+    "summary": "This is a step-by-step tutorial showing how to add a cashier in the Kaspi Pay application. It illustrates the process from selecting a sales point to confirming the cashier has been added.",
+    "extracted_text": "Откройте «Точки продаж и кассиры»\nНа главном экране Kaspi Рау нажмите\nна блок «Точки продаж и кассиры».\nВыберите точку продаж\nВыберите точку продаж из списка,\nв которой вы хотите добавить кассира.\n9:41\nKaspi Pay\nИП «Мой магазин»\u003e\nПродажи за сек\n245 600 т\nLatk\nKaspi QR\nПринимать\nплатени\n♡\nМагазин\nна Kaspi.kz\nМоментальные\nна Казрі Gold\nG\nСчета на\nоплату\nСсылки\nна оплату\nТочки продаж\nи кассиры\nОтчёты\nG\n9:41\n\u003c Точки продаж и кассиры\nМой магазин\nул. Абая, 132\n21 кассир\nМагазин №№2\nпр. Аль-Фараби, 77/7\n12 кассира\nМагазин №3\nул. Толе би, 15\n11 кассир\n+ Добавить точку продаж\nГлавном Платежи Сообщения Сервисы\n3 Добавьте кассира\nВведите ФИО кассира\nУкажите номер телефона\nРоль: Кассир (по умолчанию)\nНажмите «Сохранить»\n9:41\n\u003c Добавьте кассира\nФИО кассира\nИванов Иван Иванович\nНомер телефона\n+7 777 123-45-67\nРоль\nКассир\n• Кассир сможет принимать платежи\nи работать с продажами.\n0\nКассир добавлен\nНовый кассир появился в списке.\nОн получит SMS-приглашение\nи сможет войти в Kaspi Pay.\n9:41\n\u003c Точки продаж и кассиры\nМой магазин\nул. Абая, 132\n• Иванов Иван Иванович\n+7 777 123-45-67\n• Петров Петр Петрович\n+7777 000-11-22\n+ Добавить кассира\nМагазин №№2\nпр. Аль-Фараби, 77/7\n1 2 кассира\nМагазин №3\nул. Толе би, 15\n11 кассир\nСохранить\nОтменить\n• Кассир добавлен\nКассиру отправлено SMS-приглашение\n\u003e\n\u003e\n\u003e\n\u003e",
+    "language": "ru",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "instruction",
+    "relates_to_hint": "Kaspi Pay cashier management"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": true
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": false,
+      "detail": "not in the allowed list: 21, 12, 11, 0"
+    },
+    {
+      "name": "no_reasoning_leak",
+      "pass": true
+    },
+    {
+      "name": "required_numbers",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2566,
+    "completion_tokens": 750,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "cost_usd_estimate": 0.0026448,
+  "cost_basis": "measured_split"
+}

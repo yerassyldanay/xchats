@@ -1,0 +1,83 @@
+# evals/scenarios/shop-decisions-v1/data.yaml — the ONE source of truth for this
+# scenario's prompt. Same shop as shop-current, rebuilt per DECISIONS.md: fact values are
+# language-neutral (unit lives in the column name, not the value), media is grouped
+# columns instead of a separate per-file table.
+
+topics:
+  - ref: delivery
+    title: "Доставка"
+    keywords: "доставка, сроки, привезти"
+    body: |
+      Доставляем по городу и области; при крупном заказе доставка бесплатна.
+      Точные суммы и сроки называй только из FACTS.
+    media:
+      - field: illustration_images
+        files: ["delivery-zones.png"]
+        description: "карта зон доставки"
+
+  - ref: payment
+    title: "Оплата"
+    keywords: "оплата, kaspi, рассрочка"
+    body: |
+      Принимаем карту, Kaspi и наличные; на крупные заказы есть рассрочка.
+
+  - ref: how_to_order
+    title: "Как заказать"
+    keywords: "заказ, оформить, купить"
+    body: |
+      Напишите, что интересует → адрес доставки → подтверждение. Счёт пришлём в WhatsApp.
+
+fact_tables:
+  - table: product
+    label_format: "{display_name} — {field_label}"
+    descriptions_label: "ТОВАРЫ (описания):"
+    fields:
+      - { name: price, label: "цена", value_kind: money_display }
+      - { name: available_pieces, label: "штук в наличии", value_kind: number, unit_ru: "штук", unit_kk: "дана" }
+    rows:
+      - ref: coffee-machine
+        display_name: "Кофемашина DeLonghi"
+        description: "автоматическая кофемашина для дома. В наличии на складе в Алматы."
+        values: { price: "129 900 ₸", available_pieces: "5" }
+        media:
+          - { field: gallery_images, files: ["cm-1.jpg", "cm-2.jpg", "cm-3.jpg"], description: "фото кофемашины" }
+          - { field: demo_videos, files: ["cm-demo.mp4"], description: "видео-обзор" }
+          - { field: certificate_documents, files: ["cm-cert.pdf"], description: "сертификат качества (PDF)" }
+      - ref: cookware-set
+        display_name: "Набор посуды"
+        description: "набор из 12 предметов. Под заказ, привозим за несколько дней."
+        values: { price: "24 900 ₸", available_pieces: "0" }
+        media:
+          - { field: gallery_images, files: ["set-1.jpg", "set-2.jpg"], description: "фото набора посуды" }
+
+  - table: policy
+    label_format: "{field_label}"
+    fields:
+      - { name: delivery_cost, label: "стоимость доставки", value_kind: money_display }
+      - { name: free_delivery_from, label: "бесплатная доставка от", value_kind: money_display }
+      - { name: delivery_in_days, label: "срок доставки, в днях", value_kind: number_range, unit_ru: "дня", unit_kk: "күн" }
+      - { name: return_period_days, label: "срок возврата, в днях", value_kind: number, unit_ru: "дней", unit_kk: "күн" }
+      - { name: warranty_months, label: "гарантия, в месяцах", value_kind: number, unit_ru: "месяцев", unit_kk: "ай" }
+    rows:
+      - ref: main
+        display_name: "Условия"
+        values:
+          delivery_cost: "1 500 ₸"
+          free_delivery_from: "20 000 ₸"
+          delivery_in_days: "1–3"
+          return_period_days: "14"
+          warranty_months: "12"
+
+  - table: contact
+    label_format: "{field_label}"
+    fields:
+      - { name: phone, label: "телефон" }
+      - { name: instagram, label: "Instagram" }
+      - { name: work_hours, label: "часы работы", value_kind: time_display }
+    rows:
+      - ref: support
+        display_name: "Контакты"
+        values:
+          phone: "+7 727 300 00 00"
+          instagram: "@demoshop.kz"
+          work_hours: "9:00–19:00"

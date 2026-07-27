@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/base64"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/assistant"
@@ -109,17 +110,18 @@ func (w *Worker) handleWaEvent(ctx context.Context, raw []byte) error {
 		return err
 	}
 	if m.IsGroup {
-		w.Log.Info("dropping group event", "kind", env.Event)
+		w.Log.Info("wa event dropped", "event", env.Event, "result", "group")
 		return nil
 	}
 	acct := config.AccountID(m.OwnerJID)
 	account, err := w.Store.AccountByID(ctx, acct)
 	if err != nil {
-		w.Log.Warn("event for unknown account", "owner_jid", m.OwnerJID)
+		w.Log.Warn("wa event dropped", "event", env.Event, "result", "unknown_account")
+		w.Log.Debug("unknown account detail", "owner_jid", m.OwnerJID)
 		return nil
 	}
 	if m.PhoneJID == "" {
-		w.Log.Warn("event without a phone jid", "kind", env.Event)
+		w.Log.Warn("wa event dropped", "event", env.Event, "result", "no_phone")
 		return nil
 	}
 
@@ -150,9 +152,13 @@ func (w *Worker) handleWaEvent(ctx context.Context, raw []byte) error {
 
 	if !res.MessageInserted {
 		// dedup or own-send echo collapsing onto the existing row: enrichment only.
+		w.Log.Info("wa event processed", "event", env.Event, "account_id", acct,
+			"direction", m.Direction, "result", "duplicate")
 		w.emitMessage(ctx, "message.updated", res.MessageID)
 		return nil
 	}
+	w.Log.Info("wa event processed", "event", env.Event, "account_id", acct,
+		"direction", m.Direction, "result", "new")
 	w.emitMessage(ctx, "message.created", res.MessageID)
 	if res.ChatCreated {
 		w.emitChat(ctx, "chat.created", res.ChatID)
@@ -206,6 +212,15 @@ func (w *Worker) handleStatus(ctx context.Context, env normalize.Envelope) error
 	}
 	if err != nil {
 		return err
+	}
+	// Surface delivery outcomes — especially failures, which otherwise only show as
+	// a silent ⚠️ in the UI. A send can return 2xx yet still fail delivery here.
+	if su.DeliveryState == "failed" {
+		w.Log.Warn("delivery failed", "message_id", msgID, "evolution_message_id", su.EvolutionMessageID,
+			"state", su.DeliveryState)
+	} else {
+		w.Log.Info("delivery update", "message_id", msgID, "evolution_message_id", su.EvolutionMessageID,
+			"state", su.DeliveryState)
 	}
 	w.emitMessage(ctx, "message.updated", msgID)
 	return nil
@@ -264,8 +279,26 @@ func (w *Worker) handleMediaDownload(ctx context.Context, t MediaDownloadTask) e
 
 // --- outbound sends -------------------------------------------------------
 
+// maskPhone keeps only the last 4 digits for logs (PII redaction): "77058686509"
+// → "*******6509". Short/empty values are returned as-is.
+func maskPhone(p string) string {
+	if len(p) <= 4 {
+		return p
+	}
+	return strings.Repeat("*", len(p)-4) + p[len(p)-4:]
+}
+
 func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
 	number := config.PhoneFromJID(t.PhoneJID) // phone, never the @lid
+	kind := "text"
+	if t.MediaID != "" {
+		kind = "media"
+	}
+	// instance="" means the worker falls back to the client's default instance —
+	// surface it so a missing account→instance mapping is visible in logs.
+	w.Log.Info("outbound send start", "message_id", t.MessageID, "account_id", t.AccountID,
+		"instance", t.Instance, "phone", maskPhone(number), "kind", kind)
+
 	var res evolution.SendResult
 	var err error
 	if t.MediaID == "" {
@@ -280,10 +313,21 @@ func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
 		}
 	}
 	if err != nil {
-		w.Log.Error("outbound send failed", "err", err, "message_id", t.MessageID)
+		w.Log.Error("outbound send failed", "message_id", t.MessageID, "instance", t.Instance,
+			"phone", maskPhone(number), "kind", kind, "err", err)
 		_ = w.Store.SetDeliveryState(ctx, t.MessageID, "failed")
 		w.emitMessage(ctx, "message.updated", t.MessageID)
 		return err
+	}
+	// A 2xx with no key id means the gateway accepted the request but produced no
+	// message — usually the number isn't on WhatsApp or the instance dropped. The
+	// fromMe echo can't correlate, so the bubble would silently stay unconfirmed.
+	if res.KeyID == "" {
+		w.Log.Warn("outbound send returned no message id", "message_id", t.MessageID,
+			"instance", t.Instance, "phone", maskPhone(number), "status", res.Status)
+	} else {
+		w.Log.Info("outbound send ok", "message_id", t.MessageID, "instance", t.Instance,
+			"key_id", res.KeyID, "status", res.Status)
 	}
 	// Stamp the gateway id so the fromMe=true echo collapses onto this row.
 	if err := w.Store.StampEvolutionID(ctx, t.MessageID, res.KeyID); err != nil {

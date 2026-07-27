@@ -25,6 +25,7 @@ type Drafter struct {
 	httpc         *http.Client
 	baseURL       string
 	apiKey        string
+	provider      string // gen_ai.system label for Langfuse (openrouter|openai|gemini)
 	fastModel     string // used for drafting (the Draft path)
 	thinkingModel string // stronger model, available for harder calls
 	maxTokens     int
@@ -32,12 +33,14 @@ type Drafter struct {
 }
 
 // New builds the Drafter from LLM_* config. Drafting uses fastModel; thinkingModel
-// is retained for callers that need deeper reasoning.
-func New(baseURL, apiKey, fastModel, thinkingModel string, maxTokens int, temperature float64) *Drafter {
+// is retained for callers that need deeper reasoning. provider is a label only
+// (the wire format is OpenAI-compatible regardless).
+func New(baseURL, apiKey, provider, fastModel, thinkingModel string, maxTokens int, temperature float64) *Drafter {
 	return &Drafter{
 		httpc:         &http.Client{Timeout: 60 * time.Second},
 		baseURL:       strings.TrimRight(baseURL, "/"),
 		apiKey:        apiKey,
+		provider:      provider,
 		fastModel:     fastModel,
 		thinkingModel: thinkingModel,
 		maxTokens:     maxTokens,
@@ -84,60 +87,90 @@ type chatResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
 
 // Draft issues the chat/completions call and decodes the forced tool arguments.
+// The call is recorded as a Langfuse generation span (no-op when tracing is off).
 func (d *Drafter) Draft(ctx context.Context, p brain.Prompt) (domain.RawDraft, error) {
+	msgs := []message{
+		{Role: "system", Content: p.System},
+		{Role: "user", Content: p.User},
+	}
+	input, _ := json.Marshal(msgs)
+	ctx, gen := startGeneration(ctx, genParams{
+		name: "llm.draft", provider: d.provider, model: d.fastModel,
+		temperature: d.temperature, maxTokens: d.maxTokens, input: string(input),
+	})
+
+	rd, args, usage, err := d.draft(ctx, msgs)
+	if usage != nil {
+		gen.setUsage(usage.PromptTokens, usage.CompletionTokens)
+	}
+	gen.end(args, err)
+	return rd, err
+}
+
+type tokenUsage struct{ PromptTokens, CompletionTokens int }
+
+// draft performs the HTTP exchange and returns the parsed draft, the raw emitted
+// tool arguments (for the trace output), and token usage.
+func (d *Drafter) draft(ctx context.Context, msgs []message) (domain.RawDraft, string, *tokenUsage, error) {
 	reqBody := chatRequest{
 		Model:       d.fastModel,
 		MaxTokens:   d.maxTokens,
 		Temperature: d.temperature,
-		Messages: []message{
-			{Role: "system", Content: p.System},
-			{Role: "user", Content: p.User},
-		},
-		Tools:      []tool{emitDraftTool()},
-		ToolChoice: map[string]any{"type": "function", "function": map[string]string{"name": "emit_draft"}},
+		Messages:    msgs,
+		Tools:       []tool{emitDraftTool()},
+		ToolChoice:  map[string]any{"type": "function", "function": map[string]string{"name": "emit_draft"}},
 	}
 	buf, err := json.Marshal(reqBody)
 	if err != nil {
-		return domain.RawDraft{}, err
+		return domain.RawDraft{}, "", nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.baseURL+"/chat/completions", bytes.NewReader(buf))
 	if err != nil {
-		return domain.RawDraft{}, err
+		return domain.RawDraft{}, "", nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+d.apiKey)
 
 	resp, err := d.httpc.Do(req)
 	if err != nil {
-		return domain.RawDraft{}, fmt.Errorf("llm request: %w", err)
+		return domain.RawDraft{}, "", nil, fmt.Errorf("llm request: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		return domain.RawDraft{}, fmt.Errorf("llm http %d: %s", resp.StatusCode, string(body))
+		return domain.RawDraft{}, "", nil, fmt.Errorf("llm http %d: %s", resp.StatusCode, string(body))
 	}
 
 	var cr chatResponse
 	if err := json.Unmarshal(body, &cr); err != nil {
-		return domain.RawDraft{}, fmt.Errorf("llm decode: %w", err)
+		return domain.RawDraft{}, "", nil, fmt.Errorf("llm decode: %w", err)
+	}
+	var usage *tokenUsage
+	if cr.Usage != nil {
+		usage = &tokenUsage{cr.Usage.PromptTokens, cr.Usage.CompletionTokens}
 	}
 	if cr.Error != nil {
-		return domain.RawDraft{}, fmt.Errorf("llm error: %s", cr.Error.Message)
+		return domain.RawDraft{}, "", usage, fmt.Errorf("llm error: %s", cr.Error.Message)
 	}
 	if len(cr.Choices) == 0 {
-		return domain.RawDraft{}, fmt.Errorf("llm: no choices")
+		return domain.RawDraft{}, "", usage, fmt.Errorf("llm: no choices")
 	}
 	args := firstToolArgs(cr)
 	if args == "" {
-		return domain.RawDraft{}, fmt.Errorf("llm: no emit_draft tool call")
+		return domain.RawDraft{}, "", usage, fmt.Errorf("llm: no emit_draft tool call")
 	}
-	return ParseRawDraft(args)
+	rd, err := ParseRawDraft(args)
+	return rd, args, usage, err
 }
 
 func firstToolArgs(cr chatResponse) string {

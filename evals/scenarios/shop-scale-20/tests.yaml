@@ -1,0 +1,9 @@
+include:
+  - common/shop-scale-questions.yaml
+
+tests:
+  - id: "6. deep-list product (#15 of 20), price question"
+    message: "Кухонный комбайн Moulinex есть? Сколько стоит?"
+    requires:
+      - ["product.food-processor-moulinex.price"]
+    language: ru

@@ -1,0 +1,64 @@
+# evals/common/shop-scale-questions.yaml — shared by shop-scale-10/20/30. Every question
+# here may ONLY reference a product among the shop-scale pool's first 10 rows (see
+# scenarios/shop-scale/data.yaml's comment) — those are the only rows guaranteed to exist
+# at every size. Deep-list questions (product #11+) belong in each scenario's OWN
+# tests.yaml, only where that product actually exists at that size.
+tests:
+  - id: "1. exact-name price question"
+    message: "Сколько стоит блендер Bosch?"
+    requires:
+      - ["product.blender-bosch.price"]
+    escalate: false
+    language: ru
+
+  - id: "2. product we don't sell"
+    message: "У вас есть посудомоечная машина Bosch?"
+    escalate: true
+    language: ru
+    # Bare "в наличии" is deliberately NOT on this list: a correct answer legitimately
+    # says "нет в наличии" (not in stock), which contains that exact substring — the same
+    # false positive shop-questions.yaml's test 18 documents. Only phrases that assert
+    # HAVING the product belong here.
+    must_not_contain:
+      - "да, есть"
+      - "да, в наличии"
+
+  - id: "3. ambiguous name matches two products"
+    message: "Сколько стоит чайник?"
+    language: ru
+    # No `requires` on purpose: the catalog has TWO kettles (kettle-tefal, kettle-bosch)
+    # and the message names neither brand. Either a request for clarification or a
+    # two-option answer is correct; forcing one token would penalize the other valid
+    # behavior (the same doctrine as shop-questions.yaml's "5. out-of-stock product").
+    # No `escalate` assertion either, for the same reason — either clarifying or
+    # answering both is legitimate, so neither escalate value is uniquely correct here.
+    # Universal checks (no invented digits/prices, contract pass) still apply; read the
+    # injected text in CONTRACT.md by eye for the rest.
+
+  - id: "4. deep-list question is NOT this — Kazakh price question, in-pool product"
+    message: "Микротолқынды пеш Samsung қанша тұрады?"
+    requires:
+      - ["product.microwave-samsung.price"]
+    escalate: false
+    language: kk
+
+  - id: "5. media request for a non-first product"
+    message: "Пришлите фото тостера Philips"
+    escalate: false
+    language: ru
+    media:
+      any_of: ["products.toaster-philips.gallery_images"]
+
+  - id: "8. history follow-up, price of an in-pool product"
+    # ID starts at 8 on purpose: "6."/"7." are taken by shop-scale-20/30's own deep-list
+    # tests, which land in the same resolved set as this bank.
+    history:
+      - role: client
+        text: "Мультиварка Redmond есть в наличии?"
+      - role: assistant
+        text: "Да, мультиварка Redmond есть в наличии, можно оформить заказ."
+    message: "Отлично, а сколько она стоит?"
+    requires:
+      - ["product.multicooker-redmond.price"]
+    escalate: false
+    language: ru

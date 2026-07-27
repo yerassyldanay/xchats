@@ -1,0 +1,64 @@
+{
+  "case_id": "product-photo",
+  "model": "google/gemini-2.5-flash-lite",
+  "prompt": {
+    "name": "extract",
+    "version": 1,
+    "sha256": "dcad0020679babe7928f721af04a451b570bbafb6fe0179d5967c593cb21aa44"
+  },
+  "preprocessor": "image_1024_jpeg85",
+  "raw": "{\n  \"content_kind\": \"product_photo\",\n  \"summary\": \"A product photo of an orange and gray magnetic drill press with a coolant bottle and power cord. The drill has ON/OFF switches and a brand name visible.\",\n  \"extracted_text\": \"llis\\nON\\nOFF\\nELECTRIC DRILL SWITCH\\nMAGNET SWITCH\",\n  \"language\": \"mixed\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"none\",\n  \"relates_to_hint\": \"magnetic drill press\"\n}",
+  "parsed": {
+    "content_kind": "product_photo",
+    "summary": "A product photo of an orange and gray magnetic drill press with a coolant bottle and power cord. The drill has ON/OFF switches and a brand name visible.",
+    "extracted_text": "llis\nON\nOFF\nELECTRIC DRILL SWITCH\nMAGNET SWITCH",
+    "language": "mixed",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "none",
+    "relates_to_hint": "magnetic drill press"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": false,
+      "detail": "want \"gallery\", got \"none\""
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": true
+    },
+    {
+      "name": "identify_contains_any",
+      "pass": true
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": true
+    },
+    {
+      "name": "no_reasoning_leak",
+      "pass": true
+    },
+    {
+      "name": "forbid_currency",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2566,
+    "completion_tokens": 124,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "cost_usd_estimate": 0.0003062,
+  "cost_basis": "measured_split"
+}

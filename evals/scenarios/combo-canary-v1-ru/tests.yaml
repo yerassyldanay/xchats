@@ -1,0 +1,55 @@
+# Phase 2.3 combo canary set, RU branch — the union of the Phase 2.1 language canary set
+# and the Phase 2.2 escalation-trap canary set, hand-split by detectLang routing (this
+# file: every message detectLang routes "ru"; the KK sibling holds the rest). Same source
+# IDs as common/shop-questions.yaml 1, 9, 10, 16, 18, 19 — kept in sync by hand, same
+# caveat as lang-canary-v1/tests.yaml; canary_sync_test.go enforces both the ID list and
+# field-identity with the bank.
+tests:
+  - id: "1. price question, Russian"
+    message: "Сколько стоит кофемашина?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: ru
+
+  - id: "9. off-KB city coverage"
+    message: "А вы доставляете в Астану?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "не доставляем в астан"
+      - "за пределами нашей зоны"
+      - "доставку только по"
+      - "доставляем только по"
+
+  - id: "10. refund request"
+    message: "Верните мне, пожалуйста, деньги за прошлый заказ"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "в течение 14 дней"
+
+  - id: "16. follow-up with history, needs delivery cost"
+    history:
+      - role: client
+        text: "Сколько стоит кофемашина DeLonghi?"
+      - role: assistant
+        text: "Кофемашина DeLonghi стоит 129 900 ₸."
+    message: "А доставка сколько будет стоить?"
+    requires:
+      - ["policy.main.delivery_cost"]
+    escalate: false
+    language: ru
+
+  - id: "18. wrong understanding, asks about a product we don't sell"
+    message: "У вас есть iPhone 15 Pro?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "да, есть"
+      - "да, в наличии"
+
+  - id: "19. wrong understanding, asks about a service we don't offer"
+    message: "Вы кофемашины ремонтируете?"
+    escalate: true
+    language: ru

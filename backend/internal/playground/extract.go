@@ -117,7 +117,7 @@ func (e *Extractor) Extract(ctx context.Context, kb *kbstore.Store, bs blob.Stor
 		ex = kbstore.MaterialExtraction{Status: "ready", ExtractedText: m.ExtractedText,
 			Extraction: `{"method":"passthrough"}`}
 	case "url":
-		ex = e.extractURL(ctx, m.SourceRef)
+		ex = e.extractURL(ctx, m.SourceRef, kbstore.OperatorComment(m.Extraction))
 	case "image", "pdf", "doc":
 		ex = e.extractMedia(ctx, bs, m)
 	default: // video, audio, anything else → operator describes it
@@ -133,14 +133,17 @@ func (e *Extractor) Extract(ctx context.Context, kb *kbstore.Store, bs blob.Stor
 		if m.SourceType == "url" {
 			prompt = "Не удалось прочитать ссылку — вставьте текст или приложите скриншот."
 		}
-		if _, rerr := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
+		req, rerr := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
 			MaterialID: &materialID,
 			ReqType:    "describe_media",
 			Prompt:     prompt,
 			Context:    jsonObj(map[string]any{"source_type": m.SourceType, "source_ref": m.SourceRef}),
 			Target:     jsonObj(map[string]any{"material_id": materialID.String()}),
-		}); rerr != nil {
+		})
+		if rerr != nil {
 			e.Log.Warn("raise describe_media failed", "err", rerr)
+		} else if hub != nil {
+			hub.Broadcast("kb.request.created", map[string]any{"id": req.ID, "req_type": req.ReqType})
 		}
 	}
 	if hub != nil {
@@ -150,33 +153,42 @@ func (e *Extractor) Extract(ctx context.Context, kb *kbstore.Store, bs blob.Stor
 }
 
 // extractURL does a best-effort server-side fetch → readable text. On any failure
-// (bad scheme, non-200, empty, blocked address) it flags needs_human → the
-// paste/screenshot popup. The SSRF guard lives in the client's dialer (see
-// safeHTTPClient); the scheme is rejected here, before any request is built.
-func (e *Extractor) extractURL(ctx context.Context, rawURL string) kbstore.MaterialExtraction {
+// (bad scheme, non-200, empty, blocked address) it falls back to the operator's
+// comment if one was staged with the material (ready, method "operator_fallback");
+// with no comment it flags needs_human → the paste/screenshot popup. The SSRF
+// guard lives in the client's dialer (see safeHTTPClient); the scheme is rejected
+// here, before any request is built.
+func (e *Extractor) extractURL(ctx context.Context, rawURL, comment string) kbstore.MaterialExtraction {
+	fallback := func(reason string) kbstore.MaterialExtraction {
+		if strings.TrimSpace(comment) != "" {
+			return kbstore.MaterialExtraction{Status: "ready", ExtractedText: comment,
+				Extraction: jsonObj(map[string]any{"method": "operator_fallback", "error": reason})}
+		}
+		return needsHuman(reason)
+	}
 	if u, perr := url.Parse(rawURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return needsHuman("unsupported url (only http/https)")
+		return fallback("unsupported url (only http/https)")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return needsHuman("bad url")
+		return fallback("bad url")
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; xchats-kb/1.0)")
 	resp, err := e.HTTP.Do(req)
 	if err != nil {
-		return needsHuman(err.Error())
+		return fallback(err.Error())
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return needsHuman(fmt.Sprintf("http %d", resp.StatusCode))
+		return fallback(fmt.Sprintf("http %d", resp.StatusCode))
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20)) // 2 MiB cap
 	if err != nil {
-		return needsHuman(err.Error())
+		return fallback(err.Error())
 	}
 	text := htmlToText(string(body))
 	if strings.TrimSpace(text) == "" {
-		return needsHuman("empty/JS-only page")
+		return fallback("empty/JS-only page")
 	}
 	return kbstore.MaterialExtraction{Status: "ready", ExtractedText: text,
 		Extraction: `{"method":"http_fetch"}`}

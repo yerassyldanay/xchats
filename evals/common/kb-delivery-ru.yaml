@@ -1,0 +1,133 @@
+# evals/common/kb-delivery-ru.yaml — the delivery-zones question bank for the
+# shop-kb-v1 family (pipeline: schema_kb_v1). Included by all three active size
+# scenarios (shop-kb-v1-10/-50/-100's tests.yaml via
+# `include: [common/kb-delivery-ru.yaml]`) — delivery behavior is verified at
+# every scale, not just the smallest one.
+#
+# Exercises evals/scenarios/shop-kb-v1/data-ru.yaml's ai_delivery_zones (see
+# internal/kbfixture/generate.go's generateDeliveryZones): "kazakhstan"
+# (country-level fallback, 10 000 ₸ / 3–4 days), "astana" and "almaty" (cities
+# nested under it, cheaper/faster), and "baikonur" (an explicit deny row
+# nested under the same country). IDs are pinned by
+# shop_kb_v1_test.go's TestKBDeliveryRUBank_PinnedIDList — an accidental
+# deletion or truncation fails loudly instead of silently shrinking coverage.
+#
+# `requires`/`forbid_tokens` are AND-of-OR / a flat list over bare
+# `table.ref.field` tokens (no braces — judge.go adds the {{ }} itself);
+# delivery tokens use the singular "delivery" table segment, e.g.
+# "delivery.astana.delivery_cost" (see backend/aiprompt/registry.go). Every
+# test sets `language: ru` — this bank is Russian CUSTOMER INPUT by design (see
+# frame-ru.txt rule 7 for how reply language is actually routed; Kazakh input
+# is exercised separately by common/kb-messages-kk*.yaml).
+#
+# d3/d4 additionally declare `llm_checks`: binary semantic claims judged only
+# by the separate, OPT-IN `judge-llm` command (see judge_llm.go) — the plain
+# `judge` command ignores this field entirely, so this bank's deterministic
+# pass/fail is identical whether or not judge-llm ever runs. They exist
+# because a paraphrased refusal ("К сожалению, туда не доставим.") has no
+# fixed spelling a substring blocklist could reliably catch, and no token
+# marks a REFUSAL the way a token marks an answer.
+tests:
+  - id: "d1. listed city — Astana"
+    message: "Сколько будет стоить доставка в Астану?"
+    requires:
+      - ["delivery.astana.delivery_cost"]
+      - ["delivery.astana.delivery_in_days"]
+    forbid_tokens: ["delivery.kazakhstan.", "delivery.almaty.", "delivery.baikonur."]
+    escalate: false
+    language: ru
+
+  - id: "d2. listed city, different declension — Astane (dative)"
+    message: "Уточните, пожалуйста, сколько стоит доставка по Астане?"
+    requires:
+      - ["delivery.astana.delivery_cost"]
+      - ["delivery.astana.delivery_in_days"]
+    forbid_tokens: ["delivery.kazakhstan.", "delivery.almaty.", "delivery.baikonur."]
+    escalate: false
+    language: ru
+
+  - id: "d3. explicit deny zone — Baikonur beats its parent's allow"
+    message: "А в Байконур доставляете?"
+    # baikonur is nested under kazakhstan (available, 10 000 ₸), but its OWN row denies
+    # delivery — the deny row must win over the parent's allow, not fall back to it.
+    requires:
+      - ["delivery.baikonur.delivery_available"]
+    forbid_tokens: ["delivery.kazakhstan.", "delivery.astana.", "delivery.almaty."]
+    escalate: false
+    language: ru
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что доставки в Байконур нет"
+        expect: true
+      - claim: "Ответ добавляет что-то сверх отказа — обещания, альтернативы, особые условия или контакты партнёров"
+        expect: false
+
+  - id: "d4. unlisted country — China refuses via outside_zones_note"
+    message: "А в Китай доставляете?"
+    # No zone matches "Китай" at all — the closed-world refusal must come from the
+    # seller-authored outside_zones_note token, never invented model prose, and must NOT
+    # escalate (this is a confirmed answer, not an unknown).
+    requires:
+      - ["policy.main.outside_zones_note"]
+    forbid_tokens: ["delivery."]
+    escalate: false
+    language: ru
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что доставки в Китай нет"
+        expect: true
+      - claim: "Ответ добавляет что-то сверх отказа — обещания, альтернативы, особые условия или контакты партнёров"
+        expect: false
+
+  - id: "d5. unplaceable location escalates"
+    message: "А в Верхние Васюки доставляете?"
+    # A deliberately unplaceable town name (no real, identifiable location).
+    # `escalate: true` was removed (2026-07-26): the KB already answers this — no zone
+    # matches, so outside_zones_note ("за пределы Казахстана не доставляем") is a
+    # confirmed seller answer, exactly as in d4. Whether the model additionally
+    # escalates on top of that isn't a boundary this bank can draw, so it's no longer
+    # graded either way; what must hold is that the customer is told there's no
+    # delivery there. (Id kept as-is on purpose, despite no longer asserting escalation,
+    # so this case stays comparable across historic runs — it's pinned in
+    # shop_kb_v1_test.go's kbDeliveryRUPinnedIDs.)
+    language: ru
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что доставки в этот город нет"
+        expect: true
+
+  - id: "d6. negotiation for an excluded direction escalates"
+    message: "А если я сам найму курьера и оплачу, довезёте товар до Китая?"
+    # A customer proposing an exception to a confirmed non-delivery direction is no longer
+    # a simple lookup — outside_zones_note answers "do you deliver", not "what if I make
+    # my own arrangement", so this must escalate rather than improvise a policy.
+    escalate: true
+    language: ru
+
+  - id: "d7. refund demand escalates"
+    message: "Верните мне, пожалуйста, деньги за прошлый заказ."
+    escalate: true
+    must_not_contain: ["в течение 14 дней", "оформите возврат"]
+    language: ru
+
+  - id: "d8. repair service question escalates"
+    message: "Вы ремонтируете кофемашины?"
+    escalate: true
+    must_not_contain: ["не ремонтируем", "не занимаемся ремонтом", "да, ремонтируем"]
+    language: ru
+
+  - id: "d9. off-catalog product escalates"
+    message: "У вас есть iPhone 15 Pro?"
+    escalate: true
+    must_not_contain: ["нет в продаже", "не продаём", "да, есть", "да, в наличии"]
+    language: ru
+
+  - id: "d10. history follow-up resolves the zone already discussed"
+    history:
+      - role: client
+        text: "Здравствуйте! Хочу заказать кофемашину DeLonghi с доставкой в Астану."
+      - role: assistant
+        text: "Здравствуйте! Кофемашина DeLonghi есть в наличии. Уточню детали доставки в Астану."
+    message: "А по времени сколько это займёт?"
+    requires:
+      - ["delivery.astana.delivery_in_days"]
+    forbid_tokens: ["delivery.kazakhstan.", "delivery.almaty.", "delivery.baikonur."]
+    escalate: false
+    language: ru

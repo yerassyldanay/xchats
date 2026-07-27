@@ -1,0 +1,89 @@
+# evals/common/kb-messages-kk-ambiguous.yaml — Kazakh CUSTOMER MESSAGES typed WITHOUT
+# Kazakh-specific letters (ә, ғ, қ, ң, ө, ұ, ү, һ, і) — a customer routinely types Kazakh
+# using only the Russian keyboard, which is invisible to any detector that keys purely on
+# letter presence. Companion bank to kb-messages-kk.yaml (native Kazakh orthography);
+# included by all three kb-size-sweep scenarios (shop-kb-v1-10/-50/-100) identically, same
+# doctrine as that bank. 2026-07-27 decision: Kazakh must be recognized by its words and
+# grammar (see evals/harness/langdetect.go's classifyText), not by its alphabet — this
+# bank is the eval-side proof that the recognizer and the frame (rule 7) actually agree on
+# these messages.
+#
+# DRAFT — every Kazakh phrase below is machine-drafted, pending native Kazakh speaker
+# review before any billed comparison treats Kazakh output as production-quality (same
+# doctrine as kb-messages-kk.yaml — see that file's header).
+#
+# Every test's `message` is asserted elsewhere (shop_kb_v1_test.go) to itself route "kk"
+# via detectLang — this bank's whole reason to exist is proving that recognition works
+# without relying on Kazakh-only letters; a case that quietly needed one would defeat the
+# bank silently. `requires`/`forbid_tokens`/`media`/`stock_check` follow the exact same
+# doctrine as kb-questions-ru.yaml. Every test sets `language: kk`.
+tests:
+  - id: "kka1. shared-alphabet Kazakh — out-of-stock honesty"
+    message: "Сиздерде Филипс блендери бар ма? Билейин деген едим."
+    # Mirrors kk3/kb-questions-ru.yaml test 3: blender-philips is deliberately out of
+    # stock. in_stock is not a fact token (2026-07-26) — stock_check judges the reply's
+    # honesty about availability semantically.
+    forbid_tokens: ["product.blender-philips.price"]
+    media:
+      forbid: true
+    escalate: false
+    language: kk
+    stock_check: "blender-philips"
+
+  - id: "kka2. shared-alphabet Kazakh — exact price"
+    message: "Кофемашина DeLonghi канша турады?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: kk
+
+  - id: "kka3. mixed RU greeting + shared-alphabet KK question clause — delivery cost"
+    message: "Здравствуйте! Астанага жеткизу канша турады?"
+    # The Russian greeting must not pull the reply into Russian: the question itself —
+    # the clause that actually needs answering — is the shared-alphabet Kazakh one.
+    requires:
+      - ["delivery.astana.delivery_cost"]
+    forbid_tokens: ["delivery.kazakhstan.", "delivery.almaty.", "delivery.baikonur."]
+    escalate: false
+    language: kk
+
+  - id: "kka4. bare short follow-up — history carries the language"
+    history:
+      - role: client
+        text: "Кофемашина DeLonghi канша турады?"
+      - role: assistant
+        text: "Қазір бағасын жіберемін."
+    message: "Бар ма?"
+    # Too short (5 Cyrillic letters) to classify on its own — the immediately preceding
+    # client turn (shared-alphabet Kazakh) is what actually carries the language here.
+    # Natural follow-up reading: after being quoted the price, the customer asks whether
+    # the product itself is available.
+    escalate: false
+    language: kk
+    stock_check: "coffee-machine"
+
+  - id: "kka5. code-switching within one message — exact price"
+    message: "Сәлеметсіз бе! Подскажите бағасын кофемашины DeLonghi"
+    # A Kazakh greeting, a Russian verb ("подскажите"), and a Kazakh noun phrase
+    # ("бағасын") inside ONE message, no punctuation separating them at all.
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: kk
+
+  - id: "kka6. mid-conversation language switch — delivery cost"
+    history:
+      - role: client
+        text: "Здравствуйте, что есть из кофемашин?"
+      - role: assistant
+        text: "Здравствуйте! У нас есть кофемашина DeLonghi — автоматическая, с капучинатором."
+    message: "Астанаға жеткізу қанша тұрады?"
+    # Turn 1 is Russian; the customer switches to (native-orthography) Kazakh on turn 2.
+    # The live message alone is long enough to classify directly — this is the sanity
+    # check that a mid-conversation switch is read from the CURRENT message, not stuck
+    # on the conversation's opening language.
+    requires:
+      - ["delivery.astana.delivery_cost"]
+    forbid_tokens: ["delivery.kazakhstan.", "delivery.almaty.", "delivery.baikonur."]
+    escalate: false
+    language: kk

@@ -2,6 +2,55 @@
 @tailwind components;
 @tailwind utilities;
 
+/* shadcn-vue v3 design tokens — Linear-style minimal (HSL: H S% L%).
+   Light is the default; .dark on <html> flips to a deep cool charcoal.
+   --primary reuses #4F46E5 so the accent doesn't shift from the legacy brand. */
+@layer base {
+  :root {
+    --background: 210 20% 98%; /* cool near-white canvas */
+    --foreground: 222 47% 11%; /* ink */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 243 75% 59%; /* #4F46E5 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 20% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 16% 47%; /* = #64748B (legacy secondary text) */
+    --accent: 210 20% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 16% 91%; /* hairline */
+    --input: 220 16% 91%;
+    --ring: 243 75% 59%; /* = --primary */
+    --radius: 0.5rem; /* tight */
+  }
+  .dark {
+    --background: 224 30% 8%; /* deep cool charcoal */
+    --foreground: 210 20% 96%;
+    --card: 224 25% 11%;
+    --card-foreground: 210 20% 96%;
+    --popover: 224 25% 11%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 243 80% 67%; /* lifted indigo */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 222 20% 18%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 222 20% 16%;
+    --muted-foreground: 215 18% 62%;
+    --accent: 222 20% 18%;
+    --accent-foreground: 210 20% 96%;
+    --destructive: 0 63% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 16% 22%;
+    --input: 220 16% 22%;
+    --ring: 243 80% 67%;
+  }
+}
+
 html,
 body,
 #app {
@@ -9,38 +58,7 @@ body,
   margin: 0;
 }
 body {
-  @apply font-sans text-ink bg-panel antialiased;
-}
-
-/* Reusable building blocks so templates stay clean and consistent. */
-@layer components {
-  .card {
-    @apply bg-white rounded-2xl border border-hair shadow-card;
-  }
-  .icon-btn {
-    @apply w-9 h-9 rounded-lg grid place-items-center text-slate-500 hover:bg-panel hover:text-ink transition-colors;
-  }
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl text-sm font-semibold transition disabled:opacity-60 disabled:pointer-events-none;
-  }
-  .btn-brand {
-    @apply btn bg-brand text-white hover:bg-brand-600 shadow-sm;
-  }
-  .btn-wa {
-    @apply btn bg-wa text-white hover:bg-wa-600 shadow-sm;
-  }
-  .btn-ghost {
-    @apply btn border border-hair bg-white text-ink hover:bg-panel;
-  }
-  .btn-sm {
-    @apply h-8 px-3 text-[13px];
-  }
-  .badge {
-    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
-  }
-  .field {
-    @apply w-full rounded-xl border border-hair bg-white px-3 py-2.5 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/10;
-  }
+  @apply font-sans text-foreground bg-background antialiased;
 }
 
 /* Tidy scrollbars to match the clean aesthetic. */

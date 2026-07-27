@@ -1,0 +1,63 @@
+{
+  "case_id": "product-photo",
+  "model": "anthropic/claude-haiku-4.5",
+  "prompt": {
+    "name": "extract",
+    "version": 1,
+    "sha256": "dcad0020679babe7928f721af04a451b570bbafb6fe0179d5967c593cb21aa44"
+  },
+  "preprocessor": "image_1024_jpeg85",
+  "raw": "```json\n{\n  \"content_kind\": \"product_photo\",\n  \"summary\": \"A product photograph of an orange and black magnetic drill press machine with a power cord, shown against a white background. The device features a brand name 'llis' visible on the orange body, control switches, and a flexible hose attachment.\",\n  \"extracted_text\": \"llis\",\n  \"language\": \"none\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"gallery\",\n  \"relates_to_hint\": \"magnetic drill press / portable drilling machine\"\n}\n```",
+  "parsed": {
+    "content_kind": "product_photo",
+    "summary": "A product photograph of an orange and black magnetic drill press machine with a power cord, shown against a white background. The device features a brand name 'llis' visible on the orange body, control switches, and a flexible hose attachment.",
+    "extracted_text": "llis",
+    "language": "none",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "gallery",
+    "relates_to_hint": "magnetic drill press / portable drilling machine"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": true
+    },
+    {
+      "name": "identify_contains_any",
+      "pass": true
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": true
+    },
+    {
+      "name": "no_reasoning_leak",
+      "pass": true
+    },
+    {
+      "name": "forbid_currency",
+      "pass": true
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1717,
+    "completion_tokens": 138,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "cost_usd_estimate": 0.002407,
+  "cost_basis": "measured_split"
+}

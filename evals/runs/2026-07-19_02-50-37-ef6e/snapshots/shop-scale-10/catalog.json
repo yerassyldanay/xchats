@@ -1,0 +1,141 @@
+{
+  "contract": "attach_groups",
+  "tokens": [
+    {
+      "token": "{{contact.support.instagram}}",
+      "value": "@demoshop.kz"
+    },
+    {
+      "token": "{{contact.support.phone}}",
+      "value": "+7 727 300 00 00"
+    },
+    {
+      "token": "{{contact.support.work_hours}}",
+      "value": "9:00–19:00"
+    },
+    {
+      "token": "{{policy.main.delivery_cost}}",
+      "value": "1 500 ₸"
+    },
+    {
+      "token": "{{policy.main.delivery_in_days}}",
+      "value": "1–3"
+    },
+    {
+      "token": "{{policy.main.free_delivery_from}}",
+      "value": "20 000 ₸"
+    },
+    {
+      "token": "{{policy.main.return_period_days}}",
+      "value": "14"
+    },
+    {
+      "token": "{{policy.main.warranty_months}}",
+      "value": "12"
+    },
+    {
+      "token": "{{product.blender-bosch.available_pieces}}",
+      "value": "12"
+    },
+    {
+      "token": "{{product.blender-bosch.price}}",
+      "value": "18 500 ₸"
+    },
+    {
+      "token": "{{product.coffee-machine-delonghi.available_pieces}}",
+      "value": "5"
+    },
+    {
+      "token": "{{product.coffee-machine-delonghi.price}}",
+      "value": "129 900 ₸"
+    },
+    {
+      "token": "{{product.cookware-set-12.available_pieces}}",
+      "value": "0"
+    },
+    {
+      "token": "{{product.cookware-set-12.price}}",
+      "value": "24 900 ₸"
+    },
+    {
+      "token": "{{product.iron-philips.available_pieces}}",
+      "value": "15"
+    },
+    {
+      "token": "{{product.iron-philips.price}}",
+      "value": "9 800 ₸"
+    },
+    {
+      "token": "{{product.kettle-bosch.available_pieces}}",
+      "value": "14"
+    },
+    {
+      "token": "{{product.kettle-bosch.price}}",
+      "value": "13 900 ₸"
+    },
+    {
+      "token": "{{product.kettle-tefal.available_pieces}}",
+      "value": "20"
+    },
+    {
+      "token": "{{product.kettle-tefal.price}}",
+      "value": "12 900 ₸"
+    },
+    {
+      "token": "{{product.microwave-samsung.available_pieces}}",
+      "value": "4"
+    },
+    {
+      "token": "{{product.microwave-samsung.price}}",
+      "value": "45 000 ₸"
+    },
+    {
+      "token": "{{product.multicooker-redmond.available_pieces}}",
+      "value": "6"
+    },
+    {
+      "token": "{{product.multicooker-redmond.price}}",
+      "value": "32 900 ₸"
+    },
+    {
+      "token": "{{product.toaster-philips.available_pieces}}",
+      "value": "8"
+    },
+    {
+      "token": "{{product.toaster-philips.price}}",
+      "value": "15 400 ₸"
+    },
+    {
+      "token": "{{product.vacuum-dyson.available_pieces}}",
+      "value": "3"
+    },
+    {
+      "token": "{{product.vacuum-dyson.price}}",
+      "value": "89 900 ₸"
+    }
+  ],
+  "media_refs": null,
+  "media_groups": [
+    "product.blender-bosch.images",
+    "product.coffee-machine-delonghi.images",
+    "product.coffee-machine-delonghi.videos",
+    "product.cookware-set-12.images",
+    "product.iron-philips.images",
+    "product.kettle-bosch.images",
+    "product.kettle-tefal.images",
+    "product.microwave-samsung.images",
+    "product.multicooker-redmond.images",
+    "product.toaster-philips.images",
+    "product.vacuum-dyson.certificates",
+    "product.vacuum-dyson.images",
+    "topic.delivery.images"
+  ],
+  "trusted_digits": [
+    "1",
+    "12",
+    "2",
+    "23",
+    "5",
+    "7"
+  ]
+}
