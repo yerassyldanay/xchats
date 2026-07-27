@@ -85,6 +85,7 @@ type AiDraft struct {
 	TriggerMessageID *string      `json:"trigger_message_id"`
 	Ordinal          int          `json:"ordinal"`
 	DraftText        string       `json:"draft_text"`
+	ReplyLanguage    string       `json:"reply_language"`
 	Media            []DraftMedia `json:"media"`
 	ContextStatus    string       `json:"context_status"`
 	Confidence       *float64     `json:"confidence"`
@@ -222,6 +223,7 @@ func MapDraft(d store.Draft) AiDraft {
 		TriggerMessageID: nullUUIDPtr(d.TriggerMessageID),
 		Ordinal:          d.OptionOrdinal,
 		DraftText:        d.DraftText,
+		ReplyLanguage:    d.ReplyLanguage,
 		Media:            media,
 		ContextStatus:    d.ContextState,
 		Confidence:       d.Confidence,

@@ -250,6 +250,7 @@ func (s *Store) attachMedia(ctx context.Context, msgs []Message) error {
 type DraftOption struct {
 	Ordinal          int
 	Text             string
+	ReplyLanguage    string
 	Confidence       *float64
 	Escalate         bool
 	EscalationReason string
@@ -273,11 +274,11 @@ func (s *Store) WriteDraftSet(ctx context.Context, chatID uuid.UUID, trigger uui
 	for _, o := range opts {
 		var d Draft
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO xchats.ai_drafts (chat_id, trigger_message_id, option_ordinal, draft_text, confidence, escalate, escalation_reason, draft_state)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 'suggested')
-			RETURNING id, chat_id, trigger_message_id, option_ordinal, draft_text, context_state, confidence, escalate, escalation_reason, draft_state, created_at`,
-			chatID, trigger, o.Ordinal, o.Text, o.Confidence, o.Escalate, o.EscalationReason).
-			Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt); err != nil {
+			INSERT INTO xchats.ai_drafts (chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, confidence, escalate, escalation_reason, draft_state)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'suggested')
+			RETURNING id, chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at`,
+			chatID, trigger, o.Ordinal, o.Text, o.ReplyLanguage, o.Confidence, o.Escalate, o.EscalationReason).
+			Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt); err != nil {
 			return nil, err
 		}
 		for _, a := range o.Assets {
@@ -300,7 +301,7 @@ func (s *Store) WriteDraftSet(ctx context.Context, chatID uuid.UUID, trigger uui
 // PendingDrafts returns the chat's suggested options (with assets).
 func (s *Store) PendingDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, chat_id, trigger_message_id, option_ordinal, draft_text, context_state, confidence, escalate, escalation_reason, draft_state, created_at
+		SELECT id, chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at
 		FROM xchats.ai_drafts WHERE chat_id = $1 AND draft_state='suggested'
 		ORDER BY option_ordinal`, chatID)
 	if err != nil {
@@ -310,7 +311,7 @@ func (s *Store) PendingDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, e
 	var out []Draft
 	for rows.Next() {
 		var d Draft
-		if err := rows.Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -348,9 +349,9 @@ func (s *Store) loadDraftAssets(ctx context.Context, d *Draft) error {
 func (s *Store) DraftByID(ctx context.Context, id uuid.UUID) (Draft, error) {
 	var d Draft
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, chat_id, trigger_message_id, option_ordinal, draft_text, context_state, confidence, escalate, escalation_reason, draft_state, created_at
+		SELECT id, chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at
 		FROM xchats.ai_drafts WHERE id = $1`, id).
-		Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt)
+		Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -373,8 +374,8 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 	err = tx.QueryRow(ctx, `
 		UPDATE xchats.ai_drafts SET draft_state='sent', updated_at=now()
 		WHERE id = $1 AND draft_state='suggested'
-		RETURNING id, chat_id, trigger_message_id, option_ordinal, draft_text, context_state, confidence, escalate, escalation_reason, draft_state, created_at`,
-		draftID).Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt)
+		RETURNING id, chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at`,
+		draftID).Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}
