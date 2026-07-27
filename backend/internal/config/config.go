@@ -77,6 +77,11 @@ type Config struct {
 	LLMDraftTimeoutSeconds int     `yaml:"llm_draft_timeout_seconds" env:"LLM_DRAFT_TIMEOUT_SECONDS"`
 	LLMDraftRetry          bool    `yaml:"llm_draft_retry" env:"LLM_DRAFT_RETRY"`
 
+	// SimulatorEnabled gates the /simulator/messages API (Phase 10): the route is
+	// not registered at all when false. Defaults false — only a dev/staging
+	// deployment should set SIMULATOR_ENABLED=true.
+	SimulatorEnabled bool `yaml:"simulator_enabled" env:"SIMULATOR_ENABLED"`
+
 	// --- Langfuse (LLM observability; secrets via .env) ---
 	// Tracing is best-effort: when disabled or keys are missing the LLM clients
 	// emit to OTel's no-op tracer (≈ free). See internal/telemetry.NewLangfuseProvider.

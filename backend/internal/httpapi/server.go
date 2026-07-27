@@ -133,6 +133,12 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/media/:id", s.handleServeMedia)
 	auth.GET("/realtime", s.handleRealtime)
 
+	// Simulator API (Phase 10) — gated: the route does not exist at all unless
+	// explicitly enabled (SIMULATOR_ENABLED, default false outside dev).
+	if s.cfg.SimulatorEnabled {
+		auth.POST("/simulator/messages", s.handleSimulatorMessage)
+	}
+
 	// Playground — the KB builder (chat → materials → draft blob → approve into
 	// the live KB, 15 Decisions 3–4). No more open/publish/rollback: GET always
 	// returns the merged view; approve is the only write path to live.

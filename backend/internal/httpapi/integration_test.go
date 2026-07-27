@@ -34,12 +34,15 @@ import (
 	"log/slog"
 )
 
-// fakeLLMClient/fakeLLMRegistry stand in for a real provider in this harness:
-// no test here asserts on generated draft CONTENT, and the seeded org has no
-// ai_assistants row (KnowledgeBaseRepo.Load always fails "not configured"
-// before ever reaching the LLM), so a scripted escalation-shaped response is
-// enough to let handleAIDraft/handleOutboundSend run to completion instead of
-// hitting a nil dependency.
+// fakeLLMClient/fakeLLMRegistry stand in for a real provider in this harness.
+// No test here asserts on generated draft CONTENT beyond what this scripted
+// response fixes — its purpose is letting handleAIDraft/the simulator API run
+// to completion instead of hitting a nil dependency or a real network call.
+// fakeLLMRegistry only recognizes fakeLLMProvider (mirroring a real
+// llm.Registry's per-provider rejection), so tests can still exercise the
+// "unregistered provider" validation path with a provider name it doesn't know.
+const fakeLLMProvider = "fake"
+
 type fakeLLMClient struct{}
 
 func (fakeLLMClient) Complete(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
@@ -48,7 +51,12 @@ func (fakeLLMClient) Complete(ctx context.Context, req llm.ChatRequest) (llm.Cha
 
 type fakeLLMRegistry struct{}
 
-func (fakeLLMRegistry) Client(ref llm.ModelRef) (llm.ChatClient, error) { return fakeLLMClient{}, nil }
+func (fakeLLMRegistry) Client(ref llm.ModelRef) (llm.ChatClient, error) {
+	if ref.Provider != fakeLLMProvider {
+		return nil, fmt.Errorf("fakeLLMRegistry: no client configured for provider %q", ref.Provider)
+	}
+	return fakeLLMClient{}, nil
+}
 
 const (
 	ownerJID     = "77011111111@s.whatsapp.net"
@@ -90,7 +98,7 @@ func newHarness(t *testing.T) *harness {
 
 	cfg := &config.Config{
 		WebhookToken: webhookToken, SessionTTLHours: 1, MinPasswordLen: 8,
-		PageSize: 50, CORSOrigins: []string{"*"},
+		PageSize: 50, CORSOrigins: []string{"*"}, SimulatorEnabled: true,
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -137,17 +145,19 @@ func newHarness(t *testing.T) *harness {
 	extractor := playground.NewExtractor(nil, log)
 	builder := playground.NewBuilder(nil, hub)
 
-	// A minimal, real (fake-LLM-backed) response.Service — the seeded org has no
-	// ai_assistants row, so every Respond call degrades to the holding draft;
-	// that's fine, no test here asserts on generated draft content, only that
-	// the async ai_draft/outbound_send tasks complete instead of panicking on
-	// a nil dependency.
+	// A minimal, real (fake-LLM-backed) response.Service. kb.SeedLiveIfEmpty
+	// above already gives the org an ai_assistants row (among other tables), so
+	// KnowledgeBaseRepo.Load succeeds and Respond calls all the way through to
+	// fakeLLMClient's scripted response — no test here asserts on generated
+	// draft CONTENT beyond that fixed response, only that the async
+	// ai_draft/outbound_send tasks complete instead of panicking on a nil
+	// dependency.
 	responseService := &response.Service{
 		Conversations: &responsestore.ConversationRepo{Store: st},
 		KnowledgeBase: &responsestore.KnowledgeBaseRepo{Pool: st.Pool()},
 		Drafts:        &responsestore.DraftRepo{Store: st},
 		Engine: &response.Engine{
-			LLMs: fakeLLMRegistry{}, DefaultModel: llm.ModelRef{Provider: "fake", Model: "fake"},
+			LLMs: fakeLLMRegistry{}, DefaultModel: llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
 			MaxTokens: 500, Temperature: 0.3, RetryEnabled: true,
 		},
 	}

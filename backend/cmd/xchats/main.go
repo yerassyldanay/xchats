@@ -65,6 +65,8 @@ func main() {
 		seed(context.Background(), cfg, st, log)
 	case "webhook-set":
 		runWebhookSet(cfg, log)
+	case "simulate-message":
+		runSimulateMessage(flag.Args()[1:])
 	default:
 		log.Error("unknown command", "cmd", cmd)
 		os.Exit(2)
