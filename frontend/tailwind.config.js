@@ -1,9 +1,15 @@
+import typography from '@tailwindcss/typography'
 import animate from 'tailwindcss-animate'
 
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ['class'],
-  content: ['./index.html', './src/**/*.{vue,ts}'],
+  // ./content/**/*.md and ./scripts/**/*.ts: the blog's markdown content and
+  // generator script (see scripts/build-blog.ts) don't currently embed Tailwind
+  // class strings themselves — src/blog/**/*.vue (already under ./src/**) is
+  // where the classes live — but scanning them costs nothing and covers the
+  // blog pipeline from every angle it could ever need one.
+  content: ['./index.html', './src/**/*.{vue,ts}', './content/**/*.md', './scripts/**/*.ts'],
   theme: {
     extend: {
       colors: {
@@ -59,5 +65,5 @@ export default {
       },
     },
   },
-  plugins: [animate],
+  plugins: [animate, typography],
 }

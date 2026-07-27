@@ -144,12 +144,18 @@ Copy the closest existing scenario folder, then edit:
   named; the prompt and the grading catalog are both generated from it, so they can never
   disagree with each other.
 - `frame.txt` — the rules/persona wording, with `%%KNOWLEDGE_BASE%%` / `%%MEDIA%%` /
-  `%%FACTS%%` / `%%DESCRIPTIONS%%` / `%%MEDIA_FIELD%%` slots the renderer fills in.
-- `scenario.yaml` — points at the two files above plus `tests.yaml`, and says which
-  response contract (`asset_refs` or `attach_groups`) this version's frame expects back.
-  Optionally caps a fact table's row count with `limits: { <table>: N }` (see
+  `%%FACTS%%` / `%%DESCRIPTIONS%%` slots the renderer fills in. Every frame's response
+  contract is the same fixed shape: `reply_text`, `reply_language`,
+  `media_files_to_send`, `escalate`, `escalation_reason`, `confidence` — there is no
+  per-scenario contract choice any more.
+- `scenario.yaml` — points at the two files above plus `tests.yaml`. Optionally caps a
+  fact table's row count with `limits: { <table>: N }` (see
   `scenarios/shop-scale-10/scenario.yaml`) — lets several scenarios share ONE larger
-  `data.yaml` while each imitating a different catalog size.
+  `data.yaml` while each imitating a different catalog size. Setting `pipeline:
+  schema_kb_v1` instead renders through `backend/aiprompt` (see `internal/kbfixture`) —
+  a schema-shaped fixture (matching the product's actual DB columns) in place of
+  `data.yaml`, using the exact prompt/catalog/response code the production backend will
+  eventually call, instead of the harness's own free-standing renderer.
 - `tests.yaml` — usually just `include: [common/shop-questions.yaml]`; add scenario-only
   questions under `tests:` if this version needs one a shared bank doesn't have. A test can
   set `history: [{role: client, text: ...}, {role: assistant, text: ...}]` to simulate a
@@ -317,10 +323,12 @@ Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
 - **The harness is a playground twin of the real renderer, not the real renderer.** It
   proves the *design* can work; the product's own Go code that does this today is tested
   separately: [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L160).
-- **A scenario's response contract may not be the shipping one.** `attach_groups`
-  (grouped media) is a DECISIONS.md proposal; the product today returns `asset_refs`
-  (individual file refs) — see [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212).
-  Check `scenario.yaml`'s `contract:` field before treating a pass rate as migration proof.
+- **The eval suite's response contract is not the shipping one yet.** Every scenario
+  returns the unified `media_files_to_send` shape (grouped media, via `backend/aiprompt`);
+  the product today still returns `asset_refs` (individual file refs, capped at 3) — see
+  [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212). A green run here is
+  evidence the new contract design works, not proof the shipped pipeline already speaks
+  it — wiring the production backend to `backend/aiprompt` is separate, later work.
 - **`schema.sql` files are documentation, not a database.** Nothing runs or enforces them.
 - **Media is validated by NAME, not by file existence.** `data.yaml`'s media filenames
   (e.g. `cm-1.jpg`) are fictional — judge.go checks a model attached a group/ref that

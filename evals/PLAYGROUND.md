@@ -90,8 +90,15 @@ different wording" without duplicating the data file.
 
 ## The harness — what it actually runs
 
-Five small Go programs (no dependency on the product's `backend/` code — the harness is
-free-standing on purpose, since it exists to try out ideas the product hasn't built yet):
+Five small Go programs. Most scenarios are free-standing on purpose, since they exist to
+try out ideas the product hasn't built yet — no dependency on the product's `backend/`
+code. One pipeline is the exception: a scenario with `pipeline: schema_kb_v1` in its
+`scenario.yaml` loads a schema-shaped fixture (`internal/kbfixture`, matching the
+product's actual DB columns) and renders it through `backend/aiprompt` directly — the
+exact prompt/catalog/response code the production backend will eventually call, not a
+harness-side reimplementation of it. Both pipelines produce the same
+`prompt.txt`/`catalog.json`/`promptfooconfig.yaml` outputs and go through the same
+`judge`/`report` steps below.
 
 1. **`render`** — reads `data.yaml`, fills `frame.txt`'s slots with the generated
    KNOWLEDGE BASE / MEDIA / FACTS text, writes `generated/prompt.txt` +
@@ -163,14 +170,15 @@ A schema idea is not ready to build until both pass.
   [TestPostProcess_PriceRenderFailurePostsManualNote](../backend/internal/brain/prompt_test.go#L160).
   A green run here is evidence a design is worth building — it is not a replacement for
   testing the shipped pipeline once it exists.
-- **A scenario can describe a response format the product doesn't have yet** (e.g.
-  `attach_groups` — grouped media — is a proposal; the product today returns
-  `asset_refs`, individual file refs; see
-  [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212)). That's the whole
+- **Every scenario describes a response format the product doesn't have yet.** All of
+  them return the unified `media_files_to_send` shape (grouped media); the product today
+  still returns `asset_refs`, individual file refs capped at 3 — see
+  [openrouter.go](../backend/internal/brain/llm/openrouter.go#L212). That's the whole
   point of a playground — but it means a scenario's pass rate is never migration proof by
-  itself. Say in `scenario.yaml` which real contract (if any) a scenario matches.
-  `schema.sql` files are the same kind of thing: documentation of an idea, never executed,
-  never a real database.
+  itself, even for the `schema_kb_v1` scenarios that render through `backend/aiprompt`
+  directly: that package is not wired into the production backend yet. `schema.sql`
+  files are the same kind of thing: documentation of an idea, never executed, never a
+  real database.
 
 ## One rule this reverses, on purpose
 

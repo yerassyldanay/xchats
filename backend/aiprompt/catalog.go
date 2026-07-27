@@ -6,30 +6,33 @@ import (
 	"strings"
 )
 
-// FactEntry is one row of the fact-placeholder catalog.
+// FactEntry is one model-facing row of the fact-placeholder catalog. It carries
+// selection metadata and, for delivery availability only, a semantic reasoning state;
+// exact customer values remain private in KB and are available only through ResolveFact.
 type FactEntry struct {
-	Token     string    `json:"token"` // {{table.ref.column}}, singular table segment
-	Table     string    `json:"table"`
-	Ref       string    `json:"ref"`
-	Column    string    `json:"column"`
-	Label     string    `json:"label"`
-	Value     string    `json:"value"` // display value; for in_stock: "да"/"нет"
-	Kind      ValueKind `json:"value_kind"`
-	UsageNote string    `json:"usage_note,omitempty"`
-
-	stockValue bool // parsed in_stock value, valid when Kind == KindStockFlag
+	Token          string    `json:"token"` // {{table.ref.column}}, singular table segment
+	Table          string    `json:"table"`
+	Ref            string    `json:"ref"`
+	Column         string    `json:"column"`
+	Label          string    `json:"label"`
+	Kind           ValueKind `json:"value_kind"`
+	ReasoningState string    `json:"reasoning_state,omitempty"` // delivers | no_delivery; delivery-availability facts only
+	UsageNote      string    `json:"usage_note,omitempty"`
 }
 
-// MediaEntry is one row of the semantic media catalog.
+// MediaEntry is one row of the PUBLIC semantic media catalog: the exact token
+// the model must copy, its purpose label, kind, and count. This is the only
+// media shape ever passed to RenderPrompt or serialized as catalog.json — it
+// has no route to a material record or ID, so the renderer cannot leak one
+// even by accident.
 type MediaEntry struct {
-	Token       string    `json:"token"` // table.ref.column, domain table segment
-	Table       string    `json:"table"`
-	Ref         string    `json:"ref"`
-	Column      string    `json:"column"`
-	Label       string    `json:"label"`
-	Kind        MediaKind `json:"kind"`
-	Count       int       `json:"count"`
-	MaterialIDs []string  `json:"-"` // backend-only; never rendered or exported
+	Token  string    `json:"token"` // table.ref.column, domain table segment
+	Table  string    `json:"table"`
+	Ref    string    `json:"ref"`
+	Column string    `json:"column"`
+	Label  string    `json:"label"`
+	Kind   MediaKind `json:"kind"`
+	Count  int       `json:"count"`
 }
 
 // AbsentEntry names an approved record whose media columns are ALL empty.
@@ -40,11 +43,12 @@ type AbsentEntry struct {
 }
 
 // Catalog is everything derived from one approved KB for prompt building and
-// response validation.
+// response validation. Facts, Media, and Absent are the public projection:
+// safe to serialize as catalog.json and safe to hand to RenderPrompt.
 type Catalog struct {
-	Facts  []FactEntry
-	Media  []MediaEntry
-	Absent []AbsentEntry
+	Facts  []FactEntry   `json:"facts"`
+	Media  []MediaEntry  `json:"media"`
+	Absent []AbsentEntry `json:"absent"`
 }
 
 var refPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
@@ -54,7 +58,11 @@ var refPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // Any invalid or stale material reference in a non-empty media column is a
 // hard error — rendering fails, it is never silently treated as empty.
 func BuildCatalog(kb *KB) (*Catalog, error) {
-	cat := &Catalog{}
+	cat := &Catalog{
+		Facts:  []FactEntry{},
+		Media:  []MediaEntry{},
+		Absent: []AbsentEntry{},
+	}
 	if err := buildFacts(kb, cat); err != nil {
 		return nil, err
 	}
@@ -64,7 +72,7 @@ func BuildCatalog(kb *KB) (*Catalog, error) {
 	return cat, nil
 }
 
-func active(salesStatus string) bool { return salesStatus == "" || salesStatus == "active" }
+func active(salesStatus string) bool { return salesStatus == "active" }
 
 func validRef(ref string) error {
 	if !refPattern.MatchString(ref) || strings.Contains(ref, ".") {
@@ -80,24 +88,22 @@ func addFact(cat *Catalog, table, ref string, col FactColumn, value string) {
 		return
 	}
 	cat.Facts = append(cat.Facts, FactEntry{
-		Token:     "{{" + table + "." + ref + "." + col.Column + "}}",
-		Table:     table, Ref: ref, Column: col.Column,
-		Label: col.Label, Value: value, Kind: col.Kind, UsageNote: usageNote(col),
+		Token: "{{" + table + "." + ref + "." + col.Column + "}}",
+		Table: table, Ref: ref, Column: col.Column,
+		Label: col.Label, Kind: col.Kind, UsageNote: usageNote(col),
 	})
 }
 
-func addStockFact(cat *Catalog, ref string, col FactColumn, inStock bool) {
-	display := "да"
-	if !inStock {
-		display = "нет"
+func addDeliveryFlagFact(cat *Catalog, ref string, col FactColumn, available bool) {
+	state := "delivers"
+	if !available {
+		state = "no_delivery"
 	}
-	e := FactEntry{
-		Token:     "{{product." + ref + "." + col.Column + "}}",
-		Table:     "product", Ref: ref, Column: col.Column,
-		Label: col.Label, Value: display, Kind: col.Kind, UsageNote: usageNote(col),
-		stockValue: inStock,
-	}
-	cat.Facts = append(cat.Facts, e)
+	cat.Facts = append(cat.Facts, FactEntry{
+		Token: "{{delivery." + ref + "." + col.Column + "}}",
+		Table: "delivery", Ref: ref, Column: col.Column,
+		Label: col.Label, Kind: col.Kind, ReasoningState: state, UsageNote: usageNote(col),
+	})
 }
 
 func buildFacts(kb *KB, cat *Catalog) error {
@@ -112,8 +118,6 @@ func buildFacts(kb *KB, cat *Catalog) error {
 			switch col.Column {
 			case "price":
 				addFact(cat, "product", p.Ref, col, p.Price)
-			case "in_stock":
-				addStockFact(cat, p.Ref, col, p.InStock)
 			}
 		}
 	}
@@ -147,9 +151,99 @@ func buildFacts(kb *KB, cat *Catalog) error {
 			"delivery_cost": p.DeliveryCost, "delivery_in_days": p.DeliveryInDays,
 			"free_delivery_from": p.FreeDeliveryFrom, "min_order": p.MinOrder,
 			"return_period_in_days": p.ReturnPeriodInDays,
+			"outside_zones_note":    p.OutsideZonesNote,
 		}
 		for _, col := range factColumns["policy"] {
 			addFact(cat, "policy", SingletonRef, col, vals[col.Column])
+		}
+	}
+	if err := buildDeliveryZoneFacts(kb, cat); err != nil {
+		return err
+	}
+	return nil
+}
+
+var validZoneLevels = map[string]bool{"city": true, "region": true, "country": true}
+
+// buildDeliveryZoneFacts derives per-zone delivery facts and enforces every
+// zones-specific fail-closed rule. An empty DeliveryZones means the feature
+// is unused: no rule below applies, and delivery questions fall back to the
+// flat ai_policies.delivery_cost/delivery_in_days facts already added above.
+//
+// Once any zone exists, three invariants are enforced (any violation is a
+// hard BuildCatalog error, never a silent drop):
+//  1. each row is internally consistent — DeliveryAvailable true requires a
+//     non-blank cost and days; false requires both blank. A contradictory row
+//     could otherwise be read either way at substitution time.
+//  2. ParentRef chains resolve to an existing zone with no cycle, so a model
+//     token referencing a parent zone is always resolvable.
+//  3. the flat ai_policies delivery facts are blank (they would contradict
+//     per-zone pricing) and OutsideZonesNote is non-blank (every unlisted
+//     direction must have a real refusal token, never invented prose).
+func buildDeliveryZoneFacts(kb *KB, cat *Catalog) error {
+	if len(kb.DeliveryZones) == 0 {
+		return nil
+	}
+
+	byRef := make(map[string]*DeliveryZone, len(kb.DeliveryZones))
+	for i := range kb.DeliveryZones {
+		z := &kb.DeliveryZones[i]
+		if err := validRef(z.Ref); err != nil {
+			return err
+		}
+		if byRef[z.Ref] != nil {
+			return fmt.Errorf("aiprompt: duplicate delivery zone ref %q", z.Ref)
+		}
+		byRef[z.Ref] = z
+		if !validZoneLevels[z.ZoneLevel] {
+			return fmt.Errorf("aiprompt: delivery zone %q has invalid zone_level %q (want city, region, or country)", z.Ref, z.ZoneLevel)
+		}
+		if z.DeliveryAvailable {
+			if strings.TrimSpace(z.DeliveryCost) == "" || strings.TrimSpace(z.DeliveryInDays) == "" {
+				return fmt.Errorf("aiprompt: delivery zone %q is available but delivery_cost or delivery_in_days is blank", z.Ref)
+			}
+		} else if strings.TrimSpace(z.DeliveryCost) != "" || strings.TrimSpace(z.DeliveryInDays) != "" {
+			return fmt.Errorf("aiprompt: delivery zone %q is unavailable but delivery_cost or delivery_in_days is set", z.Ref)
+		}
+	}
+	for ref, z := range byRef {
+		seen := map[string]bool{ref: true}
+		for parent := z.ParentRef; parent != ""; {
+			if seen[parent] {
+				return fmt.Errorf("aiprompt: delivery zone %q has a cyclic parent_ref chain", ref)
+			}
+			seen[parent] = true
+			next, ok := byRef[parent]
+			if !ok {
+				return fmt.Errorf("aiprompt: delivery zone %q references unknown parent_ref %q", ref, parent)
+			}
+			parent = next.ParentRef
+		}
+	}
+
+	if kb.Policies == nil {
+		return fmt.Errorf("aiprompt: ai_policies is required when ai_delivery_zones is non-empty")
+	}
+	if strings.TrimSpace(kb.Policies.DeliveryCost) != "" || strings.TrimSpace(kb.Policies.DeliveryInDays) != "" {
+		return fmt.Errorf("aiprompt: ai_policies.delivery_cost and delivery_in_days must be blank when ai_delivery_zones is non-empty — use per-zone facts instead")
+	}
+	if strings.TrimSpace(kb.Policies.OutsideZonesNote) == "" {
+		return fmt.Errorf("aiprompt: ai_policies.outside_zones_note is required when ai_delivery_zones is non-empty")
+	}
+
+	for _, z := range kb.DeliveryZones {
+		if !active(z.SalesStatus) {
+			continue
+		}
+		for _, col := range factColumns["delivery"] {
+			switch col.Column {
+			case "delivery_cost":
+				addFact(cat, "delivery", z.Ref, col, z.DeliveryCost)
+			case "delivery_in_days":
+				addFact(cat, "delivery", z.Ref, col, z.DeliveryInDays)
+			case "delivery_available":
+				addDeliveryFlagFact(cat, z.Ref, col, z.DeliveryAvailable)
+			}
 		}
 	}
 	return nil
@@ -182,10 +276,10 @@ func productMedia(p *Product) map[string][]string {
 
 func tariffMedia(t *Tariff) map[string][]string {
 	return map[string][]string{
-		"featured_image":  singular(t.FeaturedImage),
-		"pricing_images":  t.PricingImages,
+		"featured_image":   singular(t.FeaturedImage),
+		"pricing_images":   t.PricingImages,
 		"explainer_videos": t.ExplainerVideos,
-		"terms_documents": t.TermsDocuments,
+		"terms_documents":  t.TermsDocuments,
 	}
 }
 
@@ -260,10 +354,11 @@ func buildMedia(kb *KB, cat *Catalog) error {
 				}
 			}
 			hasAny = true
+			token := o.table + "." + o.ref + "." + spec.Column
 			cat.Media = append(cat.Media, MediaEntry{
-				Token: o.table + "." + o.ref + "." + spec.Column,
+				Token: token,
 				Table: o.table, Ref: o.ref, Column: spec.Column,
-				Label: spec.Label, Kind: spec.Kind, Count: len(ids), MaterialIDs: ids,
+				Label: spec.Label, Kind: spec.Kind, Count: len(ids),
 			})
 		}
 		if !hasAny {
@@ -295,7 +390,7 @@ func validateMaterialRef(kb *KB, id string, spec MediaColumn, table, ref string)
 	if m.SizeBytes <= 0 {
 		return fmt.Errorf("aiprompt: %s references zero-size material %s", at, id)
 	}
-	if m.CustomerVisibility != "visible" {
+	if m.CustomerVisibility != "visible" && m.CustomerVisibility != "auto" {
 		return fmt.Errorf("aiprompt: %s references non-customer-sendable material %s (customer_visibility=%s)", at, id, m.CustomerVisibility)
 	}
 	if !mimeMatches(spec.Kind, m.MimeType) {

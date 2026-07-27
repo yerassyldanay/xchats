@@ -22,6 +22,10 @@ func main() {
 		err = cmdRender(os.Args[2:])
 	case "judge":
 		err = cmdJudge(os.Args[2:])
+	case "judge-llm":
+		err = cmdJudgeLLM(os.Args[2:])
+	case "rewrite-lang":
+		err = cmdRewriteLang(os.Args[2:])
 	case "report":
 		err = cmdReport(os.Args[2:])
 	case "run":
@@ -57,6 +61,29 @@ commands:
   render -scenario <dir> [-models m1,m2] [-models-file path]
                                        build generated/prompt.txt + catalog.json + promptfooconfig.yaml
   judge  -scenario <dir> -run <dir>   grade a run's results.json against the scenario's catalog
+  judge-llm -scenario <dir> -run <dir> [-judge-model id] [-force]
+                                       OPTIONAL, separate semantic-judge pass over an
+                                       already-judged run: for every TestCase.llm_checks
+                                       claim on a ContractPass row, asks a pinned cheap
+                                       model one binary question and writes the result
+                                       back onto judged.json. Never changes ContractPass/
+                                       ModelBehaviorPass — the plain judge command's
+                                       output is byte-identical whether or not this ever
+                                       runs. Makes real, billed model calls; caches per
+                                       claim, so a re-run only bills for new/changed rows
+  rewrite-lang -scenario <dir> -run <dir> [-rewrite-model id] [-force]
+                                       OPTIONAL language safety net over an already-
+                                       judged run: for every ContractPass row, compares
+                                       the customer message's language (detectLang) to
+                                       the reply's actual language (classifyText on the
+                                       injected text); on a mismatch, asks a cheap model
+                                       to rewrite ONLY reply_text (every other field
+                                       copied verbatim, placeholders preserved
+                                       byte-for-byte), re-judges the rewrite from
+                                       scratch, and keeps it only if it passes contract.
+                                       Zero cost on the happy path (language already
+                                       matches). Makes real, billed model calls only on a
+                                       mismatch; -force re-checks rows already evaluated
   report -run <dir>                   write runs/<id>/SUMMARY.md from judge verdicts
   run    -scenario <dir>[,<dir>...] | -all   [-models m1,m2] [-models-file path] [-expect-calls N]
                                        render -> promptfoo eval -> judge -> report; prints the

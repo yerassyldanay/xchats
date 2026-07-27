@@ -167,12 +167,13 @@ tests:
     escalate: false
     language: ru
     media:
-      any_of_groups: ["tariff.business.documents"]
+      any_of: ["tariffs.business.contract_documents"]
       exclusive: true
-    # `tariff.business.documents` is a media GROUP (contract.pdf + presentation.pdf), not
-    # a fact token — no `requires`. `exclusive: true` rejects mixing in the unrelated
-    # `topic.pricing.images` card (already "sent" per history) or the `topic.connect.
-    # documents` connection guide alongside the requested contract/presentation.
+    # `tariffs.business.contract_documents` is a media GROUP (contract.pdf +
+    # presentation.pdf), not a fact token — no `requires`. `exclusive: true` rejects
+    # mixing in the unrelated `topics.pricing.illustration_images` card (already "sent"
+    # per history) or the `topics.connect.guide_documents` connection guide alongside the
+    # requested contract/presentation.
 
   - id: "xph8. post-escalation follow-up: crypto question stays unresolved"
     history:

@@ -6,9 +6,9 @@
 # `requires` is AND-of-OR: every inner list must have at least one of its tokens used.
 # Bare `table.ref.field` (no braces) — judge.go adds the {{ }} itself. Where the two shop
 # schemas name a field differently, an OR-group lists both names (shop-questions.yaml
-# test 3 pattern), and every media expectation declares BOTH any_of_refs (shop-current's
-# asset_refs contract) and any_of_groups (shop-decisions-v1's attach_groups contract), so
-# this bank works under either contract without edits.
+# test 3 pattern). Media expectations declare `any_of` with the unified, pluralized
+# purpose-named token shape ("products.coffee-machine.demo_videos") — both schemas now
+# group media the same way, so this bank works under either without edits.
 #
 # The axis under test: history depth and history-vs-KB conflicts. Two authoring rules
 # hold everywhere below (both are judge.go facts, not style):
@@ -158,8 +158,7 @@ tests:
     escalate: false
     language: ru
     media:
-      any_of_groups: ["product.coffee-machine.videos"]
-      any_of_refs: ["coffee-video"]
+      any_of: ["products.coffee-machine.demo_videos"]
       exclusive: true
     # Photos were already "sent" per history; the follow-up switches media TYPE — the
     # model must select the video, not re-send photos alongside it. `exclusive: true`

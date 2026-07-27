@@ -25,6 +25,8 @@ func cmdRun(args []string) (runID string, err error) {
 	expectCalls := fs.Int("expect-calls", 0, "if >0, hard-fail before spending anything unless the resolved (tests x models x repeats) call count matches exactly — a deliberate confirmation gate for billed runs")
 	repeats := fs.Int("repeats", 1, "run every (test, model) pair this many times (formalized sample sizes: 3 uncached repetitions for screening, 5 for a finalist's 15-intent bank) — requires -no-cache when >1")
 	launchID := fs.String("launch", "", "group this run under an existing launch id (see `harness launch`) — leave empty for a standalone run, which is then its own singleton launch")
+	retryMedia := fs.Bool("retry-media", false, "opt-in (default off): after each scenario's billed pass, retry IN PLACE (within this same run, before judging/publishing) any row whose media_files_to_send named a nonexistent or no-longer-resolvable media reference — labeled retry_reason=\"media_not_found\" in judged.json. See `harness retry` for the post-hoc, derivative-run alternative against an already-published run.")
+	baseURL := fs.String("base-url", "", "override the OpenRouter base URL used by -retry-media's retry calls (default: $EVAL_BASE_URL, else https://openrouter.ai/api/v1) — same convention as `harness retry`")
 	if err := fs.Parse(args); err != nil {
 		return "", err
 	}
@@ -42,11 +44,35 @@ func cmdRun(args []string) (runID string, err error) {
 			return "", err
 		}
 		for _, m := range matches {
-			scenarioDirs = append(scenarioDirs, filepath.Dir(m))
+			sd := filepath.Dir(m)
+			sc, err := loadScenario(sd)
+			if err != nil {
+				return "", fmt.Errorf("load %s: %w", sd, err)
+			}
+			// Archived scenarios are silently skipped (logged, not an error) during -all
+			// glob expansion — -all must keep working forever with archived dirs present,
+			// exactly the zero-new-spend guarantee archival exists for. See
+			// ScenarioConfig.Archived's doc comment.
+			if sc.Archived {
+				fmt.Printf("run: skipping archived scenario %s (%s)\n", sd, sc.ArchivedReason)
+				continue
+			}
+			scenarioDirs = append(scenarioDirs, sd)
 		}
 	} else if *scenarioList != "" {
 		for _, s := range strings.Split(*scenarioList, ",") {
-			scenarioDirs = append(scenarioDirs, strings.TrimSpace(s))
+			sd := strings.TrimSpace(s)
+			sc, err := loadScenario(sd)
+			if err != nil {
+				return "", fmt.Errorf("load %s: %w", sd, err)
+			}
+			// Unlike -all's silent skip, an EXPLICIT -scenario request naming an archived
+			// scenario is a mistake worth failing loudly before any spend, not a request to
+			// quietly honor.
+			if sc.Archived {
+				return "", fmt.Errorf("run: scenario %s is archived (%s) — refusing to run it; remove it from -scenario if this is intentional", sd, sc.ArchivedReason)
+			}
+			scenarioDirs = append(scenarioDirs, sd)
 		}
 	}
 	if len(scenarioDirs) == 0 {
@@ -82,6 +108,9 @@ func cmdRun(args []string) (runID string, err error) {
 		totalTests += len(resolved.Tests)
 	}
 	totalCalls := resolveExpectedCalls(totalTests, len(filteredModels), *repeats)
+	if err := validateResolvedRunSize(totalTests, totalCalls); err != nil {
+		return "", err
+	}
 	if *repeats > 1 {
 		fmt.Printf("run: %d scenario(s), %d test(s) total, %d model(s), %d repeat(s) => %d billed calls (uncached — every repeat is a fresh call)\n",
 			len(scenarioDirs), totalTests, len(filteredModels), *repeats, totalCalls)
@@ -94,7 +123,7 @@ func cmdRun(args []string) (runID string, err error) {
 	}
 
 	var runDir string
-	runID, runDir, err = provenance.NewRunDir("runs")
+	runID, runDir, err = provenance.NewStagedRunDir("runs")
 	if err != nil {
 		return "", err
 	}
@@ -127,13 +156,30 @@ func cmdRun(args []string) (runID string, err error) {
 			return runID, err
 		}
 
-		ref, err := provenance.SnapshotScenario(sd, runDir, scenario.Name)
+		fixturePath := ""
+		if scenario.Pipeline == "schema_kb_v1" {
+			fixturePath = filepath.Join(sd, scenario.Data)
+		}
+		ref, err := provenance.SnapshotScenario(sd, runDir, scenario.Name, fixturePath)
 		if err != nil {
 			return runID, fmt.Errorf("snapshot %s: %w", scenario.Name, err)
 		}
 
 		if err := runPromptfoo(sd, scenario.Name, absRunDir, *noCache, *repeats); err != nil {
 			return runID, fmt.Errorf("promptfoo eval for %s: %w", scenario.Name, err)
+		}
+		if *retryMedia {
+			base := *baseURL
+			if base == "" {
+				base = envOrDefault("EVAL_BASE_URL", "https://openrouter.ai/api/v1")
+			}
+			retried, err := retryMediaNotFoundInPlace(sd, absRunDir, scenario, models, manifest.ModelsSHA256, base, os.Getenv("OPENROUTER_API_KEY"))
+			if err != nil {
+				return runID, fmt.Errorf("retry-media %s: %w", scenario.Name, err)
+			}
+			if retried > 0 {
+				fmt.Printf("retry-media: retried %d media-not-found row(s) in %s\n", retried, scenario.Name)
+			}
 		}
 		if sha, err := provenance.SHA256File(filepath.Join(runDir, scenario.Name+".results.json")); err == nil {
 			ref.ResultsSHA256 = sha
@@ -153,7 +199,11 @@ func cmdRun(args []string) (runID string, err error) {
 		return runID, err
 	}
 
-	return runID, reportRun(runDir, *modelsPath)
+	publishedRunDir, err := provenance.PublishStagedRun("runs", runID, runDir)
+	if err != nil {
+		return runID, err
+	}
+	return runID, reportRun(publishedRunDir, *modelsPath)
 }
 
 func runPromptfoo(scenarioDir, scenarioName, absRunDir string, noCache bool, repeats int) error {
@@ -178,6 +228,18 @@ func runPromptfoo(scenarioDir, scenarioName, absRunDir string, noCache bool, rep
 // testable (run_test.go) rather than only exercised inline inside cmdRun.
 func resolveExpectedCalls(totalTests, numModels, repeats int) int {
 	return totalTests * numModels * repeats
+}
+
+// validateResolvedRunSize rejects an empty scenario selection before a run directory
+// is minted. An empty test set is a configuration error, not a meaningful 0/0 result.
+func validateResolvedRunSize(totalTests, totalCalls int) error {
+	if totalTests < 1 {
+		return fmt.Errorf("run: resolved zero tests — refusing to create an empty 0/0 run")
+	}
+	if totalCalls < 1 {
+		return fmt.Errorf("run: resolved zero model calls — refusing to create an empty 0/0 run")
+	}
+	return nil
 }
 
 // validateRepeats hard-requires -no-cache whenever -repeats requests more than one call

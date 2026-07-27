@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -45,7 +46,7 @@ func TestScenarioExecutionFromVerdict_ParseFailure_EverythingDownstreamIsNotRun(
 
 	downstream := []string{
 		"contract_fields", "no_unknown_tokens", "no_leftover_braces", "no_reasoning_leak",
-		"requires", "media", "escalate", "language", "language_text_ok", "language_field_ok",
+		"requires", "media", "escalate", "escalate_text_consistency", "language", "language_text_ok", "language_field_ok",
 		"must_not_contain", "outcomes", "no_invented_digits", "no_unit_issues", "no_unknown_media", "media_count",
 	}
 	for _, name := range downstream {
@@ -78,23 +79,25 @@ func TestScenarioExecutionFromVerdict_ParseFailure_EverythingDownstreamIsNotRun(
 // model-behavior checks that run after it.
 func TestScenarioExecutionFromVerdict_ParseOK_EveryScoreReflectsRealEvaluation(t *testing.T) {
 	v := Verdict{
-		TestID:              "t2",
-		Model:               "test/model",
-		ParseOK:             true,
-		ContractFields:      false, // e.g. missing reply_text — but judgeOne kept going anyway
-		RequiresPass:        false,
-		MediaPass:           true,
-		EscalatePass:        true,
-		LanguagePass:        true,
-		MustNotContainPass:  true,
-		ModelBehaviorPass:   false,
-		ContractPass:        false,
-		MediaCountEvaluated: true, // real judgeOne always sets this once ParseOK is true
+		TestID:                            "t2",
+		Model:                             "test/model",
+		ParseOK:                           true,
+		ContractFields:                    false, // e.g. missing reply_text — but judgeOne kept going anyway
+		RequiresPass:                      false,
+		MediaPass:                         true,
+		EscalatePass:                      true,
+		EscalateTextConsistencyEvaluated:  true, // real judgeOne always sets this once escalate itself parsed
+		EscalateTextConsistencyPass:       true,
+		LanguagePass:                      true,
+		MustNotContainPass:                true,
+		ModelBehaviorPass:                 false,
+		ContractPass:                      false,
+		MediaCountEvaluated:               true, // real judgeOne always sets this once ParseOK is true
 	}
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
 
 	for _, name := range []string{"contract_fields", "no_unknown_tokens", "no_leftover_braces",
-		"no_reasoning_leak", "requires", "media", "escalate", "language", "language_text_ok",
+		"no_reasoning_leak", "requires", "media", "escalate", "escalate_text_consistency", "language", "language_text_ok",
 		"language_field_ok", "must_not_contain", "no_invented_digits", "no_unit_issues", "no_unknown_media",
 		"media_count"} {
 		s, ok := scoreByName(exec.Scores, name)
@@ -240,12 +243,12 @@ func TestLoadRunExecutions_CombinesBothFamilies(t *testing.T) {
 // ModelBehaviorPass=true). Confirms the adapter's not_run logic agrees with actual
 // production code, not just a model of it.
 func TestScenarioExecutionFromVerdict_RealJudgeOne_ContractFieldsFailStillEvaluatesBehavior(t *testing.T) {
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test-model"
-	row.Response.Output = `{"reply_text":"ok","reply_language":7,"attach_groups":[],"escalate":"true"}`
+	row.Response.Output = `{"reply_text":"ok","reply_language":7,"media_files_to_send":[],"escalate":"true"}`
 
-	v := judgeOne(TestCase{ID: "bad-contract"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "bad-contract"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if v.ContractPass || !v.ModelBehaviorPass {
 		t.Fatalf("precondition failed: got ContractPass=%v ModelBehaviorPass=%v, want false/true", v.ContractPass, v.ModelBehaviorPass)
 	}
@@ -293,7 +296,7 @@ func TestScenarioExecutionFromVerdict_ReplyTextExtractedFromRawOutput(t *testing
 	v := Verdict{
 		TestID:    "t1",
 		Model:     "test/model",
-		RawOutput: `{"reply_text":"Доставка 1500 тг.","reply_language":"ru","attach_groups":[],"escalate":false}`,
+		RawOutput: `{"reply_text":"Доставка 1500 тг.","reply_language":"ru","media_files_to_send":[],"escalate":false}`,
 		ParseOK:   true,
 	}
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
@@ -441,12 +444,13 @@ func TestEnrichScenarioExecutions_FallbacksForLegacyAndUnannotatedData(t *testin
 }
 
 // TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail proves
-// the six universal safety rows attach unconditionally (no snapshot needed) and read
+// the seven universal safety rows attach unconditionally (no snapshot needed) and read
 // their Pass/Actual straight back off the Scores this same function just built — never
 // a second, independently-computed verdict. This fixture deliberately does NOT set
-// MediaCountEvaluated (simulating a verdict judged by pre-upgrade code, ParseOK=true
-// notwithstanding — see MediaCountEvaluated's own doc comment on Verdict) — the
-// media_count row must render as not-applicable (Pass=nil), never a fabricated pass.
+// MediaCountEvaluated or EscalateTextConsistencyEvaluated (simulating a verdict judged
+// by pre-upgrade code, ParseOK=true notwithstanding — see each field's own doc comment
+// on Verdict) — both rows must render as not-applicable (Pass=nil), never a fabricated
+// pass.
 func TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail(t *testing.T) {
 	v := Verdict{
 		TestID: "t1", Model: "test/model", ParseOK: true, ContractFields: true,
@@ -454,7 +458,7 @@ func TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail
 	}
 	exec := scenarioExecutionFromVerdict("fixture-scenario", v)
 
-	wantKeys := []string{"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count", "no_control_chars"}
+	wantKeys := []string{"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count", "no_control_chars", "escalate_text_consistency"}
 	if len(exec.Contract) != len(wantKeys) {
 		t.Fatalf("want exactly %d safety rows, got %d: %+v", len(wantKeys), len(exec.Contract), exec.Contract)
 	}
@@ -478,6 +482,10 @@ func TestScenarioExecutionFromVerdict_ContractSafetyRows_AlwaysPresentPassOrFail
 	if p := contractRow(t, exec.Contract, "media_count"); p.Pass != nil {
 		t.Errorf("want media_count Pass=nil for a verdict that never set MediaCountEvaluated, got %v (Actual=%q)", *p.Pass, p.Actual)
 	}
+	// Same guarantee for the escalate/text consistency row (EscalateTextConsistencyEvaluated).
+	if p := contractRow(t, exec.Contract, "escalate_text_consistency"); p.Pass != nil {
+		t.Errorf("want escalate_text_consistency Pass=nil for a verdict that never set EscalateTextConsistencyEvaluated, got %v (Actual=%q)", *p.Pass, p.Actual)
+	}
 }
 
 // TestScenarioExecutionFromVerdict_MediaCountEvaluated_RendersRealPassOrFail is the
@@ -495,6 +503,68 @@ func TestScenarioExecutionFromVerdict_MediaCountEvaluated_RendersRealPassOrFail(
 	exec2 := scenarioExecutionFromVerdict("fixture-scenario", over)
 	if p := contractRow(t, exec2.Contract, "media_count"); p.Pass == nil || *p.Pass || p.Actual != "5 attachments" {
 		t.Errorf("want media_count=fail with the count in Actual when over the cap, got %+v", p)
+	}
+}
+
+// TestScenarioExecutionFromVerdict_EscalateTextConsistencyEvaluated_RendersRealPassOrFail
+// mirrors TestScenarioExecutionFromVerdict_MediaCountEvaluated_RendersRealPassOrFail for
+// escalate_text_consistency: not_run when EscalateTextConsistencyEvaluated is false (see
+// the test above), a real pass/fail once it's true.
+func TestScenarioExecutionFromVerdict_EscalateTextConsistencyEvaluated_RendersRealPassOrFail(t *testing.T) {
+	ok := Verdict{TestID: "t1", Model: "m", ParseOK: true, ContractFields: true, EscalateTextConsistencyEvaluated: true, EscalateTextConsistencyPass: true}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", ok)
+	if p := contractRow(t, exec.Contract, "escalate_text_consistency"); p.Pass == nil || !*p.Pass {
+		t.Errorf("want escalate_text_consistency=pass when evaluated and consistent, got %+v", p)
+	}
+
+	deflected := Verdict{
+		TestID: "t1", Model: "m", ParseOK: true, ContractFields: true,
+		EscalateTextConsistencyEvaluated: true, EscalateTextConsistencyPass: false,
+		DeflectionPhrase: "уточните у менеджера",
+	}
+	exec2 := scenarioExecutionFromVerdict("fixture-scenario", deflected)
+	if p := contractRow(t, exec2.Contract, "escalate_text_consistency"); p.Pass == nil || *p.Pass || !strings.Contains(p.Actual, "уточните у менеджера") {
+		t.Errorf("want escalate_text_consistency=fail with the deflection phrase in Actual, got %+v", p)
+	}
+}
+
+// TestScenarioExecutionFromVerdict_StockLLMCheck_NotRunThenRealPassOrFail mirrors
+// TestScenarioExecutionFromVerdict_MediaCountEvaluated_RendersRealPassOrFail for the
+// auto-generated stock-correctness dimension (2026-07 consolidation): not_run when
+// StockLLMEvaluated is false (the test declared no StockCheckRef, or judge-llm never
+// ran), a real pass/fail once it's true — never a fabricated pass from LLMStockPass's
+// nil/zero value.
+func TestScenarioExecutionFromVerdict_StockLLMCheck_NotRunThenRealPassOrFail(t *testing.T) {
+	untouched := Verdict{TestID: "t1", Model: "m", ParseOK: true, ContractFields: true}
+	exec := scenarioExecutionFromVerdict("fixture-scenario", untouched)
+	if s, ok := scoreByName(exec.Scores, "stock_llm_check"); !ok || s.Status != ScoreNotRun {
+		t.Errorf("want stock_llm_check=not_run when StockLLMEvaluated is false, got %+v (ok=%v)", s, ok)
+	}
+
+	passTrue := true
+	passed := Verdict{
+		TestID: "t1", Model: "m", ParseOK: true, ContractFields: true,
+		StockLLMEvaluated: true, LLMStockPass: &passTrue,
+		StockLLMChecks: []StockLLMCheckResult{{ProductRef: "coffee-machine", ExpectedState: "in_stock", Classification: "in_stock", Pass: true}},
+	}
+	exec2 := scenarioExecutionFromVerdict("fixture-scenario", passed)
+	if s, ok := scoreByName(exec2.Scores, "stock_llm_check"); !ok || s.Status != ScorePass {
+		t.Errorf("want stock_llm_check=pass, got %+v (ok=%v)", s, ok)
+	}
+
+	passFalse := false
+	failed := Verdict{
+		TestID: "t1", Model: "m", ParseOK: true, ContractFields: true,
+		StockLLMEvaluated: true, LLMStockPass: &passFalse,
+		StockLLMChecks: []StockLLMCheckResult{{ProductRef: "blender-philips", ExpectedState: "out_of_stock", Classification: "unclear", Pass: false}},
+	}
+	exec3 := scenarioExecutionFromVerdict("fixture-scenario", failed)
+	s, ok := scoreByName(exec3.Scores, "stock_llm_check")
+	if !ok || s.Status != ScoreFail {
+		t.Errorf("want stock_llm_check=fail, got %+v (ok=%v)", s, ok)
+	}
+	if !strings.Contains(s.Detail, "blender-philips") || !strings.Contains(s.Detail, "unclear") {
+		t.Errorf("want Detail to name the product ref and classification, got %q", s.Detail)
 	}
 }
 
@@ -537,20 +607,20 @@ func contractRow(t *testing.T, rows []VContractRow, key string) VContractRow {
 // — never a re-grade (Pass always matches the Verdict-derived Score already on Scores).
 func TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown(t *testing.T) {
 	runDir := t.TempDir()
-	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{Contract: "asset_refs"}, []TestCase{
+	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{}, []TestCase{
 		{
 			ID:             "t1",
 			Message:        "Сколько стоит кофемашина?",
 			Requires:       [][]string{{"product.coffee-machine.price"}},
 			Language:       "ru",
 			Escalate:       boolPtr(false),
-			Media:          &MediaExpect{AnyOfRefs: []string{"coffee-photo-1"}},
+			Media:          &MediaExpect{AnyOf: []string{"coffee-photo-1"}},
 			MustNotContain: []string{"бесплатно"},
 		},
 		{ID: "t2", Message: "no requirements declared at all"},
 	})
 
-	raw := `{"reply_text":"Кофемашина стоит {{product.coffee-machine.price}}","reply_language":"ru","escalate":false,"asset_refs":["coffee-photo-1"]}`
+	raw := `{"reply_text":"Кофемашина стоит {{product.coffee-machine.price}}","reply_language":"ru","escalate":false,"media_files_to_send":["coffee-photo-1"]}`
 	v1 := Verdict{
 		TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: raw,
 		RequiresPass: true, LanguagePass: true, EscalatePass: true, MediaPass: true, MustNotContainPass: true,
@@ -562,9 +632,9 @@ func TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown(
 
 	t1 := out[0]
 	wantOrder := []string{"requires", "language", "escalate", "media", "must_not_contain",
-		"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count", "no_control_chars"}
+		"valid_json", "contract_fields", "no_unresolved_placeholders", "no_unknown_media", "no_invented_digits", "media_count", "no_control_chars", "escalate_text_consistency"}
 	if len(t1.Contract) != len(wantOrder) {
-		t.Fatalf("want %d rows (5 requirement + 7 safety), got %d: %+v", len(wantOrder), len(t1.Contract), t1.Contract)
+		t.Fatalf("want %d rows (5 requirement + 8 safety), got %d: %+v", len(wantOrder), len(t1.Contract), t1.Contract)
 	}
 	for i, k := range wantOrder {
 		if t1.Contract[i].Key != k {
@@ -594,8 +664,8 @@ func TestEnrichScenarioExecutions_ContractRequirementRows_OnlyDeclaredOnesShown(
 	}
 
 	t2 := out[1]
-	if len(t2.Contract) != 7 {
-		t.Fatalf("want t2 (no requirements declared) to carry ONLY the 7 safety rows, got %d: %+v", len(t2.Contract), t2.Contract)
+	if len(t2.Contract) != 8 {
+		t.Fatalf("want t2 (no requirements declared) to carry ONLY the 8 safety rows, got %d: %+v", len(t2.Contract), t2.Contract)
 	}
 	for _, r := range t2.Contract {
 		if r.Kind != "safety" {
@@ -636,10 +706,10 @@ func TestEnrichScenarioExecutions_ContractRequirementRows_FailedRequirementShows
 // any_of_groups/any_of_refs expectation, which would render the allowed list instead.
 func TestEnrichScenarioExecutions_ForbidMediaShowsDedicatedExpectedText(t *testing.T) {
 	runDir := t.TempDir()
-	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{Contract: "asset_refs"}, []TestCase{
+	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{}, []TestCase{
 		{ID: "t1", Message: "Здравствуйте!", Media: &MediaExpect{Forbid: true}},
 	})
-	v := Verdict{TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: `{"reply_text":"Здравствуйте!","reply_language":"ru","asset_refs":[],"escalate":false}`, MediaPass: true}
+	v := Verdict{TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true, RawOutput: `{"reply_text":"Здравствуйте!","reply_language":"ru","media_files_to_send":[],"escalate":false}`, MediaPass: true}
 	execs := enrichScenarioExecutions(runDir, "shop-current", "", []VExecution{scenarioExecutionFromVerdict("shop-current", v)})
 
 	media := contractRow(t, execs[0].Contract, "media")
@@ -838,7 +908,7 @@ func TestScenarioExecutionFromVerdict_OutcomesScore(t *testing.T) {
 func TestEnrichScenarioExecutions_OutcomesRequirementRow(t *testing.T) {
 	runDir := t.TempDir()
 	escalateFalse := false
-	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{Contract: "asset_refs"}, []TestCase{
+	writeSnapshotScenario(t, runDir, "shop-current", ScenarioConfig{}, []TestCase{
 		{
 			ID:      "t1",
 			Message: "Кстати, а какой у него лимит платежей в месяц?",
@@ -851,7 +921,7 @@ func TestEnrichScenarioExecutions_OutcomesRequirementRow(t *testing.T) {
 
 	v := Verdict{
 		TestID: "t1", Model: "m1", ParseOK: true, ContractFields: true,
-		RawOutput:        `{"reply_text":"Уточните, пожалуйста, какой тариф вас интересует?","reply_language":"ru","escalate":false,"asset_refs":[]}`,
+		RawOutput:        `{"reply_text":"Уточните, пожалуйста, какой тариф вас интересует?","reply_language":"ru","escalate":false,"media_files_to_send":[]}`,
 		OutcomesDeclared: true, OutcomesPass: true, OutcomeMatched: "asks which tariff",
 		OutcomeLabels: []string{"answers with the token", "asks which tariff"},
 	}

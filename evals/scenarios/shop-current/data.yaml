@@ -17,6 +17,8 @@ topics:
       Доставляем по городу и области; срок и стоимость зависят от адреса, а при заказе на крупную
       сумму доставка становится бесплатной. Если спрашивают про срок, стоимость или порог бесплатной
       доставки — называйте точные значения из FACTS, не оценивайте на глаз.
+    media:
+      - { field: illustration_images, files: [delivery-zones], description: "Карта зон доставки по Алматы" }
 
   - ref: how_to_order
     lang: ru
@@ -35,9 +37,15 @@ fact_tables:
       - ref: coffee-machine
         display_name: "Кофемашина DeLonghi"
         values: { price: "129 900 ₸", availability: "В наличии" }
+        media:
+          - { field: gallery_images, files: [coffee-photo-1, coffee-photo-2, coffee-photo-3], description: "Фото кофемашины DeLonghi: спереди, сбоку, с открытым лотком" }
+          - { field: demo_videos, files: [coffee-video], description: "Видео-обзор кофемашины DeLonghi" }
+          - { field: certificate_documents, files: [coffee-cert], description: "Сертификат качества на кофемашину DeLonghi (PDF)" }
       - ref: cookware-set
         display_name: "Набор посуды"
         values: { price: "24 900 ₸", availability: "Под заказ, 3–5 дней" }
+        media:
+          - { field: gallery_images, files: [cookware-photo-1, cookware-photo-2], description: "Фото набора посуды: общий вид, отдельные предметы" }
 
   - table: policy
     label_format: "{display_name} — {field_label}"
@@ -70,15 +78,3 @@ fact_tables:
           phone: "+7 727 300 00 00"
           instagram: "@demoshop.kz"
           working_hours: "Пн–Сб, 9:00–19:00"
-
-# OLD style: one row per media file, individual refs, matched by a free-text description
-# (no grouping — see schema.sql for why this is the trait under test in this scenario).
-assets:
-  - { ref: coffee-photo-1, kind: image, topic: catalog, description: "Фото кофемашины DeLonghi спереди" }
-  - { ref: coffee-photo-2, kind: image, topic: catalog, description: "Фото кофемашины DeLonghi сбоку" }
-  - { ref: coffee-photo-3, kind: image, topic: catalog, description: "Фото кофемашины DeLonghi с открытым лотком" }
-  - { ref: coffee-video, kind: video, topic: catalog, description: "Видео-обзор кофемашины DeLonghi" }
-  - { ref: coffee-cert, kind: document, topic: catalog, description: "Сертификат качества на кофемашину DeLonghi (PDF)" }
-  - { ref: cookware-photo-1, kind: image, topic: catalog, description: "Фото набора посуды, общий вид" }
-  - { ref: cookware-photo-2, kind: image, topic: catalog, description: "Фото набора посуды, отдельные предметы" }
-  - { ref: delivery-zones, kind: image, topic: delivery, description: "Карта зон доставки по Алматы" }

@@ -1,4 +1,6 @@
 name: xpayment-history-v1
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged."
 description: >
   Deep chat-history coverage for a software/SaaS product: xpayment-decisions-v1's frame
   and data are referenced byte-for-byte and exercised against a dedicated history bank
@@ -10,5 +12,4 @@ description: >
 frame: ../xpayment-decisions-v1/frame.txt
 data: ../xpayment-decisions-v1/data.yaml
 tests: tests.yaml
-contract: attach_groups
 topic_format: "# {ref} — {title} ({keywords})\n{body}"

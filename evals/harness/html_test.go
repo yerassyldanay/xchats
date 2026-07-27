@@ -19,18 +19,18 @@ func TestWriteRunHTML_BothFamilies(t *testing.T) {
 	// Scenario side: one passing verdict, one parse-failure verdict (to prove not_run
 	// scores render without breaking the template) — reuses judgeOne so the fixture
 	// is exactly what real code produces.
-	catalog := &Catalog{Contract: "attach_groups", Tokens: []CatalogFact{
+	catalog := &Catalog{Tokens: []CatalogFact{
 		{Token: "{{policy.main.delivery_cost}}", Value: "1 500 ₸"},
 	}}
 	passRow := PromptfooRow{}
 	passRow.Provider.ID = "test/model"
-	passRow.Response.Output = `{"reply_text":"Доставка {{policy.main.delivery_cost}}.","reply_language":"ru","attach_groups":[],"escalate":false}`
-	passVerdict := judgeOne(TestCase{ID: "delivery", Requires: [][]string{{"policy.main.delivery_cost"}}}, passRow, catalog, map[string]string{"{{policy.main.delivery_cost}}": "1 500 ₸"}, nil, map[string]bool{})
+	passRow.Response.Output = `{"reply_text":"Доставка {{policy.main.delivery_cost}}.","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	passVerdict := judgeOne(TestCase{ID: "delivery", Requires: [][]string{{"policy.main.delivery_cost"}}}, passRow, map[string]string{"{{policy.main.delivery_cost}}": "1 500 ₸"}, map[string]bool{}, catalog.TrustedDigits)
 
 	failRow := PromptfooRow{}
 	failRow.Provider.ID = "test/model"
 	failRow.Response.Output = "not json"
-	failVerdict := judgeOne(TestCase{ID: "broken"}, failRow, catalog, map[string]string{}, nil, map[string]bool{})
+	failVerdict := judgeOne(TestCase{ID: "broken"}, failRow, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 
 	jr := JudgedRun{Scenario: "fixture-scenario", Verdicts: []Verdict{passVerdict, failVerdict}}
 	if err := writeJSON(filepath.Join(runDir, "fixture-scenario.judged.json"), jr); err != nil {
@@ -122,15 +122,57 @@ func TestWriteRunHTML_BothFamilies(t *testing.T) {
 	}
 }
 
-// TestWriteRunHTML_EmptyRunDir proves the viewer degrades gracefully (no panic, no
-// error) for a run dir with nothing gradeable in it yet.
+// TestWriteRunHTML_EmptyRunDir proves a directory with nothing gradeable is rejected
+// rather than being published as a misleading 0/0 evaluation.
+// TestWriteRunHTML_ArchivedScenarioAndModelBadged confirms the per-run page badges an
+// archived scenario/model — resolved at RENDER time against the CURRENT
+// scenarios/*/scenario.yaml + models.yaml (loadArchivedScenarios/loadArchivedModels),
+// not baked into the judged.json being rendered.
+func TestWriteRunHTML_ArchivedScenarioAndModelBadged(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	writeCatalogFixtureScenario(t, root, "retired-scenario", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml", Archived: true, ArchivedReason: "superseded by v2",
+	}, Data{}, "tests:\n")
+	modelsYAML := "providers:\n  - id: openrouter:archived/model\narchived_models:\n  - id: openrouter:archived/model\n    reason: retired\n"
+	if err := os.WriteFile(filepath.Join(root, "models.yaml"), []byte(modelsYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runDir := filepath.Join(root, "runs", "2026-01-01_00-00-00-aaaa")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jr := JudgedRun{Scenario: "retired-scenario", Verdicts: []Verdict{
+		{TestID: "t1", Model: "openrouter:archived/model", ParseOK: true, ContractPass: true},
+	}}
+	if err := writeJSON(filepath.Join(runDir, "retired-scenario.judged.json"), jr); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeRunHTML(runDir); err != nil {
+		t.Fatalf("writeRunHTML: %v", err)
+	}
+	page, err := os.ReadFile(filepath.Join(runDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), "superseded by v2") {
+		t.Error("want the archived scenario's reason to appear on the page")
+	}
+	if !strings.Contains(string(page), "ARCHIVED") {
+		t.Error("want an ARCHIVED badge to render")
+	}
+}
+
 func TestWriteRunHTML_EmptyRunDir(t *testing.T) {
 	runDir := t.TempDir()
-	if err := writeRunHTML(runDir); err != nil {
-		t.Fatalf("writeRunHTML on empty dir: %v", err)
+	if err := writeRunHTML(runDir); err == nil {
+		t.Fatal("want empty run rejected, got nil error")
 	}
-	if _, err := os.Stat(filepath.Join(runDir, "index.html")); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(runDir, "index.html")); !os.IsNotExist(err) {
+		t.Fatalf("empty run must not receive index.html, stat err = %v", err)
 	}
 }
 
@@ -142,11 +184,11 @@ func TestWriteRunHTML_EmptyRunDir(t *testing.T) {
 func TestWriteRunHTML_ReasoningLeakWarningRenders(t *testing.T) {
 	runDir := t.TempDir()
 
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test/model"
 	row.Response.Output = "<think>internal chain of thought, never meant for a customer</think>"
-	v := judgeOne(TestCase{ID: "leaky"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "leaky"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 
 	jr := JudgedRun{Scenario: "fixture-scenario", Verdicts: []Verdict{v}}
 	if err := writeJSON(filepath.Join(runDir, "fixture-scenario.judged.json"), jr); err != nil {
@@ -178,12 +220,12 @@ func TestWriteRunHTML_ReasoningLeakWarningRenders(t *testing.T) {
 func TestWriteRunHTML_EvidenceDivShowsTruncatedAndReasoningLeak(t *testing.T) {
 	runDir := t.TempDir()
 
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test/model"
-	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 	row.Response.FinishReason = "length"
-	v := judgeOne(TestCase{ID: "truncated-case"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "truncated-case"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if !v.Truncated {
 		t.Fatal("precondition failed: want Truncated=true")
 	}
@@ -216,12 +258,12 @@ func TestWriteRunHTML_EvidenceDivShowsTruncatedAndReasoningLeak(t *testing.T) {
 func TestWriteRunHTML_ReasoningContentRendersSeparatelyFromRawOutput(t *testing.T) {
 	runDir := t.TempDir()
 
-	catalog := &Catalog{Contract: "attach_groups"}
+	catalog := &Catalog{}
 	row := PromptfooRow{}
 	row.Provider.ID = "test/model"
-	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","attach_groups":[],"escalate":false}`
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 	row.Response.Reasoning = "the customer wants the price, I should state it plainly"
-	v := judgeOne(TestCase{ID: "reasoning-case"}, row, catalog, map[string]string{}, nil, map[string]bool{})
+	v := judgeOne(TestCase{ID: "reasoning-case"}, row, map[string]string{}, map[string]bool{}, catalog.TrustedDigits)
 	if v.Reasoning == "" {
 		t.Fatal("precondition failed: want Verdict.Reasoning populated from row.Response.Reasoning")
 	}

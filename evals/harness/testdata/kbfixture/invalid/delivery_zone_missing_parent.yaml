@@ -1,0 +1,15 @@
+# Fail-closed rule under test: parent_ref must reference an existing zone —
+# a typo or a deleted parent must not silently orphan a city, since a model
+# token referencing the parent zone would then have nothing to resolve.
+organization_id: "33333333-3333-3333-3333-333333333333"
+ai_policies:
+  outside_zones_note: "Не доставляем за пределы зоны."
+ai_delivery_zones:
+  - ref: probe
+    name: "Тестовая зона"
+    zone_level: city
+    parent_ref: "does-not-exist"
+    delivery_available: true
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active

@@ -20,14 +20,40 @@ const (
 	KindTextComplete ValueKind = "text_complete" // value is complete as written (links, handles)
 	KindNumber       ValueKind = "number"        // bare number; unit word comes from the column meaning
 	KindNumberRange  ValueKind = "number_range"  // bare number or range like 1–3
-	KindStockFlag    ValueKind = "stock_flag"    // boolean; code substitutes reviewed Russian wording
+	KindDeliveryFlag ValueKind = "delivery_flag" // boolean; code substitutes reviewed Russian wording
 )
 
-// StockWordingRU is the reviewed Russian wording code substitutes for the
-// in_stock boolean. The model never writes the boolean literal to a customer.
-var StockWordingRU = map[bool]string{
-	true:  "в наличии",
-	false: "нет в наличии",
+// DeliveryWordingRU is the reviewed Russian wording code substitutes for the
+// delivery_available boolean. The model never writes the boolean literal, and
+// never phrases delivery availability itself — it only ever copies the token.
+var DeliveryWordingRU = map[bool]string{
+	true:  "доставляем",
+	false: "не доставляем",
+}
+
+// DeliveryWordingKK is the Kazakh counterpart, selected when a response
+// declares reply_language "kk" (2026-07 Kazakh customer-message testing — see
+// ResolveFactLang/SubstituteFactsLang). The prompt and knowledge base stay
+// Russian-only; only the CUSTOMER-facing reply may be Kazakh, so this wording
+// exists purely for that substitution path.
+//
+// DRAFT — machine-translated, pending native Kazakh speaker review before any
+// billed comparison treats Kazakh output as production-quality (same doctrine
+// already applied to every other Kazakh frame in this repo's history).
+var DeliveryWordingKK = map[bool]string{
+	true:  "жеткіземіз",
+	false: "жеткізбейміз",
+}
+
+// deliveryWording selects the reviewed wording table for a response's
+// declared reply language — "kk" selects the DRAFT Kazakh table, anything
+// else (including "" and "ru") selects the native-reviewed Russian table, the
+// always-safe default.
+func deliveryWording(lang string) map[bool]string {
+	if lang == "kk" {
+		return DeliveryWordingKK
+	}
+	return DeliveryWordingRU
 }
 
 // FactColumn describes one exact-value column.
@@ -36,6 +62,11 @@ type FactColumn struct {
 	Label  string // Russian meaning shown in the FACTS catalog
 	Kind   ValueKind
 	Unit   string // Russian unit word for number/number_range kinds
+	// UnitKK is Unit's Kazakh counterpart, told to the model alongside Unit
+	// (usageNote renders both) so a Kazakh-language reply appends the correct
+	// word instead of the Russian one — empty when Unit itself is empty. DRAFT,
+	// pending native Kazakh review (see DeliveryWordingKK's doc comment).
+	UnitKK string
 }
 
 // MediaKind is the MIME class a media column accepts.
@@ -61,7 +92,6 @@ type MediaColumn struct {
 var factColumns = map[string][]FactColumn{
 	"product": {
 		{Column: "price", Label: "цена", Kind: KindMoneyDisplay},
-		{Column: "in_stock", Label: "наличие", Kind: KindStockFlag},
 	},
 	"tariff": {
 		{Column: "price", Label: "цена", Kind: KindMoneyDisplay},
@@ -77,10 +107,19 @@ var factColumns = map[string][]FactColumn{
 	},
 	"policy": {
 		{Column: "delivery_cost", Label: "стоимость доставки", Kind: KindMoneyDisplay},
-		{Column: "delivery_in_days", Label: "срок доставки, в днях", Kind: KindNumberRange, Unit: "дня"},
+		{Column: "delivery_in_days", Label: "срок доставки, в днях", Kind: KindNumberRange, Unit: "дня", UnitKK: "күн"},
 		{Column: "free_delivery_from", Label: "бесплатная доставка от", Kind: KindMoneyDisplay},
 		{Column: "min_order", Label: "минимальный заказ", Kind: KindMoneyDisplay},
-		{Column: "return_period_in_days", Label: "срок возврата, в днях", Kind: KindNumber, Unit: "дней"},
+		{Column: "return_period_in_days", Label: "срок возврата, в днях", Kind: KindNumber, Unit: "дней", UnitKK: "күн"},
+		{Column: "outside_zones_note", Label: "доставка вне списка зон", Kind: KindTextComplete},
+	},
+	// "delivery" is a multi-row fact table (one row per ai_delivery_zones
+	// entry, keyed by its own ref), unlike "policy" which is the fixed "main"
+	// singleton — see DeliveryZone's doc comment for the containment model.
+	"delivery": {
+		{Column: "delivery_cost", Label: "стоимость доставки", Kind: KindMoneyDisplay},
+		{Column: "delivery_in_days", Label: "срок доставки, в днях", Kind: KindNumberRange, Unit: "дня", UnitKK: "күн"},
+		{Column: "delivery_available", Label: "доступность доставки", Kind: KindDeliveryFlag},
 	},
 }
 
@@ -138,6 +177,20 @@ func mediaColumnSpec(table, column string) (MediaColumn, error) {
 	return MediaColumn{}, fmt.Errorf("aiprompt: unknown media column %q.%q", table, column)
 }
 
+// factColumnSpec returns the closed registry entry for table.column.
+func factColumnSpec(table, column string) (FactColumn, error) {
+	cols, ok := factColumns[table]
+	if !ok {
+		return FactColumn{}, fmt.Errorf("aiprompt: unknown fact table %q", table)
+	}
+	for _, col := range cols {
+		if col.Column == column {
+			return col, nil
+		}
+	}
+	return FactColumn{}, fmt.Errorf("aiprompt: unknown fact column %q.%q", table, column)
+}
+
 // usageNote renders the FACTS usage-note text for a fact column.
 func usageNote(f FactColumn) string {
 	switch f.Kind {
@@ -151,10 +204,25 @@ func usageNote(f FactColumn) string {
 		if f.Unit == "" {
 			return "только число"
 		}
+		if f.UnitKK != "" {
+			return "только число; в русском ответе добавь слово «" + f.Unit + "» после токена, в казахском — «" + f.UnitKK + "»"
+		}
 		return "только число; добавь слово «" + f.Unit + "» после токена"
-	case KindStockFlag:
-		return "флаг наличия; называя наличие, вставляй сам токен — код подставит правильную формулировку; значение да/нет показано только для твоих рассуждений: товар «нет» не предлагай активно, предложи альтернативу в наличии"
+	case KindDeliveryFlag:
+		return "флаг доступности доставки в это направление; " + deliveryUsageGuidance() +
+			". Направление без такого токена и без токена нужной зоны — не «нет», а «неизвестно»: используй {{policy.main.outside_zones_note}}, если он есть, иначе эскалируй"
 	default:
 		return ""
 	}
+}
+
+// deliveryUsageGuidance is the wording-map-derived phrasing rule for
+// delivery_available, interpolated from DeliveryWordingRU — used by usageNote
+// (the FACTS-table path) so the reviewed wording is typed exactly once, never
+// retyped into a frame file.
+func deliveryUsageGuidance() string {
+	yes, no := DeliveryWordingRU[true], DeliveryWordingRU[false]
+	return "код заменит токен на готовую фразу «" + yes + "» или «" + no +
+		"» (в казахском ответе — казахский эквивалент); называя доступность, вставляй сам токен — " +
+		"никогда не пиши «" + yes + "»/«" + no + "» от себя, даже пересказывая своими словами"
 }

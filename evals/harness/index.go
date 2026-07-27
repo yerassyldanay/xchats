@@ -17,8 +17,21 @@ import (
 var runsIndexTemplateFS embed.FS
 
 var runsIndexTemplate = template.Must(template.New("index.html.tmpl").Funcs(template.FuncMap{
-	"pct": formatPct,
+	"pct":    formatPct,
+	"inList": inStringList,
 }).ParseFS(runsIndexTemplateFS, "templates/index.html.tmpl"))
+
+// inStringList is the runs-index template's membership test (Go templates have no
+// built-in "is x in this slice" operator) — used to badge a row's Models entries
+// against its own already-computed ArchivedModels subset.
+func inStringList(s string, list []string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
 
 // runsIndexPageData is the html/template view model for runs/index.html — the
 // cross-run landing page listing every run dir, newest first.
@@ -54,6 +67,16 @@ type runsIndexRow struct {
 	ScenarioContractPass int
 	ExtractTotal         int
 	ExtractChecksPass    int
+
+	// ArchivedScenarios/ArchivedModels are the subsets of this run's own scenario
+	// names / models (below) that are currently archived — resolved at DISPLAY time
+	// against the CURRENT scenarios/*/scenario.yaml + models.yaml, never baked into
+	// the run itself (see ScenarioConfig.Archived's doc comment). A run entirely made
+	// of archived scenarios/models is still listed (historical data untouched); the
+	// index template badges it rather than hiding it.
+	Scenarios         []string
+	ArchivedScenarios []string
+	ArchivedModels    []string
 
 	IndexHref   string // "<id>/index.html", relative to runs/, if that run's own page exists
 	ReportLinks []reportLink
@@ -99,13 +122,11 @@ func buildRunsIndexRows(runsRoot string) ([]runsIndexRow, error) {
 	}
 	var rows []runsIndexRow
 	for _, e := range entries {
-		// "launches" holds LaunchManifest files (see internal/provenance/launch.go),
-		// not a run dir — it has no *.judged.json/extract_outputs/manifest.json of
-		// its own, so treating it as one would produce a bogus, empty "unknown
-		// family" row. Same exclusion cmdExport's -all path already applies
-		// (export.go) — kept as two explicit checks rather than one shared helper,
-		// since this is the only other place runsRoot's entries are walked.
-		if !e.IsDir() || e.Name() == "launches" {
+		// These are support directories, not published runs. In particular,
+		// .incomplete retains interrupted raw responses for debugging, while catalog
+		// holds image assets used by catalog.json. Scanning either one used to create
+		// bogus 0/0 rows.
+		if !e.IsDir() || isRunSupportDir(e.Name()) {
 			continue
 		}
 		row, err := buildRunsIndexRow(filepath.Join(runsRoot, e.Name()))
@@ -115,10 +136,19 @@ func buildRunsIndexRows(runsRoot string) ([]runsIndexRow, error) {
 			// skipping it or failing the whole index.
 			row = runsIndexRow{RunID: e.Name(), LoadError: err.Error()}
 		}
+		// A directory with no judged scenario rows and no extraction outputs is not
+		// an evaluation result. Do not publish a meaningless 0/0 entry.
+		if row.LoadError == "" && row.ScenarioTotal == 0 && row.ExtractTotal == 0 {
+			continue
+		}
 		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].RunID > rows[j].RunID }) // newest first
 	return rows, nil
+}
+
+func isRunSupportDir(name string) bool {
+	return name == "launches" || name == "catalog" || name == provenance.IncompleteRunsDirName
 }
 
 func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
@@ -153,6 +183,7 @@ func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
 	}
 	modelSet := map[string]bool{}
 	promptSet := map[string]bool{}
+	scenarioSet := map[string]bool{}
 	for _, e := range execs {
 		if e.Variant.Model != "" {
 			modelSet[e.Variant.Model] = true
@@ -163,6 +194,9 @@ func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
 		switch e.Family {
 		case "scenario":
 			row.ScenarioTotal++
+			if e.Subject.Scenario != "" {
+				scenarioSet[e.Subject.Scenario] = true
+			}
 			for _, r := range e.Rollups {
 				switch {
 				case r.Key == "model_behavior_pass" && r.Pass:
@@ -182,6 +216,20 @@ func buildRunsIndexRow(runDir string) (runsIndexRow, error) {
 	}
 	row.Models = sortedMapKeys(modelSet)
 	row.Prompts = sortedMapKeys(promptSet)
+	row.Scenarios = sortedMapKeys(scenarioSet)
+
+	archivedScenarios := loadArchivedScenarios()
+	for _, name := range row.Scenarios {
+		if info, ok := archivedScenarios[name]; ok && info.Archived {
+			row.ArchivedScenarios = append(row.ArchivedScenarios, name)
+		}
+	}
+	archivedModels := loadArchivedModels()
+	for _, model := range row.Models {
+		if _, ok := archivedModels[orModelID(model)]; ok {
+			row.ArchivedModels = append(row.ArchivedModels, model)
+		}
+	}
 
 	if row.Family == "" {
 		switch {

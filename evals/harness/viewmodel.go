@@ -144,6 +144,14 @@ type VOutput struct {
 	// that's actually captured (Verdict.Reasoning / extractRunResult.Reasoning) isn't
 	// silently invisible to every downstream report/viewer, same debug-only status as Raw.
 	Reasoning string `json:"reasoning,omitempty"`
+	// Final/NonFinal/ExtractionMethod mirror Verdict.FinalOutput/NonFinalOutput/
+	// ExtractionMethod: the exact final customer-response JSON that was judged, the
+	// reasoning/preamble text separated off it (debug-only, never scored), and how the
+	// final answer was located. All empty when the row never parsed or predates
+	// extraction-aware judging — Raw stays the complete provider response either way.
+	Final            string `json:"final,omitempty"`
+	NonFinal         string `json:"non_final,omitempty"`
+	ExtractionMethod string `json:"extraction_method,omitempty"`
 }
 
 // VCost mirrors the existing cost-basis discipline: EstimateUSD must never be read
@@ -278,6 +286,21 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		}
 	}
 
+	// escalate_text_consistency follows the media_count pattern
+	// (EscalateTextConsistencyEvaluated is the same kind of marker): a verdict judged
+	// before this check existed, or one whose contract never even produced a parseable
+	// escalate value, renders not_run rather than a fabricated pass from
+	// EscalateTextConsistencyPass's zero value.
+	escalateTextStatus := ScoreNotRun
+	escalateTextDetail := ""
+	if v.EscalateTextConsistencyEvaluated {
+		escalateTextStatus = ScorePass
+		if !v.EscalateTextConsistencyPass {
+			escalateTextStatus = ScoreFail
+			escalateTextDetail = v.DeflectionPhrase
+		}
+	}
+
 	// outcomes follows the media_count pattern (OutcomesDeclared is the same kind of
 	// marker as MediaCountEvaluated): a verdict judged before the check existed — or a
 	// test that declares no alternative outcomes — renders not_run, never a fabricated
@@ -295,6 +318,53 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		}
 	}
 
+	// llm_checks follows the same not_run-by-default pattern as media_count/outcomes:
+	// LLMCheckEvaluated is an opt-in marker (only the separate judge-llm command ever
+	// sets it), so a verdict never touched by judge-llm renders not_run, never a
+	// fabricated pass from LLMJudgePass's nil/zero value. Detail lists the claim(s) that
+	// failed or came back unverified, mirroring OutcomesPass's "name what went wrong"
+	// convention.
+	llmChecksStatus := ScoreNotRun
+	llmChecksDetail := ""
+	if v.LLMCheckEvaluated {
+		llmChecksStatus = ScorePass
+		if v.LLMJudgePass == nil || !*v.LLMJudgePass {
+			llmChecksStatus = ScoreFail
+		}
+		var issues []string
+		for _, r := range v.LLMChecks {
+			if r.Unverified {
+				issues = append(issues, r.Claim+" (unverified)")
+			} else if !r.Pass {
+				issues = append(issues, r.Claim)
+			}
+		}
+		llmChecksDetail = strings.Join(issues, " | ")
+	}
+
+	// stock_llm_check follows the exact same not_run-by-default pattern as llm_checks
+	// above, for the SEPARATE auto-generated stock-correctness dimension (2026-07
+	// consolidation) — StockLLMEvaluated is judge-llm's own opt-in marker (only set for
+	// a TestCase declaring StockCheckRef), so a verdict never touched by that dimension
+	// renders not_run, never a fabricated pass from LLMStockPass's nil/zero value.
+	stockLLMStatus := ScoreNotRun
+	stockLLMDetail := ""
+	if v.StockLLMEvaluated {
+		stockLLMStatus = ScorePass
+		if v.LLMStockPass == nil || !*v.LLMStockPass {
+			stockLLMStatus = ScoreFail
+		}
+		if len(v.StockLLMChecks) > 0 {
+			r := v.StockLLMChecks[0]
+			switch {
+			case r.Unverified:
+				stockLLMDetail = r.ProductRef + ": unverified"
+			default:
+				stockLLMDetail = fmt.Sprintf("%s: classified %q, expected %q", r.ProductRef, r.Classification, r.ExpectedState)
+			}
+		}
+	}
+
 	scores := []VScore{
 		{Name: "parse_ok", Status: parseStatus, Detail: parseDetail},
 		{Name: "finish_reason_ok", Status: finishReasonStatus, Detail: v.FinishReason},
@@ -303,8 +373,10 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Name: "no_leftover_braces", Status: evaluated(!v.LeftoverBraces)},
 		{Name: "no_reasoning_leak", Status: evaluated(!v.ReasoningLeak)},
 		{Name: "requires", Status: evaluated(v.RequiresPass)},
+		{Name: "forbid_tokens", Status: evaluated(v.ForbidTokensPass), Detail: strings.Join(v.ForbiddenTokensHit, ", ")},
 		{Name: "media", Status: evaluated(v.MediaPass)},
 		{Name: "escalate", Status: evaluated(v.EscalatePass)},
+		{Name: "escalate_text_consistency", Status: escalateTextStatus, Detail: escalateTextDetail},
 		{Name: "language", Status: evaluated(v.LanguagePass), Detail: v.LanguageIssue},
 		// Reported separately from the combined "language" row above (Phase 0.4): looksKazakh
 		// is a cheap presence heuristic, not a whole-reply classifier — telling "the text
@@ -323,6 +395,8 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 		{Name: "must_not_contain", Status: evaluated(v.MustNotContainPass), Detail: v.ForbiddenPhrase},
 		{Name: "must_contain_any", Status: evaluated(v.MustContainAnyPass), Detail: strings.Join(v.MustContainAnyExpected, ", ")},
 		{Name: "outcomes", Status: outcomesStatus, Detail: outcomesDetail},
+		{Name: "llm_checks", Status: llmChecksStatus, Detail: llmChecksDetail},
+		{Name: "stock_llm_check", Status: stockLLMStatus, Detail: stockLLMDetail},
 		{Name: "no_invented_digits", Status: evaluated(len(v.InventedDigits) == 0), Detail: strings.Join(v.InventedDigits, ", ")},
 		{Name: "no_unit_issues", Status: evaluated(len(v.UnitIssues) == 0), Detail: strings.Join(v.UnitIssues, ", ")},
 		{Name: "no_unknown_media", Status: evaluated(len(v.UnknownMedia) == 0), Detail: strings.Join(v.UnknownMedia, ", ")},
@@ -383,21 +457,32 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 	if controlCharsRow.Detail != "" {
 		controlCharsActual = controlCharsRow.Detail
 	}
+	escalateTextRow, _ := scoreByName(scores, "escalate_text_consistency")
+	escalateTextActual := "ок"
+	switch {
+	case escalateTextRow.Status == ScoreNotRun:
+		escalateTextActual = "не проверялось (verdict до добавления этой проверки)"
+	case escalateTextRow.Detail != "":
+		escalateTextActual = "отсылает клиента к менеджеру: \"" + escalateTextRow.Detail + "\""
+	}
 	safetyContract := []VContractRow{
 		{Key: "valid_json", Label: "Валидный JSON", Kind: "safety", Expected: "корректный JSON-объект", Actual: jsonActual, Pass: scorePassPtr(parseStatus)},
 		{Key: "contract_fields", Label: "Поля контракта", Kind: "safety", Expected: "все обязательные поля присутствуют", Actual: contractFieldsActual, Pass: scorePassPtr(contractFieldsOK.Status)},
 		{Key: "no_unresolved_placeholders", Label: "Без неразрешённых плейсхолдеров", Kind: "safety", Expected: "нет неизвестных токенов, ответ не заблокирован", Actual: placeholderActual, Pass: placeholderPass},
 		{Key: "no_unknown_media", Label: "Валидные ссылки на медиа", Kind: "safety", Expected: "все ссылки существуют в каталоге", Actual: mediaActual, Pass: scorePassPtr(mediaOK.Status)},
 		{Key: "no_invented_digits", Label: "Без выдуманных чисел", Kind: "safety", Expected: "нет чисел вне ответа модели", Actual: digitsActual, Pass: scorePassPtr(digitsOK.Status)},
-		{Key: "media_count", Label: "Не больше вложений, чем разрешает промпт", Kind: "safety", Expected: "не более 3 ссылок / 2 групп (правило 3 фрейма)", Actual: mediaCountActual, Pass: scorePassPtr(mediaCountRow.Status)},
+		{Key: "media_count", Label: "Не больше вложений, чем разрешает промпт", Kind: "safety", Expected: "не более 2 ссылок (правило 4 фрейма)", Actual: mediaCountActual, Pass: scorePassPtr(mediaCountRow.Status)},
 		{Key: "no_control_chars", Label: "Без управляющих символов", Kind: "safety", Expected: "нет служебных байтов (например backspace) в reply_text", Actual: controlCharsActual, Pass: scorePassPtr(controlCharsRow.Status)},
+		{Key: "escalate_text_consistency", Label: "Текст согласован с флагом эскалации", Kind: "safety", Expected: "нет отсылки клиента к менеджеру и нет обещания передать вопрос при escalate=false", Actual: escalateTextActual, Pass: scorePassPtr(escalateTextRow.Status)},
 	}
 
-	// ReplyText re-parses RawOutput the same way judgeOne itself did — a second parse
-	// of already-validated JSON, not a new trust boundary; empty (not an error) when
-	// ParseOK is false, matching every other "not evaluated" field on this struct.
+	// ReplyText re-parses the judged output the same way judgeOne itself did — a second
+	// parse of already-validated JSON, not a new trust boundary; empty (not an error)
+	// when ParseOK is false, matching every other "not evaluated" field on this struct.
+	// FinalOutput (the extracted final answer) is preferred when set; RawOutput remains
+	// the fallback for verdicts judged before extraction existed.
 	var replyText string
-	if obj, ok := parseModelJSON(v.RawOutput); ok {
+	if obj, ok := parseModelJSON(judgedOutput(v)); ok {
 		replyText, _ = obj["reply_text"].(string)
 	}
 
@@ -411,6 +496,9 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 			ReplyText:              replyText,
 			RawHasReasoningMarkers: evaltext.HasReasoningMarkers(v.RawOutput),
 			Reasoning:              v.Reasoning,
+			Final:                  v.FinalOutput,
+			NonFinal:               v.NonFinalOutput,
+			ExtractionMethod:       v.ExtractionMethod,
 		},
 		Scores:    scores,
 		Rollups:   rollups,
@@ -435,6 +523,16 @@ func scenarioExecutionFromVerdict(scenario string, v Verdict) VExecution {
 			MediaCountEvaluated: v.MediaCountEvaluated,
 		},
 	}
+}
+
+// judgedOutput returns the output text a verdict was actually judged from: the
+// extracted final answer when extraction ran, else the raw provider response
+// (legacy verdicts and rows that never parsed).
+func judgedOutput(v Verdict) string {
+	if v.FinalOutput != "" {
+		return v.FinalOutput
+	}
+	return v.RawOutput
 }
 
 func scenarioExecutionsFromJudgedRun(jr JudgedRun) []VExecution {
@@ -802,7 +900,7 @@ func enrichScenarioExecutions(runDir, scenario, promptSHA256 string, execs []VEx
 		// Requirement rows go BEFORE the safety rows scenarioExecutionFromVerdict
 		// already attached — "test-specific rows + universal safety rows" order.
 		if tc, ok := testByID[execs[i].Subject.TestID]; ok {
-			execs[i].Contract = append(scenarioRequirementRows(execs[i], tc, sc.Contract), execs[i].Contract...)
+			execs[i].Contract = append(scenarioRequirementRows(execs[i], tc), execs[i].Contract...)
 		}
 	}
 	return execs
@@ -815,10 +913,14 @@ func enrichScenarioExecutions(runDir, scenario, promptSHA256 string, execs []VEx
 // "n/a"). Pass values are read back from `exec`'s own already-computed Scores —
 // NEVER recomputed here — only Expected/Actual display strings and row presence are
 // new. Actual values for language/escalate/media are read from the model's own parsed
-// JSON (exec.Output.Raw) — the same raw output already persisted with this execution,
-// not a new trust boundary.
-func scenarioRequirementRows(exec VExecution, tc TestCase, mediaField string) []VContractRow {
-	obj, _ := parseModelJSON(exec.Output.Raw)
+// JSON (the extracted final answer when set, else exec.Output.Raw) — the same judged
+// output already persisted with this execution, not a new trust boundary.
+func scenarioRequirementRows(exec VExecution, tc TestCase) []VContractRow {
+	parseSrc := exec.Output.Raw
+	if exec.Output.Final != "" {
+		parseSrc = exec.Output.Final
+	}
+	obj, _ := parseModelJSON(parseSrc)
 	var rows []VContractRow
 
 	if len(tc.Requires) > 0 {
@@ -865,16 +967,19 @@ func scenarioRequirementRows(exec VExecution, tc TestCase, mediaField string) []
 		if tc.Media.Forbid {
 			expectedDisplay = "медиа быть не должно"
 		} else {
-			expected := tc.Media.AnyOfGroups
-			if mediaField == "asset_refs" {
-				expected = tc.Media.AnyOfRefs
+			var parts []string
+			if len(tc.Media.AllOf) > 0 {
+				parts = append(parts, strings.Join(tc.Media.AllOf, " И "))
 			}
-			expectedDisplay = strings.Join(expected, " ИЛИ ")
+			if len(tc.Media.AnyOf) > 0 {
+				parts = append(parts, strings.Join(tc.Media.AnyOf, " ИЛИ "))
+			}
+			expectedDisplay = strings.Join(parts, " + ")
 			if tc.Media.Exclusive {
 				expectedDisplay += " (только из этого списка)"
 			}
 		}
-		actual := mediaEntries(obj, mediaField)
+		actual := mediaEntries(obj)
 		actualDisplay := "нет"
 		if len(actual) > 0 {
 			actualDisplay = strings.Join(actual, ", ")

@@ -38,7 +38,7 @@ func TestBuildCatalog_TrustedDigits(t *testing.T) {
 			},
 		},
 	}
-	cat := buildCatalog(data, "attach_groups")
+	cat := buildCatalog(data)
 	want := map[string]bool{"1": true, "7": true}
 	got := map[string]bool{}
 	for _, d := range cat.TrustedDigits {
@@ -72,7 +72,7 @@ func TestValidatePrompt(t *testing.T) {
 
 // TestValidateTestMedia_ForbidWithAnyOfConflicts proves render's fail-closed gate against
 // a self-contradictory media expectation: Forbid (no attachment allowed) combined with
-// AnyOfGroups/AnyOfRefs (attach one of these) can never both be satisfied by one reply.
+// AnyOf/AnyOf (attach one of these) can never both be satisfied by one reply.
 func TestValidateTestMedia_ForbidWithAnyOfConflicts(t *testing.T) {
 	if err := validateTestMedia("s1", "t1", nil); err != nil {
 		t.Errorf("nil media should never conflict, got %v", err)
@@ -83,11 +83,11 @@ func TestValidateTestMedia_ForbidWithAnyOfConflicts(t *testing.T) {
 	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true}); err != nil {
 		t.Errorf("Forbid alone (no any_of) should never conflict, got %v", err)
 	}
-	if err := validateTestMedia("s1", "t1", &MediaExpect{AnyOfGroups: []string{"g"}}); err != nil {
+	if err := validateTestMedia("s1", "t1", &MediaExpect{AnyOf: []string{"g"}}); err != nil {
 		t.Errorf("any_of alone (Forbid=false) should never conflict, got %v", err)
 	}
 
-	err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, AnyOfGroups: []string{"g"}})
+	err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, AnyOf: []string{"g"}})
 	if err == nil {
 		t.Fatal("want an error when Forbid is combined with any_of_groups")
 	}
@@ -95,7 +95,7 @@ func TestValidateTestMedia_ForbidWithAnyOfConflicts(t *testing.T) {
 		t.Errorf("want the error to name the scenario and test, got %v", err)
 	}
 
-	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, AnyOfRefs: []string{"r"}}); err == nil {
+	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, AnyOf: []string{"r"}}); err == nil {
 		t.Error("want an error when Forbid is combined with any_of_refs too")
 	}
 }
@@ -105,10 +105,10 @@ func TestValidateTestMedia_ForbidWithAnyOfConflicts(t *testing.T) {
 // with Forbid (which already means "nothing is allowed", leaving nothing for Exclusive
 // to scope).
 func TestValidateTestMedia_ExclusiveConstraints(t *testing.T) {
-	if err := validateTestMedia("s1", "t1", &MediaExpect{AnyOfGroups: []string{"g"}, Exclusive: true}); err != nil {
+	if err := validateTestMedia("s1", "t1", &MediaExpect{AnyOf: []string{"g"}, Exclusive: true}); err != nil {
 		t.Errorf("Exclusive with a non-empty any_of_groups should never conflict, got %v", err)
 	}
-	if err := validateTestMedia("s1", "t1", &MediaExpect{AnyOfRefs: []string{"r"}, Exclusive: true}); err != nil {
+	if err := validateTestMedia("s1", "t1", &MediaExpect{AnyOf: []string{"r"}, Exclusive: true}); err != nil {
 		t.Errorf("Exclusive with a non-empty any_of_refs should never conflict, got %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestValidateTestMedia_ExclusiveConstraints(t *testing.T) {
 	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, Exclusive: true}); err == nil {
 		t.Error("want an error when Forbid is combined with Exclusive, even with no any_of_* set")
 	}
-	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, Exclusive: true, AnyOfRefs: []string{"r"}}); err == nil {
+	if err := validateTestMedia("s1", "t1", &MediaExpect{Forbid: true, Exclusive: true, AnyOf: []string{"r"}}); err == nil {
 		t.Error("want an error when Forbid, Exclusive, and any_of_refs are all combined")
 	}
 }
@@ -139,7 +139,7 @@ func TestValidateResolvedTests_RunsMediaValidationOverEveryTest(t *testing.T) {
 
 	conflicted := []TestCase{
 		{ID: "ok"},
-		{ID: "bad", Media: &MediaExpect{Forbid: true, AnyOfRefs: []string{"r"}}},
+		{ID: "bad", Media: &MediaExpect{Forbid: true, AnyOf: []string{"r"}}},
 	}
 	if err := validateResolvedTests("s1", conflicted); err == nil {
 		t.Fatal("want an error when ANY test in the list conflicts, not just the first")
@@ -236,6 +236,65 @@ func TestFilterProviders_DefaultFlag(t *testing.T) {
 	}
 }
 
+// TestFilterProviders_ExcludesArchivedModels is the archival counterpart to
+// TestFilterProviders_DefaultFlag: an archived model must vanish from the default
+// selection and from "-models all", but naming it EXPLICITLY must error loudly rather
+// than silently drop it — a deliberate request against a retired/unverified model is a
+// mistake worth surfacing before any spend, not a request to quietly honor.
+func TestFilterProviders_ExcludesArchivedModels(t *testing.T) {
+	mf := &ModelsFile{
+		Providers: []ModelProvider{
+			{ID: "openrouter:openai/gpt-4o-mini", Default: true},
+			{ID: "openrouter:google/gemini-3.5-flash", Default: true},
+			{ID: "openrouter:deepseek/deepseek-v3.2-exp"},
+		},
+		ArchivedModels: []ArchivedModel{
+			{ID: "openrouter:google/gemini-3.5-flash", Reason: "not yet probe-verified"},
+		},
+	}
+
+	defaults, err := filterProviders(mf, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range defaults {
+		if orModelID(p.ID) == "google/gemini-3.5-flash" {
+			t.Fatalf("archived model must be excluded from the default selection, got %+v", defaults)
+		}
+	}
+	if len(defaults) != 1 {
+		t.Fatalf("want only the one non-archived default provider, got %d: %+v", len(defaults), defaults)
+	}
+
+	all, err := filterProviders(mf, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range all {
+		if orModelID(p.ID) == "google/gemini-3.5-flash" {
+			t.Fatalf("archived model must be excluded even from -models all, got %+v", all)
+		}
+	}
+	if len(all) != 2 {
+		t.Fatalf("want every non-archived provider under -models all, got %d: %+v", len(all), all)
+	}
+
+	if _, err := filterProviders(mf, "google/gemini-3.5-flash"); err == nil {
+		t.Fatal("want an error when an archived model is named EXPLICITLY via -models, got nil")
+	} else if !strings.Contains(err.Error(), "archived") {
+		t.Errorf("want the error to mention archival, got: %v", err)
+	}
+
+	// A non-archived model named explicitly is unaffected.
+	named, err := filterProviders(mf, "deepseek/deepseek-v3.2-exp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(named) != 1 {
+		t.Fatalf("want the explicitly named non-archived provider, got %+v", named)
+	}
+}
+
 func TestBuildPassthrough(t *testing.T) {
 	if got := buildPassthrough(ModelProvider{ID: "m"}); got != nil {
 		t.Fatalf("want nil passthrough when neither Provider nor Reasoning is set, got %+v", got)
@@ -304,7 +363,7 @@ func providerYAMLEntries(t *testing.T, path string) []map[string]any {
 // existing scenario's generated promptfooconfig.yaml must not change shape at all.
 func TestWritePromptfooConfig_PassthroughOmittedWhenUnset(t *testing.T) {
 	dir := t.TempDir()
-	scenario := &ScenarioConfig{Name: "fixture", Contract: "asset_refs"}
+	scenario := &ScenarioConfig{Name: "fixture"}
 	models := &ModelsFile{Providers: []ModelProvider{{ID: "openrouter:x/y", Temperature: 0.3, MaxTokens: 500}}}
 	if err := writePromptfooConfig(dir, scenario, nil, models); err != nil {
 		t.Fatal(err)
@@ -331,7 +390,7 @@ func TestWritePromptfooConfig_PassthroughOmittedWhenUnset(t *testing.T) {
 // provider forwards upstream.
 func TestWritePromptfooConfig_PassthroughAndLabelPresentWhenSet(t *testing.T) {
 	dir := t.TempDir()
-	scenario := &ScenarioConfig{Name: "fixture", Contract: "asset_refs"}
+	scenario := &ScenarioConfig{Name: "fixture"}
 	allowFallbacks := false
 	models := &ModelsFile{Providers: []ModelProvider{{
 		ID: "openrouter:google/gemini-2.5-flash", Temperature: 0.3, MaxTokens: 500,

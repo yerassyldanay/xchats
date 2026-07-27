@@ -12,6 +12,8 @@ import (
 
 	"xchats-evals-harness/internal/evaltext"
 	"xchats-evals-harness/internal/provenance"
+
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 )
 
 // PromptfooResults mirrors the shape of promptfoo's -o results.json — only the fields
@@ -90,6 +92,11 @@ type PromptfooRow struct {
 	// call failed, the ORIGINAL attempt stayed selected" (see retry.go's HTTP-error
 	// handling), not "no retry happened" (that case has Attempts entirely empty).
 	SelectedAttempt int `json:"selected_attempt,omitempty"`
+	// RetryReason labels WHY retry.go retried this row — "contract_shape" (unparseable
+	// JSON or a missing/wrong-typed field) or "media_not_found" (a hallucinated media
+	// token, or one that no longer resolves through kbd_materials) — see retryReason's
+	// doc comment. Empty for every row retry.go has never touched.
+	RetryReason string `json:"retry_reason,omitempty"`
 }
 
 // ResultAttempt is one attempt (the original promptfoo call, or a later retry.go
@@ -122,6 +129,9 @@ type ResultAttempt struct {
 	// HTTP-error handling keeps the ORIGINAL attempt selected in that case, but still
 	// records the failed retry attempt here so it's visible one happened.
 	Error string `json:"error,omitempty"`
+	// RetryReason mirrors PromptfooRow.RetryReason — set on the RETRY attempt only
+	// (the original attempt was never itself a retry, so it carries no reason).
+	RetryReason string `json:"retry_reason,omitempty"`
 }
 
 // Verdict is one judged answer — the harness's contribution on top of promptfoo's own
@@ -132,8 +142,23 @@ type Verdict struct {
 	Model   string `json:"model"`
 	Message string `json:"message"`
 
+	// RawOutput is the provider's complete response, byte-for-byte — the immutable
+	// audit record. It is never rewritten by validation or re-judging; everything
+	// judged is judged from a COPY (FinalOutput) selected out of it.
 	RawOutput    string `json:"raw_output"`
 	InjectedText string `json:"injected_text"`
+
+	// FinalOutput/NonFinalOutput/ExtractionMethod record how the model's FINAL
+	// customer-response JSON was separated from any reasoning text the provider
+	// returned combined with it (aiprompt.ExtractFinalOutput). FinalOutput is the
+	// exact span that was validated and scored; NonFinalOutput is the surrounding
+	// reasoning/diagnostic text — kept for debugging, never scored and never
+	// customer-facing; ExtractionMethod is one of aiprompt's Extract* constants.
+	// All empty when ParseOK is false (no complete final answer existed) and for
+	// verdicts judged before these fields existed.
+	FinalOutput      string `json:"final_output,omitempty"`
+	NonFinalOutput   string `json:"non_final_output,omitempty"`
+	ExtractionMethod string `json:"extraction_method,omitempty"`
 
 	ParseOK        bool     `json:"parse_ok"`
 	ContractFields bool     `json:"contract_fields_ok"`
@@ -141,16 +166,40 @@ type Verdict struct {
 	Blocked        bool     `json:"blocked"`
 	LeftoverBraces bool     `json:"leftover_braces"`
 	UnknownMedia   []string `json:"unknown_media"` // -> the real product drops these (logged), does NOT block
+	// EscalationReasonOK is retained for old judged.json compatibility but is now
+	// ALWAYS true: escalation_reason is diagnostic-only telemetry (never shown to the
+	// customer), so a nonempty value with escalate=false — or placeholders/braces
+	// inside it — is no longer a failure of any kind and never gates ContractPass.
+	EscalationReasonOK bool `json:"escalation_reason_ok"`
+	// MediaResolveOK/MediaResolveIssue: schema_kb_v1 verdicts only (always true, no
+	// issue, for a legacy verdict — there is nothing to resolve). True when every
+	// media_files_to_send token that passed the catalog-membership check ALSO resolves
+	// through aiprompt.ResolveSend against the live kbd_materials rows right now — i.e.
+	// it isn't merely a name the catalog recognizes but a reference that would actually
+	// still send. Folded into ContractPass: a token valid at catalog-build time but
+	// stale at send time is a pipeline-safety issue, the same category as an unknown
+	// token.
+	MediaResolveOK    bool   `json:"media_resolve_ok"`
+	MediaResolveIssue string `json:"media_resolve_issue,omitempty"`
 
 	RequiresPass bool `json:"requires_pass"`
-	MediaPass    bool `json:"media_pass"`
+	// ForbidTokensPass mirrors MustNotContainPass but checks fact/media TOKENS rather
+	// than free text, on the raw (pre-substitution) reply — vacuously true when the test
+	// declares no forbid_tokens, same convention as MustNotContainPass. Built for cases
+	// that must prove the model picked a DIFFERENT fact than the one it's tempted to
+	// reuse — e.g. an unlisted-delivery-direction reply must never cite ANY zone's
+	// cost/days token, which a text-only blocklist can't express (see
+	// TestCase.ForbidTokens).
+	ForbidTokensPass   bool     `json:"forbid_tokens_pass"`
+	ForbiddenTokensHit []string `json:"forbidden_tokens_hit,omitempty"`
+	MediaPass          bool     `json:"media_pass"`
 	// MediaIssue is a human-readable detail for a MediaPass failure the generic "did not
 	// attach the expected media" wording doesn't fit — today only the Forbid case
 	// ("attached media, but this test forbids any attachment").
 	MediaIssue string `json:"media_issue,omitempty"`
 	// MediaCount/TooManyMedia are UNIVERSAL — checked on every test regardless of whether
 	// it declares a `media:` expectation, mirroring every frame's own rule-3 attachment
-	// cap (see maxMediaRefs/maxMediaGroups). MediaCountEvaluated is a CODE-VERSION marker,
+	// cap (see maxMediaGroups). MediaCountEvaluated is a CODE-VERSION marker,
 	// not derived from ParseOK: a verdict judged by pre-upgrade code has this field
 	// entirely absent from its JSON, which unmarshals as false. Without this marker,
 	// re-reading such a verdict would report TooManyMedia's zero value (false) as a
@@ -160,6 +209,22 @@ type Verdict struct {
 	TooManyMedia        bool `json:"too_many_media"`
 	MediaCountEvaluated bool `json:"media_count_evaluated,omitempty"`
 	EscalatePass        bool `json:"escalate_pass"`
+	// EscalateTextConsistencyPass fails a row whose escalate is false while the
+	// INJECTED reply text still hands the customer off to / deflects them to a manager
+	// (see managerDeflectionPatterns) — the text-vs-flag contradiction observed
+	// 2026-07-26: a model writing "I'll pass this to the manager" or "check the exact
+	// terms with the manager" while leaving escalate=false, so the promise reaches the
+	// customer but nothing downstream is ever told to act on it. Universal (every test,
+	// no opt-in) and gates ModelBehaviorPass only — never ContractPass, never retry
+	// candidacy (retry.go judges candidacy against an empty TestCase{}, which never sets
+	// Escalate, so this check never even runs there). EscalateTextConsistencyEvaluated
+	// is the CODE-VERSION + field-presence marker (MediaCountEvaluated pattern): a
+	// verdict judged before this check existed, or a row whose ContractFields didn't
+	// even include a parseable escalate value, renders "not run" rather than a
+	// fabricated pass from the zero value.
+	EscalateTextConsistencyPass      bool   `json:"escalate_text_consistency_pass"`
+	EscalateTextConsistencyEvaluated bool   `json:"escalate_text_consistency_evaluated,omitempty"`
+	DeflectionPhrase                 string `json:"deflection_phrase,omitempty"`
 	// LanguagePass = LanguageTextOK && LanguageFieldOK — kept as the single pass/fail
 	// gate everything else already depends on. The two components are ALSO reported
 	// separately (Phase 0.4 of the language plan): looksKazakh is a cheap heuristic, not
@@ -224,8 +289,19 @@ type Verdict struct {
 	// report.go can show per-model retry stats and a recovered row never silently
 	// looks identical to a clean first-attempt pass. RetryRecovered = Retries>0 &&
 	// ParseOK — the row needed a retry AND the SELECTED attempt is now parseable.
-	Retries        int  `json:"retries,omitempty"`
-	RetryRecovered bool `json:"retry_recovered,omitempty"`
+	Retries        int    `json:"retries,omitempty"`
+	RetryRecovered bool   `json:"retry_recovered,omitempty"`
+	RetryReason    string `json:"retry_reason,omitempty"`
+	// FirstAttemptParseOK/FirstAttemptContractPass judge the ORIGINAL (attempt 0) output
+	// independently of whichever attempt ended up selected — every other field on this
+	// Verdict reflects the FINAL/selected attempt, so these are the only place a
+	// report can recover "would the first try alone have passed" once a retry has
+	// happened. Equal to this Verdict's own ParseOK/ContractPass when the row was never
+	// retried (Attempts empty) — attempt 0 IS this verdict in that case. Computed by
+	// judgeScenario/judgeSchemaKBRows, not judgeOne itself (judgeOne only ever sees one
+	// output at a time).
+	FirstAttemptParseOK      bool `json:"first_attempt_parse_ok"`
+	FirstAttemptContractPass bool `json:"first_attempt_contract_pass"`
 	// Reasoning mirrors PromptfooRow.Response.Reasoning verbatim, IF promptfoo ever
 	// populates it — kept as its own field (never merged into RawOutput or any
 	// customer-facing text) so a captured value isn't silently dropped once something
@@ -256,6 +332,129 @@ type Verdict struct {
 	TokensOut       int     `json:"tokens_out"`
 	CostEstimateUSD float64 `json:"cost_estimate_usd"`
 	CostBasis       string  `json:"cost_basis"`
+
+	// LLMCheckEvaluated is the CODE-VERSION + opt-in marker for TestCase.LLMChecks (same
+	// convention as OutcomesDeclared/MediaCountEvaluated): false for every verdict the
+	// plain `judge` command writes (it never reads or writes any LLMCheck field at all),
+	// and false for a verdict whose test declares no llm_checks or whose ContractPass is
+	// false (nothing sensible to judge). Only a run through the separate, opt-in
+	// `judge-llm` command against a ContractPass row with llm_checks declared ever sets
+	// this true — report.go/viewmodel.go must treat false as "not run," never as a
+	// fabricated pass.
+	LLMCheckEvaluated bool `json:"llm_check_evaluated,omitempty"`
+	// LLMJudgePass is nil when not evaluated, else true only if EVERY declared claim's
+	// judged verdict matched its Expect value (and none was Unverified). A *bool (not
+	// bool) so "not evaluated" and "evaluated, failed" are never confused on
+	// re-serialization — the same reasoning as every other nilable pass field here.
+	// Deliberately NOT folded into ModelBehaviorPass or ContractPass: this is reported as
+	// its own dimension, so the two core metrics stay identical whether or not judge-llm
+	// ever runs (see judge_llm.go's doc comment).
+	LLMJudgePass  *bool            `json:"llm_judge_pass,omitempty"`
+	LLMJudgeModel string           `json:"llm_judge_model,omitempty"`
+	LLMChecks     []LLMCheckResult `json:"llm_checks,omitempty"`
+	// LLMJudgeCostUSD is this verdict's OWN spend from the run that last wrote its
+	// LLMChecks — a run that reuses every claim from cache reports 0 here, honestly: no
+	// new API call means no new spend, not a stale total carried forward.
+	LLMJudgeCostUSD float64 `json:"llm_judge_cost_usd,omitempty"`
+
+	// StockLLMEvaluated/LLMStockPass/StockLLMChecks/LLMStockModel/LLMStockCostUSD are
+	// the auto-generated semantic stock-correctness dimension (2026-07 consolidation),
+	// evaluated by the SAME opt-in `judge-llm` command as LLMChecks above but kept as a
+	// wholly SEPARATE dimension: unlike LLMChecks (hand-declared per test), these are
+	// synthesized from TestCase.StockCheckRef + the catalog's own ground-truth stock
+	// state, never hand-authored, so they can never drift from the fixture. Never folds
+	// into ContractPass/ModelBehaviorPass/LLMJudgePass — schema_kb_v1 only (a stock
+	// classification needs a product ref to look up ground truth against).
+	StockLLMEvaluated bool `json:"stock_llm_evaluated,omitempty"`
+	// LLMStockPass is nil when not evaluated (StockLLMEvaluated false, e.g. the test
+	// declares no StockCheckRef), else true only if the judge's classification matched
+	// the catalog's ground-truth state AND the call was not Unverified.
+	LLMStockPass    *bool                 `json:"llm_stock_pass,omitempty"`
+	StockLLMChecks  []StockLLMCheckResult `json:"stock_llm_checks,omitempty"`
+	LLMStockModel   string                `json:"llm_stock_model,omitempty"`
+	LLMStockCostUSD float64               `json:"llm_stock_cost_usd,omitempty"`
+
+	// LanguageRewriteEvaluated..LanguageRewriteCostUSD are the language safety net
+	// (2026-07-27 design note; see rewrite_lang.go), the SEPARATE, opt-in `rewrite-lang`
+	// command's own dimension — same doctrine as LLMCheckEvaluated/StockLLMEvaluated
+	// above: false for every verdict the plain `judge` command writes, and every field
+	// below stays at its zero value until `rewrite-lang` actually runs. On the happy
+	// path (the target and the reply's own language already agree) rewrite-lang costs
+	// nothing and sets only LanguageRewriteEvaluated + TargetLanguage — there is no
+	// mismatch to record. See LanguageRewriteApplied's doc comment for what changes when
+	// a rewrite IS applied.
+	LanguageRewriteEvaluated bool `json:"language_rewrite_evaluated,omitempty"`
+	// TargetLanguage is detectLang(customer message, history)'s verdict — the language
+	// the reply SHOULD be in — recorded whenever LanguageRewriteEvaluated is true,
+	// independent of whether a mismatch was ever found.
+	TargetLanguage string `json:"target_language,omitempty"`
+	// PreRewriteLanguage/PreRewriteInjectedText are set ONLY when a mismatch was
+	// detected (TargetLanguage disagreed with classifyText's read of the pre-rewrite
+	// InjectedText, or that text was too short/unclear to classify at all — an empty
+	// PreRewriteLanguage means the latter). PreRewriteInjectedText is the discarded
+	// original customer-facing text, kept for audit — the same role RawOutput plays for
+	// the raw provider response, one level up the pipeline.
+	PreRewriteLanguage     string `json:"pre_rewrite_language,omitempty"`
+	PreRewriteInjectedText string `json:"pre_rewrite_injected_text,omitempty"`
+	// LanguageRewriteApplied is true only when a mismatch was found AND the rewrite
+	// model's replacement reply_text passed the full re-judge (judgeOne/judgeOneSchemaKB
+	// against a synthetic row carrying the rewritten template) — at that point EVERY
+	// other field on this Verdict (ParseOK, ContractPass, InjectedText,
+	// ModelBehaviorPass, every requirement/behavior check, Reason, ...) already reflects
+	// the REWRITTEN text, re-graded from scratch exactly as if the model had drafted it
+	// that way originally. Only the fields that describe the ORIGINAL provider call
+	// itself (RawOutput, Cost, LatencyMs, Tokens, TokensIn/Out, CostEstimateUSD,
+	// CostBasis, Retries, Reasoning) are preserved from before the rewrite — the rewrite
+	// model's own spend is tracked separately, in LanguageRewriteCostUSD. False with
+	// PreRewriteLanguage non-empty means a mismatch WAS found but the rewrite was
+	// discarded (LanguageRewriteFailReason explains why) — the verdict is then
+	// COMPLETELY UNCHANGED from what plain `judge` produced, mismatch and all.
+	LanguageRewriteApplied bool `json:"language_rewrite_applied,omitempty"`
+	// LanguageRewriteFailReason is set only when a mismatch was found and the rewrite
+	// attempt was discarded: the rewrite call itself failed (network/parse error), or
+	// the rewritten template failed its re-judge (a corrupted/dropped placeholder is the
+	// expected failure mode — judgeOne/judgeOneSchemaKB catch that exactly like they
+	// would for any model's own mistake).
+	LanguageRewriteFailReason string `json:"language_rewrite_fail_reason,omitempty"`
+	// LanguageRewriteModel/LanguageRewriteCostUSD are set only when a rewrite call was
+	// actually made (i.e. a mismatch was found) — the happy path never touches these,
+	// which is the entire cost claim: $0 unless a mismatch is real.
+	LanguageRewriteModel   string  `json:"language_rewrite_model,omitempty"`
+	LanguageRewriteCostUSD float64 `json:"language_rewrite_cost_usd,omitempty"`
+}
+
+// LLMCheckResult is one TestCase.LLMChecks claim's judged outcome — see judge_llm.go.
+type LLMCheckResult struct {
+	Claim   string `json:"claim"`
+	Expect  bool   `json:"expect"`
+	Verdict bool   `json:"verdict"`
+	Pass    bool   `json:"pass"`
+	// Unverified is true when the judge call failed outright or its response could not
+	// be parsed into a boolean verdict — Verdict/Pass are meaningless zero values in that
+	// case (Pass is left false: fail-closed, an unverified claim is never silently
+	// treated as passed).
+	Unverified bool `json:"unverified"`
+	// CacheKey is sha256(message, reply text, claim, judge model id) — a later judge-llm
+	// run reuses this exact entry (no API call) when the key still matches; see
+	// llmCheckCacheKey.
+	CacheKey string `json:"cache_key"`
+}
+
+// StockLLMCheckResult is one auto-generated stock-correctness classification's judged
+// outcome — see judge_llm.go's autoStockChecks/judgeStockClaim. Classification is one
+// of "in_stock" | "out_of_stock" | "unclear" | "contradictory" (never a binary yes/no —
+// this is the 4-way semantic classification the LLM judge produces, distinct from a
+// plain LLMCheckResult).
+type StockLLMCheckResult struct {
+	ProductRef     string `json:"product_ref"`
+	ExpectedState  string `json:"expected_state"` // "in_stock" | "out_of_stock" — from the catalog, never hand-authored
+	Classification string `json:"classification"`
+	Pass           bool   `json:"pass"`
+	// Unverified is true when the judge call failed outright or its response could not
+	// be parsed into a recognized classification — Classification/Pass are meaningless
+	// zero values in that case (Pass left false: fail-closed).
+	Unverified bool   `json:"unverified"`
+	CacheKey   string `json:"cache_key"`
 }
 
 // CostBasis values — what CostEstimateUSD is actually computed from, so a report can never
@@ -368,7 +567,40 @@ var (
 		{label: "duplicated day unit", re: regexp.MustCompile(`(?i)(дня|дней)\s+(дня|дней)`)},
 		{label: "mixed Russian/Kazakh day-unit hint", re: regexp.MustCompile(`(?i)дня\s*/\s*күнде`)},
 	}
+	// managerDeflectionPatterns catch a reply that hands the customer off to / deflects
+	// them to a manager — used by managerDeflection to fail escalate=false rows that
+	// contradict their own text (see Verdict.EscalateTextConsistencyPass). Regexes, not a
+	// fixed substring list: the observed real failure «Уточняйте условия у менеджера при
+	// оформлении заказа» (bd13, 2026-07-26) defeats any substring check anchored on
+	// "уточняйте у менеджера" alone. The [^.!?\n]{0,40} window keeps every match inside
+	// roughly one clause/sentence, so an unrelated later mention of "менеджер" elsewhere
+	// in a long reply can't retroactively pair with an earlier verb. Deliberately NARROW
+	// verb lists (not a bare "менеджер" anywhere in the text): the pickup topic's honest,
+	// correctly non-escalating «...по предварительной договорённости с менеджером» must
+	// NOT match (see judge_test.go's pinned negative control) — broadening these lists
+	// must re-check that sentence.
+	managerDeflectionPatterns = []unitIssuePattern{
+		{label: "clarify-with-manager", re: regexp.MustCompile(`(?i)уточн[а-яё]*[^.!?\n]{0,40}менеджер`)},
+		{label: "contact-the-manager", re: regexp.MustCompile(`(?i)(свяжитесь|связаться|обратитесь|обращайтесь|обратиться|напишите|позвоните|спросите|спросить|узнайте|узнать)[^.!?\n]{0,40}менеджер`)},
+		{label: "handoff-promise", re: regexp.MustCompile(`(?i)переда(ю|м|ём|ем|дим|ст)[^.!?\n]{0,40}менеджер`)},
+		{label: "manager-will-follow-up", re: regexp.MustCompile(`(?i)менеджер[^.!?\n]{0,40}(свяжется|ответит|перезвонит|напишет|уточнит|подскажет)`)},
+		{label: "kk-forward-to-manager", re: regexp.MustCompile(`(?i)менеджерге[^.!?\n]{0,40}(жолда|жібер|бер|тапсыр|хабарла)`)},
+		{label: "kk-ask-the-manager", re: regexp.MustCompile(`(?i)менеджер(ден|ге|мен)[^.!?\n]{0,40}(сұра|хабарлас|байланыс|жүгін)`)},
+		{label: "kk-manager-will-contact", re: regexp.MustCompile(`(?i)менеджер[^.!?\n]{0,40}(хабарласады|жауап береді|байланысады)`)},
+	}
 )
+
+// managerDeflection reports the first managerDeflectionPatterns match in text (the
+// INJECTED reply, same convention as MustNotContain/firstForbidden) — matched is the
+// literal substring matched, for DeflectionPhrase's failure detail.
+func managerDeflection(text string) (matched string, hit bool) {
+	for _, p := range managerDeflectionPatterns {
+		if m := p.re.FindString(text); m != "" {
+			return m, true
+		}
+	}
+	return "", false
+}
 
 // kazakhOnlyLetters are the Cyrillic letters that exist in the Kazakh alphabet but not
 // the Russian one. і (U+0456) belongs here too: Russian dropped that letter in 1918, and
@@ -397,15 +629,13 @@ func normalizeLangCode(code string) string {
 	return code
 }
 
-// maxMediaRefs/maxMediaGroups mirror each frame's own attachment cap — rule 3 in every
-// frame.txt: asset_refs frames say "Maximum 3" (e.g. shop-current/frame.txt,
-// lang-canary-v1/frame.txt), attach_groups frames say "Максимум 2 группы" (e.g.
-// shop-scale/frame.txt, shop-decisions-v1/frame.txt, xpayment-decisions-v1/frame.txt). If
-// either frame's stated cap ever changes, this constant must change with it.
-const (
-	maxMediaRefs   = 3
-	maxMediaGroups = 2
-)
+// maxMediaGroups mirrors every frame's own attachment cap — rule 3 in every frame.txt,
+// "Максимум 2" (e.g. shop-scale/frame.txt, shop-decisions-v1/frame.txt,
+// xpayment-decisions-v1/frame.txt, shop-current/frame.txt, frame-ru.txt). Every scenario
+// shares this one cap now — the historical separate asset_refs cap of 3 no longer
+// exists now that every scenario returns media_files_to_send. If a frame's stated cap
+// ever changes, this constant must change with it.
+const maxMediaGroups = 2
 
 // providerModelKey is the ONE key every grouping of judged results (Verdict.Model,
 // priceByModel, freshSplit) must use once two provider entries can share the same
@@ -470,20 +700,20 @@ func cmdJudge(args []string) error {
 }
 
 func judgeScenario(scenarioDir, runDir, modelsPath string) error {
-	scenario, err := loadScenario(scenarioDir)
+	inputs, err := resolveScenarioRunInputs(scenarioDir, runDir)
 	if err != nil {
-		return fmt.Errorf("load scenario.yaml: %w", err)
+		return err
 	}
+	scenario := inputs.Scenario
 
 	// Prefer this run's own snapshot of what render produced over the live, mutable
 	// scenarios/*/generated/ — the whole point of snapshotting: re-judging an old run
 	// must grade against the requirements THAT RUN saw, not whatever the scenario looks
 	// like today. Legacy runs (no snapshot) and a standalone `judge` right after a fresh
 	// `render` fall back to genDir/modelsPath exactly as before this existed.
-	genDir := filepath.Join(scenarioDir, "generated")
+	genDir := inputs.GeneratedDir
 	resolvedModelsPath := modelsPath
-	if snapDir, ok := provenance.SnapshotDirFor(runDir, scenario.Name); ok {
-		genDir = snapDir
+	if inputs.SnapshotDir != "" {
 		resolvedModelsPath = provenance.SnapshotModelsPath(runDir, modelsPath)
 	}
 
@@ -494,23 +724,6 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	priceByModel := map[string]ModelProvider{}
 	for _, p := range models.Providers {
 		priceByModel[providerModelKey(p.ID, p.Label)] = p
-	}
-
-	var catalog Catalog
-	if err := readJSON(filepath.Join(genDir, "catalog.json"), &catalog); err != nil {
-		return fmt.Errorf("read catalog.json (did you run render first?): %w", err)
-	}
-	tokenValue := map[string]string{}
-	for _, f := range catalog.Tokens {
-		tokenValue[f.Token] = f.Value
-	}
-	validMediaRef := map[string]bool{}
-	for _, r := range catalog.MediaRefs {
-		validMediaRef[r] = true
-	}
-	validMediaGroup := map[string]bool{}
-	for _, g := range catalog.MediaGroups {
-		validMediaGroup[g] = true
 	}
 
 	var resolved ResolvedTests
@@ -528,28 +741,42 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 		return fmt.Errorf("read %s: %w", resultsPath, err)
 	}
 
-	// freshSplit lets a cached row (promptfoo reports prompt:0, completion:0 on a cache
-	// hit) borrow the real in/out split from another row in THIS SAME run that made a
-	// fresh call for the identical (model, test) — a cache hit means an identical request
-	// would have cost the same, so the split is still a valid estimate, just not this
-	// row's own measurement.
-	freshSplit := map[string]tokenSplit{}
-	for _, row := range results.Results.Results {
-		if !row.Response.Cached && row.TokenUsage.Prompt > 0 {
-			key := providerModelKey(row.Provider.ID, row.Provider.Label) + "|" + row.TestCase.Description
-			freshSplit[key] = tokenSplit{row.TokenUsage.Prompt, row.TokenUsage.Completion}
-		}
-	}
+	freshSplit := buildFreshSplit(results)
 
 	var verdicts []Verdict
-	for _, row := range results.Results.Results {
-		tc, ok := testByID[row.TestCase.Description]
-		if !ok {
-			continue // belongs to a different scenario's tests, if results were ever merged
+	if scenario.Pipeline == "schema_kb_v1" {
+		// The public catalog deliberately excludes exact values and kbd_materials, so
+		// schema judging rebuilds its private resolution context from the snapshotted
+		// fixture selected by resolveScenarioRunInputs.
+		verdicts, err = judgeSchemaKBRows(inputs.FixturePath, scenario, results, testByID, priceByModel, freshSplit)
+		if err != nil {
+			return err
 		}
-		v := judgeOne(tc, row, &catalog, tokenValue, validMediaRef, validMediaGroup)
-		applyCostEstimate(&v, row, priceByModel, freshSplit)
-		verdicts = append(verdicts, v)
+	} else {
+		var catalog Catalog
+		if err := readJSON(filepath.Join(genDir, "catalog.json"), &catalog); err != nil {
+			return fmt.Errorf("read catalog.json (did you run render first?): %w", err)
+		}
+		tokenValue := map[string]string{}
+		for _, f := range catalog.Tokens {
+			tokenValue[f.Token] = f.Value
+		}
+		validMedia := map[string]bool{}
+		for _, tok := range catalog.MediaTokens {
+			validMedia[tok] = true
+		}
+		for _, row := range results.Results.Results {
+			tc, ok := testByID[row.TestCase.Description]
+			if !ok {
+				continue // belongs to a different scenario's tests, if results were ever merged
+			}
+			v := judgeOne(tc, row, tokenValue, validMedia, catalog.TrustedDigits)
+			v.FirstAttemptParseOK, v.FirstAttemptContractPass = firstAttemptOutcome(row, v, func(r PromptfooRow) Verdict {
+				return judgeOne(TestCase{}, r, tokenValue, validMedia, catalog.TrustedDigits)
+			})
+			applyCostEstimate(&v, row, priceByModel, freshSplit)
+			verdicts = append(verdicts, v)
+		}
 	}
 
 	out := JudgedRun{Scenario: scenario.Name, Verdicts: verdicts}
@@ -559,6 +786,41 @@ func judgeScenario(scenarioDir, runDir, modelsPath string) error {
 	}
 	fmt.Printf("judged %s: %d verdicts -> %s\n", scenario.Name, len(verdicts), outPath)
 	return nil
+}
+
+// firstAttemptOutcome reports whether row's ORIGINAL (attempt 0) output would itself
+// have parsed and passed the strict contract, independent of whichever attempt ended up
+// selected. A row never retried (Attempts empty) has attempt 0 already reflected in v,
+// so its own ParseOK/ContractPass is returned directly rather than re-judging identical
+// input. Otherwise judgeOneOnAttempt0 re-judges a copy of row with Response.Output
+// swapped to Attempts[0].Output, against an empty TestCase{} — only contract shape
+// matters here, not any test's specific requires/media/escalate/language expectations
+// (those are about MODEL BEHAVIOR on the ultimately-selected attempt, a different
+// question from "did the pipeline itself hold up on the first try").
+func firstAttemptOutcome(row PromptfooRow, v Verdict, judgeOneOnAttempt0 func(PromptfooRow) Verdict) (parseOK, contractPass bool) {
+	if len(row.Attempts) == 0 {
+		return v.ParseOK, v.ContractPass
+	}
+	synthetic := row
+	synthetic.Response.Output = row.Attempts[0].Output
+	fv := judgeOneOnAttempt0(synthetic)
+	return fv.ParseOK, fv.ContractPass
+}
+
+// buildFreshSplit lets a cached row (promptfoo reports prompt:0, completion:0 on a cache
+// hit) borrow the real in/out split from another row in THIS SAME run that made a fresh
+// call for the identical (model, test) — a cache hit means an identical request would
+// have cost the same, so the split is still a valid estimate, just not this row's own
+// measurement. Shared by both the legacy and schema_kb_v1 judging paths.
+func buildFreshSplit(results PromptfooResults) map[string]tokenSplit {
+	freshSplit := map[string]tokenSplit{}
+	for _, row := range results.Results.Results {
+		if !row.Response.Cached && row.TokenUsage.Prompt > 0 {
+			key := providerModelKey(row.Provider.ID, row.Provider.Label) + "|" + row.TestCase.Description
+			freshSplit[key] = tokenSplit{row.TokenUsage.Prompt, row.TokenUsage.Completion}
+		}
+	}
+	return freshSplit
 }
 
 // appendReason accumulates fact onto v.Reason, joined with "; " when something is
@@ -580,7 +842,7 @@ func (v *Verdict) appendReason(fact string) {
 	}
 }
 
-func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[string]string, validRef, validGroup map[string]bool) Verdict {
+func judgeOne(tc TestCase, row PromptfooRow, tokenValue map[string]string, validMedia map[string]bool, trustedDigits []string) Verdict {
 	v := Verdict{
 		TestID:       tc.ID,
 		Model:        providerModelKey(row.Provider.ID, row.Provider.Label),
@@ -593,9 +855,15 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		Truncated:    isTruncatedFinish(row.Response.FinishReason),
 		Reasoning:    row.Response.Reasoning,
 		Retries:      row.Retries,
+		RetryReason:  row.RetryReason,
+		// MediaResolveOK has no meaning on the legacy pipeline (nothing to resolve — its
+		// data.yaml never had a kbd_materials-shaped registry to re-validate against), so
+		// it is fixed true here rather than left at bool's false zero value, which would
+		// otherwise misreport as a failure.
+		MediaResolveOK: true,
 	}
 
-	obj, ok := parseModelJSON(row.Response.Output)
+	obj, ok := extractModelJSON(row.Response.Output, &v)
 	v.ParseOK = ok
 	v.RetryRecovered = v.Retries > 0 && v.ParseOK
 	if !ok {
@@ -608,18 +876,18 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 
 	// Type-checked, not just presence-checked: a model can return the right KEYS with
 	// the wrong shape (escalate: "true" as a string, reply_language: 7) and the older
-	// presence-only check would have let that through as a valid contract.
+	// presence-only check would have let that through as a valid contract. The four
+	// OPERATIONAL fields are checked (DECISIONS.md §"Customer-response JSON contract");
+	// escalation_reason and confidence are diagnostic-only telemetry — absent,
+	// mistyped, or out-of-range diagnostics never fail an otherwise valid reply (the
+	// raw output preserves whatever the model actually wrote there).
 	replyText, hasReplyText := obj["reply_text"].(string)
 	_, hasLang := obj["reply_language"].(string)
 	escalateVal, hasEscalate := obj["escalate"].(bool)
-	mediaField := "asset_refs"
-	if catalog.Contract == "attach_groups" {
-		mediaField = "attach_groups"
-	}
 	// mediaRaw is the UNTYPED array — kept around (not just mediaEntries' string-filtered
 	// view) so MediaCount below counts every entry the model actually wrote, including a
 	// stray non-string one, instead of silently undercounting by dropping it first.
-	mediaRaw, hasMediaField := obj[mediaField].([]any)
+	mediaRaw, hasMediaField := obj[mediaFilesField].([]any)
 	mediaAllStrings := true
 	for _, e := range mediaRaw {
 		if _, ok := e.(string); !ok {
@@ -627,10 +895,15 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 			break
 		}
 	}
-	v.ContractFields = hasReplyText && replyText != "" && hasLang && hasEscalate && hasMediaField && mediaAllStrings
+	v.ContractFields = hasReplyText && replyText != "" && hasLang && hasEscalate &&
+		hasMediaField && mediaAllStrings
 	if !v.ContractFields {
-		v.appendReason(fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array %s of strings)", mediaField))
+		v.appendReason(fmt.Sprintf("missing or wrong-typed contract field (need string reply_text, string reply_language, bool escalate, array %s of strings)", mediaFilesField))
 	}
+	// escalation_reason/escalate consistency is a diagnostic observation, not a
+	// contract gate — EscalationReasonOK stays true unconditionally (field kept so
+	// old judged.json rows keep their meaning on re-read).
+	v.EscalationReasonOK = true
 
 	// Reasoning/thinking content must never leak into reply_text — the one field the
 	// real product would forward to a customer after human review. Scans replyText
@@ -651,12 +924,10 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	}
 
 	// Fail-closed: every token the model used must resolve, or the real product would
-	// block the whole draft rather than ship a half-rendered fact. escalation_reason is
-	// internal (never shown to the customer) but still scanned: an unknown token there
-	// means the model referenced a fact that doesn't exist, the same underlying bug.
-	escalationReason, _ := obj["escalation_reason"].(string)
+	// block the whole draft rather than ship a half-rendered fact. Only reply_text is
+	// scanned: escalation_reason is diagnostic-only — placeholders or braces there are
+	// never substituted and never a failure (the field is never shown to the customer).
 	spans := tokenSpanRE.FindAllString(replyText, -1)
-	reasonSpans := tokenSpanRE.FindAllString(escalationReason, -1)
 	injected := replyText
 	for _, tok := range spans {
 		val, known := tokenValue[tok]
@@ -665,11 +936,6 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 			continue
 		}
 		injected = strings.ReplaceAll(injected, tok, val)
-	}
-	for _, tok := range reasonSpans {
-		if _, known := tokenValue[tok]; !known {
-			v.UnknownTokens = append(v.UnknownTokens, tok)
-		}
 	}
 	v.Blocked = len(v.UnknownTokens) > 0
 	if v.Blocked {
@@ -693,7 +959,8 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	if v.Truncated {
 		v.appendReason(truncationNote(v.FinishReason))
 	}
-	v.ContractPass = v.ParseOK && v.ContractFields && !v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak && !v.ControlChars
+	v.ContractPass = v.ParseOK && v.ContractFields &&
+		!v.Blocked && !v.LeftoverBraces && !v.Truncated && !v.ReasoningLeak && !v.ControlChars
 
 	// Model-behavior checks (only meaningful once we know the contract held).
 	stripped := tokenSpanRE.ReplaceAllString(replyText, "")
@@ -706,13 +973,16 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	// against real runs: a model repeating a customer-named off-catalog product's model
 	// number, or correctly quoting a description's "1.7 л" / "7 режимов" spec, both got
 	// wrongly flagged here before these exclusions existed.
-	v.InventedDigits = filterInventedDigits(digitRunRE.FindAllString(stripped, -1), tc.Message, catalog.TrustedDigits)
+	v.InventedDigits = filterInventedDigits(digitRunRE.FindAllString(stripped, -1), tc.Message, trustedDigits)
 
 	v.RequiresPass = requiresSatisfied(tc.Requires, replyText, tokenValue)
+	v.ForbiddenTokensHit = forbiddenTokensHit(tc.ForbidTokens, replyText)
+	v.ForbidTokensPass = len(v.ForbiddenTokensHit) == 0
 
+	entries := mediaEntries(obj)
 	v.MediaPass = true
 	if tc.Media != nil {
-		v.MediaPass, v.MediaIssue = checkMediaExpect(tc.Media, obj, mediaRaw, mediaField)
+		v.MediaPass, v.MediaIssue = checkMediaExpect(tc.Media, entries)
 	}
 
 	// MediaCount/TooManyMedia is UNIVERSAL — every frame's own rule 3 caps attachments, so
@@ -724,15 +994,27 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 	// undercounted by silently dropping the malformed entry first.
 	v.MediaCountEvaluated = true
 	v.MediaCount = len(mediaRaw)
-	mediaLimit := maxMediaRefs
-	if mediaField == "attach_groups" {
-		mediaLimit = maxMediaGroups
-	}
-	v.TooManyMedia = v.MediaCount > mediaLimit
+	v.TooManyMedia = v.MediaCount > maxMediaGroups
 
 	v.EscalatePass = true
 	if tc.Escalate != nil {
 		v.EscalatePass = escalateVal == *tc.Escalate
+	}
+
+	// Universal, independent of whether the test declares an `escalate:` expectation at
+	// all (unlike EscalatePass above) — gated only on the contract actually having a
+	// parseable escalate value to check against (hasEscalate; a missing/mistyped field is
+	// already a ContractFields failure, no need to stack a second, noisier complaint on
+	// top of it). See Verdict.EscalateTextConsistencyPass's doc comment.
+	v.EscalateTextConsistencyPass = true
+	if hasEscalate {
+		v.EscalateTextConsistencyEvaluated = true
+		if !escalateVal {
+			if m, hit := managerDeflection(injected); hit {
+				v.EscalateTextConsistencyPass = false
+				v.DeflectionPhrase = m
+			}
+		}
 	}
 
 	// Two independent checks: does the TEXT read as the expected language (a Kazakh-letter
@@ -803,15 +1085,13 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		}
 		replyLang, _ := obj["reply_language"].(string)
 		in := outcomeInputs{
-			replyText:  replyText,
-			injected:   injected,
-			checkText:  checkText,
-			replyLang:  replyLang,
-			escalate:   escalateVal,
-			obj:        obj,
-			mediaRaw:   mediaRaw,
-			mediaField: mediaField,
-			tokenValue: tokenValue,
+			replyText:    replyText,
+			injected:     injected,
+			checkText:    checkText,
+			replyLang:    replyLang,
+			escalate:     escalateVal,
+			mediaEntries: entries,
+			tokenValue:   tokenValue,
 		}
 		v.OutcomesPass = false
 		for _, oc := range tc.Outcomes {
@@ -823,13 +1103,13 @@ func judgeOne(tc TestCase, row PromptfooRow, catalog *Catalog, tokenValue map[st
 		}
 	}
 
-	for _, entry := range mediaEntries(obj, mediaField) {
-		if (mediaField == "asset_refs" && !validRef[entry]) || (mediaField == "attach_groups" && !validGroup[entry]) {
+	for _, entry := range entries {
+		if !validMedia[entry] {
 			v.UnknownMedia = append(v.UnknownMedia, entry)
 		}
 	}
 
-	v.ModelBehaviorPass = v.RequiresPass && v.MediaPass && v.EscalatePass && v.LanguagePass &&
+	v.ModelBehaviorPass = v.RequiresPass && v.ForbidTokensPass && v.MediaPass && v.EscalatePass && v.EscalateTextConsistencyPass && v.LanguagePass &&
 		v.MustNotContainPass && v.MustContainAnyPass && v.OutcomesPass && len(v.InventedDigits) == 0 && len(v.UnitIssues) == 0 && len(v.UnknownMedia) == 0 &&
 		!v.TooManyMedia
 
@@ -846,6 +1126,8 @@ func firstFailureReason(v Verdict) string {
 	switch {
 	case !v.RequiresPass:
 		return "did not use the required fact token(s)"
+	case !v.ForbidTokensPass:
+		return "reply_text cites a forbidden fact token: " + strings.Join(v.ForbiddenTokensHit, ", ")
 	case !v.MediaPass:
 		if v.MediaIssue != "" {
 			return v.MediaIssue
@@ -853,6 +1135,8 @@ func firstFailureReason(v Verdict) string {
 		return "did not attach the expected media"
 	case !v.EscalatePass:
 		return "escalate did not match expectation"
+	case v.EscalateTextConsistencyEvaluated && !v.EscalateTextConsistencyPass:
+		return "reply hands the customer off to a manager while escalate=false: \"" + v.DeflectionPhrase + "\""
 	case !v.LanguagePass:
 		return v.LanguageIssue
 	case !v.MustNotContainPass:
@@ -881,6 +1165,33 @@ func parseModelJSON(raw string) (map[string]any, bool) {
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(cleaned), &obj); err != nil {
 		return nil, false
+	}
+	return obj, true
+}
+
+// extractModelJSON locates the model's FINAL customer-response JSON in raw provider
+// output that may combine reasoning text with the answer (aiprompt.ExtractFinalOutput —
+// direct JSON, one outer fence, or the last complete operational object inside combined
+// text; a truncated/incomplete object is never repaired and fails). On success the
+// extraction record (final span, non-final remainder, method) is written onto v; raw
+// itself is never modified — v.RawOutput keeps the provider response byte-for-byte.
+// Distinct from parseModelJSON on purpose: that one stays a plain fence-tolerant syntax
+// parse for outputs that are NOT customer-response objects (e.g. the judge-llm verdict
+// {"verdict": true}, which extraction would rightly refuse for having no operational
+// fields).
+func extractModelJSON(raw string, v *Verdict) (map[string]any, bool) {
+	ex, ok := aiprompt.ExtractFinalOutput(raw)
+	if !ok {
+		return nil, false
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(ex.Final), &obj); err != nil {
+		return nil, false // unreachable in practice: ex.Final is a validated JSON object
+	}
+	if v != nil {
+		v.FinalOutput = ex.Final
+		v.NonFinalOutput = ex.NonFinal
+		v.ExtractionMethod = ex.Method
 	}
 	return obj, true
 }
@@ -915,6 +1226,35 @@ func factTokenLiteral(dotted string) string {
 	return "{{" + dotted + "}}"
 }
 
+// forbiddenTokensHit scans every {{table.ref.column}} span in replyText (the RAW,
+// pre-substitution reply — forbid_tokens is about which fact the model picked, not what
+// the injected text reads) and returns the spans matching one of forbid's entries. An
+// entry ending in "." is a dotted PREFIX (e.g. "delivery." matches every
+// "delivery.<zone>.*" token); any other entry must match the span's dotted form exactly.
+// Returns nil (not just empty) when forbid is empty, so callers can treat a nil result as
+// "no forbid_tokens declared" the same way MustNotContain's absence is vacuously true.
+func forbiddenTokensHit(forbid []string, replyText string) []string {
+	if len(forbid) == 0 {
+		return nil
+	}
+	var hits []string
+	for _, span := range tokenSpanRE.FindAllString(replyText, -1) {
+		dotted := strings.TrimSuffix(strings.TrimPrefix(span, "{{"), "}}")
+		for _, f := range forbid {
+			if strings.HasSuffix(f, ".") {
+				if strings.HasPrefix(dotted, f) {
+					hits = append(hits, span)
+					break
+				}
+			} else if dotted == f {
+				hits = append(hits, span)
+				break
+			}
+		}
+	}
+	return hits
+}
+
 // languageTextOK is the text-side language check — the exact looksKazakh polarity switch
 // judgeOne's universal check uses, extracted so OutcomeCase blocks run the identical
 // logic. expected must be "kk" or "ru" (callers gate on that); any other value returns
@@ -935,22 +1275,22 @@ func languageFieldOK(expected, replyLang string) bool {
 	return normalizeLangCode(replyLang) == expected
 }
 
-// checkMediaExpect evaluates one MediaExpect block (Forbid / any_of_* / Exclusive)
-// against the reply's media array — judgeOne's universal media check verbatim, extracted
-// so OutcomeCase blocks share it. Returns pass plus the human-readable issue detail for
-// the failure modes that have one.
-func checkMediaExpect(exp *MediaExpect, obj map[string]any, mediaRaw []any, mediaField string) (bool, string) {
+// checkMediaExpect evaluates one MediaExpect block (Forbid / any_of / all_of / Exclusive)
+// against the reply's already-extracted media_files_to_send entries — judgeOne's
+// universal media check verbatim, extracted so OutcomeCase blocks share it. Returns pass
+// plus the human-readable issue detail for the failure modes that have one.
+func checkMediaExpect(exp *MediaExpect, entries []string) (bool, string) {
 	if exp.Forbid {
-		if len(mediaRaw) > 0 {
+		if len(entries) > 0 {
 			return false, "attached media, but this test forbids any attachment"
 		}
 		return true, ""
 	}
-	if !mediaExpectationMet(exp, obj, mediaField) {
+	if !mediaExpectationMet(exp, entries) {
 		return false, ""
 	}
 	if exp.Exclusive {
-		if outsiders := mediaOutsideExpectation(exp, obj, mediaField); len(outsiders) > 0 {
+		if outsiders := mediaOutsideExpectation(exp, entries); len(outsiders) > 0 {
 			return false, "attached media outside the expected set: " + strings.Join(outsiders, ", ")
 		}
 	}
@@ -983,18 +1323,17 @@ func anyContained(list []string, text string) bool {
 }
 
 // outcomeInputs bundles the per-reply facts an OutcomeCase block is evaluated against —
-// all computed once in judgeOne and shared by every block, so evaluating N alternatives
-// never re-derives (or diverges on) what the reply actually said.
+// all computed once by the caller (judgeOne or judgeOneSchemaKB) and shared by every
+// block, so evaluating N alternatives never re-derives (or diverges on) what the reply
+// actually said.
 type outcomeInputs struct {
-	replyText  string         // raw model reply_text (requires matches the un-substituted {{token}} spans)
-	injected   string         // token-injected text (must_not_contain / must_contain_any scan this)
-	checkText  string         // language-check text: InjectedText with judgeOne's replyText fallback
-	replyLang  string         // the model's declared reply_language field
-	escalate   bool           // the model's escalate field (type-checked earlier)
-	obj        map[string]any // parsed reply object (media helpers read the array from it)
-	mediaRaw   []any          // untyped media array, for Forbid's raw-length semantics
-	mediaField string         // "asset_refs" | "attach_groups"
-	tokenValue map[string]string
+	replyText    string // raw model reply_text (requires matches the un-substituted {{token}} spans)
+	injected     string // token-injected text (must_not_contain / must_contain_any scan this)
+	checkText    string // language-check text: InjectedText with the caller's replyText fallback
+	replyLang    string // the model's declared reply_language field
+	escalate     bool   // the model's escalate field (type-checked earlier)
+	mediaEntries []string
+	tokenValue   map[string]string
 }
 
 // outcomeSatisfied evaluates ONE OutcomeCase block: every check the block declares must
@@ -1003,6 +1342,9 @@ type outcomeInputs struct {
 // checks use, so block semantics and top-level semantics are one implementation.
 func outcomeSatisfied(oc OutcomeCase, in outcomeInputs) bool {
 	if !requiresSatisfied(oc.Requires, in.replyText, in.tokenValue) {
+		return false
+	}
+	if len(forbiddenTokensHit(oc.ForbidTokens, in.replyText)) > 0 {
 		return false
 	}
 	if oc.Escalate != nil && in.escalate != *oc.Escalate {
@@ -1014,7 +1356,7 @@ func outcomeSatisfied(oc OutcomeCase, in outcomeInputs) bool {
 		}
 	}
 	if oc.Media != nil {
-		if pass, _ := checkMediaExpect(oc.Media, in.obj, in.mediaRaw, in.mediaField); !pass {
+		if pass, _ := checkMediaExpect(oc.Media, in.mediaEntries); !pass {
 			return false
 		}
 	}
@@ -1053,8 +1395,13 @@ func filterInventedDigits(found []string, message string, trustedDigits []string
 	return out
 }
 
-func mediaEntries(obj map[string]any, field string) []string {
-	raw, ok := obj[field].([]any)
+// mediaFilesField is the ONE canonical response property every scenario returns media
+// selections in, regardless of pipeline or which token vocabulary this scenario's own
+// catalog happens to populate it with (DECISIONS.md §"Customer-response JSON contract").
+const mediaFilesField = "media_files_to_send"
+
+func mediaEntries(obj map[string]any) []string {
+	raw, ok := obj[mediaFilesField].([]any)
 	if !ok {
 		return nil
 	}
@@ -1067,38 +1414,49 @@ func mediaEntries(obj map[string]any, field string) []string {
 	return out
 }
 
-func mediaExpectationMet(exp *MediaExpect, obj map[string]any, field string) bool {
-	entries := mediaEntries(obj, field)
-	want := exp.AnyOfGroups
-	if field == "asset_refs" {
-		want = exp.AnyOfRefs
-	}
-	if len(want) == 0 {
-		return true
-	}
-	for _, w := range want {
-		for _, e := range entries {
-			if e == w {
-				return true
-			}
+func hasEntry(entries []string, want string) bool {
+	for _, e := range entries {
+		if e == want {
+			return true
 		}
 	}
 	return false
 }
 
-// mediaOutsideExpectation returns every attached entry NOT in the test's declared
-// any_of_* set — used only when Exclusive is true, on top of mediaExpectationMet's
-// existing "at least one of these" check, to enforce "this set AND NOTHING ELSE". Same
-// want-list side-selection (refs under asset_refs, groups under attach_groups) as
-// mediaExpectationMet, so the two checks can never disagree about which list is active.
-func mediaOutsideExpectation(exp *MediaExpect, obj map[string]any, field string) []string {
-	entries := mediaEntries(obj, field)
-	want := exp.AnyOfGroups
-	if field == "asset_refs" {
-		want = exp.AnyOfRefs
+// mediaExpectationMet checks entries against exp's AnyOf (at least one present) and
+// AllOf (every one present) declarations — both vacuously true when empty, same
+// "nothing declared, nothing to fail" convention as every other optional TestCase knob.
+func mediaExpectationMet(exp *MediaExpect, entries []string) bool {
+	for _, w := range exp.AllOf {
+		if !hasEntry(entries, w) {
+			return false
+		}
 	}
+	if len(exp.AnyOf) > 0 {
+		met := false
+		for _, w := range exp.AnyOf {
+			if hasEntry(entries, w) {
+				met = true
+				break
+			}
+		}
+		if !met {
+			return false
+		}
+	}
+	return true
+}
+
+// mediaOutsideExpectation returns every attached entry NOT in the test's declared
+// any_of/all_of union — used only when Exclusive is true, on top of
+// mediaExpectationMet's existing "these must be present" check, to enforce "this set AND
+// NOTHING ELSE".
+func mediaOutsideExpectation(exp *MediaExpect, entries []string) []string {
 	allowed := map[string]bool{}
-	for _, w := range want {
+	for _, w := range exp.AnyOf {
+		allowed[w] = true
+	}
+	for _, w := range exp.AllOf {
 		allowed[w] = true
 	}
 	var outsiders []string

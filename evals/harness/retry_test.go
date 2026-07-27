@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,27 +15,39 @@ import (
 
 func TestRetryCandidateIndexes(t *testing.T) {
 	rows := []PromptfooRow{
-		{}, // index 0: unparseable (empty output) -> candidate
+		{}, // index 0: unparseable (empty output) -> candidate, contract_shape
 		{}, // index 1: valid JSON -> not a candidate
 		{}, // index 2: unparseable but already retried once -> NOT a candidate (idempotent)
-		{}, // index 3: unparseable, never retried -> candidate
+		{}, // index 3: unparseable, never retried -> candidate, contract_shape
 	}
 	rows[0].Response.Output = ""
-	rows[1].Response.Output = `{"reply_text":"ok","reply_language":"ru","asset_refs":[],"escalate":false}`
+	rows[1].Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 	rows[2].Response.Output = "Thinking: still broken"
 	rows[2].Retries = 1
 	rows[3].Response.Output = "not json at all"
 
-	got := retryCandidateIndexes(rows)
-	want := []int{0, 3}
+	got := retryCandidateIndexes(rows, map[string]bool{})
+	want := []retryCandidate{{Index: 0, Reason: retryReasonContractShape}, {Index: 3, Reason: retryReasonContractShape}}
 	if len(got) != len(want) {
-		t.Fatalf("want candidates %v, got %v", want, got)
+		t.Fatalf("want candidates %+v, got %+v", want, got)
 	}
 	for i, w := range want {
 		if got[i] != w {
-			t.Errorf("want candidates %v, got %v", want, got)
+			t.Errorf("want candidates %+v, got %+v", want, got)
 			break
 		}
+	}
+}
+
+// TestRetryCandidateIndexes_MediaNotFoundReason confirms an otherwise-well-formed row
+// naming an out-of-catalog media token is labeled media_not_found, not contract_shape —
+// the two reasons must never collapse into one.
+func TestRetryCandidateIndexes_MediaNotFoundReason(t *testing.T) {
+	row := PromptfooRow{}
+	row.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":["totally.invented.token"],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	got := retryCandidateIndexes([]PromptfooRow{row}, map[string]bool{})
+	if len(got) != 1 || got[0].Reason != retryReasonMediaNotFound {
+		t.Fatalf("want a single media_not_found candidate, got %+v", got)
 	}
 }
 
@@ -45,7 +58,7 @@ func TestRetryCandidateIndexes_RunTwiceIsANoOp(t *testing.T) {
 	rows := []PromptfooRow{{}}
 	rows[0].Response.Output = ""
 	rows[0].Retries = 1 // already retried once, and the retry itself still failed
-	got := retryCandidateIndexes(rows)
+	got := retryCandidateIndexes(rows, map[string]bool{})
 	if len(got) != 0 {
 		t.Fatalf("want no candidates (already retried once), got %v", got)
 	}
@@ -69,7 +82,7 @@ func TestMergeRowPatch_PreservesUnknownFields(t *testing.T) {
 	}`)
 
 	patch := rowPatch{Retries: 1, SelectedAttempt: 1}
-	patch.Response.Output = `{"reply_text":"fixed","reply_language":"ru","asset_refs":[],"escalate":false}`
+	patch.Response.Output = `{"reply_text":"fixed","reply_language":"ru","media_files_to_send":[],"escalate":false}`
 	patch.Response.FinishReason = "stop"
 	patch.TokenUsage.Total = 900
 	patch.TokenUsage.Prompt = 400
@@ -139,7 +152,7 @@ func TestRetryOneRow_SuccessAppendsAttemptAndSelectsIt(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := orResponse{ID: "gen-test-1", Provider: "TestProvider"}
 		resp.Choices = []orChoice{{FinishReason: "stop", NativeFinishReason: "stop"}}
-		resp.Choices[0].Message.Content = `{"reply_text":"fixed on retry","reply_language":"ru","asset_refs":[],"escalate":false}`
+		resp.Choices[0].Message.Content = `{"reply_text":"fixed on retry","reply_language":"ru","media_files_to_send":[],"escalate":false}`
 		reasoningTokens := 42
 		resp.Usage = &orUsage{
 			PromptTokens: 100, CompletionTokens: 60,
@@ -159,12 +172,18 @@ func TestRetryOneRow_SuccessAppendsAttemptAndSelectsIt(t *testing.T) {
 	row.LatencyMs = 30000
 	row.Prompt.Raw = "the exact rendered prompt"
 
-	patch, err := retryOneRow(client, provider, row, "parent-sha", "retry-sha")
+	patch, err := retryOneRow(client, provider, row, "parent-sha", "retry-sha", map[string]bool{}, nil, nil, retryReasonContractShape)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if patch.Retries != 1 {
 		t.Errorf("want Retries=1, got %d", patch.Retries)
+	}
+	if patch.RetryReason != string(retryReasonContractShape) {
+		t.Errorf("want RetryReason=%q, got %q", retryReasonContractShape, patch.RetryReason)
+	}
+	if patch.Attempts[1].RetryReason != string(retryReasonContractShape) {
+		t.Errorf("want the retry attempt's own RetryReason=%q, got %q", retryReasonContractShape, patch.Attempts[1].RetryReason)
 	}
 	if patch.SelectedAttempt != 1 {
 		t.Errorf("want SelectedAttempt=1 (the retry), got %d", patch.SelectedAttempt)
@@ -178,7 +197,7 @@ func TestRetryOneRow_SuccessAppendsAttemptAndSelectsIt(t *testing.T) {
 	if patch.Attempts[1].ModelConfigSHA256 != "retry-sha" || patch.Attempts[1].ReasoningTokens != 42 {
 		t.Errorf("want attempt 1 to be the retry under the retry config with reasoning tokens captured, got %+v", patch.Attempts[1])
 	}
-	if patch.Response.Output != `{"reply_text":"fixed on retry","reply_language":"ru","asset_refs":[],"escalate":false}` {
+	if patch.Response.Output != `{"reply_text":"fixed on retry","reply_language":"ru","media_files_to_send":[],"escalate":false}` {
 		t.Errorf("want response.output = the retry's content, got %q", patch.Response.Output)
 	}
 	// Real spend, real wall time: summed across BOTH attempts, not just the selected one.
@@ -202,7 +221,7 @@ func TestRetryOneRow_HTTPFailureKeepsOriginalSelected(t *testing.T) {
 	row.LatencyMs = 30000
 	row.Prompt.Raw = "the exact rendered prompt"
 
-	patch, err := retryOneRow(client, provider, row, "parent-sha", "retry-sha")
+	patch, err := retryOneRow(client, provider, row, "parent-sha", "retry-sha", map[string]bool{}, nil, nil, retryReasonMediaNotFound)
 	// An HTTP failure on the retry call itself is NOT a fatal error for the batch —
 	// it's recorded as a failed attempt, original stays selected.
 	if err != nil {
@@ -220,6 +239,11 @@ func TestRetryOneRow_HTTPFailureKeepsOriginalSelected(t *testing.T) {
 	if len(patch.Attempts) != 2 || patch.Attempts[1].Error == "" {
 		t.Fatalf("want 2 attempts with the second carrying a non-empty Error, got %+v", patch.Attempts)
 	}
+	// RetryReason is still recorded even though the retry call itself failed — WHY a
+	// retry was attempted is a fact about candidacy, independent of the outcome.
+	if patch.RetryReason != string(retryReasonMediaNotFound) || patch.Attempts[1].RetryReason != string(retryReasonMediaNotFound) {
+		t.Errorf("want RetryReason recorded on both patch and the failed attempt, got patch=%q attempt=%q", patch.RetryReason, patch.Attempts[1].RetryReason)
+	}
 }
 
 // TestPatchResultsFile_UntouchedRowsByteIdentical is the losslessness guarantee: a row
@@ -230,7 +254,7 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 	srcPath := dir + "/src.results.json"
 	dstPath := dir + "/dst.results.json"
 
-	untouchedRow := `{"id":"row-untouched","zzz_last_field":"should survive in this exact position","response":{"output":"{\"reply_text\":\"ok\",\"reply_language\":\"ru\",\"asset_refs\":[],\"escalate\":false}","cached":false,"finishReason":"stop"},"tokenUsage":{"total":100,"prompt":80,"completion":20},"testCase":{"description":"ok test"},"provider":{"id":"openrouter:minimax/minimax-m2.5","label":""}}`
+	untouchedRow := `{"id":"row-untouched","zzz_last_field":"should survive in this exact position","response":{"output":"{\"reply_text\":\"ok\",\"reply_language\":\"ru\",\"media_files_to_send\":[],\"escalate\":false,\"escalation_reason\":\"\",\"confidence\":0.9}","cached":false,"finishReason":"stop"},"tokenUsage":{"total":100,"prompt":80,"completion":20},"testCase":{"description":"ok test"},"provider":{"id":"openrouter:minimax/minimax-m2.5","label":""}}`
 	brokenRow := `{"id":"row-broken","response":{"output":"Thinking: broken","cached":false,"finishReason":"length"},"tokenUsage":{"total":500,"prompt":400,"completion":100},"testCase":{"description":"broken test"},"provider":{"id":"openrouter:minimax/minimax-m2.5","label":""},"prompt":{"raw":"the prompt"}}`
 
 	srcJSON := `{"results":{"results":[` + untouchedRow + `,` + brokenRow + `]}}`
@@ -241,7 +265,7 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := orResponse{}
 		resp.Choices = []orChoice{{FinishReason: "stop"}}
-		resp.Choices[0].Message.Content = `{"reply_text":"fixed","reply_language":"ru","asset_refs":[],"escalate":false}`
+		resp.Choices[0].Message.Content = `{"reply_text":"fixed","reply_language":"ru","media_files_to_send":[],"escalate":false}`
 		resp.Usage = &orUsage{PromptTokens: 400, CompletionTokens: 50}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -255,12 +279,24 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := typedResults.Results.Results
-	candidateIdx := retryCandidateIndexes(rows)
-	if len(candidateIdx) != 1 || candidateIdx[0] != 1 {
-		t.Fatalf("want exactly row 1 (the broken one) as a candidate, got %v", candidateIdx)
+	candidates := retryCandidateIndexes(rows, map[string]bool{})
+	if len(candidates) != 1 || candidates[0].Index != 1 {
+		t.Fatalf("want exactly row 1 (the broken one) as a candidate, got %+v", candidates)
 	}
 
-	retried, err := patchResultsFile(srcPath, dstPath, candidateIdx, rows, client, provider, "parent-sha", "retry-sha")
+	retried, err := patchResultsFile(
+		srcPath,
+		dstPath,
+		candidates,
+		rows,
+		client,
+		map[int]ModelProvider{1: provider},
+		"parent-sha",
+		"retry-sha",
+		map[string]bool{},
+		nil,
+		nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,11 +323,213 @@ func TestPatchResultsFile_UntouchedRowsByteIdentical(t *testing.T) {
 		t.Fatal(err)
 	}
 	response, _ := patchedRow["response"].(map[string]any)
-	if response["output"] != `{"reply_text":"fixed","reply_language":"ru","asset_refs":[],"escalate":false}` {
+	if response["output"] != `{"reply_text":"fixed","reply_language":"ru","media_files_to_send":[],"escalate":false}` {
 		t.Errorf("want retried row's response.output patched, got %v", response["output"])
 	}
 	if patchedRow["retries"] != float64(1) {
 		t.Errorf("want retried row's retries=1, got %v", patchedRow["retries"])
+	}
+}
+
+func TestPatchResultsFile_UsesEachCandidatesProvider(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "src.results.json")
+	dstPath := filepath.Join(dir, "dst.results.json")
+	rowA := `{"response":{"output":"broken a","finishReason":"length"},"testCase":{"description":"a"},"provider":{"id":"openrouter:vendor/model-a","label":"fast"},"prompt":{"raw":"prompt a"}}`
+	rowB := `{"response":{"output":"broken b","finishReason":"length"},"testCase":{"description":"b"},"provider":{"id":"openrouter:vendor/model-b","label":"accurate"},"prompt":{"raw":"prompt b"}}`
+	if err := os.WriteFile(srcPath, []byte(`{"results":{"results":[`+rowA+`,`+rowB+`]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	modelsSeen := []string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req orRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		modelsSeen = append(modelsSeen, req.Model)
+		resp := orResponse{}
+		resp.Choices = []orChoice{{FinishReason: "stop"}}
+		resp.Choices[0].Message.Content = `{"reply_text":"fixed","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+		resp.Usage = &orUsage{PromptTokens: 10, CompletionTokens: 5}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	var typedResults PromptfooResults
+	if err := readJSON(srcPath, &typedResults); err != nil {
+		t.Fatal(err)
+	}
+	providers := map[int]ModelProvider{
+		0: {ID: "openrouter:vendor/model-a", Label: "fast", MaxTokens: 100},
+		1: {ID: "openrouter:vendor/model-b", Label: "accurate", MaxTokens: 200},
+	}
+	retried, err := patchResultsFile(
+		srcPath,
+		dstPath,
+		[]retryCandidate{{Index: 0, Reason: retryReasonContractShape}, {Index: 1, Reason: retryReasonContractShape}},
+		typedResults.Results.Results,
+		newORClientWithTimeout(srv.URL, "test-key", 5*time.Second),
+		providers,
+		"parent-sha",
+		"retry-sha",
+		map[string]bool{},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried != 2 {
+		t.Fatalf("retried = %d, want 2", retried)
+	}
+	want := []string{"vendor/model-a", "vendor/model-b"}
+	if len(modelsSeen) != len(want) {
+		t.Fatalf("models seen = %v, want %v", modelsSeen, want)
+	}
+	for i := range want {
+		if modelsSeen[i] != want[i] {
+			t.Fatalf("models seen = %v, want %v", modelsSeen, want)
+		}
+	}
+}
+
+// TestRetryMediaNotFoundInPlace_RetriesOnlyMediaNotFoundCandidatesInPlace is
+// cmdRun's `-retry-media` opt-in path exercised directly (bypassing cmdRun/promptfoo
+// entirely, the same way patchResultsFile/retryOneRow are tested at their own level):
+// a row naming an out-of-catalog media token is retried and overwritten IN PLACE in
+// the same results.json path, labeled retry_reason=media_not_found; an already-fine
+// row is left completely untouched.
+func TestRetryMediaNotFoundInPlace_RetriesOnlyMediaNotFoundCandidatesInPlace(t *testing.T) {
+	root := t.TempDir()
+	sd := filepath.Join(root, "scenarios", "media-fixture")
+	genDir := filepath.Join(sd, "generated")
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sd, "scenario.yaml"), []byte("name: media-fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Empty catalog (no media tokens at all) -> any media_files_to_send entry counts
+	// as out-of-catalog, i.e. a media_not_found candidate.
+	if err := writeJSON(filepath.Join(genDir, "catalog.json"), Catalog{}); err != nil {
+		t.Fatal(err)
+	}
+
+	runDir := filepath.Join(root, "runs", "2026-01-01_00-00-00-r1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mediaNotFoundRow := PromptfooRow{}
+	mediaNotFoundRow.Provider.ID = "openrouter:test/model"
+	mediaNotFoundRow.TestCase.Description = "media-not-found test"
+	mediaNotFoundRow.Prompt.Raw = "the exact rendered prompt"
+	mediaNotFoundRow.Response.Output = `{"reply_text":"вот фото","reply_language":"ru","media_files_to_send":["totally.invented.token"],"escalate":false,"escalation_reason":"","confidence":0.9}`
+
+	okRow := PromptfooRow{}
+	okRow.Provider.ID = "openrouter:test/model"
+	okRow.TestCase.Description = "ok test"
+	okRow.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+
+	results := PromptfooResults{}
+	results.Results.Results = []PromptfooRow{mediaNotFoundRow, okRow}
+	resultsPath := filepath.Join(runDir, "media-fixture.results.json")
+	if err := writeJSON(resultsPath, results); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		resp := orResponse{}
+		resp.Choices = []orChoice{{FinishReason: "stop"}}
+		resp.Choices[0].Message.Content = `{"reply_text":"fixed","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		resp.Usage = &orUsage{PromptTokens: 50, CompletionTokens: 20}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	scenario := &ScenarioConfig{Name: "media-fixture"}
+	models := &ModelsFile{Providers: []ModelProvider{{ID: "openrouter:test/model"}}}
+
+	retried, err := retryMediaNotFoundInPlace(sd, runDir, scenario, models, "models-sha", srv.URL, "test-key")
+	if err != nil {
+		t.Fatalf("retryMediaNotFoundInPlace: %v", err)
+	}
+	if retried != 1 {
+		t.Fatalf("want exactly 1 row retried (the media_not_found one), got %d", retried)
+	}
+	if calls != 1 {
+		t.Fatalf("want exactly 1 HTTP call, got %d", calls)
+	}
+
+	// The SAME results.json path must now reflect the retry, in place.
+	var patched PromptfooResults
+	if err := readJSON(resultsPath, &patched); err != nil {
+		t.Fatal(err)
+	}
+	if len(patched.Results.Results) != 2 {
+		t.Fatalf("want 2 rows still present, got %d", len(patched.Results.Results))
+	}
+	retriedRow := patched.Results.Results[0]
+	if retriedRow.Retries != 1 || retriedRow.RetryReason != string(retryReasonMediaNotFound) {
+		t.Errorf("want row 0 retried with reason=media_not_found, got Retries=%d RetryReason=%q", retriedRow.Retries, retriedRow.RetryReason)
+	}
+	if len(retriedRow.Attempts) != 2 {
+		t.Fatalf("want 2 attempts recorded (original + retry), got %d", len(retriedRow.Attempts))
+	}
+	okRowAfter := patched.Results.Results[1]
+	if okRowAfter.Retries != 0 {
+		t.Errorf("want the already-fine row completely untouched, got Retries=%d", okRowAfter.Retries)
+	}
+}
+
+// TestRetryMediaNotFoundInPlace_NothingToRetryIsANoOp confirms a scenario with no
+// media_not_found candidates makes zero HTTP calls and reports 0 retried.
+func TestRetryMediaNotFoundInPlace_NothingToRetryIsANoOp(t *testing.T) {
+	root := t.TempDir()
+	sd := filepath.Join(root, "scenarios", "clean-fixture")
+	genDir := filepath.Join(sd, "generated")
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sd, "scenario.yaml"), []byte("name: clean-fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(genDir, "catalog.json"), Catalog{}); err != nil {
+		t.Fatal(err)
+	}
+	runDir := filepath.Join(root, "runs", "2026-01-01_00-00-00-r1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	okRow := PromptfooRow{}
+	okRow.Provider.ID = "openrouter:test/model"
+	okRow.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
+	results := PromptfooResults{}
+	results.Results.Results = []PromptfooRow{okRow}
+	if err := writeJSON(filepath.Join(runDir, "clean-fixture.results.json"), results); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+	}))
+	defer srv.Close()
+
+	scenario := &ScenarioConfig{Name: "clean-fixture"}
+	models := &ModelsFile{Providers: []ModelProvider{{ID: "openrouter:test/model"}}}
+	retried, err := retryMediaNotFoundInPlace(sd, runDir, scenario, models, "models-sha", srv.URL, "test-key")
+	if err != nil {
+		t.Fatalf("retryMediaNotFoundInPlace: %v", err)
+	}
+	if retried != 0 || calls != 0 {
+		t.Fatalf("want 0 retried and 0 calls when nothing is a candidate, got retried=%d calls=%d", retried, calls)
 	}
 }
 
@@ -312,7 +550,7 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(scenarioDir, "scenario.yaml"), []byte("name: fixture-scenario\ncontract: asset_refs\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(scenarioDir, "scenario.yaml"), []byte("name: fixture-scenario\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -324,10 +562,10 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 	if err := os.MkdirAll(snapDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(snapDir, "scenario.yaml"), []byte("name: fixture-scenario\ncontract: asset_refs\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(snapDir, "scenario.yaml"), []byte("name: fixture-scenario\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cat := Catalog{Contract: "asset_refs"}
+	cat := Catalog{}
 	if err := writeJSON(filepath.Join(snapDir, "catalog.json"), cat); err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +586,7 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 	okRow := PromptfooRow{}
 	okRow.Provider.ID = "openrouter:test/model"
 	okRow.TestCase.Description = "t1"
-	okRow.Response.Output = `{"reply_text":"ok","reply_language":"ru","asset_refs":[],"escalate":false}`
+	okRow.Response.Output = `{"reply_text":"ok","reply_language":"ru","media_files_to_send":[],"escalate":false,"escalation_reason":"","confidence":0.9}`
 	brokenRow := PromptfooRow{}
 	brokenRow.Provider.ID = "openrouter:test/model"
 	brokenRow.TestCase.Description = "t2"
@@ -362,6 +600,11 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 
 	parentManifest := provenance.NewManifest(parentRunDir, "2026-01-01_00-00-00-par1", "scenario", "run", nil)
 	parentManifest.ModelsPath = "models.yaml"
+	parentManifest.Scenarios = []provenance.ScenarioSnapshotRef{{
+		Scenario:      "fixture-scenario",
+		FixtureSHA256: "parent-fixture-sha",
+		PromptSHA256:  "parent-prompt-sha",
+	}}
 	if sha, err := provenance.SHA256File(filepath.Join(parentRunDir, "snapshots", "models.yaml")); err == nil {
 		parentManifest.ModelsSHA256 = sha
 	}
@@ -377,6 +620,47 @@ func setupRetryFixture(t *testing.T, srv *httptest.Server) (scenarioDir, parentR
 	return scenarioDir, parentRunDir, retryModelsPath
 }
 
+// TestCmdRetry_ArchivedScenario_HardErrorsBeforeAnyCall confirms `harness retry` never
+// bills a call against an archived scenario — an explicit request naming a retired
+// scenario is a mistake worth failing loudly on, the same doctrine as cmdRun's own
+// -scenario path (run.go), not the -all silent skip (a retry always names one
+// scenario). resolveScenarioRunInputs prefers a run's OWN snapshotted scenario.yaml
+// over the live one when present, so both copies are archived here to exercise the
+// actual resolution path this fixture takes.
+func TestCmdRetry_ArchivedScenario_HardErrorsBeforeAnyCall(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+	}))
+	defer srv.Close()
+
+	scenarioDir, parentRunDir, retryModelsPath := setupRetryFixture(t, srv)
+	archivedYAML := []byte("name: fixture-scenario\narchived: true\narchived_reason: superseded\n")
+	if err := os.WriteFile(filepath.Join(scenarioDir, "scenario.yaml"), archivedYAML, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parentRunDir, "snapshots", "fixture-scenario", "scenario.yaml"), archivedYAML, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cmdRetry([]string{
+		"-scenario", scenarioDir,
+		"-run", parentRunDir,
+		"-models-file", retryModelsPath,
+		"-base-url", srv.URL,
+	})
+	if err == nil {
+		t.Fatal("want an error for an archived scenario, got nil")
+	}
+	if !strings.Contains(err.Error(), "archived") {
+		t.Errorf("want the error to mention archival, got: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("want zero HTTP calls (refused before any spend), got %d", calls)
+	}
+}
+
 // TestCmdRetry_EndToEnd_RepairsAndIsIdempotentOnSecondInvocation is the integration
 // proof for Part 6: a real `harness retry` invocation creates a derivative run with the
 // broken row fixed (and the clean row byte-identical to the parent), then a SECOND
@@ -389,7 +673,7 @@ func TestCmdRetry_EndToEnd_RepairsAndIsIdempotentOnSecondInvocation(t *testing.T
 		calls++
 		resp := orResponse{}
 		resp.Choices = []orChoice{{FinishReason: "stop"}}
-		resp.Choices[0].Message.Content = `{"reply_text":"fixed t2","reply_language":"ru","asset_refs":[],"escalate":false}`
+		resp.Choices[0].Message.Content = `{"reply_text":"fixed t2","reply_language":"ru","media_files_to_send":[],"escalate":false}`
 		resp.Usage = &orUsage{PromptTokens: 50, CompletionTokens: 20}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -438,6 +722,12 @@ func TestCmdRetry_EndToEnd_RepairsAndIsIdempotentOnSecondInvocation(t *testing.T
 	}
 	if derivManifest.RepairKey == "" {
 		t.Error("want a non-empty repair key recorded")
+	}
+	if len(derivManifest.Scenarios) != 1 ||
+		derivManifest.Scenarios[0].FixtureSHA256 != "parent-fixture-sha" ||
+		derivManifest.Scenarios[0].PromptSHA256 != "parent-prompt-sha" ||
+		derivManifest.Scenarios[0].ResultsSHA256 == "" {
+		t.Fatalf("derivative scenario provenance was not copied and updated: %+v", derivManifest.Scenarios)
 	}
 	for _, name := range []string{"models.parent.yaml", "models.retry.yaml", "models.yaml"} {
 		if _, err := os.Stat(filepath.Join(derivDir, "snapshots", name)); err != nil {

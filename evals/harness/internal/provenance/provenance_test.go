@@ -49,7 +49,7 @@ func TestSnapshotFile_CopiesAndHashesContent(t *testing.T) {
 	}
 }
 
-func TestSnapshotScenario_CopiesAllFiveFilesWithMatchingHashes(t *testing.T) {
+func TestSnapshotScenario_CopiesGeneratedFilesAndOptionalFixture(t *testing.T) {
 	scenarioDir := t.TempDir()
 	genDir := filepath.Join(scenarioDir, "generated")
 	if err := os.MkdirAll(genDir, 0o755); err != nil {
@@ -67,9 +67,13 @@ func TestSnapshotScenario_CopiesAllFiveFilesWithMatchingHashes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	fixturePath := filepath.Join(scenarioDir, "data-ru.yaml")
+	if err := os.WriteFile(fixturePath, []byte("organization_id: test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	runDir := t.TempDir()
-	ref, err := SnapshotScenario(scenarioDir, runDir, "x")
+	ref, err := SnapshotScenario(scenarioDir, runDir, "x", fixturePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +88,7 @@ func TestSnapshotScenario_CopiesAllFiveFilesWithMatchingHashes(t *testing.T) {
 		{"catalog.json", ref.CatalogSHA256, filepath.Join(genDir, "catalog.json")},
 		{"resolved_tests.json", ref.ResolvedTestsSHA256, filepath.Join(genDir, "resolved_tests.json")},
 		{"promptfooconfig.yaml", ref.PromptfooConfigSHA256, filepath.Join(genDir, "promptfooconfig.yaml")},
+		{"kb-fixture.yaml", ref.FixtureSHA256, fixturePath},
 	}
 	for _, c := range checks {
 		want, err := SHA256File(c.src)
@@ -108,6 +113,18 @@ func TestSnapshotScenario_CopiesAllFiveFilesWithMatchingHashes(t *testing.T) {
 	}
 	if _, ok := SnapshotDirFor(runDir, "does-not-exist"); ok {
 		t.Fatal("snapshotDirFor: expected no snapshot for an unknown scenario")
+	}
+
+	legacyRunDir := t.TempDir()
+	legacyRef, err := SnapshotScenario(scenarioDir, legacyRunDir, "x", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyRef.FixtureSHA256 != "" {
+		t.Fatalf("fixture hash = %q, want empty when no fixture was supplied", legacyRef.FixtureSHA256)
+	}
+	if _, err := os.Stat(filepath.Join(legacyRunDir, "snapshots", "x", "kb-fixture.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("legacy snapshot unexpectedly contains kb-fixture.yaml: %v", err)
 	}
 }
 

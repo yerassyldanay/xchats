@@ -35,7 +35,7 @@ wa_account_display_name: "Sales WhatsApp"
 # wa_owner_jid: "77011111111@s.whatsapp.net"   # or learned via FetchInstances
 
 # seed: default organization + admin login (passwords better set via .env)
-org_name: "XChats"
+org_name: "xchats"
 # seed_admin_email: "admin@example.com"
 # seed_admin_password: "change-me"
 

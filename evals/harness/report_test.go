@@ -41,6 +41,29 @@ func TestScaleSizeOf(t *testing.T) {
 	}
 }
 
+// TestScaleSizeOf_IgnoresEarlierDigits is the regression test for the trailing-digit
+// fix: a naive left-to-right digit-concatenation over the whole scenario name corrupts
+// the result the moment ANY earlier digit exists in the name (e.g. a "-v1-" version
+// marker) by shifting it in ahead of the real size digits. Only the TRAILING run of
+// digits is the size.
+func TestScaleSizeOf_IgnoresEarlierDigits(t *testing.T) {
+	cases := []struct {
+		name string
+		want int
+	}{
+		{"shop-kb-v1-scale-100", 100},
+		{"shop-kb-v1-scale-60", 60},
+		{"shop-kb-v1-30", 30},
+		{"shop-kb-v1-canary", 0}, // no trailing digits at all
+		{"shop-scale-2-v1-10", 10},
+	}
+	for _, tc := range cases {
+		if got := scaleSizeOf(tc.name); got != tc.want {
+			t.Errorf("scaleSizeOf(%q) = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestFormatCostCell(t *testing.T) {
 	tests := []struct {
 		name string
@@ -83,10 +106,107 @@ func TestFormatRetryCell_EmptyWhenNothingRetried(t *testing.T) {
 }
 
 func TestFormatRetryCell_ReportsRetriedAndRecoveredSeparatelyFromPassRate(t *testing.T) {
-	ms := modelStats{total: 29, retried: 2, retryRecovered: 2, firstAttemptParseOK: 27}
-	want := "retried 2, recovered 2 — first-attempt JSON parse success 27/29 (93%)"
+	ms := modelStats{total: 29, retried: 2, retryRecovered: 2}
+	want := "retried 2, recovered 2"
 	if got := formatRetryCell(&ms); got != want {
 		t.Fatalf("formatRetryCell() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatRetryCell_EmptyWhenNeverRetried(t *testing.T) {
+	ms := modelStats{total: 10}
+	if got := formatRetryCell(&ms); got != "" {
+		t.Fatalf("formatRetryCell() = %q, want empty string for a run that never touched retry", got)
+	}
+}
+
+// TestFormatMediaNotFoundRetryCell_EmptyWhenNeverRetried mirrors
+// TestFormatRetryCell_EmptyWhenNeverRetried for the media-not-found-specific SUBSET
+// (2026-07 consolidation).
+func TestFormatMediaNotFoundRetryCell_EmptyWhenNeverRetried(t *testing.T) {
+	ms := modelStats{total: 10, retried: 3, retryRecovered: 3} // general retries happened, but none media_not_found
+	if got := formatMediaNotFoundRetryCell(&ms); got != "" {
+		t.Fatalf("formatMediaNotFoundRetryCell() = %q, want empty string when mediaNotFoundRetried=0", got)
+	}
+}
+
+func TestFormatMediaNotFoundRetryCell_ReportsRetriedAndRecovered(t *testing.T) {
+	ms := modelStats{total: 10, retried: 2, retryRecovered: 1, mediaNotFoundRetried: 2, mediaNotFoundRecovered: 1}
+	want := "2 retried for missing media, 1 recovered (first-shot failed, selected succeeded after retry)"
+	if got := formatMediaNotFoundRetryCell(&ms); got != want {
+		t.Fatalf("formatMediaNotFoundRetryCell() = %q, want %q", got, want)
+	}
+}
+
+// TestFormatLLMCheckCell_EmptyWhenNeverEvaluated proves judge-llm's optional column never
+// prints for a run that never ran judge-llm — every SUMMARY.md before this feature
+// existed must render identically.
+func TestFormatLLMCheckCell_EmptyWhenNeverEvaluated(t *testing.T) {
+	ms := modelStats{total: 10}
+	if got := formatLLMCheckCell(&ms); got != "" {
+		t.Fatalf("formatLLMCheckCell() = %q, want empty string when llmChecked=0", got)
+	}
+}
+
+func TestFormatLLMCheckCell_ReportsPassRateAndUnverifiedSeparately(t *testing.T) {
+	ms := modelStats{total: 5, llmChecked: 4, llmPass: 3, llmUnverified: 1, llmCost: 0.0021}
+	want := "3/4 pass (75%), 1 unverified, ~$0.0021"
+	if got := formatLLMCheckCell(&ms); got != want {
+		t.Fatalf("formatLLMCheckCell() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatLLMCheckCell_OmitsUnverifiedClauseWhenZero(t *testing.T) {
+	ms := modelStats{total: 5, llmChecked: 2, llmPass: 2, llmCost: 0.0005}
+	want := "2/2 pass (100%), ~$0.0005"
+	if got := formatLLMCheckCell(&ms); got != want {
+		t.Fatalf("formatLLMCheckCell() = %q, want %q", got, want)
+	}
+}
+
+// TestFormatStockCheckCell_EmptyWhenNeverEvaluated mirrors
+// TestFormatLLMCheckCell_EmptyWhenNeverEvaluated for the auto-generated stock
+// dimension: absent, never a fabricated 0%, for a run that never evaluated any
+// StockCheckRef test.
+func TestFormatStockCheckCell_EmptyWhenNeverEvaluated(t *testing.T) {
+	ms := modelStats{total: 10}
+	if got := formatStockCheckCell(&ms); got != "" {
+		t.Fatalf("formatStockCheckCell() = %q, want empty string when stockChecked=0", got)
+	}
+}
+
+func TestFormatStockCheckCell_ReportsPassRateUnverifiedAndClassDistribution(t *testing.T) {
+	ms := modelStats{
+		total: 5, stockChecked: 4, stockPass: 3, stockUnverified: 1, stockCost: 0.0021,
+		stockClassCount: map[string]int{"in_stock": 2, "out_of_stock": 1, "unclear": 1},
+	}
+	want := "3/4 pass (75%), 1 unverified (in_stock=2, out_of_stock=1, unclear=1), ~$0.0021"
+	if got := formatStockCheckCell(&ms); got != want {
+		t.Fatalf("formatStockCheckCell() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatStockCheckCell_OmitsUnverifiedClauseWhenZero(t *testing.T) {
+	ms := modelStats{
+		total: 5, stockChecked: 2, stockPass: 2, stockCost: 0.0005,
+		stockClassCount: map[string]int{"in_stock": 2},
+	}
+	want := "2/2 pass (100%) (in_stock=2), ~$0.0005"
+	if got := formatStockCheckCell(&ms); got != want {
+		t.Fatalf("formatStockCheckCell() = %q, want %q", got, want)
+	}
+}
+
+// TestFormatFirstShotCell_ReflectsAttempt0EvenWhenRetried is the split-reporting
+// guarantee: firstAttemptContractPass pools Verdict.FirstAttemptContractPass — attempt
+// 0's own outcome — across every row, so a model that needed retry.go's correction on
+// most rows shows a LOWER first-shot number than its final contract-pass rate, never
+// the same number twice under two different labels.
+func TestFormatFirstShotCell_ReflectsAttempt0EvenWhenRetried(t *testing.T) {
+	ms := modelStats{total: 10, contractPass: 9, firstAttemptContractPass: 6}
+	want := "6/10 (60%)"
+	if got := formatFirstShotCell(&ms); got != want {
+		t.Fatalf("formatFirstShotCell() = %q, want %q", got, want)
 	}
 }
 

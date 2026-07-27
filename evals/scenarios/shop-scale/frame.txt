@@ -18,7 +18,7 @@
    (том, на котором задан сам вопрос).
 5. Не длиннее ~120 слов, тепло и конкретно, один следующий шаг.
 
-Ответ — строго JSON: {"reply_text", "reply_language", "%%MEDIA_FIELD%%": [],
+Ответ — строго JSON: {"reply_text", "reply_language", "media_files_to_send": [],
 "escalate": false, "escalation_reason": "", "confidence": 0..1}
 
 БАЗА ЗНАНИЙ:

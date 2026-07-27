@@ -94,7 +94,7 @@ func TestBuildCatalogScenario_LimitsAppliedBeforeFactsAreBuilt(t *testing.T) {
 		}},
 	}
 	writeCatalogFixtureScenario(t, root, "capped", ScenarioConfig{
-		Data: "data.yaml", Tests: "tests.yaml", Contract: "asset_refs",
+		Data: "data.yaml", Tests: "tests.yaml",
 		Limits: map[string]int{"product": 1},
 	}, data, "tests:\n")
 
@@ -110,6 +110,93 @@ func TestBuildCatalogScenario_LimitsAppliedBeforeFactsAreBuilt(t *testing.T) {
 	}
 }
 
+// TestBuildCatalogScenario_ArchivedFieldsCarried confirms the catalog's Archived/
+// ArchivedReason are a direct copy of ScenarioConfig's own fields (writeCatalogJSON's
+// doc comment: the catalog is a repository-state snapshot, never a re-derivation) —
+// both for an archived scenario and for the (default) non-archived case, so a
+// forgotten `archived: true` never silently defaults to "archived" for every scenario.
+func TestBuildCatalogScenario_ArchivedFieldsCarried(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	writeCatalogFixtureScenario(t, root, "retired", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml", Archived: true, ArchivedReason: "superseded by v2",
+	}, Data{}, "tests:\n")
+	writeCatalogFixtureScenario(t, root, "active", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml",
+	}, Data{}, "tests:\n")
+
+	retired, err := buildCatalogScenario(filepath.Join(root, "scenarios", "retired"))
+	if err != nil {
+		t.Fatalf("buildCatalogScenario(retired): %v", err)
+	}
+	if !retired.Archived || retired.ArchivedReason != "superseded by v2" {
+		t.Errorf("want Archived=true with the reason carried through, got Archived=%v Reason=%q", retired.Archived, retired.ArchivedReason)
+	}
+
+	active, err := buildCatalogScenario(filepath.Join(root, "scenarios", "active"))
+	if err != nil {
+		t.Fatalf("buildCatalogScenario(active): %v", err)
+	}
+	if active.Archived || active.ArchivedReason != "" {
+		t.Errorf("want Archived=false with no reason for an unannotated scenario, got Archived=%v Reason=%q", active.Archived, active.ArchivedReason)
+	}
+}
+
+// TestBuildCatalogScenario_TestsPathRecorded proves TestsPath names the actual
+// tests.yaml a scenario resolves against — both for a scenario that owns its own file
+// and for a "borrow case" (ScenarioConfig.Tests pointing at another scenario's dir via
+// "../"), where filepath.Join must clean the traversal into a normal scenarios/-rooted
+// path rather than leaking the borrower's own dir.
+func TestBuildCatalogScenario_TestsPathRecorded(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	writeCatalogFixtureScenario(t, root, "owner", ScenarioConfig{
+		Data: "data.yaml", Tests: "tests.yaml",
+	}, Data{}, "tests:\n")
+
+	borrowerDir := filepath.Join(root, "scenarios", "borrower")
+	if err := os.MkdirAll(borrowerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sc := ScenarioConfig{Name: "borrower", Data: "data.yaml", Tests: "../owner/tests.yaml"}
+	scB, err := yaml.Marshal(sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(borrowerDir, "scenario.yaml"), scB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dataB, err := yaml.Marshal(Data{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(borrowerDir, "data.yaml"), dataB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// buildCatalogScenario is called here the same way writeCatalogJSON actually calls
+	// it — with a dir RELATIVE to the evals/ CWD (filepath.Glob's own matches are
+	// relative) — since TestsPath's exact shape depends on that: an absolute dir would
+	// make TestsPath absolute too, which is not what production ever produces.
+	owner, err := buildCatalogScenario(filepath.Join("scenarios", "owner"))
+	if err != nil {
+		t.Fatalf("buildCatalogScenario(owner): %v", err)
+	}
+	if owner.TestsPath != filepath.ToSlash(filepath.Join("scenarios", "owner", "tests.yaml")) {
+		t.Errorf("want TestsPath=scenarios/owner/tests.yaml, got %s", owner.TestsPath)
+	}
+
+	borrower, err := buildCatalogScenario(filepath.Join("scenarios", "borrower"))
+	if err != nil {
+		t.Fatalf("buildCatalogScenario(borrower): %v", err)
+	}
+	if borrower.TestsPath != filepath.ToSlash(filepath.Join("scenarios", "owner", "tests.yaml")) {
+		t.Errorf("want the '../' borrow cleaned into scenarios/owner/tests.yaml, got %s", borrower.TestsPath)
+	}
+}
+
 func TestBuildCatalogScenario_FactsResolvedToRealValuesAndSourceRecorded(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
@@ -122,7 +209,7 @@ func TestBuildCatalogScenario_FactsResolvedToRealValuesAndSourceRecorded(t *test
 		}},
 	}
 	writeCatalogFixtureScenario(t, root, "shop", ScenarioConfig{
-		Data: "data.yaml", Tests: "tests.yaml", Contract: "asset_refs",
+		Data: "data.yaml", Tests: "tests.yaml",
 		Description: "Test shop", Setup: "shop-v1", Experiment: "shop-bakeoff",
 	}, data, "tests:\n")
 
@@ -171,15 +258,15 @@ func TestCatalogTestCaseFrom_EscalateNilVsFalse(t *testing.T) {
 }
 
 func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
-	tc := catalogTestCaseFrom(TestCase{ID: "t1", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}}}, "tests.yaml")
-	if tc.Media == nil || len(tc.Media.AnyOfRefs) != 1 || tc.Media.AnyOfRefs[0] != "photo-1" {
+	tc := catalogTestCaseFrom(TestCase{ID: "t1", Message: "m", Media: &MediaExpect{AnyOf: []string{"photo-1"}}}, "tests.yaml")
+	if tc.Media == nil || len(tc.Media.AnyOf) != 1 || tc.Media.AnyOf[0] != "photo-1" {
 		t.Fatalf("want media carried through, got %+v", tc.Media)
 	}
 	b, err := json.Marshal(tc.Media)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"any_of_refs"`) {
+	if !strings.Contains(string(b), `"any_of"`) {
 		t.Errorf("want snake_case json tags on CatalogMediaExpect, got %s", b)
 	}
 
@@ -201,7 +288,7 @@ func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
 	if !strings.Contains(string(fb), `"forbid":true`) {
 		t.Errorf("want forbid:true present when set, got %s", fb)
 	}
-	notForbidden := catalogTestCaseFrom(TestCase{ID: "t4", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}}}, "tests.yaml")
+	notForbidden := catalogTestCaseFrom(TestCase{ID: "t4", Message: "m", Media: &MediaExpect{AnyOf: []string{"photo-1"}}}, "tests.yaml")
 	nfb, err := json.Marshal(notForbidden.Media)
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +297,7 @@ func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
 		t.Errorf("want forbid key OMITTED (omitempty) when false, got %s", nfb)
 	}
 
-	exclusive := catalogTestCaseFrom(TestCase{ID: "t5", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}, Exclusive: true}}, "tests.yaml")
+	exclusive := catalogTestCaseFrom(TestCase{ID: "t5", Message: "m", Media: &MediaExpect{AnyOf: []string{"photo-1"}, Exclusive: true}}, "tests.yaml")
 	if exclusive.Media == nil || !exclusive.Media.Exclusive {
 		t.Fatalf("want Exclusive carried through, got %+v", exclusive.Media)
 	}
@@ -221,13 +308,57 @@ func TestCatalogTestCaseFrom_MediaExpectCarriedWithJSONTags(t *testing.T) {
 	if !strings.Contains(string(eb), `"exclusive":true`) {
 		t.Errorf("want exclusive:true present when set, got %s", eb)
 	}
-	nonExclusive := catalogTestCaseFrom(TestCase{ID: "t6", Message: "m", Media: &MediaExpect{AnyOfRefs: []string{"photo-1"}}}, "tests.yaml")
+	nonExclusive := catalogTestCaseFrom(TestCase{ID: "t6", Message: "m", Media: &MediaExpect{AnyOf: []string{"photo-1"}}}, "tests.yaml")
 	neb, err := json.Marshal(nonExclusive.Media)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(neb), "exclusive") {
 		t.Errorf("want exclusive key OMITTED (omitempty) when false, got %s", neb)
+	}
+}
+
+// TestCatalogTestCaseFrom_StockCheckForbidTokensAndLLMChecks proves the v3 fields
+// export under the yaml key names, not the Go field names — stock_check (not
+// stock_check_ref: TestCase.StockCheckRef's yaml tag is "stock_check", and the JSON
+// projection must match it), and that forbid_tokens/llm_checks are present when set,
+// omitted (not empty arrays) when the test declares neither.
+func TestCatalogTestCaseFrom_StockCheckForbidTokensAndLLMChecks(t *testing.T) {
+	full := catalogTestCaseFrom(TestCase{
+		ID: "t1", Message: "m",
+		ForbidTokens:  []string{"product.blender-philips."},
+		StockCheckRef: "blender-philips",
+		LLMChecks:     []LLMCheck{{Claim: "no delivery date promised", Expect: true}},
+	}, "tests.yaml")
+
+	b, err := json.Marshal(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"stock_check":"blender-philips"`) {
+		t.Errorf("want stock_check key (matching the yaml key), got %s", s)
+	}
+	if strings.Contains(s, "stock_check_ref") {
+		t.Errorf("want stock_check_ref NOT present (renamed to stock_check), got %s", s)
+	}
+	if !strings.Contains(s, `"forbid_tokens":["product.blender-philips."]`) {
+		t.Errorf("want forbid_tokens carried through, got %s", s)
+	}
+	if !strings.Contains(s, `"llm_checks":[{"claim":"no delivery date promised","expect":true}]`) {
+		t.Errorf("want llm_checks carried through with claim/expect tags, got %s", s)
+	}
+
+	bare := catalogTestCaseFrom(TestCase{ID: "t2", Message: "m"}, "tests.yaml")
+	bb, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := string(bb)
+	for _, key := range []string{"stock_check", "forbid_tokens", "llm_checks"} {
+		if strings.Contains(bs, key) {
+			t.Errorf("want %q OMITTED (omitempty) when the test declares none, got %s", key, bs)
+		}
 	}
 }
 
@@ -244,14 +375,14 @@ func TestResolveCatalogTests_RejectsConflictedMediaExpectation(t *testing.T) {
 	if err := os.MkdirAll(scenarioDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	testsYAML := "tests:\n  - id: \"bad\"\n    message: \"hi\"\n    media:\n      forbid: true\n      any_of_refs: [\"r\"]\n"
+	testsYAML := "tests:\n  - id: \"bad\"\n    message: \"hi\"\n    media:\n      forbid: true\n      any_of: [\"r\"]\n"
 	if err := os.WriteFile(filepath.Join(scenarioDir, "tests.yaml"), []byte(testsYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	_, err := resolveCatalogTests("s1", scenarioDir, "tests.yaml")
 	if err == nil {
-		t.Fatal("want an error for a test declaring both media.forbid and any_of_refs")
+		t.Fatal("want an error for a test declaring both media.forbid and any_of")
 	}
 	if !strings.Contains(err.Error(), "bad") {
 		t.Errorf("want the error to name the conflicting test id, got %v", err)
@@ -351,7 +482,7 @@ func TestWriteCatalogJSON_SkipsScenarioDirsWithoutScenarioYAML(t *testing.T) {
 	t.Chdir(root)
 
 	data := Data{FactTables: []FactTable{{Table: "product", Fields: []FieldSpec{{Name: "price"}}, Rows: []FactRow{{Ref: "p1", Values: map[string]string{"price": "1"}}}}}}
-	writeCatalogFixtureScenario(t, root, "real-scenario", ScenarioConfig{Data: "data.yaml", Tests: "tests.yaml", Contract: "asset_refs"}, data, "tests:\n")
+	writeCatalogFixtureScenario(t, root, "real-scenario", ScenarioConfig{Data: "data.yaml", Tests: "tests.yaml"}, data, "tests:\n")
 
 	// A dir with data but NO scenario.yaml (mirrors shop-scale's real shape) must be
 	// silently skipped, never an error.

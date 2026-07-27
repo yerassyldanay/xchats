@@ -49,9 +49,16 @@ func cmdRender(args []string) error {
 // earlier single-value byID map made `-models <id>` against a labeled-pair models file
 // silently return 1 provider instead of 2 — exactly the "collapse into one bucket"
 // failure providerModelKey (judge.go) exists to prevent everywhere else.
+//
+// mf.ArchivedModels is excluded from every path below (default, explicit list, and
+// "all") — a deliberately-named archived id errors loudly instead of silently
+// vanishing, since asking for one by name is a mistake worth surfacing before any
+// spend; the default/"all" paths simply omit it, the same way an unconfigured model
+// would never appear either.
 func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, error) {
+	archived := archivedModelIDs(mf)
 	if modelsFilter == "all" {
-		return mf.Providers, nil
+		return excludeArchivedProviders(mf.Providers, archived), nil
 	}
 	if modelsFilter == "" {
 		var defaults []ModelProvider
@@ -60,10 +67,11 @@ func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, erro
 				defaults = append(defaults, p)
 			}
 		}
+		defaults = excludeArchivedProviders(defaults, archived)
 		if len(defaults) > 0 {
 			return defaults, nil
 		}
-		return mf.Providers, nil
+		return excludeArchivedProviders(mf.Providers, archived), nil
 	}
 	byID := map[string][]ModelProvider{}
 	for _, p := range mf.Providers {
@@ -72,7 +80,11 @@ func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, erro
 	}
 	out := make([]ModelProvider, 0, len(mf.Providers))
 	for _, id := range splitCSV(modelsFilter) {
-		ps, ok := byID[orModelID(id)]
+		key := orModelID(id)
+		if reason, ok := archived[key]; ok {
+			return nil, fmt.Errorf("model %q is archived (%s) — refusing to run it; remove it from -models, or from models.yaml's archived_models stanza, if this is intentional", id, reason)
+		}
+		ps, ok := byID[key]
 		if !ok {
 			return nil, fmt.Errorf("model %q not found in models.yaml", id)
 		}
@@ -81,13 +93,27 @@ func filterProviders(mf *ModelsFile, modelsFilter string) ([]ModelProvider, erro
 	return out, nil
 }
 
+// excludeArchivedProviders filters ps down to entries whose (de-prefixed) id is not in
+// archived — used by filterProviders' default/"all" paths, which silently omit an
+// archived model rather than erroring (only an EXPLICIT -models request for one errors).
+func excludeArchivedProviders(ps []ModelProvider, archived map[string]string) []ModelProvider {
+	out := make([]ModelProvider, 0, len(ps))
+	for _, p := range ps {
+		if _, ok := archived[orModelID(p.ID)]; ok {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func renderScenario(scenarioDir, modelsPath, modelsFilter string) error {
 	scenario, err := loadScenario(scenarioDir)
 	if err != nil {
 		return fmt.Errorf("load scenario.yaml: %w", err)
 	}
-	if scenario.Contract != "asset_refs" && scenario.Contract != "attach_groups" {
-		return fmt.Errorf("scenario %q: contract must be \"asset_refs\" or \"attach_groups\", got %q", scenario.Name, scenario.Contract)
+	if scenario.Pipeline == "schema_kb_v1" {
+		return renderSchemaKBScenario(scenarioDir, scenario, modelsPath, modelsFilter)
 	}
 
 	dataPath := filepath.Join(scenarioDir, scenario.Data)
@@ -123,7 +149,7 @@ func renderScenario(scenarioDir, modelsPath, modelsFilter string) error {
 	}
 	models = &ModelsFile{PricingSource: models.PricingSource, PricingCheckedAt: models.PricingCheckedAt, Providers: filtered}
 
-	catalog := buildCatalog(data, scenario.Contract)
+	catalog := buildCatalog(data)
 	if err := validateCatalog(catalog); err != nil {
 		return fmt.Errorf("scenario %q: %w", scenario.Name, err)
 	}
@@ -151,7 +177,7 @@ func renderScenario(scenarioDir, modelsPath, modelsFilter string) error {
 	}
 
 	fmt.Printf("rendered %s: %d fact tokens, %d media entries, %d tests\n",
-		scenario.Name, len(catalog.Tokens), len(catalog.MediaRefs)+len(catalog.MediaGroups), len(tests))
+		scenario.Name, len(catalog.Tokens), len(catalog.MediaTokens), len(tests))
 	return nil
 }
 
@@ -247,8 +273,14 @@ func resolveTests(scenarioDir, testsRel string) ([]TestCase, error) {
 
 // buildCatalog is the ONLY place a token or media entry is considered "valid" — render
 // derives the prompt from the same rows, so the prompt and the catalog can never disagree.
-func buildCatalog(data *Data, contract string) *Catalog {
-	cat := &Catalog{Contract: contract}
+//
+// MediaTokens unions BOTH media shapes a data.yaml can use: the old per-file Assets list
+// (each ref is its own token) and grouped FactRow/Topic Media (each group is one token,
+// "{pluralOwnerType}.{ref}.{field}"). A real data.yaml only ever populates one of the two
+// in practice — this union exists so buildCatalog never has to be told in advance which
+// shape a given scenario uses; it simply reflects whatever the data actually contains.
+func buildCatalog(data *Data) *Catalog {
+	cat := &Catalog{}
 	for _, ft := range data.FactTables {
 		for _, row := range ft.Rows {
 			for _, f := range ft.Fields {
@@ -259,30 +291,24 @@ func buildCatalog(data *Data, contract string) *Catalog {
 				token := factToken(ft.Table, row.Ref, f.Name)
 				cat.Tokens = append(cat.Tokens, CatalogFact{Token: token, Value: v})
 			}
-			if contract == "attach_groups" {
-				for _, m := range row.Media {
-					if len(m.Files) == 0 {
-						continue
-					}
-					cat.MediaGroups = append(cat.MediaGroups, mediaGroupToken(ft.Table, row.Ref, m.Field))
-				}
-			}
-		}
-	}
-	if contract == "attach_groups" {
-		for _, t := range data.Topics {
-			for _, m := range t.Media {
+			for _, m := range row.Media {
 				if len(m.Files) == 0 {
 					continue
 				}
-				cat.MediaGroups = append(cat.MediaGroups, mediaGroupToken("topic", t.Ref, m.Field))
+				cat.MediaTokens = append(cat.MediaTokens, mediaGroupToken(ft.Table, row.Ref, m.Field))
 			}
 		}
 	}
-	if contract == "asset_refs" {
-		for _, a := range data.Assets {
-			cat.MediaRefs = append(cat.MediaRefs, a.Ref)
+	for _, t := range data.Topics {
+		for _, m := range t.Media {
+			if len(m.Files) == 0 {
+				continue
+			}
+			cat.MediaTokens = append(cat.MediaTokens, mediaGroupToken("topic", t.Ref, m.Field))
 		}
+	}
+	for _, a := range data.Assets {
+		cat.MediaTokens = append(cat.MediaTokens, a.Ref)
 	}
 	trustedDigits := map[string]bool{}
 	for _, ft := range data.FactTables {
@@ -296,8 +322,7 @@ func buildCatalog(data *Data, contract string) *Catalog {
 		cat.TrustedDigits = append(cat.TrustedDigits, d)
 	}
 	sort.Slice(cat.Tokens, func(i, j int) bool { return cat.Tokens[i].Token < cat.Tokens[j].Token })
-	sort.Strings(cat.MediaRefs)
-	sort.Strings(cat.MediaGroups)
+	sort.Strings(cat.MediaTokens)
 	sort.Strings(cat.TrustedDigits)
 	return cat
 }
@@ -350,13 +375,13 @@ func validatePrompt(prompt string, cat *Catalog) error {
 }
 
 // validateTestMedia rejects a test whose media expectation is self-contradictory:
-//   - Forbid (no attachment allowed) combined with AnyOfGroups/AnyOfRefs (attach one of
-//     these) can never both be satisfied by the same reply.
+//   - Forbid (no attachment allowed) combined with AnyOf/AllOf (attach these) can never
+//     both be satisfied by the same reply.
 //   - Forbid combined with Exclusive: Forbid already means "nothing may be attached",
 //     leaving Exclusive nothing to scope.
-//   - Exclusive without a non-empty AnyOfGroups/AnyOfRefs: Exclusive is a MODIFIER on an
-//     any_of_* declaration ("this set and nothing else"), not a standalone expectation —
-//     it has no set to narrow without one.
+//   - Exclusive without a non-empty AnyOf/AllOf: Exclusive is a MODIFIER on an any_of/
+//     all_of declaration ("this set and nothing else"), not a standalone expectation — it
+//     has no set to narrow without one.
 //
 // Shared by both resolution paths — render's resolveTests/renderScenario and the catalog
 // export's resolveCatalogTests — so a conflicted test fails the free render gate AND
@@ -365,17 +390,17 @@ func validateTestMedia(scenarioName, testID string, m *MediaExpect) error {
 	if m == nil {
 		return nil
 	}
-	hasAnyOf := len(m.AnyOfGroups) > 0 || len(m.AnyOfRefs) > 0
+	hasExpectation := len(m.AnyOf) > 0 || len(m.AllOf) > 0
 	if m.Forbid {
-		if hasAnyOf {
-			return fmt.Errorf("scenario %q: test %q: media.forbid is set together with any_of_groups/any_of_refs — a test cannot both require and forbid an attachment", scenarioName, testID)
+		if hasExpectation {
+			return fmt.Errorf("scenario %q: test %q: media.forbid is set together with any_of/all_of — a test cannot both require and forbid an attachment", scenarioName, testID)
 		}
 		if m.Exclusive {
 			return fmt.Errorf("scenario %q: test %q: media.forbid is set together with media.exclusive — forbid already means no attachment is allowed at all, exclusive has nothing left to scope", scenarioName, testID)
 		}
 	}
-	if m.Exclusive && !hasAnyOf {
-		return fmt.Errorf("scenario %q: test %q: media.exclusive is set without any_of_groups/any_of_refs — exclusive narrows an existing any_of_* declaration, it cannot stand alone", scenarioName, testID)
+	if m.Exclusive && !hasExpectation {
+		return fmt.Errorf("scenario %q: test %q: media.exclusive is set without any_of/all_of — exclusive narrows an existing any_of/all_of declaration, it cannot stand alone", scenarioName, testID)
 	}
 	return nil
 }
@@ -406,7 +431,8 @@ func validateTestOutcomes(scenarioName, testID string, ocs []OutcomeCase) error 
 			return fmt.Errorf("scenario %q: test %q: outcomes[%d] has no label — every alternative must be nameable in failure reasons", scenarioName, testID, i)
 		}
 		declares := len(oc.Requires) > 0 || oc.Media != nil || oc.Escalate != nil ||
-			oc.Language != "" || len(oc.MustNotContain) > 0 || len(oc.MustContainAny) > 0
+			oc.Language != "" || len(oc.MustNotContain) > 0 || len(oc.MustContainAny) > 0 ||
+			len(oc.ForbidTokens) > 0
 		if !declares {
 			return fmt.Errorf("scenario %q: test %q: outcomes[%d] (%q) declares no checks — a check-less block passes every reply, which can only be an authoring mistake", scenarioName, testID, i, oc.Label)
 		}
@@ -438,30 +464,54 @@ func factToken(table, ref, field string) string {
 	return "{{" + table + "." + ref + "." + field + "}}"
 }
 
-// mediaGroupToken names a media group as "{ownerType}.{ref}.{field}" — matching the
-// FACTS token shape ({{table.ref.field}}) instead of dropping the owner type. A review
-// caught that "coffee-machine.images" (no type prefix) collides as soon as two owner
-// kinds could share a ref (e.g. a topic and a product both called "delivery"); the fix
-// is to name it the same way a fact is named, everywhere.
-func mediaGroupToken(ownerType, ref, field string) string {
-	return ownerType + "." + ref + "." + field
+// mediaOwnerTypePlural maps a fact/media owner's SINGULAR type name (FactTable.Table, or
+// the hardcoded "topic") to the PLURAL domain segment backend/aiprompt's own semantic
+// media tokens use (topics/products/tariffs/contacts/policies — see DECISIONS.md
+// §"Concrete media-column naming"). Fact tokens stay singular ({{product.ref.field}});
+// only media-group tokens pluralize, so a legacy scenario's media_files_to_send values
+// read in the same shape as a schema_kb_v1 scenario's, even though the two pipelines
+// build their catalogs completely differently.
+var mediaOwnerTypePlural = map[string]string{
+	"product": "products", "tariff": "tariffs", "topic": "topics",
+	"contact": "contacts", "policy": "policies",
 }
 
-// buildPrompt fills frame.txt's %%SLOTS%% from data.yaml, then wraps the result in
-// {% raw %}/{% endraw %} + the {{message}} tail — the ONE place that wrapping happens, so
-// no scenario author needs to remember the promptfoo-templating-safety trick by hand.
-func buildPrompt(frame string, scenario *ScenarioConfig, data *Data, cat *Catalog) string {
-	mediaField := "asset_refs"
-	if scenario.Contract == "attach_groups" {
-		mediaField = "attach_groups"
+// mediaGroupToken names a media group as "{pluralOwnerType}.{ref}.{field}" — matching
+// the FACTS token shape ({{table.ref.field}}) instead of dropping the owner type, except
+// pluralized (see mediaOwnerTypePlural). A review caught that "coffee-machine.images" (no
+// type prefix) collides as soon as two owner kinds could share a ref (e.g. a topic and a
+// product both called "delivery"); the fix is to name it the same way a fact is named,
+// everywhere.
+func mediaGroupToken(ownerType, ref, field string) string {
+	plural, ok := mediaOwnerTypePlural[ownerType]
+	if !ok {
+		plural = ownerType // defensive fallback; every real owner type is in the map above
 	}
+	return plural + "." + ref + "." + field
+}
+
+// buildPrompt fills frame.txt's %%SLOTS%% from data.yaml, then wraps the result via
+// wrapPromptfooTemplate. There is no more %%MEDIA_FIELD%% slot: every scenario's response
+// field is named media_files_to_send, so a frame.txt states that literally instead of
+// asking render to fill in which name applies.
+func buildPrompt(frame string, scenario *ScenarioConfig, data *Data, cat *Catalog) string {
 	filled := frame
-	filled = strings.ReplaceAll(filled, "%%MEDIA_FIELD%%", mediaField)
 	filled = strings.ReplaceAll(filled, "%%KNOWLEDGE_BASE%%", renderKnowledgeBase(data.Topics, scenario.TopicFormat))
-	filled = strings.ReplaceAll(filled, "%%MEDIA%%", renderMedia(data, scenario.Contract))
+	filled = strings.ReplaceAll(filled, "%%MEDIA%%", renderMedia(data))
 	filled = strings.ReplaceAll(filled, "%%FACTS%%", renderFacts(data.FactTables))
 	filled = strings.ReplaceAll(filled, "%%DESCRIPTIONS%%", renderDescriptions(data.FactTables))
+	return wrapPromptfooTemplate(filled)
+}
 
+// wrapPromptfooTemplate wraps an already-fully-rendered stable prefix in
+// {% raw %}/{% endraw %} (so promptfoo's own Nunjucks-style templating never
+// interprets a literal {{token}} span meant for OUR later substitution step,
+// whether that span is a legacy {{table.ref.field}} fact placeholder or an
+// aiprompt one) and appends the {{history}}/{{message}} tail every scenario's
+// prompt needs. The ONE place this wrapping happens, shared by every
+// pipeline, so no scenario author or pipeline implementation needs to
+// remember the promptfoo-templating-safety trick by hand.
+func wrapPromptfooTemplate(filled string) string {
 	var b strings.Builder
 	b.WriteString("{% raw %}\n")
 	b.WriteString(strings.TrimRight(filled, "\n"))
@@ -516,14 +566,10 @@ func renderKnowledgeBase(topics []Topic, format string) string {
 // %%MEDIA%%, same as KNOWLEDGE BASE's header already works. Two scenarios were found to
 // use genuinely different header wording for the same contract style, so this can't be
 // hardcoded in Go without silently reproducing the wrong one.
-func renderMedia(data *Data, contract string) string {
-	if contract == "asset_refs" {
-		var lines []string
-		for _, a := range data.Assets {
-			lines = append(lines, fmt.Sprintf("%s | %s | %s | %s", a.Ref, a.Kind, a.Topic, a.Description))
-		}
-		return strings.Join(lines, "\n")
-	}
+//
+// Unions both media shapes a data.yaml can use, same as buildCatalog — see its doc
+// comment for why this never actually mixes shapes within one real scenario.
+func renderMedia(data *Data) string {
 	var lines []string
 	for _, ft := range data.FactTables {
 		for _, row := range ft.Rows {
@@ -542,6 +588,9 @@ func renderMedia(data *Data, contract string) string {
 			}
 			lines = append(lines, fmt.Sprintf("%s — %s", mediaGroupToken("topic", t.Ref, m.Field), m.Description))
 		}
+	}
+	for _, a := range data.Assets {
+		lines = append(lines, fmt.Sprintf("%s | %s | %s | %s", a.Ref, a.Kind, a.Topic, a.Description))
 	}
 	return strings.Join(lines, "\n")
 }

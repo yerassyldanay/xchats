@@ -29,6 +29,7 @@ const manifestSchemaVersion = 1
 type ScenarioSnapshotRef struct {
 	Scenario              string `json:"scenario"`
 	ScenarioYAMLSHA256    string `json:"scenario_yaml_sha256"`
+	FixtureSHA256         string `json:"fixture_sha256,omitempty"`
 	PromptSHA256          string `json:"prompt_sha256"`
 	CatalogSHA256         string `json:"catalog_sha256"`
 	ResolvedTestsSHA256   string `json:"resolved_tests_sha256"`
@@ -208,11 +209,11 @@ func SnapshotFile(src, dst string) (sha256hex string, err error) {
 }
 
 // SnapshotScenario copies the historically-relevant files for one scenario run — its
-// scenario.yaml plus everything render wrote to generated/ — into
+// scenario.yaml, an optional private schema fixture, and everything render wrote to generated/ — into
 // runs/<id>/snapshots/<scenario>/, so judge and report can later read the EXACT
 // requirements this run graded against, not whatever scenarios/*/generated/ contains
 // by the time someone re-judges it.
-func SnapshotScenario(scenarioDir, runDir, scenarioName string) (ScenarioSnapshotRef, error) {
+func SnapshotScenario(scenarioDir, runDir, scenarioName, fixturePath string) (ScenarioSnapshotRef, error) {
 	genDir := filepath.Join(scenarioDir, "generated")
 	dstDir := filepath.Join(runDir, "snapshots", scenarioName)
 	ref := ScenarioSnapshotRef{Scenario: scenarioName}
@@ -234,6 +235,13 @@ func SnapshotScenario(scenarioDir, runDir, scenarioName string) (ScenarioSnapsho
 			return ref, fmt.Errorf("snapshot %s: %w", p.src, err)
 		}
 		*p.out = sha
+	}
+	if fixturePath != "" {
+		sha, err := SnapshotFile(fixturePath, filepath.Join(dstDir, "kb-fixture.yaml"))
+		if err != nil {
+			return ref, fmt.Errorf("snapshot %s: %w", fixturePath, err)
+		}
+		ref.FixtureSHA256 = sha
 	}
 	return ref, nil
 }

@@ -16,6 +16,8 @@
   .family-extract { color: #a35b00; }
   .family-mixed { color: #6a3fb5; }
   .family-unknown, .family-error { color: #cf222e; }
+  .badge-archived { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 0.3rem; font-size: 0.78rem;
+    font-weight: 600; background: #6e768133; color: #6e7681; border: 1px solid #6e768166; margin-left: 0.3rem; }
   code { background: #8881; padding: 0.1rem 0.3rem; border-radius: 0.2rem; font-size: 0.85rem; }
   .links a { margin-right: 0.6rem; }
   input#filter { padding: 0.4rem 0.6rem; width: 100%; max-width: 24rem; margin-bottom: 0.5rem;
@@ -55,13 +57,14 @@
 </thead>
 <tbody>
 {{range .Rows}}
+{{$row := .}}
 <tr class="{{if not .HasManifest}}legacy{{end}}">
   <td>{{if .IndexHref}}<a href="{{.IndexHref}}">{{.RunID}}</a>{{else}}{{.RunID}}{{end}}{{if not .HasManifest}} <span class="meta">(legacy)</span>{{end}}</td>
   <td>{{if .StartedAt}}{{.StartedAt}}{{else}}&mdash;{{end}}</td>
   <td class="family-{{.Family}}">{{.Family}}</td>
-  <td>{{range .Models}}<code>{{.}}</code> {{end}}</td>
+  <td>{{range .Models}}<code>{{.}}</code>{{if inList . $row.ArchivedModels}} <span class="badge-archived" title="archived model">ARCHIVED</span>{{end}} {{end}}</td>
   <td>{{range .Prompts}}<code>{{.}}</code> {{end}}</td>
-  <td>{{if .ScenarioTotal}}{{pct .ScenarioBehaviorPass .ScenarioTotal}} / {{pct .ScenarioContractPass .ScenarioTotal}}{{else}}&mdash;{{end}}</td>
+  <td>{{if .ScenarioTotal}}{{pct .ScenarioBehaviorPass .ScenarioTotal}} / {{pct .ScenarioContractPass .ScenarioTotal}}{{if .ArchivedScenarios}} <span class="badge-archived" title="{{range .ArchivedScenarios}}{{.}} {{end}}">ARCHIVED SCENARIO</span>{{end}}{{else}}&mdash;{{end}}</td>
   <td>{{if .ExtractTotal}}{{pct .ExtractChecksPass .ExtractTotal}}{{else}}&mdash;{{end}}</td>
   <td class="links">
     {{range .ReportLinks}}<a href="{{.Href}}">{{.Name}}</a>{{end}}

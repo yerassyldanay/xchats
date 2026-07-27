@@ -1,0 +1,203 @@
+# evals/common/kb-questions-ru.yaml — the pinned question bank for the shop-kb-v1
+# family (pipeline: schema_kb_v1). Included by shop-kb-v1-10/-50/-100's tests.yaml via
+# `include: [common/kb-questions-ru.yaml]`.
+#
+# Every test targets a specific, known row in evals/scenarios/shop-kb-v1/data-ru.yaml
+# (see internal/kbfixture/generate.go for exactly how each row was built) — the IDs
+# below are pinned by shop_kb_v1_test.go's TestKBQuestionsRUBank_PinnedIDList, so an
+# accidental deletion or truncation fails loudly instead of silently shrinking coverage.
+#
+# `requires` is AND-of-OR over bare `table.ref.field` tokens (no braces — judge.go adds
+# the {{ }} itself); fact tokens use the SINGULAR table segment (product/policy/contact),
+# media tokens use the PLURAL one (products/topics), matching aiprompt's own token shapes
+# exactly (see backend/aiprompt/registry.go). `escalate: false` on every KB-answerable
+# question is a deterministic assertion, same doctrine as common/shop-questions.yaml.
+# Every test sets `language: ru` — this bank is Russian CUSTOMER INPUT by design (the
+# companion common/kb-messages-kk*.yaml banks are where Kazakh input is exercised — see
+# frame-ru.txt rule 7 for how reply language is actually routed), so this checks the bank
+# itself never accidentally drifts into Kazakh-looking text.
+tests:
+  - id: "1. exact price — coffee machine"
+    message: "Сколько стоит кофемашина DeLonghi?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: ru
+
+  - id: "2. in-stock availability — coffee machine"
+    message: "Кофемашина DeLonghi сейчас в наличии?"
+    # `requires` on product.coffee-machine.in_stock was removed (2026-07-26): in_stock
+    # is no longer a fact token at all — a token can't carry a value whole sentences
+    # grammatically depend on (see backend/aiprompt/registry.go). Stock correctness is
+    # judged entirely semantically by the auto-generated LLM stock check below.
+    escalate: false
+    language: ru
+    stock_check: "coffee-machine"
+
+  - id: "3. out-of-stock honesty — no facts or media for an unavailable product"
+    message: "Блендер Philips есть в наличии?"
+    # blender-philips is deliberately out of stock (index 3, i%3==0). Reworked for the
+    # 2026-07 canonical-block prompt (out-of-stock products are name-only — no facts,
+    # no media): the model must not quote a price for it (that token no longer exists
+    # in its catalog once out-of-stock) and must not attach media for it. in_stock is
+    # no longer a fact token at all (2026-07-26 removal — a token can't carry a value
+    # whole sentences grammatically depend on); quoting a fabricated in_stock token now
+    # fails structurally via no_unknown_tokens instead of needing a hand-maintained
+    # forbid_tokens entry. Semantic "did it clearly say unavailable" is judged by the
+    # auto-generated LLM stock check (stock_check below), which also fails an
+    # alternative-only reply that never actually states blender-philips itself is
+    # unavailable — see judge_llm.go/autoStockChecks. Whether the model additionally
+    # names an in-stock alternative is a judgment call this bank does not force either way.
+    forbid_tokens: ["product.blender-philips.price"]
+    media:
+      forbid: true
+    escalate: false
+    language: ru
+    stock_check: "blender-philips"
+
+  - id: "4. photo request — media-ful product"
+    message: "Пришлите фото кофемашины DeLonghi, пожалуйста."
+    media:
+      any_of: ["products.coffee-machine.featured_image", "products.coffee-machine.gallery_images"]
+      exclusive: true
+    escalate: false
+    language: ru
+
+  - id: "5. photo and certificate combined (all_of)"
+    message: "Пришлите, пожалуйста, фото блендера Panasonic и сертификат качества."
+    # "фото" is satisfied by EITHER photo-shaped token this product has — a customer
+    # asking for a photo doesn't care whether it's the featured image or the gallery,
+    # and requiring one specific kind was an authoring bug (both gemini and deepseek
+    # independently chose featured_image and were wrongly failed for it). The
+    # certificate remains mandatory via all_of; any_of narrows only the photo choice.
+    media:
+      all_of: ["products.blender-panasonic.certificate_documents"]
+      any_of: ["products.blender-panasonic.gallery_images", "products.blender-panasonic.featured_image"]
+    escalate: false
+    language: ru
+
+  - id: "6. photo request — media-less product"
+    message: "Пришлите фото блендера Bosch, пожалуйста."
+    # blender-bosch carries no media in any column at all — a "БЕЗ МЕДИА" record. The
+    # must_not_contain phrase ban on "вот фото"/etc. was removed (2026-07-26, deliberate
+    # decision): those phrases are ordinary customer-service wording when media IS
+    # attached elsewhere, and banning them here punished the WORDS rather than the
+    # behavior. media.forbid still enforces that no attachment is actually sent; this
+    # test no longer separately checks whether the reply's phrasing implies one was.
+    media:
+      forbid: true
+    escalate: false
+    language: ru
+
+  - id: "7. media request for an out-of-stock product — no media at all"
+    message: "Пришлите видео набора посуды, пожалуйста."
+    # cookware-set is out of stock (index 1) — reworked for the 2026-07 canonical-block
+    # prompt: an unavailable product gets NO media at all regardless of which kind was
+    # asked for, a stock-driven refusal rather than "this specific kind happens to be
+    # missing" (contrast with test 8 below, which probes a genuinely missing media KIND
+    # on an in-stock, media-bearing product). Excluded from the LLM stock check (no
+    # stock_check field) — this test's point is media/facts, not stock-language
+    # classification; segmentation analysis treats it as an out-of-stock confound, not
+    # a media-absence signal (see evals/SHOP_KB_V1_30_POSTMORTEM.md follow-up). The
+    # must_not_contain phrase ban was replaced (2026-07-26) with a semantic llm_check —
+    # same reasoning as test 6: the words aren't the failure, an actual false claim is,
+    # and a paraphrased false claim has no fixed spelling a substring list could catch.
+    forbid_tokens: ["product.cookware-set.price"]
+    media:
+      forbid: true
+    escalate: false
+    language: ru
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что этого товара сейчас нет в наличии"
+        expect: true
+
+  - id: "8. partial-media probe — asks for the one missing kind"
+    message: "А сертификат качества на блендер Tefal есть? Пришлите, если есть."
+    # blender-tefal has gallery_images + demo_videos but NO certificate_documents — a
+    # partially-populated record, not a media-less one. The missing column must still
+    # forbid attaching anything and answer honestly, exactly like a fully media-less row.
+    # The must_not_contain phrase ban was replaced (2026-07-26) with a semantic
+    # llm_check — same reasoning as tests 6/7.
+    media:
+      forbid: true
+    escalate: false
+    language: ru
+    llm_checks:
+      - claim: "Ответ ясно сообщает клиенту, что сертификата качества на этот блендер нет"
+        expect: true
+
+  - id: "9. delivery cost (general, zones present)"
+    message: "Сколько стоит доставка?"
+    # ai_delivery_zones is non-empty in the fixture, so the flat policy.main.delivery_cost
+    # fact does not exist (aiprompt.BuildCatalog requires it blank once zones exist — see
+    # DECISIONS.md §"Canonical knowledge-base schema"). A bare "how much is delivery" has
+    # no single answer any more: two shapes are acceptable — asking which direction, or
+    # answering with a concrete zone's price. A reply doing BOTH at once (states one
+    # zone's price, then also asks which city) satisfies the second shape, not neither —
+    # naming a real, non-fabricated price is the behavior under test, not the absence of
+    # a follow-up question.
+    escalate: false
+    language: ru
+    outcomes:
+      - label: "asks which direction, without citing any zone's price"
+        forbid_tokens: ["delivery."]
+      - label: "answers with at least one zone's price"
+        requires:
+          - ["delivery.almaty.delivery_cost", "delivery.astana.delivery_cost", "delivery.kazakhstan.delivery_cost"]
+
+  - id: "10. delivery days (general, zones present)"
+    message: "А сколько по времени займёт доставка?"
+    # Same shape as test 9, for delivery_in_days.
+    escalate: false
+    language: ru
+    outcomes:
+      - label: "asks which direction, without citing any zone's timeline"
+        forbid_tokens: ["delivery."]
+      - label: "answers with at least one zone's delivery time"
+        requires:
+          - ["delivery.almaty.delivery_in_days", "delivery.astana.delivery_in_days", "delivery.kazakhstan.delivery_in_days"]
+
+  - id: "11. minimum order amount"
+    message: "Какая у вас минимальная сумма заказа?"
+    requires:
+      - ["policy.main.min_order"]
+    escalate: false
+    language: ru
+
+  - id: "12. working hours and phone"
+    message: "Подскажите часы работы и номер телефона для связи."
+    requires:
+      - ["contact.main.working_hours"]
+      - ["contact.main.phone"]
+    escalate: false
+    language: ru
+
+  - id: "13. missing exact value — return period escalates"
+    message: "Какой у вас срок возврата товара?"
+    # ai_policies.main.return_period_in_days is deliberately empty in the fixture — no
+    # placeholder exists for it, so the only honest move is escalation, never a guess.
+    escalate: true
+    language: ru
+
+  - id: "14. warranty duration escalates (prose-only, no fact column)"
+    message: "На сколько месяцев у вас гарантия на кофемашину?"
+    # "warranty" has no fact column anywhere in the registry (see registry.go) — only
+    # number-free topic prose. A duration question can never be answered from it.
+    escalate: true
+    language: ru
+
+  - id: "15. off-KB city resolves via country zone fallback"
+    message: "А в Караганду доставляете?"
+    # Караганда has no city-level zone of its own in the fixture — it must resolve
+    # through the "kazakhstan" country-level fallback zone (most-specific-wins: no exact
+    # match -> the containing region/country zone answers instead), not escalate. This is
+    # the ONE case in this bank graded on the model's own geography knowledge (Караганда
+    # is a real city in Kazakhstan) rather than KB content alone — deliberate: it proves
+    # the country fallback actually fires. A cautious model that escalates instead is a
+    # real, informative failure signal, not a false negative in this test.
+    requires:
+      - ["delivery.kazakhstan.delivery_available", "delivery.kazakhstan.delivery_cost", "delivery.kazakhstan.delivery_in_days"]
+    forbid_tokens: ["delivery.almaty.", "delivery.astana.", "delivery.baikonur."]
+    escalate: false
+    must_not_contain: ["не доставля", "доставляем только по"]
+    language: ru

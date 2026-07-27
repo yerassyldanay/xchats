@@ -1,10 +1,11 @@
 # evals/scenarios/xpayment-decisions-v1/data.yaml — a payments-SaaS imitation (tariffs
 # instead of shop products) built on the same DECISIONS.md structure as shop-decisions-v1.
 #
-# Note: the "pricing" topic below exists to own the "pricing.images" media group. The
-# hand-written prompt this scenario is based on referenced that group without any topic
-# or row owning it — an authoring gap fixed here rather than reproduced (a group must
-# belong to something real, or the catalog it's validated against would be a fiction).
+# Note: the "pricing" topic below exists to own the "pricing.illustration_images" media
+# group. The hand-written prompt this scenario is based on referenced that group without
+# any topic or row owning it — an authoring gap fixed here rather than reproduced (a
+# group must belong to something real, or the catalog it's validated against would be a
+# fiction).
 
 topics:
   - ref: connect
@@ -15,7 +16,7 @@ topics:
       называйте точное значение из FACTS, не оценивайте на глаз. Подробная инструкция —
       в приложенном документе.
     media:
-      - field: documents
+      - field: guide_documents
         files: ["connect-guide.pdf"]
         description: "инструкция по подключению (PDF)"
 
@@ -38,7 +39,7 @@ topics:
       У нас три тарифа — «Старт», «Стандарт», «Бизнес». Точные цены и лимиты называйте
       только из FACTS.
     media:
-      - field: images
+      - field: illustration_images
         files: ["tariff-card.png"]
         description: "карточка тарифов"
 
@@ -64,7 +65,7 @@ fact_tables:
         description: "максимум объёма и приоритетная поддержка."
         values: { price_monthly: "49 900 ₸", commission_percent: "1.9", payment_limit_monthly: "10 000 000 ₸" }
         media:
-          - { field: documents, files: ["contract.pdf", "presentation.pdf"], description: "договор + презентация (PDF)" }
+          - { field: contract_documents, files: ["contract.pdf", "presentation.pdf"], description: "договор + презентация (PDF)" }
 
   - table: contact
     label_format: "{field_label}"
