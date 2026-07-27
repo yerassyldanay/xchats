@@ -1,5 +1,6 @@
-# One-shot WhatsApp histories for shop-kb-v1-30. Each test is one independent
-# provider call: the complete authored history and final message are rendered together.
+# One-shot WhatsApp histories for the shop-kb-v1 family (shop-kb-v1-10/-50/-100). Each
+# test is one independent provider call: the complete authored history and final message
+# are rendered together.
 tests:
   - id: "h1. pronoun price follow-up"
     history:

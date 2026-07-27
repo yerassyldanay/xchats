@@ -1,4 +1,4 @@
-# shop-kb-v1 — schema-driven, Russian-only shop family
+# shop-kb-v1 — schema-driven shop family (Russian KB, Kazakh-aware replies)
 
 This directory holds the shared source data for the `shop-kb-v1-*` scenarios
 (`pipeline: schema_kb_v1`). It has no `scenario.yaml` of its own — same
@@ -14,9 +14,13 @@ caps, not a runnable scenario by itself.
   set — see `ai_delivery_zones` below), four `ai_delivery_zones` rows (a
   country-level fallback, two cheaper/faster cities nested under it, and one
   explicit deny city), and one `kbd_materials` row per referenced file.
-- `frame-ru.txt` — the only frame this family ever renders. No language-
-  routing rule: every reply is Russian (`reply_language: "ru"`), enforced by
-  `aiprompt.ValidateResponse`, not by frame wording alone.
+- `frame-ru.txt` — the only frame this family ever renders (prompt_ref
+  `shop-kb@v4`). The KNOWLEDGE BASE is Russian-only, but the frame DOES
+  route reply language by the CUSTOMER's own message (rule 7): a Kazakh
+  message gets a fully Kazakh reply, recognized by words and grammar, not
+  by alphabet — a customer typing Kazakh on a Russian keyboard (no
+  ә/ғ/қ/ң/ө/ұ/ү/һ/і at all) still gets routed to Kazakh. `reply_language`
+  is still enforced as one of `"ru"`/`"kk"` by `aiprompt.ValidateResponse`.
 
 Unlike every other family in `evals/scenarios/`, this one's prompt is NOT
 built by this harness's own `buildCatalog`/`buildPrompt` — `data-ru.yaml` is
@@ -25,56 +29,55 @@ directly, the same package the production backend will eventually call. See
 `evals/PLAYGROUND.md`'s "What this is" section for how the two pipelines
 relate.
 
-## The three size variants
+## The three active size variants
 
-| Scenario                | ai_products limit | Question bank                                                          |
-| ------------------------ | ------------------ | ----------------------------------------------------------------------- |
-| `shop-kb-v1-30`          | 30                 | core + one-shot history + delivery-zones banks + 1 boundary test        |
-| `shop-kb-v1-scale-60`    | 60                 | core + delivery-zones banks + 2 deep-boundary tests                     |
-| `shop-kb-v1-scale-100`   | (none — full pool) | core + delivery-zones banks + 2 deep-boundary tests                     |
+| Scenario         | ai_products limit  | Question banks (all five, identical across sizes)                                                              |
+| ----------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `shop-kb-v1-10`   | 10                  | `kb-questions-ru`, `kb-history-ru`, `kb-delivery-ru`, `kb-messages-kk`, `kb-messages-kk-ambiguous` |
+| `shop-kb-v1-50`   | 50                  | same five banks                                                                                                    |
+| `shop-kb-v1-100`  | (none — full pool)  | same five banks                                                                                                    |
 
-Each deep-boundary test targets a specific product near that scenario's own
-row-count boundary (e.g. the ~30th product for `shop-kb-v1-30`), so scaling
-is actually exercised at the edge of the visible catalog, not just on the
-same first few rows every size would trivially pass.
+`scenarios/shop-kb-v1-{10,50,100}/tests.yaml` are byte-identical by design
+(see that file's own header comment) — the catalog-size sweep controls for
+every variable except product count, so the question set itself never
+differs between sizes. `kb-messages-kk.yaml` (native Kazakh orthography) and
+`kb-messages-kk-ambiguous.yaml` (Kazakh typed with only Russian-keyboard
+letters, mixed-language clauses, mid-conversation language switches) are a
+separate axis layered on top of the Russian-customer banks — both DRAFT,
+machine-translated Kazakh pending native-speaker review (see each bank's own
+header comment).
 
-The five history cases (`common/kb-history-ru.yaml`) run only in the
-30-product baseline: every case is one independent provider call containing
-its complete history plus final message; the 60/100 variants stay focused on
-catalog-size boundaries. The ten delivery-zones cases
-(`common/kb-delivery-ru.yaml`) run in ALL THREE sizes — delivery/escalation
-behavior is verified at every scale, not just the smallest one — and
-`ai_delivery_zones` is unaffected by `limits.ai_products`, so the same four
-zones are present regardless of scenario size.
-
-## Prompt sizes (recorded 2026-07-22, free `render` only — no model calls)
-
-Measured directly on `generated/prompt.txt` after `harness render`; word/char
-counts are a size proxy, not a token count — actual token usage is model-
-specific and is recorded per real call in a billed run's `SUMMARY.md`
-(prompt-vs-completion token share), never estimated here.
-
-| Scenario                | Fact tokens | Media entries | Tests | Prompt chars | Prompt words |
-| ------------------------ | ----------- | -------------- | ----- | ------------- | ------------- |
-| `shop-kb-v1-30`          | 76          | 30              | 31    | 44,303        | 3,675         |
-| `shop-kb-v1-scale-60`    | 136         | 56              | 27    | 69,130        | 5,739         |
-| `shop-kb-v1-scale-100`   | 216         | 91              | 27    | 104,181       | 8,488         |
-
-Growth from 30 to 100 products is roughly linear (~2.6x the products, ~2.6x
-the prompt size) — no unexpected super-linear blowup from the fact/media
-catalog construction at this scale.
+Earlier size families in this pool's history (`shop-kb-v1-30`,
+`shop-kb-v1-scale-60`, `shop-kb-v1-scale-100`) are archived —
+`archived: true` + `archived_reason` in each `scenario.yaml` explains what
+superseded them; their historical runs are preserved unchanged.
 
 ## Regenerating and verifying (free)
 
 ```bash
 cd evals/harness
 go run ./cmd/genkbfixture        # rewrite data-ru.yaml if the generator changed
-go test ./...                    # structural shape, strict round-trip, drift, fail-closed matrix
+go test ./...                    # structural shape, strict round-trip, drift, fail-closed matrix,
+                                  # frame guard test, lingua-go bank/canary agreement
 go build -o harness . && cd ..
-./harness/harness render -scenario scenarios/shop-kb-v1-30
-./harness/harness render -scenario scenarios/shop-kb-v1-scale-60
-./harness/harness render -scenario scenarios/shop-kb-v1-scale-100
+./harness/harness render -scenario scenarios/shop-kb-v1-10
+./harness/harness render -scenario scenarios/shop-kb-v1-50
+./harness/harness render -scenario scenarios/shop-kb-v1-100
 ```
 
-No scenario in this family has been run against a real model yet — that is
-the billed checkpoint the parent task hands to a human to run explicitly.
+## Running against real models (billed)
+
+```bash
+cd evals
+./harness/harness run -scenario scenarios/shop-kb-v1-10,scenarios/shop-kb-v1-50,scenarios/shop-kb-v1-100 \
+  -models openrouter:google/gemini-2.5-flash,openrouter:google/gemini-3.5-flash \
+  -expect-calls <tests_per_scenario * models * 3>
+./harness/harness rewrite-lang -scenario scenarios/shop-kb-v1-10 -run runs/<id>   # repeat per size
+./harness/harness judge-llm -scenario scenarios/shop-kb-v1-10 -run runs/<id>      # repeat per size
+```
+
+`rewrite-lang` is optional and only ever bills for a row whose reply's
+language doesn't match the customer's — see its own doc comment
+(`evals/harness/rewrite_lang.go`) for the full mismatch/rewrite/re-judge
+contract. Run it before `judge-llm` so judge-llm's semantic checks see the
+final (possibly rewritten) text.
