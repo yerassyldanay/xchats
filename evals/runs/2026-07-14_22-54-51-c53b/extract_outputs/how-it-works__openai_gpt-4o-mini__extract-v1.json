@@ -1,0 +1,61 @@
+{
+  "case_id": "how-it-works",
+  "model": "openai/gpt-4o-mini",
+  "prompt": {
+    "name": "extract",
+    "version": 1,
+    "sha256": "dcad0020679babe7928f721af04a451b570bbafb6fe0179d5967c593cb21aa44"
+  },
+  "preprocessor": "image_1024_jpeg85",
+  "raw": "{\n  \"content_kind\": \"tutorial\",\n  \"summary\": \"This is a graphic explaining how the xpayment integration with Kaspi Pay works, detailing the steps involved in the payment process.\",\n  \"extracted_text\": \"Как работает xpayment\\nФлоу интеграции Kaspi Pay для вашего продукта\\n\\n1  Kaspi Pay кассир\\nУ вас есть Kaspi Pay кассир для приёма платежей.\\n\\n2  Виртуальный кассир xpayment\\nНомер кассира 123456789012\\nКод подтверждения\\nKaspi Pay кассир теперь xpayment как оригинальный кассир\\n\\n3  xpayment API\\nAPI\\nсоздание платежей\\nстатусы\\nуведомления\\n\\n4  Ваш продукт\\nинтернет-магазин\\nTelegram бот\\nCRM\\nмобильное приложение\\n\\n5  Клиент видит оплату в вашем продукте\\nQR  \\nDeeplink \\nКлиент 24 500 ₸\\nЗаказ #A-2041 \\nОплатить через Kaspi \\n\\n6  Клиент видит оплату в Kaspi Pay \\n18:43 \\nKaspi Pay \\nСканируйте QR-код \\nЗаказ #A-2041 \\nК оплате 24 500 ₸\\nСпособы оплаты \\nKaspi Pay ₸1234 \\nKaspi Gold ₸24 500 ₸\\nОплатить 24 500 ₸\\n\\n7  Успешная оплата \\nплатеж оплачен \\nуведомление в ваш продукт \\nзаказ оплачен\",\n  \"language\": \"ru\",\n  \"visibility_suggestion\": \"visible\",\n  \"media_role_hint\": \"instruction\",\n  \"relates_to_hint\": \"Kaspi Pay payment integration\"\n}",
+  "parsed": {
+    "content_kind": "tutorial",
+    "summary": "This is a graphic explaining how the xpayment integration with Kaspi Pay works, detailing the steps involved in the payment process.",
+    "extracted_text": "Как работает xpayment\nФлоу интеграции Kaspi Pay для вашего продукта\n\n1  Kaspi Pay кассир\nУ вас есть Kaspi Pay кассир для приёма платежей.\n\n2  Виртуальный кассир xpayment\nНомер кассира 123456789012\nКод подтверждения\nKaspi Pay кассир теперь xpayment как оригинальный кассир\n\n3  xpayment API\nAPI\nсоздание платежей\nстатусы\nуведомления\n\n4  Ваш продукт\nинтернет-магазин\nTelegram бот\nCRM\nмобильное приложение\n\n5  Клиент видит оплату в вашем продукте\nQR  \nDeeplink \nКлиент 24 500 ₸\nЗаказ #A-2041 \nОплатить через Kaspi \n\n6  Клиент видит оплату в Kaspi Pay \n18:43 \nKaspi Pay \nСканируйте QR-код \nЗаказ #A-2041 \nК оплате 24 500 ₸\nСпособы оплаты \nKaspi Pay ₸1234 \nKaspi Gold ₸24 500 ₸\nОплатить 24 500 ₸\n\n7  Успешная оплата \nплатеж оплачен \nуведомление в ваш продукт \nзаказ оплачен",
+    "language": "ru",
+    "visibility_suggestion": "visible",
+    "media_role_hint": "instruction",
+    "relates_to_hint": "Kaspi Pay payment integration"
+  },
+  "checks": [
+    {
+      "name": "field:content_kind",
+      "pass": true
+    },
+    {
+      "name": "field:media_role_hint",
+      "pass": true
+    },
+    {
+      "name": "field:visibility_suggestion",
+      "pass": true
+    },
+    {
+      "name": "text_contains_all",
+      "pass": false,
+      "detail": "missing: накоплено 320, green basket"
+    },
+    {
+      "name": "no_invented_numbers",
+      "pass": true
+    },
+    {
+      "name": "no_reasoning_leak",
+      "pass": true
+    },
+    {
+      "name": "required_numbers",
+      "pass": false,
+      "detail": "missing required number(s): 320"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 26218,
+    "completion_tokens": 395,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "cost_usd_estimate": 0.0041697,
+  "cost_basis": "measured_split"
+}

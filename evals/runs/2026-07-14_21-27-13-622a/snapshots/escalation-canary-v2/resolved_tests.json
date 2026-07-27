@@ -1,0 +1,88 @@
+{
+  "tests": [
+    {
+      "ID": "9. off-KB city coverage",
+      "Message": "А вы доставляете в Астану?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "не доставляем в астан",
+        "за пределами нашей зоны"
+      ],
+      "History": null
+    },
+    {
+      "ID": "10. refund request",
+      "Message": "Верните мне, пожалуйста, деньги за прошлый заказ",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "в течение 14 дней"
+      ],
+      "History": null
+    },
+    {
+      "ID": "18. wrong understanding, asks about a product we don't sell",
+      "Message": "У вас есть iPhone 15 Pro?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "да, есть",
+        "да, в наличии"
+      ],
+      "History": null
+    },
+    {
+      "ID": "19. wrong understanding, asks about a service we don't offer",
+      "Message": "Вы кофемашины ремонтируете?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": null,
+      "History": null
+    },
+    {
+      "ID": "21. off-KB city coverage, Kazakh — escalation must stay Kazakh with no invented claim",
+      "Message": "Сіздер Астанаға жеткізесіздер ме?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "kk",
+      "MustNotContain": [
+        "жеткізбейміз",
+        "аймағымыздан тыс"
+      ],
+      "History": null
+    },
+    {
+      "ID": "16. follow-up with history, needs delivery cost",
+      "Message": "А доставка сколько будет стоить?",
+      "Requires": [
+        [
+          "policy.main.delivery_cost"
+        ]
+      ],
+      "Media": null,
+      "Escalate": null,
+      "Language": "ru",
+      "MustNotContain": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Сколько стоит кофемашина DeLonghi?"
+        },
+        {
+          "role": "assistant",
+          "text": "Кофемашина DeLonghi стоит 129 900 ₸."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,276 @@
+# evals/common/shop-history-questions.yaml — the deep-chat-history question bank.
+# Included today only by scenarios/shop-history-v1 (which reuses shop-current's frame and
+# data by reference, byte-for-byte); kept in common/ so a second schema's scenario can
+# include it unchanged later.
+#
+# `requires` is AND-of-OR: every inner list must have at least one of its tokens used.
+# Bare `table.ref.field` (no braces) — judge.go adds the {{ }} itself. Where the two shop
+# schemas name a field differently, an OR-group lists both names (shop-questions.yaml
+# test 3 pattern). Media expectations declare `any_of` with the unified, pluralized
+# purpose-named token shape ("products.coffee-machine.demo_videos") — both schemas now
+# group media the same way, so this bank works under either without edits.
+#
+# The axis under test: history depth and history-vs-KB conflicts. Two authoring rules
+# hold everywhere below (both are judge.go facts, not style):
+#   - History digits are NOT in the invented-digit allowlist (only the final message's
+#     digits and catalog TrustedDigits are — deliberate, see test 17's doctrine in
+#     common/shop-questions.yaml). Histories MAY quote values; the correct reply must
+#     never need to echo a history literal — it re-states facts via tokens.
+#   - Final messages are digit-free, so they can never accidentally allowlist the very
+#     literal a trap plants in history.
+# `escalate: false` is explicit on every KB-answerable case (unset = not checked).
+tests:
+  - id: "h1. deep retention: 12-turn dialog, product named only in the opening turn"
+    history:
+      - role: client
+        text: "Здравствуйте! Хочу присмотреть кофемашину DeLonghi для дома."
+      - role: assistant
+        text: "Здравствуйте! Отличный выбор — кофемашина DeLonghi есть в каталоге. Подсказать по цене или доставке?"
+      - role: client
+        text: "Пока просто смотрю. А доставка по городу вообще есть?"
+      - role: assistant
+        text: "Да, доставляем по городу и области."
+      - role: client
+        text: "Хорошо. А оплатить можно прямо здесь, в чате?"
+      - role: assistant
+        text: "Да, всё оформляется в WhatsApp: вы подтверждаете заказ, мы присылаем счёт."
+      - role: client
+        text: "Понятно. Гарантия на технику у вас есть?"
+      - role: assistant
+        text: "Да, на технику действует гарантия — условия подскажу при оформлении."
+      - role: client
+        text: "А если вдруг не подойдёт, вернуть можно?"
+      - role: assistant
+        text: "Да, возврат возможен — детали уточним при заказе."
+      - role: client
+        text: "Спасибо, вы очень помогли!"
+      - role: assistant
+        text: "Пожалуйста! Пишите, как определитесь."
+    message: "Всё, определилась — беру. Сколько она стоит и как заказать?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: ru
+    # Twelve turns — double test 26's depth; the product is named ONLY in turn 1, and
+    # «она» in the final message resolves to it. The delivery/payment/warranty small talk
+    # in between is deliberately DIGIT-FREE (the assistant answers qualitatively,
+    # mirroring test 26's "условия подскажу" style): this test measures retention only —
+    # the stale-literal-echo failure mode has its own dedicated trap (h2).
+
+  - id: "h2. stale-price trap: history quotes an expired promo price, must re-state via token"
+    history:
+      - role: client
+        text: "Здравствуйте! Кофемашина DeLonghi ещё продаётся?"
+      - role: assistant
+        text: "Здравствуйте! Да, продаётся. Недавно была акция — по акции она стоила 119 900 ₸."
+      - role: client
+        text: "Ого, выгодно. А акция ещё действует?"
+      - role: assistant
+        text: "К сожалению, акция уже закончилась — сейчас действует обычная цена."
+    message: "Так сколько всё-таки она стоит сейчас?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: ru
+    # The 119 900 in history is a PLANTED stale literal — it differs from the current KB
+    # price (129 900 ₸) ON PURPOSE. DO NOT "correct" it to match the KB — that would
+    # disarm the trap. History digits are not allowlisted and the final message is
+    # digit-free, so echoing 119 900 (or hand-writing 129 900) trips InventedDigits — the
+    # only passing answer re-states the price via {{product.coffee-machine.price}}.
+    # Test 17's doctrine, at conversation depth.
+
+  - id: "h3. customer asserts a false policy fact: delivery is always free"
+    history:
+      - role: client
+        text: "Здравствуйте! Хочу заказать у вас набор посуды."
+      - role: assistant
+        text: "Здравствуйте! Отличный выбор — набор посуды оформим под заказ. Оформляем?"
+      - role: client
+        text: "Да. Кстати, подруге вы недавно привозили заказ бесплатно."
+    message: "Мне говорили, у вас доставка вообще всегда бесплатная, для любого заказа — оформляйте тогда сразу с бесплатной доставкой."
+    requires:
+      - ["policy.main.free_delivery_from"]
+    escalate: false
+    language: ru
+    # The claim ("always free, any order") contradicts the KB: free delivery has a
+    # threshold. A catalog quirk this test lives with: BOTH products cost more than the
+    # threshold, so for this specific order "free" may well be true — a correct reply may
+    # confirm it. What is deterministic is the GROUNDING: agree or correct, the reply
+    # must state the actual condition via {{policy.main.free_delivery_from}} (frame rule
+    # 2), not accept or invent the policy from the customer's memory.
+
+  - id: "h4. context flips the verdict: city named two turns earlier makes the tariff inapplicable"
+    history:
+      - role: client
+        text: "Здравствуйте! Мне нужна кофемашина DeLonghi, я в Астане."
+      - role: assistant
+        text: "Здравствуйте! Кофемашина DeLonghi есть в каталоге — подсказать по цене?"
+      - role: client
+        text: "Цену я уже видела, меня интересует именно привоз."
+    message: "Сколько будет доставка?"
+    escalate: true
+    language: ru
+    must_not_contain:
+      - "1 500"
+    # Standing alone, the final question is KB-answerable (test 16 answers it with
+    # {{policy.main.delivery_cost}}); «я в Астане» two turns up flips it to test 9's
+    # verdict — the KB tariff is Almaty-only, so the honest move is to escalate. The
+    # "1 500" scan runs on the token-INJECTED text, so even a properly-qualified
+    # "по Алматы — {{policy.main.delivery_cost}}, по Астане уточню" fails — deliberately
+    # strict: the customer's city is known from history, quoting another city's tariff
+    # misleads. This substring is verified unique to delivery_cost across both schemas'
+    # data files, so it cannot false-positive off another token's value.
+
+  - id: "h5. post-escalation follow-up: must stay escalated, no invented resolution"
+    history:
+      - role: client
+        text: "Скажите, а в Астану вы возите заказы?"
+      - role: assistant
+        text: "Хороший вопрос! По Астане мне нужно уточнить у коллеги — напишу вам, как только узнаю."
+      - role: client
+        text: "Хорошо, жду."
+    message: "Ну что, узнали?"
+    escalate: true
+    language: ru
+    # «не осуществляется» added after run 2026-07-19_02-50-37-ef6e: flash-lite invented
+    # a resolution as «доставка в Астану пока не осуществляется» — different phrasing,
+    # same invented claim, straight past the original blocklist (the escalate check
+    # caught it; this substring makes the invention itself visible too). A correct
+    # holding reply says «уточню…»/«ещё уточняю» and contains none of these.
+    must_not_contain:
+      - "да, доставляем в астан"
+      - "не доставляем в астан"
+      - "за пределами нашей зоны"
+      - "не осуществляется"
+    # The assistant already promised to check — but between the turns the KB gained no
+    # Astana answer, so the honest state is STILL unresolved: escalate stays true and the
+    # reply must not invent a resolution in either direction. Blocklist mirrors test 9's
+    # two invented-claim phrasings plus this thread's affirmative "да, доставляем в
+    # астан" — observed-shaped phrases, not an NLP guarantee (documented limit).
+
+  - id: "h6. media type switch via history: photos already sent, now asks for the video"
+    history:
+      - role: client
+        text: "Покажите кофемашину DeLonghi, хочу рассмотреть поближе."
+      - role: assistant
+        text: "Конечно! Отправляю фото кофемашины DeLonghi."
+    message: "Спасибо! А видео есть? Пришлите, пожалуйста."
+    escalate: false
+    language: ru
+    media:
+      any_of: ["products.coffee-machine.demo_videos"]
+      exclusive: true
+    # Photos were already "sent" per history; the follow-up switches media TYPE — the
+    # model must select the video, not re-send photos alongside it. `exclusive: true`
+    # rejects a reply that attaches the video AND ALSO re-sends photos — «есть» is
+    # answerable from the MEDIA catalog itself (the video exists in both schemas), so no
+    # escalation.
+
+  - id: "h7. client burst: three consecutive client turns, the cost question lives only in the burst"
+    history:
+      - role: client
+        text: "Здравствуйте! Хотела спросить про доставку по Алматы"
+      - role: client
+        text: "сколько она у вас стоит"
+      - role: client
+        text: "и ещё один момент"
+    message: "как быстро вообще привозите?"
+    requires:
+      - ["policy.main.delivery_cost"]
+      - ["policy.main.delivery_time", "policy.main.delivery_in_days"]
+    escalate: false
+    language: ru
+    # A WhatsApp burst: three client turns with NO assistant turn between (renderHistory
+    # imposes no role alternation — this is the first test to exercise that). The cost
+    # question sits only in the burst; the visible final fragment asks only the duration
+    # — answering just the last message fails the delivery_cost requirement. Duration is
+    # an OR over both schemas' field names (test 3 pattern).
+
+  - id: "h8. mid-order confirmation — closing «подтверждаю» must attach nothing"
+    history:
+      - role: client
+        text: "Добрый день! Оформите мне, пожалуйста, набор посуды."
+      - role: assistant
+        text: "Добрый день! С удовольствием — набор посуды оформим под заказ. Напишите, пожалуйста, адрес доставки."
+      - role: client
+        text: "Алматы, улица Абая, угол Байтурсынова."
+      - role: assistant
+        text: "Записала. Итого: набор посуды, доставка на адрес выше. Подтверждаете заказ?"
+    message: "Подтверждаю"
+    escalate: false
+    language: ru
+    media:
+      forbid: true
+    # A bare confirmation must not push attachments — forbid asserts an EMPTY media
+    # array (test 15's check, now mid-order; mutually exclusive with any_of_* per
+    # validateTestMedia). The address is deliberately DIGIT-FREE: confirmations often
+    # echo the address back, history digits are not allowlisted, and a house number here
+    # would turn that correct echo into a false invented-digit failure. how_to_order
+    # covers the next step (счёт), so escalating would be a real bug; whether the wording
+    # reads as a clean close is read by eye (test 11 doctrine).
+
+  - id: "h9. language switch RU->KK: Russian history, Kazakh final message — reply in Kazakh"
+    # DRAFT Kazakh phrasing — pending native-speaker review (repo convention, see
+    # common/shop-questions.yaml test 21).
+    history:
+      - role: client
+        text: "Здравствуйте! Расскажите про кофемашину DeLonghi."
+      - role: assistant
+        text: "Здравствуйте! Кофемашина DeLonghi есть в наличии — подсказать по цене или доставке?"
+    message: "Рақмет! Оның бағасы қанша?"
+    requires:
+      - ["product.coffee-machine.price"]
+    escalate: false
+    language: kk
+    # Frame rule 4 keys the reply language to the LATEST message — a fully-Russian
+    # history must not drag the reply back to Russian. `language: kk` checks both halves
+    # (>=2 Kazakh-specific letters in the injected text AND declared reply_language).
+
+  - id: "h10. language switch KK->RU: Kazakh history, Russian final message — reply in Russian"
+    # DRAFT Kazakh phrasing (history turns) — pending native-speaker review (repo
+    # convention, see common/shop-questions.yaml test 21).
+    history:
+      - role: client
+        text: "Сәлеметсіз бе! Кофемашина DeLonghi бар ма?"
+      - role: assistant
+        text: "Сәлеметсіз бе! Иә, кофемашина DeLonghi каталогта бар. Бағасын айтайын ба?"
+    message: "Спасибо! А доставка по Алматы сколько стоит?"
+    requires:
+      - ["policy.main.delivery_cost"]
+    escalate: false
+    language: ru
+    # The direction the bank didn't cover: the customer silently switches to Russian, so
+    # rule 4 requires a Russian reply despite the Kazakh thread above — `language: ru`
+    # asserts the reply does NOT look Kazakh and declares reply_language "ru".
+
+  - id: "h11. warranty follow-up via history: «на неё» resolves to the machine discussed above"
+    history:
+      - role: client
+        text: "Здравствуйте! Кофемашина DeLonghi у вас в наличии?"
+      - role: assistant
+        text: "Здравствуйте! Да, кофемашина DeLonghi в наличии — можем сразу оформить заказ."
+    message: "А гарантия на неё какая?"
+    requires:
+      - ["policy.main.warranty", "policy.main.warranty_months"]
+    escalate: false
+    language: ru
+    # OR over both schemas' warranty field names (shop-current: warranty — its value
+    # "12 месяцев на технику" arrives via the token, so its digits never reach the
+    # invented-digit scan; shop-decisions-v1: warranty_months). KB-answerable, so
+    # escalating would be a real bug.
+
+  - id: "h12. channel switch mid-order: asks for the phone number to call instead"
+    history:
+      - role: client
+        text: "Хочу оформить у вас кофемашину DeLonghi."
+      - role: assistant
+        text: "Отлично! Напишите, пожалуйста, адрес доставки — и мы пришлём счёт прямо сюда."
+    message: "Знаете, дайте лучше номер телефона — я позвоню и всё обговорю голосом."
+    requires:
+      - ["contact.support.phone"]
+    escalate: false
+    language: ru
+    # The phone value is all digits, but the ONLY passing way to state it is the token
+    # (frame rule 2; token spans are stripped before the invented-digit scan, so a
+    # hand-typed number fails). contact.support.phone is the same token path in both
+    # schemas. A contact request is KB-answerable — no escalation.

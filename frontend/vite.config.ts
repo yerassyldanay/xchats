@@ -18,6 +18,15 @@ export default defineConfig({
         target: process.env.API_BASE_URL || 'http://localhost:8080',
         changeOrigin: true,
       },
+      // Eval comparison UI's static data (frontend/nginx.conf's /evals-data/
+      // location in the built image) — in dev, proxy straight to the compose
+      // nginx container itself (which mounts evals/runs/ read-only), since dev
+      // mode has no nginx of its own to serve it. Requires `make up` (or the
+      // frontend container specifically) to be running; see evals/README.md.
+      '/evals-data': {
+        target: process.env.EVALS_DATA_BASE_URL || 'http://localhost:8081',
+        changeOrigin: true,
+      },
     },
   },
   build: { outDir: 'dist' },

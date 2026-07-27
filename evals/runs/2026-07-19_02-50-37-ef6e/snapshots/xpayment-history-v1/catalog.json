@@ -1,0 +1,60 @@
+{
+  "contract": "attach_groups",
+  "tokens": [
+    {
+      "token": "{{contact.support.phone}}",
+      "value": "+7 727 300 00 01"
+    },
+    {
+      "token": "{{contact.support.work_hours}}",
+      "value": "9:00–19:00"
+    },
+    {
+      "token": "{{policy.main.connection_days}}",
+      "value": "1"
+    },
+    {
+      "token": "{{tariff.business.commission_percent}}",
+      "value": "1.9"
+    },
+    {
+      "token": "{{tariff.business.payment_limit_monthly}}",
+      "value": "10 000 000 ₸"
+    },
+    {
+      "token": "{{tariff.business.price_monthly}}",
+      "value": "49 900 ₸"
+    },
+    {
+      "token": "{{tariff.standard.commission_percent}}",
+      "value": "2.5"
+    },
+    {
+      "token": "{{tariff.standard.payment_limit_monthly}}",
+      "value": "5 000 000 ₸"
+    },
+    {
+      "token": "{{tariff.standard.price_monthly}}",
+      "value": "19 900 ₸"
+    },
+    {
+      "token": "{{tariff.start.commission_percent}}",
+      "value": "3.5"
+    },
+    {
+      "token": "{{tariff.start.payment_limit_monthly}}",
+      "value": "1 000 000 ₸"
+    },
+    {
+      "token": "{{tariff.start.price_monthly}}",
+      "value": "9 900 ₸"
+    }
+  ],
+  "media_refs": null,
+  "media_groups": [
+    "tariff.business.documents",
+    "topic.connect.documents",
+    "topic.pricing.images"
+  ],
+  "trusted_digits": null
+}

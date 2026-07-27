@@ -44,7 +44,7 @@ function onSearch() {
   <aside class="relative flex flex-col bg-card">
     <!-- brand header -->
     <div class="flex items-center justify-between px-4 pt-4 pb-3">
-      <span class="text-[19px] font-bold tracking-tight">XChats</span>
+      <span class="text-[19px] font-bold tracking-tight">xchats</span>
       <Button variant="ghost" size="icon" class="text-primary" title="Новое сообщение" @click="showNew = true">
         <SquarePen class="w-[18px] h-[18px]" />
       </Button>

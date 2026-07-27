@@ -1,0 +1,80 @@
+# evals/scenarios/shop-current/data.yaml — the ONE source of truth for this scenario's
+# prompt. render.go builds the KNOWLEDGE BASE / MEDIA CATALOG / FACTS blocks and the
+# catalog.json ground truth from this file alone — never hand-typed elsewhere.
+
+topics:
+  - ref: catalog
+    lang: ru
+    keywords: "товар, товары, каталог, купить, техника, посуда"
+    body: |
+      В каталоге есть техника и товары для дома — например, кофемашина и набор посуды. Скажите,
+      что ищете, и я назову цену и подберу вариант.
+
+  - ref: delivery
+    lang: ru
+    keywords: "доставка, доставить, сроки, когда привезут, стоимость доставки, бесплатная доставка"
+    body: |
+      Доставляем по городу и области; срок и стоимость зависят от адреса, а при заказе на крупную
+      сумму доставка становится бесплатной. Если спрашивают про срок, стоимость или порог бесплатной
+      доставки — называйте точные значения из FACTS, не оценивайте на глаз.
+    media:
+      - { field: illustration_images, files: [delivery-zones], description: "Карта зон доставки по Алматы" }
+
+  - ref: how_to_order
+    lang: ru
+    keywords: "как заказать, оформить, заказ, купить, оплата"
+    body: |
+      Оформить заказ просто: 1) напишите, какой товар интересует; 2) укажите адрес доставки;
+      3) подтвердите заказ — мы пришлём счёт и оформим доставку прямо в WhatsApp.
+
+fact_tables:
+  - table: product
+    label_format: "Товар «{display_name}» — {field_label}"
+    fields:
+      - { name: price, label: "цена", value_kind: money_display }
+      - { name: availability, label: "наличие" }
+    rows:
+      - ref: coffee-machine
+        display_name: "Кофемашина DeLonghi"
+        values: { price: "129 900 ₸", availability: "В наличии" }
+        media:
+          - { field: gallery_images, files: [coffee-photo-1, coffee-photo-2, coffee-photo-3], description: "Фото кофемашины DeLonghi: спереди, сбоку, с открытым лотком" }
+          - { field: demo_videos, files: [coffee-video], description: "Видео-обзор кофемашины DeLonghi" }
+          - { field: certificate_documents, files: [coffee-cert], description: "Сертификат качества на кофемашину DeLonghi (PDF)" }
+      - ref: cookware-set
+        display_name: "Набор посуды"
+        values: { price: "24 900 ₸", availability: "Под заказ, 3–5 дней" }
+        media:
+          - { field: gallery_images, files: [cookware-photo-1, cookware-photo-2], description: "Фото набора посуды: общий вид, отдельные предметы" }
+
+  - table: policy
+    label_format: "{display_name} — {field_label}"
+    fields:
+      - { name: delivery_cost, label: "стоимость доставки", value_kind: money_display }
+      - { name: delivery_time, label: "срок доставки", value_kind: text_complete }
+      - { name: free_delivery_from, label: "бесплатная доставка от", value_kind: money_display }
+      - { name: return_period, label: "срок возврата", value_kind: text_complete }
+      - { name: warranty, label: "гарантия", value_kind: text_complete }
+    rows:
+      - ref: main
+        display_name: "Условия"
+        values:
+          delivery_cost: "1 500 ₸ по Алматы"
+          delivery_time: "1–3 дня"
+          free_delivery_from: "20 000 ₸"
+          return_period: "14 дней"
+          warranty: "12 месяцев на технику"
+
+  - table: contact
+    label_format: "{display_name} — {field_label}"
+    fields:
+      - { name: phone, label: "телефон" }
+      - { name: instagram, label: "Instagram" }
+      - { name: working_hours, label: "график работы", value_kind: time_display }
+    rows:
+      - ref: support
+        display_name: "Контакты поддержки"
+        values:
+          phone: "+7 727 300 00 00"
+          instagram: "@demoshop.kz"
+          working_hours: "Пн–Сб, 9:00–19:00"

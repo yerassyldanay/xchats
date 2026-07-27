@@ -130,27 +130,50 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/media/:id", s.handleServeMedia)
 	auth.GET("/realtime", s.handleRealtime)
 
-	// Playground — the KB builder (chat → materials → draft KB → publish).
+	// Playground — the KB builder (chat → materials → draft blob → approve into
+	// the live KB, 15 Decisions 3–4). No more open/publish/rollback: GET always
+	// returns the merged view; approve is the only write path to live.
 	pg := auth.Group("/playground")
 	pg.GET("/draft", s.handlePlaygroundDraft)
-	pg.POST("/draft", s.handlePlaygroundOpenDraft)
 	pg.DELETE("/draft", s.handlePlaygroundDiscardDraft)
 	pg.POST("/draft/topics", s.handlePlaygroundUpsertTopic)
 	pg.DELETE("/draft/topics/:slug", s.handlePlaygroundDeleteTopic)
 	pg.POST("/draft/assets", s.handlePlaygroundUploadAsset)
 	pg.PATCH("/draft/assets/:ref", s.handlePlaygroundPatchAsset)
 	pg.DELETE("/draft/assets/:ref", s.handlePlaygroundDeleteAsset)
-	pg.POST("/draft/values", s.handlePlaygroundUpsertValue)
-	pg.DELETE("/draft/values/:token", s.handlePlaygroundDeleteValue)
+	pg.POST("/draft/tariffs", s.handlePlaygroundUpsertTariff)
+	pg.DELETE("/draft/tariffs/:ref", s.handlePlaygroundDeleteTariff)
+	pg.POST("/draft/products", s.handlePlaygroundUpsertProduct)
+	pg.DELETE("/draft/products/:ref", s.handlePlaygroundDeleteProduct)
+	pg.PATCH("/draft/contacts", s.handlePlaygroundPatchContacts)
+	pg.PATCH("/draft/policies", s.handlePlaygroundPatchPolicies)
 	pg.PATCH("/draft/config", s.handlePlaygroundPatchConfig)
-	pg.POST("/draft/review/:kind/:id", s.handlePlaygroundReview)
 	pg.POST("/draft/materials", s.handlePlaygroundCreateMaterial)
 	pg.GET("/draft/materials", s.handlePlaygroundListMaterials)
 	pg.POST("/chat", s.handlePlaygroundChat)
 	pg.GET("/requests", s.handlePlaygroundListRequests)
 	pg.POST("/requests/:id/resolve", s.handlePlaygroundResolveRequest)
-	pg.POST("/publish", s.handlePlaygroundPublish)
-	pg.POST("/rollback", s.handlePlaygroundRollback)
+	pg.POST("/draft/approve", s.handlePlaygroundApprove)
+	pg.POST("/draft/approve/:kind/:id", s.handlePlaygroundApproveEntity)
+
+	// KB — the live-only editor (/knowledge-base). Every write here lands
+	// directly in the live ai_ tables: no draft blob, no approve step, so it
+	// can never mix with Playground's pending work (see plan "Playground
+	// redesign").
+	auth.GET("/kb", s.handleKBGet)
+	kb := auth.Group("/kb")
+	kb.POST("/topics", s.handleKBUpsertTopic)
+	kb.DELETE("/topics/:slug", s.handleKBDeleteTopic)
+	kb.POST("/assets", s.handleKBUploadAsset)
+	kb.PATCH("/assets/:ref", s.handleKBPatchAsset)
+	kb.DELETE("/assets/:ref", s.handleKBDeleteAsset)
+	kb.POST("/tariffs", s.handleKBUpsertTariff)
+	kb.DELETE("/tariffs/:ref", s.handleKBDeleteTariff)
+	kb.POST("/products", s.handleKBUpsertProduct)
+	kb.DELETE("/products/:ref", s.handleKBDeleteProduct)
+	kb.PATCH("/contacts", s.handleKBPatchContacts)
+	kb.PATCH("/policies", s.handleKBPatchPolicies)
+	kb.PATCH("/config", s.handleKBPatchConfig)
 	return r
 }
 

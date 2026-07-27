@@ -1,0 +1,16 @@
+# Fail-closed rule under test: once any delivery zone exists, the flat
+# ai_policies.delivery_cost/delivery_in_days must be blank — a KB-wide flat
+# answer would contradict per-zone pricing, so BuildCatalog rejects the
+# ambiguity rather than picking a side.
+organization_id: "33333333-3333-3333-3333-333333333333"
+ai_policies:
+  delivery_cost: "1 500 ₸"
+  outside_zones_note: "Не доставляем за пределы зоны."
+ai_delivery_zones:
+  - ref: probe
+    name: "Тестовая зона"
+    zone_level: city
+    delivery_available: true
+    delivery_cost: "1 000 ₸"
+    delivery_in_days: "1"
+    sales_status: active

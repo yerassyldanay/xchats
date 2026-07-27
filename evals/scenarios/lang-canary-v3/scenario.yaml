@@ -1,0 +1,17 @@
+name: lang-canary-v3
+description: >
+  Phase 2.1 language architecture bake-off, variant V3: the grounding, fact-token, and
+  language rules are each stated in BOTH Russian and Kazakh inside one frame (no
+  knowledge-base duplication — KB/FACTS stay Russian-only, per the plan's explicit
+  constraint against doubling KB tokens). Tests whether Kazakh instruction PRESENCE
+  alone breaks the Russian-context pull, without any routing machinery. DRAFT Kazakh
+  wording — needs native-speaker review before any billed run (see Phase 2.1 note).
+setup: lang-v3
+prompt_ref: lang-bilingual@v3
+experiment: lang-bakeoff
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged."
+frame: frame.txt
+data: ../shop-current/data.yaml
+tests: ../lang-canary-v1/tests.yaml
+topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

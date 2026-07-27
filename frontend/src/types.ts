@@ -95,52 +95,113 @@ export interface AiDraft {
   created_at: string
 }
 
-// --- Knowledge Base (Playground) — see plan/7.1-endpoints.md ---
-export type ReviewState = 'proposed' | 'approved' | 'rejected'
+// --- Knowledge Base (Playground) — see plan/7.1-endpoints.md, plan/15 ---
+// An entity is either LIVE (a row in a live ai_ table) or «Черновик» — present
+// in the kbd_draft blob, flagged `draft: true` here. There is no more
+// review_state/proposed-approved-rejected: a pending entity IS the "Правки" set.
 
 export interface DraftConfig {
-  snapshot_id: string
-  version: number
-  state: string
+  organization_id: string
   persona: string
   mission: string
   guardrails: string
   language_policy: string
   reply_max_words: number
+  draft: boolean
+  base_version: number
   updated_at: string
 }
 export interface TopicRow {
-  id: string
+  id: string // = slug (blob entries carry no DB row id)
   slug: string
   lang: string
   title: string
   keywords: string
   body_md: string
-  review_state: ReviewState
-  provenance: string
+  draft: boolean
+  provenance?: string
   updated_at: string
 }
 export interface AssetRow {
-  id: string
+  id: string // = ref
   ref: string
   kind: string
-  topic_slug: string
+  owner_kind: string // 'topic' | 'product' | 'tariff' | '' (unattached)
+  owner_ref: string
   title: string
   description: string
   url: string
   lang: string
-  review_state: ReviewState
-  provenance: string
+  draft: boolean
+  provenance?: string
   updated_at: string
 }
-export interface ValueRow {
-  id: string
-  token: string
+// Facts lane — typed entity rows. Every exact fact (price, limit, phone, …) is a
+// CONCRETE COLUMN here, never a generic key→value; the brain quotes it in replies
+// as a {{table.slug.field}} token. `id` = the row's natural key (ref, or the
+// contact singleton lang) since blob entries carry no DB row id.
+export interface TariffRow {
+  id: string // = ref
+  ref: string
   lang: string
-  value_text: string
+  name: string
+  price: string
+  limit_text: string
+  fee: string
+  summary: string
+  pricing_type: string // fixed | percentage | tiered
+  advantages: string
+  disadvantages: string
+  draft: boolean
+  provenance?: string
+  updated_at: string
+}
+export interface ProductRow {
+  id: string // = ref
+  ref: string
+  lang: string
+  name: string
+  price: string
   description: string
-  review_state: ReviewState
-  provenance: string
+  category: string
+  availability: string
+  draft: boolean
+  provenance?: string
+  updated_at: string
+}
+export interface ContactRow {
+  id: string // = lang (the 'support' singleton, one row per language)
+  slug: string
+  lang: string
+  whatsapp: string
+  email: string
+  address: string
+  legal: string
+  callback_time: string
+  working_hours: string
+  phone: string
+  website: string
+  instagram: string
+  draft: boolean
+  provenance?: string
+  updated_at: string
+}
+// PolicyRow — org commerce-policy scalars (delivery/payment/returns terms), a
+// structural clone of ContactRow (id = lang, the 'main' singleton).
+export interface PolicyRow {
+  id: string // = lang
+  slug: string
+  lang: string
+  delivery_cost: string
+  delivery_time: string
+  free_delivery_from: string
+  min_order: string
+  prepayment: string
+  installment: string
+  return_period: string
+  warranty: string
+  draft: boolean
+  provenance?: string
   updated_at: string
 }
 export interface KbMaterial {
@@ -158,11 +219,11 @@ export interface KbMaterial {
 export interface KbRequest {
   id: string
   material_id: string | null
-  req_type: string // confirm_value | describe_media | comment
+  req_type: string // confirm_fact | describe_media | comment
   prompt: string
   context: string // JSON string, e.g. {"suggested":"5000 ₸"}
-  target: string // JSON string, e.g. {token,lang} | {asset_ref} | {material_id}
-  state: string // open | resolved | dismissed
+  target: string // JSON string, e.g. {table,slug,field,lang} | {asset_ref} | {material_id}
+  state: string // pending | resolved | dismissed
   resolution: string | null
   created_at: string
   resolved_at: string | null
@@ -171,7 +232,281 @@ export interface DraftView {
   config: DraftConfig
   topics: TopicRow[]
   assets: AssetRow[]
-  values: ValueRow[]
+  tariffs: TariffRow[]
+  products: ProductRow[]
+  contacts: ContactRow[]
+  policies: PolicyRow[]
   materials: KbMaterial[]
   requests: KbRequest[]
+}
+
+// --- Eval comparison UI — mirrors evals/harness/viewmodel.go + export.go +
+// internal/provenance/launch.go's JSON shapes EXACTLY (field-for-field, same json
+// tags). Fetched as plain static files from /evals-data/ (frontend/nginx.conf),
+// never through the backend's envelope-wrapped API — see api/evals.ts.
+
+export type ScoreStatus = 'pass' | 'fail' | 'not_run' | 'error'
+
+export interface VScore {
+  name: string
+  status: ScoreStatus
+  detail?: string
+}
+export interface VRollup {
+  key: string
+  label: string
+  pass: boolean
+}
+// The Requirements-panel projection of scores/rollups above — same pass/fail, never a
+// re-grade, just Expected/Actual display strings. pass is null (not omitted) when a row
+// is not applicable to this test (e.g. no escalate: expectation) rather than a real fail.
+export interface VContractRow {
+  key: string
+  label: string
+  kind: 'requirement' | 'safety'
+  expected?: string
+  actual?: string
+  pass?: boolean | null
+}
+export interface HistoryTurn {
+  role: 'client' | 'assistant'
+  text: string
+}
+export interface VSubject {
+  scenario?: string
+  test_id?: string
+  message?: string
+  history?: HistoryTurn[]
+  case_id?: string
+  input_ref?: string
+}
+export interface PromptRef {
+  name: string
+  version: number
+  sha256?: string
+}
+export interface VVariant {
+  model: string
+  setup?: string
+  experiment?: string
+  prompt?: PromptRef
+  preprocessor?: string
+}
+export interface VOutput {
+  raw?: string
+  parse_ok: boolean
+  reply_text?: string
+  parse_error?: string
+  error?: string
+  raw_has_reasoning_markers?: boolean
+  reasoning?: string
+}
+export interface VCost {
+  tokens_in: number
+  tokens_out: number
+  estimate_usd: number
+  basis: string // "measured_split" | "cached_replay_borrowed" | "cached_replay_unpriceable" | "unknown_pricing"
+}
+export interface VScenarioDetails {
+  injected_text?: string
+  unknown_tokens?: string[]
+  unknown_media?: string[]
+  invented_digits?: string[]
+  unit_issues?: string[]
+  forbidden_phrase?: string
+  blocked: boolean
+  leftover_braces: boolean
+  finish_reason?: string
+  truncated: boolean
+  reasoning_leak: boolean
+  // media_count_evaluated is a CODE-VERSION marker, not derived from parse success — a
+  // verdict judged before this check existed omits it entirely (undefined), and must be
+  // rendered as "not checked", never a fabricated pass just because too_many_media's
+  // default is false. See judge.go's Verdict.MediaCountEvaluated doc comment.
+  media_count?: number
+  too_many_media?: boolean
+  media_count_evaluated?: boolean
+}
+export interface VExtractDetails {
+  content_kind?: string
+  summary?: string
+  extracted_text?: string
+  language?: string
+  visibility_suggestion?: string
+  media_role_hint?: string
+  relates_to_hint?: string
+}
+export interface VExecution {
+  family: 'scenario' | 'extract'
+  subject: VSubject
+  variant: VVariant
+  output: VOutput
+  scores: VScore[] | null
+  rollups: VRollup[]
+  contract?: VContractRow[]
+  cost: VCost
+  latency_ms?: number
+  // retries mirrors the harness's Verdict.Retries (evals/harness/judge.go) — how many
+  // times the retry mechanism (evals/harness/retry.go) retried this row. 0/undefined
+  // for every execution the retry path never touched.
+  retries?: number
+  scenario?: VScenarioDetails
+  extract?: VExtractDetails
+}
+export interface ExecutionsFile {
+  schema_version: number
+  run_id: string
+  launch_id?: string
+  generated_at: string
+  git_sha?: string
+  executions: VExecution[]
+}
+
+export interface RunSummary {
+  run_id: string
+  launch_id?: string
+  has_manifest: boolean
+  family: string // "scenario" | "extract" | "mixed" | "unknown"
+  models: string[]
+  prompts: string[]
+  started_at?: string
+  finished_at?: string // empty = interrupted/still running, never guessed
+  scenario_total: number
+  scenario_behavior_pass: number
+  scenario_contract_pass: number
+  extract_total: number
+  extract_checks_pass: number
+  has_index_html: boolean
+  load_error?: string
+}
+export interface RunsFile {
+  schema_version: number
+  generated_at: string
+  runs: RunSummary[]
+}
+
+export type LaunchMemberStatus = 'pending' | 'running' | 'complete' | 'failed'
+export type LaunchStatus = 'running' | 'complete' | 'failed' | 'partial'
+export interface LaunchCallCount {
+  scenario: number
+  extract: number
+  total: number
+}
+export interface LaunchMember {
+  family: string // "scenario" | "extract"
+  run_id?: string
+  status: LaunchMemberStatus
+  error?: string
+}
+export interface LaunchManifest {
+  schema_version: number
+  launch_id: string
+  status: LaunchStatus
+  planned_families: string[]
+  expected_calls: LaunchCallCount
+  members: LaunchMember[]
+  started_at: string
+  finished_at?: string
+}
+
+// --- Requirements catalog (runs/catalog.json, evals/harness/catalog.go) ---
+// The ONE repository-state (not run-snapshot) export: every scenario's and extraction
+// case's requirements, resolved to real current values, for review BEFORE any billed
+// run. See evalCatalog.ts for the display logic built on these types.
+export interface CatalogFact {
+  token: string
+  value: string
+}
+export interface CatalogMedia {
+  name: string
+  kind: string
+  description: string
+}
+export interface CatalogMediaExpect {
+  any_of?: string[]
+  all_of?: string[]
+  // forbid means this test's reply must attach NO media at all — the opposite
+  // expectation from any_of/all_of (mutually exclusive, enforced at render
+  // time). Omitted (undefined) when false.
+  forbid?: boolean
+  // exclusive narrows any_of/all_of from "attach at least one/all of these" to
+  // "attach these, and nothing else" — a modifier on the SAME declaration, not a
+  // separate allowed-list field. Requires a non-empty any_of and is mutually exclusive
+  // with forbid (both enforced at render time). Omitted when false.
+  exclusive?: boolean
+}
+// One alternative acceptable-behavior block from a test's `outcomes:` list — the same
+// per-test knobs a CatalogTestCase itself has (label is the block's display name; the
+// test passes the outcomes gate when ANY one block's declared checks all hold).
+export interface CatalogOutcomeCase {
+  label: string
+  requires?: string[][]
+  media?: CatalogMediaExpect
+  escalate?: boolean
+  language?: string
+  must_not_contain?: string[]
+  must_contain_any?: string[]
+}
+// One binary semantic claim judged by a pinned cheap model — an OPTIONAL dimension,
+// only evaluated when the separate `judge-llm` command runs (never the plain `judge`).
+export interface CatalogLLMCheck {
+  claim: string
+  expect: boolean
+}
+// escalate is `boolean | undefined` on the wire (omitempty on a Go *bool omits only
+// when nil) — undefined means "not checked by this test", false is an ACTIVE
+// "must not escalate" requirement. Never collapse the two.
+export interface CatalogTestCase {
+  id: string
+  message: string
+  history?: HistoryTurn[]
+  requires?: string[][]
+  language?: string
+  escalate?: boolean
+  must_not_contain?: string[]
+  must_contain_any?: string[]
+  forbid_tokens?: string[]
+  media?: CatalogMediaExpect
+  outcomes?: CatalogOutcomeCase[]
+  // stock_check names a product ref; judge-llm-only (see CatalogLLMCheck).
+  stock_check?: string
+  llm_checks?: CatalogLLMCheck[]
+  source: string
+}
+export interface CatalogScenario {
+  name: string
+  description?: string
+  setup?: string
+  prompt_ref?: string
+  experiment?: string
+  // archived/archived_reason/pipeline/tests_path are optional: a stale v2 catalog.json
+  // (schema_version < 3, or generated before the 2026-07 archival mechanism) simply
+  // omits them — never a parse error, just a display fallback (see scenarioNavLabel).
+  archived?: boolean
+  archived_reason?: string
+  pipeline?: string
+  tests_path?: string
+  facts_source: string
+  facts: CatalogFact[]
+  media_tokens?: string[]
+  media?: CatalogMedia[]
+  tests: CatalogTestCase[]
+}
+export interface CatalogExtractCase {
+  id: string
+  image: string
+  fields?: Record<string, string>
+  text_contains_all?: string[]
+  identify_contains_all?: string[]
+  identify_contains_any?: string[]
+  allowed_numbers?: string[]
+  required_numbers?: string[]
+  forbid_currency?: boolean
+  source: string
+}
+export interface CatalogFile {
+  schema_version: number
+  generated_at: string
+  scenarios: CatalogScenario[]
+  extract_cases: CatalogExtractCase[]
 }

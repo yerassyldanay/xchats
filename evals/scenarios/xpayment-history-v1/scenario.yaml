@@ -1,0 +1,15 @@
+name: xpayment-history-v1
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged."
+description: >
+  Deep chat-history coverage for a software/SaaS product: xpayment-decisions-v1's frame
+  and data are referenced byte-for-byte and exercised against a dedicated history bank
+  (common/xpayment-history-questions.yaml) — tariff retention, plan switching with
+  pronoun resolution, stale-price traps, onboarding, unsupported-integration
+  escalation, and document follow-ups. A coverage axis for the current production
+  frame, not a prompt bake-off: setup/prompt_ref/experiment are left unset on purpose,
+  same as xpayment-decisions-v1 itself.
+frame: ../xpayment-decisions-v1/frame.txt
+data: ../xpayment-decisions-v1/data.yaml
+tests: tests.yaml
+topic_format: "# {ref} — {title} ({keywords})\n{body}"

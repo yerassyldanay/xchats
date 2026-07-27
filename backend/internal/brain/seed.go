@@ -19,49 +19,79 @@ const (
 )
 
 // SeedSnapshot returns the embedded "Demo Shop" knowledge base — a small online
-// shop assistant. Prices/contacts are value tokens, never digits in topic bodies;
-// the PriceBook is the single source of numbers (rendered after drafting). This is
-// the in-memory ContentSource for v1; a DB-backed snapshot drops in behind the same
-// *domain.Snapshot later (todo: ai_* tables).
+// shop assistant. Facts (tariff prices, product prices/availability, support
+// contacts, commerce policies) are CONCRETE COLUMNS on typed rows (ai_tariffs /
+// ai_products / ai_contacts / ai_policies), quoted in replies only as
+// {{table.slug.field}} tokens; topic bodies are PURE PROSE (no digits, no
+// tokens — 14 Decision 3). This is the in-memory ContentSource for v1 and the
+// boot-time fallback; the DB-backed snapshot loads the same shape.
 func SeedSnapshot() *domain.Snapshot {
+	tariffs := []domain.Tariff{
+		{Ref: "basic", Lang: "ru", Name: "Базовый", Price: "9 900 ₸", PricingType: "fixed",
+			Summary: "Стартовый тариф для небольших заказов."},
+		{Ref: "standard", Lang: "ru", Name: "Стандарт", Price: "19 900 ₸", PricingType: "fixed",
+			Summary: "Оптимальный тариф — доставка и поддержка включены."},
+		{Ref: "premium", Lang: "ru", Name: "Премиум", Price: "39 900 ₸", PricingType: "fixed",
+			Summary: "Максимум возможностей и приоритетная поддержка."},
+	}
+	products := []domain.Product{
+		{Ref: "coffee-machine", Lang: "ru", Name: "Кофемашина DeLonghi", Price: "129 900 ₸",
+			Category: "Техника", Description: "Автоматическая кофемашина для дома.", Availability: "В наличии"},
+		{Ref: "cookware-set", Lang: "ru", Name: "Набор посуды", Price: "24 900 ₸",
+			Category: "Кухня", Description: "Набор из 12 предметов.", Availability: "Под заказ, 3–5 дней"},
+	}
+	contacts := []domain.Contact{
+		{Lang: "*", WhatsApp: "+7 700 123 45 67", Email: "hello@demoshop.kz",
+			Address: "Алматы, ул. Абая, 10", CallbackTime: "в течение часа",
+			WorkingHours: "Пн–Сб, 9:00–19:00", Phone: "+7 727 300 00 00",
+			Website: "demoshop.kz", Instagram: "@demoshop.kz"},
+	}
+	policies := []domain.Policy{
+		{Lang: "*", DeliveryCost: "1 500 ₸ по Алматы", DeliveryTime: "1–3 дня",
+			FreeDeliveryFrom: "20 000 ₸", MinOrder: "5 000 ₸", Prepayment: "не требуется",
+			Installment: "рассрочка 0-0-3 при заказе от 50 000 ₸", ReturnPeriod: "14 дней",
+			Warranty: "12 месяцев на технику"},
+	}
+
 	return &domain.Snapshot{
 		Config: domain.AssistantConfig{
 			Version: 1,
 			Persona: "Ты — ассистент интернет-магазина «Demo Shop». Дружелюбный и конкретный, " +
-				"объясняешь просто, без навязывания. Помогаешь выбрать тариф и оформить заказ.",
-			Mission: "Помочь клиенту выбрать подходящий тариф и оформить заказ; всегда предлагай один понятный следующий шаг.",
-			Guardrails: "Никогда не выдумывай цены или числа — используй только токены из базы знаний. " +
+				"объясняешь просто, без навязывания. Помогаешь выбрать тариф или товар и оформить заказ.",
+			Mission: "Помочь клиенту выбрать подходящий тариф или товар и оформить заказ; всегда предлагай один понятный следующий шаг.",
+			Guardrails: "Никогда не выдумывай цены, числа или контакты — используй только токены из списка FACTS. " +
 				"Если спрашивают про возврат денег, юридические вопросы или это недовольный/сложный клиент — эскалируй " +
 				"(escalate=true). Всегда предлагай следующий шаг.",
 			LanguagePolicy: "Отвечай на языке клиента. Если сообщение смешивает казахский и русский — отвечай по-русски.",
 			ReplyMaxWords:  120,
 		},
-		// Values are free-text per (token, lang): units live IN the value so they
-		// render verbatim. Contacts are language-neutral ('*').
-		Values: domain.NewValueBook(
-			domain.Value{Token: "price.basic", Lang: "ru", Text: "9 900 ₸", Description: "Тариф «Базовый» — цена в месяц"},
-			domain.Value{Token: "price.standard", Lang: "ru", Text: "19 900 ₸", Description: "Тариф «Стандарт» — цена в месяц"},
-			domain.Value{Token: "price.premium", Lang: "ru", Text: "39 900 ₸", Description: "Тариф «Премиум» — цена в месяц"},
-			domain.Value{Token: "price.free_delivery_min", Lang: "ru", Text: "30 000 ₸", Description: "Сумма заказа для бесплатной доставки"},
-			domain.Value{Token: "delivery.days", Lang: "ru", Text: "1–3 дня", Description: "Срок доставки"},
-			domain.Value{Token: "delivery.days", Lang: "kk", Text: "1–3 күн", Description: "Жеткізу мерзімі"},
-			domain.Value{Token: "contact.whatsapp", Lang: "*", Text: "+7 700 123 45 67", Description: "WhatsApp поддержки"},
-			domain.Value{Token: "contact.email", Lang: "*", Text: "hello@demoshop.kz", Description: "E-mail поддержки"},
-			domain.Value{Token: "contact.address", Lang: "*", Text: "Алматы, ул. Абая, 10", Description: "Адрес"},
-		),
+		Tariffs:  tariffs,
+		Products: products,
+		Contacts: contacts,
+		Policies: policies,
+		Facts:    domain.NewFactBook(tariffs, products, contacts, policies),
+		// Topic bodies are PURE PROSE: names may appear, but exact prices/contacts
+		// never — the model quotes those as FACTS tokens when it drafts.
 		Topics: []domain.Topic{
 			{
 				Slug: "pricing", Language: "ru", Keywords: "цена, цены, тариф, тарифы, сколько стоит, стоимость, план",
 				Title: "Тарифы и цены",
-				BodyMD: "У нас три тарифа: Базовый — {{price.basic}}, Стандарт — {{price.standard}}, " +
-					"Премиум — {{price.premium}}. Доставка занимает {{delivery.days}}. " +
-					"При заказе от {{price.free_delivery_min}} доставка бесплатная.",
+				BodyMD: "У нас три тарифа: Базовый, Стандарт и Премиум — от самого доступного к самому полному. " +
+					"Если спрашивают о конкретном тарифе, называйте его точную цену; для общего вопроса кратко " +
+					"перечислите тарифы и предложите подобрать подходящий.",
 			},
 			{
-				Slug: "delivery", Language: "ru", Keywords: "доставка, доставить, сроки, когда привезут, бесплатная доставка",
+				Slug: "catalog", Language: "ru", Keywords: "товар, товары, каталог, купить, техника, посуда",
+				Title: "Каталог товаров",
+				BodyMD: "В каталоге есть техника и товары для дома — например, кофемашина и набор посуды. " +
+					"Скажите, что ищете, и я назову цену и подберу вариант.",
+			},
+			{
+				Slug: "delivery", Language: "ru", Keywords: "доставка, доставить, сроки, когда привезут, стоимость доставки, бесплатная доставка",
 				Title: "Доставка",
-				BodyMD: "Доставка занимает {{delivery.days}}. При заказе от {{price.free_delivery_min}} " +
-					"доставка бесплатная, иначе рассчитывается по адресу.",
+				BodyMD: "Доставляем по городу и области; срок и стоимость зависят от адреса, а при заказе на " +
+					"крупную сумму доставка становится бесплатной. Если спрашивают про срок, стоимость или порог " +
+					"бесплатной доставки — называйте точные значения из FACTS, не оценивайте на глаз.",
 			},
 			{
 				Slug: "how_to_order", Language: "ru", Keywords: "как заказать, оформить, заказ, купить, оплата",
@@ -72,8 +102,7 @@ func SeedSnapshot() *domain.Snapshot {
 			{
 				Slug: "contacts", Language: "ru", Keywords: "контакты, связаться, телефон, почта, адрес, где вы находитесь",
 				Title: "Контакты",
-				BodyMD: "Связаться с нами: WhatsApp {{contact.whatsapp}}, e-mail {{contact.email}}. " +
-					"Адрес: {{contact.address}}.",
+				BodyMD: "Связаться с нами можно в WhatsApp или по e-mail; наш адрес и реквизиты доступны по запросу.",
 			},
 		},
 		Assets: []domain.Asset{
@@ -84,7 +113,7 @@ func SeedSnapshot() *domain.Snapshot {
 				Description: "Карточка с тремя тарифами и ценами (RU). Для вопросов о цене.",
 			},
 			{
-				Ref: RefCatalogPDF, TopicSlug: "pricing", Kind: "document", Language: "ru",
+				Ref: RefCatalogPDF, TopicSlug: "catalog", Kind: "document", Language: "ru",
 				URL:         mediaURLPrefix + RefCatalogPDF,
 				Title:       "Каталог (PDF)",
 				Description: "PDF-каталог товаров с ценами. Когда просят подробности.",

@@ -1,0 +1,72 @@
+# evals/models-reasoning.yaml — reasoning-on vs. reasoning-off comparison pairs.
+#
+# Sibling to models.yaml, NOT a replacement: models.yaml's existing 4 screening
+# candidates are untouched by this file's existence. This file exists to isolate a
+# single, focused hypothesis test — reformulated from "are these models capable of
+# fluent Kazakh" (they were never given the chance to try) to "does opt-in reasoning
+# change reply quality on these SAME already-configured models" — before reaching for a
+# different, stronger model family. Run it as its own `harness run -models-file
+# models-reasoning.yaml` invocation, into its own run dir; never merge its numbers with
+# a models.yaml run's.
+#
+# Only the two OpenRouter-confirmed reasoning-capable candidates already in models.yaml
+# are here: google/gemini-2.5-flash and anthropic/claude-haiku-4.5 (verified against
+# OpenRouter's own model pages, per the task that produced this file). gpt-4o-mini and
+# gemini-2.5-flash-lite are NOT reasoning-capable via OpenRouter as of this writing —
+# omitted rather than silently included with reasoning config that would just be ignored.
+#
+# Each pair shares one model ID with a DIFFERENT `label` (reasoning-off / reasoning-on)
+# — the harness's providerModelKey (judge.go) uses id+label together so the two never
+# collapse into one bucket downstream (report.go, viewmodel.go), and promptfoo's own
+# provider.label field keeps them distinguishable in the raw results too.
+pricing_source: "https://openrouter.ai/models"
+pricing_checked_at: "2026-07-11"
+providers:
+  - id: openrouter:google/gemini-2.5-flash
+    label: reasoning-off
+    temperature: 0.3
+    max_tokens: 500
+    input_per_mtok: 0.30
+    output_per_mtok: 2.50
+
+  - id: openrouter:google/gemini-2.5-flash
+    label: reasoning-on
+    temperature: 0.3
+    max_tokens: 500
+    input_per_mtok: 0.30
+    # Gemini 2.5 Flash was confirmed (per the task that produced this file) to bill
+    # reasoning tokens at the standard output rate — re-verify against OpenRouter's
+    # pricing page before trusting this for a real budget decision; do not assume it
+    # generalizes to the claude-haiku-4.5 pair below.
+    output_per_mtok: 2.50
+    reasoning:
+      enabled: true
+      effort: low
+      # billed_separately: false — see the output_per_mtok comment above. A
+      # hand-documented fact, not inferred from any response.
+      billed_separately: false
+
+  - id: openrouter:anthropic/claude-haiku-4.5
+    label: reasoning-off
+    temperature: 0.3
+    max_tokens: 500
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
+
+  - id: openrouter:anthropic/claude-haiku-4.5
+    label: reasoning-on
+    temperature: 0.3
+    max_tokens: 500
+    # No verified reasoning-token rate for Claude Haiku 4.5 in this repo — left unset
+    # (unknown_pricing is the honest, correct state) rather than assuming it bills the
+    # same as the Gemini pair above. Confirm against a real response before pricing it.
+    #
+    # Explicit reasoning budget SEPARATE from this same entry's max_tokens: 500 above —
+    # for a provider that shares one completion budget across reasoning and the final
+    # answer, leaving this unset risks reasoning alone consuming the whole budget before
+    # the model ever writes reply_text. Verify this provider's actual behavior (does
+    # reasoning eat into max_tokens, or is it truly additive?) before a real comparison
+    # run — see ReasoningConfig's doc comment in harness/types.go.
+    reasoning:
+      enabled: true
+      max_tokens: 500

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>eval run {{.RunID}}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; margin: 2rem; line-height: 1.4; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+  h2 { margin-top: 2.5rem; border-bottom: 2px solid #8884; padding-bottom: 0.3rem; }
+  h3 { margin-top: 1.5rem; }
+  .meta { color: #888; font-size: 0.9rem; }
+  .links a { margin-right: 1rem; }
+  table { border-collapse: collapse; margin: 0.75rem 0; width: 100%; max-width: 60rem; }
+  th, td { border: 1px solid #8884; padding: 0.35rem 0.6rem; text-align: left; font-size: 0.92rem; }
+  th { background: #8881; }
+  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 0.3rem; font-size: 0.82rem; font-weight: 600; }
+  .badge-pass { background: #1a7f371a; color: #1a7f37; border: 1px solid #1a7f3755; }
+  .badge-fail { background: #cf222e1a; color: #cf222e; border: 1px solid #cf222e55; }
+  .badge-archived { background: #6e768133; color: #6e7681; border: 1px solid #6e768166; }
+  .status-pass { color: #1a7f37; font-weight: 600; }
+  .status-fail { color: #cf222e; font-weight: 600; }
+  .status-not_run { color: #888; font-style: italic; }
+  .status-error { color: #9a6700; font-weight: 600; }
+  .case, .variant-card { border: 1px solid #8883; border-radius: 0.5rem; padding: 1rem; margin: 1rem 0; }
+  .case-body { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start; }
+  .case-image img { max-width: 320px; max-height: 320px; border: 1px solid #8884; border-radius: 0.3rem; }
+  .case-image .missing { width: 320px; height: 120px; display: flex; align-items: center; justify-content: center;
+    border: 1px dashed #8886; border-radius: 0.3rem; color: #888; font-style: italic; }
+  .variant-list { flex: 1; min-width: 280px; }
+  .variant-head { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+  details { margin-top: 0.5rem; }
+  summary { cursor: pointer; color: #06c; }
+  pre { white-space: pre-wrap; word-break: break-word; background: #8881; padding: 0.6rem; border-radius: 0.3rem; font-size: 0.85rem; }
+  .evidence { font-size: 0.88rem; }
+  .evidence b { display: inline-block; min-width: 10rem; }
+  code { background: #8881; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+</style>
+</head>
+<body>
+
+<h1>Eval run {{.RunID}}</h1>
+<p class="meta">Generated {{.GeneratedAt}}</p>
+
+{{if .ReportLinks}}
+<p class="links">
+{{range .ReportLinks}}<a href="{{.Href}}">{{.Name}}</a>{{end}}
+</p>
+{{end}}
+
+{{if .HasManifest}}
+<h2>Run provenance</h2>
+<table>
+  <tr><th>Family</th><td>{{.Manifest.Family}}</td></tr>
+  <tr><th>Command</th><td><code>{{.Manifest.Command}} {{range .Manifest.Args}}{{.}} {{end}}</code></td></tr>
+  <tr><th>Git SHA</th><td>{{if .Manifest.GitSHA}}<code>{{.Manifest.GitSHA}}</code>{{else}}n/a{{end}}
+    {{if .Manifest.GitDirty}}<span class="status-fail">(dirty{{if .Manifest.WorktreeDiffPath}}, see <a href="{{.Manifest.WorktreeDiffPath}}">worktree.diff</a>{{end}})</span>{{end}}</td></tr>
+  {{if .Manifest.PromptfooVersion}}<tr><th>Promptfoo</th><td>{{.Manifest.PromptfooVersion}}</td></tr>{{end}}
+  <tr><th>Models file</th><td><code>{{.Manifest.ModelsPath}}</code> (sha256 <code>{{.Manifest.ModelsSHA256}}</code>)</td></tr>
+  <tr><th>Started / finished</th><td>{{.Manifest.StartedAt}} &rarr; {{if .Manifest.FinishedAt}}{{.Manifest.FinishedAt}}{{else}}<span class="status-fail">(incomplete)</span>{{end}}</td></tr>
+</table>
+{{end}}
+
+{{if .ExtractGroups}}
+<h2>Media extraction</h2>
+{{range .ExtractGroups}}
+<div class="case">
+  <h3>{{.CaseID}}</h3>
+  <div class="case-body">
+    <div class="case-image">
+      {{if .InputExists}}
+        <img src="{{.InputRelPath}}" alt="input for {{.CaseID}}">
+      {{else}}
+        <div class="missing">input not captured</div>
+      {{end}}
+    </div>
+    <div class="variant-list">
+      {{range .Variants}}
+      <div class="variant-card">
+        <div class="variant-head">
+          {{range .Rollups}}<span class="badge {{if .Pass}}badge-pass{{else}}badge-fail{{end}}">{{.Label}}: {{if .Pass}}PASS{{else}}FAIL{{end}}</span>{{end}}
+          <b>{{.Variant.Model}}</b>
+          {{if .Variant.Prompt.Name}}<span class="meta">prompt {{.Variant.Prompt.Name}}@v{{.Variant.Prompt.Version}}</span>{{end}}
+          {{if .Variant.Preprocessor}}<span class="meta">{{.Variant.Preprocessor}}</span>{{end}}
+          <span class="meta">{{costLabel .Cost}}</span>
+        </div>
+        {{if .Output.Error}}
+          <p class="status-error">ERROR: {{.Output.Error}}</p>
+        {{else if .Output.ParseError}}
+          <p class="status-fail">PARSE FAILED: {{.Output.ParseError}}</p>
+        {{else if .Extract}}
+          <table>
+            <tr><th>content_kind</th><td>{{.Extract.ContentKind}}</td></tr>
+            <tr><th>summary</th><td>{{.Extract.Summary}}</td></tr>
+            <tr><th>language</th><td>{{.Extract.Language}}</td></tr>
+            <tr><th>visibility_suggestion</th><td>{{.Extract.VisibilitySuggestion}}</td></tr>
+            <tr><th>media_role_hint</th><td>{{.Extract.MediaRoleHint}}</td></tr>
+            <tr><th>relates_to_hint</th><td>{{.Extract.RelatesToHint}}</td></tr>
+          </table>
+        {{end}}
+        {{if .Scores}}
+        <table>
+          <tr><th>check</th><th>status</th><th>detail</th></tr>
+          {{range .Scores}}
+          <tr><td>{{.Name}}</td><td class="status-{{.Status}}">{{upper (printf "%v" .Status)}}</td><td>{{.Detail}}</td></tr>
+          {{end}}
+        </table>
+        {{end}}
+        <details>
+          <summary>extracted_text / raw output</summary>
+          {{if .Extract}}<pre>{{.Extract.ExtractedText}}</pre>{{end}}
+          {{if .Output.RawHasReasoningMarkers}}<p class="status-fail"><b>Raw output contains a reasoning/thinking tag marker</b> (&lt;think&gt;/&lt;thinking&gt;) &mdash; see no_reasoning_leak above for whether it reached a customer-facing field</p>{{end}}
+          <pre>{{.Output.Raw}}</pre>
+        </details>
+        {{if .Output.Reasoning}}
+        <details>
+          <summary>reasoning (separate from raw output above — never part of the graded content)</summary>
+          <pre>{{.Output.Reasoning}}</pre>
+        </details>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{if .ScenarioGroups}}
+<h2>WhatsApp response scenarios</h2>
+{{range .ScenarioGroups}}
+<h3>{{.Scenario}}{{if .Archived}} <span class="badge badge-archived" title="{{.ArchivedReason}}">ARCHIVED</span>{{end}}</h3>
+{{if .Archived}}<p class="meta">Archived: {{.ArchivedReason}} — excluded from new runs/comparisons; this historical data is unaffected.</p>{{end}}
+<table>
+  <tr><th>model</th><th>model-behavior pass</th><th>contract pass</th><th>est. cost</th></tr>
+  {{range .Stats}}
+  <tr>
+    <td>{{.Model}}{{if .Archived}} <span class="badge badge-archived" title="{{.ArchivedReason}}">ARCHIVED</span>{{end}}</td>
+    <td>{{pct .BehaviorPass .Total}}</td>
+    <td>{{pct .ContractPass .Total}}</td>
+    <td>{{.CostLabel}}</td>
+  </tr>
+  {{end}}
+</table>
+
+{{range .Verdicts}}
+<details>
+  <summary>
+    <code>{{.Subject.TestID}}</code> &mdash; {{.Variant.Model}}
+    {{range .Rollups}}<span class="badge {{if .Pass}}badge-pass{{else}}badge-fail{{end}}">{{.Label}}</span>{{end}}
+  </summary>
+  <p><b>Message:</b> {{.Subject.Message}}</p>
+  <table>
+    <tr><th>check</th><th>status</th><th>detail</th></tr>
+    {{range .Scores}}
+    <tr><td>{{.Name}}</td><td class="status-{{.Status}}">{{upper (printf "%v" .Status)}}</td><td>{{.Detail}}</td></tr>
+    {{end}}
+  </table>
+  {{if .Scenario}}
+  <div class="evidence">
+    <p><b>Injected text:</b> {{.Scenario.InjectedText}}</p>
+    {{if .Scenario.Blocked}}<p class="status-fail"><b>BLOCKED</b> (unknown token)</p>{{end}}
+    {{if .Scenario.LeftoverBraces}}<p class="status-fail"><b>Leftover brace</b> survived injection</p>{{end}}
+    {{if .Scenario.Truncated}}<p class="status-fail"><b>TRUNCATED</b> (finish_reason={{.Scenario.FinishReason}}) &mdash; response was cut off before the model finished</p>{{end}}
+    {{if .Scenario.ReasoningLeak}}<p class="status-fail"><b>REASONING LEAK</b> &mdash; reply_text contains a &lt;think&gt;/&lt;thinking&gt; tag marker</p>{{end}}
+    {{if .Scenario.UnknownTokens}}<p><b>Unknown tokens:</b> {{range .Scenario.UnknownTokens}}<code>{{.}}</code> {{end}}</p>{{end}}
+    {{if .Scenario.UnknownMedia}}<p><b>Unknown media:</b> {{range .Scenario.UnknownMedia}}<code>{{.}}</code> {{end}}</p>{{end}}
+    {{if .Scenario.InventedDigits}}<p><b>Invented digits:</b> {{range .Scenario.InventedDigits}}<code>{{.}}</code> {{end}}</p>{{end}}
+    {{if .Scenario.UnitIssues}}<p><b>Unit issues:</b> {{range .Scenario.UnitIssues}}{{.}}; {{end}}</p>{{end}}
+    {{if .Scenario.ForbiddenPhrase}}<p><b>Forbidden phrase matched:</b> {{.Scenario.ForbiddenPhrase}}</p>{{end}}
+    {{if and .Scenario.MediaCountEvaluated .Scenario.TooManyMedia}}<p class="status-fail"><b>Too many attachments</b> &mdash; {{.Scenario.MediaCount}} entries, over the frame's cap</p>{{end}}
+  </div>
+  {{end}}
+  <p class="meta">{{costLabel .Cost}}{{if .LatencyMs}} &middot; {{.LatencyMs}}ms{{end}}</p>
+  <details>
+    <summary>raw output</summary>
+    {{if .Output.RawHasReasoningMarkers}}<p class="status-fail"><b>Raw output contains a reasoning/thinking tag marker</b> (&lt;think&gt;/&lt;thinking&gt;) &mdash; see no_reasoning_leak above for whether it reached reply_text</p>{{end}}
+    <pre>{{.Output.Raw}}</pre>
+  </details>
+  {{if .Output.Reasoning}}
+  <details>
+    <summary>reasoning (separate from raw output above — never part of the graded reply_text)</summary>
+    <pre>{{.Output.Reasoning}}</pre>
+  </details>
+  {{end}}
+</details>
+{{end}}
+{{end}}
+{{end}}
+
+{{if and (not .ExtractGroups) (not .ScenarioGroups)}}
+<p class="meta">No graded results found in this run directory.</p>
+{{end}}
+
+</body>
+</html>

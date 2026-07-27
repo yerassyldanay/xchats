@@ -1,0 +1,8 @@
+name: xpayment-decisions-v1
+description: "Payments-SaaS schema per DECISIONS.md: tariffs instead of products, grouped media columns"
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged."
+frame: frame.txt
+data: data.yaml
+tests: tests.yaml
+topic_format: "# {ref} — {title} ({keywords})\n{body}"

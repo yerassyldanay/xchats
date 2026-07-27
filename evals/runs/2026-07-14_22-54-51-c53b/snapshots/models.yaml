@@ -1,0 +1,55 @@
+# evals/models.yaml — the model list every scenario runs against, in one place.
+# Add a model here and every scenario picks it up on its next render+run.
+#
+# Pricing is HAND-MAINTAINED and produces an ESTIMATE, not real spend — OpenRouter prices
+# change, and promptfoo has no pricing table of its own for generic `openrouter:` IDs (see
+# README.md "Known limits"). Leave input_per_mtok/output_per_mtok unset (omit them) for a
+# model whose current price you haven't verified — the report will call it out as
+# "unknown_pricing" instead of showing a number that might be wrong. Check current prices at
+# pricing_source before filling one in, and update pricing_checked_at when you do.
+#
+# Three more optional per-provider fields exist (harness/types.go: ModelProvider) but are
+# deliberately left unset below, on every entry, for the same "mark unverified rather than
+# guess" reason as pricing:
+#   - label: disambiguates two entries that share one `id` but differ in config (e.g. a
+#     reasoning-on/reasoning-off comparison pair — see evals/models-reasoning.yaml for a
+#     worked example). Every entry below is the only one of its id, so none need it.
+#   - provider: {order: [...], allow_fallbacks: true|false} pins the exact OpenRouter
+#     upstream route for a comparison run, e.g.:
+#       provider:
+#         order: ["Google AI Studio"]   # verify the exact upstream name against
+#         allow_fallbacks: false        # OpenRouter's own model page before using this —
+#                                        # it is NOT verified for any entry below.
+#   - reasoning: {enabled, effort, max_tokens, exclude, billed_separately} opts a model
+#     into OpenRouter's reasoning API — see evals/models-reasoning.yaml.
+pricing_source: "https://openrouter.ai/models"
+pricing_checked_at: "2026-07-11"
+providers:
+  - id: openrouter:openai/gpt-4o-mini
+    temperature: 0.3
+    max_tokens: 500
+    # Stable, well-documented OpenAI list price — unchanged for a long time as of
+    # pricing_checked_at. Still: verify at pricing_source before trusting it for a real
+    # budget decision, per the file-level note above.
+    input_per_mtok: 0.15
+    output_per_mtok: 0.60
+  - id: openrouter:anthropic/claude-haiku-4.5
+    temperature: 0.3
+    max_tokens: 500
+    # Verified against pricing_source on pricing_checked_at.
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
+  - id: openrouter:google/gemini-2.5-flash
+    temperature: 0.3
+    max_tokens: 500
+    # Verified against pricing_source on pricing_checked_at.
+    input_per_mtok: 0.30
+    output_per_mtok: 2.50
+  - id: openrouter:google/gemini-2.5-flash-lite
+    temperature: 0.3
+    max_tokens: 500
+    # Verified directly against the OpenRouter API on 2026-07-10 (see
+    # evals/parsing-costs.md) — cheaper than gemini-2.5-flash and a candidate vision
+    # model for the extraction eval; compare its extraction quality, not just its price.
+    input_per_mtok: 0.10
+    output_per_mtok: 0.40

@@ -1,0 +1,28 @@
+name: combo-canary-v1-kk
+description: >
+  Phase 2.3 combined-variant bake-off, V1 — the KK branch: lang-canary-v4-kk's full
+  Kazakh frame with escalation-canary-v2's strengthened rule 1 translated into it, plus
+  the NEW "the KNOWLEDGE BASE may be INCOMPLETE — never claim we do/don't have something
+  that isn't in it; escalate instead" rule. Sent only when detectLang (langdetect.go)
+  classifies the customer's message as Kazakh — including genuinely-mixed messages whose
+  QUESTION clause is Kazakh (test 20), per the dominant-language rule. This is the branch
+  that finally puts both bake-off winners in front of test 21 (Kazakh escalation), which
+  failed in EVERY variant of run 2026-07-19_02-50-37-ef6e because no frame carried both
+  fixes. KB/FACTS injected data stays Russian (no knowledge-base duplication, per the
+  plan's explicit constraint). DRAFT translation — NOT yet reviewed by a native Kazakh
+  speaker; the plan requires that review before this variant is used in any billed
+  comparison treated as final (a mistranslated instruction would invalidate the whole
+  experiment).
+# setup is shared with the sibling combo-canary-v1-ru scenario ON PURPOSE — the two
+# together realize ONE routed strategy (v4's convention): the eval comparison UI must
+# show one "combo-v1-routed" column, not two. prompt_ref is what actually differs
+# between the siblings.
+setup: combo-v1-routed
+prompt_ref: combo-kk@v1
+experiment: combo-bakeoff
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged. (Its Kazakh frame was also never natively reviewed.)"
+frame: frame.txt
+data: ../shop-current/data.yaml
+tests: tests.yaml
+topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

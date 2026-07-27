@@ -1,0 +1,15 @@
+name: lang-canary-v1
+description: >
+  Phase 2.1 language architecture bake-off, variant V1 (control): shop-current's frame,
+  byte-for-byte unchanged, against the focused language/escalation canary set. Every
+  variant reuses shop-current's real knowledge base (data.yaml) so only the FRAME differs
+  between V1-V4 — the thing the experiment is actually testing.
+setup: lang-v1
+prompt_ref: lang-control@v1
+experiment: lang-bakeoff
+archived: true
+archived_reason: "Superseded by the schema_kb_v1 consolidation (2026-07-23) — only schema_kb_v1 (shop-kb-v1-*) scenarios are active for new runs/comparisons; this scenario's historical runs are preserved unchanged."
+frame: frame.txt
+data: ../shop-current/data.yaml
+tests: tests.yaml
+topic_format: "# topic: {ref} ({lang})\nkeywords: {keywords}\n{body}"

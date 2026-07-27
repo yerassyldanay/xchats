@@ -32,8 +32,12 @@ draft that a human will review and send. You never send messages yourself.
 Rules (hard, non-negotiable):
 1. Answer ONLY from the KNOWLEDGE BASE below. If the answer is not there, do not guess —
    set "escalate": true with a short escalation_reason and a brief holding reply.
-2. NEVER write a price or a number as a digit. Use the tokens exactly as written
-   in the knowledge base, e.g. {{price.standard}}. Code fills the real values after you.
+2. When the customer asks for an exact fact (price, limit, fee, phone, e-mail, address), ANSWER IT
+   DIRECTLY — do not deflect to a media card, do not say "уточните" or "посмотрите карточку", do not
+   ask them to look it up. State the fact by emitting its token from the FACTS list, exactly as written,
+   e.g. "Тариф Стандарт стоит {{tariff.standard.price}}." NEVER write the number/contact as a digit or
+   literal — always the token; code fills the real value in after you. Only if a fact is truly absent
+   from the FACTS list may you escalate.
 3. Attach media ONLY by returning refs that exist in the MEDIA CATALOG. Maximum 3. If none fit, [].
 4. Reply in the customer's language. If the latest message mixes Kazakh and Russian, reply in Russian.
 5. Keep the reply under ~120 words, warm and concrete. One clear next step or question.
@@ -73,6 +77,21 @@ func BuildSystem(s *domain.Snapshot) string {
 	b.WriteString("ref | kind | topic | description\n")
 	for _, a := range s.Assets {
 		fmt.Fprintf(&b, "%s | %s | %s | %s\n", a.Ref, a.Kind, a.TopicSlug, a.Description)
+	}
+
+	// [F] FACTS — the Facts lane. Per fact: the token the model must emit, its
+	// meaning, and the current value (shown so the model picks the right one; it
+	// still outputs the token, never the number). v1 is ru-only, so this is
+	// single-valued and cache-stable.
+	facts := s.Facts.List()
+	if len(facts) > 0 {
+		b.WriteString("\nFACTS — when the customer asks about one of these, quote it by emitting its token " +
+			"exactly as written (never the value; code substitutes it). The current value is shown only so " +
+			"you pick the right fact:\n")
+		b.WriteString("token | meaning | current value\n")
+		for _, f := range facts {
+			fmt.Fprintf(&b, "%s | %s | %s\n", f.Token, f.Label, f.Value)
+		}
 	}
 	return b.String()
 }
@@ -120,8 +139,17 @@ func PostProcess(raw domain.RawDraft, snap *domain.Snapshot, log *slog.Logger) d
 	}
 
 	// 2. Escalate gate — flag for a human and stop (no media, no auto-send).
+	//
+	// The customer-facing text on this path is a TRUSTED holding reply, never
+	// raw.ReplyText: a model that correctly sets escalate=true can still write an
+	// invented claim in the same breath (observed in eval canaries — e.g. asserting
+	// "we don't deliver to Astana", a claim the knowledge base never makes). The
+	// prompt asking the model not to do that is a quality measure, not a safety
+	// guarantee; this substitution is the guarantee. EscalationReason (internal,
+	// never shown to the customer) and Confidence still come from the model — only
+	// the customer-facing ReplyText is replaced.
 	if raw.Escalate {
-		d := escalationDraft(raw.ReplyText, raw.EscalationReason)
+		d := escalationDraft(holdingReplyFor(raw.ReplyLanguage), raw.EscalationReason)
 		d.Confidence = raw.Confidence
 		return d
 	}
@@ -139,12 +167,12 @@ func PostProcess(raw domain.RawDraft, snap *domain.Snapshot, log *slog.Logger) d
 		SuggestedCallback: raw.SuggestedCallback,
 	}
 
-	// 4. Inject prices — never ship a half-rendered price (Decision 8).
+	// 4. Inject facts — never ship a half-rendered fact token (Decision 8).
 	lang := raw.ReplyLanguage
 	if lang == "" {
 		lang = "ru"
 	}
-	rendered, err := snap.Values.Render(raw.ReplyText, lang)
+	rendered, err := snap.Facts.Render(raw.ReplyText, lang)
 	if err != nil {
 		log.Warn("price render failed; posting check-pricing note", "err", err)
 		d.PricingError = true
@@ -187,6 +215,29 @@ func escalationDraft(reply, reason string) domain.Draft {
 const (
 	// HoldingReply is the brief reply shipped when drafting fails or the model
 	// escalates without its own text (the LLM-error path in RealDrafter uses it).
+	// Also holdingReplyByLanguage["ru"] below — same wording, one source of truth
+	// for what "ru" means, since RealDrafter's error path has no reply_language to
+	// consult and must pick something.
 	HoldingReply      = "Уточню это у коллеги и вернусь с точным ответом — буквально пару минут."
 	pricingManualNote = "⚠️ Не удалось подставить цену автоматически — проверьте перед отправкой."
 )
+
+// holdingReplyByLanguage is the trusted, deterministic copy shown to a customer
+// whenever the model escalates (see PostProcess's escalate gate) — the only two
+// reply_language values the emit_draft tool schema allows (openrouter.go's tool
+// schema enum: "ru", "kk"). Never add a model-supplied string to this map at
+// runtime; it must stay a fixed, reviewed set.
+var holdingReplyByLanguage = map[string]string{
+	"ru": HoldingReply,
+	"kk": "Мұны әріптесіммен нақтылап, бірнеше минут ішінде нақты жауап беремін.",
+}
+
+// holdingReplyFor returns the trusted holding reply for lang, defaulting to "ru"
+// for an empty or unrecognized value — the same default PostProcess's fact-
+// injection path already uses for raw.ReplyLanguage.
+func holdingReplyFor(lang string) string {
+	if reply, ok := holdingReplyByLanguage[lang]; ok {
+		return reply
+	}
+	return holdingReplyByLanguage["ru"]
+}

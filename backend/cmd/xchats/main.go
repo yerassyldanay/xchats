@@ -94,12 +94,13 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	}
 	accountID := seed(ctx, cfg, st, log)
 
-	// The KB lives in the DB now: seed the published snapshot from the literal on
-	// first boot, then the brain reads the DB snapshot (literal kept as fallback).
+	// The KB lives in the DB now: seed the org's LIVE KB from the literal on first
+	// boot, then the brain reads the DB's live rows directly (literal kept as
+	// fallback — no version, no snapshot, no publish step).
 	kb := kbstore.New(st.Pool())
 	orgID := seededOrgID(ctx, cfg, st, log)
 	if orgID != uuid.Nil {
-		if err := kb.SeedIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
+		if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 			log.Warn("kb seed failed; using literal fallback", "err", err)
 		}
 	}
@@ -161,7 +162,7 @@ func buildDrafter(ctx context.Context, cfg *config.Config, st *store.Store, kb *
 		}
 		lc := llm.New(cfg.LLMResolvedBaseURL(), cfg.LLMAPIKey, cfg.LLMProvider, cfg.LLMFastModel, "", cfg.LLMMaxTokens, cfg.LLMTemperature)
 		log.Info("assistant drafter active", "mode", "real", "provider", cfg.LLMProvider, "model", cfg.LLMFastModel)
-		return assistant.NewReal(st, lc, publishedOrSeed(ctx, kb, orgID, log), log)
+		return assistant.NewReal(st, lc, liveOrSeed(ctx, kb, orgID, log), log)
 	}
 	d, err := assistant.NewStub(blobStore, "")
 	if err != nil {
@@ -171,15 +172,15 @@ func buildDrafter(ctx context.Context, cfg *config.Config, st *store.Store, kb *
 	return d
 }
 
-// publishedOrSeed loads the org's published KB snapshot from the DB, falling back
-// to the embedded literal if the DB is empty/unreachable (so the brain always boots).
-func publishedOrSeed(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, log *slog.Logger) *domain.Snapshot {
+// liveOrSeed loads the org's live KB from the DB, falling back to the embedded
+// literal if the DB is empty/unreachable (so the brain always boots).
+func liveOrSeed(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, log *slog.Logger) *domain.Snapshot {
 	if orgID != uuid.Nil {
-		if snap, err := kb.LoadPublished(ctx, orgID); err == nil {
-			log.Info("brain KB source", "source", "db", "version", snap.Config.Version)
+		if snap, err := kb.LoadLive(ctx, orgID); err == nil {
+			log.Info("brain KB source", "source", "db", "topics", len(snap.Topics))
 			return snap
 		} else {
-			log.Warn("load published KB failed; using literal", "err", err)
+			log.Warn("load live KB failed; using literal", "err", err)
 		}
 	}
 	return brain.SeedSnapshot()

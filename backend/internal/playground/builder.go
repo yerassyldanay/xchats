@@ -29,11 +29,12 @@ type SynthInput struct {
 }
 
 // Plan is the synthesizer's output: KB mutations + human-in-the-loop popups.
-// Numbers are never baked into a body — they leave as ConfirmValue popups.
+// Numbers are never baked into a body — they leave as FactConfirm popups and the
+// body prose has the amount excised.
 type Plan struct {
 	Topics   []TopicProposal
 	Assets   []AssetProposal
-	Confirm  []ValueConfirm  // → confirm_value popups
+	Confirm  []FactConfirm   // → confirm_fact popups
 	Describe []DescribeMedia // → describe_media popups
 	Comment  string
 }
@@ -50,10 +51,11 @@ type AssetProposal struct {
 	MaterialID                                    string
 }
 
-// ValueConfirm raises a confirm_value popup (a price/number detected in material).
-type ValueConfirm struct {
-	Token, Lang, Suggested, Description string
-	MaterialID                          string
+// FactConfirm raises a confirm_fact popup (a price/amount detected in material)
+// targeting a concrete typed-fact column (e.g. tariff <slug>.price).
+type FactConfirm struct {
+	Table, Slug, Field, Lang, Suggested, Description string
+	MaterialID                                       string
 }
 
 // DescribeMedia raises a describe_media popup for a material with no description.
@@ -92,7 +94,7 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 	if err != nil {
 		return TurnResult{}, err
 	}
-	draft, err := kb.GetDraft(ctx, orgID)
+	draft, err := kb.Draft(ctx, orgID)
 	if err != nil {
 		return TurnResult{}, err
 	}
@@ -118,49 +120,60 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 		}
 		if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
 			Slug: t.Slug, Lang: t.Lang, Title: t.Title, Keywords: t.Keywords, BodyMD: body,
-			ReviewState: "proposed", Provenance: prov,
+			Provenance: prov,
 		}); err != nil {
 			return res, err
 		}
 		res.TopicsUpserted++
 	}
 	for _, a := range plan.Assets {
+		ownerKind := ""
+		if a.TopicSlug != "" {
+			ownerKind = "topic"
+		}
 		if err := kb.UpsertAsset(ctx, orgID, kbstore.AssetInput{
-			Ref: a.Ref, Kind: a.Kind, TopicSlug: a.TopicSlug, Title: a.Title,
-			Description: a.Description, URL: a.URL, ReviewState: "proposed", Provenance: prov,
+			Ref: a.Ref, Kind: a.Kind, OwnerKind: ownerKind, OwnerRef: a.TopicSlug, Title: a.Title,
+			Description: a.Description, URL: a.URL, Provenance: prov,
 		}); err != nil {
 			return res, err
 		}
 		res.AssetsAttached++
 		if strings.TrimSpace(a.Description) == "" {
-			_, _ = kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
+			req, _ := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
 				ReqType: "describe_media", Prompt: "Опишите, что показывает этот файл и когда его отправлять.",
 				Target: jsonObj(map[string]any{"asset_ref": a.Ref}),
 			})
+			b.broadcastRequest(req)
 			res.Describes++
 		}
 	}
 	for _, cv := range plan.Confirm {
 		mid := materialPtr(cv.MaterialID)
-		if _, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
-			MaterialID: mid, ReqType: "confirm_value",
-			Prompt:  fmt.Sprintf("Подтвердите значение для %s: «%s»?", cv.Token, cv.Suggested),
+		req, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
+			MaterialID: mid, ReqType: "confirm_fact",
+			Prompt:  fmt.Sprintf("Подтвердите цену: «%s»?", cv.Suggested),
 			Context: jsonObj(map[string]any{"suggested": cv.Suggested, "description": cv.Description}),
-			Target:  jsonObj(map[string]any{"token": cv.Token, "lang": orElse(cv.Lang, "ru")}),
-		}); err != nil {
+			Target: jsonObj(map[string]any{
+				"table": cv.Table, "slug": cv.Slug, "field": cv.Field, "lang": orElse(cv.Lang, "ru"),
+			}),
+		})
+		if err != nil {
 			return res, err
 		}
+		b.broadcastRequest(req)
 		res.Confirms++
 	}
 	for _, d := range plan.Describe {
 		mid := materialPtr(d.MaterialID)
-		if _, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
+		req, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
 			MaterialID: mid, ReqType: "describe_media",
 			Prompt: orElse(d.Prompt, "Опишите этот материал."),
 			Target: jsonObj(map[string]any{"material_id": d.MaterialID}),
-		}); err != nil {
+		})
+		if err != nil {
 			return res, err
 		}
+		b.broadcastRequest(req)
 		res.Describes++
 	}
 
@@ -177,6 +190,16 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 		b.hub.Broadcast("kb.row.changed", map[string]any{"turn": res})
 	}
 	return res, nil
+}
+
+// broadcastRequest emits kb.request.created for a freshly-raised popup so the
+// Конструктор chat and the Редактор editor both update live. A zero-value
+// Request (CreateRequest failed) is silently skipped.
+func (b *Builder) broadcastRequest(req kbstore.Request) {
+	if b.hub == nil || req.ID == uuid.Nil {
+		return
+	}
+	b.hub.Broadcast("kb.request.created", map[string]any{"id": req.ID, "req_type": req.ReqType})
 }
 
 // jsonObj marshals a small map to a compact JSON string for a jsonb column. Using
@@ -225,15 +248,17 @@ func orElse(v, def string) string {
 // ---------------------------------------------------------------------------
 
 // RuleSynthesizer turns a batch of materials into one coherent topic without an
-// LLM: it cross-references the ready text into a single topic body, tokenizes
-// detected prices (raising confirm_value popups so a digit never enters the body),
-// and proposes an asset per media file (raising describe_media when undescribed).
-// It is the deterministic proof of the build contract and the test baseline; an
-// LLM synthesizer implements the same Synthesizer interface for richer judgment.
+// LLM: it cross-references the ready text into a single topic body (PURE PROSE),
+// EXCISES detected prices (raising confirm_fact popups so a digit never enters a
+// body — the confirmed amount lands in a typed tariff column), and proposes an
+// asset per media file (raising describe_media when undescribed). It is the
+// deterministic proof of the build contract and the test baseline; an LLM
+// synthesizer implements the same Synthesizer interface for richer judgment.
 type RuleSynthesizer struct{}
 
 // priceRE matches "25 000 ₸" / "9 900 ₸/мес" — a number (with space/nbsp groups)
-// suffixed by ₸ and an optional unit. These become tokens, never body digits.
+// suffixed by ₸ and an optional unit. These are excised from bodies and confirmed
+// into typed tariff price columns, never left as digits in prose.
 var priceRE = regexp.MustCompile(`[0-9][0-9 \x{00a0}]*₸(?:/[A-Za-zА-Яа-я]+)?`)
 
 // Plan implements Synthesizer.
@@ -246,22 +271,25 @@ func (RuleSynthesizer) Plan(_ context.Context, in SynthInput) (Plan, error) {
 		}
 	}
 
-	// Tokenize prices across the combined text → confirm_value popups.
+	// Excise prices from the prose body (bodies are pure prose — 14 D3) and raise a
+	// confirm_fact per unique amount, targeting a new tariff's price column. The
+	// operator confirms + names the tariff in the editor; the body keeps only prose.
 	combined := strings.Join(textParts, "\n\n")
-	seen := map[string]string{} // price text → token
+	seen := map[string]string{} // price text → tariff slug
 	n := 0
 	body := priceRE.ReplaceAllStringFunc(combined, func(match string) string {
 		match = strings.TrimSpace(match)
-		token, ok := seen[match]
+		slug, ok := seen[match]
 		if !ok {
 			n++
-			token = fmt.Sprintf("price.item_%d", n)
-			seen[match] = token
-			plan.Confirm = append(plan.Confirm, ValueConfirm{
-				Token: token, Lang: "ru", Suggested: match, Description: "Обнаружено в материалах",
+			slug = fmt.Sprintf("item_%d", n)
+			seen[match] = slug
+			plan.Confirm = append(plan.Confirm, FactConfirm{
+				Table: "tariff", Slug: slug, Field: "price", Lang: "ru",
+				Suggested: match, Description: "Цена, обнаруженная в материалах",
 			})
 		}
-		return "{{" + token + "}}"
+		return "—"
 	})
 
 	slug := slugify(in.Instruction)

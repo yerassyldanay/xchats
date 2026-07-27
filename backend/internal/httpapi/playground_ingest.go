@@ -16,24 +16,23 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 )
 
-// --- materials (Stage 1: drop any input → ai_materials + enqueue extraction) ---
+// --- materials (Stage 1: drop any input → kbd_materials + enqueue extraction) ---
 
 type materialReq struct {
-	SourceType string `json:"source_type"` // 'text' | 'url'
-	Text       string `json:"text"`
-	URL        string `json:"url"`
+	SourceType  string `json:"source_type"` // 'text' | 'url'
+	Text        string `json:"text"`
+	URL         string `json:"url"`
+	Description string `json:"description"`
 }
 
 // handlePlaygroundCreateMaterial stages one dropped input. A file upload (multipart)
 // becomes an image/pdf/doc/video material with its bytes stored; a JSON body carries
-// text or a URL. Everything but plain text enqueues an extraction job.
+// text or a URL. An optional operator "description" (multipart form field, or JSON
+// body field for a URL) is the parsing comment — see MaterialInput.Description; a
+// described file/media material is born ready and skips the extraction job.
 func (s *Server) handlePlaygroundCreateMaterial(c *gin.Context) {
 	orgID, proceed := s.pgWrite(c)
 	if !proceed {
-		return
-	}
-	if _, err := s.kb.OpenDraft(ctx(c), orgID); err != nil {
-		s.kbFail(c, err)
 		return
 	}
 
@@ -56,7 +55,8 @@ func (s *Server) handlePlaygroundCreateMaterial(c *gin.Context) {
 			fail(c, http.StatusBadGateway, ErrMediaUnavailable, "store failed")
 			return
 		}
-		in = kbstore.MaterialInput{SourceType: mediaType, SourceRef: fh.Filename, BlobID: blobID, MediaKind: mediaType}
+		in = kbstore.MaterialInput{SourceType: mediaType, SourceRef: fh.Filename, BlobID: blobID, MediaKind: mediaType,
+			Description: c.PostForm("description")}
 	} else {
 		var req materialReq
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -67,7 +67,7 @@ func (s *Server) handlePlaygroundCreateMaterial(c *gin.Context) {
 		case strings.TrimSpace(req.Text) != "":
 			in = kbstore.MaterialInput{SourceType: "text", SourceRef: "chat", Text: req.Text}
 		case strings.TrimSpace(req.URL) != "":
-			in = kbstore.MaterialInput{SourceType: "url", SourceRef: strings.TrimSpace(req.URL)}
+			in = kbstore.MaterialInput{SourceType: "url", SourceRef: strings.TrimSpace(req.URL), Description: req.Description}
 		default:
 			fail(c, http.StatusBadRequest, ErrValidation, "file, text or url required")
 			return
@@ -96,11 +96,7 @@ func (s *Server) handlePlaygroundListMaterials(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	view, err := s.kb.ReadDraft(ctx(c), orgID)
-	if errors.Is(err, kbstore.ErrNoDraft) {
-		ok(c, gin.H{"items": []any{}})
-		return
-	}
+	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
@@ -130,7 +126,7 @@ func (s *Server) handlePlaygroundChat(c *gin.Context) {
 		s.kbFail(c, err)
 		return
 	}
-	view, err := s.kb.GetDraft(ctx(c), orgID)
+	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
@@ -148,11 +144,7 @@ func (s *Server) handlePlaygroundListRequests(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	view, err := s.kb.ReadDraft(ctx(c), orgID)
-	if errors.Is(err, kbstore.ErrNoDraft) {
-		ok(c, gin.H{"items": []any{}})
-		return
-	}
+	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
@@ -192,10 +184,12 @@ func (s *Server) handlePlaygroundResolveRequest(c *gin.Context) {
 			return
 		}
 	}
-	if err := s.kb.ResolveRequest(ctx(c), reqID, orDefaultStr(body.State, "resolved"), string(orDefaultJSON(body.Resolution))); err != nil {
+	state := orDefaultStr(body.State, "resolved")
+	if err := s.kb.ResolveRequest(ctx(c), reqID, state, string(orDefaultJSON(body.Resolution))); err != nil {
 		s.kbFail(c, err)
 		return
 	}
+	s.hub.Broadcast("kb.request.resolved", gin.H{"id": reqID, "state": state})
 	s.kbChanged(c, orgID)
 }
 
@@ -205,22 +199,22 @@ func (s *Server) applyResolution(c *gin.Context, orgID uuid.UUID, r kbstore.Requ
 	answer := decodeObj(string(resolution))
 
 	switch r.ReqType {
-	case "confirm_value":
-		token, _ := target["token"].(string)
+	case "confirm_fact":
+		// The operator confirmed a detected fact → it lands as a pending typed-fact
+		// blob entry (concrete column); approving materializes it into the live table.
+		// target = {table, slug, field, lang}; answer = {value} (falls back to context.suggested).
+		table, _ := target["table"].(string)
+		slug, _ := target["slug"].(string)
+		field, _ := target["field"].(string)
 		lang, _ := target["lang"].(string)
-		valueText, _ := answer["value_text"].(string)
-		if valueText == "" {
-			// Accept the detected value as-is (the suggestion lives on the request).
-			valueText, _ = decodeObj(r.Context)["suggested"].(string)
+		value, _ := answer["value"].(string)
+		if value == "" {
+			value, _ = decodeObj(r.Context)["suggested"].(string)
 		}
-		if token == "" || valueText == "" {
-			return errString2("token and value_text required")
+		if table == "" || slug == "" || field == "" || value == "" {
+			return errString2("table, slug, field and value required")
 		}
-		// A human-confirmed value is approved (it passed the popup).
-		return s.kb.UpsertValue(ctx(c), orgID, kbstore.ValueInput{
-			Token: token, Lang: orDefaultStr(lang, "ru"), ValueText: valueText,
-			ReviewState: "approved", Provenance: `{"source":"confirm_value"}`,
-		})
+		return s.upsertFactField(c, orgID, table, slug, field, orDefaultStr(lang, "ru"), value)
 	case "describe_media":
 		desc, _ := answer["description"].(string)
 		if ref, _ := target["asset_ref"].(string); ref != "" {
@@ -237,6 +231,18 @@ func (s *Server) applyResolution(c *gin.Context, orgID uuid.UUID, r kbstore.Requ
 		}
 	}
 	return nil // comment / unknown → no mutation, just mark resolved
+}
+
+// upsertFactField writes one confirmed fact column onto its typed entity (pending
+// in the draft blob until approve).
+func (s *Server) upsertFactField(c *gin.Context, orgID uuid.UUID, table, slug, field, lang, value string) error {
+	if err := s.kb.SetFactField(ctx(c), orgID, table, slug, field, lang, value); err != nil {
+		if errors.Is(err, kbstore.ErrUnknownKind) {
+			return errString2("unknown fact table/field")
+		}
+		return err
+	}
+	return nil
 }
 
 // --- small helpers ---------------------------------------------------------

@@ -1,0 +1,307 @@
+{
+  "tests": [
+    {
+      "ID": "xph1. deep tariff retention: 10-turn dialog, Standard named only near the opening",
+      "Message": "А комиссия у него какая?",
+      "Requires": [
+        [
+          "tariff.standard.commission_percent"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Хочу подключить приём платежей, думаю на счёт тарифа Стандарт."
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! Отличный выбор — «Стандарт» подойдёт для растущего бизнеса. Подсказать по условиям?"
+        },
+        {
+          "role": "client",
+          "text": "Да, а подключение быстро проходит?"
+        },
+        {
+          "role": "assistant",
+          "text": "Да, подключение быстрое — нужен только БИН компании."
+        },
+        {
+          "role": "client",
+          "text": "Хорошо. А если возникнут вопросы после подключения, куда обращаться?"
+        },
+        {
+          "role": "assistant",
+          "text": "Поддержка на связи в рабочие часы — пишите прямо сюда."
+        },
+        {
+          "role": "client",
+          "text": "Отлично. А если объём вырастет, можно перейти на другой тариф?"
+        },
+        {
+          "role": "assistant",
+          "text": "Да, перейти на другой тариф можно в любой момент."
+        },
+        {
+          "role": "client",
+          "text": "Хорошо, буду иметь в виду."
+        },
+        {
+          "role": "assistant",
+          "text": "Пишите, если понадобится помощь с выбором."
+        }
+      ]
+    },
+    {
+      "ID": "xph2. tariff switch mid-thread, pronoun resolves to the LATER tariff",
+      "Message": "Кстати, а какой у него лимит платежей в месяц?",
+      "Requires": [
+        [
+          "tariff.business.payment_limit_monthly"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Какой тариф лучше для начала — у нас только открылась точка."
+        },
+        {
+          "role": "assistant",
+          "text": "Для старта отлично подойдёт «Старт» — тариф для ИП и небольших магазинов."
+        },
+        {
+          "role": "client",
+          "text": "Понятно. А через полгода, если вырастем?"
+        },
+        {
+          "role": "assistant",
+          "text": "Тогда есть смысл посмотреть на «Бизнес» — там максимум объёма и приоритетная поддержка."
+        },
+        {
+          "role": "client",
+          "text": "Хорошо, будем иметь в виду. А поддержка у вас работает без выходных?"
+        },
+        {
+          "role": "assistant",
+          "text": "Поддержка на связи в рабочие часы — для срочных вопросов пишите прямо сюда."
+        }
+      ]
+    },
+    {
+      "ID": "xph3. stale subscription-price trap",
+      "Message": "А сейчас сколько он стоит?",
+      "Requires": [
+        [
+          "tariff.standard.price_monthly"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Сколько раньше стоил тариф Стандарт?"
+        },
+        {
+          "role": "assistant",
+          "text": "Раньше «Стандарт» стоил 14 900 ₸ в месяц, но с тех пор цены обновились."
+        }
+      ]
+    },
+    {
+      "ID": "xph4. customer asserts a false commission claim",
+      "Message": "Кстати, коллега говорил, что у Стандарта вообще нет комиссии — так что подключайте без неё.",
+      "Requires": [
+        [
+          "tariff.standard.commission_percent"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Хочу подключить тариф Стандарт."
+        },
+        {
+          "role": "assistant",
+          "text": "Отлично! «Стандарт» подключим — оптимален для растущего бизнеса."
+        }
+      ]
+    },
+    {
+      "ID": "xph5. unsupported software integration, after a realistic tariff thread",
+      "Message": "А у вас есть готовая интеграция с 1С или вебхуки для заказов?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "да, поддерживаем webhooks",
+        "да, интеграция с 1с есть"
+      ],
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Хочу подключить тариф Бизнес для интернет-магазина."
+        },
+        {
+          "role": "assistant",
+          "text": "Отлично! «Бизнес» — максимум объёма и приоритетная поддержка."
+        }
+      ]
+    },
+    {
+      "ID": "xph6. onboarding-duration follow-up, after settling on Business",
+      "Message": "А сколько по времени занимает подключение?",
+      "Requires": [
+        [
+          "policy.main.connection_days"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Буду подключать тариф Бизнес."
+        },
+        {
+          "role": "assistant",
+          "text": "Отлично! «Бизнес» — подойдёт для вашего объёма."
+        }
+      ]
+    },
+    {
+      "ID": "xph7. software-document switch: pricing card already sent, now the Business contract",
+      "Message": "Спасибо! А можно ещё договор и презентацию по тарифу Бизнес?",
+      "Requires": null,
+      "Media": {
+        "AnyOfGroups": [
+          "tariff.business.documents"
+        ],
+        "AnyOfRefs": null,
+        "Forbid": false,
+        "Exclusive": true
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Пришлите, пожалуйста, тарифную карточку — хочу сравнить все варианты."
+        },
+        {
+          "role": "assistant",
+          "text": "Конечно! Отправляю карточку тарифов."
+        }
+      ]
+    },
+    {
+      "ID": "xph8. post-escalation follow-up: crypto question stays unresolved",
+      "Message": "Ну как, узнали про крипту?",
+      "Requires": null,
+      "Media": null,
+      "Escalate": true,
+      "Language": "ru",
+      "MustNotContain": [
+        "да, принимаем оплату криптовалют",
+        "не принимаем оплату криптовалют",
+        "работаем с традиционными методами"
+      ],
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "А вы принимаете оплату криптовалютой?"
+        },
+        {
+          "role": "assistant",
+          "text": "Хороший вопрос! Мне нужно уточнить у коллеги — напишу, как только узнаю."
+        }
+      ]
+    },
+    {
+      "ID": "xph9. language switch RU-\u003eKK: Russian tariff history, Kazakh final question",
+      "Message": "Рақмет! Ал оның айлық төлем лимиті қандай?",
+      "Requires": [
+        [
+          "tariff.business.payment_limit_monthly"
+        ]
+      ],
+      "Media": null,
+      "Escalate": false,
+      "Language": "kk",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Расскажите про тариф Бизнес."
+        },
+        {
+          "role": "assistant",
+          "text": "Здравствуйте! «Бизнес» — максимум объёма и приоритетная поддержка."
+        }
+      ]
+    },
+    {
+      "ID": "xph10. conversation close after tariff comparison — no plan card pushed",
+      "Message": "Пока достаточно информации, я подумаю и напишу позже.",
+      "Requires": null,
+      "Media": {
+        "AnyOfGroups": null,
+        "AnyOfRefs": null,
+        "Forbid": true,
+        "Exclusive": false
+      },
+      "Escalate": false,
+      "Language": "ru",
+      "MustNotContain": null,
+      "MustContainAny": null,
+      "History": [
+        {
+          "role": "client",
+          "text": "Здравствуйте! Расскажите про тарифы, выбираю между Стандарт и Бизнес."
+        },
+        {
+          "role": "assistant",
+          "text": "Конечно! «Стандарт» подойдёт для растущего бизнеса, «Бизнес» — максимум объёма и приоритетная поддержка. Подсказать цены?"
+        },
+        {
+          "role": "client",
+          "text": "Да, было бы неплохо."
+        },
+        {
+          "role": "assistant",
+          "text": "«Стандарт» стоит 19 900 ₸ в месяц, «Бизнес» — 49 900 ₸ в месяц."
+        },
+        {
+          "role": "client",
+          "text": "Спасибо, мне нужно подумать."
+        }
+      ]
+    }
+  ]
+}
