@@ -156,7 +156,7 @@ func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization
 	// Idempotent without a UNIQUE(name) constraint: reuse the existing org for this
 	// name (preferring the one that owns a WhatsApp account, else the oldest) and
 	// only insert when none exists. The old code used `ON CONFLICT DO NOTHING` with
-	// no conflict target, so every boot inserted a fresh "XChats" — this stops that
+	// no conflict target, so every boot inserted a fresh "xchats" — this stops that
 	// at the source without deleting the historical duplicates.
 	err := s.pool.QueryRow(ctx, `
 		SELECT o.id, o.name, o.respond_mode

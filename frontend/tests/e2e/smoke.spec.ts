@@ -3,7 +3,7 @@ import { login } from './helpers'
 
 test('login → chatboard (nav rail + chat list)', async ({ page }) => {
   await login(page)
-  await expect(page.getByText('XChats')).toBeVisible()
+  await expect(page.getByText('xchats')).toBeVisible()
 })
 
 test('NavRail exposes the two Knowledge-Base destinations', async ({ page }) => {

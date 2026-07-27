@@ -39,7 +39,7 @@ async function submit() {
       <div>
         <div class="flex items-center gap-3 text-2xl font-bold tracking-tight">
           <span class="w-11 h-11 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold">X</span>
-          XChats
+          xchats
         </div>
         <h1 class="mt-8 text-3xl font-semibold leading-snug tracking-tight">Командный инбокс<br />и ИИ-ассистент</h1>
         <ul class="mt-10 space-y-4 text-slate-300">
@@ -64,7 +64,7 @@ async function submit() {
       <form class="w-full max-w-sm" @submit.prevent="submit">
         <div class="md:hidden flex items-center gap-2 text-2xl font-bold mb-6">
           <span class="w-9 h-9 rounded-md bg-primary text-primary-foreground grid place-items-center">X</span>
-          XChats
+          xchats
         </div>
         <h2 class="text-2xl font-semibold tracking-tight mb-1">Вход в аккаунт</h2>
         <p class="text-sm text-muted-foreground mb-7">Войдите, чтобы открыть инбокс</p>

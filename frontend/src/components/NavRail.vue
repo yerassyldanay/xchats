@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
-import { Blocks, FlaskConical, Inbox, Library, LogOut } from 'lucide-vue-next'
+import { Blocks, FlaskConical, Inbox, Library, LogOut, BookOpen } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
 import { evalsApi } from '../api/evals'
@@ -41,6 +41,7 @@ const baseNav: { name: string; icon: Component; label: string; match: string[] }
 // Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
 // and rendered in its own bottom cluster (separated by a divider, above the avatar)
 // so it never reads as one more product feature.
+const blogItem = { name: 'blog', icon: BookOpen, label: 'Блог', match: ['blog', 'blog-post'] }
 const evalsItem = { name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch', 'eval-catalog'] }
 function isActive(match: string[]) {
   return match.includes(route.name as string)
@@ -55,9 +56,9 @@ async function logout() {
 <template>
   <nav class="w-[68px] bg-slate-900 flex flex-col items-center py-4 shrink-0">
     <TooltipProvider :delay-duration="300">
-      <div class="w-10 h-10 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold text-lg">
-        X
-      </div>
+      <RouterLink :to="{ name: 'home' }" class="w-10 h-10 rounded-lg bg-transparent overflow-hidden grid place-items-center hover:opacity-80 transition">
+        <img src="/logo.png" alt="xchats logo" class="w-full h-full object-contain" />
+      </RouterLink>
 
       <div class="mt-6 flex flex-col gap-2">
         <Tooltip v-for="item in baseNav" :key="item.name">
@@ -75,6 +76,21 @@ async function logout() {
       </div>
 
       <div class="mt-auto flex flex-col items-center gap-3">
+          <div class="h-px w-8 bg-white/10" aria-hidden="true" />
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <!-- We assume 'blog' is the route name for the blog -->
+              <RouterLink
+                :to="{ name: blogItem.name }"
+                class="w-11 h-11 rounded-lg grid place-items-center transition"
+                :class="isActive(blogItem.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
+              >
+                <component :is="blogItem.icon" class="w-5 h-5" />
+              </RouterLink>
+            </TooltipTrigger>
+            <TooltipContent side="right">{{ blogItem.label }}</TooltipContent>
+          </Tooltip>
+
         <template v-if="evalsAvailable">
           <div class="h-px w-8 bg-white/10" aria-hidden="true" />
           <Tooltip>

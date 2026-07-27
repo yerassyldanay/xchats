@@ -28,7 +28,7 @@ const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const distDir = join(frontendRoot, 'dist')
 const ssrOutDir = join(frontendRoot, 'dist-ssr')
 
-const SITE_TITLE = 'XChats'
+const SITE_TITLE = 'xchats'
 const GITHUB_URL = 'https://github.com/yerassyldanay/xchats'
 // .example is IANA-reserved for documentation/placeholder use — never resolves
 // to a real host, so local builds can't accidentally emit a real-looking URL.
