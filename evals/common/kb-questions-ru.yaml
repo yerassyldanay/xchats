@@ -1,6 +1,6 @@
 # evals/common/kb-questions-ru.yaml — the pinned question bank for the shop-kb-v1
-# family (pipeline: schema_kb_v1). Included by shop-kb-v1-30/-scale-60/-scale-100's
-# tests.yaml via `include: [common/kb-questions-ru.yaml]`.
+# family (pipeline: schema_kb_v1). Included by shop-kb-v1-10/-50/-100's tests.yaml via
+# `include: [common/kb-questions-ru.yaml]`.
 #
 # Every test targets a specific, known row in evals/scenarios/shop-kb-v1/data-ru.yaml
 # (see internal/kbfixture/generate.go for exactly how each row was built) — the IDs
@@ -12,9 +12,10 @@
 # media tokens use the PLURAL one (products/topics), matching aiprompt's own token shapes
 # exactly (see backend/aiprompt/registry.go). `escalate: false` on every KB-answerable
 # question is a deterministic assertion, same doctrine as common/shop-questions.yaml.
-# Every test sets `language: ru` — this family has no language routing at all (frame-ru.txt
-# always replies in Russian; aiprompt.ValidateResponse rejects anything else), so this
-# checks the bank itself never accidentally drifts into Kazakh-looking text.
+# Every test sets `language: ru` — this bank is Russian CUSTOMER INPUT by design (the
+# companion common/kb-messages-kk*.yaml banks are where Kazakh input is exercised — see
+# frame-ru.txt rule 7 for how reply language is actually routed), so this checks the bank
+# itself never accidentally drifts into Kazakh-looking text.
 tests:
   - id: "1. exact price — coffee machine"
     message: "Сколько стоит кофемашина DeLonghi?"

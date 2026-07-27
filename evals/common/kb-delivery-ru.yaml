@@ -1,6 +1,6 @@
 # evals/common/kb-delivery-ru.yaml — the delivery-zones question bank for the
-# shop-kb-v1 family (pipeline: schema_kb_v1). Included by all three size
-# scenarios (shop-kb-v1-30/-scale-60/-scale-100's tests.yaml via
+# shop-kb-v1 family (pipeline: schema_kb_v1). Included by all three active size
+# scenarios (shop-kb-v1-10/-50/-100's tests.yaml via
 # `include: [common/kb-delivery-ru.yaml]`) — delivery behavior is verified at
 # every scale, not just the smallest one.
 #
@@ -16,8 +16,9 @@
 # `table.ref.field` tokens (no braces — judge.go adds the {{ }} itself);
 # delivery tokens use the singular "delivery" table segment, e.g.
 # "delivery.astana.delivery_cost" (see backend/aiprompt/registry.go). Every
-# test sets `language: ru` — this family has no language routing (frame-ru.txt
-# always replies in Russian).
+# test sets `language: ru` — this bank is Russian CUSTOMER INPUT by design (see
+# frame-ru.txt rule 7 for how reply language is actually routed; Kazakh input
+# is exercised separately by common/kb-messages-kk*.yaml).
 #
 # d3/d4 additionally declare `llm_checks`: binary semantic claims judged only
 # by the separate, OPT-IN `judge-llm` command (see judge_llm.go) — the plain
