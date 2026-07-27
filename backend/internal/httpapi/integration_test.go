@@ -25,6 +25,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
+	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -174,6 +175,7 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	}
 	senders := messaging.NewSenderRegistry()
 	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(fake))
+	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
 
 	w := &worker.Worker{Store: st, Queue: q, Evo: fake, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, KB: kb, Extract: extractor, Log: log}

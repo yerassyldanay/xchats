@@ -96,3 +96,46 @@ func TestWhatsAppInboundProducesGroundedDraftAndApprovalDelivers(t *testing.T) {
 		t.Fatalf("approved send was not recorded as sender_kind='ai'")
 	}
 }
+
+// TestSimulatorApprovalNeverCallsEvolution is the full-stack complement to
+// internal/simulator's TestChannelSender_PackageHasNoNetworkingCapability:
+// that test proves the simulator channel adapter cannot reach the network by
+// construction; this one proves the running server actually routes a
+// simulator-channel draft approval to that adapter — not to the fake
+// Evolution client sitting in the very same messaging.SenderRegistry, which a
+// channel-routing bug could easily send it to instead.
+func TestSimulatorApprovalNeverCallsEvolution(t *testing.T) {
+	h := newHarness(t)
+
+	resp, env := h.postJSON("/xchats/api/v1/simulator/messages", map[string]any{
+		"contact_ref": "sim-no-network-contact", "conversation_ref": "sim-no-network-conv",
+		"text": "Здравствуйте!", "wait_for_response": true,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("simulator message status = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		ConversationID string `json:"conversation_id"`
+		Draft          struct {
+			ID string `json:"id"`
+		} `json:"draft"`
+	}
+	mustPayload(t, env, &out)
+	if out.Draft.ID == "" {
+		t.Fatal("missing draft id")
+	}
+
+	callsBefore := len(h.fake.Calls)
+
+	resp2, _ := h.postJSON("/xchats/api/v1/ai-drafts/"+out.Draft.ID+"/approve", map[string]any{"media_ids": []string{}})
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("approve status = %d, want 200", resp2.StatusCode)
+	}
+
+	if got := len(h.fake.Calls); got != callsBefore {
+		t.Fatalf("simulator approval made %d fake Evolution call(s), want 0 (routed to the WhatsApp fake instead of the simulator sender)", got-callsBefore)
+	}
+	if !aiMessageExists(t, h, out.ConversationID) {
+		t.Fatalf("approved simulator send was not recorded as sender_kind='ai'")
+	}
+}

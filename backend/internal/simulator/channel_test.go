@@ -2,6 +2,8 @@ package simulator
 
 import (
 	"context"
+	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/yerassyldanay/xchats/backend/messaging"
@@ -60,6 +62,32 @@ func TestChannelSender_RecordsNoNetworkCallAndReportsDelivered(t *testing.T) {
 	}
 	if res.ExternalID != "sim-11111111-1111-1111-1111-111111111111" {
 		t.Errorf("external id = %q, want a deterministic sim-<message id>", res.ExternalID)
+	}
+}
+
+// TestChannelSender_PackageHasNoNetworkingCapability structurally proves the
+// "no network call" claim ChannelSender's own doc comment makes: this
+// package's entire dependency closure must never include net, an HTTP or RPC
+// client, TLS dialing, or the WhatsApp provider's own client package — so a
+// simulator-channel approval cannot reach a real network by construction,
+// not merely because the current method body happens not to call one.
+func TestChannelSender_PackageHasNoNetworkingCapability(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", "./...").Output()
+	if err != nil {
+		t.Fatalf("go list -deps: %v", err)
+	}
+	denied := map[string]string{
+		"net":        "no networking of any kind",
+		"net/http":   "no HTTP client",
+		"net/rpc":    "no RPC client",
+		"crypto/tls": "no TLS dialing",
+		"github.com/yerassyldanay/xchats/backend/internal/evolution": "must never call the WhatsApp provider",
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if reason, bad := denied[line]; bad {
+			t.Errorf("internal/simulator depends on %s (%s)", line, reason)
+		}
 	}
 }
 
