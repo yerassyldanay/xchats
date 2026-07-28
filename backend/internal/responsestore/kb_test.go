@@ -24,8 +24,8 @@ func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
 
 	mustExec(t, pool, `INSERT INTO xchats.ai_assistants (organization_id, persona, mission, guardrails, language_policy, reply_max_words)
 		VALUES ($1, 'Персона', 'Миссия', 'Правила', 'Языковая политика', 100)`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_topics (organization_id, slug, lang, title, keywords, body_md)
-		VALUES ($1, 'delivery', 'ru', 'Доставка', 'доставка, сроки , стоимость', 'Доставляем по городу.')`, orgID)
+	mustExec(t, pool, `INSERT INTO xchats.ai_topics (organization_id, slug, lang, title, body_md)
+		VALUES ($1, 'delivery', 'ru', 'Доставка', 'Доставляем по городу.')`, orgID)
 	mustExec(t, pool, `INSERT INTO xchats.ai_products (organization_id, ref, lang, name, price, description, category, status, in_stock)
 		VALUES ($1, 'widget', 'ru', 'Виджет', '1 000 ₸', 'Описание', '', 'active', true)`, orgID)
 	mustExec(t, pool, `INSERT INTO xchats.ai_tariffs (organization_id, ref, lang, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages, status)
@@ -44,7 +44,7 @@ func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
 	if kb.Assistant == nil || kb.Assistant.Persona != "Персона" {
 		t.Fatalf("assistant = %+v", kb.Assistant)
 	}
-	if len(kb.Topics) != 1 || len(kb.Topics[0].Keywords) != 3 || kb.Topics[0].Keywords[1] != "сроки" {
+	if len(kb.Topics) != 1 || kb.Topics[0].Title != "Доставка" {
 		t.Fatalf("topics = %+v", kb.Topics)
 	}
 	if len(kb.Products) != 1 || kb.Products[0].SalesStatus != "active" || !kb.Products[0].InStock {

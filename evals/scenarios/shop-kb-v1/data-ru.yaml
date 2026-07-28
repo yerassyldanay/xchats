@@ -39,11 +39,6 @@ ai_assistants:
 ai_topics:
     - slug: catalog
       title: Каталог
-      keywords:
-        - каталог
-        - ассортимент
-        - что есть
-        - товары
       body_md: В каталоге бытовая техника для дома и кухни — от кофемашин и мелкой техники до пылесосов и обогревателей. Актуальные позиции, цены и наличие — только из FACTS и каталога, не перечисляй товары по памяти.
       featured_image: ""
       illustration_images: []
@@ -52,11 +47,6 @@ ai_topics:
       reference_documents: []
     - slug: delivery
       title: Доставка
-      keywords:
-        - доставка
-        - привезти
-        - сроки
-        - стоимость доставки
       body_md: Доставляем по Алматы и области; срок и стоимость зависят от адреса, а при заказе на крупную сумму доставка становится бесплатной. Называй точные значения только из FACTS.
       featured_image: ""
       illustration_images:
@@ -66,11 +56,6 @@ ai_topics:
       reference_documents: []
     - slug: payment
       title: Оплата
-      keywords:
-        - оплата
-        - kaspi
-        - рассрочка
-        - карта
       body_md: Принимаем оплату картой, через Kaspi и наличными при получении. Оформление — прямо в WhatsApp.
       featured_image: ""
       illustration_images: []
@@ -79,11 +64,6 @@ ai_topics:
       reference_documents: []
     - slug: how_to_order
       title: Как заказать
-      keywords:
-        - заказ
-        - оформить
-        - купить
-        - как купить
       body_md: 'Оформить заказ просто: напишите, какой товар интересует, укажите адрес доставки и подтвердите заказ — мы пришлём счёт и оформим доставку.'
       featured_image: ""
       illustration_images: []
@@ -92,11 +72,6 @@ ai_topics:
       reference_documents: []
     - slug: warranty
       title: Гарантия
-      keywords:
-        - гарантия
-        - поломка
-        - ремонт
-        - сервис
       body_md: На технику действует гарантия производителя — она покрывает заводской брак и оформляется чеком или подтверждением заказа. Точный срок гарантии уточняйте у менеджера.
       featured_image: ""
       illustration_images: []
@@ -105,11 +80,6 @@ ai_topics:
       reference_documents: []
     - slug: returns
       title: Возврат
-      keywords:
-        - возврат
-        - вернуть
-        - не подошло
-        - обмен
       body_md: Возврат и обмен возможны, если товар не был в использовании и сохранена упаковка. Уточняйте условия у менеджера при оформлении.
       featured_image: ""
       illustration_images: []
@@ -118,11 +88,6 @@ ai_topics:
       reference_documents: []
     - slug: promo
       title: Акции
-      keywords:
-        - акция
-        - скидка
-        - промокод
-        - распродажа
       body_md: Актуальные акции и промокоды уточняйте у менеджера — здесь фиксированного списка нет.
       featured_image: ""
       illustration_images: []
@@ -131,11 +96,6 @@ ai_topics:
       reference_documents: []
     - slug: support
       title: Поддержка
-      keywords:
-        - поддержка
-        - помощь
-        - вопрос
-        - менеджер
       body_md: Поддержка на связи в рабочее время — контакты для связи смотрите в разделе контактов.
       featured_image: ""
       illustration_images: []
@@ -144,10 +104,6 @@ ai_topics:
       reference_documents: []
     - slug: pickup
       title: Самовывоз
-      keywords:
-        - самовывоз
-        - забрать
-        - склад
       body_md: Самовывоз возможен со склада в Алматы по предварительной договорённости с менеджером.
       featured_image: ""
       illustration_images: []

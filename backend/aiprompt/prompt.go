@@ -128,9 +128,6 @@ func renderTopics(topics []Topic) string {
 		if strings.TrimSpace(t.Title) != "" {
 			head += " — " + t.Title
 		}
-		if len(t.Keywords) > 0 {
-			head += "\nключевые слова: " + strings.Join(t.Keywords, ", ")
-		}
 		lines = append(lines, head+"\n"+strings.TrimSpace(t.BodyMD))
 	}
 	return strings.Join(lines, "\n\n")
@@ -309,7 +306,7 @@ func renderProductsOutOfStock(input *PromptInput) string {
 }
 
 // renderTopicBlocks renders the v2 canonical-block frame's topic list
-// (%%TOPICS%%): one block per topic with prose (slug/title/keywords/body plus
+// (%%TOPICS%%): one block per topic with prose (slug/title/body plus
 // every populated media reference), each field appearing exactly once. This is
 // the v2 replacement for renderTopics (SlotKnowledgeBase, kept for legacy frame
 // compatibility) — topic prose appears ONLY here in a v2 frame, never repeated
@@ -323,9 +320,6 @@ func renderTopicBlocks(input *PromptInput, cat *Catalog) string {
 		lines := []string{"topic: " + t.Slug}
 		if s := strings.TrimSpace(t.Title); s != "" {
 			lines = append(lines, "title: "+s)
-		}
-		if len(t.Keywords) > 0 {
-			lines = append(lines, "keywords: "+strings.Join(t.Keywords, ", "))
 		}
 		lines = append(lines, "body: "+strings.TrimSpace(t.BodyMD))
 		lines = append(lines, mediaRefLines(cat, "topics", t.Slug)...)

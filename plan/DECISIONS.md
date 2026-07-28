@@ -241,7 +241,6 @@ timestamps. `contacts` and `policies` are nullable singleton objects, not arrays
 | `organization_id` | `uuid` | not null, FK `organizations(id)` | — |
 | `slug` | `text` | not null, unique per organization | Stable natural key used in tokens |
 | `title` | `text` | not null | Russian topic title |
-| `keywords` | `text[]` | not null, default `{}` | Russian matching terms and synonyms |
 | `body_md` | `text` | not null | Approved Russian Markdown knowledge |
 | `featured_image` | `uuid` | null, FK `kbd_materials(id)` | Single main topic image |
 | `illustration_images` | `uuid[]` | not null, default `{}` | Supporting topic illustrations, in send order |
@@ -441,7 +440,6 @@ prompt.
   "table": "ai_topics",
   "slug": "how-to-order",
   "title": "Как оформить заказ",
-  "keywords": ["заказ", "оформить", "купить"],
   "body_md": "Напишите, какой товар вас интересует, и укажите адрес доставки.",
   "featured_image": null,
   "illustration_images": [],

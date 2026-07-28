@@ -227,9 +227,9 @@ const pendingRail = computed(() => (showAllChanges.value ? pendingRailAll.value 
 const publishedRail = computed(() => (showAllChanges.value ? publishedRailAll.value : publishedRailAll.value.slice(0, RAIL_CAP)))
 const hasMoreChanges = computed(() => pendingRailAll.value.length > RAIL_CAP || publishedRailAll.value.length > RAIL_CAP)
 
-const tBuf = reactive<Record<string, { title: string; keywords: string; body_md: string; lang: string }>>({})
+const tBuf = reactive<Record<string, { title: string; body_md: string; lang: string }>>({})
 function vmTopic(t: TopicRow) {
-  if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, keywords: t.keywords, body_md: t.body_md, lang: t.lang || 'ru' }
+  if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, body_md: t.body_md, lang: t.lang || 'ru' }
   return tBuf[t.id]
 }
 type ProductBuf = { name: string; price: string; description: string; category: string; availability: string }
@@ -459,7 +459,6 @@ async function discardAll() {
                   <Badge variant="secondary" :class="draftBadge(!liveTopicSlugs.has(t.slug)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveTopicSlugs.has(t.slug)).label }}</Badge>
                 </div>
                 <Input v-model="vmTopic(t).title" placeholder="Название" class="h-9" />
-                <Input v-model="vmTopic(t).keywords" placeholder="Ключевые слова" class="h-9" />
                 <Textarea v-model="vmTopic(t).body_md" rows="3" placeholder="Текст темы…" class="min-h-0 text-[14px]" />
                 <div class="flex items-center gap-2">
                   <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.upsertTopic({ slug: t.slug, ...vmTopic(t) })">Сохранить</Button>

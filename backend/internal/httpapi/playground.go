@@ -111,11 +111,10 @@ func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 // --- topics ----------------------------------------------------------------
 
 type topicReq struct {
-	Slug     string `json:"slug"`
-	Lang     string `json:"lang"`
-	Title    string `json:"title"`
-	Keywords string `json:"keywords"`
-	BodyMD   string `json:"body_md"`
+	Slug   string `json:"slug"`
+	Lang   string `json:"lang"`
+	Title  string `json:"title"`
+	BodyMD string `json:"body_md"`
 }
 
 func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
@@ -129,7 +128,7 @@ func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
 		return
 	}
 	if err := s.kb.UpsertTopic(ctx(c), orgID, kbstore.TopicInput{
-		Slug: req.Slug, Lang: req.Lang, Title: req.Title, Keywords: req.Keywords, BodyMD: req.BodyMD,
+		Slug: req.Slug, Lang: req.Lang, Title: req.Title, BodyMD: req.BodyMD,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
@@ -289,6 +288,10 @@ type productReq struct {
 	Description  string `json:"description"`
 	Category     string `json:"category"`
 	Availability string `json:"availability"`
+	// InStock is read only by handleKBUpsertProduct (the live-write path) —
+	// handlePlaygroundUpsertProduct never reads it, so a draft write's
+	// behavior is unaffected by this field's presence.
+	InStock *bool `json:"in_stock"`
 }
 
 func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
@@ -371,6 +374,24 @@ type policiesReq struct {
 	Installment      *string `json:"installment"`
 	ReturnPeriod     *string `json:"return_period"`
 	Warranty         *string `json:"warranty"`
+	// OutsideZonesNote is read only by handleKBPatchPolicies (the live-write
+	// path) — handlePlaygroundPatchPolicies never reads it.
+	OutsideZonesNote *string `json:"outside_zones_note"`
+}
+
+// zoneReq is the /kb/zones upsert payload — no Playground/draft counterpart
+// exists yet (draft milestone later), so this is read only by
+// handleKBUpsertZone.
+type zoneReq struct {
+	Ref               string `json:"ref"`
+	Name              string `json:"name"`
+	ZoneLevel         string `json:"zone_level"`
+	ParentRef         string `json:"parent_ref"`
+	DeliveryAvailable bool   `json:"delivery_available"`
+	DeliveryCost      string `json:"delivery_cost"`
+	DeliveryInDays    string `json:"delivery_in_days"`
+	Notes             string `json:"notes"`
+	Status            string `json:"status"`
 }
 
 func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
@@ -442,6 +463,7 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 		s.kbFail(c, err)
 		return
 	}
+	s.invalidateKBCache(orgID)
 	s.reloadBrain(c, orgID)
 	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {
@@ -475,6 +497,7 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 		s.kbFail(c, err)
 		return
 	}
+	s.invalidateKBCache(orgID)
 	s.reloadBrain(c, orgID)
 	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {

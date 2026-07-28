@@ -10,5 +10,7 @@ export async function login(page: Page) {
   await page.locator('input[type=email]').fill(EMAIL)
   await page.locator('input[type=password]').fill(PASSWORD)
   await page.getByRole('button', { name: 'Войти' }).click()
-  await expect(page).toHaveURL('/')
+  // Login.vue navigates to { name: 'chatboard' } (router.ts) → URL /chatboard,
+  // not '/' (a separate "home" route) — this asserted the wrong target.
+  await expect(page).toHaveURL('/chatboard')
 }

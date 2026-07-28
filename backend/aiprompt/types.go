@@ -44,7 +44,6 @@ type Assistant struct {
 type Topic struct {
 	Slug                string
 	Title               string
-	Keywords            []string
 	BodyMD              string
 	FeaturedImage       string
 	IllustrationImages  []string
