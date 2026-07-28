@@ -111,11 +111,10 @@ func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 // --- topics ----------------------------------------------------------------
 
 type topicReq struct {
-	Slug     string `json:"slug"`
-	Lang     string `json:"lang"`
-	Title    string `json:"title"`
-	Keywords string `json:"keywords"`
-	BodyMD   string `json:"body_md"`
+	Slug   string `json:"slug"`
+	Lang   string `json:"lang"`
+	Title  string `json:"title"`
+	BodyMD string `json:"body_md"`
 }
 
 func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
@@ -129,7 +128,7 @@ func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
 		return
 	}
 	if err := s.kb.UpsertTopic(ctx(c), orgID, kbstore.TopicInput{
-		Slug: req.Slug, Lang: req.Lang, Title: req.Title, Keywords: req.Keywords, BodyMD: req.BodyMD,
+		Slug: req.Slug, Lang: req.Lang, Title: req.Title, BodyMD: req.BodyMD,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)

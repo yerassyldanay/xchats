@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -97,25 +96,9 @@ func loadAssistant(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) (*aiprompt.A
 	return &a, nil
 }
 
-// splitKeywords splits ai_topics.keywords (a comma-separated text column, not
-// an array) into aiprompt.Topic.Keywords, trimming blanks.
-func splitKeywords(s string) []string {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 func loadTopics(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) ([]aiprompt.Topic, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT slug, title, keywords, body_md
+		SELECT slug, title, body_md
 		FROM xchats.ai_topics WHERE organization_id = $1 AND lang = 'ru' ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("responsestore: load topics: %w", err)
@@ -124,11 +107,9 @@ func loadTopics(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) ([]aiprompt.Top
 	var out []aiprompt.Topic
 	for rows.Next() {
 		var t aiprompt.Topic
-		var keywords string
-		if err := rows.Scan(&t.Slug, &t.Title, &keywords, &t.BodyMD); err != nil {
+		if err := rows.Scan(&t.Slug, &t.Title, &t.BodyMD); err != nil {
 			return nil, fmt.Errorf("responsestore: scan topic: %w", err)
 		}
-		t.Keywords = splitKeywords(keywords)
 		out = append(out, t)
 	}
 	return out, rows.Err()

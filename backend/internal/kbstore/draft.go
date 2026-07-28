@@ -38,7 +38,6 @@ type DraftTopic struct {
 	Slug       string `json:"slug"`
 	Lang       string `json:"lang"`
 	Title      string `json:"title"`
-	Keywords   string `json:"keywords"`
 	BodyMD     string `json:"body_md"`
 	Provenance string `json:"provenance,omitempty"`
 }
@@ -393,7 +392,6 @@ type TopicRow struct {
 	Slug       string    `json:"slug"`
 	Lang       string    `json:"lang"`
 	Title      string    `json:"title"`
-	Keywords   string    `json:"keywords"`
 	BodyMD     string    `json:"body_md"`
 	Draft      bool      `json:"draft"`
 	Provenance string    `json:"provenance,omitempty"`
@@ -544,6 +542,12 @@ func (s *Store) LiveView(ctx context.Context, orgID uuid.UUID) (*DraftView, erro
 	}
 	v.Materials = []Material{}
 	v.Requests = []Request{}
+	// ai_assets is legacy (plan/database-schema.md: "not part of the target");
+	// the live editor's «Медиа-ресурсы» tab was removed in favor of the
+	// kbd_materials-backed «Файлы (материалы)» tab, so this view no longer
+	// surfaces it. Playground's draft/approve path still reads/writes
+	// ai_assets via mergedView/Draft — untouched here.
+	v.Assets = []AssetRow{}
 	return v, nil
 }
 
@@ -583,14 +587,14 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// topics
 	topicIdx := map[string]int{}
-	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, keywords, body_md, updated_at
+	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, body_md, updated_at
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for trows.Next() {
 		var t TopicRow
-		if err := trows.Scan(&t.Slug, &t.Lang, &t.Title, &t.Keywords, &t.BodyMD, &t.UpdatedAt); err != nil {
+		if err := trows.Scan(&t.Slug, &t.Lang, &t.Title, &t.BodyMD, &t.UpdatedAt); err != nil {
 			trows.Close()
 			return nil, err
 		}
@@ -603,7 +607,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		return nil, err
 	}
 	for _, bt := range blob.Topics {
-		row := TopicRow{ID: bt.Slug, Slug: bt.Slug, Lang: bt.Lang, Title: bt.Title, Keywords: bt.Keywords,
+		row := TopicRow{ID: bt.Slug, Slug: bt.Slug, Lang: bt.Lang, Title: bt.Title,
 			BodyMD: bt.BodyMD, Draft: true, Provenance: bt.Provenance, UpdatedAt: updatedAt}
 		if i, ok := topicIdx[bt.Slug]; ok {
 			v.Topics[i] = row
@@ -912,8 +916,8 @@ func (s *Store) PatchConfig(ctx context.Context, orgID uuid.UUID, p ConfigPatch)
 
 // TopicInput is an upsert payload for a draft topic.
 type TopicInput struct {
-	Slug, Lang, Title, Keywords, BodyMD string
-	Provenance                          string // "" → '{}'
+	Slug, Lang, Title, BodyMD string
+	Provenance                string // "" → '{}'
 }
 
 // UpsertTopic stages a topic create/update in the draft blob, by slug.
@@ -921,7 +925,7 @@ func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, in TopicInput)
 	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
 		b.upsertTopic(DraftTopic{
 			Slug: in.Slug, Lang: orDefault(in.Lang, "ru"), Title: in.Title,
-			Keywords: in.Keywords, BodyMD: in.BodyMD, Provenance: orDefault(in.Provenance, "{}"),
+			BodyMD: in.BodyMD, Provenance: orDefault(in.Provenance, "{}"),
 		})
 		return nil
 	})
@@ -1471,12 +1475,12 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 
 	for _, t := range set.topics {
 		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-			(organization_id, slug, lang, title, keywords, body_md)
-			VALUES ($1,$2,$3,$4,$5,$6)
+			(organization_id, slug, lang, title, body_md)
+			VALUES ($1,$2,$3,$4,$5)
 			ON CONFLICT (organization_id, slug) DO UPDATE SET
-				lang=EXCLUDED.lang, title=EXCLUDED.title, keywords=EXCLUDED.keywords,
+				lang=EXCLUDED.lang, title=EXCLUDED.title,
 				body_md=EXCLUDED.body_md, updated_at=now()`,
-			orgID, t.Slug, orDefault(t.Lang, "ru"), t.Title, t.Keywords, t.BodyMD); err != nil {
+			orgID, t.Slug, orDefault(t.Lang, "ru"), t.Title, t.BodyMD); err != nil {
 			return err
 		}
 	}
@@ -1690,7 +1694,7 @@ func mergeForGate(live *domain.Snapshot, topics []DraftTopic, assets []DraftAsse
 		tIdx[t.Slug] = len(out.Topics) - 1
 	}
 	for _, t := range topics {
-		nt := domain.Topic{Slug: t.Slug, Language: t.Lang, Title: t.Title, Keywords: t.Keywords, BodyMD: t.BodyMD}
+		nt := domain.Topic{Slug: t.Slug, Language: t.Lang, Title: t.Title, BodyMD: t.BodyMD}
 		if i, ok := tIdx[t.Slug]; ok {
 			out.Topics[i] = nt
 		} else {

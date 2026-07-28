@@ -22,7 +22,6 @@ ai_assistants:
 ai_topics:
   - slug: delivery
     title: "Доставка"
-    keywords: ["доставка", "сроки"]
     body_md: "Доставляем по всему Алматы."
     illustration_images: []
 

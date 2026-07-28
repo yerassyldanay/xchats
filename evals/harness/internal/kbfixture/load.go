@@ -102,7 +102,7 @@ func toKB(fx *Fixture) (*aiprompt.KB, error) {
 			return nil, fmt.Errorf("ai_topics[%s]: body_md is required", t.Slug)
 		}
 		kb.Topics = append(kb.Topics, aiprompt.Topic{
-			Slug: t.Slug, Title: t.Title, Keywords: t.Keywords, BodyMD: t.BodyMD,
+			Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD,
 			FeaturedImage: t.FeaturedImage, IllustrationImages: t.IllustrationImages,
 			ExplainerVideos: t.ExplainerVideos, NarrationAudioFiles: t.NarrationAudioFiles,
 			ReferenceDocuments: t.ReferenceDocuments,

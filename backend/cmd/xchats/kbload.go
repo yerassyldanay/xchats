@@ -67,11 +67,10 @@ type kbLoadPolicies struct {
 }
 
 type kbLoadTopic struct {
-	Slug     string `json:"slug"`
-	Lang     string `json:"lang"`
-	Title    string `json:"title"`
-	Keywords string `json:"keywords"`
-	BodyMD   string `json:"body_md"`
+	Slug   string `json:"slug"`
+	Lang   string `json:"lang"`
+	Title  string `json:"title"`
+	BodyMD string `json:"body_md"`
 }
 
 type kbLoadProduct struct {
@@ -185,7 +184,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	}
 	for _, t := range doc.Topics {
 		if err := kb.PutLiveTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
-			Slug: t.Slug, Lang: t.Lang, Title: t.Title, Keywords: t.Keywords, BodyMD: t.BodyMD,
+			Slug: t.Slug, Lang: t.Lang, Title: t.Title, BodyMD: t.BodyMD,
 		}); err != nil {
 			fatal("kb-load: topic "+t.Slug, err)
 		}

@@ -130,7 +130,7 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft topics ---------------------------------------------------------
-    upsertTopic(input: { slug: string; lang?: string; title?: string; keywords?: string; body_md?: string }) {
+    upsertTopic(input: { slug: string; lang?: string; title?: string; body_md?: string }) {
       return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/topics', input, this.ifMatch())))
     },
     deleteTopic(slug: string) {
@@ -308,7 +308,7 @@ export const usePlayground = defineStore('playground', {
         this.liveBusy = false
       }
     },
-    liveUpsertTopic(input: { slug: string; lang?: string; title?: string; keywords?: string; body_md?: string }) {
+    liveUpsertTopic(input: { slug: string; lang?: string; title?: string; body_md?: string }) {
       return this.writeLive(async () => {
         this.live = await api.post<DraftView>('/kb/topics', input)
       })
@@ -316,27 +316,6 @@ export const usePlayground = defineStore('playground', {
     liveDeleteTopic(slug: string) {
       return this.writeLive(async () => {
         this.live = await api.del<DraftView>('/kb/topics/' + encodeURIComponent(slug))
-      })
-    },
-    liveUploadAsset(file: File, meta: { owner_kind?: string; owner_ref?: string; description: string; lang?: string }) {
-      return this.writeLive(async () => {
-        const form = new FormData()
-        form.append('file', file)
-        if (meta.owner_kind) form.append('owner_kind', meta.owner_kind)
-        if (meta.owner_ref) form.append('owner_ref', meta.owner_ref)
-        form.append('description', meta.description)
-        if (meta.lang) form.append('lang', meta.lang)
-        this.live = await api.postForm<DraftView>('/kb/assets', form)
-      })
-    },
-    livePatchAsset(ref: string, patch: { description?: string; owner_kind?: string; owner_ref?: string }) {
-      return this.writeLive(async () => {
-        this.live = await api.patch<DraftView>('/kb/assets/' + encodeURIComponent(ref), patch)
-      })
-    },
-    liveDeleteAsset(ref: string) {
-      return this.writeLive(async () => {
-        this.live = await api.del<DraftView>('/kb/assets/' + encodeURIComponent(ref))
       })
     },
     liveUpsertTariff(input: {

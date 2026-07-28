@@ -66,14 +66,14 @@ func (s *Store) LoadLive(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot
 
 // loadLiveContent fills Topics/Assets/Values from the live ai_ tables for an org.
 func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *domain.Snapshot) error {
-	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, keywords, body_md
+	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, body_md
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for trows.Next() {
 		var t domain.Topic
-		if err := trows.Scan(&t.Slug, &t.Language, &t.Title, &t.Keywords, &t.BodyMD); err != nil {
+		if err := trows.Scan(&t.Slug, &t.Language, &t.Title, &t.BodyMD); err != nil {
 			trows.Close()
 			return err
 		}
@@ -228,12 +228,12 @@ func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *doma
 func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *domain.Snapshot) error {
 	for _, t := range snap.Topics {
 		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-			(organization_id, slug, lang, title, keywords, body_md)
-			VALUES ($1,$2,$3,$4,$5,$6)
+			(organization_id, slug, lang, title, body_md)
+			VALUES ($1,$2,$3,$4,$5)
 			ON CONFLICT (organization_id, slug) DO UPDATE SET
-				lang = EXCLUDED.lang, title = EXCLUDED.title, keywords = EXCLUDED.keywords,
+				lang = EXCLUDED.lang, title = EXCLUDED.title,
 				body_md = EXCLUDED.body_md, updated_at = now()`,
-			orgID, t.Slug, t.Language, t.Title, t.Keywords, t.BodyMD); err != nil {
+			orgID, t.Slug, t.Language, t.Title, t.BodyMD); err != nil {
 			return fmt.Errorf("insert topic %s: %w", t.Slug, err)
 		}
 	}

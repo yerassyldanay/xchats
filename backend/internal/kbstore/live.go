@@ -41,12 +41,12 @@ func (s *Store) PutLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 	}
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-		(organization_id, slug, lang, title, keywords, body_md)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		(organization_id, slug, lang, title, body_md)
+		VALUES ($1,$2,$3,$4,$5)
 		ON CONFLICT (organization_id, slug) DO UPDATE SET
-			lang=EXCLUDED.lang, title=EXCLUDED.title, keywords=EXCLUDED.keywords,
+			lang=EXCLUDED.lang, title=EXCLUDED.title,
 			body_md=EXCLUDED.body_md, updated_at=now()`,
-		orgID, in.Slug, orDefault(in.Lang, "ru"), in.Title, in.Keywords, in.BodyMD); err != nil {
+		orgID, in.Slug, orDefault(in.Lang, "ru"), in.Title, in.BodyMD); err != nil {
 		return err
 	}
 	if err := auditRow(ctx, tx, orgID, actor, "edit", "topic:"+in.Slug); err != nil {
@@ -66,106 +66,6 @@ func (s *Store) DeleteLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid
 		return err
 	}
 	if err := auditRow(ctx, tx, orgID, actor, "delete", "topic:"+slug); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
-// putLiveAssetRow writes one ai_assets row — shared by PutLiveAsset (its own
-// transaction) and PatchLiveAsset (the transaction its FOR UPDATE read opened).
-func putLiveAssetRow(ctx context.Context, db dbtx, orgID uuid.UUID, in AssetInput) error {
-	_, err := db.Exec(ctx, `INSERT INTO xchats.ai_assets
-		(organization_id, ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		ON CONFLICT (organization_id, ref) DO UPDATE SET
-			asset_kind=EXCLUDED.asset_kind, owner_kind=EXCLUDED.owner_kind, owner_ref=EXCLUDED.owner_ref,
-			title=EXCLUDED.title, description=EXCLUDED.description, asset_url=EXCLUDED.asset_url,
-			lang=EXCLUDED.lang, updated_at=now()`,
-		orgID, in.Ref, orDefault(in.Kind, "image"), in.OwnerKind, in.OwnerRef, in.Title, in.Description, in.URL, orDefault(in.Lang, "ru"))
-	return err
-}
-
-// PutLiveAsset upserts an asset directly into the live table. Rejects an empty
-// description — an undescribed live asset would fail every future Playground
-// approve anyway (gate.go), so this refuses it up front instead of leaving a
-// landmine in the live KB.
-func (s *Store) PutLiveAsset(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in AssetInput) error {
-	if reasons := gateAsset(domain.Asset{Ref: in.Ref, Description: in.Description}, nil); len(reasons) > 0 {
-		return &GateError{Reasons: reasons}
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err := putLiveAssetRow(ctx, tx, orgID, in); err != nil {
-		return err
-	}
-	if err := auditRow(ctx, tx, orgID, actor, "edit", "asset:"+in.Ref); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
-// PatchLiveAsset edits an existing live asset's description and/or owner,
-// starting from its current row (locked FOR UPDATE for the duration of this
-// transaction, so a concurrent patch of the same asset serializes instead of
-// one silently clobbering the other) so an omitted field stays unchanged.
-func (s *Store) PatchLiveAsset(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string, p AssetPatch) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	cur, err := currentLiveAssetTx(ctx, tx, orgID, ref)
-	if err != nil {
-		return err
-	}
-	if p.Description != nil {
-		cur.Description = *p.Description
-	}
-	if p.OwnerKind != nil {
-		cur.OwnerKind = *p.OwnerKind
-	}
-	if p.OwnerRef != nil {
-		cur.OwnerRef = *p.OwnerRef
-	}
-	in := AssetInput{Ref: cur.Ref, Kind: cur.Kind, OwnerKind: cur.OwnerKind, OwnerRef: cur.OwnerRef,
-		Title: cur.Title, Description: cur.Description, URL: cur.URL, Lang: cur.Lang}
-	if reasons := gateAsset(domain.Asset{Ref: in.Ref, Description: in.Description}, nil); len(reasons) > 0 {
-		return &GateError{Reasons: reasons}
-	}
-	if err := putLiveAssetRow(ctx, tx, orgID, in); err != nil {
-		return err
-	}
-	if err := auditRow(ctx, tx, orgID, actor, "edit", "asset:"+ref); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
-func currentLiveAssetTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, ref string) (DraftAsset, error) {
-	var a DraftAsset
-	err := tx.QueryRow(ctx, `SELECT ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang
-		FROM xchats.ai_assets WHERE organization_id = $1 AND ref = $2 FOR UPDATE`, orgID, ref).
-		Scan(&a.Ref, &a.Kind, &a.OwnerKind, &a.OwnerRef, &a.Title, &a.Description, &a.URL, &a.Lang)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return DraftAsset{}, ErrUnknownKind
-	}
-	return a, err
-}
-
-// DeleteLiveAsset removes a live asset by ref.
-func (s *Store) DeleteLiveAsset(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM xchats.ai_assets WHERE organization_id=$1 AND ref=$2`, orgID, ref); err != nil {
-		return err
-	}
-	if err := auditRow(ctx, tx, orgID, actor, "delete", "asset:"+ref); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

@@ -7,7 +7,14 @@ includes `organization_id` (directly or through an owning row).
 
 This is the target contract. Existing migrations may lag and must migrate toward
 it; legacy `ai_assets`, generic value bags, or per-job draft tables are not part
-of the target.
+of the target. `ai_assets` is retired from the live `/knowledge-base` editor
+UI (no «Медиа-ресурсы» tab, no `/kb/assets*` endpoints) — `kbd_materials` is
+the single material/file registry going forward (see `DECISIONS.md`'s
+`kbd_materials` section); the typed media columns (`featured_image`,
+`gallery_images`, …) FK into `kbd_materials`, never into `ai_assets`. The
+table itself is not yet dropped: Playground's dormant draft/approve path
+still reads/writes it, and its real retirement is scoped to the media
+milestone's backfill.
 
 ## Shared and channel transport
 
@@ -71,7 +78,7 @@ ai_assistants — singleton per organization
   UNIQUE (organization_id)
 
 ai_topics — explanatory trusted prose
-  id, organization_id, slug, title, keywords, body_md,
+  id, organization_id, slug, title, body_md,
   featured_image, illustration_images, explainer_videos,
   narration_audio_files, reference_documents,
   created_at, updated_at

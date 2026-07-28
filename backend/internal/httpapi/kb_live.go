@@ -1,14 +1,11 @@
 package httpapi
 
 import (
-	"io"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
 
@@ -99,7 +96,7 @@ func (s *Server) handleKBUpsertTopic(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PutLiveTopic(ctx(c), orgID, currentUser(c).ID, kbstore.TopicInput{
-		Slug: req.Slug, Lang: req.Lang, Title: req.Title, Keywords: req.Keywords, BodyMD: req.BodyMD,
+		Slug: req.Slug, Lang: req.Lang, Title: req.Title, BodyMD: req.BodyMD,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -113,87 +110,6 @@ func (s *Server) handleKBDeleteTopic(c *gin.Context) {
 		return
 	}
 	if err := s.kb.DeleteLiveTopic(ctx(c), orgID, currentUser(c).ID, c.Param("slug")); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbLiveChanged(c, orgID)
-}
-
-// --- assets (upload bytes + meta; description required) ----------------------
-
-func (s *Server) handleKBUploadAsset(c *gin.Context) {
-	orgID, proceed := s.kbWrite(c)
-	if !proceed {
-		return
-	}
-	desc := strings.TrimSpace(c.PostForm("description"))
-	if desc == "" {
-		fail(c, http.StatusBadRequest, ErrValidation, "description required")
-		return
-	}
-	fh, err := c.FormFile("file")
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, "file part required")
-		return
-	}
-	f, err := fh.Open()
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, "cannot open file")
-		return
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, "cannot read file")
-		return
-	}
-	mediaType, mimetype := detectMedia(fh.Filename, fh.Header.Get("Content-Type"))
-	ref := uuid.NewString()
-	if _, err := s.blob.Put(ref, data, blob.Meta{MediaType: mediaType, Mimetype: mimetype, FileName: fh.Filename, FileSize: int64(len(data))}); err != nil {
-		fail(c, http.StatusBadGateway, ErrMediaUnavailable, "store failed")
-		return
-	}
-	ownerKind := c.PostForm("owner_kind")
-	ownerRef := c.PostForm("owner_ref")
-	if ownerKind == "" && ownerRef != "" {
-		ownerKind = "topic"
-	}
-	if err := s.kb.PutLiveAsset(ctx(c), orgID, currentUser(c).ID, kbstore.AssetInput{
-		Ref: ref, Kind: mediaType, OwnerKind: ownerKind, OwnerRef: ownerRef,
-		Title: fh.Filename, Description: desc, URL: "/xchats/api/v1/media/" + ref, Lang: c.PostForm("lang"),
-	}); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbLiveChanged(c, orgID)
-}
-
-func (s *Server) handleKBPatchAsset(c *gin.Context) {
-	orgID, proceed := s.kbWrite(c)
-	if !proceed {
-		return
-	}
-	var req assetPatchReq
-	_ = c.ShouldBindJSON(&req)
-	if req.Description != nil && strings.TrimSpace(*req.Description) == "" {
-		fail(c, http.StatusBadRequest, ErrValidation, "description required")
-		return
-	}
-	if err := s.kb.PatchLiveAsset(ctx(c), orgID, currentUser(c).ID, c.Param("ref"), kbstore.AssetPatch{
-		Description: req.Description, OwnerKind: req.OwnerKind, OwnerRef: req.OwnerRef,
-	}); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbLiveChanged(c, orgID)
-}
-
-func (s *Server) handleKBDeleteAsset(c *gin.Context) {
-	orgID, proceed := s.kbWrite(c)
-	if !proceed {
-		return
-	}
-	if err := s.kb.DeleteLiveAsset(ctx(c), orgID, currentUser(c).ID, c.Param("ref")); err != nil {
 		s.kbFail(c, err)
 		return
 	}

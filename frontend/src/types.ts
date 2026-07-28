@@ -116,7 +116,6 @@ export interface TopicRow {
   slug: string
   lang: string
   title: string
-  keywords: string
   body_md: string
   draft: boolean
   provenance?: string
