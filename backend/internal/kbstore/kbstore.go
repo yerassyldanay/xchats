@@ -259,7 +259,9 @@ func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *do
 		}
 	}
 	for _, p := range snap.Products {
-		if err := upsertProductRow(ctx, tx, orgID, p); err != nil {
+		// nil: the brain-seed snapshot has no stock signal — let the schema
+		// default (true) or, on update, the existing value stand.
+		if err := upsertProductRow(ctx, tx, orgID, p, nil); err != nil {
 			return err
 		}
 	}
@@ -269,7 +271,8 @@ func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *do
 		}
 	}
 	for _, p := range snap.Policies {
-		if err := upsertPolicyRow(ctx, tx, orgID, p); err != nil {
+		// "": the brain-seed snapshot has no outside_zones_note concept.
+		if err := upsertPolicyRow(ctx, tx, orgID, p, ""); err != nil {
 			return err
 		}
 	}
@@ -303,14 +306,20 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t domain.T
 	return nil
 }
 
-func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Product) error {
+// upsertProductRow writes one ai_products row. inStock is nil-able so a caller
+// with no opinion on stock (legacy brain-seed/Approve materialize paths)
+// leaves it at its column default on insert and PRESERVES the existing value
+// on update, instead of silently resetting it — only the /kb/* live-write path
+// (PutLiveProduct) ever passes a non-nil value.
+func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Product, inStock *bool) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_products
-		(organization_id, ref, lang, name, price, description, category, availability)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		(organization_id, ref, lang, name, price, description, category, availability, in_stock)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,true))
 		ON CONFLICT (organization_id, ref, lang) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
-			category=EXCLUDED.category, availability=EXCLUDED.availability, updated_at=now()`,
-		orgID, p.Ref, orDefault(p.Lang, "ru"), p.Name, p.Price, p.Description, p.Category, p.Availability); err != nil {
+			category=EXCLUDED.category, availability=EXCLUDED.availability,
+			in_stock=COALESCE($9, xchats.ai_products.in_stock), updated_at=now()`,
+		orgID, p.Ref, orDefault(p.Lang, "ru"), p.Name, p.Price, p.Description, p.Category, p.Availability, inStock); err != nil {
 		return fmt.Errorf("insert product %s/%s: %w", p.Ref, p.Lang, err)
 	}
 	return nil
@@ -334,22 +343,60 @@ func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c domain.
 }
 
 // upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow
-// (singleton slug 'main', keyed by lang).
-func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Policy) error {
+// (singleton slug 'main', keyed by lang). outsideZonesNote is a plain string,
+// not a pointer: every caller already resolves it read-modify-write style
+// (currentLivePolicy/currentPolicy) before reaching here, so there is no
+// "leave unchanged" case left to express at this layer.
+func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Policy, outsideZonesNote string) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_policies
 		(organization_id, slug, lang, delivery_cost, delivery_time, free_delivery_from, min_order,
-		 prepayment, installment, return_period, warranty)
-		VALUES ($1,'main',$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		 prepayment, installment, return_period, warranty, outside_zones_note)
+		VALUES ($1,'main',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (organization_id, lang) DO UPDATE SET
 			delivery_cost=EXCLUDED.delivery_cost, delivery_time=EXCLUDED.delivery_time,
 			free_delivery_from=EXCLUDED.free_delivery_from, min_order=EXCLUDED.min_order,
 			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
-			return_period=EXCLUDED.return_period, warranty=EXCLUDED.warranty, updated_at=now()`,
+			return_period=EXCLUDED.return_period, warranty=EXCLUDED.warranty,
+			outside_zones_note=EXCLUDED.outside_zones_note, updated_at=now()`,
 		orgID, orDefault(p.Lang, "*"), p.DeliveryCost, p.DeliveryTime, p.FreeDeliveryFrom, p.MinOrder,
-		p.Prepayment, p.Installment, p.ReturnPeriod, p.Warranty); err != nil {
+		p.Prepayment, p.Installment, p.ReturnPeriod, p.Warranty, outsideZonesNote); err != nil {
 		return fmt.Errorf("insert policy %s: %w", p.Lang, err)
 	}
 	return nil
+}
+
+// upsertConfigRow upserts the org's ai_assistants row. It fixes the silent
+// no-op PatchLiveConfig had (live.go): a bare UPDATE hits zero rows when the
+// org has no ai_assistants row yet (e.g. a fresh org with no seed/kb-load run
+// yet), so a first-ever PATCH /kb/config appeared to succeed but changed
+// nothing. ON CONFLICT DO UPDATE with COALESCE mirrors PatchLiveConfig's own
+// "only non-nil fields change" contract on the insert path too, using each
+// column's own schema default when the row is being created for the first time.
+func upsertConfigRow(ctx context.Context, tx execer, orgID uuid.UUID, p ConfigPatch) error {
+	_, err := tx.Exec(ctx, `INSERT INTO xchats.ai_assistants
+		(organization_id, persona, mission, guardrails, language_policy, reply_max_words)
+		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), COALESCE($5,''), COALESCE($6,120))
+		ON CONFLICT (organization_id) DO UPDATE SET
+			persona = COALESCE($2, xchats.ai_assistants.persona),
+			mission = COALESCE($3, xchats.ai_assistants.mission),
+			guardrails = COALESCE($4, xchats.ai_assistants.guardrails),
+			language_policy = COALESCE($5, xchats.ai_assistants.language_policy),
+			reply_max_words = COALESCE($6, xchats.ai_assistants.reply_max_words),
+			updated_at = now()`,
+		orgID, p.Persona, p.Mission, p.Guardrails, p.LanguagePolicy, p.ReplyMaxWords)
+	return err
+}
+
+// auditRow appends one xchats.ai_audit_log row — action is 'edit'|'delete' for
+// the /kb/* live-write path (no CHECK constraint pins the vocabulary; 'approve'
+// remains the Playground Approve's own action). actor is nil-able: a zero
+// uuid.UUID (no authenticated user in context) is stored as SQL NULL rather
+// than a literal zero UUID, since actor_user_id's FK would otherwise reject it.
+func auditRow(ctx context.Context, tx execer, orgID uuid.UUID, actor uuid.UUID, action, note string) error {
+	_, err := tx.Exec(ctx, `INSERT INTO xchats.ai_audit_log (organization_id, action, actor_user_id, note)
+		VALUES ($1,$2,$3,$4)`,
+		orgID, action, uuid.NullUUID{UUID: actor, Valid: actor != uuid.Nil}, note)
+	return err
 }
 
 // ---------------------------------------------------------------------------

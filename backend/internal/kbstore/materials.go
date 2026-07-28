@@ -159,6 +159,23 @@ func (s *Store) MarkMaterialsBuilt(ctx context.Context, ids []uuid.UUID) error {
 	return err
 }
 
+// ListLiveMaterials returns the org's kbd_materials rows for the read-only
+// "Файлы (материалы)" tab on /knowledge-base (GET /kb/materials) — the exact
+// same rows Draft() already exposes to Playground, just reachable from the
+// live-only editor surface too (which has no DraftView of its own to
+// piggyback on). Upload/attach/edit stays Playground-only until the media
+// milestone (see plan "Future Work").
+func (s *Store) ListLiveMaterials(ctx context.Context, orgID uuid.UUID) ([]Material, error) {
+	materials, err := s.listMaterials(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	if materials == nil {
+		materials = []Material{}
+	}
+	return materials, nil
+}
+
 func (s *Store) listMaterials(ctx context.Context, orgID uuid.UUID) ([]Material, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction::text, created_at, updated_at
 		FROM xchats.kbd_materials WHERE organization_id = $1 ORDER BY created_at`, orgID)

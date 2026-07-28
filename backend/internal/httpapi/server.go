@@ -30,6 +30,14 @@ import (
 // (header only — never a query param, so it never lands in access logs).
 const webhookTokenHeader = "X-Webhook-Token"
 
+// kbInvalidator is the narrow slice of CachedKBRepo (internal/responsestore)
+// the /kb/* live-write epilogue needs — declared inline (rather than importing
+// responsestore here) so httpapi keeps its existing single dependency edge on
+// backend/response, per this PR's "no new package edge" constraint.
+type kbInvalidator interface {
+	Invalidate(orgID uuid.UUID)
+}
+
 // Server wires the HTTP edges to their dependencies.
 type Server struct {
 	cfg      *config.Config
@@ -45,6 +53,16 @@ type Server struct {
 	orgID    uuid.UUID
 	log      *slog.Logger
 
+	// kbRepo/kbInvalidator are the response engine's own KB reader — a
+	// CachedKBRepo in production (main.go), the SAME cached build GET
+	// /kb/prompt renders from and every /kb/* write invalidates. Distinct from
+	// kb (*kbstore.Store) above: kb is the older, kbstore-domain live editor +
+	// dormant Playground path; kbRepo reads the aiprompt.KB shape the response
+	// engine and the Промпт tab both need (in_stock, delivery zones,
+	// outside_zones_note — see internal/responsestore/kb.go's doc comment).
+	kbRepo        response.KnowledgeBaseRepository
+	kbInvalidator kbInvalidator
+
 	// pendingNames carries the display_name from "add account" (POST) to the QR
 	// connect step (where the wa_accounts row is finally written): pre-connect
 	// there is no row to hold it. Keyed by instance name; best-effort (process-
@@ -55,18 +73,20 @@ type Server struct {
 
 // Deps is the constructor input.
 type Deps struct {
-	Cfg      *config.Config
-	Store    *store.Store
-	Queue    queue.Queue
-	Hub      *realtime.Hub
-	Blob     blob.Store
-	Drafter  assistant.Drafter
-	Response *response.Service
-	Evo      evolution.Client
-	KB       *kbstore.Store
-	Builder  *playground.Builder
-	OrgID    uuid.UUID
-	Log      *slog.Logger
+	Cfg           *config.Config
+	Store         *store.Store
+	Queue         queue.Queue
+	Hub           *realtime.Hub
+	Blob          blob.Store
+	Drafter       assistant.Drafter
+	Response      *response.Service
+	Evo           evolution.Client
+	KB            *kbstore.Store
+	Builder       *playground.Builder
+	KBRepo        response.KnowledgeBaseRepository
+	KBInvalidator kbInvalidator
+	OrgID         uuid.UUID
+	Log           *slog.Logger
 }
 
 // New builds a Server.
@@ -74,6 +94,7 @@ func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
 		blob: d.Blob, drafter: d.Drafter, response: d.Response, evo: d.Evo, kb: d.KB, builder: d.Builder,
+		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
 		pendingNames: map[string]string{},
 	}
@@ -170,6 +191,7 @@ func (s *Server) Router() *gin.Engine {
 	// can never mix with Playground's pending work (see plan "Playground
 	// redesign").
 	auth.GET("/kb", s.handleKBGet)
+	auth.GET("/kb/prompt", s.handleKBPrompt)
 	kb := auth.Group("/kb")
 	kb.POST("/topics", s.handleKBUpsertTopic)
 	kb.DELETE("/topics/:slug", s.handleKBDeleteTopic)
@@ -182,6 +204,9 @@ func (s *Server) Router() *gin.Engine {
 	kb.DELETE("/products/:ref", s.handleKBDeleteProduct)
 	kb.PATCH("/contacts", s.handleKBPatchContacts)
 	kb.PATCH("/policies", s.handleKBPatchPolicies)
+	kb.POST("/zones", s.handleKBUpsertZone)
+	kb.DELETE("/zones/:ref", s.handleKBDeleteZone)
+	kb.GET("/materials", s.handleKBListMaterials)
 	kb.PATCH("/config", s.handleKBPatchConfig)
 	return r
 }

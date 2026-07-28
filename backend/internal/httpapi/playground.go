@@ -289,6 +289,10 @@ type productReq struct {
 	Description  string `json:"description"`
 	Category     string `json:"category"`
 	Availability string `json:"availability"`
+	// InStock is read only by handleKBUpsertProduct (the live-write path) —
+	// handlePlaygroundUpsertProduct never reads it, so a draft write's
+	// behavior is unaffected by this field's presence.
+	InStock *bool `json:"in_stock"`
 }
 
 func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
@@ -371,6 +375,24 @@ type policiesReq struct {
 	Installment      *string `json:"installment"`
 	ReturnPeriod     *string `json:"return_period"`
 	Warranty         *string `json:"warranty"`
+	// OutsideZonesNote is read only by handleKBPatchPolicies (the live-write
+	// path) — handlePlaygroundPatchPolicies never reads it.
+	OutsideZonesNote *string `json:"outside_zones_note"`
+}
+
+// zoneReq is the /kb/zones upsert payload — no Playground/draft counterpart
+// exists yet (draft milestone later), so this is read only by
+// handleKBUpsertZone.
+type zoneReq struct {
+	Ref               string `json:"ref"`
+	Name              string `json:"name"`
+	ZoneLevel         string `json:"zone_level"`
+	ParentRef         string `json:"parent_ref"`
+	DeliveryAvailable bool   `json:"delivery_available"`
+	DeliveryCost      string `json:"delivery_cost"`
+	DeliveryInDays    string `json:"delivery_in_days"`
+	Notes             string `json:"notes"`
+	Status            string `json:"status"`
 }
 
 func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {

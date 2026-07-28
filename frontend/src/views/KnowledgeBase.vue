@@ -1,20 +1,24 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
-  CircleAlert, Download, ExternalLink, FileText, Film, Folder, Globe, Hash,
-  Images, Layers, Link2, ListTree, LoaderCircle, MoreHorizontal, Package, PanelsTopLeft, Pencil,
-  Phone, Play, Plus, Receipt, Save, Search, ShieldCheck, Target, Trash2, Truck, Upload, UserRound, WandSparkles,
+  CircleAlert, Download, ExternalLink, FileText, Files, Film, Folder, Globe, Hash,
+  Images, Layers, Link2, ListTree, LoaderCircle, MapPinned, MoreHorizontal, Package, PanelsTopLeft, Pencil,
+  Phone, Play, Plus, Receipt, Search, ShieldCheck, Sparkles, Target, Trash2, Truck, Upload, UserRound, WandSparkles,
 } from 'lucide-vue-next'
 import { usePlayground } from '../stores/playground'
 import { shortTime } from '../lib/format'
 import { api } from '../api/client'
-import type { AssetRow, ContactRow, PolicyRow, ProductRow, TariffRow, TopicRow } from '../types'
+import type { AssetRow, ContactRow, KbMaterial, PolicyRow, ProductRow, TariffRow, TopicRow } from '../types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import ZoneCards from '@/components/kb/ZoneCards.vue'
+import PromptTab from '@/components/kb/PromptTab.vue'
+import SaveButtons from '@/components/kb/SaveButtons.vue'
 
 // This page shows and edits the LIVE knowledge base ONLY — every save here
 // (POST/PATCH/DELETE /kb/*) is immediately final, no draft step. It never
@@ -205,11 +209,33 @@ const pricingTypes = [
   { key: 'tiered', label: 'Пороговая' },
 ]
 
+// --- Файлы (материалы): read-only list of kbd_materials (GET /kb/materials).
+// No draft/attach/edit here — that is the media milestone (see plan "Future
+// Work"); this tab only shows what already exists.
+const materials = ref<KbMaterial[]>([])
+const materialsLoading = ref(false)
+async function loadMaterials() {
+  materialsLoading.value = true
+  try {
+    const res = await api.get<{ materials: KbMaterial[] }>('/kb/materials')
+    materials.value = res.materials
+  } finally {
+    materialsLoading.value = false
+  }
+}
+function materialPreviewURL(m: KbMaterial): string | null {
+  return m.media_kind === 'image' && m.blob_id ? api.mediaURL('/xchats/api/v1/media/' + m.blob_id) : null
+}
+
 // --- Товары: per-row edit buffers + a new-row form ---
-type ProductBuf = { name: string; price: string; description: string; category: string; availability: string }
+// availability (free-form seller prose) stays editable but is no longer what
+// the AI reads for stock — the AI reads in_stock (a plain boolean toggle).
+type ProductBuf = { name: string; price: string; description: string; category: string; availability: string; in_stock: boolean }
 const prodBuf = reactive<Record<string, ProductBuf>>({})
 function vmProduct(p: ProductRow): ProductBuf {
-  if (!prodBuf[p.id]) prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category, availability: p.availability }
+  if (!prodBuf[p.id]) {
+    prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category, availability: p.availability, in_stock: p.in_stock }
+  }
   return prodBuf[p.id]
 }
 
@@ -240,9 +266,14 @@ async function saveContacts() {
 // --- Политики: the 'main' commerce-policy singleton — a structural clone of
 // Контакты above.
 const policyRow = computed<PolicyRow | undefined>(() => pg.live?.policies?.[0])
+// delivery_cost/delivery_time are the flat KB-wide delivery answer — the AI
+// reads them ONLY when no delivery zone exists; the moment a zone exists,
+// per-zone cost/days take over and these two fields are disabled here (see
+// the Политики template block below), matching plan/ui/ui_knowledge_base_003.png.
+const zonesExist = computed(() => (pg.live?.zones.length ?? 0) > 0)
 const policyForm = reactive({
   delivery_cost: '', delivery_time: '', free_delivery_from: '', min_order: '',
-  prepayment: '', installment: '', return_period: '', warranty: '',
+  prepayment: '', installment: '', return_period: '', warranty: '', outside_zones_note: '',
 })
 function seedPolicyForm() {
   const p = policyRow.value
@@ -254,6 +285,7 @@ function seedPolicyForm() {
   policyForm.installment = p?.installment ?? ''
   policyForm.return_period = p?.return_period ?? ''
   policyForm.warranty = p?.warranty ?? ''
+  policyForm.outside_zones_note = p?.outside_zones_note ?? ''
 }
 async function savePolicies() {
   await pg.livePatchPolicies({ ...policyForm })
@@ -262,6 +294,8 @@ async function savePolicies() {
 watch(() => tab.value, (t) => {
   if (t === 'contacts') seedContactForm()
   if (t === 'policies') seedPolicyForm()
+  if (t === 'materials' && !materials.value.length) loadMaterials()
+  if (t === 'prompt' && !pg.promptView) pg.loadPrompt()
 })
 
 // --- new-row forms ---
@@ -278,11 +312,12 @@ async function addTariff() {
   newTariff.ref = newTariff.name = newTariff.price = newTariff.summary = ''
   newTariff.pricing_type = 'fixed'
 }
-const newProduct = reactive({ ref: '', name: '', price: '', category: '', description: '', availability: '' })
+const newProduct = reactive({ ref: '', name: '', price: '', category: '', description: '', availability: '', in_stock: true })
 async function addProduct() {
   if (!newProduct.ref.trim()) return
   await pg.liveUpsertProduct({ ...newProduct })
   newProduct.ref = newProduct.name = newProduct.price = newProduct.category = newProduct.description = newProduct.availability = ''
+  newProduct.in_stock = true
 }
 
 // --- Последние изменения ---
@@ -305,9 +340,12 @@ const tabs = [
   { key: 'topics', label: 'Темы', icon: ListTree },
   { key: 'products', label: 'Товары', icon: Package },
   { key: 'tariffs', label: 'Тарифы', icon: Receipt },
+  { key: 'zones', label: 'Зоны доставки', icon: MapPinned },
   { key: 'assets', label: 'Медиа-ресурсы', icon: Images },
   { key: 'contacts', label: 'Контакты', icon: Phone },
   { key: 'policies', label: 'Политики', icon: Truck },
+  { key: 'prompt', label: 'Промпт', icon: Sparkles },
+  { key: 'materials', label: 'Файлы (материалы)', icon: Files },
 ]
 </script>
 
@@ -333,7 +371,7 @@ const tabs = [
 
       <div v-else class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
         <!-- stat cards -->
-        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-4">
           <div class="rounded-xl border border-border bg-card p-5">
             <div class="text-3xl font-bold leading-none">{{ pg.live?.topics.length ?? 0 }}</div>
             <div class="text-sm text-muted-foreground mt-2">Темы</div>
@@ -345,6 +383,10 @@ const tabs = [
           <div class="rounded-xl border border-border bg-card p-5">
             <div class="text-3xl font-bold leading-none">{{ pg.live?.tariffs.length ?? 0 }}</div>
             <div class="text-sm text-muted-foreground mt-2">Тарифы</div>
+          </div>
+          <div class="rounded-xl border border-border bg-card p-5">
+            <div class="text-3xl font-bold leading-none">{{ pg.live?.zones.length ?? 0 }}</div>
+            <div class="text-sm text-muted-foreground mt-2">Зоны доставки</div>
           </div>
           <div class="rounded-xl border border-border bg-card p-5">
             <div class="text-3xl font-bold leading-none">{{ pg.live?.assets.length ?? 0 }}</div>
@@ -447,7 +489,7 @@ const tabs = [
             <Input v-model="vmTopic(t).title" placeholder="Название" class="h-9" />
             <Input v-model="vmTopic(t).keywords" placeholder="Ключевые слова" class="h-9" />
             <Textarea v-model="vmTopic(t).body_md" rows="3" placeholder="Текст темы…" class="min-h-0 text-[14px]" />
-            <Button size="sm" :disabled="pg.liveBusy" @click="pg.liveUpsertTopic({ slug: t.slug, ...vmTopic(t) })"><Save class="w-4 h-4" /> Сохранить</Button>
+            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertTopic({ slug: t.slug, ...vmTopic(t) })" />
           </div>
         </div>
 
@@ -559,7 +601,9 @@ const tabs = [
             <Input v-model="newProduct.name" placeholder="Название" class="h-9" />
             <Input v-model="newProduct.price" placeholder="Цена (напр. 129 900 ₸)" class="h-9 font-mono" />
             <Input v-model="newProduct.category" placeholder="Категория" class="h-9" />
-            <Input v-model="newProduct.availability" placeholder="Наличие (напр. В наличии)" class="h-9" />
+            <label class="flex items-center gap-2 px-1 h-9">
+              <Switch v-model="newProduct.in_stock" /> <span class="text-sm text-muted-foreground">В наличии</span>
+            </label>
             <Button size="sm" :disabled="pg.liveBusy || !newProduct.ref.trim()" @click="addProduct"><Plus class="w-4 h-4" /> Добавить товар</Button>
           </div>
           <p v-if="!pg.live?.products.length" class="text-sm text-muted-foreground py-6 text-center">Товаров пока нет.</p>
@@ -572,10 +616,12 @@ const tabs = [
               <Input v-model="vmProduct(p).name" placeholder="Название" class="h-9" />
               <Input v-model="vmProduct(p).price" placeholder="Цена" class="h-9 font-mono" />
               <Input v-model="vmProduct(p).category" placeholder="Категория" class="h-9" />
-              <Input v-model="vmProduct(p).availability" placeholder="Наличие" class="h-9" />
+              <label class="flex items-center gap-2 px-1 h-9">
+                <Switch v-model="vmProduct(p).in_stock" /> <span class="text-sm text-muted-foreground">В наличии</span>
+              </label>
             </div>
             <Textarea v-model="vmProduct(p).description" rows="2" placeholder="Описание товара…" class="min-h-0 text-[14px]" />
-            <Button size="sm" :disabled="pg.liveBusy" @click="pg.liveUpsertProduct({ ref: p.ref, lang: p.lang, ...vmProduct(p) })"><Save class="w-4 h-4" /> Сохранить</Button>
+            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertProduct({ ref: p.ref, lang: p.lang, ...vmProduct(p) })" />
           </div>
         </div>
 
@@ -610,8 +656,13 @@ const tabs = [
               <Textarea v-model="vmTariff(t).advantages" rows="2" placeholder="Преимущества (по строке)…" class="min-h-0 text-[14px]" />
               <Textarea v-model="vmTariff(t).disadvantages" rows="2" placeholder="Ограничения (по строке)…" class="min-h-0 text-[14px]" />
             </div>
-            <Button size="sm" :disabled="pg.liveBusy" @click="pg.liveUpsertTariff({ ref: t.ref, lang: t.lang, ...vmTariff(t) })"><Save class="w-4 h-4" /> Сохранить</Button>
+            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertTariff({ ref: t.ref, lang: t.lang, ...vmTariff(t) })" />
           </div>
+        </div>
+
+        <!-- Зоны доставки -->
+        <div v-show="tab === 'zones'">
+          <ZoneCards :zones="pg.live?.zones ?? []" />
         </div>
 
         <!-- Контакты (the 'support' singleton) -->
@@ -657,7 +708,7 @@ const tabs = [
                 <Input v-model="contactForm.callback_time" placeholder="в течение часа" class="mt-1 h-9" />
               </label>
             </div>
-            <Button size="sm" :disabled="pg.liveBusy" @click="saveContacts"><Save class="w-4 h-4" /> Сохранить</Button>
+            <SaveButtons :busy="pg.liveBusy" @save="saveContacts" />
           </div>
         </div>
 
@@ -668,12 +719,18 @@ const tabs = [
             <p class="text-xs text-muted-foreground">Ассистент подставляет эти данные в ответы как факты — доставку, минимальный заказ и условия оплаты не пишут вручную в текстах тем.</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label class="block">
-                <span class="text-xs font-medium text-muted-foreground">Стоимость доставки</span>
-                <Input v-model="policyForm.delivery_cost" placeholder="1 500 ₸ по Алматы" class="mt-1 h-9 font-mono" />
+                <span class="text-xs font-medium text-muted-foreground">
+                  Стоимость доставки
+                  <span v-if="zonesExist" class="text-muted-foreground/70">— управляется в «Зонах доставки»</span>
+                </span>
+                <Input v-model="policyForm.delivery_cost" placeholder="1 500 ₸ по Алматы" class="mt-1 h-9 font-mono" :disabled="zonesExist" :title="zonesExist ? 'Управляется в «Зонах доставки»' : undefined" />
               </label>
               <label class="block">
-                <span class="text-xs font-medium text-muted-foreground">Срок доставки</span>
-                <Input v-model="policyForm.delivery_time" placeholder="1–3 дня" class="mt-1 h-9 font-mono" />
+                <span class="text-xs font-medium text-muted-foreground">
+                  Срок доставки
+                  <span v-if="zonesExist" class="text-muted-foreground/70">— управляется в «Зонах доставки»</span>
+                </span>
+                <Input v-model="policyForm.delivery_time" placeholder="1–3 дня" class="mt-1 h-9 font-mono" :disabled="zonesExist" :title="zonesExist ? 'Управляется в «Зонах доставки»' : undefined" />
               </label>
               <label class="block">
                 <span class="text-xs font-medium text-muted-foreground">Бесплатная доставка от</span>
@@ -699,8 +756,42 @@ const tabs = [
                 <span class="text-xs font-medium text-muted-foreground">Гарантия</span>
                 <Input v-model="policyForm.warranty" placeholder="12 месяцев на технику" class="mt-1 h-9" />
               </label>
+              <label class="block sm:col-span-2">
+                <span class="text-xs font-medium text-muted-foreground">Вне зон доставки</span>
+                <Textarea v-model="policyForm.outside_zones_note" rows="2" placeholder="В города и страны за пределами списка зон доставки мы не доставляем." class="mt-1 min-h-0 text-[14px]" />
+                <p class="text-xs text-muted-foreground mt-1">Ответ ассистента, когда направление клиента не входит ни в одну зону доставки.</p>
+              </label>
             </div>
-            <Button size="sm" :disabled="pg.liveBusy" @click="savePolicies"><Save class="w-4 h-4" /> Сохранить</Button>
+            <SaveButtons :busy="pg.liveBusy" @save="savePolicies" />
+          </div>
+        </div>
+
+        <!-- Промпт -->
+        <div v-show="tab === 'prompt'">
+          <PromptTab />
+        </div>
+
+        <!-- Файлы (материалы) — read-only -->
+        <div v-show="tab === 'materials'" class="space-y-3">
+          <p class="text-xs text-muted-foreground">
+            Материалы, загруженные через «Конструктор» (/playground) — только просмотр. Загрузка и привязка файлов появятся с обновлением медиа.
+          </p>
+          <div v-if="materialsLoading && !materials.length" class="text-sm text-muted-foreground py-6 text-center">Загрузка…</div>
+          <p v-else-if="!materials.length" class="text-sm text-muted-foreground py-6 text-center">Материалов пока нет.</p>
+          <div v-for="m in materials" :key="m.id" class="rounded-lg border border-border bg-card p-4 flex items-center gap-4">
+            <div class="w-14 h-14 rounded-lg border border-border overflow-hidden shrink-0 grid place-items-center bg-muted">
+              <img v-if="materialPreviewURL(m)" :src="materialPreviewURL(m) ?? ''" class="w-full h-full object-cover" />
+              <FileText v-else class="w-6 h-6 text-muted-foreground" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <Badge variant="secondary" class="text-[11px]">{{ m.source_type }}</Badge>
+                <Badge v-if="m.media_kind" variant="secondary" class="text-[11px]">{{ m.media_kind }}</Badge>
+                <span class="text-xs text-muted-foreground">{{ m.status }}</span>
+              </div>
+              <p class="text-sm truncate mt-1">{{ m.source_ref || '—' }}</p>
+            </div>
+            <span class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">{{ shortTime(m.created_at) }}</span>
           </div>
         </div>
 
@@ -744,9 +835,7 @@ const tabs = [
       </div>
       <DialogFooter>
         <Button variant="ghost" size="sm" @click="editing = null">Отмена</Button>
-        <Button size="sm" :disabled="pg.liveBusy" @click="saveEdit">
-          <LoaderCircle v-if="pg.liveBusy" class="w-4 h-4 animate-spin" /><Save v-else class="w-4 h-4" /> Сохранить
-        </Button>
+        <SaveButtons :busy="pg.liveBusy" @save="saveEdit" />
       </DialogFooter>
     </DialogContent>
   </Dialog>
@@ -814,9 +903,7 @@ const tabs = [
       </div>
       <DialogFooter>
         <Button variant="ghost" size="sm" @click="editingAsset = null">Отмена</Button>
-        <Button size="sm" :disabled="pg.liveBusy || !aEdit.description.trim()" @click="saveAssetEdit">
-          <LoaderCircle v-if="pg.liveBusy" class="w-4 h-4 animate-spin" /><Save v-else class="w-4 h-4" /> Сохранить
-        </Button>
+        <SaveButtons :busy="pg.liveBusy" :disabled="!aEdit.description.trim()" @save="saveAssetEdit" />
       </DialogFooter>
     </DialogContent>
   </Dialog>

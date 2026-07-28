@@ -1,0 +1,169 @@
+{
+  "assistant": {
+    "persona": "Ты — ассистент по подготовке ответов клиентам интернет-магазина «Demo Shop» в WhatsApp. Ты готовишь ОДИН черновик ответа, который проверит и отправит человек — ты никогда не отправляешь сообщения сам.",
+    "mission": "Помогай клиентам выбрать товар, узнать актуальную цену и наличие, и оформить заказ.",
+    "guardrails": "Никогда не выдумывай цены, наличие, сроки или контактные данные — используй только подтверждённые значения. Никогда не обещай медиафайл, которого нет в каталоге.",
+    "language_policy": "Отвечай на языке сообщения клиента — по-русски или по-казахски.",
+    "reply_max_words": 120
+  },
+  "contacts": {
+    "lang": "*",
+    "whatsapp": "",
+    "email": "",
+    "address": "",
+    "legal": "",
+    "callback_time": "",
+    "working_hours": "Пн–Сб, 9:00–19:00",
+    "phone": "+7 700 000 00 00",
+    "website": "",
+    "instagram": "@demo.shop"
+  },
+  "policies": {
+    "lang": "*",
+    "delivery_cost": "",
+    "delivery_time": "",
+    "free_delivery_from": "20 000 ₸",
+    "min_order": "5 000 ₸",
+    "prepayment": "",
+    "installment": "",
+    "return_period": "",
+    "warranty": "",
+    "outside_zones_note": "В города и страны за пределами списка зон доставки мы не доставляем."
+  },
+  "topics": [
+    {
+      "slug": "demo_catalog",
+      "lang": "ru",
+      "title": "Каталог",
+      "keywords": "каталог, ассортимент, что есть, товары",
+      "body_md": "В каталоге бытовая техника для дома и кухни. Актуальные позиции, цены и наличие — только из блоков товаров, не перечисляй товары по памяти."
+    },
+    {
+      "slug": "demo_payment",
+      "lang": "ru",
+      "title": "Оплата",
+      "keywords": "оплата, kaspi, рассрочка, карта",
+      "body_md": "Принимаем оплату картой, через Kaspi и наличными при получении. Оформление — прямо в WhatsApp."
+    },
+    {
+      "slug": "demo_warranty",
+      "lang": "ru",
+      "title": "Гарантия",
+      "keywords": "гарантия, поломка, ремонт, сервис",
+      "body_md": "На технику действует гарантия производителя — она покрывает заводской брак и оформляется чеком или подтверждением заказа."
+    }
+  ],
+  "products": [
+    {
+      "ref": "demo_coffee-machine",
+      "lang": "ru",
+      "name": "Кофемашина DeLonghi",
+      "price": "129 900 ₸",
+      "description": "Автоматическая кофемашина для дома с капучинатором и жерновковой кофемолкой.",
+      "category": "",
+      "availability": "",
+      "in_stock": true
+    },
+    {
+      "ref": "demo_blender",
+      "lang": "ru",
+      "name": "Блендер Bosch",
+      "price": "11 200 ₸",
+      "description": "Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.",
+      "category": "",
+      "availability": "",
+      "in_stock": true
+    },
+    {
+      "ref": "demo_kettle",
+      "lang": "ru",
+      "name": "Чайник Bosch",
+      "price": "40 200 ₸",
+      "description": "Электрический чайник с быстрым закипанием и автоматическим отключением.",
+      "category": "",
+      "availability": "",
+      "in_stock": false
+    },
+    {
+      "ref": "demo_toaster",
+      "lang": "ru",
+      "name": "Тостер Tefal",
+      "price": "81 600 ₸",
+      "description": "Компактный тостер с регулировкой степени поджаривания и функцией разморозки.",
+      "category": "",
+      "availability": "",
+      "in_stock": true
+    },
+    {
+      "ref": "demo_vacuum",
+      "lang": "ru",
+      "name": "Пылесос Samsung",
+      "price": "83 800 ₸",
+      "description": "Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.",
+      "category": "",
+      "availability": "",
+      "in_stock": false
+    }
+  ],
+  "tariffs": [
+    {
+      "ref": "demo_basic",
+      "lang": "ru",
+      "name": "Базовая доставка",
+      "price": "5 000 ₸",
+      "limit_text": "",
+      "fee": "",
+      "summary": "Доставка курьером в удобное время.",
+      "pricing_type": "fixed",
+      "advantages": "",
+      "disadvantages": ""
+    },
+    {
+      "ref": "demo_express",
+      "lang": "ru",
+      "name": "Экспресс-доставка",
+      "price": "8 000 ₸",
+      "limit_text": "",
+      "fee": "",
+      "summary": "Доставка в течение нескольких часов.",
+      "pricing_type": "fixed",
+      "advantages": "",
+      "disadvantages": ""
+    }
+  ],
+  "zones": [
+    {
+      "ref": "demo_kazakhstan",
+      "name": "Казахстан (остальные города)",
+      "zone_level": "country",
+      "parent_ref": "",
+      "delivery_available": true,
+      "delivery_cost": "10 000 ₸",
+      "delivery_in_days": "3–4",
+      "notes": "",
+      "status": "active"
+    },
+    {
+      "ref": "demo_almaty",
+      "name": "Алматы",
+      "zone_level": "city",
+      "parent_ref": "demo_kazakhstan",
+      "delivery_available": true,
+      "delivery_cost": "5 000 ₸",
+      "delivery_in_days": "1",
+      "notes": "",
+      "status": "active"
+    },
+    {
+      "ref": "demo_baikonur",
+      "name": "Байконур",
+      "zone_level": "city",
+      "parent_ref": "demo_kazakhstan",
+      "delivery_available": false,
+      "delivery_cost": "",
+      "delivery_in_days": "",
+      "notes": "Особый административный статус города — курьерская доставка туда не осуществляется.",
+      "status": "active"
+    }
+  ]
+}

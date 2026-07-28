@@ -163,10 +163,14 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	// fakeLLMClient's scripted response — no test here asserts on generated
 	// draft CONTENT beyond that fixed response, only that the async
 	// ai_draft/outbound_send tasks complete instead of panicking on a nil
-	// dependency.
+	// dependency. cachedKB mirrors main.go's production wiring exactly (a
+	// CachedKBRepo, not the raw KnowledgeBaseRepo) so every test built on this
+	// harness doubles as a regression check that caching the response engine's
+	// KB read leaves production behavior byte-identical.
+	cachedKB := responsestore.NewCachedKBRepo(&responsestore.KnowledgeBaseRepo{Pool: st.Pool()})
 	responseService := &response.Service{
 		Conversations: &responsestore.ConversationRepo{Store: st},
-		KnowledgeBase: &responsestore.KnowledgeBaseRepo{Pool: st.Pool()},
+		KnowledgeBase: cachedKB,
 		Drafts:        &responsestore.DraftRepo{Store: st},
 		Engine: &response.Engine{
 			LLMs: fakeLLMRegistry{client: llmClient}, DefaultModel: llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
@@ -183,7 +187,9 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Response: responseService, Evo: fake, KB: kb, Builder: builder, OrgID: org.ID, Log: log,
+		Drafter: drafter, Response: responseService, Evo: fake, KB: kb, Builder: builder,
+		KBRepo: cachedKB, KBInvalidator: cachedKB,
+		OrgID: org.ID, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
