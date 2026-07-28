@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { connectRealtime } from '../lib/sse'
 import { log } from '../lib/logfmt'
-import type { DraftView, KbMaterial } from '../types'
+import type { DraftView, KbMaterial, PromptView } from '../types'
 
 // usePlayground backs the two KB pages — Конструктор (/playground) and Редактор
 // (/knowledge-base) — over the same underlying KB. WRITES stay DELIBERATELY
@@ -34,6 +34,13 @@ export const usePlayground = defineStore('playground', {
     liveLoading: false,
     liveBusy: false,
     liveError: '' as string,
+
+    // --- prompt (Промпт tab) — the rendered prompt GET /kb/prompt returns,
+    // auto-refreshed alongside `live` on every kb.row.changed SSE event once
+    // the tab has been opened at least once (see startRealtime below). -------
+    promptView: null as PromptView | null,
+    promptLoading: false,
+    promptLoadError: '' as string,
 
     // --- shared realtime plumbing --------------------------------------------
     disconnect: null as null | (() => void),
@@ -123,7 +130,7 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft topics ---------------------------------------------------------
-    upsertTopic(input: { slug: string; lang?: string; title?: string; keywords?: string; body_md?: string }) {
+    upsertTopic(input: { slug: string; lang?: string; title?: string; body_md?: string }) {
       return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/topics', input, this.ifMatch())))
     },
     deleteTopic(slug: string) {
@@ -301,7 +308,7 @@ export const usePlayground = defineStore('playground', {
         this.liveBusy = false
       }
     },
-    liveUpsertTopic(input: { slug: string; lang?: string; title?: string; keywords?: string; body_md?: string }) {
+    liveUpsertTopic(input: { slug: string; lang?: string; title?: string; body_md?: string }) {
       return this.writeLive(async () => {
         this.live = await api.post<DraftView>('/kb/topics', input)
       })
@@ -309,27 +316,6 @@ export const usePlayground = defineStore('playground', {
     liveDeleteTopic(slug: string) {
       return this.writeLive(async () => {
         this.live = await api.del<DraftView>('/kb/topics/' + encodeURIComponent(slug))
-      })
-    },
-    liveUploadAsset(file: File, meta: { owner_kind?: string; owner_ref?: string; description: string; lang?: string }) {
-      return this.writeLive(async () => {
-        const form = new FormData()
-        form.append('file', file)
-        if (meta.owner_kind) form.append('owner_kind', meta.owner_kind)
-        if (meta.owner_ref) form.append('owner_ref', meta.owner_ref)
-        form.append('description', meta.description)
-        if (meta.lang) form.append('lang', meta.lang)
-        this.live = await api.postForm<DraftView>('/kb/assets', form)
-      })
-    },
-    livePatchAsset(ref: string, patch: { description?: string; owner_kind?: string; owner_ref?: string }) {
-      return this.writeLive(async () => {
-        this.live = await api.patch<DraftView>('/kb/assets/' + encodeURIComponent(ref), patch)
-      })
-    },
-    liveDeleteAsset(ref: string) {
-      return this.writeLive(async () => {
-        this.live = await api.del<DraftView>('/kb/assets/' + encodeURIComponent(ref))
       })
     },
     liveUpsertTariff(input: {
@@ -353,7 +339,16 @@ export const usePlayground = defineStore('playground', {
         this.live = await api.del<DraftView>('/kb/tariffs/' + encodeURIComponent(ref))
       })
     },
-    liveUpsertProduct(input: { ref: string; lang?: string; name?: string; price?: string; description?: string; category?: string; availability?: string }) {
+    liveUpsertProduct(input: {
+      ref: string
+      lang?: string
+      name?: string
+      price?: string
+      description?: string
+      category?: string
+      availability?: string
+      in_stock?: boolean
+    }) {
       return this.writeLive(async () => {
         this.live = await api.post<DraftView>('/kb/products', input)
       })
@@ -363,6 +358,32 @@ export const usePlayground = defineStore('playground', {
         this.live = await api.del<DraftView>('/kb/products/' + encodeURIComponent(ref))
       })
     },
+
+    // --- live delivery zones (Зоны доставки) — no draft/Playground
+    // counterpart yet (draft milestone later); the org's whole zone/policy
+    // world is re-validated server-side on every write (a 422 surfaces as
+    // liveError, same as every other live write's GateError).
+    liveUpsertZone(input: {
+      ref: string
+      name?: string
+      zone_level: string
+      parent_ref?: string
+      delivery_available?: boolean
+      delivery_cost?: string
+      delivery_in_days?: string
+      notes?: string
+      status?: string
+    }) {
+      return this.writeLive(async () => {
+        this.live = await api.post<DraftView>('/kb/zones', input)
+      })
+    },
+    liveDeleteZone(ref: string) {
+      return this.writeLive(async () => {
+        this.live = await api.del<DraftView>('/kb/zones/' + encodeURIComponent(ref))
+      })
+    },
+
     livePatchContacts(patch: {
       lang?: string; whatsapp?: string; email?: string; address?: string; legal?: string; callback_time?: string
       working_hours?: string; phone?: string; website?: string; instagram?: string
@@ -373,7 +394,7 @@ export const usePlayground = defineStore('playground', {
     },
     livePatchPolicies(patch: {
       lang?: string; delivery_cost?: string; delivery_time?: string; free_delivery_from?: string; min_order?: string
-      prepayment?: string; installment?: string; return_period?: string; warranty?: string
+      prepayment?: string; installment?: string; return_period?: string; warranty?: string; outside_zones_note?: string
     }) {
       return this.writeLive(async () => {
         this.live = await api.patch<DraftView>('/kb/policies', patch)
@@ -383,6 +404,26 @@ export const usePlayground = defineStore('playground', {
       return this.writeLive(async () => {
         this.live = await api.patch<DraftView>('/kb/config', patch)
       })
+    },
+
+    // --- prompt (Промпт tab) — GET /kb/prompt renders the exact prompt the
+    // response engine would send right now, from the SAME cached KB build the
+    // production reply path reads (backend/internal/responsestore.CachedKBRepo).
+    async loadPrompt() {
+      this.promptLoading = true
+      this.promptLoadError = ''
+      try {
+        this.promptView = await api.get<PromptView>('/kb/prompt')
+      } catch (e) {
+        // A transport-level failure (401/503/network) is distinct from the
+        // server's own reported status:"error" (a KB-not-configured 200,
+        // handled entirely by PromptTab from promptView.status) — without
+        // this catch the request's rejection was unhandled and the tab was
+        // stuck on "Загрузка промпта…" forever with no visible explanation.
+        this.promptLoadError = e instanceof ApiError ? e.message : 'Не удалось загрузить промпт.'
+      } finally {
+        this.promptLoading = false
+      }
     },
 
     // --- realtime -----------------------------------------------------------
@@ -401,6 +442,10 @@ export const usePlayground = defineStore('playground', {
           }
           if (this.draft) this.load().then(() => this.maybeBuild())
           if (this.live) this.loadLive()
+          // promptView starts null and is only ever set by loadPrompt() (the
+          // Промпт tab's own onMounted/"Обновить"), so this is a no-op until
+          // that tab has been opened at least once — same pattern as `live`.
+          if (this.promptView) this.loadPrompt()
         }, 250)
       }
       this.disconnect = connectRealtime({

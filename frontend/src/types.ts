@@ -116,7 +116,6 @@ export interface TopicRow {
   slug: string
   lang: string
   title: string
-  keywords: string
   body_md: string
   draft: boolean
   provenance?: string
@@ -165,6 +164,7 @@ export interface ProductRow {
   description: string
   category: string
   availability: string
+  in_stock: boolean
   draft: boolean
   provenance?: string
   updated_at: string
@@ -200,8 +200,26 @@ export interface PolicyRow {
   installment: string
   return_period: string
   warranty: string
+  outside_zones_note: string
   draft: boolean
   provenance?: string
+  updated_at: string
+}
+// DeliveryZoneRow — a live ai_delivery_zones row («Зоны доставки»). Live-only:
+// there is no pending/draft variant yet (draft milestone later), so `draft`
+// is always false — kept for shape-parity with every other /kb/* row.
+export interface DeliveryZoneRow {
+  id: string // = ref
+  ref: string
+  name: string
+  zone_level: string // city | region | country
+  parent_ref: string
+  delivery_available: boolean
+  delivery_cost: string
+  delivery_in_days: string
+  notes: string
+  status: string // active | inactive
+  draft: boolean
   updated_at: string
 }
 export interface KbMaterial {
@@ -236,8 +254,33 @@ export interface DraftView {
   products: ProductRow[]
   contacts: ContactRow[]
   policies: PolicyRow[]
+  zones: DeliveryZoneRow[]
   materials: KbMaterial[]
   requests: KbRequest[]
+}
+
+// PromptView mirrors GET /kb/prompt (backend/internal/httpapi/kb_prompt.go) —
+// the rendered prompt the response engine would send right now, plus enough
+// metadata to power the Промпт tab's «О промпте» sidebar without a second
+// round trip.
+export interface PromptSectionCounts {
+  topics: number
+  products: number
+  tariffs: number
+  zones: number
+  contacts: number
+  policies: number
+}
+export interface PromptView {
+  prompt_ref: string
+  rendered_text: string
+  frame_text: string
+  char_count: number
+  approx_tokens: number
+  built_at: string
+  status: 'ok' | 'error'
+  error?: string
+  section_counts: PromptSectionCounts
 }
 
 // --- Eval comparison UI — mirrors evals/harness/viewmodel.go + export.go +

@@ -38,7 +38,6 @@ type DraftTopic struct {
 	Slug       string `json:"slug"`
 	Lang       string `json:"lang"`
 	Title      string `json:"title"`
-	Keywords   string `json:"keywords"`
 	BodyMD     string `json:"body_md"`
 	Provenance string `json:"provenance,omitempty"`
 }
@@ -95,7 +94,11 @@ type DraftContact struct {
 }
 
 // DraftPolicy is a pending ai_policies entry — a structural clone of
-// DraftContact (singleton slug 'main', keyed by lang).
+// DraftContact (singleton slug 'main', keyed by lang). OutsideZonesNote is
+// also used as the live-write path's read-modify-write scratch value
+// (live.go · currentLivePolicy) even though nothing on the Playground/draft
+// side sets it yet (draft milestone later) — so it always round-trips as ""
+// for a Playground-authored entry, same as before this field existed.
 type DraftPolicy struct {
 	Lang             string `json:"lang"`
 	DeliveryCost     string `json:"delivery_cost"`
@@ -106,6 +109,7 @@ type DraftPolicy struct {
 	Installment      string `json:"installment"`
 	ReturnPeriod     string `json:"return_period"`
 	Warranty         string `json:"warranty"`
+	OutsideZonesNote string `json:"outside_zones_note"`
 	Provenance       string `json:"provenance,omitempty"`
 }
 
@@ -388,7 +392,6 @@ type TopicRow struct {
 	Slug       string    `json:"slug"`
 	Lang       string    `json:"lang"`
 	Title      string    `json:"title"`
-	Keywords   string    `json:"keywords"`
 	BodyMD     string    `json:"body_md"`
 	Draft      bool      `json:"draft"`
 	Provenance string    `json:"provenance,omitempty"`
@@ -436,6 +439,7 @@ type ProductRow struct {
 	Description  string    `json:"description"`
 	Category     string    `json:"category"`
 	Availability string    `json:"availability"`
+	InStock      bool      `json:"in_stock"`
 	Draft        bool      `json:"draft"`
 	Provenance   string    `json:"provenance,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -473,6 +477,7 @@ type PolicyRow struct {
 	Installment      string    `json:"installment"`
 	ReturnPeriod     string    `json:"return_period"`
 	Warranty         string    `json:"warranty"`
+	OutsideZonesNote string    `json:"outside_zones_note"`
 	Draft            bool      `json:"draft"`
 	Provenance       string    `json:"provenance,omitempty"`
 	UpdatedAt        time.Time `json:"updated_at"`
@@ -481,15 +486,20 @@ type PolicyRow struct {
 // DraftView is the whole working KB for the editor + builder: live rows merged
 // with pending blob entries.
 type DraftView struct {
-	Config    DraftConfig  `json:"config"`
-	Topics    []TopicRow   `json:"topics"`
-	Assets    []AssetRow   `json:"assets"`
-	Tariffs   []TariffRow  `json:"tariffs"`
-	Products  []ProductRow `json:"products"`
-	Contacts  []ContactRow `json:"contacts"`
-	Policies  []PolicyRow  `json:"policies"`
-	Materials []Material   `json:"materials"`
-	Requests  []Request    `json:"requests"`
+	Config   DraftConfig  `json:"config"`
+	Topics   []TopicRow   `json:"topics"`
+	Assets   []AssetRow   `json:"assets"`
+	Tariffs  []TariffRow  `json:"tariffs"`
+	Products []ProductRow `json:"products"`
+	Contacts []ContactRow `json:"contacts"`
+	Policies []PolicyRow  `json:"policies"`
+	// Zones is populated straight from the live ai_delivery_zones table, with
+	// no blob-overlay step: the draft blob has no zones concept yet (draft
+	// milestone later), so Draft() and LiveView() show identical zone data —
+	// every row's Draft field stays false.
+	Zones     []ZoneRow  `json:"zones"`
+	Materials []Material `json:"materials"`
+	Requests  []Request  `json:"requests"`
 }
 
 // Draft assembles the merged working view: live rows, overlaid by pending blob
@@ -532,6 +542,12 @@ func (s *Store) LiveView(ctx context.Context, orgID uuid.UUID) (*DraftView, erro
 	}
 	v.Materials = []Material{}
 	v.Requests = []Request{}
+	// ai_assets is legacy (plan/database-schema.md: "not part of the target");
+	// the live editor's «Медиа-ресурсы» tab was removed in favor of the
+	// kbd_materials-backed «Файлы (материалы)» tab, so this view no longer
+	// surfaces it. Playground's draft/approve path still reads/writes
+	// ai_assets via mergedView/Draft — untouched here.
+	v.Assets = []AssetRow{}
 	return v, nil
 }
 
@@ -571,14 +587,14 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// topics
 	topicIdx := map[string]int{}
-	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, keywords, body_md, updated_at
+	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, body_md, updated_at
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for trows.Next() {
 		var t TopicRow
-		if err := trows.Scan(&t.Slug, &t.Lang, &t.Title, &t.Keywords, &t.BodyMD, &t.UpdatedAt); err != nil {
+		if err := trows.Scan(&t.Slug, &t.Lang, &t.Title, &t.BodyMD, &t.UpdatedAt); err != nil {
 			trows.Close()
 			return nil, err
 		}
@@ -591,7 +607,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		return nil, err
 	}
 	for _, bt := range blob.Topics {
-		row := TopicRow{ID: bt.Slug, Slug: bt.Slug, Lang: bt.Lang, Title: bt.Title, Keywords: bt.Keywords,
+		row := TopicRow{ID: bt.Slug, Slug: bt.Slug, Lang: bt.Lang, Title: bt.Title,
 			BodyMD: bt.BodyMD, Draft: true, Provenance: bt.Provenance, UpdatedAt: updatedAt}
 		if i, ok := topicIdx[bt.Slug]; ok {
 			v.Topics[i] = row
@@ -678,14 +694,14 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// products
 	productIdx := map[string]int{}
-	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category, availability, updated_at
+	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category, availability, in_stock, updated_at
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for prows.Next() {
 		var p ProductRow
-		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category, &p.Availability, &p.UpdatedAt); err != nil {
+		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category, &p.Availability, &p.InStock, &p.UpdatedAt); err != nil {
 			prows.Close()
 			return nil, err
 		}
@@ -700,9 +716,14 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	for _, bp := range blob.Products {
 		row := ProductRow{ID: bp.Ref, Ref: bp.Ref, Lang: bp.Lang, Name: bp.Name, Price: bp.Price,
 			Description: bp.Description, Category: bp.Category, Availability: bp.Availability,
-			Draft: true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
+			InStock: true, Draft: true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
 		k := refLangKey(bp.Ref, bp.Lang)
 		if i, ok := productIdx[k]; ok {
+			// DraftProduct carries no in_stock field yet (draft milestone later) —
+			// keep showing the live row's current value through a pending edit
+			// instead of silently zeroing it out (LiveView never reaches this
+			// branch: it always overlays an empty blob).
+			row.InStock = v.Products[i].InStock
 			v.Products[i] = row
 		} else {
 			v.Products = append(v.Products, row)
@@ -764,7 +785,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	// keyed by lang, slug domain.PolicySlug).
 	policyIdx := map[string]int{}
 	polrows, err := s.pool.Query(ctx, `SELECT slug, lang, delivery_cost, delivery_time, free_delivery_from, min_order,
-		prepayment, installment, return_period, warranty, updated_at
+		prepayment, installment, return_period, warranty, outside_zones_note, updated_at
 		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -772,7 +793,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	for polrows.Next() {
 		var p PolicyRow
 		if err := polrows.Scan(&p.Slug, &p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.FreeDeliveryFrom, &p.MinOrder,
-			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty, &p.UpdatedAt); err != nil {
+			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty, &p.OutsideZonesNote, &p.UpdatedAt); err != nil {
 			polrows.Close()
 			return nil, err
 		}
@@ -788,7 +809,8 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		row := PolicyRow{ID: bp.Lang, Slug: domain.PolicySlug, Lang: bp.Lang, DeliveryCost: bp.DeliveryCost,
 			DeliveryTime: bp.DeliveryTime, FreeDeliveryFrom: bp.FreeDeliveryFrom, MinOrder: bp.MinOrder,
 			Prepayment: bp.Prepayment, Installment: bp.Installment, ReturnPeriod: bp.ReturnPeriod, Warranty: bp.Warranty,
-			Draft: true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
+			OutsideZonesNote: bp.OutsideZonesNote,
+			Draft:            true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
 		if i, ok := policyIdx[bp.Lang]; ok {
 			v.Policies[i] = row
 		} else {
@@ -804,9 +826,17 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	}
 	v.Policies = kpol
 
+	// zones — live-only, no blob overlay (see DraftView.Zones's doc comment).
+	if v.Zones, err = loadZoneRows(ctx, s.pool, orgID); err != nil {
+		return nil, err
+	}
+
 	// Guarantee non-nil slices: every collection must serialize as a JSON array
 	// ([]), never null. A nil slice (empty table + empty blob) marshals to null,
 	// and the client reads d.<coll>.length directly — a null would crash the page.
+	if v.Zones == nil {
+		v.Zones = []ZoneRow{}
+	}
 	if v.Topics == nil {
 		v.Topics = []TopicRow{}
 	}
@@ -886,8 +916,8 @@ func (s *Store) PatchConfig(ctx context.Context, orgID uuid.UUID, p ConfigPatch)
 
 // TopicInput is an upsert payload for a draft topic.
 type TopicInput struct {
-	Slug, Lang, Title, Keywords, BodyMD string
-	Provenance                          string // "" → '{}'
+	Slug, Lang, Title, BodyMD string
+	Provenance                string // "" → '{}'
 }
 
 // UpsertTopic stages a topic create/update in the draft blob, by slug.
@@ -895,7 +925,7 @@ func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, in TopicInput)
 	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
 		b.upsertTopic(DraftTopic{
 			Slug: in.Slug, Lang: orDefault(in.Lang, "ru"), Title: in.Title,
-			Keywords: in.Keywords, BodyMD: in.BodyMD, Provenance: orDefault(in.Provenance, "{}"),
+			BodyMD: in.BodyMD, Provenance: orDefault(in.Provenance, "{}"),
 		})
 		return nil
 	})
@@ -1016,8 +1046,13 @@ func (s *Store) DeleteTariff(ctx context.Context, orgID uuid.UUID, ref string) e
 }
 
 // ProductInput is an upsert payload for a draft product (one language row).
+// InStock is nil-able and read only by the live-write path (PutLiveProduct →
+// upsertProductRow): nil leaves the column at its schema default/current
+// value, so UpsertProduct (the Playground draft path, which never sets this
+// field) is completely unaffected.
 type ProductInput struct {
 	Ref, Lang, Name, Price, Description, Category, Availability string
+	InStock                                                     *bool
 	Provenance                                                  string
 }
 
@@ -1100,7 +1135,9 @@ func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, p ContactPat
 }
 
 // PolicyPatch carries optional commerce-policy edits for one language row (nil
-// = leave) — a structural clone of ContactPatch.
+// = leave) — a structural clone of ContactPatch. OutsideZonesNote is applied
+// by the live-write path (PatchLivePolicies); PatchPolicies (the Playground
+// draft path) never sets it, so it stays a no-op there.
 type PolicyPatch struct {
 	Lang             string // which row; "" → '*'
 	DeliveryCost     *string
@@ -1111,6 +1148,7 @@ type PolicyPatch struct {
 	Installment      *string
 	ReturnPeriod     *string
 	Warranty         *string
+	OutsideZonesNote *string
 	Provenance       string
 }
 
@@ -1437,12 +1475,12 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 
 	for _, t := range set.topics {
 		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-			(organization_id, slug, lang, title, keywords, body_md)
-			VALUES ($1,$2,$3,$4,$5,$6)
+			(organization_id, slug, lang, title, body_md)
+			VALUES ($1,$2,$3,$4,$5)
 			ON CONFLICT (organization_id, slug) DO UPDATE SET
-				lang=EXCLUDED.lang, title=EXCLUDED.title, keywords=EXCLUDED.keywords,
+				lang=EXCLUDED.lang, title=EXCLUDED.title,
 				body_md=EXCLUDED.body_md, updated_at=now()`,
-			orgID, t.Slug, orDefault(t.Lang, "ru"), t.Title, t.Keywords, t.BodyMD); err != nil {
+			orgID, t.Slug, orDefault(t.Lang, "ru"), t.Title, t.BodyMD); err != nil {
 			return err
 		}
 	}
@@ -1467,9 +1505,12 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 		}
 	}
 	for _, p := range set.products {
+		// nil: the draft blob carries no in_stock field yet (draft milestone
+		// later) — preserve the live row's current value / schema default,
+		// byte-identical to Approve's pre-existing behavior.
 		if err := upsertProductRow(ctx, tx, orgID, domain.Product{
 			Ref: p.Ref, Lang: p.Lang, Name: p.Name, Price: p.Price, Description: p.Description, Category: p.Category,
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 	}
@@ -1486,7 +1527,7 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 			Lang: p.Lang, DeliveryCost: p.DeliveryCost, DeliveryTime: p.DeliveryTime, FreeDeliveryFrom: p.FreeDeliveryFrom,
 			MinOrder: p.MinOrder, Prepayment: p.Prepayment, Installment: p.Installment,
 			ReturnPeriod: p.ReturnPeriod, Warranty: p.Warranty,
-		}); err != nil {
+		}, p.OutsideZonesNote); err != nil {
 			return err
 		}
 	}
@@ -1653,7 +1694,7 @@ func mergeForGate(live *domain.Snapshot, topics []DraftTopic, assets []DraftAsse
 		tIdx[t.Slug] = len(out.Topics) - 1
 	}
 	for _, t := range topics {
-		nt := domain.Topic{Slug: t.Slug, Language: t.Lang, Title: t.Title, Keywords: t.Keywords, BodyMD: t.BodyMD}
+		nt := domain.Topic{Slug: t.Slug, Language: t.Lang, Title: t.Title, BodyMD: t.BodyMD}
 		if i, ok := tIdx[t.Slug]; ok {
 			out.Topics[i] = nt
 		} else {

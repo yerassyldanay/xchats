@@ -76,7 +76,6 @@ type AIAssistant struct {
 type AITopic struct {
 	Slug                string   `yaml:"slug"`
 	Title               string   `yaml:"title"`
-	Keywords            []string `yaml:"keywords"`
 	BodyMD              string   `yaml:"body_md"`
 	FeaturedImage       string   `yaml:"featured_image"`
 	IllustrationImages  []string `yaml:"illustration_images"`

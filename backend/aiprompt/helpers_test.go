@@ -51,7 +51,7 @@ func baseKB() *KB {
 		},
 		Topics: []Topic{
 			{
-				Slug: "delivery", Title: "Доставка", Keywords: []string{"доставка", "сроки"},
+				Slug: "delivery", Title: "Доставка",
 				BodyMD: "Доставляем по всему Алматы в течение нескольких дней.",
 			},
 		},

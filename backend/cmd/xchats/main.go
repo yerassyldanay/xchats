@@ -67,6 +67,8 @@ func main() {
 		runWebhookSet(cfg, log)
 	case "simulate-message":
 		runSimulateMessage(flag.Args()[1:])
+	case "kb-load":
+		runKBLoad(cfg, log, flag.Args()[1:])
 	default:
 		log.Error("unknown command", "cmd", cmd)
 		os.Exit(2)
@@ -122,9 +124,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Temperature:  cfg.LLMDraftTemperature,
 		RetryEnabled: cfg.LLMDraftRetry,
 	}
+	// cachedKB is the ONE shared, cached build of the prompt-facing KB: the
+	// response engine's hot path (every customer reply) and GET /kb/prompt
+	// (the /knowledge-base "Промпт" tab) both read through it, so the tab is
+	// never a second, possibly-divergent rendering of the same data.
+	cachedKB := responsestore.NewCachedKBRepo(&responsestore.KnowledgeBaseRepo{Pool: st.Pool()})
 	responseService := &response.Service{
 		Conversations: &responsestore.ConversationRepo{Store: st},
-		KnowledgeBase: &responsestore.KnowledgeBaseRepo{Pool: st.Pool()},
+		KnowledgeBase: cachedKB,
 		Drafts:        &responsestore.DraftRepo{Store: st},
 		Engine:        engine,
 	}
@@ -147,7 +154,9 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, Evo: evo, KB: kb, OrgID: orgID, Log: log,
+		Response: responseService, Evo: evo, KB: kb,
+		KBRepo: cachedKB, KBInvalidator: cachedKB,
+		OrgID: orgID, Log: log,
 	})
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
 

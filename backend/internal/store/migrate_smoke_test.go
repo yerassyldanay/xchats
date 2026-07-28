@@ -2,7 +2,10 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/yerassyldanay/xchats/backend/migrations"
 )
@@ -133,4 +136,83 @@ func TestMigrations_0008IsIdempotentAndNeverOverwrites(t *testing.T) {
 	if customCount != 1 {
 		t.Fatalf("re-apply: operator-added product was touched, count = %d, want 1", customCount)
 	}
+}
+
+// TestMigrations_0001Through0009ApplyCleanOnFreshDatabase proves the full
+// current migration sequence — through 0009, this PR's own addition — still
+// applies cleanly on a database with no organization yet (newTestStoreForSimulator
+// already ran it) and is recorded as applied, so `serve`'s normal migrate step
+// (main.go's runServe, before the identity seed creates the org) never trips
+// on 0009.
+func TestMigrations_0001Through0009ApplyCleanOnFreshDatabase(t *testing.T) {
+	st, closeFn := newTestStoreForSimulator(t) // resets schema + runs 0001-0009, no org seeded
+	defer closeFn()
+	ctx := context.Background()
+
+	var applied bool
+	if err := st.Pool().QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM public.xchats_schema_migrations WHERE version = '0009_remove_kb_response_demo_data')`,
+	).Scan(&applied); err != nil {
+		t.Fatalf("check migration recorded: %v", err)
+	}
+	if !applied {
+		t.Fatal("0009_remove_kb_response_demo_data did not run as part of the normal migrate step")
+	}
+}
+
+// TestMigrations_0009IsIdempotentAndRemovesDemoData is 0009's removal-side
+// mirror of TestMigrations_0008IsIdempotentAndNeverOverwrites: after 0008
+// inserts its demo rows, applying 0009's body deletes exactly those fixed
+// UUIDs, and a second application is a harmless no-op (nothing left to delete).
+func TestMigrations_0009IsIdempotentAndRemovesDemoData(t *testing.T) {
+	st, closeFn := newTestStoreForSimulator(t)
+	defer closeFn()
+	ctx := context.Background()
+
+	org, err := st.SeedOrganization(ctx, "demo-removal-org")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+
+	body8, err := migrations.FS.ReadFile("0008_kb_response_demo_data.up.sql")
+	if err != nil {
+		t.Fatalf("read 0008 up.sql: %v", err)
+	}
+	if _, err := st.Pool().Exec(ctx, string(body8)); err != nil {
+		t.Fatalf("apply 0008 body: %v", err)
+	}
+
+	const demoAssistantID = "00000000-0000-4000-9000-000000000d01"
+	var persona string
+	if err := st.Pool().QueryRow(ctx, `SELECT persona FROM xchats.ai_assistants WHERE id = $1`, demoAssistantID).Scan(&persona); err != nil {
+		t.Fatalf("demo assistant row missing after 0008: %v", err)
+	}
+
+	body9, err := migrations.FS.ReadFile("0009_remove_kb_response_demo_data.up.sql")
+	if err != nil {
+		t.Fatalf("read 0009 up.sql: %v", err)
+	}
+	applyOnce9 := func() {
+		t.Helper()
+		if _, err := st.Pool().Exec(ctx, string(body9)); err != nil {
+			t.Fatalf("apply 0009 body: %v", err)
+		}
+	}
+	applyOnce9()
+
+	err = st.Pool().QueryRow(ctx, `SELECT persona FROM xchats.ai_assistants WHERE id = $1`, demoAssistantID).Scan(&persona)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("demo assistant row should be gone after 0009, err=%v persona=%q", err, persona)
+	}
+	var productCount, zoneCount, topicCount, tariffCount int
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND ref LIKE 'demo_%'`, org.ID).Scan(&productCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_delivery_zones WHERE organization_id = $1`, org.ID).Scan(&zoneCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_topics WHERE organization_id = $1 AND slug LIKE 'demo_%'`, org.ID).Scan(&topicCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_tariffs WHERE organization_id = $1 AND ref LIKE 'demo_%'`, org.ID).Scan(&tariffCount)
+	if productCount != 0 || zoneCount != 0 || topicCount != 0 || tariffCount != 0 {
+		t.Fatalf("demo rows remain after 0009: products=%d zones=%d topics=%d tariffs=%d",
+			productCount, zoneCount, topicCount, tariffCount)
+	}
+
+	applyOnce9() // re-apply: must be a harmless no-op — nothing left to delete
 }

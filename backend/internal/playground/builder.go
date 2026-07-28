@@ -41,8 +41,8 @@ type Plan struct {
 
 // TopicProposal upserts a draft topic (proposed for review).
 type TopicProposal struct {
-	Slug, Lang, Title, Keywords, BodyMD string
-	MaterialID                          string
+	Slug, Lang, Title, BodyMD string
+	MaterialID                string
 }
 
 // AssetProposal attaches a material's bytes as a draft asset (proposed).
@@ -119,7 +119,7 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 			}
 		}
 		if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-			Slug: t.Slug, Lang: t.Lang, Title: t.Title, Keywords: t.Keywords, BodyMD: body,
+			Slug: t.Slug, Lang: t.Lang, Title: t.Title, BodyMD: body,
 			Provenance: prov,
 		}); err != nil {
 			return res, err
@@ -298,8 +298,7 @@ func (RuleSynthesizer) Plan(_ context.Context, in SynthInput) (Plan, error) {
 	}
 	if strings.TrimSpace(body) != "" {
 		plan.Topics = append(plan.Topics, TopicProposal{
-			Slug: slug, Lang: "ru", Title: firstLine(in.Instruction),
-			Keywords: keywordsOf(in.Instruction), BodyMD: body,
+			Slug: slug, Lang: "ru", Title: firstLine(in.Instruction), BodyMD: body,
 		})
 	}
 
@@ -347,16 +346,3 @@ func firstLine(s string) string {
 	return s
 }
 
-func keywordsOf(s string) string {
-	fields := strings.Fields(strings.ToLower(s))
-	var kw []string
-	for _, f := range fields {
-		if len([]rune(f)) >= 4 {
-			kw = append(kw, f)
-		}
-		if len(kw) >= 8 {
-			break
-		}
-	}
-	return strings.Join(kw, ", ")
-}

@@ -96,26 +96,23 @@ BEGIN
 
     -- ai_topics — 2-3 demo topics, pure prose (no fact tokens, no digits).
     IF NOT EXISTS (SELECT 1 FROM xchats.ai_topics WHERE organization_id = v_org_id AND slug = 'demo_catalog') THEN
-        INSERT INTO xchats.ai_topics (id, organization_id, slug, lang, title, keywords, body_md)
+        INSERT INTO xchats.ai_topics (id, organization_id, slug, lang, title, body_md)
         VALUES (
             '00000000-0000-4000-9000-000000000d11', v_org_id, 'demo_catalog', 'ru', 'Каталог',
-            'каталог, ассортимент, что есть, товары',
             'В каталоге бытовая техника для дома и кухни. Актуальные позиции, цены и наличие — только из блоков товаров, не перечисляй товары по памяти.'
         );
     END IF;
     IF NOT EXISTS (SELECT 1 FROM xchats.ai_topics WHERE organization_id = v_org_id AND slug = 'demo_payment') THEN
-        INSERT INTO xchats.ai_topics (id, organization_id, slug, lang, title, keywords, body_md)
+        INSERT INTO xchats.ai_topics (id, organization_id, slug, lang, title, body_md)
         VALUES (
             '00000000-0000-4000-9000-000000000d12', v_org_id, 'demo_payment', 'ru', 'Оплата',
-            'оплата, kaspi, рассрочка, карта',
             'Принимаем оплату картой, через Kaspi и наличными при получении. Оформление — прямо в WhatsApp.'
         );
     END IF;
     IF NOT EXISTS (SELECT 1 FROM xchats.ai_topics WHERE organization_id = v_org_id AND slug = 'demo_warranty') THEN
-        INSERT INTO xchats.ai_topics (id, organization_id, slug, lang, title, keywords, body_md)
+        INSERT INTO xchats.ai_topics (id, organization_id, slug, lang, title, body_md)
         VALUES (
             '00000000-0000-4000-9000-000000000d13', v_org_id, 'demo_warranty', 'ru', 'Гарантия',
-            'гарантия, поломка, ремонт, сервис',
             'На технику действует гарантия производителя — она покрывает заводской брак и оформляется чеком или подтверждением заказа.'
         );
     END IF;
