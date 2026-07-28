@@ -1,7 +1,7 @@
 // Package worker consumes the in-memory queue: it ingests raw Evolution events
 // (normalize → idempotent upsert → SSE), downloads media, performs outbound
-// sends, and runs the AI-draft stub. Workers expose no HTTP — the queue is their
-// only interface.
+// sends, and runs the multichannel response engine. Workers expose no HTTP —
+// the queue is their only interface.
 package worker
 
 import (
@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/yerassyldanay/xchats/backend/internal/assistant"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
@@ -22,12 +21,19 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/messaging"
+	"github.com/yerassyldanay/xchats/backend/response"
 )
 
-// OutboundTask sends one part (text OR one media file) to WhatsApp.
+// OutboundTask sends one part (text OR one media file). Channel selects the
+// messaging.ChannelSender the text branch routes through (Worker.Senders); the
+// media branch stays on the direct Evolution client — media send/administration
+// is out of scope for the multichannel response service (text-only this
+// milestone) and today only ever runs for WhatsApp's manual-send UI.
 type OutboundTask struct {
 	MessageID uuid.UUID
 	AccountID uuid.UUID
+	Channel   messaging.Channel
 	Instance  string // the sending account's Evolution instance (multi-account)
 	PhoneJID  string
 	Text      string
@@ -43,7 +49,7 @@ type MediaDownloadTask struct {
 	BlobID             string
 }
 
-// AIDraftTask runs the stub Drafter for a chat's latest inbound.
+// AIDraftTask runs the response engine for a chat's latest inbound message.
 type AIDraftTask struct {
 	ChatID uuid.UUID
 }
@@ -56,15 +62,16 @@ type ExtractMaterialTask struct {
 
 // Worker holds the dependencies for all queue handlers.
 type Worker struct {
-	Store   *store.Store
-	Queue   queue.Queue
-	Evo     evolution.Client
-	Blob    blob.Store
-	Hub     *realtime.Hub
-	Drafter assistant.Drafter
-	KB      *kbstore.Store        // playground KB (nil in transport-only setups)
-	Extract *playground.Extractor // Stage-1 ingest adapters (nil when KB is nil)
-	Log     *slog.Logger
+	Store    *store.Store
+	Queue    queue.Queue
+	Evo      evolution.Client
+	Blob     blob.Store
+	Hub      *realtime.Hub
+	Response *response.Service         // the multichannel response engine's entry point
+	Senders  *messaging.SenderRegistry // channel -> ChannelSender, for outbound text sends
+	KB       *kbstore.Store            // playground KB (nil in transport-only setups)
+	Extract  *playground.Extractor     // Stage-1 ingest adapters (nil when KB is nil)
+	Log      *slog.Logger
 }
 
 // Handle is the queue dispatcher.
@@ -290,31 +297,28 @@ func maskPhone(p string) string {
 
 func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
 	number := config.PhoneFromJID(t.PhoneJID) // phone, never the @lid
-	kind := "text"
 	if t.MediaID != "" {
-		kind = "media"
+		return w.sendMedia(ctx, t, number)
 	}
-	// instance="" means the worker falls back to the client's default instance —
-	// surface it so a missing account→instance mapping is visible in logs.
-	w.Log.Info("outbound send start", "message_id", t.MessageID, "account_id", t.AccountID,
-		"instance", t.Instance, "phone", maskPhone(number), "kind", kind)
+	return w.sendText(ctx, t, number)
+}
 
+// sendMedia sends one media file directly through the Evolution client — the
+// manual-send UI's media path. Unrelated to the response-service milestone
+// (text-only this milestone) and today only ever runs for WhatsApp.
+func (w *Worker) sendMedia(ctx context.Context, t OutboundTask, number string) error {
+	w.Log.Info("outbound send start", "message_id", t.MessageID, "account_id", t.AccountID,
+		"instance", t.Instance, "phone", maskPhone(number), "kind", "media")
+
+	data, meta, err := w.Blob.Get(t.MediaID)
 	var res evolution.SendResult
-	var err error
-	if t.MediaID == "" {
-		res, err = w.Evo.SendText(ctx, t.Instance, number, t.Text)
-	} else {
-		data, meta, gerr := w.Blob.Get(t.MediaID)
-		if gerr != nil {
-			err = gerr
-		} else {
-			b64 := base64.StdEncoding.EncodeToString(data)
-			res, err = w.Evo.SendMedia(ctx, t.Instance, number, meta.MediaType, meta.Mimetype, b64, meta.FileName, t.Caption)
-		}
+	if err == nil {
+		b64 := base64.StdEncoding.EncodeToString(data)
+		res, err = w.Evo.SendMedia(ctx, t.Instance, number, meta.MediaType, meta.Mimetype, b64, meta.FileName, t.Caption)
 	}
 	if err != nil {
 		w.Log.Error("outbound send failed", "message_id", t.MessageID, "instance", t.Instance,
-			"phone", maskPhone(number), "kind", kind, "err", err)
+			"phone", maskPhone(number), "kind", "media", "err", err)
 		_ = w.Store.SetDeliveryState(ctx, t.MessageID, "failed")
 		w.emitMessage(ctx, "message.updated", t.MessageID)
 		return err
@@ -337,42 +341,82 @@ func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
 	return nil
 }
 
-// --- AI draft stub --------------------------------------------------------
+// sendText routes through the channel-neutral sender registry (Worker.Senders)
+// so a WhatsApp and a simulator conversation share the exact same outbound
+// path — only the registered messaging.ChannelSender differs, and JIDs/
+// instance names never leave this function (they're passed only as the
+// opaque To/Route routing hints a channel-neutral OutboundMessage carries).
+func (w *Worker) sendText(ctx context.Context, t OutboundTask, number string) error {
+	w.Log.Info("outbound send start", "message_id", t.MessageID, "account_id", t.AccountID,
+		"channel", t.Channel, "instance", t.Instance, "phone", maskPhone(number), "kind", "text")
 
+	sender, err := w.Senders.Sender(t.Channel)
+	if err != nil {
+		w.Log.Error("outbound send failed", "message_id", t.MessageID, "channel", t.Channel, "err", err)
+		_ = w.Store.SetDeliveryState(ctx, t.MessageID, "failed")
+		w.emitMessage(ctx, "message.updated", t.MessageID)
+		return err
+	}
+	res, err := sender.Send(ctx, messaging.OutboundMessage{
+		MessageID: t.MessageID.String(), AccountID: t.AccountID.String(), Channel: t.Channel,
+		Text: t.Text, To: number, Route: t.Instance,
+	})
+	if err != nil {
+		w.Log.Error("outbound send failed", "message_id", t.MessageID, "channel", t.Channel,
+			"instance", t.Instance, "phone", maskPhone(number), "err", err)
+		_ = w.Store.SetDeliveryState(ctx, t.MessageID, "failed")
+		w.emitMessage(ctx, "message.updated", t.MessageID)
+		return err
+	}
+	if res.ExternalID == "" {
+		w.Log.Warn("outbound send returned no external id", "message_id", t.MessageID,
+			"channel", t.Channel, "instance", t.Instance, "phone", maskPhone(number))
+	} else {
+		w.Log.Info("outbound send ok", "message_id", t.MessageID, "channel", t.Channel,
+			"instance", t.Instance, "external_id", res.ExternalID)
+	}
+	// Stamp the provider id so a real WhatsApp fromMe=true echo collapses onto
+	// this row; the simulator's synthetic id has no echo to collapse, but
+	// stamping it keeps the column's meaning ("this send's provider id")
+	// consistent across channels.
+	if err := w.Store.StampEvolutionID(ctx, t.MessageID, res.ExternalID); err != nil {
+		return err
+	}
+	w.emitMessage(ctx, "message.updated", t.MessageID)
+	return nil
+}
+
+// --- AI response engine ----------------------------------------------------
+
+// handleAIDraft calls the multichannel response engine for a chat's latest
+// inbound message and persists exactly one suggested draft. It derives the
+// channel from the chat's own account (never hardcoded), so the exact same
+// path serves a WhatsApp conversation and a simulator conversation's async
+// ("wait_for_response=false") request — both ride this same queue task.
 func (w *Worker) handleAIDraft(ctx context.Context, t AIDraftTask) error {
 	chat, err := w.Store.ChatByID(ctx, t.ChatID)
 	if err != nil {
 		return err
 	}
-	trigger, err := w.Store.LatestInboundMessageID(ctx, t.ChatID)
+	account, err := w.Store.AccountByID(ctx, chat.AccountID)
 	if err != nil {
 		return err
 	}
-	opts, err := w.Drafter.Draft(ctx, assistant.Input{
-		ChatID:      t.ChatID.String(),
-		ContactName: chat.Contact.PushName,
-	})
+	persisted, err := w.Response.Respond(ctx, messaging.Channel(account.Channel), t.ChatID.String(), response.RespondOptions{})
 	if err != nil {
 		return err
 	}
-	dopts := make([]store.DraftOption, 0, len(opts))
-	for _, o := range opts {
-		so := store.DraftOption{
-			Ordinal: o.Ordinal, Text: o.Text, Confidence: o.Confidence,
-			Escalate: o.Escalate, EscalationReason: o.Reason,
+	for _, p := range persisted {
+		id, perr := uuid.Parse(p.ID)
+		if perr != nil {
+			w.Log.Error("reload persisted draft: bad id", "draft_id", p.ID, "err", perr)
+			continue
 		}
-		for i, md := range o.Media {
-			so.Assets = append(so.Assets, store.DraftAsset{
-				AssetRef: md.Ref, MediaKind: md.Kind, MediaURL: md.URL, Ordinal: i + 1,
-			})
+		d, derr := w.Store.DraftByID(ctx, id)
+		if derr != nil {
+			w.Log.Error("reload persisted draft", "draft_id", p.ID, "err", derr)
+			continue
 		}
-		dopts = append(dopts, so)
-	}
-	drafts, err := w.Store.WriteDraftSet(ctx, t.ChatID, trigger, dopts)
-	if err != nil {
-		return err
-	}
-	for _, d := range drafts {
 		w.Hub.Broadcast("ai_draft.created", dto.MapDraft(d))
 	}
 	return nil

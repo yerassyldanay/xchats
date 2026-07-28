@@ -1,0 +1,149 @@
+// Package response is the channel-neutral response engine and service: given
+// an organization's knowledge base and a conversation, it renders the
+// evaluated shop-kb-v4 prompt, calls the configured LLM, and returns a
+// grounded, validated draft reply. It depends only on backend/aiprompt,
+// backend/llm's contracts, backend/messaging's contracts, and its own
+// repository interfaces — never on a specific channel provider, PostgreSQL,
+// or any concrete LLM provider's wire format. Those live in backend/internal
+// and are wired together only at the composition root (cmd/xchats).
+package response
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
+	"github.com/yerassyldanay/xchats/backend/llm"
+	"github.com/yerassyldanay/xchats/backend/messaging"
+)
+
+// Engine renders the evaluated prompt, calls the configured LLM, and
+// validates/grounds its response. It has no database, channel-send, or
+// provider-HTTP dependency, and constructs no fake knowledge-base data —
+// GenerateRequest.KB must already be a real, loaded knowledge base.
+type Engine struct {
+	LLMs         llm.Registry
+	DefaultModel llm.ModelRef
+	MaxTokens    int
+	Temperature  float64
+	RetryEnabled bool
+}
+
+// GenerateRequest is one channel-neutral request to produce a draft reply.
+type GenerateRequest struct {
+	OrganizationID string
+	ConversationID string
+	Channel        messaging.Channel
+	History        []aiprompt.HistoryTurn
+	IncomingText   string
+	KB             *aiprompt.KB
+	// ModelOverride is settable only by the authenticated simulator handler,
+	// and only to a registered provider; nil in production (the WhatsApp path
+	// never sets it).
+	ModelOverride *llm.ModelRef
+}
+
+// GenerateResult is the engine's grounded, contract-validated output.
+// Escalate=true keeps the model's own eval-validated holding text in
+// FinalText — a canned holding string is only ever produced by the caller on
+// a hard Generate error, never substituted in here.
+type GenerateResult struct {
+	FinalText        string
+	ReplyLanguage    string
+	Escalate         bool
+	EscalationReason string
+	Confidence       float64
+}
+
+// Generate renders the prompt, calls the LLM (retrying once when the response
+// is a contract_shape or media_not_found candidate and RetryEnabled is set),
+// and returns the validated, fact-substituted result. Any failure — a KB that
+// fails to build a catalog, a leak-gate rejection, an LLM/provider error, or a
+// response that still fails contract validation after the retry — is returned
+// as a plain error; producing a holding/escalation draft from that error is
+// the caller's job (response.Service), not the engine's.
+func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateResult, error) {
+	if req.KB == nil {
+		return nil, fmt.Errorf("response: GenerateRequest.KB is required")
+	}
+
+	cat, err := aiprompt.BuildCatalog(req.KB)
+	if err != nil {
+		return nil, fmt.Errorf("response: build catalog: %w", err)
+	}
+	rendered, err := aiprompt.RenderPrompt(aiprompt.FrameShopKBV4RU(), req.KB.PromptInput(), cat)
+	if err != nil {
+		return nil, fmt.Errorf("response: render prompt: %w", err)
+	}
+	if err := aiprompt.ValidateNoMaterialLeak(rendered, req.KB.Materials); err != nil {
+		return nil, fmt.Errorf("response: %w", err)
+	}
+	if err := aiprompt.ValidateNoStorageLocatorLeak(rendered); err != nil {
+		return nil, fmt.Errorf("response: %w", err)
+	}
+	prompt := rendered + aiprompt.ConversationTail(aiprompt.RenderHistory(req.History), req.IncomingText)
+
+	modelRef := e.DefaultModel
+	if req.ModelOverride != nil {
+		modelRef = *req.ModelOverride
+	}
+	client, err := e.LLMs.Client(modelRef)
+	if err != nil {
+		return nil, fmt.Errorf("response: resolve model client: %w", err)
+	}
+
+	raw, err := e.complete(ctx, client, modelRef, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("response: llm call: %w", err)
+	}
+
+	if reason := aiprompt.ClassifyRetry(raw, req.KB, cat); reason != aiprompt.RetryReasonNone && e.RetryEnabled {
+		retryPrompt := prompt + aiprompt.RetryFeedback(raw, req.KB, cat)
+		retryRaw, err := e.complete(ctx, client, modelRef, retryPrompt)
+		if err != nil {
+			return nil, fmt.Errorf("response: llm retry call: %w", err)
+		}
+		raw = retryRaw
+	}
+
+	ext, ok := aiprompt.ExtractFinalOutput(raw)
+	if !ok {
+		return nil, fmt.Errorf("response: model output has no extractable final answer")
+	}
+	resp, issues := aiprompt.ValidateResponse(ext.Final, req.KB, cat)
+	if resp == nil {
+		return nil, fmt.Errorf("response: response fails the contract shape: %+v", issues)
+	}
+	if len(issues) > 0 {
+		return nil, fmt.Errorf("response: response fails validation: %+v", issues)
+	}
+
+	finalText, err := aiprompt.SubstituteFactsLang(resp.ReplyText, req.KB, cat, resp.ReplyLanguage)
+	if err != nil {
+		return nil, fmt.Errorf("response: substitute facts: %w", err)
+	}
+	if _, err := aiprompt.ResolveSend(resp.MediaFilesToSend, req.KB, cat); err != nil {
+		return nil, fmt.Errorf("response: resolve media: %w", err)
+	}
+
+	return &GenerateResult{
+		FinalText:        finalText,
+		ReplyLanguage:    resp.ReplyLanguage,
+		Escalate:         resp.Escalate,
+		EscalationReason: resp.EscalationReason,
+		Confidence:       resp.Confidence,
+	}, nil
+}
+
+func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string) (string, error) {
+	resp, err := client.Complete(ctx, llm.ChatRequest{
+		Model:       modelRef.Model,
+		Messages:    []llm.Message{{Role: "user", Content: prompt}},
+		Temperature: e.Temperature,
+		MaxTokens:   e.MaxTokens,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.Text, nil
+}

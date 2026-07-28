@@ -7,6 +7,8 @@ backend/.env
 backend/config.yaml
 frontend/.env
 
+cookies.txt
+
 # local-only deploy helpers (machine-specific host ports; restore script holds a
 # local Evolution API key) — keep out of git
 deploy/docker-compose.override.yaml

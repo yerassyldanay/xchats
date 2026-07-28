@@ -24,11 +24,40 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
+	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
+	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
+	"github.com/yerassyldanay/xchats/backend/llm"
+	"github.com/yerassyldanay/xchats/backend/messaging"
 	"github.com/yerassyldanay/xchats/backend/migrations"
+	"github.com/yerassyldanay/xchats/backend/response"
 	"log/slog"
 )
+
+// fakeLLMClient/fakeLLMRegistry stand in for a real provider in this harness.
+// No test here asserts on generated draft CONTENT beyond what this scripted
+// response fixes — its purpose is letting handleAIDraft/the simulator API run
+// to completion instead of hitting a nil dependency or a real network call.
+// fakeLLMRegistry only recognizes fakeLLMProvider (mirroring a real
+// llm.Registry's per-provider rejection), so tests can still exercise the
+// "unregistered provider" validation path with a provider name it doesn't know.
+const fakeLLMProvider = "fake"
+
+type fakeLLMClient struct{}
+
+func (fakeLLMClient) Complete(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{Text: `{"reply_text":"Секунду, уточню и вернусь.","reply_language":"ru","media_files_to_send":[],"escalate":false}`}, nil
+}
+
+type fakeLLMRegistry struct{ client llm.ChatClient }
+
+func (r fakeLLMRegistry) Client(ref llm.ModelRef) (llm.ChatClient, error) {
+	if ref.Provider != fakeLLMProvider {
+		return nil, fmt.Errorf("fakeLLMRegistry: no client configured for provider %q", ref.Provider)
+	}
+	return r.client, nil
+}
 
 const (
 	ownerJID     = "77011111111@s.whatsapp.net"
@@ -51,6 +80,17 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessWithLLM(t, fakeLLMClient{})
+}
+
+// newHarnessWithLLM is newHarness parameterized on the scripted LLM client the
+// org's response.Service reaches. Most tests don't care what the model
+// "says" beyond a fixed, valid response (newHarness's fakeLLMClient); one
+// (TestWhatsAppInboundProducesGroundedDraftAndApprovalDelivers) needs a
+// scripted reply that names a real KB fact placeholder, to assert on
+// grounding/substitution end to end rather than just plumbing.
+func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
+	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		t.Skip("DATABASE_URL not set; skipping DB integration test")
@@ -70,7 +110,7 @@ func newHarness(t *testing.T) *harness {
 
 	cfg := &config.Config{
 		WebhookToken: webhookToken, SessionTTLHours: 1, MinPasswordLen: 8,
-		PageSize: 50, CORSOrigins: []string{"*"},
+		PageSize: 50, CORSOrigins: []string{"*"}, SimulatorEnabled: true,
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -117,13 +157,33 @@ func newHarness(t *testing.T) *harness {
 	extractor := playground.NewExtractor(nil, log)
 	builder := playground.NewBuilder(nil, hub)
 
+	// A minimal, real (fake-LLM-backed) response.Service. kb.SeedLiveIfEmpty
+	// above already gives the org an ai_assistants row (among other tables), so
+	// KnowledgeBaseRepo.Load succeeds and Respond calls all the way through to
+	// fakeLLMClient's scripted response — no test here asserts on generated
+	// draft CONTENT beyond that fixed response, only that the async
+	// ai_draft/outbound_send tasks complete instead of panicking on a nil
+	// dependency.
+	responseService := &response.Service{
+		Conversations: &responsestore.ConversationRepo{Store: st},
+		KnowledgeBase: &responsestore.KnowledgeBaseRepo{Pool: st.Pool()},
+		Drafts:        &responsestore.DraftRepo{Store: st},
+		Engine: &response.Engine{
+			LLMs: fakeLLMRegistry{client: llmClient}, DefaultModel: llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
+			MaxTokens: 500, Temperature: 0.3, RetryEnabled: true,
+		},
+	}
+	senders := messaging.NewSenderRegistry()
+	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(fake))
+	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
+
 	w := &worker.Worker{Store: st, Queue: q, Evo: fake, Blob: blobStore, Hub: hub,
-		Drafter: drafter, KB: kb, Extract: extractor, Log: log}
+		Response: responseService, Senders: senders, KB: kb, Extract: extractor, Log: log}
 	q.Start(context.Background(), w.Handle)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Evo: fake, KB: kb, Builder: builder, OrgID: org.ID, Log: log,
+		Drafter: drafter, Response: responseService, Evo: fake, KB: kb, Builder: builder, OrgID: org.ID, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)

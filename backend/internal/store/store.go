@@ -49,9 +49,9 @@ func (s *Store) Close() { s.pool.Close() }
 // ---------------------------------------------------------------------------
 
 type Organization struct {
-	ID           uuid.UUID
-	Name         string
-	RespondMode  string
+	ID          uuid.UUID
+	Name        string
+	RespondMode string
 }
 
 type User struct {
@@ -71,6 +71,7 @@ type Account struct {
 	InstanceName    string
 	InstanceID      string
 	ConnectionState string
+	Channel         string // "whatsapp" | "simulator"
 	LastLiveEventAt *time.Time
 	CreatedAt       time.Time
 	DeletedAt       *time.Time
@@ -124,18 +125,19 @@ type MediaRef struct {
 }
 
 type Draft struct {
-	ID                uuid.UUID
-	ChatID            uuid.UUID
-	TriggerMessageID  uuid.NullUUID
-	OptionOrdinal     int
-	DraftText         string
-	ContextState      string
-	Confidence        *float64
-	Escalate          bool
-	EscalationReason  string
-	DraftState        string
-	CreatedAt         time.Time
-	Assets            []DraftAsset
+	ID               uuid.UUID
+	ChatID           uuid.UUID
+	TriggerMessageID uuid.NullUUID
+	OptionOrdinal    int
+	DraftText        string
+	ReplyLanguage    string
+	ContextState     string
+	Confidence       *float64
+	Escalate         bool
+	EscalationReason string
+	DraftState       string
+	CreatedAt        time.Time
+	Assets           []DraftAsset
 }
 
 type DraftAsset struct {
@@ -217,13 +219,13 @@ func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 
 // accountCols is the canonical wa_accounts projection; scanAccountDst pairs with it.
 const accountCols = `id, organization_id, display_name, owner_jid, phone_number,
-	evolution_instance_name, evolution_instance_id, connection_state,
+	evolution_instance_name, evolution_instance_id, connection_state, channel,
 	last_live_event_at, created_at, deleted_at`
 
 func scanAccountDst(a *Account) []any {
 	return []any{
 		&a.ID, &a.OrganizationID, &a.DisplayName, &a.OwnerJID, &a.PhoneNumber,
-		&a.InstanceName, &a.InstanceID, &a.ConnectionState,
+		&a.InstanceName, &a.InstanceID, &a.ConnectionState, &a.Channel,
 		&a.LastLiveEventAt, &a.CreatedAt, &a.DeletedAt,
 	}
 }

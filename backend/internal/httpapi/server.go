@@ -23,6 +23,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/response"
 )
 
 // webhookTokenHeader is the header Evolution echoes back so we can verify it
@@ -31,17 +32,18 @@ const webhookTokenHeader = "X-Webhook-Token"
 
 // Server wires the HTTP edges to their dependencies.
 type Server struct {
-	cfg     *config.Config
-	store   *store.Store
-	queue   queue.Queue
-	hub     *realtime.Hub
-	blob    blob.Store
-	drafter assistant.Drafter
-	evo     evolution.Client
-	kb      *kbstore.Store
-	builder *playground.Builder
-	orgID   uuid.UUID
-	log     *slog.Logger
+	cfg      *config.Config
+	store    *store.Store
+	queue    queue.Queue
+	hub      *realtime.Hub
+	blob     blob.Store
+	drafter  assistant.Drafter // dormant: only the disconnected playground hot-swap reads this
+	response *response.Service // the multichannel response engine's entry point (simulator API)
+	evo      evolution.Client
+	kb       *kbstore.Store
+	builder  *playground.Builder
+	orgID    uuid.UUID
+	log      *slog.Logger
 
 	// pendingNames carries the display_name from "add account" (POST) to the QR
 	// connect step (where the wa_accounts row is finally written): pre-connect
@@ -53,24 +55,25 @@ type Server struct {
 
 // Deps is the constructor input.
 type Deps struct {
-	Cfg     *config.Config
-	Store   *store.Store
-	Queue   queue.Queue
-	Hub     *realtime.Hub
-	Blob    blob.Store
-	Drafter assistant.Drafter
-	Evo     evolution.Client
-	KB      *kbstore.Store
-	Builder *playground.Builder
-	OrgID   uuid.UUID
-	Log     *slog.Logger
+	Cfg      *config.Config
+	Store    *store.Store
+	Queue    queue.Queue
+	Hub      *realtime.Hub
+	Blob     blob.Store
+	Drafter  assistant.Drafter
+	Response *response.Service
+	Evo      evolution.Client
+	KB       *kbstore.Store
+	Builder  *playground.Builder
+	OrgID    uuid.UUID
+	Log      *slog.Logger
 }
 
 // New builds a Server.
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, drafter: d.Drafter, evo: d.Evo, kb: d.KB, builder: d.Builder,
+		blob: d.Blob, drafter: d.Drafter, response: d.Response, evo: d.Evo, kb: d.KB, builder: d.Builder,
 		orgID: d.OrgID, log: d.Log,
 		pendingNames: map[string]string{},
 	}
@@ -129,6 +132,12 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/media", s.handleUploadMedia)
 	auth.GET("/media/:id", s.handleServeMedia)
 	auth.GET("/realtime", s.handleRealtime)
+
+	// Simulator API (Phase 10) — gated: the route does not exist at all unless
+	// explicitly enabled (SIMULATOR_ENABLED, default false outside dev).
+	if s.cfg.SimulatorEnabled {
+		auth.POST("/simulator/messages", s.handleSimulatorMessage)
+	}
 
 	// Playground — the KB builder (chat → materials → draft blob → approve into
 	// the live KB, 15 Decisions 3–4). No more open/publish/rollback: GET always

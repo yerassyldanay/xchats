@@ -59,6 +59,29 @@ type Config struct {
 	// hosts. Default false (SSRF-safe); enable only for trusted self-hosted setups.
 	KBAllowPrivateFetch bool `yaml:"kb_allow_private_fetch" env:"KB_ALLOW_PRIVATE_FETCH"`
 
+	// --- multichannel response-service LLM layer (backend/llm + internal/llmprovider) ---
+	// Provider-neutral: LLMDefaultProvider/LLMDefaultModel select WHICH configured
+	// provider/model the response engine calls; switching either is configuration
+	// only. Distinct from the legacy LLMProvider/LLMAPIKey/... fields above, which
+	// the dormant internal/brain path still reads — the two must never be conflated.
+	LLMDefaultProvider     string  `yaml:"llm_default_provider" env:"LLM_DEFAULT_PROVIDER"`
+	LLMDefaultModel        string  `yaml:"llm_default_model" env:"LLM_DEFAULT_MODEL"`
+	OpenRouterAPIKey       string  `env:"OPENROUTER_API_KEY"`
+	OpenRouterBaseURL      string  `yaml:"openrouter_base_url" env:"OPENROUTER_BASE_URL"`
+	OpenAIAPIKey           string  `env:"OPENAI_API_KEY"`
+	OpenAIBaseURL          string  `yaml:"openai_base_url" env:"OPENAI_BASE_URL"`
+	GeminiAPIKey           string  `env:"GEMINI_API_KEY"`
+	GeminiBaseURL          string  `yaml:"gemini_base_url" env:"GEMINI_BASE_URL"`
+	LLMDraftMaxTokens      int     `yaml:"llm_draft_max_tokens" env:"LLM_DRAFT_MAX_TOKENS"`
+	LLMDraftTemperature    float64 `yaml:"llm_draft_temperature" env:"LLM_DRAFT_TEMPERATURE"`
+	LLMDraftTimeoutSeconds int     `yaml:"llm_draft_timeout_seconds" env:"LLM_DRAFT_TIMEOUT_SECONDS"`
+	LLMDraftRetry          bool    `yaml:"llm_draft_retry" env:"LLM_DRAFT_RETRY"`
+
+	// SimulatorEnabled gates the /simulator/messages API (Phase 10): the route is
+	// not registered at all when false. Defaults false — only a dev/staging
+	// deployment should set SIMULATOR_ENABLED=true.
+	SimulatorEnabled bool `yaml:"simulator_enabled" env:"SIMULATOR_ENABLED"`
+
 	// --- Langfuse (LLM observability; secrets via .env) ---
 	// Tracing is best-effort: when disabled or keys are missing the LLM clients
 	// emit to OTel's no-op tracer (≈ free). See internal/telemetry.NewLangfuseProvider.
@@ -97,6 +120,26 @@ func defaults() Config {
 		LLMTemperature:  0.3,
 		OrgName:         "xchats",
 		PageSize:        50,
+
+		LLMDefaultProvider:     "openrouter",
+		LLMDefaultModel:        "google/gemini-2.5-flash",
+		LLMDraftMaxTokens:      500,
+		LLMDraftTemperature:    0.3,
+		LLMDraftTimeoutSeconds: 60,
+		LLMDraftRetry:          true,
+	}
+}
+
+// LLMProviderKey returns the configured API key for the named response-service
+// LLM provider ("openrouter" | "openai" | "gemini"), or "" if none is set.
+func (c *Config) LLMProviderKey(provider string) string {
+	switch strings.ToLower(provider) {
+	case "openai":
+		return c.OpenAIAPIKey
+	case "gemini":
+		return c.GeminiAPIKey
+	default:
+		return c.OpenRouterAPIKey
 	}
 }
 

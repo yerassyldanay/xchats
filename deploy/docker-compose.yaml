@@ -39,7 +39,8 @@ services:
       SEED_ADMIN_EMAIL: "${SEED_ADMIN_EMAIL:-admin@example.com}"
       SEED_ADMIN_PASSWORD: "${SEED_ADMIN_PASSWORD:-change-me-strong-password}"
       WA_OWNER_JID: "${WA_OWNER_JID:-}"
-      # LLM / AI brain — when LLM_API_KEY is empty the backend uses the Stub drafter.
+      # Legacy brain/playground config — those packages stay compiled but are no
+      # longer constructed by main.go; kept only for internal/kbstore consumers.
       LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
       LLM_API_KEY: "${LLM_API_KEY:-}"
       LLM_BASE_URL: "${LLM_BASE_URL:-}"
@@ -47,6 +48,23 @@ services:
       LLM_VISION_MODEL: "${LLM_VISION_MODEL:-}"
       LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-1024}"
       LLM_TEMPERATURE: "${LLM_TEMPERATURE:-0.3}"
+      # response.Service's LLM layer — required; boot fails fast without a key
+      # for LLM_DEFAULT_PROVIDER (no stub fallback, by design).
+      LLM_DEFAULT_PROVIDER: "${LLM_DEFAULT_PROVIDER:-openrouter}"
+      LLM_DEFAULT_MODEL: "${LLM_DEFAULT_MODEL:-google/gemini-2.5-flash}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OPENROUTER_BASE_URL: "${OPENROUTER_BASE_URL:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_BASE_URL: "${GEMINI_BASE_URL:-}"
+      LLM_DRAFT_MAX_TOKENS: "${LLM_DRAFT_MAX_TOKENS:-500}"
+      LLM_DRAFT_TEMPERATURE: "${LLM_DRAFT_TEMPERATURE:-0.3}"
+      LLM_DRAFT_TIMEOUT_SECONDS: "${LLM_DRAFT_TIMEOUT_SECONDS:-60}"
+      LLM_DRAFT_RETRY: "${LLM_DRAFT_RETRY:-true}"
+      # Simulator HTTP API (Phase 10) — gates whether the route is registered
+      # at all. Default false; set true to test without a WhatsApp number.
+      SIMULATOR_ENABLED: "${SIMULATOR_ENABLED:-false}"
     ports:
       - "8080:8080"
     volumes:

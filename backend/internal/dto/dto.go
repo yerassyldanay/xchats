@@ -35,14 +35,14 @@ type Contact struct {
 
 // Chat is the API chat shape.
 type Chat struct {
-	ID                 string   `json:"id"`
-	WaAccountID        string   `json:"wa_account_id"`
-	Contact            Contact  `json:"contact"`
-	Status             string   `json:"status"`
-	AssigneeUserID     *string  `json:"assignee_user_id"`
-	UnreadCount        int      `json:"unread_count"`
-	LastMessageAt      *string  `json:"last_message_at"`
-	LastMessagePreview string   `json:"last_message_preview"`
+	ID                 string  `json:"id"`
+	WaAccountID        string  `json:"wa_account_id"`
+	Contact            Contact `json:"contact"`
+	Status             string  `json:"status"`
+	AssigneeUserID     *string `json:"assignee_user_id"`
+	UnreadCount        int     `json:"unread_count"`
+	LastMessageAt      *string `json:"last_message_at"`
+	LastMessagePreview string  `json:"last_message_preview"`
 }
 
 // Media is one media item on a message (a "list of URLs", each enriched).
@@ -85,6 +85,7 @@ type AiDraft struct {
 	TriggerMessageID *string      `json:"trigger_message_id"`
 	Ordinal          int          `json:"ordinal"`
 	DraftText        string       `json:"draft_text"`
+	ReplyLanguage    string       `json:"reply_language"`
 	Media            []DraftMedia `json:"media"`
 	ContextStatus    string       `json:"context_status"`
 	Confidence       *float64     `json:"confidence"`
@@ -222,6 +223,7 @@ func MapDraft(d store.Draft) AiDraft {
 		TriggerMessageID: nullUUIDPtr(d.TriggerMessageID),
 		Ordinal:          d.OptionOrdinal,
 		DraftText:        d.DraftText,
+		ReplyLanguage:    d.ReplyLanguage,
 		Media:            media,
 		ContextStatus:    d.ContextState,
 		Confidence:       d.Confidence,
