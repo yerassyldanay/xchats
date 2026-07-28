@@ -20,6 +20,7 @@ const cacheTTL = 60 * time.Second
 type cacheEntry struct {
 	kb      *aiprompt.KB
 	builtAt time.Time
+	gen     uint64
 }
 
 // CachedKBRepo wraps a response.KnowledgeBaseRepository with a per-org, in-
@@ -34,11 +35,20 @@ type CachedKBRepo struct {
 
 	mu      sync.Mutex
 	entries map[string]cacheEntry
+	// gens tracks the current invalidation generation per org so a Load that
+	// started before an Invalidate can't clobber it: a concurrent write's
+	// Invalidate() during another goroutine's in-flight DB read must not have
+	// that stale read win the race and get cached anyway.
+	gens map[string]uint64
 }
 
 // NewCachedKBRepo builds a ready-to-use cache wrapping inner.
 func NewCachedKBRepo(inner response.KnowledgeBaseRepository) *CachedKBRepo {
-	return &CachedKBRepo{Inner: inner, entries: make(map[string]cacheEntry)}
+	return &CachedKBRepo{
+		Inner:   inner,
+		entries: make(map[string]cacheEntry),
+		gens:    make(map[string]uint64),
+	}
 }
 
 // Load returns organizationID's cached *aiprompt.KB when fresh (built within
@@ -48,8 +58,9 @@ func NewCachedKBRepo(inner response.KnowledgeBaseRepository) *CachedKBRepo {
 func (r *CachedKBRepo) Load(ctx context.Context, organizationID string) (*aiprompt.KB, error) {
 	r.mu.Lock()
 	e, ok := r.entries[organizationID]
+	startGen := r.gens[organizationID]
 	r.mu.Unlock()
-	if ok && time.Since(e.builtAt) < cacheTTL {
+	if ok && time.Since(e.builtAt) < cacheTTL && e.gen == startGen {
 		return e.kb, nil
 	}
 
@@ -58,16 +69,25 @@ func (r *CachedKBRepo) Load(ctx context.Context, organizationID string) (*aiprom
 		return nil, err
 	}
 	r.mu.Lock()
-	r.entries[organizationID] = cacheEntry{kb: kb, builtAt: time.Now()}
+	// Only cache this build if no Invalidate landed for this org while the
+	// DB read above was in flight — otherwise a slow read started before an
+	// edit would overwrite the fresh invalidation with stale data.
+	if r.gens[organizationID] == startGen {
+		r.entries[organizationID] = cacheEntry{kb: kb, builtAt: time.Now(), gen: startGen}
+	}
 	r.mu.Unlock()
 	return kb, nil
 }
 
 // Invalidate drops orgID's cached entry, if any, so the next Load re-reads
 // Postgres instead of serving a stale build. Safe to call for an org with no
-// cached entry (a plain no-op).
+// cached entry (a plain no-op). Also bumps the org's generation so any Load
+// already in flight (its DB read started before this call) discards its
+// result instead of caching it.
 func (r *CachedKBRepo) Invalidate(orgID uuid.UUID) {
+	key := orgID.String()
 	r.mu.Lock()
-	delete(r.entries, orgID.String())
+	delete(r.entries, key)
+	r.gens[key]++
 	r.mu.Unlock()
 }

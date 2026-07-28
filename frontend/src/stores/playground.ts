@@ -40,6 +40,7 @@ export const usePlayground = defineStore('playground', {
     // the tab has been opened at least once (see startRealtime below). -------
     promptView: null as PromptView | null,
     promptLoading: false,
+    promptLoadError: '' as string,
 
     // --- shared realtime plumbing --------------------------------------------
     disconnect: null as null | (() => void),
@@ -431,8 +432,16 @@ export const usePlayground = defineStore('playground', {
     // production reply path reads (backend/internal/responsestore.CachedKBRepo).
     async loadPrompt() {
       this.promptLoading = true
+      this.promptLoadError = ''
       try {
         this.promptView = await api.get<PromptView>('/kb/prompt')
+      } catch (e) {
+        // A transport-level failure (401/503/network) is distinct from the
+        // server's own reported status:"error" (a KB-not-configured 200,
+        // handled entirely by PromptTab from promptView.status) — without
+        // this catch the request's rejection was unhandled and the tab was
+        // stuck on "Загрузка промпта…" forever with no visible explanation.
+        this.promptLoadError = e instanceof ApiError ? e.message : 'Не удалось загрузить промпт.'
       } finally {
         this.promptLoading = false
       }

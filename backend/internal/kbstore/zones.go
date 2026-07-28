@@ -237,6 +237,9 @@ func zoneGateReasons(zones []ZoneRow, policies []PolicyRow) []string {
 	if len(zones) == 0 {
 		return reasons
 	}
+	if len(policies) == 0 {
+		reasons = append(reasons, "at least one policy row with outside_zones_note is required while delivery zones exist")
+	}
 	for _, p := range policies {
 		if strings.TrimSpace(p.DeliveryCost) != "" || strings.TrimSpace(p.DeliveryTime) != "" {
 			reasons = append(reasons, fmt.Sprintf(

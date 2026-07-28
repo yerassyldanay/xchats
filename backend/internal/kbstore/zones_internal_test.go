@@ -107,6 +107,16 @@ func TestZoneGateReasons_ZonesRequireOutsideZonesNote(t *testing.T) {
 	}
 }
 
+func TestZoneGateReasons_ZonesWithNoPolicyRowsAtAllIsBlocked(t *testing.T) {
+	// Zero policy rows must not vacuously satisfy "every policy row is
+	// compliant" — with no rows to check, the loop finds nothing to flag, so
+	// this needs its own explicit check.
+	r := zoneGateReasons([]ZoneRow{zone("almaty", "", true, "5 000 ₸", "1")}, nil)
+	if !hasReason(r, "at least one policy row with outside_zones_note is required") {
+		t.Fatalf("want a no-policy-rows reason when zones exist, got %v", r)
+	}
+}
+
 func TestZoneGateReasons_EveryPolicyLangRowChecked(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{zone("almaty", "", true, "5 000 ₸", "1")}, []PolicyRow{
 		{Lang: "ru", OutsideZonesNote: "ok"},

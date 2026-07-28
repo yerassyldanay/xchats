@@ -464,6 +464,7 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 		s.kbFail(c, err)
 		return
 	}
+	s.invalidateKBCache(orgID)
 	s.reloadBrain(c, orgID)
 	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {
@@ -497,6 +498,7 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 		s.kbFail(c, err)
 		return
 	}
+	s.invalidateKBCache(orgID)
 	s.reloadBrain(c, orgID)
 	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {

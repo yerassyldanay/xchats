@@ -28,7 +28,7 @@ test('База знаний: the live KB shows stat cards + tabs, no draft/Пр�
   await expect(page.getByRole('button', { name: 'Правки' })).toHaveCount(0)
   // switch to the Тарифы tab and confirm a seeded tariff row renders
   await page.getByRole('button', { name: 'Тарифы' }).click()
-  await expect(page.getByText('basic', { exact: true })).toBeVisible()
+  await expect(page.getByText('demo_basic', { exact: true })).toBeVisible()
 })
 
 // The Промпт tab renders the exact prompt GET /kb/prompt returns — proof the

@@ -7,7 +7,7 @@ import {
 } from 'lucide-vue-next'
 import { usePlayground } from '../stores/playground'
 import { shortTime } from '../lib/format'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import type { AssetRow, ContactRow, KbMaterial, PolicyRow, ProductRow, TariffRow, TopicRow } from '../types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -214,11 +214,15 @@ const pricingTypes = [
 // Work"); this tab only shows what already exists.
 const materials = ref<KbMaterial[]>([])
 const materialsLoading = ref(false)
+const materialsError = ref('')
 async function loadMaterials() {
   materialsLoading.value = true
+  materialsError.value = ''
   try {
     const res = await api.get<{ materials: KbMaterial[] }>('/kb/materials')
     materials.value = res.materials
+  } catch (e) {
+    materialsError.value = e instanceof ApiError ? e.message : 'Не удалось загрузить материалы.'
   } finally {
     materialsLoading.value = false
   }
@@ -777,6 +781,10 @@ const tabs = [
             Материалы, загруженные через «Конструктор» (/playground) — только просмотр. Загрузка и привязка файлов появятся с обновлением медиа.
           </p>
           <div v-if="materialsLoading && !materials.length" class="text-sm text-muted-foreground py-6 text-center">Загрузка…</div>
+          <div v-else-if="materialsError" class="flex items-center gap-2 text-sm text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+            <CircleAlert class="w-4 h-4 shrink-0" /> {{ materialsError }}
+            <Button size="sm" variant="outline" class="ml-auto" @click="loadMaterials">Повторить</Button>
+          </div>
           <p v-else-if="!materials.length" class="text-sm text-muted-foreground py-6 text-center">Материалов пока нет.</p>
           <div v-for="m in materials" :key="m.id" class="rounded-lg border border-border bg-card p-4 flex items-center gap-4">
             <div class="w-14 h-14 rounded-lg border border-border overflow-hidden shrink-0 grid place-items-center bg-muted">

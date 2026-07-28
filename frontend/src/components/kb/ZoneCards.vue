@@ -31,6 +31,7 @@ type ZoneBuf = {
   delivery_cost: string
   delivery_in_days: string
   notes: string
+  status: string
 }
 const buf = reactive<Record<string, ZoneBuf>>({})
 function vm(z: DeliveryZoneRow): ZoneBuf {
@@ -43,6 +44,11 @@ function vm(z: DeliveryZoneRow): ZoneBuf {
       delivery_cost: z.delivery_cost,
       delivery_in_days: z.delivery_in_days,
       notes: z.notes,
+      // upsertZoneRow defaults a blank status to "active" on EVERY save
+      // (insert and update alike) — omitting it here would silently
+      // reactivate an inactive zone on its next save, so it always rides
+      // along even though there's no UI control for it yet.
+      status: z.status || 'active',
     }
   }
   return buf[z.id]
@@ -84,8 +90,12 @@ function setNewAvailable(available: boolean) {
 }
 async function addZone() {
   if (!newZone.ref.trim() || !newZone.zone_level) return
-  const ok = await pg.liveUpsertZone({ ...newZone })
-  if (ok === undefined) return // failed — keep the form filled so the operator can fix + retry
+  await pg.liveUpsertZone({ ...newZone })
+  // writeLive() resolves to undefined on BOTH success and failure (its
+  // wrapped fn only assigns pg.live, it never returns a value) — liveError is
+  // the one reliable success/failure signal it sets, cleared to '' on every
+  // call and populated only in the catch branch.
+  if (pg.liveError) return // failed — keep the form filled so the operator can fix + retry
   newZone.ref = ''
   newZone.name = ''
   newZone.parent_ref = ''

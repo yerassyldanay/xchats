@@ -135,6 +135,12 @@ const sectionRows = computed(() => {
       </div>
 
       <div v-if="pg.promptLoading && !pg.promptView" class="p-10 text-center text-sm text-muted-foreground">Загрузка промпта…</div>
+      <div v-else-if="pg.promptLoadError && !pg.promptView" class="p-5">
+        <p class="flex items-start gap-2 text-sm text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+          <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> <span>{{ pg.promptLoadError }}</span>
+        </p>
+        <Button size="sm" variant="outline" class="mt-3" @click="pg.loadPrompt()">Повторить</Button>
+      </div>
       <div v-else-if="mode === 'rendered' && pg.promptView?.status === 'error'" class="p-5">
         <p class="flex items-start gap-2 text-sm text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
           <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> <span>{{ pg.promptView.error || 'Не удалось собрать промпт.' }}</span>

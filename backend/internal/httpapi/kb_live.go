@@ -30,6 +30,19 @@ func (s *Server) kbWrite(c *gin.Context) (uuid.UUID, bool) {
 	return s.pgOrg(c)
 }
 
+// invalidateKBCache drops orgID's cached prompt-facing KB (see CachedKBRepo)
+// so the NEXT Load — the next customer reply, or the next GET /kb/prompt —
+// re-reads Postgres instead of serving a stale build. Called after every
+// write that changes what the response engine reads: /kb/* live writes
+// (kbLiveChanged) AND Playground approve (handlePlaygroundApprove/
+// ApproveEntity), since approve also materializes rows into the same live
+// tables the cache is built from.
+func (s *Server) invalidateKBCache(orgID uuid.UUID) {
+	if s.kbInvalidator != nil {
+		s.kbInvalidator.Invalidate(orgID)
+	}
+}
+
 // kbLiveChanged is the /kb/* write epilogue: invalidate the response engine's
 // cached prompt KB (the only REAL invalidation left on this path — see below),
 // hot-reload the brain, broadcast, and return the refreshed live view.
@@ -39,9 +52,7 @@ func (s *Server) kbLiveChanged(c *gin.Context, orgID uuid.UUID) {
 	// 60s TTL backstop — this synchronous Invalidate is what makes a live edit
 	// visible to the NEXT customer reply (and to GET /kb/prompt) immediately
 	// instead of up to a minute later.
-	if s.kbInvalidator != nil {
-		s.kbInvalidator.Invalidate(orgID)
-	}
+	s.invalidateKBCache(orgID)
 	// reloadBrain is a production no-op: main.go no longer constructs a drafter
 	// implementing brainReloader/SetSnapshot (the response engine above replaced
 	// it), so s.drafter is nil here in every real deployment. It survives only
