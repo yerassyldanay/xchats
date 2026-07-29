@@ -44,6 +44,8 @@ func main() {
 		err = cmdLaunch(os.Args[2:])
 	case "export":
 		err = cmdExport(os.Args[2:])
+	case "schema-parity":
+		err = cmdSchemaParity(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -130,5 +132,17 @@ commands:
                                        runs/catalog.json — every scenario's and
                                        extraction case's requirements, resolved to real
                                        values, no billed calls; the read-only
-                                       requirements review at /evals/catalog`)
+                                       requirements review at /evals/catalog
+  schema-parity -db <DATABASE_URL> [-mode transitional|strict]
+                                       OPT-IN, explicit: compares the seven approved-KB
+                                       production tables + kbd_materials against the
+                                       manifest derived from internal/kbfixture's struct
+                                       tags (cross-checked against backend/aiprompt's
+                                       media registry — see internal/schemamanifest).
+                                       -mode transitional (default) tolerates the named
+                                       legacy columns/tables migration 0011 leaves in
+                                       place; -mode strict allows nothing beyond the
+                                       manifest (the state after migration 0012). Prints
+                                       every diff and exits nonzero if any remain; never
+                                       writes to the database`)
 }

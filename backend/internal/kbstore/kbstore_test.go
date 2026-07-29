@@ -74,12 +74,20 @@ func TestRoundTrip_RendersIdentically(t *testing.T) {
 			t.Fatalf("topic %q body mismatch:\n seed: %q\n db:   %q", topic.Slug, want, topic.BodyMD)
 		}
 	}
-	// Every advertised fact resolves to the same value from either snapshot.
+	// Every advertised fact resolves to the same value from either snapshot —
+	// EXCEPT product.*.availability: that column is retired (plan/database-
+	// schema.md: not part of the target canonical schema) and kbstore no
+	// longer writes it, so it never round-trips through the DB even though
+	// the in-memory seed literal (brain/seed.go) still sets flavor text for
+	// it. This is expected, not a regression.
 	facts := seed.Facts.List()
 	if len(facts) == 0 {
 		t.Fatal("seed advertises no facts to round-trip")
 	}
 	for _, f := range facts {
+		if strings.HasSuffix(f.Token, ".availability}}") {
+			continue
+		}
 		want, werr := seed.Facts.Render(f.Token, "ru")
 		got, gerr := loaded.Facts.Render(f.Token, "ru")
 		if werr != nil || gerr != nil {
@@ -512,7 +520,7 @@ func zoneCompatiblePolicy(t *testing.T, kb *kbstore.Store, orgID uuid.UUID) {
 	t.Helper()
 	blank, note := "", "не доставляем за пределами списка зон"
 	if err := kb.PatchLivePolicies(context.Background(), orgID, uuid.Nil, kbstore.PolicyPatch{
-		DeliveryCost: &blank, DeliveryTime: &blank, OutsideZonesNote: &note,
+		DeliveryCost: &blank, DeliveryInDays: &blank, OutsideZonesNote: &note,
 	}); err != nil {
 		t.Fatalf("seed zone-compatible policy: %v", err)
 	}

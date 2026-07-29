@@ -196,13 +196,12 @@ func (s *Server) handlePlaygroundDeleteTariff(c *gin.Context) {
 }
 
 type productReq struct {
-	Ref          string `json:"ref"`
-	Lang         string `json:"lang"`
-	Name         string `json:"name"`
-	Price        string `json:"price"`
-	Description  string `json:"description"`
-	Category     string `json:"category"`
-	Availability string `json:"availability"`
+	Ref         string `json:"ref"`
+	Lang        string `json:"lang"`
+	Name        string `json:"name"`
+	Price       string `json:"price"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
 	// InStock is read only by handleKBUpsertProduct (the live-write path) —
 	// handlePlaygroundUpsertProduct never reads it, so a draft write's
 	// behavior is unaffected by this field's presence.
@@ -221,7 +220,7 @@ func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
 	}
 	if err := s.kb.UpsertProduct(ctx(c), orgID, kbstore.ProductInput{
 		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price,
-		Description: req.Description, Category: req.Category, Availability: req.Availability,
+		Description: req.Description, Category: req.Category,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
@@ -243,16 +242,16 @@ func (s *Server) handlePlaygroundDeleteProduct(c *gin.Context) {
 }
 
 type contactsReq struct {
-	Lang         string  `json:"lang"`
-	WhatsApp     *string `json:"whatsapp"`
-	Email        *string `json:"email"`
-	Address      *string `json:"address"`
-	Legal        *string `json:"legal"`
-	CallbackTime *string `json:"callback_time"`
-	WorkingHours *string `json:"working_hours"`
-	Phone        *string `json:"phone"`
-	Website      *string `json:"website"`
-	Instagram    *string `json:"instagram"`
+	Lang             string  `json:"lang"`
+	WhatsApp         *string `json:"whatsapp"`
+	Email            *string `json:"email"`
+	Address          *string `json:"address"`
+	LegalInformation *string `json:"legal_information"`
+	CallbackTime     *string `json:"callback_time"`
+	WorkingHours     *string `json:"working_hours"`
+	Phone            *string `json:"phone"`
+	Website          *string `json:"website"`
+	Instagram        *string `json:"instagram"`
 }
 
 func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
@@ -267,7 +266,7 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 	}
 	if err := s.kb.PatchContacts(ctx(c), orgID, kbstore.ContactPatch{
 		Lang: req.Lang, WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
-		Legal: req.Legal, CallbackTime: req.CallbackTime,
+		LegalInformation: req.LegalInformation, CallbackTime: req.CallbackTime,
 		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
@@ -280,15 +279,15 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 // --- typed facts: commerce policies -----------------------------------------
 
 type policiesReq struct {
-	Lang             string  `json:"lang"`
-	DeliveryCost     *string `json:"delivery_cost"`
-	DeliveryTime     *string `json:"delivery_time"`
-	FreeDeliveryFrom *string `json:"free_delivery_from"`
-	MinOrder         *string `json:"min_order"`
-	Prepayment       *string `json:"prepayment"`
-	Installment      *string `json:"installment"`
-	ReturnPeriod     *string `json:"return_period"`
-	Warranty         *string `json:"warranty"`
+	Lang               string  `json:"lang"`
+	DeliveryCost       *string `json:"delivery_cost"`
+	DeliveryInDays     *string `json:"delivery_in_days"`
+	FreeDeliveryFrom   *string `json:"free_delivery_from"`
+	MinOrder           *string `json:"min_order"`
+	Prepayment         *string `json:"prepayment"`
+	Installment        *string `json:"installment"`
+	ReturnPeriodInDays *string `json:"return_period_in_days"`
+	Warranty           *string `json:"warranty"`
 	// OutsideZonesNote is read only by handleKBPatchPolicies (the live-write
 	// path) — handlePlaygroundPatchPolicies never reads it.
 	OutsideZonesNote *string `json:"outside_zones_note"`
@@ -306,7 +305,7 @@ type zoneReq struct {
 	DeliveryCost      string `json:"delivery_cost"`
 	DeliveryInDays    string `json:"delivery_in_days"`
 	Notes             string `json:"notes"`
-	Status            string `json:"status"`
+	SalesStatus       string `json:"sales_status"`
 }
 
 func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
@@ -320,9 +319,9 @@ func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PatchPolicies(ctx(c), orgID, kbstore.PolicyPatch{
-		Lang: req.Lang, DeliveryCost: req.DeliveryCost, DeliveryTime: req.DeliveryTime,
+		Lang: req.Lang, DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
 		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
-		Installment: req.Installment, ReturnPeriod: req.ReturnPeriod, Warranty: req.Warranty,
+		Installment: req.Installment, ReturnPeriodInDays: req.ReturnPeriodInDays, Warranty: req.Warranty,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)

@@ -31,7 +31,7 @@ type ZoneBuf = {
   delivery_cost: string
   delivery_in_days: string
   notes: string
-  status: string
+  sales_status: string
 }
 const buf = reactive<Record<string, ZoneBuf>>({})
 function vm(z: DeliveryZoneRow): ZoneBuf {
@@ -44,11 +44,11 @@ function vm(z: DeliveryZoneRow): ZoneBuf {
       delivery_cost: z.delivery_cost,
       delivery_in_days: z.delivery_in_days,
       notes: z.notes,
-      // upsertZoneRow defaults a blank status to "active" on EVERY save
+      // upsertZoneRow defaults a blank sales_status to "active" on EVERY save
       // (insert and update alike) — omitting it here would silently
       // reactivate an inactive zone on its next save, so it always rides
       // along even though there's no UI control for it yet.
-      status: z.status || 'active',
+      sales_status: z.sales_status || 'active',
     }
   }
   return buf[z.id]

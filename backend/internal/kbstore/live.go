@@ -116,7 +116,7 @@ func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.
 	defer tx.Rollback(ctx)
 	if err := upsertProductRow(ctx, tx, orgID, domain.Product{
 		Ref: in.Ref, Lang: in.Lang, Name: in.Name, Price: in.Price, Description: in.Description,
-		Category: in.Category, Availability: in.Availability,
+		Category: in.Category,
 	}, in.InStock); err != nil {
 		return err
 	}
@@ -166,8 +166,8 @@ func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, actor uu
 	if p.Address != nil {
 		cur.Address = *p.Address
 	}
-	if p.Legal != nil {
-		cur.Legal = *p.Legal
+	if p.LegalInformation != nil {
+		cur.LegalInformation = *p.LegalInformation
 	}
 	if p.CallbackTime != nil {
 		cur.CallbackTime = *p.CallbackTime
@@ -186,7 +186,7 @@ func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, actor uu
 	}
 	if err := upsertContactRow(ctx, tx, orgID, domain.Contact{
 		Lang: cur.Lang, WhatsApp: cur.WhatsApp, Email: cur.Email, Address: cur.Address,
-		Legal: cur.Legal, CallbackTime: cur.CallbackTime,
+		Legal: cur.LegalInformation, CallbackTime: cur.CallbackTime,
 		WorkingHours: cur.WorkingHours, Phone: cur.Phone, Website: cur.Website, Instagram: cur.Instagram,
 	}); err != nil {
 		return err
@@ -199,14 +199,16 @@ func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, actor uu
 
 func currentLiveContactTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, lang string) (DraftContact, error) {
 	var c DraftContact
-	err := tx.QueryRow(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time,
+	var legalInfo *string
+	err := tx.QueryRow(ctx, `SELECT lang, whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram
 		FROM xchats.ai_contacts WHERE organization_id = $1 AND lang = $2 FOR UPDATE`, orgID, lang).
-		Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime,
+		Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftContact{Lang: lang}, nil
 	}
+	c.LegalInformation = strOrEmpty(legalInfo)
 	return c, err
 }
 
@@ -230,8 +232,8 @@ func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, actor uu
 	if p.DeliveryCost != nil {
 		cur.DeliveryCost = *p.DeliveryCost
 	}
-	if p.DeliveryTime != nil {
-		cur.DeliveryTime = *p.DeliveryTime
+	if p.DeliveryInDays != nil {
+		cur.DeliveryInDays = *p.DeliveryInDays
 	}
 	if p.FreeDeliveryFrom != nil {
 		cur.FreeDeliveryFrom = *p.FreeDeliveryFrom
@@ -245,8 +247,8 @@ func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, actor uu
 	if p.Installment != nil {
 		cur.Installment = *p.Installment
 	}
-	if p.ReturnPeriod != nil {
-		cur.ReturnPeriod = *p.ReturnPeriod
+	if p.ReturnPeriodInDays != nil {
+		cur.ReturnPeriodInDays = *p.ReturnPeriodInDays
 	}
 	if p.Warranty != nil {
 		cur.Warranty = *p.Warranty
@@ -255,9 +257,9 @@ func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, actor uu
 		cur.OutsideZonesNote = *p.OutsideZonesNote
 	}
 	if err := upsertPolicyRow(ctx, tx, orgID, domain.Policy{
-		Lang: cur.Lang, DeliveryCost: cur.DeliveryCost, DeliveryTime: cur.DeliveryTime,
+		Lang: cur.Lang, DeliveryCost: cur.DeliveryCost, DeliveryTime: cur.DeliveryInDays,
 		FreeDeliveryFrom: cur.FreeDeliveryFrom, MinOrder: cur.MinOrder, Prepayment: cur.Prepayment,
-		Installment: cur.Installment, ReturnPeriod: cur.ReturnPeriod, Warranty: cur.Warranty,
+		Installment: cur.Installment, ReturnPeriod: cur.ReturnPeriodInDays, Warranty: cur.Warranty,
 	}, cur.OutsideZonesNote); err != nil {
 		return err
 	}
@@ -272,14 +274,17 @@ func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, actor uu
 
 func currentLivePolicyTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, lang string) (DraftPolicy, error) {
 	var p DraftPolicy
-	err := tx.QueryRow(ctx, `SELECT lang, delivery_cost, delivery_time, free_delivery_from, min_order,
-		prepayment, installment, return_period, warranty, outside_zones_note
+	var deliveryInDays, returnPeriodInDays *string
+	err := tx.QueryRow(ctx, `SELECT lang, delivery_cost, delivery_in_days, free_delivery_from, min_order,
+		prepayment, installment, return_period_in_days, warranty, outside_zones_note
 		FROM xchats.ai_policies WHERE organization_id = $1 AND lang = $2 FOR UPDATE`, orgID, lang).
-		Scan(&p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.FreeDeliveryFrom, &p.MinOrder,
-			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty, &p.OutsideZonesNote)
+		Scan(&p.Lang, &p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
+			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty, &p.OutsideZonesNote)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftPolicy{Lang: lang}, nil
 	}
+	p.DeliveryInDays = strOrEmpty(deliveryInDays)
+	p.ReturnPeriodInDays = strOrEmpty(returnPeriodInDays)
 	return p, err
 }
 

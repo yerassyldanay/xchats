@@ -83,7 +83,7 @@ func TestZoneGateReasons_ValidParentChainOK(t *testing.T) {
 func TestZoneGateReasons_EmptyZonesSkipsPolicyChecks(t *testing.T) {
 	// No zones at all: a flat, non-blank policy delivery answer is legal — the
 	// zones feature is simply unused (aiprompt.Policies's doc comment).
-	r := zoneGateReasons(nil, []PolicyRow{{Lang: "*", DeliveryCost: "1 500 ₸", DeliveryTime: "1–3 дня"}})
+	r := zoneGateReasons(nil, []PolicyRow{{Lang: "*", DeliveryCost: "1 500 ₸", DeliveryInDays: "1–3 дня"}})
 	if len(r) != 0 {
 		t.Fatalf("no zones should skip every policy check, got %v", r)
 	}
@@ -93,7 +93,7 @@ func TestZoneGateReasons_ZonesRequireBlankFlatPolicyFields(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{zone("almaty", "", true, "5 000 ₸", "1")}, []PolicyRow{
 		{Lang: "*", DeliveryCost: "1 500 ₸", OutsideZonesNote: "не доставляем"},
 	})
-	if !hasReason(r, "delivery_cost and delivery_time must be blank") {
+	if !hasReason(r, "delivery_cost and delivery_in_days must be blank") {
 		t.Fatalf("want a flat-delivery-must-be-blank reason, got %v", r)
 	}
 }

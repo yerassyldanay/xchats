@@ -32,7 +32,7 @@ func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
 		VALUES ($1, 'basic', 'ru', 'Базовый', '5 000 ₸', '', '', '', 'fixed', '', '', 'active')`, orgID)
 	mustExec(t, pool, `INSERT INTO xchats.ai_contacts (organization_id, lang, phone, working_hours)
 		VALUES ($1, '*', '+7 700 000 00 00', '9:00-18:00')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_policies (organization_id, lang, delivery_cost, delivery_time, outside_zones_note)
+	mustExec(t, pool, `INSERT INTO xchats.ai_policies (organization_id, lang, delivery_cost, delivery_in_days, outside_zones_note)
 		VALUES ($1, '*', '1 000 ₸', '1-2', '')`, orgID)
 
 	repo := &responsestore.KnowledgeBaseRepo{Pool: pool}

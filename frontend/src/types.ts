@@ -143,7 +143,6 @@ export interface ProductRow {
   price: string
   description: string
   category: string
-  availability: string
   in_stock: boolean
   draft: boolean
   provenance?: string
@@ -156,7 +155,7 @@ export interface ContactRow {
   whatsapp: string
   email: string
   address: string
-  legal: string
+  legal_information: string
   callback_time: string
   working_hours: string
   phone: string
@@ -173,12 +172,12 @@ export interface PolicyRow {
   slug: string
   lang: string
   delivery_cost: string
-  delivery_time: string
+  delivery_in_days: string
   free_delivery_from: string
   min_order: string
   prepayment: string
   installment: string
-  return_period: string
+  return_period_in_days: string
   warranty: string
   outside_zones_note: string
   draft: boolean
@@ -198,7 +197,7 @@ export interface DeliveryZoneRow {
   delivery_cost: string
   delivery_in_days: string
   notes: string
-  status: string // active | inactive
+  sales_status: string // active | inactive
   draft: boolean
   updated_at: string
 }

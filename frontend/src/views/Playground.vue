@@ -226,10 +226,10 @@ function vmTopic(t: TopicRow) {
   if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, body_md: t.body_md, lang: t.lang || 'ru' }
   return tBuf[t.id]
 }
-type ProductBuf = { name: string; price: string; description: string; category: string; availability: string }
+type ProductBuf = { name: string; price: string; description: string; category: string }
 const prodBuf = reactive<Record<string, ProductBuf>>({})
 function vmProduct(p: ProductRow): ProductBuf {
-  if (!prodBuf[p.id]) prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category, availability: p.availability }
+  if (!prodBuf[p.id]) prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category }
   return prodBuf[p.id]
 }
 type TariffBuf = { name: string; price: string; limit_text: string; fee: string; summary: string; pricing_type: string; advantages: string; disadvantages: string }
@@ -244,7 +244,7 @@ const pricingTypes = [
   { key: 'tiered', label: 'Пороговая' },
 ]
 const contactForm = reactive({
-  whatsapp: '', email: '', address: '', legal: '', callback_time: '',
+  whatsapp: '', email: '', address: '', legal_information: '', callback_time: '',
   working_hours: '', phone: '', website: '', instagram: '',
 })
 // Re-seed the form whenever a NEW pending contact row appears (by id) — not on
@@ -259,7 +259,7 @@ watch(
     contactForm.whatsapp = c.whatsapp
     contactForm.email = c.email
     contactForm.address = c.address
-    contactForm.legal = c.legal
+    contactForm.legal_information = c.legal_information
     contactForm.callback_time = c.callback_time
     contactForm.working_hours = c.working_hours
     contactForm.phone = c.phone
@@ -270,8 +270,8 @@ watch(
 )
 
 const policyForm = reactive({
-  delivery_cost: '', delivery_time: '', free_delivery_from: '', min_order: '',
-  prepayment: '', installment: '', return_period: '', warranty: '',
+  delivery_cost: '', delivery_in_days: '', free_delivery_from: '', min_order: '',
+  prepayment: '', installment: '', return_period_in_days: '', warranty: '',
 })
 // Same re-seed-on-new-id pattern as contactForm above.
 let policySeededFor = ''
@@ -281,12 +281,12 @@ watch(
     if (!p || policySeededFor === p.id) return
     policySeededFor = p.id
     policyForm.delivery_cost = p.delivery_cost
-    policyForm.delivery_time = p.delivery_time
+    policyForm.delivery_in_days = p.delivery_in_days
     policyForm.free_delivery_from = p.free_delivery_from
     policyForm.min_order = p.min_order
     policyForm.prepayment = p.prepayment
     policyForm.installment = p.installment
-    policyForm.return_period = p.return_period
+    policyForm.return_period_in_days = p.return_period_in_days
     policyForm.warranty = p.warranty
   },
   { immediate: true }
@@ -465,7 +465,6 @@ async function discardAll() {
                   <Input v-model="vmProduct(p).name" placeholder="Название" class="h-9" />
                   <Input v-model="vmProduct(p).price" placeholder="Цена" class="h-9 font-mono" />
                   <Input v-model="vmProduct(p).category" placeholder="Категория" class="h-9" />
-                  <Input v-model="vmProduct(p).availability" placeholder="Наличие" class="h-9" />
                 </div>
                 <Textarea v-model="vmProduct(p).description" rows="2" placeholder="Описание товара…" class="min-h-0 text-[14px]" />
                 <div class="flex items-center gap-2">
@@ -521,7 +520,7 @@ async function discardAll() {
                   <Input v-model="contactForm.instagram" placeholder="Instagram" class="h-9" />
                   <Input v-model="contactForm.working_hours" placeholder="График работы" class="h-9" />
                   <Input v-model="contactForm.address" placeholder="Адрес" class="h-9 sm:col-span-2" />
-                  <Textarea v-model="contactForm.legal" rows="2" placeholder="Юридические реквизиты…" class="min-h-0 text-[14px] sm:col-span-2" />
+                  <Textarea v-model="contactForm.legal_information" rows="2" placeholder="Юридические реквизиты…" class="min-h-0 text-[14px] sm:col-span-2" />
                   <Input v-model="contactForm.callback_time" placeholder="Время обратного звонка" class="h-9 sm:col-span-2" />
                 </div>
                 <div class="flex items-center gap-2">
@@ -540,12 +539,12 @@ async function discardAll() {
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Input v-model="policyForm.delivery_cost" placeholder="Стоимость доставки" class="h-9 font-mono" />
-                  <Input v-model="policyForm.delivery_time" placeholder="Срок доставки" class="h-9 font-mono" />
+                  <Input v-model="policyForm.delivery_in_days" placeholder="Срок доставки" class="h-9 font-mono" />
                   <Input v-model="policyForm.free_delivery_from" placeholder="Бесплатная доставка от" class="h-9 font-mono" />
                   <Input v-model="policyForm.min_order" placeholder="Минимальный заказ" class="h-9 font-mono" />
                   <Input v-model="policyForm.prepayment" placeholder="Предоплата" class="h-9" />
                   <Input v-model="policyForm.installment" placeholder="Рассрочка" class="h-9" />
-                  <Input v-model="policyForm.return_period" placeholder="Срок возврата" class="h-9 font-mono" />
+                  <Input v-model="policyForm.return_period_in_days" placeholder="Срок возврата" class="h-9 font-mono" />
                   <Input v-model="policyForm.warranty" placeholder="Гарантия" class="h-9" />
                 </div>
                 <div class="flex items-center gap-2">

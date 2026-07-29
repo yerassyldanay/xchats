@@ -103,14 +103,17 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category, availability
+	// availability is a dead legacy column (plan/database-schema.md: not part
+	// of the target) — no longer read; domain.Product.Availability stays
+	// permanently empty for a DB-backed snapshot.
+	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for prows.Next() {
 		var p domain.Product
-		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category, &p.Availability); err != nil {
+		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category); err != nil {
 			prows.Close()
 			return err
 		}
@@ -121,7 +124,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	crows, err := s.pool.Query(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time,
+	crows, err := s.pool.Query(ctx, `SELECT lang, whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram
 		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
@@ -129,11 +132,13 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 	}
 	for crows.Next() {
 		var c domain.Contact
-		if err := crows.Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime,
+		var legalInfo *string
+		if err := crows.Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram); err != nil {
 			crows.Close()
 			return err
 		}
+		c.Legal = strOrEmpty(legalInfo)
 		snap.Contacts = append(snap.Contacts, c)
 	}
 	crows.Close()
@@ -141,19 +146,22 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	polrows, err := s.pool.Query(ctx, `SELECT lang, delivery_cost, delivery_time, free_delivery_from, min_order,
-		prepayment, installment, return_period, warranty
+	polrows, err := s.pool.Query(ctx, `SELECT lang, delivery_cost, delivery_in_days, free_delivery_from, min_order,
+		prepayment, installment, return_period_in_days, warranty
 		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for polrows.Next() {
 		var p domain.Policy
-		if err := polrows.Scan(&p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.FreeDeliveryFrom, &p.MinOrder,
-			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty); err != nil {
+		var deliveryInDays, returnPeriodInDays *string
+		if err := polrows.Scan(&p.Lang, &p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
+			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty); err != nil {
 			polrows.Close()
 			return err
 		}
+		p.DeliveryTime = strOrEmpty(deliveryInDays)
+		p.ReturnPeriod = strOrEmpty(returnPeriodInDays)
 		snap.Policies = append(snap.Policies, p)
 	}
 	polrows.Close()
@@ -270,16 +278,21 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t domain.T
 // with no opinion on stock (legacy brain-seed/Approve materialize paths)
 // leaves it at its column default on insert and PRESERVES the existing value
 // on update, instead of silently resetting it — only the /kb/* live-write path
-// (PutLiveProduct) ever passes a non-nil value.
+// (PutLiveProduct) ever passes a non-nil value. availability is a dead legacy
+// column (plan/database-schema.md: not part of the target) and is no longer
+// written — p.Availability is ignored. sales_status is likewise untouched
+// here: no caller of this function has an opinion on it yet (no live-write
+// payload exposes it), so it stays at whatever migration 0011 backfilled
+// (its schema DEFAULT 'active' otherwise).
 func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Product, inStock *bool) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_products
-		(organization_id, ref, lang, name, price, description, category, availability, in_stock)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,true))
+		(organization_id, ref, lang, name, price, description, category, in_stock)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,true))
 		ON CONFLICT (organization_id, ref, lang) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
-			category=EXCLUDED.category, availability=EXCLUDED.availability,
-			in_stock=COALESCE($9, xchats.ai_products.in_stock), updated_at=now()`,
-		orgID, p.Ref, orDefault(p.Lang, "ru"), p.Name, p.Price, p.Description, p.Category, p.Availability, inStock); err != nil {
+			category=EXCLUDED.category,
+			in_stock=COALESCE($8, xchats.ai_products.in_stock), updated_at=now()`,
+		orgID, p.Ref, orDefault(p.Lang, "ru"), p.Name, p.Price, p.Description, p.Category, inStock); err != nil {
 		return fmt.Errorf("insert product %s/%s: %w", p.Ref, p.Lang, err)
 	}
 	return nil
@@ -287,12 +300,12 @@ func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.
 
 func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c domain.Contact) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_contacts
-		(organization_id, slug, lang, whatsapp, email, address, legal, callback_time,
+		(organization_id, slug, lang, whatsapp, email, address, legal_information, callback_time,
 		 working_hours, phone, website, instagram)
 		VALUES ($1,'support',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (organization_id, lang) DO UPDATE SET
 			whatsapp=EXCLUDED.whatsapp, email=EXCLUDED.email, address=EXCLUDED.address,
-			legal=EXCLUDED.legal, callback_time=EXCLUDED.callback_time,
+			legal_information=EXCLUDED.legal_information, callback_time=EXCLUDED.callback_time,
 			working_hours=EXCLUDED.working_hours, phone=EXCLUDED.phone,
 			website=EXCLUDED.website, instagram=EXCLUDED.instagram, updated_at=now()`,
 		orgID, orDefault(c.Lang, "*"), c.WhatsApp, c.Email, c.Address, c.Legal, c.CallbackTime,
@@ -309,14 +322,14 @@ func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c domain.
 // "leave unchanged" case left to express at this layer.
 func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Policy, outsideZonesNote string) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_policies
-		(organization_id, slug, lang, delivery_cost, delivery_time, free_delivery_from, min_order,
-		 prepayment, installment, return_period, warranty, outside_zones_note)
+		(organization_id, slug, lang, delivery_cost, delivery_in_days, free_delivery_from, min_order,
+		 prepayment, installment, return_period_in_days, warranty, outside_zones_note)
 		VALUES ($1,'main',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (organization_id, lang) DO UPDATE SET
-			delivery_cost=EXCLUDED.delivery_cost, delivery_time=EXCLUDED.delivery_time,
+			delivery_cost=EXCLUDED.delivery_cost, delivery_in_days=EXCLUDED.delivery_in_days,
 			free_delivery_from=EXCLUDED.free_delivery_from, min_order=EXCLUDED.min_order,
 			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
-			return_period=EXCLUDED.return_period, warranty=EXCLUDED.warranty,
+			return_period_in_days=EXCLUDED.return_period_in_days, warranty=EXCLUDED.warranty,
 			outside_zones_note=EXCLUDED.outside_zones_note, updated_at=now()`,
 		orgID, orDefault(p.Lang, "*"), p.DeliveryCost, p.DeliveryTime, p.FreeDeliveryFrom, p.MinOrder,
 		p.Prepayment, p.Installment, p.ReturnPeriod, p.Warranty, outsideZonesNote); err != nil {
@@ -412,6 +425,16 @@ func (s *Store) pendingRequestCount(ctx context.Context, orgID uuid.UUID) (int, 
 	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM xchats.kbd_requests
 		WHERE organization_id = $1 AND state = 'pending'`, orgID).Scan(&n)
 	return n, err
+}
+
+// strOrEmpty converts a nullable text column (legal_information,
+// delivery_in_days, return_period_in_days — added nullable by migration
+// 0011) into the plain string every row/patch type here uses, "" for NULL.
+func strOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func orDefaultInt(v, def int) int {
