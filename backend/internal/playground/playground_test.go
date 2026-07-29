@@ -105,7 +105,7 @@ func TestBuildFromMaterialsToApprove(t *testing.T) {
 
 	// 4. Approve the whole draft → the gate passes and every pending entry
 	// materializes into the live tables (topic + the typed tariff row).
-	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}, nil); err != nil {
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestExtractURL_Ready(t *testing.T) {
 }
 
 // With no vision client, a media drop can't auto-extract → needs_human + a
-// describe_media popup (the human fallback IS the pipeline).
+// describe_file popup (the human fallback IS the pipeline).
 func TestExtractMedia_FallsBackToDescribePopup(t *testing.T) {
 	kb, orgID := newKB(t)
 	ctx := context.Background()
@@ -177,22 +177,22 @@ func TestExtractMedia_FallsBackToDescribePopup(t *testing.T) {
 	view, _ := kb.Draft(ctx, orgID)
 	hasDescribe := false
 	for _, r := range view.Requests {
-		if r.ReqType == "describe_media" && r.State == "pending" {
+		if r.ReqType == "describe_file" && r.State == "pending" {
 			hasDescribe = true
 		}
 	}
 	if !hasDescribe {
-		t.Fatalf("expected a pending describe_media popup, got %+v", view.Requests)
+		t.Fatalf("expected a pending describe_file popup, got %+v", view.Requests)
 	}
 }
 
 // The counterpart to TestExtractMedia_FallsBackToDescribePopup: an operator
 // description staged WITH the upload substitutes for auto-extraction — the
-// material is born ready immediately (no extraction job needed, no popup), and
-// a subsequent builder turn proposes the asset already described (a media
-// material with no text sibling contributes no topic body — see RuleSynthesizer
-// — so only the asset half of the plan is exercised here).
-func TestCreateMaterial_WithDescription_SkipsDescribePopup(t *testing.T) {
+// material is born ready immediately (no extraction job needed, no popup).
+// The builder folds that description into the SAME topic-body prose as any
+// other ready material (there is no generic asset section any more — see
+// Plan's doc comment in builder.go) and raises no describe_file popup for it.
+func TestCreateMaterial_WithDescription_BornReadyNoPopup(t *testing.T) {
 	kb, orgID := newKB(t)
 	ctx := context.Background()
 
@@ -215,11 +215,8 @@ func TestCreateMaterial_WithDescription_SkipsDescribePopup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if res.AssetsAttached != 1 {
-		t.Fatalf("want 1 asset attached, got %d", res.AssetsAttached)
-	}
 	if res.Describes != 0 {
-		t.Fatalf("a described material must not raise describe_media, got %d", res.Describes)
+		t.Fatalf("a described material must not raise describe_file, got %d", res.Describes)
 	}
 
 	view, err := kb.Draft(ctx, orgID)
@@ -227,17 +224,17 @@ func TestCreateMaterial_WithDescription_SkipsDescribePopup(t *testing.T) {
 		t.Fatalf("draft: %v", err)
 	}
 	for _, r := range view.Requests {
-		if r.ReqType == "describe_media" {
-			t.Fatalf("a described material must not raise describe_media, got %+v", r)
+		if r.ReqType == "describe_file" {
+			t.Fatalf("a described material must not raise describe_file, got %+v", r)
 		}
 	}
-	foundDescribedAsset := false
-	for _, a := range view.Assets {
-		if a.Description == "Скриншот тарифов: Базовый 9900, Стандарт 19900." {
-			foundDescribedAsset = true
+	foundInTopicBody := false
+	for _, top := range view.Topics {
+		if strings.Contains(top.BodyMD, "Базовый 9900") {
+			foundInTopicBody = true
 		}
 	}
-	if !foundDescribedAsset {
-		t.Fatalf("expected the builder to propose the asset already described, got %+v", view.Assets)
+	if !foundInTopicBody {
+		t.Fatalf("expected the material's description to land in a topic body, got %+v", view.Topics)
 	}
 }

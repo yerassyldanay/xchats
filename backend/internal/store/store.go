@@ -137,15 +137,6 @@ type Draft struct {
 	EscalationReason string
 	DraftState       string
 	CreatedAt        time.Time
-	Assets           []DraftAsset
-}
-
-type DraftAsset struct {
-	ID        uuid.UUID
-	AssetRef  string
-	MediaKind string
-	MediaURL  string
-	Ordinal   int
 }
 
 // ---------------------------------------------------------------------------

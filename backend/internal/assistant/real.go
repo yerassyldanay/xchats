@@ -31,8 +31,8 @@ const windowSize = 15
 
 // RealDrafter is the KB-grounded Drafter: it builds the prompt from the embedded
 // snapshot + the chat's recent window, calls the LLM, post-processes the result,
-// and returns ONE reply option (text + resolved catalog media). It satisfies
-// assistant.Drafter, so it drops in wherever the Stub was used.
+// and returns ONE reply option. It satisfies assistant.Drafter, so it drops in
+// wherever the Stub was used.
 type RealDrafter struct {
 	store   windowReader
 	llm     brainDrafter
@@ -137,15 +137,11 @@ func toDomainMsg(m store.Message) domain.Message {
 
 func optionFromDraft(d domain.Draft) Option {
 	conf := d.Confidence
-	opt := Option{
+	return Option{
 		Ordinal:    1,
 		Text:       d.ReplyText,
 		Confidence: &conf,
 		Escalate:   d.Escalate,
 		Reason:     d.EscalationReason,
 	}
-	for _, m := range d.Media {
-		opt.Media = append(opt.Media, Media{Ref: m.Ref, Kind: m.Kind, URL: m.URL})
-	}
-	return opt
 }

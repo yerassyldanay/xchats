@@ -71,28 +71,20 @@ type Message struct {
 	Timestamp          *string `json:"timestamp"`
 }
 
-// DraftMedia is a suggested attachment on a draft option.
-type DraftMedia struct {
-	AssetID   string `json:"asset_id"`
-	MediaKind string `json:"media_kind"`
-	URL       string `json:"url"`
-}
-
 // AiDraft is one suggested option.
 type AiDraft struct {
-	ID               string       `json:"id"`
-	ChatID           string       `json:"chat_id"`
-	TriggerMessageID *string      `json:"trigger_message_id"`
-	Ordinal          int          `json:"ordinal"`
-	DraftText        string       `json:"draft_text"`
-	ReplyLanguage    string       `json:"reply_language"`
-	Media            []DraftMedia `json:"media"`
-	ContextStatus    string       `json:"context_status"`
-	Confidence       *float64     `json:"confidence"`
-	Escalate         bool         `json:"escalate"`
-	EscalationReason string       `json:"escalation_reason"`
-	Status           string       `json:"status"`
-	CreatedAt        string       `json:"created_at"`
+	ID               string   `json:"id"`
+	ChatID           string   `json:"chat_id"`
+	TriggerMessageID *string  `json:"trigger_message_id"`
+	Ordinal          int      `json:"ordinal"`
+	DraftText        string   `json:"draft_text"`
+	ReplyLanguage    string   `json:"reply_language"`
+	ContextStatus    string   `json:"context_status"`
+	Confidence       *float64 `json:"confidence"`
+	Escalate         bool     `json:"escalate"`
+	EscalationReason string   `json:"escalation_reason"`
+	Status           string   `json:"status"`
+	CreatedAt        string   `json:"created_at"`
 }
 
 // WhatsAppAccount is the API shape for one connected number (mirrors an Evolution
@@ -211,12 +203,8 @@ func MapMessage(m store.Message) Message {
 	}
 }
 
-// MapDraft maps a store.Draft (with assets).
+// MapDraft maps a store.Draft.
 func MapDraft(d store.Draft) AiDraft {
-	media := make([]DraftMedia, 0, len(d.Assets))
-	for _, a := range d.Assets {
-		media = append(media, DraftMedia{AssetID: a.AssetRef, MediaKind: a.MediaKind, URL: a.MediaURL})
-	}
 	return AiDraft{
 		ID:               d.ID.String(),
 		ChatID:           d.ChatID.String(),
@@ -224,7 +212,6 @@ func MapDraft(d store.Draft) AiDraft {
 		Ordinal:          d.OptionOrdinal,
 		DraftText:        d.DraftText,
 		ReplyLanguage:    d.ReplyLanguage,
-		Media:            media,
 		ContextStatus:    d.ContextState,
 		Confidence:       d.Confidence,
 		Escalate:         d.Escalate,

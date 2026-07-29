@@ -107,7 +107,7 @@ func (s *Server) handleApprove(c *gin.Context) {
 	if req.EditedText != nil {
 		text = *req.EditedText
 	}
-	mediaIDs := defaultMediaIDs(claim)
+	var mediaIDs []string
 	if req.MediaIDs != nil {
 		mediaIDs = *req.MediaIDs
 	}
@@ -144,16 +144,6 @@ func (s *Server) classifyLostClaim(c *gin.Context, draftID uuid.UUID) {
 	default: // sent / rejected
 		fail(c, http.StatusConflict, ErrConflict, "draft already approved")
 	}
-}
-
-func defaultMediaIDs(d store.Draft) []string {
-	var ids []string
-	for _, a := range d.Assets {
-		if a.AssetRef != "" {
-			ids = append(ids, a.AssetRef)
-		}
-	}
-	return ids
 }
 
 func mapDrafts(ds []store.Draft) []dto.AiDraft {

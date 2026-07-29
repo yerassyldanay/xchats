@@ -42,18 +42,6 @@ type DraftTopic struct {
 	Provenance string `json:"provenance,omitempty"`
 }
 
-type DraftAsset struct {
-	Ref         string `json:"ref"`
-	Kind        string `json:"kind"`
-	OwnerKind   string `json:"owner_kind"`
-	OwnerRef    string `json:"owner_ref"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	URL         string `json:"url"`
-	Lang        string `json:"lang"`
-	Provenance  string `json:"provenance,omitempty"`
-}
-
 type DraftTariff struct {
 	Ref           string `json:"ref"`
 	Lang          string `json:"lang"`
@@ -124,7 +112,6 @@ type DraftDelete struct {
 type DraftBlob struct {
 	Config   DraftConfigPatch `json:"config"`
 	Topics   []DraftTopic     `json:"topics"`
-	Assets   []DraftAsset     `json:"assets"`
 	Tariffs  []DraftTariff    `json:"tariffs"`
 	Products []DraftProduct   `json:"products"`
 	Contacts []DraftContact   `json:"contacts"`
@@ -152,26 +139,6 @@ func (b *DraftBlob) removeTopic(slug string) {
 		}
 	}
 	b.Topics = out
-}
-
-func (b *DraftBlob) upsertAsset(a DraftAsset) {
-	for i := range b.Assets {
-		if b.Assets[i].Ref == a.Ref {
-			b.Assets[i] = a
-			return
-		}
-	}
-	b.Assets = append(b.Assets, a)
-}
-
-func (b *DraftBlob) removeAsset(ref string) {
-	out := b.Assets[:0]
-	for _, a := range b.Assets {
-		if a.Ref != ref {
-			out = append(out, a)
-		}
-	}
-	b.Assets = out
 }
 
 func (b *DraftBlob) upsertTariff(t DraftTariff) {
@@ -383,10 +350,10 @@ type DraftConfig struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// TopicRow / AssetRow / TariffRow / ProductRow / ContactRow are editor-facing KB
-// rows. ID is the entity's natural key (slug / ref / ref / ref / lang) — blob
-// entries carry no DB row id. UpdatedAt is the live row's own timestamp for a
-// live entity, or the whole draft blob's timestamp for a pending one.
+// TopicRow / TariffRow / ProductRow / ContactRow are editor-facing KB rows. ID
+// is the entity's natural key (slug / ref / ref / lang) — blob entries carry
+// no DB row id. UpdatedAt is the live row's own timestamp for a live entity,
+// or the whole draft blob's timestamp for a pending one.
 type TopicRow struct {
 	ID         string    `json:"id"`
 	Slug       string    `json:"slug"`
@@ -396,21 +363,6 @@ type TopicRow struct {
 	Draft      bool      `json:"draft"`
 	Provenance string    `json:"provenance,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at"`
-}
-
-type AssetRow struct {
-	ID          string    `json:"id"`
-	Ref         string    `json:"ref"`
-	Kind        string    `json:"kind"`
-	OwnerKind   string    `json:"owner_kind"`
-	OwnerRef    string    `json:"owner_ref"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	URL         string    `json:"url"`
-	Lang        string    `json:"lang"`
-	Draft       bool      `json:"draft"`
-	Provenance  string    `json:"provenance,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type TariffRow struct {
@@ -488,7 +440,6 @@ type PolicyRow struct {
 type DraftView struct {
 	Config   DraftConfig  `json:"config"`
 	Topics   []TopicRow   `json:"topics"`
-	Assets   []AssetRow   `json:"assets"`
 	Tariffs  []TariffRow  `json:"tariffs"`
 	Products []ProductRow `json:"products"`
 	Contacts []ContactRow `json:"contacts"`
@@ -542,12 +493,6 @@ func (s *Store) LiveView(ctx context.Context, orgID uuid.UUID) (*DraftView, erro
 	}
 	v.Materials = []Material{}
 	v.Requests = []Request{}
-	// ai_assets is legacy (plan/database-schema.md: "not part of the target");
-	// the live editor's «Медиа-ресурсы» tab was removed in favor of the
-	// kbd_materials-backed «Файлы (материалы)» tab, so this view no longer
-	// surfaces it. Playground's draft/approve path still reads/writes
-	// ai_assets via mergedView/Draft — untouched here.
-	v.Assets = []AssetRow{}
 	return v, nil
 }
 
@@ -617,39 +562,6 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		}
 	}
 	v.Topics = filterTopics(v.Topics, deleted)
-
-	// assets
-	assetIdx := map[string]int{}
-	arows, err := s.pool.Query(ctx, `SELECT ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang, updated_at
-		FROM xchats.ai_assets WHERE organization_id = $1 ORDER BY created_at`, orgID)
-	if err != nil {
-		return nil, err
-	}
-	for arows.Next() {
-		var a AssetRow
-		if err := arows.Scan(&a.Ref, &a.Kind, &a.OwnerKind, &a.OwnerRef, &a.Title, &a.Description, &a.URL, &a.Lang, &a.UpdatedAt); err != nil {
-			arows.Close()
-			return nil, err
-		}
-		a.ID = a.Ref
-		v.Assets = append(v.Assets, a)
-		assetIdx[a.Ref] = len(v.Assets) - 1
-	}
-	arows.Close()
-	if err := arows.Err(); err != nil {
-		return nil, err
-	}
-	for _, ba := range blob.Assets {
-		row := AssetRow{ID: ba.Ref, Ref: ba.Ref, Kind: ba.Kind, OwnerKind: ba.OwnerKind, OwnerRef: ba.OwnerRef,
-			Title: ba.Title, Description: ba.Description, URL: ba.URL, Lang: ba.Lang, Draft: true, Provenance: ba.Provenance, UpdatedAt: updatedAt}
-		if i, ok := assetIdx[ba.Ref]; ok {
-			v.Assets[i] = row
-		} else {
-			v.Assets = append(v.Assets, row)
-			assetIdx[ba.Ref] = len(v.Assets) - 1
-		}
-	}
-	v.Assets = filterAssets(v.Assets, deleted)
 
 	// tariffs
 	tariffIdx := map[string]int{}
@@ -840,9 +752,6 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	if v.Topics == nil {
 		v.Topics = []TopicRow{}
 	}
-	if v.Assets == nil {
-		v.Assets = []AssetRow{}
-	}
 	if v.Tariffs == nil {
 		v.Tariffs = []TariffRow{}
 	}
@@ -863,16 +772,6 @@ func filterTopics(in []TopicRow, deleted map[string]bool) []TopicRow {
 	for _, t := range in {
 		if !deleted["topic:"+t.Slug] {
 			out = append(out, t)
-		}
-	}
-	return out
-}
-
-func filterAssets(in []AssetRow, deleted map[string]bool) []AssetRow {
-	out := in[:0]
-	for _, a := range in {
-		if !deleted["asset:"+a.Ref] {
-			out = append(out, a)
 		}
 	}
 	return out
@@ -937,81 +836,6 @@ func (s *Store) DeleteTopic(ctx context.Context, orgID uuid.UUID, slug string) e
 	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
 		b.removeTopic(slug)
 		b.addDelete("topic", slug)
-		return nil
-	})
-}
-
-// AssetInput is an upsert payload for a draft asset.
-type AssetInput struct {
-	Ref, Kind, OwnerKind, OwnerRef, Title, Description, URL, Lang string
-	Provenance                                                    string
-}
-
-// UpsertAsset stages an asset create/update in the draft blob, by ref.
-func (s *Store) UpsertAsset(ctx context.Context, orgID uuid.UUID, in AssetInput) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		b.upsertAsset(DraftAsset{
-			Ref: in.Ref, Kind: orDefault(in.Kind, "image"), OwnerKind: in.OwnerKind, OwnerRef: in.OwnerRef,
-			Title: in.Title, Description: in.Description, URL: in.URL, Lang: orDefault(in.Lang, "ru"),
-			Provenance: orDefault(in.Provenance, "{}"),
-		})
-		return nil
-	})
-}
-
-// AssetPatch edits an asset's description and/or reassigns its owner (nil = leave).
-type AssetPatch struct {
-	Description *string
-	OwnerKind   *string
-	OwnerRef    *string
-}
-
-// PatchAsset stages an edit to an existing asset by ref — starting from its
-// current merged row (draft entry if pending, else the live row) so a partial
-// patch never blanks the untouched fields.
-func (s *Store) PatchAsset(ctx context.Context, orgID uuid.UUID, ref string, p AssetPatch) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		cur, err := s.currentAsset(ctx, orgID, ref, b)
-		if err != nil {
-			return err
-		}
-		if p.Description != nil {
-			cur.Description = *p.Description
-		}
-		if p.OwnerKind != nil {
-			cur.OwnerKind = *p.OwnerKind
-		}
-		if p.OwnerRef != nil {
-			cur.OwnerRef = *p.OwnerRef
-		}
-		b.upsertAsset(cur)
-		return nil
-	})
-}
-
-// currentAsset resolves the entity's merged current shape: the pending blob
-// entry if one exists, else the live row, else a blank scaffold (new asset).
-func (s *Store) currentAsset(ctx context.Context, orgID uuid.UUID, ref string, b *DraftBlob) (DraftAsset, error) {
-	for _, a := range b.Assets {
-		if a.Ref == ref {
-			return a, nil
-		}
-	}
-	var a DraftAsset
-	err := s.pool.QueryRow(ctx, `SELECT ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang
-		FROM xchats.ai_assets WHERE organization_id = $1 AND ref = $2`, orgID, ref).
-		Scan(&a.Ref, &a.Kind, &a.OwnerKind, &a.OwnerRef, &a.Title, &a.Description, &a.URL, &a.Lang)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return DraftAsset{Ref: ref, Kind: "image", Lang: "ru"}, nil
-	}
-	return a, err
-}
-
-// DeleteAsset stages an asset removal by ref.
-func (s *Store) DeleteAsset(ctx context.Context, orgID uuid.UUID, ref string) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		b.removeAsset(ref)
-		b.addDelete("asset", ref)
 		return nil
 	})
 }
@@ -1416,13 +1240,12 @@ func orDefault(v, def string) string {
 // ApproveSelector picks what to materialize: a zero-value selector (Kind=="")
 // selects the WHOLE draft; a non-empty kind+key picks one entity.
 type ApproveSelector struct {
-	Kind string // "" | "topics" | "assets" | "tariffs" | "products" | "contacts" | "policies"
-	Key  string // slug | ref | ref | ref | lang | lang
+	Kind string // "" | "topics" | "tariffs" | "products" | "contacts" | "policies"
+	Key  string // slug | ref | ref | lang | lang
 }
 
 type approveSet struct {
 	topics   []DraftTopic
-	assets   []DraftAsset
 	tariffs  []DraftTariff
 	products []DraftProduct
 	contacts []DraftContact
@@ -1431,15 +1254,14 @@ type approveSet struct {
 }
 
 func (a approveSet) empty() bool {
-	return len(a.topics)+len(a.assets)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.deletes) == 0
+	return len(a.topics)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.deletes) == 0
 }
 
 // Approve validates the resulting live set against the deterministic gate, then
 // materializes the selection into the live typed tables on their natural key,
 // applies matching deletes, removes the applied entries from the blob, and
-// appends an audit-log row. blobExists reports whether an asset's bytes are
-// present (nil skips the dangling-blob check).
-func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelector, blobExists func(ref string) bool) error {
+// appends an audit-log row.
+func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelector) error {
 	blob, _, _, err := s.readDraftBlob(ctx, orgID)
 	if err != nil {
 		return err
@@ -1453,7 +1275,7 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 	if err != nil {
 		return err
 	}
-	resulting := mergeForGate(live, set.topics, set.assets, set.deletes)
+	resulting := mergeForGate(live, set.topics, set.deletes)
 	// Pending requests block the WHOLE-draft approve (sel.Kind == "") — but an
 	// unrelated unanswered popup must not hold a single row's approval hostage,
 	// so a per-entity approve skips that reason (content checks below still run).
@@ -1463,7 +1285,7 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 			return err
 		}
 	}
-	if reasons := gate(resulting, pending, blobExists); len(reasons) > 0 {
+	if reasons := gate(resulting, pending); len(reasons) > 0 {
 		return &GateError{Reasons: reasons}
 	}
 
@@ -1481,18 +1303,6 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 				lang=EXCLUDED.lang, title=EXCLUDED.title,
 				body_md=EXCLUDED.body_md, updated_at=now()`,
 			orgID, t.Slug, orDefault(t.Lang, "ru"), t.Title, t.BodyMD); err != nil {
-			return err
-		}
-	}
-	for _, a := range set.assets {
-		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_assets
-			(organization_id, ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-			ON CONFLICT (organization_id, ref) DO UPDATE SET
-				asset_kind=EXCLUDED.asset_kind, owner_kind=EXCLUDED.owner_kind, owner_ref=EXCLUDED.owner_ref,
-				title=EXCLUDED.title, description=EXCLUDED.description, asset_url=EXCLUDED.asset_url,
-				lang=EXCLUDED.lang, updated_at=now()`,
-			orgID, a.Ref, orDefault(a.Kind, "image"), a.OwnerKind, a.OwnerRef, a.Title, a.Description, a.URL, orDefault(a.Lang, "ru")); err != nil {
 			return err
 		}
 	}
@@ -1564,9 +1374,6 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 		for _, t := range set.topics {
 			b.removeTopic(t.Slug)
 		}
-		for _, a := range set.assets {
-			b.removeAsset(a.Ref)
-		}
 		for _, t := range set.tariffs {
 			b.removeTariff(t.Ref)
 		}
@@ -1595,8 +1402,6 @@ func applyDelete(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, d DraftDelete)
 	switch d.Kind {
 	case "topic":
 		q = `DELETE FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`
-	case "asset":
-		q = `DELETE FROM xchats.ai_assets WHERE organization_id=$1 AND ref=$2`
 	case "tariff":
 		q = `DELETE FROM xchats.ai_tariffs WHERE organization_id=$1 AND ref=$2`
 	case "product":
@@ -1616,15 +1421,15 @@ func approveNote(sel ApproveSelector, set approveSet) string {
 	if sel.Kind != "" {
 		return fmt.Sprintf("approved %s %s", strings.TrimSuffix(sel.Kind, "s"), sel.Key)
 	}
-	return fmt.Sprintf("approved %d topic(s), %d asset(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d deletion(s)",
-		len(set.topics), len(set.assets), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.deletes))
+	return fmt.Sprintf("approved %d topic(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d deletion(s)",
+		len(set.topics), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.deletes))
 }
 
 // selectApproved picks the blob entries an ApproveSelector targets. Deletes are
-// keyed by entity kind (singular): topic|asset|tariff|product|contact|policy.
+// keyed by entity kind (singular): topic|tariff|product|contact|policy.
 func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	if sel.Kind == "" {
-		return approveSet{b.Topics, b.Assets, b.Tariffs, b.Products, b.Contacts, b.Policies, b.Deletes}
+		return approveSet{b.Topics, b.Tariffs, b.Products, b.Contacts, b.Policies, b.Deletes}
 	}
 	var set approveSet
 	singular := strings.TrimSuffix(sel.Kind, "s")
@@ -1638,12 +1443,6 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 		for _, t := range b.Topics {
 			if t.Slug == sel.Key {
 				set.topics = append(set.topics, t)
-			}
-		}
-	case "assets":
-		for _, a := range b.Assets {
-			if a.Ref == sel.Key {
-				set.assets = append(set.assets, a)
 			}
 		}
 	case "tariffs":
@@ -1674,11 +1473,11 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	return set
 }
 
-// mergeForGate builds the resulting live snapshot the gate validates: live topics
-// + assets with the approved entries applied on top, matching deletes removed.
+// mergeForGate builds the resulting live snapshot the gate validates: live
+// topics with the approved entries applied on top, matching deletes removed.
 // Facts are typed columns validated at reply-render time (fail closed), so the
 // gate — and this merge — do not touch them.
-func mergeForGate(live *domain.Snapshot, topics []DraftTopic, assets []DraftAsset, deletes []DraftDelete) *domain.Snapshot {
+func mergeForGate(live *domain.Snapshot, topics []DraftTopic, deletes []DraftDelete) *domain.Snapshot {
 	out := &domain.Snapshot{Config: live.Config}
 	del := map[string]bool{}
 	for _, d := range deletes {
@@ -1699,26 +1498,6 @@ func mergeForGate(live *domain.Snapshot, topics []DraftTopic, assets []DraftAsse
 			out.Topics[i] = nt
 		} else {
 			out.Topics = append(out.Topics, nt)
-		}
-	}
-
-	aIdx := map[string]int{}
-	for _, a := range live.Assets {
-		if del["asset:"+a.Ref] {
-			continue
-		}
-		out.Assets = append(out.Assets, a)
-		aIdx[a.Ref] = len(out.Assets) - 1
-	}
-	for _, a := range assets {
-		na := domain.Asset{Ref: a.Ref, Kind: a.Kind, Title: a.Title, Description: a.Description, URL: a.URL, Language: a.Lang}
-		if a.OwnerKind == "" || a.OwnerKind == "topic" {
-			na.TopicSlug = a.OwnerRef
-		}
-		if i, ok := aIdx[a.Ref]; ok {
-			out.Assets[i] = na
-		} else {
-			out.Assets = append(out.Assets, na)
 		}
 	}
 	return out

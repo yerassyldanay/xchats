@@ -94,12 +94,6 @@ func main() {
 	final := brain.PostProcess(raw, snap, slog.Default())
 	fmt.Println("================ FINAL DRAFT (after PostProcess) ======================")
 	fmt.Println("reply:   ", final.ReplyText)
-	for _, m := range final.Media {
-		fmt.Printf("media:    %s (%s) → %s\n", m.Ref, m.Kind, m.URL)
-	}
-	if len(final.Media) == 0 {
-		fmt.Println("media:    (none)")
-	}
 	fmt.Println("escalate:", final.Escalate, "| confidence:", final.Confidence,
-		"| pricing_error:", final.PricingError, "| dropped_refs:", final.DroppedRefs)
+		"| pricing_error:", final.PricingError)
 }

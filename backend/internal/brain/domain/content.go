@@ -29,17 +29,6 @@ type Topic struct {
 	BodyMD   string
 }
 
-// Asset is one ai_assets row — the LLM-facing menu entry the model selects on.
-type Asset struct {
-	Ref         string
-	TopicSlug   string
-	Kind        string
-	URL         string
-	Title       string
-	Description string
-	Language    string
-}
-
 // --- Facts lane: typed entities, quoted as {{table.slug.field}} tokens --------
 //
 // Every exact fact (price, limit, fee, phone, e-mail, …) is a CONCRETE COLUMN on
@@ -251,7 +240,6 @@ func (b FactBook) List() []Fact { return b.entries }
 type Snapshot struct {
 	Config   AssistantConfig
 	Topics   []Topic
-	Assets   []Asset
 	Tariffs  []Tariff
 	Products []Product
 	Contacts []Contact

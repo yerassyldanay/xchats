@@ -159,7 +159,7 @@ type resolveReq struct {
 
 // handlePlaygroundResolveRequest applies the operator's popup answer to the draft,
 // then marks the request resolved. confirm_value → upsert the (confirmed) value;
-// describe_media → fill an asset description or a material's text.
+// describe_file → fill a material's text.
 func (s *Server) handlePlaygroundResolveRequest(c *gin.Context) {
 	orgID, proceed := s.pgWrite(c)
 	if !proceed {
@@ -215,11 +215,8 @@ func (s *Server) applyResolution(c *gin.Context, orgID uuid.UUID, r kbstore.Requ
 			return errString2("table, slug, field and value required")
 		}
 		return s.upsertFactField(c, orgID, table, slug, field, orDefaultStr(lang, "ru"), value)
-	case "describe_media":
+	case "describe_file":
 		desc, _ := answer["description"].(string)
-		if ref, _ := target["asset_ref"].(string); ref != "" {
-			return s.kb.PatchAsset(ctx(c), orgID, ref, kbstore.AssetPatch{Description: &desc})
-		}
 		if mid, _ := target["material_id"].(string); mid != "" {
 			id, perr := uuid.Parse(mid)
 			if perr != nil {

@@ -75,18 +75,12 @@ export interface EvolutionInstance {
   managed: boolean
   stale: boolean
 }
-export interface DraftMedia {
-  asset_id: string
-  media_kind: string
-  url: string
-}
 export interface AiDraft {
   id: string
   chat_id: string
   trigger_message_id: string | null
   ordinal: number
   draft_text: string
-  media: DraftMedia[]
   context_status: string
   confidence: number | null
   escalate: boolean
@@ -117,20 +111,6 @@ export interface TopicRow {
   lang: string
   title: string
   body_md: string
-  draft: boolean
-  provenance?: string
-  updated_at: string
-}
-export interface AssetRow {
-  id: string // = ref
-  ref: string
-  kind: string
-  owner_kind: string // 'topic' | 'product' | 'tariff' | '' (unattached)
-  owner_ref: string
-  title: string
-  description: string
-  url: string
-  lang: string
   draft: boolean
   provenance?: string
   updated_at: string
@@ -237,10 +217,10 @@ export interface KbMaterial {
 export interface KbRequest {
   id: string
   material_id: string | null
-  req_type: string // confirm_fact | describe_media | comment
+  req_type: string // confirm_fact | describe_file | comment
   prompt: string
   context: string // JSON string, e.g. {"suggested":"5000 ₸"}
-  target: string // JSON string, e.g. {table,slug,field,lang} | {asset_ref} | {material_id}
+  target: string // JSON string, e.g. {table,slug,field,lang} | {material_id}
   state: string // pending | resolved | dismissed
   resolution: string | null
   created_at: string
@@ -249,7 +229,6 @@ export interface KbRequest {
 export interface DraftView {
   config: DraftConfig
   topics: TopicRow[]
-  assets: AssetRow[]
   tariffs: TariffRow[]
   products: ProductRow[]
   contacts: ContactRow[]

@@ -235,7 +235,7 @@ func (h *harness) uploadMaterial(filename, ct, description string, data []byte) 
 }
 
 // A file uploaded WITH a description over HTTP is born ready immediately (no
-// extraction job, no describe_media popup) — the description substitutes for
+// extraction job, no describe_file popup) — the description substitutes for
 // auto-extraction (see kbstore.MaterialInput.Description).
 func TestPlayground_UploadMaterial_WithDescription_BornReady(t *testing.T) {
 	h := newHarness(t)

@@ -105,7 +105,7 @@ func TestRoundTrip_UnitBearingValue(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert tariff: %v", err)
 	}
-	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}, nil); err != nil {
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	loaded, err := kb.LoadLive(ctx, orgID)
@@ -164,7 +164,7 @@ func TestDraftEditAndApprove(t *testing.T) {
 		t.Fatal("new_topic missing from the merged draft view")
 	}
 
-	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "topics", Key: "new_topic"}, nil); err != nil {
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "topics", Key: "new_topic"}); err != nil {
 		t.Fatalf("approve entity: %v", err)
 	}
 	view, err = kb.Draft(ctx, orgID)
@@ -203,47 +203,54 @@ func TestDraft_CollectionsNeverNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("draft: %v", err)
 	}
-	if view.Topics == nil || view.Assets == nil || view.Tariffs == nil ||
+	if view.Topics == nil || view.Tariffs == nil ||
 		view.Products == nil || view.Contacts == nil || view.Policies == nil ||
 		view.Materials == nil || view.Requests == nil {
-		t.Fatalf("a collection is nil: topics=%v assets=%v tariffs=%v products=%v contacts=%v policies=%v materials=%v requests=%v",
-			view.Topics == nil, view.Assets == nil, view.Tariffs == nil, view.Products == nil,
+		t.Fatalf("a collection is nil: topics=%v tariffs=%v products=%v contacts=%v policies=%v materials=%v requests=%v",
+			view.Topics == nil, view.Tariffs == nil, view.Products == nil,
 			view.Contacts == nil, view.Policies == nil, view.Materials == nil, view.Requests == nil)
 	}
 	blob, err := json.Marshal(view)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	for _, k := range []string{"topics", "assets", "tariffs", "products", "contacts", "policies", "materials", "requests"} {
+	for _, k := range []string{"topics", "tariffs", "products", "contacts", "policies", "materials", "requests"} {
 		if strings.Contains(string(blob), `"`+k+`":null`) {
 			t.Fatalf("collection %q serialized as null (must be []): %s", k, blob)
 		}
 	}
 }
 
-// The deterministic gate blocks approve on an undescribed asset and a topic body
-// that is not pure prose (carries a fact token), listing every reason.
+// The deterministic gate blocks approve on every non-prose topic body it
+// finds, listing every reason — not just the first. Two topics, each
+// violating a different rule (a fact token; a literal currency amount),
+// exercises the gate aggregating across multiple rows via the full DB path
+// (Approve → LoadLive → mergeForGate → gate) — the pure-unit
+// gate_internal_test.go does not go through the DB.
 func TestApproveGateBlocks(t *testing.T) {
 	kb, orgID, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// An asset with no description + a topic whose body carries a fact token
-	// (bodies must be pure prose — 14 D3).
-	if err := kb.UpsertAsset(ctx, orgID, kbstore.AssetInput{Ref: "loose_img", Kind: "image", Description: ""}); err != nil {
-		t.Fatalf("asset: %v", err)
-	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "broken", Lang: "ru", BodyMD: "Цена {{tariff.unknown.price}}"}); err != nil {
+	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+		Slug: "broken_token", Lang: "ru", BodyMD: "Цена {{tariff.unknown.price}}",
+	}); err != nil {
 		t.Fatalf("topic: %v", err)
 	}
-	err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}, nil)
+	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+		Slug: "broken_amount", Lang: "ru", BodyMD: "Доставка стоит 1 500 ₸ по городу.",
+	}); err != nil {
+		t.Fatalf("topic: %v", err)
+	}
+	err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{})
 	var ge *kbstore.GateError
 	if !errors.As(err, &ge) {
 		t.Fatalf("want GateError, got %T: %v", err, err)
 	}
-	if len(ge.Reasons) < 2 {
-		t.Fatalf("want >=2 gate reasons, got %v", ge.Reasons)
+	joined := strings.Join(ge.Reasons, "; ")
+	if !strings.Contains(joined, "pure prose") || !strings.Contains(joined, "literal amount") {
+		t.Fatalf("want both a token reason and a literal-amount reason, got %v", ge.Reasons)
 	}
 }
 
@@ -347,12 +354,12 @@ func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
 		t.Fatalf("upsert topic: %v", err)
 	}
 	// An unrelated pending request — nothing to do with the topic above.
-	if _, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{ReqType: "describe_media", Prompt: "?"}); err != nil {
+	if _, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{ReqType: "describe_file", Prompt: "?"}); err != nil {
 		t.Fatalf("create request: %v", err)
 	}
 
 	// Per-entity approve of the unrelated topic must succeed despite the pending request.
-	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "topics", Key: "unrelated_ok"}, nil); err != nil {
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "topics", Key: "unrelated_ok"}); err != nil {
 		t.Fatalf("per-entity approve should ignore the unrelated pending request: %v", err)
 	}
 	live, err := kb.LoadLive(ctx, orgID)
@@ -375,7 +382,7 @@ func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
 	}
-	err = kb.Approve(ctx, orgID, kbstore.ApproveSelector{}, nil)
+	err = kb.Approve(ctx, orgID, kbstore.ApproveSelector{})
 	var ge *kbstore.GateError
 	if !errors.As(err, &ge) {
 		t.Fatalf("whole-draft approve should still be blocked by the pending request, got %T: %v", err, err)

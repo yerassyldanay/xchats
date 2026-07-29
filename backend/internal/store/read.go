@@ -254,11 +254,10 @@ type DraftOption struct {
 	Confidence       *float64
 	Escalate         bool
 	EscalationReason string
-	Assets           []DraftAsset
 }
 
 // WriteDraftSet supersedes any prior pending options for the chat and inserts the
-// new 1–3 options (+ assets) atomically, returning the written drafts.
+// new 1–3 options atomically, returning the written drafts.
 func (s *Store) WriteDraftSet(ctx context.Context, chatID uuid.UUID, trigger uuid.NullUUID, opts []DraftOption) ([]Draft, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -281,24 +280,12 @@ func (s *Store) WriteDraftSet(ctx context.Context, chatID uuid.UUID, trigger uui
 			Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt); err != nil {
 			return nil, err
 		}
-		for _, a := range o.Assets {
-			var da DraftAsset
-			if err := tx.QueryRow(ctx, `
-				INSERT INTO xchats.ai_draft_assets (draft_id, asset_ref, media_kind, media_url, ordinal)
-				VALUES ($1, $2, $3, $4, $5)
-				RETURNING id, asset_ref, media_kind, media_url, ordinal`,
-				d.ID, a.AssetRef, a.MediaKind, a.MediaURL, a.Ordinal).
-				Scan(&da.ID, &da.AssetRef, &da.MediaKind, &da.MediaURL, &da.Ordinal); err != nil {
-				return nil, err
-			}
-			d.Assets = append(d.Assets, da)
-		}
 		out = append(out, d)
 	}
 	return out, tx.Commit(ctx)
 }
 
-// PendingDrafts returns the chat's suggested options (with assets).
+// PendingDrafts returns the chat's suggested options.
 func (s *Store) PendingDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at
@@ -319,33 +306,10 @@ func (s *Store) PendingDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, e
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i := range out {
-		if err := s.loadDraftAssets(ctx, &out[i]); err != nil {
-			return nil, err
-		}
-	}
 	return out, nil
 }
 
-func (s *Store) loadDraftAssets(ctx context.Context, d *Draft) error {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, asset_ref, media_kind, media_url, ordinal FROM xchats.ai_draft_assets
-		WHERE draft_id = $1 ORDER BY ordinal`, d.ID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var a DraftAsset
-		if err := rows.Scan(&a.ID, &a.AssetRef, &a.MediaKind, &a.MediaURL, &a.Ordinal); err != nil {
-			return err
-		}
-		d.Assets = append(d.Assets, a)
-	}
-	return rows.Err()
-}
-
-// DraftByID loads one draft (+assets).
+// DraftByID loads one draft.
 func (s *Store) DraftByID(ctx context.Context, id uuid.UUID) (Draft, error) {
 	var d Draft
 	err := s.pool.QueryRow(ctx, `
@@ -358,7 +322,7 @@ func (s *Store) DraftByID(ctx context.Context, id uuid.UUID) (Draft, error) {
 	if err != nil {
 		return d, err
 	}
-	return d, s.loadDraftAssets(ctx, &d)
+	return d, nil
 }
 
 // ClaimDraft is the guarded single-send: it flips exactly one suggested option to
@@ -390,7 +354,7 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 	if err := tx.Commit(ctx); err != nil {
 		return d, err
 	}
-	return d, s.loadDraftAssets(ctx, &d)
+	return d, nil
 }
 
 // SetDraftSent records the message a draft actually produced.

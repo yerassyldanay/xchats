@@ -30,12 +30,15 @@ type SynthInput struct {
 
 // Plan is the synthesizer's output: KB mutations + human-in-the-loop popups.
 // Numbers are never baked into a body — they leave as FactConfirm popups and the
-// body prose has the amount excised.
+// body prose has the amount excised. There is no generic media/asset section:
+// a file stays a kbd_materials row and its extracted/confirmed description may
+// contribute source prose, but the builder never turns it into sendable media
+// (see plan/database-schema.md — the canonical semantic-media assignment flow
+// lands once the typed media columns exist).
 type Plan struct {
 	Topics   []TopicProposal
-	Assets   []AssetProposal
-	Confirm  []FactConfirm   // → confirm_fact popups
-	Describe []DescribeMedia // → describe_media popups
+	Confirm  []FactConfirm // → confirm_fact popups
+	Describe []DescribeFile // → describe_file popups
 	Comment  string
 }
 
@@ -45,12 +48,6 @@ type TopicProposal struct {
 	MaterialID                string
 }
 
-// AssetProposal attaches a material's bytes as a draft asset (proposed).
-type AssetProposal struct {
-	Ref, Kind, TopicSlug, Title, Description, URL string
-	MaterialID                                    string
-}
-
 // FactConfirm raises a confirm_fact popup (a price/amount detected in material)
 // targeting a concrete typed-fact column (e.g. tariff <slug>.price).
 type FactConfirm struct {
@@ -58,8 +55,8 @@ type FactConfirm struct {
 	MaterialID                                       string
 }
 
-// DescribeMedia raises a describe_media popup for a material with no description.
-type DescribeMedia struct {
+// DescribeFile raises a describe_file popup for a material with no description.
+type DescribeFile struct {
 	MaterialID string
 	Prompt     string
 }
@@ -82,7 +79,6 @@ func NewBuilder(synth Synthesizer, hub *realtime.Hub) *Builder {
 // TurnResult summarizes what a build turn produced (for the chat reply).
 type TurnResult struct {
 	TopicsUpserted int    `json:"topics_upserted"`
-	AssetsAttached int    `json:"assets_attached"`
 	Confirms       int    `json:"confirms"`
 	Describes      int    `json:"describes"`
 	Comment        string `json:"comment"`
@@ -126,27 +122,6 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 		}
 		res.TopicsUpserted++
 	}
-	for _, a := range plan.Assets {
-		ownerKind := ""
-		if a.TopicSlug != "" {
-			ownerKind = "topic"
-		}
-		if err := kb.UpsertAsset(ctx, orgID, kbstore.AssetInput{
-			Ref: a.Ref, Kind: a.Kind, OwnerKind: ownerKind, OwnerRef: a.TopicSlug, Title: a.Title,
-			Description: a.Description, URL: a.URL, Provenance: prov,
-		}); err != nil {
-			return res, err
-		}
-		res.AssetsAttached++
-		if strings.TrimSpace(a.Description) == "" {
-			req, _ := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
-				ReqType: "describe_media", Prompt: "Опишите, что показывает этот файл и когда его отправлять.",
-				Target: jsonObj(map[string]any{"asset_ref": a.Ref}),
-			})
-			b.broadcastRequest(req)
-			res.Describes++
-		}
-	}
 	for _, cv := range plan.Confirm {
 		mid := materialPtr(cv.MaterialID)
 		req, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
@@ -166,7 +141,7 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 	for _, d := range plan.Describe {
 		mid := materialPtr(d.MaterialID)
 		req, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
-			MaterialID: mid, ReqType: "describe_media",
+			MaterialID: mid, ReqType: "describe_file",
 			Prompt: orElse(d.Prompt, "Опишите этот материал."),
 			Target: jsonObj(map[string]any{"material_id": d.MaterialID}),
 		})
@@ -248,12 +223,14 @@ func orElse(v, def string) string {
 // ---------------------------------------------------------------------------
 
 // RuleSynthesizer turns a batch of materials into one coherent topic without an
-// LLM: it cross-references the ready text into a single topic body (PURE PROSE),
-// EXCISES detected prices (raising confirm_fact popups so a digit never enters a
-// body — the confirmed amount lands in a typed tariff column), and proposes an
-// asset per media file (raising describe_media when undescribed). It is the
-// deterministic proof of the build contract and the test baseline; an LLM
-// synthesizer implements the same Synthesizer interface for richer judgment.
+// LLM: it cross-references the ready text into a single topic body (PURE PROSE)
+// and EXCISES detected prices (raising confirm_fact popups so a digit never
+// enters a body — the confirmed amount lands in a typed tariff column). A file
+// material's extracted/confirmed description folds into the same prose like
+// any other material; there is no separate sendable-media output (see the Plan
+// doc comment). It is the deterministic proof of the build contract and the
+// test baseline; an LLM synthesizer implements the same Synthesizer interface
+// for richer judgment.
 type RuleSynthesizer struct{}
 
 // priceRE matches "25 000 ₸" / "9 900 ₸/мес" — a number (with space/nbsp groups)
@@ -266,7 +243,7 @@ func (RuleSynthesizer) Plan(_ context.Context, in SynthInput) (Plan, error) {
 	var plan Plan
 	var textParts []string
 	for _, m := range in.Materials {
-		if m.BlobID == "" && strings.TrimSpace(m.ExtractedText) != "" {
+		if strings.TrimSpace(m.ExtractedText) != "" {
 			textParts = append(textParts, m.ExtractedText)
 		}
 	}
@@ -302,23 +279,11 @@ func (RuleSynthesizer) Plan(_ context.Context, in SynthInput) (Plan, error) {
 		})
 	}
 
-	// One asset per media material; vision-captioned ones carry a description.
-	for _, m := range in.Materials {
-		if m.BlobID == "" {
-			continue
-		}
-		plan.Assets = append(plan.Assets, AssetProposal{
-			Ref: m.BlobID, Kind: orElse(m.MediaKind, "image"), TopicSlug: slug,
-			Title: m.SourceRef, Description: m.ExtractedText,
-			URL: "/xchats/api/v1/media/" + m.BlobID, MaterialID: m.ID.String(),
-		})
-	}
-
-	if len(plan.Topics) == 0 && len(plan.Assets) == 0 {
+	if len(plan.Topics) == 0 {
 		plan.Comment = "Нет готовых материалов для сборки — добавьте текст, ссылку или файлы."
 	} else {
-		plan.Comment = fmt.Sprintf("Собрал черновик: тем — %d, файлов — %d, значений на подтверждение — %d.",
-			len(plan.Topics), len(plan.Assets), len(plan.Confirm))
+		plan.Comment = fmt.Sprintf("Собрал черновик: тем — %d, значений на подтверждение — %d.",
+			len(plan.Topics), len(plan.Confirm))
 	}
 	return plan, nil
 }

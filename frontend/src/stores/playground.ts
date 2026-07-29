@@ -56,7 +56,6 @@ export const usePlayground = defineStore('playground', {
         tariffs: d?.tariffs?.length ?? 0,
         contacts: d?.contacts?.length ?? 0,
         policies: d?.policies?.length ?? 0,
-        assets: d?.assets?.length ?? 0,
         materials: d?.materials?.length ?? 0,
         requests: (d?.requests ?? []).filter((r) => r.state === 'pending').length,
       }
@@ -68,7 +67,7 @@ export const usePlayground = defineStore('playground', {
       if (!d) return 0
       const p = (xs?: { draft: boolean }[]) => (xs ?? []).filter((x) => x.draft).length
       return (
-        p(d.topics) + p(d.assets) + p(d.tariffs) + p(d.products) + p(d.contacts) + p(d.policies) +
+        p(d.topics) + p(d.tariffs) + p(d.products) + p(d.contacts) + p(d.policies) +
         (d.config?.draft ? 1 : 0)
       )
     },
@@ -95,7 +94,7 @@ export const usePlayground = defineStore('playground', {
       }
     },
     // Catch materials that finished extraction asynchronously (a URL/PDF job,
-    // or an operator's describe_media answer) after the user's own explicit
+    // or an operator's describe_file answer) after the user's own explicit
     // build — run the SAME instruction again so it lands under the same topic.
     // Never called mid-send (that would race an in-flight explicit chat()).
     async maybeBuild() {
@@ -135,25 +134,6 @@ export const usePlayground = defineStore('playground', {
     },
     deleteTopic(slug: string) {
       return this.write(async () => this.setDraft(await api.del<DraftView>('/playground/draft/topics/' + encodeURIComponent(slug), this.ifMatch())))
-    },
-
-    // --- draft assets -----------------------------------------------------------
-    uploadAsset(file: File, meta: { owner_kind?: string; owner_ref?: string; description?: string; lang?: string } = {}) {
-      return this.write(async () => {
-        const form = new FormData()
-        form.append('file', file)
-        if (meta.owner_kind) form.append('owner_kind', meta.owner_kind)
-        if (meta.owner_ref) form.append('owner_ref', meta.owner_ref)
-        if (meta.description) form.append('description', meta.description)
-        if (meta.lang) form.append('lang', meta.lang)
-        this.setDraft(await api.postForm<DraftView>('/playground/draft/assets', form, this.ifMatch()))
-      })
-    },
-    patchAsset(ref: string, patch: { description?: string; owner_kind?: string; owner_ref?: string }) {
-      return this.write(async () => this.setDraft(await api.patch<DraftView>('/playground/draft/assets/' + encodeURIComponent(ref), patch, this.ifMatch())))
-    },
-    deleteAsset(ref: string) {
-      return this.write(async () => this.setDraft(await api.del<DraftView>('/playground/draft/assets/' + encodeURIComponent(ref), this.ifMatch())))
     },
 
     // --- draft tariffs (typed facts: verbatim price/limit/fee columns) --------
@@ -252,14 +232,14 @@ export const usePlayground = defineStore('playground', {
 
     // --- approve ("Принять всё" / "Принять") ------------------------
     // approve(): the WHOLE pending draft. approveEntity(kind,key): one row —
-    // kind ∈ topics|assets|tariffs|products|contacts|policies; key = the row's
-    // natural id (slug for topics, ref for assets/tariffs/products, lang for
+    // kind ∈ topics|tariffs|products|contacts|policies; key = the row's
+    // natural id (slug for topics, ref for tariffs/products, lang for
     // contacts/policies).
     async approve(): Promise<boolean> {
       return this.approveWith('/playground/draft/approve')
     },
     async approveEntity(
-      kind: 'topics' | 'assets' | 'tariffs' | 'products' | 'contacts' | 'policies',
+      kind: 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies',
       key: string
     ): Promise<boolean> {
       return this.approveWith(`/playground/draft/approve/${kind}/${encodeURIComponent(key)}`)

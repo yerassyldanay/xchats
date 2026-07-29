@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
@@ -143,89 +141,6 @@ func (s *Server) handlePlaygroundDeleteTopic(c *gin.Context) {
 		return
 	}
 	if err := s.kb.DeleteTopic(ctx(c), orgID, c.Param("slug")); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbChanged(c, orgID)
-}
-
-// --- assets (upload bytes + meta) ------------------------------------------
-
-func (s *Server) handlePlaygroundUploadAsset(c *gin.Context) {
-	orgID, proceed := s.pgWrite(c)
-	if !proceed {
-		return
-	}
-	fh, err := c.FormFile("file")
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, "file part required")
-		return
-	}
-	f, err := fh.Open()
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, "cannot open file")
-		return
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, "cannot read file")
-		return
-	}
-	mediaType, mimetype := detectMedia(fh.Filename, fh.Header.Get("Content-Type"))
-	ref := uuid.NewString()
-	if _, err := s.blob.Put(ref, data, blob.Meta{MediaType: mediaType, Mimetype: mimetype, FileName: fh.Filename, FileSize: int64(len(data))}); err != nil {
-		fail(c, http.StatusBadGateway, ErrMediaUnavailable, "store failed")
-		return
-	}
-	// owner_kind defaults to 'topic' when only owner_ref is given — the common
-	// case of attaching media to a topic (owner_kind must be given explicitly to
-	// attach to a product/tariff once those land).
-	ownerKind := c.PostForm("owner_kind")
-	ownerRef := c.PostForm("owner_ref")
-	if ownerKind == "" && ownerRef != "" {
-		ownerKind = "topic"
-	}
-	if err := s.kb.UpsertAsset(ctx(c), orgID, kbstore.AssetInput{
-		Ref: ref, Kind: mediaType, OwnerKind: ownerKind, OwnerRef: ownerRef,
-		Title: fh.Filename, Description: c.PostForm("description"),
-		URL: "/xchats/api/v1/media/" + ref, Lang: c.PostForm("lang"),
-		Provenance: `{"source":"manual"}`,
-	}); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbChanged(c, orgID)
-}
-
-type assetPatchReq struct {
-	Description *string `json:"description"`
-	OwnerKind   *string `json:"owner_kind"`
-	OwnerRef    *string `json:"owner_ref"`
-}
-
-func (s *Server) handlePlaygroundPatchAsset(c *gin.Context) {
-	orgID, proceed := s.pgWrite(c)
-	if !proceed {
-		return
-	}
-	var req assetPatchReq
-	_ = c.ShouldBindJSON(&req)
-	if err := s.kb.PatchAsset(ctx(c), orgID, c.Param("ref"), kbstore.AssetPatch{
-		Description: req.Description, OwnerKind: req.OwnerKind, OwnerRef: req.OwnerRef,
-	}); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbChanged(c, orgID)
-}
-
-func (s *Server) handlePlaygroundDeleteAsset(c *gin.Context) {
-	orgID, proceed := s.pgWrite(c)
-	if !proceed {
-		return
-	}
-	if err := s.kb.DeleteAsset(ctx(c), orgID, c.Param("ref")); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -459,7 +374,7 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{}, s.blob.Exists); err != nil {
+	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{}); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -475,8 +390,8 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 }
 
 // handlePlaygroundApproveEntity approves ONE pending entity by natural key
-// ("Подтвердить" on a single row). kind ∈ topics|assets|tariffs|products|contacts|policies;
-// id = slug | ref | ref | ref | lang | lang.
+// ("Подтвердить" on a single row). kind ∈ topics|tariffs|products|contacts|policies;
+// id = slug | ref | ref | lang | lang.
 func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -487,13 +402,13 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	}
 	kind := c.Param("kind")
 	switch kind {
-	case "topics", "assets", "tariffs", "products", "contacts", "policies":
+	case "topics", "tariffs", "products", "contacts", "policies":
 	default:
-		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|assets|tariffs|products|contacts|policies")
+		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|tariffs|products|contacts|policies")
 		return
 	}
 	key := c.Param("id")
-	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{Kind: kind, Key: key}, s.blob.Exists); err != nil {
+	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{Kind: kind, Key: key}); err != nil {
 		s.kbFail(c, err)
 		return
 	}

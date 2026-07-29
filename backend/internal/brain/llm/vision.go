@@ -16,7 +16,7 @@ import (
 // The Drafter's wire message carries text-only content; vision needs the OpenAI
 // content-array shape ([{type:text},{type:image_url}]), so it has its own request
 // type here. It satisfies playground.VisionClient. PDFs/docs are not images and
-// are rejected (→ the describe_media fallback) until a doc path is added.
+// are rejected (→ the describe_file fallback) until a doc path is added.
 type Vision struct {
 	httpc     *http.Client
 	baseURL   string
@@ -68,7 +68,7 @@ type visionRequest struct {
 }
 
 // Describe returns a caption for image bytes. Non-image mimetypes are rejected so
-// the caller falls back to a describe_media popup. The call is recorded as a
+// the caller falls back to a describe_file popup. The call is recorded as a
 // Langfuse generation span; the raw image bytes are never sent to Langfuse (only
 // a redacted placeholder), per the PII policy.
 func (v *Vision) Describe(ctx context.Context, mimetype string, data []byte) (string, error) {

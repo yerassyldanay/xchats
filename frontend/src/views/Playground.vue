@@ -6,8 +6,7 @@ import {
 } from 'lucide-vue-next'
 import { usePlayground, parseJSON } from '../stores/playground'
 import { shortTime } from '../lib/format'
-import { api } from '../api/client'
-import type { AssetRow, ContactRow, KbMaterial, PolicyRow, ProductRow, TariffRow, TopicRow } from '../types'
+import type { ContactRow, KbMaterial, PolicyRow, ProductRow, TariffRow, TopicRow } from '../types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -147,7 +146,6 @@ async function dismiss(id: string) {
 const draftTopics = computed(() => (pg.draft?.topics ?? []).filter((t) => t.draft))
 const draftProducts = computed(() => (pg.draft?.products ?? []).filter((p) => p.draft))
 const draftTariffs = computed(() => (pg.draft?.tariffs ?? []).filter((t) => t.draft))
-const draftAssets = computed(() => (pg.draft?.assets ?? []).filter((a) => a.draft))
 const draftContact = computed<ContactRow | undefined>(() => pg.draft?.contacts?.find((c) => c.draft))
 const draftPolicy = computed<PolicyRow | undefined>(() => pg.draft?.policies?.find((p) => p.draft))
 
@@ -157,7 +155,6 @@ const draftPolicy = computed<PolicyRow | undefined>(() => pg.draft?.policies?.fi
 const liveTopicSlugs = computed(() => new Set((pg.live?.topics ?? []).map((t) => t.slug)))
 const liveProductRefs = computed(() => new Set((pg.live?.products ?? []).map((p) => p.ref)))
 const liveTariffRefs = computed(() => new Set((pg.live?.tariffs ?? []).map((t) => t.ref)))
-const liveAssetRefs = computed(() => new Set((pg.live?.assets ?? []).map((a) => a.ref)))
 const liveContactLangs = computed(() => new Set((pg.live?.contacts ?? []).map((c) => c.lang)))
 const livePolicyLangs = computed(() => new Set((pg.live?.policies ?? []).map((p) => p.lang)))
 const DRAFT_BADGE = {
@@ -169,7 +166,7 @@ function draftBadge(isNew: boolean) {
 }
 
 // --- Черновик tabs: Обзор (everything, mixed) + one per non-empty kind --------
-type DraftTabKey = 'overview' | 'topics' | 'products' | 'tariffs' | 'assets' | 'contacts' | 'policies'
+type DraftTabKey = 'overview' | 'topics' | 'products' | 'tariffs' | 'contacts' | 'policies'
 const draftTab = ref<DraftTabKey>('overview')
 const draftTabs = computed(() => {
   const tabs: { key: DraftTabKey; label: string; icon: any; count: number | null }[] = [
@@ -178,7 +175,6 @@ const draftTabs = computed(() => {
   if (draftTopics.value.length) tabs.push({ key: 'topics', label: 'Темы', icon: ListTree, count: draftTopics.value.length })
   if (draftProducts.value.length) tabs.push({ key: 'products', label: 'Товары', icon: Package, count: draftProducts.value.length })
   if (draftTariffs.value.length) tabs.push({ key: 'tariffs', label: 'Тарифы', icon: Receipt, count: draftTariffs.value.length })
-  if (draftAssets.value.length) tabs.push({ key: 'assets', label: 'Медиа-ресурсы', icon: ImageIcon, count: draftAssets.value.length })
   if (draftContact.value) tabs.push({ key: 'contacts', label: 'Контакты', icon: Phone, count: 1 })
   if (draftPolicy.value) tabs.push({ key: 'policies', label: 'Политики', icon: Truck, count: 1 })
   return tabs
@@ -201,7 +197,6 @@ const pendingRailAll = computed(() => {
     ...draftTopics.value.map((t) => ({ label: 'Тема · ' + (t.title || t.slug), at: t.updated_at })),
     ...draftProducts.value.map((p) => ({ label: 'Товар · ' + (p.name || p.ref), at: p.updated_at })),
     ...draftTariffs.value.map((t) => ({ label: 'Тариф · ' + (t.name || t.ref), at: t.updated_at })),
-    ...draftAssets.value.map((a) => ({ label: 'Медиа · ' + (a.title || a.ref), at: a.updated_at })),
   ]
   if (draftContact.value) rows.push({ label: 'Контакты', at: draftContact.value.updated_at })
   if (draftPolicy.value) rows.push({ label: 'Политики', at: draftPolicy.value.updated_at })
@@ -215,7 +210,6 @@ const publishedRailAll = computed(() => {
     ...(d.topics ?? []).map((t) => ({ label: 'Тема · ' + (t.title || t.slug), at: t.updated_at })),
     ...(d.products ?? []).map((p) => ({ label: 'Товар · ' + (p.name || p.ref), at: p.updated_at })),
     ...(d.tariffs ?? []).map((t) => ({ label: 'Тариф · ' + (t.name || t.ref), at: t.updated_at })),
-    ...(d.assets ?? []).map((a) => ({ label: 'Медиа · ' + (a.title || a.ref), at: a.updated_at })),
     ...(d.contacts ?? []).map((c) => ({ label: 'Контакты', at: c.updated_at })),
     ...(d.policies ?? []).map((p) => ({ label: 'Политики', at: p.updated_at })),
   ]
@@ -249,15 +243,6 @@ const pricingTypes = [
   { key: 'percentage', label: 'Процент' },
   { key: 'tiered', label: 'Пороговая' },
 ]
-const aBuf = reactive<Record<string, string>>({})
-function vmAsset(a: AssetRow) {
-  if (aBuf[a.id] === undefined) aBuf[a.id] = a.description
-  return aBuf[a.id]
-}
-function assetCategory(a: AssetRow): 'image' | 'other' {
-  return a.kind === 'image' ? 'image' : 'other'
-}
-
 const contactForm = reactive({
   whatsapp: '', email: '', address: '', legal: '', callback_time: '',
   working_hours: '', phone: '', website: '', instagram: '',
@@ -517,29 +502,6 @@ async function discardAll() {
                   <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.upsertTariff({ ref: t.ref, lang: t.lang, ...vmTariff(t) })">Сохранить</Button>
                   <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('tariffs', t.ref)">Принять</Button>
                   <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.deleteTariff(t.ref)">Отклонить</Button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Медиа -->
-            <div v-if="draftAssets.length && tabActive('assets')" class="space-y-2">
-              <div v-for="a in [...draftAssets].reverse()" :key="a.id" class="rounded-lg border border-border bg-card p-4 flex gap-3">
-                <div class="w-14 h-14 rounded-lg border border-border overflow-hidden shrink-0 grid place-items-center bg-muted">
-                  <img v-if="assetCategory(a) === 'image' && a.url" :src="api.mediaURL(a.url)" class="w-full h-full object-cover" />
-                  <FileText v-else class="w-6 h-6 text-muted-foreground" />
-                </div>
-                <div class="flex-1 min-w-0 space-y-2">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><ImageIcon class="w-3.5 h-3.5" /> Медиа</span>
-                    <span class="text-sm font-medium truncate">{{ a.title || a.ref }}</span>
-                    <Badge variant="secondary" :class="draftBadge(!liveAssetRefs.has(a.ref)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveAssetRefs.has(a.ref)).label }}</Badge>
-                  </div>
-                  <Textarea :model-value="vmAsset(a)" @update:model-value="(v) => (aBuf[a.id] = String(v))" rows="2" placeholder="Описание файла…" class="min-h-0 text-[13px]" />
-                  <div class="flex items-center gap-2">
-                    <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchAsset(a.ref, { description: aBuf[a.id] })">Сохранить</Button>
-                    <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('assets', a.ref)">Принять</Button>
-                    <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.deleteAsset(a.ref)">Отклонить</Button>
-                  </div>
                 </div>
               </div>
             </div>

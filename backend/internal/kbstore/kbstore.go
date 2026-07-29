@@ -1,6 +1,6 @@
 // Package kbstore is the writable Knowledge Base data layer: it loads the LIVE
-// KB the brain reasons from (ai_assistants/ai_topics/ai_assets/ai_values, each
-// keyed DIRECTLY on organization_id — 15 Decision 1), and owns the Playground's
+// KB the brain reasons from (ai_assistants/ai_topics and the typed fact tables,
+// each keyed DIRECTLY on organization_id — 15 Decision 1), and owns the Playground's
 // single draft blob (kbd_draft) + Approve (validate → materialize → clear — 15
 // Decisions 3–4). There is no version, no snapshot clone, no publish/rollback:
 // live tables hold live rows only; a pending edit lives in the blob until
@@ -31,7 +31,7 @@ import (
 // draft blob moved since the client loaded it.
 var ErrStale = errors.New("kbstore: stale draft write")
 
-// ErrUnknownKind is returned for an unrecognized entity kind (topics|assets|values).
+// ErrUnknownKind is returned for an unrecognized entity kind.
 var ErrUnknownKind = errors.New("kbstore: unknown row kind")
 
 // Store wraps the pgx pool with KB operations.
@@ -64,7 +64,8 @@ func (s *Store) LoadLive(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot
 	return snap, nil
 }
 
-// loadLiveContent fills Topics/Assets/Values from the live ai_ tables for an org.
+// loadLiveContent fills Topics and the typed fact tables from the live ai_
+// tables for an org.
 func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *domain.Snapshot) error {
 	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, body_md
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
@@ -81,31 +82,6 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 	}
 	trows.Close()
 	if err := trows.Err(); err != nil {
-		return err
-	}
-
-	arows, err := s.pool.Query(ctx, `SELECT ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang
-		FROM xchats.ai_assets WHERE organization_id = $1 ORDER BY created_at`, orgID)
-	if err != nil {
-		return err
-	}
-	for arows.Next() {
-		var a domain.Asset
-		var ownerKind, ownerRef string
-		if err := arows.Scan(&a.Ref, &a.Kind, &ownerKind, &ownerRef, &a.Title, &a.Description, &a.URL, &a.Language); err != nil {
-			arows.Close()
-			return err
-		}
-		// domain.Asset.TopicSlug is the only owner the v1 prompt renders; a
-		// non-topic owner (product/tariff, added with the typed facts) simply
-		// leaves it empty for now.
-		if ownerKind == "" || ownerKind == "topic" {
-			a.TopicSlug = ownerRef
-		}
-		snap.Assets = append(snap.Assets, a)
-	}
-	arows.Close()
-	if err := arows.Err(); err != nil {
 		return err
 	}
 
@@ -235,22 +211,6 @@ func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *do
 				body_md = EXCLUDED.body_md, updated_at = now()`,
 			orgID, t.Slug, t.Language, t.Title, t.BodyMD); err != nil {
 			return fmt.Errorf("insert topic %s: %w", t.Slug, err)
-		}
-	}
-	for _, a := range snap.Assets {
-		ownerKind, ownerRef := "", ""
-		if a.TopicSlug != "" {
-			ownerKind, ownerRef = "topic", a.TopicSlug
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_assets
-			(organization_id, ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-			ON CONFLICT (organization_id, ref) DO UPDATE SET
-				asset_kind = EXCLUDED.asset_kind, owner_kind = EXCLUDED.owner_kind, owner_ref = EXCLUDED.owner_ref,
-				title = EXCLUDED.title, description = EXCLUDED.description, asset_url = EXCLUDED.asset_url,
-				lang = EXCLUDED.lang, updated_at = now()`,
-			orgID, a.Ref, a.Kind, ownerKind, ownerRef, a.Title, a.Description, a.URL, a.Language); err != nil {
-			return fmt.Errorf("insert asset %s: %w", a.Ref, err)
 		}
 	}
 	for _, t := range snap.Tariffs {
@@ -409,34 +369,16 @@ type GateError struct{ Reasons []string }
 func (e *GateError) Error() string { return "publish gate failed: " + strings.Join(e.Reasons, "; ") }
 
 // gate is the deterministic approve gate (pure, testable): over the resulting
-// LIVE set (live ∪ approved, minus deletes), every asset is described, every topic
-// body is pure prose (no fact tokens, no literal currency), no blob dangles, no
-// request pends. Facts are typed columns (validated at reply-render time, fail
-// closed), so the gate does not touch them.
-func gate(snap *domain.Snapshot, pendingRequests int, blobExists func(ref string) bool) []string {
+// LIVE set (live ∪ approved, minus deletes), every topic body is pure prose (no
+// fact tokens, no literal currency), no request pends. Facts are typed columns
+// (validated at reply-render time, fail closed), so the gate does not touch them.
+func gate(snap *domain.Snapshot, pendingRequests int) []string {
 	var reasons []string
-	for _, a := range snap.Assets {
-		reasons = append(reasons, gateAsset(a, blobExists)...)
-	}
 	for _, t := range snap.Topics {
 		reasons = append(reasons, gateTopicBody(t.Slug, t.BodyMD)...)
 	}
 	if pendingRequests > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d unresolved request(s)", pendingRequests))
-	}
-	return reasons
-}
-
-// gateAsset is the per-asset half of the gate — also reused stand-alone by the
-// /kb/* live-write path (live.go), so a single asset write is held to the exact
-// same bar as an approve.
-func gateAsset(a domain.Asset, blobExists func(ref string) bool) []string {
-	var reasons []string
-	if strings.TrimSpace(a.Description) == "" {
-		reasons = append(reasons, fmt.Sprintf("asset %q has no description", a.Ref))
-	}
-	if blobExists != nil && a.Ref != "" && !blobExists(a.Ref) {
-		reasons = append(reasons, fmt.Sprintf("asset %q has no stored bytes", a.Ref))
 	}
 	return reasons
 }

@@ -15,13 +15,13 @@ import (
 // the live ai_ tables: no draft blob, no approve step. This is the ONLY write
 // path LiveView/the /kb/* HTTP handlers use, so a live edit can never leak into
 // — or be confused with — a Playground draft (see plan "Playground redesign").
-// Content is held to the same bar the approve gate enforces (gateTopicBody /
-// gateAsset, kbstore.go), just checked immediately instead of at approve time.
+// Content is held to the same bar the approve gate enforces (gateTopicBody,
+// kbstore.go), just checked immediately instead of at approve time.
 //
 // Every function here takes the acting user's id (actor) and runs its write
 // plus an ai_audit_log row inside ONE transaction (pool.Begin), so the audit
 // trail can never desync from what was actually written — either both commit
-// or neither does. A read-modify-write function (PatchLiveAsset/Contacts/
+// or neither does. A read-modify-write function (PatchLiveContacts/
 // Policies) additionally takes its "current row" read with SELECT ... FOR
 // UPDATE inside that same transaction, closing a lost-update race an earlier
 // version of this file had (read + compute on the pool, upsert as a separate

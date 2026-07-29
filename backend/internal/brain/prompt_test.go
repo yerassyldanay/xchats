@@ -16,7 +16,6 @@ func testSnapshot() *domain.Snapshot {
 		Tariffs: tariffs,
 		Facts:   domain.NewFactBook(tariffs, nil, nil, nil),
 		Topics:  []domain.Topic{{Slug: "pricing", Language: "ru", BodyMD: "Наш стандартный тариф покрывает основные нужды."}},
-		Assets:  []domain.Asset{{Ref: "pricing_card", Kind: "image", URL: "/media/p.png"}},
 	}
 }
 
@@ -33,12 +32,11 @@ func TestBuildSystem_IncludesFactsBlock(t *testing.T) {
 }
 
 // Parity with the vendored brain_test.go: the post-processing pipeline injects
-// prices, resolves+drops refs, strips the stage key, and flattens status.
+// prices, strips the stage key, and flattens status.
 func TestPostProcess_NormalPricingAnswer(t *testing.T) {
 	raw := domain.RawDraft{
 		ReplyText:       "Стандарт — {{tariff.standard.price}}/мес.",
 		ReplyLanguage:   "ru",
-		AssetRefs:       []string{"pricing_card", "hallucinated_ref"},
 		ProfilePatch:    map[string]any{"interested_plan": "standard", "stage": "qualifying"},
 		SuggestedStatus: &domain.StageWrapper{Stage: "qualifying"},
 		Confidence:      0.82,
@@ -46,12 +44,6 @@ func TestPostProcess_NormalPricingAnswer(t *testing.T) {
 	d := PostProcess(raw, testSnapshot(), nil)
 	if d.ReplyText != "Стандарт — 19 900 ₸/мес." {
 		t.Fatalf("prices not injected: %q", d.ReplyText)
-	}
-	if len(d.Media) != 1 || d.Media[0].Ref != "pricing_card" {
-		t.Fatalf("media not resolved: %+v", d.Media)
-	}
-	if len(d.DroppedRefs) != 1 || d.DroppedRefs[0] != "hallucinated_ref" {
-		t.Fatalf("hallucinated ref not dropped: %v", d.DroppedRefs)
 	}
 	if _, ok := d.ProfilePatch["stage"]; ok {
 		t.Fatal("stage key must be stripped from profile_patch")
@@ -72,14 +64,10 @@ func TestPostProcess_EscalateGateStops(t *testing.T) {
 		ReplyText:        "Уточню у коллеги.",
 		Escalate:         true,
 		EscalationReason: "off-KB",
-		AssetRefs:        []string{"pricing_card"},
 	}
 	d := PostProcess(raw, testSnapshot(), nil)
 	if !d.Escalate {
 		t.Fatal("expected escalate")
-	}
-	if len(d.Media) != 0 {
-		t.Fatal("escalation must carry no media")
 	}
 }
 
@@ -95,7 +83,6 @@ func TestPostProcess_EscalateReplacesInventedClaimWithHoldingReply(t *testing.T)
 		ReplyLanguage:    "ru",
 		Escalate:         true,
 		EscalationReason: "off-KB city coverage",
-		AssetRefs:        []string{"pricing_card"},
 	}
 	d := PostProcess(raw, testSnapshot(), nil)
 	if strings.Contains(d.ReplyText, "не доставляем") {
@@ -106,9 +93,6 @@ func TestPostProcess_EscalateReplacesInventedClaimWithHoldingReply(t *testing.T)
 	}
 	if d.EscalationReason != "off-KB city coverage" {
 		t.Fatalf("EscalationReason must survive unchanged, got %q", d.EscalationReason)
-	}
-	if len(d.Media) != 0 {
-		t.Fatal("escalation must carry no media")
 	}
 }
 
@@ -161,7 +145,6 @@ func TestPostProcess_PriceRenderFailurePostsManualNote(t *testing.T) {
 	raw := domain.RawDraft{
 		ReplyText:     "{{tariff.enterprise.price}}", // unknown tariff
 		ReplyLanguage: "ru",
-		AssetRefs:     []string{"pricing_card"},
 	}
 	d := PostProcess(raw, testSnapshot(), nil)
 	if !d.PricingError {
@@ -169,9 +152,6 @@ func TestPostProcess_PriceRenderFailurePostsManualNote(t *testing.T) {
 	}
 	if d.ReplyText != pricingManualNote {
 		t.Fatalf("expected manual-check note, got %q", d.ReplyText)
-	}
-	if len(d.Media) != 0 {
-		t.Fatal("must not ship media with a pricing failure")
 	}
 }
 

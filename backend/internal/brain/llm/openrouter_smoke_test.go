@@ -26,7 +26,7 @@ func TestDraft_LiveHTTPPath(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"choices":[{"message":{"tool_calls":[{"function":{"name":"emit_draft",
-			"arguments":"{\"reply_text\":\"Стандарт — {{tariff.standard.price}}.\",\"reply_language\":\"ru\",\"asset_refs\":[\"pricing_card\"],\"confidence\":0.9,\"escalate\":false}"}}]}}]}`)
+			"arguments":"{\"reply_text\":\"Стандарт — {{tariff.standard.price}}.\",\"reply_language\":\"ru\",\"confidence\":0.9,\"escalate\":false}"}}]}}]}`)
 	}))
 	defer srv.Close()
 
@@ -38,7 +38,7 @@ func TestDraft_LiveHTTPPath(t *testing.T) {
 	if !strings.Contains(raw.ReplyText, "{{tariff.standard.price}}") {
 		t.Fatalf("token should survive the wire intact: %q", raw.ReplyText)
 	}
-	if raw.ReplyLanguage != "ru" || raw.Escalate || len(raw.AssetRefs) != 1 {
+	if raw.ReplyLanguage != "ru" || raw.Escalate {
 		t.Fatalf("unexpected parsed draft: %+v", raw)
 	}
 }
@@ -47,7 +47,7 @@ func TestDraft_LiveHTTPPath(t *testing.T) {
 // (no tool_calls) — the defensive fallback path.
 func TestDraft_ContentFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"reply_text\\\":\\\"ok\\\",\\\"reply_language\\\":\\\"ru\\\",\\\"asset_refs\\\":[],\\\"confidence\\\":0.5,\\\"escalate\\\":false}\\n```\"}}]}")
+		io.WriteString(w, "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"reply_text\\\":\\\"ok\\\",\\\"reply_language\\\":\\\"ru\\\",\\\"confidence\\\":0.5,\\\"escalate\\\":false}\\n```\"}}]}")
 	}))
 	defer srv.Close()
 
