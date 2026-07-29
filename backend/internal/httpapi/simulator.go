@@ -100,7 +100,7 @@ func (s *Server) handleSimulatorMessage(c *gin.Context) {
 	s.emitInbound(c, res)
 
 	if !req.WaitForResponse {
-		_ = s.queue.Publish(queue.Message{Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: res.ChatID}})
+		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: res.ChatID}})
 		accepted(c, gin.H{"conversation_id": res.ChatID.String(), "message_id": res.MessageID.String()})
 		return
 	}

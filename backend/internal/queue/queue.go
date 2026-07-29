@@ -30,9 +30,12 @@ type Message struct {
 // dropped (Build 0 accepts the loss window); panics are recovered by the worker.
 type Handler func(ctx context.Context, m Message) error
 
-// Queue is the port producers and consumers depend on.
+// Queue is the port producers and consumers depend on. Publish takes a context
+// so a full buffer becomes a retryable error at the producer instead of an
+// unbounded block — the Telegram webhook, for one, turns that error into a 500
+// so Telegram redelivers rather than hanging the request.
 type Queue interface {
-	Publish(m Message) error
+	Publish(ctx context.Context, m Message) error
 	Start(ctx context.Context, h Handler)
 	Wait() // block until all in-flight work is processed (drain-and-assert in tests)
 	Close()
@@ -58,11 +61,20 @@ func NewInMem(buffer, workers int, log *slog.Logger) *InMem {
 	return &InMem{ch: make(chan Message, buffer), workers: workers, log: log}
 }
 
-// Publish enqueues a message. It tracks the message as in-flight so Wait() can drain.
-func (q *InMem) Publish(m Message) error {
+// Publish enqueues a message, tracking it as in-flight so Wait() can drain.
+// When the buffer is full it blocks only until ctx is done, then returns
+// ctx.Err() and undoes the in-flight accounting — so backpressure surfaces as a
+// retryable error at the producer instead of wedging the calling goroutine
+// forever (the send is a plain `q.ch <- m` otherwise).
+func (q *InMem) Publish(ctx context.Context, m Message) error {
 	q.wg.Add(1)
-	q.ch <- m
-	return nil
+	select {
+	case q.ch <- m:
+		return nil
+	case <-ctx.Done():
+		q.wg.Done() // never enqueued — don't leave Wait() hanging on it
+		return ctx.Err()
+	}
 }
 
 // Start launches the worker pool; each worker recovers from panics so one bad

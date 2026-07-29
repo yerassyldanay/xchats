@@ -3,10 +3,56 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+)
+
+// ---------------------------------------------------------------------------
+// Channel dispatch
+// ---------------------------------------------------------------------------
+// The unified views are read-only; every write has to land in the channel's own
+// transport table. These two helpers are the single place that mapping lives.
+//
+// The wa_* gateway carries BOTH the whatsapp and simulator channels (the
+// simulator is wa_accounts rows with channel='simulator'), so both map there.
+// An empty channel means "a caller that predates the channel column" and is
+// treated as whatsapp — the same table it has always written to. Anything else
+// is a programming error and is reported, never silently routed to wa_*.
+
+func chatsTableFor(channel string) (string, error) {
+	switch channel {
+	case string(chanTelegram):
+		return "xchats.tg_chats", nil
+	case string(chanWhatsApp), string(chanSimulator), "":
+		return "xchats.wa_chats", nil
+	default:
+		return "", fmt.Errorf("store: no chat table for channel %q", channel)
+	}
+}
+
+func messagesTableFor(channel string) (string, error) {
+	switch channel {
+	case string(chanTelegram):
+		return "xchats.tg_messages", nil
+	case string(chanWhatsApp), string(chanSimulator), "":
+		return "xchats.wa_messages", nil
+	default:
+		return "", fmt.Errorf("store: no message table for channel %q", channel)
+	}
+}
+
+// The channel names, duplicated here as plain strings: internal/store must not
+// import backend/messaging (the contracts package deliberately depends on
+// nothing, and the dependency would run the wrong way).
+type channelName string
+
+const (
+	chanWhatsApp  channelName = "whatsapp"
+	chanSimulator channelName = "simulator"
+	chanTelegram  channelName = "telegram"
 )
 
 // InboundUpsert is the worker's normalized input for one message event.
@@ -143,6 +189,31 @@ func (s *Store) AdvanceDeliveryState(ctx context.Context, accountID uuid.UUID, e
 	return msgID, chatID, err
 }
 
+// UpsertOutboundMedia records the attachment on an outbound message in the
+// channel's own media table. The WhatsApp table's FK points at wa_messages, so
+// a Telegram row written there would be rejected — this is the dispatch that
+// keeps the send path channel-neutral above it.
+//
+// The Telegram row carries an empty file_id on purpose: these bytes are OURS
+// (a blob we already hold), not something Telegram hosts, and the download
+// sweeper explicitly skips rows without a file_id.
+func (s *Store) UpsertOutboundMedia(ctx context.Context, channel string, messageID uuid.UUID, m MediaRef, storageKey string) error {
+	if channel == string(chanTelegram) {
+		_, err := s.pool.Exec(ctx, `
+			INSERT INTO xchats.tg_message_media
+				(message_id, file_id, file_unique_id, media_type, mimetype, filename, size, storage_key, download_status)
+			VALUES ($1, '', '', $2, $3, $4, $5, $6, 'ready')
+			ON CONFLICT (message_id) DO UPDATE SET
+				storage_key = EXCLUDED.storage_key,
+				download_status = 'ready',
+				updated_at = now()`,
+			messageID, m.MediaType, m.Mimetype, m.FileName, m.FileSize, storageKey)
+		return err
+	}
+	_, _, err := s.UpsertMessageMedia(ctx, messageID, m, storageKey, "ready")
+	return err
+}
+
 // UpsertMessageMedia inserts a media row for a message (idempotent on UNIQUE(message_id)).
 func (s *Store) UpsertMessageMedia(ctx context.Context, messageID uuid.UUID, m MediaRef, storageURL, downloadStatus string) (uuid.UUID, bool, error) {
 	var id uuid.UUID
@@ -165,10 +236,10 @@ func (s *Store) SetMediaReady(ctx context.Context, messageID uuid.UUID, fileSize
 	return err
 }
 
-// MediaStorageURL resolves a public media id (message_media.id) to its blob key.
+// MediaStorageURL resolves a public media id to its blob key, on any channel.
 func (s *Store) MediaStorageURL(ctx context.Context, id uuid.UUID) (storageURL, mimetype, fileName string, err error) {
 	err = s.pool.QueryRow(ctx, `
-		SELECT storage_url, mimetype, file_name FROM xchats.message_media WHERE id = $1`, id).
+		SELECT storage_key, mimetype, filename FROM xchats.inbox_message_media_v WHERE id = $1`, id).
 		Scan(&storageURL, &mimetype, &fileName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", "", ErrNotFound
@@ -176,9 +247,18 @@ func (s *Store) MediaStorageURL(ctx context.Context, id uuid.UUID) (storageURL, 
 	return
 }
 
-// InsertOutboundMessage creates a queued outbound row (evolution_message_id NULL
-// until stamped) and bumps the chat aggregates. Used by the send pipeline (B7).
-func (s *Store) InsertOutboundMessage(ctx context.Context, chatID, accountID uuid.UUID, senderKind string, senderUserID uuid.NullUUID, messageKind, body, preview string) (uuid.UUID, error) {
+// InsertOutbound creates a queued outbound row (the provider's own message id
+// stays NULL until stamped) in the channel's transport table and bumps the chat
+// aggregates. Used by the send pipeline for every channel.
+func (s *Store) InsertOutbound(ctx context.Context, channel string, chatID, accountID uuid.UUID, senderKind string, senderUserID uuid.NullUUID, messageKind, body, preview string) (uuid.UUID, error) {
+	msgTable, err := messagesTableFor(channel)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	chatTable, err := chatsTableFor(channel)
+	if err != nil {
+		return uuid.Nil, err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, err
@@ -186,7 +266,7 @@ func (s *Store) InsertOutboundMessage(ctx context.Context, chatID, accountID uui
 	defer tx.Rollback(ctx)
 	var id uuid.UUID
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO xchats.wa_messages
+		INSERT INTO `+msgTable+`
 			(account_id, chat_id, direction, sender_kind, sender_user_id, message_kind, body, delivery_state, source, message_ts)
 		VALUES ($1, $2, 'out', $3, $4, $5, $6, 'queued', 'app', now())
 		RETURNING id`,
@@ -194,7 +274,7 @@ func (s *Store) InsertOutboundMessage(ctx context.Context, chatID, accountID uui
 		return uuid.Nil, wrap("insert outbound", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE xchats.wa_chats SET last_message_at = now(), last_message_preview = $2, unread_count = 0, updated_at = now()
+		UPDATE `+chatTable+` SET last_message_at = now(), last_message_preview = $2, unread_count = 0, updated_at = now()
 		WHERE id = $1`, chatID, preview); err != nil {
 		return uuid.Nil, wrap("update aggregates", err)
 	}
@@ -236,19 +316,43 @@ func (s *Store) FindOrCreateChat(ctx context.Context, accountID uuid.UUID, phone
 	return chatID, created, tx.Commit(ctx)
 }
 
-// StampEvolutionID records the gateway's key.id onto a sent outbound row; this is
-// what lets the fromMe=true echo collapse onto it instead of duplicating.
-func (s *Store) StampEvolutionID(ctx context.Context, messageID uuid.UUID, keyID string) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE xchats.wa_messages SET evolution_message_id = $2, delivery_state = 'sent', updated_at = now()
-		WHERE id = $1`, messageID, keyID)
+// StampOutboundSent records the provider's own id for a just-sent outbound row
+// and flips it to 'sent'. On WhatsApp that id is what lets the fromMe=true echo
+// collapse onto this row instead of duplicating; on Telegram it is the
+// sendMessage response's message_id (bots get no echo, and no delivery
+// receipts either, so 'sent' is the terminal success state there).
+func (s *Store) StampOutboundSent(ctx context.Context, channel string, messageID uuid.UUID, externalID string) error {
+	table, err := messagesTableFor(channel)
+	if err != nil {
+		return err
+	}
+	if channel == string(chanTelegram) {
+		// telegram_message_id is bigint; an empty id (a send that reported no
+		// message) stays NULL rather than failing the cast.
+		var msgIDArg any
+		if externalID != "" {
+			msgIDArg = externalID
+		}
+		_, err := s.pool.Exec(ctx, `
+			UPDATE `+table+` SET telegram_message_id = $2::bigint, delivery_state = 'sent', updated_at = now()
+			WHERE id = $1`, messageID, msgIDArg)
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
+		UPDATE `+table+` SET evolution_message_id = $2, delivery_state = 'sent', updated_at = now()
+		WHERE id = $1`, messageID, externalID)
 	return err
 }
 
-// SetDeliveryState forces a delivery state (e.g. 'failed' when a send errors).
-func (s *Store) SetDeliveryState(ctx context.Context, messageID uuid.UUID, state string) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE xchats.wa_messages SET delivery_state = $2, updated_at = now() WHERE id = $1`, messageID, state)
+// SetDeliveryStateFor forces a delivery state (e.g. 'failed' when a send errors)
+// on the channel's own transport table.
+func (s *Store) SetDeliveryStateFor(ctx context.Context, channel string, messageID uuid.UUID, state string) error {
+	table, err := messagesTableFor(channel)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx,
+		`UPDATE `+table+` SET delivery_state = $2, updated_at = now() WHERE id = $1`, messageID, state)
 	return err
 }
 

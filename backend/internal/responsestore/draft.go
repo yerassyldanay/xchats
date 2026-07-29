@@ -33,7 +33,7 @@ func (r *DraftRepo) ReplaceSuggested(ctx context.Context, draft response.DraftTo
 		trigger = uuid.NullUUID{UUID: tid, Valid: true}
 	}
 
-	written, err := r.Store.WriteDraftSet(ctx, chatID, trigger, []store.DraftOption{{
+	written, err := r.Store.WriteDraftSet(ctx, string(draft.Channel), chatID, trigger, []store.DraftOption{{
 		Ordinal:          1,
 		Text:             draft.Text,
 		ReplyLanguage:    draft.ReplyLanguage,

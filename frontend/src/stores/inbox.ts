@@ -24,7 +24,7 @@ export const useInbox = defineStore('inbox', {
     messages: [] as Message[],
     drafts: [] as AiDraft[],
     filter: 'all' as Assignee,
-    accountFilter: null as string | null, // wa_account_id; null = all numbers
+    accountFilter: null as string | null, // account_id (any channel); null = all
     query: '',
     composerText: '',
     loadingChats: false,
@@ -43,7 +43,7 @@ export const useInbox = defineStore('inbox', {
       try {
         const params = new URLSearchParams()
         if (this.filter !== 'all') params.set('assignee', this.filter)
-        if (this.accountFilter) params.set('wa_account_id', this.accountFilter)
+        if (this.accountFilter) params.set('account_id', this.accountFilter)
         if (this.query) params.set('q', this.query)
         const p = await api.get<ListChats>('/chats?' + params.toString())
         this.chats = p.items
@@ -106,7 +106,7 @@ export const useInbox = defineStore('inbox', {
         phone,
         text: text || undefined,
         media_ids: media_ids.length ? media_ids : undefined,
-        wa_account_id: accountId || undefined,
+        account_id: accountId || undefined,
       })
       this.upsertChat(res.chat)
       await this.selectChat(res.chat.id)

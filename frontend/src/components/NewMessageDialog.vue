@@ -17,7 +17,9 @@ const accounts = useAccounts()
 const phone = ref('')
 const text = ref('')
 const files = ref<File[]>([])
-const fromAccount = ref(accounts.accounts[0]?.id || '')
+// Compose is WhatsApp-only: a Telegram bot cannot open a conversation — the
+// customer has to message it first — so it is never offered as a "from".
+const fromAccount = ref(accounts.whatsappAccounts[0]?.id || '')
 const fileInput = ref<HTMLInputElement | null>(null)
 const sending = ref(false)
 const error = ref('')
@@ -71,15 +73,15 @@ async function submit() {
       </DialogHeader>
 
       <div class="px-5 py-5 space-y-4">
-        <div v-if="accounts.hasMultiple">
+        <div v-if="accounts.whatsappAccounts.length > 1">
           <label class="text-xs font-medium text-muted-foreground">Отправить с номера</label>
           <Select v-model="fromAccount">
             <SelectTrigger class="mt-1.5">
               <SelectValue placeholder="Выберите номер" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem v-for="a in accounts.accounts" :key="a.id" :value="a.id">
-                {{ a.display_name }}{{ a.phone_number ? ' (+' + a.phone_number + ')' : '' }}
+              <SelectItem v-for="a in accounts.whatsappAccounts" :key="a.id" :value="a.id">
+                {{ a.display_name }}{{ a.external_handle ? ' (+' + a.external_handle + ')' : '' }}
               </SelectItem>
             </SelectContent>
           </Select>

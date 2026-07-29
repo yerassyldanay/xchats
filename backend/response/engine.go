@@ -71,7 +71,7 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	if err != nil {
 		return nil, fmt.Errorf("response: build catalog: %w", err)
 	}
-	rendered, err := aiprompt.RenderPrompt(aiprompt.FrameShopKBV4RU(), req.KB.PromptInput(), cat)
+	rendered, err := aiprompt.RenderPrompt(frameFor(req.Channel), req.KB.PromptInput(), cat)
 	if err != nil {
 		return nil, fmt.Errorf("response: render prompt: %w", err)
 	}
@@ -133,6 +133,27 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 		EscalationReason: resp.EscalationReason,
 		Confidence:       resp.Confidence,
 	}, nil
+}
+
+// frameFor picks the prompt frame for a channel. WhatsApp and the simulator
+// keep the byte-identical evaluated frame (the simulator exists to rehearse the
+// WhatsApp path, so it must not diverge from it); Telegram gets the variant
+// whose only difference is a persona line that does not call the assistant a
+// WhatsApp one. An unset channel — a caller that predates GenerateRequest
+// carrying it — keeps the evaluated frame rather than guessing.
+func frameFor(channel messaging.Channel) string {
+	if channel == messaging.ChannelTelegram {
+		return aiprompt.FrameShopKBV4TGRU()
+	}
+	return aiprompt.FrameShopKBV4RU()
+}
+
+// PromptRefFor names the frame frameFor would pick, for logs and draft records.
+func PromptRefFor(channel messaging.Channel) string {
+	if channel == messaging.ChannelTelegram {
+		return aiprompt.PromptRefShopKBV4TG
+	}
+	return aiprompt.PromptRefShopKBV4
 }
 
 func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string) (string, error) {

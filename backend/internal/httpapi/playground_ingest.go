@@ -81,7 +81,7 @@ func (s *Server) handlePlaygroundCreateMaterial(c *gin.Context) {
 	}
 	// Text is born ready; everything else needs an extraction pass.
 	if m.Status != "ready" {
-		_ = s.queue.Publish(queue.Message{Kind: queue.KindExtractMaterial,
+		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindExtractMaterial,
 			Payload: worker.ExtractMaterialTask{MaterialID: m.ID, OrgID: orgID}})
 	}
 	s.hub.Broadcast("kb.material.updated", gin.H{"material_id": m.ID, "status": m.Status})

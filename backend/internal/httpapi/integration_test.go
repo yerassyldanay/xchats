@@ -25,8 +25,10 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
+	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
@@ -66,16 +68,36 @@ const (
 	webhookToken = "test-token"
 	adminEmail   = "admin@xchats.test"
 	adminPass    = "password123"
+
+	// Telegram fixtures. The base URL must be https:// — the provisioning flow
+	// refuses anything else, because Telegram itself does.
+	telegramBaseURL = "https://xchats.test"
+	testEncKey      = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" // 32 bytes, hex
+	testBotID       = int64(8123456789)
+	testBotUsername = "xchats_test_bot"
+	testBotToken    = "8123456789:AAH-test-token_never-logged"
 )
 
 type harness struct {
 	t         *testing.T
 	srv       *httptest.Server
 	client    *http.Client
+	cfg       *config.Config
 	fake      *evolution.Fake
+	tg        *telegram.Fake
 	queue     *queue.InMem
 	store     *store.Store
+	worker    *worker.Worker
+	orgID     uuid.UUID
 	accountID uuid.UUID
+}
+
+// setTelegramBase rewrites the configured public base URL mid-test. The Server
+// holds the same *config.Config, so this exercises the real handler path for a
+// misconfigured deployment without standing up a second harness.
+func (h *harness) setTelegramBase(t *testing.T, base string) {
+	t.Helper()
+	h.cfg.TelegramWebhookPublicBaseURL = base
 }
 
 func newHarness(t *testing.T) *harness {
@@ -111,7 +133,15 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	cfg := &config.Config{
 		WebhookToken: webhookToken, SessionTTLHours: 1, MinPasswordLen: 8,
 		PageSize: 50, CORSOrigins: []string{"*"}, SimulatorEnabled: true,
+		TelegramWebhookPublicBaseURL: telegramBaseURL,
 	}
+	// Credential encryption is required for the Telegram lifecycle; the key is
+	// test-local and deterministic so a sealed token can be asserted on.
+	box, err := secretbox.FromEnvValue(testEncKey)
+	if err != nil {
+		t.Fatalf("secretbox: %v", err)
+	}
+	st.UseCredentialsBox(box)
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	// seed org + admin + account
@@ -126,8 +156,8 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	accountID := config.AccountID(ownerJID)
 	if _, err := st.SeedAccount(ctx, store.Account{
 		ID: accountID, OrganizationID: uuid.NullUUID{UUID: org.ID, Valid: true},
-		DisplayName: "WhatsApp", OwnerJID: config.CanonicalJID(ownerJID),
-		PhoneNumber: config.PhoneFromJID(ownerJID), InstanceName: "xpayment", ConnectionState: "connected",
+		DisplayName: "WhatsApp", ExternalAccountRef: config.CanonicalJID(ownerJID),
+		ExternalHandle: config.PhoneFromJID(ownerJID), InstanceName: "xpayment", ConnectionState: "connected",
 	}); err != nil {
 		t.Fatalf("seed account: %v", err)
 	}
@@ -172,23 +202,26 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 			MaxTokens: 500, Temperature: 0.3, RetryEnabled: true,
 		},
 	}
+	tgFake := telegram.NewFake(testBotID, testBotUsername)
 	senders := messaging.NewSenderRegistry()
-	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(fake))
+	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(fake, blobStore))
 	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
+	senders.Register(messaging.ChannelTelegram, telegram.NewChannelSender(tgFake, st, blobStore))
 
-	w := &worker.Worker{Store: st, Queue: q, Evo: fake, Blob: blobStore, Hub: hub,
+	w := &worker.Worker{Store: st, Queue: q, Evo: fake, TG: tgFake, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, KB: kb, Extract: extractor, Log: log}
 	q.Start(context.Background(), w.Handle)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Response: responseService, Evo: fake, KB: kb, Builder: builder,
+		Drafter: drafter, Response: responseService, Evo: fake, TG: tgFake, KB: kb, Builder: builder,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: org.ID, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
-	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, fake: fake, queue: q, store: st, accountID: accountID}
+	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, cfg: cfg, fake: fake, tg: tgFake,
+		queue: q, store: st, worker: w, orgID: org.ID, accountID: accountID}
 	t.Cleanup(func() { ts.Close(); q.Close(); st.Close() })
 	h.login()
 	return h

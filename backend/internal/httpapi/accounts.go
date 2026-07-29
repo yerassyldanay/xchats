@@ -11,6 +11,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/messaging"
 )
 
 // staleAfter is how long an unconnected Evolution instance may linger in the
@@ -27,7 +28,7 @@ func (s *Server) handleListWhatsAppAccounts(c *gin.Context) {
 	if !okOrg {
 		return
 	}
-	accts, err := s.store.ListAccountsForOrg(ctx(c), org.ID)
+	accts, err := s.store.ListWaAccountsForOrg(ctx(c), org.ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
@@ -36,6 +37,30 @@ func (s *Server) handleListWhatsAppAccounts(c *gin.Context) {
 	items := make([]dto.WhatsAppAccount, 0, len(accts))
 	for _, a := range accts {
 		items = append(items, dto.MapAccount(a, live[a.InstanceName]))
+	}
+	ok(c, gin.H{"items": items})
+}
+
+// handleListAccounts is the channel-neutral account listing: every connected
+// account the org owns, on every channel, in one shape. It is what the UI's
+// «Каналы» page renders. /whatsapp-accounts stays alongside it, WhatsApp-only,
+// because the QR lifecycle it drives has no meaning for any other channel.
+func (s *Server) handleListAccounts(c *gin.Context) {
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
+	accts, err := s.store.ListAccountsForOrg(ctx(c), org.ID)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	// The live probe only exists for the Evolution gateway; a Telegram row keeps
+	// its stored state (its own health lives in the webhook_* columns).
+	live := s.liveStatusByInstance(c)
+	items := make([]dto.Account, 0, len(accts))
+	for _, a := range accts {
+		items = append(items, dto.MapNeutralAccount(a, live[a.InstanceName]))
 	}
 	ok(c, gin.H{"items": items})
 }
@@ -295,19 +320,19 @@ func (s *Server) finalizeConnect(c *gin.Context, instance string, org store.Orga
 	}
 	ownerJID := config.CanonicalJID(found.OwnerJID)
 	acct, err := s.store.UpsertConnectedAccount(ctx(c), store.Account{
-		ID:              config.AccountID(ownerJID),
-		OrganizationID:  uuid.NullUUID{UUID: org.ID, Valid: true},
-		DisplayName:     s.takePendingName(instance),
-		OwnerJID:        ownerJID,
-		PhoneNumber:     config.PhoneFromJID(ownerJID),
-		InstanceName:    instance,
-		InstanceID:      found.ID,
-		ConnectionState: "connected",
+		ID:                 config.AccountID(ownerJID),
+		OrganizationID:     uuid.NullUUID{UUID: org.ID, Valid: true},
+		DisplayName:        s.takePendingName(instance),
+		ExternalAccountRef: ownerJID,
+		ExternalHandle:     config.PhoneFromJID(ownerJID),
+		InstanceName:       instance,
+		InstanceID:         found.ID,
+		ConnectionState:    "connected",
 	})
 	if err != nil {
 		return nil, err
 	}
-	s.log.Info("account connected", "id", acct.ID, "owner_jid", acct.OwnerJID, "instance", instance)
+	s.log.Info("account connected", "id", acct.ID, "owner_jid", acct.ExternalAccountRef, "instance", instance)
 	s.hub.Broadcast("wa_account.status_changed", dto.MapAccount(acct, "connected"))
 	return &acct, nil
 }
@@ -331,13 +356,18 @@ func (s *Server) liveStatusByInstance(c *gin.Context) map[string]string {
 }
 
 // orgAccount resolves an account id and enforces org ownership (404 otherwise).
+// AccountByID now reads the cross-channel view, so this also refuses accounts
+// that do not live on the wa_* gateway: /whatsapp-accounts/:id drives QR,
+// reconnect and Evolution-instance deletion, none of which a Telegram bot has.
+// Its own lifecycle is /telegram-accounts/:id.
 func (s *Server) orgAccount(c *gin.Context, id uuid.UUID) (store.Account, bool) {
 	org, okOrg := s.orgOf(c)
 	if !okOrg {
 		return store.Account{}, false
 	}
 	acct, err := s.store.AccountByID(ctx(c), id)
-	if err != nil || !acct.OrganizationID.Valid || acct.OrganizationID.UUID != org.ID {
+	if err != nil || !acct.OrganizationID.Valid || acct.OrganizationID.UUID != org.ID ||
+		acct.Channel == string(messaging.ChannelTelegram) {
 		fail(c, http.StatusNotFound, ErrNotFound, "account not found")
 		return store.Account{}, false
 	}

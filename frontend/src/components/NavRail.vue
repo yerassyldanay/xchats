@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
-import { Blocks, FlaskConical, Inbox, Library, LogOut, BookOpen } from 'lucide-vue-next'
+import { Blocks, FlaskConical, Inbox, Library, LogOut, BookOpen, Radio } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
 import { evalsApi } from '../api/evals'
@@ -14,7 +14,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 
 // Persistent left navigation rail — always present on authed pages. Rendered once
 // by App.vue so it never disappears.
@@ -34,7 +33,7 @@ onMounted(async () => {
 
 const baseNav: { name: string; icon: Component; label: string; match: string[] }[] = [
   { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
-  { name: 'accounts', icon: WhatsappIcon, label: 'Номера WhatsApp', match: ['accounts', 'instances'] },
+  { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts', 'instances'] },
   { name: 'playground', icon: Blocks, label: 'Конструктор', match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
 ]

@@ -16,6 +16,6 @@ func (s *Store) GetOrCreateSimulatorAccount(ctx context.Context, orgID uuid.UUID
 		INSERT INTO xchats.wa_accounts (id, organization_id, display_name, owner_jid, channel, connection_state)
 		VALUES (uuid_generate_v4(), $1::uuid, 'Simulator', 'simulator:' || $1::text, 'simulator', 'connected')
 		ON CONFLICT (owner_jid) DO UPDATE SET updated_at = now()
-		RETURNING `+accountCols, orgID).Scan(scanAccountDst(&a)...)
+		RETURNING `+waAccountCols, orgID).Scan(scanWaAccountDst(&a)...)
 	return a, err
 }

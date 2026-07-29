@@ -35,8 +35,14 @@ type Contact struct {
 
 // Chat is the API chat shape.
 type Chat struct {
-	ID                 string  `json:"id"`
-	WaAccountID        string  `json:"wa_account_id"`
+	ID        string `json:"id"`
+	Channel   string `json:"channel"`
+	AccountID string `json:"account_id"`
+	// WaAccountID is the deprecated alias for AccountID, emitted only for chats
+	// on the wa_* gateway (whatsapp/simulator) so an older client keeps working
+	// through the transition. A Telegram chat deliberately omits it rather than
+	// pretending its account is a WhatsApp one.
+	WaAccountID        string  `json:"wa_account_id,omitempty"`
 	Contact            Contact `json:"contact"`
 	Status             string  `json:"status"`
 	AssigneeUserID     *string `json:"assignee_user_id"`
@@ -119,11 +125,70 @@ func MapAccount(a store.Account, liveStatus string) WhatsAppAccount {
 		DisplayName:      name,
 		ConnectionStatus: status,
 		Assigned:         a.OrganizationID.Valid,
-		OwnerJID:         a.OwnerJID,
-		PhoneNumber:      a.PhoneNumber,
+		OwnerJID:         a.ExternalAccountRef,
+		PhoneNumber:      a.ExternalHandle,
 		LastLiveEventAt:  tsPtr(a.LastLiveEventAt),
 		CreatedAt:        tsPtr(&a.CreatedAt),
 	}
+}
+
+// Account is the channel-neutral account shape GET /accounts returns — the one
+// list the UI renders for every channel. The webhook_* fields are Telegram
+// health and stay null on a WhatsApp row; instance_name is the reverse.
+type Account struct {
+	ID              string `json:"id"`
+	Channel         string `json:"channel"`
+	DisplayName     string `json:"display_name"`
+	ExternalHandle  string `json:"external_handle"`
+	ConnectionState string `json:"connection_state"`
+	Assigned        bool   `json:"assigned"`
+	// InstanceName is the Evolution instance (wa_* gateway only).
+	InstanceName    string  `json:"instance_name"`
+	LastLiveEventAt *string `json:"last_live_event_at"`
+	CreatedAt       *string `json:"created_at"`
+
+	WebhookURL           *string `json:"webhook_url"`
+	WebhookRegisteredAt  *string `json:"webhook_registered_at"`
+	WebhookLastCheckedAt *string `json:"webhook_last_checked_at"`
+	WebhookLastError     *string `json:"webhook_last_error"`
+}
+
+// MapNeutralAccount maps a store.Account (as read from inbox_accounts_v) to the
+// neutral API shape. liveStatus overrides the stored state when a live probe is
+// available, exactly like MapAccount.
+func MapNeutralAccount(a store.Account, liveStatus string) Account {
+	name := a.DisplayName
+	if name == "" {
+		name = a.InstanceName
+	}
+	if name == "" {
+		name = a.ExternalHandle
+	}
+	status := liveStatus
+	if status == "" {
+		status = a.ConnectionState
+	}
+	out := Account{
+		ID:              a.ID.String(),
+		Channel:         a.Channel,
+		DisplayName:     name,
+		ExternalHandle:  a.ExternalHandle,
+		ConnectionState: status,
+		Assigned:        a.OrganizationID.Valid,
+		InstanceName:    a.InstanceName,
+		LastLiveEventAt: tsPtr(a.LastLiveEventAt),
+		CreatedAt:       tsPtr(&a.CreatedAt),
+	}
+	// Only a channel that actually has webhook health reports it; a WhatsApp row
+	// leaves all four null rather than emitting empty strings that read as "set".
+	if a.Channel == "telegram" {
+		url, lastErr := a.WebhookURL, a.WebhookLastError
+		out.WebhookURL = &url
+		out.WebhookLastError = &lastErr
+		out.WebhookRegisteredAt = tsPtr(a.WebhookRegisteredAt)
+		out.WebhookLastCheckedAt = tsPtr(a.WebhookLastCheckedAt)
+	}
+	return out
 }
 
 func mediaURL(id uuid.UUID) string { return "/xchats/api/v1/media/" + id.String() }
@@ -157,7 +222,7 @@ func MapContact(c store.Contact) Contact {
 		ID:          c.ID.String(),
 		DisplayName: name,
 		PhoneNumber: c.PhoneNumber,
-		PhoneJID:    c.PhoneJID,
+		PhoneJID:    c.ExternalContactRef,
 		LidJID:      c.LidJID,
 		PushName:    c.PushName,
 		Attributes:  decodeAttrs(c.Attributes),
@@ -166,9 +231,14 @@ func MapContact(c store.Contact) Contact {
 
 // MapChat maps a store.Chat (with embedded contact).
 func MapChat(c store.Chat) Chat {
-	return Chat{
+	channel := c.Channel
+	if channel == "" {
+		channel = "whatsapp"
+	}
+	out := Chat{
 		ID:                 c.ID.String(),
-		WaAccountID:        c.AccountID.String(),
+		Channel:            channel,
+		AccountID:          c.AccountID.String(),
 		Contact:            MapContact(c.Contact),
 		Status:             c.ChatState,
 		AssigneeUserID:     nullUUIDPtr(c.AssigneeUserID),
@@ -176,6 +246,10 @@ func MapChat(c store.Chat) Chat {
 		LastMessageAt:      tsPtr(c.LastMessageAt),
 		LastMessagePreview: c.LastMessagePreview,
 	}
+	if channel != "telegram" {
+		out.WaAccountID = c.AccountID.String()
+	}
+	return out
 }
 
 // MapMessage maps a store.Message (with media).
@@ -193,7 +267,7 @@ func MapMessage(m store.Message) Message {
 		Direction:          m.Direction,
 		SenderType:         m.SenderKind,
 		SenderUserID:       nullUUIDPtr(m.SenderUserID),
-		EvolutionMessageID: m.EvolutionMessageID,
+		EvolutionMessageID: m.ExternalMessageID,
 		MessageType:        m.MessageKind,
 		Content:            m.Body,
 		Media:              media,

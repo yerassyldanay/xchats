@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -69,6 +70,20 @@ func newTestStoreThrough(t *testing.T, upTo string) (*store.Store, func()) {
 		}
 	}
 	return st, st.Close
+}
+
+// seedOrgAt inserts an organization with plain SQL, for the harnesses pinned to
+// a HISTORICAL schema. Store.SeedOrganization deliberately targets the current
+// schema (its org ranking now covers tg_accounts, which does not exist at 0008),
+// so a test replaying an old migration body must not route through it.
+func seedOrgAt(t *testing.T, st *store.Store, name string) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	if err := st.Pool().QueryRow(context.Background(),
+		`INSERT INTO xchats.organizations (name) VALUES ($1) RETURNING id`, name).Scan(&id); err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	return id
 }
 
 // TestMigrations_FreshDatabaseNoOpsDemoData proves 0001-0008 apply cleanly on
@@ -136,10 +151,7 @@ func TestMigrations_0008IsIdempotentAndNeverOverwrites(t *testing.T) {
 	defer closeFn()
 	ctx := context.Background()
 
-	org, err := st.SeedOrganization(ctx, "demo-data-org")
-	if err != nil {
-		t.Fatalf("seed org: %v", err)
-	}
+	orgID := seedOrgAt(t, st, "demo-data-org")
 
 	body, err := migrations.FS.ReadFile("0008_kb_response_demo_data.up.sql")
 	if err != nil {
@@ -164,9 +176,9 @@ func TestMigrations_0008IsIdempotentAndNeverOverwrites(t *testing.T) {
 	}
 
 	var productCount, zoneCount, topicCount int
-	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND ref LIKE 'demo_%'`, org.ID).Scan(&productCount)
-	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_delivery_zones WHERE organization_id = $1`, org.ID).Scan(&zoneCount)
-	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_topics WHERE organization_id = $1 AND slug LIKE 'demo_%'`, org.ID).Scan(&topicCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND ref LIKE 'demo_%'`, orgID).Scan(&productCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_delivery_zones WHERE organization_id = $1`, orgID).Scan(&zoneCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_topics WHERE organization_id = $1 AND slug LIKE 'demo_%'`, orgID).Scan(&topicCount)
 	if productCount != 5 {
 		t.Fatalf("demo products = %d, want 5", productCount)
 	}
@@ -182,15 +194,15 @@ func TestMigrations_0008IsIdempotentAndNeverOverwrites(t *testing.T) {
 	const customRef = "operator-added-product"
 	if _, err := st.Pool().Exec(ctx, `
 		INSERT INTO xchats.ai_products (organization_id, ref, lang, name, price, status, in_stock)
-		VALUES ($1, $2, 'ru', 'Custom', '1 ₸', 'active', true)`, org.ID, customRef); err != nil { // schema as of 0008 — lang/status still present at this point in history
+		VALUES ($1, $2, 'ru', 'Custom', '1 ₸', 'active', true)`, orgID, customRef); err != nil { // schema as of 0008 — lang/status still present at this point in history
 		t.Fatalf("insert operator product: %v", err)
 	}
 
 	applyOnce() // re-apply: must be a complete no-op
 
 	var productCount2, customCount int
-	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND ref LIKE 'demo_%'`, org.ID).Scan(&productCount2)
-	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND ref = $2`, org.ID, customRef).Scan(&customCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND ref LIKE 'demo_%'`, orgID).Scan(&productCount2)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND ref = $2`, orgID, customRef).Scan(&customCount)
 	if productCount2 != 5 {
 		t.Fatalf("re-apply: demo products = %d, want still 5 (no duplicates)", productCount2)
 	}
@@ -221,6 +233,76 @@ func TestMigrations_0001Through0009ApplyCleanOnFreshDatabase(t *testing.T) {
 	}
 }
 
+// TestMigrations_0013AppliesAndBuildsTheChannelViews proves migration 0013 runs
+// as part of the normal migrate step and leaves the schema the multichannel read
+// layer depends on: the six tg_* tables, the four unified views, and a
+// channel-neutral ai_drafts (FKs into wa_* gone, so a Telegram draft can exist
+// at all).
+func TestMigrations_0013AppliesAndBuildsTheChannelViews(t *testing.T) {
+	st, closeFn := newTestStoreForSimulator(t)
+	defer closeFn()
+	ctx := context.Background()
+
+	var applied bool
+	if err := st.Pool().QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM public.xchats_schema_migrations WHERE version = '0013_telegram_channel')`,
+	).Scan(&applied); err != nil {
+		t.Fatalf("check migration recorded: %v", err)
+	}
+	if !applied {
+		t.Fatal("0013_telegram_channel did not run as part of the normal migrate step")
+	}
+
+	for _, tbl := range []string{
+		"tg_accounts", "tg_credentials", "tg_contacts", "tg_chats", "tg_messages", "tg_message_media",
+	} {
+		var n int
+		if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.`+tbl).Scan(&n); err != nil {
+			t.Fatalf("table %s: %v", tbl, err)
+		}
+	}
+	for _, view := range []string{
+		"inbox_accounts_v", "inbox_chats_v", "inbox_messages_v", "inbox_message_media_v",
+	} {
+		var n int
+		if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.`+view).Scan(&n); err != nil {
+			t.Fatalf("view %s: %v", view, err)
+		}
+		var kind string
+		if err := st.Pool().QueryRow(ctx,
+			`SELECT c.relkind::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+			 WHERE n.nspname = 'xchats' AND c.relname = $1`, view).Scan(&kind); err != nil {
+			t.Fatalf("relkind of %s: %v", view, err)
+		}
+		if kind != "v" {
+			t.Fatalf("%s relkind = %q, want a view", view, kind)
+		}
+	}
+
+	// ai_drafts must no longer be tied to the WhatsApp tables.
+	var fks int
+	if err := st.Pool().QueryRow(ctx, `
+		SELECT count(*) FROM pg_constraint c
+		JOIN pg_class t ON t.oid = c.conrelid
+		JOIN pg_namespace n ON n.oid = t.relnamespace
+		WHERE n.nspname = 'xchats' AND t.relname = 'ai_drafts' AND c.contype = 'f'`).Scan(&fks); err != nil {
+		t.Fatalf("count ai_drafts fks: %v", err)
+	}
+	if fks != 0 {
+		t.Fatalf("ai_drafts still has %d foreign keys — a Telegram draft cannot be stored", fks)
+	}
+	var channel string
+	if err := st.Pool().QueryRow(ctx, `
+		SELECT column_default FROM information_schema.columns
+		WHERE table_schema = 'xchats' AND table_name = 'ai_drafts' AND column_name = 'channel'`).
+		Scan(&channel); err != nil {
+		t.Fatalf("ai_drafts.channel is missing: %v", err)
+	}
+	if !strings.Contains(channel, "whatsapp") {
+		t.Fatalf("ai_drafts.channel default = %q, want 'whatsapp' so existing rows keep their meaning", channel)
+	}
+}
+
 // TestMigrations_0009IsIdempotentAndRemovesDemoData is 0009's removal-side
 // mirror of TestMigrations_0008IsIdempotentAndNeverOverwrites: after 0008
 // inserts its demo rows, applying 0009's body deletes exactly those fixed
@@ -230,10 +312,7 @@ func TestMigrations_0009IsIdempotentAndRemovesDemoData(t *testing.T) {
 	defer closeFn()
 	ctx := context.Background()
 
-	org, err := st.SeedOrganization(ctx, "demo-removal-org")
-	if err != nil {
-		t.Fatalf("seed org: %v", err)
-	}
+	orgID := seedOrgAt(t, st, "demo-removal-org")
 
 	body8, err := migrations.FS.ReadFile("0008_kb_response_demo_data.up.sql")
 	if err != nil {
@@ -266,10 +345,10 @@ func TestMigrations_0009IsIdempotentAndRemovesDemoData(t *testing.T) {
 		t.Fatalf("demo assistant row should be gone after 0009, err=%v persona=%q", err, persona)
 	}
 	var productCount, zoneCount, topicCount, tariffCount int
-	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND ref LIKE 'demo_%'`, org.ID).Scan(&productCount)
-	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_delivery_zones WHERE organization_id = $1`, org.ID).Scan(&zoneCount)
-	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_topics WHERE organization_id = $1 AND slug LIKE 'demo_%'`, org.ID).Scan(&topicCount)
-	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_tariffs WHERE organization_id = $1 AND ref LIKE 'demo_%'`, org.ID).Scan(&tariffCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND ref LIKE 'demo_%'`, orgID).Scan(&productCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_delivery_zones WHERE organization_id = $1`, orgID).Scan(&zoneCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_topics WHERE organization_id = $1 AND slug LIKE 'demo_%'`, orgID).Scan(&topicCount)
+	st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_tariffs WHERE organization_id = $1 AND ref LIKE 'demo_%'`, orgID).Scan(&tariffCount)
 	if productCount != 0 || zoneCount != 0 || topicCount != 0 || tariffCount != 0 {
 		t.Fatalf("demo rows remain after 0009: products=%d zones=%d topics=%d tariffs=%d",
 			productCount, zoneCount, topicCount, tariffCount)

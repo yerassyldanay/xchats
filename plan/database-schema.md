@@ -56,9 +56,87 @@ message_media — media belonging to a conversation message
   storage_backend, storage_key, download_status, created_at, updated_at
 ```
 
-Future channels add transport tables such as `ig_*` and `tg_*` behind the same
-normalized contracts. They do not add channel-specific columns to shared AI,
-authoring, or suggestion tables.
+Future channels add transport tables such as `ig_*` behind the same normalized
+contracts. They do not add channel-specific columns to shared AI, authoring, or
+suggestion tables.
+
+## Telegram transport (`tg_*`)
+
+Telegram is the second channel and the proof the pattern above scales. Its
+transport tables mirror the WhatsApp ones one-for-one; nothing about Telegram
+reaches `wa_accounts` (whose `channel` CHECK stays `whatsapp | simulator`).
+
+```text
+tg_accounts — Telegram bots. id = uuidv5(ns, 'telegram:bot:<bot_id>'), so
+              re-pasting the same token revives the row (history intact) and
+              keeps the webhook URL — which embeds this uuid — stable.
+  id, organization_id, display_name, bot_id (UNIQUE), bot_username,
+  connection_state, webhook_url, webhook_registered_at, webhook_last_checked_at,
+  webhook_last_error, last_live_event_at, deleted_at, created_at, updated_at
+
+tg_credentials — the bot token, AES-256-GCM at rest (CREDENTIALS_ENC_KEY)
+  account_id, bot_token_enc, encryption_key_version, created_at, updated_at
+
+tg_contacts — account-scoped Telegram users
+  id, account_id, telegram_user_id, username, first_name, last_name,
+  display_name, created_at, updated_at
+
+tg_chats — Telegram conversations (private only for now)
+  id, account_id, contact_id, telegram_chat_id, chat_type, chat_state,
+  assignee_user_id, last_message_at, last_message_preview, unread_count,
+  created_at, updated_at
+
+tg_messages — normalized Telegram messages plus provider audit payload
+  id, account_id, chat_id, direction, sender_kind, sender_user_id,
+  telegram_update_id, telegram_message_id, message_kind, body, delivery_state,
+  source, raw, message_ts, created_at, updated_at
+
+tg_message_media — media belonging to a Telegram message
+  id, message_id, file_id, file_unique_id, media_type, mimetype, filename,
+  size, storage_key, download_status, created_at, updated_at
+```
+
+There is deliberately **no generic inbound-event table**. Telegram redelivers
+any update it does not receive a 2xx for, so the webhook commits the normalized
+rows *before* it acks: a database failure answers 500 and the update comes back,
+and `UNIQUE(account_id, telegram_update_id)` plus `UNIQUE(chat_id,
+telegram_message_id)` make the replay a no-op. Attachment downloads are the one
+piece of deferred work, and their retry lives on the `tg_message_media` row —
+the durable work item a sweeper re-enqueues from.
+
+## Unified read views
+
+Writes always go to a channel's own transport tables. **Reads** go through four
+read-only `UNION ALL` views, so the inbox, the org guards and the response
+engine are written once rather than per channel:
+
+```text
+inbox_accounts_v      id, organization_id, channel, display_name,
+                      external_handle, external_account_ref, instance_name,
+                      connection_state, last_live_event_at, deleted_at,
+                      created_at, webhook_* (Telegram health; NULL elsewhere)
+inbox_chats_v         id, account_id, organization_id, channel,
+                      account_deleted_at, external_conversation_ref, …contact_*
+inbox_messages_v      id, chat_id, account_id, channel, direction, sender_kind,
+                      sender_user_id, external_message_id, …
+inbox_message_media_v id, message_id, channel, media_type, mimetype, filename,
+                      size, storage_key, download_status, created_at
+```
+
+Two rules keep them honest:
+
+- Provider vocabulary is folded into neutral names (`external_handle`,
+  `external_account_ref`, `external_conversation_ref`, `external_contact_ref`,
+  `external_message_id`).
+- The WhatsApp legs are **unfiltered on channel**. The simulator lives inside
+  `wa_*` as rows with `channel='simulator'`, so filtering there would make
+  simulator conversations vanish from the inbox. The media view derives its
+  channel from `wa_accounts` for the same reason.
+
+`ai_drafts` is channel-neutral: its foreign keys into `wa_*` are dropped, it
+carries a `channel` column, and its single-pending-suggestion index is
+`(channel, chat_id, option_ordinal) WHERE draft_state='suggested'`. Ids stay
+loose UUID references, so orphan cleanup on a hard delete is code-level.
 
 ## Approved live knowledge (`ai_*`)
 

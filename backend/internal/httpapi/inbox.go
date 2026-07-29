@@ -36,13 +36,19 @@ func (s *Server) handleListChats(c *gin.Context) {
 		Limit:    limit,
 		Offset:   offset,
 	}
-	if raw := c.Query("wa_account_id"); raw != "" {
+	// account_id is the neutral filter; wa_account_id is kept as a deprecated
+	// alias so an older client keeps working through the transition.
+	raw, param := c.Query("account_id"), "account_id"
+	if raw == "" {
+		raw, param = c.Query("wa_account_id"), "wa_account_id"
+	}
+	if raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil {
-			fail(c, http.StatusBadRequest, ErrValidation, "invalid wa_account_id")
+			fail(c, http.StatusBadRequest, ErrValidation, "invalid "+param)
 			return
 		}
-		f.WaAccountID = uuid.NullUUID{UUID: id, Valid: true}
+		f.AccountID = uuid.NullUUID{UUID: id, Valid: true}
 	}
 	chats, total, err := s.store.ListChatsForOrg(ctx(c), f)
 	if err != nil {
@@ -138,14 +144,17 @@ func (s *Server) handleSendMessage(c *gin.Context) {
 // (sender_kind=user) and AI approve (sender_kind=ai).
 func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, senderUserID uuid.NullUUID, text string, mediaIDs []string) ([]dto.Message, error) {
 	var out []dto.Message
-	// Resolve the chat's account once → its Evolution instance and channel, so
-	// the send goes out from the right number (multi-account) through the right
-	// messaging.ChannelSender. Empty instance falls back to the client's default
-	// instance in the worker; an empty channel fails the sender lookup explicitly.
-	instance, channel := "", ""
+	// Resolve the chat's account once → its Evolution instance, so the send goes
+	// out from the right number (multi-account). Empty instance falls back to the
+	// client's default instance in the worker. The channel comes from the chat
+	// itself (the view already carries it), so it is never guessed.
+	channel := chat.Channel
+	instance := ""
 	if acct, err := s.store.AccountByID(ctx(c), chat.AccountID); err == nil {
 		instance = acct.InstanceName
-		channel = acct.Channel
+		if channel == "" {
+			channel = acct.Channel
+		}
 	} else {
 		// No account row → the worker falls back to the default Evolution instance.
 		// If that default is wrong, sends go nowhere; make the fallback visible.
@@ -157,18 +166,18 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 
 	// sendText emits a standalone text message (no media, or no media ref resolved).
 	sendText := func() error {
-		msgID, err := s.store.InsertOutboundMessage(ctx(c), chat.ID, chat.AccountID, senderKind, senderUserID, "conversation", text, preview(text))
+		msgID, err := s.store.InsertOutbound(ctx(c), channel, chat.ID, chat.AccountID, senderKind, senderUserID, "conversation", text, preview(text))
 		if err != nil {
 			return err
 		}
 		msg, _ := s.store.MessageByID(ctx(c), msgID)
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
-		_ = s.queue.Publish(queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
+		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
-			Instance: instance, PhoneJID: chat.RemoteJID, Text: text,
+			Instance: instance, PhoneJID: chat.ExternalConversationRef, Text: text,
 		}})
-		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "instance", instance,
-			"sender_kind", senderKind, "kind", "text")
+		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "channel", channel,
+			"instance", instance, "sender_kind", senderKind, "kind", "text")
 		out = append(out, dto.MapMessage(msg))
 		return nil
 	}
@@ -199,18 +208,20 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 			prev = preview(caption)
 		}
 		kind := mediaMessageKind(meta.MediaType)
-		msgID, err := s.store.InsertOutboundMessage(ctx(c), chat.ID, chat.AccountID, senderKind, senderUserID, kind, caption, prev)
+		msgID, err := s.store.InsertOutbound(ctx(c), channel, chat.ID, chat.AccountID, senderKind, senderUserID, kind, caption, prev)
 		if err != nil {
 			return nil, err
 		}
-		_, _, _ = s.store.UpsertMessageMedia(ctx(c), msgID, store.MediaRef{
+		if err := s.store.UpsertOutboundMedia(ctx(c), channel, msgID, store.MediaRef{
 			MediaType: meta.MediaType, Mimetype: meta.Mimetype, FileName: meta.FileName, FileSize: int(meta.FileSize),
-		}, mid, "ready")
+		}, mid); err != nil {
+			return nil, err
+		}
 		msg, _ := s.store.MessageByID(ctx(c), msgID)
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
-		_ = s.queue.Publish(queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
+		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
-			Instance: instance, PhoneJID: chat.RemoteJID, MediaID: mid, Caption: caption,
+			Instance: instance, PhoneJID: chat.ExternalConversationRef, MediaID: mid, Caption: caption,
 		}})
 		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "instance", instance,
 			"sender_kind", senderKind, "kind", kind, "media_id", mid)
@@ -225,15 +236,19 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 }
 
 // selectComposeAccount picks the "from" account for a new conversation: the
-// explicit wa_account_id if given (and owned by the org), else the sole account
+// explicit account_id if given (and owned by the org), else the sole account
 // when exactly one is connected. With zero or many it returns an error so the UI
 // shows the "from number" picker (multiple) or prompts to connect one (none).
+//
+// It deliberately lists only the wa_* gateway's accounts: a Telegram bot cannot
+// start a conversation (Telegram requires the user to message the bot first), so
+// it must never be offered as a "from" here.
 func (s *Server) selectComposeAccount(c *gin.Context, rawID string) (store.Account, bool) {
 	org, okOrg := s.orgOf(c)
 	if !okOrg {
 		return store.Account{}, false
 	}
-	accts, err := s.store.ListAccountsForOrg(ctx(c), org.ID)
+	accts, err := s.store.ListWaAccountsForOrg(ctx(c), org.ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return store.Account{}, false
@@ -241,7 +256,7 @@ func (s *Server) selectComposeAccount(c *gin.Context, rawID string) (store.Accou
 	if rawID != "" {
 		id, perr := uuid.Parse(rawID)
 		if perr != nil {
-			fail(c, http.StatusBadRequest, ErrValidation, "invalid wa_account_id")
+			fail(c, http.StatusBadRequest, ErrValidation, "invalid account_id")
 			return store.Account{}, false
 		}
 		for _, a := range accts {
@@ -249,7 +264,7 @@ func (s *Server) selectComposeAccount(c *gin.Context, rawID string) (store.Accou
 				return a, true
 			}
 		}
-		fail(c, http.StatusBadRequest, ErrValidation, "wa_account_id not found in your accounts")
+		fail(c, http.StatusBadRequest, ErrValidation, "account_id not found in your WhatsApp accounts")
 		return store.Account{}, false
 	}
 	switch len(accts) {
@@ -259,16 +274,27 @@ func (s *Server) selectComposeAccount(c *gin.Context, rawID string) (store.Accou
 		fail(c, http.StatusConflict, ErrAccountNotConnected, "no connected WhatsApp account")
 		return store.Account{}, false
 	default:
-		fail(c, http.StatusBadRequest, ErrValidation, "wa_account_id required (multiple accounts connected)")
+		fail(c, http.StatusBadRequest, ErrValidation, "account_id required (multiple accounts connected)")
 		return store.Account{}, false
 	}
 }
 
 type composeReq struct {
-	Phone       string   `json:"phone"`
-	Text        string   `json:"text"`
-	MediaIDs    []string `json:"media_ids"`
-	WaAccountID string   `json:"wa_account_id"`
+	Phone     string   `json:"phone"`
+	Text      string   `json:"text"`
+	MediaIDs  []string `json:"media_ids"`
+	AccountID string   `json:"account_id"`
+	// WaAccountID is the deprecated alias for AccountID, still accepted so an
+	// older client keeps working through the transition.
+	WaAccountID string `json:"wa_account_id"`
+}
+
+// accountID resolves the compose "from" account, preferring the neutral field.
+func (r composeReq) accountID() string {
+	if r.AccountID != "" {
+		return r.AccountID
+	}
+	return r.WaAccountID
 }
 
 // handleCreateChat starts (or reuses) a conversation by phone number and sends the
@@ -288,7 +314,7 @@ func (s *Server) handleCreateChat(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "text or media_ids required")
 		return
 	}
-	acct, okAcct := s.selectComposeAccount(c, req.WaAccountID)
+	acct, okAcct := s.selectComposeAccount(c, req.accountID())
 	if !okAcct {
 		return
 	}

@@ -36,7 +36,7 @@ func (s *Server) handleSuggest(c *gin.Context) {
 		}
 	}
 	trigger, _ := s.store.LatestInboundMessageID(ctx(c), chatID)
-	_ = s.queue.Publish(queue.Message{Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: chatID}})
+	s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: chatID}})
 	var trig *string
 	if trigger.Valid {
 		t := trigger.UUID.String()

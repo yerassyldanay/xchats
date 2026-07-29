@@ -16,9 +16,14 @@ export interface Contact {
   push_name: string
   attributes?: Record<string, unknown>
 }
+export type ChannelName = 'whatsapp' | 'simulator' | 'telegram'
+
 export interface Chat {
   id: string
-  wa_account_id: string
+  channel: ChannelName
+  account_id: string
+  /** @deprecated alias for account_id, emitted only for wa_* channels. */
+  wa_account_id?: string
   contact: Contact
   status: string
   assignee_user_id: string | null
@@ -57,6 +62,38 @@ export interface WhatsAppAccount {
   phone_number: string
   last_live_event_at: string | null
   created_at: string | null
+}
+
+// Account is the channel-neutral shape GET /accounts returns — one list for
+// every channel. external_handle is the phone number for WhatsApp and
+// "@botname" for Telegram; the webhook_* fields are Telegram health and stay
+// null everywhere else, as instance_name does for Telegram.
+export interface Account {
+  id: string
+  channel: ChannelName
+  display_name: string
+  external_handle: string
+  // whatsapp: connecting | qr_required | connected | disconnected
+  // telegram: connecting | connected | webhook_error | token_error
+  //         | disconnect_pending | disconnect_error | disconnected
+  connection_state: string
+  assigned: boolean
+  instance_name: string
+  last_live_event_at: string | null
+  created_at: string | null
+  webhook_url: string | null
+  webhook_registered_at: string | null
+  webhook_last_checked_at: string | null
+  webhook_last_error: string | null
+}
+
+// TelegramAccountResponse is what the /telegram-accounts lifecycle routes
+// return: the refreshed account plus the state the call just produced.
+export interface TelegramAccountResponse {
+  account: Account
+  connection_state: string
+  pending_update_count?: number
+  expected_webhook_url?: string
 }
 export interface QrResponse {
   status: string // qr_required | connecting | connected
