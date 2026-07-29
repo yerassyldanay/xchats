@@ -69,8 +69,6 @@ func main() {
 		runSimulateMessage(flag.Args()[1:])
 	case "kb-load":
 		runKBLoad(cfg, log, flag.Args()[1:])
-	case "kb-preflight":
-		runKBPreflight(cfg, log, flag.Args()[1:])
 	default:
 		log.Error("unknown command", "cmd", cmd)
 		os.Exit(2)

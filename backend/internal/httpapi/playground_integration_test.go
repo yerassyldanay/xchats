@@ -119,7 +119,7 @@ func TestPlayground_ApproveGateBlocksUnconfirmed(t *testing.T) {
 	h := newHarness(t)
 
 	resp, _ := h.postJSON("/xchats/api/v1/playground/draft/topics",
-		map[string]string{"slug": "broken", "lang": "ru", "body_md": "Цена {{tariff.ghost.price}}"})
+		map[string]string{"slug": "broken", "body_md": "Цена {{tariff.ghost.price}}"})
 	if resp.StatusCode != 200 {
 		t.Fatalf("upsert topic: %d", resp.StatusCode)
 	}
@@ -159,7 +159,7 @@ func TestKB_GetAndUpsertTopic_AppliesLiveImmediately(t *testing.T) {
 
 	// A write applies straight to the live table — no approve step.
 	resp, _ := h.postJSON("/xchats/api/v1/kb/topics",
-		map[string]string{"slug": "kb_live_topic", "lang": "ru", "body_md": "Обычный текст без фактов."})
+		map[string]string{"slug": "kb_live_topic", "body_md": "Обычный текст без фактов."})
 	if resp.StatusCode != 200 {
 		t.Fatalf("upsert live topic: %d", resp.StatusCode)
 	}
@@ -198,7 +198,7 @@ func TestKB_GetAndUpsertTopic_AppliesLiveImmediately(t *testing.T) {
 func TestKB_UpsertTopic_RejectsNonProseBody(t *testing.T) {
 	h := newHarness(t)
 	resp, env := h.postJSON("/xchats/api/v1/kb/topics",
-		map[string]string{"slug": "kb_broken", "lang": "ru", "body_md": "Цена {{tariff.ghost.price}}"})
+		map[string]string{"slug": "kb_broken", "body_md": "Цена {{tariff.ghost.price}}"})
 	if resp.StatusCode != 422 {
 		t.Fatalf("want 422 gate failure, got %d (%v)", resp.StatusCode, env)
 	}

@@ -44,15 +44,15 @@ type Plan struct {
 
 // TopicProposal upserts a draft topic (proposed for review).
 type TopicProposal struct {
-	Slug, Lang, Title, BodyMD string
-	MaterialID                string
+	Slug, Title, BodyMD string
+	MaterialID          string
 }
 
 // FactConfirm raises a confirm_fact popup (a price/amount detected in material)
 // targeting a concrete typed-fact column (e.g. tariff <slug>.price).
 type FactConfirm struct {
-	Table, Slug, Field, Lang, Suggested, Description string
-	MaterialID                                       string
+	Table, Slug, Field, Suggested, Description string
+	MaterialID                                 string
 }
 
 // DescribeFile raises a describe_file popup for a material with no description.
@@ -115,7 +115,7 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 			}
 		}
 		if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-			Slug: t.Slug, Lang: t.Lang, Title: t.Title, BodyMD: body,
+			Slug: t.Slug, Title: t.Title, BodyMD: body,
 			Provenance: prov,
 		}); err != nil {
 			return res, err
@@ -129,7 +129,7 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 			Prompt:  fmt.Sprintf("Подтвердите цену: «%s»?", cv.Suggested),
 			Context: jsonObj(map[string]any{"suggested": cv.Suggested, "description": cv.Description}),
 			Target: jsonObj(map[string]any{
-				"table": cv.Table, "slug": cv.Slug, "field": cv.Field, "lang": orElse(cv.Lang, "ru"),
+				"table": cv.Table, "slug": cv.Slug, "field": cv.Field,
 			}),
 		})
 		if err != nil {
@@ -262,7 +262,7 @@ func (RuleSynthesizer) Plan(_ context.Context, in SynthInput) (Plan, error) {
 			slug = fmt.Sprintf("item_%d", n)
 			seen[match] = slug
 			plan.Confirm = append(plan.Confirm, FactConfirm{
-				Table: "tariff", Slug: slug, Field: "price", Lang: "ru",
+				Table: "tariff", Slug: slug, Field: "price",
 				Suggested: match, Description: "Цена, обнаруженная в материалах",
 			})
 		}
@@ -275,7 +275,7 @@ func (RuleSynthesizer) Plan(_ context.Context, in SynthInput) (Plan, error) {
 	}
 	if strings.TrimSpace(body) != "" {
 		plan.Topics = append(plan.Topics, TopicProposal{
-			Slug: slug, Lang: "ru", Title: firstLine(in.Instruction), BodyMD: body,
+			Slug: slug, Title: firstLine(in.Instruction), BodyMD: body,
 		})
 	}
 

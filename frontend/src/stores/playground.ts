@@ -129,7 +129,7 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft topics ---------------------------------------------------------
-    upsertTopic(input: { slug: string; lang?: string; title?: string; body_md?: string }) {
+    upsertTopic(input: { slug: string; title?: string; body_md?: string }) {
       return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/topics', input, this.ifMatch())))
     },
     deleteTopic(slug: string) {
@@ -139,7 +139,6 @@ export const usePlayground = defineStore('playground', {
     // --- draft tariffs (typed facts: verbatim price/limit/fee columns) --------
     upsertTariff(input: {
       ref: string
-      lang?: string
       name?: string
       price?: string
       limit_text?: string
@@ -156,24 +155,24 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft products (typed facts: verbatim price column) ------------------
-    upsertProduct(input: { ref: string; lang?: string; name?: string; price?: string; description?: string; category?: string }) {
+    upsertProduct(input: { ref: string; name?: string; price?: string; description?: string; category?: string }) {
       return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/products', input, this.ifMatch())))
     },
     deleteProduct(ref: string) {
       return this.write(async () => this.setDraft(await api.del<DraftView>('/playground/draft/products/' + encodeURIComponent(ref), this.ifMatch())))
     },
 
-    // --- draft contacts (the 'support' singleton — one PATCH per language row) -
+    // --- draft contacts (the 'support' singleton — one org, one PATCH) -------
     patchContacts(patch: {
-      lang?: string; whatsapp?: string; email?: string; address?: string; legal_information?: string; callback_time?: string
+      whatsapp?: string; email?: string; address?: string; legal_information?: string; callback_time?: string
       working_hours?: string; phone?: string; website?: string; instagram?: string
     }) {
       return this.write(async () => this.setDraft(await api.patch<DraftView>('/playground/draft/contacts', patch, this.ifMatch())))
     },
 
-    // --- draft policies (the 'main' singleton — one PATCH per language row) ---
+    // --- draft policies (the 'main' singleton — one org, one PATCH) ----------
     patchPolicies(patch: {
-      lang?: string; delivery_cost?: string; delivery_in_days?: string; free_delivery_from?: string; min_order?: string
+      delivery_cost?: string; delivery_in_days?: string; free_delivery_from?: string; min_order?: string
       prepayment?: string; installment?: string; return_period_in_days?: string; warranty?: string
     }) {
       return this.write(async () => this.setDraft(await api.patch<DraftView>('/playground/draft/policies', patch, this.ifMatch())))
@@ -233,8 +232,8 @@ export const usePlayground = defineStore('playground', {
     // --- approve ("Принять всё" / "Принять") ------------------------
     // approve(): the WHOLE pending draft. approveEntity(kind,key): one row —
     // kind ∈ topics|tariffs|products|contacts|policies; key = the row's
-    // natural id (slug for topics, ref for tariffs/products, lang for
-    // contacts/policies).
+    // natural id (slug for topics, ref for tariffs/products, the fixed
+    // singleton slug for contacts/policies).
     async approve(): Promise<boolean> {
       return this.approveWith('/playground/draft/approve')
     },
@@ -288,7 +287,7 @@ export const usePlayground = defineStore('playground', {
         this.liveBusy = false
       }
     },
-    liveUpsertTopic(input: { slug: string; lang?: string; title?: string; body_md?: string }) {
+    liveUpsertTopic(input: { slug: string; title?: string; body_md?: string }) {
       return this.writeLive(async () => {
         this.live = await api.post<DraftView>('/kb/topics', input)
       })
@@ -300,7 +299,6 @@ export const usePlayground = defineStore('playground', {
     },
     liveUpsertTariff(input: {
       ref: string
-      lang?: string
       name?: string
       price?: string
       limit_text?: string
@@ -321,7 +319,6 @@ export const usePlayground = defineStore('playground', {
     },
     liveUpsertProduct(input: {
       ref: string
-      lang?: string
       name?: string
       price?: string
       description?: string
@@ -364,7 +361,7 @@ export const usePlayground = defineStore('playground', {
     },
 
     livePatchContacts(patch: {
-      lang?: string; whatsapp?: string; email?: string; address?: string; legal_information?: string; callback_time?: string
+      whatsapp?: string; email?: string; address?: string; legal_information?: string; callback_time?: string
       working_hours?: string; phone?: string; website?: string; instagram?: string
     }) {
       return this.writeLive(async () => {
@@ -372,7 +369,7 @@ export const usePlayground = defineStore('playground', {
       })
     },
     livePatchPolicies(patch: {
-      lang?: string; delivery_cost?: string; delivery_in_days?: string; free_delivery_from?: string; min_order?: string
+      delivery_cost?: string; delivery_in_days?: string; free_delivery_from?: string; min_order?: string
       prepayment?: string; installment?: string; return_period_in_days?: string; warranty?: string; outside_zones_note?: string
     }) {
       return this.writeLive(async () => {

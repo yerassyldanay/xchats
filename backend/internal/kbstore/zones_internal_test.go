@@ -23,7 +23,7 @@ func TestZoneGateReasons_AvailableRequiresCostAndDays(t *testing.T) {
 
 func TestZoneGateReasons_AvailableWithCostAndDaysOK(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{zone("almaty", "", true, "5 000 ₸", "1")}, []PolicyRow{
-		{Lang: "*", OutsideZonesNote: "не доставляем"},
+		{OutsideZonesNote: "не доставляем"},
 	})
 	if len(r) != 0 {
 		t.Fatalf("fully-specified available zone should pass, got %v", r)
@@ -39,7 +39,7 @@ func TestZoneGateReasons_UnavailableMustBeBlank(t *testing.T) {
 
 func TestZoneGateReasons_UnavailableBlankOK(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{zone("baikonur", "", false, "", "")}, []PolicyRow{
-		{Lang: "*", OutsideZonesNote: "не доставляем"},
+		{OutsideZonesNote: "не доставляем"},
 	})
 	if len(r) != 0 {
 		t.Fatalf("fully-blank unavailable zone should pass, got %v", r)
@@ -64,7 +64,7 @@ func TestZoneGateReasons_ParentRefCycle(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{
 		zone("a", "b", true, "1 ₸", "1"),
 		zone("b", "a", true, "1 ₸", "1"),
-	}, []PolicyRow{{Lang: "*", OutsideZonesNote: "x"}})
+	}, []PolicyRow{{OutsideZonesNote: "x"}})
 	if !hasReason(r, "cycle") {
 		t.Fatalf("want a cycle reason, got %v", r)
 	}
@@ -74,7 +74,7 @@ func TestZoneGateReasons_ValidParentChainOK(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{
 		zone("kazakhstan", "", true, "10 000 ₸", "3–4"),
 		zone("almaty", "kazakhstan", true, "5 000 ₸", "1"),
-	}, []PolicyRow{{Lang: "*", OutsideZonesNote: "не доставляем за пределами списка"}})
+	}, []PolicyRow{{OutsideZonesNote: "не доставляем за пределами списка"}})
 	if len(r) != 0 {
 		t.Fatalf("valid two-level chain should pass, got %v", r)
 	}
@@ -83,7 +83,7 @@ func TestZoneGateReasons_ValidParentChainOK(t *testing.T) {
 func TestZoneGateReasons_EmptyZonesSkipsPolicyChecks(t *testing.T) {
 	// No zones at all: a flat, non-blank policy delivery answer is legal — the
 	// zones feature is simply unused (aiprompt.Policies's doc comment).
-	r := zoneGateReasons(nil, []PolicyRow{{Lang: "*", DeliveryCost: "1 500 ₸", DeliveryInDays: "1–3 дня"}})
+	r := zoneGateReasons(nil, []PolicyRow{{DeliveryCost: "1 500 ₸", DeliveryInDays: "1–3 дня"}})
 	if len(r) != 0 {
 		t.Fatalf("no zones should skip every policy check, got %v", r)
 	}
@@ -91,7 +91,7 @@ func TestZoneGateReasons_EmptyZonesSkipsPolicyChecks(t *testing.T) {
 
 func TestZoneGateReasons_ZonesRequireBlankFlatPolicyFields(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{zone("almaty", "", true, "5 000 ₸", "1")}, []PolicyRow{
-		{Lang: "*", DeliveryCost: "1 500 ₸", OutsideZonesNote: "не доставляем"},
+		{DeliveryCost: "1 500 ₸", OutsideZonesNote: "не доставляем"},
 	})
 	if !hasReason(r, "delivery_cost and delivery_in_days must be blank") {
 		t.Fatalf("want a flat-delivery-must-be-blank reason, got %v", r)
@@ -100,7 +100,7 @@ func TestZoneGateReasons_ZonesRequireBlankFlatPolicyFields(t *testing.T) {
 
 func TestZoneGateReasons_ZonesRequireOutsideZonesNote(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{zone("almaty", "", true, "5 000 ₸", "1")}, []PolicyRow{
-		{Lang: "*", OutsideZonesNote: ""},
+		{OutsideZonesNote: ""},
 	})
 	if !hasReason(r, "outside_zones_note is required") {
 		t.Fatalf("want an outside_zones_note-required reason, got %v", r)
@@ -117,15 +117,12 @@ func TestZoneGateReasons_ZonesWithNoPolicyRowsAtAllIsBlocked(t *testing.T) {
 	}
 }
 
-func TestZoneGateReasons_EveryPolicyLangRowChecked(t *testing.T) {
+func TestZoneGateReasons_EveryPolicyRowChecked(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{zone("almaty", "", true, "5 000 ₸", "1")}, []PolicyRow{
-		{Lang: "ru", OutsideZonesNote: "ok"},
-		{Lang: "kk", OutsideZonesNote: ""},
+		{OutsideZonesNote: "ok"},
+		{OutsideZonesNote: ""},
 	})
-	if !hasReason(r, `policy "kk"`) {
-		t.Fatalf("want the kk row flagged, got %v", r)
-	}
-	if hasReason(r, `policy "ru"`) {
-		t.Fatalf("compliant ru row should not be flagged, got %v", r)
+	if !hasReason(r, "outside_zones_note is required") {
+		t.Fatalf("want the blank row flagged, got %v", r)
 	}
 }

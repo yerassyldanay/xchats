@@ -151,12 +151,14 @@ const draftPolicy = computed<PolicyRow | undefined>(() => pg.draft?.policies?.fi
 
 // --- «Новый» vs «Изменён»: a pending row overlays/replaces its live counterpart
 // (see kbstore.mergedView), so telling them apart means checking the LIVE slice
-// for the same natural key (slug/ref/lang) — never derivable from the draft row alone.
+// for the same natural key (slug/ref) — never derivable from the draft row alone.
+// Contacts/policies are true singletons (one row per org), so "new" there just
+// means the org has no live row yet.
 const liveTopicSlugs = computed(() => new Set((pg.live?.topics ?? []).map((t) => t.slug)))
 const liveProductRefs = computed(() => new Set((pg.live?.products ?? []).map((p) => p.ref)))
 const liveTariffRefs = computed(() => new Set((pg.live?.tariffs ?? []).map((t) => t.ref)))
-const liveContactLangs = computed(() => new Set((pg.live?.contacts ?? []).map((c) => c.lang)))
-const livePolicyLangs = computed(() => new Set((pg.live?.policies ?? []).map((p) => p.lang)))
+const liveHasContact = computed(() => (pg.live?.contacts ?? []).length > 0)
+const liveHasPolicy = computed(() => (pg.live?.policies ?? []).length > 0)
 const DRAFT_BADGE = {
   new: { label: 'Новый', cls: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
   changed: { label: 'Изменён', cls: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
@@ -221,9 +223,9 @@ const pendingRail = computed(() => (showAllChanges.value ? pendingRailAll.value 
 const publishedRail = computed(() => (showAllChanges.value ? publishedRailAll.value : publishedRailAll.value.slice(0, RAIL_CAP)))
 const hasMoreChanges = computed(() => pendingRailAll.value.length > RAIL_CAP || publishedRailAll.value.length > RAIL_CAP)
 
-const tBuf = reactive<Record<string, { title: string; body_md: string; lang: string }>>({})
+const tBuf = reactive<Record<string, { title: string; body_md: string }>>({})
 function vmTopic(t: TopicRow) {
-  if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, body_md: t.body_md, lang: t.lang || 'ru' }
+  if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, body_md: t.body_md }
   return tBuf[t.id]
 }
 type ProductBuf = { name: string; price: string; description: string; category: string }
@@ -468,7 +470,7 @@ async function discardAll() {
                 </div>
                 <Textarea v-model="vmProduct(p).description" rows="2" placeholder="Описание товара…" class="min-h-0 text-[14px]" />
                 <div class="flex items-center gap-2">
-                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.upsertProduct({ ref: p.ref, lang: p.lang, ...vmProduct(p) })">Сохранить</Button>
+                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.upsertProduct({ ref: p.ref, ...vmProduct(p) })">Сохранить</Button>
                   <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('products', p.ref)">Принять</Button>
                   <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.deleteProduct(p.ref)">Отклонить</Button>
                 </div>
@@ -498,7 +500,7 @@ async function discardAll() {
                   <Textarea v-model="vmTariff(t).disadvantages" rows="2" placeholder="Ограничения…" class="min-h-0 text-[14px]" />
                 </div>
                 <div class="flex items-center gap-2">
-                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.upsertTariff({ ref: t.ref, lang: t.lang, ...vmTariff(t) })">Сохранить</Button>
+                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.upsertTariff({ ref: t.ref, ...vmTariff(t) })">Сохранить</Button>
                   <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('tariffs', t.ref)">Принять</Button>
                   <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.deleteTariff(t.ref)">Отклонить</Button>
                 </div>
@@ -510,7 +512,7 @@ async function discardAll() {
               <div class="rounded-lg border border-border bg-card p-4 space-y-2">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Phone class="w-3.5 h-3.5" /> Контакты</span>
-                  <Badge variant="secondary" :class="draftBadge(!liveContactLangs.has(draftContact.lang)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveContactLangs.has(draftContact.lang)).label }}</Badge>
+                  <Badge variant="secondary" :class="draftBadge(!liveHasContact).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveHasContact).label }}</Badge>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Input v-model="contactForm.whatsapp" placeholder="WhatsApp" class="h-9 font-mono" />
@@ -524,8 +526,8 @@ async function discardAll() {
                   <Input v-model="contactForm.callback_time" placeholder="Время обратного звонка" class="h-9 sm:col-span-2" />
                 </div>
                 <div class="flex items-center gap-2">
-                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchContacts({ lang: draftContact.lang, ...contactForm })">Сохранить</Button>
-                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('contacts', draftContact.lang)">Принять</Button>
+                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchContacts({ ...contactForm })">Сохранить</Button>
+                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('contacts', draftContact.id)">Принять</Button>
                 </div>
               </div>
             </div>
@@ -535,7 +537,7 @@ async function discardAll() {
               <div class="rounded-lg border border-border bg-card p-4 space-y-2">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Truck class="w-3.5 h-3.5" /> Политики</span>
-                  <Badge variant="secondary" :class="draftBadge(!livePolicyLangs.has(draftPolicy.lang)).cls + ' text-[11px] font-medium'">{{ draftBadge(!livePolicyLangs.has(draftPolicy.lang)).label }}</Badge>
+                  <Badge variant="secondary" :class="draftBadge(!liveHasPolicy).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveHasPolicy).label }}</Badge>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Input v-model="policyForm.delivery_cost" placeholder="Стоимость доставки" class="h-9 font-mono" />
@@ -548,8 +550,8 @@ async function discardAll() {
                   <Input v-model="policyForm.warranty" placeholder="Гарантия" class="h-9" />
                 </div>
                 <div class="flex items-center gap-2">
-                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchPolicies({ lang: draftPolicy.lang, ...policyForm })">Сохранить</Button>
-                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('policies', draftPolicy.lang)">Принять</Button>
+                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchPolicies({ ...policyForm })">Сохранить</Button>
+                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('policies', draftPolicy.id)">Принять</Button>
                 </div>
               </div>
             </div>

@@ -153,7 +153,7 @@ func loadZoneRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]ZoneRow, err
 // tx-safe sibling of draft.go's mergedView policy query (no blob overlay, no
 // Slug/ID convenience fields), used only to feed zoneGateReasons.
 func loadPolicyRowsForGate(ctx context.Context, db dbtx, orgID uuid.UUID) ([]PolicyRow, error) {
-	rows, err := db.Query(ctx, `SELECT lang, delivery_cost, delivery_in_days, outside_zones_note
+	rows, err := db.Query(ctx, `SELECT delivery_cost, delivery_in_days, outside_zones_note
 		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -163,7 +163,7 @@ func loadPolicyRowsForGate(ctx context.Context, db dbtx, orgID uuid.UUID) ([]Pol
 	for rows.Next() {
 		var p PolicyRow
 		var deliveryInDays *string
-		if err := rows.Scan(&p.Lang, &p.DeliveryCost, &deliveryInDays, &p.OutsideZonesNote); err != nil {
+		if err := rows.Scan(&p.DeliveryCost, &deliveryInDays, &p.OutsideZonesNote); err != nil {
 			return nil, err
 		}
 		p.DeliveryInDays = strOrEmpty(deliveryInDays)
@@ -244,12 +244,10 @@ func zoneGateReasons(zones []ZoneRow, policies []PolicyRow) []string {
 	}
 	for _, p := range policies {
 		if strings.TrimSpace(p.DeliveryCost) != "" || strings.TrimSpace(p.DeliveryInDays) != "" {
-			reasons = append(reasons, fmt.Sprintf(
-				"policy %q: delivery_cost and delivery_in_days must be blank while delivery zones exist — set cost/days per zone instead", p.Lang))
+			reasons = append(reasons, "policy: delivery_cost and delivery_in_days must be blank while delivery zones exist — set cost/days per zone instead")
 		}
 		if strings.TrimSpace(p.OutsideZonesNote) == "" {
-			reasons = append(reasons, fmt.Sprintf(
-				"policy %q: outside_zones_note is required while delivery zones exist", p.Lang))
+			reasons = append(reasons, "policy: outside_zones_note is required while delivery zones exist")
 		}
 	}
 	return reasons

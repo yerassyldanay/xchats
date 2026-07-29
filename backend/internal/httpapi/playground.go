@@ -110,7 +110,6 @@ func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 
 type topicReq struct {
 	Slug   string `json:"slug"`
-	Lang   string `json:"lang"`
 	Title  string `json:"title"`
 	BodyMD string `json:"body_md"`
 }
@@ -126,7 +125,7 @@ func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
 		return
 	}
 	if err := s.kb.UpsertTopic(ctx(c), orgID, kbstore.TopicInput{
-		Slug: req.Slug, Lang: req.Lang, Title: req.Title, BodyMD: req.BodyMD,
+		Slug: req.Slug, Title: req.Title, BodyMD: req.BodyMD,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
@@ -151,7 +150,6 @@ func (s *Server) handlePlaygroundDeleteTopic(c *gin.Context) {
 
 type tariffReq struct {
 	Ref           string `json:"ref"`
-	Lang          string `json:"lang"`
 	Name          string `json:"name"`
 	Price         string `json:"price"`
 	LimitText     string `json:"limit_text"`
@@ -173,7 +171,7 @@ func (s *Server) handlePlaygroundUpsertTariff(c *gin.Context) {
 		return
 	}
 	if err := s.kb.UpsertTariff(ctx(c), orgID, kbstore.TariffInput{
-		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
+		Ref: req.Ref, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
 		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
@@ -197,7 +195,6 @@ func (s *Server) handlePlaygroundDeleteTariff(c *gin.Context) {
 
 type productReq struct {
 	Ref         string `json:"ref"`
-	Lang        string `json:"lang"`
 	Name        string `json:"name"`
 	Price       string `json:"price"`
 	Description string `json:"description"`
@@ -219,7 +216,7 @@ func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
 		return
 	}
 	if err := s.kb.UpsertProduct(ctx(c), orgID, kbstore.ProductInput{
-		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price,
+		Ref: req.Ref, Name: req.Name, Price: req.Price,
 		Description: req.Description, Category: req.Category,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
@@ -242,7 +239,6 @@ func (s *Server) handlePlaygroundDeleteProduct(c *gin.Context) {
 }
 
 type contactsReq struct {
-	Lang             string  `json:"lang"`
 	WhatsApp         *string `json:"whatsapp"`
 	Email            *string `json:"email"`
 	Address          *string `json:"address"`
@@ -265,7 +261,7 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PatchContacts(ctx(c), orgID, kbstore.ContactPatch{
-		Lang: req.Lang, WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
+		WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
 		LegalInformation: req.LegalInformation, CallbackTime: req.CallbackTime,
 		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
 		Provenance: `{"source":"manual"}`,
@@ -279,7 +275,6 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 // --- typed facts: commerce policies -----------------------------------------
 
 type policiesReq struct {
-	Lang               string  `json:"lang"`
 	DeliveryCost       *string `json:"delivery_cost"`
 	DeliveryInDays     *string `json:"delivery_in_days"`
 	FreeDeliveryFrom   *string `json:"free_delivery_from"`
@@ -319,7 +314,7 @@ func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PatchPolicies(ctx(c), orgID, kbstore.PolicyPatch{
-		Lang: req.Lang, DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
+		DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
 		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
 		Installment: req.Installment, ReturnPeriodInDays: req.ReturnPeriodInDays, Warranty: req.Warranty,
 		Provenance: `{"source":"manual"}`,

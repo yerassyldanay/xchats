@@ -92,9 +92,9 @@ function pickSection(s: Section) {
 }
 
 // --- per-row edit buffers (lazy; persist until saved) ---
-const tBuf = reactive<Record<string, { title: string; body_md: string; lang: string }>>({})
+const tBuf = reactive<Record<string, { title: string; body_md: string }>>({})
 function vmTopic(t: TopicRow) {
-  if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, body_md: t.body_md, lang: t.lang || 'ru' }
+  if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, body_md: t.body_md }
   return tBuf[t.id]
 }
 
@@ -403,7 +403,7 @@ const tabs = [
               </label>
             </div>
             <Textarea v-model="vmProduct(p).description" rows="2" placeholder="Описание товара…" class="min-h-0 text-[14px]" />
-            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertProduct({ ref: p.ref, lang: p.lang, ...vmProduct(p) })" />
+            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertProduct({ ref: p.ref, ...vmProduct(p) })" />
           </div>
         </div>
 
@@ -438,7 +438,7 @@ const tabs = [
               <Textarea v-model="vmTariff(t).advantages" rows="2" placeholder="Преимущества (по строке)…" class="min-h-0 text-[14px]" />
               <Textarea v-model="vmTariff(t).disadvantages" rows="2" placeholder="Ограничения (по строке)…" class="min-h-0 text-[14px]" />
             </div>
-            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertTariff({ ref: t.ref, lang: t.lang, ...vmTariff(t) })" />
+            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertTariff({ ref: t.ref, ...vmTariff(t) })" />
           </div>
         </div>
 

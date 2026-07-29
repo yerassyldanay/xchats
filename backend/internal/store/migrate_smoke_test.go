@@ -3,19 +3,80 @@ package store_test
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/migrations"
 )
+
+// newTestStoreThrough resets the schema and applies migrations up to and
+// including upTo (a version stem like "0008_kb_response_demo_data") — no
+// further. TestMigrations_0008IsIdempotentAndNeverOverwrites and its 0009
+// sibling below manually re-apply a historical migration's raw SQL body to
+// prove IT is idempotent; that body only makes sense against the schema shape
+// that existed right after it first ran, not after later migrations (e.g.
+// 0012, which drops ai_products/ai_tariffs.lang) changed the columns it
+// references.
+func newTestStoreThrough(t *testing.T, upTo string) (*store.Store, func()) {
+	t.Helper()
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL not set; skipping store DB test")
+	}
+	ctx := context.Background()
+	st, err := store.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
+		t.Fatalf("reset schema: %v", err)
+	}
+	if _, err := st.Pool().Exec(ctx, `CREATE TABLE IF NOT EXISTS public.xchats_schema_migrations (
+		version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+		t.Fatalf("create migrations table: %v", err)
+	}
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatalf("read migrations dir: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".up.sql") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		version := strings.TrimSuffix(name, ".up.sql")
+		if version > upTo {
+			break
+		}
+		body, err := migrations.FS.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if _, err := st.Pool().Exec(ctx, string(body)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+		if _, err := st.Pool().Exec(ctx, `INSERT INTO public.xchats_schema_migrations (version) VALUES ($1)`, version); err != nil {
+			t.Fatalf("record %s: %v", name, err)
+		}
+	}
+	return st, st.Close
+}
 
 // TestMigrations_FreshDatabaseNoOpsDemoData proves 0001-0008 apply cleanly on
 // a database with no organization yet, and that 0008 leaves no KB rows behind
 // (its RAISE NOTICE no-op path) — the exact sequence `serve` runs on a brand
 // new deployment (migrations before the identity seed creates the org).
 func TestMigrations_FreshDatabaseNoOpsDemoData(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t) // resets schema + runs 0001-0008, no org seeded
+	st, closeFn := newTestStoreForSimulator(t) // resets schema + runs every migration through the latest, no org seeded
 	defer closeFn()
 	ctx := context.Background()
 
@@ -71,7 +132,7 @@ func TestMigrations_WaAccountsChannelDefaultsToWhatsApp(t *testing.T) {
 // fixed UUIDs, a second application must be a complete no-op (same rows, same
 // count), and a pre-existing (non-demo) KB row must never be touched.
 func TestMigrations_0008IsIdempotentAndNeverOverwrites(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
+	st, closeFn := newTestStoreThrough(t, "0008_kb_response_demo_data")
 	defer closeFn()
 	ctx := context.Background()
 
@@ -121,7 +182,7 @@ func TestMigrations_0008IsIdempotentAndNeverOverwrites(t *testing.T) {
 	const customRef = "operator-added-product"
 	if _, err := st.Pool().Exec(ctx, `
 		INSERT INTO xchats.ai_products (organization_id, ref, lang, name, price, status, in_stock)
-		VALUES ($1, $2, 'ru', 'Custom', '1 ₸', 'active', true)`, org.ID, customRef); err != nil {
+		VALUES ($1, $2, 'ru', 'Custom', '1 ₸', 'active', true)`, org.ID, customRef); err != nil { // schema as of 0008 — lang/status still present at this point in history
 		t.Fatalf("insert operator product: %v", err)
 	}
 
@@ -145,7 +206,7 @@ func TestMigrations_0008IsIdempotentAndNeverOverwrites(t *testing.T) {
 // (main.go's runServe, before the identity seed creates the org) never trips
 // on 0009.
 func TestMigrations_0001Through0009ApplyCleanOnFreshDatabase(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t) // resets schema + runs 0001-0009, no org seeded
+	st, closeFn := newTestStoreForSimulator(t) // resets schema + runs every migration through the latest, no org seeded
 	defer closeFn()
 	ctx := context.Background()
 
@@ -165,7 +226,7 @@ func TestMigrations_0001Through0009ApplyCleanOnFreshDatabase(t *testing.T) {
 // inserts its demo rows, applying 0009's body deletes exactly those fixed
 // UUIDs, and a second application is a harmless no-op (nothing left to delete).
 func TestMigrations_0009IsIdempotentAndRemovesDemoData(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
+	st, closeFn := newTestStoreThrough(t, "0009_remove_kb_response_demo_data")
 	defer closeFn()
 	ctx := context.Background()
 

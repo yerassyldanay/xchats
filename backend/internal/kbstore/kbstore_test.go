@@ -109,7 +109,7 @@ func TestRoundTrip_UnitBearingValue(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := kb.UpsertTariff(ctx, orgID, kbstore.TariffInput{
-		Ref: "growth", Lang: "ru", Name: "Рост", Price: "25 000 ₸/мес",
+		Ref: "growth", Name: "Рост", Price: "25 000 ₸/мес",
 	}); err != nil {
 		t.Fatalf("upsert tariff: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestDraftEditAndApprove(t *testing.T) {
 	}
 
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "new_topic", Lang: "ru", Title: "Новая тема", BodyMD: "Просто текст.",
+		Slug: "new_topic", Title: "Новая тема", BodyMD: "Просто текст.",
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
 	}
@@ -242,12 +242,12 @@ func TestApproveGateBlocks(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "broken_token", Lang: "ru", BodyMD: "Цена {{tariff.unknown.price}}",
+		Slug: "broken_token", BodyMD: "Цена {{tariff.unknown.price}}",
 	}); err != nil {
 		t.Fatalf("topic: %v", err)
 	}
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "broken_amount", Lang: "ru", BodyMD: "Доставка стоит 1 500 ₸ по городу.",
+		Slug: "broken_amount", BodyMD: "Доставка стоит 1 500 ₸ по городу.",
 	}); err != nil {
 		t.Fatalf("topic: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestLiveView_IgnoresDraftBlob(t *testing.T) {
 	}
 	// Stage a PENDING topic in the draft blob — never approved.
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "pending_only", Lang: "ru", Title: "Черновик", BodyMD: "Только в черновике.",
+		Slug: "pending_only", Title: "Черновик", BodyMD: "Только в черновике.",
 	}); err != nil {
 		t.Fatalf("upsert draft topic: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestPutLiveTopic_RejectsNonProseBody(t *testing.T) {
 	kb, orgID, _ := newTestKB(t)
 	ctx := context.Background()
 	err := kb.PutLiveTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
-		Slug: "broken", Lang: "ru", BodyMD: "Цена {{tariff.unknown.price}}",
+		Slug: "broken", BodyMD: "Цена {{tariff.unknown.price}}",
 	})
 	var ge *kbstore.GateError
 	if !errors.As(err, &ge) {
@@ -331,7 +331,7 @@ func TestPutLiveTariff_VisibleViaLoadLiveImmediately(t *testing.T) {
 	kb, orgID, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.PutLiveTariff(ctx, orgID, uuid.Nil, kbstore.TariffInput{
-		Ref: "instant", Lang: "ru", Name: "Мгновенный", Price: "5 000 ₸",
+		Ref: "instant", Name: "Мгновенный", Price: "5 000 ₸",
 	}); err != nil {
 		t.Fatalf("put live tariff: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "unrelated_ok", Lang: "ru", Title: "OK", BodyMD: "Обычный текст без фактов.",
+		Slug: "unrelated_ok", Title: "OK", BodyMD: "Обычный текст без фактов.",
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
 
 	// The WHOLE-draft approve must still be blocked while the request is pending.
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "second", Lang: "ru", Title: "Ещё", BodyMD: "Ещё текст.",
+		Slug: "second", Title: "Ещё", BodyMD: "Ещё текст.",
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
 	}
@@ -410,7 +410,7 @@ func TestDraftBaseVersionAdvances(t *testing.T) {
 	if v0 != 0 {
 		t.Fatalf("want 0 before any draft write, got %d", v0)
 	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "a", Lang: "ru", BodyMD: "x"}); err != nil {
+	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "a", BodyMD: "x"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	v1, err := kb.DraftBaseVersion(ctx, orgID)
@@ -420,7 +420,7 @@ func TestDraftBaseVersionAdvances(t *testing.T) {
 	if v1 <= v0 {
 		t.Fatalf("base_version should advance: v0=%d v1=%d", v0, v1)
 	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "b", Lang: "ru", BodyMD: "y"}); err != nil {
+	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "b", BodyMD: "y"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	v2, err := kb.DraftBaseVersion(ctx, orgID)
@@ -454,7 +454,7 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 
 	// insert, InStock nil -> schema default true.
 	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
-		Ref: "kettle", Lang: "ru", Name: "Чайник", Price: "1 ₸",
+		Ref: "kettle", Name: "Чайник", Price: "1 ₸",
 	}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -465,7 +465,7 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 	// explicit false persists.
 	f := false
 	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
-		Ref: "kettle", Lang: "ru", Name: "Чайник", Price: "1 ₸", InStock: &f,
+		Ref: "kettle", Name: "Чайник", Price: "1 ₸", InStock: &f,
 	}); err != nil {
 		t.Fatalf("update explicit false: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 	// a later write with InStock nil PRESERVES the existing (false) value —
 	// never silently resets it back to true.
 	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
-		Ref: "kettle", Lang: "ru", Name: "Чайник (переименован)", Price: "2 ₸",
+		Ref: "kettle", Name: "Чайник (переименован)", Price: "2 ₸",
 	}); err != nil {
 		t.Fatalf("update nil InStock: %v", err)
 	}
@@ -605,7 +605,7 @@ func TestPatchLivePolicies_BlockedWhileZonesExist(t *testing.T) {
 	}
 
 	var gotCost string
-	if err := st.Pool().QueryRow(ctx, `SELECT delivery_cost FROM xchats.ai_policies WHERE organization_id=$1 AND lang='*'`, orgID).Scan(&gotCost); err != nil {
+	if err := st.Pool().QueryRow(ctx, `SELECT delivery_cost FROM xchats.ai_policies WHERE organization_id=$1`, orgID).Scan(&gotCost); err != nil {
 		t.Fatalf("read policy: %v", err)
 	}
 	if gotCost != "" {
@@ -624,7 +624,7 @@ func TestLiveWrites_AuditActor(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	if err := kb.PutLiveTopic(ctx, orgID, user.ID, kbstore.TopicInput{Slug: "t1", Lang: "ru", BodyMD: "Просто текст."}); err != nil {
+	if err := kb.PutLiveTopic(ctx, orgID, user.ID, kbstore.TopicInput{Slug: "t1", BodyMD: "Просто текст."}); err != nil {
 		t.Fatalf("put topic: %v", err)
 	}
 	if err := kb.DeleteLiveTopic(ctx, orgID, user.ID, "t1"); err != nil {

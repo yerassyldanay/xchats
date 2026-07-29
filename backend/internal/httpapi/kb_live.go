@@ -96,7 +96,7 @@ func (s *Server) handleKBUpsertTopic(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PutLiveTopic(ctx(c), orgID, currentUser(c).ID, kbstore.TopicInput{
-		Slug: req.Slug, Lang: req.Lang, Title: req.Title, BodyMD: req.BodyMD,
+		Slug: req.Slug, Title: req.Title, BodyMD: req.BodyMD,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -129,7 +129,7 @@ func (s *Server) handleKBUpsertTariff(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PutLiveTariff(ctx(c), orgID, currentUser(c).ID, kbstore.TariffInput{
-		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
+		Ref: req.Ref, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
 		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
 	}); err != nil {
 		s.kbFail(c, err)
@@ -161,7 +161,7 @@ func (s *Server) handleKBUpsertProduct(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PutLiveProduct(ctx(c), orgID, currentUser(c).ID, kbstore.ProductInput{
-		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price,
+		Ref: req.Ref, Name: req.Name, Price: req.Price,
 		Description: req.Description, Category: req.Category,
 		InStock: req.InStock,
 	}); err != nil {
@@ -194,7 +194,7 @@ func (s *Server) handleKBPatchContacts(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PatchLiveContacts(ctx(c), orgID, currentUser(c).ID, kbstore.ContactPatch{
-		Lang: req.Lang, WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
+		WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
 		LegalInformation: req.LegalInformation, CallbackTime: req.CallbackTime,
 		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
 	}); err != nil {
@@ -217,7 +217,7 @@ func (s *Server) handleKBPatchPolicies(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PatchLivePolicies(ctx(c), orgID, currentUser(c).ID, kbstore.PolicyPatch{
-		Lang: req.Lang, DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
+		DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
 		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
 		Installment: req.Installment, ReturnPeriodInDays: req.ReturnPeriodInDays, Warranty: req.Warranty,
 		OutsideZonesNote: req.OutsideZonesNote,

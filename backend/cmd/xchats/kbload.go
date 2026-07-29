@@ -41,7 +41,6 @@ type kbLoadAssistant struct {
 }
 
 type kbLoadContacts struct {
-	Lang             string `json:"lang"`
 	WhatsApp         string `json:"whatsapp"`
 	Email            string `json:"email"`
 	Address          string `json:"address"`
@@ -54,7 +53,6 @@ type kbLoadContacts struct {
 }
 
 type kbLoadPolicies struct {
-	Lang               string `json:"lang"`
 	DeliveryCost       string `json:"delivery_cost"`
 	DeliveryInDays     string `json:"delivery_in_days"`
 	FreeDeliveryFrom   string `json:"free_delivery_from"`
@@ -68,14 +66,12 @@ type kbLoadPolicies struct {
 
 type kbLoadTopic struct {
 	Slug   string `json:"slug"`
-	Lang   string `json:"lang"`
 	Title  string `json:"title"`
 	BodyMD string `json:"body_md"`
 }
 
 type kbLoadProduct struct {
 	Ref         string `json:"ref"`
-	Lang        string `json:"lang"`
 	Name        string `json:"name"`
 	Price       string `json:"price"`
 	Description string `json:"description"`
@@ -85,7 +81,6 @@ type kbLoadProduct struct {
 
 type kbLoadTariff struct {
 	Ref           string `json:"ref"`
-	Lang          string `json:"lang"`
 	Name          string `json:"name"`
 	Price         string `json:"price"`
 	LimitText     string `json:"limit_text"`
@@ -162,7 +157,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	}
 	if c := doc.Contacts; c != nil {
 		if err := kb.PatchLiveContacts(ctx, orgID, uuid.Nil, kbstore.ContactPatch{
-			Lang: c.Lang, WhatsApp: &c.WhatsApp, Email: &c.Email, Address: &c.Address, LegalInformation: &c.LegalInformation,
+			WhatsApp: &c.WhatsApp, Email: &c.Email, Address: &c.Address, LegalInformation: &c.LegalInformation,
 			CallbackTime: &c.CallbackTime, WorkingHours: &c.WorkingHours, Phone: &c.Phone,
 			Website: &c.Website, Instagram: &c.Instagram,
 		}); err != nil {
@@ -172,7 +167,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	}
 	if p := doc.Policies; p != nil {
 		if err := kb.PatchLivePolicies(ctx, orgID, uuid.Nil, kbstore.PolicyPatch{
-			Lang: p.Lang, DeliveryCost: &p.DeliveryCost, DeliveryInDays: &p.DeliveryInDays,
+			DeliveryCost: &p.DeliveryCost, DeliveryInDays: &p.DeliveryInDays,
 			FreeDeliveryFrom: &p.FreeDeliveryFrom, MinOrder: &p.MinOrder, Prepayment: &p.Prepayment,
 			Installment: &p.Installment, ReturnPeriodInDays: &p.ReturnPeriodInDays, Warranty: &p.Warranty,
 			OutsideZonesNote: &p.OutsideZonesNote,
@@ -183,7 +178,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	}
 	for _, t := range doc.Topics {
 		if err := kb.PutLiveTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
-			Slug: t.Slug, Lang: t.Lang, Title: t.Title, BodyMD: t.BodyMD,
+			Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD,
 		}); err != nil {
 			fatal("kb-load: topic "+t.Slug, err)
 		}
@@ -192,7 +187,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	for _, p := range doc.Products {
 		inStock := p.InStock
 		if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
-			Ref: p.Ref, Lang: p.Lang, Name: p.Name, Price: p.Price, Description: p.Description,
+			Ref: p.Ref, Name: p.Name, Price: p.Price, Description: p.Description,
 			Category: p.Category, InStock: &inStock,
 		}); err != nil {
 			fatal("kb-load: product "+p.Ref, err)
@@ -201,7 +196,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	log.Info("kb-load: products upserted", "count", len(doc.Products))
 	for _, t := range doc.Tariffs {
 		if err := kb.PutLiveTariff(ctx, orgID, uuid.Nil, kbstore.TariffInput{
-			Ref: t.Ref, Lang: t.Lang, Name: t.Name, Price: t.Price, LimitText: t.LimitText, Fee: t.Fee,
+			Ref: t.Ref, Name: t.Name, Price: t.Price, LimitText: t.LimitText, Fee: t.Fee,
 			Summary: t.Summary, PricingType: t.PricingType, Advantages: t.Advantages, Disadvantages: t.Disadvantages,
 		}); err != nil {
 			fatal("kb-load: tariff "+t.Ref, err)
@@ -257,14 +252,12 @@ func removeKBLoadDoc(ctx context.Context, st *store.Store, kb *kbstore.Store, or
 		}
 	}
 	if doc.Contacts != nil {
-		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_contacts WHERE organization_id=$1 AND lang=$2`,
-			orgID, orDefault(doc.Contacts.Lang, "*")); err != nil {
+		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_contacts WHERE organization_id=$1`, orgID); err != nil {
 			fatal("kb-load -remove: contacts", err)
 		}
 	}
 	if doc.Policies != nil {
-		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_policies WHERE organization_id=$1 AND lang=$2`,
-			orgID, orDefault(doc.Policies.Lang, "*")); err != nil {
+		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_policies WHERE organization_id=$1`, orgID); err != nil {
 			fatal("kb-load -remove: policies", err)
 		}
 	}

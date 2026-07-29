@@ -108,7 +108,6 @@ export interface DraftConfig {
 export interface TopicRow {
   id: string // = slug (blob entries carry no DB row id)
   slug: string
-  lang: string
   title: string
   body_md: string
   draft: boolean
@@ -118,11 +117,10 @@ export interface TopicRow {
 // Facts lane — typed entity rows. Every exact fact (price, limit, phone, …) is a
 // CONCRETE COLUMN here, never a generic key→value; the brain quotes it in replies
 // as a {{table.slug.field}} token. `id` = the row's natural key (ref, or the
-// contact singleton lang) since blob entries carry no DB row id.
+// fixed contact/policy singleton slug) since blob entries carry no DB row id.
 export interface TariffRow {
   id: string // = ref
   ref: string
-  lang: string
   name: string
   price: string
   limit_text: string
@@ -138,7 +136,6 @@ export interface TariffRow {
 export interface ProductRow {
   id: string // = ref
   ref: string
-  lang: string
   name: string
   price: string
   description: string
@@ -149,9 +146,8 @@ export interface ProductRow {
   updated_at: string
 }
 export interface ContactRow {
-  id: string // = lang (the 'support' singleton, one row per language)
+  id: string // = the 'support' singleton slug — one row per org
   slug: string
-  lang: string
   whatsapp: string
   email: string
   address: string
@@ -166,11 +162,10 @@ export interface ContactRow {
   updated_at: string
 }
 // PolicyRow — org commerce-policy scalars (delivery/payment/returns terms), a
-// structural clone of ContactRow (id = lang, the 'main' singleton).
+// structural clone of ContactRow (id = the 'main' singleton slug).
 export interface PolicyRow {
-  id: string // = lang
+  id: string
   slug: string
-  lang: string
   delivery_cost: string
   delivery_in_days: string
   free_delivery_from: string
@@ -219,7 +214,7 @@ export interface KbRequest {
   req_type: string // confirm_fact | describe_file | comment
   prompt: string
   context: string // JSON string, e.g. {"suggested":"5000 ₸"}
-  target: string // JSON string, e.g. {table,slug,field,lang} | {material_id}
+  target: string // JSON string, e.g. {table,slug,field} | {material_id}
   state: string // pending | resolved | dismissed
   resolution: string | null
   created_at: string

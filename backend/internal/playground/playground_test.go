@@ -92,7 +92,7 @@ func TestBuildFromMaterialsToApprove(t *testing.T) {
 	// 3. Confirm the detected fact onto its typed tariff column (what the resolve
 	// endpoint does via SetFactField) + resolve the popup — both are pending in the
 	// draft blob until approve.
-	if err := kb.SetFactField(ctx, orgID, "tariff", "item_1", "price", "ru", "25 000 ₸/мес"); err != nil {
+	if err := kb.SetFactField(ctx, orgID, "tariff", "item_1", "price", "25 000 ₸/мес"); err != nil {
 		t.Fatalf("confirm fact: %v", err)
 	}
 	for _, r := range view.Requests {

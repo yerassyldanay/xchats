@@ -41,12 +41,12 @@ func (s *Store) PutLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 	}
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-		(organization_id, slug, lang, title, body_md)
-		VALUES ($1,$2,$3,$4,$5)
+		(organization_id, slug, title, body_md)
+		VALUES ($1,$2,$3,$4)
 		ON CONFLICT (organization_id, slug) DO UPDATE SET
-			lang=EXCLUDED.lang, title=EXCLUDED.title,
+			title=EXCLUDED.title,
 			body_md=EXCLUDED.body_md, updated_at=now()`,
-		orgID, in.Slug, orDefault(in.Lang, "ru"), in.Title, in.BodyMD); err != nil {
+		orgID, in.Slug, in.Title, in.BodyMD); err != nil {
 		return err
 	}
 	if err := auditRow(ctx, tx, orgID, actor, "edit", "topic:"+in.Slug); err != nil {
@@ -80,7 +80,7 @@ func (s *Store) PutLiveTariff(ctx context.Context, orgID uuid.UUID, actor uuid.U
 	}
 	defer tx.Rollback(ctx)
 	if err := upsertTariffRow(ctx, tx, orgID, domain.Tariff{
-		Ref: in.Ref, Lang: in.Lang, Name: in.Name, Price: in.Price, LimitText: in.LimitText, Fee: in.Fee,
+		Ref: in.Ref, Name: in.Name, Price: in.Price, LimitText: in.LimitText, Fee: in.Fee,
 		Summary: in.Summary, PricingType: in.PricingType, Advantages: in.Advantages, Disadvantages: in.Disadvantages,
 	}); err != nil {
 		return err
@@ -115,7 +115,7 @@ func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.
 	}
 	defer tx.Rollback(ctx)
 	if err := upsertProductRow(ctx, tx, orgID, domain.Product{
-		Ref: in.Ref, Lang: in.Lang, Name: in.Name, Price: in.Price, Description: in.Description,
+		Ref: in.Ref, Name: in.Name, Price: in.Price, Description: in.Description,
 		Category: in.Category,
 	}, in.InStock); err != nil {
 		return err
@@ -142,18 +142,17 @@ func (s *Store) DeleteLiveProduct(ctx context.Context, orgID uuid.UUID, actor uu
 	return tx.Commit(ctx)
 }
 
-// PatchLiveContacts edits the org's live support-contact row for a language,
-// starting from its current row (locked FOR UPDATE for this transaction) so
-// an omitted field stays unchanged and a concurrent patch serializes instead
-// of racing.
+// PatchLiveContacts edits the org's live support-contact row — a true
+// singleton — starting from its current row (locked FOR UPDATE for this
+// transaction) so an omitted field stays unchanged and a concurrent patch
+// serializes instead of racing.
 func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p ContactPatch) error {
-	lang := orDefault(p.Lang, "*")
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	cur, err := currentLiveContactTx(ctx, tx, orgID, lang)
+	cur, err := currentLiveContactTx(ctx, tx, orgID)
 	if err != nil {
 		return err
 	}
@@ -185,47 +184,47 @@ func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, actor uu
 		cur.Instagram = *p.Instagram
 	}
 	if err := upsertContactRow(ctx, tx, orgID, domain.Contact{
-		Lang: cur.Lang, WhatsApp: cur.WhatsApp, Email: cur.Email, Address: cur.Address,
+		WhatsApp: cur.WhatsApp, Email: cur.Email, Address: cur.Address,
 		Legal: cur.LegalInformation, CallbackTime: cur.CallbackTime,
 		WorkingHours: cur.WorkingHours, Phone: cur.Phone, Website: cur.Website, Instagram: cur.Instagram,
 	}); err != nil {
 		return err
 	}
-	if err := auditRow(ctx, tx, orgID, actor, "edit", "contacts:"+lang); err != nil {
+	if err := auditRow(ctx, tx, orgID, actor, "edit", "contacts"); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-func currentLiveContactTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, lang string) (DraftContact, error) {
+func currentLiveContactTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) (DraftContact, error) {
 	var c DraftContact
 	var legalInfo *string
-	err := tx.QueryRow(ctx, `SELECT lang, whatsapp, email, address, legal_information, callback_time,
+	err := tx.QueryRow(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram
-		FROM xchats.ai_contacts WHERE organization_id = $1 AND lang = $2 FOR UPDATE`, orgID, lang).
-		Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
+		FROM xchats.ai_contacts WHERE organization_id = $1 FOR UPDATE`, orgID).
+		Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return DraftContact{Lang: lang}, nil
+		return DraftContact{}, nil
 	}
 	c.LegalInformation = strOrEmpty(legalInfo)
 	return c, err
 }
 
-// PatchLivePolicies edits the org's live commerce-policy row for a language,
-// starting from its current row (locked FOR UPDATE for this transaction) so
-// an omitted field stays unchanged — a near-clone of PatchLiveContacts, plus
-// a validateZoneWorld re-check before commit: a policy edit that leaves the
-// zone/policy world inconsistent (e.g. setting a non-blank flat delivery_cost
-// while delivery zones exist) is rejected atomically, never landing half-written.
+// PatchLivePolicies edits the org's live commerce-policy row — a true
+// singleton — starting from its current row (locked FOR UPDATE for this
+// transaction) so an omitted field stays unchanged — a near-clone of
+// PatchLiveContacts, plus a validateZoneWorld re-check before commit: a
+// policy edit that leaves the zone/policy world inconsistent (e.g. setting a
+// non-blank flat delivery_cost while delivery zones exist) is rejected
+// atomically, never landing half-written.
 func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p PolicyPatch) error {
-	lang := orDefault(p.Lang, "*")
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	cur, err := currentLivePolicyTx(ctx, tx, orgID, lang)
+	cur, err := currentLivePolicyTx(ctx, tx, orgID)
 	if err != nil {
 		return err
 	}
@@ -257,7 +256,7 @@ func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, actor uu
 		cur.OutsideZonesNote = *p.OutsideZonesNote
 	}
 	if err := upsertPolicyRow(ctx, tx, orgID, domain.Policy{
-		Lang: cur.Lang, DeliveryCost: cur.DeliveryCost, DeliveryTime: cur.DeliveryInDays,
+		DeliveryCost: cur.DeliveryCost, DeliveryTime: cur.DeliveryInDays,
 		FreeDeliveryFrom: cur.FreeDeliveryFrom, MinOrder: cur.MinOrder, Prepayment: cur.Prepayment,
 		Installment: cur.Installment, ReturnPeriod: cur.ReturnPeriodInDays, Warranty: cur.Warranty,
 	}, cur.OutsideZonesNote); err != nil {
@@ -266,22 +265,22 @@ func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, actor uu
 	if err := validateZoneWorld(ctx, tx, orgID); err != nil {
 		return err
 	}
-	if err := auditRow(ctx, tx, orgID, actor, "edit", "policies:"+lang); err != nil {
+	if err := auditRow(ctx, tx, orgID, actor, "edit", "policies"); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-func currentLivePolicyTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, lang string) (DraftPolicy, error) {
+func currentLivePolicyTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) (DraftPolicy, error) {
 	var p DraftPolicy
 	var deliveryInDays, returnPeriodInDays *string
-	err := tx.QueryRow(ctx, `SELECT lang, delivery_cost, delivery_in_days, free_delivery_from, min_order,
+	err := tx.QueryRow(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		prepayment, installment, return_period_in_days, warranty, outside_zones_note
-		FROM xchats.ai_policies WHERE organization_id = $1 AND lang = $2 FOR UPDATE`, orgID, lang).
-		Scan(&p.Lang, &p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
+		FROM xchats.ai_policies WHERE organization_id = $1 FOR UPDATE`, orgID).
+		Scan(&p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
 			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty, &p.OutsideZonesNote)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return DraftPolicy{Lang: lang}, nil
+		return DraftPolicy{}, nil
 	}
 	p.DeliveryInDays = strOrEmpty(deliveryInDays)
 	p.ReturnPeriodInDays = strOrEmpty(returnPeriodInDays)

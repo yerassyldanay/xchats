@@ -67,14 +67,14 @@ func (s *Store) LoadLive(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot
 // loadLiveContent fills Topics and the typed fact tables from the live ai_
 // tables for an org.
 func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *domain.Snapshot) error {
-	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, body_md
+	trows, err := s.pool.Query(ctx, `SELECT slug, title, body_md
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for trows.Next() {
 		var t domain.Topic
-		if err := trows.Scan(&t.Slug, &t.Language, &t.Title, &t.BodyMD); err != nil {
+		if err := trows.Scan(&t.Slug, &t.Title, &t.BodyMD); err != nil {
 			trows.Close()
 			return err
 		}
@@ -85,14 +85,14 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	trows2, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages
+	trows2, err := s.pool.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages
 		FROM xchats.ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for trows2.Next() {
 		var t domain.Tariff
-		if err := trows2.Scan(&t.Ref, &t.Lang, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages, &t.Disadvantages); err != nil {
+		if err := trows2.Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages, &t.Disadvantages); err != nil {
 			trows2.Close()
 			return err
 		}
@@ -106,14 +106,14 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 	// availability is a dead legacy column (plan/database-schema.md: not part
 	// of the target) — no longer read; domain.Product.Availability stays
 	// permanently empty for a DB-backed snapshot.
-	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category
+	prows, err := s.pool.Query(ctx, `SELECT ref, name, price, description, category
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for prows.Next() {
 		var p domain.Product
-		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category); err != nil {
+		if err := prows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category); err != nil {
 			prows.Close()
 			return err
 		}
@@ -124,7 +124,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	crows, err := s.pool.Query(ctx, `SELECT lang, whatsapp, email, address, legal_information, callback_time,
+	crows, err := s.pool.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram
 		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
@@ -133,7 +133,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 	for crows.Next() {
 		var c domain.Contact
 		var legalInfo *string
-		if err := crows.Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
+		if err := crows.Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram); err != nil {
 			crows.Close()
 			return err
@@ -146,7 +146,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	polrows, err := s.pool.Query(ctx, `SELECT lang, delivery_cost, delivery_in_days, free_delivery_from, min_order,
+	polrows, err := s.pool.Query(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		prepayment, installment, return_period_in_days, warranty
 		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
@@ -155,7 +155,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 	for polrows.Next() {
 		var p domain.Policy
 		var deliveryInDays, returnPeriodInDays *string
-		if err := polrows.Scan(&p.Lang, &p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
+		if err := polrows.Scan(&p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
 			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty); err != nil {
 			polrows.Close()
 			return err
@@ -212,12 +212,12 @@ func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *doma
 func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *domain.Snapshot) error {
 	for _, t := range snap.Topics {
 		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-			(organization_id, slug, lang, title, body_md)
-			VALUES ($1,$2,$3,$4,$5)
+			(organization_id, slug, title, body_md)
+			VALUES ($1,$2,$3,$4)
 			ON CONFLICT (organization_id, slug) DO UPDATE SET
-				lang = EXCLUDED.lang, title = EXCLUDED.title,
+				title = EXCLUDED.title,
 				body_md = EXCLUDED.body_md, updated_at = now()`,
-			orgID, t.Slug, t.Language, t.Title, t.BodyMD); err != nil {
+			orgID, t.Slug, t.Title, t.BodyMD); err != nil {
 			return fmt.Errorf("insert topic %s: %w", t.Slug, err)
 		}
 	}
@@ -261,15 +261,15 @@ type execer interface {
 // and the /kb/* live-write path (live.go).
 func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t domain.Tariff) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_tariffs
-		(organization_id, ref, lang, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (organization_id, ref, lang) DO UPDATE SET
+		(organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, limit_text=EXCLUDED.limit_text, fee=EXCLUDED.fee,
 			summary=EXCLUDED.summary, pricing_type=EXCLUDED.pricing_type, advantages=EXCLUDED.advantages,
 			disadvantages=EXCLUDED.disadvantages, updated_at=now()`,
-		orgID, t.Ref, orDefault(t.Lang, "ru"), t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
+		orgID, t.Ref, t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
 		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages); err != nil {
-		return fmt.Errorf("insert tariff %s/%s: %w", t.Ref, t.Lang, err)
+		return fmt.Errorf("insert tariff %s: %w", t.Ref, err)
 	}
 	return nil
 }
@@ -286,54 +286,54 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t domain.T
 // (its schema DEFAULT 'active' otherwise).
 func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Product, inStock *bool) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_products
-		(organization_id, ref, lang, name, price, description, category, in_stock)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,true))
-		ON CONFLICT (organization_id, ref, lang) DO UPDATE SET
+		(organization_id, ref, name, price, description, category, in_stock)
+		VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true))
+		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
 			category=EXCLUDED.category,
-			in_stock=COALESCE($8, xchats.ai_products.in_stock), updated_at=now()`,
-		orgID, p.Ref, orDefault(p.Lang, "ru"), p.Name, p.Price, p.Description, p.Category, inStock); err != nil {
-		return fmt.Errorf("insert product %s/%s: %w", p.Ref, p.Lang, err)
+			in_stock=COALESCE($7, xchats.ai_products.in_stock), updated_at=now()`,
+		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, inStock); err != nil {
+		return fmt.Errorf("insert product %s: %w", p.Ref, err)
 	}
 	return nil
 }
 
 func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c domain.Contact) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_contacts
-		(organization_id, slug, lang, whatsapp, email, address, legal_information, callback_time,
+		(organization_id, whatsapp, email, address, legal_information, callback_time,
 		 working_hours, phone, website, instagram)
-		VALUES ($1,'support',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (organization_id, lang) DO UPDATE SET
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (organization_id) DO UPDATE SET
 			whatsapp=EXCLUDED.whatsapp, email=EXCLUDED.email, address=EXCLUDED.address,
 			legal_information=EXCLUDED.legal_information, callback_time=EXCLUDED.callback_time,
 			working_hours=EXCLUDED.working_hours, phone=EXCLUDED.phone,
 			website=EXCLUDED.website, instagram=EXCLUDED.instagram, updated_at=now()`,
-		orgID, orDefault(c.Lang, "*"), c.WhatsApp, c.Email, c.Address, c.Legal, c.CallbackTime,
+		orgID, c.WhatsApp, c.Email, c.Address, c.Legal, c.CallbackTime,
 		c.WorkingHours, c.Phone, c.Website, c.Instagram); err != nil {
-		return fmt.Errorf("insert contact %s: %w", c.Lang, err)
+		return fmt.Errorf("insert contact: %w", err)
 	}
 	return nil
 }
 
-// upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow
-// (singleton slug 'main', keyed by lang). outsideZonesNote is a plain string,
-// not a pointer: every caller already resolves it read-modify-write style
-// (currentLivePolicy/currentPolicy) before reaching here, so there is no
-// "leave unchanged" case left to express at this layer.
+// upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow.
+// outsideZonesNote is a plain string, not a pointer: every caller already
+// resolves it read-modify-write style (currentLivePolicy/currentPolicy)
+// before reaching here, so there is no "leave unchanged" case left to express
+// at this layer.
 func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Policy, outsideZonesNote string) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_policies
-		(organization_id, slug, lang, delivery_cost, delivery_in_days, free_delivery_from, min_order,
+		(organization_id, delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		 prepayment, installment, return_period_in_days, warranty, outside_zones_note)
-		VALUES ($1,'main',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (organization_id, lang) DO UPDATE SET
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (organization_id) DO UPDATE SET
 			delivery_cost=EXCLUDED.delivery_cost, delivery_in_days=EXCLUDED.delivery_in_days,
 			free_delivery_from=EXCLUDED.free_delivery_from, min_order=EXCLUDED.min_order,
 			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
 			return_period_in_days=EXCLUDED.return_period_in_days, warranty=EXCLUDED.warranty,
 			outside_zones_note=EXCLUDED.outside_zones_note, updated_at=now()`,
-		orgID, orDefault(p.Lang, "*"), p.DeliveryCost, p.DeliveryTime, p.FreeDeliveryFrom, p.MinOrder,
+		orgID, p.DeliveryCost, p.DeliveryTime, p.FreeDeliveryFrom, p.MinOrder,
 		p.Prepayment, p.Installment, p.ReturnPeriod, p.Warranty, outsideZonesNote); err != nil {
-		return fmt.Errorf("insert policy %s: %w", p.Lang, err)
+		return fmt.Errorf("insert policy: %w", err)
 	}
 	return nil
 }
