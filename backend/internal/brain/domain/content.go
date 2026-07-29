@@ -29,17 +29,6 @@ type Topic struct {
 	BodyMD   string
 }
 
-// Asset is one ai_assets row — the LLM-facing menu entry the model selects on.
-type Asset struct {
-	Ref         string
-	TopicSlug   string
-	Kind        string
-	URL         string
-	Title       string
-	Description string
-	Language    string
-}
-
 // --- Facts lane: typed entities, quoted as {{table.slug.field}} tokens --------
 //
 // Every exact fact (price, limit, fee, phone, e-mail, …) is a CONCRETE COLUMN on
@@ -141,37 +130,43 @@ func NewFactBook(tariffs []Tariff, products []Product, contacts []Contact, polic
 		})
 	}
 
+	// The KB has no lang column anymore (production is Russian-only,
+	// plan/DECISIONS.md) — t.Lang/c.Lang/p.Lang are always "" for a DB-loaded
+	// snapshot, so indexing ignores them and stores under the same fixed
+	// language every row always carried in practice: "ru" for tariffs/
+	// products, "*" for the singleton contact/policy rows. This matches what
+	// entry() below and Resolve's fallback chain already assume.
 	for _, t := range tariffs {
-		put("tariff", t.Ref, "name", t.Lang, t.Name)
-		put("tariff", t.Ref, "price", t.Lang, t.Price)
-		put("tariff", t.Ref, "limit_text", t.Lang, t.LimitText)
-		put("tariff", t.Ref, "fee", t.Lang, t.Fee)
+		put("tariff", t.Ref, "name", "ru", t.Name)
+		put("tariff", t.Ref, "price", "ru", t.Price)
+		put("tariff", t.Ref, "limit_text", "ru", t.LimitText)
+		put("tariff", t.Ref, "fee", "ru", t.Fee)
 	}
 	for _, p := range products {
-		put("product", p.Ref, "name", p.Lang, p.Name)
-		put("product", p.Ref, "price", p.Lang, p.Price)
-		put("product", p.Ref, "availability", p.Lang, p.Availability)
+		put("product", p.Ref, "name", "ru", p.Name)
+		put("product", p.Ref, "price", "ru", p.Price)
+		put("product", p.Ref, "availability", "ru", p.Availability)
 	}
 	for _, c := range contacts {
-		put("contact", ContactSlug, "whatsapp", c.Lang, c.WhatsApp)
-		put("contact", ContactSlug, "email", c.Lang, c.Email)
-		put("contact", ContactSlug, "address", c.Lang, c.Address)
-		put("contact", ContactSlug, "legal", c.Lang, c.Legal)
-		put("contact", ContactSlug, "callback_time", c.Lang, c.CallbackTime)
-		put("contact", ContactSlug, "working_hours", c.Lang, c.WorkingHours)
-		put("contact", ContactSlug, "phone", c.Lang, c.Phone)
-		put("contact", ContactSlug, "website", c.Lang, c.Website)
-		put("contact", ContactSlug, "instagram", c.Lang, c.Instagram)
+		put("contact", ContactSlug, "whatsapp", "*", c.WhatsApp)
+		put("contact", ContactSlug, "email", "*", c.Email)
+		put("contact", ContactSlug, "address", "*", c.Address)
+		put("contact", ContactSlug, "legal", "*", c.Legal)
+		put("contact", ContactSlug, "callback_time", "*", c.CallbackTime)
+		put("contact", ContactSlug, "working_hours", "*", c.WorkingHours)
+		put("contact", ContactSlug, "phone", "*", c.Phone)
+		put("contact", ContactSlug, "website", "*", c.Website)
+		put("contact", ContactSlug, "instagram", "*", c.Instagram)
 	}
 	for _, p := range policies {
-		put("policy", PolicySlug, "delivery_cost", p.Lang, p.DeliveryCost)
-		put("policy", PolicySlug, "delivery_time", p.Lang, p.DeliveryTime)
-		put("policy", PolicySlug, "free_delivery_from", p.Lang, p.FreeDeliveryFrom)
-		put("policy", PolicySlug, "min_order", p.Lang, p.MinOrder)
-		put("policy", PolicySlug, "prepayment", p.Lang, p.Prepayment)
-		put("policy", PolicySlug, "installment", p.Lang, p.Installment)
-		put("policy", PolicySlug, "return_period", p.Lang, p.ReturnPeriod)
-		put("policy", PolicySlug, "warranty", p.Lang, p.Warranty)
+		put("policy", PolicySlug, "delivery_cost", "*", p.DeliveryCost)
+		put("policy", PolicySlug, "delivery_time", "*", p.DeliveryTime)
+		put("policy", PolicySlug, "free_delivery_from", "*", p.FreeDeliveryFrom)
+		put("policy", PolicySlug, "min_order", "*", p.MinOrder)
+		put("policy", PolicySlug, "prepayment", "*", p.Prepayment)
+		put("policy", PolicySlug, "installment", "*", p.Installment)
+		put("policy", PolicySlug, "return_period", "*", p.ReturnPeriod)
+		put("policy", PolicySlug, "warranty", "*", p.Warranty)
 	}
 
 	// [F] entries in a stable order (tariffs → products → contacts → policies),
@@ -251,7 +246,6 @@ func (b FactBook) List() []Fact { return b.entries }
 type Snapshot struct {
 	Config   AssistantConfig
 	Topics   []Topic
-	Assets   []Asset
 	Tariffs  []Tariff
 	Products []Product
 	Contacts []Contact

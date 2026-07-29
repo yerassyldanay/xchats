@@ -107,7 +107,7 @@ func TestKBPrompt_InvalidationOnWrite(t *testing.T) {
 	}
 
 	resp, _ := h.postJSON("/xchats/api/v1/kb/products", map[string]any{
-		"ref": "coffee-machine", "lang": "ru", "name": "Кофемашина DeLonghi", "price": "129 900 ₸",
+		"ref": "coffee-machine", "name": "Кофемашина DeLonghi", "price": "129 900 ₸",
 		"description": marker, "category": "Техника", "availability": "В наличии", "in_stock": true,
 	})
 	if resp.StatusCode != http.StatusOK {

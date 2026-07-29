@@ -24,16 +24,16 @@ func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
 
 	mustExec(t, pool, `INSERT INTO xchats.ai_assistants (organization_id, persona, mission, guardrails, language_policy, reply_max_words)
 		VALUES ($1, 'Персона', 'Миссия', 'Правила', 'Языковая политика', 100)`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_topics (organization_id, slug, lang, title, body_md)
-		VALUES ($1, 'delivery', 'ru', 'Доставка', 'Доставляем по городу.')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_products (organization_id, ref, lang, name, price, description, category, status, in_stock)
-		VALUES ($1, 'widget', 'ru', 'Виджет', '1 000 ₸', 'Описание', '', 'active', true)`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_tariffs (organization_id, ref, lang, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages, status)
-		VALUES ($1, 'basic', 'ru', 'Базовый', '5 000 ₸', '', '', '', 'fixed', '', '', 'active')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_contacts (organization_id, lang, phone, working_hours)
-		VALUES ($1, '*', '+7 700 000 00 00', '9:00-18:00')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_policies (organization_id, lang, delivery_cost, delivery_time, outside_zones_note)
-		VALUES ($1, '*', '1 000 ₸', '1-2', '')`, orgID)
+	mustExec(t, pool, `INSERT INTO xchats.ai_topics (organization_id, slug, title, body_md)
+		VALUES ($1, 'delivery', 'Доставка', 'Доставляем по городу.')`, orgID)
+	mustExec(t, pool, `INSERT INTO xchats.ai_products (organization_id, ref, name, price, description, category, in_stock)
+		VALUES ($1, 'widget', 'Виджет', '1 000 ₸', 'Описание', '', true)`, orgID)
+	mustExec(t, pool, `INSERT INTO xchats.ai_tariffs (organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
+		VALUES ($1, 'basic', 'Базовый', '5 000 ₸', '', '', '', 'fixed', '', '')`, orgID)
+	mustExec(t, pool, `INSERT INTO xchats.ai_contacts (organization_id, phone, working_hours)
+		VALUES ($1, '+7 700 000 00 00', '9:00-18:00')`, orgID)
+	mustExec(t, pool, `INSERT INTO xchats.ai_policies (organization_id, delivery_cost, delivery_in_days, outside_zones_note)
+		VALUES ($1, '1 000 ₸', '1-2', '')`, orgID)
 
 	repo := &responsestore.KnowledgeBaseRepo{Pool: pool}
 	kb, err := repo.Load(ctx, orgID.String())
@@ -74,8 +74,8 @@ func TestKnowledgeBaseRepo_LoadsDeliveryZones(t *testing.T) {
 	pool := st.Pool()
 
 	mustExec(t, pool, `INSERT INTO xchats.ai_assistants (organization_id, persona) VALUES ($1, 'p')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_policies (organization_id, lang, outside_zones_note) VALUES ($1, '*', 'Вне зон не доставляем.')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_delivery_zones (organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, status)
+	mustExec(t, pool, `INSERT INTO xchats.ai_policies (organization_id, outside_zones_note) VALUES ($1, 'Вне зон не доставляем.')`, orgID)
+	mustExec(t, pool, `INSERT INTO xchats.ai_delivery_zones (organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, sales_status)
 		VALUES ($1, 'kz', 'Казахстан', 'country', '', true, '10 000 ₸', '3-4', 'active')`, orgID)
 
 	repo := &responsestore.KnowledgeBaseRepo{Pool: pool}

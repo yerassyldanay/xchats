@@ -41,52 +41,46 @@ type kbLoadAssistant struct {
 }
 
 type kbLoadContacts struct {
-	Lang         string `json:"lang"`
-	WhatsApp     string `json:"whatsapp"`
-	Email        string `json:"email"`
-	Address      string `json:"address"`
-	Legal        string `json:"legal"`
-	CallbackTime string `json:"callback_time"`
-	WorkingHours string `json:"working_hours"`
-	Phone        string `json:"phone"`
-	Website      string `json:"website"`
-	Instagram    string `json:"instagram"`
+	WhatsApp         string `json:"whatsapp"`
+	Email            string `json:"email"`
+	Address          string `json:"address"`
+	LegalInformation string `json:"legal_information"`
+	CallbackTime     string `json:"callback_time"`
+	WorkingHours     string `json:"working_hours"`
+	Phone            string `json:"phone"`
+	Website          string `json:"website"`
+	Instagram        string `json:"instagram"`
 }
 
 type kbLoadPolicies struct {
-	Lang             string `json:"lang"`
-	DeliveryCost     string `json:"delivery_cost"`
-	DeliveryTime     string `json:"delivery_time"`
-	FreeDeliveryFrom string `json:"free_delivery_from"`
-	MinOrder         string `json:"min_order"`
-	Prepayment       string `json:"prepayment"`
-	Installment      string `json:"installment"`
-	ReturnPeriod     string `json:"return_period"`
-	Warranty         string `json:"warranty"`
-	OutsideZonesNote string `json:"outside_zones_note"`
+	DeliveryCost       string `json:"delivery_cost"`
+	DeliveryInDays     string `json:"delivery_in_days"`
+	FreeDeliveryFrom   string `json:"free_delivery_from"`
+	MinOrder           string `json:"min_order"`
+	Prepayment         string `json:"prepayment"`
+	Installment        string `json:"installment"`
+	ReturnPeriodInDays string `json:"return_period_in_days"`
+	Warranty           string `json:"warranty"`
+	OutsideZonesNote   string `json:"outside_zones_note"`
 }
 
 type kbLoadTopic struct {
 	Slug   string `json:"slug"`
-	Lang   string `json:"lang"`
 	Title  string `json:"title"`
 	BodyMD string `json:"body_md"`
 }
 
 type kbLoadProduct struct {
-	Ref          string `json:"ref"`
-	Lang         string `json:"lang"`
-	Name         string `json:"name"`
-	Price        string `json:"price"`
-	Description  string `json:"description"`
-	Category     string `json:"category"`
-	Availability string `json:"availability"`
-	InStock      bool   `json:"in_stock"`
+	Ref         string `json:"ref"`
+	Name        string `json:"name"`
+	Price       string `json:"price"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+	InStock     bool   `json:"in_stock"`
 }
 
 type kbLoadTariff struct {
 	Ref           string `json:"ref"`
-	Lang          string `json:"lang"`
 	Name          string `json:"name"`
 	Price         string `json:"price"`
 	LimitText     string `json:"limit_text"`
@@ -106,7 +100,7 @@ type kbLoadZone struct {
 	DeliveryCost      string `json:"delivery_cost"`
 	DeliveryInDays    string `json:"delivery_in_days"`
 	Notes             string `json:"notes"`
-	Status            string `json:"status"`
+	SalesStatus       string `json:"sales_status"`
 }
 
 // runKBLoad implements `xchats kb-load -file <path> [-remove]`: reads a
@@ -163,7 +157,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	}
 	if c := doc.Contacts; c != nil {
 		if err := kb.PatchLiveContacts(ctx, orgID, uuid.Nil, kbstore.ContactPatch{
-			Lang: c.Lang, WhatsApp: &c.WhatsApp, Email: &c.Email, Address: &c.Address, Legal: &c.Legal,
+			WhatsApp: &c.WhatsApp, Email: &c.Email, Address: &c.Address, LegalInformation: &c.LegalInformation,
 			CallbackTime: &c.CallbackTime, WorkingHours: &c.WorkingHours, Phone: &c.Phone,
 			Website: &c.Website, Instagram: &c.Instagram,
 		}); err != nil {
@@ -173,9 +167,9 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	}
 	if p := doc.Policies; p != nil {
 		if err := kb.PatchLivePolicies(ctx, orgID, uuid.Nil, kbstore.PolicyPatch{
-			Lang: p.Lang, DeliveryCost: &p.DeliveryCost, DeliveryTime: &p.DeliveryTime,
+			DeliveryCost: &p.DeliveryCost, DeliveryInDays: &p.DeliveryInDays,
 			FreeDeliveryFrom: &p.FreeDeliveryFrom, MinOrder: &p.MinOrder, Prepayment: &p.Prepayment,
-			Installment: &p.Installment, ReturnPeriod: &p.ReturnPeriod, Warranty: &p.Warranty,
+			Installment: &p.Installment, ReturnPeriodInDays: &p.ReturnPeriodInDays, Warranty: &p.Warranty,
 			OutsideZonesNote: &p.OutsideZonesNote,
 		}); err != nil {
 			fatal("kb-load: policies", err)
@@ -184,7 +178,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	}
 	for _, t := range doc.Topics {
 		if err := kb.PutLiveTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
-			Slug: t.Slug, Lang: t.Lang, Title: t.Title, BodyMD: t.BodyMD,
+			Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD,
 		}); err != nil {
 			fatal("kb-load: topic "+t.Slug, err)
 		}
@@ -193,8 +187,8 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	for _, p := range doc.Products {
 		inStock := p.InStock
 		if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
-			Ref: p.Ref, Lang: p.Lang, Name: p.Name, Price: p.Price, Description: p.Description,
-			Category: p.Category, Availability: p.Availability, InStock: &inStock,
+			Ref: p.Ref, Name: p.Name, Price: p.Price, Description: p.Description,
+			Category: p.Category, InStock: &inStock,
 		}); err != nil {
 			fatal("kb-load: product "+p.Ref, err)
 		}
@@ -202,7 +196,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	log.Info("kb-load: products upserted", "count", len(doc.Products))
 	for _, t := range doc.Tariffs {
 		if err := kb.PutLiveTariff(ctx, orgID, uuid.Nil, kbstore.TariffInput{
-			Ref: t.Ref, Lang: t.Lang, Name: t.Name, Price: t.Price, LimitText: t.LimitText, Fee: t.Fee,
+			Ref: t.Ref, Name: t.Name, Price: t.Price, LimitText: t.LimitText, Fee: t.Fee,
 			Summary: t.Summary, PricingType: t.PricingType, Advantages: t.Advantages, Disadvantages: t.Disadvantages,
 		}); err != nil {
 			fatal("kb-load: tariff "+t.Ref, err)
@@ -213,7 +207,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 		if err := kb.PutLiveZone(ctx, orgID, uuid.Nil, kbstore.ZoneInput{
 			Ref: z.Ref, Name: z.Name, ZoneLevel: z.ZoneLevel, ParentRef: z.ParentRef,
 			DeliveryAvailable: z.DeliveryAvailable, DeliveryCost: z.DeliveryCost, DeliveryInDays: z.DeliveryInDays,
-			Notes: z.Notes, Status: z.Status,
+			Notes: z.Notes, SalesStatus: z.SalesStatus,
 		}); err != nil {
 			fatal("kb-load: zone "+z.Ref, err)
 		}
@@ -258,14 +252,12 @@ func removeKBLoadDoc(ctx context.Context, st *store.Store, kb *kbstore.Store, or
 		}
 	}
 	if doc.Contacts != nil {
-		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_contacts WHERE organization_id=$1 AND lang=$2`,
-			orgID, orDefault(doc.Contacts.Lang, "*")); err != nil {
+		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_contacts WHERE organization_id=$1`, orgID); err != nil {
 			fatal("kb-load -remove: contacts", err)
 		}
 	}
 	if doc.Policies != nil {
-		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_policies WHERE organization_id=$1 AND lang=$2`,
-			orgID, orDefault(doc.Policies.Lang, "*")); err != nil {
+		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_policies WHERE organization_id=$1`, orgID); err != nil {
 			fatal("kb-load -remove: policies", err)
 		}
 	}

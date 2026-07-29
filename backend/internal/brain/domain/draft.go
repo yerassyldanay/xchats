@@ -5,7 +5,6 @@ package domain
 type RawDraft struct {
 	ReplyText         string         `json:"reply_text"`
 	ReplyLanguage     string         `json:"reply_language"`
-	AssetRefs         []string       `json:"asset_refs"`
 	ProfilePatch      map[string]any `json:"profile_patch"`
 	SuggestedCallback *Callback      `json:"suggested_callback"`
 	SuggestedStatus   *StageWrapper  `json:"suggested_status"`
@@ -26,19 +25,11 @@ type Callback struct {
 	Note  string `json:"note"`
 }
 
-// ResolvedAsset is a media item after asset_refs are validated against the catalog.
-type ResolvedAsset struct {
-	Ref  string
-	Kind string
-	URL  string
-}
-
-// Draft is the fully post-processed result: final reply text (prices injected),
-// resolved media (URLs, not refs), and structured side-data. The caller maps it
-// to the channel's draft rows (docs/02 · the contract).
+// Draft is the fully post-processed result: final reply text (prices injected)
+// and structured side-data. The caller maps it to the channel's draft rows
+// (docs/02 · the contract).
 type Draft struct {
 	ReplyText         string
-	Media             []ResolvedAsset
 	ProfilePatch      map[string]any
 	SuggestedStatus   string
 	SuggestedCallback *Callback
@@ -49,6 +40,4 @@ type Draft struct {
 	// PricingError is set when price-token rendering failed; the caller posts a
 	// "check pricing manually" note rather than shipping a half-rendered price.
 	PricingError bool
-	// DroppedRefs are asset_refs the model returned that did not resolve (logged).
-	DroppedRefs []string
 }

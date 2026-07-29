@@ -75,18 +75,12 @@ export interface EvolutionInstance {
   managed: boolean
   stale: boolean
 }
-export interface DraftMedia {
-  asset_id: string
-  media_kind: string
-  url: string
-}
 export interface AiDraft {
   id: string
   chat_id: string
   trigger_message_id: string | null
   ordinal: number
   draft_text: string
-  media: DraftMedia[]
   context_status: string
   confidence: number | null
   escalate: boolean
@@ -114,23 +108,8 @@ export interface DraftConfig {
 export interface TopicRow {
   id: string // = slug (blob entries carry no DB row id)
   slug: string
-  lang: string
   title: string
   body_md: string
-  draft: boolean
-  provenance?: string
-  updated_at: string
-}
-export interface AssetRow {
-  id: string // = ref
-  ref: string
-  kind: string
-  owner_kind: string // 'topic' | 'product' | 'tariff' | '' (unattached)
-  owner_ref: string
-  title: string
-  description: string
-  url: string
-  lang: string
   draft: boolean
   provenance?: string
   updated_at: string
@@ -138,11 +117,10 @@ export interface AssetRow {
 // Facts lane — typed entity rows. Every exact fact (price, limit, phone, …) is a
 // CONCRETE COLUMN here, never a generic key→value; the brain quotes it in replies
 // as a {{table.slug.field}} token. `id` = the row's natural key (ref, or the
-// contact singleton lang) since blob entries carry no DB row id.
+// fixed contact/policy singleton slug) since blob entries carry no DB row id.
 export interface TariffRow {
   id: string // = ref
   ref: string
-  lang: string
   name: string
   price: string
   limit_text: string
@@ -158,25 +136,22 @@ export interface TariffRow {
 export interface ProductRow {
   id: string // = ref
   ref: string
-  lang: string
   name: string
   price: string
   description: string
   category: string
-  availability: string
   in_stock: boolean
   draft: boolean
   provenance?: string
   updated_at: string
 }
 export interface ContactRow {
-  id: string // = lang (the 'support' singleton, one row per language)
+  id: string // = the 'support' singleton slug — one row per org
   slug: string
-  lang: string
   whatsapp: string
   email: string
   address: string
-  legal: string
+  legal_information: string
   callback_time: string
   working_hours: string
   phone: string
@@ -187,18 +162,17 @@ export interface ContactRow {
   updated_at: string
 }
 // PolicyRow — org commerce-policy scalars (delivery/payment/returns terms), a
-// structural clone of ContactRow (id = lang, the 'main' singleton).
+// structural clone of ContactRow (id = the 'main' singleton slug).
 export interface PolicyRow {
-  id: string // = lang
+  id: string
   slug: string
-  lang: string
   delivery_cost: string
-  delivery_time: string
+  delivery_in_days: string
   free_delivery_from: string
   min_order: string
   prepayment: string
   installment: string
-  return_period: string
+  return_period_in_days: string
   warranty: string
   outside_zones_note: string
   draft: boolean
@@ -218,7 +192,7 @@ export interface DeliveryZoneRow {
   delivery_cost: string
   delivery_in_days: string
   notes: string
-  status: string // active | inactive
+  sales_status: string // active | inactive
   draft: boolean
   updated_at: string
 }
@@ -237,10 +211,10 @@ export interface KbMaterial {
 export interface KbRequest {
   id: string
   material_id: string | null
-  req_type: string // confirm_fact | describe_media | comment
+  req_type: string // confirm_fact | describe_file | comment
   prompt: string
   context: string // JSON string, e.g. {"suggested":"5000 ₸"}
-  target: string // JSON string, e.g. {table,slug,field,lang} | {asset_ref} | {material_id}
+  target: string // JSON string, e.g. {table,slug,field} | {material_id}
   state: string // pending | resolved | dismissed
   resolution: string | null
   created_at: string
@@ -249,7 +223,6 @@ export interface KbRequest {
 export interface DraftView {
   config: DraftConfig
   topics: TopicRow[]
-  assets: AssetRow[]
   tariffs: TariffRow[]
   products: ProductRow[]
   contacts: ContactRow[]

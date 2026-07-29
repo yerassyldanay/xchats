@@ -136,11 +136,6 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	if err != nil {
 		t.Fatalf("blob: %v", err)
 	}
-	// Load the embedded KB media so seed assets have stored bytes (as production's
-	// buildDrafter does) — the publish gate's dangling-blob check needs them.
-	if err := brain.LoadMedia(blobStore); err != nil {
-		t.Fatalf("kb media: %v", err)
-	}
 	drafter, err := assistant.NewStub(blobStore, "")
 	if err != nil {
 		t.Fatalf("stub: %v", err)

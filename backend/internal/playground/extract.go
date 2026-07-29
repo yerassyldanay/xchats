@@ -26,7 +26,7 @@ import (
 )
 
 // VisionClient captions media bytes ("what it shows + when to send it"). It is the
-// per-adapter upgrade seam: when nil, media falls back to a describe_media popup,
+// per-adapter upgrade seam: when nil, media falls back to a describe_file popup,
 // so the pipeline is fully chat-driven with no vision dependency.
 type VisionClient interface {
 	Describe(ctx context.Context, mimetype string, data []byte) (string, error)
@@ -135,13 +135,13 @@ func (e *Extractor) Extract(ctx context.Context, kb *kbstore.Store, bs blob.Stor
 		}
 		req, rerr := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{
 			MaterialID: &materialID,
-			ReqType:    "describe_media",
+			ReqType:    "describe_file",
 			Prompt:     prompt,
 			Context:    jsonObj(map[string]any{"source_type": m.SourceType, "source_ref": m.SourceRef}),
 			Target:     jsonObj(map[string]any{"material_id": materialID.String()}),
 		})
 		if rerr != nil {
-			e.Log.Warn("raise describe_media failed", "err", rerr)
+			e.Log.Warn("raise describe_file failed", "err", rerr)
 		} else if hub != nil {
 			hub.Broadcast("kb.request.created", map[string]any{"id": req.ID, "req_type": req.ReqType})
 		}
@@ -195,7 +195,7 @@ func (e *Extractor) extractURL(ctx context.Context, rawURL, comment string) kbst
 }
 
 // extractMedia captions media via the vision client; with no client it defers to
-// the operator (describe_media), keeping the pipeline chat-driven.
+// the operator (describe_file), keeping the pipeline chat-driven.
 func (e *Extractor) extractMedia(ctx context.Context, bs blob.Store, m kbstore.Material) kbstore.MaterialExtraction {
 	if e.Vision == nil || m.BlobID == "" {
 		return needsHuman("no vision extractor")

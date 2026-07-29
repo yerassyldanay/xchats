@@ -74,12 +74,20 @@ func TestRoundTrip_RendersIdentically(t *testing.T) {
 			t.Fatalf("topic %q body mismatch:\n seed: %q\n db:   %q", topic.Slug, want, topic.BodyMD)
 		}
 	}
-	// Every advertised fact resolves to the same value from either snapshot.
+	// Every advertised fact resolves to the same value from either snapshot —
+	// EXCEPT product.*.availability: that column is retired (plan/database-
+	// schema.md: not part of the target canonical schema) and kbstore no
+	// longer writes it, so it never round-trips through the DB even though
+	// the in-memory seed literal (brain/seed.go) still sets flavor text for
+	// it. This is expected, not a regression.
 	facts := seed.Facts.List()
 	if len(facts) == 0 {
 		t.Fatal("seed advertises no facts to round-trip")
 	}
 	for _, f := range facts {
+		if strings.HasSuffix(f.Token, ".availability}}") {
+			continue
+		}
 		want, werr := seed.Facts.Render(f.Token, "ru")
 		got, gerr := loaded.Facts.Render(f.Token, "ru")
 		if werr != nil || gerr != nil {
@@ -101,11 +109,11 @@ func TestRoundTrip_UnitBearingValue(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := kb.UpsertTariff(ctx, orgID, kbstore.TariffInput{
-		Ref: "growth", Lang: "ru", Name: "Рост", Price: "25 000 ₸/мес",
+		Ref: "growth", Name: "Рост", Price: "25 000 ₸/мес",
 	}); err != nil {
 		t.Fatalf("upsert tariff: %v", err)
 	}
-	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}, nil); err != nil {
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	loaded, err := kb.LoadLive(ctx, orgID)
@@ -143,7 +151,7 @@ func TestDraftEditAndApprove(t *testing.T) {
 	}
 
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "new_topic", Lang: "ru", Title: "Новая тема", BodyMD: "Просто текст.",
+		Slug: "new_topic", Title: "Новая тема", BodyMD: "Просто текст.",
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
 	}
@@ -164,7 +172,7 @@ func TestDraftEditAndApprove(t *testing.T) {
 		t.Fatal("new_topic missing from the merged draft view")
 	}
 
-	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "topics", Key: "new_topic"}, nil); err != nil {
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "topics", Key: "new_topic"}); err != nil {
 		t.Fatalf("approve entity: %v", err)
 	}
 	view, err = kb.Draft(ctx, orgID)
@@ -203,47 +211,54 @@ func TestDraft_CollectionsNeverNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("draft: %v", err)
 	}
-	if view.Topics == nil || view.Assets == nil || view.Tariffs == nil ||
+	if view.Topics == nil || view.Tariffs == nil ||
 		view.Products == nil || view.Contacts == nil || view.Policies == nil ||
 		view.Materials == nil || view.Requests == nil {
-		t.Fatalf("a collection is nil: topics=%v assets=%v tariffs=%v products=%v contacts=%v policies=%v materials=%v requests=%v",
-			view.Topics == nil, view.Assets == nil, view.Tariffs == nil, view.Products == nil,
+		t.Fatalf("a collection is nil: topics=%v tariffs=%v products=%v contacts=%v policies=%v materials=%v requests=%v",
+			view.Topics == nil, view.Tariffs == nil, view.Products == nil,
 			view.Contacts == nil, view.Policies == nil, view.Materials == nil, view.Requests == nil)
 	}
 	blob, err := json.Marshal(view)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	for _, k := range []string{"topics", "assets", "tariffs", "products", "contacts", "policies", "materials", "requests"} {
+	for _, k := range []string{"topics", "tariffs", "products", "contacts", "policies", "materials", "requests"} {
 		if strings.Contains(string(blob), `"`+k+`":null`) {
 			t.Fatalf("collection %q serialized as null (must be []): %s", k, blob)
 		}
 	}
 }
 
-// The deterministic gate blocks approve on an undescribed asset and a topic body
-// that is not pure prose (carries a fact token), listing every reason.
+// The deterministic gate blocks approve on every non-prose topic body it
+// finds, listing every reason — not just the first. Two topics, each
+// violating a different rule (a fact token; a literal currency amount),
+// exercises the gate aggregating across multiple rows via the full DB path
+// (Approve → LoadLive → mergeForGate → gate) — the pure-unit
+// gate_internal_test.go does not go through the DB.
 func TestApproveGateBlocks(t *testing.T) {
 	kb, orgID, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// An asset with no description + a topic whose body carries a fact token
-	// (bodies must be pure prose — 14 D3).
-	if err := kb.UpsertAsset(ctx, orgID, kbstore.AssetInput{Ref: "loose_img", Kind: "image", Description: ""}); err != nil {
-		t.Fatalf("asset: %v", err)
-	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "broken", Lang: "ru", BodyMD: "Цена {{tariff.unknown.price}}"}); err != nil {
+	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+		Slug: "broken_token", BodyMD: "Цена {{tariff.unknown.price}}",
+	}); err != nil {
 		t.Fatalf("topic: %v", err)
 	}
-	err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}, nil)
+	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+		Slug: "broken_amount", BodyMD: "Доставка стоит 1 500 ₸ по городу.",
+	}); err != nil {
+		t.Fatalf("topic: %v", err)
+	}
+	err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{})
 	var ge *kbstore.GateError
 	if !errors.As(err, &ge) {
 		t.Fatalf("want GateError, got %T: %v", err, err)
 	}
-	if len(ge.Reasons) < 2 {
-		t.Fatalf("want >=2 gate reasons, got %v", ge.Reasons)
+	joined := strings.Join(ge.Reasons, "; ")
+	if !strings.Contains(joined, "pure prose") || !strings.Contains(joined, "literal amount") {
+		t.Fatalf("want both a token reason and a literal-amount reason, got %v", ge.Reasons)
 	}
 }
 
@@ -259,7 +274,7 @@ func TestLiveView_IgnoresDraftBlob(t *testing.T) {
 	}
 	// Stage a PENDING topic in the draft blob — never approved.
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "pending_only", Lang: "ru", Title: "Черновик", BodyMD: "Только в черновике.",
+		Slug: "pending_only", Title: "Черновик", BodyMD: "Только в черновике.",
 	}); err != nil {
 		t.Fatalf("upsert draft topic: %v", err)
 	}
@@ -302,7 +317,7 @@ func TestPutLiveTopic_RejectsNonProseBody(t *testing.T) {
 	kb, orgID, _ := newTestKB(t)
 	ctx := context.Background()
 	err := kb.PutLiveTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
-		Slug: "broken", Lang: "ru", BodyMD: "Цена {{tariff.unknown.price}}",
+		Slug: "broken", BodyMD: "Цена {{tariff.unknown.price}}",
 	})
 	var ge *kbstore.GateError
 	if !errors.As(err, &ge) {
@@ -316,7 +331,7 @@ func TestPutLiveTariff_VisibleViaLoadLiveImmediately(t *testing.T) {
 	kb, orgID, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.PutLiveTariff(ctx, orgID, uuid.Nil, kbstore.TariffInput{
-		Ref: "instant", Lang: "ru", Name: "Мгновенный", Price: "5 000 ₸",
+		Ref: "instant", Name: "Мгновенный", Price: "5 000 ₸",
 	}); err != nil {
 		t.Fatalf("put live tariff: %v", err)
 	}
@@ -342,17 +357,17 @@ func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "unrelated_ok", Lang: "ru", Title: "OK", BodyMD: "Обычный текст без фактов.",
+		Slug: "unrelated_ok", Title: "OK", BodyMD: "Обычный текст без фактов.",
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
 	}
 	// An unrelated pending request — nothing to do with the topic above.
-	if _, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{ReqType: "describe_media", Prompt: "?"}); err != nil {
+	if _, err := kb.CreateRequest(ctx, orgID, kbstore.RequestInput{ReqType: "describe_file", Prompt: "?"}); err != nil {
 		t.Fatalf("create request: %v", err)
 	}
 
 	// Per-entity approve of the unrelated topic must succeed despite the pending request.
-	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "topics", Key: "unrelated_ok"}, nil); err != nil {
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "topics", Key: "unrelated_ok"}); err != nil {
 		t.Fatalf("per-entity approve should ignore the unrelated pending request: %v", err)
 	}
 	live, err := kb.LoadLive(ctx, orgID)
@@ -371,11 +386,11 @@ func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
 
 	// The WHOLE-draft approve must still be blocked while the request is pending.
 	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
-		Slug: "second", Lang: "ru", Title: "Ещё", BodyMD: "Ещё текст.",
+		Slug: "second", Title: "Ещё", BodyMD: "Ещё текст.",
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
 	}
-	err = kb.Approve(ctx, orgID, kbstore.ApproveSelector{}, nil)
+	err = kb.Approve(ctx, orgID, kbstore.ApproveSelector{})
 	var ge *kbstore.GateError
 	if !errors.As(err, &ge) {
 		t.Fatalf("whole-draft approve should still be blocked by the pending request, got %T: %v", err, err)
@@ -395,7 +410,7 @@ func TestDraftBaseVersionAdvances(t *testing.T) {
 	if v0 != 0 {
 		t.Fatalf("want 0 before any draft write, got %d", v0)
 	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "a", Lang: "ru", BodyMD: "x"}); err != nil {
+	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "a", BodyMD: "x"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	v1, err := kb.DraftBaseVersion(ctx, orgID)
@@ -405,7 +420,7 @@ func TestDraftBaseVersionAdvances(t *testing.T) {
 	if v1 <= v0 {
 		t.Fatalf("base_version should advance: v0=%d v1=%d", v0, v1)
 	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "b", Lang: "ru", BodyMD: "y"}); err != nil {
+	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "b", BodyMD: "y"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	v2, err := kb.DraftBaseVersion(ctx, orgID)
@@ -439,7 +454,7 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 
 	// insert, InStock nil -> schema default true.
 	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
-		Ref: "kettle", Lang: "ru", Name: "Чайник", Price: "1 ₸",
+		Ref: "kettle", Name: "Чайник", Price: "1 ₸",
 	}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -450,7 +465,7 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 	// explicit false persists.
 	f := false
 	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
-		Ref: "kettle", Lang: "ru", Name: "Чайник", Price: "1 ₸", InStock: &f,
+		Ref: "kettle", Name: "Чайник", Price: "1 ₸", InStock: &f,
 	}); err != nil {
 		t.Fatalf("update explicit false: %v", err)
 	}
@@ -461,7 +476,7 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 	// a later write with InStock nil PRESERVES the existing (false) value —
 	// never silently resets it back to true.
 	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
-		Ref: "kettle", Lang: "ru", Name: "Чайник (переименован)", Price: "2 ₸",
+		Ref: "kettle", Name: "Чайник (переименован)", Price: "2 ₸",
 	}); err != nil {
 		t.Fatalf("update nil InStock: %v", err)
 	}
@@ -505,7 +520,7 @@ func zoneCompatiblePolicy(t *testing.T, kb *kbstore.Store, orgID uuid.UUID) {
 	t.Helper()
 	blank, note := "", "не доставляем за пределами списка зон"
 	if err := kb.PatchLivePolicies(context.Background(), orgID, uuid.Nil, kbstore.PolicyPatch{
-		DeliveryCost: &blank, DeliveryTime: &blank, OutsideZonesNote: &note,
+		DeliveryCost: &blank, DeliveryInDays: &blank, OutsideZonesNote: &note,
 	}); err != nil {
 		t.Fatalf("seed zone-compatible policy: %v", err)
 	}
@@ -590,7 +605,7 @@ func TestPatchLivePolicies_BlockedWhileZonesExist(t *testing.T) {
 	}
 
 	var gotCost string
-	if err := st.Pool().QueryRow(ctx, `SELECT delivery_cost FROM xchats.ai_policies WHERE organization_id=$1 AND lang='*'`, orgID).Scan(&gotCost); err != nil {
+	if err := st.Pool().QueryRow(ctx, `SELECT delivery_cost FROM xchats.ai_policies WHERE organization_id=$1`, orgID).Scan(&gotCost); err != nil {
 		t.Fatalf("read policy: %v", err)
 	}
 	if gotCost != "" {
@@ -609,7 +624,7 @@ func TestLiveWrites_AuditActor(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	if err := kb.PutLiveTopic(ctx, orgID, user.ID, kbstore.TopicInput{Slug: "t1", Lang: "ru", BodyMD: "Просто текст."}); err != nil {
+	if err := kb.PutLiveTopic(ctx, orgID, user.ID, kbstore.TopicInput{Slug: "t1", BodyMD: "Просто текст."}); err != nil {
 		t.Fatalf("put topic: %v", err)
 	}
 	if err := kb.DeleteLiveTopic(ctx, orgID, user.ID, "t1"); err != nil {

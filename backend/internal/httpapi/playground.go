@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
@@ -112,7 +110,6 @@ func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 
 type topicReq struct {
 	Slug   string `json:"slug"`
-	Lang   string `json:"lang"`
 	Title  string `json:"title"`
 	BodyMD string `json:"body_md"`
 }
@@ -128,7 +125,7 @@ func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
 		return
 	}
 	if err := s.kb.UpsertTopic(ctx(c), orgID, kbstore.TopicInput{
-		Slug: req.Slug, Lang: req.Lang, Title: req.Title, BodyMD: req.BodyMD,
+		Slug: req.Slug, Title: req.Title, BodyMD: req.BodyMD,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
@@ -149,94 +146,10 @@ func (s *Server) handlePlaygroundDeleteTopic(c *gin.Context) {
 	s.kbChanged(c, orgID)
 }
 
-// --- assets (upload bytes + meta) ------------------------------------------
-
-func (s *Server) handlePlaygroundUploadAsset(c *gin.Context) {
-	orgID, proceed := s.pgWrite(c)
-	if !proceed {
-		return
-	}
-	fh, err := c.FormFile("file")
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, "file part required")
-		return
-	}
-	f, err := fh.Open()
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, "cannot open file")
-		return
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, "cannot read file")
-		return
-	}
-	mediaType, mimetype := detectMedia(fh.Filename, fh.Header.Get("Content-Type"))
-	ref := uuid.NewString()
-	if _, err := s.blob.Put(ref, data, blob.Meta{MediaType: mediaType, Mimetype: mimetype, FileName: fh.Filename, FileSize: int64(len(data))}); err != nil {
-		fail(c, http.StatusBadGateway, ErrMediaUnavailable, "store failed")
-		return
-	}
-	// owner_kind defaults to 'topic' when only owner_ref is given — the common
-	// case of attaching media to a topic (owner_kind must be given explicitly to
-	// attach to a product/tariff once those land).
-	ownerKind := c.PostForm("owner_kind")
-	ownerRef := c.PostForm("owner_ref")
-	if ownerKind == "" && ownerRef != "" {
-		ownerKind = "topic"
-	}
-	if err := s.kb.UpsertAsset(ctx(c), orgID, kbstore.AssetInput{
-		Ref: ref, Kind: mediaType, OwnerKind: ownerKind, OwnerRef: ownerRef,
-		Title: fh.Filename, Description: c.PostForm("description"),
-		URL: "/xchats/api/v1/media/" + ref, Lang: c.PostForm("lang"),
-		Provenance: `{"source":"manual"}`,
-	}); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbChanged(c, orgID)
-}
-
-type assetPatchReq struct {
-	Description *string `json:"description"`
-	OwnerKind   *string `json:"owner_kind"`
-	OwnerRef    *string `json:"owner_ref"`
-}
-
-func (s *Server) handlePlaygroundPatchAsset(c *gin.Context) {
-	orgID, proceed := s.pgWrite(c)
-	if !proceed {
-		return
-	}
-	var req assetPatchReq
-	_ = c.ShouldBindJSON(&req)
-	if err := s.kb.PatchAsset(ctx(c), orgID, c.Param("ref"), kbstore.AssetPatch{
-		Description: req.Description, OwnerKind: req.OwnerKind, OwnerRef: req.OwnerRef,
-	}); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbChanged(c, orgID)
-}
-
-func (s *Server) handlePlaygroundDeleteAsset(c *gin.Context) {
-	orgID, proceed := s.pgWrite(c)
-	if !proceed {
-		return
-	}
-	if err := s.kb.DeleteAsset(ctx(c), orgID, c.Param("ref")); err != nil {
-		s.kbFail(c, err)
-		return
-	}
-	s.kbChanged(c, orgID)
-}
-
 // --- typed facts: tariffs / products / contacts ----------------------------
 
 type tariffReq struct {
 	Ref           string `json:"ref"`
-	Lang          string `json:"lang"`
 	Name          string `json:"name"`
 	Price         string `json:"price"`
 	LimitText     string `json:"limit_text"`
@@ -258,7 +171,7 @@ func (s *Server) handlePlaygroundUpsertTariff(c *gin.Context) {
 		return
 	}
 	if err := s.kb.UpsertTariff(ctx(c), orgID, kbstore.TariffInput{
-		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
+		Ref: req.Ref, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
 		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
@@ -281,13 +194,11 @@ func (s *Server) handlePlaygroundDeleteTariff(c *gin.Context) {
 }
 
 type productReq struct {
-	Ref          string `json:"ref"`
-	Lang         string `json:"lang"`
-	Name         string `json:"name"`
-	Price        string `json:"price"`
-	Description  string `json:"description"`
-	Category     string `json:"category"`
-	Availability string `json:"availability"`
+	Ref         string `json:"ref"`
+	Name        string `json:"name"`
+	Price       string `json:"price"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
 	// InStock is read only by handleKBUpsertProduct (the live-write path) —
 	// handlePlaygroundUpsertProduct never reads it, so a draft write's
 	// behavior is unaffected by this field's presence.
@@ -305,8 +216,8 @@ func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
 		return
 	}
 	if err := s.kb.UpsertProduct(ctx(c), orgID, kbstore.ProductInput{
-		Ref: req.Ref, Lang: req.Lang, Name: req.Name, Price: req.Price,
-		Description: req.Description, Category: req.Category, Availability: req.Availability,
+		Ref: req.Ref, Name: req.Name, Price: req.Price,
+		Description: req.Description, Category: req.Category,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
@@ -328,16 +239,15 @@ func (s *Server) handlePlaygroundDeleteProduct(c *gin.Context) {
 }
 
 type contactsReq struct {
-	Lang         string  `json:"lang"`
-	WhatsApp     *string `json:"whatsapp"`
-	Email        *string `json:"email"`
-	Address      *string `json:"address"`
-	Legal        *string `json:"legal"`
-	CallbackTime *string `json:"callback_time"`
-	WorkingHours *string `json:"working_hours"`
-	Phone        *string `json:"phone"`
-	Website      *string `json:"website"`
-	Instagram    *string `json:"instagram"`
+	WhatsApp         *string `json:"whatsapp"`
+	Email            *string `json:"email"`
+	Address          *string `json:"address"`
+	LegalInformation *string `json:"legal_information"`
+	CallbackTime     *string `json:"callback_time"`
+	WorkingHours     *string `json:"working_hours"`
+	Phone            *string `json:"phone"`
+	Website          *string `json:"website"`
+	Instagram        *string `json:"instagram"`
 }
 
 func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
@@ -351,8 +261,8 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PatchContacts(ctx(c), orgID, kbstore.ContactPatch{
-		Lang: req.Lang, WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
-		Legal: req.Legal, CallbackTime: req.CallbackTime,
+		WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
+		LegalInformation: req.LegalInformation, CallbackTime: req.CallbackTime,
 		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
@@ -365,15 +275,14 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 // --- typed facts: commerce policies -----------------------------------------
 
 type policiesReq struct {
-	Lang             string  `json:"lang"`
-	DeliveryCost     *string `json:"delivery_cost"`
-	DeliveryTime     *string `json:"delivery_time"`
-	FreeDeliveryFrom *string `json:"free_delivery_from"`
-	MinOrder         *string `json:"min_order"`
-	Prepayment       *string `json:"prepayment"`
-	Installment      *string `json:"installment"`
-	ReturnPeriod     *string `json:"return_period"`
-	Warranty         *string `json:"warranty"`
+	DeliveryCost       *string `json:"delivery_cost"`
+	DeliveryInDays     *string `json:"delivery_in_days"`
+	FreeDeliveryFrom   *string `json:"free_delivery_from"`
+	MinOrder           *string `json:"min_order"`
+	Prepayment         *string `json:"prepayment"`
+	Installment        *string `json:"installment"`
+	ReturnPeriodInDays *string `json:"return_period_in_days"`
+	Warranty           *string `json:"warranty"`
 	// OutsideZonesNote is read only by handleKBPatchPolicies (the live-write
 	// path) — handlePlaygroundPatchPolicies never reads it.
 	OutsideZonesNote *string `json:"outside_zones_note"`
@@ -391,7 +300,7 @@ type zoneReq struct {
 	DeliveryCost      string `json:"delivery_cost"`
 	DeliveryInDays    string `json:"delivery_in_days"`
 	Notes             string `json:"notes"`
-	Status            string `json:"status"`
+	SalesStatus       string `json:"sales_status"`
 }
 
 func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
@@ -405,9 +314,9 @@ func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
 		return
 	}
 	if err := s.kb.PatchPolicies(ctx(c), orgID, kbstore.PolicyPatch{
-		Lang: req.Lang, DeliveryCost: req.DeliveryCost, DeliveryTime: req.DeliveryTime,
+		DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
 		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
-		Installment: req.Installment, ReturnPeriod: req.ReturnPeriod, Warranty: req.Warranty,
+		Installment: req.Installment, ReturnPeriodInDays: req.ReturnPeriodInDays, Warranty: req.Warranty,
 		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
@@ -459,7 +368,7 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{}, s.blob.Exists); err != nil {
+	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{}); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -475,8 +384,8 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 }
 
 // handlePlaygroundApproveEntity approves ONE pending entity by natural key
-// ("Подтвердить" on a single row). kind ∈ topics|assets|tariffs|products|contacts|policies;
-// id = slug | ref | ref | ref | lang | lang.
+// ("Подтвердить" on a single row). kind ∈ topics|tariffs|products|contacts|policies;
+// id = slug | ref | ref | lang | lang.
 func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -487,13 +396,13 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	}
 	kind := c.Param("kind")
 	switch kind {
-	case "topics", "assets", "tariffs", "products", "contacts", "policies":
+	case "topics", "tariffs", "products", "contacts", "policies":
 	default:
-		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|assets|tariffs|products|contacts|policies")
+		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|tariffs|products|contacts|policies")
 		return
 	}
 	key := c.Param("id")
-	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{Kind: kind, Key: key}, s.blob.Exists); err != nil {
+	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{Kind: kind, Key: key}); err != nil {
 		s.kbFail(c, err)
 		return
 	}

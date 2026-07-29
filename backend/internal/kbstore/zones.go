@@ -42,7 +42,7 @@ type ZoneInput struct {
 	DeliveryCost      string
 	DeliveryInDays    string
 	Notes             string
-	Status            string // active | inactive; "" -> active
+	SalesStatus       string // active | inactive; "" -> active
 }
 
 // ZoneRow is the editor-facing ai_delivery_zones row — json shape mirrors the
@@ -59,7 +59,7 @@ type ZoneRow struct {
 	DeliveryCost      string    `json:"delivery_cost"`
 	DeliveryInDays    string    `json:"delivery_in_days"`
 	Notes             string    `json:"notes"`
-	Status            string    `json:"status"`
+	SalesStatus       string    `json:"sales_status"`
 	Draft             bool      `json:"draft"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
@@ -111,14 +111,14 @@ func (s *Store) DeleteLiveZone(ctx context.Context, orgID uuid.UUID, actor uuid.
 
 func upsertZoneRow(ctx context.Context, db dbtx, orgID uuid.UUID, in ZoneInput) error {
 	if _, err := db.Exec(ctx, `INSERT INTO xchats.ai_delivery_zones
-		(organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, notes, status)
+		(organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, notes, sales_status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, zone_level=EXCLUDED.zone_level, parent_ref=EXCLUDED.parent_ref,
 			delivery_available=EXCLUDED.delivery_available, delivery_cost=EXCLUDED.delivery_cost,
-			delivery_in_days=EXCLUDED.delivery_in_days, notes=EXCLUDED.notes, status=EXCLUDED.status, updated_at=now()`,
+			delivery_in_days=EXCLUDED.delivery_in_days, notes=EXCLUDED.notes, sales_status=EXCLUDED.sales_status, updated_at=now()`,
 		orgID, in.Ref, in.Name, in.ZoneLevel, in.ParentRef, in.DeliveryAvailable, in.DeliveryCost, in.DeliveryInDays,
-		in.Notes, orDefault(in.Status, "active")); err != nil {
+		in.Notes, orDefault(in.SalesStatus, "active")); err != nil {
 		return fmt.Errorf("insert zone %s: %w", in.Ref, err)
 	}
 	return nil
@@ -130,7 +130,7 @@ func upsertZoneRow(ctx context.Context, db dbtx, orgID uuid.UUID, in ZoneInput) 
 // see that same transaction's own uncommitted write (validateZoneWorld).
 func loadZoneRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]ZoneRow, error) {
 	rows, err := db.Query(ctx, `SELECT ref, name, zone_level, parent_ref, delivery_available, delivery_cost,
-		delivery_in_days, notes, status, updated_at
+		delivery_in_days, notes, sales_status, updated_at
 		FROM xchats.ai_delivery_zones WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -140,7 +140,7 @@ func loadZoneRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]ZoneRow, err
 	for rows.Next() {
 		var z ZoneRow
 		if err := rows.Scan(&z.Ref, &z.Name, &z.ZoneLevel, &z.ParentRef, &z.DeliveryAvailable, &z.DeliveryCost,
-			&z.DeliveryInDays, &z.Notes, &z.Status, &z.UpdatedAt); err != nil {
+			&z.DeliveryInDays, &z.Notes, &z.SalesStatus, &z.UpdatedAt); err != nil {
 			return nil, err
 		}
 		z.ID = z.Ref
@@ -153,7 +153,7 @@ func loadZoneRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]ZoneRow, err
 // tx-safe sibling of draft.go's mergedView policy query (no blob overlay, no
 // Slug/ID convenience fields), used only to feed zoneGateReasons.
 func loadPolicyRowsForGate(ctx context.Context, db dbtx, orgID uuid.UUID) ([]PolicyRow, error) {
-	rows, err := db.Query(ctx, `SELECT lang, delivery_cost, delivery_time, outside_zones_note
+	rows, err := db.Query(ctx, `SELECT delivery_cost, delivery_in_days, outside_zones_note
 		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -162,9 +162,11 @@ func loadPolicyRowsForGate(ctx context.Context, db dbtx, orgID uuid.UUID) ([]Pol
 	var out []PolicyRow
 	for rows.Next() {
 		var p PolicyRow
-		if err := rows.Scan(&p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.OutsideZonesNote); err != nil {
+		var deliveryInDays *string
+		if err := rows.Scan(&p.DeliveryCost, &deliveryInDays, &p.OutsideZonesNote); err != nil {
 			return nil, err
 		}
+		p.DeliveryInDays = strOrEmpty(deliveryInDays)
 		out = append(out, p)
 	}
 	return out, rows.Err()
@@ -241,13 +243,11 @@ func zoneGateReasons(zones []ZoneRow, policies []PolicyRow) []string {
 		reasons = append(reasons, "at least one policy row with outside_zones_note is required while delivery zones exist")
 	}
 	for _, p := range policies {
-		if strings.TrimSpace(p.DeliveryCost) != "" || strings.TrimSpace(p.DeliveryTime) != "" {
-			reasons = append(reasons, fmt.Sprintf(
-				"policy %q: delivery_cost and delivery_time must be blank while delivery zones exist — set cost/days per zone instead", p.Lang))
+		if strings.TrimSpace(p.DeliveryCost) != "" || strings.TrimSpace(p.DeliveryInDays) != "" {
+			reasons = append(reasons, "policy: delivery_cost and delivery_in_days must be blank while delivery zones exist — set cost/days per zone instead")
 		}
 		if strings.TrimSpace(p.OutsideZonesNote) == "" {
-			reasons = append(reasons, fmt.Sprintf(
-				"policy %q: outside_zones_note is required while delivery zones exist", p.Lang))
+			reasons = append(reasons, "policy: outside_zones_note is required while delivery zones exist")
 		}
 	}
 	return reasons

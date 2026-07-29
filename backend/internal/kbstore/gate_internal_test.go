@@ -11,7 +11,7 @@ func gateReasons(topicBody string) []string {
 	snap := &domain.Snapshot{
 		Topics: []domain.Topic{{Slug: "t", Language: "ru", BodyMD: topicBody}},
 	}
-	return gate(snap, 0, nil)
+	return gate(snap, 0)
 }
 
 // A pure-prose body passes: facts live in typed columns, quoted only in replies.

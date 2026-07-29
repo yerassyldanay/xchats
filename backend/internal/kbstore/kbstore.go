@@ -1,6 +1,6 @@
 // Package kbstore is the writable Knowledge Base data layer: it loads the LIVE
-// KB the brain reasons from (ai_assistants/ai_topics/ai_assets/ai_values, each
-// keyed DIRECTLY on organization_id — 15 Decision 1), and owns the Playground's
+// KB the brain reasons from (ai_assistants/ai_topics and the typed fact tables,
+// each keyed DIRECTLY on organization_id — 15 Decision 1), and owns the Playground's
 // single draft blob (kbd_draft) + Approve (validate → materialize → clear — 15
 // Decisions 3–4). There is no version, no snapshot clone, no publish/rollback:
 // live tables hold live rows only; a pending edit lives in the blob until
@@ -31,7 +31,7 @@ import (
 // draft blob moved since the client loaded it.
 var ErrStale = errors.New("kbstore: stale draft write")
 
-// ErrUnknownKind is returned for an unrecognized entity kind (topics|assets|values).
+// ErrUnknownKind is returned for an unrecognized entity kind.
 var ErrUnknownKind = errors.New("kbstore: unknown row kind")
 
 // Store wraps the pgx pool with KB operations.
@@ -64,16 +64,17 @@ func (s *Store) LoadLive(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot
 	return snap, nil
 }
 
-// loadLiveContent fills Topics/Assets/Values from the live ai_ tables for an org.
+// loadLiveContent fills Topics and the typed fact tables from the live ai_
+// tables for an org.
 func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *domain.Snapshot) error {
-	trows, err := s.pool.Query(ctx, `SELECT slug, lang, title, body_md
+	trows, err := s.pool.Query(ctx, `SELECT slug, title, body_md
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for trows.Next() {
 		var t domain.Topic
-		if err := trows.Scan(&t.Slug, &t.Language, &t.Title, &t.BodyMD); err != nil {
+		if err := trows.Scan(&t.Slug, &t.Title, &t.BodyMD); err != nil {
 			trows.Close()
 			return err
 		}
@@ -84,39 +85,14 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	arows, err := s.pool.Query(ctx, `SELECT ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang
-		FROM xchats.ai_assets WHERE organization_id = $1 ORDER BY created_at`, orgID)
-	if err != nil {
-		return err
-	}
-	for arows.Next() {
-		var a domain.Asset
-		var ownerKind, ownerRef string
-		if err := arows.Scan(&a.Ref, &a.Kind, &ownerKind, &ownerRef, &a.Title, &a.Description, &a.URL, &a.Language); err != nil {
-			arows.Close()
-			return err
-		}
-		// domain.Asset.TopicSlug is the only owner the v1 prompt renders; a
-		// non-topic owner (product/tariff, added with the typed facts) simply
-		// leaves it empty for now.
-		if ownerKind == "" || ownerKind == "topic" {
-			a.TopicSlug = ownerRef
-		}
-		snap.Assets = append(snap.Assets, a)
-	}
-	arows.Close()
-	if err := arows.Err(); err != nil {
-		return err
-	}
-
-	trows2, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages
+	trows2, err := s.pool.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages
 		FROM xchats.ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for trows2.Next() {
 		var t domain.Tariff
-		if err := trows2.Scan(&t.Ref, &t.Lang, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages, &t.Disadvantages); err != nil {
+		if err := trows2.Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages, &t.Disadvantages); err != nil {
 			trows2.Close()
 			return err
 		}
@@ -127,14 +103,17 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	prows, err := s.pool.Query(ctx, `SELECT ref, lang, name, price, description, category, availability
+	// availability is a dead legacy column (plan/database-schema.md: not part
+	// of the target) — no longer read; domain.Product.Availability stays
+	// permanently empty for a DB-backed snapshot.
+	prows, err := s.pool.Query(ctx, `SELECT ref, name, price, description, category
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for prows.Next() {
 		var p domain.Product
-		if err := prows.Scan(&p.Ref, &p.Lang, &p.Name, &p.Price, &p.Description, &p.Category, &p.Availability); err != nil {
+		if err := prows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category); err != nil {
 			prows.Close()
 			return err
 		}
@@ -145,7 +124,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	crows, err := s.pool.Query(ctx, `SELECT lang, whatsapp, email, address, legal, callback_time,
+	crows, err := s.pool.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram
 		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
@@ -153,11 +132,13 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 	}
 	for crows.Next() {
 		var c domain.Contact
-		if err := crows.Scan(&c.Lang, &c.WhatsApp, &c.Email, &c.Address, &c.Legal, &c.CallbackTime,
+		var legalInfo *string
+		if err := crows.Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram); err != nil {
 			crows.Close()
 			return err
 		}
+		c.Legal = strOrEmpty(legalInfo)
 		snap.Contacts = append(snap.Contacts, c)
 	}
 	crows.Close()
@@ -165,19 +146,22 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	polrows, err := s.pool.Query(ctx, `SELECT lang, delivery_cost, delivery_time, free_delivery_from, min_order,
-		prepayment, installment, return_period, warranty
+	polrows, err := s.pool.Query(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
+		prepayment, installment, return_period_in_days, warranty
 		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
 	for polrows.Next() {
 		var p domain.Policy
-		if err := polrows.Scan(&p.Lang, &p.DeliveryCost, &p.DeliveryTime, &p.FreeDeliveryFrom, &p.MinOrder,
-			&p.Prepayment, &p.Installment, &p.ReturnPeriod, &p.Warranty); err != nil {
+		var deliveryInDays, returnPeriodInDays *string
+		if err := polrows.Scan(&p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
+			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty); err != nil {
 			polrows.Close()
 			return err
 		}
+		p.DeliveryTime = strOrEmpty(deliveryInDays)
+		p.ReturnPeriod = strOrEmpty(returnPeriodInDays)
 		snap.Policies = append(snap.Policies, p)
 	}
 	polrows.Close()
@@ -228,29 +212,13 @@ func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *doma
 func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *domain.Snapshot) error {
 	for _, t := range snap.Topics {
 		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-			(organization_id, slug, lang, title, body_md)
-			VALUES ($1,$2,$3,$4,$5)
+			(organization_id, slug, title, body_md)
+			VALUES ($1,$2,$3,$4)
 			ON CONFLICT (organization_id, slug) DO UPDATE SET
-				lang = EXCLUDED.lang, title = EXCLUDED.title,
+				title = EXCLUDED.title,
 				body_md = EXCLUDED.body_md, updated_at = now()`,
-			orgID, t.Slug, t.Language, t.Title, t.BodyMD); err != nil {
+			orgID, t.Slug, t.Title, t.BodyMD); err != nil {
 			return fmt.Errorf("insert topic %s: %w", t.Slug, err)
-		}
-	}
-	for _, a := range snap.Assets {
-		ownerKind, ownerRef := "", ""
-		if a.TopicSlug != "" {
-			ownerKind, ownerRef = "topic", a.TopicSlug
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_assets
-			(organization_id, ref, asset_kind, owner_kind, owner_ref, title, description, asset_url, lang)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-			ON CONFLICT (organization_id, ref) DO UPDATE SET
-				asset_kind = EXCLUDED.asset_kind, owner_kind = EXCLUDED.owner_kind, owner_ref = EXCLUDED.owner_ref,
-				title = EXCLUDED.title, description = EXCLUDED.description, asset_url = EXCLUDED.asset_url,
-				lang = EXCLUDED.lang, updated_at = now()`,
-			orgID, a.Ref, a.Kind, ownerKind, ownerRef, a.Title, a.Description, a.URL, a.Language); err != nil {
-			return fmt.Errorf("insert asset %s: %w", a.Ref, err)
 		}
 	}
 	for _, t := range snap.Tariffs {
@@ -293,15 +261,15 @@ type execer interface {
 // and the /kb/* live-write path (live.go).
 func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t domain.Tariff) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_tariffs
-		(organization_id, ref, lang, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (organization_id, ref, lang) DO UPDATE SET
+		(organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, limit_text=EXCLUDED.limit_text, fee=EXCLUDED.fee,
 			summary=EXCLUDED.summary, pricing_type=EXCLUDED.pricing_type, advantages=EXCLUDED.advantages,
 			disadvantages=EXCLUDED.disadvantages, updated_at=now()`,
-		orgID, t.Ref, orDefault(t.Lang, "ru"), t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
+		orgID, t.Ref, t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
 		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages); err != nil {
-		return fmt.Errorf("insert tariff %s/%s: %w", t.Ref, t.Lang, err)
+		return fmt.Errorf("insert tariff %s: %w", t.Ref, err)
 	}
 	return nil
 }
@@ -310,57 +278,62 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t domain.T
 // with no opinion on stock (legacy brain-seed/Approve materialize paths)
 // leaves it at its column default on insert and PRESERVES the existing value
 // on update, instead of silently resetting it — only the /kb/* live-write path
-// (PutLiveProduct) ever passes a non-nil value.
+// (PutLiveProduct) ever passes a non-nil value. availability is a dead legacy
+// column (plan/database-schema.md: not part of the target) and is no longer
+// written — p.Availability is ignored. sales_status is likewise untouched
+// here: no caller of this function has an opinion on it yet (no live-write
+// payload exposes it), so it stays at whatever migration 0011 backfilled
+// (its schema DEFAULT 'active' otherwise).
 func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Product, inStock *bool) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_products
-		(organization_id, ref, lang, name, price, description, category, availability, in_stock)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,true))
-		ON CONFLICT (organization_id, ref, lang) DO UPDATE SET
+		(organization_id, ref, name, price, description, category, in_stock)
+		VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true))
+		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
-			category=EXCLUDED.category, availability=EXCLUDED.availability,
-			in_stock=COALESCE($9, xchats.ai_products.in_stock), updated_at=now()`,
-		orgID, p.Ref, orDefault(p.Lang, "ru"), p.Name, p.Price, p.Description, p.Category, p.Availability, inStock); err != nil {
-		return fmt.Errorf("insert product %s/%s: %w", p.Ref, p.Lang, err)
+			category=EXCLUDED.category,
+			in_stock=COALESCE($7, xchats.ai_products.in_stock), updated_at=now()`,
+		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, inStock); err != nil {
+		return fmt.Errorf("insert product %s: %w", p.Ref, err)
 	}
 	return nil
 }
 
 func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c domain.Contact) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_contacts
-		(organization_id, slug, lang, whatsapp, email, address, legal, callback_time,
+		(organization_id, whatsapp, email, address, legal_information, callback_time,
 		 working_hours, phone, website, instagram)
-		VALUES ($1,'support',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (organization_id, lang) DO UPDATE SET
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (organization_id) DO UPDATE SET
 			whatsapp=EXCLUDED.whatsapp, email=EXCLUDED.email, address=EXCLUDED.address,
-			legal=EXCLUDED.legal, callback_time=EXCLUDED.callback_time,
+			legal_information=EXCLUDED.legal_information, callback_time=EXCLUDED.callback_time,
 			working_hours=EXCLUDED.working_hours, phone=EXCLUDED.phone,
 			website=EXCLUDED.website, instagram=EXCLUDED.instagram, updated_at=now()`,
-		orgID, orDefault(c.Lang, "*"), c.WhatsApp, c.Email, c.Address, c.Legal, c.CallbackTime,
+		orgID, c.WhatsApp, c.Email, c.Address, c.Legal, c.CallbackTime,
 		c.WorkingHours, c.Phone, c.Website, c.Instagram); err != nil {
-		return fmt.Errorf("insert contact %s: %w", c.Lang, err)
+		return fmt.Errorf("insert contact: %w", err)
 	}
 	return nil
 }
 
-// upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow
-// (singleton slug 'main', keyed by lang). outsideZonesNote is a plain string,
-// not a pointer: every caller already resolves it read-modify-write style
-// (currentLivePolicy/currentPolicy) before reaching here, so there is no
-// "leave unchanged" case left to express at this layer.
+// upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow.
+// outsideZonesNote is a plain string, not a pointer: every caller already
+// resolves it read-modify-write style (currentLivePolicy/currentPolicy)
+// before reaching here, so there is no "leave unchanged" case left to express
+// at this layer.
 func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Policy, outsideZonesNote string) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_policies
-		(organization_id, slug, lang, delivery_cost, delivery_time, free_delivery_from, min_order,
-		 prepayment, installment, return_period, warranty, outside_zones_note)
-		VALUES ($1,'main',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (organization_id, lang) DO UPDATE SET
-			delivery_cost=EXCLUDED.delivery_cost, delivery_time=EXCLUDED.delivery_time,
+		(organization_id, delivery_cost, delivery_in_days, free_delivery_from, min_order,
+		 prepayment, installment, return_period_in_days, warranty, outside_zones_note)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (organization_id) DO UPDATE SET
+			delivery_cost=EXCLUDED.delivery_cost, delivery_in_days=EXCLUDED.delivery_in_days,
 			free_delivery_from=EXCLUDED.free_delivery_from, min_order=EXCLUDED.min_order,
 			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
-			return_period=EXCLUDED.return_period, warranty=EXCLUDED.warranty,
+			return_period_in_days=EXCLUDED.return_period_in_days, warranty=EXCLUDED.warranty,
 			outside_zones_note=EXCLUDED.outside_zones_note, updated_at=now()`,
-		orgID, orDefault(p.Lang, "*"), p.DeliveryCost, p.DeliveryTime, p.FreeDeliveryFrom, p.MinOrder,
+		orgID, p.DeliveryCost, p.DeliveryTime, p.FreeDeliveryFrom, p.MinOrder,
 		p.Prepayment, p.Installment, p.ReturnPeriod, p.Warranty, outsideZonesNote); err != nil {
-		return fmt.Errorf("insert policy %s: %w", p.Lang, err)
+		return fmt.Errorf("insert policy: %w", err)
 	}
 	return nil
 }
@@ -409,34 +382,16 @@ type GateError struct{ Reasons []string }
 func (e *GateError) Error() string { return "publish gate failed: " + strings.Join(e.Reasons, "; ") }
 
 // gate is the deterministic approve gate (pure, testable): over the resulting
-// LIVE set (live ∪ approved, minus deletes), every asset is described, every topic
-// body is pure prose (no fact tokens, no literal currency), no blob dangles, no
-// request pends. Facts are typed columns (validated at reply-render time, fail
-// closed), so the gate does not touch them.
-func gate(snap *domain.Snapshot, pendingRequests int, blobExists func(ref string) bool) []string {
+// LIVE set (live ∪ approved, minus deletes), every topic body is pure prose (no
+// fact tokens, no literal currency), no request pends. Facts are typed columns
+// (validated at reply-render time, fail closed), so the gate does not touch them.
+func gate(snap *domain.Snapshot, pendingRequests int) []string {
 	var reasons []string
-	for _, a := range snap.Assets {
-		reasons = append(reasons, gateAsset(a, blobExists)...)
-	}
 	for _, t := range snap.Topics {
 		reasons = append(reasons, gateTopicBody(t.Slug, t.BodyMD)...)
 	}
 	if pendingRequests > 0 {
 		reasons = append(reasons, fmt.Sprintf("%d unresolved request(s)", pendingRequests))
-	}
-	return reasons
-}
-
-// gateAsset is the per-asset half of the gate — also reused stand-alone by the
-// /kb/* live-write path (live.go), so a single asset write is held to the exact
-// same bar as an approve.
-func gateAsset(a domain.Asset, blobExists func(ref string) bool) []string {
-	var reasons []string
-	if strings.TrimSpace(a.Description) == "" {
-		reasons = append(reasons, fmt.Sprintf("asset %q has no description", a.Ref))
-	}
-	if blobExists != nil && a.Ref != "" && !blobExists(a.Ref) {
-		reasons = append(reasons, fmt.Sprintf("asset %q has no stored bytes", a.Ref))
 	}
 	return reasons
 }
@@ -470,6 +425,16 @@ func (s *Store) pendingRequestCount(ctx context.Context, orgID uuid.UUID) (int, 
 	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM xchats.kbd_requests
 		WHERE organization_id = $1 AND state = 'pending'`, orgID).Scan(&n)
 	return n, err
+}
+
+// strOrEmpty converts a nullable text column (legal_information,
+// delivery_in_days, return_period_in_days — added nullable by migration
+// 0011) into the plain string every row/patch type here uses, "" for NULL.
+func strOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func orDefaultInt(v, def int) int {

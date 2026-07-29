@@ -159,7 +159,7 @@ type resolveReq struct {
 
 // handlePlaygroundResolveRequest applies the operator's popup answer to the draft,
 // then marks the request resolved. confirm_value → upsert the (confirmed) value;
-// describe_media → fill an asset description or a material's text.
+// describe_file → fill a material's text.
 func (s *Server) handlePlaygroundResolveRequest(c *gin.Context) {
 	orgID, proceed := s.pgWrite(c)
 	if !proceed {
@@ -202,11 +202,10 @@ func (s *Server) applyResolution(c *gin.Context, orgID uuid.UUID, r kbstore.Requ
 	case "confirm_fact":
 		// The operator confirmed a detected fact → it lands as a pending typed-fact
 		// blob entry (concrete column); approving materializes it into the live table.
-		// target = {table, slug, field, lang}; answer = {value} (falls back to context.suggested).
+		// target = {table, slug, field}; answer = {value} (falls back to context.suggested).
 		table, _ := target["table"].(string)
 		slug, _ := target["slug"].(string)
 		field, _ := target["field"].(string)
-		lang, _ := target["lang"].(string)
 		value, _ := answer["value"].(string)
 		if value == "" {
 			value, _ = decodeObj(r.Context)["suggested"].(string)
@@ -214,12 +213,9 @@ func (s *Server) applyResolution(c *gin.Context, orgID uuid.UUID, r kbstore.Requ
 		if table == "" || slug == "" || field == "" || value == "" {
 			return errString2("table, slug, field and value required")
 		}
-		return s.upsertFactField(c, orgID, table, slug, field, orDefaultStr(lang, "ru"), value)
-	case "describe_media":
+		return s.upsertFactField(c, orgID, table, slug, field, value)
+	case "describe_file":
 		desc, _ := answer["description"].(string)
-		if ref, _ := target["asset_ref"].(string); ref != "" {
-			return s.kb.PatchAsset(ctx(c), orgID, ref, kbstore.AssetPatch{Description: &desc})
-		}
 		if mid, _ := target["material_id"].(string); mid != "" {
 			id, perr := uuid.Parse(mid)
 			if perr != nil {
@@ -235,8 +231,8 @@ func (s *Server) applyResolution(c *gin.Context, orgID uuid.UUID, r kbstore.Requ
 
 // upsertFactField writes one confirmed fact column onto its typed entity (pending
 // in the draft blob until approve).
-func (s *Server) upsertFactField(c *gin.Context, orgID uuid.UUID, table, slug, field, lang, value string) error {
-	if err := s.kb.SetFactField(ctx(c), orgID, table, slug, field, lang, value); err != nil {
+func (s *Server) upsertFactField(c *gin.Context, orgID uuid.UUID, table, slug, field, value string) error {
+	if err := s.kb.SetFactField(ctx(c), orgID, table, slug, field, value); err != nil {
 		if errors.Is(err, kbstore.ErrUnknownKind) {
 			return errString2("unknown fact table/field")
 		}

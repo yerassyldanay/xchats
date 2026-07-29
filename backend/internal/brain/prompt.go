@@ -1,9 +1,9 @@
 // Package brain is the ported assistant core: it builds the cache-stable system
 // prompt + the dynamic user block from a published Snapshot, and post-processes
-// the model's emit_draft output into a final Draft (escalate → resolve refs →
-// inject prices → clean profile → flatten status). It performs no writes and has
-// no transport dependency — the caller (internal/assistant.RealDrafter) wires it
-// to the LLM and the store. Ported from xpayment-crm (module path rewritten).
+// the model's emit_draft output into a final Draft (escalate → inject prices →
+// clean profile → flatten status). It performs no writes and has no transport
+// dependency — the caller (internal/assistant.RealDrafter) wires it to the LLM
+// and the store. Ported from xpayment-crm (module path rewritten).
 package brain
 
 import (
@@ -38,11 +38,10 @@ Rules (hard, non-negotiable):
    e.g. "Тариф Стандарт стоит {{tariff.standard.price}}." NEVER write the number/contact as a digit or
    literal — always the token; code fills the real value in after you. Only if a fact is truly absent
    from the FACTS list may you escalate.
-3. Attach media ONLY by returning refs that exist in the MEDIA CATALOG. Maximum 3. If none fit, [].
-4. Reply in the customer's language. If the latest message mixes Kazakh and Russian, reply in Russian.
-5. Keep the reply under ~120 words, warm and concrete. One clear next step or question.
-6. Never ask for or repeat passwords or other secrets.
-7. Extract into profile_patch ONLY facts you are newly confident about. Do not invent fields.
+3. Reply in the customer's language. If the latest message mixes Kazakh and Russian, reply in Russian.
+4. Keep the reply under ~120 words, warm and concrete. One clear next step or question.
+5. Never ask for or repeat passwords or other secrets.
+6. Extract into profile_patch ONLY facts you are newly confident about. Do not invent fields.
 
 You MUST respond by calling the emit_draft tool with the required JSON. No prose outside the tool call.`
 
@@ -68,12 +67,6 @@ func BuildSystem(s *domain.Snapshot) string {
 	for _, t := range s.Topics {
 		fmt.Fprintf(&b, "\n# topic: %s (%s)\n", t.Slug, t.Language)
 		fmt.Fprintf(&b, "%s\n", t.BodyMD)
-	}
-
-	b.WriteString("\nMEDIA CATALOG:\n")
-	b.WriteString("ref | kind | topic | description\n")
-	for _, a := range s.Assets {
-		fmt.Fprintf(&b, "%s | %s | %s | %s\n", a.Ref, a.Kind, a.TopicSlug, a.Description)
 	}
 
 	// [F] FACTS — the Facts lane. Per fact: the token the model must emit, its
@@ -127,9 +120,9 @@ func marshalProfile(profile map[string]any) string {
 }
 
 // PostProcess runs the pipeline (docs/02 · post-processing), in order: escalate
-// gate → resolve+cap asset refs → inject prices → clean profile_patch → flatten
-// status. It never returns an error: a price-render failure becomes a manual-check
-// note, an escalation stops the pipeline.
+// gate → inject prices → clean profile_patch → flatten status. It never returns
+// an error: a price-render failure becomes a manual-check note, an escalation
+// stops the pipeline.
 func PostProcess(raw domain.RawDraft, snap *domain.Snapshot, log *slog.Logger) domain.Draft {
 	if log == nil {
 		log = slog.Default()
@@ -151,20 +144,12 @@ func PostProcess(raw domain.RawDraft, snap *domain.Snapshot, log *slog.Logger) d
 		return d
 	}
 
-	// 3. Validate + resolve asset_refs (drop unknown, cap 3).
-	resolved, unknown := snap.ResolveAssets(raw.AssetRefs)
-	if len(unknown) > 0 {
-		log.Warn("dropped unknown asset_refs", "refs", unknown)
-	}
-
 	d := domain.Draft{
-		Media:             resolved,
-		DroppedRefs:       unknown,
 		Confidence:        raw.Confidence,
 		SuggestedCallback: raw.SuggestedCallback,
 	}
 
-	// 4. Inject facts — never ship a half-rendered fact token (Decision 8).
+	// 3. Inject facts — never ship a half-rendered fact token (Decision 8).
 	lang := raw.ReplyLanguage
 	if lang == "" {
 		lang = "ru"
@@ -174,15 +159,14 @@ func PostProcess(raw domain.RawDraft, snap *domain.Snapshot, log *slog.Logger) d
 		log.Warn("price render failed; posting check-pricing note", "err", err)
 		d.PricingError = true
 		d.ReplyText = pricingManualNote
-		d.Media = nil
 		return d
 	}
 	d.ReplyText = rendered
 
-	// 5. profile_patch — drop the stage key (that is status, handled next).
+	// 4. profile_patch — drop the stage key (that is status, handled next).
 	d.ProfilePatch = cleanProfilePatch(raw.ProfilePatch)
 
-	// 6. status — flatten suggested_status.stage to a label.
+	// 5. status — flatten suggested_status.stage to a label.
 	if raw.SuggestedStatus != nil {
 		d.SuggestedStatus = raw.SuggestedStatus.Stage
 	}

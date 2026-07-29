@@ -1,6 +1,9 @@
 package aiprompt
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // The registry is the code-owned, closed projection of DECISIONS.md
 // §"Canonical knowledge-base schema" — which columns are exact-value facts
@@ -161,6 +164,31 @@ var mediaColumns = map[string][]MediaColumn{
 
 // SingletonRef is the fixed code-owned natural ref for contacts and policies.
 const SingletonRef = "main"
+
+// MediaColumnsFor returns the closed media-column list for a model-facing
+// table segment (topics|products|tariffs|contacts|policies), in catalog
+// render order — a read-only copy of the registry entry so a caller cannot
+// mutate the package-level map. Exported for the eval-manifest generator
+// (evals/harness), which cross-checks this registry against kbfixture's
+// struct tags so the singular/plural media typing is declared exactly once
+// and the two can never silently drift from each other.
+func MediaColumnsFor(table string) []MediaColumn {
+	cols := mediaColumns[table]
+	out := make([]MediaColumn, len(cols))
+	copy(out, cols)
+	return out
+}
+
+// MediaTables returns every model-facing table segment that has a media
+// registry entry, in a stable (sorted) order.
+func MediaTables() []string {
+	out := make([]string, 0, len(mediaColumns))
+	for t := range mediaColumns {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // mediaColumnSpec returns the registry entry for table.column, or an error —
 // unknown media columns fail closed, never pass through.

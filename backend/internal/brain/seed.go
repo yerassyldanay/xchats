@@ -6,18 +6,6 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 )
 
-// mediaURLPrefix is the relative path the frontend resolves media by (served by
-// GET /xchats/api/v1/media/{ref}). An asset's ref IS its blob id, so the same ref
-// is used to attach the file on approve (see LoadMedia + assistant.RealDrafter).
-const mediaURLPrefix = "/xchats/api/v1/media/"
-
-// Asset refs — also the blob ids LoadMedia writes (must match KB-media files).
-const (
-	RefPricingCard = "pricing_card"
-	RefCatalogPDF  = "catalog_pdf"
-	RefIntroAudio  = "intro_audio"
-)
-
 // SeedSnapshot returns the embedded "Demo Shop" knowledge base — a small online
 // shop assistant. Facts (tariff prices, product prices/availability, support
 // contacts, commerce policies) are CONCRETE COLUMNS on typed rows (ai_tariffs /
@@ -108,26 +96,6 @@ func SeedSnapshot() *domain.Snapshot {
 				Language: "ru",
 				Title: "Контакты",
 				BodyMD: "Связаться с нами можно в WhatsApp или по e-mail; наш адрес и реквизиты доступны по запросу.",
-			},
-		},
-		Assets: []domain.Asset{
-			{
-				Ref: RefPricingCard, TopicSlug: "pricing", Kind: "image", Language: "ru",
-				URL:         mediaURLPrefix + RefPricingCard,
-				Title:       "Карточка тарифов",
-				Description: "Карточка с тремя тарифами и ценами (RU). Для вопросов о цене.",
-			},
-			{
-				Ref: RefCatalogPDF, TopicSlug: "catalog", Kind: "document", Language: "ru",
-				URL:         mediaURLPrefix + RefCatalogPDF,
-				Title:       "Каталог (PDF)",
-				Description: "PDF-каталог товаров с ценами. Когда просят подробности.",
-			},
-			{
-				Ref: RefIntroAudio, TopicSlug: "how_to_order", Kind: "audio", Language: "ru",
-				URL:         mediaURLPrefix + RefIntroAudio,
-				Title:       "Как оформить заказ (аудио)",
-				Description: "Голосовое: как оформить заказ за минуту.",
 			},
 		},
 		Loaded: time.Now(),

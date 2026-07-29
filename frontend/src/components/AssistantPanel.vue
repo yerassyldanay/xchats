@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, reactive, type Component } from 'vue'
-import { FileText, Film, Image, LoaderCircle, Mic, PenLine, RotateCw, Send, WandSparkles, X } from 'lucide-vue-next'
+import { computed, reactive } from 'vue'
+import { LoaderCircle, PenLine, RotateCw, Send, WandSparkles } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { vAutosize } from '../lib/autosize'
-import type { AiDraft, DraftMedia } from '../types'
+import type { AiDraft } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
@@ -11,22 +11,18 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 const inbox = useInbox()
 
-// per-option local edit state (text + kept media), keyed by draft id
-const edits = reactive<Record<string, { text: string; media: DraftMedia[] }>>({})
+// per-option local edit state, keyed by draft id
+const edits = reactive<Record<string, { text: string }>>({})
 const busy = reactive<Record<string, boolean>>({})
 
 function vm(d: AiDraft) {
-  if (!edits[d.id]) edits[d.id] = { text: d.draft_text, media: [...d.media] }
+  if (!edits[d.id]) edits[d.id] = { text: d.draft_text }
   return edits[d.id]
-}
-function detach(d: AiDraft, ref: string) {
-  vm(d).media = vm(d).media.filter((m) => m.asset_id !== ref)
 }
 async function approve(d: AiDraft) {
   busy[d.id] = true
   try {
-    const v = vm(d)
-    await inbox.approve(d.id, v.text, v.media.map((m) => m.asset_id))
+    await inbox.approve(d.id, vm(d).text)
   } finally {
     busy[d.id] = false
   }
@@ -35,15 +31,6 @@ function toComposer(d: AiDraft) {
   inbox.composerText = vm(d).text
 }
 
-const mediaMeta: Record<string, { icon: Component; label: string; tile: string }> = {
-  image: { icon: Image, label: 'Изображение', tile: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
-  audio: { icon: Mic, label: 'Аудио', tile: 'bg-sky-500/10 text-sky-600 dark:text-sky-400' },
-  video: { icon: Film, label: 'Видео', tile: 'bg-rose-500/10 text-rose-600 dark:text-rose-400' },
-  document: { icon: FileText, label: 'Документ', tile: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-}
-function media(kind: string) {
-  return mediaMeta[kind] ?? mediaMeta.document
-}
 function conf(d: AiDraft) {
   if (d.confidence === null || d.confidence === undefined) return null
   const pct = Math.round(d.confidence * 100)
@@ -126,30 +113,6 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
               placeholder="Текст ответа…"
               class="min-h-0 resize-none overflow-hidden rounded-lg bg-muted/40 text-[14px] leading-snug"
             />
-          </div>
-
-          <!-- attachments -->
-          <div v-if="vm(d).media.length" class="px-4 pt-2.5 space-y-1.5">
-            <div
-              v-for="md in vm(d).media"
-              :key="md.asset_id"
-              class="flex items-center gap-2.5 rounded-lg border border-border bg-background px-2.5 py-2"
-            >
-              <span class="w-8 h-8 rounded-md grid place-items-center shrink-0" :class="media(md.media_kind).tile">
-                <component :is="media(md.media_kind).icon" class="w-4 h-4" />
-              </span>
-              <div class="min-w-0 flex-1">
-                <div class="text-[13px] font-medium truncate">{{ media(md.media_kind).label }}</div>
-                <div class="text-[11px] text-muted-foreground truncate">{{ md.asset_id }}</div>
-              </div>
-              <button
-                class="w-7 h-7 rounded-md grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition"
-                title="Открепить"
-                @click="detach(d, md.asset_id)"
-              >
-                <X class="w-3.5 h-3.5" />
-              </button>
-            </div>
           </div>
 
           <!-- actions -->

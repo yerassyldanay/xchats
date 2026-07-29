@@ -42,7 +42,7 @@ type MaterialInput struct {
 	// "what it is and when to send it". For a type with no independent way to read
 	// its own content (image/pdf/doc/video/audio — captioning needs a vision client
 	// this deployment may not have), a non-empty Description IS the content: the
-	// material is born ready immediately, no extraction job, no describe_media
+	// material is born ready immediately, no extraction job, no describe_file
 	// popup. For url (which has a real, usually-richer fetch+extract path) it is
 	// instead kept as a fallback: extraction still runs, and only a failed fetch
 	// falls back to this comment instead of needs_human.

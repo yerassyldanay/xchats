@@ -92,9 +92,9 @@ function pickSection(s: Section) {
 }
 
 // --- per-row edit buffers (lazy; persist until saved) ---
-const tBuf = reactive<Record<string, { title: string; body_md: string; lang: string }>>({})
+const tBuf = reactive<Record<string, { title: string; body_md: string }>>({})
 function vmTopic(t: TopicRow) {
-  if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, body_md: t.body_md, lang: t.lang || 'ru' }
+  if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, body_md: t.body_md }
   return tBuf[t.id]
 }
 
@@ -134,13 +134,13 @@ function materialPreviewURL(m: KbMaterial): string | null {
 }
 
 // --- Товары: per-row edit buffers + a new-row form ---
-// availability (free-form seller prose) stays editable but is no longer what
-// the AI reads for stock — the AI reads in_stock (a plain boolean toggle).
-type ProductBuf = { name: string; price: string; description: string; category: string; availability: string; in_stock: boolean }
+// The AI reads in_stock (a plain boolean toggle) for stock — availability
+// (free-form seller prose) is a retired legacy column, no longer editable.
+type ProductBuf = { name: string; price: string; description: string; category: string; in_stock: boolean }
 const prodBuf = reactive<Record<string, ProductBuf>>({})
 function vmProduct(p: ProductRow): ProductBuf {
   if (!prodBuf[p.id]) {
-    prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category, availability: p.availability, in_stock: p.in_stock }
+    prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category, in_stock: p.in_stock }
   }
   return prodBuf[p.id]
 }
@@ -149,7 +149,7 @@ function vmProduct(p: ProductRow): ProductBuf {
 // the current live row and re-seeded when it changes.
 const contactRow = computed<ContactRow | undefined>(() => pg.live?.contacts?.[0])
 const contactForm = reactive({
-  whatsapp: '', email: '', address: '', legal: '', callback_time: '',
+  whatsapp: '', email: '', address: '', legal_information: '', callback_time: '',
   working_hours: '', phone: '', website: '', instagram: '',
 })
 function seedContactForm() {
@@ -157,7 +157,7 @@ function seedContactForm() {
   contactForm.whatsapp = c?.whatsapp ?? ''
   contactForm.email = c?.email ?? ''
   contactForm.address = c?.address ?? ''
-  contactForm.legal = c?.legal ?? ''
+  contactForm.legal_information = c?.legal_information ?? ''
   contactForm.callback_time = c?.callback_time ?? ''
   contactForm.working_hours = c?.working_hours ?? ''
   contactForm.phone = c?.phone ?? ''
@@ -172,24 +172,24 @@ async function saveContacts() {
 // --- Политики: the 'main' commerce-policy singleton — a structural clone of
 // Контакты above.
 const policyRow = computed<PolicyRow | undefined>(() => pg.live?.policies?.[0])
-// delivery_cost/delivery_time are the flat KB-wide delivery answer — the AI
+// delivery_cost/delivery_in_days are the flat KB-wide delivery answer — the AI
 // reads them ONLY when no delivery zone exists; the moment a zone exists,
 // per-zone cost/days take over and these two fields are disabled here (see
 // the Политики template block below), matching plan/ui/ui_knowledge_base_003.png.
 const zonesExist = computed(() => (pg.live?.zones.length ?? 0) > 0)
 const policyForm = reactive({
-  delivery_cost: '', delivery_time: '', free_delivery_from: '', min_order: '',
-  prepayment: '', installment: '', return_period: '', warranty: '', outside_zones_note: '',
+  delivery_cost: '', delivery_in_days: '', free_delivery_from: '', min_order: '',
+  prepayment: '', installment: '', return_period_in_days: '', warranty: '', outside_zones_note: '',
 })
 function seedPolicyForm() {
   const p = policyRow.value
   policyForm.delivery_cost = p?.delivery_cost ?? ''
-  policyForm.delivery_time = p?.delivery_time ?? ''
+  policyForm.delivery_in_days = p?.delivery_in_days ?? ''
   policyForm.free_delivery_from = p?.free_delivery_from ?? ''
   policyForm.min_order = p?.min_order ?? ''
   policyForm.prepayment = p?.prepayment ?? ''
   policyForm.installment = p?.installment ?? ''
-  policyForm.return_period = p?.return_period ?? ''
+  policyForm.return_period_in_days = p?.return_period_in_days ?? ''
   policyForm.warranty = p?.warranty ?? ''
   policyForm.outside_zones_note = p?.outside_zones_note ?? ''
 }
@@ -218,11 +218,11 @@ async function addTariff() {
   newTariff.ref = newTariff.name = newTariff.price = newTariff.summary = ''
   newTariff.pricing_type = 'fixed'
 }
-const newProduct = reactive({ ref: '', name: '', price: '', category: '', description: '', availability: '', in_stock: true })
+const newProduct = reactive({ ref: '', name: '', price: '', category: '', description: '', in_stock: true })
 async function addProduct() {
   if (!newProduct.ref.trim()) return
   await pg.liveUpsertProduct({ ...newProduct })
-  newProduct.ref = newProduct.name = newProduct.price = newProduct.category = newProduct.description = newProduct.availability = ''
+  newProduct.ref = newProduct.name = newProduct.price = newProduct.category = newProduct.description = ''
   newProduct.in_stock = true
 }
 
@@ -403,7 +403,7 @@ const tabs = [
               </label>
             </div>
             <Textarea v-model="vmProduct(p).description" rows="2" placeholder="Описание товара…" class="min-h-0 text-[14px]" />
-            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertProduct({ ref: p.ref, lang: p.lang, ...vmProduct(p) })" />
+            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertProduct({ ref: p.ref, ...vmProduct(p) })" />
           </div>
         </div>
 
@@ -438,7 +438,7 @@ const tabs = [
               <Textarea v-model="vmTariff(t).advantages" rows="2" placeholder="Преимущества (по строке)…" class="min-h-0 text-[14px]" />
               <Textarea v-model="vmTariff(t).disadvantages" rows="2" placeholder="Ограничения (по строке)…" class="min-h-0 text-[14px]" />
             </div>
-            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertTariff({ ref: t.ref, lang: t.lang, ...vmTariff(t) })" />
+            <SaveButtons :busy="pg.liveBusy" @save="pg.liveUpsertTariff({ ref: t.ref, ...vmTariff(t) })" />
           </div>
         </div>
 
@@ -483,7 +483,7 @@ const tabs = [
               </label>
               <label class="block sm:col-span-2">
                 <span class="text-xs font-medium text-muted-foreground">Реквизиты</span>
-                <Textarea v-model="contactForm.legal" rows="2" placeholder="Юридические реквизиты…" class="mt-1 min-h-0 text-[14px]" />
+                <Textarea v-model="contactForm.legal_information" rows="2" placeholder="Юридические реквизиты…" class="mt-1 min-h-0 text-[14px]" />
               </label>
               <label class="block sm:col-span-2">
                 <span class="text-xs font-medium text-muted-foreground">Время обратного звонка</span>
@@ -512,7 +512,7 @@ const tabs = [
                   Срок доставки
                   <span v-if="zonesExist" class="text-muted-foreground/70">— управляется в «Зонах доставки»</span>
                 </span>
-                <Input v-model="policyForm.delivery_time" placeholder="1–3 дня" class="mt-1 h-9 font-mono" :disabled="zonesExist" :title="zonesExist ? 'Управляется в «Зонах доставки»' : undefined" />
+                <Input v-model="policyForm.delivery_in_days" placeholder="1–3 дня" class="mt-1 h-9 font-mono" :disabled="zonesExist" :title="zonesExist ? 'Управляется в «Зонах доставки»' : undefined" />
               </label>
               <label class="block">
                 <span class="text-xs font-medium text-muted-foreground">Бесплатная доставка от</span>
@@ -532,7 +532,7 @@ const tabs = [
               </label>
               <label class="block">
                 <span class="text-xs font-medium text-muted-foreground">Срок возврата</span>
-                <Input v-model="policyForm.return_period" placeholder="14 дней" class="mt-1 h-9 font-mono" />
+                <Input v-model="policyForm.return_period_in_days" placeholder="14 дней" class="mt-1 h-9 font-mono" />
               </label>
               <label class="block">
                 <span class="text-xs font-medium text-muted-foreground">Гарантия</span>

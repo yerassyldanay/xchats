@@ -35,15 +35,14 @@ func inboundWindow(text string) fakeWindow {
 	}}
 }
 
-// A grounded answer: the RealDrafter renders price tokens and resolves catalog
-// media against the embedded Demo Shop snapshot, returning one option.
+// A grounded answer: the RealDrafter renders price tokens against the embedded
+// Demo Shop snapshot, returning one option.
 func TestRealDrafter_GroundedOption(t *testing.T) {
 	r := NewReal(
 		inboundWindow("Сколько стоит?"),
 		fakeLLM{raw: domain.RawDraft{
 			ReplyText:     "Стандарт — {{tariff.standard.price}}.",
 			ReplyLanguage: "ru",
-			AssetRefs:     []string{brain.RefPricingCard},
 			Confidence:    0.8,
 		}},
 		brain.SeedSnapshot(), nil,
@@ -57,12 +56,6 @@ func TestRealDrafter_GroundedOption(t *testing.T) {
 	}
 	if opts[0].Text != "Стандарт — 19 900 ₸." {
 		t.Fatalf("price not injected: %q", opts[0].Text)
-	}
-	if len(opts[0].Media) != 1 || opts[0].Media[0].Ref != brain.RefPricingCard {
-		t.Fatalf("media not resolved: %+v", opts[0].Media)
-	}
-	if opts[0].Media[0].URL != "/xchats/api/v1/media/"+brain.RefPricingCard {
-		t.Fatalf("unexpected media url: %q", opts[0].Media[0].URL)
 	}
 	if opts[0].Escalate {
 		t.Fatal("should not escalate")

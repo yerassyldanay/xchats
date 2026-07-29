@@ -209,7 +209,6 @@ func emitDraftTool() tool {
 				"properties": map[string]any{
 					"reply_text":     map[string]any{"type": "string", "description": "Uses {{price.*}}/{{limit.*}} tokens, never digits."},
 					"reply_language": map[string]any{"type": "string", "enum": []string{"ru", "kk"}},
-					"asset_refs":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 3},
 					"profile_patch":  map[string]any{"type": "object", "description": "Only newly-confident fields."},
 					"suggested_callback": map[string]any{"type": "object", "properties": map[string]any{
 						"due_at": map[string]any{"type": "string"}, "note": map[string]any{"type": "string"},
@@ -221,7 +220,7 @@ func emitDraftTool() tool {
 					"escalate":          map[string]any{"type": "boolean"},
 					"escalation_reason": map[string]any{"type": "string"},
 				},
-				"required": []string{"reply_text", "reply_language", "asset_refs", "confidence", "escalate"},
+				"required": []string{"reply_text", "reply_language", "confidence", "escalate"},
 			},
 		},
 	}

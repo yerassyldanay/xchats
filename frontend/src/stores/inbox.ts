@@ -142,11 +142,10 @@ export const useInbox = defineStore('inbox', {
         this.suggesting = false
       }
     },
-    async approve(draftId: string, editedText: string | undefined, mediaIds: string[]) {
+    async approve(draftId: string, editedText: string | undefined) {
       try {
         await api.post(`/ai-drafts/${draftId}/approve`, {
           edited_text: editedText,
-          media_ids: mediaIds,
         })
         this.drafts = []
       } catch (e) {
