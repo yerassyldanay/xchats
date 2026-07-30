@@ -33,49 +33,76 @@ type DraftConfigPatch struct {
 }
 
 // Draft* are pending blob entries — the same fields as their live row, plus
-// authoring provenance.
+// authoring provenance. Media fields mirror the canonical ai_* columns
+// (plan/DECISIONS.md "Concrete media-column naming"): a nullable singular
+// reference is *uuid.UUID (nil = none), a plural reference is []uuid.UUID
+// (never nil — always at least an empty slice, matching the live column's
+// NOT NULL DEFAULT '{}').
 type DraftTopic struct {
-	Slug       string `json:"slug"`
-	Title      string `json:"title"`
-	BodyMD     string `json:"body_md"`
-	Provenance string `json:"provenance,omitempty"`
+	Slug                string      `json:"slug"`
+	Title               string      `json:"title"`
+	BodyMD              string      `json:"body_md"`
+	FeaturedImage       *uuid.UUID  `json:"featured_image"`
+	IllustrationImages  []uuid.UUID `json:"illustration_images"`
+	ExplainerVideos     []uuid.UUID `json:"explainer_videos"`
+	NarrationAudioFiles []uuid.UUID `json:"narration_audio_files"`
+	ReferenceDocuments  []uuid.UUID `json:"reference_documents"`
+	Provenance          string      `json:"provenance,omitempty"`
 }
 
 type DraftTariff struct {
-	Ref           string `json:"ref"`
-	Name          string `json:"name"`
-	Price         string `json:"price"`
-	LimitText     string `json:"limit_text"`
-	Fee           string `json:"fee"`
-	Summary       string `json:"summary"`
-	PricingType   string `json:"pricing_type"`
-	Advantages    string `json:"advantages"`
-	Disadvantages string `json:"disadvantages"`
-	Provenance    string `json:"provenance,omitempty"`
+	Ref             string      `json:"ref"`
+	Name            string      `json:"name"`
+	Price           string      `json:"price"`
+	LimitText       string      `json:"limit_text"`
+	Fee             string      `json:"fee"`
+	Summary         string      `json:"summary"`
+	PricingType     string      `json:"pricing_type"`
+	Advantages      string      `json:"advantages"`
+	Disadvantages   string      `json:"disadvantages"`
+	SalesStatus     string      `json:"sales_status"`
+	FeaturedImage   *uuid.UUID  `json:"featured_image"`
+	PricingImages   []uuid.UUID `json:"pricing_images"`
+	ExplainerVideos []uuid.UUID `json:"explainer_videos"`
+	TermsDocuments  []uuid.UUID `json:"terms_documents"`
+	Provenance      string      `json:"provenance,omitempty"`
 }
 
 type DraftProduct struct {
-	Ref         string `json:"ref"`
-	Name        string `json:"name"`
-	Price       string `json:"price"`
-	Description string `json:"description"`
-	Category    string `json:"category"`
-	Provenance  string `json:"provenance,omitempty"`
+	Ref                    string      `json:"ref"`
+	Name                   string      `json:"name"`
+	Price                  string      `json:"price"`
+	Description            string      `json:"description"`
+	Category               string      `json:"category"`
+	InStock                bool        `json:"in_stock"`
+	SalesStatus            string      `json:"sales_status"`
+	FeaturedImage          *uuid.UUID  `json:"featured_image"`
+	GalleryImages          []uuid.UUID `json:"gallery_images"`
+	DemoVideos             []uuid.UUID `json:"demo_videos"`
+	AudioDescriptionFiles  []uuid.UUID `json:"audio_description_files"`
+	CertificateDocuments   []uuid.UUID `json:"certificate_documents"`
+	ManualDocuments        []uuid.UUID `json:"manual_documents"`
+	GuaranteeDocuments     []uuid.UUID `json:"guarantee_documents"`
+	SpecificationDocuments []uuid.UUID `json:"specification_documents"`
+	Provenance             string      `json:"provenance,omitempty"`
 }
 
 // DraftContact is the org's single pending support-contact entry — a true
 // singleton (no lang dimension; V1 is Russian-only, plan/DECISIONS.md).
 type DraftContact struct {
-	WhatsApp         string `json:"whatsapp"`
-	Email            string `json:"email"`
-	Address          string `json:"address"`
-	LegalInformation string `json:"legal_information"`
-	CallbackTime     string `json:"callback_time"`
-	WorkingHours     string `json:"working_hours"`
-	Phone            string `json:"phone"`
-	Website          string `json:"website"`
-	Instagram        string `json:"instagram"`
-	Provenance       string `json:"provenance,omitempty"`
+	WhatsApp              string      `json:"whatsapp"`
+	Email                 string      `json:"email"`
+	Address               string      `json:"address"`
+	LegalInformation      string      `json:"legal_information"`
+	CallbackTime          string      `json:"callback_time"`
+	WorkingHours          string      `json:"working_hours"`
+	Phone                 string      `json:"phone"`
+	Website               string      `json:"website"`
+	Instagram             string      `json:"instagram"`
+	ContactCardImage      *uuid.UUID  `json:"contact_card_image"`
+	LocationMapImage      *uuid.UUID  `json:"location_map_image"`
+	CompanyLegalDocuments []uuid.UUID `json:"company_legal_documents"`
+	Provenance            string      `json:"provenance,omitempty"`
 }
 
 // DraftPolicy is a pending ai_policies entry — a structural clone of
@@ -85,35 +112,52 @@ type DraftContact struct {
 // it yet (draft milestone later) — so it always round-trips as "" for a
 // Playground-authored entry, same as before this field existed.
 type DraftPolicy struct {
-	DeliveryCost       string `json:"delivery_cost"`
-	DeliveryInDays     string `json:"delivery_in_days"`
-	FreeDeliveryFrom   string `json:"free_delivery_from"`
-	MinOrder           string `json:"min_order"`
-	Prepayment         string `json:"prepayment"`
-	Installment        string `json:"installment"`
-	ReturnPeriodInDays string `json:"return_period_in_days"`
-	Warranty           string `json:"warranty"`
-	OutsideZonesNote   string `json:"outside_zones_note"`
-	Provenance         string `json:"provenance,omitempty"`
+	DeliveryCost            string      `json:"delivery_cost"`
+	DeliveryInDays          string      `json:"delivery_in_days"`
+	FreeDeliveryFrom        string      `json:"free_delivery_from"`
+	MinOrder                string      `json:"min_order"`
+	Prepayment              string      `json:"prepayment"`
+	Installment             string      `json:"installment"`
+	ReturnPeriodInDays      string      `json:"return_period_in_days"`
+	Warranty                string      `json:"warranty"`
+	OutsideZonesNote        string      `json:"outside_zones_note"`
+	CommercePolicyDocuments []uuid.UUID `json:"commerce_policy_documents"`
+	Provenance              string      `json:"provenance,omitempty"`
+}
+
+// DraftDeliveryZone is a pending ai_delivery_zones entry — no media columns
+// exist on this table in v1 (plan/DECISIONS.md).
+type DraftDeliveryZone struct {
+	Ref               string `json:"ref"`
+	Name              string `json:"name"`
+	ZoneLevel         string `json:"zone_level"`
+	ParentRef         string `json:"parent_ref"`
+	DeliveryAvailable bool   `json:"delivery_available"`
+	DeliveryCost      string `json:"delivery_cost"`
+	DeliveryInDays    string `json:"delivery_in_days"`
+	Notes             string `json:"notes"`
+	SalesStatus       string `json:"sales_status"`
+	Provenance        string `json:"provenance,omitempty"`
 }
 
 // DraftDelete marks a live entity for removal at approve. Key is the entity's
-// natural key: topic slug, tariff/product ref; contact/policy carry no key
-// (true singletons — Kind alone identifies the one row).
+// natural key: topic slug, tariff/product/zone ref; contact/policy carry no
+// key (true singletons — Kind alone identifies the one row).
 type DraftDelete struct {
-	Kind string `json:"kind"` // 'topic'|'tariff'|'product'|'contact'|'policy'
+	Kind string `json:"kind"` // 'topic'|'tariff'|'product'|'contact'|'policy'|'delivery_zone'
 	Key  string `json:"key"`
 }
 
 // DraftBlob is the whole pending KB — the exact shape of kbd_draft.draft.
 type DraftBlob struct {
-	Config   DraftConfigPatch `json:"config"`
-	Topics   []DraftTopic     `json:"topics"`
-	Tariffs  []DraftTariff    `json:"tariffs"`
-	Products []DraftProduct   `json:"products"`
-	Contacts []DraftContact   `json:"contacts"`
-	Policies []DraftPolicy    `json:"policies"`
-	Deletes  []DraftDelete    `json:"deletes"`
+	Config        DraftConfigPatch    `json:"config"`
+	Topics        []DraftTopic        `json:"topics"`
+	Tariffs       []DraftTariff       `json:"tariffs"`
+	Products      []DraftProduct      `json:"products"`
+	Contacts      []DraftContact      `json:"contacts"`
+	Policies      []DraftPolicy       `json:"policies"`
+	DeliveryZones []DraftDeliveryZone `json:"delivery_zones"`
+	Deletes       []DraftDelete       `json:"deletes"`
 }
 
 func (b *DraftBlob) upsertTopic(t DraftTopic) {
@@ -196,6 +240,26 @@ func (b *DraftBlob) removePolicy() {
 	b.Policies = nil
 }
 
+func (b *DraftBlob) upsertZone(z DraftDeliveryZone) {
+	for i := range b.DeliveryZones {
+		if b.DeliveryZones[i].Ref == z.Ref {
+			b.DeliveryZones[i] = z
+			return
+		}
+	}
+	b.DeliveryZones = append(b.DeliveryZones, z)
+}
+
+func (b *DraftBlob) removeZone(ref string) {
+	out := b.DeliveryZones[:0]
+	for _, z := range b.DeliveryZones {
+		if z.Ref != ref {
+			out = append(out, z)
+		}
+	}
+	b.DeliveryZones = out
+}
+
 func (b *DraftBlob) addDelete(kind, key string) {
 	for _, d := range b.Deletes {
 		if d.Kind == kind && d.Key == key {
@@ -254,45 +318,67 @@ func (s *Store) DraftBaseVersion(ctx context.Context, orgID uuid.UUID) (int64, e
 // writeDraftBlob runs mutate over the org's draft blob inside a row-locked
 // transaction (SELECT ... FOR UPDATE), so concurrent writers serialize instead
 // of racing, then persists the result and bumps base_version. This is the ONLY
-// way the blob is written.
+// way the blob is written for every pre-existing (non-MCP) caller.
 func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, mutate func(*DraftBlob) error) error {
+	_, err := s.writeDraftBlobVersioned(ctx, orgID, nil, mutate)
+	return err
+}
+
+// writeDraftBlobVersioned is writeDraftBlob's superset for the MCP write
+// path: when expectedVersion is non-nil, the write is rejected with ErrStale
+// unless the blob's CURRENT base_version (read under the same row lock)
+// matches exactly (plan/mcp.md's `expected_draft_version?` optimistic
+// concurrency — an MCP-only concern; writeDraftBlob's nil-expectedVersion
+// callers never conflict on version, unchanged from before this existed).
+// Returns the resulting base_version either way, so a caller can report it
+// back (kb_summary's draft_version, an upsert result's new version).
+func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, expectedVersion *int64, mutate func(*DraftBlob) error) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback(ctx)
 
 	var raw []byte
-	err = tx.QueryRow(ctx, `SELECT draft FROM xchats.kbd_draft WHERE organization_id = $1 FOR UPDATE`, orgID).Scan(&raw)
+	var currentVersion int64
+	err = tx.QueryRow(ctx, `SELECT draft, base_version FROM xchats.kbd_draft WHERE organization_id = $1 FOR UPDATE`, orgID).
+		Scan(&raw, &currentVersion)
 	blob := DraftBlob{}
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		// no row yet — nothing to lock against; the upsert below creates it.
+		// no row yet — version 0, nothing to lock against; the upsert below creates it.
 	case err != nil:
-		return err
+		return 0, err
 	case len(raw) > 0:
 		if err := json.Unmarshal(raw, &blob); err != nil {
-			return err
+			return 0, err
 		}
+	}
+	if expectedVersion != nil && *expectedVersion != currentVersion {
+		return 0, ErrStale
 	}
 
 	if err := mutate(&blob); err != nil {
-		return err
+		return 0, err
 	}
 
 	out, err := json.Marshal(blob)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	newVersion := currentVersion + 1
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO xchats.kbd_draft (organization_id, draft, base_version, updated_at)
 		VALUES ($1, $2::jsonb, 1, now())
 		ON CONFLICT (organization_id) DO UPDATE SET
 			draft = EXCLUDED.draft, base_version = xchats.kbd_draft.base_version + 1, updated_at = now()`,
 		orgID, string(out)); err != nil {
-		return err
+		return 0, err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return newVersion, nil
 }
 
 // ClearDraft discards every pending edit ("Отменить изменения") — a plain reset
@@ -328,78 +414,101 @@ type DraftConfig struct {
 // draft blob's timestamp for a pending one. ContactRow/PolicyRow (below) are
 // true singletons — one per org, ID a fixed constant.
 type TopicRow struct {
-	ID         string    `json:"id"`
-	Slug       string    `json:"slug"`
-	Title      string    `json:"title"`
-	BodyMD     string    `json:"body_md"`
-	Draft      bool      `json:"draft"`
-	Provenance string    `json:"provenance,omitempty"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID                  string      `json:"id"`
+	Slug                string      `json:"slug"`
+	Title               string      `json:"title"`
+	BodyMD              string      `json:"body_md"`
+	FeaturedImage       *uuid.UUID  `json:"featured_image"`
+	IllustrationImages  []uuid.UUID `json:"illustration_images"`
+	ExplainerVideos     []uuid.UUID `json:"explainer_videos"`
+	NarrationAudioFiles []uuid.UUID `json:"narration_audio_files"`
+	ReferenceDocuments  []uuid.UUID `json:"reference_documents"`
+	Draft               bool        `json:"draft"`
+	Provenance          string      `json:"provenance,omitempty"`
+	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
 type TariffRow struct {
-	ID            string    `json:"id"`
-	Ref           string    `json:"ref"`
-	Name          string    `json:"name"`
-	Price         string    `json:"price"`
-	LimitText     string    `json:"limit_text"`
-	Fee           string    `json:"fee"`
-	Summary       string    `json:"summary"`
-	PricingType   string    `json:"pricing_type"`
-	Advantages    string    `json:"advantages"`
-	Disadvantages string    `json:"disadvantages"`
-	Draft         bool      `json:"draft"`
-	Provenance    string    `json:"provenance,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID              string      `json:"id"`
+	Ref             string      `json:"ref"`
+	Name            string      `json:"name"`
+	Price           string      `json:"price"`
+	LimitText       string      `json:"limit_text"`
+	Fee             string      `json:"fee"`
+	Summary         string      `json:"summary"`
+	PricingType     string      `json:"pricing_type"`
+	Advantages      string      `json:"advantages"`
+	Disadvantages   string      `json:"disadvantages"`
+	SalesStatus     string      `json:"sales_status"`
+	FeaturedImage   *uuid.UUID  `json:"featured_image"`
+	PricingImages   []uuid.UUID `json:"pricing_images"`
+	ExplainerVideos []uuid.UUID `json:"explainer_videos"`
+	TermsDocuments  []uuid.UUID `json:"terms_documents"`
+	Draft           bool        `json:"draft"`
+	Provenance      string      `json:"provenance,omitempty"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }
 
 type ProductRow struct {
-	ID          string    `json:"id"`
-	Ref         string    `json:"ref"`
-	Name        string    `json:"name"`
-	Price       string    `json:"price"`
-	Description string    `json:"description"`
-	Category    string    `json:"category"`
-	InStock     bool      `json:"in_stock"`
-	Draft       bool      `json:"draft"`
-	Provenance  string    `json:"provenance,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                     string      `json:"id"`
+	Ref                    string      `json:"ref"`
+	Name                   string      `json:"name"`
+	Price                  string      `json:"price"`
+	Description            string      `json:"description"`
+	Category               string      `json:"category"`
+	InStock                bool        `json:"in_stock"`
+	SalesStatus            string      `json:"sales_status"`
+	FeaturedImage          *uuid.UUID  `json:"featured_image"`
+	GalleryImages          []uuid.UUID `json:"gallery_images"`
+	DemoVideos             []uuid.UUID `json:"demo_videos"`
+	AudioDescriptionFiles  []uuid.UUID `json:"audio_description_files"`
+	CertificateDocuments   []uuid.UUID `json:"certificate_documents"`
+	ManualDocuments        []uuid.UUID `json:"manual_documents"`
+	GuaranteeDocuments     []uuid.UUID `json:"guarantee_documents"`
+	SpecificationDocuments []uuid.UUID `json:"specification_documents"`
+	Draft                  bool        `json:"draft"`
+	Provenance             string      `json:"provenance,omitempty"`
+	UpdatedAt              time.Time   `json:"updated_at"`
 }
 
 type ContactRow struct {
-	ID               string    `json:"id"`
-	Slug             string    `json:"slug"`
-	WhatsApp         string    `json:"whatsapp"`
-	Email            string    `json:"email"`
-	Address          string    `json:"address"`
-	LegalInformation string    `json:"legal_information"`
-	CallbackTime     string    `json:"callback_time"`
-	WorkingHours     string    `json:"working_hours"`
-	Phone            string    `json:"phone"`
-	Website          string    `json:"website"`
-	Instagram        string    `json:"instagram"`
-	Draft            bool      `json:"draft"`
-	Provenance       string    `json:"provenance,omitempty"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID                    string      `json:"id"`
+	Slug                  string      `json:"slug"`
+	WhatsApp              string      `json:"whatsapp"`
+	Email                 string      `json:"email"`
+	Address               string      `json:"address"`
+	LegalInformation      string      `json:"legal_information"`
+	CallbackTime          string      `json:"callback_time"`
+	WorkingHours          string      `json:"working_hours"`
+	Phone                 string      `json:"phone"`
+	Website               string      `json:"website"`
+	Instagram             string      `json:"instagram"`
+	ContactCardImage      *uuid.UUID  `json:"contact_card_image"`
+	LocationMapImage      *uuid.UUID  `json:"location_map_image"`
+	CompanyLegalDocuments []uuid.UUID `json:"company_legal_documents"`
+	Draft                 bool        `json:"draft"`
+	Provenance            string      `json:"provenance,omitempty"`
+	UpdatedAt             time.Time   `json:"updated_at"`
 }
 
 // PolicyRow is the editor-facing ai_policies row — a structural clone of
 // ContactRow (ID/Slug the singleton domain.PolicySlug).
 type PolicyRow struct {
-	ID                 string    `json:"id"`
-	Slug               string    `json:"slug"`
-	DeliveryCost       string    `json:"delivery_cost"`
-	DeliveryInDays     string    `json:"delivery_in_days"`
-	FreeDeliveryFrom   string    `json:"free_delivery_from"`
-	MinOrder           string    `json:"min_order"`
-	Prepayment         string    `json:"prepayment"`
-	Installment        string    `json:"installment"`
-	ReturnPeriodInDays string    `json:"return_period_in_days"`
-	Warranty           string    `json:"warranty"`
-	OutsideZonesNote   string    `json:"outside_zones_note"`
-	Draft              bool      `json:"draft"`
-	Provenance         string    `json:"provenance,omitempty"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                      string      `json:"id"`
+	Slug                    string      `json:"slug"`
+	DeliveryCost            string      `json:"delivery_cost"`
+	DeliveryInDays          string      `json:"delivery_in_days"`
+	FreeDeliveryFrom        string      `json:"free_delivery_from"`
+	MinOrder                string      `json:"min_order"`
+	Prepayment              string      `json:"prepayment"`
+	Installment             string      `json:"installment"`
+	ReturnPeriodInDays      string      `json:"return_period_in_days"`
+	Warranty                string      `json:"warranty"`
+	OutsideZonesNote        string      `json:"outside_zones_note"`
+	CommercePolicyDocuments []uuid.UUID `json:"commerce_policy_documents"`
+	Draft                   bool        `json:"draft"`
+	Provenance              string      `json:"provenance,omitempty"`
+	UpdatedAt               time.Time   `json:"updated_at"`
 }
 
 // DraftView is the whole working KB for the editor + builder: live rows merged
@@ -463,6 +572,122 @@ func (s *Store) LiveView(ctx context.Context, orgID uuid.UUID) (*DraftView, erro
 	return v, nil
 }
 
+// DraftOnly returns exactly what is pending in kbd_draft — no live overlay —
+// with every row's origin explicit (Draft: true) and no merging with a live
+// counterpart. This is what kb_read(source=both) needs that Draft() cannot
+// give it: Draft() shadows a live row with its pending edit into ONE row, but
+// plan/mcp.md §5 requires "live and draft origins remain explicit... there is
+// no effective source." Every draft entry is already a complete row by the
+// time it is written (the common-write-behavior contract every MCP upsert
+// follows), so presenting it standalone needs no live read at all.
+func (s *Store) DraftOnly(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
+	blob, ver, updatedAt, err := s.readDraftBlob(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	v := &DraftView{Config: DraftConfig{OrganizationID: orgID, BaseVersion: ver, UpdatedAt: updatedAt}}
+	deleted := map[string]bool{}
+	for _, d := range blob.Deletes {
+		deleted[d.Kind+":"+d.Key] = true
+	}
+	if p := blob.Config.Persona; p != nil {
+		v.Config.Persona, v.Config.Draft = *p, true
+	}
+	if p := blob.Config.Mission; p != nil {
+		v.Config.Mission, v.Config.Draft = *p, true
+	}
+	if p := blob.Config.Guardrails; p != nil {
+		v.Config.Guardrails, v.Config.Draft = *p, true
+	}
+	if p := blob.Config.LanguagePolicy; p != nil {
+		v.Config.LanguagePolicy, v.Config.Draft = *p, true
+	}
+	if p := blob.Config.ReplyMaxWords; p != nil {
+		v.Config.ReplyMaxWords, v.Config.Draft = *p, true
+	}
+	for _, t := range blob.Topics {
+		if deleted["topic:"+t.Slug] {
+			continue
+		}
+		v.Topics = append(v.Topics, TopicRow{ID: t.Slug, Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD,
+			FeaturedImage: t.FeaturedImage, IllustrationImages: t.IllustrationImages,
+			ExplainerVideos: t.ExplainerVideos, NarrationAudioFiles: t.NarrationAudioFiles,
+			ReferenceDocuments: t.ReferenceDocuments,
+			Draft:              true, Provenance: t.Provenance, UpdatedAt: updatedAt})
+	}
+	for _, t := range blob.Tariffs {
+		if deleted["tariff:"+t.Ref] {
+			continue
+		}
+		v.Tariffs = append(v.Tariffs, TariffRow{ID: t.Ref, Ref: t.Ref, Name: t.Name, Price: t.Price,
+			LimitText: t.LimitText, Fee: t.Fee, Summary: t.Summary, PricingType: t.PricingType,
+			Advantages: t.Advantages, Disadvantages: t.Disadvantages, SalesStatus: t.SalesStatus,
+			FeaturedImage: t.FeaturedImage, PricingImages: t.PricingImages, ExplainerVideos: t.ExplainerVideos,
+			TermsDocuments: t.TermsDocuments,
+			Draft:          true, Provenance: t.Provenance, UpdatedAt: updatedAt})
+	}
+	for _, p := range blob.Products {
+		if deleted["product:"+p.Ref] {
+			continue
+		}
+		v.Products = append(v.Products, ProductRow{ID: p.Ref, Ref: p.Ref, Name: p.Name, Price: p.Price,
+			Description: p.Description, Category: p.Category, InStock: p.InStock, SalesStatus: p.SalesStatus,
+			FeaturedImage: p.FeaturedImage, GalleryImages: p.GalleryImages, DemoVideos: p.DemoVideos,
+			AudioDescriptionFiles: p.AudioDescriptionFiles, CertificateDocuments: p.CertificateDocuments,
+			ManualDocuments: p.ManualDocuments, GuaranteeDocuments: p.GuaranteeDocuments,
+			SpecificationDocuments: p.SpecificationDocuments,
+			Draft:                  true, Provenance: p.Provenance, UpdatedAt: updatedAt})
+	}
+	if len(blob.Contacts) > 0 && !deleted["contact:"] {
+		c := blob.Contacts[0]
+		v.Contacts = append(v.Contacts, ContactRow{ID: domain.ContactSlug, Slug: domain.ContactSlug,
+			WhatsApp: c.WhatsApp, Email: c.Email, Address: c.Address, LegalInformation: c.LegalInformation,
+			CallbackTime: c.CallbackTime, WorkingHours: c.WorkingHours, Phone: c.Phone, Website: c.Website,
+			Instagram: c.Instagram, ContactCardImage: c.ContactCardImage, LocationMapImage: c.LocationMapImage,
+			CompanyLegalDocuments: c.CompanyLegalDocuments,
+			Draft:                 true, Provenance: c.Provenance, UpdatedAt: updatedAt})
+	}
+	if len(blob.Policies) > 0 && !deleted["policy:"] {
+		p := blob.Policies[0]
+		v.Policies = append(v.Policies, PolicyRow{ID: domain.PolicySlug, Slug: domain.PolicySlug,
+			DeliveryCost: p.DeliveryCost, DeliveryInDays: p.DeliveryInDays, FreeDeliveryFrom: p.FreeDeliveryFrom,
+			MinOrder: p.MinOrder, Prepayment: p.Prepayment, Installment: p.Installment,
+			ReturnPeriodInDays: p.ReturnPeriodInDays, Warranty: p.Warranty, OutsideZonesNote: p.OutsideZonesNote,
+			CommercePolicyDocuments: p.CommercePolicyDocuments,
+			Draft:                   true, Provenance: p.Provenance, UpdatedAt: updatedAt})
+	}
+	for _, z := range blob.DeliveryZones {
+		if deleted["delivery_zone:"+z.Ref] {
+			continue
+		}
+		v.Zones = append(v.Zones, ZoneRow{ID: z.Ref, Ref: z.Ref, Name: z.Name, ZoneLevel: z.ZoneLevel,
+			ParentRef: z.ParentRef, DeliveryAvailable: z.DeliveryAvailable, DeliveryCost: z.DeliveryCost,
+			DeliveryInDays: z.DeliveryInDays, Notes: z.Notes, SalesStatus: orDefault(z.SalesStatus, "active"),
+			Draft: true, Provenance: z.Provenance, UpdatedAt: updatedAt})
+	}
+	v.Materials = []Material{}
+	v.Requests = []Request{}
+	if v.Topics == nil {
+		v.Topics = []TopicRow{}
+	}
+	if v.Tariffs == nil {
+		v.Tariffs = []TariffRow{}
+	}
+	if v.Products == nil {
+		v.Products = []ProductRow{}
+	}
+	if v.Contacts == nil {
+		v.Contacts = []ContactRow{}
+	}
+	if v.Policies == nil {
+		v.Policies = []PolicyRow{}
+	}
+	if v.Zones == nil {
+		v.Zones = []ZoneRow{}
+	}
+	return v, nil
+}
+
 // mergedView loads live rows and overlays the given blob's pending entries —
 // shared by Draft (a real blob) and LiveView (an always-empty blob, so every
 // overlay loop below is a no-op and every row stays Draft:false). It fills
@@ -499,14 +724,16 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// topics
 	topicIdx := map[string]int{}
-	trows, err := s.pool.Query(ctx, `SELECT slug, title, body_md, updated_at
+	trows, err := s.pool.Query(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
+		explainer_videos, narration_audio_files, reference_documents, updated_at
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for trows.Next() {
 		var t TopicRow
-		if err := trows.Scan(&t.Slug, &t.Title, &t.BodyMD, &t.UpdatedAt); err != nil {
+		if err := trows.Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
+			&t.ExplainerVideos, &t.NarrationAudioFiles, &t.ReferenceDocuments, &t.UpdatedAt); err != nil {
 			trows.Close()
 			return nil, err
 		}
@@ -519,8 +746,11 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		return nil, err
 	}
 	for _, bt := range blob.Topics {
-		row := TopicRow{ID: bt.Slug, Slug: bt.Slug, Title: bt.Title,
-			BodyMD: bt.BodyMD, Draft: true, Provenance: bt.Provenance, UpdatedAt: updatedAt}
+		row := TopicRow{ID: bt.Slug, Slug: bt.Slug, Title: bt.Title, BodyMD: bt.BodyMD,
+			FeaturedImage: bt.FeaturedImage, IllustrationImages: bt.IllustrationImages,
+			ExplainerVideos: bt.ExplainerVideos, NarrationAudioFiles: bt.NarrationAudioFiles,
+			ReferenceDocuments: bt.ReferenceDocuments,
+			Draft:              true, Provenance: bt.Provenance, UpdatedAt: updatedAt}
 		if i, ok := topicIdx[bt.Slug]; ok {
 			v.Topics[i] = row
 		} else {
@@ -532,14 +762,17 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// tariffs
 	tariffIdx := map[string]int{}
-	trrows, err := s.pool.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages, updated_at
+	trrows, err := s.pool.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
+		disadvantages, sales_status, featured_image, pricing_images, explainer_videos, terms_documents, updated_at
 		FROM xchats.ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for trrows.Next() {
 		var t TariffRow
-		if err := trrows.Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages, &t.Disadvantages, &t.UpdatedAt); err != nil {
+		if err := trrows.Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages,
+			&t.Disadvantages, &t.SalesStatus, &t.FeaturedImage, &t.PricingImages, &t.ExplainerVideos, &t.TermsDocuments,
+			&t.UpdatedAt); err != nil {
 			trrows.Close()
 			return nil, err
 		}
@@ -554,7 +787,9 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	for _, bt := range blob.Tariffs {
 		row := TariffRow{ID: bt.Ref, Ref: bt.Ref, Name: bt.Name, Price: bt.Price, LimitText: bt.LimitText,
 			Fee: bt.Fee, Summary: bt.Summary, PricingType: bt.PricingType, Advantages: bt.Advantages,
-			Disadvantages: bt.Disadvantages, Draft: true, Provenance: bt.Provenance, UpdatedAt: updatedAt}
+			Disadvantages: bt.Disadvantages, SalesStatus: bt.SalesStatus, FeaturedImage: bt.FeaturedImage,
+			PricingImages: bt.PricingImages, ExplainerVideos: bt.ExplainerVideos, TermsDocuments: bt.TermsDocuments,
+			Draft: true, Provenance: bt.Provenance, UpdatedAt: updatedAt}
 		if i, ok := tariffIdx[bt.Ref]; ok {
 			v.Tariffs[i] = row
 		} else {
@@ -572,14 +807,18 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// products (availability is a dead legacy column — not selected)
 	productIdx := map[string]int{}
-	prows, err := s.pool.Query(ctx, `SELECT ref, name, price, description, category, in_stock, updated_at
+	prows, err := s.pool.Query(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
+		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
+		manual_documents, guarantee_documents, specification_documents, updated_at
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for prows.Next() {
 		var p ProductRow
-		if err := prows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.UpdatedAt); err != nil {
+		if err := prows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
+			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.AudioDescriptionFiles, &p.CertificateDocuments,
+			&p.ManualDocuments, &p.GuaranteeDocuments, &p.SpecificationDocuments, &p.UpdatedAt); err != nil {
 			prows.Close()
 			return nil, err
 		}
@@ -593,14 +832,13 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	}
 	for _, bp := range blob.Products {
 		row := ProductRow{ID: bp.Ref, Ref: bp.Ref, Name: bp.Name, Price: bp.Price,
-			Description: bp.Description, Category: bp.Category,
-			InStock: true, Draft: true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
+			Description: bp.Description, Category: bp.Category, InStock: bp.InStock, SalesStatus: bp.SalesStatus,
+			FeaturedImage: bp.FeaturedImage, GalleryImages: bp.GalleryImages, DemoVideos: bp.DemoVideos,
+			AudioDescriptionFiles: bp.AudioDescriptionFiles, CertificateDocuments: bp.CertificateDocuments,
+			ManualDocuments: bp.ManualDocuments, GuaranteeDocuments: bp.GuaranteeDocuments,
+			SpecificationDocuments: bp.SpecificationDocuments,
+			Draft:                  true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
 		if i, ok := productIdx[bp.Ref]; ok {
-			// DraftProduct carries no in_stock field yet (draft milestone later) —
-			// keep showing the live row's current value through a pending edit
-			// instead of silently zeroing it out (LiveView never reaches this
-			// branch: it always overlays an empty blob).
-			row.InStock = v.Products[i].InStock
 			v.Products[i] = row
 		} else {
 			v.Products = append(v.Products, row)
@@ -618,7 +856,8 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	// contacts — a true singleton: at most one live row, at most one pending
 	// blob entry, both keyed by nothing but the org.
 	crows, err := s.pool.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
-		working_hours, phone, website, instagram, updated_at
+		working_hours, phone, website, instagram, contact_card_image, location_map_image,
+		company_legal_documents, updated_at
 		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -627,7 +866,8 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		var c ContactRow
 		var legalInfo *string
 		if err := crows.Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
-			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.UpdatedAt); err != nil {
+			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.ContactCardImage, &c.LocationMapImage,
+			&c.CompanyLegalDocuments, &c.UpdatedAt); err != nil {
 			crows.Close()
 			return nil, err
 		}
@@ -644,7 +884,9 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		row := ContactRow{ID: domain.ContactSlug, Slug: domain.ContactSlug, WhatsApp: bc.WhatsApp, Email: bc.Email,
 			Address: bc.Address, LegalInformation: bc.LegalInformation, CallbackTime: bc.CallbackTime,
 			WorkingHours: bc.WorkingHours, Phone: bc.Phone, Website: bc.Website, Instagram: bc.Instagram,
-			Draft: true, Provenance: bc.Provenance, UpdatedAt: updatedAt}
+			ContactCardImage: bc.ContactCardImage, LocationMapImage: bc.LocationMapImage,
+			CompanyLegalDocuments: bc.CompanyLegalDocuments,
+			Draft:                 true, Provenance: bc.Provenance, UpdatedAt: updatedAt}
 		if len(v.Contacts) > 0 {
 			v.Contacts[0] = row
 		} else {
@@ -658,7 +900,8 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	// policies — an exact clone of the contacts section above (singleton
 	// table, slug domain.PolicySlug).
 	polrows, err := s.pool.Query(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
-		prepayment, installment, return_period_in_days, warranty, outside_zones_note, updated_at
+		prepayment, installment, return_period_in_days, warranty, outside_zones_note,
+		commerce_policy_documents, updated_at
 		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -667,7 +910,8 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		var p PolicyRow
 		var deliveryInDays, returnPeriodInDays *string
 		if err := polrows.Scan(&p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
-			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty, &p.OutsideZonesNote, &p.UpdatedAt); err != nil {
+			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty, &p.OutsideZonesNote,
+			&p.CommercePolicyDocuments, &p.UpdatedAt); err != nil {
 			polrows.Close()
 			return nil, err
 		}
@@ -685,8 +929,8 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		row := PolicyRow{ID: domain.PolicySlug, Slug: domain.PolicySlug, DeliveryCost: bp.DeliveryCost,
 			DeliveryInDays: bp.DeliveryInDays, FreeDeliveryFrom: bp.FreeDeliveryFrom, MinOrder: bp.MinOrder,
 			Prepayment: bp.Prepayment, Installment: bp.Installment, ReturnPeriodInDays: bp.ReturnPeriodInDays, Warranty: bp.Warranty,
-			OutsideZonesNote: bp.OutsideZonesNote,
-			Draft:            true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
+			OutsideZonesNote: bp.OutsideZonesNote, CommercePolicyDocuments: bp.CommercePolicyDocuments,
+			Draft: true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
 		if len(v.Policies) > 0 {
 			v.Policies[0] = row
 		} else {
@@ -697,10 +941,36 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 		v.Policies = nil
 	}
 
-	// zones — live-only, no blob overlay (see DraftView.Zones's doc comment).
-	if v.Zones, err = loadZoneRows(ctx, s.pool, orgID); err != nil {
+	// zones — live rows overlaid by pending blob.DeliveryZones entries, same
+	// pattern as tariffs/products above (no media columns in v1).
+	zoneIdx := map[string]int{}
+	liveZones, err := loadZoneRows(ctx, s.pool, orgID)
+	if err != nil {
 		return nil, err
 	}
+	for _, z := range liveZones {
+		v.Zones = append(v.Zones, z)
+		zoneIdx[z.Ref] = len(v.Zones) - 1
+	}
+	for _, bz := range blob.DeliveryZones {
+		row := ZoneRow{ID: bz.Ref, Ref: bz.Ref, Name: bz.Name, ZoneLevel: bz.ZoneLevel, ParentRef: bz.ParentRef,
+			DeliveryAvailable: bz.DeliveryAvailable, DeliveryCost: bz.DeliveryCost, DeliveryInDays: bz.DeliveryInDays,
+			Notes: bz.Notes, SalesStatus: orDefault(bz.SalesStatus, "active"),
+			Draft: true, Provenance: bz.Provenance, UpdatedAt: updatedAt}
+		if i, ok := zoneIdx[bz.Ref]; ok {
+			v.Zones[i] = row
+		} else {
+			v.Zones = append(v.Zones, row)
+			zoneIdx[bz.Ref] = len(v.Zones) - 1
+		}
+	}
+	kz := v.Zones[:0]
+	for _, z := range v.Zones {
+		if !deleted["delivery_zone:"+z.Ref] {
+			kz = append(kz, z)
+		}
+	}
+	v.Zones = kz
 
 	// Guarantee non-nil slices: every collection must serialize as a JSON array
 	// ([]), never null. A nil slice (empty table + empty blob) marshals to null,
@@ -778,13 +1048,19 @@ type TopicInput struct {
 	Provenance          string // "" → '{}'
 }
 
-// UpsertTopic stages a topic create/update in the draft blob, by slug.
+// UpsertTopic stages a topic create/update in the draft blob, by slug. Starts
+// from the topic's current merged shape (currentTopic) so this text-only
+// caller — the Playground editor, which has no media inputs — can never
+// blank out media an MCP tool already staged on the same topic.
 func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, in TopicInput) error {
 	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		b.upsertTopic(DraftTopic{
-			Slug: in.Slug, Title: in.Title,
-			BodyMD: in.BodyMD, Provenance: orDefault(in.Provenance, "{}"),
-		})
+		cur, err := s.currentTopic(ctx, orgID, in.Slug, b)
+		if err != nil {
+			return err
+		}
+		cur.Title, cur.BodyMD = in.Title, in.BodyMD
+		cur.Provenance = orDefault(in.Provenance, "{}")
+		b.upsertTopic(cur)
 		return nil
 	})
 }
@@ -804,17 +1080,24 @@ func (s *Store) DeleteTopic(ctx context.Context, orgID uuid.UUID, slug string) e
 // TariffInput is an upsert payload for a draft tariff.
 type TariffInput struct {
 	Ref, Name, Price, LimitText, Fee, Summary, PricingType, Advantages, Disadvantages string
-	Provenance                                                                       string
+	Provenance                                                                        string
 }
 
 // UpsertTariff stages a tariff create/update in the draft blob, by ref.
+// Merges onto the tariff's current shape (currentTariff) so this text-only
+// caller never blanks out media/sales_status an MCP tool already staged.
 func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, in TariffInput) error {
 	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		b.upsertTariff(DraftTariff{
-			Ref: in.Ref, Name: in.Name, Price: in.Price, LimitText: in.LimitText,
-			Fee: in.Fee, Summary: in.Summary, PricingType: orDefault(in.PricingType, "fixed"),
-			Advantages: in.Advantages, Disadvantages: in.Disadvantages, Provenance: orDefault(in.Provenance, "{}"),
-		})
+		cur, err := s.currentTariff(ctx, orgID, in.Ref, b)
+		if err != nil {
+			return err
+		}
+		cur.Name, cur.Price, cur.LimitText = in.Name, in.Price, in.LimitText
+		cur.Fee, cur.Summary = in.Fee, in.Summary
+		cur.PricingType = orDefault(in.PricingType, "fixed")
+		cur.Advantages, cur.Disadvantages = in.Advantages, in.Disadvantages
+		cur.Provenance = orDefault(in.Provenance, "{}")
+		b.upsertTariff(cur)
 		return nil
 	})
 }
@@ -835,18 +1118,25 @@ func (s *Store) DeleteTariff(ctx context.Context, orgID uuid.UUID, ref string) e
 // completely unaffected.
 type ProductInput struct {
 	Ref, Name, Price, Description, Category string
-	InStock                                  *bool
-	Provenance                               string
+	InStock                                 *bool
+	Provenance                              string
 }
 
 // UpsertProduct stages a product create/update in the draft blob, by ref.
+// Merges onto the product's current shape (currentProduct) so this caller —
+// InStock is nil-able and, true to ProductInput's existing contract, still
+// never read here — cannot blank out in_stock/sales_status/media an MCP tool
+// already staged.
 func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, in ProductInput) error {
 	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		b.upsertProduct(DraftProduct{
-			Ref: in.Ref, Name: in.Name, Price: in.Price,
-			Description: in.Description, Category: in.Category,
-			Provenance: orDefault(in.Provenance, "{}"),
-		})
+		cur, err := s.currentProduct(ctx, orgID, in.Ref, b)
+		if err != nil {
+			return err
+		}
+		cur.Name, cur.Price = in.Name, in.Price
+		cur.Description, cur.Category = in.Description, in.Category
+		cur.Provenance = orDefault(in.Provenance, "{}")
+		b.upsertProduct(cur)
 		return nil
 	})
 }
@@ -1105,8 +1395,31 @@ func setPolicyPatchField(p *PolicyPatch, field, value string) bool {
 	return true
 }
 
-// currentTariff / currentProduct resolve the merged current shape of a typed fact
-// row: the pending blob entry, else the live row, else a blank scaffold.
+// currentTopic / currentTariff / currentProduct resolve the merged current
+// shape of an entity: the pending blob entry, else the COMPLETE live row
+// (every canonical column, including media/sales_status/in_stock), else a
+// blank scaffold. Every caller that stages a draft entry — the legacy
+// whole-row Upsert* methods below, SetFactField, and the MCP patch-based
+// upserts (mcp.go) — starts here, so a partial edit never blanks out a
+// field it did not intend to touch.
+func (s *Store) currentTopic(ctx context.Context, orgID uuid.UUID, slug string, b *DraftBlob) (DraftTopic, error) {
+	for _, t := range b.Topics {
+		if t.Slug == slug {
+			return t, nil
+		}
+	}
+	var t DraftTopic
+	err := s.pool.QueryRow(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
+		explainer_videos, narration_audio_files, reference_documents
+		FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`, orgID, slug).
+		Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
+			&t.ExplainerVideos, &t.NarrationAudioFiles, &t.ReferenceDocuments)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DraftTopic{Slug: slug}, nil
+	}
+	return t, err
+}
+
 func (s *Store) currentTariff(ctx context.Context, orgID uuid.UUID, ref string, b *DraftBlob) (DraftTariff, error) {
 	for _, t := range b.Tariffs {
 		if t.Ref == ref {
@@ -1114,9 +1427,11 @@ func (s *Store) currentTariff(ctx context.Context, orgID uuid.UUID, ref string, 
 		}
 	}
 	var t DraftTariff
-	err := s.pool.QueryRow(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages
+	err := s.pool.QueryRow(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
+		disadvantages, sales_status, featured_image, pricing_images, explainer_videos, terms_documents
 		FROM xchats.ai_tariffs WHERE organization_id=$1 AND ref=$2`, orgID, ref).
-		Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages, &t.Disadvantages)
+		Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages,
+			&t.Disadvantages, &t.SalesStatus, &t.FeaturedImage, &t.PricingImages, &t.ExplainerVideos, &t.TermsDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftTariff{Ref: ref, PricingType: "fixed"}, nil
 	}
@@ -1130,13 +1445,37 @@ func (s *Store) currentProduct(ctx context.Context, orgID uuid.UUID, ref string,
 		}
 	}
 	var p DraftProduct
-	err := s.pool.QueryRow(ctx, `SELECT ref, name, price, description, category
+	err := s.pool.QueryRow(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
+		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
+		manual_documents, guarantee_documents, specification_documents
 		FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).
-		Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category)
+		Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
+			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.AudioDescriptionFiles, &p.CertificateDocuments,
+			&p.ManualDocuments, &p.GuaranteeDocuments, &p.SpecificationDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return DraftProduct{Ref: ref}, nil
+		return DraftProduct{Ref: ref, InStock: true}, nil
 	}
 	return p, err
+}
+
+// currentZone resolves the merged current shape of a delivery zone — the
+// same pattern as currentTariff/currentProduct, over ai_delivery_zones.
+func (s *Store) currentZone(ctx context.Context, orgID uuid.UUID, ref string, b *DraftBlob) (DraftDeliveryZone, error) {
+	for _, z := range b.DeliveryZones {
+		if z.Ref == ref {
+			return z, nil
+		}
+	}
+	var z DraftDeliveryZone
+	err := s.pool.QueryRow(ctx, `SELECT ref, name, zone_level, parent_ref, delivery_available, delivery_cost,
+		delivery_in_days, notes, sales_status
+		FROM xchats.ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, ref).
+		Scan(&z.Ref, &z.Name, &z.ZoneLevel, &z.ParentRef, &z.DeliveryAvailable, &z.DeliveryCost,
+			&z.DeliveryInDays, &z.Notes, &z.SalesStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DraftDeliveryZone{Ref: ref}, nil
+	}
+	return z, err
 }
 
 // currentContact resolves the merged current shape of the org's singleton
@@ -1149,10 +1488,12 @@ func (s *Store) currentContact(ctx context.Context, orgID uuid.UUID, b *DraftBlo
 	var c DraftContact
 	var legalInfo *string
 	err := s.pool.QueryRow(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
-		working_hours, phone, website, instagram
+		working_hours, phone, website, instagram, contact_card_image, location_map_image,
+		company_legal_documents
 		FROM xchats.ai_contacts WHERE organization_id = $1`, orgID).
 		Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
-			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram)
+			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.ContactCardImage, &c.LocationMapImage,
+			&c.CompanyLegalDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftContact{}, nil
 	}
@@ -1169,10 +1510,11 @@ func (s *Store) currentPolicy(ctx context.Context, orgID uuid.UUID, b *DraftBlob
 	var p DraftPolicy
 	var deliveryInDays, returnPeriodInDays *string
 	err := s.pool.QueryRow(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
-		prepayment, installment, return_period_in_days, warranty
+		prepayment, installment, return_period_in_days, warranty, outside_zones_note, commerce_policy_documents
 		FROM xchats.ai_policies WHERE organization_id = $1`, orgID).
 		Scan(&p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
-			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty)
+			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty, &p.OutsideZonesNote,
+			&p.CommercePolicyDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftPolicy{}, nil
 	}
@@ -1199,8 +1541,8 @@ func orDefault(v, def string) string {
 // domain.ContactSlug/domain.PolicySlug constant (there is nothing else to key
 // on — the natural key IS the org).
 type ApproveSelector struct {
-	Kind string // "" | "topics" | "tariffs" | "products" | "contacts" | "policies"
-	Key  string // slug | ref | ref | domain.ContactSlug | domain.PolicySlug
+	Kind string // "" | "topics" | "tariffs" | "products" | "contacts" | "policies" | "delivery_zones"
+	Key  string // slug | ref | ref | domain.ContactSlug | domain.PolicySlug | ref
 }
 
 type approveSet struct {
@@ -1209,17 +1551,19 @@ type approveSet struct {
 	products []DraftProduct
 	contacts []DraftContact
 	policies []DraftPolicy
+	zones    []DraftDeliveryZone
 	deletes  []DraftDelete
 }
 
 func (a approveSet) empty() bool {
-	return len(a.topics)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.deletes) == 0
+	return len(a.topics)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.zones)+len(a.deletes) == 0
 }
 
-// Approve validates the resulting live set against the deterministic gate, then
-// materializes the selection into the live typed tables on their natural key,
-// applies matching deletes, removes the applied entries from the blob, and
-// appends an audit-log row.
+// Approve validates the resulting live set against the deterministic gate
+// (including the zone/policy exclusivity invariant zoneGateReasons enforces),
+// then materializes the selection into the live typed tables on their natural
+// key, applies matching deletes, removes the applied entries from the blob,
+// and appends an audit-log row.
 func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelector) error {
 	blob, _, _, err := s.readDraftBlob(ctx, orgID)
 	if err != nil {
@@ -1244,7 +1588,17 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 			return err
 		}
 	}
-	if reasons := gate(resulting, pending); len(reasons) > 0 {
+	reasons := gate(resulting, pending)
+	liveZones, err := loadZoneRows(ctx, s.pool, orgID)
+	if err != nil {
+		return err
+	}
+	resultPolicies, err := resultingPolicyForGate(ctx, s.pool, orgID, set.policies)
+	if err != nil {
+		return err
+	}
+	reasons = append(reasons, zoneGateReasons(resultingZonesForGate(liveZones, set.zones, set.deletes), resultPolicies)...)
+	if len(reasons) > 0 {
 		return &GateError{Reasons: reasons}
 	}
 
@@ -1255,48 +1609,36 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 	defer tx.Rollback(ctx)
 
 	for _, t := range set.topics {
-		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-			(organization_id, slug, title, body_md)
-			VALUES ($1,$2,$3,$4)
-			ON CONFLICT (organization_id, slug) DO UPDATE SET
-				title=EXCLUDED.title,
-				body_md=EXCLUDED.body_md, updated_at=now()`,
-			orgID, t.Slug, t.Title, t.BodyMD); err != nil {
+		if err := upsertTopicRow(ctx, tx, orgID, t); err != nil {
 			return err
 		}
 	}
 	for _, t := range set.tariffs {
-		if err := upsertTariffRow(ctx, tx, orgID, domain.Tariff{
-			Ref: t.Ref, Name: t.Name, Price: t.Price, LimitText: t.LimitText, Fee: t.Fee,
-			Summary: t.Summary, PricingType: t.PricingType, Advantages: t.Advantages, Disadvantages: t.Disadvantages,
-		}); err != nil {
+		if err := upsertTariffRow(ctx, tx, orgID, t); err != nil {
 			return err
 		}
 	}
 	for _, p := range set.products {
-		// nil: the draft blob carries no in_stock field yet (draft milestone
-		// later) — preserve the live row's current value / schema default,
-		// byte-identical to Approve's pre-existing behavior.
-		if err := upsertProductRow(ctx, tx, orgID, domain.Product{
-			Ref: p.Ref, Name: p.Name, Price: p.Price, Description: p.Description, Category: p.Category,
-		}, nil); err != nil {
+		if err := upsertProductRow(ctx, tx, orgID, p); err != nil {
 			return err
 		}
 	}
 	for _, c := range set.contacts {
-		if err := upsertContactRow(ctx, tx, orgID, domain.Contact{
-			WhatsApp: c.WhatsApp, Email: c.Email, Address: c.Address, Legal: c.LegalInformation, CallbackTime: c.CallbackTime,
-			WorkingHours: c.WorkingHours, Phone: c.Phone, Website: c.Website, Instagram: c.Instagram,
-		}); err != nil {
+		if err := upsertContactRow(ctx, tx, orgID, c); err != nil {
 			return err
 		}
 	}
 	for _, p := range set.policies {
-		if err := upsertPolicyRow(ctx, tx, orgID, domain.Policy{
-			DeliveryCost: p.DeliveryCost, DeliveryTime: p.DeliveryInDays, FreeDeliveryFrom: p.FreeDeliveryFrom,
-			MinOrder: p.MinOrder, Prepayment: p.Prepayment, Installment: p.Installment,
-			ReturnPeriod: p.ReturnPeriodInDays, Warranty: p.Warranty,
-		}, p.OutsideZonesNote); err != nil {
+		if err := upsertPolicyRow(ctx, tx, orgID, p); err != nil {
+			return err
+		}
+	}
+	for _, z := range set.zones {
+		if err := upsertZoneRow(ctx, tx, orgID, ZoneInput{
+			Ref: z.Ref, Name: z.Name, ZoneLevel: z.ZoneLevel, ParentRef: z.ParentRef,
+			DeliveryAvailable: z.DeliveryAvailable, DeliveryCost: z.DeliveryCost, DeliveryInDays: z.DeliveryInDays,
+			Notes: z.Notes, SalesStatus: z.SalesStatus,
+		}); err != nil {
 			return err
 		}
 	}
@@ -1345,6 +1687,9 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 		if len(set.policies) > 0 {
 			b.removePolicy()
 		}
+		for _, z := range set.zones {
+			b.removeZone(z.Ref)
+		}
 		for _, d := range set.deletes {
 			b.removeDelete(d.Kind, d.Key)
 		}
@@ -1374,6 +1719,9 @@ func applyDelete(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, d DraftDelete)
 	case "policy":
 		_, err := tx.Exec(ctx, `DELETE FROM xchats.ai_policies WHERE organization_id=$1`, orgID)
 		return err
+	case "delivery_zone":
+		_, err := tx.Exec(ctx, `DELETE FROM xchats.ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
+		return err
 	}
 	return nil
 }
@@ -1382,15 +1730,15 @@ func approveNote(sel ApproveSelector, set approveSet) string {
 	if sel.Kind != "" {
 		return fmt.Sprintf("approved %s %s", strings.TrimSuffix(sel.Kind, "s"), sel.Key)
 	}
-	return fmt.Sprintf("approved %d topic(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d deletion(s)",
-		len(set.topics), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.deletes))
+	return fmt.Sprintf("approved %d topic(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d zone(s), %d deletion(s)",
+		len(set.topics), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.zones), len(set.deletes))
 }
 
 // selectApproved picks the blob entries an ApproveSelector targets. Deletes are
-// keyed by entity kind (singular): topic|tariff|product|contact|policy.
+// keyed by entity kind (singular): topic|tariff|product|contact|policy|delivery_zone.
 func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	if sel.Kind == "" {
-		return approveSet{b.Topics, b.Tariffs, b.Products, b.Contacts, b.Policies, b.Deletes}
+		return approveSet{b.Topics, b.Tariffs, b.Products, b.Contacts, b.Policies, b.DeliveryZones, b.Deletes}
 	}
 	var set approveSet
 	singular := strings.TrimSuffix(sel.Kind, "s")
@@ -1425,6 +1773,12 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	case "policies":
 		if sel.Key == domain.PolicySlug {
 			set.policies = b.Policies
+		}
+	case "delivery_zones":
+		for _, z := range b.DeliveryZones {
+			if z.Ref == sel.Key {
+				set.zones = append(set.zones, z)
+			}
 		}
 	}
 	return set

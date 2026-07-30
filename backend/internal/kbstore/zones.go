@@ -47,8 +47,9 @@ type ZoneInput struct {
 
 // ZoneRow is the editor-facing ai_delivery_zones row — json shape mirrors the
 // other /kb/* view rows (id/draft/updated_at alongside the entity's own
-// columns), even though every zone row is currently Draft:false (see
-// DraftView.Zones's doc comment).
+// columns). Draft is true when a pending kbd_draft.delivery_zones entry
+// shadows (or newly proposes) this ref — the same overlay-by-natural-key
+// pattern as topics/tariffs/products (see mergedView).
 type ZoneRow struct {
 	ID                string    `json:"id"` // = ref
 	Ref               string    `json:"ref"`
@@ -61,6 +62,7 @@ type ZoneRow struct {
 	Notes             string    `json:"notes"`
 	SalesStatus       string    `json:"sales_status"`
 	Draft             bool      `json:"draft"`
+	Provenance        string    `json:"provenance,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
@@ -170,6 +172,54 @@ func loadPolicyRowsForGate(ctx context.Context, db dbtx, orgID uuid.UUID) ([]Pol
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// resultingZonesForGate computes the RESULTING zone set an Approve call would
+// publish — live zones, overlaid by pending zone upserts, minus matching
+// deletes — the same in-memory-merge idiom draft.go's mergeForGate uses for
+// topics, so Approve validates the publishable state before writing anything.
+func resultingZonesForGate(live []ZoneRow, upserts []DraftDeliveryZone, deletes []DraftDelete) []ZoneRow {
+	del := map[string]bool{}
+	for _, d := range deletes {
+		if d.Kind == "delivery_zone" {
+			del[d.Key] = true
+		}
+	}
+	idx := map[string]int{}
+	var out []ZoneRow
+	for _, z := range live {
+		if del[z.Ref] {
+			continue
+		}
+		out = append(out, z)
+		idx[z.Ref] = len(out) - 1
+	}
+	for _, u := range upserts {
+		row := ZoneRow{
+			Ref: u.Ref, Name: u.Name, ZoneLevel: u.ZoneLevel, ParentRef: u.ParentRef,
+			DeliveryAvailable: u.DeliveryAvailable, DeliveryCost: u.DeliveryCost,
+			DeliveryInDays: u.DeliveryInDays, Notes: u.Notes, SalesStatus: orDefault(u.SalesStatus, "active"),
+		}
+		if i, ok := idx[u.Ref]; ok {
+			out[i] = row
+		} else {
+			out = append(out, row)
+			idx[u.Ref] = len(out) - 1
+		}
+	}
+	return out
+}
+
+// resultingPolicyForGate computes the resulting ai_policies row's
+// gate-relevant fields: the live row, overridden by a pending policy draft
+// entry in the SAME approve batch (there is at most one — policies is a
+// singleton, so a pending entry fully replaces the live row for gate purposes).
+func resultingPolicyForGate(ctx context.Context, db dbtx, orgID uuid.UUID, upserts []DraftPolicy) ([]PolicyRow, error) {
+	if len(upserts) > 0 {
+		p := upserts[0]
+		return []PolicyRow{{DeliveryCost: p.DeliveryCost, DeliveryInDays: p.DeliveryInDays, OutsideZonesNote: p.OutsideZonesNote}}, nil
+	}
+	return loadPolicyRowsForGate(ctx, db, orgID)
 }
 
 // validateZoneWorld re-derives the org's current zone/policy world INSIDE the

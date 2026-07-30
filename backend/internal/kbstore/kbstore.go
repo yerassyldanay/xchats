@@ -209,38 +209,50 @@ func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *doma
 
 // insertLiveContent upserts a snapshot's topics/assets/typed-facts as live rows.
 // Shared by SeedLiveIfEmpty and Approve (both write the same live shape).
+// SeedLiveIfEmpty only ever reaches here for a brand-new org (guarded on
+// ai_topics being empty), so the ON CONFLICT branch below is never hit in
+// production (main.go never even calls it — test-only path); the domain
+// snapshot carries no media/sales_status/in_stock opinion, so this seeds the
+// schema defaults (true / 'active' / no media) exactly as before this file
+// gained those columns.
 func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *domain.Snapshot) error {
 	for _, t := range snap.Topics {
-		if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-			(organization_id, slug, title, body_md)
-			VALUES ($1,$2,$3,$4)
-			ON CONFLICT (organization_id, slug) DO UPDATE SET
-				title = EXCLUDED.title,
-				body_md = EXCLUDED.body_md, updated_at = now()`,
-			orgID, t.Slug, t.Title, t.BodyMD); err != nil {
-			return fmt.Errorf("insert topic %s: %w", t.Slug, err)
+		if err := upsertTopicRow(ctx, tx, orgID, DraftTopic{Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD}); err != nil {
+			return err
 		}
 	}
 	for _, t := range snap.Tariffs {
-		if err := upsertTariffRow(ctx, tx, orgID, t); err != nil {
+		if err := upsertTariffRow(ctx, tx, orgID, DraftTariff{
+			Ref: t.Ref, Name: t.Name, Price: t.Price, LimitText: t.LimitText, Fee: t.Fee,
+			Summary: t.Summary, PricingType: t.PricingType, Advantages: t.Advantages, Disadvantages: t.Disadvantages,
+		}); err != nil {
 			return err
 		}
 	}
 	for _, p := range snap.Products {
-		// nil: the brain-seed snapshot has no stock signal — let the schema
-		// default (true) or, on update, the existing value stand.
-		if err := upsertProductRow(ctx, tx, orgID, p, nil); err != nil {
+		if err := upsertProductRow(ctx, tx, orgID, DraftProduct{
+			Ref: p.Ref, Name: p.Name, Price: p.Price, Description: p.Description, Category: p.Category,
+			InStock: true,
+		}); err != nil {
 			return err
 		}
 	}
 	for _, c := range snap.Contacts {
-		if err := upsertContactRow(ctx, tx, orgID, c); err != nil {
+		if err := upsertContactRow(ctx, tx, orgID, DraftContact{
+			WhatsApp: c.WhatsApp, Email: c.Email, Address: c.Address, LegalInformation: c.Legal,
+			CallbackTime: c.CallbackTime, WorkingHours: c.WorkingHours, Phone: c.Phone,
+			Website: c.Website, Instagram: c.Instagram,
+		}); err != nil {
 			return err
 		}
 	}
 	for _, p := range snap.Policies {
-		// "": the brain-seed snapshot has no outside_zones_note concept.
-		if err := upsertPolicyRow(ctx, tx, orgID, p, ""); err != nil {
+		// OutsideZonesNote "": the brain-seed snapshot has no such concept.
+		if err := upsertPolicyRow(ctx, tx, orgID, DraftPolicy{
+			DeliveryCost: p.DeliveryCost, DeliveryInDays: p.DeliveryTime, FreeDeliveryFrom: p.FreeDeliveryFrom,
+			MinOrder: p.MinOrder, Prepayment: p.Prepayment, Installment: p.Installment,
+			ReturnPeriodInDays: p.ReturnPeriod, Warranty: p.Warranty,
+		}); err != nil {
 			return err
 		}
 	}
@@ -256,86 +268,127 @@ type execer interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
-// upsertTariffRow / upsertProductRow / upsertContactRow write one typed fact row
-// (verbatim columns). Shared by insertLiveContent (seed), Approve (materialize),
-// and the /kb/* live-write path (live.go).
-func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t domain.Tariff) error {
+// upsertTopicRow / upsertTariffRow / upsertProductRow / upsertContactRow /
+// upsertPolicyRow write one complete typed-fact row (verbatim columns,
+// including the canonical media/sales_status/in_stock columns). Shared by
+// insertLiveContent (seed), Approve (materialize), and the /kb/* live-write
+// path (live.go) — every caller already resolves the COMPLETE row it wants
+// written (read-modify-write happens upstream: currentTopic/currentTariff/
+// currentProduct for the draft path, currentLive*Tx for the live-write path),
+// so these helpers never need a "leave unchanged" sentinel of their own.
+func upsertTopicRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTopic) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
+		(organization_id, slug, title, body_md, featured_image, illustration_images,
+		 explainer_videos, narration_audio_files, reference_documents)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (organization_id, slug) DO UPDATE SET
+			title=EXCLUDED.title, body_md=EXCLUDED.body_md,
+			featured_image=EXCLUDED.featured_image, illustration_images=EXCLUDED.illustration_images,
+			explainer_videos=EXCLUDED.explainer_videos, narration_audio_files=EXCLUDED.narration_audio_files,
+			reference_documents=EXCLUDED.reference_documents, updated_at=now()`,
+		orgID, t.Slug, t.Title, t.BodyMD, t.FeaturedImage, nonNilUUIDs(t.IllustrationImages),
+		nonNilUUIDs(t.ExplainerVideos), nonNilUUIDs(t.NarrationAudioFiles), nonNilUUIDs(t.ReferenceDocuments)); err != nil {
+		return fmt.Errorf("insert topic %s: %w", t.Slug, err)
+	}
+	return nil
+}
+
+func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTariff) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_tariffs
-		(organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		(organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages,
+		 sales_status, featured_image, pricing_images, explainer_videos, terms_documents)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, limit_text=EXCLUDED.limit_text, fee=EXCLUDED.fee,
 			summary=EXCLUDED.summary, pricing_type=EXCLUDED.pricing_type, advantages=EXCLUDED.advantages,
-			disadvantages=EXCLUDED.disadvantages, updated_at=now()`,
+			disadvantages=EXCLUDED.disadvantages, sales_status=EXCLUDED.sales_status,
+			featured_image=EXCLUDED.featured_image, pricing_images=EXCLUDED.pricing_images,
+			explainer_videos=EXCLUDED.explainer_videos, terms_documents=EXCLUDED.terms_documents, updated_at=now()`,
 		orgID, t.Ref, t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
-		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages); err != nil {
+		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages, orDefault(t.SalesStatus, "active"),
+		t.FeaturedImage, nonNilUUIDs(t.PricingImages), nonNilUUIDs(t.ExplainerVideos), nonNilUUIDs(t.TermsDocuments)); err != nil {
 		return fmt.Errorf("insert tariff %s: %w", t.Ref, err)
 	}
 	return nil
 }
 
-// upsertProductRow writes one ai_products row. inStock is nil-able so a caller
-// with no opinion on stock (legacy brain-seed/Approve materialize paths)
-// leaves it at its column default on insert and PRESERVES the existing value
-// on update, instead of silently resetting it — only the /kb/* live-write path
-// (PutLiveProduct) ever passes a non-nil value. availability is a dead legacy
+// upsertProductRow writes one ai_products row. availability is a dead legacy
 // column (plan/database-schema.md: not part of the target) and is no longer
-// written — p.Availability is ignored. sales_status is likewise untouched
-// here: no caller of this function has an opinion on it yet (no live-write
-// payload exposes it), so it stays at whatever migration 0011 backfilled
-// (its schema DEFAULT 'active' otherwise).
-func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Product, inStock *bool) error {
+// written.
+func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftProduct) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_products
-		(organization_id, ref, name, price, description, category, in_stock)
-		VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true))
+		(organization_id, ref, name, price, description, category, in_stock, sales_status,
+		 featured_image, gallery_images, demo_videos, audio_description_files,
+		 certificate_documents, manual_documents, guarantee_documents, specification_documents)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
-			category=EXCLUDED.category,
-			in_stock=COALESCE($7, xchats.ai_products.in_stock), updated_at=now()`,
-		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, inStock); err != nil {
+			category=EXCLUDED.category, in_stock=EXCLUDED.in_stock, sales_status=EXCLUDED.sales_status,
+			featured_image=EXCLUDED.featured_image, gallery_images=EXCLUDED.gallery_images,
+			demo_videos=EXCLUDED.demo_videos, audio_description_files=EXCLUDED.audio_description_files,
+			certificate_documents=EXCLUDED.certificate_documents, manual_documents=EXCLUDED.manual_documents,
+			guarantee_documents=EXCLUDED.guarantee_documents, specification_documents=EXCLUDED.specification_documents,
+			updated_at=now()`,
+		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, p.InStock, orDefault(p.SalesStatus, "active"),
+		p.FeaturedImage, nonNilUUIDs(p.GalleryImages), nonNilUUIDs(p.DemoVideos), nonNilUUIDs(p.AudioDescriptionFiles),
+		nonNilUUIDs(p.CertificateDocuments), nonNilUUIDs(p.ManualDocuments), nonNilUUIDs(p.GuaranteeDocuments),
+		nonNilUUIDs(p.SpecificationDocuments)); err != nil {
 		return fmt.Errorf("insert product %s: %w", p.Ref, err)
 	}
 	return nil
 }
 
-func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c domain.Contact) error {
+func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftContact) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_contacts
 		(organization_id, whatsapp, email, address, legal_information, callback_time,
-		 working_hours, phone, website, instagram)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		 working_hours, phone, website, instagram, contact_card_image, location_map_image,
+		 company_legal_documents)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			whatsapp=EXCLUDED.whatsapp, email=EXCLUDED.email, address=EXCLUDED.address,
 			legal_information=EXCLUDED.legal_information, callback_time=EXCLUDED.callback_time,
 			working_hours=EXCLUDED.working_hours, phone=EXCLUDED.phone,
-			website=EXCLUDED.website, instagram=EXCLUDED.instagram, updated_at=now()`,
-		orgID, c.WhatsApp, c.Email, c.Address, c.Legal, c.CallbackTime,
-		c.WorkingHours, c.Phone, c.Website, c.Instagram); err != nil {
+			website=EXCLUDED.website, instagram=EXCLUDED.instagram,
+			contact_card_image=EXCLUDED.contact_card_image, location_map_image=EXCLUDED.location_map_image,
+			company_legal_documents=EXCLUDED.company_legal_documents, updated_at=now()`,
+		orgID, c.WhatsApp, c.Email, c.Address, c.LegalInformation, c.CallbackTime,
+		c.WorkingHours, c.Phone, c.Website, c.Instagram, c.ContactCardImage, c.LocationMapImage,
+		nonNilUUIDs(c.CompanyLegalDocuments)); err != nil {
 		return fmt.Errorf("insert contact: %w", err)
 	}
 	return nil
 }
 
 // upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow.
-// outsideZonesNote is a plain string, not a pointer: every caller already
-// resolves it read-modify-write style (currentLivePolicy/currentPolicy)
-// before reaching here, so there is no "leave unchanged" case left to express
-// at this layer.
-func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p domain.Policy, outsideZonesNote string) error {
+func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPolicy) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_policies
 		(organization_id, delivery_cost, delivery_in_days, free_delivery_from, min_order,
-		 prepayment, installment, return_period_in_days, warranty, outside_zones_note)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		 prepayment, installment, return_period_in_days, warranty, outside_zones_note,
+		 commerce_policy_documents)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			delivery_cost=EXCLUDED.delivery_cost, delivery_in_days=EXCLUDED.delivery_in_days,
 			free_delivery_from=EXCLUDED.free_delivery_from, min_order=EXCLUDED.min_order,
 			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
 			return_period_in_days=EXCLUDED.return_period_in_days, warranty=EXCLUDED.warranty,
-			outside_zones_note=EXCLUDED.outside_zones_note, updated_at=now()`,
-		orgID, p.DeliveryCost, p.DeliveryTime, p.FreeDeliveryFrom, p.MinOrder,
-		p.Prepayment, p.Installment, p.ReturnPeriod, p.Warranty, outsideZonesNote); err != nil {
+			outside_zones_note=EXCLUDED.outside_zones_note,
+			commerce_policy_documents=EXCLUDED.commerce_policy_documents, updated_at=now()`,
+		orgID, p.DeliveryCost, p.DeliveryInDays, p.FreeDeliveryFrom, p.MinOrder,
+		p.Prepayment, p.Installment, p.ReturnPeriodInDays, p.Warranty, p.OutsideZonesNote,
+		nonNilUUIDs(p.CommercePolicyDocuments)); err != nil {
 		return fmt.Errorf("insert policy: %w", err)
 	}
 	return nil
+}
+
+// nonNilUUIDs guarantees a non-nil slice for a uuid[] NOT NULL DEFAULT '{}'
+// column: a nil Go slice and an empty one are equivalent input to pgx, but
+// staying explicit here documents that these columns are never SQL NULL.
+func nonNilUUIDs(v []uuid.UUID) []uuid.UUID {
+	if v == nil {
+		return []uuid.UUID{}
+	}
+	return v
 }
 
 // upsertConfigRow upserts the org's ai_assistants row. It fixes the silent

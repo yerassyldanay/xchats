@@ -27,6 +27,30 @@ type Config struct {
 	LogFormat   string   `yaml:"log_format" env:"LOG_FORMAT"`
 	LogLevel    string   `yaml:"log_level" env:"LOG_LEVEL"`
 	APIBaseURL  string   `yaml:"api_base_url" env:"API_BASE_URL"`
+	// FrontendBaseURL is the deployed Vue SPA's own public origin (a separate
+	// service from the backend — see deploy/docker-compose.yaml). The MCP KB
+	// Manager widget's "Review and publish in Xchats" link and the OAuth
+	// consent page both need it to build a real URL into /playground.
+	FrontendBaseURL string `yaml:"frontend_base_url" env:"FRONTEND_BASE_URL"`
+
+	// --- MCP connector (plan/mcp.md) ---
+	// MCPJWTSigningKey seeds the Ed25519 keypair that signs MCP OAuth access
+	// tokens (internal/mcpauth), parsed the same three ways as
+	// TG_CREDENTIALS_ENC_KEY (64 hex chars, base64, or a 32-char literal). Unset
+	// in dev falls back to an ephemeral in-memory key (logged loudly): every
+	// previously issued token stops verifying on restart, and every replica in
+	// a multi-instance deployment would mint tokens no other replica can check
+	// — set this for anything beyond a single local process.
+	MCPJWTSigningKey string `env:"MCP_JWT_SIGNING_KEY"`
+	// MCPAccessTokenTTLSeconds / MCPRefreshTokenTTLDays: short-lived access
+	// tokens, long-lived rotated-on-use refresh tokens (plan/mcp.md §3).
+	MCPAccessTokenTTLSeconds int `yaml:"mcp_access_token_ttl_seconds" env:"MCP_ACCESS_TOKEN_TTL_SECONDS"`
+	MCPRefreshTokenTTLDays   int `yaml:"mcp_refresh_token_ttl_days" env:"MCP_REFRESH_TOKEN_TTL_DAYS"`
+	// MCPAuthCodeTTLSeconds bounds the PKCE authorization code's lifetime
+	// between /oauth/authorize and the POST /oauth/token exchange.
+	MCPAuthCodeTTLSeconds int `yaml:"mcp_auth_code_ttl_seconds" env:"MCP_AUTH_CODE_TTL_SECONDS"`
+	// MCPUploadTokenTTLSeconds bounds a kb_media_upload signed upload URL.
+	MCPUploadTokenTTLSeconds int `yaml:"mcp_upload_token_ttl_seconds" env:"MCP_UPLOAD_TOKEN_TTL_SECONDS"`
 
 	// --- secrets (.env only) ---
 	DatabaseURL          string `env:"DATABASE_URL"`
@@ -141,6 +165,12 @@ func defaults() Config {
 		LLMTemperature:  0.3,
 		OrgName:         "xchats",
 		PageSize:        50,
+		FrontendBaseURL: "http://localhost:5173",
+
+		MCPAccessTokenTTLSeconds: 900, // 15 minutes
+		MCPRefreshTokenTTLDays:   30,
+		MCPAuthCodeTTLSeconds:    300, // 5 minutes
+		MCPUploadTokenTTLSeconds: 900, // 15 minutes
 
 		LLMDefaultProvider:     "openrouter",
 		LLMDefaultModel:        "google/gemini-2.5-flash",
@@ -178,6 +208,20 @@ func (c *Config) LLMResolvedBaseURL() string {
 	default: // openrouter
 		return "https://openrouter.ai/api/v1"
 	}
+}
+
+// MCPResourceURL is the canonical MCP resource identifier every OAuth access
+// token must be audience-bound to (RFC 8707) — the exact `/mcp` endpoint URL,
+// derived from APIBaseURL rather than a separate setting so it can never
+// drift from where POST /mcp actually listens.
+func (c *Config) MCPResourceURL() string {
+	return strings.TrimRight(c.APIBaseURL, "/") + "/mcp"
+}
+
+// MCPResolvedFrontendBaseURL returns the frontend origin with no trailing
+// slash, for building links like {base}/playground.
+func (c *Config) MCPResolvedFrontendBaseURL() string {
+	return strings.TrimRight(c.FrontendBaseURL, "/")
 }
 
 // LangfuseTracingEnabled reports whether LLM calls should export traces to

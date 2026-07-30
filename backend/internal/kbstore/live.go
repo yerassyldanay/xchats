@@ -6,8 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-
-	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 )
 
 // ---------------------------------------------------------------------------
@@ -30,7 +28,10 @@ import (
 
 // PutLiveTopic upserts a topic directly into the live table. Rejects a body
 // that is not pure prose (a fact token or a literal currency amount) — the
-// exact check the approve gate runs, just enforced at write time here.
+// exact check the approve gate runs, just enforced at write time here. Reads
+// the row FOR UPDATE first (currentLiveTopicTx) and merges only title/body_md
+// from in, so this text-only caller (the live editor has no media inputs)
+// cannot blank out media an MCP tool already published.
 func (s *Store) PutLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TopicInput) error {
 	if reasons := gateTopicBody(in.Slug, in.BodyMD); len(reasons) > 0 {
 		return &GateError{Reasons: reasons}
@@ -40,19 +41,31 @@ func (s *Store) PutLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
-		(organization_id, slug, title, body_md)
-		VALUES ($1,$2,$3,$4)
-		ON CONFLICT (organization_id, slug) DO UPDATE SET
-			title=EXCLUDED.title,
-			body_md=EXCLUDED.body_md, updated_at=now()`,
-		orgID, in.Slug, in.Title, in.BodyMD); err != nil {
+	cur, err := currentLiveTopicTx(ctx, tx, orgID, in.Slug)
+	if err != nil {
+		return err
+	}
+	cur.Title, cur.BodyMD = in.Title, in.BodyMD
+	if err := upsertTopicRow(ctx, tx, orgID, cur); err != nil {
 		return err
 	}
 	if err := auditRow(ctx, tx, orgID, actor, "edit", "topic:"+in.Slug); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func currentLiveTopicTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, slug string) (DraftTopic, error) {
+	t := DraftTopic{Slug: slug}
+	err := tx.QueryRow(ctx, `SELECT title, body_md, featured_image, illustration_images,
+		explainer_videos, narration_audio_files, reference_documents
+		FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2 FOR UPDATE`, orgID, slug).
+		Scan(&t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
+			&t.ExplainerVideos, &t.NarrationAudioFiles, &t.ReferenceDocuments)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DraftTopic{Slug: slug}, nil
+	}
+	return t, err
 }
 
 // DeleteLiveTopic removes a live topic by slug.
@@ -73,22 +86,42 @@ func (s *Store) DeleteLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid
 
 // PutLiveTariff upserts a tariff row directly into the live table (no content
 // gate — typed fact columns are validated at reply-render time, fail closed).
+// Reads the row FOR UPDATE first and merges only the text fields TariffInput
+// carries, so this caller (no media inputs) cannot blank out media/
+// sales_status an MCP tool already published.
 func (s *Store) PutLiveTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TariffInput) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err := upsertTariffRow(ctx, tx, orgID, domain.Tariff{
-		Ref: in.Ref, Name: in.Name, Price: in.Price, LimitText: in.LimitText, Fee: in.Fee,
-		Summary: in.Summary, PricingType: in.PricingType, Advantages: in.Advantages, Disadvantages: in.Disadvantages,
-	}); err != nil {
+	cur, err := currentLiveTariffTx(ctx, tx, orgID, in.Ref)
+	if err != nil {
+		return err
+	}
+	cur.Name, cur.Price, cur.LimitText = in.Name, in.Price, in.LimitText
+	cur.Fee, cur.Summary, cur.PricingType = in.Fee, in.Summary, in.PricingType
+	cur.Advantages, cur.Disadvantages = in.Advantages, in.Disadvantages
+	if err := upsertTariffRow(ctx, tx, orgID, cur); err != nil {
 		return err
 	}
 	if err := auditRow(ctx, tx, orgID, actor, "edit", "tariff:"+in.Ref); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func currentLiveTariffTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, ref string) (DraftTariff, error) {
+	t := DraftTariff{Ref: ref, PricingType: "fixed"}
+	err := tx.QueryRow(ctx, `SELECT name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages,
+		sales_status, featured_image, pricing_images, explainer_videos, terms_documents
+		FROM xchats.ai_tariffs WHERE organization_id=$1 AND ref=$2 FOR UPDATE`, orgID, ref).
+		Scan(&t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages, &t.Disadvantages,
+			&t.SalesStatus, &t.FeaturedImage, &t.PricingImages, &t.ExplainerVideos, &t.TermsDocuments)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DraftTariff{Ref: ref, PricingType: "fixed"}, nil
+	}
+	return t, err
 }
 
 // DeleteLiveTariff removes a live tariff row by ref.
@@ -107,23 +140,48 @@ func (s *Store) DeleteLiveTariff(ctx context.Context, orgID uuid.UUID, actor uui
 	return tx.Commit(ctx)
 }
 
-// PutLiveProduct upserts a product row directly into the live table.
+// PutLiveProduct upserts a product row directly into the live table. Reads
+// the row FOR UPDATE first and merges the text fields plus InStock (when
+// given — nil preserves the current value, same contract as before), so
+// this caller cannot blank out sales_status/media an MCP tool already
+// published.
 func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ProductInput) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err := upsertProductRow(ctx, tx, orgID, domain.Product{
-		Ref: in.Ref, Name: in.Name, Price: in.Price, Description: in.Description,
-		Category: in.Category,
-	}, in.InStock); err != nil {
+	cur, err := currentLiveProductTx(ctx, tx, orgID, in.Ref)
+	if err != nil {
+		return err
+	}
+	cur.Name, cur.Price = in.Name, in.Price
+	cur.Description, cur.Category = in.Description, in.Category
+	if in.InStock != nil {
+		cur.InStock = *in.InStock
+	}
+	if err := upsertProductRow(ctx, tx, orgID, cur); err != nil {
 		return err
 	}
 	if err := auditRow(ctx, tx, orgID, actor, "edit", "product:"+in.Ref); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func currentLiveProductTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, ref string) (DraftProduct, error) {
+	p := DraftProduct{Ref: ref, InStock: true}
+	err := tx.QueryRow(ctx, `SELECT name, price, description, category, in_stock, sales_status,
+		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
+		manual_documents, guarantee_documents, specification_documents
+		FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2 FOR UPDATE`, orgID, ref).
+		Scan(&p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
+			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.AudioDescriptionFiles, &p.CertificateDocuments,
+			&p.ManualDocuments, &p.GuaranteeDocuments, &p.SpecificationDocuments)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DraftProduct{Ref: ref, InStock: true}, nil
+	}
+	return p, err
 }
 
 // DeleteLiveProduct removes a live product row by ref.
@@ -183,11 +241,7 @@ func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, actor uu
 	if p.Instagram != nil {
 		cur.Instagram = *p.Instagram
 	}
-	if err := upsertContactRow(ctx, tx, orgID, domain.Contact{
-		WhatsApp: cur.WhatsApp, Email: cur.Email, Address: cur.Address,
-		Legal: cur.LegalInformation, CallbackTime: cur.CallbackTime,
-		WorkingHours: cur.WorkingHours, Phone: cur.Phone, Website: cur.Website, Instagram: cur.Instagram,
-	}); err != nil {
+	if err := upsertContactRow(ctx, tx, orgID, cur); err != nil {
 		return err
 	}
 	if err := auditRow(ctx, tx, orgID, actor, "edit", "contacts"); err != nil {
@@ -200,10 +254,12 @@ func currentLiveContactTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) (Draf
 	var c DraftContact
 	var legalInfo *string
 	err := tx.QueryRow(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
-		working_hours, phone, website, instagram
+		working_hours, phone, website, instagram, contact_card_image, location_map_image,
+		company_legal_documents
 		FROM xchats.ai_contacts WHERE organization_id = $1 FOR UPDATE`, orgID).
 		Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
-			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram)
+			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.ContactCardImage, &c.LocationMapImage,
+			&c.CompanyLegalDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftContact{}, nil
 	}
@@ -255,11 +311,7 @@ func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, actor uu
 	if p.OutsideZonesNote != nil {
 		cur.OutsideZonesNote = *p.OutsideZonesNote
 	}
-	if err := upsertPolicyRow(ctx, tx, orgID, domain.Policy{
-		DeliveryCost: cur.DeliveryCost, DeliveryTime: cur.DeliveryInDays,
-		FreeDeliveryFrom: cur.FreeDeliveryFrom, MinOrder: cur.MinOrder, Prepayment: cur.Prepayment,
-		Installment: cur.Installment, ReturnPeriod: cur.ReturnPeriodInDays, Warranty: cur.Warranty,
-	}, cur.OutsideZonesNote); err != nil {
+	if err := upsertPolicyRow(ctx, tx, orgID, cur); err != nil {
 		return err
 	}
 	if err := validateZoneWorld(ctx, tx, orgID); err != nil {
@@ -275,10 +327,11 @@ func currentLivePolicyTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) (Draft
 	var p DraftPolicy
 	var deliveryInDays, returnPeriodInDays *string
 	err := tx.QueryRow(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
-		prepayment, installment, return_period_in_days, warranty, outside_zones_note
+		prepayment, installment, return_period_in_days, warranty, outside_zones_note, commerce_policy_documents
 		FROM xchats.ai_policies WHERE organization_id = $1 FOR UPDATE`, orgID).
 		Scan(&p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
-			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty, &p.OutsideZonesNote)
+			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty, &p.OutsideZonesNote,
+			&p.CommercePolicyDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftPolicy{}, nil
 	}
