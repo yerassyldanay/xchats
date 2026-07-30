@@ -260,6 +260,7 @@ func buildMCPConnector(cfg *config.Config, st *store.Store, kb *kbstore.Store, b
 		UploadBaseURL:    strings.TrimRight(cfg.APIBaseURL, "/"),
 		SignUpload:       uploadSigner.Sign,
 		UploadTTLSeconds: cfg.MCPUploadTokenTTLSeconds,
+		FrontendBaseURL:  cfg.MCPResolvedFrontendBaseURL(),
 	})
 	return authorizer, mcpSrv
 }

@@ -1,7 +1,853 @@
 <!doctype html>
-<html>
-<head><meta charset="utf-8"><title>KB Manager</title></head>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Xchats — База знаний</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9; --card: #ffffff; --text: #1a1d21; --muted: #6b7280; --border: #e5e7eb;
+    --accent: #2563eb; --accent-text: #ffffff; --danger: #dc2626; --ok: #16a34a; --warn: #d97706;
+    --chip-bg: #eef2ff; --code-bg: #f1f5f9;
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181c; --card: #22252a; --text: #e7e9ec; --muted: #9aa1ad; --border: #33373d;
+    --accent: #3b82f6; --accent-text: #ffffff; --danger: #f87171; --ok: #4ade80; --warn: #fbbf24;
+    --chip-bg: #1e2a4a; --code-bg: #1c1f24;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181c; --card: #22252a; --text: #e7e9ec; --muted: #9aa1ad; --border: #33373d;
+      --accent: #3b82f6; --accent-text: #ffffff; --danger: #f87171; --ok: #4ade80; --warn: #fbbf24;
+      --chip-bg: #1e2a4a; --code-bg: #1c1f24;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; line-height: 1.45;
+    overflow-x: hidden;
+  }
+  #app { display: flex; flex-direction: column; min-height: 100vh; }
+  a { color: var(--accent); }
+  button { font-family: inherit; cursor: pointer; }
+  .btn {
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 500;
+  }
+  .btn:hover { filter: brightness(1.05); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+  .btn-sm { padding: 4px 9px; font-size: 12px; }
+
+  header.topbar {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap;
+  }
+  header.topbar h1 { font-size: 15px; margin: 0; font-weight: 700; white-space: nowrap; }
+  header.topbar .sub { font-size: 11px; color: var(--muted); }
+  header.topbar .spacer { flex: 1; }
+
+  nav.tabs { display: flex; gap: 4px; padding: 8px 16px 0; background: var(--card); flex-wrap: wrap; }
+  nav.tabs button {
+    border: none; background: transparent; color: var(--muted); padding: 8px 12px;
+    font-size: 13px; font-weight: 600; border-bottom: 2px solid transparent; border-radius: 0;
+  }
+  nav.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  nav.tabs { border-bottom: 1px solid var(--border); }
+
+  main { flex: 1; padding: 14px 16px 32px; max-width: 900px; width: 100%; margin: 0 auto; }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .chip {
+    border: 1px solid var(--border); background: var(--card); color: var(--muted);
+    border-radius: 999px; padding: 5px 11px; font-size: 12px; font-weight: 600;
+  }
+  .chip.active { background: var(--chip-bg); color: var(--accent); border-color: var(--accent); }
+  input[type="search"], input[type="text"], select, textarea {
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    border-radius: 8px; padding: 7px 10px; font-size: 13px; font-family: inherit;
+  }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 8px;
+  }
+  .row-card { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .row-card:hover { border-color: var(--accent); }
+  .row-main { flex: 1; min-width: 0; }
+  .row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .row-sub code { background: var(--code-bg); border-radius: 4px; padding: 1px 5px; }
+
+  .badge { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 700; }
+  .badge-published { background: #dcfce7; color: #166534; }
+  .badge-new { background: #dbeafe; color: #1e40af; }
+  .badge-changed { background: #fef9c3; color: #854d0e; }
+  .badge-to_delete { background: #fee2e2; color: #991b1b; }
+  .badge-live { background: var(--chip-bg); color: var(--accent); }
+  .badge-draft { background: #fef3c7; color: #92400e; }
+  :root[data-theme="dark"] .badge-published { background: #14351f; color: #86efac; }
+  :root[data-theme="dark"] .badge-new { background: #1e2f4d; color: #93c5fd; }
+  :root[data-theme="dark"] .badge-changed { background: #3f3313; color: #fde047; }
+  :root[data-theme="dark"] .badge-to_delete { background: #451a1a; color: #fca5a5; }
+  :root[data-theme="dark"] .badge-draft { background: #3f3313; color: #fde047; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .badge-published { background: #14351f; color: #86efac; }
+    :root:not([data-theme="light"]) .badge-new { background: #1e2f4d; color: #93c5fd; }
+    :root:not([data-theme="light"]) .badge-changed { background: #3f3313; color: #fde047; }
+    :root:not([data-theme="light"]) .badge-to_delete { background: #451a1a; color: #fca5a5; }
+    :root:not([data-theme="light"]) .badge-draft { background: #3f3313; color: #fde047; }
+  }
+
+  .empty { text-align: center; color: var(--muted); padding: 40px 16px; }
+  .error-box { background: #fee2e2; color: #991b1b; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
+  :root[data-theme="dark"] .error-box { background: #451a1a; color: #fca5a5; }
+  .loading { color: var(--muted); padding: 24px; text-align: center; }
+
+  .publish-banner {
+    display: flex; align-items: center; gap: 10px; justify-content: space-between;
+    background: var(--chip-bg); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 14px;
+  }
+  .publish-banner p { margin: 0; font-size: 13px; }
+
+  .field-row { display: flex; padding: 7px 0; border-bottom: 1px solid var(--border); gap: 14px; }
+  .field-row:last-child { border-bottom: none; }
+  .field-label { width: 40%; color: var(--muted); font-size: 12px; flex-shrink: 0; }
+  .field-value { flex: 1; word-break: break-word; white-space: pre-wrap; }
+  .field-value.empty-val { color: var(--muted); font-style: italic; }
+  .media-chip {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--code-bg);
+    border-radius: 6px; padding: 3px 8px; font-size: 11px; font-family: ui-monospace, monospace;
+  }
+
+  .source-block { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+  .source-block h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+  .dropzone {
+    border: 2px dashed var(--border); border-radius: 12px; padding: 28px 16px; text-align: center;
+    color: var(--muted); font-size: 13px; margin-bottom: 14px;
+  }
+  .dropzone.drag { border-color: var(--accent); color: var(--accent); background: var(--chip-bg); }
+  .form-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 10px; }
+  .form-grid label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 3px; }
+  .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 8px 0; }
+  .progress-bar > div { height: 100%; background: var(--accent); transition: width .2s; }
+
+  .back-link { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 10px; font-size: 13px; color: var(--muted); background: none; border: none; padding: 0; }
+  .back-link:hover { color: var(--accent); }
+</style>
+</head>
 <body>
-<p>KB Manager widget placeholder — replaced by the real implementation.</p>
+<div id="app"><div class="loading">Загрузка…</div></div>
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------------------
+  // Constants mirroring the server's fixed vocabulary (plan/mcp.md §2, §5).
+  // Kept in sync with backend/internal/kbstore/mcp_types.go and
+  // internal/mcpserver/handlers.go's per-type field lists — this widget has
+  // no way to introspect tool schemas through every host bridge, so these
+  // stay hand-maintained rather than fetched.
+  // ---------------------------------------------------------------------
+  var ALL_TYPES = ["assistant", "topic", "product", "tariff", "contacts", "policies", "delivery_zone"];
+  var TYPE_META = {
+    assistant:     { tool: "kb_assistant_upsert",     keyParam: null,   label: "Ассистент" },
+    topic:         { tool: "kb_topic_upsert",         keyParam: "slug", label: "Тема" },
+    product:       { tool: "kb_product_upsert",       keyParam: "ref",  label: "Товар" },
+    tariff:        { tool: "kb_tariff_upsert",        keyParam: "ref",  label: "Тариф" },
+    contacts:      { tool: "kb_contacts_upsert",      keyParam: null,   label: "Контакты" },
+    policies:      { tool: "kb_policies_upsert",      keyParam: null,   label: "Политики" },
+    delivery_zone: { tool: "kb_delivery_zone_upsert", keyParam: "ref",  label: "Зона доставки" },
+  };
+  // field -> singular(1)/plural(0), per tool's InputSchema (tools.go).
+  var MEDIA_FIELDS = {
+    topic: [["featured_image", 1], ["illustration_images", 0], ["explainer_videos", 0],
+            ["narration_audio_files", 0], ["reference_documents", 0]],
+    product: [["featured_image", 1], ["gallery_images", 0], ["demo_videos", 0],
+              ["audio_description_files", 0], ["certificate_documents", 0], ["manual_documents", 0],
+              ["guarantee_documents", 0], ["specification_documents", 0]],
+    tariff: [["featured_image", 1], ["pricing_images", 0], ["explainer_videos", 0], ["terms_documents", 0]],
+    contacts: [["contact_card_image", 1], ["location_map_image", 1], ["company_legal_documents", 0]],
+    policies: [["commerce_policy_documents", 0]],
+    assistant: [],
+    delivery_zone: [],
+  };
+  var FIELD_LABELS = {
+    title: "Заголовок", body_md: "Текст", name: "Название", price: "Цена", description: "Описание",
+    category: "Категория", in_stock: "В наличии", sales_status: "Статус продаж",
+    limit_text: "Лимит", fee: "Комиссия", summary: "Кратко", pricing_type: "Тип тарификации",
+    advantages: "Преимущества", disadvantages: "Недостатки",
+    whatsapp: "WhatsApp", email: "Email", address: "Адрес", legal_information: "Юр. информация",
+    callback_time: "Время звонка", working_hours: "Часы работы", phone: "Телефон", website: "Сайт", instagram: "Instagram",
+    delivery_cost: "Стоимость доставки", delivery_in_days: "Срок доставки, дн.",
+    free_delivery_from: "Бесплатно от", min_order: "Мин. заказ", prepayment: "Предоплата",
+    installment: "Рассрочка", return_period_in_days: "Возврат, дн.", warranty: "Гарантия",
+    outside_zones_note: "Вне зон доставки", zone_level: "Уровень зоны", parent_ref: "Родительская зона",
+    notes: "Заметки", delivery_available: "Доставка доступна",
+    persona: "Персона", mission: "Миссия", guardrails: "Ограничения", language_policy: "Язык ответов",
+    reply_max_words: "Макс. слов в ответе", ref: "Ref", slug: "Slug", updated_at: "Обновлено",
+  };
+  var STATE_LABELS = { published: "Опубликовано", new: "Новое", changed: "Изменено", to_delete: "На удаление" };
+
+  // ---------------------------------------------------------------------
+  // Application state (a single mutable object; render() redraws #app from
+  // it — no framework, this is a small enough surface that plain DOM string
+  // building is clearer than pulling one in).
+  // ---------------------------------------------------------------------
+  var state = {
+    bridgeKind: null,     // "openai" | "postmessage" | "none" | null (not yet determined)
+    connecting: true,
+    view: "all",          // "all" | "live" | "draft" | "media" | "record"
+    typeFilter: null,
+    query: "",
+    items: [],
+    draftVersion: null,
+    frontendBaseUrl: "",
+    mediaFieldKinds: {},
+    record: null,          // { type, key, entries: [{type,source,data}, ...] }
+    recordBack: "all",
+    loading: false,
+    error: null,
+    pendingOpen: null,
+    media: { file: null, status: null, materialId: null, uploadUrl: null, uploadHeaders: null,
+             progress: 0, error: null, dragOver: false,
+             attachType: "product", attachKey: "", attachField: "", attachBusy: false, attachDone: false },
+  };
+
+  function esc(s) {
+    if (s === null || s === undefined) return "";
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function humanize(key) {
+    if (FIELD_LABELS[key]) return FIELD_LABELS[key];
+    return key.replace(/_/g, " ").replace(/^./, function (c) { return c.toUpperCase(); });
+  }
+  function withTimeout(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var t = setTimeout(function () { reject(new Error("timeout")); }, ms);
+      promise.then(function (v) { clearTimeout(t); resolve(v); }, function (e) { clearTimeout(t); reject(e); });
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Host bridge. Wire-format caveat (see internal/mcpserver/resources.go):
+  // ChatGPT's Apps SDK (window.openai.callTool) is the concretely documented
+  // path; anything else gets a best-effort generic postMessage JSON-RPC
+  // envelope, downgrading to a disconnected state if neither ever answers.
+  // ---------------------------------------------------------------------
+  var rpcSeq = 0;
+  var pendingRpc = {};
+  window.addEventListener("message", function (ev) {
+    var data = ev.data;
+    if (!data || typeof data !== "object" || !pendingRpc[data.id]) return;
+    var p = pendingRpc[data.id];
+    delete pendingRpc[data.id];
+    if (data.error) p.reject(new Error(data.error.message || "tool call failed"));
+    else p.resolve(data.result);
+  });
+  function callToolViaPostMessage(name, args) {
+    return new Promise(function (resolve, reject) {
+      var id = "kbw-" + (++rpcSeq) + "-" + Date.now();
+      pendingRpc[id] = { resolve: resolve, reject: reject };
+      window.parent.postMessage({ jsonrpc: "2.0", id: id, method: "tools/call", params: { name: name, arguments: args } }, "*");
+      setTimeout(function () {
+        if (pendingRpc[id]) { delete pendingRpc[id]; reject(new Error("timed out waiting for host response")); }
+      }, 15000);
+    });
+  }
+  function unwrapToolResult(result) {
+    if (result && typeof result === "object") {
+      if (result.isError) {
+        var text = Array.isArray(result.content) && result.content[0] && result.content[0].text;
+        throw new Error(text || "tool call failed");
+      }
+      if ("structuredContent" in result) return result.structuredContent;
+    }
+    return result;
+  }
+  function callTool(name, args) {
+    if (state.bridgeKind === "openai") {
+      return window.openai.callTool(name, args).then(unwrapToolResult);
+    }
+    if (state.bridgeKind === "postmessage") {
+      return callToolViaPostMessage(name, args).then(unwrapToolResult);
+    }
+    return Promise.reject(new Error("no host bridge available"));
+  }
+  function applyTheme() {
+    var t = window.openai && window.openai.theme;
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+  }
+  window.addEventListener("openai:set_globals", applyTheme);
+
+  function seedFromInitialOutput() {
+    var out = window.openai && window.openai.toolOutput;
+    if (!out || typeof out !== "object") return;
+    if (out.material_id && out.upload_url && !out.type) {
+      state.view = "media";
+      state.media.materialId = out.material_id;
+      state.media.uploadUrl = out.upload_url;
+      state.media.status = "staged";
+    } else if (out.type && out.key && "draft_version" in out) {
+      state.pendingOpen = { type: out.type, key: out.key };
+    }
+  }
+
+  function connect() {
+    if (window.openai && typeof window.openai.callTool === "function") {
+      state.bridgeKind = "openai";
+    } else if (window.parent && window.parent !== window) {
+      state.bridgeKind = "postmessage";
+    } else {
+      state.bridgeKind = "none";
+      return Promise.resolve(null);
+    }
+    return withTimeout(callTool("kb_info", {}), 4000).catch(function () {
+      state.bridgeKind = "none";
+      return null;
+    });
+  }
+
+  async function boot() {
+    applyTheme();
+    seedFromInitialOutput();
+    render();
+    var info = await connect();
+    state.connecting = false;
+    if (info) {
+      state.frontendBaseUrl = info.frontend_base_url || "";
+      state.mediaFieldKinds = info.media_field_kinds || {};
+    }
+    if (state.bridgeKind === "none") { render(); return; }
+    if (state.pendingOpen) {
+      var p = state.pendingOpen; state.pendingOpen = null;
+      await openRecord(p.type, p.key, "all");
+      return;
+    }
+    await loadForView(state.view);
+  }
+
+  // ---------------------------------------------------------------------
+  // Data loading
+  // ---------------------------------------------------------------------
+  function loadForView(view) {
+    if (view === "all") return loadSummary(false);
+    if (view === "draft") return loadSummary(true);
+    if (view === "live") return loadLive();
+    render();
+    return Promise.resolve();
+  }
+
+  async function loadSummary(draftOnly) {
+    state.loading = true; state.error = null; render();
+    try {
+      var page = await callTool("kb_summary", { types: state.typeFilter ? [state.typeFilter] : undefined, limit: 100 });
+      state.draftVersion = page.draft_version;
+      var items = page.items || [];
+      state.items = draftOnly ? items.filter(function (it) { return it.exists_in_draft; }) : items;
+    } catch (e) {
+      state.error = String((e && e.message) || e);
+    }
+    state.loading = false; render();
+  }
+
+  async function loadLive() {
+    state.loading = true; state.error = null; render();
+    try {
+      var page = await callTool("kb_read", {
+        types: state.typeFilter ? [state.typeFilter] : undefined,
+        source: "live", limit: 100, query: state.query || undefined,
+      });
+      state.items = page.items || [];
+    } catch (e) {
+      state.error = String((e && e.message) || e);
+    }
+    state.loading = false; render();
+  }
+
+  async function openRecord(type, key, backView) {
+    state.recordBack = backView || (state.view === "record" ? "all" : state.view);
+    state.view = "record";
+    state.loading = true; state.error = null; state.record = null; render();
+    try {
+      var page = await callTool("kb_read", { types: [type], source: "both", key: key });
+      state.record = { type: type, key: key, entries: page.items || [] };
+    } catch (e) {
+      state.error = String((e && e.message) || e);
+    }
+    state.loading = false; render();
+  }
+
+  async function deleteRecord(type, key) {
+    if (!window.confirm("Пометить «" + key + "» на удаление в черновике? Запись останется опубликованной до подтверждения в Xchats.")) return;
+    state.loading = true; render();
+    try {
+      await callTool("kb_delete", { type: type, key: key });
+      state.view = state.recordBack || "all";
+      await loadForView(state.view);
+    } catch (e) {
+      state.error = String((e && e.message) || e);
+      state.loading = false; render();
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Shape helpers for kb_read's { type, source, data } records
+  // ---------------------------------------------------------------------
+  function titleOf(type, data) {
+    if (!data) return "";
+    switch (type) {
+      case "topic": return data.title || data.slug || "";
+      case "product": return data.name || data.ref || "";
+      case "tariff": return data.name || data.ref || "";
+      case "delivery_zone": return data.name || data.ref || "";
+      case "contacts": return "Контакты";
+      case "policies": return "Политики";
+      case "assistant": return "Ассистент";
+      default: return "";
+    }
+  }
+  function keyOf(type, data) {
+    if (!data) return "";
+    if (type === "topic") return data.slug || "";
+    if (type === "contacts" || type === "policies" || type === "assistant") return "main";
+    return data.ref || "";
+  }
+  function typeLabel(type) { return (TYPE_META[type] && TYPE_META[type].label) || type; }
+
+  // ---------------------------------------------------------------------
+  // Rendering
+  // ---------------------------------------------------------------------
+  function render() {
+    var app = document.getElementById("app");
+    // innerHTML below destroys and rebuilds every node, which would drop
+    // keyboard focus (and cursor position) out of the search box on every
+    // debounced re-render while the user is mid-search — save and restore
+    // it across the rebuild.
+    var active = document.activeElement;
+    var focusId = active && active.id;
+    var selStart = focusId && typeof active.selectionStart === "number" ? active.selectionStart : null;
+    var selEnd = focusId && typeof active.selectionEnd === "number" ? active.selectionEnd : null;
+
+    var html = "";
+    html += renderHeader();
+    html += renderTabs();
+    html += '<main>';
+    if (state.connecting) {
+      html += '<div class="loading">Подключение к Xchats…</div>';
+    } else if (state.bridgeKind === "none") {
+      html += renderDisconnected();
+    } else if (state.view === "record") {
+      html += renderRecordView();
+    } else if (state.view === "media") {
+      html += renderMediaView();
+    } else {
+      html += renderListView();
+    }
+    html += '</main>';
+    app.innerHTML = html;
+    wireEvents();
+
+    if (focusId) {
+      var restored = document.getElementById(focusId);
+      if (restored) {
+        restored.focus();
+        if (selStart != null && restored.setSelectionRange) restored.setSelectionRange(selStart, selEnd);
+      }
+    }
+  }
+
+  function renderHeader() {
+    var sub = state.draftVersion != null ? "версия черновика: " + esc(state.draftVersion) : "";
+    var link = state.frontendBaseUrl ? state.frontendBaseUrl + "/playground" : "";
+    return '' +
+      '<header class="topbar">' +
+      '<div><h1>База знаний Xchats</h1><div class="sub">' + sub + '</div></div>' +
+      '<div class="spacer"></div>' +
+      (link
+        ? '<a class="btn btn-primary" href="' + esc(link) + '" target="_blank" rel="noopener">Просмотреть и опубликовать в Xchats</a>'
+        : '<span class="btn" style="opacity:.6">Xchats недоступен</span>') +
+      '</header>';
+  }
+
+  function renderTabs() {
+    var tabs = [["all", "Все"], ["live", "Опубликовано"], ["draft", "Черновик"], ["media", "Медиа"]];
+    var html = '<nav class="tabs">';
+    tabs.forEach(function (t) {
+      var active = (state.view === t[0]) || (state.view === "record" && state.recordBack === t[0]);
+      html += '<button data-tab="' + t[0] + '" class="' + (active ? "active" : "") + '">' + esc(t[1]) + '</button>';
+    });
+    html += '</nav>';
+    return html;
+  }
+
+  function renderDisconnected() {
+    return '' +
+      '<div class="empty">' +
+      '<p><strong>Не удалось подключиться к Xchats.</strong></p>' +
+      '<p>Этот хост не поддерживает вызов инструментов из виджета. Все функции остаются доступны модели через обычные MCP-инструменты.</p>' +
+      '<p>Черновик и публикация доступны в разделе «Черновик» приложения Xchats.</p>' +
+      '</div>';
+  }
+
+  function renderTypeChips() {
+    var html = '<div class="toolbar">';
+    html += '<button class="chip' + (state.typeFilter === null ? ' active' : '') + '" data-type-filter="">Все типы</button>';
+    ALL_TYPES.forEach(function (t) {
+      html += '<button class="chip' + (state.typeFilter === t ? ' active' : '') + '" data-type-filter="' + t + '">' + esc(typeLabel(t)) + '</button>';
+    });
+    if (state.view === "live") {
+      html += '<input type="search" id="query-box" placeholder="Поиск по названию…" value="' + esc(state.query) + '" style="margin-left:auto">';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderListView() {
+    var html = "";
+    if (state.error) html += '<div class="error-box">' + esc(state.error) + '</div>';
+    if (state.view === "draft") {
+      html += '<div class="publish-banner"><p>Черновик содержит несохранённые изменения. Публикация подтверждается человеком в Xchats.</p>' +
+        (state.frontendBaseUrl
+          ? '<a class="btn btn-primary btn-sm" href="' + esc(state.frontendBaseUrl + "/playground") + '" target="_blank" rel="noopener">Открыть в Xchats</a>'
+          : '') + '</div>';
+    }
+    html += renderTypeChips();
+    if (state.loading) { html += '<div class="loading">Загрузка…</div>'; return html; }
+    if (!state.items.length) {
+      html += '<div class="empty">' + (state.view === "draft" ? "Черновик пуст." : "Ничего не найдено.") + '</div>';
+      return html;
+    }
+    if (state.view === "live") {
+      state.items.forEach(function (rec) {
+        html += renderRecordRow(rec.type, keyOf(rec.type, rec.data), titleOf(rec.type, rec.data), [
+          ["badge-live", "Опубликовано"],
+        ]);
+      });
+    } else {
+      state.items.forEach(function (it) {
+        html += renderRecordRow(it.type, it.key, it.title || it.key, [
+          ["badge-" + it.state, STATE_LABELS[it.state] || it.state],
+        ]);
+      });
+    }
+    return html;
+  }
+
+  function renderRecordRow(type, key, title, badges) {
+    var badgeHtml = badges.map(function (b) { return '<span class="badge ' + b[0] + '">' + esc(b[1]) + '</span>'; }).join(" ");
+    return '' +
+      '<div class="card row-card" data-open-type="' + esc(type) + '" data-open-key="' + esc(key) + '">' +
+      '<div class="row-main">' +
+      '<div class="row-title">' + esc(title || key) + '</div>' +
+      '<div class="row-sub">' + esc(typeLabel(type)) + ' · <code>' + esc(key) + '</code></div>' +
+      '</div>' + badgeHtml +
+      '</div>';
+  }
+
+  function renderRecordView() {
+    var html = '<button class="back-link" data-back="1">← Назад</button>';
+    if (state.error) html += '<div class="error-box">' + esc(state.error) + '</div>';
+    if (state.loading) { html += '<div class="loading">Загрузка…</div>'; return html; }
+    if (!state.record) { html += '<div class="empty">Запись не найдена.</div>'; return html; }
+    var entries = state.record.entries || [];
+    if (!entries.length) {
+      html += '<div class="empty">Запись «' + esc(state.record.key) + '» не найдена ни в опубликованной версии, ни в черновике.</div>';
+      return html;
+    }
+    entries.forEach(function (rec) {
+      html += '<div class="source-block">';
+      html += '<h3>' + (rec.source === "draft" ? "Черновик" : "Опубликовано") + '</h3>';
+      html += renderFields(rec.data || {});
+      html += '</div>';
+    });
+    html += '<div style="margin-top:10px"><button class="btn btn-danger" data-delete-type="' + esc(state.record.type) +
+      '" data-delete-key="' + esc(state.record.key) + '">Удалить (пометить в черновике)</button></div>';
+    return html;
+  }
+
+  function renderFields(data) {
+    var html = "";
+    var keys = Object.keys(data);
+    if (!keys.length) return '<div class="empty">Нет данных.</div>';
+    keys.forEach(function (k) {
+      var v = data[k];
+      var isMedia = !!state.mediaFieldKinds[k];
+      var valueHtml;
+      if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) {
+        valueHtml = '<span class="empty-val">не задано</span>';
+      } else if (isMedia) {
+        var ids = Array.isArray(v) ? v : [v];
+        valueHtml = ids.map(function (id) { return '<span class="media-chip">' + esc(String(id).slice(0, 8)) + '…</span>'; }).join(" ");
+      } else if (typeof v === "boolean") {
+        valueHtml = v ? "Да" : "Нет";
+      } else if (Array.isArray(v)) {
+        valueHtml = esc(v.join(", "));
+      } else if (typeof v === "object") {
+        valueHtml = '<code>' + esc(JSON.stringify(v)) + '</code>';
+      } else {
+        valueHtml = esc(v);
+      }
+      html += '<div class="field-row"><div class="field-label">' + esc(humanize(k)) + '</div><div class="field-value' +
+        (valueHtml.indexOf("empty-val") >= 0 ? " empty-val" : "") + '">' + valueHtml + '</div></div>';
+    });
+    return html;
+  }
+
+  // ---------------------------------------------------------------------
+  // Media view: upload + attach-to-field
+  // ---------------------------------------------------------------------
+  function renderMediaView() {
+    var m = state.media;
+    var html = "";
+    if (m.error) html += '<div class="error-box">' + esc(m.error) + '</div>';
+    if (!m.materialId) {
+      html += '<div class="dropzone' + (m.dragOver ? " drag" : "") + '" id="dropzone">' +
+        '<p>Перетащите файл сюда или</p>' +
+        '<input type="file" id="file-input" style="margin-top:8px">' +
+        '</div>';
+      if (m.status === "uploading") {
+        html += '<div class="progress-bar"><div style="width:' + m.progress + '%"></div></div><div class="row-sub">Загрузка…</div>';
+      }
+      return html;
+    }
+    html += '<div class="card">';
+    html += '<div class="row-sub">material_id</div><div class="media-chip" style="margin-bottom:8px">' + esc(m.materialId) + '</div>';
+    if (m.status === "staged") {
+      html += '<p class="row-sub">Файл выбран. Загрузите байты, затем прикрепите к полю записи.</p>';
+      html += '<button class="btn btn-primary btn-sm" id="do-upload">Загрузить</button>';
+    } else if (m.status === "uploading") {
+      html += '<div class="progress-bar"><div style="width:' + m.progress + '%"></div></div><div class="row-sub">Загрузка…</div>';
+    } else if (m.status === "uploaded") {
+      html += '<p class="row-sub" style="color:var(--ok)">Файл загружен. Укажите, к какой записи прикрепить.</p>';
+      html += renderAttachForm();
+    }
+    html += '</div>';
+    if (m.attachDone) {
+      html += '<div class="card" style="border-color:var(--ok)"><p>Материал прикреплён к записи.</p>' +
+        '<button class="btn btn-sm" id="new-upload">Загрузить ещё один файл</button></div>';
+    }
+    return html;
+  }
+
+  function renderAttachForm() {
+    var m = state.media;
+    var meta = TYPE_META[m.attachType];
+    var fields = MEDIA_FIELDS[m.attachType] || [];
+    var html = '<div class="form-grid">';
+    html += '<div><label>Тип записи</label><select id="attach-type">';
+    ALL_TYPES.forEach(function (t) {
+      html += '<option value="' + t + '"' + (t === m.attachType ? " selected" : "") + '>' + esc(typeLabel(t)) + '</option>';
+    });
+    html += '</select></div>';
+    if (meta.keyParam) {
+      html += '<div><label>Ключ (' + meta.keyParam + ')</label><input type="text" id="attach-key" value="' + esc(m.attachKey) + '" placeholder="например, tarif-standard"></div>';
+    }
+    if (fields.length) {
+      html += '<div><label>Поле</label><select id="attach-field">' +
+        fields.map(function (f) { return '<option value="' + f[0] + '"' + (f[0] === m.attachField ? " selected" : "") + '>' + esc(humanize(f[0])) + '</option>'; }).join("") +
+        '</select></div>';
+      html += '<button class="btn btn-primary btn-sm" id="do-attach"' + (m.attachBusy ? " disabled" : "") + '>' +
+        (m.attachBusy ? "Прикрепление…" : "Прикрепить") + '</button>';
+    } else {
+      html += '<p class="row-sub">У этого типа записи нет медиа-полей.</p>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+    state.media.file = file;
+    state.media.status = "uploading";
+    state.media.progress = 0;
+    state.media.error = null;
+    render();
+    try {
+      var buf = await file.arrayBuffer();
+      var digest = await crypto.subtle.digest("SHA-256", buf);
+      var hex = Array.prototype.map.call(new Uint8Array(digest), function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+      var out = await callTool("kb_media_upload", {
+        filename: file.name, mime_type: file.type || "application/octet-stream",
+        size_bytes: file.size, sha256_checksum: hex,
+      });
+      state.media.materialId = out.material_id;
+      state.media.uploadUrl = out.upload_url;
+      state.media.uploadHeaders = out.upload_headers || {};
+      await putUploadBytes(file);
+    } catch (e) {
+      state.media.status = null;
+      state.media.error = String((e && e.message) || e);
+      render();
+    }
+  }
+
+  function putUploadBytes(file) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open("PUT", state.media.uploadUrl, true);
+      var headers = state.media.uploadHeaders || {};
+      Object.keys(headers).forEach(function (h) { xhr.setRequestHeader(h, headers[h]); });
+      xhr.upload.onprogress = function (ev) {
+        if (ev.lengthComputable) { state.media.progress = Math.round((ev.loaded / ev.total) * 100); render(); }
+      };
+      xhr.onload = function () {
+        if (xhr.status >= 200 && xhr.status < 300) { state.media.status = "uploaded"; render(); resolve(); }
+        else { state.media.status = null; state.media.error = "Загрузка не удалась (" + xhr.status + ")"; render(); reject(new Error("upload failed")); }
+      };
+      xhr.onerror = function () { state.media.status = null; state.media.error = "Сетевая ошибка при загрузке"; render(); reject(new Error("network error")); };
+      xhr.send(file);
+    });
+  }
+
+  async function doAttach() {
+    var m = state.media;
+    var meta = TYPE_META[m.attachType];
+    var fieldDef = (MEDIA_FIELDS[m.attachType] || []).filter(function (f) { return f[0] === m.attachField; })[0];
+    if (!fieldDef) return;
+    var isPlural = fieldDef[1] === 0;
+    var key = meta.keyParam ? m.attachKey.trim() : "main";
+    if (meta.keyParam && !key) { m.error = "Укажите ключ записи."; render(); return; }
+    m.attachBusy = true; m.error = null; render();
+    try {
+      var changes = {};
+      if (isPlural) {
+        var current = await kbReadOne(m.attachType, key);
+        var existing = (current && Array.isArray(current[m.attachField])) ? current[m.attachField] : [];
+        changes[m.attachField] = existing.concat([m.materialId]);
+      } else {
+        changes[m.attachField] = m.materialId;
+      }
+      var args = { changes: changes };
+      if (meta.keyParam) args[meta.keyParam] = key;
+      await callTool(meta.tool, args);
+      m.attachBusy = false; m.attachDone = true; render();
+    } catch (e) {
+      m.attachBusy = false; m.error = String((e && e.message) || e); render();
+    }
+  }
+
+  async function kbReadOne(type, key) {
+    try {
+      var draftPage = await callTool("kb_read", { types: [type], source: "draft", key: key });
+      if (draftPage.items && draftPage.items.length) return draftPage.items[0].data;
+    } catch (e) { /* fall through to live */ }
+    try {
+      var livePage = await callTool("kb_read", { types: [type], source: "live", key: key });
+      if (livePage.items && livePage.items.length) return livePage.items[0].data;
+    } catch (e) { /* no existing record — treat as empty */ }
+    return null;
+  }
+
+  function resetMedia() {
+    state.media = { file: null, status: null, materialId: null, uploadUrl: null, uploadHeaders: null,
+      progress: 0, error: null, dragOver: false,
+      attachType: "product", attachKey: "", attachField: "", attachBusy: false, attachDone: false };
+    render();
+  }
+
+  // ---------------------------------------------------------------------
+  // Event wiring — re-attached after every render() since innerHTML replaces
+  // the whole subtree.
+  // ---------------------------------------------------------------------
+  function wireEvents() {
+    var app = document.getElementById("app");
+
+    app.querySelectorAll("nav.tabs button[data-tab]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        state.view = btn.getAttribute("data-tab");
+        state.error = null;
+        loadForView(state.view);
+      });
+    });
+
+    var back = app.querySelector("[data-back]");
+    if (back) back.addEventListener("click", function () {
+      state.view = state.recordBack || "all";
+      loadForView(state.view);
+    });
+
+    app.querySelectorAll("[data-open-type]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        openRecord(el.getAttribute("data-open-type"), el.getAttribute("data-open-key"), state.view);
+      });
+    });
+
+    var del = app.querySelector("[data-delete-type]");
+    if (del) del.addEventListener("click", function () {
+      deleteRecord(del.getAttribute("data-delete-type"), del.getAttribute("data-delete-key"));
+    });
+
+    app.querySelectorAll("[data-type-filter]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var t = el.getAttribute("data-type-filter");
+        state.typeFilter = t === "" ? null : t;
+        loadForView(state.view);
+      });
+    });
+
+    var qbox = app.querySelector("#query-box");
+    if (qbox) {
+      var qTimer = null;
+      qbox.addEventListener("input", function () {
+        state.query = qbox.value;
+        clearTimeout(qTimer);
+        qTimer = setTimeout(function () { loadLive(); }, 350);
+      });
+    }
+
+    var dropzone = app.querySelector("#dropzone");
+    if (dropzone) {
+      dropzone.addEventListener("dragover", function (ev) { ev.preventDefault(); state.media.dragOver = true; dropzone.classList.add("drag"); });
+      dropzone.addEventListener("dragleave", function () { state.media.dragOver = false; dropzone.classList.remove("drag"); });
+      dropzone.addEventListener("drop", function (ev) {
+        ev.preventDefault();
+        state.media.dragOver = false;
+        var f = ev.dataTransfer.files && ev.dataTransfer.files[0];
+        if (f) handleFile(f);
+      });
+    }
+    var fileInput = app.querySelector("#file-input");
+    if (fileInput) fileInput.addEventListener("change", function () {
+      if (fileInput.files && fileInput.files[0]) handleFile(fileInput.files[0]);
+    });
+
+    var doUpload = app.querySelector("#do-upload");
+    if (doUpload) doUpload.addEventListener("click", function () { putUploadBytes(state.media.file); });
+
+    var attachType = app.querySelector("#attach-type");
+    if (attachType) attachType.addEventListener("change", function () {
+      state.media.attachType = attachType.value;
+      state.media.attachField = "";
+      render();
+    });
+    var attachKey = app.querySelector("#attach-key");
+    if (attachKey) attachKey.addEventListener("input", function () { state.media.attachKey = attachKey.value; });
+    var attachField = app.querySelector("#attach-field");
+    if (attachField) attachField.addEventListener("change", function () { state.media.attachField = attachField.value; });
+    var doAttachBtn = app.querySelector("#do-attach");
+    if (doAttachBtn) doAttachBtn.addEventListener("click", function () {
+      if (!state.media.attachField) {
+        var fields = MEDIA_FIELDS[state.media.attachType] || [];
+        if (fields.length) state.media.attachField = fields[0][0];
+      }
+      doAttach();
+    });
+    var newUpload = app.querySelector("#new-upload");
+    if (newUpload) newUpload.addEventListener("click", resetMedia);
+  }
+
+  boot();
+})();
+</script>
 </body>
 </html>

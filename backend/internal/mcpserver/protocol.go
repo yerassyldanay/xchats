@@ -72,6 +72,12 @@ type Deps struct {
 	SignUpload func(materialID string, expiresAt int64) string
 	// UploadTTLSeconds bounds how long a signed upload URL stays valid.
 	UploadTTLSeconds int
+	// FrontendBaseURL is the Xchats app's own origin (e.g. https://xchats.kz,
+	// no trailing slash) — kb_info returns it so the KB Manager widget (a
+	// static embedded document with no server config of its own) can build
+	// its "Review and publish in Xchats" link (plan/mcp.md §6) without a
+	// second templating mechanism just for one string.
+	FrontendBaseURL string
 }
 
 // Server dispatches JSON-RPC requests against Deps, scoped to a Principal

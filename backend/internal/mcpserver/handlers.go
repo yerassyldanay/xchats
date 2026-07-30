@@ -565,6 +565,7 @@ func (s *Server) handleKBInfo(ctx context.Context, orgID uuid.UUID, args map[str
 		"types":             kbstore.AllKBTypes,
 		"natural_key_main":  kbstore.NaturalKeyMain,
 		"media_field_kinds": mediaFieldKindsInfo(),
+		"frontend_base_url": s.Deps.FrontendBaseURL,
 	}, "all"), nil
 }
 
