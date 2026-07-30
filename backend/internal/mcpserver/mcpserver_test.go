@@ -280,3 +280,63 @@ func TestKBMediaUpload_RejectsMismatchedTargetMime(t *testing.T) {
 		t.Fatalf("expected a mime-mismatch isError, got %+v", res)
 	}
 }
+
+// TestResources_ListAndReadTheKBManagerWidget is a regression guard for the
+// embedded widget resource (plan/mcp.md §6): resources/list must advertise
+// exactly the one reusable ui://xchats/kb-manager.html resource, and
+// resources/read must serve real HTML+JS content, not the old placeholder
+// (`<p>KB Manager widget placeholder ...`) and not an empty/truncated embed.
+// This does not replace exercising the widget in an actual browser (done
+// manually against a mocked host bridge, matching the real Go tool result
+// shapes, for this change) — it only catches the file going missing, empty,
+// or reverting to the placeholder in a future edit.
+func TestResources_ListAndReadTheKBManagerWidget(t *testing.T) {
+	srv, principal := newTestServer(t)
+
+	listResp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "resources/list"})
+	if listResp.Error != nil {
+		t.Fatalf("resources/list returned an error: %+v", listResp.Error)
+	}
+	listResult := listResp.Result.(map[string]any)
+	resources := listResult["resources"].([]map[string]any)
+	if len(resources) != 1 || resources[0]["uri"] != "ui://xchats/kb-manager.html" {
+		t.Fatalf("expected exactly the one KB Manager resource, got %+v", resources)
+	}
+	if resources[0]["mimeType"] != "text/html" {
+		t.Fatalf("expected mimeType text/html, got %+v", resources[0])
+	}
+
+	readResp := srv.Handle(context.Background(), principal, mcpserver.Request{
+		JSONRPC: "2.0", ID: rpcID(2), Method: "resources/read",
+		Params: mustMarshal(t, map[string]any{"uri": "ui://xchats/kb-manager.html"}),
+	})
+	if readResp.Error != nil {
+		t.Fatalf("resources/read returned an error: %+v", readResp.Error)
+	}
+	readResult := readResp.Result.(map[string]any)
+	contents := readResult["contents"].([]map[string]any)
+	if len(contents) != 1 {
+		t.Fatalf("expected exactly one content entry, got %+v", contents)
+	}
+	html, _ := contents[0]["text"].(string)
+	if strings.Contains(html, "KB Manager widget placeholder") {
+		t.Fatalf("widget resource still serves the old stub, not the real implementation")
+	}
+	for _, want := range []string{"<script>", "</script>", "callTool", "window.openai"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("widget HTML missing expected content %q (len=%d)", want, len(html))
+		}
+	}
+	if len(html) < 5000 {
+		t.Fatalf("widget HTML looks truncated: only %d bytes", len(html))
+	}
+
+	// An unknown resource URI must be a clean invalid-params error, not a panic.
+	badResp := srv.Handle(context.Background(), principal, mcpserver.Request{
+		JSONRPC: "2.0", ID: rpcID(3), Method: "resources/read",
+		Params: mustMarshal(t, map[string]any{"uri": "ui://xchats/does-not-exist.html"}),
+	})
+	if badResp.Error == nil {
+		t.Fatalf("expected an error for an unknown resource uri")
+	}
+}
