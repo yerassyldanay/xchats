@@ -49,16 +49,32 @@ func typeWanted(want map[string]bool, t string) bool {
 // entry per natural key, across the requested types, live ∪ draft, with
 // state pre-derived. types nil/empty means every type.
 func (s *Store) IdentityIndex(ctx context.Context, orgID uuid.UUID, types []string) ([]Identity, error) {
+	return s.identityIndex(ctx, s.pool, orgID, types)
+}
+
+// identityIndex is IdentityIndex's db-parameterized core. Every MCPUpsert*
+// duplicate check calls this (not IdentityIndex) from inside
+// writeDraftBlobVersioned's mutate closure, passing the closure's own tx —
+// reusing that already-locked connection instead of letting LiveView/
+// DraftOnly/readDraftBlob each check out a SEPARATE one from the pool. Under
+// N concurrent writers hitting the SAME org, that second acquisition can
+// starve: writer A holds the row lock (via tx) and blocks on a free
+// connection for this read, while every other writer is itself blocked on
+// A's lock while holding a connection of its own — a pool-exhaustion
+// deadlock with no timeout, not just a slow path (caught by
+// TestMCPUpsert_ConcurrentWritesSerializeWithoutLostUpdates hanging forever
+// before this fix).
+func (s *Store) identityIndex(ctx context.Context, db dbtx, orgID uuid.UUID, types []string) ([]Identity, error) {
 	want := typeSet(types)
-	live, err := s.LiveView(ctx, orgID)
+	live, err := s.liveView(ctx, db, orgID)
 	if err != nil {
 		return nil, err
 	}
-	draft, err := s.DraftOnly(ctx, orgID)
+	draft, err := s.draftOnly(ctx, db, orgID)
 	if err != nil {
 		return nil, err
 	}
-	blob, _, _, err := s.readDraftBlob(ctx, orgID)
+	blob, _, _, err := s.readDraftBlob(ctx, db, orgID)
 	if err != nil {
 		return nil, err
 	}

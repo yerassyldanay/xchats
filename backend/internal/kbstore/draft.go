@@ -285,12 +285,14 @@ func (b *DraftBlob) removeDelete(kind, key string) {
 
 // readDraftBlob is a side-effect-free read of the org's draft blob — an empty
 // blob, version 0, zero time if no row exists yet (the row is created lazily on
-// the first write).
-func (s *Store) readDraftBlob(ctx context.Context, orgID uuid.UUID) (DraftBlob, int64, time.Time, error) {
+// the first write). db lets a caller already inside writeDraftBlobVersioned's
+// transaction (tx) reuse that SAME connection instead of checking out another
+// one from the pool — see identityIndex's doc comment for why that matters.
+func (s *Store) readDraftBlob(ctx context.Context, db dbtx, orgID uuid.UUID) (DraftBlob, int64, time.Time, error) {
 	var raw []byte
 	var ver int64
 	var updatedAt time.Time
-	err := s.pool.QueryRow(ctx, `SELECT draft, base_version, updated_at FROM xchats.kbd_draft WHERE organization_id = $1`, orgID).
+	err := db.QueryRow(ctx, `SELECT draft, base_version, updated_at FROM xchats.kbd_draft WHERE organization_id = $1`, orgID).
 		Scan(&raw, &ver, &updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftBlob{}, 0, time.Time{}, nil
@@ -311,15 +313,20 @@ func (s *Store) readDraftBlob(ctx context.Context, orgID uuid.UUID) (DraftBlob, 
 // concurrency token clients echo via If-Match (doc 9 · kbd_draft.base_version).
 // 0 if no draft activity has happened yet.
 func (s *Store) DraftBaseVersion(ctx context.Context, orgID uuid.UUID) (int64, error) {
-	_, ver, _, err := s.readDraftBlob(ctx, orgID)
+	_, ver, _, err := s.readDraftBlob(ctx, s.pool, orgID)
 	return ver, err
 }
 
 // writeDraftBlob runs mutate over the org's draft blob inside a row-locked
 // transaction (SELECT ... FOR UPDATE), so concurrent writers serialize instead
 // of racing, then persists the result and bumps base_version. This is the ONLY
-// way the blob is written for every pre-existing (non-MCP) caller.
-func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, mutate func(*DraftBlob) error) error {
+// way the blob is written for every pre-existing (non-MCP) caller. mutate
+// receives the transaction itself (as a dbtx) so a closure that needs to read
+// something else (currentTopic and friends, IdentityIndex) can run that read
+// on the SAME already-locked connection — see identityIndex's doc comment for
+// why reaching for s.pool instead, mid-transaction, is a deadlock risk under
+// concurrent writers.
+func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, mutate func(dbtx, *DraftBlob) error) error {
 	_, err := s.writeDraftBlobVersioned(ctx, orgID, nil, mutate)
 	return err
 }
@@ -332,7 +339,7 @@ func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, mutate func
 // callers never conflict on version, unchanged from before this existed).
 // Returns the resulting base_version either way, so a caller can report it
 // back (kb_summary's draft_version, an upsert result's new version).
-func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, expectedVersion *int64, mutate func(*DraftBlob) error) (int64, error) {
+func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, expectedVersion *int64, mutate func(dbtx, *DraftBlob) error) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -358,7 +365,7 @@ func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, ex
 		return 0, ErrStale
 	}
 
-	if err := mutate(&blob); err != nil {
+	if err := mutate(tx, &blob); err != nil {
 		return 0, err
 	}
 
@@ -384,7 +391,7 @@ func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, ex
 // ClearDraft discards every pending edit ("Отменить изменения") — a plain reset
 // of the blob to empty. Live rows are untouched.
 func (s *Store) ClearDraft(ctx context.Context, orgID uuid.UUID) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
 		*b = DraftBlob{}
 		return nil
 	})
@@ -532,11 +539,11 @@ type DraftView struct {
 // Draft assembles the merged working view: live rows, overlaid by pending blob
 // entries, with entities under a Deletes[] marker suppressed. Side-effect-free.
 func (s *Store) Draft(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
-	blob, ver, updatedAt, err := s.readDraftBlob(ctx, orgID)
+	blob, ver, updatedAt, err := s.readDraftBlob(ctx, s.pool, orgID)
 	if err != nil {
 		return nil, err
 	}
-	v, err := s.mergedView(ctx, orgID, blob, ver, updatedAt)
+	v, err := s.mergedView(ctx, s.pool, orgID, blob, ver, updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -563,7 +570,14 @@ func (s *Store) Draft(ctx context.Context, orgID uuid.UUID) (*DraftView, error) 
 // Playground work — the two flows stay fully separate (see plan "Playground
 // redesign").
 func (s *Store) LiveView(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
-	v, err := s.mergedView(ctx, orgID, DraftBlob{}, 0, time.Time{})
+	return s.liveView(ctx, s.pool, orgID)
+}
+
+// liveView is LiveView's db-parameterized core — see identityIndex's doc
+// comment for why a caller already inside writeDraftBlobVersioned's
+// transaction must pass tx here instead of letting this reach for s.pool.
+func (s *Store) liveView(ctx context.Context, db dbtx, orgID uuid.UUID) (*DraftView, error) {
+	v, err := s.mergedView(ctx, db, orgID, DraftBlob{}, 0, time.Time{})
 	if err != nil {
 		return nil, err
 	}
@@ -581,7 +595,12 @@ func (s *Store) LiveView(ctx context.Context, orgID uuid.UUID) (*DraftView, erro
 // time it is written (the common-write-behavior contract every MCP upsert
 // follows), so presenting it standalone needs no live read at all.
 func (s *Store) DraftOnly(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
-	blob, ver, updatedAt, err := s.readDraftBlob(ctx, orgID)
+	return s.draftOnly(ctx, s.pool, orgID)
+}
+
+// draftOnly is DraftOnly's db-parameterized core (see liveView).
+func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*DraftView, error) {
+	blob, ver, updatedAt, err := s.readDraftBlob(ctx, db, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -693,9 +712,9 @@ func (s *Store) DraftOnly(ctx context.Context, orgID uuid.UUID) (*DraftView, err
 // overlay loop below is a no-op and every row stays Draft:false). It fills
 // everything except Materials/Requests, which only Draft queries (LiveView has
 // no playground concept of them).
-func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt time.Time) (*DraftView, error) {
+func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt time.Time) (*DraftView, error) {
 	v := &DraftView{Config: DraftConfig{OrganizationID: orgID, ReplyMaxWords: 120, BaseVersion: ver, UpdatedAt: updatedAt}}
-	err := s.pool.QueryRow(ctx, `SELECT persona, mission, guardrails, language_policy, reply_max_words
+	err := db.QueryRow(ctx, `SELECT persona, mission, guardrails, language_policy, reply_max_words
 		FROM xchats.ai_assistants WHERE organization_id = $1`, orgID).
 		Scan(&v.Config.Persona, &v.Config.Mission, &v.Config.Guardrails, &v.Config.LanguagePolicy, &v.Config.ReplyMaxWords)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -724,7 +743,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// topics
 	topicIdx := map[string]int{}
-	trows, err := s.pool.Query(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
+	trows, err := db.Query(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
 		explainer_videos, narration_audio_files, reference_documents, updated_at
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
@@ -762,7 +781,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// tariffs
 	tariffIdx := map[string]int{}
-	trrows, err := s.pool.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
+	trrows, err := db.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
 		disadvantages, sales_status, featured_image, pricing_images, explainer_videos, terms_documents, updated_at
 		FROM xchats.ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
@@ -807,7 +826,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// products (availability is a dead legacy column — not selected)
 	productIdx := map[string]int{}
-	prows, err := s.pool.Query(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
+	prows, err := db.Query(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
 		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
 		manual_documents, guarantee_documents, specification_documents, updated_at
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
@@ -855,7 +874,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// contacts — a true singleton: at most one live row, at most one pending
 	// blob entry, both keyed by nothing but the org.
-	crows, err := s.pool.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
+	crows, err := db.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram, contact_card_image, location_map_image,
 		company_legal_documents, updated_at
 		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
@@ -899,7 +918,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 
 	// policies — an exact clone of the contacts section above (singleton
 	// table, slug domain.PolicySlug).
-	polrows, err := s.pool.Query(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
+	polrows, err := db.Query(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		prepayment, installment, return_period_in_days, warranty, outside_zones_note,
 		commerce_policy_documents, updated_at
 		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
@@ -944,7 +963,7 @@ func (s *Store) mergedView(ctx context.Context, orgID uuid.UUID, blob DraftBlob,
 	// zones — live rows overlaid by pending blob.DeliveryZones entries, same
 	// pattern as tariffs/products above (no media columns in v1).
 	zoneIdx := map[string]int{}
-	liveZones, err := loadZoneRows(ctx, s.pool, orgID)
+	liveZones, err := loadZoneRows(ctx, db, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -1022,7 +1041,7 @@ type ConfigPatch struct {
 
 // PatchConfig stages config edits in the draft blob (only non-nil fields).
 func (s *Store) PatchConfig(ctx context.Context, orgID uuid.UUID, p ConfigPatch) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
 		if p.Persona != nil {
 			b.Config.Persona = p.Persona
 		}
@@ -1053,8 +1072,8 @@ type TopicInput struct {
 // caller — the Playground editor, which has no media inputs — can never
 // blank out media an MCP tool already staged on the same topic.
 func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, in TopicInput) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		cur, err := s.currentTopic(ctx, orgID, in.Slug, b)
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentTopic(ctx, db, orgID, in.Slug, b)
 		if err != nil {
 			return err
 		}
@@ -1068,7 +1087,7 @@ func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, in TopicInput)
 // DeleteTopic stages a topic removal by slug (drops any pending edit and marks
 // the live row, if any, for deletion at approve).
 func (s *Store) DeleteTopic(ctx context.Context, orgID uuid.UUID, slug string) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
 		b.removeTopic(slug)
 		b.addDelete("topic", slug)
 		return nil
@@ -1087,8 +1106,8 @@ type TariffInput struct {
 // Merges onto the tariff's current shape (currentTariff) so this text-only
 // caller never blanks out media/sales_status an MCP tool already staged.
 func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, in TariffInput) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		cur, err := s.currentTariff(ctx, orgID, in.Ref, b)
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentTariff(ctx, db, orgID, in.Ref, b)
 		if err != nil {
 			return err
 		}
@@ -1104,7 +1123,7 @@ func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, in TariffInpu
 
 // DeleteTariff stages removal of a tariff by ref.
 func (s *Store) DeleteTariff(ctx context.Context, orgID uuid.UUID, ref string) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
 		b.removeTariff(ref)
 		b.addDelete("tariff", ref)
 		return nil
@@ -1128,8 +1147,8 @@ type ProductInput struct {
 // never read here — cannot blank out in_stock/sales_status/media an MCP tool
 // already staged.
 func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, in ProductInput) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		cur, err := s.currentProduct(ctx, orgID, in.Ref, b)
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentProduct(ctx, db, orgID, in.Ref, b)
 		if err != nil {
 			return err
 		}
@@ -1143,7 +1162,7 @@ func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, in ProductIn
 
 // DeleteProduct stages removal of a product by ref.
 func (s *Store) DeleteProduct(ctx context.Context, orgID uuid.UUID, ref string) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
 		b.removeProduct(ref)
 		b.addDelete("product", ref)
 		return nil
@@ -1168,8 +1187,8 @@ type ContactPatch struct {
 // PatchContacts stages an edit to the org's singleton support-contact row,
 // starting from its current merged shape so omitted fields stay unchanged.
 func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, p ContactPatch) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		cur, err := s.currentContact(ctx, orgID, b)
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentContact(ctx, db, orgID, b)
 		if err != nil {
 			return err
 		}
@@ -1227,8 +1246,8 @@ type PolicyPatch struct {
 // starting from its current merged shape so omitted fields stay unchanged — an
 // exact clone of PatchContacts.
 func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, p PolicyPatch) error {
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-		cur, err := s.currentPolicy(ctx, orgID, b)
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentPolicy(ctx, db, orgID, b)
 		if err != nil {
 			return err
 		}
@@ -1270,8 +1289,8 @@ func (s *Store) SetFactField(ctx context.Context, orgID uuid.UUID, table, slug, 
 	prov := `{"source":"confirm_fact"}`
 	switch table {
 	case "tariff":
-		return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-			cur, err := s.currentTariff(ctx, orgID, slug, b)
+		return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+			cur, err := s.currentTariff(ctx, db, orgID, slug, b)
 			if err != nil {
 				return err
 			}
@@ -1283,8 +1302,8 @@ func (s *Store) SetFactField(ctx context.Context, orgID uuid.UUID, table, slug, 
 			return nil
 		})
 	case "product":
-		return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
-			cur, err := s.currentProduct(ctx, orgID, slug, b)
+		return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+			cur, err := s.currentProduct(ctx, db, orgID, slug, b)
 			if err != nil {
 				return err
 			}
@@ -1402,14 +1421,14 @@ func setPolicyPatchField(p *PolicyPatch, field, value string) bool {
 // whole-row Upsert* methods below, SetFactField, and the MCP patch-based
 // upserts (mcp.go) — starts here, so a partial edit never blanks out a
 // field it did not intend to touch.
-func (s *Store) currentTopic(ctx context.Context, orgID uuid.UUID, slug string, b *DraftBlob) (DraftTopic, error) {
+func (s *Store) currentTopic(ctx context.Context, db dbtx, orgID uuid.UUID, slug string, b *DraftBlob) (DraftTopic, error) {
 	for _, t := range b.Topics {
 		if t.Slug == slug {
 			return t, nil
 		}
 	}
 	var t DraftTopic
-	err := s.pool.QueryRow(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
+	err := db.QueryRow(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
 		explainer_videos, narration_audio_files, reference_documents
 		FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`, orgID, slug).
 		Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
@@ -1420,14 +1439,14 @@ func (s *Store) currentTopic(ctx context.Context, orgID uuid.UUID, slug string, 
 	return t, err
 }
 
-func (s *Store) currentTariff(ctx context.Context, orgID uuid.UUID, ref string, b *DraftBlob) (DraftTariff, error) {
+func (s *Store) currentTariff(ctx context.Context, db dbtx, orgID uuid.UUID, ref string, b *DraftBlob) (DraftTariff, error) {
 	for _, t := range b.Tariffs {
 		if t.Ref == ref {
 			return t, nil
 		}
 	}
 	var t DraftTariff
-	err := s.pool.QueryRow(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
+	err := db.QueryRow(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
 		disadvantages, sales_status, featured_image, pricing_images, explainer_videos, terms_documents
 		FROM xchats.ai_tariffs WHERE organization_id=$1 AND ref=$2`, orgID, ref).
 		Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages,
@@ -1438,14 +1457,14 @@ func (s *Store) currentTariff(ctx context.Context, orgID uuid.UUID, ref string, 
 	return t, err
 }
 
-func (s *Store) currentProduct(ctx context.Context, orgID uuid.UUID, ref string, b *DraftBlob) (DraftProduct, error) {
+func (s *Store) currentProduct(ctx context.Context, db dbtx, orgID uuid.UUID, ref string, b *DraftBlob) (DraftProduct, error) {
 	for _, p := range b.Products {
 		if p.Ref == ref {
 			return p, nil
 		}
 	}
 	var p DraftProduct
-	err := s.pool.QueryRow(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
+	err := db.QueryRow(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
 		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
 		manual_documents, guarantee_documents, specification_documents
 		FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).
@@ -1460,14 +1479,14 @@ func (s *Store) currentProduct(ctx context.Context, orgID uuid.UUID, ref string,
 
 // currentZone resolves the merged current shape of a delivery zone — the
 // same pattern as currentTariff/currentProduct, over ai_delivery_zones.
-func (s *Store) currentZone(ctx context.Context, orgID uuid.UUID, ref string, b *DraftBlob) (DraftDeliveryZone, error) {
+func (s *Store) currentZone(ctx context.Context, db dbtx, orgID uuid.UUID, ref string, b *DraftBlob) (DraftDeliveryZone, error) {
 	for _, z := range b.DeliveryZones {
 		if z.Ref == ref {
 			return z, nil
 		}
 	}
 	var z DraftDeliveryZone
-	err := s.pool.QueryRow(ctx, `SELECT ref, name, zone_level, parent_ref, delivery_available, delivery_cost,
+	err := db.QueryRow(ctx, `SELECT ref, name, zone_level, parent_ref, delivery_available, delivery_cost,
 		delivery_in_days, notes, sales_status
 		FROM xchats.ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, ref).
 		Scan(&z.Ref, &z.Name, &z.ZoneLevel, &z.ParentRef, &z.DeliveryAvailable, &z.DeliveryCost,
@@ -1481,13 +1500,13 @@ func (s *Store) currentZone(ctx context.Context, orgID uuid.UUID, ref string, b 
 // currentContact resolves the merged current shape of the org's singleton
 // contact row: the pending blob entry if one exists, else the live row, else
 // a blank scaffold.
-func (s *Store) currentContact(ctx context.Context, orgID uuid.UUID, b *DraftBlob) (DraftContact, error) {
+func (s *Store) currentContact(ctx context.Context, db dbtx, orgID uuid.UUID, b *DraftBlob) (DraftContact, error) {
 	if len(b.Contacts) > 0 {
 		return b.Contacts[0], nil
 	}
 	var c DraftContact
 	var legalInfo *string
-	err := s.pool.QueryRow(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
+	err := db.QueryRow(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram, contact_card_image, location_map_image,
 		company_legal_documents
 		FROM xchats.ai_contacts WHERE organization_id = $1`, orgID).
@@ -1503,13 +1522,13 @@ func (s *Store) currentContact(ctx context.Context, orgID uuid.UUID, b *DraftBlo
 
 // currentPolicy resolves the merged current shape of the org's singleton
 // commerce-policy row — an exact clone of currentContact.
-func (s *Store) currentPolicy(ctx context.Context, orgID uuid.UUID, b *DraftBlob) (DraftPolicy, error) {
+func (s *Store) currentPolicy(ctx context.Context, db dbtx, orgID uuid.UUID, b *DraftBlob) (DraftPolicy, error) {
 	if len(b.Policies) > 0 {
 		return b.Policies[0], nil
 	}
 	var p DraftPolicy
 	var deliveryInDays, returnPeriodInDays *string
-	err := s.pool.QueryRow(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
+	err := db.QueryRow(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		prepayment, installment, return_period_in_days, warranty, outside_zones_note, commerce_policy_documents
 		FROM xchats.ai_policies WHERE organization_id = $1`, orgID).
 		Scan(&p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
@@ -1565,7 +1584,7 @@ func (a approveSet) empty() bool {
 // key, applies matching deletes, removes the applied entries from the blob,
 // and appends an audit-log row.
 func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelector) error {
-	blob, _, _, err := s.readDraftBlob(ctx, orgID)
+	blob, _, _, err := s.readDraftBlob(ctx, s.pool, orgID)
 	if err != nil {
 		return err
 	}
@@ -1671,7 +1690,7 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 	// Remove the applied entries from the blob. A crash between the two commits
 	// leaves an already-materialized entry sitting in the blob; a re-approve of it
 	// is a harmless no-op upsert (same values), so this need not share the tx.
-	return s.writeDraftBlob(ctx, orgID, func(b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
 		for _, t := range set.topics {
 			b.removeTopic(t.Slug)
 		}

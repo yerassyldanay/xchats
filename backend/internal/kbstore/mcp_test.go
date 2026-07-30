@@ -3,6 +3,8 @@ package kbstore_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -436,5 +438,180 @@ func TestLegacyUpsertTopic_PreservesMCPAuthoredMedia(t *testing.T) {
 	}
 	if row.Title != "Как заказать (ред.)" {
 		t.Fatalf("legacy edit did not apply: %+v", row)
+	}
+}
+
+// TestReadRecords_CrossOrgIsolation is plan/mcp.md §9's "tenant isolation"
+// validation item at the read path: kb_summary (IdentityIndex) and kb_read
+// (ReadRecords) for one organization must never surface another
+// organization's draft or live records, even though both share the same
+// kbd_draft/ai_* tables keyed only by organization_id.
+func TestReadRecords_CrossOrgIsolation(t *testing.T) {
+	kb, orgA, st := newTestKB(t)
+	ctx := context.Background()
+	orgBRow, err := st.SeedOrganization(ctx, "org-b")
+	if err != nil {
+		t.Fatalf("seed org b: %v", err)
+	}
+	orgB := orgBRow.ID
+
+	if _, err := kb.MCPUpsertProduct(ctx, orgA, "a-product", kbstore.ProductChanges{
+		Name: strp("Товар A"), InStock: boolp(true),
+	}, nil, ""); err != nil {
+		t.Fatalf("seed org a product: %v", err)
+	}
+	if _, err := kb.MCPUpsertProduct(ctx, orgB, "b-product", kbstore.ProductChanges{
+		Name: strp("Товар B"), InStock: boolp(true),
+	}, nil, ""); err != nil {
+		t.Fatalf("seed org b product: %v", err)
+	}
+
+	idxA, err := kb.IdentityIndex(ctx, orgA, nil)
+	if err != nil {
+		t.Fatalf("identity index a: %v", err)
+	}
+	foundOwn := false
+	for _, id := range idxA {
+		if id.Key == "b-product" {
+			t.Fatalf("org A's identity index leaked org B's record: %+v", id)
+		}
+		if id.Key == "a-product" {
+			foundOwn = true
+		}
+	}
+	if !foundOwn {
+		t.Fatalf("org A's own product missing from its identity index: %+v", idxA)
+	}
+
+	pageA, err := kb.ReadRecords(ctx, orgA, []string{"product"}, "both", "", "", 0, "")
+	if err != nil {
+		t.Fatalf("read records a: %v", err)
+	}
+	for _, rec := range pageA.Items {
+		if row := rec.Data.(kbstore.ProductRow); row.Ref == "b-product" {
+			t.Fatalf("org A's kb_read leaked org B's record: %+v", row)
+		}
+	}
+
+	pageB, err := kb.ReadRecords(ctx, orgB, []string{"product"}, "both", "", "", 0, "")
+	if err != nil {
+		t.Fatalf("read records b: %v", err)
+	}
+	for _, rec := range pageB.Items {
+		if row := rec.Data.(kbstore.ProductRow); row.Ref == "a-product" {
+			t.Fatalf("org B's kb_read leaked org A's record: %+v", row)
+		}
+	}
+
+	// A key-scoped read for the OTHER org's key must come back empty, not
+	// the other org's record — key matching alone must never cross orgID.
+	pageCrossKey, err := kb.ReadRecords(ctx, orgA, []string{"product"}, "both", "b-product", "", 0, "")
+	if err != nil {
+		t.Fatalf("read records cross-key: %v", err)
+	}
+	if len(pageCrossKey.Items) != 0 {
+		t.Fatalf("org A's kb_read(key=%q) should find nothing, got %+v", "b-product", pageCrossKey.Items)
+	}
+}
+
+// TestReadRecords_PaginationCoversAllItemsExactlyOnce is plan/mcp.md §9's
+// "pagination" validation item: following next_cursor to the end must
+// return every record exactly once with no gaps or repeats.
+func TestReadRecords_PaginationCoversAllItemsExactlyOnce(t *testing.T) {
+	kb, orgID, _ := newTestKB(t)
+	ctx := context.Background()
+	const n = 7
+	for i := 0; i < n; i++ {
+		ref := fmt.Sprintf("product-%02d", i)
+		if _, err := kb.MCPUpsertProduct(ctx, orgID, ref, kbstore.ProductChanges{
+			Name: strp(fmt.Sprintf("Товар %02d", i)), InStock: boolp(true),
+		}, nil, ""); err != nil {
+			t.Fatalf("seed %s: %v", ref, err)
+		}
+	}
+
+	seen := map[string]bool{}
+	cursor := ""
+	pages := 0
+	for {
+		page, err := kb.ReadRecords(ctx, orgID, []string{"product"}, "draft", "", "", 3, cursor)
+		if err != nil {
+			t.Fatalf("read page: %v", err)
+		}
+		pages++
+		if pages > n {
+			t.Fatalf("pagination did not terminate after %d pages", pages)
+		}
+		for _, rec := range page.Items {
+			row := rec.Data.(kbstore.ProductRow)
+			if seen[row.Ref] {
+				t.Fatalf("record %s returned more than once across pages", row.Ref)
+			}
+			seen[row.Ref] = true
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if len(seen) != n {
+		t.Fatalf("expected %d distinct records across all pages, got %d: %v", n, len(seen), seen)
+	}
+	if pages < 2 {
+		t.Fatalf("expected the small page size (3) to force at least 2 pages for %d records, got %d", n, pages)
+	}
+}
+
+// TestMCPUpsert_ConcurrentWritesSerializeWithoutLostUpdates is plan/mcp.md
+// §9's "concurrent draft writes" validation item: writeDraftBlobVersioned
+// takes a row-level FOR UPDATE lock (draft.go), so N real concurrent writers
+// to the SAME draft row must all serialize through it and every write must
+// land — none silently lost to a lost-update race.
+func TestMCPUpsert_ConcurrentWritesSerializeWithoutLostUpdates(t *testing.T) {
+	kb, orgID, _ := newTestKB(t)
+	ctx := context.Background()
+	if _, err := kb.MCPUpsertTopic(ctx, orgID, "faq", kbstore.TopicChanges{
+		Title: strp("FAQ"), BodyMD: strp("v0"),
+	}, nil, ""); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	const n = 10
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			_, err := kb.MCPUpsertTopic(ctx, orgID, "faq", kbstore.TopicChanges{
+				BodyMD: strp(fmt.Sprintf("v%d", i+1)),
+			}, nil, "")
+			errs[i] = err
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent writer %d failed: %v", i, err)
+		}
+	}
+
+	final, err := kb.DraftBaseVersion(ctx, orgID)
+	if err != nil {
+		t.Fatalf("base version: %v", err)
+	}
+	// 1 (seed write) + n concurrent writes: every write serialized through
+	// the row lock must be counted, or this comes up short.
+	if final != int64(1+n) {
+		t.Fatalf("expected base_version %d after %d serialized writes, got %d", 1+n, n, final)
+	}
+
+	afterAll, err := kb.ReadRecords(ctx, orgID, []string{"topic"}, "draft", "faq", "", 0, "")
+	if err != nil {
+		t.Fatalf("final read: %v", err)
+	}
+	if len(afterAll.Items) != 1 {
+		t.Fatalf("expected exactly one draft topic to survive concurrent writes, got %+v", afterAll.Items)
 	}
 }
