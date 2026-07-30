@@ -1,50 +1,97 @@
-# MCP Connector, Authentication, and KB Approval
+# MCP Connector for Xchats Knowledge Base
 
-[`DECISIONS.md`](DECISIONS.md) and the eval-canonical schema are authoritative.
-This document proposes the first production implementation for
-`https://xchats.kz/mcp`. File upload and material-management tools are out of
-scope.
+This document defines the first implementation of `https://xchats.kz/mcp`.
+`DECISIONS.md` and the canonical database schema remain authoritative.
 
-## Outcome
+## 1. Scope
 
-Claude, ChatGPT, and other compatible hosts can read the live and pending KB,
-propose partial changes, and render approval widgets in chat. A model can never
-approve its own change.
+ChatGPT, Claude, and other compatible MCP hosts can:
+
+- authenticate an existing Xchats user;
+- inspect the live and draft knowledge bases;
+- detect possible duplicates before writing;
+- create, partially update, or delete draft records;
+- show the knowledge base and draft inside a chat widget;
+- upload media and attach it to supported KB fields.
+
+MCP changes go directly to `kbd_draft`. There is no approval for every draft
+change. The single safety boundary remains:
 
 ```text
-model proposes → human applies to kbd_draft → human publishes to live ai_*
+MCP change → kbd_draft → human review → live ai_* tables
 ```
 
-Two approvals are intentional: the first protects the shared draft; the second
-protects customer-facing knowledge.
+Publishing stays in the existing authenticated Xchats review page for v1. The
+chat widget links to that page. An in-chat publish tool can be added later.
 
-The first approval is an MCP-specific ingress gate, not a second lifecycle on
-`kbd_draft`: it closes when the external proposal is accepted or rejected.
-The existing first-party builder keeps its current single draft-to-live gate.
-Record this external-connector exception in `DECISIONS.md` before implementation.
+## 2. Data boundaries
 
-## Authentication and authorization
+There are seven writable live KB tables:
 
-Use OAuth 2.1 authorization code flow with PKCE (`S256`). Use a maintained OAuth
-implementation; do not implement protocol or cryptography from scratch.
+| KB type | Live table | Draft section | Stable key |
+|---|---|---|---|
+| Assistant | `ai_assistants` | `assistant` | `main` |
+| Topic | `ai_topics` | `topics` | `slug` |
+| Product | `ai_products` | `products` | `ref` |
+| Tariff | `ai_tariffs` | `tariffs` | `ref` |
+| Contacts | `ai_contacts` | `contacts` | `main` |
+| Policies | `ai_policies` | `policies` | `main` |
+| Delivery zone | `ai_delivery_zones` | `delivery_zones` | `ref` |
 
-1. The host calls `/mcp` without a token.
-2. xchats returns `401` with `WWW-Authenticate` pointing to protected-resource
-   metadata.
-3. The host opens `/oauth/authorize` in a browser.
-4. The existing `xchats_session` cookie identifies an already logged-in user;
-   otherwise the user signs in with the existing email/password page.
-5. xchats shows requested scopes and consent, then returns a one-time code.
-6. The host exchanges the code at `/oauth/token` and stores access/refresh
-   tokens.
-7. Every MCP call sends `Authorization: Bearer <access-token>`.
+`ai_audit_log` is not writable through MCP. Files belong to `kbd_materials`;
+the removed `ai_assets` and `ai_draft_assets` tables must not be recreated.
 
-The web cookie is never given to the host. Use short-lived signed JWT access
-tokens and rotating opaque refresh tokens stored only as hashes. Validate
-signature, issuer, audience=`https://xchats.kz/mcp`, expiry, scopes, user status,
-and current organization membership on every call.
+The current `kbd_draft` shape does not contain delivery zones. Before enabling
+the delivery-zone MCP tool, add `delivery_zones: []` to the draft schema,
+validation, diff, materialization, and frontend types.
 
-Required endpoints:
+The draft stores deltas, not a second copy of the live KB. A draft entry with
+the same natural key shadows its live row. The backend reconstructs a complete
+draft row when an MCP tool submits a partial update.
+
+## 3. Authentication
+
+Use OAuth 2.1 authorization-code flow with PKCE (`S256`).
+
+The browser cookie and OAuth access token have different jobs:
+
+- The existing Xchats cookie authenticates the user only on the browser login
+  and consent pages.
+- The MCP host stores an OAuth access token and sends it on every MCP request:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+The cookie is never given to ChatGPT or Claude. The access token may be a
+short-lived signed JWT or an opaque token. A JWT should contain or resolve to
+`user_id`, `organization_id`, scopes, audience, issuer, and expiry. The chosen
+organization is bound during authorization; tools never accept an arbitrary
+`organization_id`.
+
+The backend must still verify that the user is active and belongs to the bound
+organization on every request.
+
+### First connection
+
+1. The user adds `https://xchats.kz/mcp` as a connector.
+2. The host calls `/mcp` without a token.
+3. Xchats returns `401` with OAuth protected-resource metadata.
+4. The host opens the Xchats authorization page.
+5. The existing login cookie is used, or the user signs in with email/password.
+6. The user selects an organization and grants the requested permissions.
+7. The host exchanges the authorization code for access and refresh tokens.
+8. The host stores the tokens and sends the access token with every MCP call.
+
+Minimum scopes:
+
+```text
+kb:read
+kb:draft:write
+media:write
+```
+
+Required discovery and protocol surfaces:
 
 ```text
 POST /mcp
@@ -53,131 +100,311 @@ GET  /.well-known/oauth-authorization-server
 GET  /oauth/authorize
 POST /oauth/token
 POST /oauth/revoke
-POST /oauth/register
-GET  /oauth/jwks.json
+GET  /oauth/jwks.json                 # when JWT access tokens are used
 ```
 
-Prefer Client ID Metadata Documents; keep dynamic client registration as a
-rate-limited fallback for compatible hosts. Validate exact redirect URIs and
-protect metadata fetching from SSRF.
+Support Client ID Metadata Documents. Dynamic client registration can remain a
+compatibility fallback. Access tokens must be audience-bound to the MCP
+resource, short-lived, revocable, and never accepted in query parameters.
 
-Scopes:
+## 4. Duplicate prevention
+
+Duplicate prevention is based primarily on identity, not full record content:
+
+- `ref` for products, tariffs, and delivery zones;
+- `slug` for topics;
+- `main` for singleton tables;
+- title/name as a secondary comparison.
+
+The model follows this sequence:
 
 ```text
-kb:read          read live, pending, effective, and diff views
-kb:draft:write   create proposals and apply an approved proposal
-kb:publish       preview and publish the reviewed draft
+kb_summary → possible match → kb_read exact record → upsert or create
 ```
 
-## Storage additions
+The backend repeats the check because a model may skip a step:
 
-Add OAuth client/grant, authorization-code, and hashed refresh-token tables.
-Add:
+1. Exact natural-key match means update.
+2. Exact normalized title/name with another key means return a conflict.
+3. Similar titles return candidates and require the user to choose.
+4. No match means create.
+
+Internal database UUIDs are not identity keys and are not exposed unless they
+are required media references.
+
+## 5. MCP tools
+
+The initial contract has **12 tools**:
+
+- 7 typed draft-upsert tools;
+- 4 shared knowledge tools;
+- 1 widget-oriented media-upload tool.
+
+`organization_id` and `user_id` always come from the access token.
+`kb_read`, `kb_summary`, `kb_info`, and mutation results may attach the shared
+KB Manager resource with the appropriate initial view.
+
+### Common write behavior
+
+Every upsert accepts:
 
 ```text
-kb_change_proposals
-  id, organization_id, actor_user_id, entity_kind, entity_key, operation,
-  before_json, after_json, draft_version, status, expires_at, created_at
-
-kb_publish_reviews
-  id, organization_id, actor_user_id, draft_version, draft_hash,
-  diff_json, status, expires_at, created_at
+expected_draft_version?  optimistic-concurrency value
+provenance?              { source_url?, material_ids? }
 ```
 
-Approval secrets are one-time, hashed, and bound to the OAuth user,
-organization, exact content, and draft version. Send the plaintext secret only
-in widget-only tool-result `_meta`; never expose it to the model or transcript.
+For collection tables, the natural key is optional:
 
-Before MCP writes are enabled, extend `kbd_draft` to the complete canonical row
-shape, including `in_stock`, `sales_status`, and delivery zones. This is needed
-because every MCP write must pass through the draft; zones must no longer be
-live-only.
+- existing key: partially update that record;
+- new supplied key: create with that key;
+- missing key: generate a stable key from the title/name after duplicate checks.
 
-## MCP tools
+Omitted fields remain unchanged. Explicit `null` clears a nullable field.
+Create operations must still supply all canonical required fields. The backend
+merges the patch with the current draft/live row and stores a complete row in
+`kbd_draft`.
 
-The initial contract has 18 tools: seven reads, seven proposal tools, and four
-workflow tools. `organization_id` and `user_id` always come from the token.
+### Typed upsert tools
 
-Common read parameter:
-
-```text
-view: live | draft | effective | diff
-```
-
-`effective` means live rows overlaid with pending draft changes. Collection
-reads also accept their natural key, `query`, `limit` (max 100), and `cursor`.
-
-| Tool | Parameters beyond `view` | Responsibility |
+| Tool | Main parameters | Responsibility |
 |---|---|---|
-| `kb_assistant_read` | — | Read assistant configuration. |
-| `kb_topics_read` | `slug?`, `query?`, `limit?`, `cursor?` | Read/search topics. |
-| `kb_products_read` | `ref?`, `query?`, `limit?`, `cursor?` | Read/search products. |
-| `kb_tariffs_read` | `ref?`, `query?`, `limit?`, `cursor?` | Read/search tariffs. |
-| `kb_contacts_read` | — | Read the contacts singleton. |
-| `kb_policies_read` | — | Read the policies singleton. |
-| `kb_delivery_zones_read` | `ref?`, `query?`, `limit?`, `cursor?` | Read/search zones. |
+| `kb_assistant_upsert` | `changes{persona?, mission?, guardrails?, language_policy?, reply_max_words?}` | Create or patch the assistant singleton in draft. |
+| `kb_topic_upsert` | `slug?`, `changes{title?, body_md?, featured_image?, illustration_images?, explainer_videos?, narration_audio_files?, reference_documents?}` | Create or patch a topic. |
+| `kb_product_upsert` | `ref?`, `changes{name?, price?, description?, category?, in_stock?, sales_status?, featured_image?, gallery_images?, demo_videos?, audio_description_files?, certificate_documents?, manual_documents?, guarantee_documents?, specification_documents?}` | Create or patch a product. `in_stock` is required on create. |
+| `kb_tariff_upsert` | `ref?`, `changes{name?, price?, limit_text?, fee?, summary?, pricing_type?, advantages?, disadvantages?, sales_status?, featured_image?, pricing_images?, explainer_videos?, terms_documents?}` | Create or patch a tariff. `pricing_type` is required on create. |
+| `kb_contacts_upsert` | `changes{whatsapp?, email?, address?, legal_information?, callback_time?, working_hours?, phone?, website?, instagram?, contact_card_image?, location_map_image?, company_legal_documents?}` | Create or patch the contacts singleton. |
+| `kb_policies_upsert` | `changes{delivery_cost?, delivery_in_days?, free_delivery_from?, min_order?, prepayment?, installment?, return_period_in_days?, warranty?, outside_zones_note?, commerce_policy_documents?}` | Create or patch the policies singleton. |
+| `kb_delivery_zone_upsert` | `ref?`, `changes{name?, zone_level?, parent_ref?, delivery_available?, delivery_cost?, delivery_in_days?, notes?, sales_status?}` | Create or patch a delivery zone. `delivery_available` is required on create. |
 
-Every proposal receives `expected_draft_version`. `create` requires a missing
-natural key, `patch` preserves omitted fields, and `delete` stages deletion.
-`null` clears a nullable field; empty/whitespace-only scalar values are rejected.
+### Shared tools
 
-| Tool | Parameters | Responsibility |
-|---|---|---|
-| `kb_assistant_propose_change` | `changes{persona?, mission?, guardrails?, language_policy?, reply_max_words?}` | Patch the assistant singleton. |
-| `kb_topic_propose_change` | `operation`, `slug`, `changes{title?, body_md?}` | Create, patch, or delete a topic. |
-| `kb_product_propose_change` | `operation`, `ref`, `changes{name?, price?, description?, category?, in_stock?, sales_status?}` | Create, patch, or delete a product. `in_stock` is required on create. |
-| `kb_tariff_propose_change` | `operation`, `ref`, `changes{name?, price?, limit_text?, fee?, summary?, pricing_type?, advantages?, disadvantages?, sales_status?}` | Create, patch, or delete a tariff. |
-| `kb_contacts_propose_change` | `operation=upsert|delete`, `changes{whatsapp?, email?, address?, legal_information?, callback_time?, working_hours?, phone?, website?, instagram?}` | Change the contacts singleton. |
-| `kb_policies_propose_change` | `operation=upsert|delete`, `changes{delivery_cost?, delivery_in_days?, free_delivery_from?, min_order?, prepayment?, installment?, return_period_in_days?, warranty?, outside_zones_note?}` | Change the policies singleton. |
-| `kb_delivery_zone_propose_change` | `operation`, `ref`, `changes{name?, zone_level?, parent_ref?, delivery_available?, delivery_cost?, delivery_in_days?, notes?, sales_status?}` | Create, patch, or delete a zone. `delivery_available` is required on create. |
+#### `kb_read`
 
-Media columns are returned as user-readable attachment summaries but are not
-accepted in proposal parameters until file support is implemented.
+Reads complete records for the model or widget.
 
-Workflow tools:
+```text
+types?    one or more KB types
+source    live | draft | both (default: both)
+key?      exact ref, slug, or main
+query?    text search
+limit?    default 50, maximum 100
+cursor?   pagination cursor
+```
 
-| Tool | Visibility | Parameters | Responsibility |
-|---|---|---|---|
-| `kb_draft_apply_change` | app only | `proposal_id`, `approval_token` | Apply the exact reviewed proposal to `kbd_draft`. |
-| `kb_draft_reject_change` | app only | `proposal_id`, `approval_token`, `reason?` | Reject without changing the draft. |
-| `kb_publish_preview` | model | `expected_draft_version` | Validate the complete effective KB and render the publish diff. |
-| `kb_publish` | app only | `publish_review_id`, `approval_token` | Revalidate the same draft hash and publish it to live `ai_*`. |
+When `source=both`, live and draft origins remain explicit. There is no
+`effective` source.
 
-## Approval UI
+#### `kb_delete`
 
-Return one shared MCP Apps resource, for example
-`ui://xchats/kb-review.html`, from proposal and publish-preview results. The
-widget shows exact before/after values, warnings, and Approve/Reject buttons.
-It calls app-only tools through `tools/call`; those tools use
-`visibility: ["app"]`, so the model cannot invoke them.
+Adds a delete marker to the draft.
 
-Keep the authoritative proposal and review state on the server. Widget state is
-presentation-only. If `base_version` or the draft hash changed, reject with a
-stale error and render a fresh diff.
+```text
+type
+key                       ref, slug, or main
+expected_draft_version?
+```
 
-## Validation and audit
+The backend validates the type/key and blocks a delete that would make the
+publishable KB invalid.
 
-- Enforce migration `0012` names only: no `lang`, legacy aliases, or mutable
-  slugs for contacts/policies.
-- Require literal booleans for `in_stock` and `delivery_available`.
-- Reject duplicate natural keys and warn about similar names.
-- Validate tariff enums, zone parent chains, and the zone/policy exclusivity
-  rules before draft apply and again before publish.
-- Publish in one transaction, clear the published delta, invalidate the KB
-  cache, reload the response brain, and append `ai_audit_log`.
-- Redact tokens and approval secrets from logs and MCP results.
+#### `kb_summary`
 
-## Implementation order
+Returns a compact identity index for duplicate detection and widget lists.
 
-1. Make `kbd_draft` canonical and add delivery-zone draft support.
-2. Add proposal/review persistence and deterministic diff/validation services.
-3. Add OAuth discovery, authorization, token issuance, rotation, and revocation.
-4. Add the authenticated Streamable HTTP MCP server and 18 tools.
-5. Add the shared MCP Apps approval widget.
-6. Test with MCP Inspector, ChatGPT, and Claude: auth, tenant isolation,
-   duplicate/stale changes, both approvals, revocation, and failed validation.
+```text
+types?
+source    live | draft | both (default: both)
+query?
+limit?
+cursor?
+```
 
-## Protocol references
+Example result:
+
+```json
+{
+  "draft_version": 12,
+  "items": [
+    {
+      "type": "tariff",
+      "key": "business",
+      "title": "Business",
+      "exists_in_live": true,
+      "exists_in_draft": true,
+      "state": "changed"
+    }
+  ]
+}
+```
+
+It intentionally omits prices and other full content unless they are needed to
+identify the record.
+
+#### `kb_info`
+
+Explains:
+
+- available KB types and their natural keys;
+- required and supported fields;
+- duplicate-check workflow;
+- draft-only mutation rule;
+- media-field meanings;
+- how to review and publish.
+
+The same short rules should also appear in the MCP server instructions so the
+model normally does not need to call this tool.
+
+### Media upload tool
+
+#### `kb_media_upload`
+
+This widget-oriented tool creates a pending `kbd_materials` row and returns a
+short-lived signed upload target. It is app-only: the widget invokes it, not
+the model.
+
+```text
+filename
+mime_type
+size_bytes
+sha256_checksum?
+target?            { type, key, field }
+```
+
+The widget uploads bytes directly to object storage, never through a JSON MCP
+payload. Xchats verifies size, MIME type, checksum, organization ownership, and
+the object before it can be attached. The result contains `material_id`,
+upload instructions, expiry, and processing status.
+
+## 6. Widgets
+
+Tools perform backend work. Widgets are optional user interfaces rendered by
+the MCP host. A widget receives tool results and can call the same tools; it
+never bypasses backend authentication or validation.
+
+Use one reusable fullscreen resource:
+
+```text
+ui://xchats/kb-manager.html
+```
+
+It has these views:
+
+### All
+
+Shows live and draft records grouped by stable key. Each row displays:
+
+- type;
+- `ref`, `slug`, or `main`;
+- title/name;
+- presence in live and/or draft;
+- state: `published`, `new`, `changed`, or `to_delete`.
+
+This is a grouped comparison, not an `effective` merged dataset.
+
+### Live
+
+Shows the currently published KB. Type filters allow the user to view only
+products, tariffs, topics, contacts, policies, assistant configuration, or
+delivery zones.
+
+### Draft
+
+Shows only pending draft changes, including field-level differences from live.
+After an MCP upsert/delete, the widget opens this view and confirms what
+changed. It does not ask for approval for each draft edit.
+
+### Record details
+
+Loads one full record with `kb_read`. Large collections are paginated; the
+widget never loads the entire KB into one MCP result.
+
+### Media
+
+Provides file selection, drag-and-drop, preview, upload progress, processing
+status, and attachment to a supported semantic field such as
+`tariffs.pricing_images` or `products.featured_image`.
+
+The widget should prefer shared MCP Apps APIs. ChatGPT-specific file-library
+helpers may be used only after capability detection. Hosts without widget or
+file APIs still retain all model-facing tools; the fallback is the normal
+Xchats upload/review page.
+
+### Publish
+
+The draft view displays a computed diff and a **Review and publish in Xchats**
+button. For v1 this opens the existing authenticated Xchats review page, where
+the user performs the only required approval. Widget state is never treated as
+authorization.
+
+## 7. Complete tariff-image flow
+
+Assume the first-time OAuth connection above has completed.
+
+1. The user uploads a tariff image in chat and asks to add its information.
+2. The LLM reads the image and extracts candidate tariff names and fields.
+3. It calls `kb_summary(types=["tariffs"], source="both", query=...)`.
+4. For every possible match, it calls `kb_read` with the exact tariff `ref`.
+5. The media widget stores the original image through `kb_media_upload` and
+   receives a `material_id`.
+6. If the `ref` exists, the LLM calls `kb_tariff_upsert` with only changed
+   fields and attaches the material to `featured_image` or `pricing_images`.
+7. If no record matches, it creates a new tariff with a stable `ref`.
+8. If names are similar but identity is uncertain, it asks the user which
+   tariff should be updated; it does not create a duplicate.
+9. The backend repeats duplicate checks, validates canonical tariff fields,
+   reconstructs the complete row, writes it to `kbd_draft`, and increments
+   `base_version`.
+10. The KB widget opens the Draft view and shows the new/changed tariff and its
+    media.
+11. The user may continue editing; later draft changes build on the same draft.
+12. The user selects **Review and publish in Xchats**, reviews the complete
+    diff, and approves.
+13. Xchats validates again, materializes the draft into `ai_tariffs`, writes the
+    audit entry, clears the published delta, and invalidates the KB cache.
+
+## 8. Complete product-URL flow
+
+1. The user sends a coffee-machine product URL and asks to store the product.
+2. The LLM host opens the page and extracts the product name, site SKU/slug,
+   price, description, category, stock state, and supported media.
+3. It derives a candidate `ref` from the stable site SKU/slug and calls
+   `kb_summary(types=["products"], source="both", query=...)`.
+4. If a possible product exists, it calls `kb_read` for the exact record.
+5. Exact `ref` means update. The same normalized name under another `ref`
+   produces a conflict, and the LLM asks the user before proceeding.
+6. With no match, it calls `kb_product_upsert` to create the product. With a
+   match, it sends only changed fields. The URL is passed as provenance, not
+   placed into an unsupported product column.
+7. The backend stores URL provenance in `kbd_materials`, validates the product,
+   reconstructs a complete draft row, and updates `kbd_draft`.
+8. The widget shows the product under Draft and shows whether a live version
+   already exists.
+9. The user reviews and publishes through the Xchats review page.
+10. Xchats validates again, writes the live `ai_products` row, records the
+    audit event, clears the published delta, and refreshes the live KB.
+
+If the host cannot access the URL, it must ask the user to paste the product
+content. Server-side URL fetching is not part of this initial MCP contract.
+
+## 9. Validation and implementation order
+
+All writes must enforce canonical field names, required booleans, enum values,
+same-organization media references, natural-key uniqueness, zone hierarchy,
+policy/zone exclusivity, and optimistic concurrency.
+
+Implementation order:
+
+1. Add delivery zones to the `kbd_draft` shape and materialization path.
+2. Add OAuth discovery, authorization, token rotation, revocation, and tenant
+   checks.
+3. Implement the 11 model-facing KB tools.
+4. Implement `kb_media_upload` and signed object-storage uploads.
+5. Implement the KB Manager widget and Xchats review-page handoff.
+6. Test OAuth, tenant isolation, duplicate handling, concurrent draft writes,
+   media ownership, pagination, host capability fallbacks, and publish
+   validation with MCP Inspector, ChatGPT, and Claude.
+
+## References
 
 - MCP authorization: <https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization>
 - MCP Apps: <https://modelcontextprotocol.io/extensions/apps/overview>
