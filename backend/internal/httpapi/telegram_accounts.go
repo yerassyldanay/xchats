@@ -100,7 +100,7 @@ func (s *Server) handleCreateTelegramAccount(c *gin.Context) {
 		return
 	}
 	if errors.Is(err, store.ErrNoCredentialsKey) {
-		fail(c, http.StatusBadRequest, ErrValidation, "CREDENTIALS_ENC_KEY не настроен — токен негде хранить безопасно")
+		fail(c, http.StatusBadRequest, ErrValidation, "TG_CREDENTIALS_ENC_KEY не настроен — токен негде хранить безопасно")
 		return
 	}
 	if err != nil {
@@ -283,7 +283,7 @@ func (s *Server) registerTelegramWebhook(c *gin.Context, accountID uuid.UUID, to
 	tctx, cancel := context.WithTimeout(ctx(c), telegramConnectTimeout)
 	defer cancel()
 
-	err := s.tg.SetWebhook(tctx, token, url, s.cfg.WebhookToken, telegram.DefaultAllowedUpdates, dropPending)
+	err := s.tg.SetWebhook(tctx, token, url, s.cfg.TelegramResolvedWebhookSecret(), telegram.DefaultAllowedUpdates, dropPending)
 	if err == nil {
 		_ = s.store.SetTelegramWebhookState(ctx(c), accountID, store.TelegramWebhookState{
 			State: "connected", URL: url, Registered: true, Checked: true,
@@ -333,24 +333,25 @@ func telegramFailState(code int) string {
 func (s *Server) telegramWebhookBase() (string, error) {
 	base := strings.TrimSpace(s.cfg.TelegramWebhookPublicBaseURL)
 	if base == "" {
-		return "", errors.New("TELEGRAM_WEBHOOK_PUBLIC_BASE_URL не настроен — Telegram не сможет доставлять сообщения")
+		return "", errors.New("TG_WEBHOOK_PUBLIC_BASE_URL не настроен — Telegram не сможет доставлять сообщения")
 	}
 	if !strings.HasPrefix(strings.ToLower(base), "https://") {
-		return "", errors.New("TELEGRAM_WEBHOOK_PUBLIC_BASE_URL должен начинаться с https:// — Telegram не принимает http")
+		return "", errors.New("TG_WEBHOOK_PUBLIC_BASE_URL должен начинаться с https:// — Telegram не принимает http")
 	}
 	return base, nil
 }
 
-// telegramSecretUsable checks the shared webhook secret against Telegram's
-// charset rule. An empty secret is allowed (dev): registration then omits
-// secret_token and the ingress skips the check, which is exactly what the
-// Evolution webhook already does with the same variable.
+// telegramSecretUsable checks the effective webhook secret (TG_WEBHOOK_SECRET,
+// falling back to WEBHOOK_TOKEN) against Telegram's charset rule. An empty
+// secret is allowed (dev): registration then omits secret_token and the
+// ingress skips the check.
 func (s *Server) telegramSecretUsable() error {
-	if s.cfg.WebhookToken == "" {
+	secret := s.cfg.TelegramResolvedWebhookSecret()
+	if secret == "" {
 		return nil
 	}
-	if !webhookSecretRe.MatchString(s.cfg.WebhookToken) {
-		return errors.New("WEBHOOK_TOKEN содержит недопустимые символы для Telegram (разрешены A-Z a-z 0-9 _ -, до 256 символов)")
+	if !webhookSecretRe.MatchString(secret) {
+		return errors.New("TG_WEBHOOK_SECRET (или WEBHOOK_TOKEN как fallback) содержит недопустимые символы для Telegram (разрешены A-Z a-z 0-9 _ -, до 256 символов)")
 	}
 	return nil
 }

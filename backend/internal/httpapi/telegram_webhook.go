@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"errors"
 	"net/http"
 
@@ -37,8 +38,8 @@ func (s *Server) handleTelegramWebhook(c *gin.Context) {
 
 	// Secret check first: an attacker who guesses the URL must not be able to
 	// probe which account ids exist.
-	if s.cfg.WebhookToken != "" {
-		if c.GetHeader(telegramSecretHeader) != s.cfg.WebhookToken {
+	if secret := s.cfg.TelegramResolvedWebhookSecret(); secret != "" {
+		if subtle.ConstantTimeCompare([]byte(c.GetHeader(telegramSecretHeader)), []byte(secret)) != 1 {
 			s.log.Warn("telegram webhook auth rejected", "account_id", rawID, "reason", "bad secret token")
 			fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook secret")
 			return

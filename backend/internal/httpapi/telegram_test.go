@@ -122,7 +122,7 @@ func TestTelegramConnectRegistersWebhookAndStoresTokenEncrypted(t *testing.T) {
 	if c.URL != telegramBaseURL+"/telegram/api/v1/webhook/"+id.String() {
 		t.Fatalf("webhook url = %q", c.URL)
 	}
-	if c.Secret != webhookToken {
+	if c.Secret != tgWebhookSecret {
 		t.Fatalf("secret = %q, want the configured webhook token", c.Secret)
 	}
 	if c.DropPending {
@@ -435,6 +435,102 @@ func TestTelegramReplaceTokenRefusesADifferentBot(t *testing.T) {
 	}
 }
 
+// TestTelegramCheckReportsConnectedDriftAndDeadToken exercises the whole
+// POST /telegram-accounts/:id/check path — untested until now — across its
+// three outcomes: healthy, Telegram pointing elsewhere, and a revoked token.
+func TestTelegramCheckReportsConnectedDriftAndDeadToken(t *testing.T) {
+	h := newHarness(t)
+	id := h.connectBot(t, "Бот", false)
+
+	// Happy path: the fake still reports the webhook URL SetWebhook recorded.
+	resp, env := h.postJSON("/xchats/api/v1/telegram-accounts/"+id.String()+"/check", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("check status %d, body %s", resp.StatusCode, env["message"])
+	}
+	var payload struct {
+		ConnectionState    string `json:"connection_state"`
+		PendingUpdateCount int    `json:"pending_update_count"`
+		ExpectedWebhookURL string `json:"expected_webhook_url"`
+	}
+	mustPayload(t, env, &payload)
+	wantURL := telegramBaseURL + "/telegram/api/v1/webhook/" + id.String()
+	if payload.ConnectionState != "connected" {
+		t.Fatalf("connection_state = %q, want connected", payload.ConnectionState)
+	}
+	if payload.ExpectedWebhookURL != wantURL {
+		t.Fatalf("expected_webhook_url = %q, want %q", payload.ExpectedWebhookURL, wantURL)
+	}
+
+	// Drift: Telegram is registered against some other address.
+	h.tg.Info = telegram.WebhookInfo{URL: "https://elsewhere.example/hook"}
+	resp, env = h.postJSON("/xchats/api/v1/telegram-accounts/"+id.String()+"/check", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("check status %d, body %s", resp.StatusCode, env["message"])
+	}
+	mustPayload(t, env, &payload)
+	if payload.ConnectionState != "webhook_error" {
+		t.Fatalf("connection_state = %q, want webhook_error", payload.ConnectionState)
+	}
+	// The drift persists: a fresh GET /accounts reflects it too.
+	var listing struct {
+		Items []map[string]any `json:"items"`
+	}
+	h.get("/xchats/api/v1/accounts", &listing)
+	for _, it := range listing.Items {
+		if it["id"] == id.String() && it["connection_state"] != "webhook_error" {
+			t.Fatalf("persisted connection_state = %v, want webhook_error", it["connection_state"])
+		}
+	}
+
+	// Dead token: getMe itself now fails with 401.
+	h.tg.BadTokens[testBotToken] = true
+	resp, env = h.postJSON("/xchats/api/v1/telegram-accounts/"+id.String()+"/check", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("check status %d, body %s", resp.StatusCode, env["message"])
+	}
+	mustPayload(t, env, &payload)
+	if payload.ConnectionState != "token_error" {
+		t.Fatalf("connection_state = %q, want token_error", payload.ConnectionState)
+	}
+}
+
+// TestChatsFilterByAccountID pins the channel-neutral GET /chats?account_id=
+// filter the frontend now uses (wa_account_id is the deprecated alias, and was
+// the only form previously exercised by any test).
+func TestChatsFilterByAccountID(t *testing.T) {
+	h := newHarness(t)
+	id := h.connectBot(t, "Бот", false)
+	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), tgWebhookSecret); got != 200 {
+		t.Fatalf("webhook status %d", got)
+	}
+
+	var tgChats struct {
+		Items []map[string]any `json:"items"`
+	}
+	h.get("/xchats/api/v1/chats?account_id="+id.String(), &tgChats)
+	if len(tgChats.Items) != 1 || tgChats.Items[0]["channel"] != "telegram" {
+		t.Fatalf("account_id=%s chats = %v, want exactly one telegram chat", id, tgChats.Items)
+	}
+
+	var waChats struct {
+		Items []map[string]any `json:"items"`
+	}
+	h.get("/xchats/api/v1/chats?account_id="+h.accountID.String(), &waChats)
+	for _, c := range waChats.Items {
+		if c["channel"] == "telegram" {
+			t.Fatalf("the WhatsApp account_id filter leaked a Telegram chat: %v", c)
+		}
+	}
+
+	var emptyChats struct {
+		Items []map[string]any `json:"items"`
+	}
+	h.get("/xchats/api/v1/chats?account_id="+uuid.New().String(), &emptyChats)
+	if len(emptyChats.Items) != 0 {
+		t.Fatalf("a random account_id returned chats: %v", emptyChats.Items)
+	}
+}
+
 // The delete state machine: a failed deleteWebhook keeps the account AND its
 // token so the operator can retry; only a confirmed removal purges them.
 func TestTelegramDeleteFailureKeepsTokenAndRetrySucceeds(t *testing.T) {
@@ -491,7 +587,7 @@ func TestTelegramDeleteFailureKeepsTokenAndRetrySucceeds(t *testing.T) {
 func TestTelegramReconnectRevivesTheSameAccountAndHistory(t *testing.T) {
 	h := newHarness(t)
 	id := h.connectBot(t, "Бот", false)
-	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "здравствуйте"), webhookToken); got != 200 {
+	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "здравствуйте"), tgWebhookSecret); got != 200 {
 		t.Fatalf("webhook status %d", got)
 	}
 
@@ -536,13 +632,13 @@ func TestTelegramWebhookIngestsTextCaptionAndBareMedia(t *testing.T) {
 	h := newHarness(t)
 	id := h.connectBot(t, "Бот", false)
 
-	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "сколько стоит доставка?"), webhookToken); got != 200 {
+	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "сколько стоит доставка?"), tgWebhookSecret); got != 200 {
 		t.Fatalf("text update status %d", got)
 	}
-	if got := h.tgWebhook(id, mediaUpdate(2, 101, 500100, "это подойдёт?"), webhookToken); got != 200 {
+	if got := h.tgWebhook(id, mediaUpdate(2, 101, 500100, "это подойдёт?"), tgWebhookSecret); got != 200 {
 		t.Fatalf("captioned photo status %d", got)
 	}
-	if got := h.tgWebhook(id, mediaUpdate(3, 102, 500100, ""), webhookToken); got != 200 {
+	if got := h.tgWebhook(id, mediaUpdate(3, 102, 500100, ""), tgWebhookSecret); got != 200 {
 		t.Fatalf("caption-less photo status %d", got)
 	}
 
@@ -607,10 +703,10 @@ func TestTelegramWebhookRedeliveryIsANoOp(t *testing.T) {
 	id := h.connectBot(t, "Бот", false)
 	body := textUpdate(7, 100, 500100, "привет")
 
-	if got := h.tgWebhook(id, body, webhookToken); got != 200 {
+	if got := h.tgWebhook(id, body, tgWebhookSecret); got != 200 {
 		t.Fatalf("first delivery status %d", got)
 	}
-	if got := h.tgWebhook(id, body, webhookToken); got != 200 {
+	if got := h.tgWebhook(id, body, tgWebhookSecret); got != 200 {
 		t.Fatalf("redelivery status %d", got)
 	}
 	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 1 {
@@ -633,12 +729,12 @@ func TestTelegramRedeliveryReenqueuesAMissingDraft(t *testing.T) {
 	id := h.connectBot(t, "Бот", false)
 	body := textUpdate(9, 100, 500100, "здравствуйте")
 
-	h.tgWebhook(id, body, webhookToken)
+	h.tgWebhook(id, body, tgWebhookSecret)
 	// Simulate "the first attempt died before the draft was written".
 	if _, err := h.store.Pool().Exec(context.Background(), `DELETE FROM xchats.ai_drafts`); err != nil {
 		t.Fatalf("clear drafts: %v", err)
 	}
-	h.tgWebhook(id, body, webhookToken)
+	h.tgWebhook(id, body, tgWebhookSecret)
 
 	if n := h.countRows(`SELECT count(*) FROM xchats.ai_drafts`); n == 0 {
 		t.Fatal("the redelivery did not re-enqueue the missing draft")
@@ -650,7 +746,7 @@ func TestTelegramRedeliveryReenqueuesAMissingDraft(t *testing.T) {
 
 	// A redelivery that DOES find a draft must not pile on another set.
 	before := h.countRows(`SELECT count(*) FROM xchats.ai_drafts`)
-	h.tgWebhook(id, body, webhookToken)
+	h.tgWebhook(id, body, tgWebhookSecret)
 	if after := h.countRows(`SELECT count(*) FROM xchats.ai_drafts`); after != before {
 		t.Fatalf("drafts %d -> %d: a redelivery regenerated despite an existing draft", before, after)
 	}
@@ -662,8 +758,34 @@ func TestTelegramWebhookRejectsWrongSecret(t *testing.T) {
 	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "hi"), "not-the-secret"); got != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401", got)
 	}
+	// The Evolution webhook's own token must NOT double as the Telegram
+	// secret: this pins the two ingresses to distinct config values (a
+	// regression that resolved the wrong one would let this through).
+	if got := h.tgWebhook(id, textUpdate(2, 101, 500100, "hi"), webhookToken); got != http.StatusUnauthorized {
+		t.Fatalf("status %d using the Evolution token, want 401", got)
+	}
 	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 0 {
 		t.Fatal("an unauthenticated update was stored")
+	}
+}
+
+// TestTelegramWebhookSecretFallsBackToWebhookToken covers a deployment that has
+// not set TG_WEBHOOK_SECRET yet: the shared WEBHOOK_TOKEN must still work, both
+// for registration and for the ingress check.
+func TestTelegramWebhookSecretFallsBackToWebhookToken(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.TelegramWebhookSecret = ""
+	id := h.connectBot(t, "Бот", false)
+
+	calls := h.tg.CallsFor("setWebhook")
+	if len(calls) != 1 || calls[0].Secret != webhookToken {
+		t.Fatalf("setWebhook secret = %v, want the fallback WEBHOOK_TOKEN", calls)
+	}
+	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "hi"), webhookToken); got != 200 {
+		t.Fatalf("status %d using the fallback secret, want 200", got)
+	}
+	if got := h.tgWebhook(id, textUpdate(2, 101, 500100, "hi"), tgWebhookSecret); got != http.StatusUnauthorized {
+		t.Fatalf("status %d using the unset TG secret, want 401", got)
 	}
 }
 
@@ -671,7 +793,7 @@ func TestTelegramWebhookDiscardsUnknownAndDisconnectedAccounts(t *testing.T) {
 	h := newHarness(t)
 
 	// Never-seen account id: ack (Telegram must stop), store nothing.
-	if got := h.tgWebhook(uuid.New(), textUpdate(1, 100, 500100, "hi"), webhookToken); got != 200 {
+	if got := h.tgWebhook(uuid.New(), textUpdate(1, 100, 500100, "hi"), tgWebhookSecret); got != 200 {
 		t.Fatalf("unknown account status %d, want 200", got)
 	}
 	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 0 {
@@ -683,7 +805,7 @@ func TestTelegramWebhookDiscardsUnknownAndDisconnectedAccounts(t *testing.T) {
 	req, _ := http.NewRequest("DELETE", h.srv.URL+"/xchats/api/v1/telegram-accounts/"+id.String(), nil)
 	resp, _ := h.client.Do(req)
 	resp.Body.Close()
-	if got := h.tgWebhook(id, textUpdate(2, 101, 500100, "hi"), webhookToken); got != 200 {
+	if got := h.tgWebhook(id, textUpdate(2, 101, 500100, "hi"), tgWebhookSecret); got != 200 {
 		t.Fatalf("disconnected account status %d, want 200", got)
 	}
 	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 0 {
@@ -704,7 +826,7 @@ func TestTelegramWebhookIgnoresGroupsAndServiceMessages(t *testing.T) {
 			"text": "hello group",
 		},
 	})
-	if got := h.tgWebhook(id, group, webhookToken); got != 200 {
+	if got := h.tgWebhook(id, group, tgWebhookSecret); got != 200 {
 		t.Fatalf("group status %d, want 200", got)
 	}
 
@@ -717,12 +839,12 @@ func TestTelegramWebhookIgnoresGroupsAndServiceMessages(t *testing.T) {
 			"new_chat_members": []map[string]any{{"id": 9}},
 		},
 	})
-	if got := h.tgWebhook(id, service, webhookToken); got != 200 {
+	if got := h.tgWebhook(id, service, tgWebhookSecret); got != 200 {
 		t.Fatalf("service message status %d, want 200", got)
 	}
 
 	edited, _ := json.Marshal(map[string]any{"update_id": 3, "edited_message": map[string]any{"message_id": 1}})
-	if got := h.tgWebhook(id, edited, webhookToken); got != 200 {
+	if got := h.tgWebhook(id, edited, tgWebhookSecret); got != 200 {
 		t.Fatalf("edited_message status %d, want 200", got)
 	}
 
@@ -745,7 +867,7 @@ func TestTelegramWebhookAnswers500WhenIngestFails(t *testing.T) {
 		`ALTER TABLE xchats.tg_messages ADD CONSTRAINT tg_messages_force_fail CHECK (false) NOT VALID`); err != nil {
 		t.Fatalf("install failing constraint: %v", err)
 	}
-	got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), webhookToken)
+	got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), tgWebhookSecret)
 	if got != http.StatusInternalServerError {
 		t.Fatalf("status %d, want 500 so Telegram redelivers", got)
 	}
@@ -755,7 +877,7 @@ func TestTelegramWebhookAnswers500WhenIngestFails(t *testing.T) {
 	}
 
 	// Once the database is healthy, the redelivery lands.
-	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), webhookToken); got != 200 {
+	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), tgWebhookSecret); got != 200 {
 		t.Fatalf("redelivery after recovery: status %d", got)
 	}
 	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 1 {
@@ -768,7 +890,7 @@ func TestTelegramWebhookAnswers500WhenIngestFails(t *testing.T) {
 func TestTelegramApprovedDraftSendsAndStampsMessageID(t *testing.T) {
 	h := newHarness(t)
 	id := h.connectBot(t, "Бот", false)
-	h.tgWebhook(id, textUpdate(1, 100, 500100, "сколько стоит доставка?"), webhookToken)
+	h.tgWebhook(id, textUpdate(1, 100, 500100, "сколько стоит доставка?"), tgWebhookSecret)
 
 	var chats struct {
 		Items []map[string]any `json:"items"`
@@ -832,7 +954,7 @@ func TestTelegramApprovedDraftSendsAndStampsMessageID(t *testing.T) {
 func TestTelegramMediaSendGoesThroughTheRegistry(t *testing.T) {
 	h := newHarness(t)
 	id := h.connectBot(t, "Бот", false)
-	h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), webhookToken)
+	h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), tgWebhookSecret)
 	chatID := h.telegramChatID(t)
 
 	h.tg.Reset()
@@ -879,7 +1001,7 @@ func TestTelegramInboundMediaIsDownloadedAndServed(t *testing.T) {
 	want := []byte("\x89PNG\r\n\x1a\ntelegram-photo-bytes")
 	h.tg.Files["AgACbig"] = want
 
-	h.tgWebhook(id, mediaUpdate(1, 100, 500100, "вот"), webhookToken)
+	h.tgWebhook(id, mediaUpdate(1, 100, 500100, "вот"), tgWebhookSecret)
 
 	var status, storageKey string
 	var size int
@@ -922,7 +1044,7 @@ func TestTelegramMediaSweeperRetriesAFailedDownload(t *testing.T) {
 	h := newHarness(t)
 	id := h.connectBot(t, "Бот", false)
 	// No Files entry => getFile fails.
-	h.tgWebhook(id, mediaUpdate(1, 100, 500100, ""), webhookToken)
+	h.tgWebhook(id, mediaUpdate(1, 100, 500100, ""), tgWebhookSecret)
 
 	var status, storageKey string
 	if err := h.store.Pool().QueryRow(context.Background(),

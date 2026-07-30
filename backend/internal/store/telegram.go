@@ -22,7 +22,7 @@ var ErrAccountClaimed = errors.New("store: this bot already belongs to another o
 // ErrNoCredentialsKey means no encryption key was configured, so stored
 // credentials can be neither written nor read. It is a configuration failure,
 // never "the token is wrong".
-var ErrNoCredentialsKey = errors.New("store: credentials encryption key not configured (set CREDENTIALS_ENC_KEY)")
+var ErrNoCredentialsKey = errors.New("store: credentials encryption key not configured (set TG_CREDENTIALS_ENC_KEY)")
 
 // UseCredentialsBox installs the AES-GCM box that protects provider credentials
 // at rest. Wired once at the composition root; nil (unset) makes every

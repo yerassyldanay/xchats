@@ -1,7 +1,7 @@
 // Package secretbox is the at-rest encryption used for provider credentials we
 // must be able to read back (a Telegram bot token has to be replayed on every
 // send, so it cannot be hashed). AES-256-GCM with a random 96-bit nonce
-// prefixed to the ciphertext; the key comes from CREDENTIALS_ENC_KEY.
+// prefixed to the ciphertext; the key comes from TG_CREDENTIALS_ENC_KEY.
 //
 // Losing the key is recoverable but not silent: every stored token stops
 // decrypting and has to be re-pasted. Rotating it is why the credential rows
@@ -27,7 +27,7 @@ const KeyVersion = 1
 
 // ErrNoKey is returned when no encryption key is configured. Callers surface it
 // as a configuration error, never as "the token is wrong".
-var ErrNoKey = errors.New("secretbox: no encryption key configured (set CREDENTIALS_ENC_KEY)")
+var ErrNoKey = errors.New("secretbox: no encryption key configured (set TG_CREDENTIALS_ENC_KEY)")
 
 // Box seals and opens secrets with one AES-256-GCM key.
 type Box struct {
@@ -74,7 +74,7 @@ func FromEnvValue(v string) (*Box, error) {
 	if len(v) == 32 {
 		return New([]byte(v))
 	}
-	return nil, errors.New("secretbox: CREDENTIALS_ENC_KEY must decode to 32 bytes (64 hex chars, base64, or a 32-char literal)")
+	return nil, errors.New("secretbox: TG_CREDENTIALS_ENC_KEY must decode to 32 bytes (64 hex chars, base64, or a 32-char literal)")
 }
 
 // Seal encrypts plaintext, returning nonce||ciphertext.

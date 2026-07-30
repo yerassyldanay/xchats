@@ -156,7 +156,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// Credentials at rest. Without a key the Telegram lifecycle refuses to store
 	// or read a bot token (an explicit error, never silent plaintext); WhatsApp
 	// is unaffected, so this is a warning rather than a boot failure.
-	if box, err := secretbox.FromEnvValue(cfg.CredentialsEncKey); err != nil {
+	if box, err := secretbox.FromEnvValue(cfg.TelegramCredentialsEncKey); err != nil {
 		log.Warn("credentials encryption disabled; Telegram accounts cannot be connected",
 			"reason", err.Error())
 	} else {

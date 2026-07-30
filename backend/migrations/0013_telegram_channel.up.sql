@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS tg_accounts_org_idx
     WHERE deleted_at IS NULL;
 
 -- bot_token_enc is AES-256-GCM ciphertext (internal/secretbox, key from
--- CREDENTIALS_ENC_KEY); encryption_key_version exists so a key rotation can
+-- TG_CREDENTIALS_ENC_KEY); encryption_key_version exists so a key rotation can
 -- re-wrap rows without a schema change. The plaintext token never leaves this
 -- table — not into queue payloads, DTOs, log URLs, or errors.
 CREATE TABLE IF NOT EXISTS xchats.tg_credentials (

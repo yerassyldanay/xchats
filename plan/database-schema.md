@@ -74,7 +74,7 @@ tg_accounts — Telegram bots. id = uuidv5(ns, 'telegram:bot:<bot_id>'), so
   connection_state, webhook_url, webhook_registered_at, webhook_last_checked_at,
   webhook_last_error, last_live_event_at, deleted_at, created_at, updated_at
 
-tg_credentials — the bot token, AES-256-GCM at rest (CREDENTIALS_ENC_KEY)
+tg_credentials — the bot token, AES-256-GCM at rest (TG_CREDENTIALS_ENC_KEY)
   account_id, bot_token_enc, encryption_key_version, created_at, updated_at
 
 tg_contacts — account-scoped Telegram users

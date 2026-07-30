@@ -76,6 +76,12 @@ const (
 	testBotID       = int64(8123456789)
 	testBotUsername = "xchats_test_bot"
 	testBotToken    = "8123456789:AAH-test-token_never-logged"
+
+	// tgWebhookSecret is deliberately DIFFERENT from webhookToken: Telegram gets
+	// its own TG_WEBHOOK_SECRET, distinct from Evolution's shared WEBHOOK_TOKEN.
+	// Any code that resolves the wrong one fails these tests instead of passing
+	// by coincidence.
+	tgWebhookSecret = "tg-secret_distinct-1"
 )
 
 type harness struct {
@@ -134,6 +140,7 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 		WebhookToken: webhookToken, SessionTTLHours: 1, MinPasswordLen: 8,
 		PageSize: 50, CORSOrigins: []string{"*"}, SimulatorEnabled: true,
 		TelegramWebhookPublicBaseURL: telegramBaseURL,
+		TelegramWebhookSecret:        tgWebhookSecret,
 	}
 	// Credential encryption is required for the Telegram lifecycle; the key is
 	// test-local and deterministic so a sealed token can be asserted on.

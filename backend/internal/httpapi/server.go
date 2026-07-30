@@ -5,6 +5,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -239,7 +240,7 @@ func (s *Server) handleWebhook(c *gin.Context) {
 		if tok == "" {
 			tok = c.GetHeader("apikey")
 		}
-		if tok != s.cfg.WebhookToken {
+		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.cfg.WebhookToken)) != 1 {
 			s.log.Warn("webhook auth rejected", "account_id", accountID, "reason", "bad token")
 			fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook token")
 			return
