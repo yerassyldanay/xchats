@@ -34,6 +34,11 @@ services:
       EVOLUTION_INSTANCE: "${EVOLUTION_INSTANCE:-xpayment}"
       WEBHOOK_TOKEN: "${WEBHOOK_TOKEN:-change-me-shared-token}"
       WEBHOOK_PUBLIC_BASE_URL: "${WEBHOOK_PUBLIC_BASE_URL:-http://backend:8080}"
+      # --- Telegram (Bot API) ---
+      TG_WEBHOOK_PUBLIC_BASE_URL: "${TG_WEBHOOK_PUBLIC_BASE_URL:-}"
+      TG_API_BASE_URL: "${TG_API_BASE_URL:-}"
+      TG_WEBHOOK_SECRET: "${TG_WEBHOOK_SECRET:-}"
+      TG_CREDENTIALS_ENC_KEY: "${TG_CREDENTIALS_ENC_KEY:-}"
       SESSION_SECRET: "${SESSION_SECRET:-change-me-random}"
       SECURE_COOKIES: "false"
       SEED_ADMIN_EMAIL: "${SEED_ADMIN_EMAIL:-admin@example.com}"

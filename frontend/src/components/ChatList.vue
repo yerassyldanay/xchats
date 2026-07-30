@@ -12,10 +12,24 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
+import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 
 const inbox = useInbox()
 const accounts = useAccounts()
 const showNew = ref(false)
+
+// A chat carries its own channel, so the badge never has to guess from the
+// account list (which may not have loaded yet on a cold open).
+function channelIcon(channel: string) {
+  return channel === 'telegram' ? TelegramIcon : WhatsappIcon
+}
+// Telegram blue vs WhatsApp green — the two brand colours the inbox mixes.
+function channelDot(channel: string) {
+  return channel === 'telegram' ? 'bg-[#229ED9]' : 'bg-wa'
+}
+function channelText(channel: string) {
+  return channel === 'telegram' ? 'text-[#229ED9]' : 'text-wa'
+}
 
 const ALL = '__all__'
 
@@ -77,13 +91,14 @@ function onSearch() {
       >
         <SelectTrigger class="mt-2 h-9 text-[13px]">
           <span class="flex items-center gap-2 min-w-0">
-            <WhatsappIcon class="w-3.5 h-3.5 text-wa shrink-0" />
-            <SelectValue placeholder="Все номера" />
+            <SelectValue placeholder="Все каналы" />
           </span>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem :value="ALL">Все номера</SelectItem>
-          <SelectItem v-for="a in accounts.accounts" :key="a.id" :value="a.id">{{ a.display_name }}</SelectItem>
+          <SelectItem :value="ALL">Все каналы</SelectItem>
+          <SelectItem v-for="a in accounts.accounts" :key="a.id" :value="a.id">
+            {{ a.display_name }}
+          </SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -112,9 +127,10 @@ function onSearch() {
             <AvatarFallback class="bg-transparent text-sm font-semibold">{{ initials(c.contact.display_name) }}</AvatarFallback>
           </Avatar>
           <span
-            class="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full bg-wa ring-2 ring-card grid place-items-center text-white"
+            class="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full ring-2 ring-card grid place-items-center text-white"
+            :class="channelDot(c.channel)"
           >
-            <WhatsappIcon class="w-2.5 h-2.5" />
+            <component :is="channelIcon(c.channel)" class="w-2.5 h-2.5" />
           </span>
         </div>
         <div class="min-w-0 flex-1">
@@ -123,10 +139,11 @@ function onSearch() {
             <span class="text-[11px] text-muted-foreground shrink-0">{{ shortTime(c.last_message_at) }}</span>
           </div>
           <div
-            v-if="accounts.hasMultiple && accounts.accountName(c.wa_account_id)"
+            v-if="accounts.hasMultiple && accounts.accountName(c.account_id)"
             class="flex items-center gap-1 text-[11px] text-muted-foreground truncate"
           >
-            <WhatsappIcon class="w-3 h-3 text-wa" /> {{ accounts.accountName(c.wa_account_id) }}
+            <component :is="channelIcon(c.channel)" class="w-3 h-3" :class="channelText(c.channel)" />
+            {{ accounts.accountName(c.account_id) }}
           </div>
           <div class="mt-0.5 flex items-center justify-between gap-2">
             <span class="text-[13px] text-muted-foreground truncate">{{ c.last_message_preview }}</span>

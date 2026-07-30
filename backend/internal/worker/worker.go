@@ -7,8 +7,10 @@ package worker
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
@@ -21,15 +23,15 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/messaging"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
 
 // OutboundTask sends one part (text OR one media file). Channel selects the
-// messaging.ChannelSender the text branch routes through (Worker.Senders); the
-// media branch stays on the direct Evolution client — media send/administration
-// is out of scope for the multichannel response service (text-only this
-// milestone) and today only ever runs for WhatsApp's manual-send UI.
+// messaging.ChannelSender it routes through (Worker.Senders) — text AND media
+// alike: media used to bypass the registry on a direct Evolution call, which
+// meant every new channel had to re-implement it.
 type OutboundTask struct {
 	MessageID uuid.UUID
 	AccountID uuid.UUID
@@ -41,12 +43,21 @@ type OutboundTask struct {
 	Caption   string
 }
 
-// MediaDownloadTask fetches media bytes when they weren't inline.
+// MediaDownloadTask fetches media bytes when they weren't inline. It carries no
+// credential: the Telegram branch resolves the bot token from the store by
+// AccountID, so a token never rides the queue.
 type MediaDownloadTask struct {
-	MessageID          uuid.UUID
-	Instance           string // the receiving account's Evolution instance
+	MessageID uuid.UUID
+	Channel   messaging.Channel
+	AccountID uuid.UUID
+	BlobID    string
+
+	// WhatsApp: the Evolution instance + message id to re-fetch from.
+	Instance           string
 	EvolutionMessageID string
-	BlobID             string
+
+	// Telegram: the file handle to resolve through getFile.
+	FileID string
 }
 
 // AIDraftTask runs the response engine for a chat's latest inbound message.
@@ -65,6 +76,7 @@ type Worker struct {
 	Store    *store.Store
 	Queue    queue.Queue
 	Evo      evolution.Client
+	TG       telegram.Client // nil in a WhatsApp-only wiring; the media sweep no-ops
 	Blob     blob.Store
 	Hub      *realtime.Hub
 	Response *response.Service         // the multichannel response engine's entry point
@@ -72,6 +84,23 @@ type Worker struct {
 	KB       *kbstore.Store            // playground KB (nil in transport-only setups)
 	Extract  *playground.Extractor     // Stage-1 ingest adapters (nil when KB is nil)
 	Log      *slog.Logger
+}
+
+// publishTimeout bounds every enqueue a handler makes. A worker that fans work
+// back onto a full queue must fail fast (and say so) rather than occupy a pool
+// slot forever — the pool is what would drain that buffer.
+const publishTimeout = 2 * time.Second
+
+// publish enqueues with a bounded deadline; a failure is logged and returned so
+// the caller decides whether it is fatal to its task.
+func (w *Worker) publish(parent context.Context, m queue.Message) error {
+	pctx, cancel := context.WithTimeout(parent, publishTimeout)
+	defer cancel()
+	if err := w.Queue.Publish(pctx, m); err != nil {
+		w.Log.Error("enqueue failed", "kind", m.Kind, "err", err)
+		return err
+	}
+	return nil
 }
 
 // Handle is the queue dispatcher.
@@ -181,7 +210,7 @@ func (w *Worker) handleWaEvent(ctx context.Context, raw []byte) error {
 	// always reflects the latest message instead of a stale first draft. Outbound
 	// echoes (direction "out") and dedup hits (handled above) never reach here.
 	if m.Direction == "in" {
-		_ = w.Queue.Publish(queue.Message{Kind: queue.KindAIDraft, Payload: AIDraftTask{ChatID: res.ChatID}})
+		_ = w.publish(ctx, queue.Message{Kind: queue.KindAIDraft, Payload: AIDraftTask{ChatID: res.ChatID}})
 	}
 	return nil
 }
@@ -258,14 +287,18 @@ func (w *Worker) ingestMedia(ctx context.Context, messageID uuid.UUID, instance 
 		return
 	}
 	if status == "pending" {
-		_ = w.Queue.Publish(queue.Message{Kind: queue.KindMediaDownload, Payload: MediaDownloadTask{
-			MessageID: messageID, Instance: instance, EvolutionMessageID: m.EvolutionMessageID, BlobID: blobID,
+		_ = w.publish(ctx, queue.Message{Kind: queue.KindMediaDownload, Payload: MediaDownloadTask{
+			MessageID: messageID, Channel: messaging.ChannelWhatsApp,
+			Instance: instance, EvolutionMessageID: m.EvolutionMessageID, BlobID: blobID,
 		}})
 	}
 	w.emitMessage(ctx, "message.updated", messageID)
 }
 
 func (w *Worker) handleMediaDownload(ctx context.Context, t MediaDownloadTask) error {
+	if t.Channel == messaging.ChannelTelegram {
+		return w.downloadTelegramMedia(ctx, t)
+	}
 	b64, fileName, mimetype, err := w.Evo.GetBase64(ctx, t.Instance, t.EvolutionMessageID)
 	if err != nil {
 		return err
@@ -284,6 +317,106 @@ func (w *Worker) handleMediaDownload(ctx context.Context, t MediaDownloadTask) e
 	return nil
 }
 
+// downloadTelegramMedia fetches an inbound attachment's bytes: getFile resolves
+// the handle to a path, the file endpoint serves it, and the media row flips to
+// 'ready'. A failure leaves the row 'pending' with its file_id intact, which is
+// what the sweeper retries from — there is no event to replay.
+func (w *Worker) downloadTelegramMedia(ctx context.Context, t MediaDownloadTask) error {
+	if w.TG == nil {
+		return nil
+	}
+	token, err := w.Store.TelegramBotToken(ctx, t.AccountID)
+	if err != nil {
+		return fmt.Errorf("telegram media: resolve token: %w", err)
+	}
+	info, err := w.TG.GetFile(ctx, token, t.FileID)
+	if err != nil {
+		w.markTelegramMediaFailed(ctx, t.MessageID, err)
+		return fmt.Errorf("telegram media: getFile: %w", err)
+	}
+	data, err := w.TG.DownloadFile(ctx, token, info.FilePath)
+	if err != nil {
+		w.markTelegramMediaFailed(ctx, t.MessageID, err)
+		return fmt.Errorf("telegram media: download: %w", err)
+	}
+	meta, err := w.Store.TelegramMediaMeta(ctx, t.MessageID)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Blob.Put(t.BlobID, data, blob.Meta{
+		MediaType: meta.MediaType, Mimetype: meta.Mimetype, FileName: meta.FileName, FileSize: int64(len(data)),
+	}); err != nil {
+		return err
+	}
+	if err := w.Store.SetTelegramMediaReady(ctx, t.MessageID, t.BlobID, len(data)); err != nil {
+		return err
+	}
+	w.Log.Info("telegram media downloaded", "message_id", t.MessageID, "bytes", len(data))
+	w.emitMessage(ctx, "message.updated", t.MessageID)
+	return nil
+}
+
+// markTelegramMediaFailed records a permanent-looking failure so the sweeper's
+// backoff sees a fresh timestamp instead of hammering the same broken file_id.
+func (w *Worker) markTelegramMediaFailed(ctx context.Context, messageID uuid.UUID, cause error) {
+	if err := w.Store.SetTelegramMediaFailed(ctx, messageID); err != nil {
+		w.Log.Error("mark telegram media failed", "message_id", messageID, "err", err)
+	}
+	w.Log.Warn("telegram media download failed", "message_id", messageID, "err", cause)
+}
+
+// SweepTelegramMedia re-enqueues attachments whose bytes were never fetched:
+// rows still 'pending' (or 'failed') past a quiet period. This is the retry
+// mechanism the design trades an inbound-event table for — the media ROW is the
+// durable work item, so a crashed or failed download is recoverable from the
+// database alone.
+func (w *Worker) SweepTelegramMedia(ctx context.Context, olderThan time.Duration, limit int) (int, error) {
+	pending, err := w.Store.PendingTelegramMedia(ctx, olderThan, limit)
+	if err != nil {
+		return 0, err
+	}
+	queued := 0
+	for _, p := range pending {
+		if err := w.publish(ctx, queue.Message{Kind: queue.KindMediaDownload, Payload: MediaDownloadTask{
+			MessageID: p.MessageID, Channel: messaging.ChannelTelegram, AccountID: p.AccountID,
+			FileID: p.FileID, BlobID: TelegramBlobID(p.MessageID),
+		}}); err != nil {
+			return queued, err
+		}
+		queued++
+	}
+	if queued > 0 {
+		w.Log.Info("telegram media sweep", "queued", queued)
+	}
+	return queued, nil
+}
+
+// StartTelegramMediaSweeper runs SweepTelegramMedia once at startup (picking up
+// anything a crash left behind) and then on a ticker until ctx is done.
+func (w *Worker) StartTelegramMediaSweeper(ctx context.Context, every, olderThan time.Duration, limit int) {
+	go func() {
+		if _, err := w.SweepTelegramMedia(ctx, 0, limit); err != nil {
+			w.Log.Error("telegram media sweep (startup)", "err", err)
+		}
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if _, err := w.SweepTelegramMedia(ctx, olderThan, limit); err != nil {
+					w.Log.Error("telegram media sweep", "err", err)
+				}
+			}
+		}
+	}()
+}
+
+// TelegramBlobID is the deterministic blob key for a Telegram attachment: keyed
+// by the message row, so a retried download overwrites rather than accumulates.
+func TelegramBlobID(messageID uuid.UUID) string { return "tg-" + messageID.String() }
+
 // --- outbound sends -------------------------------------------------------
 
 // maskPhone keeps only the last 4 digits for logs (PII redaction): "77058686509"
@@ -295,82 +428,61 @@ func maskPhone(p string) string {
 	return strings.Repeat("*", len(p)-4) + p[len(p)-4:]
 }
 
+// handleOutboundSend routes EVERY send — text and media alike — through the
+// channel-neutral sender registry (Worker.Senders), so WhatsApp, simulator and
+// Telegram conversations share one outbound path. Media used to bypass the
+// registry on a direct Evolution call, which meant each new channel had to
+// re-implement it; the Evolution adapter now owns that call.
+//
+// Provider vocabulary never leaves this function: JIDs, instance names and chat
+// ids travel only as the opaque To/Route routing hints a channel-neutral
+// OutboundMessage carries.
 func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
-	number := config.PhoneFromJID(t.PhoneJID) // phone, never the @lid
+	// PhoneFromJID passes a non-JID string straight through, so a numeric
+	// Telegram chat id survives untouched.
+	destination := config.PhoneFromJID(t.PhoneJID) // phone, never the @lid
+	kind := "text"
 	if t.MediaID != "" {
-		return w.sendMedia(ctx, t, number)
+		kind = "media"
 	}
-	return w.sendText(ctx, t, number)
-}
-
-// sendMedia sends one media file directly through the Evolution client — the
-// manual-send UI's media path. Unrelated to the response-service milestone
-// (text-only this milestone) and today only ever runs for WhatsApp.
-func (w *Worker) sendMedia(ctx context.Context, t OutboundTask, number string) error {
 	w.Log.Info("outbound send start", "message_id", t.MessageID, "account_id", t.AccountID,
-		"instance", t.Instance, "phone", maskPhone(number), "kind", "media")
-
-	data, meta, err := w.Blob.Get(t.MediaID)
-	var res evolution.SendResult
-	if err == nil {
-		b64 := base64.StdEncoding.EncodeToString(data)
-		res, err = w.Evo.SendMedia(ctx, t.Instance, number, meta.MediaType, meta.Mimetype, b64, meta.FileName, t.Caption)
-	}
-	if err != nil {
-		w.Log.Error("outbound send failed", "message_id", t.MessageID, "instance", t.Instance,
-			"phone", maskPhone(number), "kind", "media", "err", err)
-		_ = w.Store.SetDeliveryState(ctx, t.MessageID, "failed")
-		w.emitMessage(ctx, "message.updated", t.MessageID)
-		return err
-	}
-	// A 2xx with no key id means the gateway accepted the request but produced no
-	// message — usually the number isn't on WhatsApp or the instance dropped. The
-	// fromMe echo can't correlate, so the bubble would silently stay unconfirmed.
-	if res.KeyID == "" {
-		w.Log.Warn("outbound send returned no message id", "message_id", t.MessageID,
-			"instance", t.Instance, "phone", maskPhone(number), "status", res.Status)
-	} else {
-		w.Log.Info("outbound send ok", "message_id", t.MessageID, "instance", t.Instance,
-			"key_id", res.KeyID, "status", res.Status)
-	}
-	// Stamp the gateway id so the fromMe=true echo collapses onto this row.
-	if err := w.Store.StampEvolutionID(ctx, t.MessageID, res.KeyID); err != nil {
-		return err
-	}
-	w.emitMessage(ctx, "message.updated", t.MessageID)
-	return nil
-}
-
-// sendText routes through the channel-neutral sender registry (Worker.Senders)
-// so a WhatsApp and a simulator conversation share the exact same outbound
-// path — only the registered messaging.ChannelSender differs, and JIDs/
-// instance names never leave this function (they're passed only as the
-// opaque To/Route routing hints a channel-neutral OutboundMessage carries).
-func (w *Worker) sendText(ctx context.Context, t OutboundTask, number string) error {
-	w.Log.Info("outbound send start", "message_id", t.MessageID, "account_id", t.AccountID,
-		"channel", t.Channel, "instance", t.Instance, "phone", maskPhone(number), "kind", "text")
+		"channel", t.Channel, "instance", t.Instance, "to", maskPhone(destination), "kind", kind)
 
 	sender, err := w.Senders.Sender(t.Channel)
 	if err != nil {
 		w.Log.Error("outbound send failed", "message_id", t.MessageID, "channel", t.Channel, "err", err)
-		_ = w.Store.SetDeliveryState(ctx, t.MessageID, "failed")
+		_ = w.Store.SetDeliveryStateFor(ctx, string(t.Channel), t.MessageID, "failed")
 		w.emitMessage(ctx, "message.updated", t.MessageID)
 		return err
 	}
-	res, err := sender.Send(ctx, messaging.OutboundMessage{
+
+	out := messaging.OutboundMessage{
 		MessageID: t.MessageID.String(), AccountID: t.AccountID.String(), Channel: t.Channel,
-		Text: t.Text, To: number, Route: t.Instance,
-	})
+		Text: t.Text, To: destination, Route: t.Instance,
+	}
+	if t.MediaID != "" {
+		// The blob is the source of truth for kind/mimetype/filename; the adapter
+		// re-reads the bytes itself, so nothing large rides this struct.
+		media := &messaging.OutboundMedia{BlobID: t.MediaID, Caption: t.Caption}
+		if _, meta, gerr := w.Blob.Get(t.MediaID); gerr == nil {
+			media.Kind, media.Mimetype, media.FileName = meta.MediaType, meta.Mimetype, meta.FileName
+		}
+		out.Media = media
+	}
+
+	res, err := sender.Send(ctx, out)
 	if err != nil {
 		w.Log.Error("outbound send failed", "message_id", t.MessageID, "channel", t.Channel,
-			"instance", t.Instance, "phone", maskPhone(number), "err", err)
-		_ = w.Store.SetDeliveryState(ctx, t.MessageID, "failed")
+			"instance", t.Instance, "to", maskPhone(destination), "kind", kind, "err", err)
+		_ = w.Store.SetDeliveryStateFor(ctx, string(t.Channel), t.MessageID, "failed")
 		w.emitMessage(ctx, "message.updated", t.MessageID)
 		return err
 	}
 	if res.ExternalID == "" {
+		// A success with no provider id means the gateway accepted the request but
+		// produced no message; the bubble would silently stay unconfirmed.
 		w.Log.Warn("outbound send returned no external id", "message_id", t.MessageID,
-			"channel", t.Channel, "instance", t.Instance, "phone", maskPhone(number))
+			"channel", t.Channel, "instance", t.Instance, "to", maskPhone(destination))
 	} else {
 		w.Log.Info("outbound send ok", "message_id", t.MessageID, "channel", t.Channel,
 			"instance", t.Instance, "external_id", res.ExternalID)
@@ -379,7 +491,7 @@ func (w *Worker) sendText(ctx context.Context, t OutboundTask, number string) er
 	// this row; the simulator's synthetic id has no echo to collapse, but
 	// stamping it keeps the column's meaning ("this send's provider id")
 	// consistent across channels.
-	if err := w.Store.StampEvolutionID(ctx, t.MessageID, res.ExternalID); err != nil {
+	if err := w.Store.StampOutboundSent(ctx, string(t.Channel), t.MessageID, res.ExternalID); err != nil {
 		return err
 	}
 	w.emitMessage(ctx, "message.updated", t.MessageID)

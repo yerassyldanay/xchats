@@ -41,6 +41,7 @@ async function send<T>(method: string, path: string, body?: unknown, headers?: H
 export const api = {
   get: <T>(path: string, headers?: Headers) => send<T>('GET', path, undefined, headers),
   post: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('POST', path, body, headers),
+  put: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('PUT', path, body, headers),
   patch: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('PATCH', path, body, headers),
   del: <T>(path: string, headers?: Headers) => send<T>('DELETE', path, undefined, headers),
   // postForm sends multipart/form-data (the browser sets the boundary; do NOT set

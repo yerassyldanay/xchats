@@ -24,8 +24,9 @@ export function shortTime(iso: string | null): string {
     : d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
 
-// connStatus maps a WhatsApp account connection_status to a Russian label + a
-// UI-agnostic tone discriminant; the component maps the tone to badge/dot classes.
+// connStatus maps an account connection state to a Russian label + a UI-agnostic
+// tone discriminant; the component maps the tone to badge/dot classes. It covers
+// both lifecycles: the WhatsApp QR states and the Telegram webhook states.
 export type ConnTone = 'connected' | 'qr' | 'connecting' | 'disconnected' | 'error'
 export function connStatus(status: string): { label: string; tone: ConnTone } {
   switch (status) {
@@ -37,8 +38,31 @@ export function connStatus(status: string): { label: string; tone: ConnTone } {
       return { label: 'Подключение…', tone: 'connecting' }
     case 'disconnected':
       return { label: 'Отключён', tone: 'disconnected' }
+    // --- Telegram ---
+    case 'webhook_error':
+      return { label: 'Ошибка вебхука', tone: 'error' }
+    case 'token_error':
+      return { label: 'Токен отклонён', tone: 'error' }
+    case 'disconnect_pending':
+      return { label: 'Отключение…', tone: 'connecting' }
+    case 'disconnect_error':
+      return { label: 'Не отключился', tone: 'error' }
     default:
       return { label: status || 'Ошибка', tone: 'error' }
+  }
+}
+
+// channelLabel is the channel's display name; channelTone drives its brand
+// colour so a chat row and an account card agree at a glance.
+export type ChannelName = 'whatsapp' | 'simulator' | 'telegram'
+export function channelLabel(channel: string): string {
+  switch (channel) {
+    case 'telegram':
+      return 'Telegram'
+    case 'simulator':
+      return 'Симулятор'
+    default:
+      return 'WhatsApp'
   }
 }
 

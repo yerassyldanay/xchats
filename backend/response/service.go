@@ -58,7 +58,11 @@ func (s *Service) Respond(ctx context.Context, channel messaging.Channel, conver
 }
 
 func (s *Service) generate(ctx context.Context, conversationID string, convCtx ConversationContext, opts RespondOptions) DraftToPersist {
-	draft := DraftToPersist{ConversationID: conversationID, TriggerMessageID: convCtx.TriggerMessageID}
+	draft := DraftToPersist{
+		ConversationID:   conversationID,
+		Channel:          convCtx.Channel,
+		TriggerMessageID: convCtx.TriggerMessageID,
+	}
 
 	kb, err := s.KnowledgeBase.Load(ctx, convCtx.OrganizationID)
 	if err != nil {

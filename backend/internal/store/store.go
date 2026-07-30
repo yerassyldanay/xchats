@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
 )
 
 // ErrNotFound is returned when a lookup matches no row.
@@ -19,6 +21,10 @@ var ErrNotFound = errors.New("not found")
 // Store wraps the pgx pool.
 type Store struct {
 	pool *pgxpool.Pool
+	// creds protects provider credentials at rest (see UseCredentialsBox). nil
+	// until the composition root installs one; every credential path then fails
+	// with ErrNoCredentialsKey rather than storing plaintext.
+	creds *secretbox.Box
 }
 
 // New opens a pool against dsn and pins search_path to the xchats schema.
@@ -62,58 +68,85 @@ type User struct {
 	CreatedAt    time.Time
 }
 
+// Account is the channel-neutral account shape the unified read layer returns
+// (inbox_accounts_v). Provider vocabulary lives in the two External* fields
+// rather than in column names, so a WhatsApp number and a Telegram bot are the
+// same type to everything above the store.
 type Account struct {
-	ID              uuid.UUID
-	OrganizationID  uuid.NullUUID
-	DisplayName     string
-	OwnerJID        string
-	PhoneNumber     string
-	InstanceName    string
+	ID             uuid.UUID
+	OrganizationID uuid.NullUUID
+	DisplayName    string
+	Channel        string // "whatsapp" | "simulator" | "telegram"
+	// ExternalAccountRef is the provider's own identity for this account: the
+	// owner JID for WhatsApp/simulator, "telegram:bot:<bot_id>" for Telegram.
+	ExternalAccountRef string
+	// ExternalHandle is what an operator recognizes the account by: the phone
+	// number for WhatsApp, "@botusername" for Telegram.
+	ExternalHandle string
+	// InstanceName is the Evolution instance (wa_* gateway only; "" elsewhere).
+	InstanceName string
+	// InstanceID is Evolution's own instance id. Write-side only: it is not
+	// carried by inbox_accounts_v, so view-backed reads leave it empty.
 	InstanceID      string
 	ConnectionState string
-	Channel         string // "whatsapp" | "simulator"
 	LastLiveEventAt *time.Time
 	CreatedAt       time.Time
 	DeletedAt       *time.Time
+
+	// Telegram webhook health. Empty/nil for every other channel — the view
+	// projects NULLs on the WhatsApp leg.
+	WebhookURL           string
+	WebhookRegisteredAt  *time.Time
+	WebhookLastCheckedAt *time.Time
+	WebhookLastError     string
 }
 
 type Contact struct {
 	ID          uuid.UUID
 	AccountID   uuid.UUID
 	PhoneNumber string
-	PhoneJID    string
-	LidJID      string
-	PushName    string
-	DisplayName string
-	Attributes  []byte
+	// ExternalContactRef is the provider's identity for the person: the phone
+	// JID for WhatsApp/simulator, the numeric user id for Telegram.
+	ExternalContactRef string
+	LidJID             string
+	PushName           string
+	DisplayName        string
+	Attributes         []byte
 }
 
 type Chat struct {
-	ID                 uuid.UUID
-	AccountID          uuid.UUID
-	ContactID          uuid.UUID
-	RemoteJID          string
-	ChatState          string
-	AssigneeUserID     uuid.NullUUID
-	LastMessageAt      *time.Time
-	LastMessagePreview string
-	UnreadCount        int
-	Contact            Contact
+	ID        uuid.UUID
+	AccountID uuid.UUID
+	ContactID uuid.UUID
+	Channel   string // the owning account's channel — set by every view-backed read
+	// ExternalConversationRef is the provider's identity for the conversation
+	// (and the outbound destination): the remote JID for WhatsApp/simulator,
+	// the numeric chat id for Telegram.
+	ExternalConversationRef string
+	ChatState               string
+	AssigneeUserID          uuid.NullUUID
+	LastMessageAt           *time.Time
+	LastMessagePreview      string
+	UnreadCount             int
+	Contact                 Contact
 }
 
 type Message struct {
-	ID                 uuid.UUID
-	ChatID             uuid.UUID
-	Direction          string
-	SenderKind         string
-	SenderUserID       uuid.NullUUID
-	EvolutionMessageID string
-	MessageKind        string
-	Body               string
-	DeliveryState      string
-	Source             string
-	MessageTS          *time.Time
-	Media              []MediaRef
+	ID           uuid.UUID
+	ChatID       uuid.UUID
+	Channel      string
+	Direction    string
+	SenderKind   string
+	SenderUserID uuid.NullUUID
+	// ExternalMessageID is the provider's id for this message: Evolution's
+	// key.id for WhatsApp, the numeric message_id for Telegram.
+	ExternalMessageID string
+	MessageKind       string
+	Body              string
+	DeliveryState     string
+	Source            string
+	MessageTS         *time.Time
+	Media             []MediaRef
 }
 
 type MediaRef struct {
@@ -127,6 +160,7 @@ type MediaRef struct {
 type Draft struct {
 	ID               uuid.UUID
 	ChatID           uuid.UUID
+	Channel          string
 	TriggerMessageID uuid.NullUUID
 	OptionOrdinal    int
 	DraftText        string
@@ -139,6 +173,13 @@ type Draft struct {
 	CreatedAt        time.Time
 }
 
+// orgOwnsAccountExpr ranks an organization by whether it actually owns a
+// messaging account — where the chats live. It must cover every channel's
+// account table, not just wa_accounts: a Telegram-only organization is just as
+// real, and ignoring tg_accounts would let a stray duplicate org shadow it.
+const orgOwnsAccountExpr = `(EXISTS (SELECT 1 FROM xchats.wa_accounts a WHERE a.organization_id = o.id)
+	 OR EXISTS (SELECT 1 FROM xchats.tg_accounts t WHERE t.organization_id = o.id))`
+
 // ---------------------------------------------------------------------------
 // Seeding (idempotent, on boot)
 // ---------------------------------------------------------------------------
@@ -147,15 +188,15 @@ type Draft struct {
 func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization, error) {
 	var o Organization
 	// Idempotent without a UNIQUE(name) constraint: reuse the existing org for this
-	// name (preferring the one that owns a WhatsApp account, else the oldest) and
-	// only insert when none exists. The old code used `ON CONFLICT DO NOTHING` with
-	// no conflict target, so every boot inserted a fresh "xchats" — this stops that
-	// at the source without deleting the historical duplicates.
+	// name (preferring the one that owns a messaging account on ANY channel, else
+	// the oldest) and only insert when none exists. The old code used `ON CONFLICT
+	// DO NOTHING` with no conflict target, so every boot inserted a fresh "xchats"
+	// — this stops that at the source without deleting the historical duplicates.
 	err := s.pool.QueryRow(ctx, `
 		SELECT o.id, o.name, o.respond_mode
 		FROM xchats.organizations o
 		WHERE o.name = $1
-		ORDER BY (EXISTS (SELECT 1 FROM xchats.wa_accounts a WHERE a.organization_id = o.id)) DESC,
+		ORDER BY `+orgOwnsAccountExpr+` DESC,
 		         o.created_at ASC
 		LIMIT 1`, name).Scan(&o.ID, &o.Name, &o.RespondMode)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -198,9 +239,9 @@ func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 			connection_state = EXCLUDED.connection_state,
 			deleted_at = NULL,
 			updated_at = now()
-		RETURNING `+accountCols,
-		a.ID, a.OrganizationID, a.DisplayName, a.OwnerJID, a.PhoneNumber, a.InstanceName, a.ConnectionState).
-		Scan(scanAccountDst(&a)...)
+		RETURNING `+waAccountCols,
+		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle, a.InstanceName, a.ConnectionState).
+		Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
 
@@ -208,34 +249,93 @@ func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 // Accounts
 // ---------------------------------------------------------------------------
 
-// accountCols is the canonical wa_accounts projection; scanAccountDst pairs with it.
-const accountCols = `id, organization_id, display_name, owner_jid, phone_number,
+// waAccountCols is the wa_accounts table projection, used by the WhatsApp
+// write paths that RETURN the row they just wrote. Reads go through
+// accountViewCols below instead, so they see every channel.
+const waAccountCols = `id, organization_id, display_name, owner_jid, phone_number,
 	evolution_instance_name, evolution_instance_id, connection_state, channel,
 	last_live_event_at, created_at, deleted_at`
 
-func scanAccountDst(a *Account) []any {
+func scanWaAccountDst(a *Account) []any {
 	return []any{
-		&a.ID, &a.OrganizationID, &a.DisplayName, &a.OwnerJID, &a.PhoneNumber,
+		&a.ID, &a.OrganizationID, &a.DisplayName, &a.ExternalAccountRef, &a.ExternalHandle,
 		&a.InstanceName, &a.InstanceID, &a.ConnectionState, &a.Channel,
 		&a.LastLiveEventAt, &a.CreatedAt, &a.DeletedAt,
 	}
 }
 
-// AccountByID returns a live (non-deleted) account by its derived id.
-func (s *Store) AccountByID(ctx context.Context, id uuid.UUID) (Account, error) {
+// accountViewCols is the canonical inbox_accounts_v projection — every channel's
+// accounts under one neutral shape; scanAccountDst pairs with it.
+const accountViewCols = `id, organization_id, display_name, channel,
+	external_account_ref, external_handle, instance_name, connection_state,
+	last_live_event_at, created_at, deleted_at,
+	webhook_url, webhook_registered_at, webhook_last_checked_at, webhook_last_error`
+
+// scanAccountView reads one inbox_accounts_v row. webhook_url and
+// webhook_last_error are NULL on the WhatsApp leg, so they land in pointers
+// first and fold to "" — the struct keeps plain strings for its callers.
+func scanAccountView(row pgx.Row) (Account, error) {
 	var a Account
-	err := s.pool.QueryRow(ctx, `SELECT `+accountCols+`
-		FROM xchats.wa_accounts WHERE id = $1 AND deleted_at IS NULL`, id).
-		Scan(scanAccountDst(&a)...)
+	var url, lastErr *string
+	err := row.Scan(
+		&a.ID, &a.OrganizationID, &a.DisplayName, &a.Channel,
+		&a.ExternalAccountRef, &a.ExternalHandle, &a.InstanceName, &a.ConnectionState,
+		&a.LastLiveEventAt, &a.CreatedAt, &a.DeletedAt,
+		&url, &a.WebhookRegisteredAt, &a.WebhookLastCheckedAt, &lastErr)
+	if err != nil {
+		return a, err
+	}
+	a.WebhookURL, a.WebhookLastError = deref(url), deref(lastErr)
+	return a, nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// AccountByID returns a live (non-deleted) account of ANY channel by its
+// derived id, read through inbox_accounts_v.
+func (s *Store) AccountByID(ctx context.Context, id uuid.UUID) (Account, error) {
+	a, err := scanAccountView(s.pool.QueryRow(ctx, `SELECT `+accountViewCols+`
+		FROM xchats.inbox_accounts_v WHERE id = $1 AND deleted_at IS NULL`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, ErrNotFound
 	}
 	return a, err
 }
 
-// ListAccountsForOrg returns the org's live (non-deleted) accounts, oldest first.
+// ListAccountsForOrg returns the org's live (non-deleted) accounts across every
+// channel, oldest first — the neutral GET /accounts listing.
 func (s *Store) ListAccountsForOrg(ctx context.Context, orgID uuid.UUID) ([]Account, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+accountCols+`
+	rows, err := s.pool.Query(ctx, `SELECT `+accountViewCols+`
+		FROM xchats.inbox_accounts_v
+		WHERE organization_id = $1 AND deleted_at IS NULL
+		ORDER BY created_at`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Account
+	for rows.Next() {
+		a, err := scanAccountView(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ListWaAccountsForOrg returns the org's live accounts that live on the wa_*
+// gateway — WhatsApp numbers plus the simulator account. It is what the
+// WhatsApp-only surfaces (the /whatsapp-accounts manager, the compose "from
+// number" picker) read: a Telegram bot has no QR lifecycle and cannot start a
+// conversation, so it must never appear there.
+func (s *Store) ListWaAccountsForOrg(ctx context.Context, orgID uuid.UUID) ([]Account, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+waAccountCols+`
 		FROM xchats.wa_accounts
 		WHERE organization_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at`, orgID)
@@ -246,7 +346,7 @@ func (s *Store) ListAccountsForOrg(ctx context.Context, orgID uuid.UUID) ([]Acco
 	var out []Account
 	for rows.Next() {
 		var a Account
-		if err := rows.Scan(scanAccountDst(&a)...); err != nil {
+		if err := rows.Scan(scanWaAccountDst(&a)...); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -274,10 +374,10 @@ func (s *Store) UpsertConnectedAccount(ctx context.Context, a Account) (Account,
 			last_live_event_at = now(),
 			deleted_at = NULL,
 			updated_at = now()
-		RETURNING `+accountCols,
-		a.ID, a.OrganizationID, a.DisplayName, a.OwnerJID, a.PhoneNumber,
+		RETURNING `+waAccountCols,
+		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle,
 		a.InstanceName, a.InstanceID, a.ConnectionState).
-		Scan(scanAccountDst(&a)...)
+		Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
 
@@ -389,15 +489,15 @@ func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]User, int, 
 
 func (s *Store) OrgForUser(ctx context.Context, userID uuid.UUID) (Organization, error) {
 	var o Organization
-	// Deterministic pick: prefer an org that actually owns a WhatsApp account
-	// (where the chats live), then the oldest. Guards against a stray duplicate
-	// org silently shadowing the real one (see migration 0003).
+	// Deterministic pick: prefer an org that actually owns a messaging account on
+	// any channel (where the chats live), then the oldest. Guards against a stray
+	// duplicate org silently shadowing the real one (see migration 0003).
 	err := s.pool.QueryRow(ctx, `
 		SELECT o.id, o.name, o.respond_mode
 		FROM xchats.organizations o
 		JOIN xchats.organization_users ou ON ou.organization_id = o.id
 		WHERE ou.user_id = $1
-		ORDER BY (EXISTS (SELECT 1 FROM xchats.wa_accounts a WHERE a.organization_id = o.id)) DESC,
+		ORDER BY `+orgOwnsAccountExpr+` DESC,
 		         o.created_at ASC
 		LIMIT 1`, userID).Scan(&o.ID, &o.Name, &o.RespondMode)
 	if errors.Is(err, pgx.ErrNoRows) {

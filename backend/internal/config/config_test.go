@@ -22,3 +22,24 @@ func TestCanonicalAndPhone(t *testing.T) {
 		t.Errorf("phone extraction: %q", got)
 	}
 }
+
+func TestTelegramResolvedWebhookSecret(t *testing.T) {
+	cases := []struct {
+		name                  string
+		telegramWebhookSecret string
+		webhookToken          string
+		want                  string
+	}{
+		{"both set: TG_WEBHOOK_SECRET wins", "tg-secret", "shared-token", "tg-secret"},
+		{"only WEBHOOK_TOKEN set: falls back", "", "shared-token", "shared-token"},
+		{"neither set: empty", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{TelegramWebhookSecret: tc.telegramWebhookSecret, WebhookToken: tc.webhookToken}
+			if got := c.TelegramResolvedWebhookSecret(); got != tc.want {
+				t.Errorf("TelegramResolvedWebhookSecret() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

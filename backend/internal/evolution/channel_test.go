@@ -73,7 +73,7 @@ func TestChannelDecoder_RejectsWrongInputType(t *testing.T) {
 
 func TestChannelSender_SendsTextThroughClient(t *testing.T) {
 	fake := NewFake("test-instance", "77011111111@s.whatsapp.net")
-	sender := NewChannelSender(fake)
+	sender := NewChannelSender(fake, nil)
 
 	res, err := sender.Send(context.Background(), messaging.OutboundMessage{
 		MessageID: "m1", Channel: messaging.ChannelWhatsApp,
@@ -97,7 +97,7 @@ func TestChannelSender_SendsTextThroughClient(t *testing.T) {
 func TestChannelSender_PropagatesClientError(t *testing.T) {
 	fake := NewFake("test-instance", "77011111111@s.whatsapp.net")
 	fake.FailNext = errBoom
-	sender := NewChannelSender(fake)
+	sender := NewChannelSender(fake, nil)
 
 	if _, err := sender.Send(context.Background(), messaging.OutboundMessage{Text: "x"}); err == nil {
 		t.Fatal("want the client's error to propagate")

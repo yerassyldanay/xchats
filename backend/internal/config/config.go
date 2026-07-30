@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/caarlos0/env/v11"
@@ -35,6 +36,26 @@ type Config struct {
 	WebhookToken         string `env:"WEBHOOK_TOKEN"`
 	WebhookPublicBaseURL string `env:"WEBHOOK_PUBLIC_BASE_URL"`
 	SessionSecret        string `env:"SESSION_SECRET"`
+
+	// --- Telegram (Bot API) ---
+	// TelegramWebhookPublicBaseURL is deliberately its own variable rather than
+	// a reuse of WEBHOOK_PUBLIC_BASE_URL: Telegram refuses to register a
+	// webhook that is not public HTTPS, while the Evolution one is routinely
+	// http://localhost in dev. Validated at provisioning time.
+	TelegramWebhookPublicBaseURL string `env:"TG_WEBHOOK_PUBLIC_BASE_URL"`
+	// TelegramAPIBaseURL overrides https://api.telegram.org (a local Bot API
+	// server, or a test double).
+	TelegramAPIBaseURL string `yaml:"tg_api_base_url" env:"TG_API_BASE_URL"`
+	// TelegramCredentialsEncKey is the AES-256-GCM key protecting stored bot
+	// tokens (internal/secretbox, xchats.tg_credentials). Losing it means
+	// re-pasting every bot token; it is never logged.
+	TelegramCredentialsEncKey string `env:"TG_CREDENTIALS_ENC_KEY"`
+	// TelegramWebhookSecret is the secret_token registered with setWebhook and
+	// verified on the Telegram ingress. Falls back to WebhookToken when unset,
+	// so a deployment that hasn't set it yet keeps working; once set, it frees
+	// WEBHOOK_TOKEN from Telegram's stricter secret_token charset rule. Use
+	// TelegramResolvedWebhookSecret to read the effective value.
+	TelegramWebhookSecret string `env:"TG_WEBHOOK_SECRET"`
 
 	// --- auth / session (config.yaml) ---
 	SessionTTLHours int  `yaml:"session_ttl_hours" env:"SESSION_TTL_HOURS"`
@@ -219,6 +240,45 @@ func loadDotenv(path string) error {
 		}
 	}
 	return sc.Err()
+}
+
+// TelegramResolvedAPIBaseURL returns the Bot API root to call.
+func (c *Config) TelegramResolvedAPIBaseURL() string {
+	if c.TelegramAPIBaseURL != "" {
+		return strings.TrimRight(c.TelegramAPIBaseURL, "/")
+	}
+	return "https://api.telegram.org"
+}
+
+// TelegramResolvedWebhookSecret returns the secret_token to register with
+// Telegram and to verify on the ingress: TG_WEBHOOK_SECRET when set, else the
+// shared WEBHOOK_TOKEN (so a deployment that hasn't set TG_WEBHOOK_SECRET yet
+// keeps its existing registered webhook working).
+func (c *Config) TelegramResolvedWebhookSecret() string {
+	if c.TelegramWebhookSecret != "" {
+		return c.TelegramWebhookSecret
+	}
+	return c.WebhookToken
+}
+
+// xchatsChannelNS is the fixed namespace for deriving a non-WhatsApp channel
+// account's id from its provider owner ref. Like xchatsWaNS it must never
+// change: it is what makes re-pasting the same bot token land on the SAME
+// account row (history intact) and keep the webhook URL — which embeds this
+// uuid — stable.
+var xchatsChannelNS = uuid.MustParse("7d6e1c2b-93a4-5f80-b1c7-2a4d6e8f0b13")
+
+// TelegramOwnerRef is a Telegram bot's stable provider identity, the value
+// inbox_accounts_v exposes as external_account_ref.
+func TelegramOwnerRef(botID int64) string {
+	return "telegram:bot:" + strconv.FormatInt(botID, 10)
+}
+
+// ChannelAccountID derives a deterministic account id from a channel owner ref.
+// Unlike AccountID it applies no JID coercion — a Telegram owner ref is not a
+// phone number and must never grow an @s.whatsapp.net suffix.
+func ChannelAccountID(ownerRef string) uuid.UUID {
+	return uuid.NewSHA1(xchatsChannelNS, []byte(strings.ToLower(strings.TrimSpace(ownerRef))))
 }
 
 // CanonicalJID lowercases/trims a JID and coerces a bare phone to phone-JID form.

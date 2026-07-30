@@ -42,8 +42,8 @@ func newTestStore(t *testing.T) (*store.Store, uuid.UUID, uuid.UUID) {
 	accountID := config.AccountID(ownerJID)
 	if _, err := st.SeedAccount(ctx, store.Account{
 		ID: accountID, OrganizationID: uuid.NullUUID{UUID: org.ID, Valid: true},
-		DisplayName: "WhatsApp", OwnerJID: config.CanonicalJID(ownerJID),
-		PhoneNumber: config.PhoneFromJID(ownerJID), InstanceName: "xpayment", ConnectionState: "connected",
+		DisplayName: "WhatsApp", ExternalAccountRef: config.CanonicalJID(ownerJID),
+		ExternalHandle: config.PhoneFromJID(ownerJID), InstanceName: "xpayment", ConnectionState: "connected",
 	}); err != nil {
 		t.Fatalf("seed account: %v", err)
 	}

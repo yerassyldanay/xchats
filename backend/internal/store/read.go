@@ -11,44 +11,49 @@ import (
 )
 
 // ChatFilter holds the inbox list filters. Build 1 scopes the inbox to an org
-// (chats across all that org's live accounts) with an optional single-account
-// filter (the "from number" chip).
+// (chats across all that org's live accounts, on every channel) with an optional
+// single-account filter (the "from account" chip).
 type ChatFilter struct {
-	OrgID       uuid.UUID
-	WaAccountID uuid.NullUUID // optional: restrict to one account
-	Status      string
-	Assignee    string // me|unassigned|<uuid>
-	MeUserID    uuid.UUID
-	Query       string
-	Limit       int
-	Offset      int
+	OrgID     uuid.UUID
+	AccountID uuid.NullUUID // optional: restrict to one account
+	Status    string
+	Assignee  string // me|unassigned|<uuid>
+	MeUserID  uuid.UUID
+	Query     string
+	Limit     int
+	Offset    int
 }
 
-// chatCols is the canonical wa_chats (+ contact) projection.
-const chatCols = `c.id, c.account_id, c.contact_id, c.remote_jid, c.chat_state, c.assignee_user_id,
+// chatCols is the canonical inbox_chats_v projection — one shape for every
+// channel, with provider vocabulary already folded into neutral column names.
+const chatCols = `c.id, c.account_id, c.contact_id, c.channel, c.external_conversation_ref,
+	c.chat_state, c.assignee_user_id,
 	c.last_message_at, c.last_message_preview, c.unread_count,
-	ct.id, ct.phone_number, ct.phone_jid, COALESCE(ct.lid_jid,''), ct.push_name, ct.display_name, ct.attributes`
+	c.contact_id, c.contact_phone_number, c.external_contact_ref, c.contact_lid_jid,
+	c.contact_push_name, c.contact_display_name, c.contact_attributes`
 
 func scanChatDst(c *Chat) []any {
 	return []any{
-		&c.ID, &c.AccountID, &c.ContactID, &c.RemoteJID, &c.ChatState, &c.AssigneeUserID,
+		&c.ID, &c.AccountID, &c.ContactID, &c.Channel, &c.ExternalConversationRef,
+		&c.ChatState, &c.AssigneeUserID,
 		&c.LastMessageAt, &c.LastMessagePreview, &c.UnreadCount,
-		&c.Contact.ID, &c.Contact.PhoneNumber, &c.Contact.PhoneJID, &c.Contact.LidJID,
+		&c.Contact.ID, &c.Contact.PhoneNumber, &c.Contact.ExternalContactRef, &c.Contact.LidJID,
 		&c.Contact.PushName, &c.Contact.DisplayName, &c.Contact.Attributes,
 	}
 }
 
-// ListChatsForOrg returns the org's inbox rows (joined over all its live accounts)
-// ordered by recency, plus the total. The join to wa_accounts both scopes by org
-// and hides chats of soft-deleted accounts.
+// ListChatsForOrg returns the org's inbox rows across every channel, ordered by
+// recency, plus the total. inbox_chats_v carries the owning account's
+// organization_id and deleted_at, so the org scope and the "hide soft-deleted
+// accounts' chats" rule are the same two predicates they always were.
 func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int, error) {
 	var where []string
 	var args []any
 	args = append(args, f.OrgID)
-	where = append(where, "a.organization_id = $1", "a.deleted_at IS NULL")
+	where = append(where, "c.organization_id = $1", "c.account_deleted_at IS NULL")
 
-	if f.WaAccountID.Valid {
-		args = append(args, f.WaAccountID.UUID)
+	if f.AccountID.Valid {
+		args = append(args, f.AccountID.UUID)
 		where = append(where, "c.account_id = $"+itoa(len(args)))
 	}
 	if f.Status != "" {
@@ -70,15 +75,15 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 	if f.Query != "" {
 		args = append(args, "%"+strings.ToLower(f.Query)+"%")
 		i := itoa(len(args))
-		where = append(where, "(lower(ct.display_name) LIKE $"+i+" OR lower(ct.phone_number) LIKE $"+i+" OR ct.phone_jid LIKE $"+i+")")
+		where = append(where, "(lower(c.contact_display_name) LIKE $"+i+
+			" OR lower(c.contact_phone_number) LIKE $"+i+
+			" OR c.external_contact_ref LIKE $"+i+")")
 	}
 	clause := strings.Join(where, " AND ")
-	const joins = `xchats.wa_chats c
-		JOIN xchats.wa_contacts ct ON ct.id = c.contact_id
-		JOIN xchats.wa_accounts a ON a.id = c.account_id`
+	const from = `xchats.inbox_chats_v c`
 
 	args = append(args, f.Limit, f.Offset)
-	q := `SELECT ` + chatCols + ` FROM ` + joins + `
+	q := `SELECT ` + chatCols + ` FROM ` + from + `
 		WHERE ` + clause + `
 		ORDER BY c.last_message_at DESC NULLS LAST
 		LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
@@ -96,16 +101,15 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 		out = append(out, c)
 	}
 	var total int
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM `+joins+` WHERE `+clause, args[:len(args)-2]...).Scan(&total)
+	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM `+from+` WHERE `+clause, args[:len(args)-2]...).Scan(&total)
 	return out, total, rows.Err()
 }
 
-// ChatByID returns a chat with its contact.
+// ChatByID returns a chat with its contact, on any channel.
 func (s *Store) ChatByID(ctx context.Context, id uuid.UUID) (Chat, error) {
 	var c Chat
 	err := s.pool.QueryRow(ctx, `SELECT `+chatCols+`
-		FROM xchats.wa_chats c JOIN xchats.wa_contacts ct ON ct.id = c.contact_id
-		WHERE c.id = $1`, id).Scan(scanChatDst(&c)...)
+		FROM xchats.inbox_chats_v c WHERE c.id = $1`, id).Scan(scanChatDst(&c)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, ErrNotFound
 	}
@@ -118,10 +122,8 @@ func (s *Store) ChatByID(ctx context.Context, id uuid.UUID) (Chat, error) {
 func (s *Store) ChatByIDForOrg(ctx context.Context, id, orgID uuid.UUID) (Chat, error) {
 	var c Chat
 	err := s.pool.QueryRow(ctx, `SELECT `+chatCols+`
-		FROM xchats.wa_chats c
-		JOIN xchats.wa_contacts ct ON ct.id = c.contact_id
-		JOIN xchats.wa_accounts a ON a.id = c.account_id
-		WHERE c.id = $1 AND a.organization_id = $2 AND a.deleted_at IS NULL`, id, orgID).
+		FROM xchats.inbox_chats_v c
+		WHERE c.id = $1 AND c.organization_id = $2 AND c.account_deleted_at IS NULL`, id, orgID).
 		Scan(scanChatDst(&c)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, ErrNotFound
@@ -129,13 +131,24 @@ func (s *Store) ChatByIDForOrg(ctx context.Context, id, orgID uuid.UUID) (Chat, 
 	return c, err
 }
 
-// MarkChatRead zeroes the unread badge and returns the refreshed chat.
+// MarkChatRead zeroes the unread badge on the chat's own transport table and
+// returns the refreshed chat. The read resolves the channel; the write is
+// dispatched to wa_chats or tg_chats — views are read-only.
 func (s *Store) MarkChatRead(ctx context.Context, id uuid.UUID) (Chat, error) {
-	_, err := s.pool.Exec(ctx, `UPDATE xchats.wa_chats SET unread_count = 0, updated_at = now() WHERE id = $1`, id)
+	chat, err := s.ChatByID(ctx, id)
 	if err != nil {
 		return Chat{}, err
 	}
-	return s.ChatByID(ctx, id)
+	table, err := chatsTableFor(chat.Channel)
+	if err != nil {
+		return Chat{}, err
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE `+table+` SET unread_count = 0, updated_at = now() WHERE id = $1`, id); err != nil {
+		return Chat{}, err
+	}
+	chat.UnreadCount = 0
+	return chat, nil
 }
 
 // MessagesForChat returns up to limit messages older than `before` (chronological asc),
@@ -148,10 +161,8 @@ func (s *Store) MessagesForChat(ctx context.Context, chatID uuid.UUID, before ti
 	if before.IsZero() {
 		beforeArg = nil
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, chat_id, direction, sender_kind, sender_user_id, COALESCE(evolution_message_id,''),
-		       message_kind, body, delivery_state, source, message_ts
-		FROM xchats.wa_messages
+	rows, err := s.pool.Query(ctx, `SELECT `+messageCols+`
+		FROM xchats.inbox_messages_v
 		WHERE chat_id = $1 AND ($2::timestamptz IS NULL OR message_ts < $2)
 		ORDER BY message_ts DESC, id DESC
 		LIMIT $3`, chatID, beforeArg, limit+1)
@@ -162,8 +173,7 @@ func (s *Store) MessagesForChat(ctx context.Context, chatID uuid.UUID, before ti
 	var desc []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ChatID, &m.Direction, &m.SenderKind, &m.SenderUserID, &m.EvolutionMessageID,
-			&m.MessageKind, &m.Body, &m.DeliveryState, &m.Source, &m.MessageTS); err != nil {
+		if err := rows.Scan(scanMessageDst(&m)...); err != nil {
 			return nil, nil, err
 		}
 		desc = append(desc, m)
@@ -190,15 +200,24 @@ func (s *Store) MessagesForChat(ctx context.Context, chatID uuid.UUID, before ti
 	return out, next, nil
 }
 
+// messageCols is the canonical inbox_messages_v projection; scanMessageDst pairs
+// with it.
+const messageCols = `id, chat_id, channel, direction, sender_kind, sender_user_id,
+	external_message_id, message_kind, body, delivery_state, source, message_ts`
+
+func scanMessageDst(m *Message) []any {
+	return []any{
+		&m.ID, &m.ChatID, &m.Channel, &m.Direction, &m.SenderKind, &m.SenderUserID,
+		&m.ExternalMessageID, &m.MessageKind, &m.Body, &m.DeliveryState, &m.Source, &m.MessageTS,
+	}
+}
+
 // MessageByID returns one message with media (used for send responses + SSE).
 func (s *Store) MessageByID(ctx context.Context, id uuid.UUID) (Message, error) {
 	var m Message
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, chat_id, direction, sender_kind, sender_user_id, COALESCE(evolution_message_id,''),
-		       message_kind, body, delivery_state, source, message_ts
-		FROM xchats.wa_messages WHERE id = $1`, id).
-		Scan(&m.ID, &m.ChatID, &m.Direction, &m.SenderKind, &m.SenderUserID, &m.EvolutionMessageID,
-			&m.MessageKind, &m.Body, &m.DeliveryState, &m.Source, &m.MessageTS)
+	err := s.pool.QueryRow(ctx, `SELECT `+messageCols+`
+		FROM xchats.inbox_messages_v WHERE id = $1`, id).
+		Scan(scanMessageDst(&m)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -223,8 +242,8 @@ func (s *Store) attachMedia(ctx context.Context, msgs []Message) error {
 		idx[m.ID] = i
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT message_id, id, media_type, mimetype, file_name, file_size
-		FROM xchats.message_media WHERE message_id = ANY($1) ORDER BY created_at`, ids)
+		SELECT message_id, id, media_type, mimetype, filename, size
+		FROM xchats.inbox_message_media_v WHERE message_id = ANY($1) ORDER BY created_at`, ids)
 	if err != nil {
 		return err
 	}
@@ -246,6 +265,18 @@ func (s *Store) attachMedia(ctx context.Context, msgs []Message) error {
 // AI drafts
 // ---------------------------------------------------------------------------
 
+// draftCols is the canonical ai_drafts projection; scanDraftDst pairs with it.
+const draftCols = `id, chat_id, channel, trigger_message_id, option_ordinal, draft_text,
+	reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at`
+
+func scanDraftDst(d *Draft) []any {
+	return []any{
+		&d.ID, &d.ChatID, &d.Channel, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText,
+		&d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason,
+		&d.DraftState, &d.CreatedAt,
+	}
+}
+
 // DraftOption is one suggested reply option to be written.
 type DraftOption struct {
 	Ordinal          int
@@ -257,8 +288,13 @@ type DraftOption struct {
 }
 
 // WriteDraftSet supersedes any prior pending options for the chat and inserts the
-// new 1–3 options atomically, returning the written drafts.
-func (s *Store) WriteDraftSet(ctx context.Context, chatID uuid.UUID, trigger uuid.NullUUID, opts []DraftOption) ([]Draft, error) {
+// new 1–3 options atomically, returning the written drafts. channel is stamped on
+// each row: ai_drafts is channel-neutral (migration 0013 dropped its FKs into
+// wa_*), so the column is the only record of which transport the chat lives on.
+func (s *Store) WriteDraftSet(ctx context.Context, channel string, chatID uuid.UUID, trigger uuid.NullUUID, opts []DraftOption) ([]Draft, error) {
+	if channel == "" {
+		channel = "whatsapp"
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -273,11 +309,11 @@ func (s *Store) WriteDraftSet(ctx context.Context, chatID uuid.UUID, trigger uui
 	for _, o := range opts {
 		var d Draft
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO xchats.ai_drafts (chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, confidence, escalate, escalation_reason, draft_state)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'suggested')
-			RETURNING id, chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at`,
-			chatID, trigger, o.Ordinal, o.Text, o.ReplyLanguage, o.Confidence, o.Escalate, o.EscalationReason).
-			Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt); err != nil {
+			INSERT INTO xchats.ai_drafts (chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, confidence, escalate, escalation_reason, draft_state)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'suggested')
+			RETURNING id, chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at`,
+			chatID, channel, trigger, o.Ordinal, o.Text, o.ReplyLanguage, o.Confidence, o.Escalate, o.EscalationReason).
+			Scan(&d.ID, &d.ChatID, &d.Channel, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -285,10 +321,23 @@ func (s *Store) WriteDraftSet(ctx context.Context, chatID uuid.UUID, trigger uui
 	return out, tx.Commit(ctx)
 }
 
+// HasDraftForTrigger reports whether any draft already exists for a trigger
+// message. The Telegram webhook uses it on a duplicate delivery: a redelivery
+// that finds no draft means the first attempt died between the commit and the
+// enqueue, so the draft task is published again (at-least-once; WriteDraftSet's
+// supersede semantics make a rare double-generation harmless).
+func (s *Store) HasDraftForTrigger(ctx context.Context, triggerMessageID uuid.UUID) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM xchats.ai_drafts WHERE trigger_message_id = $1)`, triggerMessageID).
+		Scan(&exists)
+	return exists, err
+}
+
 // PendingDrafts returns the chat's suggested options.
 func (s *Store) PendingDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at
+		SELECT `+draftCols+`
 		FROM xchats.ai_drafts WHERE chat_id = $1 AND draft_state='suggested'
 		ORDER BY option_ordinal`, chatID)
 	if err != nil {
@@ -298,7 +347,7 @@ func (s *Store) PendingDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, e
 	var out []Draft
 	for rows.Next() {
 		var d Draft
-		if err := rows.Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt); err != nil {
+		if err := rows.Scan(scanDraftDst(&d)...); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -313,9 +362,9 @@ func (s *Store) PendingDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, e
 func (s *Store) DraftByID(ctx context.Context, id uuid.UUID) (Draft, error) {
 	var d Draft
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at
+		SELECT `+draftCols+`
 		FROM xchats.ai_drafts WHERE id = $1`, id).
-		Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt)
+		Scan(scanDraftDst(&d)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -338,8 +387,8 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 	err = tx.QueryRow(ctx, `
 		UPDATE xchats.ai_drafts SET draft_state='sent', updated_at=now()
 		WHERE id = $1 AND draft_state='suggested'
-		RETURNING id, chat_id, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at`,
-		draftID).Scan(&d.ID, &d.ChatID, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt)
+		RETURNING `+draftCols+``,
+		draftID).Scan(scanDraftDst(&d)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -374,7 +423,7 @@ func (s *Store) ReopenDraft(ctx context.Context, draftID uuid.UUID) error {
 func (s *Store) LatestInboundMessageID(ctx context.Context, chatID uuid.UUID) (uuid.NullUUID, error) {
 	var id uuid.NullUUID
 	err := s.pool.QueryRow(ctx, `
-		SELECT id FROM xchats.wa_messages WHERE chat_id = $1 AND direction='in'
+		SELECT id FROM xchats.inbox_messages_v WHERE chat_id = $1 AND direction='in'
 		ORDER BY message_ts DESC NULLS LAST, created_at DESC LIMIT 1`, chatID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return id, nil

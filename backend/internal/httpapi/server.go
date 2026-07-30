@@ -5,6 +5,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -23,12 +24,19 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
 
 // webhookTokenHeader is the header Evolution echoes back so we can verify it
 // (header only — never a query param, so it never lands in access logs).
 const webhookTokenHeader = "X-Webhook-Token"
+
+// publishTimeout bounds every enqueue from an HTTP handler. queue.Publish blocks
+// while the buffer is full; without a deadline that turns backpressure into a
+// hung request. With one it becomes an error the handler can act on — the
+// Telegram webhook answers 500 so Telegram redelivers, others log and continue.
+const publishTimeout = 2 * time.Second
 
 // kbInvalidator is the narrow slice of CachedKBRepo (internal/responsestore)
 // the /kb/* live-write epilogue needs — declared inline (rather than importing
@@ -48,6 +56,7 @@ type Server struct {
 	drafter  assistant.Drafter // dormant: only the disconnected playground hot-swap reads this
 	response *response.Service // the multichannel response engine's entry point (simulator API)
 	evo      evolution.Client
+	tg       telegram.Client // nil when Telegram is not configured; every handler checks
 	kb       *kbstore.Store
 	builder  *playground.Builder
 	orgID    uuid.UUID
@@ -81,6 +90,7 @@ type Deps struct {
 	Drafter       assistant.Drafter
 	Response      *response.Service
 	Evo           evolution.Client
+	TG            telegram.Client
 	KB            *kbstore.Store
 	Builder       *playground.Builder
 	KBRepo        response.KnowledgeBaseRepository
@@ -93,7 +103,7 @@ type Deps struct {
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, drafter: d.Drafter, response: d.Response, evo: d.Evo, kb: d.KB, builder: d.Builder,
+		blob: d.Blob, drafter: d.Drafter, response: d.Response, evo: d.Evo, tg: d.TG, kb: d.KB, builder: d.Builder,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
 		pendingNames: map[string]string{},
@@ -120,6 +130,10 @@ func (s *Server) Router() *gin.Engine {
 	r.POST("/evolution/api/v1/webhook/:account_id", s.handleWebhook)
 	r.POST("/evolution/api/v1/webhook/:account_id/*event", s.handleWebhook)
 
+	// Telegram webhook ingress. Unlike Evolution's, this one commits the
+	// normalized rows before it acks — see handleTelegramWebhook.
+	r.POST("/telegram/api/v1/webhook/:account_id", s.handleTelegramWebhook)
+
 	api := r.Group("/xchats/api/v1")
 	api.POST("/auth/login", s.handleLogin)
 	api.POST("/auth/logout", s.handleLogout)
@@ -131,6 +145,10 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/users", s.handleCreateUser)
 	auth.GET("/organization", s.handleGetOrg)
 
+	// Channel-neutral account listing — every channel in one shape. The
+	// per-channel routes below own each channel's own lifecycle.
+	auth.GET("/accounts", s.handleListAccounts)
+
 	// WhatsApp accounts manager (Build 1).
 	auth.GET("/whatsapp-accounts", s.handleListWhatsAppAccounts)
 	auth.POST("/whatsapp-accounts", s.handleCreateWhatsAppAccount)
@@ -139,6 +157,14 @@ func (s *Server) Router() *gin.Engine {
 	auth.DELETE("/whatsapp-accounts/:id", s.handleDeleteWhatsAppAccount)
 	auth.GET("/whatsapp-instances", s.handleListInstances)
 	auth.DELETE("/whatsapp-instances/:name", s.handleDeleteInstance)
+
+	// Telegram accounts manager. A bot has no QR and no Evolution instance, so
+	// it gets its own lifecycle routes rather than sharing /whatsapp-accounts.
+	auth.POST("/telegram-accounts", s.handleCreateTelegramAccount)
+	auth.POST("/telegram-accounts/:id/retry-webhook", s.handleRetryTelegramWebhook)
+	auth.POST("/telegram-accounts/:id/check", s.handleCheckTelegramAccount)
+	auth.PUT("/telegram-accounts/:id/token", s.handleReplaceTelegramToken)
+	auth.DELETE("/telegram-accounts/:id", s.handleDeleteTelegramAccount)
 
 	auth.GET("/chats", s.handleListChats)
 	auth.POST("/chats", s.handleCreateChat)
@@ -214,7 +240,7 @@ func (s *Server) handleWebhook(c *gin.Context) {
 		if tok == "" {
 			tok = c.GetHeader("apikey")
 		}
-		if tok != s.cfg.WebhookToken {
+		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.cfg.WebhookToken)) != 1 {
 			s.log.Warn("webhook auth rejected", "account_id", accountID, "reason", "bad token")
 			fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook token")
 			return
@@ -228,7 +254,7 @@ func (s *Server) handleWebhook(c *gin.Context) {
 	}
 	cp := make([]byte, len(raw))
 	copy(cp, raw)
-	_ = s.queue.Publish(queue.Message{Kind: queue.KindWaEvent, Payload: cp})
+	queued := s.publish(ctx(c), queue.Message{Kind: queue.KindWaEvent, Payload: cp}) == nil
 
 	// Cheap top-level peek for the event type + instance (no full parse). The full
 	// body is only logged at debug to keep customer PII out of info logs.
@@ -239,9 +265,15 @@ func (s *Server) handleWebhook(c *gin.Context) {
 	_ = json.Unmarshal(raw, &peek)
 	s.log.Info("webhook received",
 		"account_id", accountID, "event", peek.Event, "instance", peek.Instance,
-		"bytes", len(raw), "queued", true)
+		"bytes", len(raw), "queued", queued)
 	s.log.Debug("webhook body", "account_id", accountID, "body", string(raw))
 
+	// Evolution's retry semantics are not Telegram's — a 5xx here would have it
+	// hammer the same event — so a dropped enqueue stays a logged 200 (the
+	// pre-existing Build-0 loss window), now at least visible in the log line.
+	if !queued {
+		s.log.Error("webhook event dropped: queue full", "account_id", accountID, "event", peek.Event)
+	}
 	ok(c, nil)
 }
 
@@ -260,7 +292,7 @@ func (s *Server) cors() gin.HandlerFunc {
 			c.Header("Vary", "Origin")
 		}
 		if c.Request.Method == http.MethodOptions {
-			c.Header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+			c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 			c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Webhook-Token")
 			c.AbortWithStatus(http.StatusNoContent)
 			return
@@ -327,3 +359,19 @@ func parseUUID(c *gin.Context, name string) (uuid.UUID, bool) {
 
 // ctx returns the request context.
 func ctx(c *gin.Context) context.Context { return c.Request.Context() }
+
+// publish enqueues with a bounded deadline (see publishTimeout).
+func (s *Server) publish(parent context.Context, m queue.Message) error {
+	pctx, cancel := context.WithTimeout(parent, publishTimeout)
+	defer cancel()
+	return s.queue.Publish(pctx, m)
+}
+
+// publishOrLog is the fire-and-forget form for paths that have already produced
+// a durable row: a lost enqueue degrades a background nicety (a draft, a media
+// download), it never invalidates the response we already committed.
+func (s *Server) publishOrLog(parent context.Context, m queue.Message) {
+	if err := s.publish(parent, m); err != nil {
+		s.log.Error("enqueue failed", "kind", m.Kind, "err", err)
+	}
+}

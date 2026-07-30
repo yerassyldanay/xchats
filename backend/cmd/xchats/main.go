@@ -26,8 +26,10 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
+	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -37,6 +39,14 @@ import (
 )
 
 const webhookTokenHeader = "X-Webhook-Token"
+
+// Telegram media sweep cadence. The retry delay is what keeps a permanently
+// broken file_id from becoming a hot loop; the batch bounds one pass.
+const (
+	telegramMediaSweepEvery = 5 * time.Minute
+	telegramMediaRetryAfter = 2 * time.Minute
+	telegramMediaSweepBatch = 100
+)
 
 func main() {
 	cfgPath := flag.String("config", envOr("XCHATS_CONFIG", "config.yaml"), "path to config.yaml")
@@ -141,20 +151,37 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	q := queue.NewInMem(2048, cfg.QueueWorkers, log)
 	hub := realtime.NewHub()
 	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
+	tg := telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
+
+	// Credentials at rest. Without a key the Telegram lifecycle refuses to store
+	// or read a bot token (an explicit error, never silent plaintext); WhatsApp
+	// is unaffected, so this is a warning rather than a boot failure.
+	if box, err := secretbox.FromEnvValue(cfg.TelegramCredentialsEncKey); err != nil {
+		log.Warn("credentials encryption disabled; Telegram accounts cannot be connected",
+			"reason", err.Error())
+	} else {
+		st.UseCredentialsBox(box)
+		log.Info("credentials encryption enabled", "key_version", secretbox.KeyVersion)
+	}
 
 	senders := messaging.NewSenderRegistry()
-	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(evo))
+	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(evo, blobStore))
 	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
+	senders.Register(messaging.ChannelTelegram, telegram.NewChannelSender(tg, st, blobStore))
 
 	w := &worker.Worker{
-		Store: st, Queue: q, Evo: evo, Blob: blobStore, Hub: hub,
+		Store: st, Queue: q, Evo: evo, TG: tg, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, KB: kb, Log: log,
 	}
 	q.Start(ctx, w.Handle)
+	// Attachments whose bytes never arrived are retried from their own media
+	// row — the durable work item that replaces an inbound-event table. The
+	// startup pass picks up whatever a crash or an outage left behind.
+	w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, Evo: evo, KB: kb,
+		Response: responseService, Evo: evo, TG: tg, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
 	})
@@ -256,18 +283,18 @@ func seed(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Lo
 	}
 	id := config.AccountID(ownerJID)
 	acct, err := st.SeedAccount(ctx, store.Account{
-		ID:              id,
-		OrganizationID:  nullUUID(org.ID),
-		DisplayName:     orDefault(cfg.WaAccountDisplayName, "WhatsApp"),
-		OwnerJID:        config.CanonicalJID(ownerJID),
-		PhoneNumber:     config.PhoneFromJID(config.CanonicalJID(ownerJID)),
-		InstanceName:    cfg.EvolutionInstance,
-		ConnectionState: "connected",
+		ID:                 id,
+		OrganizationID:     nullUUID(org.ID),
+		DisplayName:        orDefault(cfg.WaAccountDisplayName, "WhatsApp"),
+		ExternalAccountRef: config.CanonicalJID(ownerJID),
+		ExternalHandle:     config.PhoneFromJID(config.CanonicalJID(ownerJID)),
+		InstanceName:       cfg.EvolutionInstance,
+		ConnectionState:    "connected",
 	})
 	if err != nil {
 		fatal("seed account", err)
 	}
-	log.Info("account seeded", "id", acct.ID, "owner_jid", acct.OwnerJID)
+	log.Info("account seeded", "id", acct.ID, "owner_jid", acct.ExternalAccountRef)
 	return acct.ID
 }
 

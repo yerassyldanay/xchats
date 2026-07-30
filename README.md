@@ -62,13 +62,16 @@ plan/
   database-schema.md         target tables, responsibilities, and columns
   playground.md              material-to-draft-to-live authoring flow
   knowledge-base.md          approved-KB prompt and response example
+  telegram-testing.md        verifying the Telegram channel: env vars, endpoints,
+                             response contracts, curl walkthrough, no committed tooling
 ```
 
 ## Reading order
 
 [`overview`](plan/overview.md) → [`architecture`](plan/architecture.md) →
 [`database schema`](plan/database-schema.md) → [`playground`](plan/playground.md)
-→ [`knowledge base`](plan/knowledge-base.md).
+→ [`knowledge base`](plan/knowledge-base.md) →
+[`telegram testing`](plan/telegram-testing.md).
 
 ## What this describes (in one line)
 

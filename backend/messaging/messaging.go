@@ -16,6 +16,7 @@ type Channel string
 const (
 	ChannelWhatsApp  Channel = "whatsapp"
 	ChannelSimulator Channel = "simulator"
+	ChannelTelegram  Channel = "telegram"
 )
 
 // Message is one normalized inbound (or outbound) message, independent of
@@ -45,6 +46,23 @@ type OutboundMessage struct {
 	Text           string
 	To             string
 	Route          string
+	// Media, when set, makes this an attachment send rather than a text send.
+	Media *OutboundMedia
+}
+
+// OutboundMedia is one attachment on an outbound message. BlobID names the
+// bytes in our own storage (the adapter dereferences it), so this contract
+// carries a reference rather than a payload and a channel that can stream is
+// free to do so. ProviderRef is the escape hatch for content the provider
+// already hosts — a Telegram file_id from an inbound message — letting a
+// re-send skip the upload entirely.
+type OutboundMedia struct {
+	BlobID      string
+	Kind        string // image|video|audio|document
+	Mimetype    string
+	FileName    string
+	Caption     string
+	ProviderRef string
 }
 
 // SendResult is the outcome of a ChannelSender.Send call.

@@ -37,9 +37,12 @@ type ConversationRepository interface {
 }
 
 // DraftToPersist is one generated draft ready to become a conversation's
-// single suggested option.
+// single suggested option. Channel is carried so the persisted row records
+// which transport the conversation lives on — the suggestion store is
+// channel-neutral and has no other way to know.
 type DraftToPersist struct {
 	ConversationID   string
+	Channel          messaging.Channel
 	TriggerMessageID string
 	Text             string
 	ReplyLanguage    string
