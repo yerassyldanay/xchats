@@ -506,6 +506,53 @@ func (s *Store) OrgForUser(ctx context.Context, userID uuid.UUID) (Organization,
 	return o, err
 }
 
+// OrgsForUser returns every organization a user belongs to
+// (organization_users), oldest first. OrgForUser resolves a single
+// deterministic default for the rest of the app; this is for the few
+// surfaces that need the full membership set — the MCP OAuth consent
+// page's organization picker (plan/mcp.md §3: "the user selects an
+// organization").
+func (s *Store) OrgsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT o.id, o.name, o.respond_mode
+		FROM xchats.organizations o
+		JOIN xchats.organization_users ou ON ou.organization_id = o.id
+		WHERE ou.user_id = $1
+		ORDER BY o.created_at ASC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Organization
+	for rows.Next() {
+		var o Organization
+		if err := rows.Scan(&o.ID, &o.Name, &o.RespondMode); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+// UserInOrg reports whether userID is a live member of orgID — the MCP
+// access-token verification's per-request tenant re-check (plan/mcp.md §3:
+// "The backend must still verify that the user is active and belongs to
+// the bound organization on every request"), re-derived from the live
+// organization_users/users tables rather than trusted from the token's own
+// claims alone. There is no separate "active" flag on xchats.users today
+// (no soft-delete concept for users yet); membership plus the row existing
+// is the whole of "active" this schema can currently express.
+func (s *Store) UserInOrg(ctx context.Context, userID, orgID uuid.UUID) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM xchats.organization_users ou
+			JOIN xchats.users u ON u.id = ou.user_id
+			WHERE ou.user_id = $1 AND ou.organization_id = $2
+		)`, userID, orgID).Scan(&exists)
+	return exists, err
+}
+
 // ---------------------------------------------------------------------------
 // Sessions
 // ---------------------------------------------------------------------------

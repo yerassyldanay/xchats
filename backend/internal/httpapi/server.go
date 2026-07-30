@@ -20,6 +20,8 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
+	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
+	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
 	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
@@ -62,6 +64,15 @@ type Server struct {
 	orgID    uuid.UUID
 	log      *slog.Logger
 
+	// MCP connector (plan/mcp.md). mcpAuth/mcpServer are nil when the
+	// connector is not configured (no MCP_JWT_SIGNING_KEY resolvable at
+	// boot) — every MCP route checks mcpAuthEnabled() first rather than
+	// assuming these are always set, so a deployment that hasn't set up the
+	// connector yet keeps serving everything else unaffected.
+	mcpAuth         *mcpauth.Authorizer
+	mcpServer       *mcpserver.Server
+	mcpUploadSigner *mcpauth.UploadTokenSigner
+
 	// kbRepo/kbInvalidator are the response engine's own KB reader — a
 	// CachedKBRepo in production (main.go), the SAME cached build GET
 	// /kb/prompt renders from and every /kb/* write invalidates. Distinct from
@@ -97,15 +108,25 @@ type Deps struct {
 	KBInvalidator kbInvalidator
 	OrgID         uuid.UUID
 	Log           *slog.Logger
+
+	// MCPAuth/MCPServer are nil to run without the MCP connector (every
+	// route checks mcpAuthEnabled() first).
+	MCPAuth   *mcpauth.Authorizer
+	MCPServer *mcpserver.Server
 }
 
 // New builds a Server.
 func New(d Deps) *Server {
+	var uploadSigner *mcpauth.UploadTokenSigner
+	if d.MCPAuth != nil {
+		uploadSigner = mcpauth.NewUploadTokenSigner(d.MCPAuth.Key)
+	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
 		blob: d.Blob, drafter: d.Drafter, response: d.Response, evo: d.Evo, tg: d.TG, kb: d.KB, builder: d.Builder,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
+		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer, mcpUploadSigner: uploadSigner,
 		pendingNames: map[string]string{},
 	}
 }
@@ -133,6 +154,32 @@ func (s *Server) Router() *gin.Engine {
 	// Telegram webhook ingress. Unlike Evolution's, this one commits the
 	// normalized rows before it acks — see handleTelegramWebhook.
 	r.POST("/telegram/api/v1/webhook/:account_id", s.handleTelegramWebhook)
+
+	// MCP connector (plan/mcp.md) — discovery, OAuth 2.1 + PKCE, and the
+	// JSON-RPC endpoint. Every handler here checks mcpAuthEnabled() itself,
+	// so these routes stay registered (returning 503) even when the
+	// connector has no signing key configured, rather than 404ing in a way
+	// that would look like the feature doesn't exist at all.
+	r.GET("/.well-known/oauth-protected-resource", s.handleProtectedResourceMetadata)
+	// Path-suffixed discovery alias (2025-11-25 MCP auth spec: a host may
+	// look for metadata at a URL derived from the resource's own path).
+	r.GET("/.well-known/oauth-protected-resource/mcp", s.handleProtectedResourceMetadata)
+	r.GET("/.well-known/oauth-authorization-server", s.handleAuthorizationServerMetadata)
+	r.GET("/oauth/jwks.json", s.handleJWKS)
+	r.GET("/oauth/authorize", s.handleOAuthAuthorize)
+	r.POST("/oauth/authorize/decision", s.handleOAuthDecision)
+	r.POST("/oauth/token", s.handleOAuthToken)
+	r.POST("/oauth/revoke", s.handleOAuthRevoke)
+	r.POST("/oauth/register", s.handleOAuthRegister)
+	r.POST("/mcp", s.handleMCP)
+
+	// The signed media-upload target kb_media_upload hands the widget: its
+	// own permissive CORS (see uploadCORS's doc comment), since auth here is
+	// the unguessable signed token, not a cookie.
+	upload := r.Group("/mcp/uploads")
+	upload.Use(s.uploadCORS())
+	upload.PUT("/:material_id", s.handleMCPUpload)
+	upload.OPTIONS("/:material_id", func(c *gin.Context) {}) // uploadCORS aborts+responds before this body runs
 
 	api := r.Group("/xchats/api/v1")
 	api.POST("/auth/login", s.handleLogin)

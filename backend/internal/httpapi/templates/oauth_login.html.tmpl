@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход — Xchats</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #1a1d21;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  @media (prefers-color-scheme: dark) { body { background: #16181c; color: #e7e9ec; } }
+  .card { background: white; border-radius: 12px; padding: 32px; width: 340px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  @media (prefers-color-scheme: dark) { .card { background: #22252a; box-shadow: none; border: 1px solid #33373d; } }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { font-size: 13px; color: #6b7280; margin: 0 0 20px; }
+  label { display: block; font-size: 13px; margin: 12px 0 4px; }
+  input { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 14px; }
+  @media (prefers-color-scheme: dark) { input { background: #1a1d21; border-color: #3a3f47; color: inherit; } }
+  button { width: 100%; margin-top: 18px; padding: 10px; border-radius: 8px; border: none; background: #2563eb; color: white;
+           font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  .err { color: #dc2626; font-size: 13px; margin-top: 10px; min-height: 16px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Вход в Xchats</h1>
+    <p class="sub">«{{.ClientName}}» запрашивает доступ к базе знаний вашей организации.</p>
+    <form id="f">
+      <label for="email">Email</label>
+      <input type="email" id="email" autocomplete="username" required>
+      <label for="password">Пароль</label>
+      <input type="password" id="password" autocomplete="current-password" required>
+      <div class="err" id="err"></div>
+      <button type="submit" id="submit">Войти</button>
+    </form>
+  </div>
+  <script>
+    document.getElementById('f').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var btn = document.getElementById('submit');
+      var err = document.getElementById('err');
+      btn.disabled = true; err.textContent = '';
+      try {
+        var res = await fetch('{{.APIBaseURL}}/xchats/api/v1/auth/login', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('email').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        if (res.ok) { window.location.reload(); return; }
+        err.textContent = 'Неверный email или пароль.';
+      } catch (e) {
+        err.textContent = 'Не удалось связаться с сервером.';
+      }
+      btn.disabled = false;
+    });
+  </script>
+</body>
+</html>

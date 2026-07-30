@@ -23,6 +23,8 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
+	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
+	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
@@ -179,11 +181,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// startup pass picks up whatever a crash or an outage left behind.
 	w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
 
+	mcpAuthorizer, mcpSrv := buildMCPConnector(cfg, st, kb, blobStore, log)
+
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
 		Response: responseService, Evo: evo, TG: tg, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
+		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
 	})
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
 
@@ -223,6 +228,40 @@ func buildLLMRegistry(cfg *config.Config) (llm.Registry, llm.ModelRef) {
 		{Name: "gemini", APIKey: cfg.GeminiAPIKey, BaseURL: cfg.GeminiBaseURL},
 	}, time.Duration(timeoutSeconds)*time.Second)
 	return reg, llm.ModelRef{Provider: provider, Model: model}
+}
+
+// buildMCPConnector wires the MCP connector's OAuth 2.1 authorization server
+// and JSON-RPC tool server (plan/mcp.md). Without MCP_JWT_SIGNING_KEY set it
+// degrades to an ephemeral per-process key rather than failing to boot —
+// the same warn-and-continue call runServe already makes for
+// TelegramCredentialsEncKey — so every route stays reachable for local/dev
+// use; the cost is that every token issued before a restart stops verifying
+// after one, which is unacceptable only in a real deployment (where the
+// operator is expected to set the env var).
+func buildMCPConnector(cfg *config.Config, st *store.Store, kb *kbstore.Store, blobStore blob.Store, log *slog.Logger) (*mcpauth.Authorizer, *mcpserver.Server) {
+	key, err := mcpauth.NewSigningKeyFromSeed(cfg.MCPJWTSigningKey)
+	if err != nil {
+		log.Warn("MCP_JWT_SIGNING_KEY not set; using an ephemeral key for this process — issued MCP tokens will not survive a restart",
+			"reason", err.Error())
+		key = mcpauth.NewEphemeralSigningKey()
+	}
+	mcpStore := mcpauth.NewStore(st.Pool())
+	authorizer := mcpauth.New(mcpStore, key, mcpauth.Config{
+		Issuer:            strings.TrimRight(cfg.APIBaseURL, "/"),
+		Audience:          cfg.MCPResourceURL(),
+		AllowPrivateHosts: cfg.KBAllowPrivateFetch,
+		AccessTokenTTL:    time.Duration(cfg.MCPAccessTokenTTLSeconds) * time.Second,
+		RefreshTokenTTL:   time.Duration(cfg.MCPRefreshTokenTTLDays) * 24 * time.Hour,
+		AuthCodeTTL:       time.Duration(cfg.MCPAuthCodeTTLSeconds) * time.Second,
+	})
+	uploadSigner := mcpauth.NewUploadTokenSigner(key)
+	mcpSrv := mcpserver.New(mcpserver.Deps{
+		KB: kb, Blob: blobStore, Log: log,
+		UploadBaseURL:    strings.TrimRight(cfg.APIBaseURL, "/"),
+		SignUpload:       uploadSigner.Sign,
+		UploadTTLSeconds: cfg.MCPUploadTokenTTLSeconds,
+	})
+	return authorizer, mcpSrv
 }
 
 // seededOrgID returns the seeded org's id (idempotent re-seed) for the KB + playground.
