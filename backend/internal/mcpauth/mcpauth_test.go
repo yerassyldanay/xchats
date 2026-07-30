@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -225,7 +226,25 @@ func TestVerifyAccessToken_RejectsTamperedSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	tampered := tok[:len(tok)-2] + "AA"
+	// Flip the FIRST character of the base64url signature segment, not the
+	// last: a 64-byte signature's raw-base64 encoding ends in a partial
+	// 4-character group (64 = 21*3+1), and its final 1-2 characters carry
+	// spare/padding bits Go's decoder ignores — so a naive last-character
+	// edit can round-trip to the SAME decoded bytes and leave the signature
+	// (and thus verification) unchanged, a real flake this fix avoids by
+	// construction. The first character of any base64 group has no such
+	// ambiguity: every one of its 6 encoded bits is real signature data.
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 || len(parts[2]) == 0 {
+		t.Fatalf("unexpected token shape: %q", tok)
+	}
+	first := parts[2][0]
+	replacement := byte('A')
+	if first == replacement {
+		replacement = 'B'
+	}
+	tamperedSig := string(replacement) + parts[2][1:]
+	tampered := parts[0] + "." + parts[1] + "." + tamperedSig
 	if tampered == tok {
 		t.Fatal("test setup failed to tamper token")
 	}

@@ -16,10 +16,10 @@ import (
 // record, and the draft's new version (for the next call's
 // expected_draft_version).
 type UpsertResult struct {
-	Type         string
-	Key          string
-	Created      bool
-	DraftVersion int64
+	Type         string `json:"type"`
+	Key          string `json:"key"`
+	Created      bool   `json:"created"`
+	DraftVersion int64  `json:"draft_version"`
 }
 
 // ---------------------------------------------------------------------------
@@ -669,9 +669,9 @@ func (s *Store) MCPUpsertDeliveryZone(ctx context.Context, orgID uuid.UUID, ref 
 
 // DeleteResult mirrors UpsertResult's version-reporting shape.
 type DeleteResult struct {
-	Type         string
-	Key          string
-	DraftVersion int64
+	Type         string `json:"type"`
+	Key          string `json:"key"`
+	DraftVersion int64  `json:"draft_version"`
 }
 
 // ErrCannotDelete means the type/key combination cannot be marked for
