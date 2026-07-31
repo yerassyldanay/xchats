@@ -62,7 +62,6 @@ type ZoneRow struct {
 	Notes             string    `json:"notes"`
 	SalesStatus       string    `json:"sales_status"`
 	Draft             bool      `json:"draft"`
-	Provenance        string    `json:"provenance,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 

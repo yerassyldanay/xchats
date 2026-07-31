@@ -89,6 +89,20 @@ type Server struct {
 	// local) — a lost entry just falls back to the instance name.
 	pendingMu    sync.Mutex
 	pendingNames map[string]string
+
+	// csrfSecret HMAC-signs the /oauth/authorize/decision CSRF token (see
+	// mcp_oauth_csrf.go) — cfg.SessionSecret when configured, else a
+	// per-process random fallback generated once here. The fallback is safe
+	// only for a single-replica deployment (a token minted on one replica
+	// won't verify on another); Task 17 hardens missing secrets into a hard
+	// startup failure for production generally.
+	csrfSecret []byte
+
+	// oauthRegisterLimit/oauthTokenLimit/oauthAuthorizeLimit bound abuse
+	// against the OAuth surface's most exposed routes — see ratelimit.go.
+	oauthRegisterLimit  *ipRateLimiter
+	oauthTokenLimit     *ipRateLimiter
+	oauthAuthorizeLimit *ipRateLimiter
 }
 
 // Deps is the constructor input.
@@ -128,6 +142,12 @@ func New(d Deps) *Server {
 		orgID: d.OrgID, log: d.Log,
 		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer, mcpUploadSigner: uploadSigner,
 		pendingNames: map[string]string{},
+		csrfSecret:   randomCSRFFallbackSecret(),
+		// Deliberately generous limits — these are abuse guards, not a
+		// throttle on legitimate usage. See ratelimit.go's doc comment.
+		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),  // 5/min, 5 burst — registration spam is the highest-value target
+		oauthTokenLimit:     newIPRateLimiter(30.0/60, 10), // 30/min, 10 burst — refresh-heavy legitimate usage needs headroom
+		oauthAuthorizeLimit: newIPRateLimiter(20.0/60, 10), // 20/min, 10 burst
 	}
 }
 
@@ -135,6 +155,16 @@ func New(d Deps) *Server {
 func (s *Server) Router() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	// Trust NO proxy unless explicitly configured (plan Task 17): gin's own
+	// zero-value default trusts every peer's X-Forwarded-* headers, which
+	// would let any direct, unproxied caller spoof its own client IP. Every
+	// discovery URL this server emits is already built from cfg.APIBaseURL /
+	// cfg.FrontendBaseURL, never from the request's Host or X-Forwarded-*
+	// (see mcpIssuer/MCPResourceURL) — this only affects c.ClientIP(), used
+	// by the rate limiters.
+	if err := r.SetTrustedProxies(s.cfg.TrustedProxies); err != nil {
+		panic("httpapi: invalid TRUSTED_PROXIES: " + err.Error())
+	}
 	r.Use(gin.Recovery(), s.requestLog(), s.cors())
 
 	// Ops — unversioned, no envelope.
@@ -166,12 +196,25 @@ func (s *Server) Router() *gin.Engine {
 	r.GET("/.well-known/oauth-protected-resource/mcp", s.handleProtectedResourceMetadata)
 	r.GET("/.well-known/oauth-authorization-server", s.handleAuthorizationServerMetadata)
 	r.GET("/oauth/jwks.json", s.handleJWKS)
-	r.GET("/oauth/authorize", s.handleOAuthAuthorize)
-	r.POST("/oauth/authorize/decision", s.handleOAuthDecision)
-	r.POST("/oauth/token", s.handleOAuthToken)
+	r.GET("/oauth/authorize", rateLimit(s.oauthAuthorizeLimit), s.handleOAuthAuthorize)
+	r.POST("/oauth/authorize/decision", rateLimit(s.oauthAuthorizeLimit), s.handleOAuthDecision)
+	r.POST("/oauth/token", rateLimit(s.oauthTokenLimit), s.handleOAuthToken)
 	r.POST("/oauth/revoke", s.handleOAuthRevoke)
-	r.POST("/oauth/register", s.handleOAuthRegister)
+	r.POST("/oauth/register", rateLimit(s.oauthRegisterLimit), s.handleOAuthRegister)
+	// Task 15: redeem a tool result's one-time review-handoff URL — a
+	// browser-navigated GET, like /oauth/authorize, so it renders an HTML
+	// error page rather than a JSON envelope on failure.
+	r.GET("/playground/review-handoff", s.handleReviewHandoff)
 	r.POST("/mcp", s.handleMCP)
+	// Streamable HTTP (plan Task 10): this server never pushes
+	// server-initiated messages, so GET (the SSE-stream half of the
+	// transport) is an explicit 405 rather than a stream with nothing to
+	// send — still a spec-compliant response to the method, per the
+	// transport's own "or reject with 405" allowance. DELETE acknowledges
+	// session/transport close; see handleMCPDelete's doc for why that's a
+	// no-op rather than state to clean up.
+	r.GET("/mcp", s.handleMCPGet)
+	r.DELETE("/mcp", s.handleMCPDelete)
 
 	// The signed media-upload target kb_media_upload hands the widget: its
 	// own permissive CORS (see uploadCORS's doc comment), since auth here is
@@ -191,6 +234,11 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/users", s.handleListUsers)
 	auth.POST("/users", s.handleCreateUser)
 	auth.GET("/organization", s.handleGetOrg)
+	// Task 15: explicit active-organization switch (the frontend selector) —
+	// distinct from the MCP review-handoff redirect below, which sets the
+	// SAME session field via a verified signed token instead of a direct
+	// user action.
+	auth.POST("/organization/active", s.handleSetActiveOrganization)
 
 	// Channel-neutral account listing — every channel in one shape. The
 	// per-channel routes below own each channel's own lifecycle.
@@ -245,6 +293,8 @@ func (s *Server) Router() *gin.Engine {
 	pg.DELETE("/draft/tariffs/:ref", s.handlePlaygroundDeleteTariff)
 	pg.POST("/draft/products", s.handlePlaygroundUpsertProduct)
 	pg.DELETE("/draft/products/:ref", s.handlePlaygroundDeleteProduct)
+	pg.POST("/draft/zones", s.handlePlaygroundUpsertZone)
+	pg.DELETE("/draft/zones/:ref", s.handlePlaygroundDeleteZone)
 	pg.PATCH("/draft/contacts", s.handlePlaygroundPatchContacts)
 	pg.PATCH("/draft/policies", s.handlePlaygroundPatchPolicies)
 	pg.PATCH("/draft/config", s.handlePlaygroundPatchConfig)
@@ -340,7 +390,12 @@ func (s *Server) cors() gin.HandlerFunc {
 		}
 		if c.Request.Method == http.MethodOptions {
 			c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-			c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Webhook-Token")
+			// If-Match: the Playground draft store's optimistic-concurrency
+			// header (frontend/src/stores/playground.ts's ifMatch()) — every
+			// draft write/approve call sends it whenever frontend and backend
+			// are on different origins, this preflight must allow it or the
+			// browser blocks the real request before it's ever sent.
+			c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,If-Match,X-Webhook-Token")
 			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}

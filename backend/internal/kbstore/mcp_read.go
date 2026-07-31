@@ -47,9 +47,15 @@ func typeWanted(want map[string]bool, t string) bool {
 // IdentityIndex is kb_summary's backbone (plan/mcp.md §5) and the server-side
 // duplicate-detection backstop every MCP upsert re-runs (§4): one compact
 // entry per natural key, across the requested types, live ∪ draft, with
-// state pre-derived. types nil/empty means every type.
-func (s *Store) IdentityIndex(ctx context.Context, orgID uuid.UUID, types []string) ([]Identity, error) {
-	return s.identityIndex(ctx, s.pool, orgID, types)
+// state pre-derived. types nil/empty means every type; source (""|"live"|
+// "draft"|"both") filters which entries are returned by presence, not which
+// data is fetched — ExistsInLive/ExistsInDraft are always computed either
+// way, since kb_summary's whole point is showing both dimensions even when
+// scoped to one; query, when non-empty, keeps only entries whose (possibly
+// draft-shadowed) Title case-insensitively contains it, the same
+// normalizeTitle+Contains match kb_read's flattenRecords uses.
+func (s *Store) IdentityIndex(ctx context.Context, orgID uuid.UUID, types []string, source, query string) ([]Identity, error) {
+	return s.identityIndex(ctx, s.pool, orgID, types, source, query)
 }
 
 // identityIndex is IdentityIndex's db-parameterized core. Every MCPUpsert*
@@ -63,8 +69,10 @@ func (s *Store) IdentityIndex(ctx context.Context, orgID uuid.UUID, types []stri
 // A's lock while holding a connection of its own — a pool-exhaustion
 // deadlock with no timeout, not just a slow path (caught by
 // TestMCPUpsert_ConcurrentWritesSerializeWithoutLostUpdates hanging forever
-// before this fix).
-func (s *Store) identityIndex(ctx context.Context, db dbtx, orgID uuid.UUID, types []string) ([]Identity, error) {
+// before this fix). The duplicate-check backstop always passes
+// source="both", query="" — it must see every candidate regardless of
+// whatever kb_summary filters the model itself used to get here.
+func (s *Store) identityIndex(ctx context.Context, db dbtx, orgID uuid.UUID, types []string, source, query string) ([]Identity, error) {
 	want := typeSet(types)
 	live, err := s.liveView(ctx, db, orgID)
 	if err != nil {
@@ -166,9 +174,20 @@ func (s *Store) identityIndex(ctx context.Context, db dbtx, orgID uuid.UUID, typ
 		}
 	}
 
+	qnorm := normalizeTitle(query)
 	out := make([]Identity, 0, len(order))
 	for _, k := range order {
-		out = append(out, *byKey[k])
+		e := *byKey[k]
+		if source == "live" && !e.ExistsInLive {
+			continue
+		}
+		if source == "draft" && !e.ExistsInDraft {
+			continue
+		}
+		if qnorm != "" && !strings.Contains(normalizeTitle(e.Title), qnorm) {
+			continue
+		}
+		out = append(out, e)
 	}
 	return out, nil
 }

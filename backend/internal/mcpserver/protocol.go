@@ -18,14 +18,20 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	"github.com/google/uuid"
+
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 )
 
-// protocolVersion is the MCP protocol date-version this server implements
+// ProtocolVersion is the MCP protocol date-version this server implements
 // (the "2025-11-25" spec generation referenced throughout plan/mcp.md).
-const protocolVersion = "2025-11-25"
+// Exported so internal/httpapi's Streamable HTTP transport (plan Task 10)
+// can negotiate the MCP-Protocol-Version header against the SAME value
+// initialize itself reports, rather than a second hardcoded copy that could
+// drift.
+const ProtocolVersion = "2025-11-25"
 
 // serverInstructions is returned from `initialize` and is the short
 // rule-set plan/mcp.md §5 asks for: "The same short rules should also appear
@@ -76,8 +82,20 @@ type Deps struct {
 	// no trailing slash) — kb_info returns it so the KB Manager widget (a
 	// static embedded document with no server config of its own) can build
 	// its "Review and publish in Xchats" link (plan/mcp.md §6) without a
-	// second templating mechanism just for one string.
+	// second templating mechanism just for one string. Superseded by
+	// SignReviewHandoff (Task 15) as the widget's PRIMARY review link — this
+	// stays as the fallback plain /playground link a host with no widget
+	// support (or a signing failure) still gets from kb_info.
 	FrontendBaseURL string
+	// SignReviewHandoff mints a one-time, organization-bound signed review
+	// URL for (userID, orgID) — the KB Manager widget's "Review and publish
+	// in Xchats" link (plan Task 15), landing a multi-organization user on
+	// the SAME organization the calling tool operated on rather than
+	// whichever org a bare /playground link would default to. internal/httpapi
+	// owns the signing key and the redirect target; mcpserver only calls this
+	// seam, mirroring SignUpload. Left nil when the connector has no signing
+	// key configured — callers check for nil before calling it.
+	SignReviewHandoff func(userID, orgID uuid.UUID) (url string, err error)
 }
 
 // Server dispatches JSON-RPC requests against Deps, scoped to a Principal
@@ -172,7 +190,7 @@ func (s *Server) handleToolsList() map[string]any {
 
 func (s *Server) handleInitialize() map[string]any {
 	return map[string]any{
-		"protocolVersion": protocolVersion,
+		"protocolVersion": ProtocolVersion,
 		"capabilities": map[string]any{
 			"tools":     map[string]any{},
 			"resources": map[string]any{},

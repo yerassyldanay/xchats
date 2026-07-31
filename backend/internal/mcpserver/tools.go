@@ -5,22 +5,95 @@ type Tool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
+	// SecuritySchemes declares this tool's OAuth scope requirement (set by
+	// Tools() from the SAME requiredScope map dispatchToolsCall enforces, so
+	// it can never drift from actual enforcement) — lets a capable host
+	// reason about auth/consent up front instead of discovering a scope
+	// failure by trial. This exact field shape is still emerging in the MCP
+	// ecosystem — best-effort pending a real interop pass, same caveat as
+	// the widget hints below.
+	SecuritySchemes map[string]any `json:"securitySchemes,omitempty"`
+	// Annotations are the standard MCP tool-annotation hints (readOnlyHint,
+	// destructiveHint, idempotentHint, ...) — see readOnlyAnnotations /
+	// destructiveAnnotations / notIdempotentAnnotations below for exactly
+	// which tools set which, and why.
+	Annotations *ToolAnnotations `json:"annotations,omitempty"`
+	// OutputSchema documents the structuredContent shape a widget or a
+	// schema-validating host can bind to (plan Task 9) — every tool
+	// declares one, since every one of them (including kb_delete, via
+	// kbstore.DeleteResult) sets structuredContent through handlers.go's
+	// toolResult.
+	OutputSchema map[string]any `json:"outputSchema,omitempty"`
 	// Meta carries the widget hint on tools whose result the KB Manager
 	// resource can render (plan/mcp.md §5: "kb_read, kb_summary, kb_info,
 	// and mutation results may attach the shared KB Manager resource").
 	// Keyed defensively under BOTH the ChatGPT Apps SDK convention
-	// (openai/outputTemplate) and a generic MCP-UI-style hint, since which
-	// one a given host actually honors is exactly what plan/mcp.md §9's
-	// MCP-Inspector/ChatGPT/Claude interop pass is for — see resources.go's
-	// package doc for the full caveat.
+	// (openai/outputTemplate) and the standard MCP Apps shape (a nested
+	// "ui" object, not the flat "ui/resourceUri" an earlier draft used),
+	// since which one a given host actually honors is exactly what
+	// plan/mcp.md §9's MCP-Inspector/ChatGPT/Claude interop pass is for —
+	// see resources.go's package doc for the full caveat.
 	Meta map[string]any `json:"_meta,omitempty"`
+}
+
+// ToolAnnotations are the standard MCP tool-annotation hints. Pointers (not
+// plain bool) so idempotentHint:false serializes explicitly — omitting the
+// field entirely would mean "unknown", not "confirmed not idempotent", and
+// those are different signals to a host deciding whether to prompt before
+// a retry.
+type ToolAnnotations struct {
+	ReadOnlyHint    *bool `json:"readOnlyHint,omitempty"`
+	DestructiveHint *bool `json:"destructiveHint,omitempty"`
+	IdempotentHint  *bool `json:"idempotentHint,omitempty"`
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// readOnlyAnnotations marks kb_read/kb_summary/kb_info: they never write.
+func readOnlyAnnotations() *ToolAnnotations {
+	return &ToolAnnotations{ReadOnlyHint: boolPtr(true)}
+}
+
+// destructiveAnnotations marks kb_delete: it stages removal of a record
+// (behind human review before publish, but still the closest thing this
+// contract has to a destructive action).
+func destructiveAnnotations() *ToolAnnotations {
+	return &ToolAnnotations{DestructiveHint: boolPtr(true), IdempotentHint: boolPtr(false)}
+}
+
+// notIdempotentAnnotations marks the seven typed upserts: writeDraftBlobVersioned
+// unconditionally bumps base_version and rewrites updated_at (and updated_by)
+// on every call, so calling the same upsert twice is NOT a no-op at the
+// storage layer even when the resulting content is identical. No-op
+// detection is out of scope (see plan Task 9) — this hint stays false, never
+// true, until that changes.
+func notIdempotentAnnotations() *ToolAnnotations {
+	return &ToolAnnotations{IdempotentHint: boolPtr(false)}
+}
+
+// oauthSecurityScheme is the securitySchemes value for a tool gated on scope
+// — an OpenAPI-securitySchemes-shaped object naming the OAuth scope
+// required, adapted for an MCP tool declaration.
+func oauthSecurityScheme(scope string) map[string]any {
+	return map[string]any{
+		"oauth2": map[string]any{"type": "oauth2", "scopes": []string{scope}},
+	}
 }
 
 func widgetMeta() map[string]any {
 	return map[string]any{
 		"openai/outputTemplate": widgetResourceURI,
-		"ui/resourceUri":        widgetResourceURI,
+		"ui":                    map[string]any{"resourceUri": widgetResourceURI},
 	}
+}
+
+// appOnlyMeta marks kb_media_upload: the standard MCP Apps visibility hint
+// for a tool only the widget itself should ever invoke (plan/mcp.md §5 —
+// "The model never calls this tool itself and never sees file bytes"). No
+// resourceUri: its result isn't rendered through the KB Manager resource,
+// it's an upload target the widget PUTs bytes to.
+func appOnlyMeta() map[string]any {
+	return map[string]any{"ui": map[string]any{"visibility": []string{"app"}}}
 }
 
 func obj(properties map[string]any, required ...string) map[string]any {
@@ -32,6 +105,20 @@ func obj(properties map[string]any, required ...string) map[string]any {
 }
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
+
+// clearableStr is str for a `changes` field that goes through optString
+// (args.go): omit leaves it unchanged, an explicit JSON null clears it to ""
+// (the live tables' universal "no value" sentinel — see optString's own doc
+// comment), a string sets it. Declaring the real ["string","null"] type,
+// instead of bare "string", makes that tri-state contract visible to the
+// calling model instead of leaving it to guess whether null is accepted.
+// Reserved for plain free-text changes fields — never an identifier param
+// (slug/ref/key/query/...), an enum (sales_status/pricing_type/zone_level:
+// none of these has a sensible "blank" enum value), or a boolean/integer
+// (optBool/optInt reject null outright; see their own doc comments).
+func clearableStr(desc string) map[string]any {
+	return map[string]any{"type": []string{"string", "null"}, "description": desc + " (or null to clear)"}
+}
 func boolean(desc string) map[string]any {
 	return map[string]any{"type": "boolean", "description": desc}
 }
@@ -78,6 +165,87 @@ func upsertCommon() map[string]any {
 	}
 }
 
+// upsertOutputSchema documents kbstore.UpsertResult — the shared
+// structuredContent shape all seven typed upsert tools return (including
+// kb_assistant_upsert/kb_contacts_upsert/kb_policies_upsert, whose message
+// text only mentions draft_version but whose result is the same struct).
+func upsertOutputSchema() map[string]any {
+	return obj(map[string]any{
+		"type":          str("The KB type written."),
+		"key":           str("The record's natural key (ref/slug/\"main\")."),
+		"created":       boolean("true if this call created the record, false if it updated an existing one."),
+		"draft_version": integer("The draft's new base_version — pass as expected_draft_version on the next write to this org's draft."),
+	}, "type", "key", "created", "draft_version")
+}
+
+// deleteOutputSchema documents kbstore.DeleteResult.
+func deleteOutputSchema() map[string]any {
+	return obj(map[string]any{
+		"type":          str("The KB type marked for deletion."),
+		"key":           str("The record's natural key."),
+		"draft_version": integer("The draft's new base_version."),
+	}, "type", "key", "draft_version")
+}
+
+// readPageOutputSchema documents kbstore.ReadPage.
+func readPageOutputSchema() map[string]any {
+	return obj(map[string]any{
+		"items": map[string]any{
+			"type": "array",
+			"items": obj(map[string]any{
+				"type":   str("The record's KB type."),
+				"source": enumStr("Which table this record came from.", "live", "draft"),
+				"data":   map[string]any{"type": "object", "description": "The record's full canonical fields — shape varies by type."},
+			}, "type", "source", "data"),
+			"description": "The matched records.",
+		},
+		"next_cursor": str("Pass to the next kb_read call to continue; absent when this is the last page."),
+	}, "items")
+}
+
+// summaryPageOutputSchema documents handleKBSummary's inline page shape.
+func summaryPageOutputSchema() map[string]any {
+	return obj(map[string]any{
+		"draft_version": integer("The draft's current base_version."),
+		"items": map[string]any{
+			"type": "array",
+			"items": obj(map[string]any{
+				"type":            str("The record's KB type."),
+				"key":             str("The record's natural key."),
+				"title":           str("Display title/name."),
+				"exists_in_live":  boolean("Whether a published version of this record exists."),
+				"exists_in_draft": boolean("Whether a pending draft change exists for this record."),
+				"state":           enumStr("Review state.", "published", "new", "changed", "to_delete"),
+			}, "type", "key", "title", "exists_in_live", "exists_in_draft", "state"),
+			"description": "The matched records' identity summary (no full content — call kb_read for that).",
+		},
+		"next_cursor": str("Pass to the next kb_summary call to continue; absent when this is the last page."),
+	}, "draft_version", "items")
+}
+
+// kbInfoOutputSchema documents handleKBInfo's structuredContent.
+func kbInfoOutputSchema() map[string]any {
+	return obj(map[string]any{
+		"types":             strArray("Every KB type this connector supports."),
+		"natural_key_main":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "KB types whose natural key is the literal string \"main\" (singletons)."},
+		"media_field_kinds": map[string]any{"type": "object", "description": "Maps each media field name to its kind (image/video/audio/document)."},
+		"frontend_base_url": str("The Xchats app's own origin, for a fallback plain /playground link when no per-call review URL is available."),
+	}, "types", "natural_key_main", "media_field_kinds", "frontend_base_url")
+}
+
+// mediaUploadOutputSchema documents handleKBMediaUpload's structuredContent.
+func mediaUploadOutputSchema() map[string]any {
+	return obj(map[string]any{
+		"material_id":       str("The staged material's id — reference it from a kb_*_upsert media field once uploaded."),
+		"upload_url":        str("PUT the file bytes here."),
+		"upload_method":     str("Always \"PUT\"."),
+		"upload_headers":    map[string]any{"type": "object", "description": "Headers to send with the PUT (at minimum Content-Type)."},
+		"expires_at":        str("RFC 3339 timestamp; the upload_url stops working after this."),
+		"max_size_bytes":    integer("The declared size this upload was staged for — the PUT is rejected above it."),
+		"processing_status": str("The material's current processing status."),
+	}, "material_id", "upload_url", "upload_method", "upload_headers", "expires_at", "max_size_bytes", "processing_status")
+}
+
 func merge(a, b map[string]any) map[string]any {
 	out := make(map[string]any, len(a)+len(b))
 	for k, v := range a {
@@ -91,7 +259,7 @@ func merge(a, b map[string]any) map[string]any {
 
 // Tools is the closed, ordered 12-tool contract (plan/mcp.md §5).
 func Tools() []Tool {
-	return []Tool{
+	tools := []Tool{
 		assistantUpsertTool(),
 		topicUpsertTool(),
 		productUpsertTool(),
@@ -105,6 +273,16 @@ func Tools() []Tool {
 		kbInfoTool(),
 		kbMediaUploadTool(),
 	}
+	// SecuritySchemes is derived from requiredScope (handlers.go) — the SAME
+	// map dispatchToolsCall enforces against — rather than repeated as a
+	// literal on each tool function, so declaration and enforcement can never
+	// silently drift apart.
+	for i := range tools {
+		if scope, ok := requiredScope[tools[i].Name]; ok {
+			tools[i].SecuritySchemes = oauthSecurityScheme(scope)
+		}
+	}
+	return tools
 }
 
 func assistantUpsertTool() Tool {
@@ -113,14 +291,16 @@ func assistantUpsertTool() Tool {
 		Description: "Create or patch the assistant configuration singleton (persona, mission, guardrails, language policy, reply length) in the draft. There is exactly one assistant record per organization, key \"main\".",
 		InputSchema: obj(merge(map[string]any{
 			"changes": changesObject(map[string]any{
-				"persona":         str("Russian role and voice of the assistant."),
-				"mission":         str("Russian business objective for replies."),
-				"guardrails":      str("Russian behavior and safety rules."),
-				"language_policy": str("Russian rule for reply language."),
+				"persona":         clearableStr("Russian role and voice of the assistant."),
+				"mission":         clearableStr("Russian business objective for replies."),
+				"guardrails":      clearableStr("Russian behavior and safety rules."),
+				"language_policy": clearableStr("Russian rule for reply language."),
 				"reply_max_words": integer("Maximum suggested reply length."),
 			}),
 		}, upsertCommon()), "changes"),
-		Meta: widgetMeta(),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
 	}
 }
 
@@ -131,8 +311,8 @@ func topicUpsertTool() Tool {
 		InputSchema: obj(merge(map[string]any{
 			"slug": str("Existing topic's slug to update, or a new slug to create with. Omit to derive a slug from changes.title."),
 			"changes": changesObject(map[string]any{
-				"title":                 str("Russian topic title. Required when creating."),
-				"body_md":               str("Approved Russian Markdown knowledge — pure prose, no {{...}} tokens or literal prices."),
+				"title":                 clearableStr("Russian topic title. Required when creating."),
+				"body_md":               clearableStr("Approved Russian Markdown knowledge — pure prose, no {{...}} tokens or literal prices."),
 				"featured_image":        materialID("Single main topic image."),
 				"illustration_images":   materialIDs("Supporting topic illustrations."),
 				"explainer_videos":      materialIDs("Videos that explain the topic."),
@@ -140,7 +320,9 @@ func topicUpsertTool() Tool {
 				"reference_documents":   materialIDs("Documents supporting the topic."),
 			}),
 		}, upsertCommon()), "changes"),
-		Meta: widgetMeta(),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
 	}
 }
 
@@ -151,10 +333,10 @@ func productUpsertTool() Tool {
 		InputSchema: obj(merge(map[string]any{
 			"ref": str("Existing product's ref to update, or a new ref to create with. Omit to derive a ref from changes.name."),
 			"changes": changesObject(map[string]any{
-				"name":                    str("Russian product name. Required when creating."),
-				"price":                   str("Exact approved price, including currency/range formatting."),
-				"description":             str("Trusted Russian product description."),
-				"category":                str("Product category."),
+				"name":                    clearableStr("Russian product name. Required when creating."),
+				"price":                   clearableStr("Exact approved price, including currency/range formatting."),
+				"description":             clearableStr("Trusted Russian product description."),
+				"category":                clearableStr("Product category."),
 				"in_stock":                boolean("Stock state. Required when creating."),
 				"sales_status":            enumStr("active or inactive.", "active", "inactive"),
 				"featured_image":          materialID("Single main product image."),
@@ -167,7 +349,9 @@ func productUpsertTool() Tool {
 				"specification_documents": materialIDs("Technical product specifications."),
 			}),
 		}, upsertCommon()), "changes"),
-		Meta: widgetMeta(),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
 	}
 }
 
@@ -178,14 +362,14 @@ func tariffUpsertTool() Tool {
 		InputSchema: obj(merge(map[string]any{
 			"ref": str("Existing tariff's ref to update, or a new ref to create with. Omit to derive a ref from changes.name."),
 			"changes": changesObject(map[string]any{
-				"name":             str("Russian tariff name. Required when creating."),
-				"price":            str("Exact approved tariff price."),
-				"limit_text":       str("Trusted Russian explanation of usage limits."),
-				"fee":              str("Exact approved fee, when applicable."),
-				"summary":          str("Short trusted Russian tariff summary."),
+				"name":             clearableStr("Russian tariff name. Required when creating."),
+				"price":            clearableStr("Exact approved tariff price."),
+				"limit_text":       clearableStr("Trusted Russian explanation of usage limits."),
+				"fee":              clearableStr("Exact approved fee, when applicable."),
+				"summary":          clearableStr("Short trusted Russian tariff summary."),
 				"pricing_type":     enumStr("Required when creating.", "fixed", "percentage", "tiered", "hybrid"),
-				"advantages":       str("Trusted Russian advantages."),
-				"disadvantages":    str("Trusted Russian limitations/disadvantages."),
+				"advantages":       clearableStr("Trusted Russian advantages."),
+				"disadvantages":    clearableStr("Trusted Russian limitations/disadvantages."),
 				"sales_status":     enumStr("active or inactive.", "active", "inactive"),
 				"featured_image":   materialID("Single main tariff image."),
 				"pricing_images":   materialIDs("Price cards and pricing illustrations."),
@@ -193,7 +377,9 @@ func tariffUpsertTool() Tool {
 				"terms_documents":  materialIDs("Tariff terms and conditions documents."),
 			}),
 		}, upsertCommon()), "changes"),
-		Meta: widgetMeta(),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
 	}
 }
 
@@ -203,21 +389,23 @@ func contactsUpsertTool() Tool {
 		Description: "Create or patch the organization contacts singleton. Key is \"main\".",
 		InputSchema: obj(merge(map[string]any{
 			"changes": changesObject(map[string]any{
-				"whatsapp":                str("Exact approved WhatsApp contact."),
-				"email":                   str("Exact approved support email."),
-				"address":                 str("Trusted Russian business address."),
-				"legal_information":       str("Trusted Russian legal/company details."),
-				"callback_time":           str("Trusted Russian callback expectation."),
-				"working_hours":           str("Exact approved working-hours display."),
-				"phone":                   str("Exact approved support phone."),
-				"website":                 str("Exact approved website."),
-				"instagram":               str("Exact approved Instagram account."),
+				"whatsapp":                clearableStr("Exact approved WhatsApp contact."),
+				"email":                   clearableStr("Exact approved support email."),
+				"address":                 clearableStr("Trusted Russian business address."),
+				"legal_information":       clearableStr("Trusted Russian legal/company details."),
+				"callback_time":           clearableStr("Trusted Russian callback expectation."),
+				"working_hours":           clearableStr("Exact approved working-hours display."),
+				"phone":                   clearableStr("Exact approved support phone."),
+				"website":                 clearableStr("Exact approved website."),
+				"instagram":               clearableStr("Exact approved Instagram account."),
 				"contact_card_image":      materialID("Single contact-card image."),
 				"location_map_image":      materialID("Single location/map image."),
 				"company_legal_documents": materialIDs("Customer-sendable company/legal documents."),
 			}),
 		}, upsertCommon()), "changes"),
-		Meta: widgetMeta(),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
 	}
 }
 
@@ -227,19 +415,21 @@ func policiesUpsertTool() Tool {
 		Description: "Create or patch the commerce policies singleton (delivery, payment, returns, warranty). Key is \"main\". When per-zone delivery zones exist, delivery_cost/delivery_in_days must stay blank and outside_zones_note is required — use kb_delivery_zone_upsert for per-zone pricing instead.",
 		InputSchema: obj(merge(map[string]any{
 			"changes": changesObject(map[string]any{
-				"delivery_cost":             str("Exact approved flat delivery price. Must stay blank while delivery zones exist."),
-				"delivery_in_days":          str("Exact delivery duration/range in days. Must stay blank while delivery zones exist."),
-				"free_delivery_from":        str("Exact order value that qualifies for free delivery."),
-				"min_order":                 str("Exact minimum order value."),
-				"prepayment":                str("Trusted Russian prepayment policy."),
-				"installment":               str("Trusted Russian installment policy."),
-				"return_period_in_days":     str("Exact return duration in days."),
-				"warranty":                  str("Trusted Russian warranty policy."),
-				"outside_zones_note":        str("Exact approved refusal for a direction matching no delivery zone. Required while delivery zones exist."),
+				"delivery_cost":             clearableStr("Exact approved flat delivery price. Must stay blank while delivery zones exist."),
+				"delivery_in_days":          clearableStr("Exact delivery duration/range in days. Must stay blank while delivery zones exist."),
+				"free_delivery_from":        clearableStr("Exact order value that qualifies for free delivery."),
+				"min_order":                 clearableStr("Exact minimum order value."),
+				"prepayment":                clearableStr("Trusted Russian prepayment policy."),
+				"installment":               clearableStr("Trusted Russian installment policy."),
+				"return_period_in_days":     clearableStr("Exact return duration in days."),
+				"warranty":                  clearableStr("Trusted Russian warranty policy."),
+				"outside_zones_note":        clearableStr("Exact approved refusal for a direction matching no delivery zone. Required while delivery zones exist."),
 				"commerce_policy_documents": materialIDs("Customer-sendable commerce-policy documents."),
 			}),
 		}, upsertCommon()), "changes"),
-		Meta: widgetMeta(),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
 	}
 }
 
@@ -250,17 +440,19 @@ func deliveryZoneUpsertTool() Tool {
 		InputSchema: obj(merge(map[string]any{
 			"ref": str("Existing zone's ref to update, or a new ref to create with. Omit to derive a ref from changes.name."),
 			"changes": changesObject(map[string]any{
-				"name":               str("Russian zone display name. Required when creating."),
+				"name":               clearableStr("Russian zone display name. Required when creating."),
 				"zone_level":         enumStr("Required when creating.", "city", "region", "country"),
-				"parent_ref":         str("This organization's own delivery-zone ref this zone nests under (city → region → country). Empty for a top-level zone."),
+				"parent_ref":         clearableStr("This organization's own delivery-zone ref this zone nests under (city → region → country). Empty for a top-level zone."),
 				"delivery_available": boolean("Whether this zone is served at all. Required when creating."),
-				"delivery_cost":      str("Exact approved delivery price for this zone. Required iff delivery_available."),
-				"delivery_in_days":   str("Exact delivery duration/range in days for this zone. Required iff delivery_available."),
-				"notes":              str("Trusted Russian prose about this zone."),
+				"delivery_cost":      clearableStr("Exact approved delivery price for this zone. Required iff delivery_available."),
+				"delivery_in_days":   clearableStr("Exact delivery duration/range in days for this zone. Required iff delivery_available."),
+				"notes":              clearableStr("Trusted Russian prose about this zone."),
 				"sales_status":       enumStr("active or inactive.", "active", "inactive"),
 			}),
 		}, upsertCommon()), "changes"),
-		Meta: widgetMeta(),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
 	}
 }
 
@@ -276,7 +468,9 @@ func kbReadTool() Tool {
 			"limit":  integer("Max records to return. Default 50, maximum 100."),
 			"cursor": str("Pagination cursor from a previous kb_read result."),
 		}),
-		Meta: widgetMeta(),
+		Meta:         widgetMeta(),
+		Annotations:  readOnlyAnnotations(),
+		OutputSchema: readPageOutputSchema(),
 	}
 }
 
@@ -289,6 +483,8 @@ func kbDeleteTool() Tool {
 			"key":                    str("ref, slug, or \"main\"."),
 			"expected_draft_version": integer("Optimistic-concurrency token from a prior kb_summary/kb_read/upsert result."),
 		}, "type", "key"),
+		Annotations:  destructiveAnnotations(),
+		OutputSchema: deleteOutputSchema(),
 	}
 }
 
@@ -303,16 +499,20 @@ func kbSummaryTool() Tool {
 			"limit":  integer("Max records to return. Default 50, maximum 100."),
 			"cursor": str("Pagination cursor from a previous kb_summary result."),
 		}),
-		Meta: widgetMeta(),
+		Meta:         widgetMeta(),
+		Annotations:  readOnlyAnnotations(),
+		OutputSchema: summaryPageOutputSchema(),
 	}
 }
 
 func kbInfoTool() Tool {
 	return Tool{
-		Name:        "kb_info",
-		Description: "Explain the KB types, their natural keys, required/supported fields, the duplicate-check workflow, the draft-only mutation rule, media-field meanings, and how to review and publish. The server's own instructions already summarize this — call kb_info only if you need more detail.",
-		InputSchema: obj(map[string]any{}),
-		Meta:        widgetMeta(),
+		Name:         "kb_info",
+		Description:  "Explain the KB types, their natural keys, required/supported fields, the duplicate-check workflow, the draft-only mutation rule, media-field meanings, and how to review and publish. The server's own instructions already summarize this — call kb_info only if you need more detail.",
+		InputSchema:  obj(map[string]any{}),
+		Meta:         widgetMeta(),
+		Annotations:  readOnlyAnnotations(),
+		OutputSchema: kbInfoOutputSchema(),
 	}
 }
 
@@ -331,5 +531,7 @@ func kbMediaUploadTool() Tool {
 				"field": str("The semantic media field this upload is intended for, e.g. featured_image, gallery_images."),
 			}, "type", "field"),
 		}, "filename", "mime_type", "size_bytes"),
+		Meta:         appOnlyMeta(),
+		OutputSchema: mediaUploadOutputSchema(),
 	}
 }

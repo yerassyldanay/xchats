@@ -121,7 +121,7 @@ func (s *Server) handlePlaygroundChat(c *gin.Context) {
 	}
 	var req chatReq
 	_ = c.ShouldBindJSON(&req)
-	res, err := s.builder.RunTurn(ctx(c), s.kb, orgID, req.Instruction)
+	res, err := s.builder.RunTurn(ctx(c), s.kb, orgID, currentUser(c).ID, req.Instruction)
 	if err != nil {
 		s.kbFail(c, err)
 		return
@@ -232,7 +232,7 @@ func (s *Server) applyResolution(c *gin.Context, orgID uuid.UUID, r kbstore.Requ
 // upsertFactField writes one confirmed fact column onto its typed entity (pending
 // in the draft blob until approve).
 func (s *Server) upsertFactField(c *gin.Context, orgID uuid.UUID, table, slug, field, value string) error {
-	if err := s.kb.SetFactField(ctx(c), orgID, table, slug, field, value); err != nil {
+	if err := s.kb.SetFactField(ctx(c), orgID, currentUser(c).ID, table, slug, field, value); err != nil {
 		if errors.Is(err, kbstore.ErrUnknownKind) {
 			return errString2("unknown fact table/field")
 		}

@@ -2,6 +2,7 @@ package kbstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -65,10 +66,16 @@ type materialRef struct {
 	CustomerVisibility string
 }
 
-func (s *Store) lookupMaterialRef(ctx context.Context, id uuid.UUID) (materialRef, bool, error) {
+// lookupMaterialRef takes db (not s.pool): every caller runs inside
+// writeDraftBlobVersioned's already-locked transaction (see
+// identityIndex's doc comment in mcp_read.go for the pool-exhaustion
+// deadlock this avoids — c8c0774 fixed that class for identityIndex but
+// left this exact same pattern here, still calling s.pool from inside a
+// held row lock, until this fix).
+func lookupMaterialRef(ctx context.Context, db dbtx, id uuid.UUID) (materialRef, bool, error) {
 	var m materialRef
 	var mime, storageKey, vis *string
-	err := s.pool.QueryRow(ctx, `SELECT organization_id, mime_type, storage_key, customer_visibility
+	err := db.QueryRow(ctx, `SELECT organization_id, mime_type, storage_key, customer_visibility
 		FROM xchats.kbd_materials WHERE id = $1`, id).
 		Scan(&m.OrganizationID, &mime, &storageKey, &vis)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -87,12 +94,12 @@ func (s *Store) lookupMaterialRef(ctx context.Context, id uuid.UUID) (materialRe
 // (a non-empty storage_key — kb_media_upload's PUT target fills this in),
 // not be marked customer_visibility='invisible', and its MIME type must
 // match the column's declared category.
-func (s *Store) validateMediaRef(ctx context.Context, orgID uuid.UUID, field string, materialID uuid.UUID) error {
+func validateMediaRef(ctx context.Context, db dbtx, orgID uuid.UUID, field string, materialID uuid.UUID) error {
 	kind, ok := mediaColumnKind[field]
 	if !ok {
 		return &ErrMediaReference{MaterialID: materialID, Field: field, Reason: "not a recognized media field"}
 	}
-	m, found, err := s.lookupMaterialRef(ctx, materialID)
+	m, found, err := lookupMaterialRef(ctx, db, materialID)
 	if err != nil {
 		return err
 	}
@@ -116,11 +123,13 @@ func (s *Store) validateMediaRef(ctx context.Context, orgID uuid.UUID, field str
 }
 
 // validateMediaRefs validates a batch of {field: [material ids]} — every
-// MCPUpsert* method's media fields, checked before the draft write commits.
-func (s *Store) validateMediaRefs(ctx context.Context, orgID uuid.UUID, refs map[string][]uuid.UUID) error {
+// MCPUpsert* method's media fields, checked before the draft write commits,
+// on the SAME dbtx that method's writeDraftBlobVersioned closure holds the
+// kbd_draft row lock on.
+func validateMediaRefs(ctx context.Context, db dbtx, orgID uuid.UUID, refs map[string][]uuid.UUID) error {
 	for field, ids := range refs {
 		for _, id := range ids {
-			if err := s.validateMediaRef(ctx, orgID, field, id); err != nil {
+			if err := validateMediaRef(ctx, db, orgID, field, id); err != nil {
 				return err
 			}
 		}
@@ -218,17 +227,38 @@ func (s *Store) GetUploadMaterial(ctx context.Context, id uuid.UUID) (UploadMate
 	return m, nil
 }
 
+// ErrUploadAlreadyCompleted means the material named by kb_media_upload's
+// signed PUT target already has bytes attached (processing_status is no
+// longer 'uploaded'). A signed upload URL stays individually valid for its
+// whole TTL, not single-use, so without this guard a second PUT to the same
+// URL — replay, retry-after-success, or a deliberate swap attempt — could
+// silently replace bytes already attached to a live/draft KB record.
+var ErrUploadAlreadyCompleted = errors.New("kbstore: material upload already completed")
+
 // CompleteMaterialUpload finalizes a material once its bytes are stored:
 // records the real storage locator/size/checksum and flips
 // processing_status to 'parsed' — ready to attach. A directly uploaded MCP
 // media file needs no AI extraction pass (unlike the Playground pipeline),
 // so 'parsed' is its terminal ready state.
+//
+// The WHERE clause makes this a one-time, atomic pending→completed
+// transition: it only ever affects a row still in the initial 'uploaded'
+// staging state, so two concurrent PUTs to the same signed target can never
+// both succeed — the loser's write affects zero rows and gets
+// ErrUploadAlreadyCompleted, never overwriting the winner's already-recorded
+// storage_key.
 func (s *Store) CompleteMaterialUpload(ctx context.Context, id uuid.UUID, storageBackend, storageKey string, sizeBytes int64, sha256Checksum string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE xchats.kbd_materials SET
+	tag, err := s.pool.Exec(ctx, `UPDATE xchats.kbd_materials SET
 		storage_backend = $2, storage_key = $3, size_bytes = $4, sha256_checksum = $5,
 		processing_status = 'parsed', updated_at = now()
-		WHERE id = $1`, id, storageBackend, storageKey, sizeBytes, nullIfEmpty(sha256Checksum))
-	return err
+		WHERE id = $1 AND processing_status = 'uploaded'`, id, storageBackend, storageKey, sizeBytes, nullIfEmpty(sha256Checksum))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUploadAlreadyCompleted
+	}
+	return nil
 }
 
 func nullIfEmpty(s string) *string {
@@ -236,4 +266,89 @@ func nullIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ---------------------------------------------------------------------------
+// Provenance — plan/mcp.md's "Common write behavior" provenance{source_url?,
+// material_ids?} argument, recorded in kbd_materials, NEVER as a field on the
+// draft entry itself.
+//
+// The draft document's shape is fixed by plan/DECISIONS.md: "Entries contain
+// business columns only: no database id, organization id, or timestamps."
+// An earlier version of this file added a Provenance string straight onto
+// every Draft* struct instead, and every MCP upsert wrote plan/mcp.md's
+// provenance argument into it — but no live ai_* table has ever had a
+// provenance column (migration 0004_kb_living.up.sql: "live tables hold LIVE
+// ROWS ONLY — no review_state, no provenance, no drafted_at"), so that value
+// was silently discarded the moment a draft entry was approved into live.
+// The legacy manual-editor and confirm_fact write paths had the exact same
+// gap for exactly as long — this was never MCP-specific, just newly
+// EXERCISED by MCP's tool contract explicitly promising callers a durable
+// audit/authoring trail.
+//
+// This is the fix: nothing is added to the draft/live business-column shape.
+// Instead, a source_url becomes its own kbd_materials row (source_type=
+// 'url'), and every material_id (already an existing kbd_materials row) gets
+// tagged — both via extraction_metadata.mcp_target, a plain JSON
+// association rather than a dedicated table (out of scope for V1; revisit
+// only if provenance ever needs reliable querying or multiple targets per
+// material).
+// ---------------------------------------------------------------------------
+
+// MCPProvenance is plan/mcp.md's provenance{source_url?, material_ids?}
+// argument, parsed (internal/mcpserver/args.go) into a typed value instead
+// of the opaque pre-built JSON string this used to be.
+type MCPProvenance struct {
+	SourceURL   string
+	MaterialIDs []uuid.UUID
+}
+
+func (p MCPProvenance) empty() bool { return p.SourceURL == "" && len(p.MaterialIDs) == 0 }
+
+// recordProvenance implements the association described above, called from
+// inside an MCPUpsert*'s writeDraftBlobVersioned closure — after the
+// record's key is resolved, so the association names the actual key the
+// content landed under — on that SAME already-locked db, never s.pool (the
+// pool-exhaustion deadlock identityIndex's doc comment describes, mcp_read.go,
+// applies here exactly the same way it did to media validation before c8c0774
+// and this file's own dbtx threading fixed it).
+//
+// A material_id that does not exist or belongs to a different organization
+// is rejected with ErrMediaReference — the same class of error, and the
+// same same-organization discipline, validateMediaRef already enforces for
+// an attachment reference (mcp_media.go); a provenance citation gets no
+// looser a check than an actual attachment just because it is "only" an
+// audit trail — silently accepting a foreign org's material id would let
+// one organization probe/tag another's rows.
+func (s *Store) recordProvenance(ctx context.Context, db dbtx, orgID uuid.UUID, kbType, key string, prov MCPProvenance) error {
+	if prov.empty() {
+		return nil
+	}
+	target, err := json.Marshal(map[string]any{
+		"mcp_target": map[string]string{"type": kbType, "key": key},
+	})
+	if err != nil {
+		return err
+	}
+	if prov.SourceURL != "" {
+		if _, err := db.Exec(ctx, `INSERT INTO xchats.kbd_materials
+			(organization_id, source_type, source_ref, extraction_metadata, processing_status, customer_visibility)
+			VALUES ($1, 'url', $2, $3::jsonb, 'parsed', 'invisible')`,
+			orgID, prov.SourceURL, string(target)); err != nil {
+			return fmt.Errorf("record source_url provenance: %w", err)
+		}
+	}
+	for _, id := range prov.MaterialIDs {
+		tag, err := db.Exec(ctx, `UPDATE xchats.kbd_materials
+			SET extraction_metadata = extraction_metadata || $3::jsonb
+			WHERE id = $1 AND organization_id = $2`,
+			id, orgID, string(target))
+		if err != nil {
+			return fmt.Errorf("tag material_id %s with provenance: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return &ErrMediaReference{MaterialID: id, Field: "provenance.material_ids", Reason: "not found or belongs to a different organization"}
+		}
+	}
+	return nil
 }

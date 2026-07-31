@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -88,6 +89,12 @@ func main() {
 }
 
 func runServe(cfg *config.Config, log *slog.Logger) {
+	if cfg.IsProduction() {
+		if problems := validateProductionConfig(cfg); len(problems) > 0 {
+			fatal("production config", fmt.Errorf("%s", strings.Join(problems, "; ")))
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -230,6 +237,47 @@ func buildLLMRegistry(cfg *config.Config) (llm.Registry, llm.ModelRef) {
 	return reg, llm.ModelRef{Provider: provider, Model: model}
 }
 
+// validateProductionConfig returns every reason cfg is unsafe to run with
+// ENVIRONMENT=production (plan Task 17's release gate): an ephemeral MCP
+// signing key (MCPJWTSigningKey unset or otherwise invalid — every replica
+// would then mint tokens no other replica, and no restart, can verify), or a
+// base URL still pointing at localhost/loopback. Development (the default —
+// anything other than the literal "production") never calls this: those are
+// legitimate conveniences there, not misconfigurations. An empty return means
+// clear to boot.
+func validateProductionConfig(cfg *config.Config) []string {
+	var problems []string
+	if _, err := mcpauth.NewSigningKeyFromSeed(cfg.MCPJWTSigningKey); err != nil {
+		problems = append(problems, "MCP_JWT_SIGNING_KEY is unset or invalid — production would mint an ephemeral per-process key that a restart or a second replica can never verify")
+	}
+	if isLocalBaseURL(cfg.APIBaseURL) {
+		problems = append(problems, fmt.Sprintf("API_BASE_URL=%q still points at localhost/loopback", cfg.APIBaseURL))
+	}
+	if isLocalBaseURL(cfg.FrontendBaseURL) {
+		problems = append(problems, fmt.Sprintf("FRONTEND_BASE_URL=%q still points at localhost/loopback", cfg.FrontendBaseURL))
+	}
+	return problems
+}
+
+// isLocalBaseURL reports whether raw is empty, unparseable, or points at a
+// loopback/localhost host — fine for local development, a startup-blocking
+// misconfiguration in production.
+func isLocalBaseURL(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return true
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1", "":
+		return true
+	default:
+		return false
+	}
+}
+
 // buildMCPConnector wires the MCP connector's OAuth 2.1 authorization server
 // and JSON-RPC tool server (plan/mcp.md). Without MCP_JWT_SIGNING_KEY set it
 // degrades to an ephemeral per-process key rather than failing to boot —
@@ -255,12 +303,21 @@ func buildMCPConnector(cfg *config.Config, st *store.Store, kb *kbstore.Store, b
 		AuthCodeTTL:       time.Duration(cfg.MCPAuthCodeTTLSeconds) * time.Second,
 	})
 	uploadSigner := mcpauth.NewUploadTokenSigner(key)
+	apiBase := strings.TrimRight(cfg.APIBaseURL, "/")
+	reviewSigner := mcpauth.NewReviewHandoffSigner(key, apiBase, time.Duration(cfg.MCPReviewHandoffTTLSeconds)*time.Second)
 	mcpSrv := mcpserver.New(mcpserver.Deps{
 		KB: kb, Blob: blobStore, Log: log,
-		UploadBaseURL:    strings.TrimRight(cfg.APIBaseURL, "/"),
+		UploadBaseURL:    apiBase,
 		SignUpload:       uploadSigner.Sign,
 		UploadTTLSeconds: cfg.MCPUploadTokenTTLSeconds,
 		FrontendBaseURL:  cfg.MCPResolvedFrontendBaseURL(),
+		SignReviewHandoff: func(userID, orgID uuid.UUID) (string, error) {
+			token, _, _, err := reviewSigner.Sign(userID, orgID)
+			if err != nil {
+				return "", err
+			}
+			return apiBase + "/playground/review-handoff?token=" + url.QueryEscape(token), nil
+		},
 	})
 	return authorizer, mcpSrv
 }

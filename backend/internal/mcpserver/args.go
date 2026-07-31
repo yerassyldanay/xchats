@@ -3,8 +3,11 @@ package mcpserver
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
 
 // unmarshalParams decodes a JSON-RPC request's params into a typed struct,
@@ -35,6 +38,25 @@ func rawObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
 		return nil, fmt.Errorf("expected a JSON object: %w", err)
 	}
 	return m, nil
+}
+
+// rejectUnknownFields enforces the additionalProperties:false every tool's
+// `changes` schema already declares (tools.go's changesObject) — without
+// this, a typo'd field name (e.g. "titel" instead of "title") is silently
+// dropped by every optX accessor (none of them read a key they don't know
+// about) rather than surfaced to the caller, so the model has no way to
+// learn its argument was ignored.
+func rejectUnknownFields(m map[string]json.RawMessage, allowed ...string) error {
+	known := make(map[string]bool, len(allowed))
+	for _, f := range allowed {
+		known[f] = true
+	}
+	for k := range m {
+		if !known[k] {
+			return fmt.Errorf("unknown field %q (allowed: %s)", k, strings.Join(allowed, ", "))
+		}
+	}
+	return nil
 }
 
 func isJSONNull(raw json.RawMessage) bool { return string(raw) == "null" }
@@ -158,30 +180,35 @@ func optExpectedVersion(m map[string]json.RawMessage) (*int64, error) {
 	return &n, nil
 }
 
-// provenanceString folds the common provenance?  { source_url?,
-// material_ids? } argument into the plain jsonb-ish string every kbstore
-// Draft* entry's Provenance field already stores (e.g. `{"source":"mcp",
-// "source_url":"..."}`) — a compact, human-inspectable note, not a full
-// structured object the rest of the codebase would need to parse back out.
-func provenanceString(m map[string]json.RawMessage) string {
+// parseProvenance parses the common provenance?  { source_url?,
+// material_ids? } argument (plan/mcp.md "Common write behavior") into the
+// typed value kbstore.recordProvenance uses to create/tag a kbd_materials
+// audit-trail association — never a field on the draft entry itself (Task
+// 16 / plan/DECISIONS.md's "business columns only"). Malformed provenance
+// (a non-object, or a material_ids entry that isn't a UUID) is a caller
+// error returned to the model as invalid params, not silently dropped into
+// a default value the way this used to swallow it.
+func parseProvenance(m map[string]json.RawMessage) (kbstore.MCPProvenance, error) {
 	raw, ok := m["provenance"]
 	if !ok || isJSONNull(raw) {
-		return `{"source":"mcp"}`
+		return kbstore.MCPProvenance{}, nil
 	}
 	var p struct {
 		SourceURL   string   `json:"source_url"`
 		MaterialIDs []string `json:"material_ids"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return `{"source":"mcp"}`
+		return kbstore.MCPProvenance{}, fmt.Errorf("provenance: expected an object: %w", err)
 	}
-	out, err := json.Marshal(map[string]any{
-		"source": "mcp", "source_url": p.SourceURL, "material_ids": p.MaterialIDs,
-	})
-	if err != nil {
-		return `{"source":"mcp"}`
+	ids := make([]uuid.UUID, 0, len(p.MaterialIDs))
+	for _, s := range p.MaterialIDs {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			return kbstore.MCPProvenance{}, fmt.Errorf("provenance.material_ids: invalid material_id %q: %w", s, err)
+		}
+		ids = append(ids, id)
 	}
-	return string(out)
+	return kbstore.MCPProvenance{SourceURL: p.SourceURL, MaterialIDs: ids}, nil
 }
 
 // stringField reads a plain required/optional top-level string argument

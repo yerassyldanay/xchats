@@ -534,6 +534,20 @@ func (s *Store) OrgsForUser(ctx context.Context, userID uuid.UUID) ([]Organizati
 	return out, rows.Err()
 }
 
+// OrgByID resolves one organization by id, with no membership check of its
+// own — callers that reach this from user input (the active-organization
+// endpoint, the review-handoff redirect) must check UserInOrg themselves
+// first.
+func (s *Store) OrgByID(ctx context.Context, orgID uuid.UUID) (Organization, error) {
+	var o Organization
+	err := s.pool.QueryRow(ctx, `SELECT id, name, respond_mode FROM xchats.organizations WHERE id = $1`, orgID).
+		Scan(&o.ID, &o.Name, &o.RespondMode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return o, ErrNotFound
+	}
+	return o, err
+}
+
 // UserInOrg reports whether userID is a live member of orgID — the MCP
 // access-token verification's per-request tenant re-check (plan/mcp.md §3:
 // "The backend must still verify that the user is active and belongs to
@@ -580,6 +594,39 @@ func (s *Store) UserForSession(ctx context.Context, sessionID string) (User, err
 
 func (s *Store) DeleteSession(ctx context.Context, sessionID string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM xchats.sessions WHERE id = $1`, sessionID)
+	return err
+}
+
+// ActiveOrganizationForSession returns the session's explicitly-selected
+// organization (set by SetActiveOrganization, or by a verified MCP review
+// handoff — plan Task 15), if any. ok is false when the session carries no
+// active organization at all (the common case for a single-org user, or one
+// who has never switched/landed via a handoff) — the caller falls back to
+// OrgForUser's deterministic default.
+func (s *Store) ActiveOrganizationForSession(ctx context.Context, sessionID string) (orgID uuid.UUID, ok bool, err error) {
+	var id *uuid.UUID
+	err = s.pool.QueryRow(ctx, `
+		SELECT active_organization_id FROM xchats.sessions
+		WHERE id = $1 AND expires_at > now()`, sessionID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.UUID{}, false, ErrNotFound
+	}
+	if err != nil {
+		return uuid.UUID{}, false, err
+	}
+	if id == nil {
+		return uuid.UUID{}, false, nil
+	}
+	return *id, true, nil
+}
+
+// SetActiveOrganization records which organization THIS session is scoped
+// to — orgOf (internal/httpapi) re-validates current membership on every
+// read, so this alone never grants access to an org the caller was removed
+// from after the fact.
+func (s *Store) SetActiveOrganization(ctx context.Context, sessionID string, orgID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE xchats.sessions SET active_organization_id = $2 WHERE id = $1`, sessionID, orgID)
 	return err
 }
 

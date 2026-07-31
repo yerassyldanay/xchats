@@ -2,6 +2,7 @@ package mcpauth
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -23,6 +24,10 @@ var AllScopes = []string{ScopeKBRead, ScopeKBDraftWrite, ScopeMediaWrite}
 // ParseScope splits a space-separated OAuth scope string into its known
 // members, dropping anything unrecognized (fail-closed: an unknown scope
 // requested is simply never granted, rather than silently passed through).
+// Used only where the scope has already been validated (JWT claims, an
+// already-consumed refresh token) — a NEW client-supplied scope string
+// (authorize, the decision form) must go through ValidateScope instead, so a
+// typo'd scope is rejected rather than silently narrowed to nothing.
 func ParseScope(s string) []string {
 	var out []string
 	known := map[string]bool{}
@@ -35,6 +40,32 @@ func ParseScope(s string) []string {
 		}
 	}
 	return out
+}
+
+// ErrInvalidScope means a requested scope string named a token outside
+// AllScopes.
+var ErrInvalidScope = errors.New("mcpauth: invalid scope")
+
+// ValidateScope rejects a scope string containing any unrecognized token,
+// returning the parsed list only when every token is known. An empty string
+// is valid (it defaults to AllScopes at the call site) — this only guards
+// against a scope the client actually supplied being silently narrowed.
+func ValidateScope(s string) ([]string, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	known := map[string]bool{}
+	for _, sc := range AllScopes {
+		known[sc] = true
+	}
+	var out []string
+	for _, tok := range strings.Fields(s) {
+		if !known[tok] {
+			return nil, fmt.Errorf("%w: %q", ErrInvalidScope, tok)
+		}
+		out = append(out, tok)
+	}
+	return out, nil
 }
 
 // FormatScope re-joins a scope list into the standard space-separated form.

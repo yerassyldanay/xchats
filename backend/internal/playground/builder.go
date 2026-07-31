@@ -84,8 +84,9 @@ type TurnResult struct {
 	Comment        string `json:"comment"`
 }
 
-// RunTurn executes a builder-chat turn against the org's open draft.
-func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, instruction string) (TurnResult, error) {
+// RunTurn executes a builder-chat turn against the org's open draft. actor
+// is recorded as kbd_draft.updated_by on every draft write this turn makes.
+func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, actor uuid.UUID, instruction string) (TurnResult, error) {
 	ready, err := kb.ReadyMaterials(ctx, orgID)
 	if err != nil {
 		return TurnResult{}, err
@@ -101,7 +102,6 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 
 	var res TurnResult
 	res.Comment = plan.Comment
-	prov := jsonObj(map[string]any{"source": "builder"})
 
 	for _, t := range plan.Topics {
 		body := t.BodyMD
@@ -114,9 +114,8 @@ func (b *Builder) RunTurn(ctx context.Context, kb *kbstore.Store, orgID uuid.UUI
 				body = existing.BodyMD + "\n\n" + t.BodyMD
 			}
 		}
-		if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+		if err := kb.UpsertTopic(ctx, orgID, actor, kbstore.TopicInput{
 			Slug: t.Slug, Title: t.Title, BodyMD: body,
-			Provenance: prov,
 		}); err != nil {
 			return res, err
 		}

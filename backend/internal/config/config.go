@@ -27,6 +27,21 @@ type Config struct {
 	LogFormat   string   `yaml:"log_format" env:"LOG_FORMAT"`
 	LogLevel    string   `yaml:"log_level" env:"LOG_LEVEL"`
 	APIBaseURL  string   `yaml:"api_base_url" env:"API_BASE_URL"`
+	// Environment is "development" (the default) or "production" — the
+	// switch that turns dev-only conveniences (an ephemeral MCP signing key,
+	// a localhost base URL) into hard startup failures instead of warnings
+	// (plan Task 17). Anything other than the literal "production" is
+	// treated as development, so an unset/misspelled value never accidentally
+	// disables the checks it's supposed to enable.
+	Environment string `yaml:"environment" env:"ENVIRONMENT"`
+	// TrustedProxies lists the reverse-proxy IPs/CIDRs gin should trust
+	// X-Forwarded-* headers from (gin's SetTrustedProxies). Empty means trust
+	// NONE — c.ClientIP() falls back to the raw connection address rather
+	// than any client-suppliable header. This must never default to "trust
+	// everyone" (gin's own zero-value behavior): Host and X-Forwarded-* are
+	// attacker-controlled on any request that doesn't actually come through
+	// a configured proxy (plan Task 17).
+	TrustedProxies []string `yaml:"trusted_proxies" env:"TRUSTED_PROXIES" envSeparator:","`
 	// FrontendBaseURL is the deployed Vue SPA's own public origin (a separate
 	// service from the backend — see deploy/docker-compose.yaml). The MCP KB
 	// Manager widget's "Review and publish in Xchats" link and the OAuth
@@ -51,6 +66,10 @@ type Config struct {
 	MCPAuthCodeTTLSeconds int `yaml:"mcp_auth_code_ttl_seconds" env:"MCP_AUTH_CODE_TTL_SECONDS"`
 	// MCPUploadTokenTTLSeconds bounds a kb_media_upload signed upload URL.
 	MCPUploadTokenTTLSeconds int `yaml:"mcp_upload_token_ttl_seconds" env:"MCP_UPLOAD_TOKEN_TTL_SECONDS"`
+	// MCPReviewHandoffTTLSeconds bounds the one-time signed URL a tool result
+	// hands the KB Manager widget for "Review and publish in Xchats" (plan
+	// Task 15) — short-lived: it only needs to survive the click.
+	MCPReviewHandoffTTLSeconds int `yaml:"mcp_review_handoff_ttl_seconds" env:"MCP_REVIEW_HANDOFF_TTL_SECONDS"`
 
 	// --- secrets (.env only) ---
 	DatabaseURL          string `env:"DATABASE_URL"`
@@ -166,11 +185,13 @@ func defaults() Config {
 		OrgName:         "xchats",
 		PageSize:        50,
 		FrontendBaseURL: "http://localhost:5173",
+		Environment:     "development",
 
-		MCPAccessTokenTTLSeconds: 900, // 15 minutes
-		MCPRefreshTokenTTLDays:   30,
-		MCPAuthCodeTTLSeconds:    300, // 5 minutes
-		MCPUploadTokenTTLSeconds: 900, // 15 minutes
+		MCPAccessTokenTTLSeconds:   900, // 15 minutes
+		MCPRefreshTokenTTLDays:     30,
+		MCPAuthCodeTTLSeconds:      300, // 5 minutes
+		MCPUploadTokenTTLSeconds:   900, // 15 minutes
+		MCPReviewHandoffTTLSeconds: 300, // 5 minutes
 
 		LLMDefaultProvider:     "openrouter",
 		LLMDefaultModel:        "google/gemini-2.5-flash",
@@ -222,6 +243,13 @@ func (c *Config) MCPResourceURL() string {
 // slash, for building links like {base}/playground.
 func (c *Config) MCPResolvedFrontendBaseURL() string {
 	return strings.TrimRight(c.FrontendBaseURL, "/")
+}
+
+// IsProduction reports whether Environment is explicitly set to
+// "production" (case-insensitive, surrounding whitespace ignored). Anything
+// else — including unset — is development.
+func (c *Config) IsProduction() bool {
+	return strings.EqualFold(strings.TrimSpace(c.Environment), "production")
 }
 
 // LangfuseTracingEnabled reports whether LLM calls should export traces to

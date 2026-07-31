@@ -147,8 +147,12 @@ export interface TopicRow {
   slug: string
   title: string
   body_md: string
+  featured_image: string | null
+  illustration_images: string[]
+  explainer_videos: string[]
+  narration_audio_files: string[]
+  reference_documents: string[]
   draft: boolean
-  provenance?: string
   updated_at: string
 }
 // Facts lane — typed entity rows. Every exact fact (price, limit, phone, …) is a
@@ -166,8 +170,12 @@ export interface TariffRow {
   pricing_type: string // fixed | percentage | tiered
   advantages: string
   disadvantages: string
+  sales_status: string // active | inactive
+  featured_image: string | null
+  pricing_images: string[]
+  explainer_videos: string[]
+  terms_documents: string[]
   draft: boolean
-  provenance?: string
   updated_at: string
 }
 export interface ProductRow {
@@ -178,8 +186,16 @@ export interface ProductRow {
   description: string
   category: string
   in_stock: boolean
+  sales_status: string // active | inactive
+  featured_image: string | null
+  gallery_images: string[]
+  demo_videos: string[]
+  audio_description_files: string[]
+  certificate_documents: string[]
+  manual_documents: string[]
+  guarantee_documents: string[]
+  specification_documents: string[]
   draft: boolean
-  provenance?: string
   updated_at: string
 }
 export interface ContactRow {
@@ -194,8 +210,10 @@ export interface ContactRow {
   phone: string
   website: string
   instagram: string
+  contact_card_image: string | null
+  location_map_image: string | null
+  company_legal_documents: string[]
   draft: boolean
-  provenance?: string
   updated_at: string
 }
 // PolicyRow — org commerce-policy scalars (delivery/payment/returns terms), a
@@ -212,13 +230,13 @@ export interface PolicyRow {
   return_period_in_days: string
   warranty: string
   outside_zones_note: string
+  commerce_policy_documents: string[]
   draft: boolean
-  provenance?: string
   updated_at: string
 }
-// DeliveryZoneRow — a live ai_delivery_zones row («Зоны доставки»). Live-only:
-// there is no pending/draft variant yet (draft milestone later), so `draft`
-// is always false — kept for shape-parity with every other /kb/* row.
+// DeliveryZoneRow — an ai_delivery_zones row («Зоны доставки»), live overlaid
+// by a pending kbd_draft entry — the same live+blob merge as every other
+// entity kind (see kbstore.mergedView's zones section).
 export interface DeliveryZoneRow {
   id: string // = ref
   ref: string

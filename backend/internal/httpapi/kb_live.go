@@ -131,6 +131,7 @@ func (s *Server) handleKBUpsertTariff(c *gin.Context) {
 	if err := s.kb.PutLiveTariff(ctx(c), orgID, currentUser(c).ID, kbstore.TariffInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
 		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
+		SalesStatus: req.SalesStatus,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -163,7 +164,7 @@ func (s *Server) handleKBUpsertProduct(c *gin.Context) {
 	if err := s.kb.PutLiveProduct(ctx(c), orgID, currentUser(c).ID, kbstore.ProductInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price,
 		Description: req.Description, Category: req.Category,
-		InStock: req.InStock,
+		InStock: req.InStock, SalesStatus: req.SalesStatus,
 	}); err != nil {
 		s.kbFail(c, err)
 		return

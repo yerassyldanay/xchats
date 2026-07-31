@@ -210,6 +210,10 @@
     items: [],
     draftVersion: null,
     frontendBaseUrl: "",
+    reviewUrl: null,       // one-time, organization-bound handoff URL from
+                           // the most recent tool result's _meta (Task 15);
+                           // preferred over frontendBaseUrl's bare /playground
+                           // link whenever a tool call has actually supplied one.
     mediaFieldKinds: {},
     record: null,          // { type, key, entries: [{type,source,data}, ...] }
     recordBack: "all",
@@ -246,13 +250,37 @@
   // ---------------------------------------------------------------------
   var rpcSeq = 0;
   var pendingRpc = {};
+  // Tools whose result changes what a fresh kb_summary/kb_read would show —
+  // used only to decide whether an incoming tool-result notification (below)
+  // should trigger a refresh.
+  var MUTATING_TOOLS = [
+    "kb_assistant_upsert", "kb_topic_upsert", "kb_product_upsert", "kb_tariff_upsert",
+    "kb_contacts_upsert", "kb_policies_upsert", "kb_delivery_zone_upsert", "kb_delete",
+  ];
   window.addEventListener("message", function (ev) {
+    // Ignore anything not from our actual host frame — without this check any
+    // OTHER embedded frame (or a malicious top-level page this widget was
+    // never meant to run under) could inject fake tool responses.
+    if (ev.source !== window.parent) return;
     var data = ev.data;
-    if (!data || typeof data !== "object" || !pendingRpc[data.id]) return;
-    var p = pendingRpc[data.id];
-    delete pendingRpc[data.id];
-    if (data.error) p.reject(new Error(data.error.message || "tool call failed"));
-    else p.resolve(data.result);
+    if (!data || typeof data !== "object") return;
+    if (data.id !== undefined && pendingRpc[data.id]) {
+      var p = pendingRpc[data.id];
+      delete pendingRpc[data.id];
+      if (data.error) p.reject(new Error(data.error.message || "tool call failed"));
+      else p.resolve(data.result);
+      return;
+    }
+    // Best-effort standard tool-result notification for a tool call the
+    // MODEL made directly (not through this widget's own callTool) — refresh
+    // so the widget doesn't keep showing data a concurrent model-driven write
+    // just changed. This wire format is not yet stable across hosts (see
+    // this file's own top-of-file caveat); recognized defensively, never
+    // required for the widget's own core flows to work.
+    if (data.method === "notifications/tools/result" && data.params &&
+        MUTATING_TOOLS.indexOf(data.params.name) !== -1 && state.bridgeKind) {
+      loadForView(state.view);
+    }
   });
   function callToolViaPostMessage(name, args) {
     return new Promise(function (resolve, reject) {
@@ -269,6 +297,13 @@
       if (result.isError) {
         var text = Array.isArray(result.content) && result.content[0] && result.content[0].text;
         throw new Error(text || "tool call failed");
+      }
+      // Every successful tool result carries a FRESH one-time review-handoff
+      // URL when the backend has one configured (mcpserver.Deps.SignReviewHandoff
+      // is non-nil) — captured here, the one choke point every callTool() result
+      // passes through, so no individual call site needs to know about it.
+      if (result._meta && typeof result._meta === "object" && result._meta["xchats/reviewUrl"]) {
+        state.reviewUrl = result._meta["xchats/reviewUrl"];
       }
       if ("structuredContent" in result) return result.structuredContent;
     }
@@ -302,6 +337,19 @@
     }
   }
 
+  // sendUiInitialize best-effort-announces this widget to a generic
+  // postMessage host per the standard MCP Apps handshake (plan Task 9) —
+  // window.openai's Apps SDK bridge has no documented equivalent call, so
+  // this is only sent on the generic fallback path. Never awaited: a host
+  // that doesn't recognize the method simply never replies, and every real
+  // capability this widget needs still comes from kb_info/callTool.
+  function sendUiInitialize() {
+    if (state.bridgeKind !== "postmessage") return;
+    try {
+      window.parent.postMessage({ jsonrpc: "2.0", method: "ui/initialize", params: { protocolVersion: "2025-11-25" } }, "*");
+    } catch (e) { /* best-effort */ }
+  }
+
   function connect() {
     if (window.openai && typeof window.openai.callTool === "function") {
       state.bridgeKind = "openai";
@@ -311,6 +359,7 @@
       state.bridgeKind = "none";
       return Promise.resolve(null);
     }
+    sendUiInitialize();
     return withTimeout(callTool("kb_info", {}), 4000).catch(function () {
       state.bridgeKind = "none";
       return null;
@@ -347,12 +396,38 @@
     return Promise.resolve();
   }
 
+  // loadAllPages follows next_cursor until it's absent, instead of the
+  // silent limit:100 truncation a single call would have (plan Task 9) — the
+  // KB is documented as small by design (see kbstore's ReadPage doc), so a
+  // capped loop of full pages is simpler than "load more" UI and still safe:
+  // PAGE_SAFETY_CAP stops a pathological KB from looping forever, surfacing
+  // that instead of truncating silently.
+  var PAGE_SAFETY_CAP = 20; // 20 * 100 = 2000 records
+  async function loadAllPages(toolName, baseArgs) {
+    var items = [];
+    var cursor;
+    var lastPage = {};
+    for (var i = 0; i < PAGE_SAFETY_CAP; i++) {
+      var args = Object.assign({}, baseArgs, { limit: 100 });
+      if (cursor) args.cursor = cursor;
+      var page = await callTool(toolName, args);
+      lastPage = page;
+      items = items.concat(page.items || []);
+      if (!page.next_cursor) { cursor = null; break; }
+      cursor = page.next_cursor;
+    }
+    if (cursor) {
+      console.warn("kb-manager widget: stopped paginating " + toolName + " after " + PAGE_SAFETY_CAP + " pages — results are incomplete");
+    }
+    return { items: items, draft_version: lastPage.draft_version };
+  }
+
   async function loadSummary(draftOnly) {
     state.loading = true; state.error = null; render();
     try {
-      var page = await callTool("kb_summary", { types: state.typeFilter ? [state.typeFilter] : undefined, limit: 100 });
+      var page = await loadAllPages("kb_summary", { types: state.typeFilter ? [state.typeFilter] : undefined });
       state.draftVersion = page.draft_version;
-      var items = page.items || [];
+      var items = page.items;
       state.items = draftOnly ? items.filter(function (it) { return it.exists_in_draft; }) : items;
     } catch (e) {
       state.error = String((e && e.message) || e);
@@ -363,11 +438,11 @@
   async function loadLive() {
     state.loading = true; state.error = null; render();
     try {
-      var page = await callTool("kb_read", {
+      var page = await loadAllPages("kb_read", {
         types: state.typeFilter ? [state.typeFilter] : undefined,
-        source: "live", limit: 100, query: state.query || undefined,
+        source: "live", query: state.query || undefined,
       });
-      state.items = page.items || [];
+      state.items = page.items;
     } catch (e) {
       state.error = String((e && e.message) || e);
     }
@@ -466,9 +541,18 @@
     }
   }
 
+  // reviewLink prefers the per-tool-call, organization-bound handoff URL
+  // (state.reviewUrl) over the bare static frontendBaseUrl link — the latter
+  // remains only as a fallback for a host/backend pairing that never supplies
+  // one (SignReviewHandoff not configured, or no tool call has completed yet).
+  function reviewLink() {
+    if (state.reviewUrl) return state.reviewUrl;
+    return state.frontendBaseUrl ? state.frontendBaseUrl + "/playground" : "";
+  }
+
   function renderHeader() {
     var sub = state.draftVersion != null ? "версия черновика: " + esc(state.draftVersion) : "";
-    var link = state.frontendBaseUrl ? state.frontendBaseUrl + "/playground" : "";
+    var link = reviewLink();
     return '' +
       '<header class="topbar">' +
       '<div><h1>База знаний Xchats</h1><div class="sub">' + sub + '</div></div>' +
@@ -516,9 +600,10 @@
     var html = "";
     if (state.error) html += '<div class="error-box">' + esc(state.error) + '</div>';
     if (state.view === "draft") {
+      var draftLink = reviewLink();
       html += '<div class="publish-banner"><p>Черновик содержит несохранённые изменения. Публикация подтверждается человеком в Xchats.</p>' +
-        (state.frontendBaseUrl
-          ? '<a class="btn btn-primary btn-sm" href="' + esc(state.frontendBaseUrl + "/playground") + '" target="_blank" rel="noopener">Открыть в Xchats</a>'
+        (draftLink
+          ? '<a class="btn btn-primary btn-sm" href="' + esc(draftLink) + '" target="_blank" rel="noopener">Открыть в Xchats</a>'
           : '') + '</div>';
     }
     html += renderTypeChips();
@@ -630,6 +715,8 @@
     } else if (m.status === "uploaded") {
       html += '<p class="row-sub" style="color:var(--ok)">Файл загружен. Укажите, к какой записи прикрепить.</p>';
       html += renderAttachForm();
+    } else if (m.status === "error") {
+      html += '<button class="btn btn-primary btn-sm" id="retry-upload">Повторить загрузку</button>';
     }
     html += '</div>';
     if (m.attachDone) {
@@ -672,22 +759,33 @@
     state.media.progress = 0;
     state.media.error = null;
     render();
+    var out;
     try {
       var buf = await file.arrayBuffer();
       var digest = await crypto.subtle.digest("SHA-256", buf);
       var hex = Array.prototype.map.call(new Uint8Array(digest), function (b) { return b.toString(16).padStart(2, "0"); }).join("");
-      var out = await callTool("kb_media_upload", {
+      out = await callTool("kb_media_upload", {
         filename: file.name, mime_type: file.type || "application/octet-stream",
         size_bytes: file.size, sha256_checksum: hex,
       });
-      state.media.materialId = out.material_id;
-      state.media.uploadUrl = out.upload_url;
-      state.media.uploadHeaders = out.upload_headers || {};
-      await putUploadBytes(file);
     } catch (e) {
+      // No upload target was ever staged — nothing to retry, back to the
+      // dropzone (materialId stays unset, so renderMediaView shows it again).
       state.media.status = null;
       state.media.error = String((e && e.message) || e);
       render();
+      return;
+    }
+    state.media.materialId = out.material_id;
+    state.media.uploadUrl = out.upload_url;
+    state.media.uploadHeaders = out.upload_headers || {};
+    try {
+      await putUploadBytes(file);
+    } catch (e) {
+      // putUploadBytes already set status="error" + a specific message and
+      // called render() itself (see its onload/onerror) — the retry button
+      // renderMediaView shows for status="error" re-calls it with the SAME
+      // staged file/uploadUrl, no need to re-stage via kb_media_upload.
     }
   }
 
@@ -702,9 +800,9 @@
       };
       xhr.onload = function () {
         if (xhr.status >= 200 && xhr.status < 300) { state.media.status = "uploaded"; render(); resolve(); }
-        else { state.media.status = null; state.media.error = "Загрузка не удалась (" + xhr.status + ")"; render(); reject(new Error("upload failed")); }
+        else { state.media.status = "error"; state.media.error = "Загрузка не удалась (" + xhr.status + ")"; render(); reject(new Error("upload failed")); }
       };
-      xhr.onerror = function () { state.media.status = null; state.media.error = "Сетевая ошибка при загрузке"; render(); reject(new Error("network error")); };
+      xhr.onerror = function () { state.media.status = "error"; state.media.error = "Сетевая ошибка при загрузке"; render(); reject(new Error("network error")); };
       xhr.send(file);
     });
   }
@@ -823,6 +921,14 @@
 
     var doUpload = app.querySelector("#do-upload");
     if (doUpload) doUpload.addEventListener("click", function () { putUploadBytes(state.media.file); });
+    var retryUpload = app.querySelector("#retry-upload");
+    if (retryUpload) retryUpload.addEventListener("click", function () {
+      state.media.error = null;
+      state.media.status = "uploading";
+      state.media.progress = 0;
+      render();
+      putUploadBytes(state.media.file);
+    });
 
     var attachType = app.querySelector("#attach-type");
     if (attachType) attachType.addEventListener("change", function () {

@@ -32,9 +32,21 @@ type DraftConfigPatch struct {
 	ReplyMaxWords  *int    `json:"reply_max_words,omitempty"`
 }
 
-// Draft* are pending blob entries — the same fields as their live row, plus
-// authoring provenance. Media fields mirror the canonical ai_* columns
-// (plan/DECISIONS.md "Concrete media-column naming"): a nullable singular
+// hasPending reports whether any field of the config patch is set — config
+// has no natural key, so "is there a pending edit at all" (rather than a
+// per-field check) is what an entity-scoped approve of kind "config" targets.
+func (c DraftConfigPatch) hasPending() bool {
+	return c.Persona != nil || c.Mission != nil || c.Guardrails != nil || c.LanguagePolicy != nil || c.ReplyMaxWords != nil
+}
+
+// Draft* are pending blob entries — the same fields as their live row.
+// Business columns only, no database id, organization id, timestamp, or
+// authoring metadata (plan/DECISIONS.md's kbd_draft shape: "Entries contain
+// business columns only") — an audit/authoring trail (plan/mcp.md's
+// provenance{source_url?, material_ids?}) is recorded as a kbd_materials
+// association instead (kbstore.recordProvenance, mcp_media.go), never as a
+// field here. Media fields mirror the canonical ai_* columns (plan/
+// DECISIONS.md "Concrete media-column naming"): a nullable singular
 // reference is *uuid.UUID (nil = none), a plural reference is []uuid.UUID
 // (never nil — always at least an empty slice, matching the live column's
 // NOT NULL DEFAULT '{}').
@@ -47,7 +59,6 @@ type DraftTopic struct {
 	ExplainerVideos     []uuid.UUID `json:"explainer_videos"`
 	NarrationAudioFiles []uuid.UUID `json:"narration_audio_files"`
 	ReferenceDocuments  []uuid.UUID `json:"reference_documents"`
-	Provenance          string      `json:"provenance,omitempty"`
 }
 
 type DraftTariff struct {
@@ -65,7 +76,6 @@ type DraftTariff struct {
 	PricingImages   []uuid.UUID `json:"pricing_images"`
 	ExplainerVideos []uuid.UUID `json:"explainer_videos"`
 	TermsDocuments  []uuid.UUID `json:"terms_documents"`
-	Provenance      string      `json:"provenance,omitempty"`
 }
 
 type DraftProduct struct {
@@ -84,7 +94,6 @@ type DraftProduct struct {
 	ManualDocuments        []uuid.UUID `json:"manual_documents"`
 	GuaranteeDocuments     []uuid.UUID `json:"guarantee_documents"`
 	SpecificationDocuments []uuid.UUID `json:"specification_documents"`
-	Provenance             string      `json:"provenance,omitempty"`
 }
 
 // DraftContact is the org's single pending support-contact entry — a true
@@ -102,7 +111,6 @@ type DraftContact struct {
 	ContactCardImage      *uuid.UUID  `json:"contact_card_image"`
 	LocationMapImage      *uuid.UUID  `json:"location_map_image"`
 	CompanyLegalDocuments []uuid.UUID `json:"company_legal_documents"`
-	Provenance            string      `json:"provenance,omitempty"`
 }
 
 // DraftPolicy is a pending ai_policies entry — a structural clone of
@@ -122,7 +130,6 @@ type DraftPolicy struct {
 	Warranty                string      `json:"warranty"`
 	OutsideZonesNote        string      `json:"outside_zones_note"`
 	CommercePolicyDocuments []uuid.UUID `json:"commerce_policy_documents"`
-	Provenance              string      `json:"provenance,omitempty"`
 }
 
 // DraftDeliveryZone is a pending ai_delivery_zones entry — no media columns
@@ -137,7 +144,6 @@ type DraftDeliveryZone struct {
 	DeliveryInDays    string `json:"delivery_in_days"`
 	Notes             string `json:"notes"`
 	SalesStatus       string `json:"sales_status"`
-	Provenance        string `json:"provenance,omitempty"`
 }
 
 // DraftDelete marks a live entity for removal at approve. Key is the entity's
@@ -326,8 +332,8 @@ func (s *Store) DraftBaseVersion(ctx context.Context, orgID uuid.UUID) (int64, e
 // on the SAME already-locked connection — see identityIndex's doc comment for
 // why reaching for s.pool instead, mid-transaction, is a deadlock risk under
 // concurrent writers.
-func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, mutate func(dbtx, *DraftBlob) error) error {
-	_, err := s.writeDraftBlobVersioned(ctx, orgID, nil, mutate)
+func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, mutate func(dbtx, *DraftBlob) error) error {
+	_, err := s.writeDraftBlobVersioned(ctx, orgID, nil, userID, mutate)
 	return err
 }
 
@@ -338,13 +344,34 @@ func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, mutate func
 // concurrency — an MCP-only concern; writeDraftBlob's nil-expectedVersion
 // callers never conflict on version, unchanged from before this existed).
 // Returns the resulting base_version either way, so a caller can report it
-// back (kb_summary's draft_version, an upsert result's new version).
-func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, expectedVersion *int64, mutate func(dbtx, *DraftBlob) error) (int64, error) {
+// back (kb_summary's draft_version, an upsert result's new version). userID
+// is recorded as kbd_draft.updated_by (DECISIONS.md: "Last operator who
+// changed the draft") — uuid.Nil for a caller with no attributable human
+// (there is none today; every write path, MCP or the legacy editor, has an
+// authenticated actor by the time it reaches here).
+func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, expectedVersion *int64, userID uuid.UUID, mutate func(dbtx, *DraftBlob) error) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
+
+	// A transaction-scoped advisory lock, keyed on the org, serializes EVERY
+	// writer to this org's draft — including the very first one, before any
+	// kbd_draft row exists for "SELECT ... FOR UPDATE" below to lock at all.
+	// Without this: two concurrent first-writers both see "no row, version
+	// 0" (pgx.ErrNoRows locks nothing), both mutate an independently-empty
+	// blob, and whichever's INSERT ... ON CONFLICT below runs second
+	// silently overwrites the first's already-committed content — a lost
+	// update the row lock alone cannot prevent, because there is no row yet
+	// to lock against. draftLockSeed namespaces this codebase's one
+	// advisory-lock use; a future unrelated advisory lock added elsewhere
+	// should pick a different seed to avoid needlessly serializing against
+	// this one. The _xact_ variant releases automatically at commit/
+	// rollback, so it can never leak on an early return or a panic.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, $2))`, orgID.String(), draftLockSeed); err != nil {
+		return 0, err
+	}
 
 	var raw []byte
 	var currentVersion int64
@@ -353,7 +380,8 @@ func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, ex
 	blob := DraftBlob{}
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		// no row yet — version 0, nothing to lock against; the upsert below creates it.
+		// no row yet — version 0; the advisory lock above already rules out
+		// a concurrent first-writer racing this exact branch.
 	case err != nil:
 		return 0, err
 	case len(raw) > 0:
@@ -373,13 +401,19 @@ func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, ex
 	if err != nil {
 		return 0, err
 	}
-	newVersion := currentVersion + 1
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO xchats.kbd_draft (organization_id, draft, base_version, updated_at)
-		VALUES ($1, $2::jsonb, 1, now())
+	// RETURNING the row's ACTUAL stored base_version, rather than computing
+	// currentVersion+1 locally, so the reported version can never disagree
+	// with what is really persisted — belt-and-suspenders alongside the
+	// advisory lock above, which already makes currentVersion itself
+	// trustworthy by the time we get here.
+	var newVersion int64
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO xchats.kbd_draft (organization_id, draft, base_version, updated_at, updated_by)
+		VALUES ($1, $2::jsonb, 1, now(), $3)
 		ON CONFLICT (organization_id) DO UPDATE SET
-			draft = EXCLUDED.draft, base_version = xchats.kbd_draft.base_version + 1, updated_at = now()`,
-		orgID, string(out)); err != nil {
+			draft = EXCLUDED.draft, base_version = xchats.kbd_draft.base_version + 1, updated_at = now(), updated_by = EXCLUDED.updated_by
+		RETURNING base_version`,
+		orgID, string(out), nullIfNilUUID(userID)).Scan(&newVersion); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -388,10 +422,26 @@ func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, ex
 	return newVersion, nil
 }
 
+// draftLockSeed is the hashtextextended seed for writeDraftBlobVersioned's
+// advisory lock — an arbitrary constant distinguishing this lock's key space
+// from any other advisory lock this codebase might add later.
+const draftLockSeed int64 = 0x6b626472616674 // "kbdraft" in hex, just a memorable distinct constant
+
+// nullIfNilUUID converts the zero uuid.UUID (no attributable actor) to SQL
+// NULL — kbd_draft.updated_by is a nullable FK (ON DELETE SET NULL), so a
+// literal all-zero UUID would be a foreign-key violation instead of "no
+// actor known".
+func nullIfNilUUID(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	return &id
+}
+
 // ClearDraft discards every pending edit ("Отменить изменения") — a plain reset
 // of the blob to empty. Live rows are untouched.
-func (s *Store) ClearDraft(ctx context.Context, orgID uuid.UUID) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+func (s *Store) ClearDraft(ctx context.Context, orgID uuid.UUID, actor uuid.UUID) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		*b = DraftBlob{}
 		return nil
 	})
@@ -431,7 +481,6 @@ type TopicRow struct {
 	NarrationAudioFiles []uuid.UUID `json:"narration_audio_files"`
 	ReferenceDocuments  []uuid.UUID `json:"reference_documents"`
 	Draft               bool        `json:"draft"`
-	Provenance          string      `json:"provenance,omitempty"`
 	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
@@ -452,7 +501,6 @@ type TariffRow struct {
 	ExplainerVideos []uuid.UUID `json:"explainer_videos"`
 	TermsDocuments  []uuid.UUID `json:"terms_documents"`
 	Draft           bool        `json:"draft"`
-	Provenance      string      `json:"provenance,omitempty"`
 	UpdatedAt       time.Time   `json:"updated_at"`
 }
 
@@ -474,7 +522,6 @@ type ProductRow struct {
 	GuaranteeDocuments     []uuid.UUID `json:"guarantee_documents"`
 	SpecificationDocuments []uuid.UUID `json:"specification_documents"`
 	Draft                  bool        `json:"draft"`
-	Provenance             string      `json:"provenance,omitempty"`
 	UpdatedAt              time.Time   `json:"updated_at"`
 }
 
@@ -494,7 +541,6 @@ type ContactRow struct {
 	LocationMapImage      *uuid.UUID  `json:"location_map_image"`
 	CompanyLegalDocuments []uuid.UUID `json:"company_legal_documents"`
 	Draft                 bool        `json:"draft"`
-	Provenance            string      `json:"provenance,omitempty"`
 	UpdatedAt             time.Time   `json:"updated_at"`
 }
 
@@ -514,7 +560,6 @@ type PolicyRow struct {
 	OutsideZonesNote        string      `json:"outside_zones_note"`
 	CommercePolicyDocuments []uuid.UUID `json:"commerce_policy_documents"`
 	Draft                   bool        `json:"draft"`
-	Provenance              string      `json:"provenance,omitempty"`
 	UpdatedAt               time.Time   `json:"updated_at"`
 }
 
@@ -527,10 +572,9 @@ type DraftView struct {
 	Products []ProductRow `json:"products"`
 	Contacts []ContactRow `json:"contacts"`
 	Policies []PolicyRow  `json:"policies"`
-	// Zones is populated straight from the live ai_delivery_zones table, with
-	// no blob-overlay step: the draft blob has no zones concept yet (draft
-	// milestone later), so Draft() and LiveView() show identical zone data —
-	// every row's Draft field stays false.
+	// Zones is live ai_delivery_zones rows overlaid by pending
+	// blob.DeliveryZones entries — same live+blob merge as every other
+	// entity kind (see mergedView's zones section).
 	Zones     []ZoneRow  `json:"zones"`
 	Materials []Material `json:"materials"`
 	Requests  []Request  `json:"requests"`
@@ -632,7 +676,7 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 			FeaturedImage: t.FeaturedImage, IllustrationImages: t.IllustrationImages,
 			ExplainerVideos: t.ExplainerVideos, NarrationAudioFiles: t.NarrationAudioFiles,
 			ReferenceDocuments: t.ReferenceDocuments,
-			Draft:              true, Provenance: t.Provenance, UpdatedAt: updatedAt})
+			Draft:              true, UpdatedAt: updatedAt})
 	}
 	for _, t := range blob.Tariffs {
 		if deleted["tariff:"+t.Ref] {
@@ -643,7 +687,7 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 			Advantages: t.Advantages, Disadvantages: t.Disadvantages, SalesStatus: t.SalesStatus,
 			FeaturedImage: t.FeaturedImage, PricingImages: t.PricingImages, ExplainerVideos: t.ExplainerVideos,
 			TermsDocuments: t.TermsDocuments,
-			Draft:          true, Provenance: t.Provenance, UpdatedAt: updatedAt})
+			Draft:          true, UpdatedAt: updatedAt})
 	}
 	for _, p := range blob.Products {
 		if deleted["product:"+p.Ref] {
@@ -655,7 +699,7 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 			AudioDescriptionFiles: p.AudioDescriptionFiles, CertificateDocuments: p.CertificateDocuments,
 			ManualDocuments: p.ManualDocuments, GuaranteeDocuments: p.GuaranteeDocuments,
 			SpecificationDocuments: p.SpecificationDocuments,
-			Draft:                  true, Provenance: p.Provenance, UpdatedAt: updatedAt})
+			Draft:                  true, UpdatedAt: updatedAt})
 	}
 	if len(blob.Contacts) > 0 && !deleted["contact:"] {
 		c := blob.Contacts[0]
@@ -664,7 +708,7 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 			CallbackTime: c.CallbackTime, WorkingHours: c.WorkingHours, Phone: c.Phone, Website: c.Website,
 			Instagram: c.Instagram, ContactCardImage: c.ContactCardImage, LocationMapImage: c.LocationMapImage,
 			CompanyLegalDocuments: c.CompanyLegalDocuments,
-			Draft:                 true, Provenance: c.Provenance, UpdatedAt: updatedAt})
+			Draft:                 true, UpdatedAt: updatedAt})
 	}
 	if len(blob.Policies) > 0 && !deleted["policy:"] {
 		p := blob.Policies[0]
@@ -673,7 +717,7 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 			MinOrder: p.MinOrder, Prepayment: p.Prepayment, Installment: p.Installment,
 			ReturnPeriodInDays: p.ReturnPeriodInDays, Warranty: p.Warranty, OutsideZonesNote: p.OutsideZonesNote,
 			CommercePolicyDocuments: p.CommercePolicyDocuments,
-			Draft:                   true, Provenance: p.Provenance, UpdatedAt: updatedAt})
+			Draft:                   true, UpdatedAt: updatedAt})
 	}
 	for _, z := range blob.DeliveryZones {
 		if deleted["delivery_zone:"+z.Ref] {
@@ -682,7 +726,7 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 		v.Zones = append(v.Zones, ZoneRow{ID: z.Ref, Ref: z.Ref, Name: z.Name, ZoneLevel: z.ZoneLevel,
 			ParentRef: z.ParentRef, DeliveryAvailable: z.DeliveryAvailable, DeliveryCost: z.DeliveryCost,
 			DeliveryInDays: z.DeliveryInDays, Notes: z.Notes, SalesStatus: orDefault(z.SalesStatus, "active"),
-			Draft: true, Provenance: z.Provenance, UpdatedAt: updatedAt})
+			Draft: true, UpdatedAt: updatedAt})
 	}
 	v.Materials = []Material{}
 	v.Requests = []Request{}
@@ -769,7 +813,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			FeaturedImage: bt.FeaturedImage, IllustrationImages: bt.IllustrationImages,
 			ExplainerVideos: bt.ExplainerVideos, NarrationAudioFiles: bt.NarrationAudioFiles,
 			ReferenceDocuments: bt.ReferenceDocuments,
-			Draft:              true, Provenance: bt.Provenance, UpdatedAt: updatedAt}
+			Draft:              true, UpdatedAt: updatedAt}
 		if i, ok := topicIdx[bt.Slug]; ok {
 			v.Topics[i] = row
 		} else {
@@ -808,7 +852,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			Fee: bt.Fee, Summary: bt.Summary, PricingType: bt.PricingType, Advantages: bt.Advantages,
 			Disadvantages: bt.Disadvantages, SalesStatus: bt.SalesStatus, FeaturedImage: bt.FeaturedImage,
 			PricingImages: bt.PricingImages, ExplainerVideos: bt.ExplainerVideos, TermsDocuments: bt.TermsDocuments,
-			Draft: true, Provenance: bt.Provenance, UpdatedAt: updatedAt}
+			Draft: true, UpdatedAt: updatedAt}
 		if i, ok := tariffIdx[bt.Ref]; ok {
 			v.Tariffs[i] = row
 		} else {
@@ -856,7 +900,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			AudioDescriptionFiles: bp.AudioDescriptionFiles, CertificateDocuments: bp.CertificateDocuments,
 			ManualDocuments: bp.ManualDocuments, GuaranteeDocuments: bp.GuaranteeDocuments,
 			SpecificationDocuments: bp.SpecificationDocuments,
-			Draft:                  true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
+			Draft:                  true, UpdatedAt: updatedAt}
 		if i, ok := productIdx[bp.Ref]; ok {
 			v.Products[i] = row
 		} else {
@@ -905,7 +949,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			WorkingHours: bc.WorkingHours, Phone: bc.Phone, Website: bc.Website, Instagram: bc.Instagram,
 			ContactCardImage: bc.ContactCardImage, LocationMapImage: bc.LocationMapImage,
 			CompanyLegalDocuments: bc.CompanyLegalDocuments,
-			Draft:                 true, Provenance: bc.Provenance, UpdatedAt: updatedAt}
+			Draft:                 true, UpdatedAt: updatedAt}
 		if len(v.Contacts) > 0 {
 			v.Contacts[0] = row
 		} else {
@@ -949,7 +993,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			DeliveryInDays: bp.DeliveryInDays, FreeDeliveryFrom: bp.FreeDeliveryFrom, MinOrder: bp.MinOrder,
 			Prepayment: bp.Prepayment, Installment: bp.Installment, ReturnPeriodInDays: bp.ReturnPeriodInDays, Warranty: bp.Warranty,
 			OutsideZonesNote: bp.OutsideZonesNote, CommercePolicyDocuments: bp.CommercePolicyDocuments,
-			Draft: true, Provenance: bp.Provenance, UpdatedAt: updatedAt}
+			Draft: true, UpdatedAt: updatedAt}
 		if len(v.Policies) > 0 {
 			v.Policies[0] = row
 		} else {
@@ -975,7 +1019,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 		row := ZoneRow{ID: bz.Ref, Ref: bz.Ref, Name: bz.Name, ZoneLevel: bz.ZoneLevel, ParentRef: bz.ParentRef,
 			DeliveryAvailable: bz.DeliveryAvailable, DeliveryCost: bz.DeliveryCost, DeliveryInDays: bz.DeliveryInDays,
 			Notes: bz.Notes, SalesStatus: orDefault(bz.SalesStatus, "active"),
-			Draft: true, Provenance: bz.Provenance, UpdatedAt: updatedAt}
+			Draft: true, UpdatedAt: updatedAt}
 		if i, ok := zoneIdx[bz.Ref]; ok {
 			v.Zones[i] = row
 		} else {
@@ -1026,8 +1070,10 @@ func filterTopics(in []TopicRow, deleted map[string]bool) []TopicRow {
 }
 
 // ---------------------------------------------------------------------------
-// Draft CRUD — each mutates the blob under a row lock (agent rows pass a
-// provenance string; manual edits from the editor leave it empty)
+// Draft CRUD — each mutates the blob under a row lock and records its actor
+// as kbd_draft.updated_by (DECISIONS.md: "Last operator who changed the
+// draft") — the authenticated user for the Playground editor, the verified
+// Principal.UserID for an MCP caller.
 // ---------------------------------------------------------------------------
 
 // ConfigPatch carries optional config edits (nil pointer = leave unchanged).
@@ -1040,8 +1086,8 @@ type ConfigPatch struct {
 }
 
 // PatchConfig stages config edits in the draft blob (only non-nil fields).
-func (s *Store) PatchConfig(ctx context.Context, orgID uuid.UUID, p ConfigPatch) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+func (s *Store) PatchConfig(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p ConfigPatch) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		if p.Persona != nil {
 			b.Config.Persona = p.Persona
 		}
@@ -1064,21 +1110,19 @@ func (s *Store) PatchConfig(ctx context.Context, orgID uuid.UUID, p ConfigPatch)
 // TopicInput is an upsert payload for a draft topic.
 type TopicInput struct {
 	Slug, Title, BodyMD string
-	Provenance          string // "" → '{}'
 }
 
 // UpsertTopic stages a topic create/update in the draft blob, by slug. Starts
 // from the topic's current merged shape (currentTopic) so this text-only
 // caller — the Playground editor, which has no media inputs — can never
 // blank out media an MCP tool already staged on the same topic.
-func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, in TopicInput) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TopicInput) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentTopic(ctx, db, orgID, in.Slug, b)
 		if err != nil {
 			return err
 		}
 		cur.Title, cur.BodyMD = in.Title, in.BodyMD
-		cur.Provenance = orDefault(in.Provenance, "{}")
 		b.upsertTopic(cur)
 		return nil
 	})
@@ -1086,8 +1130,8 @@ func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, in TopicInput)
 
 // DeleteTopic stages a topic removal by slug (drops any pending edit and marks
 // the live row, if any, for deletion at approve).
-func (s *Store) DeleteTopic(ctx context.Context, orgID uuid.UUID, slug string) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+func (s *Store) DeleteTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, slug string) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		b.removeTopic(slug)
 		b.addDelete("topic", slug)
 		return nil
@@ -1098,15 +1142,14 @@ func (s *Store) DeleteTopic(ctx context.Context, orgID uuid.UUID, slug string) e
 
 // TariffInput is an upsert payload for a draft tariff.
 type TariffInput struct {
-	Ref, Name, Price, LimitText, Fee, Summary, PricingType, Advantages, Disadvantages string
-	Provenance                                                                        string
+	Ref, Name, Price, LimitText, Fee, Summary, PricingType, Advantages, Disadvantages, SalesStatus string
 }
 
 // UpsertTariff stages a tariff create/update in the draft blob, by ref.
 // Merges onto the tariff's current shape (currentTariff) so this text-only
-// caller never blanks out media/sales_status an MCP tool already staged.
-func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, in TariffInput) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+// caller never blanks out media an MCP tool already staged.
+func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TariffInput) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentTariff(ctx, db, orgID, in.Ref, b)
 		if err != nil {
 			return err
@@ -1115,56 +1158,88 @@ func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, in TariffInpu
 		cur.Fee, cur.Summary = in.Fee, in.Summary
 		cur.PricingType = orDefault(in.PricingType, "fixed")
 		cur.Advantages, cur.Disadvantages = in.Advantages, in.Disadvantages
-		cur.Provenance = orDefault(in.Provenance, "{}")
+		cur.SalesStatus = orDefault(in.SalesStatus, "active")
 		b.upsertTariff(cur)
 		return nil
 	})
 }
 
 // DeleteTariff stages removal of a tariff by ref.
-func (s *Store) DeleteTariff(ctx context.Context, orgID uuid.UUID, ref string) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+func (s *Store) DeleteTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		b.removeTariff(ref)
 		b.addDelete("tariff", ref)
 		return nil
 	})
 }
 
-// ProductInput is an upsert payload for a draft product. InStock is nil-able
-// and read only by the live-write path (PutLiveProduct → upsertProductRow):
-// nil leaves the column at its schema default/current value, so
-// UpsertProduct (the Playground draft path, which never sets this field) is
-// completely unaffected.
+// ProductInput is an upsert payload for a draft product. InStock is nil-able:
+// nil leaves the column at its current merged value, matching the same
+// nil-means-unchanged idiom PutLiveProduct uses (live.go).
 type ProductInput struct {
-	Ref, Name, Price, Description, Category string
-	InStock                                 *bool
-	Provenance                              string
+	Ref, Name, Price, Description, Category, SalesStatus string
+	InStock                                              *bool
 }
 
 // UpsertProduct stages a product create/update in the draft blob, by ref.
-// Merges onto the product's current shape (currentProduct) so this caller —
-// InStock is nil-able and, true to ProductInput's existing contract, still
-// never read here — cannot blank out in_stock/sales_status/media an MCP tool
-// already staged.
-func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, in ProductInput) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+// Merges onto the product's current shape (currentProduct) so this caller
+// cannot blank out media an MCP tool already staged.
+func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ProductInput) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentProduct(ctx, db, orgID, in.Ref, b)
 		if err != nil {
 			return err
 		}
 		cur.Name, cur.Price = in.Name, in.Price
 		cur.Description, cur.Category = in.Description, in.Category
-		cur.Provenance = orDefault(in.Provenance, "{}")
+		cur.SalesStatus = orDefault(in.SalesStatus, "active")
+		if in.InStock != nil {
+			cur.InStock = *in.InStock
+		}
 		b.upsertProduct(cur)
 		return nil
 	})
 }
 
 // DeleteProduct stages removal of a product by ref.
-func (s *Store) DeleteProduct(ctx context.Context, orgID uuid.UUID, ref string) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+func (s *Store) DeleteProduct(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		b.removeProduct(ref)
 		b.addDelete("product", ref)
+		return nil
+	})
+}
+
+// DeliveryZoneInput is an upsert payload for a draft delivery zone — the
+// Playground/draft counterpart to zones.go's live-only ZoneInput.
+type DeliveryZoneInput struct {
+	Ref, Name, ZoneLevel, ParentRef, DeliveryCost, DeliveryInDays, Notes, SalesStatus string
+	DeliveryAvailable                                                                bool
+}
+
+// UpsertZone stages a delivery-zone create/update in the draft blob, by ref.
+// Merges onto the zone's current shape (currentZone) so this caller never
+// blanks out fields an MCP tool already staged.
+func (s *Store) UpsertZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in DeliveryZoneInput) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentZone(ctx, db, orgID, in.Ref, b)
+		if err != nil {
+			return err
+		}
+		cur.Name, cur.ZoneLevel, cur.ParentRef = in.Name, in.ZoneLevel, in.ParentRef
+		cur.DeliveryAvailable = in.DeliveryAvailable
+		cur.DeliveryCost, cur.DeliveryInDays, cur.Notes = in.DeliveryCost, in.DeliveryInDays, in.Notes
+		cur.SalesStatus = orDefault(in.SalesStatus, "active")
+		b.upsertZone(cur)
+		return nil
+	})
+}
+
+// DeleteZone stages removal of a delivery zone by ref.
+func (s *Store) DeleteZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+		b.removeZone(ref)
+		b.addDelete("delivery_zone", ref)
 		return nil
 	})
 }
@@ -1181,13 +1256,12 @@ type ContactPatch struct {
 	Phone            *string
 	Website          *string
 	Instagram        *string
-	Provenance       string
 }
 
 // PatchContacts stages an edit to the org's singleton support-contact row,
 // starting from its current merged shape so omitted fields stay unchanged.
-func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, p ContactPatch) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p ContactPatch) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentContact(ctx, db, orgID, b)
 		if err != nil {
 			return err
@@ -1219,16 +1293,13 @@ func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, p ContactPat
 		if p.Instagram != nil {
 			cur.Instagram = *p.Instagram
 		}
-		cur.Provenance = orDefault(p.Provenance, orDefault(cur.Provenance, "{}"))
 		b.upsertContact(cur)
 		return nil
 	})
 }
 
 // PolicyPatch carries optional edits to the org's singleton commerce-policy
-// row (nil = leave) — a structural clone of ContactPatch. OutsideZonesNote is
-// applied by the live-write path (PatchLivePolicies); PatchPolicies (the
-// Playground draft path) never sets it, so it stays a no-op there.
+// row (nil = leave) — a structural clone of ContactPatch.
 type PolicyPatch struct {
 	DeliveryCost       *string
 	DeliveryInDays     *string
@@ -1239,14 +1310,13 @@ type PolicyPatch struct {
 	ReturnPeriodInDays *string
 	Warranty           *string
 	OutsideZonesNote   *string
-	Provenance         string
 }
 
 // PatchPolicies stages an edit to the org's singleton commerce-policy row,
 // starting from its current merged shape so omitted fields stay unchanged — an
 // exact clone of PatchContacts.
-func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, p PolicyPatch) error {
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p PolicyPatch) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentPolicy(ctx, db, orgID, b)
 		if err != nil {
 			return err
@@ -1275,7 +1345,9 @@ func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, p PolicyPatc
 		if p.Warranty != nil {
 			cur.Warranty = *p.Warranty
 		}
-		cur.Provenance = orDefault(p.Provenance, orDefault(cur.Provenance, "{}"))
+		if p.OutsideZonesNote != nil {
+			cur.OutsideZonesNote = *p.OutsideZonesNote
+		}
 		b.upsertPolicy(cur)
 		return nil
 	})
@@ -1285,11 +1357,10 @@ func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, p PolicyPatc
 // starting from the entity's current merged shape so the other columns are
 // preserved. This is the confirm_fact write path: a detected price is confirmed
 // into e.g. tariff <slug>.price without blanking the rest of the row.
-func (s *Store) SetFactField(ctx context.Context, orgID uuid.UUID, table, slug, field, value string) error {
-	prov := `{"source":"confirm_fact"}`
+func (s *Store) SetFactField(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, table, slug, field, value string) error {
 	switch table {
 	case "tariff":
-		return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+		return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 			cur, err := s.currentTariff(ctx, db, orgID, slug, b)
 			if err != nil {
 				return err
@@ -1297,12 +1368,11 @@ func (s *Store) SetFactField(ctx context.Context, orgID uuid.UUID, table, slug, 
 			if !setTariffField(&cur, field, value) {
 				return ErrUnknownKind
 			}
-			cur.Provenance = prov
 			b.upsertTariff(cur)
 			return nil
 		})
 	case "product":
-		return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+		return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 			cur, err := s.currentProduct(ctx, db, orgID, slug, b)
 			if err != nil {
 				return err
@@ -1310,22 +1380,21 @@ func (s *Store) SetFactField(ctx context.Context, orgID uuid.UUID, table, slug, 
 			if !setProductField(&cur, field, value) {
 				return ErrUnknownKind
 			}
-			cur.Provenance = prov
 			b.upsertProduct(cur)
 			return nil
 		})
 	case "contact":
-		p := ContactPatch{Provenance: prov}
+		p := ContactPatch{}
 		if !setContactPatchField(&p, field, value) {
 			return ErrUnknownKind
 		}
-		return s.PatchContacts(ctx, orgID, p)
+		return s.PatchContacts(ctx, orgID, actor, p)
 	case "policy":
-		p := PolicyPatch{Provenance: prov}
+		p := PolicyPatch{}
 		if !setPolicyPatchField(&p, field, value) {
 			return ErrUnknownKind
 		}
-		return s.PatchPolicies(ctx, orgID, p)
+		return s.PatchPolicies(ctx, orgID, actor, p)
 	}
 	return ErrUnknownKind
 }
@@ -1560,8 +1629,8 @@ func orDefault(v, def string) string {
 // domain.ContactSlug/domain.PolicySlug constant (there is nothing else to key
 // on — the natural key IS the org).
 type ApproveSelector struct {
-	Kind string // "" | "topics" | "tariffs" | "products" | "contacts" | "policies" | "delivery_zones"
-	Key  string // slug | ref | ref | domain.ContactSlug | domain.PolicySlug | ref
+	Kind string // "" | "topics" | "tariffs" | "products" | "contacts" | "policies" | "delivery_zones" | "config"
+	Key  string // slug | ref | ref | domain.ContactSlug | domain.PolicySlug | ref | NaturalKeyMain
 }
 
 type approveSet struct {
@@ -1571,126 +1640,160 @@ type approveSet struct {
 	contacts []DraftContact
 	policies []DraftPolicy
 	zones    []DraftDeliveryZone
+	config   bool // a pending assistant-config edit is targeted by this selector
 	deletes  []DraftDelete
 }
 
 func (a approveSet) empty() bool {
-	return len(a.topics)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.zones)+len(a.deletes) == 0
+	return len(a.topics)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.zones)+len(a.deletes) == 0 && !a.config
 }
 
-// Approve validates the resulting live set against the deterministic gate
-// (including the zone/policy exclusivity invariant zoneGateReasons enforces),
-// then materializes the selection into the live typed tables on their natural
-// key, applies matching deletes, removes the applied entries from the blob,
-// and appends an audit-log row.
+// errApproveNothingPending is an internal control-flow sentinel:
+// selectApproved found nothing to do for an entity-scoped approve (sel.Kind
+// != ""). ApproveVersioned's mutate closure returns it to make
+// writeDraftBlobVersioned roll back without bumping base_version — a call
+// that materializes nothing should not consume a version, matching the
+// pre-existing "idempotent no-op" behavior. The wrapper below translates it
+// back to a plain nil error; it never escapes this file.
+var errApproveNothingPending = errors.New("kbstore: nothing pending for that selector")
+
+// Approve is ApproveVersioned with no optimistic-concurrency check and no
+// audit actor — the shape every pre-existing caller (tests,
+// internal/playground, and any future non-HTTP caller) uses.
 func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelector) error {
-	blob, _, _, err := s.readDraftBlob(ctx, s.pool, orgID)
-	if err != nil {
-		return err
-	}
-	set := selectApproved(blob, sel)
-	if set.empty() && sel.Kind != "" {
-		return nil // nothing pending for that key — idempotent no-op
-	}
+	return s.ApproveVersioned(ctx, orgID, sel, nil, uuid.Nil)
+}
 
-	live, err := s.LoadLive(ctx, orgID)
-	if err != nil {
-		return err
-	}
-	resulting := mergeForGate(live, set.topics, set.deletes)
-	// Pending requests block the WHOLE-draft approve (sel.Kind == "") — but an
-	// unrelated unanswered popup must not hold a single row's approval hostage,
-	// so a per-entity approve skips that reason (content checks below still run).
-	var pending int
-	if sel.Kind == "" {
-		if pending, err = s.pendingRequestCount(ctx, orgID); err != nil {
-			return err
+// ApproveVersioned validates the resulting live set against the
+// deterministic gate (including the zone/policy exclusivity invariant
+// zoneGateReasons enforces), then materializes the selection into the live
+// typed tables on their natural key, applies matching deletes, appends an
+// audit-log row, and clears exactly the approved entries from the draft —
+// all inside the SAME transaction writeDraftBlobVersioned opens and
+// row-locks kbd_draft under for its whole duration.
+//
+// This closes a real data-loss bug the previous version had: it read the
+// blob UNLOCKED (a plain s.pool query, no FOR UPDATE), computed the gate and
+// materialized into live in one transaction, and only THEN cleared the
+// approved entries from the blob in a SECOND, separately-committed
+// transaction — by natural key, not by the value that was actually
+// approved. A concurrent MCP write landing in the gap between the first read
+// and the second commit was either published as its now-stale value and
+// then deleted outright (an MCP update racing an approve of the same
+// entity), or — for a brand-new entity — deleted having never been
+// published at all (an MCP create racing a whole-draft approve). Folding
+// everything into writeDraftBlobVersioned's single locked transaction makes
+// that gap impossible: nothing can observe or mutate the draft between this
+// function's read and its own commit, because both happen under the same
+// row lock.
+//
+// expectedVersion, when non-nil, must equal the draft's CURRENT
+// base_version or the whole call fails with ErrStale (plan/mcp.md's
+// optimistic concurrency, extended to the browser-facing approve endpoints
+// via If-Match — the check now runs atomically inside the same locked
+// transaction, unlike httpapi.pgWrite's pre-existing check-then-act pattern
+// for the manual editor's own draft writes).
+//
+// actorUserID is recorded on the ai_audit_log row; uuid.Nil omits it
+// (auditRow already treats a nil UUID as NULL) for callers with no
+// authenticated human attached, such as internal tests.
+func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel ApproveSelector, expectedVersion *int64, actorUserID uuid.UUID) error {
+	_, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, actorUserID, func(db dbtx, b *DraftBlob) error {
+		set := selectApproved(*b, sel)
+		if set.empty() && sel.Kind != "" {
+			return errApproveNothingPending
 		}
-	}
-	reasons := gate(resulting, pending)
-	liveZones, err := loadZoneRows(ctx, s.pool, orgID)
-	if err != nil {
-		return err
-	}
-	resultPolicies, err := resultingPolicyForGate(ctx, s.pool, orgID, set.policies)
-	if err != nil {
-		return err
-	}
-	reasons = append(reasons, zoneGateReasons(resultingZonesForGate(liveZones, set.zones, set.deletes), resultPolicies)...)
-	if len(reasons) > 0 {
-		return &GateError{Reasons: reasons}
-	}
 
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
+		live, err := loadLive(ctx, db, orgID)
+		if err != nil {
+			return err
+		}
+		resulting := mergeForGate(live, set.topics, set.deletes)
+		// Pending requests block the WHOLE-draft approve (sel.Kind == "") —
+		// but an unrelated unanswered popup must not hold a single row's
+		// approval hostage, so a per-entity approve skips that reason
+		// (content checks below still run).
+		var pending int
+		if sel.Kind == "" {
+			if pending, err = pendingRequestCount(ctx, db, orgID); err != nil {
+				return err
+			}
+		}
+		reasons := gate(resulting, pending)
+		liveZones, err := loadZoneRows(ctx, db, orgID)
+		if err != nil {
+			return err
+		}
+		resultPolicies, err := resultingPolicyForGate(ctx, db, orgID, set.policies)
+		if err != nil {
+			return err
+		}
+		reasons = append(reasons, zoneGateReasons(resultingZonesForGate(liveZones, set.zones, set.deletes), resultPolicies)...)
+		if len(reasons) > 0 {
+			return &GateError{Reasons: reasons}
+		}
 
-	for _, t := range set.topics {
-		if err := upsertTopicRow(ctx, tx, orgID, t); err != nil {
+		for _, t := range set.topics {
+			if err := upsertTopicRow(ctx, db, orgID, t); err != nil {
+				return err
+			}
+		}
+		for _, t := range set.tariffs {
+			if err := upsertTariffRow(ctx, db, orgID, t); err != nil {
+				return err
+			}
+		}
+		for _, p := range set.products {
+			if err := upsertProductRow(ctx, db, orgID, p); err != nil {
+				return err
+			}
+		}
+		for _, c := range set.contacts {
+			if err := upsertContactRow(ctx, db, orgID, c); err != nil {
+				return err
+			}
+		}
+		for _, p := range set.policies {
+			if err := upsertPolicyRow(ctx, db, orgID, p); err != nil {
+				return err
+			}
+		}
+		for _, z := range set.zones {
+			if err := upsertZoneRow(ctx, db, orgID, ZoneInput{
+				Ref: z.Ref, Name: z.Name, ZoneLevel: z.ZoneLevel, ParentRef: z.ParentRef,
+				DeliveryAvailable: z.DeliveryAvailable, DeliveryCost: z.DeliveryCost, DeliveryInDays: z.DeliveryInDays,
+				Notes: z.Notes, SalesStatus: z.SalesStatus,
+			}); err != nil {
+				return err
+			}
+		}
+		// Config has no natural key of its own — NaturalKeyMain stands in for it,
+		// same as every other singleton — so set.config is true either for a
+		// whole-draft approve that happens to include a pending config edit, or
+		// for an entity-scoped approve of kind "config".
+		if set.config {
+			if _, err := db.Exec(ctx, `UPDATE xchats.ai_assistants SET
+				persona = COALESCE($2, persona), mission = COALESCE($3, mission),
+				guardrails = COALESCE($4, guardrails), language_policy = COALESCE($5, language_policy),
+				reply_max_words = COALESCE($6, reply_max_words), updated_at = now()
+				WHERE organization_id = $1`,
+				orgID, b.Config.Persona, b.Config.Mission, b.Config.Guardrails,
+				b.Config.LanguagePolicy, b.Config.ReplyMaxWords); err != nil {
+				return err
+			}
+		}
+		for _, d := range set.deletes {
+			if err := applyDelete(ctx, db, orgID, d); err != nil {
+				return err
+			}
+		}
+		if err := auditRow(ctx, db, orgID, actorUserID, "approve", approveNote(sel, set)); err != nil {
 			return err
 		}
-	}
-	for _, t := range set.tariffs {
-		if err := upsertTariffRow(ctx, tx, orgID, t); err != nil {
-			return err
-		}
-	}
-	for _, p := range set.products {
-		if err := upsertProductRow(ctx, tx, orgID, p); err != nil {
-			return err
-		}
-	}
-	for _, c := range set.contacts {
-		if err := upsertContactRow(ctx, tx, orgID, c); err != nil {
-			return err
-		}
-	}
-	for _, p := range set.policies {
-		if err := upsertPolicyRow(ctx, tx, orgID, p); err != nil {
-			return err
-		}
-	}
-	for _, z := range set.zones {
-		if err := upsertZoneRow(ctx, tx, orgID, ZoneInput{
-			Ref: z.Ref, Name: z.Name, ZoneLevel: z.ZoneLevel, ParentRef: z.ParentRef,
-			DeliveryAvailable: z.DeliveryAvailable, DeliveryCost: z.DeliveryCost, DeliveryInDays: z.DeliveryInDays,
-			Notes: z.Notes, SalesStatus: z.SalesStatus,
-		}); err != nil {
-			return err
-		}
-	}
-	// Config has no natural key of its own, so it only ever rides the whole-draft
-	// approve (there is no per-entity "config" kind in Правки).
-	if sel.Kind == "" {
-		if _, err := tx.Exec(ctx, `UPDATE xchats.ai_assistants SET
-			persona = COALESCE($2, persona), mission = COALESCE($3, mission),
-			guardrails = COALESCE($4, guardrails), language_policy = COALESCE($5, language_policy),
-			reply_max_words = COALESCE($6, reply_max_words), updated_at = now()
-			WHERE organization_id = $1`,
-			orgID, blob.Config.Persona, blob.Config.Mission, blob.Config.Guardrails,
-			blob.Config.LanguagePolicy, blob.Config.ReplyMaxWords); err != nil {
-			return err
-		}
-	}
-	for _, d := range set.deletes {
-		if err := applyDelete(ctx, tx, orgID, d); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_audit_log (organization_id, action, note) VALUES ($1,'approve',$2)`,
-		orgID, approveNote(sel, set)); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
 
-	// Remove the applied entries from the blob. A crash between the two commits
-	// leaves an already-materialized entry sitting in the blob; a re-approve of it
-	// is a harmless no-op upsert (same values), so this need not share the tx.
-	return s.writeDraftBlob(ctx, orgID, func(db dbtx, b *DraftBlob) error {
+		// Clear exactly the approved delta from the SAME blob this closure was
+		// handed — never a second, separately-committed pass (see the doc
+		// comment above).
 		for _, t := range set.topics {
 			b.removeTopic(t.Slug)
 		}
@@ -1712,16 +1815,22 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 		for _, d := range set.deletes {
 			b.removeDelete(d.Kind, d.Key)
 		}
-		if sel.Kind == "" {
+		if set.config {
 			b.Config = DraftConfigPatch{}
 		}
 		return nil
 	})
+	if errors.Is(err, errApproveNothingPending) {
+		return nil
+	}
+	return err
 }
 
 // applyDelete removes a live entity by its natural key at approve time.
-// contact/policy are singletons — the whole org row goes, Key unused.
-func applyDelete(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, d DraftDelete) error {
+// contact/policy are singletons — the whole org row goes, Key unused. Takes
+// execer (not pgx.Tx): ApproveVersioned calls it with the dbtx its enclosing
+// writeDraftBlobVersioned closure was handed, not a concrete pgx.Tx.
+func applyDelete(ctx context.Context, tx execer, orgID uuid.UUID, d DraftDelete) error {
 	switch d.Kind {
 	case "topic":
 		_, err := tx.Exec(ctx, `DELETE FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`, orgID, d.Key)
@@ -1757,7 +1866,11 @@ func approveNote(sel ApproveSelector, set approveSet) string {
 // keyed by entity kind (singular): topic|tariff|product|contact|policy|delivery_zone.
 func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	if sel.Kind == "" {
-		return approveSet{b.Topics, b.Tariffs, b.Products, b.Contacts, b.Policies, b.DeliveryZones, b.Deletes}
+		return approveSet{
+			topics: b.Topics, tariffs: b.Tariffs, products: b.Products,
+			contacts: b.Contacts, policies: b.Policies, zones: b.DeliveryZones,
+			config: b.Config.hasPending(), deletes: b.Deletes,
+		}
 	}
 	var set approveSet
 	singular := strings.TrimSuffix(sel.Kind, "s")
@@ -1798,6 +1911,10 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 			if z.Ref == sel.Key {
 				set.zones = append(set.zones, z)
 			}
+		}
+	case "config":
+		if sel.Key == NaturalKeyMain {
+			set.config = b.Config.hasPending()
 		}
 	}
 	return set

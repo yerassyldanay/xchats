@@ -3,6 +3,7 @@ package httpapi
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,11 +13,16 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
+	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
+	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
 )
 
-// mcpUploadMaxBytes is a hard safety cap independent of the declared
-// size_bytes — no legitimate KB media file needs more than this.
-const mcpUploadMaxBytes = 50 << 20 // 50 MiB
+// mcpUploadMaxBytes mirrors mcpserver.MaxMediaUploadBytes — the hard safety
+// cap on the ACTUAL byte transfer, independent of the declared size_bytes.
+// kb_media_upload (mcpserver.handleKBMediaUpload) already rejects a declared
+// size over this same limit at staging time; this is the backstop that
+// still applies even if that earlier check were ever bypassed.
+const mcpUploadMaxBytes = mcpserver.MaxMediaUploadBytes
 
 // uploadCORS allows any origin on the signed-upload route only: its
 // authentication is the unguessable signed token in the query string, never
@@ -69,6 +75,17 @@ func (s *Server) handleMCPUpload(c *gin.Context) {
 		fail(c, http.StatusNotFound, ErrNotFound, "material not found")
 		return
 	}
+	// Fast-fail replay/retry-after-success without reading a (possibly
+	// large) body first — a courtesy check only: the signed token stays
+	// valid for its whole TTL (not single-use), so this is NOT the actual
+	// safety boundary. CompleteMaterialUpload's atomic, WHERE-guarded update
+	// below is — it is what actually prevents a second PUT from ever
+	// overwriting bytes already attached to a live/draft KB record, even
+	// under a genuine race between two concurrent PUTs to the same target.
+	if mat.ProcessingStatus != "uploaded" {
+		fail(c, http.StatusConflict, ErrConflict, "this material's upload already completed — the signed URL cannot be reused")
+		return
+	}
 
 	limit := mcpUploadMaxBytes
 	if mat.DeclaredSizeBytes > 0 && mat.DeclaredSizeBytes < int64(limit) {
@@ -92,23 +109,31 @@ func (s *Server) handleMCPUpload(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, reason)
 		return
 	}
-	if mat.DeclaredChecksum != "" {
-		sum := sha256.Sum256(data)
-		if hex.EncodeToString(sum[:]) != strings.ToLower(mat.DeclaredChecksum) {
-			fail(c, http.StatusBadRequest, ErrValidation, "sha256_checksum does not match the uploaded bytes")
-			return
-		}
+	sum := sha256.Sum256(data)
+	sumHex := hex.EncodeToString(sum[:])
+	if mat.DeclaredChecksum != "" && sumHex != strings.ToLower(mat.DeclaredChecksum) {
+		fail(c, http.StatusBadRequest, ErrValidation, "sha256_checksum does not match the uploaded bytes")
+		return
 	}
 
-	storageKey, err := s.blob.Put(materialID.String(), data, blob.Meta{
+	// The object key is derived from the CONTENT hash, not the bare
+	// material_id, so two different byte payloads racing for the same
+	// signed target can never land on the same on-disk key — only
+	// CompleteMaterialUpload's atomic guard below decides which attempt
+	// (if either) gets to finalize, but this ensures the LOSING attempt's
+	// bytes, even if written to disk, can never overwrite the winner's.
+	storageKey, err := s.blob.Put(materialID.String()+"-"+sumHex[:16], data, blob.Meta{
 		Mimetype: mat.MimeType, FileName: mat.Filename, FileSize: int64(len(data)),
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, "store failed")
 		return
 	}
-	sum := sha256.Sum256(data)
-	if err := s.kb.CompleteMaterialUpload(ctx(c), materialID, "disk", storageKey, int64(len(data)), hex.EncodeToString(sum[:])); err != nil {
+	if err := s.kb.CompleteMaterialUpload(ctx(c), materialID, "disk", storageKey, int64(len(data)), sumHex); err != nil {
+		if errors.Is(err, kbstore.ErrUploadAlreadyCompleted) {
+			fail(c, http.StatusConflict, ErrConflict, "this material's upload already completed — the signed URL cannot be reused")
+			return
+		}
 		fail(c, http.StatusInternalServerError, ErrInternal, "finalize failed")
 		return
 	}

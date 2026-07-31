@@ -102,6 +102,7 @@ func (s *Store) PutLiveTariff(ctx context.Context, orgID uuid.UUID, actor uuid.U
 	cur.Name, cur.Price, cur.LimitText = in.Name, in.Price, in.LimitText
 	cur.Fee, cur.Summary, cur.PricingType = in.Fee, in.Summary, in.PricingType
 	cur.Advantages, cur.Disadvantages = in.Advantages, in.Disadvantages
+	cur.SalesStatus = orDefault(in.SalesStatus, "active")
 	if err := upsertTariffRow(ctx, tx, orgID, cur); err != nil {
 		return err
 	}
@@ -157,6 +158,7 @@ func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.
 	}
 	cur.Name, cur.Price = in.Name, in.Price
 	cur.Description, cur.Category = in.Description, in.Category
+	cur.SalesStatus = orDefault(in.SalesStatus, "active")
 	if in.InStock != nil {
 		cur.InStock = *in.InStock
 	}

@@ -13,19 +13,32 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
 
+// MaxMediaUploadBytes is the hard cap on a single kb_media_upload'd file —
+// no legitimate KB media file needs more than this. Enforced HERE at
+// staging time (a fast, clear tool error instead of letting the model/widget
+// attempt a large PUT that only fails afterward) and again, independently,
+// as a hard backstop on the actual byte transfer in
+// internal/httpapi.handleMCPUpload — that second check is what actually
+// matters for safety (a declared size is just a claim), this one is purely
+// fail-fast UX.
+const MaxMediaUploadBytes = 50 << 20 // 50 MiB
+
 // handleKBMediaUpload implements kb_media_upload (plan/mcp.md §5): stages a
 // pending kbd_materials row and returns a short-lived signed PUT target the
 // widget uploads bytes to directly — never through this JSON tool-call
 // payload. The actual signing secret and base URL live in
 // internal/httpapi (Deps.SignUpload/UploadBaseURL), so this package never
 // holds them.
-func (s *Server) handleKBMediaUpload(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) handleKBMediaUpload(ctx context.Context, orgID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	filename := stringField(args, "filename")
 	mimeType := stringField(args, "mime_type")
 	sizeBytes := int64(intField(args, "size_bytes"))
 	checksum := stringField(args, "sha256_checksum")
 	if filename == "" || mimeType == "" || sizeBytes <= 0 {
 		return nil, fmt.Errorf("filename, mime_type, and a positive size_bytes are required")
+	}
+	if sizeBytes > MaxMediaUploadBytes {
+		return toolError(fmt.Sprintf("size_bytes %d exceeds the %d byte (%dMiB) limit for a single KB media file", sizeBytes, int64(MaxMediaUploadBytes), MaxMediaUploadBytes>>20)), nil
 	}
 
 	visibility := "auto"
@@ -68,9 +81,9 @@ func (s *Server) handleKBMediaUpload(ctx context.Context, orgID uuid.UUID, args 
 		"max_size_bytes":    sizeBytes,
 		"processing_status": "uploaded",
 	}
-	return toolResult(
+	return s.toolResult(
 		fmt.Sprintf("Upload target created (material_id=%s). PUT the file bytes to upload_url within %d seconds, then reference this material_id in a kb_*_upsert call.", materialID, ttl),
-		structured, "media",
+		structured, "media", orgID, userID,
 	), nil
 }
 

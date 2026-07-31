@@ -108,7 +108,7 @@ func TestRoundTrip_UnitBearingValue(t *testing.T) {
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := kb.UpsertTariff(ctx, orgID, kbstore.TariffInput{
+	if err := kb.UpsertTariff(ctx, orgID, uuid.Nil, kbstore.TariffInput{
 		Ref: "growth", Name: "Рост", Price: "25 000 ₸/мес",
 	}); err != nil {
 		t.Fatalf("upsert tariff: %v", err)
@@ -150,7 +150,7 @@ func TestDraftEditAndApprove(t *testing.T) {
 		}
 	}
 
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
 		Slug: "new_topic", Title: "Новая тема", BodyMD: "Просто текст.",
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
@@ -199,6 +199,142 @@ func TestDraftEditAndApprove(t *testing.T) {
 	}
 }
 
+// TestUpsertZone_DraftRoundTripThroughApprove is Task 13's kbstore-level
+// regression guard: the delivery-zone draft path (UpsertZone/DeleteZone) must
+// behave exactly like every other typed fact — pending until approved, live
+// (LiveView) only staged-not-yet-approved for a deletion, gone from live only
+// once the deletion itself is approved.
+func TestUpsertZone_DraftRoundTripThroughApprove(t *testing.T) {
+	kb, orgID, _ := newTestKB(t)
+	ctx := context.Background()
+	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// zoneGateReasons requires blank flat delivery fields + a non-blank
+	// outside_zones_note on every policy row the moment any zone exists —
+	// the seed starts with the opposite, so fix that up first.
+	if err := kb.PatchPolicies(ctx, orgID, uuid.Nil, kbstore.PolicyPatch{
+		DeliveryCost: strp(""), DeliveryInDays: strp(""), OutsideZonesNote: strp("Только в зонах доставки."),
+	}); err != nil {
+		t.Fatalf("patch policies: %v", err)
+	}
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}); err != nil {
+		t.Fatalf("approve policy edit: %v", err)
+	}
+
+	if err := kb.UpsertZone(ctx, orgID, uuid.Nil, kbstore.DeliveryZoneInput{
+		Ref: "almaty", Name: "Алматы", ZoneLevel: "city",
+		DeliveryAvailable: true, DeliveryCost: "1500", DeliveryInDays: "1-2",
+	}); err != nil {
+		t.Fatalf("upsert zone: %v", err)
+	}
+	view, err := kb.Draft(ctx, orgID)
+	if err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	z := findZoneRow(view.Zones, "almaty")
+	if z == nil || !z.Draft {
+		t.Fatalf("new zone should be pending in the merged draft view, got %+v", z)
+	}
+
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "delivery_zones", Key: "almaty"}); err != nil {
+		t.Fatalf("approve zone: %v", err)
+	}
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("live view: %v", err)
+	}
+	if z := findZoneRow(live.Zones, "almaty"); z == nil {
+		t.Fatal("approved zone did not materialize into the live table")
+	}
+
+	if err := kb.DeleteZone(ctx, orgID, uuid.Nil, "almaty"); err != nil {
+		t.Fatalf("delete zone: %v", err)
+	}
+	view, err = kb.Draft(ctx, orgID)
+	if err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	if findZoneRow(view.Zones, "almaty") != nil {
+		t.Fatal("a zone staged for deletion should be suppressed from the merged draft view")
+	}
+	live, err = kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("live view: %v", err)
+	}
+	if findZoneRow(live.Zones, "almaty") == nil {
+		t.Fatal("the zone must still be live — only staged for deletion, not yet approved")
+	}
+
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "delivery_zones", Key: "almaty"}); err != nil {
+		t.Fatalf("approve deletion: %v", err)
+	}
+	live, err = kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("live view: %v", err)
+	}
+	if findZoneRow(live.Zones, "almaty") != nil {
+		t.Fatal("zone should be gone from the live view after the deletion is approved")
+	}
+}
+
+func findZoneRow(zones []kbstore.ZoneRow, ref string) *kbstore.ZoneRow {
+	for i := range zones {
+		if zones[i].Ref == ref {
+			return &zones[i]
+		}
+	}
+	return nil
+}
+
+// TestApprove_ConfigKindMaterializesJustConfig is Task 14a's regression
+// guard: assistant config previously had no natural key, so it only ever
+// materialized on a whole-draft approve (sel.Kind == "") — an entity-scoped
+// approve of kind "config" (keyed by NaturalKeyMain, the same singleton
+// convention contacts/policies use) did nothing at all. This drives it end to
+// end: stage a config edit, approve it individually, confirm it's live and no
+// longer pending — then confirm a second entity-scoped approve is a
+// no-op (nothing pending), never an error.
+func TestApprove_ConfigKindMaterializesJustConfig(t *testing.T) {
+	kb, orgID, _ := newTestKB(t)
+	ctx := context.Background()
+	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := kb.PatchConfig(ctx, orgID, uuid.Nil, kbstore.ConfigPatch{Persona: strp("Дружелюбный помощник")}); err != nil {
+		t.Fatalf("patch config: %v", err)
+	}
+	view, err := kb.Draft(ctx, orgID)
+	if err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	if !view.Config.Draft || view.Config.Persona != "Дружелюбный помощник" {
+		t.Fatalf("expected a pending config edit, got %+v", view.Config)
+	}
+
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "config", Key: kbstore.NaturalKeyMain}); err != nil {
+		t.Fatalf("approve config entity: %v", err)
+	}
+	view, err = kb.Draft(ctx, orgID)
+	if err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	if view.Config.Draft {
+		t.Fatal("config should no longer be flagged draft (pending) after its entity approve")
+	}
+	if view.Config.Persona != "Дружелюбный помощник" {
+		t.Fatalf("approved persona did not materialize, got %q", view.Config.Persona)
+	}
+
+	// Nothing pending now — a second entity-scoped approve must be a silent
+	// no-op (errApproveNothingPending), not an error.
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "config", Key: kbstore.NaturalKeyMain}); err != nil {
+		t.Fatalf("approve with nothing pending should be a no-op, got: %v", err)
+	}
+}
+
 // Every DraftView collection must serialize as a JSON array ([]), never null —
 // even when a table + the blob are empty. The client reads d.<coll>.length
 // directly, so a nil slice (→ null) would crash the /playground /knowledge-base
@@ -241,12 +377,12 @@ func TestApproveGateBlocks(t *testing.T) {
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
 		Slug: "broken_token", BodyMD: "Цена {{tariff.unknown.price}}",
 	}); err != nil {
 		t.Fatalf("topic: %v", err)
 	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
 		Slug: "broken_amount", BodyMD: "Доставка стоит 1 500 ₸ по городу.",
 	}); err != nil {
 		t.Fatalf("topic: %v", err)
@@ -273,7 +409,7 @@ func TestLiveView_IgnoresDraftBlob(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	// Stage a PENDING topic in the draft blob — never approved.
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
 		Slug: "pending_only", Title: "Черновик", BodyMD: "Только в черновике.",
 	}); err != nil {
 		t.Fatalf("upsert draft topic: %v", err)
@@ -348,6 +484,49 @@ func TestPutLiveTariff_VisibleViaLoadLiveImmediately(t *testing.T) {
 	}
 }
 
+// TestPutLiveTariffAndProduct_SalesStatusIsWired guards a gap Task 14 (frontend
+// record components) surfaced: PutLiveTariff/PutLiveProduct read+preserved
+// sales_status via currentLiveTariffTx/currentLiveProductTx's SELECT, but
+// never actually applied in.SalesStatus onto cur before writing it back — the
+// /kb/tariffs and /kb/products live editor silently could not change it,
+// mirroring the OutsideZonesNote gap PatchPolicies had before Task 13.
+func TestPutLiveTariffAndProduct_SalesStatusIsWired(t *testing.T) {
+	kb, orgID, _ := newTestKB(t)
+	ctx := context.Background()
+
+	if err := kb.PutLiveTariff(ctx, orgID, uuid.Nil, kbstore.TariffInput{
+		Ref: "biz", Name: "Business", SalesStatus: "inactive",
+	}); err != nil {
+		t.Fatalf("put live tariff: %v", err)
+	}
+	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
+		Ref: "kettle2", Name: "Чайник", SalesStatus: "inactive",
+	}); err != nil {
+		t.Fatalf("put live product: %v", err)
+	}
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("live view: %v", err)
+	}
+	var gotTariff, gotProduct string
+	for _, tr := range live.Tariffs {
+		if tr.Ref == "biz" {
+			gotTariff = tr.SalesStatus
+		}
+	}
+	for _, p := range live.Products {
+		if p.Ref == "kettle2" {
+			gotProduct = p.SalesStatus
+		}
+	}
+	if gotTariff != "inactive" {
+		t.Fatalf("tariff sales_status should be 'inactive', got %q", gotTariff)
+	}
+	if gotProduct != "inactive" {
+		t.Fatalf("product sales_status should be 'inactive', got %q", gotProduct)
+	}
+}
+
 // A per-entity approve must not be held hostage by an unrelated unanswered
 // popup — only the whole-draft approve is blocked by pending requests.
 func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
@@ -356,7 +535,7 @@ func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
 		Slug: "unrelated_ok", Title: "OK", BodyMD: "Обычный текст без фактов.",
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
@@ -385,7 +564,7 @@ func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
 	}
 
 	// The WHOLE-draft approve must still be blocked while the request is pending.
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{
+	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
 		Slug: "second", Title: "Ещё", BodyMD: "Ещё текст.",
 	}); err != nil {
 		t.Fatalf("upsert topic: %v", err)
@@ -410,7 +589,7 @@ func TestDraftBaseVersionAdvances(t *testing.T) {
 	if v0 != 0 {
 		t.Fatalf("want 0 before any draft write, got %d", v0)
 	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "a", BodyMD: "x"}); err != nil {
+	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{Slug: "a", BodyMD: "x"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	v1, err := kb.DraftBaseVersion(ctx, orgID)
@@ -420,7 +599,7 @@ func TestDraftBaseVersionAdvances(t *testing.T) {
 	if v1 <= v0 {
 		t.Fatalf("base_version should advance: v0=%d v1=%d", v0, v1)
 	}
-	if err := kb.UpsertTopic(ctx, orgID, kbstore.TopicInput{Slug: "b", BodyMD: "y"}); err != nil {
+	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{Slug: "b", BodyMD: "y"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	v2, err := kb.DraftBaseVersion(ctx, orgID)

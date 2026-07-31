@@ -134,6 +134,35 @@ func (e *ErrMediaReference) Error() string {
 	return fmt.Sprintf("kbstore: media reference %s for %s: %s", e.MaterialID, e.Field, e.Reason)
 }
 
+// ErrInvalidEnumValue means a field constrained to a closed set of values
+// (pricing_type, sales_status, zone_level) was given something outside it —
+// plan/mcp.md §9's "enum values" requirement, enforced here rather than
+// relying solely on the JSON-Schema `enum` hint every tool already declares
+// (advisory only; nothing previously checked it server-side).
+type ErrInvalidEnumValue struct {
+	Field, Value string
+	Allowed      []string
+}
+
+func (e *ErrInvalidEnumValue) Error() string {
+	return fmt.Sprintf("kbstore: %s: %q is not one of %s", e.Field, e.Value, strings.Join(e.Allowed, ", "))
+}
+
+// validateEnum checks value against allowed when non-blank — omitted/blank
+// is not this check's job (required-ness is validated separately, at
+// create-time, per field).
+func validateEnum(field, value string, allowed ...string) error {
+	if value == "" {
+		return nil
+	}
+	for _, a := range allowed {
+		if value == a {
+			return nil
+		}
+	}
+	return &ErrInvalidEnumValue{Field: field, Value: value, Allowed: allowed}
+}
+
 // normalizeTitle folds a title/name to the comparable form the exact-match
 // duplicate check uses: lowercase, whitespace-collapsed, trimmed. This is a
 // deliberately simple fold (no Unicode case-folding beyond strings.ToLower,

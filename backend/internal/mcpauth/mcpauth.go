@@ -62,9 +62,12 @@ func (a *Authorizer) IssueTokenPair(ctx context.Context, clientID string, userID
 
 // ExchangeAuthorizationCode implements the token endpoint's
 // grant_type=authorization_code path end to end: consume the code (PKCE +
-// single-use + client/redirect binding all checked), then mint a token pair.
-func (a *Authorizer) ExchangeAuthorizationCode(ctx context.Context, clientID, redirectURI, code, codeVerifier string) (TokenResponse, error) {
-	row, err := a.Store.ConsumeAuthorizationCode(ctx, clientID, redirectURI, code, codeVerifier)
+// single-use + client/redirect + resource binding all checked), then mint a
+// token pair. resource is the token request's own optional RFC 8707
+// parameter — re-checked against what was bound at authorize time, not
+// merely carried through unchecked.
+func (a *Authorizer) ExchangeAuthorizationCode(ctx context.Context, clientID, redirectURI, resource, code, codeVerifier string) (TokenResponse, error) {
+	row, err := a.Store.ConsumeAuthorizationCode(ctx, clientID, redirectURI, resource, code, codeVerifier)
 	if err != nil {
 		return TokenResponse{}, err
 	}

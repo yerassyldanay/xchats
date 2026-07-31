@@ -86,7 +86,7 @@ func TestFullAuthorizationCodeFlow(t *testing.T) {
 		t.Fatalf("issue code: %v", err)
 	}
 
-	tok, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/callback", code, verifier)
+	tok, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/callback", "", code, verifier)
 	if err != nil {
 		t.Fatalf("exchange code: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestFullAuthorizationCodeFlow(t *testing.T) {
 	}
 
 	// Replay is rejected: the code is single-use.
-	if _, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/callback", code, verifier); !errors.Is(err, mcpauth.ErrInvalidGrant) {
+	if _, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/callback", "", code, verifier); !errors.Is(err, mcpauth.ErrInvalidGrant) {
 		t.Fatalf("expected ErrInvalidGrant on replay, got %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestExchangeRejectsWrongPKCEVerifier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue code: %v", err)
 	}
-	if _, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/callback", code, "wrong-verifier"); !errors.Is(err, mcpauth.ErrInvalidGrant) {
+	if _, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/callback", "", code, "wrong-verifier"); !errors.Is(err, mcpauth.ErrInvalidGrant) {
 		t.Fatalf("expected ErrInvalidGrant for wrong verifier, got %v", err)
 	}
 }
@@ -176,8 +176,68 @@ func TestExchangeRejectsRedirectURIMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue code: %v", err)
 	}
-	if _, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/other", code, verifier); !errors.Is(err, mcpauth.ErrInvalidGrant) {
+	if _, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/other", "", code, verifier); !errors.Is(err, mcpauth.ErrInvalidGrant) {
 		t.Fatalf("expected ErrInvalidGrant for redirect_uri mismatch, got %v", err)
+	}
+}
+
+// TestExchangeRejectsResourceMismatch is Task 11's regression guard: RFC 8707
+// lets a client repeat `resource` at the token endpoint, and a mismatch there
+// must be rejected — previously it was validated at authorize and carried
+// into the stored code, but never re-checked at exchange, so a token request
+// naming a DIFFERENT resource than what was actually bound would have
+// silently succeeded.
+func TestExchangeRejectsResourceMismatch(t *testing.T) {
+	authz, orgID, userID := newTestAuthorizer(t)
+	ctx := context.Background()
+	client, err := authz.Store.RegisterClient(ctx, "Test Host", []string{"https://host.example/callback"})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	verifier, challenge := pkcePair()
+	code, err := authz.Store.IssueAuthorizationCode(ctx, mcpauth.AuthorizationCodeInput{
+		ClientID: client.ClientID, RedirectURI: "https://host.example/callback",
+		CodeChallenge: challenge, CodeChallengeMethod: "S256",
+		UserID: userID, OrganizationID: orgID, Scope: "kb:read",
+		Resource: "https://xchats.kz/mcp", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("issue code: %v", err)
+	}
+	// A token request naming a resource DIFFERENT from what authorize bound
+	// must fail — never silently mint a token for the wrong resource.
+	if _, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/callback", "https://attacker.example/mcp", code, verifier); !errors.Is(err, mcpauth.ErrInvalidGrant) {
+		t.Fatalf("expected ErrInvalidGrant for resource mismatch, got %v", err)
+	}
+	// The code must still be usable afterward via the matching resource (or
+	// omitting it) — a failed mismatch attempt must not have burned it via a
+	// side effect other than the one atomic consumption a real retry needs to
+	// still work through the same fresh code.
+	code2, err := authz.Store.IssueAuthorizationCode(ctx, mcpauth.AuthorizationCodeInput{
+		ClientID: client.ClientID, RedirectURI: "https://host.example/callback",
+		CodeChallenge: challenge, CodeChallengeMethod: "S256",
+		UserID: userID, OrganizationID: orgID, Scope: "kb:read",
+		Resource: "https://xchats.kz/mcp", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("issue second code: %v", err)
+	}
+	if _, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/callback", "https://xchats.kz/mcp", code2, verifier); err != nil {
+		t.Fatalf("exchange with matching resource should succeed, got %v", err)
+	}
+	// Omitting resource at exchange (not repeating it) must still succeed —
+	// RFC 8707 makes it optional at this step.
+	code3, err := authz.Store.IssueAuthorizationCode(ctx, mcpauth.AuthorizationCodeInput{
+		ClientID: client.ClientID, RedirectURI: "https://host.example/callback",
+		CodeChallenge: challenge, CodeChallengeMethod: "S256",
+		UserID: userID, OrganizationID: orgID, Scope: "kb:read",
+		Resource: "https://xchats.kz/mcp", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("issue third code: %v", err)
+	}
+	if _, err := authz.ExchangeAuthorizationCode(ctx, client.ClientID, "https://host.example/callback", "", code3, verifier); err != nil {
+		t.Fatalf("exchange omitting resource should succeed, got %v", err)
 	}
 }
 
@@ -261,5 +321,64 @@ func TestResolveClient_UnregisteredNonURLIsNotFound(t *testing.T) {
 	ctx := context.Background()
 	if _, err := authz.Store.ResolveClient(ctx, "some-opaque-unregistered-id", false); !errors.Is(err, mcpauth.ErrClientNotFound) {
 		t.Fatalf("expected ErrClientNotFound, got %v", err)
+	}
+}
+
+// TestValidateScope_RejectsUnknownToken is Task 11's regression guard:
+// ParseScope silently drops an unrecognized scope token (used only where a
+// scope has already passed validation, e.g. re-parsing a persisted JWT claim
+// or refresh-token row) — any NEW client-supplied scope string must instead
+// be rejected explicitly via ValidateScope, so a typo'd scope surfaces as an
+// error rather than a silently narrower grant.
+func TestValidateScope_RejectsUnknownToken(t *testing.T) {
+	if _, err := mcpauth.ValidateScope("kb:read kb:bogus"); !errors.Is(err, mcpauth.ErrInvalidScope) {
+		t.Fatalf("expected ErrInvalidScope for an unrecognized token, got %v", err)
+	}
+	got, err := mcpauth.ValidateScope("kb:read media:write")
+	if err != nil {
+		t.Fatalf("valid scope string should not error, got %v", err)
+	}
+	want := []string{"kb:read", "media:write"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("want %v, got %v", want, got)
+	}
+	if empty, err := mcpauth.ValidateScope(""); err != nil || empty != nil {
+		t.Fatalf("an empty scope string should validate to (nil, nil), got (%v, %v)", empty, err)
+	}
+}
+
+// TestReviewHandoffSigner_RoundTrip is Task 15's regression guard for the
+// signing primitive itself (the httpapi-level one-time-consumption and
+// membership re-check are covered by mcp_integration_test.go's own handoff
+// tests): a token this signer mints must verify with its own claims intact,
+// under the distinct ReviewHandoffAudience — never the MCP resource audience
+// access tokens use, even when signed by the SAME key.
+func TestReviewHandoffSigner_RoundTrip(t *testing.T) {
+	key := mcpauth.NewEphemeralSigningKey()
+	signer := mcpauth.NewReviewHandoffSigner(key, "https://xchats.kz", time.Minute)
+	userID, orgID := uuid.New(), uuid.New()
+
+	token, jti, expiresAt, err := signer.Sign(userID, orgID)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if token == "" || jti == "" || expiresAt.Before(time.Now()) {
+		t.Fatalf("expected a non-empty token/jti and a future expiry, got token=%q jti=%q expiresAt=%v", token, jti, expiresAt)
+	}
+	claims, err := signer.Verify(token)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if claims.Subject != userID.String() || claims.OrganizationID != orgID.String() || claims.JTI != jti {
+		t.Fatalf("claims do not round-trip: got %+v", claims)
+	}
+	if claims.Audience != mcpauth.ReviewHandoffAudience {
+		t.Fatalf("expected audience %q, got %q", mcpauth.ReviewHandoffAudience, claims.Audience)
+	}
+
+	// A handoff token must never verify as an MCP access token (same key,
+	// different audience) — the whole point of the distinct audience.
+	if _, err := key.Verify(token, "https://xchats.kz", "https://xchats.kz/mcp"); !errors.Is(err, mcpauth.ErrInvalidToken) {
+		t.Fatalf("expected a review-handoff token to fail verification against the MCP resource audience, got %v", err)
 	}
 }

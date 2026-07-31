@@ -49,8 +49,19 @@ func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // LoadLive returns the org's live KB as a brain-ready *domain.Snapshot. Live
 // tables hold live rows only, so there is no review/version filter to apply.
 func (s *Store) LoadLive(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot, error) {
+	return loadLive(ctx, s.pool, orgID)
+}
+
+// loadLive is LoadLive's dbtx-parameterized core. ApproveVersioned
+// (draft.go) calls this directly with its own already-locked transaction
+// instead of going through the Store method, which would check out a
+// SEPARATE pool connection while that transaction holds the kbd_draft row
+// lock — the exact pool-exhaustion deadlock class identityIndex's doc
+// comment (mcp_read.go) describes, just with Approve's lock instead of
+// writeDraftBlobVersioned's.
+func loadLive(ctx context.Context, db dbtx, orgID uuid.UUID) (*domain.Snapshot, error) {
 	snap := &domain.Snapshot{Loaded: time.Now()}
-	err := s.pool.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		SELECT persona, mission, guardrails, language_policy, reply_max_words
 		FROM xchats.ai_assistants WHERE organization_id = $1`, orgID).
 		Scan(&snap.Config.Persona, &snap.Config.Mission, &snap.Config.Guardrails,
@@ -58,7 +69,7 @@ func (s *Store) LoadLive(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if err := s.loadLiveContent(ctx, orgID, snap); err != nil {
+	if err := loadLiveContent(ctx, db, orgID, snap); err != nil {
 		return nil, err
 	}
 	return snap, nil
@@ -66,8 +77,8 @@ func (s *Store) LoadLive(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot
 
 // loadLiveContent fills Topics and the typed fact tables from the live ai_
 // tables for an org.
-func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *domain.Snapshot) error {
-	trows, err := s.pool.Query(ctx, `SELECT slug, title, body_md
+func loadLiveContent(ctx context.Context, db dbtx, orgID uuid.UUID, snap *domain.Snapshot) error {
+	trows, err := db.Query(ctx, `SELECT slug, title, body_md
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
@@ -85,7 +96,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	trows2, err := s.pool.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages
+	trows2, err := db.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages
 		FROM xchats.ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
@@ -106,7 +117,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 	// availability is a dead legacy column (plan/database-schema.md: not part
 	// of the target) — no longer read; domain.Product.Availability stays
 	// permanently empty for a DB-backed snapshot.
-	prows, err := s.pool.Query(ctx, `SELECT ref, name, price, description, category
+	prows, err := db.Query(ctx, `SELECT ref, name, price, description, category
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
@@ -124,7 +135,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	crows, err := s.pool.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
+	crows, err := db.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram
 		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
@@ -146,7 +157,7 @@ func (s *Store) loadLiveContent(ctx context.Context, orgID uuid.UUID, snap *doma
 		return err
 	}
 
-	polrows, err := s.pool.Query(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
+	polrows, err := db.Query(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		prepayment, installment, return_period_in_days, warranty
 		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
@@ -473,9 +484,11 @@ func gateTopicBody(slug, bodyMD string) []string {
 // ("1) 2) 3)") and bare counts are intentionally NOT matched.
 var rawCurrencyRE = regexp.MustCompile(`(?:[0-9][0-9 \x{00a0}.,]*\s*(?:₸|₽|€|£|тг|тенге|руб)|[$€£]\s*[0-9])`)
 
-func (s *Store) pendingRequestCount(ctx context.Context, orgID uuid.UUID) (int, error) {
+// pendingRequestCount is dbtx-parameterized for the same reason loadLive is
+// — ApproveVersioned calls it on its own locked transaction, never s.pool.
+func pendingRequestCount(ctx context.Context, db dbtx, orgID uuid.UUID) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM xchats.kbd_requests
+	err := db.QueryRow(ctx, `SELECT count(*) FROM xchats.kbd_requests
 		WHERE organization_id = $1 AND state = 'pending'`, orgID).Scan(&n)
 	return n, err
 }

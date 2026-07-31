@@ -56,6 +56,7 @@ export const usePlayground = defineStore('playground', {
         tariffs: d?.tariffs?.length ?? 0,
         contacts: d?.contacts?.length ?? 0,
         policies: d?.policies?.length ?? 0,
+        zones: d?.zones?.length ?? 0,
         materials: d?.materials?.length ?? 0,
         requests: (d?.requests ?? []).filter((r) => r.state === 'pending').length,
       }
@@ -67,7 +68,7 @@ export const usePlayground = defineStore('playground', {
       if (!d) return 0
       const p = (xs?: { draft: boolean }[]) => (xs ?? []).filter((x) => x.draft).length
       return (
-        p(d.topics) + p(d.tariffs) + p(d.products) + p(d.contacts) + p(d.policies) +
+        p(d.topics) + p(d.tariffs) + p(d.products) + p(d.contacts) + p(d.policies) + p(d.zones) +
         (d.config?.draft ? 1 : 0)
       )
     },
@@ -147,6 +148,7 @@ export const usePlayground = defineStore('playground', {
       pricing_type?: string
       advantages?: string
       disadvantages?: string
+      sales_status?: string
     }) {
       return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/tariffs', input, this.ifMatch())))
     },
@@ -155,11 +157,37 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft products (typed facts: verbatim price column) ------------------
-    upsertProduct(input: { ref: string; name?: string; price?: string; description?: string; category?: string }) {
+    upsertProduct(input: {
+      ref: string
+      name?: string
+      price?: string
+      description?: string
+      category?: string
+      sales_status?: string
+      in_stock?: boolean
+    }) {
       return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/products', input, this.ifMatch())))
     },
     deleteProduct(ref: string) {
       return this.write(async () => this.setDraft(await api.del<DraftView>('/playground/draft/products/' + encodeURIComponent(ref), this.ifMatch())))
+    },
+
+    // --- draft delivery zones -------------------------------------------------
+    upsertZone(input: {
+      ref: string
+      name?: string
+      zone_level: string
+      parent_ref?: string
+      delivery_available?: boolean
+      delivery_cost?: string
+      delivery_in_days?: string
+      notes?: string
+      sales_status?: string
+    }) {
+      return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/zones', input, this.ifMatch())))
+    },
+    deleteZone(ref: string) {
+      return this.write(async () => this.setDraft(await api.del<DraftView>('/playground/draft/zones/' + encodeURIComponent(ref), this.ifMatch())))
     },
 
     // --- draft contacts (the 'support' singleton — one org, one PATCH) -------
@@ -231,14 +259,15 @@ export const usePlayground = defineStore('playground', {
 
     // --- approve ("Принять всё" / "Принять") ------------------------
     // approve(): the WHOLE pending draft. approveEntity(kind,key): one row —
-    // kind ∈ topics|tariffs|products|contacts|policies; key = the row's
-    // natural id (slug for topics, ref for tariffs/products, the fixed
-    // singleton slug for contacts/policies).
+    // kind ∈ topics|tariffs|products|contacts|policies|delivery_zones|config;
+    // key = the row's natural id (slug for topics, ref for
+    // tariffs/products/delivery_zones, the fixed singleton slug for
+    // contacts/policies/config — see kbstore.NaturalKeyMain for config's).
     async approve(): Promise<boolean> {
       return this.approveWith('/playground/draft/approve')
     },
     async approveEntity(
-      kind: 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies',
+      kind: 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies' | 'delivery_zones' | 'config',
       key: string
     ): Promise<boolean> {
       return this.approveWith(`/playground/draft/approve/${kind}/${encodeURIComponent(key)}`)
@@ -307,6 +336,7 @@ export const usePlayground = defineStore('playground', {
       pricing_type?: string
       advantages?: string
       disadvantages?: string
+      sales_status?: string
     }) {
       return this.writeLive(async () => {
         this.live = await api.post<DraftView>('/kb/tariffs', input)
@@ -323,6 +353,7 @@ export const usePlayground = defineStore('playground', {
       price?: string
       description?: string
       category?: string
+      sales_status?: string
       in_stock?: boolean
     }) {
       return this.writeLive(async () => {
@@ -449,4 +480,32 @@ export function parseJSON(raw: string | null | undefined): Record<string, unknow
     log.warn('kb: bad json blob')
     return {}
   }
+}
+
+export interface KbAction {
+  key: 'save' | 'approve' | 'reject' | 'delete'
+  label: string
+  variant: 'default' | 'outline' | 'ghost'
+  destructive?: boolean
+}
+
+// kbActions is the action row RecordShell.vue renders for every kb/records/*
+// component. A live row (final, no draft step) offers Сохранить/Удалить; a
+// draft row offers Сохранить (stage the edit) / Принять (approveEntity —
+// materialize just this row) / Отклонить (discard the pending edit). Both
+// destructive actions are dropped for a singleton (contacts/policies/config
+// have no natural key and no delete affordance at all — there is nothing to
+// "reject back to" or delete, only ever edit again).
+export function kbActions(mode: 'draft' | 'live', opts: { singleton?: boolean } = {}): KbAction[] {
+  if (mode === 'live') {
+    const actions: KbAction[] = [{ key: 'save', label: 'Сохранить', variant: 'default' }]
+    if (!opts.singleton) actions.push({ key: 'delete', label: 'Удалить', variant: 'ghost', destructive: true })
+    return actions
+  }
+  const actions: KbAction[] = [
+    { key: 'save', label: 'Сохранить', variant: 'outline' },
+    { key: 'approve', label: 'Принять', variant: 'default' },
+  ]
+  if (!opts.singleton) actions.push({ key: 'reject', label: 'Отклонить', variant: 'ghost', destructive: true })
+  return actions
 }

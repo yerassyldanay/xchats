@@ -2,15 +2,22 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   AlignLeft, CircleAlert, FileText, Image as ImageIcon, Inbox, Link2, ListTree, LoaderCircle,
-  Package, Paperclip, PanelsTopLeft, Phone, Receipt, Save, Send as SendIcon, Truck, UploadCloud, X,
+  MapPinned, Package, Paperclip, PanelsTopLeft, Phone, Receipt, Save, Send as SendIcon, Sparkles,
+  Truck, UploadCloud, X,
 } from 'lucide-vue-next'
 import { usePlayground, parseJSON } from '../stores/playground'
 import { shortTime } from '../lib/format'
-import type { ContactRow, KbMaterial, PolicyRow, ProductRow, TariffRow, TopicRow } from '../types'
+import type { ContactRow, KbMaterial, PolicyRow } from '../types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
+import TopicRecord from '@/components/kb/records/TopicRecord.vue'
+import ProductRecord from '@/components/kb/records/ProductRecord.vue'
+import TariffRecord from '@/components/kb/records/TariffRecord.vue'
+import ContactsRecord from '@/components/kb/records/ContactsRecord.vue'
+import PoliciesRecord from '@/components/kb/records/PoliciesRecord.vue'
+import DeliveryZoneRecord from '@/components/kb/records/DeliveryZoneRecord.vue'
+import AssistantRecord from '@/components/kb/records/AssistantRecord.vue'
 
 // The Constructor is now the WHOLE draft workflow, on one page: stage files with
 // a comment, send, watch the builder work, and accept the resulting draft (all
@@ -146,29 +153,28 @@ async function dismiss(id: string) {
 const draftTopics = computed(() => (pg.draft?.topics ?? []).filter((t) => t.draft))
 const draftProducts = computed(() => (pg.draft?.products ?? []).filter((p) => p.draft))
 const draftTariffs = computed(() => (pg.draft?.tariffs ?? []).filter((t) => t.draft))
+const draftZones = computed(() => (pg.draft?.zones ?? []).filter((z) => z.draft))
 const draftContact = computed<ContactRow | undefined>(() => pg.draft?.contacts?.find((c) => c.draft))
 const draftPolicy = computed<PolicyRow | undefined>(() => pg.draft?.policies?.find((p) => p.draft))
+const draftConfig = computed(() => (pg.draft?.config?.draft ? pg.draft.config : undefined))
 
-// --- «Новый» vs «Изменён»: a pending row overlays/replaces its live counterpart
-// (see kbstore.mergedView), so telling them apart means checking the LIVE slice
-// for the same natural key (slug/ref) — never derivable from the draft row alone.
-// Contacts/policies are true singletons (one row per org), so "new" there just
-// means the org has no live row yet.
-const liveTopicSlugs = computed(() => new Set((pg.live?.topics ?? []).map((t) => t.slug)))
-const liveProductRefs = computed(() => new Set((pg.live?.products ?? []).map((p) => p.ref)))
-const liveTariffRefs = computed(() => new Set((pg.live?.tariffs ?? []).map((t) => t.ref)))
-const liveHasContact = computed(() => (pg.live?.contacts ?? []).length > 0)
-const liveHasPolicy = computed(() => (pg.live?.policies ?? []).length > 0)
-const DRAFT_BADGE = {
-  new: { label: 'Новый', cls: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
-  changed: { label: 'Изменён', cls: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
-}
-function draftBadge(isNew: boolean) {
-  return isNew ? DRAFT_BADGE.new : DRAFT_BADGE.changed
-}
+// --- "Новый" vs "Изменён": a pending row overlays/replaces its live counterpart
+// (see kbstore.mergedView), so telling them apart — and rendering a real
+// before/after diff — means looking up the live row for the same natural key
+// (slug/ref); each *Record component derives its own state/highlighting from
+// whether liveRow is present (see records/shared.ts recordState/changedFields).
+// Contacts/policies/config are true singletons (one row per org, at most), so
+// their "live counterpart" is just the one live row, if any.
+const liveTopicBySlug = computed(() => new Map((pg.live?.topics ?? []).map((t) => [t.slug, t])))
+const liveProductByRef = computed(() => new Map((pg.live?.products ?? []).map((p) => [p.ref, p])))
+const liveTariffByRef = computed(() => new Map((pg.live?.tariffs ?? []).map((t) => [t.ref, t])))
+const liveZoneByRef = computed(() => new Map((pg.live?.zones ?? []).map((z) => [z.ref, z])))
+const liveContact = computed(() => pg.live?.contacts?.[0])
+const livePolicy = computed(() => pg.live?.policies?.[0])
+const liveConfig = computed(() => pg.live?.config)
 
 // --- Черновик tabs: Обзор (everything, mixed) + one per non-empty kind --------
-type DraftTabKey = 'overview' | 'topics' | 'products' | 'tariffs' | 'contacts' | 'policies'
+type DraftTabKey = 'overview' | 'topics' | 'products' | 'tariffs' | 'zones' | 'contacts' | 'policies' | 'config'
 const draftTab = ref<DraftTabKey>('overview')
 const draftTabs = computed(() => {
   const tabs: { key: DraftTabKey; label: string; icon: any; count: number | null }[] = [
@@ -177,8 +183,10 @@ const draftTabs = computed(() => {
   if (draftTopics.value.length) tabs.push({ key: 'topics', label: 'Темы', icon: ListTree, count: draftTopics.value.length })
   if (draftProducts.value.length) tabs.push({ key: 'products', label: 'Товары', icon: Package, count: draftProducts.value.length })
   if (draftTariffs.value.length) tabs.push({ key: 'tariffs', label: 'Тарифы', icon: Receipt, count: draftTariffs.value.length })
+  if (draftZones.value.length) tabs.push({ key: 'zones', label: 'Зоны доставки', icon: MapPinned, count: draftZones.value.length })
   if (draftContact.value) tabs.push({ key: 'contacts', label: 'Контакты', icon: Phone, count: 1 })
   if (draftPolicy.value) tabs.push({ key: 'policies', label: 'Политики', icon: Truck, count: 1 })
+  if (draftConfig.value) tabs.push({ key: 'config', label: 'Ассистент', icon: Sparkles, count: 1 })
   return tabs
 })
 // A tab whose kind just emptied out (accepted/rejected the last row) falls back
@@ -199,9 +207,11 @@ const pendingRailAll = computed(() => {
     ...draftTopics.value.map((t) => ({ label: 'Тема · ' + (t.title || t.slug), at: t.updated_at })),
     ...draftProducts.value.map((p) => ({ label: 'Товар · ' + (p.name || p.ref), at: p.updated_at })),
     ...draftTariffs.value.map((t) => ({ label: 'Тариф · ' + (t.name || t.ref), at: t.updated_at })),
+    ...draftZones.value.map((z) => ({ label: 'Зона доставки · ' + (z.name || z.ref), at: z.updated_at })),
   ]
   if (draftContact.value) rows.push({ label: 'Контакты', at: draftContact.value.updated_at })
   if (draftPolicy.value) rows.push({ label: 'Политики', at: draftPolicy.value.updated_at })
+  if (draftConfig.value) rows.push({ label: 'Ассистент', at: draftConfig.value.updated_at })
   return rows
 })
 // Published rows keep their own real updated_at, so this half is a true recency sort.
@@ -212,6 +222,7 @@ const publishedRailAll = computed(() => {
     ...(d.topics ?? []).map((t) => ({ label: 'Тема · ' + (t.title || t.slug), at: t.updated_at })),
     ...(d.products ?? []).map((p) => ({ label: 'Товар · ' + (p.name || p.ref), at: p.updated_at })),
     ...(d.tariffs ?? []).map((t) => ({ label: 'Тариф · ' + (t.name || t.ref), at: t.updated_at })),
+    ...(d.zones ?? []).map((z) => ({ label: 'Зона доставки · ' + (z.name || z.ref), at: z.updated_at })),
     ...(d.contacts ?? []).map((c) => ({ label: 'Контакты', at: c.updated_at })),
     ...(d.policies ?? []).map((p) => ({ label: 'Политики', at: p.updated_at })),
   ]
@@ -222,77 +233,6 @@ const showAllChanges = ref(false)
 const pendingRail = computed(() => (showAllChanges.value ? pendingRailAll.value : pendingRailAll.value.slice(0, RAIL_CAP)))
 const publishedRail = computed(() => (showAllChanges.value ? publishedRailAll.value : publishedRailAll.value.slice(0, RAIL_CAP)))
 const hasMoreChanges = computed(() => pendingRailAll.value.length > RAIL_CAP || publishedRailAll.value.length > RAIL_CAP)
-
-const tBuf = reactive<Record<string, { title: string; body_md: string }>>({})
-function vmTopic(t: TopicRow) {
-  if (!tBuf[t.id]) tBuf[t.id] = { title: t.title, body_md: t.body_md }
-  return tBuf[t.id]
-}
-type ProductBuf = { name: string; price: string; description: string; category: string }
-const prodBuf = reactive<Record<string, ProductBuf>>({})
-function vmProduct(p: ProductRow): ProductBuf {
-  if (!prodBuf[p.id]) prodBuf[p.id] = { name: p.name, price: p.price, description: p.description, category: p.category }
-  return prodBuf[p.id]
-}
-type TariffBuf = { name: string; price: string; limit_text: string; fee: string; summary: string; pricing_type: string; advantages: string; disadvantages: string }
-const tarBuf = reactive<Record<string, TariffBuf>>({})
-function vmTariff(t: TariffRow): TariffBuf {
-  if (!tarBuf[t.id]) tarBuf[t.id] = { name: t.name, price: t.price, limit_text: t.limit_text, fee: t.fee, summary: t.summary, pricing_type: t.pricing_type || 'fixed', advantages: t.advantages, disadvantages: t.disadvantages }
-  return tarBuf[t.id]
-}
-const pricingTypes = [
-  { key: 'fixed', label: 'Фиксированная' },
-  { key: 'percentage', label: 'Процент' },
-  { key: 'tiered', label: 'Пороговая' },
-]
-const contactForm = reactive({
-  whatsapp: '', email: '', address: '', legal_information: '', callback_time: '',
-  working_hours: '', phone: '', website: '', instagram: '',
-})
-// Re-seed the form whenever a NEW pending contact row appears (by id) — not on
-// every re-render, so the operator's in-progress edits survive an unrelated
-// draft reload (e.g. an SSE refresh from an unrelated topic edit).
-let contactSeededFor = ''
-watch(
-  draftContact,
-  (c) => {
-    if (!c || contactSeededFor === c.id) return
-    contactSeededFor = c.id
-    contactForm.whatsapp = c.whatsapp
-    contactForm.email = c.email
-    contactForm.address = c.address
-    contactForm.legal_information = c.legal_information
-    contactForm.callback_time = c.callback_time
-    contactForm.working_hours = c.working_hours
-    contactForm.phone = c.phone
-    contactForm.website = c.website
-    contactForm.instagram = c.instagram
-  },
-  { immediate: true }
-)
-
-const policyForm = reactive({
-  delivery_cost: '', delivery_in_days: '', free_delivery_from: '', min_order: '',
-  prepayment: '', installment: '', return_period_in_days: '', warranty: '',
-})
-// Same re-seed-on-new-id pattern as contactForm above.
-let policySeededFor = ''
-watch(
-  draftPolicy,
-  (p) => {
-    if (!p || policySeededFor === p.id) return
-    policySeededFor = p.id
-    policyForm.delivery_cost = p.delivery_cost
-    policyForm.delivery_in_days = p.delivery_in_days
-    policyForm.free_delivery_from = p.free_delivery_from
-    policyForm.min_order = p.min_order
-    policyForm.prepayment = p.prepayment
-    policyForm.installment = p.installment
-    policyForm.return_period_in_days = p.return_period_in_days
-    policyForm.warranty = p.warranty
-  },
-  { immediate: true }
-)
 
 async function discardAll() {
   if (pg.pending > 0 && window.confirm('Отклонить весь черновик? Действие нельзя отменить.')) await pg.discard()
@@ -439,121 +379,49 @@ async function discardAll() {
 
             <!-- Темы -->
             <div v-if="draftTopics.length && tabActive('topics')" class="space-y-2">
-              <div v-for="t in [...draftTopics].reverse()" :key="t.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><ListTree class="w-3.5 h-3.5" /> Тема</span>
-                  <code class="text-[13px] font-mono font-medium">{{ t.slug }}</code>
-                  <Badge variant="secondary" :class="draftBadge(!liveTopicSlugs.has(t.slug)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveTopicSlugs.has(t.slug)).label }}</Badge>
-                </div>
-                <Input v-model="vmTopic(t).title" placeholder="Название" class="h-9" />
-                <Textarea v-model="vmTopic(t).body_md" rows="3" placeholder="Текст темы…" class="min-h-0 text-[14px]" />
-                <div class="flex items-center gap-2">
-                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.upsertTopic({ slug: t.slug, ...vmTopic(t) })">Сохранить</Button>
-                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('topics', t.slug)">Принять</Button>
-                  <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.deleteTopic(t.slug)">Отклонить</Button>
-                </div>
-              </div>
+              <TopicRecord
+                v-for="t in [...draftTopics].reverse()" :key="t.id"
+                mode="draft" :draft-row="t" :live-row="liveTopicBySlug.get(t.slug)"
+              />
             </div>
 
             <!-- Товары -->
             <div v-if="draftProducts.length && tabActive('products')" class="space-y-2">
-              <div v-for="p in [...draftProducts].reverse()" :key="p.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Package class="w-3.5 h-3.5" /> Товар</span>
-                  <code class="text-[13px] font-mono font-medium">{{ p.ref }}</code>
-                  <Badge variant="secondary" :class="draftBadge(!liveProductRefs.has(p.ref)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveProductRefs.has(p.ref)).label }}</Badge>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Input v-model="vmProduct(p).name" placeholder="Название" class="h-9" />
-                  <Input v-model="vmProduct(p).price" placeholder="Цена" class="h-9 font-mono" />
-                  <Input v-model="vmProduct(p).category" placeholder="Категория" class="h-9" />
-                </div>
-                <Textarea v-model="vmProduct(p).description" rows="2" placeholder="Описание товара…" class="min-h-0 text-[14px]" />
-                <div class="flex items-center gap-2">
-                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.upsertProduct({ ref: p.ref, ...vmProduct(p) })">Сохранить</Button>
-                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('products', p.ref)">Принять</Button>
-                  <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.deleteProduct(p.ref)">Отклонить</Button>
-                </div>
-              </div>
+              <ProductRecord
+                v-for="p in [...draftProducts].reverse()" :key="p.id"
+                mode="draft" :draft-row="p" :live-row="liveProductByRef.get(p.ref)"
+              />
             </div>
 
             <!-- Тарифы -->
             <div v-if="draftTariffs.length && tabActive('tariffs')" class="space-y-2">
-              <div v-for="t in [...draftTariffs].reverse()" :key="t.id" class="rounded-lg border border-border bg-card p-4 space-y-2">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Receipt class="w-3.5 h-3.5" /> Тариф</span>
-                  <code class="text-[13px] font-mono font-medium">{{ t.ref }}</code>
-                  <Badge variant="secondary" :class="draftBadge(!liveTariffRefs.has(t.ref)).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveTariffRefs.has(t.ref)).label }}</Badge>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Input v-model="vmTariff(t).name" placeholder="Название" class="h-9" />
-                  <select v-model="vmTariff(t).pricing_type" class="h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <option v-for="pt in pricingTypes" :key="pt.key" :value="pt.key">{{ pt.label }}</option>
-                  </select>
-                  <Input v-model="vmTariff(t).price" placeholder="Цена" class="h-9 font-mono" />
-                  <Input v-model="vmTariff(t).limit_text" placeholder="Лимит" class="h-9 font-mono" />
-                  <Input v-model="vmTariff(t).fee" placeholder="Комиссия" class="h-9 font-mono" />
-                </div>
-                <Textarea v-model="vmTariff(t).summary" rows="2" placeholder="Краткое описание тарифа…" class="min-h-0 text-[14px]" />
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Textarea v-model="vmTariff(t).advantages" rows="2" placeholder="Преимущества…" class="min-h-0 text-[14px]" />
-                  <Textarea v-model="vmTariff(t).disadvantages" rows="2" placeholder="Ограничения…" class="min-h-0 text-[14px]" />
-                </div>
-                <div class="flex items-center gap-2">
-                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.upsertTariff({ ref: t.ref, ...vmTariff(t) })">Сохранить</Button>
-                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('tariffs', t.ref)">Принять</Button>
-                  <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy" @click="pg.deleteTariff(t.ref)">Отклонить</Button>
-                </div>
-              </div>
+              <TariffRecord
+                v-for="t in [...draftTariffs].reverse()" :key="t.id"
+                mode="draft" :draft-row="t" :live-row="liveTariffByRef.get(t.ref)"
+              />
+            </div>
+
+            <!-- Зоны доставки -->
+            <div v-if="draftZones.length && tabActive('zones')" class="space-y-2">
+              <DeliveryZoneRecord
+                v-for="z in [...draftZones].reverse()" :key="z.id"
+                mode="draft" :draft-row="z" :live-row="liveZoneByRef.get(z.ref)" :all-zones="pg.draft?.zones ?? []"
+              />
             </div>
 
             <!-- Контакты -->
             <div v-if="draftContact && tabActive('contacts')" class="space-y-2">
-              <div class="rounded-lg border border-border bg-card p-4 space-y-2">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Phone class="w-3.5 h-3.5" /> Контакты</span>
-                  <Badge variant="secondary" :class="draftBadge(!liveHasContact).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveHasContact).label }}</Badge>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Input v-model="contactForm.whatsapp" placeholder="WhatsApp" class="h-9 font-mono" />
-                  <Input v-model="contactForm.phone" placeholder="Телефон" class="h-9 font-mono" />
-                  <Input v-model="contactForm.email" placeholder="E-mail" class="h-9" />
-                  <Input v-model="contactForm.website" placeholder="Сайт" class="h-9" />
-                  <Input v-model="contactForm.instagram" placeholder="Instagram" class="h-9" />
-                  <Input v-model="contactForm.working_hours" placeholder="График работы" class="h-9" />
-                  <Input v-model="contactForm.address" placeholder="Адрес" class="h-9 sm:col-span-2" />
-                  <Textarea v-model="contactForm.legal_information" rows="2" placeholder="Юридические реквизиты…" class="min-h-0 text-[14px] sm:col-span-2" />
-                  <Input v-model="contactForm.callback_time" placeholder="Время обратного звонка" class="h-9 sm:col-span-2" />
-                </div>
-                <div class="flex items-center gap-2">
-                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchContacts({ ...contactForm })">Сохранить</Button>
-                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('contacts', draftContact.id)">Принять</Button>
-                </div>
-              </div>
+              <ContactsRecord mode="draft" :draft-row="draftContact" :live-row="liveContact" />
             </div>
 
             <!-- Политики -->
             <div v-if="draftPolicy && tabActive('policies')" class="space-y-2">
-              <div class="rounded-lg border border-border bg-card p-4 space-y-2">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"><Truck class="w-3.5 h-3.5" /> Политики</span>
-                  <Badge variant="secondary" :class="draftBadge(!liveHasPolicy).cls + ' text-[11px] font-medium'">{{ draftBadge(!liveHasPolicy).label }}</Badge>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Input v-model="policyForm.delivery_cost" placeholder="Стоимость доставки" class="h-9 font-mono" />
-                  <Input v-model="policyForm.delivery_in_days" placeholder="Срок доставки" class="h-9 font-mono" />
-                  <Input v-model="policyForm.free_delivery_from" placeholder="Бесплатная доставка от" class="h-9 font-mono" />
-                  <Input v-model="policyForm.min_order" placeholder="Минимальный заказ" class="h-9 font-mono" />
-                  <Input v-model="policyForm.prepayment" placeholder="Предоплата" class="h-9" />
-                  <Input v-model="policyForm.installment" placeholder="Рассрочка" class="h-9" />
-                  <Input v-model="policyForm.return_period_in_days" placeholder="Срок возврата" class="h-9 font-mono" />
-                  <Input v-model="policyForm.warranty" placeholder="Гарантия" class="h-9" />
-                </div>
-                <div class="flex items-center gap-2">
-                  <Button size="sm" variant="outline" :disabled="pg.busy" @click="pg.patchPolicies({ ...policyForm })">Сохранить</Button>
-                  <Button size="sm" :disabled="pg.busy" @click="pg.approveEntity('policies', draftPolicy.id)">Принять</Button>
-                </div>
-              </div>
+              <PoliciesRecord mode="draft" :draft-row="draftPolicy" :live-row="livePolicy" />
+            </div>
+
+            <!-- Ассистент -->
+            <div v-if="draftConfig && tabActive('config')" class="space-y-2">
+              <AssistantRecord mode="draft" :draft-row="draftConfig" :live-row="liveConfig" />
             </div>
           </template>
         </div>

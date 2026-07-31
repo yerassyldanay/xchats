@@ -27,7 +27,13 @@ type UpsertResult struct {
 // ---------------------------------------------------------------------------
 
 // resolveUpsertKey runs the plan/mcp.md §4 decision sequence:
-//  1. an existing key (live or draft) → update.
+//  1. an existing key (live or draft) → update. If the update ALSO renames
+//     the record (title is non-blank), the rename itself is still checked
+//     against every OTHER key's title — renaming record A onto record B's
+//     exact title would otherwise silently merge their identities in every
+//     future kb_summary/duplicate-detection view; checkDuplicate never
+//     collides a key with itself, so this cannot false-positive on an
+//     unchanged or self-only title.
 //  2. a new/missing key whose title exactly matches another key's title →
 //     ErrDuplicateConflict.
 //  3. a new/missing key whose title is merely SIMILAR to another key's title
@@ -43,6 +49,11 @@ func resolveUpsertKey(kbType, key, title string, index []Identity) (resolvedKey 
 	if key != "" {
 		for _, id := range index {
 			if id.Key == key {
+				if strings.TrimSpace(title) != "" {
+					if verdict := checkDuplicate(kbType, key, title, index); verdict.Conflict != nil {
+						return "", false, &ErrDuplicateConflict{Type: kbType, ExistingKey: verdict.Conflict.Key, ExistingTitle: verdict.Conflict.Title}
+					}
+				}
 				return key, false, nil // step 1
 			}
 		}
@@ -150,9 +161,10 @@ type AssistantChanges struct {
 	ReplyMaxWords                                *int
 }
 
-// MCPUpsertAssistant patches the assistant singleton in the draft.
-func (s *Store) MCPUpsertAssistant(ctx context.Context, orgID uuid.UUID, ch AssistantChanges, expectedVersion *int64) (UpsertResult, error) {
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, func(db dbtx, b *DraftBlob) error {
+// MCPUpsertAssistant patches the assistant singleton in the draft. userID is
+// the verified Principal.UserID, recorded as kbd_draft.updated_by.
+func (s *Store) MCPUpsertAssistant(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ch AssistantChanges, expectedVersion *int64) (UpsertResult, error) {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
 		if ch.Persona != nil {
 			b.Config.Persona = ch.Persona
 		}
@@ -188,10 +200,10 @@ type TopicChanges struct {
 }
 
 // MCPUpsertTopic creates or patches a topic (plan/mcp.md §5's kb_topic_upsert).
-func (s *Store) MCPUpsertTopic(ctx context.Context, orgID uuid.UUID, slug string, ch TopicChanges, expectedVersion *int64, provenance string) (UpsertResult, error) {
+func (s *Store) MCPUpsertTopic(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, slug string, ch TopicChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
 	var result UpsertResult
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, func(db dbtx, b *DraftBlob) error {
-		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeTopic})
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeTopic}, "both", "")
 		if err != nil {
 			return err
 		}
@@ -241,11 +253,19 @@ func (s *Store) MCPUpsertTopic(ctx context.Context, orgID uuid.UUID, slug string
 		if reasons := gateTopicBody(key, cur.BodyMD); len(reasons) > 0 {
 			return &GateError{Reasons: reasons}
 		}
-		if err := s.validateMediaRefs(ctx, orgID, refs); err != nil {
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
 			return err
 		}
-		cur.Provenance = orDefault(provenance, "{}")
+		if err := s.recordProvenance(ctx, db, orgID, KBTypeTopic, key, provenance); err != nil {
+			return err
+		}
 		b.upsertTopic(cur)
+		// An upsert on a key currently staged for deletion means the caller
+		// is choosing to keep/update it, not delete it — cancel the pending
+		// delete so it and this patch don't both survive to Approve (where
+		// the delete would silently discard the update immediately after
+		// it materializes).
+		b.removeDelete(deleteKindFor(KBTypeTopic), key)
 		result = UpsertResult{Type: KBTypeTopic, Key: key, Created: creating}
 		return nil
 	})
@@ -271,10 +291,10 @@ type ProductChanges struct {
 }
 
 // MCPUpsertProduct creates or patches a product (kb_product_upsert).
-func (s *Store) MCPUpsertProduct(ctx context.Context, orgID uuid.UUID, ref string, ch ProductChanges, expectedVersion *int64, provenance string) (UpsertResult, error) {
+func (s *Store) MCPUpsertProduct(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ref string, ch ProductChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
 	var result UpsertResult
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, func(db dbtx, b *DraftBlob) error {
-		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeProduct})
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeProduct}, "both", "")
 		if err != nil {
 			return err
 		}
@@ -304,6 +324,9 @@ func (s *Store) MCPUpsertProduct(ctx context.Context, orgID uuid.UUID, ref strin
 			cur.Category = *ch.Category
 		}
 		if ch.SalesStatus != nil {
+			if err := validateEnum("sales_status", *ch.SalesStatus, "active", "inactive"); err != nil {
+				return err
+			}
 			cur.SalesStatus = *ch.SalesStatus
 		}
 		if creating && ch.InStock == nil {
@@ -333,11 +356,14 @@ func (s *Store) MCPUpsertProduct(ctx context.Context, orgID uuid.UUID, ref strin
 		if creating && strings.TrimSpace(cur.Name) == "" {
 			return &ErrRequiredFieldMissing{Field: "name"}
 		}
-		if err := s.validateMediaRefs(ctx, orgID, refs); err != nil {
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
 			return err
 		}
-		cur.Provenance = orDefault(provenance, "{}")
+		if err := s.recordProvenance(ctx, db, orgID, KBTypeProduct, key, provenance); err != nil {
+			return err
+		}
 		b.upsertProduct(cur)
+		b.removeDelete(deleteKindFor(KBTypeProduct), key) // upserting cancels a pending delete — see MCPUpsertTopic's comment
 		result = UpsertResult{Type: KBTypeProduct, Key: key, Created: creating}
 		return nil
 	})
@@ -361,10 +387,10 @@ type TariffChanges struct {
 }
 
 // MCPUpsertTariff creates or patches a tariff (kb_tariff_upsert).
-func (s *Store) MCPUpsertTariff(ctx context.Context, orgID uuid.UUID, ref string, ch TariffChanges, expectedVersion *int64, provenance string) (UpsertResult, error) {
+func (s *Store) MCPUpsertTariff(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ref string, ch TariffChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
 	var result UpsertResult
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, func(db dbtx, b *DraftBlob) error {
-		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeTariff})
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeTariff}, "both", "")
 		if err != nil {
 			return err
 		}
@@ -400,6 +426,9 @@ func (s *Store) MCPUpsertTariff(ctx context.Context, orgID uuid.UUID, ref string
 			return &ErrRequiredFieldMissing{Field: "pricing_type"}
 		}
 		if ch.PricingType != nil {
+			if err := validateEnum("pricing_type", *ch.PricingType, "fixed", "percentage", "tiered", "hybrid"); err != nil {
+				return err
+			}
 			cur.PricingType = *ch.PricingType
 		}
 		if ch.Advantages != nil {
@@ -409,6 +438,9 @@ func (s *Store) MCPUpsertTariff(ctx context.Context, orgID uuid.UUID, ref string
 			cur.Disadvantages = *ch.Disadvantages
 		}
 		if ch.SalesStatus != nil {
+			if err := validateEnum("sales_status", *ch.SalesStatus, "active", "inactive"); err != nil {
+				return err
+			}
 			cur.SalesStatus = *ch.SalesStatus
 		}
 		refs := map[string][]uuid.UUID{}
@@ -431,11 +463,14 @@ func (s *Store) MCPUpsertTariff(ctx context.Context, orgID uuid.UUID, ref string
 		if creating && strings.TrimSpace(cur.Name) == "" {
 			return &ErrRequiredFieldMissing{Field: "name"}
 		}
-		if err := s.validateMediaRefs(ctx, orgID, refs); err != nil {
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
 			return err
 		}
-		cur.Provenance = orDefault(provenance, "{}")
+		if err := s.recordProvenance(ctx, db, orgID, KBTypeTariff, key, provenance); err != nil {
+			return err
+		}
 		b.upsertTariff(cur)
+		b.removeDelete(deleteKindFor(KBTypeTariff), key) // upserting cancels a pending delete — see MCPUpsertTopic's comment
 		result = UpsertResult{Type: KBTypeTariff, Key: key, Created: creating}
 		return nil
 	})
@@ -458,8 +493,8 @@ type ContactsChanges struct {
 }
 
 // MCPUpsertContacts patches the contacts singleton.
-func (s *Store) MCPUpsertContacts(ctx context.Context, orgID uuid.UUID, ch ContactsChanges, expectedVersion *int64, provenance string) (UpsertResult, error) {
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, func(db dbtx, b *DraftBlob) error {
+func (s *Store) MCPUpsertContacts(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ch ContactsChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentContact(ctx, db, orgID, b)
 		if err != nil {
 			return err
@@ -504,11 +539,14 @@ func (s *Store) MCPUpsertContacts(ctx context.Context, orgID uuid.UUID, ch Conta
 			cur.CompanyLegalDocuments = nonNilUUIDs(*ch.CompanyLegalDocuments)
 			refs = mergeRefs(refs, map[string][]uuid.UUID{"company_legal_documents": cur.CompanyLegalDocuments})
 		}
-		if err := s.validateMediaRefs(ctx, orgID, refs); err != nil {
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
 			return err
 		}
-		cur.Provenance = orDefault(provenance, "{}")
+		if err := s.recordProvenance(ctx, db, orgID, KBTypeContacts, NaturalKeyMain, provenance); err != nil {
+			return err
+		}
 		b.upsertContact(cur)
+		b.removeDelete(deleteKindFor(KBTypeContacts), NaturalKeyMain) // upserting cancels a pending delete — see MCPUpsertTopic's comment
 		return nil
 	})
 	if err != nil {
@@ -529,8 +567,8 @@ type PoliciesChanges struct {
 }
 
 // MCPUpsertPolicies patches the policies singleton.
-func (s *Store) MCPUpsertPolicies(ctx context.Context, orgID uuid.UUID, ch PoliciesChanges, expectedVersion *int64, provenance string) (UpsertResult, error) {
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, func(db dbtx, b *DraftBlob) error {
+func (s *Store) MCPUpsertPolicies(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ch PoliciesChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentPolicy(ctx, db, orgID, b)
 		if err != nil {
 			return err
@@ -567,11 +605,14 @@ func (s *Store) MCPUpsertPolicies(ctx context.Context, orgID uuid.UUID, ch Polic
 			cur.CommercePolicyDocuments = nonNilUUIDs(*ch.CommercePolicyDocuments)
 			refs = mergeRefs(refs, map[string][]uuid.UUID{"commerce_policy_documents": cur.CommercePolicyDocuments})
 		}
-		if err := s.validateMediaRefs(ctx, orgID, refs); err != nil {
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
 			return err
 		}
-		cur.Provenance = orDefault(provenance, "{}")
+		if err := s.recordProvenance(ctx, db, orgID, KBTypePolicies, NaturalKeyMain, provenance); err != nil {
+			return err
+		}
 		b.upsertPolicy(cur)
+		b.removeDelete(deleteKindFor(KBTypePolicies), NaturalKeyMain) // upserting cancels a pending delete — see MCPUpsertTopic's comment
 		return nil
 	})
 	if err != nil {
@@ -598,10 +639,10 @@ type DeliveryZoneChanges struct {
 // zoneGateReasons — the same discipline as every existing zone write path
 // (zones.go); it does not need to be repeated here for a merely-staged draft
 // entry that a human still reviews before it can affect the live KB.
-func (s *Store) MCPUpsertDeliveryZone(ctx context.Context, orgID uuid.UUID, ref string, ch DeliveryZoneChanges, expectedVersion *int64, provenance string) (UpsertResult, error) {
+func (s *Store) MCPUpsertDeliveryZone(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ref string, ch DeliveryZoneChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
 	var result UpsertResult
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, func(db dbtx, b *DraftBlob) error {
-		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeDeliveryZone})
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeDeliveryZone}, "both", "")
 		if err != nil {
 			return err
 		}
@@ -622,6 +663,9 @@ func (s *Store) MCPUpsertDeliveryZone(ctx context.Context, orgID uuid.UUID, ref 
 			cur.Name = *ch.Name
 		}
 		if ch.ZoneLevel != nil {
+			if err := validateEnum("zone_level", *ch.ZoneLevel, "city", "region", "country"); err != nil {
+				return err
+			}
 			cur.ZoneLevel = *ch.ZoneLevel
 		}
 		if ch.ParentRef != nil {
@@ -643,6 +687,9 @@ func (s *Store) MCPUpsertDeliveryZone(ctx context.Context, orgID uuid.UUID, ref 
 			cur.Notes = *ch.Notes
 		}
 		if ch.SalesStatus != nil {
+			if err := validateEnum("sales_status", *ch.SalesStatus, "active", "inactive"); err != nil {
+				return err
+			}
 			cur.SalesStatus = *ch.SalesStatus
 		}
 		if creating && strings.TrimSpace(cur.Name) == "" {
@@ -651,8 +698,11 @@ func (s *Store) MCPUpsertDeliveryZone(ctx context.Context, orgID uuid.UUID, ref 
 		if creating && strings.TrimSpace(cur.ZoneLevel) == "" {
 			return &ErrRequiredFieldMissing{Field: "zone_level"}
 		}
-		cur.Provenance = orDefault(provenance, "{}")
+		if err := s.recordProvenance(ctx, db, orgID, KBTypeDeliveryZone, key, provenance); err != nil {
+			return err
+		}
 		b.upsertZone(cur)
+		b.removeDelete(deleteKindFor(KBTypeDeliveryZone), key) // upserting cancels a pending delete — see MCPUpsertTopic's comment
 		result = UpsertResult{Type: KBTypeDeliveryZone, Key: key, Created: creating}
 		return nil
 	})
@@ -681,13 +731,26 @@ type ErrCannotDelete struct{ Reason string }
 
 func (e *ErrCannotDelete) Error() string { return "kbstore: cannot delete: " + e.Reason }
 
-// MCPDelete adds (or, for a singleton with the wrong key, rejects) a delete
-// marker to the draft (plan/mcp.md §5's kb_delete). "The backend validates
-// the type/key and blocks a delete that would make the publishable KB
-// invalid" — validated here for the assistant singleton (never deletable)
-// and for an unknown type/key; the zone/policy exclusivity invariant is
-// re-validated at Approve time, same as every zone write.
-func (s *Store) MCPDelete(ctx context.Context, orgID uuid.UUID, kbType, key string, expectedVersion *int64) (DeleteResult, error) {
+// MCPDelete implements kb_delete's transition matrix (plan/mcp.md §5):
+//
+//   - nonexistent key (neither live nor draft)   → ErrCannotDelete.
+//   - draft-only (never published)               → cancel the pending
+//     creation: clear the draft entry, stage NO delete marker (there is no
+//     live row for one to ever apply to — see below for why a marker here
+//     would be a permanent phantom).
+//   - live (with or without a shadowing draft
+//     edit)                                      → drop the draft edit, if
+//     any, and stage a delete marker for Approve to apply to the live row.
+//   - repeat delete on an already-marked live
+//     entity                                     → idempotent no-op (falls
+//     out of the same "live" branch; addDelete already de-dupes).
+//
+// "The backend validates the type/key and blocks a delete that would make
+// the publishable KB invalid" — validated here for the assistant singleton
+// (never deletable), an unknown type/key, and now existence; the zone/
+// policy exclusivity invariant is re-validated at Approve time, same as
+// every zone write.
+func (s *Store) MCPDelete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, kbType, key string, expectedVersion *int64) (DeleteResult, error) {
 	switch kbType {
 	case KBTypeAssistant:
 		return DeleteResult{}, &ErrCannotDelete{Reason: "the assistant configuration cannot be deleted"}
@@ -703,7 +766,22 @@ func (s *Store) MCPDelete(ctx context.Context, orgID uuid.UUID, kbType, key stri
 		return DeleteResult{}, &ErrCannotDelete{Reason: fmt.Sprintf("unknown type %q", kbType)}
 	}
 
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, func(db dbtx, b *DraftBlob) error {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+		index, err := s.identityIndex(ctx, db, orgID, []string{kbType}, "both", "")
+		if err != nil {
+			return err
+		}
+		var found *Identity
+		for i := range index {
+			if index[i].Key == key {
+				found = &index[i]
+				break
+			}
+		}
+		if found == nil {
+			return &ErrCannotDelete{Reason: fmt.Sprintf("no %s with key %q exists (live or draft)", kbType, key)}
+		}
+
 		switch kbType {
 		case KBTypeTopic:
 			b.removeTopic(key)
@@ -718,7 +796,9 @@ func (s *Store) MCPDelete(ctx context.Context, orgID uuid.UUID, kbType, key stri
 		case KBTypePolicies:
 			b.removePolicy()
 		}
-		b.addDelete(deleteKindFor(kbType), key)
+		if found.ExistsInLive {
+			b.addDelete(deleteKindFor(kbType), key)
+		}
 		return nil
 	})
 	if err != nil {

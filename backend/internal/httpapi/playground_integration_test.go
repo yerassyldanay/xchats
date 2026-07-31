@@ -250,3 +250,119 @@ func TestPlayground_UploadMaterial_WithDescription_BornReady(t *testing.T) {
 		t.Fatalf("extracted_text should be the description verbatim, got %q", text)
 	}
 }
+
+// zoneRow is the JSON shape of a kbstore.ZoneRow entry within DraftView.Zones.
+type zoneRow struct {
+	Ref               string `json:"ref"`
+	Name              string `json:"name"`
+	ZoneLevel         string `json:"zone_level"`
+	DeliveryAvailable bool   `json:"delivery_available"`
+	DeliveryCost      string `json:"delivery_cost"`
+	DeliveryInDays    string `json:"delivery_in_days"`
+	SalesStatus       string `json:"sales_status"`
+	Draft             bool   `json:"draft"`
+}
+
+func findZone(zones []zoneRow, ref string) *zoneRow {
+	for i := range zones {
+		if zones[i].Ref == ref {
+			return &zones[i]
+		}
+	}
+	return nil
+}
+
+// TestPlaygroundZones_UpsertApproveDeleteRoundTrip is Task 13's regression
+// guard: plan/mcp.md's own delivery-zone milestone required draft support at
+// every layer — routes, kbstore.UpsertZone/DeleteZone, and the approve-entity
+// whitelist — not just the kbstore plumbing MCP already exercised. This drives
+// the actual HTTP routes (POST/DELETE /playground/draft/zones,
+// /playground/draft/approve/delivery_zones/:ref), the same way an operator's
+// browser would, end to end: create as a pending zone → approve it into live →
+// delete it → approve the deletion.
+func TestPlaygroundZones_UpsertApproveDeleteRoundTrip(t *testing.T) {
+	h := newHarness(t)
+
+	// zoneGateReasons (zones.go) requires every policy row to carry blank flat
+	// delivery fields and a non-blank outside_zones_note the moment ANY zone
+	// exists — the seeded org starts with the opposite (flat delivery, no
+	// zones), so clear that first and approve it into live before a zone can
+	// ever pass the gate.
+	resp, env := h.patchJSON("/xchats/api/v1/playground/draft/policies", map[string]any{
+		"delivery_cost": "", "delivery_in_days": "", "outside_zones_note": "Доставка только в перечисленные зоны.",
+	})
+	if resp.StatusCode != 200 {
+		t.Fatalf("patch policies: status %d body=%v", resp.StatusCode, env)
+	}
+	resp, env = h.postJSON("/xchats/api/v1/playground/draft/approve", map[string]any{})
+	if resp.StatusCode != 200 {
+		t.Fatalf("approve policy edit: status %d body=%v", resp.StatusCode, env)
+	}
+
+	resp, _ = h.postJSON("/xchats/api/v1/playground/draft/zones", map[string]any{
+		"ref": "almaty", "name": "Алматы", "zone_level": "city",
+		"delivery_available": true, "delivery_cost": "1500", "delivery_in_days": "1-2",
+	})
+	if resp.StatusCode != 200 {
+		t.Fatalf("upsert zone: status %d", resp.StatusCode)
+	}
+
+	var draft struct {
+		Zones []zoneRow `json:"zones"`
+	}
+	h.get("/xchats/api/v1/playground/draft", &draft)
+	z := findZone(draft.Zones, "almaty")
+	if z == nil {
+		t.Fatal("newly upserted zone should appear in the merged draft view")
+	}
+	if !z.Draft {
+		t.Fatal("a brand new zone should be flagged draft (pending) before approval")
+	}
+	if z.SalesStatus != "active" {
+		t.Fatalf("sales_status should default to active when omitted, got %q", z.SalesStatus)
+	}
+
+	// Approve it individually by natural key — exercises the
+	// handlePlaygroundApproveEntity whitelist entry for delivery_zones.
+	resp, env = h.postJSON("/xchats/api/v1/playground/draft/approve/delivery_zones/almaty", map[string]any{})
+	if resp.StatusCode != 200 {
+		t.Fatalf("approve zone: status %d body=%v", resp.StatusCode, env)
+	}
+
+	h.get("/xchats/api/v1/playground/draft", &draft)
+	z = findZone(draft.Zones, "almaty")
+	if z == nil || z.Draft {
+		t.Fatalf("approved zone should be live (draft=false), got %+v", z)
+	}
+
+	// Delete it — a live zone with no pending edit stages a plain deletion.
+	// Draft() previews the RESULTING state (like every other entity kind, a
+	// pending deletion is suppressed from the merged view immediately), so the
+	// only observable difference between "staged" and "approved" is on the
+	// live side: GET /kb must still show it until the deletion is approved.
+	status, delEnv := h.del("/xchats/api/v1/playground/draft/zones/almaty")
+	if status != 200 {
+		t.Fatalf("delete zone: status %d body=%v", status, delEnv)
+	}
+	h.get("/xchats/api/v1/playground/draft", &draft)
+	if findZone(draft.Zones, "almaty") != nil {
+		t.Fatal("a zone staged for deletion should be suppressed from the merged draft view")
+	}
+	var live struct {
+		Zones []zoneRow `json:"zones"`
+	}
+	h.get("/xchats/api/v1/kb", &live)
+	if findZone(live.Zones, "almaty") == nil {
+		t.Fatal("the zone must still be live — only staged for deletion, not yet approved")
+	}
+
+	// Approve the deletion — now it must actually disappear from live.
+	resp, env = h.postJSON("/xchats/api/v1/playground/draft/approve/delivery_zones/almaty", map[string]any{})
+	if resp.StatusCode != 200 {
+		t.Fatalf("approve deletion: status %d body=%v", resp.StatusCode, env)
+	}
+	h.get("/xchats/api/v1/kb", &live)
+	if findZone(live.Zones, "almaty") != nil {
+		t.Fatal("zone should be gone from the live view after the deletion is approved")
+	}
+}

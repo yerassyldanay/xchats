@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
-import { Blocks, FlaskConical, Inbox, Library, LogOut, BookOpen, Radio } from 'lucide-vue-next'
+import { Blocks, Check, FlaskConical, Inbox, Library, LogOut, BookOpen, Radio } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
 import { evalsApi } from '../api/evals'
@@ -49,6 +49,22 @@ function isActive(match: string[]) {
 async function logout() {
   await auth.logout()
   router.push({ name: 'login' })
+}
+
+// Switching re-scopes the session server-side; every org-scoped store
+// (chats, accounts, KB, playground, ...) was loaded for the PREVIOUS
+// organization, so a full reload is the simplest way to guarantee nothing
+// stale from it survives (see auth.ts's switchOrganization doc comment).
+const switchingOrg = ref(false)
+async function switchOrg(orgId: string) {
+  if (switchingOrg.value || orgId === auth.org?.id) return
+  switchingOrg.value = true
+  try {
+    await auth.switchOrganization(orgId)
+    window.location.reload()
+  } catch {
+    switchingOrg.value = false
+  }
 }
 </script>
 
@@ -128,7 +144,20 @@ async function logout() {
                 <div class="text-xs text-muted-foreground truncate">{{ auth.user?.email }}</div>
               </div>
             </div>
-            <div class="text-xs text-muted-foreground mt-1 mb-1 px-1 truncate">{{ auth.org?.name }}</div>
+            <template v-if="auth.orgs.length > 1">
+              <div class="text-xs text-muted-foreground mt-1 px-1">Организация</div>
+              <DropdownMenuItem
+                v-for="o in auth.orgs"
+                :key="o.id"
+                class="justify-between gap-2"
+                :disabled="switchingOrg"
+                @select="switchOrg(o.id)"
+              >
+                <span class="truncate">{{ o.name }}</span>
+                <Check v-if="o.id === auth.org?.id" class="w-4 h-4 shrink-0" />
+              </DropdownMenuItem>
+            </template>
+            <div v-else class="text-xs text-muted-foreground mt-1 mb-1 px-1 truncate">{{ auth.org?.name }}</div>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               class="text-destructive focus:bg-destructive/10 focus:text-destructive font-medium"

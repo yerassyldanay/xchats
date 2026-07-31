@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"golang.org/x/crypto/argon2"
 )
@@ -85,6 +86,7 @@ func (s *Server) requireSession() gin.HandlerFunc {
 			return
 		}
 		c.Set("user", u)
+		c.Set("sid", sid)
 		c.Next()
 	}
 }
@@ -95,10 +97,47 @@ func currentUser(c *gin.Context) store.User {
 	return u
 }
 
-// orgOf resolves the current user's organization, failing the request if missing.
-// It is the scoping root for the multi-account inbox and the accounts manager.
+// currentSessionID returns the raw session id requireSession already
+// validated for this request — the active-organization lookup's key (Task
+// 15: an org selection is per-BROWSER-SESSION, not per-user, so a user
+// logged in on two devices can have each independently scoped).
+func currentSessionID(c *gin.Context) string {
+	v, _ := c.Get("sid")
+	sid, _ := v.(string)
+	return sid
+}
+
+// resolveOrg is orgOf's/mePayload's shared resolution core, parameterized
+// directly on userID/sessionID rather than reading them off gin context —
+// mePayload needs that distinction: handleLogin calls it for the
+// just-authenticated user BEFORE requireSession has ever run for this
+// request (there is no "current" context user yet at that point), so it
+// must resolve for the user it was explicitly handed, not currentUser(c).
+//
+// Resolution order: the session's explicit active_organization_id (set by
+// SetActiveOrganization, or by a verified MCP review handoff — plan Task 15),
+// re-validated against CURRENT membership on every call so a stale session
+// can never keep operating against an org the user was since removed from;
+// falling back to OrgForUser's single-org deterministic default when no
+// active organization is set (unchanged behavior for every user who has
+// never switched orgs or landed via a handoff — including sessionID=="",
+// which correctly resolves no active organization and falls through here).
+func (s *Server) resolveOrg(c *gin.Context, userID uuid.UUID, sessionID string) (store.Organization, error) {
+	if activeOrgID, ok, err := s.store.ActiveOrganizationForSession(ctx(c), sessionID); err == nil && ok {
+		if inOrg, err := s.store.UserInOrg(ctx(c), userID, activeOrgID); err == nil && inOrg {
+			if org, err := s.store.OrgByID(ctx(c), activeOrgID); err == nil {
+				return org, nil
+			}
+		}
+	}
+	return s.store.OrgForUser(ctx(c), userID)
+}
+
+// orgOf resolves the current request's organization, failing the request if
+// missing. It is the scoping root for the multi-account inbox, the accounts
+// manager, and the Playground/KB editors.
 func (s *Server) orgOf(c *gin.Context) (store.Organization, bool) {
-	org, err := s.store.OrgForUser(ctx(c), currentUser(c).ID)
+	org, err := s.resolveOrg(c, currentUser(c).ID, currentSessionID(c))
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, "no organization")
 		return store.Organization{}, false
@@ -147,11 +186,62 @@ func (s *Server) handleMe(c *gin.Context) {
 }
 
 func (s *Server) mePayload(c *gin.Context, u store.User) gin.H {
-	org, _ := s.store.OrgForUser(ctx(c), u.ID)
-	return gin.H{
-		"user": gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName},
-		"organization": gin.H{"id": org.ID, "name": org.Name},
+	// u.ID, never currentUser(c).ID: handleLogin calls this for the
+	// just-authenticated user before requireSession has ever populated gin
+	// context for this request (see resolveOrg's doc comment).
+	org, _ := s.resolveOrg(c, u.ID, currentSessionID(c))
+	orgs, err := s.store.OrgsForUser(ctx(c), u.ID)
+	if err != nil {
+		orgs = nil
 	}
+	orgList := make([]gin.H, 0, len(orgs))
+	for _, o := range orgs {
+		orgList = append(orgList, gin.H{"id": o.ID, "name": o.Name})
+	}
+	return gin.H{
+		"user":         gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName},
+		"organization": gin.H{"id": org.ID, "name": org.Name},
+		// organizations is the full membership set, for the frontend's
+		// active-organization switcher (Task 15) — omitted entirely from
+		// this payload for a single-org user would be indistinguishable
+		// from a load failure, so it is always present, even as a
+		// one-element list.
+		"organizations": orgList,
+	}
+}
+
+type setActiveOrgReq struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+}
+
+// handleSetActiveOrganization lets an operator explicitly switch which
+// organization their session is scoped to (Task 15's frontend selector) —
+// the same active_organization_id column a verified review-handoff redirect
+// sets, just triggered directly instead of via a signed token. Membership is
+// re-checked here (never trust the id merely because it was posted); orgOf
+// re-checks it AGAIN on every subsequent request, so removal from an org
+// takes effect immediately even mid-session.
+func (s *Server) handleSetActiveOrganization(c *gin.Context) {
+	var req setActiveOrgReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.OrganizationID == uuid.Nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "organization_id is required")
+		return
+	}
+	u := currentUser(c)
+	inOrg, err := s.store.UserInOrg(ctx(c), u.ID, req.OrganizationID)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "membership check failed")
+		return
+	}
+	if !inOrg {
+		fail(c, http.StatusForbidden, ErrUnauthorized, "you are not a member of that organization")
+		return
+	}
+	if err := s.store.SetActiveOrganization(ctx(c), currentSessionID(c), req.OrganizationID); err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "failed to switch organization")
+		return
+	}
+	ok(c, s.mePayload(c, u))
 }
 
 func (s *Server) handleGetOrg(c *gin.Context) {

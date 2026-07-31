@@ -42,6 +42,15 @@ func (s *Server) handleAuthorizationServerMetadata(c *gin.Context) {
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": []string{"none"},
 		"scopes_supported":                      mcpauth.AllScopes,
+		// client_id_metadata_document_supported advertises that a client may
+		// self-register by naming an https:// URL as its client_id (served
+		// AT that URL) instead of calling POST /oauth/register first — this
+		// server already resolves that shape (mcpauth.FetchCIMD /
+		// Store.ResolveClient); this field just makes the capability
+		// discoverable. Field name is this ecosystem's current emerging
+		// convention — best-effort pending a real interop pass, same caveat
+		// as mcpauth/cimd.go's own doc comment.
+		"client_id_metadata_document_supported": true,
 	})
 }
 

@@ -60,6 +60,9 @@ func (s *Server) validateAuthorizeParams(c *gin.Context) (authorizeParams, mcpau
 	} else if p.Resource != s.cfg.MCPResourceURL() {
 		return p, mcpauth.Client{}, "resource must be " + s.cfg.MCPResourceURL()
 	}
+	if _, err := mcpauth.ValidateScope(p.Scope); err != nil {
+		return p, mcpauth.Client{}, err.Error()
+	}
 	client, err := s.mcpAuth.Store.ResolveClient(ctx(c), p.ClientID, s.cfg.KBAllowPrivateFetch)
 	if err != nil {
 		return p, mcpauth.Client{}, "unknown client_id — register it first (Dynamic Client Registration or a Client ID Metadata Document)"
@@ -85,7 +88,7 @@ func (s *Server) handleOAuthAuthorize(c *gin.Context) {
 		return
 	}
 
-	user, ok := s.oauthSessionUser(c)
+	user, sid, ok := s.oauthSessionUser(c)
 	if !ok {
 		s.renderOAuthLogin(c, client)
 		return
@@ -95,23 +98,25 @@ func (s *Server) handleOAuthAuthorize(c *gin.Context) {
 		s.renderOAuthError(c, "У вашей учётной записи нет организации.")
 		return
 	}
-	s.renderOAuthConsent(c, client, user, orgs, params)
+	s.renderOAuthConsent(c, client, user, sid, orgs, params)
 }
 
 // oauthSessionUser reads the existing xchats session cookie — the SAME
 // cookie requireSession checks — without failing the request when absent
 // (the authorize page's whole job is to handle "not logged in" itself, by
-// showing the login form instead of a 401).
-func (s *Server) oauthSessionUser(c *gin.Context) (store.User, bool) {
+// showing the login form instead of a 401). The raw session id is returned
+// alongside the user because the CSRF token (mcp_oauth_csrf.go) is derived
+// from it.
+func (s *Server) oauthSessionUser(c *gin.Context) (store.User, string, bool) {
 	sid, err := c.Cookie(sessionCookie)
 	if err != nil || sid == "" {
-		return store.User{}, false
+		return store.User{}, "", false
 	}
 	user, err := s.store.UserForSession(ctx(c), sid)
 	if err != nil {
-		return store.User{}, false
+		return store.User{}, "", false
 	}
-	return user, true
+	return user, sid, true
 }
 
 func (s *Server) renderOAuthError(c *gin.Context, message string) {
@@ -128,10 +133,11 @@ func (s *Server) renderOAuthLogin(c *gin.Context, client mcpauth.Client) {
 	})
 }
 
-func (s *Server) renderOAuthConsent(c *gin.Context, client mcpauth.Client, user store.User, orgs []store.Organization, p authorizeParams) {
+func (s *Server) renderOAuthConsent(c *gin.Context, client mcpauth.Client, user store.User, sessionID string, orgs []store.Organization, p authorizeParams) {
 	hidden := map[string]string{
 		"client_id": p.ClientID, "redirect_uri": p.RedirectURI, "scope": p.Scope, "state": p.State,
 		"code_challenge": p.CodeChallenge, "code_challenge_method": p.CodeChallengeMethod, "resource": p.Resource,
+		"csrf_token": s.oauthCSRFToken(sessionID),
 	}
 	c.Status(http.StatusOK)
 	c.Header("Content-Type", "text/html; charset=utf-8")
@@ -185,9 +191,18 @@ func (s *Server) handleOAuthDecision(c *gin.Context) {
 		s.renderOAuthError(c, "Коннектор MCP не настроен на этом сервере.")
 		return
 	}
-	user, ok := s.oauthSessionUser(c)
+	user, sid, ok := s.oauthSessionUser(c)
 	if !ok {
 		s.renderOAuthError(c, "Сессия истекла. Начните подключение заново.")
+		return
+	}
+	// CSRF: the consent page embedded a token bound to THIS session id
+	// (mcp_oauth_csrf.go) — SameSite=Lax on the session cookie alone still
+	// allows a top-level cross-site navigation (e.g. an auto-submitting form
+	// on an attacker's page) to carry the cookie, so this is checked
+	// explicitly rather than relied on implicitly.
+	if !s.verifyOAuthCSRFToken(sid, c.PostForm("csrf_token")) {
+		s.renderOAuthError(c, "Недействительный запрос (CSRF). Начните подключение заново.")
 		return
 	}
 
@@ -227,7 +242,12 @@ func (s *Server) handleOAuthDecision(c *gin.Context) {
 		return
 	}
 
-	scope := mcpauth.FormatScope(mcpauth.ParseScope(orDefault(c.PostForm("scope"), mcpauth.FormatScope(mcpauth.AllScopes))))
+	requestedScopes, err := mcpauth.ValidateScope(orDefault(c.PostForm("scope"), mcpauth.FormatScope(mcpauth.AllScopes)))
+	if err != nil {
+		s.renderOAuthError(c, "Недействительная область доступа (scope): "+err.Error())
+		return
+	}
+	scope := mcpauth.FormatScope(requestedScopes)
 	ttl := time.Duration(s.cfg.MCPAuthCodeTTLSeconds) * time.Second
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
@@ -268,6 +288,10 @@ func (s *Server) redirectWithQuery(c *gin.Context, redirectURI string, params ma
 // --- token / revoke / register --------------------------------------------
 
 func (s *Server) handleOAuthToken(c *gin.Context) {
+	// RFC 6749 §5.1: a token response (success or error) must never be
+	// cached — set unconditionally, before any return path below.
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
 	if !s.mcpAuthEnabled() {
 		oauthTokenError(c, http.StatusServiceUnavailable, "server_error", "MCP connector not configured")
 		return
@@ -283,9 +307,13 @@ func (s *Server) handleOAuthToken(c *gin.Context) {
 	}
 	switch c.PostForm("grant_type") {
 	case "authorization_code":
-		tok, err := s.mcpAuth.ExchangeAuthorizationCode(ctx(c), clientID, c.PostForm("redirect_uri"), c.PostForm("code"), c.PostForm("code_verifier"))
+		// resource (RFC 8707) is optional here — a client MAY repeat it from
+		// the authorize request; if it does, mcpauth re-checks it against
+		// what was actually bound to the code, rather than only carrying it
+		// through unchecked.
+		tok, err := s.mcpAuth.ExchangeAuthorizationCode(ctx(c), clientID, c.PostForm("redirect_uri"), c.PostForm("resource"), c.PostForm("code"), c.PostForm("code_verifier"))
 		if err != nil {
-			oauthTokenError(c, http.StatusBadRequest, "invalid_grant", "the authorization code is invalid, expired, redirect_uri mismatched, or already used")
+			oauthTokenError(c, http.StatusBadRequest, "invalid_grant", "the authorization code is invalid, expired, redirect_uri/resource mismatched, or already used")
 			return
 		}
 		c.JSON(http.StatusOK, tok)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -18,12 +19,27 @@ import (
 // carries the shared KB Manager resource hint so a capable host can open it
 // showing the right view (plan/mcp.md §5: "kb_read, kb_summary, kb_info, and
 // mutation results may attach the shared KB Manager resource with the
-// appropriate initial view").
-func toolResult(summary string, structured any, view string) map[string]any {
+// appropriate initial view") — plus, when SignReviewHandoff is wired
+// (Task 15), a one-time organization-bound review URL under
+// _meta["xchats/reviewUrl"], so the widget's "Review and publish in Xchats"
+// link always lands on the SAME organization the calling tool operated on,
+// not whichever org a bare /playground link would default to for a
+// multi-organization user.
+func (s *Server) toolResult(summary string, structured any, view string, orgID, userID uuid.UUID) map[string]any {
+	meta := merge(widgetMeta(), map[string]any{"xchats/widgetView": view})
+	if s.Deps.SignReviewHandoff != nil {
+		if url, err := s.Deps.SignReviewHandoff(userID, orgID); err != nil {
+			if s.Deps.Log != nil {
+				s.Deps.Log.Warn("mcpserver: sign review handoff failed", "err", err)
+			}
+		} else {
+			meta["xchats/reviewUrl"] = url
+		}
+	}
 	out := map[string]any{
 		"content": []map[string]any{{"type": "text", "text": summary}},
 		"isError": false,
-		"_meta":   merge(widgetMeta(), map[string]any{"xchats/widgetView": view}),
+		"_meta":   meta,
 	}
 	if structured != nil {
 		out["structuredContent"] = structured
@@ -35,6 +51,29 @@ func toolError(message string) map[string]any {
 	return map[string]any{
 		"content": []map[string]any{{"type": "text", "text": message}},
 		"isError": true,
+	}
+}
+
+// scopeErrorResult is a scope-failure tool result carrying a structured
+// runtime challenge under _meta, in addition to the model-facing text — a
+// capable host can read _meta["mcp/www_authenticate"] to know PROGRAMMATICALLY
+// that re-authorization with an additional scope would resolve this, the same
+// role an HTTP 401's WWW-Authenticate header plays for a browser client,
+// rather than only a string the model must interpret. This exact field name
+// is this ecosystem's current emerging convention for an in-band auth
+// challenge — best-effort pending a real interop pass, same caveat as
+// tools.go's securitySchemes/widget-hint fields.
+func scopeErrorResult(toolName, scope string) map[string]any {
+	return map[string]any{
+		"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("this connection was not granted the %q scope required by %s", scope, toolName)}},
+		"isError": true,
+		"_meta": map[string]any{
+			"mcp/www_authenticate": map[string]any{
+				"error":             "insufficient_scope",
+				"error_description": fmt.Sprintf("%s requires the %q scope", toolName, scope),
+				"scope":             scope,
+			},
+		},
 	}
 }
 
@@ -58,6 +97,10 @@ func mapKBError(err error) map[string]any {
 	var mediaErr *kbstore.ErrMediaReference
 	if errors.As(err, &mediaErr) {
 		return toolError(mediaErr.Error())
+	}
+	var enumErr *kbstore.ErrInvalidEnumValue
+	if errors.As(err, &enumErr) {
+		return toolError(enumErr.Error())
 	}
 	var cannotDelete *kbstore.ErrCannotDelete
 	if errors.As(err, &cannotDelete) {
@@ -96,11 +139,11 @@ func (s *Server) dispatchToolsCall(ctx context.Context, principal mcpauth.Princi
 	// still travels over the same bearer token, so the same scope gate below
 	// applies to it — there is no separate enforcement path.
 	if !principal.HasScope(scope) {
-		return resultResponse(req.ID, toolError(fmt.Sprintf("this connection was not granted the %q scope required by %s", scope, params.Name)))
+		return resultResponse(req.ID, scopeErrorResult(params.Name, scope))
 	}
 
 	orgID := principal.OrganizationID
-	result, herr := s.callTool(ctx, orgID, params.Name, args)
+	result, herr := s.callTool(ctx, orgID, principal.UserID, params.Name, args)
 	if herr != nil {
 		return errorResponse(req.ID, codeInvalidParams, herr.Error())
 	}
@@ -142,32 +185,32 @@ var requiredScope = map[string]string{
 // params JSON-RPC error; every KB-domain outcome (conflict, ambiguity,
 // validation) is folded into the returned map via mapKBError instead, so it
 // reaches the model as ordinary tool output.
-func (s *Server) callTool(ctx context.Context, orgID uuid.UUID, name string, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) callTool(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, name string, args map[string]json.RawMessage) (map[string]any, error) {
 	switch name {
 	case toolKBAssistantUpsert:
-		return s.handleAssistantUpsert(ctx, orgID, args)
+		return s.handleAssistantUpsert(ctx, orgID, userID, args)
 	case toolKBTopicUpsert:
-		return s.handleTopicUpsert(ctx, orgID, args)
+		return s.handleTopicUpsert(ctx, orgID, userID, args)
 	case toolKBProductUpsert:
-		return s.handleProductUpsert(ctx, orgID, args)
+		return s.handleProductUpsert(ctx, orgID, userID, args)
 	case toolKBTariffUpsert:
-		return s.handleTariffUpsert(ctx, orgID, args)
+		return s.handleTariffUpsert(ctx, orgID, userID, args)
 	case toolKBContactsUpsert:
-		return s.handleContactsUpsert(ctx, orgID, args)
+		return s.handleContactsUpsert(ctx, orgID, userID, args)
 	case toolKBPoliciesUpsert:
-		return s.handlePoliciesUpsert(ctx, orgID, args)
+		return s.handlePoliciesUpsert(ctx, orgID, userID, args)
 	case toolKBDeliveryZoneUpsert:
-		return s.handleDeliveryZoneUpsert(ctx, orgID, args)
+		return s.handleDeliveryZoneUpsert(ctx, orgID, userID, args)
 	case toolKBRead:
-		return s.handleKBRead(ctx, orgID, args)
+		return s.handleKBRead(ctx, orgID, userID, args)
 	case toolKBDelete:
-		return s.handleKBDelete(ctx, orgID, args)
+		return s.handleKBDelete(ctx, orgID, userID, args)
 	case toolKBSummary:
-		return s.handleKBSummary(ctx, orgID, args)
+		return s.handleKBSummary(ctx, orgID, userID, args)
 	case toolKBInfo:
-		return s.handleKBInfo(ctx, orgID, args)
+		return s.handleKBInfo(ctx, orgID, userID, args)
 	case toolKBMediaUpload:
-		return s.handleKBMediaUpload(ctx, orgID, args)
+		return s.handleKBMediaUpload(ctx, orgID, userID, args)
 	default:
 		return toolError("unknown tool: " + name), nil
 	}
@@ -175,10 +218,13 @@ func (s *Server) callTool(ctx context.Context, orgID uuid.UUID, name string, arg
 
 // --- typed upserts ----------------------------------------------------
 
-func (s *Server) handleAssistantUpsert(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) handleAssistantUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	changes, err := rawObject(args["changes"])
 	if err != nil {
 		return nil, fmt.Errorf("changes: %w", err)
+	}
+	if err := rejectUnknownFields(changes, "persona", "mission", "guardrails", "language_policy", "reply_max_words"); err != nil {
+		return nil, err
 	}
 	ch := kbstore.AssistantChanges{}
 	if ch.Persona, err = optString(changes, "persona"); err != nil {
@@ -200,17 +246,21 @@ func (s *Server) handleAssistantUpsert(ctx context.Context, orgID uuid.UUID, arg
 	if err != nil {
 		return nil, err
 	}
-	res, kerr := s.Deps.KB.MCPUpsertAssistant(ctx, orgID, ch, expected)
+	res, kerr := s.Deps.KB.MCPUpsertAssistant(ctx, orgID, userID, ch, expected)
 	if kerr != nil {
 		return mapKBError(kerr), nil
 	}
-	return toolResult(fmt.Sprintf("Assistant configuration updated in draft (draft_version=%d).", res.DraftVersion), res, "draft"), nil
+	return s.toolResult(fmt.Sprintf("Assistant configuration updated in draft (draft_version=%d).", res.DraftVersion), res, "draft", orgID, userID), nil
 }
 
-func (s *Server) handleTopicUpsert(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) handleTopicUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	changes, err := rawObject(args["changes"])
 	if err != nil {
 		return nil, fmt.Errorf("changes: %w", err)
+	}
+	if err := rejectUnknownFields(changes, "title", "body_md", "featured_image", "illustration_images",
+		"explainer_videos", "narration_audio_files", "reference_documents"); err != nil {
+		return nil, err
 	}
 	ch := kbstore.TopicChanges{}
 	if ch.Title, err = optString(changes, "title"); err != nil {
@@ -238,17 +288,26 @@ func (s *Server) handleTopicUpsert(ctx context.Context, orgID uuid.UUID, args ma
 	if err != nil {
 		return nil, err
 	}
-	res, kerr := s.Deps.KB.MCPUpsertTopic(ctx, orgID, stringField(args, "slug"), ch, expected, provenanceString(args))
+	prov, err := parseProvenance(args)
+	if err != nil {
+		return nil, err
+	}
+	res, kerr := s.Deps.KB.MCPUpsertTopic(ctx, orgID, userID, stringField(args, "slug"), ch, expected, prov)
 	if kerr != nil {
 		return mapKBError(kerr), nil
 	}
-	return toolResult(upsertSummary("topic", res), res, "draft"), nil
+	return s.toolResult(upsertSummary("topic", res), res, "draft", orgID, userID), nil
 }
 
-func (s *Server) handleProductUpsert(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) handleProductUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	changes, err := rawObject(args["changes"])
 	if err != nil {
 		return nil, fmt.Errorf("changes: %w", err)
+	}
+	if err := rejectUnknownFields(changes, "name", "price", "description", "category", "in_stock", "sales_status",
+		"featured_image", "gallery_images", "demo_videos", "audio_description_files", "certificate_documents",
+		"manual_documents", "guarantee_documents", "specification_documents"); err != nil {
+		return nil, err
 	}
 	ch := kbstore.ProductChanges{}
 	if ch.Name, err = optString(changes, "name"); err != nil {
@@ -297,17 +356,26 @@ func (s *Server) handleProductUpsert(ctx context.Context, orgID uuid.UUID, args 
 	if err != nil {
 		return nil, err
 	}
-	res, kerr := s.Deps.KB.MCPUpsertProduct(ctx, orgID, stringField(args, "ref"), ch, expected, provenanceString(args))
+	prov, err := parseProvenance(args)
+	if err != nil {
+		return nil, err
+	}
+	res, kerr := s.Deps.KB.MCPUpsertProduct(ctx, orgID, userID, stringField(args, "ref"), ch, expected, prov)
 	if kerr != nil {
 		return mapKBError(kerr), nil
 	}
-	return toolResult(upsertSummary("product", res), res, "draft"), nil
+	return s.toolResult(upsertSummary("product", res), res, "draft", orgID, userID), nil
 }
 
-func (s *Server) handleTariffUpsert(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) handleTariffUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	changes, err := rawObject(args["changes"])
 	if err != nil {
 		return nil, fmt.Errorf("changes: %w", err)
+	}
+	if err := rejectUnknownFields(changes, "name", "price", "limit_text", "fee", "summary", "pricing_type",
+		"advantages", "disadvantages", "sales_status", "featured_image", "pricing_images", "explainer_videos",
+		"terms_documents"); err != nil {
+		return nil, err
 	}
 	ch := kbstore.TariffChanges{}
 	if ch.Name, err = optString(changes, "name"); err != nil {
@@ -353,17 +421,26 @@ func (s *Server) handleTariffUpsert(ctx context.Context, orgID uuid.UUID, args m
 	if err != nil {
 		return nil, err
 	}
-	res, kerr := s.Deps.KB.MCPUpsertTariff(ctx, orgID, stringField(args, "ref"), ch, expected, provenanceString(args))
+	prov, err := parseProvenance(args)
+	if err != nil {
+		return nil, err
+	}
+	res, kerr := s.Deps.KB.MCPUpsertTariff(ctx, orgID, userID, stringField(args, "ref"), ch, expected, prov)
 	if kerr != nil {
 		return mapKBError(kerr), nil
 	}
-	return toolResult(upsertSummary("tariff", res), res, "draft"), nil
+	return s.toolResult(upsertSummary("tariff", res), res, "draft", orgID, userID), nil
 }
 
-func (s *Server) handleContactsUpsert(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) handleContactsUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	changes, err := rawObject(args["changes"])
 	if err != nil {
 		return nil, fmt.Errorf("changes: %w", err)
+	}
+	if err := rejectUnknownFields(changes, "whatsapp", "email", "address", "legal_information", "callback_time",
+		"working_hours", "phone", "website", "instagram", "contact_card_image", "location_map_image",
+		"company_legal_documents"); err != nil {
+		return nil, err
 	}
 	ch := kbstore.ContactsChanges{}
 	for field, dst := range map[string]**string{
@@ -390,17 +467,26 @@ func (s *Server) handleContactsUpsert(ctx context.Context, orgID uuid.UUID, args
 	if err != nil {
 		return nil, err
 	}
-	res, kerr := s.Deps.KB.MCPUpsertContacts(ctx, orgID, ch, expected, provenanceString(args))
+	prov, err := parseProvenance(args)
+	if err != nil {
+		return nil, err
+	}
+	res, kerr := s.Deps.KB.MCPUpsertContacts(ctx, orgID, userID, ch, expected, prov)
 	if kerr != nil {
 		return mapKBError(kerr), nil
 	}
-	return toolResult(fmt.Sprintf("Contacts updated in draft (draft_version=%d).", res.DraftVersion), res, "draft"), nil
+	return s.toolResult(fmt.Sprintf("Contacts updated in draft (draft_version=%d).", res.DraftVersion), res, "draft", orgID, userID), nil
 }
 
-func (s *Server) handlePoliciesUpsert(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) handlePoliciesUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	changes, err := rawObject(args["changes"])
 	if err != nil {
 		return nil, fmt.Errorf("changes: %w", err)
+	}
+	if err := rejectUnknownFields(changes, "delivery_cost", "delivery_in_days", "free_delivery_from", "min_order",
+		"prepayment", "installment", "return_period_in_days", "warranty", "outside_zones_note",
+		"commerce_policy_documents"); err != nil {
+		return nil, err
 	}
 	ch := kbstore.PoliciesChanges{}
 	for field, dst := range map[string]**string{
@@ -423,17 +509,25 @@ func (s *Server) handlePoliciesUpsert(ctx context.Context, orgID uuid.UUID, args
 	if err != nil {
 		return nil, err
 	}
-	res, kerr := s.Deps.KB.MCPUpsertPolicies(ctx, orgID, ch, expected, provenanceString(args))
+	prov, err := parseProvenance(args)
+	if err != nil {
+		return nil, err
+	}
+	res, kerr := s.Deps.KB.MCPUpsertPolicies(ctx, orgID, userID, ch, expected, prov)
 	if kerr != nil {
 		return mapKBError(kerr), nil
 	}
-	return toolResult(fmt.Sprintf("Policies updated in draft (draft_version=%d).", res.DraftVersion), res, "draft"), nil
+	return s.toolResult(fmt.Sprintf("Policies updated in draft (draft_version=%d).", res.DraftVersion), res, "draft", orgID, userID), nil
 }
 
-func (s *Server) handleDeliveryZoneUpsert(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) handleDeliveryZoneUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	changes, err := rawObject(args["changes"])
 	if err != nil {
 		return nil, fmt.Errorf("changes: %w", err)
+	}
+	if err := rejectUnknownFields(changes, "name", "zone_level", "parent_ref", "delivery_available",
+		"delivery_cost", "delivery_in_days", "notes", "sales_status"); err != nil {
+		return nil, err
 	}
 	ch := kbstore.DeliveryZoneChanges{}
 	for field, dst := range map[string]**string{
@@ -454,11 +548,15 @@ func (s *Server) handleDeliveryZoneUpsert(ctx context.Context, orgID uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
-	res, kerr := s.Deps.KB.MCPUpsertDeliveryZone(ctx, orgID, stringField(args, "ref"), ch, expected, provenanceString(args))
+	prov, err := parseProvenance(args)
+	if err != nil {
+		return nil, err
+	}
+	res, kerr := s.Deps.KB.MCPUpsertDeliveryZone(ctx, orgID, userID, stringField(args, "ref"), ch, expected, prov)
 	if kerr != nil {
 		return mapKBError(kerr), nil
 	}
-	return toolResult(upsertSummary("delivery zone", res), res, "draft"), nil
+	return s.toolResult(upsertSummary("delivery zone", res), res, "draft", orgID, userID), nil
 }
 
 func upsertSummary(label string, res kbstore.UpsertResult) string {
@@ -482,10 +580,10 @@ func capitalize(s string) string {
 
 // --- shared tools -------------------------------------------------------
 
-func (s *Server) handleKBRead(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
-	types := stringSliceField(args, "types")
-	if err := validateTypes(types); err != nil {
-		return nil, err
+func (s *Server) handleKBRead(ctx context.Context, orgID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+	types, typeErr := normalizeTypes(stringSliceField(args, "types"))
+	if typeErr != nil {
+		return typeErr, nil
 	}
 	source := stringField(args, "source")
 	if source == "" {
@@ -495,10 +593,10 @@ func (s *Server) handleKBRead(ctx context.Context, orgID uuid.UUID, args map[str
 	if err != nil {
 		return nil, err
 	}
-	return toolResult(fmt.Sprintf("%d record(s).", len(page.Items)), page, "record"), nil
+	return s.toolResult(fmt.Sprintf("%d record(s).", len(page.Items)), page, "record", orgID, userID), nil
 }
 
-func (s *Server) handleKBDelete(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+func (s *Server) handleKBDelete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	kbType := stringField(args, "type")
 	key := stringField(args, "key")
 	if kbType == "" || key == "" {
@@ -508,20 +606,24 @@ func (s *Server) handleKBDelete(ctx context.Context, orgID uuid.UUID, args map[s
 	if err != nil {
 		return nil, err
 	}
-	res, kerr := s.Deps.KB.MCPDelete(ctx, orgID, kbType, key, expected)
+	res, kerr := s.Deps.KB.MCPDelete(ctx, orgID, userID, kbType, key, expected)
 	if kerr != nil {
 		return mapKBError(kerr), nil
 	}
-	return toolResult(fmt.Sprintf("%s %q marked for deletion in draft (draft_version=%d). It is removed from the live KB only after human review and publish.",
-		capitalize(kbType), key, res.DraftVersion), res, "draft"), nil
+	return s.toolResult(fmt.Sprintf("%s %q marked for deletion in draft (draft_version=%d). It is removed from the live KB only after human review and publish.",
+		capitalize(kbType), key, res.DraftVersion), res, "draft", orgID, userID), nil
 }
 
-func (s *Server) handleKBSummary(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
-	types := stringSliceField(args, "types")
-	if err := validateTypes(types); err != nil {
-		return nil, err
+func (s *Server) handleKBSummary(ctx context.Context, orgID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+	types, typeErr := normalizeTypes(stringSliceField(args, "types"))
+	if typeErr != nil {
+		return typeErr, nil
 	}
-	index, err := s.Deps.KB.IdentityIndex(ctx, orgID, types)
+	source := stringField(args, "source")
+	if source == "" {
+		source = "both"
+	}
+	index, err := s.Deps.KB.IdentityIndex(ctx, orgID, types, source, stringField(args, "query"))
 	if err != nil {
 		return nil, err
 	}
@@ -557,16 +659,16 @@ func (s *Server) handleKBSummary(ctx context.Context, orgID uuid.UUID, args map[
 	if end < len(items) {
 		page["next_cursor"] = fmt.Sprintf("%d", end)
 	}
-	return toolResult(fmt.Sprintf("%d record(s) (draft_version=%d).", len(items), version), page, "all"), nil
+	return s.toolResult(fmt.Sprintf("%d record(s) (draft_version=%d).", len(items), version), page, "all", orgID, userID), nil
 }
 
-func (s *Server) handleKBInfo(ctx context.Context, orgID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
-	return toolResult(serverInstructions, map[string]any{
+func (s *Server) handleKBInfo(ctx context.Context, orgID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+	return s.toolResult(serverInstructions, map[string]any{
 		"types":             kbstore.AllKBTypes,
 		"natural_key_main":  kbstore.NaturalKeyMain,
 		"media_field_kinds": mediaFieldKindsInfo(),
 		"frontend_base_url": s.Deps.FrontendBaseURL,
-	}, "all"), nil
+	}, "all", orgID, userID), nil
 }
 
 func mediaFieldKindsInfo() map[string]string {
@@ -584,15 +686,41 @@ func mediaFieldKindsInfo() map[string]string {
 	return out
 }
 
-func validateTypes(types []string) error {
+// typeAliases maps the plural spelling plan/mcp.md's own worked examples use
+// (kb_summary(types=["tariffs"], ...), kb_read(types=["products"])) to this
+// server's canonical singular vocabulary. topic/product/tariff/
+// delivery_zone are singular internally (kbstore.KBTypeTopic etc.);
+// contacts/policies are already plural-shaped, so only the singular four
+// need an alias.
+var typeAliases = map[string]string{
+	"topics": kbstore.KBTypeTopic, "products": kbstore.KBTypeProduct,
+	"tariffs": kbstore.KBTypeTariff, "delivery_zones": kbstore.KBTypeDeliveryZone,
+}
+
+// normalizeTypes resolves plural aliases to their canonical singular form and
+// validates the result against the closed type vocabulary. An unrecognized
+// type comes back as an isError:true tool result (ok!=nil), never a
+// JSON-RPC error — matching this file's own stated policy (dispatchToolsCall's
+// doc comment) that a caller-correctable domain problem is guidance for the
+// model, not a transport failure. types==nil (omitted, meaning "every type")
+// passes through unchanged.
+func normalizeTypes(types []string) (normalized []string, toolErr map[string]any) {
+	if len(types) == 0 {
+		return types, nil
+	}
 	valid := map[string]bool{}
 	for _, t := range kbstore.AllKBTypes {
 		valid[t] = true
 	}
+	out := make([]string, 0, len(types))
 	for _, t := range types {
-		if !valid[t] {
-			return fmt.Errorf("unknown type %q", t)
+		if canon, ok := typeAliases[t]; ok {
+			t = canon
 		}
+		if !valid[t] {
+			return nil, toolError(fmt.Sprintf("unknown type %q — valid types: %s", t, strings.Join(kbstore.AllKBTypes, ", ")))
+		}
+		out = append(out, t)
 	}
-	return nil
+	return out, nil
 }

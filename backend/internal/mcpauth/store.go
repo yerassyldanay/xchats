@@ -146,7 +146,11 @@ type authorizationCodeRow struct {
 // second exchange attempt (replay) always fails, per OAuth 2.1's single-use
 // requirement. clientID and redirectURI must match exactly what the code was
 // issued for; codeVerifier is checked against the stored code_challenge.
-func (s *Store) ConsumeAuthorizationCode(ctx context.Context, clientID, redirectURI, code, codeVerifier string) (authorizationCodeRow, error) {
+// resource (RFC 8707) is optional at the token endpoint — a client may repeat
+// it from the authorize request, and if it does, it must match exactly what
+// was bound there; omitting it is not an error (the code's own bound resource
+// still governs the minted token).
+func (s *Store) ConsumeAuthorizationCode(ctx context.Context, clientID, redirectURI, resource, code, codeVerifier string) (authorizationCodeRow, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return authorizationCodeRow{}, err
@@ -168,7 +172,8 @@ func (s *Store) ConsumeAuthorizationCode(ctx context.Context, clientID, redirect
 		return authorizationCodeRow{}, err
 	}
 	if consumedAt != nil || time.Now().After(expiresAt) ||
-		row.ClientID != clientID || row.RedirectURI != redirectURI {
+		row.ClientID != clientID || row.RedirectURI != redirectURI ||
+		(resource != "" && row.Resource != resource) {
 		return authorizationCodeRow{}, ErrInvalidGrant
 	}
 	if !VerifyPKCE(codeVerifier, row.CodeChallenge, row.CodeChallengeMethod) {

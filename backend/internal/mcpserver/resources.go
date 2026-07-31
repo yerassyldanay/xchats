@@ -24,8 +24,32 @@ import (
 // (plan/mcp.md §6: "Use one reusable fullscreen resource").
 const widgetResourceURI = "ui://xchats/kb-manager.html"
 
+// widgetMimeType marks the resource as an MCP App per the standard
+// "profile=mcp-app" parameter (plan Task 9), not a bare text/html a host
+// might render as inert markup instead of an interactive widget.
+const widgetMimeType = "text/html;profile=mcp-app"
+
 //go:embed widget/kb-manager.html
 var widgetHTML string
+
+// widgetResourceMeta is the CSP metadata a host should apply to the widget's
+// iframe (plan Task 9). The widget only ever talks to its host via
+// postMessage/window.openai (no network calls of its own — every KB read or
+// write goes through callTool, see kb-manager.html), so both connect-src and
+// frame-src stay locked to 'none'; images/media it renders are same-origin
+// resource references the host itself resolves, not fetched by the widget.
+// Keyed under BOTH the emerging ChatGPT Apps SDK convention and a generic
+// "ui" key, same defensive-dual-key caveat as tools.go's widgetMeta.
+func widgetResourceMeta() map[string]any {
+	csp := map[string]any{
+		"connect-src": []string{"'none'"},
+		"frame-src":   []string{"'none'"},
+	}
+	return map[string]any{
+		"openai/widgetCSP": csp,
+		"ui":               map[string]any{"csp": csp},
+	}
+}
 
 func (s *Server) handleResourcesList() map[string]any {
 	return map[string]any{
@@ -33,7 +57,8 @@ func (s *Server) handleResourcesList() map[string]any {
 			"uri":         widgetResourceURI,
 			"name":        "KB Manager",
 			"description": "All / Live / Draft / Record / Media / Publish views over the Xchats knowledge base.",
-			"mimeType":    "text/html",
+			"mimeType":    widgetMimeType,
+			"_meta":       widgetResourceMeta(),
 		}},
 	}
 }
@@ -51,8 +76,9 @@ func (s *Server) dispatchResourcesRead(req Request) Response {
 	return resultResponse(req.ID, map[string]any{
 		"contents": []map[string]any{{
 			"uri":      widgetResourceURI,
-			"mimeType": "text/html",
+			"mimeType": widgetMimeType,
 			"text":     widgetHTML,
+			"_meta":    widgetResourceMeta(),
 		}},
 	})
 }

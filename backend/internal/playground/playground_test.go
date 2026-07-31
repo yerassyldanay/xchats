@@ -66,7 +66,7 @@ func TestBuildFromMaterialsToApprove(t *testing.T) {
 
 	// 2. Build: synthesize the materials into the draft blob.
 	b := playground.NewBuilder(nil, nil)
-	res, err := b.RunTurn(ctx, kb, orgID, "Вот мой тариф, собери базу знаний")
+	res, err := b.RunTurn(ctx, kb, orgID, uuid.Nil, "Вот мой тариф, собери базу знаний")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestBuildFromMaterialsToApprove(t *testing.T) {
 	// 3. Confirm the detected fact onto its typed tariff column (what the resolve
 	// endpoint does via SetFactField) + resolve the popup — both are pending in the
 	// draft blob until approve.
-	if err := kb.SetFactField(ctx, orgID, "tariff", "item_1", "price", "25 000 ₸/мес"); err != nil {
+	if err := kb.SetFactField(ctx, orgID, uuid.Nil, "tariff", "item_1", "price", "25 000 ₸/мес"); err != nil {
 		t.Fatalf("confirm fact: %v", err)
 	}
 	for _, r := range view.Requests {
@@ -211,7 +211,7 @@ func TestCreateMaterial_WithDescription_BornReadyNoPopup(t *testing.T) {
 	}
 
 	b := playground.NewBuilder(nil, nil)
-	res, err := b.RunTurn(ctx, kb, orgID, "Собери базу знаний по скриншоту")
+	res, err := b.RunTurn(ctx, kb, orgID, uuid.Nil, "Собери базу знаний по скриншоту")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

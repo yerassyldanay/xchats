@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
@@ -238,7 +239,8 @@ func (h *harness) login() {
 	body, _ := json.Marshal(map[string]string{"email": adminEmail, "password": adminPass})
 	resp, err := h.client.Post(h.srv.URL+"/xchats/api/v1/auth/login", "application/json", bytes.NewReader(body))
 	if err != nil || resp.StatusCode != 200 {
-		h.t.Fatalf("login: %v status=%v", err, resp.StatusCode)
+		b, _ := io.ReadAll(resp.Body)
+		h.t.Fatalf("login: %v status=%v body=%s", err, resp.StatusCode, b)
 	}
 }
 
@@ -277,6 +279,24 @@ func (h *harness) postJSON(path string, body any) (*http.Response, map[string]js
 	resp, err := h.client.Post(h.srv.URL+path, "application/json", bytes.NewReader(b))
 	if err != nil {
 		h.t.Fatalf("POST %s: %v", path, err)
+	}
+	var env map[string]json.RawMessage
+	_ = json.NewDecoder(resp.Body).Decode(&env)
+	resp.Body.Close()
+	h.queue.Wait()
+	return resp, env
+}
+
+func (h *harness) patchJSON(path string, body any) (*http.Response, map[string]json.RawMessage) {
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPatch, h.srv.URL+path, bytes.NewReader(b))
+	if err != nil {
+		h.t.Fatalf("PATCH %s: %v", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.t.Fatalf("PATCH %s: %v", path, err)
 	}
 	var env map[string]json.RawMessage
 	_ = json.NewDecoder(resp.Body).Decode(&env)

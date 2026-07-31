@@ -99,7 +99,7 @@ func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	if err := s.kb.ClearDraft(ctx(c), orgID); err != nil {
+	if err := s.kb.ClearDraft(ctx(c), orgID, currentUser(c).ID); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -124,9 +124,8 @@ func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "slug required")
 		return
 	}
-	if err := s.kb.UpsertTopic(ctx(c), orgID, kbstore.TopicInput{
+	if err := s.kb.UpsertTopic(ctx(c), orgID, currentUser(c).ID, kbstore.TopicInput{
 		Slug: req.Slug, Title: req.Title, BodyMD: req.BodyMD,
-		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -139,7 +138,7 @@ func (s *Server) handlePlaygroundDeleteTopic(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	if err := s.kb.DeleteTopic(ctx(c), orgID, c.Param("slug")); err != nil {
+	if err := s.kb.DeleteTopic(ctx(c), orgID, currentUser(c).ID, c.Param("slug")); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -158,6 +157,7 @@ type tariffReq struct {
 	PricingType   string `json:"pricing_type"`
 	Advantages    string `json:"advantages"`
 	Disadvantages string `json:"disadvantages"`
+	SalesStatus   string `json:"sales_status"`
 }
 
 func (s *Server) handlePlaygroundUpsertTariff(c *gin.Context) {
@@ -170,10 +170,10 @@ func (s *Server) handlePlaygroundUpsertTariff(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
 		return
 	}
-	if err := s.kb.UpsertTariff(ctx(c), orgID, kbstore.TariffInput{
+	if err := s.kb.UpsertTariff(ctx(c), orgID, currentUser(c).ID, kbstore.TariffInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
 		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
-		Provenance: `{"source":"manual"}`,
+		SalesStatus: req.SalesStatus,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -186,7 +186,7 @@ func (s *Server) handlePlaygroundDeleteTariff(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	if err := s.kb.DeleteTariff(ctx(c), orgID, c.Param("ref")); err != nil {
+	if err := s.kb.DeleteTariff(ctx(c), orgID, currentUser(c).ID, c.Param("ref")); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -199,9 +199,9 @@ type productReq struct {
 	Price       string `json:"price"`
 	Description string `json:"description"`
 	Category    string `json:"category"`
-	// InStock is read only by handleKBUpsertProduct (the live-write path) —
-	// handlePlaygroundUpsertProduct never reads it, so a draft write's
-	// behavior is unaffected by this field's presence.
+	SalesStatus string `json:"sales_status"`
+	// InStock is nil-able: omitted/null leaves the draft's current merged
+	// value unchanged (kbstore.ProductInput's own nil-means-unchanged idiom).
 	InStock *bool `json:"in_stock"`
 }
 
@@ -215,10 +215,10 @@ func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
 		return
 	}
-	if err := s.kb.UpsertProduct(ctx(c), orgID, kbstore.ProductInput{
+	if err := s.kb.UpsertProduct(ctx(c), orgID, currentUser(c).ID, kbstore.ProductInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price,
 		Description: req.Description, Category: req.Category,
-		Provenance: `{"source":"manual"}`,
+		SalesStatus: req.SalesStatus, InStock: req.InStock,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -231,7 +231,42 @@ func (s *Server) handlePlaygroundDeleteProduct(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	if err := s.kb.DeleteProduct(ctx(c), orgID, c.Param("ref")); err != nil {
+	if err := s.kb.DeleteProduct(ctx(c), orgID, currentUser(c).ID, c.Param("ref")); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
+// --- delivery zones ----------------------------------------------------------
+
+func (s *Server) handlePlaygroundUpsertZone(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	var req zoneReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Ref == "" || req.ZoneLevel == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "ref and zone_level required")
+		return
+	}
+	if err := s.kb.UpsertZone(ctx(c), orgID, currentUser(c).ID, kbstore.DeliveryZoneInput{
+		Ref: req.Ref, Name: req.Name, ZoneLevel: req.ZoneLevel, ParentRef: req.ParentRef,
+		DeliveryAvailable: req.DeliveryAvailable, DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
+		Notes: req.Notes, SalesStatus: req.SalesStatus,
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
+func (s *Server) handlePlaygroundDeleteZone(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	if err := s.kb.DeleteZone(ctx(c), orgID, currentUser(c).ID, c.Param("ref")); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -260,11 +295,10 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "bad contacts")
 		return
 	}
-	if err := s.kb.PatchContacts(ctx(c), orgID, kbstore.ContactPatch{
+	if err := s.kb.PatchContacts(ctx(c), orgID, currentUser(c).ID, kbstore.ContactPatch{
 		WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
 		LegalInformation: req.LegalInformation, CallbackTime: req.CallbackTime,
 		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
-		Provenance: `{"source":"manual"}`,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -283,14 +317,12 @@ type policiesReq struct {
 	Installment        *string `json:"installment"`
 	ReturnPeriodInDays *string `json:"return_period_in_days"`
 	Warranty           *string `json:"warranty"`
-	// OutsideZonesNote is read only by handleKBPatchPolicies (the live-write
-	// path) — handlePlaygroundPatchPolicies never reads it.
-	OutsideZonesNote *string `json:"outside_zones_note"`
+	OutsideZonesNote   *string `json:"outside_zones_note"`
 }
 
-// zoneReq is the /kb/zones upsert payload — no Playground/draft counterpart
-// exists yet (draft milestone later), so this is read only by
-// handleKBUpsertZone.
+// zoneReq is the upsert payload shared by /kb/zones (live, handleKBUpsertZone)
+// and /playground/draft/zones (handlePlaygroundUpsertZone) — same fields,
+// same shape as every other live/draft pair.
 type zoneReq struct {
 	Ref               string `json:"ref"`
 	Name              string `json:"name"`
@@ -313,11 +345,11 @@ func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "bad policies")
 		return
 	}
-	if err := s.kb.PatchPolicies(ctx(c), orgID, kbstore.PolicyPatch{
+	if err := s.kb.PatchPolicies(ctx(c), orgID, currentUser(c).ID, kbstore.PolicyPatch{
 		DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
 		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
 		Installment: req.Installment, ReturnPeriodInDays: req.ReturnPeriodInDays, Warranty: req.Warranty,
-		Provenance: `{"source":"manual"}`,
+		OutsideZonesNote: req.OutsideZonesNote,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -345,7 +377,7 @@ func (s *Server) handlePlaygroundPatchConfig(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "bad config")
 		return
 	}
-	if err := s.kb.PatchConfig(ctx(c), orgID, kbstore.ConfigPatch{
+	if err := s.kb.PatchConfig(ctx(c), orgID, currentUser(c).ID, kbstore.ConfigPatch{
 		Persona: req.Persona, Mission: req.Mission, Guardrails: req.Guardrails,
 		LanguagePolicy: req.LanguagePolicy, ReplyMaxWords: req.ReplyMaxWords,
 	}); err != nil {
@@ -359,7 +391,10 @@ func (s *Server) handlePlaygroundPatchConfig(c *gin.Context) {
 
 // handlePlaygroundApprove approves the WHOLE pending draft ("Сохранить в базу"):
 // gate over live ∪ pending → materialize every pending entry into the live
-// tables → clear them from the blob → hot-reload the brain.
+// tables → clear them from the blob → hot-reload the brain. An optional
+// If-Match is checked ATOMICALLY inside ApproveVersioned's own locked
+// transaction (not a separate pre-check, unlike pgWrite) — see
+// kbstore.ApproveVersioned's doc comment for why that distinction matters.
 func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -368,7 +403,12 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{}); err != nil {
+	expected, ok2 := ifMatchVersion(c)
+	if !ok2 {
+		fail(c, http.StatusBadRequest, ErrValidation, "If-Match must be an integer draft_version")
+		return
+	}
+	if err := s.kb.ApproveVersioned(ctx(c), orgID, kbstore.ApproveSelector{}, expected, currentUser(c).ID); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -384,8 +424,9 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 }
 
 // handlePlaygroundApproveEntity approves ONE pending entity by natural key
-// ("Подтвердить" on a single row). kind ∈ topics|tariffs|products|contacts|policies;
-// id = slug | ref | ref | lang | lang.
+// ("Подтвердить" on a single row). kind ∈
+// topics|tariffs|products|contacts|policies|delivery_zones|config; id = slug |
+// ref | ref | domain.ContactSlug | domain.PolicySlug | ref | kbstore.NaturalKeyMain.
 func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -396,13 +437,18 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	}
 	kind := c.Param("kind")
 	switch kind {
-	case "topics", "tariffs", "products", "contacts", "policies":
+	case "topics", "tariffs", "products", "contacts", "policies", "delivery_zones", "config":
 	default:
-		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|tariffs|products|contacts|policies")
+		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|tariffs|products|contacts|policies|delivery_zones|config")
 		return
 	}
 	key := c.Param("id")
-	if err := s.kb.Approve(ctx(c), orgID, kbstore.ApproveSelector{Kind: kind, Key: key}); err != nil {
+	expected, ok2 := ifMatchVersion(c)
+	if !ok2 {
+		fail(c, http.StatusBadRequest, ErrValidation, "If-Match must be an integer draft_version")
+		return
+	}
+	if err := s.kb.ApproveVersioned(ctx(c), orgID, kbstore.ApproveSelector{Kind: kind, Key: key}, expected, currentUser(c).ID); err != nil {
 		s.kbFail(c, err)
 		return
 	}
@@ -415,6 +461,27 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	}
 	s.hub.Broadcast("kb.approved", gin.H{"kind": kind})
 	ok(c, view)
+}
+
+// ifMatchVersion parses an optional If-Match header (a bare integer
+// draft_version, the same shape ifMatch() sends —
+// frontend/src/stores/playground.ts) into a pointer ApproveVersioned can
+// compare inside its own locked transaction. Unlike pgWrite's pre-check
+// (which races the write it precedes: the check and the write are two
+// separate calls with no shared lock), this value is compared atomically
+// with the read it validates against, so it can never go stale in between.
+// Returns ok=false only for a header present but not a valid integer;
+// absent means "no If-Match", which returns (nil, true).
+func ifMatchVersion(c *gin.Context) (expected *int64, ok bool) {
+	tok := strings.Trim(strings.TrimSpace(c.GetHeader("If-Match")), `"`)
+	if tok == "" {
+		return nil, true
+	}
+	v, err := strconv.ParseInt(tok, 10, 64)
+	if err != nil {
+		return nil, false
+	}
+	return &v, true
 }
 
 // --- shared helpers --------------------------------------------------------
