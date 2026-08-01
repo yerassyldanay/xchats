@@ -249,11 +249,31 @@ func buildDeliveryZoneFacts(kb *KB, cat *Catalog) error {
 	return nil
 }
 
+// resolvedFeaturedImage implements featured_image's override-with-fallback
+// rule: an explicit value always wins; a NULL/blank featured_image resolves
+// to the type's primary plural image column's first entry (already in send
+// order) when that column is non-empty; otherwise featured_image is simply
+// absent — no token, no error (buildMedia's normal "empty column" path).
+// This is deliberately a per-request RESOLUTION, not a stored value:
+// featured_image and the plural column remain two independently-writable
+// KB columns (kb_product_upsert etc. — see mcpserver), so a later edit to
+// either one is reflected the next time a catalog is built, with no
+// migration or write-time sync required.
+func resolvedFeaturedImage(explicit string, primaryImages []string) []string {
+	if explicit != "" {
+		return []string{explicit}
+	}
+	if len(primaryImages) > 0 {
+		return []string{primaryImages[0]}
+	}
+	return nil
+}
+
 // mediaValues returns each registry media column's referenced material ids for
 // one row, in registry order. Singular columns yield zero or one id.
 func topicMedia(t *Topic) map[string][]string {
 	return map[string][]string{
-		"featured_image":        singular(t.FeaturedImage),
+		"featured_image":        resolvedFeaturedImage(t.FeaturedImage, t.IllustrationImages),
 		"illustration_images":   t.IllustrationImages,
 		"explainer_videos":      t.ExplainerVideos,
 		"narration_audio_files": t.NarrationAudioFiles,
@@ -263,7 +283,7 @@ func topicMedia(t *Topic) map[string][]string {
 
 func productMedia(p *Product) map[string][]string {
 	return map[string][]string{
-		"featured_image":          singular(p.FeaturedImage),
+		"featured_image":          resolvedFeaturedImage(p.FeaturedImage, p.GalleryImages),
 		"gallery_images":          p.GalleryImages,
 		"demo_videos":             p.DemoVideos,
 		"audio_description_files": p.AudioDescriptionFiles,
@@ -276,7 +296,7 @@ func productMedia(p *Product) map[string][]string {
 
 func tariffMedia(t *Tariff) map[string][]string {
 	return map[string][]string{
-		"featured_image":   singular(t.FeaturedImage),
+		"featured_image":   resolvedFeaturedImage(t.FeaturedImage, t.PricingImages),
 		"pricing_images":   t.PricingImages,
 		"explainer_videos": t.ExplainerVideos,
 		"terms_documents":  t.TermsDocuments,

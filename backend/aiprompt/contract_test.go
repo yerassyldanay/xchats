@@ -692,6 +692,39 @@ func TestResolveSend_Deduplicates(t *testing.T) {
 	}
 }
 
+// TestResolveSend_DeduplicatesByMaterialAcrossDistinctTokens covers the
+// scenario resolvedFeaturedImage's fallback makes routine: featured_image
+// unset resolves to the SAME material as gallery_images[0], so a model
+// citing both tokens (a plausible, not even unusual, request — "send the
+// featured photo and the gallery") must still only receive that file once.
+func TestResolveSend_DeduplicatesByMaterialAcrossDistinctTokens(t *testing.T) {
+	kb := baseKB()
+	kb.Products[0].FeaturedImage = "" // now resolves to gallery_images[0] = m-cm-gallery-1
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	got, err := ResolveSend([]string{
+		"products.coffee-machine.featured_image",
+		"products.coffee-machine.gallery_images",
+	}, kb, cat)
+	if err != nil {
+		t.Fatalf("ResolveSend: %v", err)
+	}
+	// featured_image resolves to m-cm-gallery-1 (already counted under the
+	// FIRST token) — gallery_images then contributes only its remaining,
+	// not-yet-seen material.
+	wantIDs := []string{"m-cm-gallery-1", "m-cm-gallery-2"}
+	if len(got) != len(wantIDs) {
+		t.Fatalf("got %d resolved materials, want %d: %+v", len(got), len(wantIDs), got)
+	}
+	for i, want := range wantIDs {
+		if got[i].Material.ID != want {
+			t.Errorf("resolved[%d].Material.ID = %q, want %q", i, got[i].Material.ID, want)
+		}
+	}
+}
+
 func TestResolveSend_UnknownToken(t *testing.T) {
 	kb := baseKB()
 	cat := validCatalog(t)
@@ -737,9 +770,23 @@ func TestResolveSend_RereadsCurrentMediaColumn(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "cleared column is stale",
+			// featured_image is override-with-fallback (resolvedFeaturedImage):
+			// clearing the explicit value does NOT make the token stale as
+			// long as gallery_images is still non-empty — it re-resolves to
+			// gallery_images[0], baseKB's "m-cm-gallery-1".
+			name: "cleared featured_image falls back to gallery_images[0]",
 			mutate: func(kb *KB) {
 				kb.Products[0].FeaturedImage = ""
+			},
+			wantID: "m-cm-gallery-1",
+		},
+		{
+			// With NEITHER an explicit value nor a fallback array to resolve
+			// from, the token is genuinely stale.
+			name: "cleared featured_image AND empty gallery is stale",
+			mutate: func(kb *KB) {
+				kb.Products[0].FeaturedImage = ""
+				kb.Products[0].GalleryImages = nil
 			},
 			wantErr: true,
 		},
