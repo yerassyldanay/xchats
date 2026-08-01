@@ -1,8 +1,105 @@
-// evalCatalog.* is currently the ONLY content wired through vue-i18n — the app's UI
-// chrome stays hardcoded Russian everywhere else (see MEMORY.md "Frontend direction"
-// for why: this page is the pilot, not a full i18n rollout). Migrate more of the app
-// into this file/en.ts as it grows, rather than starting a second mechanism.
+// evalCatalog.* and kb.* are the content wired through vue-i18n — the app's UI chrome
+// stays hardcoded Russian everywhere else (see MEMORY.md "Frontend direction" for why:
+// these are pilots, not a full i18n rollout). Migrate more of the app into this
+// file/en.ts as it grows, rather than starting a second mechanism.
 export default {
+  // Черновик (draft review) + База знаний (the one creation surface) — see
+  // plan "Черновик + Knowledge Base UX redesign".
+  kb: {
+    live: {
+      title: 'База знаний',
+      subtitle: 'Финальные данные, которые использует ассистент',
+    },
+    tabs: {
+      overview: 'Обзор',
+      topics: 'Темы',
+      products: 'Товары',
+      tariffs: 'Тарифы',
+      zones: 'Зоны доставки',
+      contacts: 'Контакты',
+      policies: 'Политики',
+      prompt: 'Промпт',
+      materials: 'Файлы (материалы)',
+    },
+    stats: {
+      added: 'Добавлено',
+      updated: 'Изменено',
+      removed: 'Удалено',
+      total: 'Всего',
+    },
+    common: {
+      save: 'Сохранить',
+      cancel: 'Отмена',
+      edit: 'Изменить',
+      publish: 'Опубликовать',
+      cancelChange: 'Отменить изменение',
+      delete: 'Удалить',
+    },
+    draft: {
+      title: 'Черновик',
+      subtitle: 'Что изменится в базе знаний после публикации',
+      emptyTitle: 'Нет неопубликованных изменений',
+      emptyBody: 'Перейдите в Базу знаний, чтобы добавить или изменить информацию.',
+      emptyLink: 'Перейти в Базу знаний',
+      was: 'Было:',
+      publishAll: 'Опубликовать всё',
+      rejectAll: 'Отклонить всё',
+      gateErrorTitle: 'Это изменение нельзя опубликовать: в получившейся базе знаний есть конфликты проверки.',
+      blockedNote: 'Публикация заблокирована другим конфликтом в Черновике — см. сообщение выше.',
+      removedFallbackTitle: 'Опубликованная запись недоступна',
+      publishConfigGroup: 'Опубликовать изменения ассистента',
+      cancelConfigGroup: 'Отменить все изменения ассистента',
+    },
+    toolbar: {
+      addTopic: 'Добавить тему',
+      addProduct: 'Добавить товар',
+      addTariff: 'Добавить тариф',
+      addZone: 'Добавить зону',
+      editContacts: 'Изменить контакты',
+      editPolicies: 'Изменить политики',
+    },
+    banner: {
+      staged: 'Изменение добавлено в Черновик: {kind}. Проверьте и опубликуйте его из Черновика.',
+      goToDraft: 'Перейти в Черновик',
+    },
+    config: {
+      persona: { title: 'Персона', hint: 'Кто ассистент и как он общается с клиентом.' },
+      mission: { title: 'Миссия', hint: 'Главная цель ассистента в каждом диалоге.' },
+      guardrails: { title: 'Ограничения', hint: 'Правила и запреты — по одному пункту на строку.' },
+      language_policy: { title: 'Языковая политика', hint: 'На каком языке отвечать клиенту.' },
+      reply_max_words: { title: 'Макс. слов в ответе', hint: 'Ограничение длины ответа (в словах).' },
+    },
+    confirmDelete: {
+      title: 'Удалить запись?',
+      body: 'Запись будет помечена на удаление в Черновике — она останется в базе знаний, пока изменение не опубликовано.',
+      confirm: 'Удалить',
+      cancel: 'Отмена',
+    },
+    stale: {
+      title: 'Черновик изменился',
+      body: 'Пока вы редактировали, черновик обновился где-то ещё. Введённый текст сохранён — обновите данные и повторите.',
+      reloadAndRetry: 'Обновить и повторить',
+    },
+    forms: {
+      topic: { createTitle: 'Новая тема', editTitle: 'Тема', slug: 'slug (например, tariffs)', title: 'Название', body: 'Текст темы' },
+      product: {
+        createTitle: 'Новый товар', editTitle: 'Товар', ref: 'Артикул', name: 'Название', price: 'Цена',
+        category: 'Категория', description: 'Описание', inStock: 'В наличии',
+      },
+      tariff: {
+        createTitle: 'Новый тариф', editTitle: 'Тариф', ref: 'Код тарифа', name: 'Название', price: 'Цена',
+        limitText: 'Лимит', fee: 'Комиссия', summary: 'Краткое описание', pricingType: 'Тип тарификации',
+        advantages: 'Преимущества', disadvantages: 'Ограничения',
+      },
+      zone: {
+        createTitle: 'Новая зона доставки', editTitle: 'Зона доставки', ref: 'Ref', name: 'Название',
+        level: 'Уровень', parent: 'Родительская зона', noParent: 'Без родительской зоны',
+        available: 'Доставка доступна', cost: 'Стоимость доставки', days: 'Доставка в днях', notes: 'Примечание',
+      },
+      contacts: { title: 'Изменить контакты' },
+      policies: { title: 'Изменить политики' },
+    },
+  },
   evalCatalog: {
     langToggle: {
       aria: 'Язык подсказок к полям',

@@ -1,7 +1,102 @@
 // Mirrors ru.ts key-for-key — see locales.test.ts for the parity check that enforces
-// it. Only evalCatalog.* exists here; the rest of the app's chrome stays hardcoded
-// Russian for now (see ru.ts's own comment).
+// it. Only evalCatalog.* and kb.* exist here; the rest of the app's chrome stays
+// hardcoded Russian for now (see ru.ts's own comment).
 export default {
+  kb: {
+    live: {
+      title: 'Knowledge Base',
+      subtitle: 'The final data the assistant uses',
+    },
+    tabs: {
+      overview: 'Overview',
+      topics: 'Topics',
+      products: 'Products',
+      tariffs: 'Tariffs',
+      zones: 'Delivery zones',
+      contacts: 'Contacts',
+      policies: 'Policies',
+      prompt: 'Prompt',
+      materials: 'Files (materials)',
+    },
+    stats: {
+      added: 'Added',
+      updated: 'Changed',
+      removed: 'Removed',
+      total: 'Total',
+    },
+    common: {
+      save: 'Save',
+      cancel: 'Cancel',
+      edit: 'Edit',
+      publish: 'Publish',
+      cancelChange: 'Cancel change',
+      delete: 'Delete',
+    },
+    draft: {
+      title: 'Draft',
+      subtitle: 'What will change in the knowledge base after publishing',
+      emptyTitle: 'No unpublished changes',
+      emptyBody: 'Go to Knowledge Base to add or edit information.',
+      emptyLink: 'Go to Knowledge Base',
+      was: 'Was:',
+      publishAll: 'Publish all',
+      rejectAll: 'Reject all',
+      gateErrorTitle: 'This change cannot be published: the resulting knowledge base has validation conflicts.',
+      blockedNote: 'Publishing is blocked by another conflict in the Draft — see the message above.',
+      removedFallbackTitle: 'The published record is unavailable',
+      publishConfigGroup: 'Publish assistant changes',
+      cancelConfigGroup: 'Cancel all assistant changes',
+    },
+    toolbar: {
+      addTopic: 'Add topic',
+      addProduct: 'Add product',
+      addTariff: 'Add tariff',
+      addZone: 'Add zone',
+      editContacts: 'Edit contacts',
+      editPolicies: 'Edit policies',
+    },
+    banner: {
+      staged: 'The change was added to the Draft: {kind}. Review and publish it from the Draft.',
+      goToDraft: 'Go to Draft',
+    },
+    config: {
+      persona: { title: 'Persona', hint: 'Who the assistant is and how it talks to the customer.' },
+      mission: { title: 'Mission', hint: "The assistant's main goal in every conversation." },
+      guardrails: { title: 'Guardrails', hint: 'Rules and prohibitions — one item per line.' },
+      language_policy: { title: 'Language policy', hint: 'Which language to reply to the customer in.' },
+      reply_max_words: { title: 'Max words per reply', hint: 'Reply length limit (in words).' },
+    },
+    confirmDelete: {
+      title: 'Delete this record?',
+      body: 'The record will be marked for deletion in the Draft — it stays in the knowledge base until the change is published.',
+      confirm: 'Delete',
+      cancel: 'Cancel',
+    },
+    stale: {
+      title: 'The draft changed',
+      body: 'The draft was updated elsewhere while you were editing. Your typed text is preserved — reload and try again.',
+      reloadAndRetry: 'Reload and retry',
+    },
+    forms: {
+      topic: { createTitle: 'New topic', editTitle: 'Topic', slug: 'slug (e.g. tariffs)', title: 'Title', body: 'Topic text' },
+      product: {
+        createTitle: 'New product', editTitle: 'Product', ref: 'SKU', name: 'Name', price: 'Price',
+        category: 'Category', description: 'Description', inStock: 'In stock',
+      },
+      tariff: {
+        createTitle: 'New tariff', editTitle: 'Tariff', ref: 'Tariff code', name: 'Name', price: 'Price',
+        limitText: 'Limit', fee: 'Fee', summary: 'Summary', pricingType: 'Pricing type',
+        advantages: 'Advantages', disadvantages: 'Disadvantages',
+      },
+      zone: {
+        createTitle: 'New delivery zone', editTitle: 'Delivery zone', ref: 'Ref', name: 'Name',
+        level: 'Level', parent: 'Parent zone', noParent: 'No parent zone',
+        available: 'Delivery available', cost: 'Delivery cost', days: 'Delivery in days', notes: 'Notes',
+      },
+      contacts: { title: 'Edit contacts' },
+      policies: { title: 'Edit policies' },
+    },
+  },
   evalCatalog: {
     langToggle: {
       aria: 'Field description language',

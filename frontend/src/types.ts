@@ -287,6 +287,48 @@ export interface DraftView {
   requests: KbRequest[]
 }
 
+// DraftConfigPatch mirrors kbstore.DraftConfigPatch — a nullable pointer per
+// field, present only when that field has a pending edit. Unlike DraftConfig
+// (the merged view) this carries no live value at all.
+export interface DraftConfigPatch {
+  persona?: string | null
+  mission?: string | null
+  guardrails?: string | null
+  language_policy?: string | null
+  reply_max_words?: number | null
+}
+
+// DraftChangeSet is Черновик's review payload (GET /playground/draft and
+// every draft-write response) — ONLY what kbd_draft has staged, never an
+// unchanged published row. config is null when nothing is pending for it.
+export interface DraftChangeSet {
+  base_version: number
+  updated_at: string
+  config: DraftConfigPatch | null
+  topics: TopicRow[]
+  tariffs: TariffRow[]
+  products: ProductRow[]
+  contacts: ContactRow[]
+  policies: PolicyRow[]
+  zones: DeliveryZoneRow[]
+  deletes: DraftChangeDelete[]
+}
+
+// DraftChangeDelete is one staged removal, in the same plural vocabulary
+// approve/cancel routes address entities by.
+export interface DraftChangeDelete {
+  kind: 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies' | 'delivery_zones'
+  key: string
+}
+
+// CancelChangeResponse mirrors DELETE /playground/draft/changes/:kind/:key's
+// payload — changed reports whether anything actually moved (a repeat
+// cancel is a legitimate, free no-op).
+export interface CancelChangeResponse {
+  changed: boolean
+  changes: DraftChangeSet
+}
+
 // PromptView mirrors GET /kb/prompt (backend/internal/httpapi/kb_prompt.go) —
 // the rendered prompt the response engine would send right now, plus enough
 // metadata to power the Промпт tab's «О промпте» sidebar without a second

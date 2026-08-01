@@ -1,44 +1,43 @@
 <script setup lang="ts">
 // RecordShell is the shared chrome every kb/records/*Record.vue wraps its own
-// field body in: an icon + label + <code> natural key + state badge header,
-// and an action row driven by kbActions(mode) — so a live row's
-// Сохранить/Удалить and a draft row's Сохранить/Принять/Отклонить are ONE
-// styled button set, not seven components independently reinventing it
-// (plan Task 14 — shared record components with a real diff contract).
-import { computed, type Component } from 'vue'
+// read-only field body in: an icon + label + <code> natural key + state badge
+// header, and an action row — the caller computes its OWN actions (via
+// kbActions() or a fixed set, e.g. AssistantFieldRecord's edit+cancel) and
+// passes it down, so this component stays Pinia-free and purely props-in/
+// events-out.
+import type { Component } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { LoaderCircle } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { kbActions, type KbAction } from '@/stores/playground'
+import type { KbAction, KbActionKey } from './actions'
 import { RECORD_STATE_META, type RecordState } from './shared'
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     icon: Component
     label: string
     recordKey?: string // omitted for a true singleton (contacts/policies/config) — no natural key to show
-    mode: 'draft' | 'live'
     state: RecordState
+    actions: KbAction[]
     busy?: boolean
-    singleton?: boolean
-    pending?: boolean
   }>(),
-  { busy: false, singleton: false, pending: true, recordKey: undefined }
+  { busy: false, recordKey: undefined }
 )
 
-const emit = defineEmits<{ save: []; approve: []; reject: []; delete: [] }>()
+const emit = defineEmits<{ edit: []; publish: []; cancel: []; delete: [] }>()
+const { t } = useI18n()
 
-const actions = computed<KbAction[]>(() => kbActions(props.mode, { singleton: props.singleton, pending: props.pending }))
-function fire(key: KbAction['key']) {
+function fire(key: KbActionKey) {
   switch (key) {
-    case 'save':
-      emit('save')
+    case 'edit':
+      emit('edit')
       break
-    case 'approve':
-      emit('approve')
+    case 'publish':
+      emit('publish')
       break
-    case 'reject':
-      emit('reject')
+    case 'cancel':
+      emit('cancel')
       break
     case 'delete':
       emit('delete')
@@ -71,8 +70,8 @@ function fire(key: KbAction['key']) {
         :disabled="busy"
         @click="fire(a.key)"
       >
-        <LoaderCircle v-if="busy && a.key === 'save'" class="w-4 h-4 animate-spin" />
-        {{ a.label }}
+        <LoaderCircle v-if="busy && a.key === 'publish'" class="w-4 h-4 animate-spin" />
+        {{ t(a.labelKey) }}
       </Button>
     </div>
   </div>

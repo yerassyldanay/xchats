@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Blocks, Check, FlaskConical, Inbox, Library, LogOut, BookOpen, Radio } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
@@ -20,6 +21,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 const auth = useAuth()
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 
 // The "Эвалы" item only appears once /evals-data/ actually resolves — the local-dev
 // -only volume mount (deploy/docker-compose.override.yaml) is deliberately absent
@@ -34,8 +36,8 @@ onMounted(async () => {
 const baseNav: { name: string; icon: Component; label: string; match: string[] }[] = [
   { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
   { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts', 'instances'] },
-	{ name: 'playground', icon: Blocks, label: 'Черновик базы знаний', match: ['playground'] },
-  { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
+  { name: 'playground', icon: Blocks, label: t('kb.draft.title'), match: ['playground'] },
+  { name: 'knowledge-base', icon: Library, label: t('kb.live.title'), match: ['knowledge-base'] },
 ]
 // Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
 // and rendered in its own bottom cluster (separated by a divider, above the avatar)

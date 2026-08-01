@@ -1,79 +1,48 @@
 <script setup lang="ts">
-// TopicRecord is the shared /playground (draft) + /knowledge-base (live) row
-// for one topic — replaces the two pages' previously independent, duplicated
-// markup (plan Task 14).
-import { computed, reactive, watch } from 'vue'
+// TopicRecord is a read-only display card for one topic — shared by
+// Черновик's ChangeList (row = the pending or published value, depending on
+// changeType) and База знаний's RecordList (row = the published value,
+// changeType absent). All writes happen through TopicForm.vue via the modal;
+// this component only ever emits intent.
+import { computed } from 'vue'
 import { ListTree } from 'lucide-vue-next'
-import { usePlayground } from '@/stores/playground'
 import type { TopicRow } from '@/types'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import type { ChangeType } from '@/composables/draftChanges'
+import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
 import MediaChip from './MediaChip.vue'
-import { changedFields, mediaCount, recordState } from './shared'
+import { changedFields, mediaCount, stateForChange, type RecordState } from './shared'
 
 const props = defineProps<{
-  mode: 'draft' | 'live'
-  draftRow?: TopicRow
+  row: TopicRow
   liveRow?: TopicRow
+  changeType?: ChangeType // absent on База знаний (published, no pending change)
+  actions: KbAction[]
+  busy?: boolean
 }>()
+defineEmits<{ edit: []; publish: []; cancel: []; delete: [] }>()
 
-const pg = usePlayground()
-
-const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
-const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
-const state = computed(() => recordState(props.mode, !!props.liveRow, row.value?.draft))
-const diff = computed(() => changedFields(props.draftRow, props.liveRow, ['title', 'body_md']))
-
-const buf = reactive({ title: '', body_md: '' })
-let seededFor = ''
-watch(
-  row,
-  (r) => {
-    if (!r || seededFor === r.id) return
-    seededFor = r.id
-    buf.title = r.title
-    buf.body_md = r.body_md
-  },
-  { immediate: true }
-)
-
-function save() {
-  const r = row.value
-  if (!r) return
-  if (props.mode === 'draft') pg.upsertTopic({ slug: r.slug, ...buf })
-  else pg.liveUpsertTopic({ slug: r.slug, ...buf })
-}
-function approve() {
-  if (row.value) pg.approveEntity('topics', row.value.slug)
-}
-function reject() {
-  if (row.value) pg.deleteTopic(row.value.slug)
-}
-function del() {
-  if (row.value) pg.liveDeleteTopic(row.value.slug)
-}
+const state = computed<RecordState>(() => (props.changeType ? stateForChange(props.changeType) : 'published'))
+const diff = computed(() => (props.changeType === 'updated' ? changedFields(props.row, props.liveRow, ['title', 'body_md']) : []))
 </script>
 
 <template>
   <RecordShell
-    v-if="row"
     :icon="ListTree"
     label="Тема"
     :record-key="row.slug"
-    :mode="mode"
     :state="state"
+    :actions="actions"
     :busy="busy"
-    :pending="row.draft"
-    @save="save"
-    @approve="approve"
-    @reject="reject"
-    @delete="del"
+    @edit="$emit('edit')"
+    @publish="$emit('publish')"
+    @cancel="$emit('cancel')"
+    @delete="$emit('delete')"
   >
-    <Input v-model="buf.title" placeholder="Название" class="h-9" />
+    <p class="text-sm font-medium">{{ row.title || '—' }}</p>
     <FieldDiffNote :show="diff.includes('title')" :was="liveRow?.title ?? ''" />
-    <Textarea v-model="buf.body_md" rows="3" placeholder="Текст темы…" class="min-h-0 text-[14px]" />
+    <p class="text-sm text-foreground/80 whitespace-pre-line">{{ row.body_md || '—' }}</p>
     <FieldDiffNote :show="diff.includes('body_md')" :was="liveRow?.body_md ?? ''" />
     <div class="flex items-center gap-1.5 flex-wrap">
       <MediaChip label="Изображение" :count="mediaCount(row.featured_image)" />
