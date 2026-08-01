@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -285,6 +284,22 @@ func (b *DraftBlob) removeDelete(kind, key string) {
 	b.Deletes = out
 }
 
+// removeDeleteMatching is removeDelete's singleton-aware counterpart: it
+// drops every delete marker matching singular (and, for a non-singleton
+// kind, key), using deleteMatches' same key-ignored-for-a-singleton rule —
+// see changes.go's doc comment for why a singleton's delete marker must be
+// matched by kind alone, regardless of which of its several spellings wrote
+// the key.
+func (b *DraftBlob) removeDeleteMatching(singular, key string) {
+	out := b.Deletes[:0]
+	for _, d := range b.Deletes {
+		if !deleteMatches(d, singular, key) {
+			out = append(out, d)
+		}
+	}
+	b.Deletes = out
+}
+
 // ---------------------------------------------------------------------------
 // Blob read + read-modify-write (optimistic concurrency via base_version)
 // ---------------------------------------------------------------------------
@@ -332,7 +347,7 @@ func (s *Store) DraftBaseVersion(ctx context.Context, orgID uuid.UUID) (int64, e
 // on the SAME already-locked connection — see identityIndex's doc comment for
 // why reaching for s.pool instead, mid-transaction, is a deadlock risk under
 // concurrent writers.
-func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, mutate func(dbtx, *DraftBlob) error) error {
+func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, mutate func(dbtx, *DraftBlob, int64) error) error {
 	_, err := s.writeDraftBlobVersioned(ctx, orgID, nil, userID, mutate)
 	return err
 }
@@ -349,7 +364,18 @@ func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, userID uuid
 // changed the draft") — uuid.Nil for a caller with no attributable human
 // (there is none today; every write path, MCP or the legacy editor, has an
 // authenticated actor by the time it reaches here).
-func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, expectedVersion *int64, userID uuid.UUID, mutate func(dbtx, *DraftBlob) error) (int64, error) {
+//
+// mutate's third argument is the blob's CURRENT base_version, read under the
+// same row lock as the blob itself — every pre-existing caller ignores it
+// (their own expectedVersion pre-check above already ran before mutate is
+// ever invoked); CancelChange is the one caller that needs it, to decide
+// staleness itself only once it already knows there is something to cancel
+// (see CancelChange's own doc comment for why that ordering, and not the
+// reverse, is correct). Returning errDraftUnchanged from mutate short-
+// circuits straight to a commit with NO write and NO version bump, handing
+// back the version exactly as read — a general no-op facility, not specific
+// to any one caller.
+func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, expectedVersion *int64, userID uuid.UUID, mutate func(dbtx, *DraftBlob, int64) error) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -393,7 +419,13 @@ func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, ex
 		return 0, ErrStale
 	}
 
-	if err := mutate(tx, &blob); err != nil {
+	if err := mutate(tx, &blob, currentVersion); err != nil {
+		if errors.Is(err, errDraftUnchanged) {
+			if cerr := tx.Commit(ctx); cerr != nil {
+				return 0, cerr
+			}
+			return currentVersion, nil
+		}
 		return 0, err
 	}
 
@@ -441,7 +473,7 @@ func nullIfNilUUID(id uuid.UUID) *uuid.UUID {
 // ClearDraft discards every pending edit ("Отменить изменения") — a plain reset
 // of the blob to empty. Live rows are untouched.
 func (s *Store) ClearDraft(ctx context.Context, orgID uuid.UUID, actor uuid.UUID) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		*b = DraftBlob{}
 		return nil
 	})
@@ -642,113 +674,17 @@ func (s *Store) DraftOnly(ctx context.Context, orgID uuid.UUID) (*DraftView, err
 	return s.draftOnly(ctx, s.pool, orgID)
 }
 
-// draftOnly is DraftOnly's db-parameterized core (see liveView).
+// draftOnly is DraftOnly's db-parameterized core (see liveView). The
+// projection itself is draftRowsFromBlob (changes.go) — a pure function over
+// an already-read blob shared with DraftChanges, so kb_read(source=draft)
+// and the Черновик review payload can never disagree about what "pending"
+// means.
 func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*DraftView, error) {
 	blob, ver, updatedAt, err := s.readDraftBlob(ctx, db, orgID)
 	if err != nil {
 		return nil, err
 	}
-	v := &DraftView{Config: DraftConfig{OrganizationID: orgID, BaseVersion: ver, UpdatedAt: updatedAt}}
-	deleted := map[string]bool{}
-	for _, d := range blob.Deletes {
-		deleted[d.Kind+":"+d.Key] = true
-	}
-	if p := blob.Config.Persona; p != nil {
-		v.Config.Persona, v.Config.Draft = *p, true
-	}
-	if p := blob.Config.Mission; p != nil {
-		v.Config.Mission, v.Config.Draft = *p, true
-	}
-	if p := blob.Config.Guardrails; p != nil {
-		v.Config.Guardrails, v.Config.Draft = *p, true
-	}
-	if p := blob.Config.LanguagePolicy; p != nil {
-		v.Config.LanguagePolicy, v.Config.Draft = *p, true
-	}
-	if p := blob.Config.ReplyMaxWords; p != nil {
-		v.Config.ReplyMaxWords, v.Config.Draft = *p, true
-	}
-	for _, t := range blob.Topics {
-		if deleted["topic:"+t.Slug] {
-			continue
-		}
-		v.Topics = append(v.Topics, TopicRow{ID: t.Slug, Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD,
-			FeaturedImage: t.FeaturedImage, IllustrationImages: t.IllustrationImages,
-			ExplainerVideos: t.ExplainerVideos, NarrationAudioFiles: t.NarrationAudioFiles,
-			ReferenceDocuments: t.ReferenceDocuments,
-			Draft:              true, UpdatedAt: updatedAt})
-	}
-	for _, t := range blob.Tariffs {
-		if deleted["tariff:"+t.Ref] {
-			continue
-		}
-		v.Tariffs = append(v.Tariffs, TariffRow{ID: t.Ref, Ref: t.Ref, Name: t.Name, Price: t.Price,
-			LimitText: t.LimitText, Fee: t.Fee, Summary: t.Summary, PricingType: t.PricingType,
-			Advantages: t.Advantages, Disadvantages: t.Disadvantages, SalesStatus: t.SalesStatus,
-			FeaturedImage: t.FeaturedImage, PricingImages: t.PricingImages, ExplainerVideos: t.ExplainerVideos,
-			TermsDocuments: t.TermsDocuments,
-			Draft:          true, UpdatedAt: updatedAt})
-	}
-	for _, p := range blob.Products {
-		if deleted["product:"+p.Ref] {
-			continue
-		}
-		v.Products = append(v.Products, ProductRow{ID: p.Ref, Ref: p.Ref, Name: p.Name, Price: p.Price,
-			Description: p.Description, Category: p.Category, InStock: p.InStock, SalesStatus: p.SalesStatus,
-			FeaturedImage: p.FeaturedImage, GalleryImages: p.GalleryImages, DemoVideos: p.DemoVideos,
-			AudioDescriptionFiles: p.AudioDescriptionFiles, CertificateDocuments: p.CertificateDocuments,
-			ManualDocuments: p.ManualDocuments, GuaranteeDocuments: p.GuaranteeDocuments,
-			SpecificationDocuments: p.SpecificationDocuments,
-			Draft:                  true, UpdatedAt: updatedAt})
-	}
-	if len(blob.Contacts) > 0 && !deleted["contact:"] {
-		c := blob.Contacts[0]
-		v.Contacts = append(v.Contacts, ContactRow{ID: domain.ContactSlug, Slug: domain.ContactSlug,
-			WhatsApp: c.WhatsApp, Email: c.Email, Address: c.Address, LegalInformation: c.LegalInformation,
-			CallbackTime: c.CallbackTime, WorkingHours: c.WorkingHours, Phone: c.Phone, Website: c.Website,
-			Instagram: c.Instagram, ContactCardImage: c.ContactCardImage, LocationMapImage: c.LocationMapImage,
-			CompanyLegalDocuments: c.CompanyLegalDocuments,
-			Draft:                 true, UpdatedAt: updatedAt})
-	}
-	if len(blob.Policies) > 0 && !deleted["policy:"] {
-		p := blob.Policies[0]
-		v.Policies = append(v.Policies, PolicyRow{ID: domain.PolicySlug, Slug: domain.PolicySlug,
-			DeliveryCost: p.DeliveryCost, DeliveryInDays: p.DeliveryInDays, FreeDeliveryFrom: p.FreeDeliveryFrom,
-			MinOrder: p.MinOrder, Prepayment: p.Prepayment, Installment: p.Installment,
-			ReturnPeriodInDays: p.ReturnPeriodInDays, Warranty: p.Warranty, OutsideZonesNote: p.OutsideZonesNote,
-			CommercePolicyDocuments: p.CommercePolicyDocuments,
-			Draft:                   true, UpdatedAt: updatedAt})
-	}
-	for _, z := range blob.DeliveryZones {
-		if deleted["delivery_zone:"+z.Ref] {
-			continue
-		}
-		v.Zones = append(v.Zones, ZoneRow{ID: z.Ref, Ref: z.Ref, Name: z.Name, ZoneLevel: z.ZoneLevel,
-			ParentRef: z.ParentRef, DeliveryAvailable: z.DeliveryAvailable, DeliveryCost: z.DeliveryCost,
-			DeliveryInDays: z.DeliveryInDays, Notes: z.Notes, SalesStatus: orDefault(z.SalesStatus, "active"),
-			Draft: true, UpdatedAt: updatedAt})
-	}
-	v.Materials = []Material{}
-	v.Requests = []Request{}
-	if v.Topics == nil {
-		v.Topics = []TopicRow{}
-	}
-	if v.Tariffs == nil {
-		v.Tariffs = []TariffRow{}
-	}
-	if v.Products == nil {
-		v.Products = []ProductRow{}
-	}
-	if v.Contacts == nil {
-		v.Contacts = []ContactRow{}
-	}
-	if v.Policies == nil {
-		v.Policies = []PolicyRow{}
-	}
-	if v.Zones == nil {
-		v.Zones = []ZoneRow{}
-	}
-	return v, nil
+	return draftRowsFromBlob(orgID, blob, ver, updatedAt), nil
 }
 
 // mergedView loads live rows and overlays the given blob's pending entries —
@@ -956,7 +892,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			v.Contacts = append(v.Contacts, row)
 		}
 	}
-	if deleted["contact:"] {
+	if deletedSingleton(blob, "contact") {
 		v.Contacts = nil
 	}
 
@@ -1000,7 +936,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			v.Policies = append(v.Policies, row)
 		}
 	}
-	if deleted["policy:"] {
+	if deletedSingleton(blob, "policy") {
 		v.Policies = nil
 	}
 
@@ -1087,7 +1023,7 @@ type ConfigPatch struct {
 
 // PatchConfig stages config edits in the draft blob (only non-nil fields).
 func (s *Store) PatchConfig(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p ConfigPatch) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		if p.Persona != nil {
 			b.Config.Persona = p.Persona
 		}
@@ -1117,7 +1053,7 @@ type TopicInput struct {
 // caller — the Playground editor, which has no media inputs — can never
 // blank out media an MCP tool already staged on the same topic.
 func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TopicInput) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		cur, err := s.currentTopic(ctx, db, orgID, in.Slug, b)
 		if err != nil {
 			return err
@@ -1131,7 +1067,7 @@ func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUI
 // DeleteTopic stages a topic removal by slug (drops any pending edit and marks
 // the live row, if any, for deletion at approve).
 func (s *Store) DeleteTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, slug string) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		b.removeTopic(slug)
 		b.addDelete("topic", slug)
 		return nil
@@ -1149,7 +1085,7 @@ type TariffInput struct {
 // Merges onto the tariff's current shape (currentTariff) so this text-only
 // caller never blanks out media an MCP tool already staged.
 func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TariffInput) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		cur, err := s.currentTariff(ctx, db, orgID, in.Ref, b)
 		if err != nil {
 			return err
@@ -1166,7 +1102,7 @@ func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 
 // DeleteTariff stages removal of a tariff by ref.
 func (s *Store) DeleteTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		b.removeTariff(ref)
 		b.addDelete("tariff", ref)
 		return nil
@@ -1185,7 +1121,7 @@ type ProductInput struct {
 // Merges onto the product's current shape (currentProduct) so this caller
 // cannot blank out media an MCP tool already staged.
 func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ProductInput) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		cur, err := s.currentProduct(ctx, db, orgID, in.Ref, b)
 		if err != nil {
 			return err
@@ -1203,7 +1139,7 @@ func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, actor uuid.U
 
 // DeleteProduct stages removal of a product by ref.
 func (s *Store) DeleteProduct(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		b.removeProduct(ref)
 		b.addDelete("product", ref)
 		return nil
@@ -1221,7 +1157,7 @@ type DeliveryZoneInput struct {
 // Merges onto the zone's current shape (currentZone) so this caller never
 // blanks out fields an MCP tool already staged.
 func (s *Store) UpsertZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in DeliveryZoneInput) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		cur, err := s.currentZone(ctx, db, orgID, in.Ref, b)
 		if err != nil {
 			return err
@@ -1237,7 +1173,7 @@ func (s *Store) UpsertZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUID
 
 // DeleteZone stages removal of a delivery zone by ref.
 func (s *Store) DeleteZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		b.removeZone(ref)
 		b.addDelete("delivery_zone", ref)
 		return nil
@@ -1261,7 +1197,7 @@ type ContactPatch struct {
 // PatchContacts stages an edit to the org's singleton support-contact row,
 // starting from its current merged shape so omitted fields stay unchanged.
 func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p ContactPatch) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		cur, err := s.currentContact(ctx, db, orgID, b)
 		if err != nil {
 			return err
@@ -1316,7 +1252,7 @@ type PolicyPatch struct {
 // starting from its current merged shape so omitted fields stay unchanged — an
 // exact clone of PatchContacts.
 func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p PolicyPatch) error {
-	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 		cur, err := s.currentPolicy(ctx, db, orgID, b)
 		if err != nil {
 			return err
@@ -1360,7 +1296,7 @@ func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, actor uuid.U
 func (s *Store) SetFactField(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, table, slug, field, value string) error {
 	switch table {
 	case "tariff":
-		return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+		return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 			cur, err := s.currentTariff(ctx, db, orgID, slug, b)
 			if err != nil {
 				return err
@@ -1372,7 +1308,7 @@ func (s *Store) SetFactField(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 			return nil
 		})
 	case "product":
-		return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+		return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob, _ int64) error {
 			cur, err := s.currentProduct(ctx, db, orgID, slug, b)
 			if err != nil {
 				return err
@@ -1698,7 +1634,7 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 // (auditRow already treats a nil UUID as NULL) for callers with no
 // authenticated human attached, such as internal tests.
 func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel ApproveSelector, expectedVersion *int64, actorUserID uuid.UUID) error {
-	_, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, actorUserID, func(db dbtx, b *DraftBlob) error {
+	_, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, actorUserID, func(db dbtx, b *DraftBlob, _ int64) error {
 		set := selectApproved(*b, sel)
 		if set.empty() && sel.Kind != "" {
 			return errApproveNothingPending
@@ -1856,7 +1792,11 @@ func applyDelete(ctx context.Context, tx execer, orgID uuid.UUID, d DraftDelete)
 
 func approveNote(sel ApproveSelector, set approveSet) string {
 	if sel.Kind != "" {
-		return fmt.Sprintf("approved %s %s", strings.TrimSuffix(sel.Kind, "s"), sel.Key)
+		singular := sel.Kind
+		if s, ok := SingularDeleteKind(sel.Kind); ok {
+			singular = s
+		}
+		return fmt.Sprintf("approved %s %s", singular, sel.Key)
 	}
 	return fmt.Sprintf("approved %d topic(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d zone(s), %d deletion(s)",
 		len(set.topics), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.zones), len(set.deletes))
@@ -1873,10 +1813,11 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 		}
 	}
 	var set approveSet
-	singular := strings.TrimSuffix(sel.Kind, "s")
-	for _, d := range b.Deletes {
-		if d.Kind == singular && d.Key == sel.Key {
-			set.deletes = append(set.deletes, d)
+	if singular, ok := SingularDeleteKind(sel.Kind); ok {
+		for _, d := range b.Deletes {
+			if deleteMatches(d, singular, sel.Key) {
+				set.deletes = append(set.deletes, d)
+			}
 		}
 	}
 	switch sel.Kind {
@@ -1899,11 +1840,11 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 			}
 		}
 	case "contacts":
-		if sel.Key == domain.ContactSlug {
+		if sel.Key == domain.ContactSlug || sel.Key == NaturalKeyMain {
 			set.contacts = b.Contacts
 		}
 	case "policies":
-		if sel.Key == domain.PolicySlug {
+		if sel.Key == domain.PolicySlug || sel.Key == NaturalKeyMain {
 			set.policies = b.Policies
 		}
 	case "delivery_zones":

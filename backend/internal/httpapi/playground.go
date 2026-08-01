@@ -49,8 +49,9 @@ func (s *Server) pgOrg(c *gin.Context) (uuid.UUID, bool) {
 // --- draft read / discard ---------------------------------------------------
 
 // handlePlaygroundDraft is a side-effect-free read: it always returns the
-// merged working view — live rows overlaid by any pending blob entries. There
-// is no more "open a draft" step; the blob is created lazily on first write.
+// pending change set — ONLY what kbd_draft has staged, never an unchanged
+// published row. There is no more "open a draft" step; the blob is created
+// lazily on first write.
 func (s *Server) handlePlaygroundDraft(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -59,12 +60,12 @@ func (s *Server) handlePlaygroundDraft(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	view, err := s.kb.Draft(ctx(c), orgID)
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
-	ok(c, view)
+	ok(c, changes)
 }
 
 // handlePlaygroundDiscardDraft clears every pending edit ("Отменить изменения").
@@ -391,13 +392,13 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 		return
 	}
 	s.invalidateKBCache(orgID)
-	view, err := s.kb.Draft(ctx(c), orgID)
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
 	s.hub.Broadcast("kb.approved", gin.H{})
-	ok(c, view)
+	ok(c, changes)
 }
 
 // handlePlaygroundApproveEntity approves ONE pending entity by natural key
@@ -430,13 +431,59 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 		return
 	}
 	s.invalidateKBCache(orgID)
-	view, err := s.kb.Draft(ctx(c), orgID)
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
 	s.hub.Broadcast("kb.approved", gin.H{"kind": kind})
-	ok(c, view)
+	ok(c, changes)
+}
+
+// handlePlaygroundCancelChange cancels ONE pending addition, update, or
+// removal — «Отменить изменение» on a Черновик card. If-Match is compared
+// ATOMICALLY inside CancelChange's own locked transaction (unlike pgWrite's
+// pre-check), and is deliberately not enforced when the requested outcome
+// already holds (kbstore.CancelChange's doc comment). kind ∈
+// topics|tariffs|products|contacts|policies|delivery_zones|config; key = the
+// row's natural id, same vocabulary as handlePlaygroundApproveEntity — except
+// for kind "config", where key is a FIELD name (or NaturalKeyMain to cancel
+// the whole pending config patch at once).
+func (s *Server) handlePlaygroundCancelChange(c *gin.Context) {
+	if !s.kbReady(c) {
+		return
+	}
+	orgID, proceed := s.pgOrg(c)
+	if !proceed {
+		return
+	}
+	kind := c.Param("kind")
+	switch kind {
+	case "topics", "tariffs", "products", "contacts", "policies", "delivery_zones", "config":
+	default:
+		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|tariffs|products|contacts|policies|delivery_zones|config")
+		return
+	}
+	key := c.Param("key")
+	expected, ok2 := ifMatchVersion(c)
+	if !ok2 {
+		fail(c, http.StatusBadRequest, ErrValidation, "If-Match must be an integer draft_version")
+		return
+	}
+	result, err := s.kb.CancelChange(ctx(c), orgID, currentUser(c).ID, kind, key, expected)
+	if err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
+	if err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	if result.Changed {
+		s.hub.Broadcast("kb.row.changed", gin.H{"base_version": changes.BaseVersion})
+	}
+	ok(c, gin.H{"changed": result.Changed, "changes": changes})
 }
 
 // ifMatchVersion parses an optional If-Match header (a bare integer
@@ -491,13 +538,14 @@ func (s *Server) pgWrite(c *gin.Context) (uuid.UUID, bool) {
 }
 
 // kbChanged is the common write epilogue: it broadcasts the row change and
-// returns the refreshed draft view so the editor and the chat stay in sync.
+// returns the refreshed pending change set so Черновик and the chat stay in
+// sync.
 func (s *Server) kbChanged(c *gin.Context, orgID uuid.UUID) {
-	view, err := s.kb.Draft(ctx(c), orgID)
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
-	s.hub.Broadcast("kb.row.changed", gin.H{"base_version": view.Config.BaseVersion})
-	ok(c, view)
+	s.hub.Broadcast("kb.row.changed", gin.H{"base_version": changes.BaseVersion})
+	ok(c, changes)
 }

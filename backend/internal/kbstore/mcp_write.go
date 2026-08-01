@@ -164,7 +164,7 @@ type AssistantChanges struct {
 // MCPUpsertAssistant patches the assistant singleton in the draft. userID is
 // the verified Principal.UserID, recorded as kbd_draft.updated_by.
 func (s *Store) MCPUpsertAssistant(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ch AssistantChanges, expectedVersion *int64) (UpsertResult, error) {
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob, _ int64) error {
 		if ch.Persona != nil {
 			b.Config.Persona = ch.Persona
 		}
@@ -202,7 +202,7 @@ type TopicChanges struct {
 // MCPUpsertTopic creates or patches a topic (plan/mcp.md §5's kb_topic_upsert).
 func (s *Store) MCPUpsertTopic(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, slug string, ch TopicChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
 	var result UpsertResult
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob, _ int64) error {
 		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeTopic}, "both", "")
 		if err != nil {
 			return err
@@ -293,7 +293,7 @@ type ProductChanges struct {
 // MCPUpsertProduct creates or patches a product (kb_product_upsert).
 func (s *Store) MCPUpsertProduct(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ref string, ch ProductChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
 	var result UpsertResult
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob, _ int64) error {
 		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeProduct}, "both", "")
 		if err != nil {
 			return err
@@ -389,7 +389,7 @@ type TariffChanges struct {
 // MCPUpsertTariff creates or patches a tariff (kb_tariff_upsert).
 func (s *Store) MCPUpsertTariff(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ref string, ch TariffChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
 	var result UpsertResult
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob, _ int64) error {
 		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeTariff}, "both", "")
 		if err != nil {
 			return err
@@ -494,7 +494,7 @@ type ContactsChanges struct {
 
 // MCPUpsertContacts patches the contacts singleton.
 func (s *Store) MCPUpsertContacts(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ch ContactsChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob, _ int64) error {
 		cur, err := s.currentContact(ctx, db, orgID, b)
 		if err != nil {
 			return err
@@ -568,7 +568,7 @@ type PoliciesChanges struct {
 
 // MCPUpsertPolicies patches the policies singleton.
 func (s *Store) MCPUpsertPolicies(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ch PoliciesChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob, _ int64) error {
 		cur, err := s.currentPolicy(ctx, db, orgID, b)
 		if err != nil {
 			return err
@@ -641,7 +641,7 @@ type DeliveryZoneChanges struct {
 // entry that a human still reviews before it can affect the live KB.
 func (s *Store) MCPUpsertDeliveryZone(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ref string, ch DeliveryZoneChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
 	var result UpsertResult
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob, _ int64) error {
 		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeDeliveryZone}, "both", "")
 		if err != nil {
 			return err
@@ -766,7 +766,7 @@ func (s *Store) MCPDelete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID
 		return DeleteResult{}, &ErrCannotDelete{Reason: fmt.Sprintf("unknown type %q", kbType)}
 	}
 
-	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob, _ int64) error {
 		index, err := s.identityIndex(ctx, db, orgID, []string{kbType}, "both", "")
 		if err != nil {
 			return err
