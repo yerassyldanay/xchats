@@ -11,36 +11,127 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// mediaColumnKind classifies every canonical media column (plan/DECISIONS.md
-// "Concrete media-column naming") by broad MIME category — the closed v1
-// list, across all seven KB types. Used both to validate an MCP upsert's
-// media references and to hint kb_media_upload's accept filter for a given
-// `target.field`.
-var mediaColumnKind = map[string]string{
-	"featured_image":            "image",
-	"gallery_images":            "image",
-	"pricing_images":            "image",
-	"illustration_images":       "image",
-	"contact_card_image":        "image",
-	"location_map_image":        "image",
-	"demo_videos":               "video",
-	"explainer_videos":          "video",
-	"narration_audio_files":     "audio",
-	"audio_description_files":   "audio",
-	"reference_documents":       "document",
-	"certificate_documents":     "document",
-	"manual_documents":          "document",
-	"guarantee_documents":       "document",
-	"specification_documents":   "document",
-	"terms_documents":           "document",
-	"company_legal_documents":   "document",
-	"commerce_policy_documents": "document",
+// MediaAttachmentField describes one media column a caller may attach a
+// material to: which broad MIME category it accepts, and whether it holds a
+// list (uuid[]) or a single reference (uuid).
+type MediaAttachmentField struct {
+	Field    string `json:"field"`
+	Kind     string `json:"kind"`     // image | video | audio | document
+	Multiple bool   `json:"multiple"` // plural uuid[] column vs singular uuid column
+}
+
+// mediaAttachmentFields is THE authority for which media field may receive an
+// attachment on which KB type (plan/DECISIONS.md "Concrete media-column
+// naming", scoped per table rather than flattened). kb_info publishes it as
+// media_attachment_fields, kb_media_attach validates against it, and
+// kb_media_upload's optional `target` is checked against it — so the widget
+// no longer hand-maintains a parallel copy of this matrix.
+//
+// featured_image is deliberately ABSENT. It is a DERIVED column — for
+// products it always equals gallery_images[0] (syncProductFeaturedImage in
+// kbstore.go), and on topics/tariffs it is legacy storage whose values
+// migration 0016 relocated into illustration_images/pricing_images. It
+// remains a real, readable media column (see mediaColumnKind below); it is
+// simply never an attachment target.
+//
+// assistant and delivery_zone are absent because they have no media columns
+// at all — a type with no entry here offers no attachment targets.
+var mediaAttachmentFields = map[string][]MediaAttachmentField{
+	KBTypeTopic: {
+		{Field: "illustration_images", Kind: "image", Multiple: true},
+		{Field: "explainer_videos", Kind: "video", Multiple: true},
+		{Field: "narration_audio_files", Kind: "audio", Multiple: true},
+		{Field: "reference_documents", Kind: "document", Multiple: true},
+	},
+	KBTypeProduct: {
+		{Field: "gallery_images", Kind: "image", Multiple: true},
+		{Field: "demo_videos", Kind: "video", Multiple: true},
+		{Field: "audio_description_files", Kind: "audio", Multiple: true},
+		{Field: "certificate_documents", Kind: "document", Multiple: true},
+		{Field: "manual_documents", Kind: "document", Multiple: true},
+		{Field: "guarantee_documents", Kind: "document", Multiple: true},
+		{Field: "specification_documents", Kind: "document", Multiple: true},
+	},
+	KBTypeTariff: {
+		{Field: "pricing_images", Kind: "image", Multiple: true},
+		{Field: "explainer_videos", Kind: "video", Multiple: true},
+		{Field: "terms_documents", Kind: "document", Multiple: true},
+	},
+	KBTypeContacts: {
+		{Field: "contact_card_image", Kind: "image", Multiple: false},
+		{Field: "location_map_image", Kind: "image", Multiple: false},
+		{Field: "company_legal_documents", Kind: "document", Multiple: true},
+	},
+	KBTypePolicies: {
+		{Field: "commerce_policy_documents", Kind: "document", Multiple: true},
+	},
+}
+
+// derivedMediaColumnKind holds media columns that are real, validatable
+// storage but not attachment targets — see mediaAttachmentFields' comment.
+var derivedMediaColumnKind = map[string]string{"featured_image": "image"}
+
+// mediaColumnKind is the flat field→kind view every media REFERENCE check
+// works from (validateMediaRef, kb_info.media_field_kinds). It is DERIVED
+// from mediaAttachmentFields plus derivedMediaColumnKind so there is exactly
+// one list to maintain; the same field appearing on two types (e.g.
+// explainer_videos on topic and tariff) necessarily carries the same kind.
+var mediaColumnKind = buildMediaColumnKind()
+
+func buildMediaColumnKind() map[string]string {
+	out := make(map[string]string, len(derivedMediaColumnKind)+16)
+	for field, kind := range derivedMediaColumnKind {
+		out[field] = kind
+	}
+	for _, fields := range mediaAttachmentFields {
+		for _, f := range fields {
+			out[f.Field] = f.Kind
+		}
+	}
+	return out
 }
 
 // MediaFieldKind returns the broad category ("image"|"video"|"audio"|
 // "document") a canonical media column expects, or "" if field is not a
 // recognized media column.
 func MediaFieldKind(field string) string { return mediaColumnKind[field] }
+
+// MediaFieldKinds returns a copy of the flat field→kind map, for
+// kb_info.media_field_kinds. Retained alongside the richer, type-scoped
+// MediaAttachmentFieldsByType for backward compatibility with callers built
+// against the flat shape.
+func MediaFieldKinds() map[string]string {
+	out := make(map[string]string, len(mediaColumnKind))
+	for field, kind := range mediaColumnKind {
+		out[field] = kind
+	}
+	return out
+}
+
+// MediaAttachmentFieldsByType returns a copy of the attachment registry,
+// grouped by KB type — kb_info.media_attachment_fields. Types with no media
+// columns are absent, not present-and-empty, so a caller can offer exactly
+// the types that can receive something.
+func MediaAttachmentFieldsByType() map[string][]MediaAttachmentField {
+	out := make(map[string][]MediaAttachmentField, len(mediaAttachmentFields))
+	for kbType, fields := range mediaAttachmentFields {
+		out[kbType] = append([]MediaAttachmentField(nil), fields...)
+	}
+	return out
+}
+
+// LookupMediaAttachmentField resolves one (KB type, field) pair against the
+// registry. A field that exists on a DIFFERENT type — or featured_image,
+// which exists on no type — comes back ok=false, which is what makes the
+// pairing (not just the field name) the validated thing.
+func LookupMediaAttachmentField(kbType, field string) (MediaAttachmentField, bool) {
+	for _, f := range mediaAttachmentFields[kbType] {
+		if f.Field == field {
+			return f, true
+		}
+	}
+	return MediaAttachmentField{}, false
+}
 
 func mimeMatchesKind(mime, kind string) bool {
 	switch kind {

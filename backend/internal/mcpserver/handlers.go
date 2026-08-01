@@ -98,6 +98,10 @@ func mapKBError(err error) map[string]any {
 	if errors.As(err, &mediaErr) {
 		return toolError(mediaErr.Error())
 	}
+	var attachErr *kbstore.ErrAttachTarget
+	if errors.As(err, &attachErr) {
+		return toolError(attachErr.Error())
+	}
 	var enumErr *kbstore.ErrInvalidEnumValue
 	if errors.As(err, &enumErr) {
 		return toolError(enumErr.Error())
@@ -163,6 +167,7 @@ const (
 	toolKBSummary            = "kb_summary"
 	toolKBInfo               = "kb_info"
 	toolKBMediaUpload        = "kb_media_upload"
+	toolKBMediaAttach        = "kb_media_attach"
 )
 
 var requiredScope = map[string]string{
@@ -178,6 +183,12 @@ var requiredScope = map[string]string{
 	toolKBSummary:            mcpauth.ScopeKBRead,
 	toolKBInfo:               mcpauth.ScopeKBRead,
 	toolKBMediaUpload:        mcpauth.ScopeMediaWrite,
+	// kb_media_attach WRITES THE DRAFT (appends/replaces a media field on an
+	// existing record) — kb:draft:write, the same scope every kb_*_upsert
+	// requires, not media:write (kb_media_upload's scope: staging bytes is a
+	// different privilege than attaching an already-staged material to a KB
+	// record).
+	toolKBMediaAttach: mcpauth.ScopeKBDraftWrite,
 }
 
 // callTool routes to the specific per-tool implementation. The returned
@@ -211,6 +222,8 @@ func (s *Server) callTool(ctx context.Context, orgID uuid.UUID, userID uuid.UUID
 		return s.handleKBInfo(ctx, orgID, userID, args)
 	case toolKBMediaUpload:
 		return s.handleKBMediaUpload(ctx, orgID, userID, args)
+	case toolKBMediaAttach:
+		return s.handleKBMediaAttach(ctx, orgID, userID, args)
 	default:
 		return toolError("unknown tool: " + name), nil
 	}
@@ -664,26 +677,18 @@ func (s *Server) handleKBSummary(ctx context.Context, orgID, userID uuid.UUID, a
 
 func (s *Server) handleKBInfo(ctx context.Context, orgID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
 	return s.toolResult(serverInstructions, map[string]any{
-		"types":             kbstore.AllKBTypes,
-		"natural_key_main":  kbstore.NaturalKeyMain,
-		"media_field_kinds": mediaFieldKindsInfo(),
-		"frontend_base_url": s.Deps.FrontendBaseURL,
+		"types":            kbstore.AllKBTypes,
+		"natural_key_main": kbstore.NaturalKeyMain,
+		// media_attachment_fields is the authoritative, type-scoped registry
+		// (which field on which type, its kind, and its cardinality) the KB
+		// Manager widget builds its attach form from. media_field_kinds is
+		// the older flat field→kind view, kept for compatibility with
+		// anything built against it — it still lists featured_image, which
+		// media_attachment_fields deliberately never does.
+		"media_attachment_fields": kbstore.MediaAttachmentFieldsByType(),
+		"media_field_kinds":       kbstore.MediaFieldKinds(),
+		"frontend_base_url":       s.Deps.FrontendBaseURL,
 	}, "all", orgID, userID), nil
-}
-
-func mediaFieldKindsInfo() map[string]string {
-	out := map[string]string{}
-	for _, f := range []string{
-		"featured_image", "gallery_images", "pricing_images", "illustration_images",
-		"contact_card_image", "location_map_image", "demo_videos", "explainer_videos",
-		"narration_audio_files", "audio_description_files", "reference_documents",
-		"certificate_documents", "manual_documents", "guarantee_documents",
-		"specification_documents", "terms_documents", "company_legal_documents",
-		"commerce_policy_documents",
-	} {
-		out[f] = kbstore.MediaFieldKind(f)
-	}
-	return out
 }
 
 // typeAliases maps the plural spelling plan/mcp.md's own worked examples use

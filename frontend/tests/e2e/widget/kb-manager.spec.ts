@@ -10,6 +10,37 @@ import {
   UPLOAD_URL,
 } from './mockHost'
 
+// stagedUpload builds a kb_media_upload structuredContent response — the
+// same shape media_upload.go's handleKBMediaUpload returns.
+function stagedUpload(materialId: string, opts: { expiresInMs?: number; contentType?: string } = {}) {
+  return toolResult({
+    material_id: materialId,
+    upload_url: UPLOAD_URL,
+    upload_method: 'PUT',
+    upload_headers: { 'Content-Type': opts.contentType ?? 'image/png' },
+    expires_at: new Date(Date.now() + (opts.expiresInMs ?? 900_000)).toISOString(),
+    max_size_bytes: 1024,
+    processing_status: 'uploaded',
+  })
+}
+
+// summaryWith builds a kb_summary response carrying one record per (type,
+// key, title) triple, all state="published" unless overridden — the shape
+// the widget's attach-target picker (loadAttachRecords) reads.
+function summaryWith(items: Array<{ type: string; key: string; title: string; state?: string }>) {
+  return toolResult({
+    draft_version: 1,
+    items: items.map((it) => ({
+      type: it.type,
+      key: it.key,
+      title: it.title,
+      exists_in_live: true,
+      exists_in_draft: false,
+      state: it.state ?? 'published',
+    })),
+  })
+}
+
 // kb-manager.spec.ts exercises the KB Manager MCP widget (the real,
 // production backend/internal/mcpserver/widget/kb-manager.html) inside a
 // MOCK MCP HOST — a parent page implementing just enough of the generic
@@ -90,18 +121,38 @@ test('pagination follows next_cursor instead of truncating at 100', async ({ pag
   expect((calls[1].arguments as any).cursor).toBe('100')
 })
 
-test('upload flow: progress, success, error, and retry', async ({ page }) => {
-  await mountWidget(page, {
-    kb_media_upload: [toolResult({
-      material_id: 'mat-1', upload_url: UPLOAD_URL, upload_method: 'PUT',
-      upload_headers: { 'Content-Type': 'text/plain' }, expires_at: new Date(Date.now() + 900_000).toISOString(),
-      max_size_bytes: 1024, processing_status: 'uploaded',
-    })],
-  })
+test('selecting a file immediately stages and uploads it, with real progress', async ({ page }) => {
+  await mountWidget(page, { kb_media_upload: [stagedUpload('mat-1')] })
   const widget = await pageFrame(page)
   await widget.locator('nav.tabs button[data-tab="media"]').click()
 
-  // First PUT fails.
+  // The PUT resolves slowly enough for the progress bar to have a moment to
+  // render before completing.
+  await page.route(UPLOAD_URL, async (route) => {
+    await new Promise((r) => setTimeout(r, 100))
+    return route.fulfill({ status: 200, body: 'ok' })
+  })
+
+  // Selecting a file auto-stages AND auto-uploads (handleFile) — there is no
+  // separate "click to start" step, and no client-side hashing delay before
+  // the kb_media_upload call fires.
+  await widget.locator('#file-input').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('fake png bytes') })
+
+  await expect(widget.locator('.progress-bar')).toBeVisible()
+  await expect(widget.getByText('Файл загружен')).toBeVisible()
+
+  const uploadCalls = (await toolCalls(page)).filter((c) => c.name === 'kb_media_upload')
+  expect(uploadCalls.length).toBe(1)
+  // No client-side SHA-256 preprocessing: the staging call carries no
+  // sha256_checksum argument at all.
+  expect((uploadCalls[0].arguments as any).sha256_checksum).toBeUndefined()
+})
+
+test('a failed PUT can be retried against the SAME signed target, without re-staging', async ({ page }) => {
+  await mountWidget(page, { kb_media_upload: [stagedUpload('mat-1')] })
+  const widget = await pageFrame(page)
+  await widget.locator('nav.tabs button[data-tab="media"]').click()
+
   let putCount = 0
   await page.route(UPLOAD_URL, (route) => {
     putCount += 1
@@ -109,16 +160,11 @@ test('upload flow: progress, success, error, and retry', async ({ page }) => {
     return route.fulfill({ status: 200, body: 'ok' })
   })
 
-  // Selecting a file auto-stages AND auto-uploads (handleFile) — there is no
-  // separate "click to start" step on this path (#do-upload is only shown
-  // when a host seeds an already-staged upload via window.openai.toolOutput).
-  await widget.locator('#file-input').setInputFiles({ name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('hello world') })
-
+  await widget.locator('#file-input').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('fake png bytes') })
   await expect(widget.locator('.error-box')).toBeVisible()
   const retryButton = widget.locator('#retry-upload')
   await expect(retryButton).toBeVisible()
 
-  // Retry succeeds without re-staging (no second kb_media_upload call).
   await retryButton.click()
   await expect(widget.getByText('Файл загружен')).toBeVisible()
   const uploadCalls = (await toolCalls(page)).filter((c) => c.name === 'kb_media_upload')
@@ -126,37 +172,143 @@ test('upload flow: progress, success, error, and retry', async ({ page }) => {
   expect(putCount).toBe(2)
 })
 
-// Reproduces a real failure: a user uploaded a file, then in the attach form
-// picked type "Тариф" while the key they entered was actually a TOPIC slug.
-// The typed upserts are upserts, so a key matching nothing fell through to
-// "create" and the backend answered `pricing_type is required to create this
-// record` — an error about an unrelated required field, for what the user
-// experienced as "attach this image". Attaching must never create a record.
-test('attaching to a key that does not exist for the chosen type is refused clearly', async ({ page }) => {
+test('retrying against an EXPIRED signed target re-stages instead of re-PUTting', async ({ page }) => {
+  // expires_at already in the past — the widget must detect this itself
+  // (it never inspects the PUT's failure body) and re-call kb_media_upload
+  // rather than retry a target that can only ever fail again.
   await mountWidget(page, {
-    kb_media_upload: [toolResult({
-      material_id: 'mat-1', upload_url: UPLOAD_URL, upload_method: 'PUT',
-      upload_headers: { 'Content-Type': 'text/plain' }, expires_at: new Date(Date.now() + 900_000).toISOString(),
-      max_size_bytes: 1024, processing_status: 'uploaded',
-    })],
-    // No tariff has this key — kb_read returns an empty page, exactly as the
-    // real backend does for a topic slug queried as a tariff.
-    kb_read: [toolResult({ items: [] })],
+    kb_media_upload: [stagedUpload('mat-1', { expiresInMs: -1000 }), stagedUpload('mat-2')],
+  })
+  const widget = await pageFrame(page)
+  await widget.locator('nav.tabs button[data-tab="media"]').click()
+
+  let putCount = 0
+  await page.route(UPLOAD_URL, (route) => {
+    putCount += 1
+    if (putCount === 1) return route.fulfill({ status: 403, body: 'expired' })
+    return route.fulfill({ status: 200, body: 'ok' })
+  })
+
+  await widget.locator('#file-input').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('fake png bytes') })
+  await expect(widget.locator('.error-box')).toContainText('истёк')
+  await widget.locator('#retry-upload').click()
+  await expect(widget.getByText('Файл загружен')).toBeVisible()
+
+  const uploadCalls = (await toolCalls(page)).filter((c) => c.name === 'kb_media_upload')
+  expect(uploadCalls.length).toBe(2)
+  expect(putCount).toBe(2)
+})
+
+test('an unsupported MIME type is rejected before any tool call', async ({ page }) => {
+  await mountWidget(page)
+  const widget = await pageFrame(page)
+  await widget.locator('nav.tabs button[data-tab="media"]').click()
+
+  await widget.locator('#file-input').setInputFiles({ name: 'model.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from('bytes') })
+
+  await expect(widget.locator('.error-box')).toContainText('Неподдерживаемый тип файла')
+  const uploadCalls = (await toolCalls(page)).filter((c) => c.name === 'kb_media_upload')
+  expect(uploadCalls.length).toBe(0)
+})
+
+// The attach-target picker is server-driven (kb_info.media_attachment_fields),
+// not a client-side matrix — an image file must offer only types/fields whose
+// kind is "image", and featured_image (never an attachment target) must never
+// appear regardless of file kind.
+test('the attach form offers only types and fields matching the file kind, never featured_image', async ({ page }) => {
+  await mountWidget(page, {
+    kb_media_upload: [stagedUpload('mat-1')],
+    kb_summary: [summaryWith([{ type: 'product', key: 'coffee-machine', title: 'Кофемашина' }])],
   })
   const widget = await pageFrame(page)
   await widget.locator('nav.tabs button[data-tab="media"]').click()
   await page.route(UPLOAD_URL, (route) => route.fulfill({ status: 200, body: 'ok' }))
-  await widget.locator('#file-input').setInputFiles({ name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('hi') })
+  await widget.locator('#file-input').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('bytes') })
   await expect(widget.getByText('Файл загружен')).toBeVisible()
 
-  await widget.locator('#attach-type').selectOption('tariff')
-  await widget.locator('#attach-key').fill('kak-dobavit-kassira-v-kaspi-pay')
+  const typeOptions = await widget.locator('#attach-type option').allTextContents()
+  // Every type with an image field (topic, product, tariff, contacts) is
+  // offered; delivery_zone/assistant (no media columns at all) are not.
+  expect(typeOptions).toEqual(expect.arrayContaining(['Тема', 'Товар', 'Тариф', 'Контакты']))
+  expect(typeOptions).not.toContain('Зона доставки')
+  expect(typeOptions).not.toContain('Ассистент')
+
+  await widget.locator('#attach-type').selectOption('product')
+  const fieldOptions = await widget.locator('#attach-field option').evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value))
+  expect(fieldOptions).toEqual(['gallery_images'])
+  expect(fieldOptions).not.toContain('featured_image')
+  expect(fieldOptions).not.toContain('demo_videos') // a video-kind field must not appear for an image file
+})
+
+test('a video file offers only video-kind fields', async ({ page }) => {
+  await mountWidget(page, {
+    kb_media_upload: [stagedUpload('mat-1', { contentType: 'video/mp4' })],
+    kb_summary: [summaryWith([{ type: 'product', key: 'coffee-machine', title: 'Кофемашина' }])],
+  })
+  const widget = await pageFrame(page)
+  await widget.locator('nav.tabs button[data-tab="media"]').click()
+  await page.route(UPLOAD_URL, (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await widget.locator('#file-input').setInputFiles({ name: 'demo.mp4', mimeType: 'video/mp4', buffer: Buffer.from('bytes') })
+  await expect(widget.getByText('Файл загружен')).toBeVisible()
+
+  await widget.locator('#attach-type').selectOption('product')
+  const fieldOptions = await widget.locator('#attach-field option').evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value))
+  expect(fieldOptions).toEqual(['demo_videos'])
+})
+
+// Records staged for deletion must never be offered as an attach target —
+// the only way this widget can enforce "excluded" client-side.
+test('a record staged for deletion (state=to_delete) is excluded from the picker', async ({ page }) => {
+  await mountWidget(page, {
+    kb_media_upload: [stagedUpload('mat-1')],
+    kb_summary: [summaryWith([
+      { type: 'product', key: 'live-one', title: 'Живой товар' },
+      { type: 'product', key: 'doomed', title: 'Удаляемый товар', state: 'to_delete' },
+    ])],
+  })
+  const widget = await pageFrame(page)
+  await widget.locator('nav.tabs button[data-tab="media"]').click()
+  await page.route(UPLOAD_URL, (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await widget.locator('#file-input').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('bytes') })
+  await expect(widget.getByText('Файл загружен')).toBeVisible()
+
+  await widget.locator('#attach-type').selectOption('product')
+  const recordOptions = await widget.locator('#attach-key option').allTextContents()
+  expect(recordOptions.join(' ')).toContain('Живой товар')
+  expect(recordOptions.join(' ')).not.toContain('Удаляемый товар')
+})
+
+// The full happy path: stage, PUT, pick a record, attach — exactly one
+// kb_media_attach call with the expected arguments, no read-modify-upsert.
+test('attach issues exactly one kb_media_attach call with the selected target', async ({ page }) => {
+  await mountWidget(page, {
+    kb_media_upload: [stagedUpload('mat-1')],
+    kb_summary: [summaryWith([{ type: 'product', key: 'coffee-machine', title: 'Кофемашина' }])],
+    kb_media_attach: [toolResult({
+      type: 'product', key: 'coffee-machine', field: 'gallery_images',
+      material_id: 'mat-1', draft_version: 2, already_present: false,
+    })],
+  })
+  const widget = await pageFrame(page)
+  await widget.locator('nav.tabs button[data-tab="media"]').click()
+  await page.route(UPLOAD_URL, (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await widget.locator('#file-input').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('bytes') })
+  await expect(widget.getByText('Файл загружен')).toBeVisible()
+
+  await widget.locator('#attach-type').selectOption('product')
+  await widget.locator('#attach-key').selectOption('coffee-machine')
+  await widget.locator('#attach-field').selectOption('gallery_images')
   await widget.locator('#do-attach').click()
 
-  await expect(widget.locator('.error-box')).toContainText('Запись не найдена')
-  // The upsert must NOT have been attempted — that is what produced the
-  // confusing "pricing_type is required" before.
-  const upsertCalls = (await toolCalls(page)).filter((c) => c.name === 'kb_tariff_upsert')
+  await expect(widget.getByText('Материал прикреплён к записи.')).toBeVisible()
+  const attachCalls = (await toolCalls(page)).filter((c) => c.name === 'kb_media_attach')
+  expect(attachCalls.length).toBe(1)
+  expect(attachCalls[0].arguments).toEqual({
+    material_id: 'mat-1', type: 'product', key: 'coffee-machine', field: 'gallery_images',
+  })
+  // No read-modify-upsert: the old flow's kb_read/kb_*_upsert calls must not
+  // happen as part of attaching.
+  const upsertCalls = (await toolCalls(page)).filter((c) => c.name === 'kb_product_upsert')
   expect(upsertCalls.length).toBe(0)
 })
 

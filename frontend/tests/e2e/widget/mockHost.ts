@@ -36,11 +36,47 @@ export function toolResult(structuredContent: unknown, meta: Record<string, unkn
 
 const DEFAULT_FRONTEND_BASE_URL = 'https://xchats.test'
 
+// DEFAULT_MEDIA_ATTACHMENT_FIELDS mirrors the real, backend-authoritative
+// registry (kbstore.mediaAttachmentFields, mcp_media.go) — the widget fetches
+// this from kb_info and drives its entire attach form from it, so a test that
+// wants a realistic attach flow should build on this rather than redefine the
+// matrix per-test. featured_image deliberately does not appear anywhere here
+// — it is never an attachment target (see the Go registry's doc comment).
+export const DEFAULT_MEDIA_ATTACHMENT_FIELDS: Record<string, Array<{ field: string; kind: string; multiple: boolean }>> = {
+  topic: [
+    { field: 'illustration_images', kind: 'image', multiple: true },
+    { field: 'explainer_videos', kind: 'video', multiple: true },
+    { field: 'narration_audio_files', kind: 'audio', multiple: true },
+    { field: 'reference_documents', kind: 'document', multiple: true },
+  ],
+  product: [
+    { field: 'gallery_images', kind: 'image', multiple: true },
+    { field: 'demo_videos', kind: 'video', multiple: true },
+    { field: 'audio_description_files', kind: 'audio', multiple: true },
+    { field: 'certificate_documents', kind: 'document', multiple: true },
+    { field: 'manual_documents', kind: 'document', multiple: true },
+    { field: 'guarantee_documents', kind: 'document', multiple: true },
+    { field: 'specification_documents', kind: 'document', multiple: true },
+  ],
+  tariff: [
+    { field: 'pricing_images', kind: 'image', multiple: true },
+    { field: 'explainer_videos', kind: 'video', multiple: true },
+    { field: 'terms_documents', kind: 'document', multiple: true },
+  ],
+  contacts: [
+    { field: 'contact_card_image', kind: 'image', multiple: false },
+    { field: 'location_map_image', kind: 'image', multiple: false },
+    { field: 'company_legal_documents', kind: 'document', multiple: true },
+  ],
+  policies: [{ field: 'commerce_policy_documents', kind: 'document', multiple: true }],
+}
+
 function defaultKbInfo() {
   return toolResult({
     types: ['assistant', 'topic', 'product', 'tariff', 'contacts', 'policies', 'delivery_zone'],
     natural_key_main: ['assistant', 'contacts', 'policies'],
     media_field_kinds: {},
+    media_attachment_fields: DEFAULT_MEDIA_ATTACHMENT_FIELDS,
     frontend_base_url: DEFAULT_FRONTEND_BASE_URL,
   })
 }
@@ -57,7 +93,7 @@ function defaultKbSummary() {
 // can never race a test's setToolResponse() call — see mountWidget's doc.
 function hostHtml(seeded: Record<string, unknown[]>): string {
   return `<!doctype html>
-<html><body style="margin:0">
+<html><head><meta charset="utf-8"></head><body style="margin:0">
 <iframe id="widget" src="${WIDGET_URL}" style="width:100vw;height:100vh;border:0"></iframe>
 <script>
   window.__calls = [];
@@ -114,8 +150,14 @@ export async function mountWidget(
     kb_summary: [defaultKbSummary()],
     ...responses,
   }
-  await page.route(WIDGET_URL, (route) => route.fulfill({ contentType: 'text/html', body: widgetHtml() }))
-  await page.route(`${HOST_ORIGIN}/`, (route) => route.fulfill({ contentType: 'text/html', body: hostHtml(seeded) }))
+  // charset=utf-8 explicit on both: kb-manager.html carries its own <meta
+  // charset> so it was never at risk, but the mock HOST page's inline
+  // window.__toolResponses JSON (any Cyrillic mock title/label a test
+  // seeds) previously depended on the browser's un-declared-charset
+  // guess — right up until it guessed wrong and every non-ASCII test
+  // fixture came out as mojibake.
+  await page.route(WIDGET_URL, (route) => route.fulfill({ contentType: 'text/html; charset=utf-8', body: widgetHtml() }))
+  await page.route(`${HOST_ORIGIN}/`, (route) => route.fulfill({ contentType: 'text/html; charset=utf-8', body: hostHtml(seeded) }))
   await page.goto(HOST_ORIGIN + '/')
   return page.frameLocator('#widget')
 }

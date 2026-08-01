@@ -14,6 +14,11 @@ import (
 	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
+// testUploadBaseURL is the API origin newTestServer configures — used by
+// the widget resource CSP tests to confirm the domain lists are actually
+// derived from Deps.UploadBaseURL, not hard-coded or empty.
+const testUploadBaseURL = "https://api.xchats.test"
+
 func newTestServer(t *testing.T) (*mcpserver.Server, mcpauth.Principal) {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")
@@ -41,7 +46,7 @@ func newTestServer(t *testing.T) (*mcpserver.Server, mcpauth.Principal) {
 	}
 	t.Cleanup(st.Close)
 
-	srv := mcpserver.New(mcpserver.Deps{KB: kbstore.New(st.Pool())})
+	srv := mcpserver.New(mcpserver.Deps{KB: kbstore.New(st.Pool()), UploadBaseURL: testUploadBaseURL})
 	principal := mcpauth.Principal{
 		UserID: user.ID, OrganizationID: org.ID, ClientID: "test-client",
 		Scopes: []string{mcpauth.ScopeKBRead, mcpauth.ScopeKBDraftWrite, mcpauth.ScopeMediaWrite},
@@ -93,8 +98,8 @@ func TestInitialize_ReturnsProtocolShape(t *testing.T) {
 	}
 }
 
-// TestToolsList_HasAllTwelveTools confirms the closed contract's shape.
-func TestToolsList_HasAllTwelveTools(t *testing.T) {
+// TestToolsList_HasAllThirteenTools confirms the closed contract's shape.
+func TestToolsList_HasAllThirteenTools(t *testing.T) {
 	srv, principal := newTestServer(t)
 	resp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "tools/list"})
 	if resp.Error != nil {
@@ -102,8 +107,8 @@ func TestToolsList_HasAllTwelveTools(t *testing.T) {
 	}
 	result := resp.Result.(map[string]any)
 	tools := result["tools"].([]mcpserver.Tool)
-	if len(tools) != 12 {
-		t.Fatalf("expected 12 tools, got %d", len(tools))
+	if len(tools) != 13 {
+		t.Fatalf("expected 13 tools, got %d", len(tools))
 	}
 	names := map[string]bool{}
 	for _, tool := range tools {
@@ -115,7 +120,7 @@ func TestToolsList_HasAllTwelveTools(t *testing.T) {
 	for _, want := range []string{
 		"kb_assistant_upsert", "kb_topic_upsert", "kb_product_upsert", "kb_tariff_upsert",
 		"kb_contacts_upsert", "kb_policies_upsert", "kb_delivery_zone_upsert",
-		"kb_read", "kb_delete", "kb_summary", "kb_info", "kb_media_upload",
+		"kb_read", "kb_delete", "kb_summary", "kb_info", "kb_media_upload", "kb_media_attach",
 	} {
 		if !names[want] {
 			t.Fatalf("missing tool %q", want)
@@ -529,7 +534,7 @@ func TestKBMediaUpload_ReturnsSignedTarget(t *testing.T) {
 	srv, principal := newTestServer(t)
 	res := callTool(t, srv, principal, "kb_media_upload", map[string]any{
 		"filename": "hero.jpg", "mime_type": "image/jpeg", "size_bytes": 12345,
-		"target": map[string]any{"type": "product", "field": "featured_image"},
+		"target": map[string]any{"type": "product", "field": "gallery_images"},
 	})
 	if res["isError"] == true {
 		t.Fatalf("expected success, got %+v", res)
@@ -584,10 +589,144 @@ func TestKBMediaUpload_RejectsMismatchedTargetMime(t *testing.T) {
 	srv, principal := newTestServer(t)
 	res := callTool(t, srv, principal, "kb_media_upload", map[string]any{
 		"filename": "doc.pdf", "mime_type": "application/pdf", "size_bytes": 100,
-		"target": map[string]any{"type": "product", "field": "featured_image"},
+		"target": map[string]any{"type": "product", "field": "gallery_images"},
 	})
 	if res["isError"] != true {
 		t.Fatalf("expected a mime-mismatch isError, got %+v", res)
+	}
+}
+
+// TestKBMediaUpload_RejectsInvalidTargetFieldPairing confirms target is
+// validated against the type-scoped attachment registry, not just the flat
+// field→kind map — a field that exists but on a DIFFERENT type, and
+// featured_image (a real media column that is never an attachment target),
+// must both be rejected.
+func TestKBMediaUpload_RejectsInvalidTargetFieldPairing(t *testing.T) {
+	srv, principal := newTestServer(t)
+
+	res := callTool(t, srv, principal, "kb_media_upload", map[string]any{
+		"filename": "hero.jpg", "mime_type": "image/jpeg", "size_bytes": 100,
+		"target": map[string]any{"type": "topic", "field": "gallery_images"}, // product-only field
+	})
+	if res["isError"] != true {
+		t.Fatalf("expected isError for a field valid on a different type, got %+v", res)
+	}
+
+	res = callTool(t, srv, principal, "kb_media_upload", map[string]any{
+		"filename": "hero.jpg", "mime_type": "image/jpeg", "size_bytes": 100,
+		"target": map[string]any{"type": "product", "field": "featured_image"},
+	})
+	if res["isError"] != true {
+		t.Fatalf("expected isError for featured_image (never an attachment target), got %+v", res)
+	}
+}
+
+// TestKBInfo_MediaAttachmentFields confirms kb_info's structuredContent
+// carries the type-scoped registry the widget drives its attach form from,
+// that it agrees with kb_media_attach's own acceptance, and that
+// featured_image never appears there (it is a real media column — present
+// in the older, flat media_field_kinds, kept for compatibility — but never
+// an attachment target).
+func TestKBInfo_MediaAttachmentFields(t *testing.T) {
+	srv, principal := newTestServer(t)
+	res := callTool(t, srv, principal, "kb_info", map[string]any{})
+	if res["isError"] == true {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	sc := res["structuredContent"].(map[string]any)
+
+	fields, ok := sc["media_attachment_fields"].(map[string][]kbstore.MediaAttachmentField)
+	if !ok {
+		t.Fatalf("expected media_attachment_fields as map[string][]kbstore.MediaAttachmentField, got %#v", sc["media_attachment_fields"])
+	}
+	productFields := fields["product"]
+	if len(productFields) == 0 {
+		t.Fatalf("expected a non-empty product entry, got %#v", productFields)
+	}
+	seenGallery := false
+	for _, f := range productFields {
+		if f.Field == "featured_image" {
+			t.Fatalf("featured_image must never appear in media_attachment_fields, got %+v", productFields)
+		}
+		if f.Field == "gallery_images" {
+			seenGallery = true
+			if f.Kind != "image" || !f.Multiple {
+				t.Fatalf("expected gallery_images {kind:image, multiple:true}, got %+v", f)
+			}
+		}
+	}
+	if !seenGallery {
+		t.Fatalf("expected gallery_images among product's media_attachment_fields, got %+v", productFields)
+	}
+	// assistant and delivery_zone have no media columns at all — absent, not
+	// present-and-empty.
+	for _, absent := range []string{"assistant", "delivery_zone"} {
+		if _, present := fields[absent]; present {
+			t.Fatalf("expected %q absent from media_attachment_fields, got %+v", absent, fields[absent])
+		}
+	}
+
+	kinds, ok := sc["media_field_kinds"].(map[string]string)
+	if !ok {
+		t.Fatalf("expected media_field_kinds as map[string]string, got %#v", sc["media_field_kinds"])
+	}
+	if kinds["featured_image"] != "image" {
+		t.Fatalf("expected media_field_kinds to still carry featured_image (compatibility), got %+v", kinds["featured_image"])
+	}
+}
+
+// TestKBMediaAttach_EndToEnd exercises the tool-call layer for kb_media_attach:
+// stage a material, complete its upload (kbstore.CompleteMaterialUpload — the
+// signed-PUT HTTP route lives in internal/httpapi, exercised separately by
+// TestMCPMediaUploadEndToEnd), attach it to an existing product's
+// gallery_images, and confirm the draft reflects it. The bulk of the
+// validation matrix (invalid pairing, missing/deleted record, bad material)
+// is covered at the kbstore layer (mcp_attach_test.go); this only confirms
+// the tool wires through to it correctly.
+func TestKBMediaAttach_EndToEnd(t *testing.T) {
+	srv, principal := newTestServer(t)
+	ctx := context.Background()
+
+	callTool(t, srv, principal, "kb_product_upsert", map[string]any{
+		"ref": "widget-1", "changes": map[string]any{"name": "Товар", "in_stock": true},
+	})
+
+	materialID, err := srv.Deps.KB.CreateUploadMaterial(ctx, principal.OrganizationID, kbstore.UploadMaterialInput{
+		Filename: "photo.jpg", MimeType: "image/jpeg", SizeBytes: 10,
+	})
+	if err != nil {
+		t.Fatalf("stage material: %v", err)
+	}
+	if err := srv.Deps.KB.CompleteMaterialUpload(ctx, materialID, "disk", "org/x/"+materialID.String(), 10, ""); err != nil {
+		t.Fatalf("complete upload: %v", err)
+	}
+
+	attach := callTool(t, srv, principal, "kb_media_attach", map[string]any{
+		"material_id": materialID.String(), "type": "product", "key": "widget-1", "field": "gallery_images",
+	})
+	if attach["isError"] == true {
+		t.Fatalf("expected success, got %+v", attach)
+	}
+	sc := attach["structuredContent"].(kbstore.MediaAttachResult)
+	if sc.MaterialID != materialID.String() || sc.Key != "widget-1" || sc.Field != "gallery_images" {
+		t.Fatalf("unexpected attach result: %+v", sc)
+	}
+
+	read := callTool(t, srv, principal, "kb_read", map[string]any{"types": []string{"product"}, "key": "widget-1", "source": "draft"})
+	page := read["structuredContent"].(kbstore.ReadPage)
+	row := page.Items[0].Data.(kbstore.ProductRow)
+	if len(row.GalleryImages) != 1 || row.GalleryImages[0].String() != materialID.String() {
+		t.Fatalf("expected gallery_images=[%s], got %v", materialID, row.GalleryImages)
+	}
+
+	// Attaching to featured_image — a real field kb_read/kb_product_upsert
+	// both know about, but never an attachment target — is a clean tool
+	// error, not an RPC failure or a silent no-op.
+	badAttach := callTool(t, srv, principal, "kb_media_attach", map[string]any{
+		"material_id": materialID.String(), "type": "product", "key": "widget-1", "field": "featured_image",
+	})
+	if badAttach["isError"] != true {
+		t.Fatalf("expected isError attaching to featured_image, got %+v", badAttach)
 	}
 }
 
@@ -644,10 +783,7 @@ func TestResources_ListAndReadTheKBManagerWidget(t *testing.T) {
 	if resources[0]["mimeType"] != "text/html;profile=mcp-app" {
 		t.Fatalf("expected mimeType text/html;profile=mcp-app, got %+v", resources[0])
 	}
-	uiMeta, _ := resources[0]["_meta"].(map[string]any)["ui"].(map[string]any)
-	if _, ok := uiMeta["csp"]; !ok {
-		t.Fatalf("expected _meta.ui.csp on the widget resource, got %+v", resources[0]["_meta"])
-	}
+	assertWidgetCSP(t, resources[0]["_meta"])
 
 	readResp := srv.Handle(context.Background(), principal, mcpserver.Request{
 		JSONRPC: "2.0", ID: rpcID(2), Method: "resources/read",
@@ -664,9 +800,7 @@ func TestResources_ListAndReadTheKBManagerWidget(t *testing.T) {
 	if contents[0]["mimeType"] != "text/html;profile=mcp-app" {
 		t.Fatalf("expected mimeType text/html;profile=mcp-app, got %+v", contents[0]["mimeType"])
 	}
-	if _, ok := contents[0]["_meta"].(map[string]any)["ui"]; !ok {
-		t.Fatalf("expected _meta.ui on the resources/read content, got %+v", contents[0]["_meta"])
-	}
+	assertWidgetCSP(t, contents[0]["_meta"])
 	html, _ := contents[0]["text"].(string)
 	if strings.Contains(html, "KB Manager widget placeholder") {
 		t.Fatalf("widget resource still serves the old stub, not the real implementation")
@@ -687,6 +821,95 @@ func TestResources_ListAndReadTheKBManagerWidget(t *testing.T) {
 	})
 	if badResp.Error == nil {
 		t.Fatalf("expected an error for an unknown resource uri")
+	}
+}
+
+// assertWidgetCSP confirms the configured upload origin (testUploadBaseURL)
+// appears under both the modern domain-list keys (_meta.ui.csp.
+// connectDomains/resourceDomains) and the legacy ChatGPT Apps SDK keys
+// (_meta["openai/widgetCSP"].connect_domains/resource_domains) — the actual
+// fix for the widget's upload PUT being blocked by its own declared policy
+// (resources.go's widgetResourceMeta doc comment). Reused for both
+// resources/list and resources/read, which must serve identical _meta.
+func assertWidgetCSP(t *testing.T, rawMeta any) {
+	t.Helper()
+	meta, ok := rawMeta.(map[string]any)
+	if !ok {
+		t.Fatalf("expected a _meta object, got %#v", rawMeta)
+	}
+	ui, ok := meta["ui"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected _meta.ui, got %+v", meta)
+	}
+	csp, ok := ui["csp"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected _meta.ui.csp, got %+v", ui)
+	}
+	assertDomainList(t, csp["connectDomains"], "_meta.ui.csp.connectDomains")
+	assertDomainList(t, csp["resourceDomains"], "_meta.ui.csp.resourceDomains")
+
+	legacy, ok := meta["openai/widgetCSP"].(map[string]any)
+	if !ok {
+		t.Fatalf(`expected _meta["openai/widgetCSP"], got %+v`, meta)
+	}
+	assertDomainList(t, legacy["connect_domains"], `_meta["openai/widgetCSP"].connect_domains`)
+	assertDomainList(t, legacy["resource_domains"], `_meta["openai/widgetCSP"].resource_domains`)
+}
+
+func assertDomainList(t *testing.T, raw any, path string) {
+	t.Helper()
+	list, ok := raw.([]string)
+	if !ok {
+		t.Fatalf("%s: expected a []string, got %#v", path, raw)
+	}
+	if len(list) != 1 || list[0] != testUploadBaseURL {
+		t.Fatalf("%s: expected [%q], got %v", path, testUploadBaseURL, list)
+	}
+}
+
+// TestResources_WidgetCSPEmptyWithoutUploadBaseURL confirms an unconfigured
+// upload origin serializes as an empty domain list, not a null or a bogus
+// entry — a server/test setup that never wired UploadBaseURL must not crash
+// or produce a CSP a host can't parse.
+func TestResources_WidgetCSPEmptyWithoutUploadBaseURL(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL not set; skipping mcpserver DB test")
+	}
+	ctx := context.Background()
+	st, err := store.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
+		t.Fatalf("reset schema: %v", err)
+	}
+	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	org, err := st.SeedOrganization(ctx, "xchats")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	user, err := st.SeedUser(ctx, org.ID, "op2@example.com", "hash", "Op")
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	srv := mcpserver.New(mcpserver.Deps{KB: kbstore.New(st.Pool())}) // UploadBaseURL left empty, deliberately
+	principal := mcpauth.Principal{
+		UserID: user.ID, OrganizationID: org.ID, ClientID: "test-client",
+		Scopes: []string{mcpauth.ScopeKBRead, mcpauth.ScopeKBDraftWrite, mcpauth.ScopeMediaWrite},
+	}
+
+	resp := srv.Handle(ctx, principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "resources/list"})
+	resources := resp.Result.(map[string]any)["resources"].([]map[string]any)
+	ui := resources[0]["_meta"].(map[string]any)["ui"].(map[string]any)
+	csp := ui["csp"].(map[string]any)
+	list, ok := csp["connectDomains"].([]string)
+	if !ok || len(list) != 0 {
+		t.Fatalf("expected an empty (non-nil) connectDomains, got %#v", csp["connectDomains"])
 	}
 }
 
@@ -744,6 +967,37 @@ func TestToolsList_MediaUploadIsAppOnly(t *testing.T) {
 	t.Fatalf("kb_media_upload tool not found")
 }
 
+// TestToolsList_MediaAttachIsAppOnly mirrors
+// TestToolsList_MediaUploadIsAppOnly for kb_media_attach — it too is a
+// widget-invoked tool with no resourceUri of its own, gated on
+// kb:draft:write (it writes the draft) rather than media:write.
+func TestToolsList_MediaAttachIsAppOnly(t *testing.T) {
+	srv, principal := newTestServer(t)
+	resp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "tools/list"})
+	tools := resp.Result.(map[string]any)["tools"].([]mcpserver.Tool)
+	for _, tool := range tools {
+		if tool.Name != "kb_media_attach" {
+			continue
+		}
+		ui, ok := tool.Meta["ui"].(map[string]any)
+		if !ok {
+			t.Fatalf("kb_media_attach: expected _meta.ui object, got %+v", tool.Meta)
+		}
+		visibility, ok := ui["visibility"].([]string)
+		if !ok || len(visibility) != 1 || visibility[0] != "app" {
+			t.Fatalf("kb_media_attach: expected _meta.ui.visibility=[\"app\"], got %+v", ui["visibility"])
+		}
+		if _, has := ui["resourceUri"]; has {
+			t.Fatalf("kb_media_attach: expected no resourceUri, got %+v", ui)
+		}
+		if len(tool.SecuritySchemes) != 1 || tool.SecuritySchemes[0]["scopes"].([]string)[0] != mcpauth.ScopeKBDraftWrite {
+			t.Fatalf("kb_media_attach: expected securitySchemes scope kb:draft:write, got %+v", tool.SecuritySchemes)
+		}
+		return
+	}
+	t.Fatalf("kb_media_attach tool not found")
+}
+
 // TestToolsList_DeclaresAnnotations checks the standard MCP tool-annotation
 // hints plan Task 9 asks for: readOnlyHint on the three read-only tools,
 // destructiveHint+idempotentHint:false on kb_delete, and idempotentHint:false
@@ -783,7 +1037,7 @@ func TestToolsList_DeclaresAnnotations(t *testing.T) {
 	}
 }
 
-// TestToolsList_DeclaresOutputSchema confirms every one of the 12 tools
+// TestToolsList_DeclaresOutputSchema confirms every one of the 13 tools
 // documents its structuredContent shape (plan Task 9) — every tool sets
 // structuredContent via handlers.go's toolResult, kb_delete included (via
 // kbstore.DeleteResult).
@@ -791,8 +1045,8 @@ func TestToolsList_DeclaresOutputSchema(t *testing.T) {
 	srv, principal := newTestServer(t)
 	resp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "tools/list"})
 	tools := resp.Result.(map[string]any)["tools"].([]mcpserver.Tool)
-	if len(tools) != 12 {
-		t.Fatalf("expected 12 tools, got %d", len(tools))
+	if len(tools) != 13 {
+		t.Fatalf("expected 13 tools, got %d", len(tools))
 	}
 	for _, tool := range tools {
 		if tool.OutputSchema == nil {

@@ -494,8 +494,8 @@ func TestMCPOAuthFullFlow_ThroughToolsCall(t *testing.T) {
 		t.Fatalf("tools/list result not an object: %#v", list.Result)
 	}
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 12 {
-		t.Fatalf("expected 12 tools, got %d: %#v", len(tools), tools)
+	if len(tools) != 13 {
+		t.Fatalf("expected 13 tools, got %d: %#v", len(tools), tools)
 	}
 }
 
@@ -809,12 +809,29 @@ func TestMCPMediaUploadEndToEnd(t *testing.T) {
 	h := newMCPHarness(t)
 	accessToken, _, _ := h.fullAuthCodeFlow(t, "")
 
+	// Attaching never creates a record — the product must already exist
+	// before kb_media_attach can target it (see kbstore.MCPAttachMedia's doc
+	// comment: "The record is never created").
+	create := h.rpc(t, accessToken, "tools/call", map[string]any{
+		"name": "kb_product_upsert",
+		"arguments": map[string]any{
+			"ref":     "widget-1",
+			"changes": map[string]any{"name": "Widget", "price": "1000", "in_stock": true},
+		},
+	})
+	if create.Error != nil {
+		t.Fatalf("kb_product_upsert (create) rpc error: %+v", create.Error)
+	}
+	if toolCallResult(t, create)["isError"] == true {
+		t.Fatalf("kb_product_upsert (create) returned isError: %#v", toolCallResult(t, create))
+	}
+
 	upload := h.rpc(t, accessToken, "tools/call", map[string]any{
 		"name": "kb_media_upload",
 		"arguments": map[string]any{
 			"filename": "photo.png", "mime_type": "image/png", "size_bytes": len(pngBytes),
 			"sha256_checksum": pngSHA256Hex,
-			"target":          map[string]any{"type": "product", "key": "widget-1", "field": "featured_image"},
+			"target":          map[string]any{"type": "product", "key": "widget-1", "field": "gallery_images"},
 		},
 	})
 	if upload.Error != nil {
@@ -860,25 +877,28 @@ func TestMCPMediaUploadEndToEnd(t *testing.T) {
 		t.Fatalf("PUT upload status=%d body=%s", putResp.StatusCode, pb)
 	}
 
-	// Attach the uploaded material to a product's featured_image.
-	upsert := h.rpc(t, accessToken, "tools/call", map[string]any{
-		"name": "kb_product_upsert",
+	// Attach the uploaded material to the product's gallery_images via the
+	// dedicated app-only tool — not a kb_product_upsert changes patch.
+	attach := h.rpc(t, accessToken, "tools/call", map[string]any{
+		"name": "kb_media_attach",
 		"arguments": map[string]any{
-			"ref": "widget-1",
-			"changes": map[string]any{
-				"name": "Widget", "price": "1000", "in_stock": true, "featured_image": materialID,
-			},
+			"material_id": materialID, "type": "product", "key": "widget-1", "field": "gallery_images",
 		},
 	})
-	if upsert.Error != nil {
-		t.Fatalf("kb_product_upsert rpc error: %+v", upsert.Error)
+	if attach.Error != nil {
+		t.Fatalf("kb_media_attach rpc error: %+v", attach.Error)
 	}
-	upsertResult := toolCallResult(t, upsert)
-	if upsertResult["isError"] == true {
-		t.Fatalf("kb_product_upsert returned isError: %#v", upsertResult)
+	attachResult := toolCallResult(t, attach)
+	if attachResult["isError"] == true {
+		t.Fatalf("kb_media_attach returned isError: %#v", attachResult)
 	}
 
-	// Confirm the read-back record actually carries the material_id.
+	// Confirm the read-back record actually carries the material_id as the
+	// first (and only) gallery entry. featured_image is intentionally NOT
+	// asserted here: it stays whatever it already was — kb_media_attach only
+	// ever writes the field it was asked for, and gallery_images[0]'s
+	// relationship to featured_image is resolved at prompt-build time
+	// (aiprompt), not stored as a second copy in the draft/live row.
 	read := h.rpc(t, accessToken, "tools/call", map[string]any{
 		"name":      "kb_read",
 		"arguments": map[string]any{"types": []string{"product"}, "source": "draft", "key": "widget-1"},
@@ -894,8 +914,9 @@ func TestMCPMediaUploadEndToEnd(t *testing.T) {
 	}
 	record := items[0].(map[string]any)
 	data, _ := record["data"].(map[string]any)
-	if data["featured_image"] != materialID {
-		t.Fatalf("featured_image=%v want %v", data["featured_image"], materialID)
+	gallery, _ := data["gallery_images"].([]any)
+	if len(gallery) != 1 || gallery[0] != materialID {
+		t.Fatalf("gallery_images=%v want [%v]", gallery, materialID)
 	}
 }
 
