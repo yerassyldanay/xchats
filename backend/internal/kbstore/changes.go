@@ -125,6 +125,22 @@ type DraftChangeDelete struct {
 	Key  string `json:"key"`
 }
 
+// deleteDisplayKey normalizes a delete marker's key for the DraftChanges
+// payload: a singleton's key is always its canonical natural-key constant
+// (domain.ContactSlug/domain.PolicySlug), regardless of which of the several
+// spellings actually wrote the marker (see deleteMatches) — so the frontend
+// can address one card's identity with the SAME (kind,key) pair across its
+// upsert row, its Publish call, and its Cancel call.
+func deleteDisplayKey(singular, key string) string {
+	switch singular {
+	case "contact":
+		return domain.ContactSlug
+	case "policy":
+		return domain.PolicySlug
+	}
+	return key
+}
+
 // DraftChanges returns the org's pending change set — one blob read, no live
 // query, so an unchanged published row can never appear in it.
 func (s *Store) DraftChanges(ctx context.Context, orgID uuid.UUID) (*DraftChangeSet, error) {
@@ -144,7 +160,7 @@ func (s *Store) DraftChanges(ctx context.Context, orgID uuid.UUID) (*DraftChange
 		out.Config = &cfg
 	}
 	for _, d := range blob.Deletes {
-		out.Deletes = append(out.Deletes, DraftChangeDelete{Kind: PluralChangeKind(d.Kind), Key: d.Key})
+		out.Deletes = append(out.Deletes, DraftChangeDelete{Kind: PluralChangeKind(d.Kind), Key: deleteDisplayKey(d.Kind, d.Key)})
 	}
 	return out, nil
 }

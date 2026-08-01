@@ -153,6 +153,32 @@ func TestDraftChanges_SurfacesDeleteMarkersInPluralKind(t *testing.T) {
 	}
 }
 
+// A singleton delete marker's key must always come back as the canonical
+// natural-key slug (domain.ContactSlug), regardless of which spelling
+// actually wrote it (MCPDelete writes NaturalKeyMain, "main") — so the
+// frontend can address the SAME card by (kind,key) for its upsert row, its
+// Publish call, and its Cancel call, without special-casing singletons.
+func TestDraftChanges_SingletonDeleteKeyIsCanonicalSlug(t *testing.T) {
+	kb, orgID, _ := newTestKB(t)
+	ctx := context.Background()
+	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := kb.MCPDelete(ctx, orgID, uuid.Nil, kbstore.KBTypeContacts, kbstore.NaturalKeyMain, nil); err != nil {
+		t.Fatalf("mcp delete contacts: %v", err)
+	}
+	changes, err := kb.DraftChanges(ctx, orgID)
+	if err != nil {
+		t.Fatalf("DraftChanges: %v", err)
+	}
+	if len(changes.Deletes) != 1 {
+		t.Fatalf("Deletes = %+v, want exactly one marker", changes.Deletes)
+	}
+	if changes.Deletes[0].Kind != "contacts" || changes.Deletes[0].Key != domain.ContactSlug {
+		t.Fatalf("Deletes[0] = %+v, want {contacts %s} even though MCPDelete wrote key %q", changes.Deletes[0], domain.ContactSlug, kbstore.NaturalKeyMain)
+	}
+}
+
 func TestDraftChanges_ConfigIsNilWithoutAPendingPatch(t *testing.T) {
 	kb, orgID, _ := newTestKB(t)
 	ctx := context.Background()
