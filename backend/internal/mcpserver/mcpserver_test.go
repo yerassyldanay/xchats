@@ -148,19 +148,75 @@ func TestToolsList_DeclaresSecuritySchemes(t *testing.T) {
 		if !ok {
 			continue
 		}
-		oauth2, ok := tool.SecuritySchemes["oauth2"].(map[string]any)
-		if !ok {
-			t.Fatalf("tool %s: expected securitySchemes.oauth2, got %+v", tool.Name, tool.SecuritySchemes)
+		// A LIST of tagged-union entries, not a keyed object — ChatGPT
+		// rejects the entire tools/list response otherwise (see
+		// Tool.SecuritySchemes). Asserting the container type here is the
+		// point of this check, not an incidental detail.
+		if len(tool.SecuritySchemes) != 1 {
+			t.Fatalf("tool %s: expected exactly one securitySchemes entry, got %+v", tool.Name, tool.SecuritySchemes)
 		}
-		scopes, ok := oauth2["scopes"].([]string)
+		scheme := tool.SecuritySchemes[0]
+		if scheme["type"] != "oauth2" {
+			t.Fatalf("tool %s: expected securitySchemes[0].type == \"oauth2\" (the union discriminator), got %+v", tool.Name, scheme["type"])
+		}
+		scopes, ok := scheme["scopes"].([]string)
 		if !ok || len(scopes) != 1 || scopes[0] != want {
-			t.Fatalf("tool %s: expected securitySchemes.oauth2.scopes == [%q], got %+v", tool.Name, want, oauth2["scopes"])
+			t.Fatalf("tool %s: expected securitySchemes[0].scopes == [%q], got %+v", tool.Name, want, scheme["scopes"])
 		}
 	}
 	for name := range wantScope {
 		if !found[name] {
 			t.Fatalf("expected tool %q in tools/list", name)
 		}
+	}
+}
+
+// TestToolsList_SecuritySchemesSerializeAsJSONArray guards the exact wire
+// shape a host parses, not just the Go type. ChatGPT rejected the entire
+// tools/list response — the connector would not install at all — when
+// securitySchemes marshalled as a keyed object instead of a list:
+//
+//	1 validation error for list[tagged-union[NoAuthSecurityScheme,OAuthSecurityScheme]]
+//	Input should be a valid list [type=list_type,
+//	input_value={'oauth2': {'scopes': [...], 'type': 'oauth2'}}, input_type=dict]
+//
+// The typed test above would keep passing if the field were ever widened
+// back to `any` and populated with a map, so assert the marshalled JSON.
+// Needs no database: Tools() is pure.
+func TestToolsList_SecuritySchemesSerializeAsJSONArray(t *testing.T) {
+	raw, err := json.Marshal(mcpserver.Tools())
+	if err != nil {
+		t.Fatalf("marshal tools: %v", err)
+	}
+	var tools []map[string]any
+	if err := json.Unmarshal(raw, &tools); err != nil {
+		t.Fatalf("unmarshal tools: %v", err)
+	}
+
+	checked := 0
+	for _, tool := range tools {
+		schemes, present := tool["securitySchemes"]
+		if !present {
+			continue
+		}
+		list, ok := schemes.([]any)
+		if !ok {
+			t.Fatalf("tool %v: securitySchemes must marshal as a JSON array, got %T (%v)", tool["name"], schemes, schemes)
+		}
+		if len(list) == 0 {
+			t.Fatalf("tool %v: securitySchemes array is empty", tool["name"])
+		}
+		entry, ok := list[0].(map[string]any)
+		if !ok {
+			t.Fatalf("tool %v: securitySchemes[0] must be an object, got %T", tool["name"], list[0])
+		}
+		if entry["type"] != "oauth2" {
+			t.Fatalf("tool %v: securitySchemes[0].type must be the union discriminator \"oauth2\", got %v", tool["name"], entry["type"])
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("no tool declared securitySchemes — the assertion never ran")
 	}
 }
 

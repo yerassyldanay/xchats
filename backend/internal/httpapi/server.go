@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -382,6 +383,20 @@ func (s *Server) cors() gin.HandlerFunc {
 		allowed[o] = true
 	}
 	return func(c *gin.Context) {
+		// /mcp/uploads carries its OWN, deliberately permissive CORS policy
+		// (uploadCORS, in mcp_upload.go): the widget iframe posting there
+		// lives on a per-app sandbox host — e.g.
+		// https://asdk_app_<hash>.web-sandbox.oaiusercontent.com — whose name
+		// is unpredictable, so it can never be listed in CORSOrigins. Bail out
+		// BEFORE the OPTIONS branch below: that branch aborts the chain, so
+		// without this the group-level uploadCORS would never run, and a
+		// preflight would come back 204 but with no Access-Control-Allow-Origin
+		// at all — which the browser treats as "denied" and silently drops the
+		// real PUT (the server then only ever logs the OPTIONS).
+		if strings.HasPrefix(c.Request.URL.Path, "/mcp/uploads") {
+			c.Next()
+			return
+		}
 		origin := c.GetHeader("Origin")
 		if origin != "" && (allowed[origin] || allowed["*"]) {
 			c.Header("Access-Control-Allow-Origin", origin)

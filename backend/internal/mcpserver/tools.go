@@ -9,10 +9,17 @@ type Tool struct {
 	// Tools() from the SAME requiredScope map dispatchToolsCall enforces, so
 	// it can never drift from actual enforcement) — lets a capable host
 	// reason about auth/consent up front instead of discovering a scope
-	// failure by trial. This exact field shape is still emerging in the MCP
-	// ecosystem — best-effort pending a real interop pass, same caveat as
-	// the widget hints below.
-	SecuritySchemes map[string]any `json:"securitySchemes,omitempty"`
+	// failure by trial.
+	//
+	// A LIST, not an OpenAPI-style {schemeName: {...}} object. This was
+	// originally guessed as an object and ChatGPT rejected the whole
+	// tools/list response with a schema error naming the type it wants:
+	//
+	//	list[tagged-union[NoAuthSecurityScheme, OAuthSecurityScheme]]
+	//
+	// i.e. an array whose entries are discriminated on "type". Getting this
+	// wrong is not a soft degradation — the connector fails to install.
+	SecuritySchemes []map[string]any `json:"securitySchemes,omitempty"`
 	// Annotations are the standard MCP tool-annotation hints (readOnlyHint,
 	// destructiveHint, idempotentHint, ...) — see readOnlyAnnotations /
 	// destructiveAnnotations / notIdempotentAnnotations below for exactly
@@ -71,12 +78,13 @@ func notIdempotentAnnotations() *ToolAnnotations {
 	return &ToolAnnotations{IdempotentHint: boolPtr(false)}
 }
 
-// oauthSecurityScheme is the securitySchemes value for a tool gated on scope
-// — an OpenAPI-securitySchemes-shaped object naming the OAuth scope
-// required, adapted for an MCP tool declaration.
-func oauthSecurityScheme(scope string) map[string]any {
-	return map[string]any{
-		"oauth2": map[string]any{"type": "oauth2", "scopes": []string{scope}},
+// oauthSecurityScheme is the securitySchemes value for a tool gated on scope:
+// a single-element list holding the OAuthSecurityScheme variant ("type":
+// "oauth2" is the union discriminator) naming the scope this tool requires.
+// See Tool.SecuritySchemes for why this is a list rather than a keyed object.
+func oauthSecurityScheme(scope string) []map[string]any {
+	return []map[string]any{
+		{"type": "oauth2", "scopes": []string{scope}},
 	}
 }
 

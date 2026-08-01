@@ -126,6 +126,40 @@ test('upload flow: progress, success, error, and retry', async ({ page }) => {
   expect(putCount).toBe(2)
 })
 
+// Reproduces a real failure: a user uploaded a file, then in the attach form
+// picked type "Тариф" while the key they entered was actually a TOPIC slug.
+// The typed upserts are upserts, so a key matching nothing fell through to
+// "create" and the backend answered `pricing_type is required to create this
+// record` — an error about an unrelated required field, for what the user
+// experienced as "attach this image". Attaching must never create a record.
+test('attaching to a key that does not exist for the chosen type is refused clearly', async ({ page }) => {
+  await mountWidget(page, {
+    kb_media_upload: [toolResult({
+      material_id: 'mat-1', upload_url: UPLOAD_URL, upload_method: 'PUT',
+      upload_headers: { 'Content-Type': 'text/plain' }, expires_at: new Date(Date.now() + 900_000).toISOString(),
+      max_size_bytes: 1024, processing_status: 'uploaded',
+    })],
+    // No tariff has this key — kb_read returns an empty page, exactly as the
+    // real backend does for a topic slug queried as a tariff.
+    kb_read: [toolResult({ items: [] })],
+  })
+  const widget = await pageFrame(page)
+  await widget.locator('nav.tabs button[data-tab="media"]').click()
+  await page.route(UPLOAD_URL, (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await widget.locator('#file-input').setInputFiles({ name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('hi') })
+  await expect(widget.getByText('Файл загружен')).toBeVisible()
+
+  await widget.locator('#attach-type').selectOption('tariff')
+  await widget.locator('#attach-key').fill('kak-dobavit-kassira-v-kaspi-pay')
+  await widget.locator('#do-attach').click()
+
+  await expect(widget.locator('.error-box')).toContainText('Запись не найдена')
+  // The upsert must NOT have been attempted — that is what produced the
+  // confusing "pricing_type is required" before.
+  const upsertCalls = (await toolCalls(page)).filter((c) => c.name === 'kb_tariff_upsert')
+  expect(upsertCalls.length).toBe(0)
+})
+
 test('the review link falls back to the plain frontend URL when no reviewUrl is supplied', async ({ page }) => {
   await mountWidget(page)
   const widget = await pageFrame(page)

@@ -817,9 +817,24 @@
     if (meta.keyParam && !key) { m.error = "Укажите ключ записи."; render(); return; }
     m.attachBusy = true; m.error = null; render();
     try {
+      // Attaching media must never CREATE a record. The typed upserts are
+      // upserts: a key that matches nothing falls through to "create", which
+      // then fails on required fields that have nothing to do with the
+      // attachment — e.g. picking type "Тариф" for what is actually a topic
+      // slug returned `pricing_type is required to create this record`, which
+      // reads like a bug rather than "you chose the wrong record type".
+      // Singletons (contacts/policies/assistant, keyParam absent) are exempt:
+      // for them upsert-create is the legitimate first write.
+      var current = await kbReadOne(m.attachType, key);
+      if (meta.keyParam && !current) {
+        m.attachBusy = false;
+        m.error = 'Запись не найдена: ' + typeLabel(m.attachType) + ' «' + key + '». Проверьте тип записи и ключ — ' +
+          'этот ключ может принадлежать записи другого типа.';
+        render();
+        return;
+      }
       var changes = {};
       if (isPlural) {
-        var current = await kbReadOne(m.attachType, key);
         var existing = (current && Array.isArray(current[m.attachField])) ? current[m.attachField] : [];
         changes[m.attachField] = existing.concat([m.materialId]);
       } else {
