@@ -31,12 +31,11 @@ const props = defineProps<{
 const pg = usePlayground()
 
 const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
-const visible = computed(() => props.mode === 'live' || !!row.value)
 const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
 // A live config row always exists once the org is seeded, so hasLiveCounterpart
 // is really just "any published config at all" — closer to 'published' than
 // 'new' in practice, matching recordState's contract.
-const state = computed(() => recordState(props.mode, !!props.liveRow))
+const state = computed(() => recordState(props.mode, !!props.liveRow, row.value?.draft))
 const diff = computed(() =>
   changedFields(props.draftRow, props.liveRow, ['persona', 'mission', 'guardrails', 'language_policy', 'reply_max_words'])
 )
@@ -77,13 +76,13 @@ function approve() {
 
 <template>
   <RecordShell
-    v-if="visible"
     :icon="Sparkles"
     label="Ассистент"
     :mode="mode"
     :state="state"
     :busy="busy"
     singleton
+    :pending="row?.draft ?? false"
     @save="save"
     @approve="approve"
   >

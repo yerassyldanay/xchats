@@ -25,9 +25,8 @@ const props = defineProps<{
 const pg = usePlayground()
 
 const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
-const visible = computed(() => props.mode === 'live' || !!row.value)
 const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
-const state = computed(() => recordState(props.mode, !!props.liveRow))
+const state = computed(() => recordState(props.mode, !!props.liveRow, row.value?.draft))
 const diff = computed(() =>
   changedFields(props.draftRow, props.liveRow, [
     'whatsapp', 'phone', 'email', 'website', 'instagram', 'working_hours', 'address', 'legal_information', 'callback_time',
@@ -74,13 +73,13 @@ function approve() {
 
 <template>
   <RecordShell
-    v-if="visible"
     :icon="Phone"
     label="Контакты"
     :mode="mode"
     :state="state"
     :busy="busy"
     singleton
+    :pending="row?.draft ?? false"
     @save="save"
     @approve="approve"
   >

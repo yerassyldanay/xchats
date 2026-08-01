@@ -13,7 +13,6 @@ Short glossary of the terms used across `evals/` (scenarios, harness, catalog pa
 - **Scale variant** — same KB, different `limits` (e.g. `shop-kb-v1-10/-50/-100`).
 - **Canary** — a small fast-signal suite. **Holdout** — the sealed `canary-holdout/`, deliberately unreachable by `-all`.
 - **Archived** — a scenario kept for history (`archived: true` + `archived_reason`), no longer active.
-- **Extract case** — the image → structured-extraction eval family (`extract/cases.yaml`).
 
 ## Knowledge & prompt
 

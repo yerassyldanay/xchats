@@ -122,10 +122,8 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	orgID := seededOrgID(ctx, cfg, st, log)
 
 	// kb (internal/kbstore) is unrelated to the response service's own KB loader
-	// (internal/responsestore, below) — it backs the still-active /kb/* live
-	// editor and the disconnected Playground's dormant-but-compiling fields
-	// (KB/Extract/Builder are nil here; Playground routes stay registered but
-	// unreachable from any production entry point). No demo/seed content is
+	// (internal/responsestore, below) — it backs the /kb live editor and the
+	// structured draft editor at /playground. No demo/seed content is
 	// written here: SeedLiveIfEmpty(brain.SeedSnapshot()) is intentionally not
 	// called — migration 0008 is the only source of temporary demo KB data.
 	kb := kbstore.New(st.Pool())
@@ -180,7 +178,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	w := &worker.Worker{
 		Store: st, Queue: q, Evo: evo, TG: tg, Blob: blobStore, Hub: hub,
-		Response: responseService, Senders: senders, KB: kb, Log: log,
+		Response: responseService, Senders: senders, Log: log,
 	}
 	q.Start(ctx, w.Handle)
 	// Attachments whose bytes never arrived are retried from their own media

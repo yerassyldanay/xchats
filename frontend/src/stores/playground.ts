@@ -1,33 +1,30 @@
 import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { connectRealtime } from '../lib/sse'
-import { log } from '../lib/logfmt'
-import type { DraftView, KbMaterial, PromptView } from '../types'
+import type { DraftView, PromptView } from '../types'
 
-// usePlayground backs the two KB pages — Конструктор (/playground) and Редактор
-// (/knowledge-base) — over the same underlying KB. WRITES stay DELIBERATELY
-// SEPARATE, never mixed:
-//   - `draft` (Конструктор): materials → builder → the pending kbd_draft blob,
-//     merged with live rows and flagged `draft: true`. Approve materializes it.
+// usePlayground backs the two KB pages — Черновик (/playground) and Редактор
+// (/knowledge-base) — over the same underlying structured KB. Writes stay
+// deliberately separate:
+//   - `draft`: a pending kbd_draft blob merged over live rows and flagged
+//     `draft: true`. Approve materializes it.
 //   - `live` (Редактор): the live ai_ tables only, via GET/POST/PATCH/DELETE
 //     /kb/* — every write there is immediately final, no draft step, and it
 //     never shows or touches pending Playground work.
-// Конструктор additionally READS `live` (never writes it) — the draft view's
+// The draft page additionally READS `live` (never writes it) — the draft view's
 // pending rows overlay/replace their live counterpart rather than listing both
 // (see kbstore.mergedView), so telling a brand-new draft entity from an edit to
 // an already-published one, and showing recent published activity alongside
 // pending changes, needs the live slice loaded too.
 export const usePlayground = defineStore('playground', {
   state: () => ({
-    // --- draft slice (Конструктор) ------------------------------------------
+    // --- draft slice (/playground) -----------------------------------------
     draft: null as DraftView | null,
     loading: false,
-    busy: false, // a write/chat is in flight
+    busy: false, // a structured draft write is in flight
     approving: false,
     error: '' as string,
     gateReasons: '' as string, // last approve-gate (422) message
-    lastInstruction: 'Импортированные материалы', // reused by maybeBuild so a
-    // straggler material lands under the SAME topic as the last explicit build.
 
     // --- live slice (Редактор) -----------------------------------------------
     live: null as DraftView | null,
@@ -57,8 +54,6 @@ export const usePlayground = defineStore('playground', {
         contacts: d?.contacts?.length ?? 0,
         policies: d?.policies?.length ?? 0,
         zones: d?.zones?.length ?? 0,
-        materials: d?.materials?.length ?? 0,
-        requests: (d?.requests ?? []).filter((r) => r.state === 'pending').length,
       }
     },
     // pending review = entities present in the draft blob across kinds — this
@@ -71,9 +66,6 @@ export const usePlayground = defineStore('playground', {
         p(d.topics) + p(d.tariffs) + p(d.products) + p(d.contacts) + p(d.policies) + p(d.zones) +
         (d.config?.draft ? 1 : 0)
       )
-    },
-    openRequests(s) {
-      return (s.draft?.requests ?? []).filter((r) => r.state === 'pending')
     },
   },
   actions: {
@@ -93,16 +85,6 @@ export const usePlayground = defineStore('playground', {
       } finally {
         this.loading = false
       }
-    },
-    // Catch materials that finished extraction asynchronously (a URL/PDF job,
-    // or an operator's describe_file answer) after the user's own explicit
-    // build — run the SAME instruction again so it lands under the same topic.
-    // Never called mid-send (that would race an in-flight explicit chat()).
-    async maybeBuild() {
-      const d = this.draft
-      if (!d || this.busy || this.approving) return
-      if (!d.materials.some((m) => m.status === 'ready')) return
-      await this.chat(this.lastInstruction)
     },
     // discard every pending edit ("Отменить всё") — live rows untouched.
     async discard() {
@@ -209,52 +191,6 @@ export const usePlayground = defineStore('playground', {
     // --- draft config -----------------------------------------------------------
     patchConfig(patch: { persona?: string; mission?: string; guardrails?: string; language_policy?: string; reply_max_words?: number }) {
       return this.write(async () => this.setDraft(await api.patch<DraftView>('/playground/draft/config', patch, this.ifMatch())))
-    },
-
-    // --- materials (staged inputs) — description is the operator's parsing
-    // comment: for a file/media material it substitutes for auto-extraction
-    // entirely (born ready immediately, no popup); for a URL it is kept only as
-    // a fallback if the fetch fails. Uploads never happen implicitly — the
-    // composer calls these only from its own explicit "Отправить".
-    addTextMaterial(text: string) {
-      return this.write(async () => {
-        await api.post<KbMaterial>('/playground/draft/materials', { source_type: 'text', text }, this.ifMatch())
-        await this.load()
-      })
-    },
-    addUrlMaterial(url: string, description?: string) {
-      return this.write(async () => {
-        await api.post<KbMaterial>('/playground/draft/materials', { source_type: 'url', url, description }, this.ifMatch())
-        await this.load()
-      })
-    },
-    addFileMaterial(file: File, description?: string) {
-      return this.write(async () => {
-        const form = new FormData()
-        form.append('file', file)
-        if (description) form.append('description', description)
-        await api.postForm<KbMaterial>('/playground/draft/materials', form, this.ifMatch())
-        await this.load()
-      })
-    },
-
-    // --- builder chat (synthesize ready materials into the draft) -----------
-    async chat(instruction: string): Promise<Record<string, unknown> | undefined> {
-      this.lastInstruction = instruction || this.lastInstruction
-      return this.write(async () => {
-        const res = await api.post<{ result: Record<string, unknown>; draft: DraftView }>(
-          '/playground/chat',
-          { instruction },
-          this.ifMatch()
-        )
-        this.setDraft(res.draft)
-        return res.result
-      })
-    },
-
-    // --- requests (popups) --------------------------------------------------
-    resolveRequest(id: string, body: { state?: 'resolved' | 'dismissed'; resolution?: Record<string, unknown> }) {
-      return this.write(async () => this.setDraft(await api.post<DraftView>(`/playground/requests/${id}/resolve`, body, this.ifMatch())))
     },
 
     // --- approve ("Принять всё" / "Принять") ------------------------
@@ -447,7 +383,7 @@ export const usePlayground = defineStore('playground', {
             refresh()
             return
           }
-          if (this.draft) this.load().then(() => this.maybeBuild())
+          if (this.draft) this.load()
           if (this.live) this.loadLive()
           // promptView starts null and is only ever set by loadPrompt() (the
           // Промпт tab's own onMounted/"Обновить"), so this is a no-op until
@@ -456,11 +392,8 @@ export const usePlayground = defineStore('playground', {
         }, 250)
       }
       this.disconnect = connectRealtime({
-        kbMaterialUpdated: refresh,
         kbRowChanged: refresh,
         kbApproved: refresh,
-        kbRequestCreated: refresh,
-        kbRequestResolved: refresh,
       })
     },
     stopRealtime() {
@@ -470,17 +403,6 @@ export const usePlayground = defineStore('playground', {
     },
   },
 })
-
-// small helper: safely parse a Request's JSON `context`/`target` string
-export function parseJSON(raw: string | null | undefined): Record<string, unknown> {
-  if (!raw) return {}
-  try {
-    return JSON.parse(raw)
-  } catch {
-    log.warn('kb: bad json blob')
-    return {}
-  }
-}
 
 export interface KbAction {
   key: 'save' | 'approve' | 'reject' | 'delete'
@@ -496,11 +418,14 @@ export interface KbAction {
 // destructive actions are dropped for a singleton (contacts/policies/config
 // have no natural key and no delete affordance at all — there is nothing to
 // "reject back to" or delete, only ever edit again).
-export function kbActions(mode: 'draft' | 'live', opts: { singleton?: boolean } = {}): KbAction[] {
+export function kbActions(mode: 'draft' | 'live', opts: { singleton?: boolean; pending?: boolean } = {}): KbAction[] {
   if (mode === 'live') {
     const actions: KbAction[] = [{ key: 'save', label: 'Сохранить', variant: 'default' }]
     if (!opts.singleton) actions.push({ key: 'delete', label: 'Удалить', variant: 'ghost', destructive: true })
     return actions
+  }
+  if (opts.pending === false) {
+    return [{ key: 'save', label: 'Изменить в черновике', variant: 'outline' }]
   }
   const actions: KbAction[] = [
     { key: 'save', label: 'Сохранить', variant: 'outline' },

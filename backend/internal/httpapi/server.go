@@ -16,14 +16,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/yerassyldanay/xchats/backend/internal/assistant"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
-	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -56,12 +54,10 @@ type Server struct {
 	queue    queue.Queue
 	hub      *realtime.Hub
 	blob     blob.Store
-	drafter  assistant.Drafter // dormant: only the disconnected playground hot-swap reads this
 	response *response.Service // the multichannel response engine's entry point (simulator API)
 	evo      evolution.Client
 	tg       telegram.Client // nil when Telegram is not configured; every handler checks
 	kb       *kbstore.Store
-	builder  *playground.Builder
 	orgID    uuid.UUID
 	log      *slog.Logger
 
@@ -113,12 +109,10 @@ type Deps struct {
 	Queue         queue.Queue
 	Hub           *realtime.Hub
 	Blob          blob.Store
-	Drafter       assistant.Drafter
 	Response      *response.Service
 	Evo           evolution.Client
 	TG            telegram.Client
 	KB            *kbstore.Store
-	Builder       *playground.Builder
 	KBRepo        response.KnowledgeBaseRepository
 	KBInvalidator kbInvalidator
 	OrgID         uuid.UUID
@@ -138,7 +132,7 @@ func New(d Deps) *Server {
 	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, drafter: d.Drafter, response: d.Response, evo: d.Evo, tg: d.TG, kb: d.KB, builder: d.Builder,
+		blob: d.Blob, response: d.Response, evo: d.Evo, tg: d.TG, kb: d.KB,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
 		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer, mcpUploadSigner: uploadSigner,
@@ -146,7 +140,7 @@ func New(d Deps) *Server {
 		csrfSecret:   randomCSRFFallbackSecret(),
 		// Deliberately generous limits — these are abuse guards, not a
 		// throttle on legitimate usage. See ratelimit.go's doc comment.
-		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),  // 5/min, 5 burst — registration spam is the highest-value target
+		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — registration spam is the highest-value target
 		oauthTokenLimit:     newIPRateLimiter(30.0/60, 10), // 30/min, 10 burst — refresh-heavy legitimate usage needs headroom
 		oauthAuthorizeLimit: newIPRateLimiter(20.0/60, 10), // 20/min, 10 burst
 	}
@@ -267,6 +261,7 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/chats/:id/messages", s.handleListMessages)
 	auth.POST("/chats/:id/messages", s.handleSendMessage)
 	auth.POST("/chats/:id/read", s.handleReadChat)
+	auth.PATCH("/chats/:id/assignee", s.handleAssignChat)
 
 	auth.GET("/chats/:id/ai-drafts", s.handleListDrafts)
 	auth.POST("/chats/:id/ai-drafts", s.handleSuggest)
@@ -282,9 +277,8 @@ func (s *Server) Router() *gin.Engine {
 		auth.POST("/simulator/messages", s.handleSimulatorMessage)
 	}
 
-	// Playground — the KB builder (chat → materials → draft blob → approve into
-	// the live KB, 15 Decisions 3–4). No more open/publish/rollback: GET always
-	// returns the merged view; approve is the only write path to live.
+	// Playground — a draft copy of the structured knowledge base. Writes remain
+	// pending until the operator approves them into the live KB.
 	pg := auth.Group("/playground")
 	pg.GET("/draft", s.handlePlaygroundDraft)
 	pg.DELETE("/draft", s.handlePlaygroundDiscardDraft)
@@ -299,11 +293,6 @@ func (s *Server) Router() *gin.Engine {
 	pg.PATCH("/draft/contacts", s.handlePlaygroundPatchContacts)
 	pg.PATCH("/draft/policies", s.handlePlaygroundPatchPolicies)
 	pg.PATCH("/draft/config", s.handlePlaygroundPatchConfig)
-	pg.POST("/draft/materials", s.handlePlaygroundCreateMaterial)
-	pg.GET("/draft/materials", s.handlePlaygroundListMaterials)
-	pg.POST("/chat", s.handlePlaygroundChat)
-	pg.GET("/requests", s.handlePlaygroundListRequests)
-	pg.POST("/requests/:id/resolve", s.handlePlaygroundResolveRequest)
 	pg.POST("/draft/approve", s.handlePlaygroundApprove)
 	pg.POST("/draft/approve/:kind/:id", s.handlePlaygroundApproveEntity)
 

@@ -413,7 +413,7 @@ const tabs = [
         <!-- Файлы (материалы) — read-only -->
         <div v-show="tab === 'materials'" class="space-y-3">
           <p class="text-xs text-muted-foreground">
-            Материалы, загруженные через «Конструктор» (/playground) — только просмотр. Загрузка и привязка файлов появятся с обновлением медиа.
+            Материалы, добавленные через интеграции базы знаний, доступны здесь только для просмотра.
           </p>
           <div v-if="materialsLoading && !materials.length" class="text-sm text-muted-foreground py-6 text-center">Загрузка…</div>
           <div v-else-if="materialsError" class="flex items-center gap-2 text-sm text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">

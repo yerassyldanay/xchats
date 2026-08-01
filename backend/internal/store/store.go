@@ -466,10 +466,13 @@ func (s *Store) CreateUser(ctx context.Context, orgID uuid.UUID, email, password
 	return u, err
 }
 
-func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]User, int, error) {
+func (s *Store) ListUsersForOrg(ctx context.Context, orgID uuid.UUID, limit, offset int) ([]User, int, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, email, display_name, created_at FROM xchats.users
-		ORDER BY created_at LIMIT $1 OFFSET $2`, limit, offset)
+		SELECT u.id, u.email, u.display_name, u.created_at
+		FROM xchats.users u
+		JOIN xchats.organization_users ou ON ou.user_id = u.id
+		WHERE ou.organization_id = $1
+		ORDER BY u.created_at LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -483,7 +486,8 @@ func (s *Store) ListUsers(ctx context.Context, limit, offset int) ([]User, int, 
 		out = append(out, u)
 	}
 	var total int
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM xchats.users`).Scan(&total)
+	_ = s.pool.QueryRow(ctx, `
+		SELECT count(*) FROM xchats.organization_users WHERE organization_id = $1`, orgID).Scan(&total)
 	return out, total, rows.Err()
 }
 

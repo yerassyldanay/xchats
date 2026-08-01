@@ -193,11 +193,9 @@ answers, applied to the prompt itself before any model ever sees it.
   text, cost basis for that one answer, and every check's pass/fail.
 - **`runs/INDEX.md`** — one line per deliberately retained evidence run; ordinary local
   attempts are discovered through the generated viewer export instead.
-- **`index.html`** — one self-contained page per run covering BOTH families: for scenario
-  runs, the same model × pass-rate table as SUMMARY.md plus a collapsible per-verdict
-  detail (scores, injected text, evidence); for extraction runs, each case's captured
-  input image next to every model/prompt variant's parsed fields, checks, and raw
-  output. Written automatically at the end of `run`, `extract`, and `report` (best-effort
+- **`index.html`** — one self-contained page per run with the same model × pass-rate
+  table as SUMMARY.md plus a collapsible per-verdict detail (scores, injected text,
+  evidence). Written automatically at the end of `run` and `report` (best-effort
   — a broken viewer never fails the underlying eval); regenerate by hand with `harness
   html -run <dir>`. Gitignored (regenerate rather than diff in review). Works on runs
   from before this existed too, degrading gracefully — no manifest section, and a
@@ -221,10 +219,9 @@ Then open `http://localhost:8081/evals` (log in first) — a launches list, each
 decision matrix (model × prompt/setup, pass rate + contract rate + cost + latency per
 cell) and a drill-down into every individual test: the customer message and history, the
 exact prompt version used, the model's raw reply next to the post-injection
-customer-facing text, and every check. Both eval families (WhatsApp responses and media
-extraction) show up as tabs within one launch.
+customer-facing text, and every check.
 
-How the data gets there: `harness html` (auto-run at the end of `run`/`extract`/`report`,
+How the data gets there: `harness html` (auto-run at the end of `run`/`report`,
 best-effort) and `harness export` (fatal-on-error — the one command a **fresh clone**
 needs before the viewer has anything to show, since the derived `executions.json`/
 `runs.json` are gitignored, same status as `index.html`) both write the SAME dedicated,
@@ -233,21 +230,6 @@ schema-versioned JSON next to each run's `SUMMARY.md`. `frontend/nginx.conf` ser
 `docker-compose.override.yaml` (**local dev only**: this is raw model output, prompts,
 and KB material with no auth in front of it; the base compose file never mounts it, so
 an internet-facing deploy of the same image simply 404s there).
-
-### Grouping multiple families into one launch
-
-```bash
-./harness/harness launch -all -expect-calls 616
-```
-
-Mints one `launch_id`, writes `runs/launches/<id>.json` **before any billed call**
-(status, planned families, the COMBINED scenario+extract pre-flight count —
-`-expect-calls` gates the total, same discipline as `run`'s own gate), then runs both
-families under that id so the viewer groups them as one launch instead of two unrelated
-runs. A launch where one family fails and the other completes reports `partial`, not a
-flat success/failure — read `runs/launches/<id>.json` to see which. Running `run`/
-`extract` directly (not through `launch`) is still fully supported; each is simply its
-own singleton launch unless you pass its own `-launch <id>` flag.
 
 ### Comparison metadata (`setup` / `prompt_ref` / `experiment`)
 
@@ -267,44 +249,6 @@ exactly which frame it actually used. All three fields are optional; an unannota
 scenario (e.g. `shop-*`) falls back to its own name for both `setup` and `prompt_ref`,
 and to an empty `experiment` (never auto-compared against anything — the safer default).
 See `lang-canary-v1..v4-*` and `escalation-canary-v1/v2` for worked examples.
-
-## Extraction eval (Eval 1: file -> extracted information)
-
-Separate from the scenarios above — this tests the playground's pass-1 extraction step
-in isolation, with real files and real OpenRouter vision calls (no promptfoo).
-
-```bash
-cd evals/harness && go build -o harness . && cd ..
-cp .env.example .env        # fill in OPENROUTER_API_KEY
-./harness/harness extract -all
-./harness/harness extract -case screenshot -models google/gemini-2.5-flash
-./harness/harness extract -record -case infographic -models google/gemini-2.5-flash
-```
-
-Each case in `extract/cases.yaml` names one real file under `assets/` and the exact
-requirements a correct extraction must satisfy (written by looking directly at the file —
-ground truth, not guesses). The model must answer with one fixed JSON shape (see
-`extract_types.go`'s `ExtractionResult`) — every check is deterministic string/number
-matching, same philosophy as `judge.go`. Output is `runs/<timestamp>/EXTRACT.md` plus the
-raw per-(case,model,prompt) JSON under `runs/<timestamp>/extract_outputs/`. `-record`
-freezes a fully-passing output to `extract/fixtures/<case>.json` (plus a
-`<case>.provenance.json` sidecar naming the model/prompt/run that produced it), meant to
-feed a later, separate eval (extracted information -> `ai_*` draft schema) without
-re-calling vision models.
-
-The prompt under test lives in `prompts/extract/v1.txt`, not in Go — pass `-prompt
-extract@v1` (the default) or a comma-separated list (e.g. `-prompt
-extract@v1,extract@v2`) to compare prompt versions in one run; cut a new
-`prompts/extract/v2.txt` rather than editing `v1.txt` in place, since existing runs'
-results are tied to `v1`'s exact hash.
-
-The asset directory intentionally contains only the five images referenced by these
-cases and `xpayment_caledar_ads_kz.mp3`. The MP3 is reserved for a future audio or
-transcription evaluation and is not used by the current image-only extraction harness.
-Full-size video fixtures are excluded until an active video case justifies a small,
-deliberately committed sample.
-
-Cost: a few tenths of a cent per case per model (see `parsing-costs.md`).
 
 ## Known limits
 

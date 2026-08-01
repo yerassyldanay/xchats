@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
 
@@ -29,12 +28,6 @@ func (s *Server) kbFail(c *gin.Context, err error) {
 	}
 }
 
-// brainReloader is implemented by the real drafter: it hot-swaps the live KB
-// the brain drafts from. The stub drafter does not implement it (no-op reload).
-type brainReloader interface {
-	SetSnapshot(*domain.Snapshot)
-}
-
 // kbReady fails the request if the KB layer isn't wired (stub/no-DB boot).
 func (s *Server) kbReady(c *gin.Context) bool {
 	if s.kb == nil {
@@ -51,21 +44,6 @@ func (s *Server) pgOrg(c *gin.Context) (uuid.UUID, bool) {
 		return uuid.Nil, false
 	}
 	return org.ID, true
-}
-
-// reloadBrain reloads the live KB into the drafter after an approve.
-func (s *Server) reloadBrain(c *gin.Context, orgID uuid.UUID) {
-	r, ok := s.drafter.(brainReloader)
-	if !ok {
-		return
-	}
-	snap, err := s.kb.LoadLive(ctx(c), orgID)
-	if err != nil {
-		s.log.Warn("reload brain after approve failed", "err", err)
-		return
-	}
-	r.SetSnapshot(snap)
-	s.log.Info("brain KB reloaded", "topics", len(snap.Topics))
 }
 
 // --- draft read / discard ---------------------------------------------------
@@ -413,7 +391,6 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 		return
 	}
 	s.invalidateKBCache(orgID)
-	s.reloadBrain(c, orgID)
 	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
@@ -453,7 +430,6 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 		return
 	}
 	s.invalidateKBCache(orgID)
-	s.reloadBrain(c, orgID)
 	view, err := s.kb.Draft(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)

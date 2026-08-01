@@ -354,6 +354,34 @@ func TestMarkChatReadDispatchesByChannel(t *testing.T) {
 	}
 }
 
+func TestAssignChatDispatchesByChannelAndCanClear(t *testing.T) {
+	st, closeFn := newTestStoreForSimulator(t)
+	defer closeFn()
+	ctx := context.Background()
+	orgID, waChat, _, tgChat := seedThreeChannels(t, st)
+	user, err := st.SeedUser(ctx, orgID, "assignee@example.com", "hash", "Assignee")
+	if err != nil {
+		t.Fatalf("SeedUser: %v", err)
+	}
+
+	for _, id := range []uuid.UUID{waChat, tgChat} {
+		assigned, err := st.AssignChat(ctx, id, uuid.NullUUID{UUID: user.ID, Valid: true})
+		if err != nil {
+			t.Fatalf("AssignChat(%s): %v", id, err)
+		}
+		if !assigned.AssigneeUserID.Valid || assigned.AssigneeUserID.UUID != user.ID {
+			t.Fatalf("assignee = %v, want %s", assigned.AssigneeUserID, user.ID)
+		}
+		cleared, err := st.AssignChat(ctx, id, uuid.NullUUID{})
+		if err != nil {
+			t.Fatalf("clear AssignChat(%s): %v", id, err)
+		}
+		if cleared.AssigneeUserID.Valid {
+			t.Fatalf("assignee still set after clear: %v", cleared.AssigneeUserID)
+		}
+	}
+}
+
 // A re-claim of the same bot by the same org must revive the row (and its
 // history) rather than create a second account.
 func TestClaimTelegramAccountRevivesTheSameRow(t *testing.T) {

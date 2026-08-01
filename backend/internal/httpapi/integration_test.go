@@ -15,14 +15,12 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/yerassyldanay/xchats/backend/internal/assistant"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/brain"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
-	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
@@ -174,22 +172,15 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	if err != nil {
 		t.Fatalf("blob: %v", err)
 	}
-	drafter, err := assistant.NewStub(blobStore, "")
-	if err != nil {
-		t.Fatalf("stub: %v", err)
-	}
 	q := queue.NewInMem(256, 2, log)
 	hub := realtime.NewHub()
 	fake := evolution.NewFake("xpayment", ownerJID)
 
-	// Playground KB engine (seed the org's live KB so the brain + builder work).
+	// Seed the org's live KB for response and structured draft tests.
 	kb := kbstore.New(st.Pool())
 	if err := kb.SeedLiveIfEmpty(ctx, org.ID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed kb: %v", err)
 	}
-	extractor := playground.NewExtractor(nil, log)
-	builder := playground.NewBuilder(nil, hub)
-
 	// A minimal, real (fake-LLM-backed) response.Service. kb.SeedLiveIfEmpty
 	// above already gives the org an ai_assistants row (among other tables), so
 	// KnowledgeBaseRepo.Load succeeds and Respond calls all the way through to
@@ -217,12 +208,12 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	senders.Register(messaging.ChannelTelegram, telegram.NewChannelSender(tgFake, st, blobStore))
 
 	w := &worker.Worker{Store: st, Queue: q, Evo: fake, TG: tgFake, Blob: blobStore, Hub: hub,
-		Response: responseService, Senders: senders, KB: kb, Extract: extractor, Log: log}
+		Response: responseService, Senders: senders, Log: log}
 	q.Start(context.Background(), w.Handle)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Drafter: drafter, Response: responseService, Evo: fake, TG: tgFake, KB: kb, Builder: builder,
+		Response: responseService, Evo: fake, TG: tgFake, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: org.ID, Log: log,
 	})

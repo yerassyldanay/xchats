@@ -67,7 +67,6 @@ services:
       LLM_API_KEY: "${LLM_API_KEY:-}"
       LLM_BASE_URL: "${LLM_BASE_URL:-}"
       LLM_FAST_MODEL: "${LLM_FAST_MODEL:-openai/gpt-4o-mini}"
-      LLM_VISION_MODEL: "${LLM_VISION_MODEL:-}"
       LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-1024}"
       LLM_TEMPERATURE: "${LLM_TEMPERATURE:-0.3}"
       # response.Service's LLM layer — required; boot fails fast without a key

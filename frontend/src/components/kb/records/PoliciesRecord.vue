@@ -22,9 +22,8 @@ const props = defineProps<{
 const pg = usePlayground()
 
 const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
-const visible = computed(() => props.mode === 'live' || !!row.value)
 const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
-const state = computed(() => recordState(props.mode, !!props.liveRow))
+const state = computed(() => recordState(props.mode, !!props.liveRow, row.value?.draft))
 const diff = computed(() =>
   changedFields(props.draftRow, props.liveRow, [
     'delivery_cost', 'delivery_in_days', 'free_delivery_from', 'min_order',
@@ -37,7 +36,10 @@ const diff = computed(() =>
 // per-zone cost/days take over (kbstore.zoneGateReasons enforces this at
 // save/approve time in BOTH modes, so the same disabled-with-hint treatment
 // applies here that KnowledgeBase.vue's live-only policy form already used).
-const zonesExist = computed(() => (pg.live?.zones.length ?? 0) > 0)
+const zonesExist = computed(() => {
+  const zones = props.mode === 'draft' ? pg.draft?.zones : pg.live?.zones
+  return (zones?.length ?? 0) > 0
+})
 
 const buf = reactive({
   delivery_cost: '', delivery_in_days: '', free_delivery_from: '', min_order: '',
@@ -76,13 +78,13 @@ function approve() {
 
 <template>
   <RecordShell
-    v-if="visible"
     :icon="Truck"
     label="Политики"
     :mode="mode"
     :state="state"
     :busy="busy"
     singleton
+    :pending="row?.draft ?? false"
     @save="save"
     @approve="approve"
   >

@@ -15,9 +15,10 @@
 // reachable through the Playground page's own data.
 export type RecordState = 'published' | 'new' | 'changed' | 'to_delete'
 
-export function recordState(mode: 'draft' | 'live', hasLiveCounterpart: boolean): RecordState {
-  if (mode === 'live') return 'published'
-  return hasLiveCounterpart ? 'changed' : 'new'
+export function recordState(mode: 'draft' | 'live', hasLiveCounterpart: boolean, isPending = true): RecordState {
+	if (mode === 'live') return 'published'
+	if (!isPending) return 'published'
+	return hasLiveCounterpart ? 'changed' : 'new'
 }
 
 export const RECORD_STATE_META: Record<RecordState, { label: string; cls: string }> = {

@@ -126,7 +126,7 @@ export interface AiDraft {
   created_at: string
 }
 
-// --- Knowledge Base (Playground) — see plan/7.1-endpoints.md, plan/15 ---
+// --- Knowledge Base draft + live views ---
 // An entity is either LIVE (a row in a live ai_ table) or «Черновик» — present
 // in the kbd_draft blob, flagged `draft: true` here. There is no more
 // review_state/proposed-approved-rejected: a pending entity IS the "Правки" set.

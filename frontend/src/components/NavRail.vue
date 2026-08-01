@@ -34,7 +34,7 @@ onMounted(async () => {
 const baseNav: { name: string; icon: Component; label: string; match: string[] }[] = [
   { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
   { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts', 'instances'] },
-  { name: 'playground', icon: Blocks, label: 'Конструктор', match: ['playground'] },
+	{ name: 'playground', icon: Blocks, label: 'Черновик базы знаний', match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
 ]
 // Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav

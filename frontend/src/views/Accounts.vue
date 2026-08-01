@@ -4,7 +4,6 @@ import { RouterLink } from 'vue-router'
 import {
   CircleAlert,
   CircleCheck,
-  Info,
   KeyRound,
   LoaderCircle,
   Plus,
@@ -24,7 +23,6 @@ import ReplaceTokenDialog from '../components/ReplaceTokenDialog.vue'
 import type { Account } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 
@@ -121,12 +119,6 @@ async function remove(a: Account) {
   }
 }
 
-const steps = [
-  'Нажмите «Подключить канал» в правом верхнем углу и выберите WhatsApp или Telegram.',
-  'WhatsApp: укажите название и имя инстанса, затем отсканируйте QR-код в «Связанных устройствах».',
-  'Telegram: создайте бота у @BotFather командой /newbot и вставьте выданный токен.',
-  'Канал появится здесь как «Подключён» — входящие сообщения сразу попадут в инбокс.',
-]
 </script>
 
 <template>
@@ -305,54 +297,6 @@ const steps = [
         </div>
       </div>
     </div>
-
-    <!-- right-hand instructions panel (always visible) -->
-    <aside class="w-80 shrink-0 border-l border-border bg-card overflow-y-auto p-6 hidden lg:block">
-      <h3 class="flex items-center gap-2 font-semibold">
-        <span class="w-7 h-7 rounded-md bg-primary/10 text-primary grid place-items-center"><Info class="w-4 h-4" /></span>
-        Как подключить
-      </h3>
-      <ol class="mt-4 space-y-3">
-        <li v-for="(s, i) in steps" :key="i" class="flex gap-3">
-          <span class="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold grid place-items-center shrink-0">{{ i + 1 }}</span>
-          <span class="text-sm text-foreground/80 leading-snug">{{ s }}</span>
-        </li>
-      </ol>
-
-      <Separator class="my-5" />
-
-      <h3 class="font-semibold">Подсказки</h3>
-      <ul class="mt-3 space-y-3 text-sm text-foreground/80">
-        <li class="flex gap-2.5">
-          <RotateCw class="w-4 h-4 text-primary mt-0.5 shrink-0" />
-          <span><span class="font-medium text-foreground">Переподключение:</span> WhatsApp — снова отсканируйте QR; Telegram — «Повторить вебхук» на карточке.</span>
-        </li>
-        <li class="flex gap-2.5">
-          <KeyRound class="w-4 h-4 text-primary mt-0.5 shrink-0" />
-          <span><span class="font-medium text-foreground">Смена токена:</span> если токен бота отозван, вставьте новый — только для того же бота.</span>
-        </li>
-        <li class="flex gap-2.5">
-          <Trash2 class="w-4 h-4 text-destructive mt-0.5 shrink-0" />
-          <span><span class="font-medium text-foreground">Удаление:</span> чаты сохраняются и вернутся при повторном подключении того же номера или бота.</span>
-        </li>
-        <li class="flex gap-2.5">
-          <Wrench class="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-          <span><span class="font-medium text-foreground">Обслуживание:</span> удаляйте старые инстансы WhatsApp на странице «Обслуживание инстансов».</span>
-        </li>
-      </ul>
-
-      <div class="mt-6 rounded-lg bg-muted p-4">
-        <div class="flex items-center gap-2 text-sm font-medium">
-          <WhatsappIcon class="w-4 h-4 text-wa" />
-          <TelegramIcon class="w-4 h-4 text-[#229ED9]" />
-          Безопасное подключение
-        </div>
-        <p class="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-          QR-код берётся напрямую из Evolution и нигде не сохраняется. Токен Telegram-бота хранится
-          в зашифрованном виде и никогда не показывается повторно.
-        </p>
-      </div>
-    </aside>
 
     <AddAccountDialog
       v-if="showAdd"

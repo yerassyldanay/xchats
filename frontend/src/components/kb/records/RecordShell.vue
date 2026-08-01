@@ -21,13 +21,14 @@ const props = withDefaults(
     state: RecordState
     busy?: boolean
     singleton?: boolean
+    pending?: boolean
   }>(),
-  { busy: false, singleton: false, recordKey: undefined }
+  { busy: false, singleton: false, pending: true, recordKey: undefined }
 )
 
 const emit = defineEmits<{ save: []; approve: []; reject: []; delete: [] }>()
 
-const actions = computed<KbAction[]>(() => kbActions(props.mode, { singleton: props.singleton }))
+const actions = computed<KbAction[]>(() => kbActions(props.mode, { singleton: props.singleton, pending: props.pending }))
 function fire(key: KbAction['key']) {
   switch (key) {
     case 'save':

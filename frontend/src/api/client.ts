@@ -44,17 +44,6 @@ export const api = {
   put: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('PUT', path, body, headers),
   patch: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('PATCH', path, body, headers),
   del: <T>(path: string, headers?: Headers) => send<T>('DELETE', path, undefined, headers),
-  // postForm sends multipart/form-data (the browser sets the boundary; do NOT set
-  // Content-Type). Used for KB asset/material uploads that carry extra text fields.
-  async postForm<T>(path: string, form: FormData, headers?: Headers): Promise<T> {
-    const res = await fetch(API_BASE + PREFIX + path, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { ...(headers || {}) },
-      body: form,
-    })
-    return unwrap<T>(res, path)
-  },
   async upload(file: File): Promise<{ media_id: string; url: string; media_type: string }> {
     const form = new FormData()
     form.append('file', file)

@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { CatalogExtractCase, CatalogFact, CatalogScenario, CatalogTestCase } from '../types'
+import type { CatalogFact, CatalogScenario, CatalogTestCase } from '../types'
 import {
   annotateMediaExpect,
   formatYamlValue,
   groupScenariosByExperiment,
-  notCheckedExtractRequirements,
   notCheckedRequirements,
   partitionScenariosByArchived,
   resolveRequires,
@@ -117,29 +116,6 @@ describe('notCheckedRequirements', () => {
   it('a declared forbid_tokens list counts as checked', () => {
     const items = notCheckedRequirements(baseTest({ forbid_tokens: ['product.x.'] }))
     expect(items).not.toContain('forbid_tokens')
-  })
-})
-
-function baseExtractCase(over: Partial<CatalogExtractCase> = {}): CatalogExtractCase {
-  return { id: 'c1', image: 'catalog/inputs/c1.jpg', source: 'extract/cases.yaml', ...over }
-}
-
-describe('notCheckedExtractRequirements', () => {
-  it('lists every knob a bare case omits, EXCLUDING no_invented_numbers (always active)', () => {
-    const items = notCheckedExtractRequirements(baseExtractCase())
-    expect(items).toEqual([
-      'Классификация',
-      'Обязательные фразы',
-      'Тема/описание (обязательно)',
-      'Тема/описание (любое из)',
-      'Обязательные числа',
-      'Запрет валюты',
-    ])
-  })
-
-  it('drops a knob once declared', () => {
-    const items = notCheckedExtractRequirements(baseExtractCase({ fields: { content_kind: 'infographic' } }))
-    expect(items).not.toContain('Классификация')
   })
 })
 

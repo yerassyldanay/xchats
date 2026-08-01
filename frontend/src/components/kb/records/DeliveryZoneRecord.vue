@@ -35,7 +35,7 @@ const zoneLevels = [
 
 const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
 const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
-const state = computed(() => recordState(props.mode, !!props.liveRow))
+const state = computed(() => recordState(props.mode, !!props.liveRow, row.value?.draft))
 const diff = computed(() =>
   changedFields(props.draftRow, props.liveRow, [
     'name', 'zone_level', 'parent_ref', 'delivery_available', 'delivery_cost', 'delivery_in_days', 'notes', 'sales_status',
@@ -121,6 +121,7 @@ function del() {
     :mode="mode"
     :state="state"
     :busy="busy"
+    :pending="row.draft"
     @save="save"
     @approve="approve"
     @reject="reject"

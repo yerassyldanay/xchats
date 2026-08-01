@@ -23,7 +23,7 @@ const pg = usePlayground()
 
 const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
 const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
-const state = computed(() => recordState(props.mode, !!props.liveRow))
+const state = computed(() => recordState(props.mode, !!props.liveRow, row.value?.draft))
 const diff = computed(() => changedFields(props.draftRow, props.liveRow, ['title', 'body_md']))
 
 const buf = reactive({ title: '', body_md: '' })
@@ -65,6 +65,7 @@ function del() {
     :mode="mode"
     :state="state"
     :busy="busy"
+    :pending="row.draft"
     @save="save"
     @approve="approve"
     @reject="reject"

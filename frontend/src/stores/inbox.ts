@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { connectRealtime } from '../lib/sse'
 import { log } from '../lib/logfmt'
-import type { AiDraft, Chat, Message } from '../types'
+import type { AiDraft, Chat, Message, User } from '../types'
 
 type Assignee = 'me' | 'unassigned' | 'all'
 
@@ -23,6 +23,7 @@ export const useInbox = defineStore('inbox', {
     activeId: null as string | null,
     messages: [] as Message[],
     drafts: [] as AiDraft[],
+    users: [] as User[],
     filter: 'all' as Assignee,
     accountFilter: null as string | null, // account_id (any channel); null = all
     query: '',
@@ -30,6 +31,8 @@ export const useInbox = defineStore('inbox', {
     loadingChats: false,
     suggesting: false,
     sending: false,
+    assigning: false,
+    assignmentError: '',
     disconnect: null as null | (() => void),
   }),
   getters: {
@@ -51,10 +54,34 @@ export const useInbox = defineStore('inbox', {
         this.loadingChats = false
       }
     },
+    async loadUsers() {
+      try {
+        const p = await api.get<{ items: User[] }>('/users?page_size=200')
+        this.users = p.items
+      } catch (error) {
+        log.warn('load users failed', { error: String(error) })
+      }
+    },
+    async assignChat(chatId: string, userId: string | null) {
+      this.assigning = true
+      this.assignmentError = ''
+      try {
+        const chat = await api.patch<Chat>(`/chats/${chatId}/assignee`, {
+          assignee_user_id: userId,
+        })
+        this.upsertChat(chat)
+        if (this.filter !== 'all') await this.loadChats()
+      } catch (error) {
+        this.assignmentError = error instanceof ApiError ? error.message : 'Не удалось изменить назначение.'
+      } finally {
+        this.assigning = false
+      }
+    },
     async selectChat(id: string) {
       this.activeId = id
       this.messages = []
       this.drafts = []
+      this.assignmentError = ''
       await Promise.all([this.loadMessages(id), this.loadDrafts(id)])
       this.markRead(id)
     },
