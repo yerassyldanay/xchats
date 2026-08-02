@@ -27,12 +27,10 @@ type MediaAttachmentField struct {
 // kb_media_upload's optional `target` is checked against it — so the widget
 // no longer hand-maintains a parallel copy of this matrix.
 //
-// featured_image is deliberately ABSENT. It is a DERIVED column — for
-// products it always equals gallery_images[0] (syncProductFeaturedImage in
-// kbstore.go), and on topics/tariffs it is legacy storage whose values
-// migration 0016 relocated into illustration_images/pricing_images. It
-// remains a real, readable media column (see mediaColumnKind below); it is
-// simply never an attachment target.
+// featured_image is deliberately ABSENT. It remains a real, readable media
+// column that typed upserts may write, and the response catalog falls back to
+// the first plural image when it is empty. The widget only offers append-style
+// uploads for the attachment targets listed here.
 //
 // assistant and delivery_zone are absent because they have no media columns
 // at all — a type with no entry here offers no attachment targets.
@@ -40,17 +38,13 @@ var mediaAttachmentFields = map[string][]MediaAttachmentField{
 	KBTypeTopic: {
 		{Field: "illustration_images", Kind: "image", Multiple: true},
 		{Field: "explainer_videos", Kind: "video", Multiple: true},
-		{Field: "narration_audio_files", Kind: "audio", Multiple: true},
 		{Field: "reference_documents", Kind: "document", Multiple: true},
 	},
 	KBTypeProduct: {
 		{Field: "gallery_images", Kind: "image", Multiple: true},
 		{Field: "demo_videos", Kind: "video", Multiple: true},
-		{Field: "audio_description_files", Kind: "audio", Multiple: true},
 		{Field: "certificate_documents", Kind: "document", Multiple: true},
-		{Field: "manual_documents", Kind: "document", Multiple: true},
 		{Field: "guarantee_documents", Kind: "document", Multiple: true},
-		{Field: "specification_documents", Kind: "document", Multiple: true},
 	},
 	KBTypeTariff: {
 		{Field: "pricing_images", Kind: "image", Multiple: true},
@@ -284,6 +278,9 @@ func (s *Store) CreateUploadMaterial(ctx context.Context, orgID uuid.UUID, in Up
 }
 
 // UploadMaterial is the signed-upload handler's view of a staged material.
+// StorageKey is empty until CompleteMaterialUpload has run, which is what
+// makes it the single reliable "have the bytes actually arrived?" test — the
+// signed media-read handler uses it exactly that way.
 type UploadMaterial struct {
 	ID                uuid.UUID
 	OrganizationID    uuid.UUID
@@ -292,19 +289,20 @@ type UploadMaterial struct {
 	DeclaredSizeBytes int64
 	DeclaredChecksum  string
 	ProcessingStatus  string
+	StorageKey        string
 }
 
 // GetUploadMaterial reads back a staged material for the signed PUT handler
 // to check the incoming bytes against (declared size/mime/checksum, org
-// ownership).
+// ownership), and for the signed READ handler to locate the stored object.
 func (s *Store) GetUploadMaterial(ctx context.Context, id uuid.UUID) (UploadMaterial, error) {
 	var m UploadMaterial
-	var filename, mimeType, checksum *string
+	var filename, mimeType, checksum, storageKey *string
 	var sizeBytes *int64
 	err := s.pool.QueryRow(ctx, `SELECT id, organization_id, filename, mime_type, size_bytes,
-		sha256_checksum, processing_status
+		sha256_checksum, processing_status, storage_key
 		FROM xchats.kbd_materials WHERE id = $1`, id).
-		Scan(&m.ID, &m.OrganizationID, &filename, &mimeType, &sizeBytes, &checksum, &m.ProcessingStatus)
+		Scan(&m.ID, &m.OrganizationID, &filename, &mimeType, &sizeBytes, &checksum, &m.ProcessingStatus, &storageKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UploadMaterial{}, ErrUnknownKind
 	}
@@ -312,10 +310,76 @@ func (s *Store) GetUploadMaterial(ctx context.Context, id uuid.UUID) (UploadMate
 		return UploadMaterial{}, err
 	}
 	m.Filename, m.MimeType, m.DeclaredChecksum = strOrEmpty(filename), strOrEmpty(mimeType), strOrEmpty(checksum)
+	m.StorageKey = strOrEmpty(storageKey)
 	if sizeBytes != nil {
 		m.DeclaredSizeBytes = *sizeBytes
 	}
 	return m, nil
+}
+
+// MaterialPreview is one material's display metadata, for the KB Manager
+// widget's per-record media section.
+type MaterialPreview struct {
+	ID        uuid.UUID `json:"id"`
+	Filename  string    `json:"filename"`
+	MimeType  string    `json:"mime_type"`
+	SizeBytes int64     `json:"size_bytes"`
+	Kind      string    `json:"kind"`   // image | video | audio | document
+	Status    string    `json:"status"` // processing_status
+}
+
+// MaterialPreviews batch-loads display metadata for ids, scoped to orgID in
+// the WHERE clause rather than filtered in Go, and restricted to materials
+// whose bytes actually landed. Anything foreign, missing, or still incomplete
+// is simply absent from the result — the widget renders those as "preview
+// unavailable", which is the correct outcome for all three cases and leaks
+// nothing about which one applies.
+func (s *Store) MaterialPreviews(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]MaterialPreview, error) {
+	out := map[uuid.UUID]MaterialPreview{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id, filename, mime_type, size_bytes, processing_status
+		FROM xchats.kbd_materials
+		WHERE organization_id = $1 AND id = ANY($2)
+		  AND storage_key IS NOT NULL AND storage_key <> ''`, orgID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p MaterialPreview
+		var filename, mimeType *string
+		var sizeBytes *int64
+		if err := rows.Scan(&p.ID, &filename, &mimeType, &sizeBytes, &p.Status); err != nil {
+			return nil, err
+		}
+		p.Filename, p.MimeType = strOrEmpty(filename), strOrEmpty(mimeType)
+		if sizeBytes != nil {
+			p.SizeBytes = *sizeBytes
+		}
+		p.Kind = KindOfMime(p.MimeType)
+		out[p.ID] = p
+	}
+	return out, rows.Err()
+}
+
+// KindOfMime is the four-way split mimeMatchesKind validates against, in
+// forward form: given a MIME type, which media kind is it? The widget mirrors
+// this exactly (classifyMime in kb-manager.html).
+func KindOfMime(mime string) string {
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return "image"
+	case strings.HasPrefix(mime, "video/"):
+		return "video"
+	case strings.HasPrefix(mime, "audio/"):
+		return "audio"
+	case strings.HasPrefix(mime, "application/"), strings.HasPrefix(mime, "text/"):
+		return "document"
+	default:
+		return ""
+	}
 }
 
 // ErrUploadAlreadyCompleted means the material named by kb_media_upload's

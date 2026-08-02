@@ -341,3 +341,122 @@ func readProductGallery(t *testing.T, kb *kbstore.Store, orgID uuid.UUID, ref st
 	row := page.Items[0].Data.(kbstore.ProductRow)
 	return row.GalleryImages
 }
+
+// TestMaterialPreviews_ScopedToOrg confirms the org scoping is real: another
+// organization's material must simply not come back, so the widget renders
+// "preview unavailable" rather than leaking a filename across a tenant
+// boundary.
+func TestMaterialPreviews_ScopedToOrg(t *testing.T) {
+	kb, orgID, st := newTestKB(t)
+	ctx := context.Background()
+
+	otherOrg, err := st.SeedOrganization(ctx, "other-org")
+	if err != nil {
+		t.Fatalf("seed other org: %v", err)
+	}
+
+	mine := mkAttachMaterial(t, kb, orgID, "image/png", "visible", true)
+	theirs := mkAttachMaterial(t, kb, otherOrg.ID, "image/png", "visible", true)
+	pending := mkAttachMaterial(t, kb, orgID, "image/png", "visible", false) // no bytes yet
+
+	got, perr := kb.MaterialPreviews(ctx, orgID, []uuid.UUID{mine, theirs, pending})
+	if perr != nil {
+		t.Fatalf("previews: %v", perr)
+	}
+	if _, ok := got[mine]; !ok {
+		t.Error("own completed material must be present")
+	}
+	if _, ok := got[theirs]; ok {
+		t.Error("another organization's material must NOT be present")
+	}
+	if _, ok := got[pending]; ok {
+		t.Error("a material whose upload never completed must NOT be present")
+	}
+	if p := got[mine]; p.Kind != "image" || p.MimeType != "image/png" {
+		t.Errorf("unexpected preview: %+v", p)
+	}
+}
+
+
+// TestMediaIDsIn_CoversEveryMediaColumn drives real records through the real
+// read path and asserts every recognised media column is collected.
+//
+// It deliberately does NOT hand-build structs: KBRecord.Data holds DraftView's
+// *Row types (TopicRow, ProductRow, …), not the same-named Draft* blob types,
+// and an earlier version of this test constructed the blob types — so it
+// passed green against a MediaIDsIn that in fact collected nothing at all.
+// Going through ReadRecords is what makes the test able to fail.
+func TestMediaIDsIn_CoversEveryMediaColumn(t *testing.T) {
+	kb, orgID, _ := newTestKB(t)
+	ctx := context.Background()
+
+	// One material per kind — validateMediaRef enforces the pairing, so a
+	// document cannot be parked in an image column just to make a test pass.
+	byKind := map[string]uuid.UUID{
+		"image":    mkAttachMaterial(t, kb, orgID, "image/jpeg", "visible", true),
+		"video":    mkAttachMaterial(t, kb, orgID, "video/mp4", "visible", true),
+		"audio":    mkAttachMaterial(t, kb, orgID, "audio/mpeg", "visible", true),
+		"document": mkAttachMaterial(t, kb, orgID, "application/pdf", "visible", true),
+	}
+
+	if _, err := kb.MCPUpsertTopic(ctx, orgID, uuid.Nil, "t", kbstore.TopicChanges{
+		Title: strp("Тема"),
+	}, nil, kbstore.MCPProvenance{}); err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p", kbstore.ProductChanges{
+		Name: strp("Товар"), InStock: boolp(true),
+	}, nil, kbstore.MCPProvenance{}); err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	if _, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "tar", kbstore.TariffChanges{
+		Name: strp("Тариф"), PricingType: strp("fixed"),
+	}, nil, kbstore.MCPProvenance{}); err != nil {
+		t.Fatalf("create tariff: %v", err)
+	}
+
+	// Every attachable column, via the real attach path.
+	want := map[uuid.UUID]bool{}
+	for kbType, key := range map[string]string{
+		kbstore.KBTypeTopic: "t", kbstore.KBTypeProduct: "p", kbstore.KBTypeTariff: "tar",
+		kbstore.KBTypeContacts: kbstore.NaturalKeyMain, kbstore.KBTypePolicies: kbstore.NaturalKeyMain,
+	} {
+		for _, def := range kbstore.MediaAttachmentFieldsByType()[kbType] {
+			id := byKind[def.Kind]
+			if _, err := kb.MCPAttachMedia(ctx, orgID, uuid.Nil, kbstore.MediaAttachInput{
+				MaterialID: id, Type: kbType, Key: key, Field: def.Field,
+			}, nil); err != nil {
+				t.Fatalf("attach %s.%s: %v", kbType, def.Field, err)
+			}
+			want[id] = true
+		}
+	}
+
+	// featured_image is not attachable, so set it the only way it can be set —
+	// through the typed upsert. It must still be COLLECTED for preview.
+	featured := mkAttachMaterial(t, kb, orgID, "image/png", "visible", true)
+	fp := &featured
+	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p", kbstore.ProductChanges{
+		FeaturedImage: &fp,
+	}, nil, kbstore.MCPProvenance{}); err != nil {
+		t.Fatalf("set featured_image: %v", err)
+	}
+	want[featured] = true
+
+	page, err := kb.ReadRecords(ctx, orgID, nil, "draft", "", "", 100, "")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	got := map[uuid.UUID]bool{}
+	for _, id := range kbstore.MediaIDsIn(page) {
+		got[id] = true
+	}
+	for id := range want {
+		if !got[id] {
+			t.Errorf("MediaIDsIn missed material %s — some media column is not collected", id)
+		}
+	}
+	if len(got) == 0 {
+		t.Fatal("MediaIDsIn collected nothing at all — it is almost certainly switching on the wrong types")
+	}
+}

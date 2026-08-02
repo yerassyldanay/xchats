@@ -78,6 +78,13 @@ type Deps struct {
 	SignUpload func(materialID string, expiresAt int64) string
 	// UploadTTLSeconds bounds how long a signed upload URL stays valid.
 	UploadTTLSeconds int
+	// SignMediaRead mints a short-lived signed READ token for one material —
+	// the same seam as SignUpload, opposite direction: internal/httpapi owns
+	// the key, mcpserver only calls this. Nil disables preview URLs entirely,
+	// which degrades the widget to uuid chips rather than breaking anything.
+	SignMediaRead func(materialID string, expiresAt int64) string
+	// MediaTTLSeconds bounds how long a signed media-read URL stays valid.
+	MediaTTLSeconds int
 	// FrontendBaseURL is the Xchats app's own origin (e.g. https://xchats.kz,
 	// no trailing slash) — kb_info returns it so the KB Manager widget (a
 	// static embedded document with no server config of its own) can build

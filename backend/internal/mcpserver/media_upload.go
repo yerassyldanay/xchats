@@ -93,9 +93,58 @@ func (s *Server) handleKBMediaUpload(ctx context.Context, orgID, userID uuid.UUI
 		"processing_status": "uploaded",
 	}
 	return s.toolResult(
-		fmt.Sprintf("Upload target created (material_id=%s). PUT the file bytes to upload_url within %d seconds, then reference this material_id in a kb_*_upsert call.", materialID, ttl),
+		fmt.Sprintf("Upload target created (material_id=%s), but no file bytes have been uploaded yet. PUT the bytes to upload_url within %d seconds; only a successful PUT completes the upload. Then attach this material_id to the target record.", materialID, ttl),
 		structured, "media", orgID, userID,
 	), nil
+}
+
+// mediaIndexFor builds kb_read's _meta["xchats/media"]: per-material display
+// metadata plus a short-lived signed preview URL, keyed by material id.
+//
+// Costs exactly ZERO extra queries for a page that references no media, and
+// one batch query otherwise — ReadRecords itself stays free of per-record
+// database work. A failure here is logged and swallowed: missing previews are
+// a degradation, but a failed kb_read is an outage.
+func (s *Server) mediaIndexFor(ctx context.Context, orgID uuid.UUID, page kbstore.ReadPage) map[string]any {
+	ids := kbstore.MediaIDsIn(page)
+	if len(ids) == 0 {
+		return nil
+	}
+	previews, err := s.Deps.KB.MaterialPreviews(ctx, orgID, ids)
+	if err != nil {
+		if s.Deps.Log != nil {
+			s.Deps.Log.Warn("mcpserver: media previews failed", "err", err)
+		}
+		return nil
+	}
+	if len(previews) == 0 {
+		return nil
+	}
+	ttl := s.Deps.MediaTTLSeconds
+	if ttl <= 0 {
+		ttl = 3600
+	}
+	expiresAt := time.Now().Add(time.Duration(ttl) * time.Second)
+	out := make(map[string]any, len(previews))
+	for id, p := range previews {
+		entry := map[string]any{
+			"id": p.ID.String(), "filename": p.Filename, "mime_type": p.MimeType,
+			"size_bytes": p.SizeBytes, "kind": p.Kind, "status": p.Status,
+		}
+		if s.Deps.SignMediaRead != nil {
+			// Built against UploadBaseURL, NOT a separate media host: the CSP
+			// resourceDomains the host applies to this widget is derived from
+			// exactly originOf(UploadBaseURL) — see widgetResourceMeta in
+			// resources.go. A different origin here would silently break every
+			// preview.
+			token := s.Deps.SignMediaRead(id.String(), expiresAt.Unix())
+			entry["url"] = fmt.Sprintf("%s/mcp/media/%s?token=%s",
+				strings.TrimRight(s.Deps.UploadBaseURL, "/"), id, url.QueryEscape(token))
+			entry["expires_at"] = expiresAt.UTC().Format(time.RFC3339)
+		}
+		out[id.String()] = entry
+	}
+	return out
 }
 
 // handleKBMediaAttach implements kb_media_attach: attaches an

@@ -32,7 +32,20 @@ const mcpUploadMaxBytes = mcpserver.MaxMediaUploadBytes
 // chatgpt.com/claude.ai's own origin, must be able to PUT bytes here
 // directly (plan/mcp.md §6: "The widget uploads bytes directly to object
 // storage").
-func (s *Server) uploadCORS() gin.HandlerFunc {
+func (s *Server) uploadCORS() gin.HandlerFunc { return permissiveSignedCORS("PUT,OPTIONS") }
+
+// mediaCORS is uploadCORS's read-direction twin, for GET /mcp/media/:id.
+// Same justification verbatim: the only credential is the unguessable signed
+// token in the query string, never a cookie, so there is no credentialed
+// cross-origin request to protect and the widget's unpredictable sandbox
+// origin can be echoed back safely.
+func (s *Server) mediaCORS() gin.HandlerFunc { return permissiveSignedCORS("GET,OPTIONS") }
+
+// permissiveSignedCORS echoes any Origin for a route whose authentication is
+// a signed token rather than a cookie. Access-Control-Allow-Credentials is
+// deliberately NEVER set: that is what keeps "echo any origin" from becoming
+// an ambient-authority hole.
+func permissiveSignedCORS(allowMethods string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		if origin != "" {
@@ -40,7 +53,7 @@ func (s *Server) uploadCORS() gin.HandlerFunc {
 			c.Header("Vary", "Origin")
 		}
 		if c.Request.Method == http.MethodOptions {
-			c.Header("Access-Control-Allow-Methods", "PUT,OPTIONS")
+			c.Header("Access-Control-Allow-Methods", allowMethods)
 			c.Header("Access-Control-Allow-Headers", "Content-Type")
 			c.AbortWithStatus(http.StatusNoContent)
 			return

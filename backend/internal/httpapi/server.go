@@ -69,6 +69,7 @@ type Server struct {
 	mcpAuth         *mcpauth.Authorizer
 	mcpServer       *mcpserver.Server
 	mcpUploadSigner *mcpauth.UploadTokenSigner
+	mcpMediaSigner  *mcpauth.MediaReadTokenSigner
 
 	// kbRepo/kbInvalidator are the response engine's own KB reader — a
 	// CachedKBRepo in production (main.go), the SAME cached build GET
@@ -127,15 +128,18 @@ type Deps struct {
 // New builds a Server.
 func New(d Deps) *Server {
 	var uploadSigner *mcpauth.UploadTokenSigner
+	var mediaSigner *mcpauth.MediaReadTokenSigner
 	if d.MCPAuth != nil {
 		uploadSigner = mcpauth.NewUploadTokenSigner(d.MCPAuth.Key)
+		mediaSigner = mcpauth.NewMediaReadTokenSigner(d.MCPAuth.Key)
 	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
 		blob: d.Blob, response: d.Response, evo: d.Evo, tg: d.TG, kb: d.KB,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
-		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer, mcpUploadSigner: uploadSigner,
+		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer,
+		mcpUploadSigner: uploadSigner, mcpMediaSigner: mediaSigner,
 		pendingNames: map[string]string{},
 		csrfSecret:   randomCSRFFallbackSecret(),
 		// Deliberately generous limits — these are abuse guards, not a
@@ -218,6 +222,13 @@ func (s *Server) Router() *gin.Engine {
 	upload.Use(s.uploadCORS())
 	upload.PUT("/:material_id", s.handleMCPUpload)
 	upload.OPTIONS("/:material_id", func(c *gin.Context) {}) // uploadCORS aborts+responds before this body runs
+
+	// The signed media-READ target the widget renders previews from — same
+	// reasoning and same shape as the upload group above, opposite direction.
+	media := r.Group("/mcp/media")
+	media.Use(s.mediaCORS())
+	media.GET("/:material_id", s.handleMCPMediaRead)
+	media.OPTIONS("/:material_id", func(c *gin.Context) {})
 
 	api := r.Group("/xchats/api/v1")
 	api.POST("/auth/login", s.handleLogin)
@@ -382,7 +393,13 @@ func (s *Server) cors() gin.HandlerFunc {
 		// preflight would come back 204 but with no Access-Control-Allow-Origin
 		// at all — which the browser treats as "denied" and silently drops the
 		// real PUT (the server then only ever logs the OPTIONS).
-		if strings.HasPrefix(c.Request.URL.Path, "/mcp/uploads") {
+		//
+		// /mcp/media is the same story in the read direction (mediaCORS).
+		// Kept as two explicit prefixes rather than a blanket "/mcp/" test —
+		// that would silently hand a permissive policy to every future
+		// /mcp/* route somebody adds.
+		if strings.HasPrefix(c.Request.URL.Path, "/mcp/uploads") ||
+			strings.HasPrefix(c.Request.URL.Path, "/mcp/media") {
 			c.Next()
 			return
 		}

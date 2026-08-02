@@ -129,13 +129,27 @@
   .source-block { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
   .source-block h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 
-  .dropzone {
-    border: 2px dashed var(--border); border-radius: 12px; padding: 28px 16px; text-align: center;
-    color: var(--muted); font-size: 13px; margin-bottom: 14px;
+  /* Per-field media editor. No player CSS: only images render inline — video,
+     audio and documents are icon + name + link, so nothing but an image is
+     ever fetched without the user clicking. */
+  .media-field { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .media-field:last-child { border-bottom: none; }
+  .media-field.drag { background: var(--chip-bg); border-radius: 8px; }
+  .media-field input[type=file] { margin: 6px 0 2px; font-size: 12px; max-width: 100%; }
+  .media-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+  .media-open { display: inline-flex; line-height: 0; }
+  .media-thumb {
+    width: 84px; height: 84px; object-fit: cover; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--chip-bg);
   }
-  .dropzone.drag { border-color: var(--accent); color: var(--accent); background: var(--chip-bg); }
-  .form-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 10px; }
-  .form-grid label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 3px; }
+  .media-thumb.media-broken { object-fit: contain; padding: 6px; }
+  .media-doc {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--code-bg);
+    border-radius: 8px; padding: 6px 10px; font-size: 12px; max-width: 100%;
+    text-decoration: none; color: var(--text);
+  }
+  .media-doc:hover { color: var(--accent); }
+  .upload-item { margin-top: 8px; padding: 6px 8px; background: var(--chip-bg); border-radius: 8px; }
   .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 8px 0; }
   .progress-bar > div { height: 100%; background: var(--accent); transition: width .2s; }
 
@@ -161,7 +175,7 @@
   // it drifted enough from the server's real schemas to offer fields a type
   // does not have. It is now fetched from kb_info.media_attachment_fields at
   // boot (state.mediaAttachmentFields) and driven entirely from there — see
-  // loadAttachRecords/renderAttachForm below.
+  // mediaFieldsFor/renderMediaSection below.
   // ---------------------------------------------------------------------
   var ALL_TYPES = ["assistant", "topic", "product", "tariff", "contacts", "policies", "delivery_zone"];
   var TYPE_META = {
@@ -202,7 +216,7 @@
   var state = {
     bridgeKind: null,     // "openai" | "postmessage" | "none" | null (not yet determined)
     connecting: true,
-    view: "all",          // "all" | "live" | "draft" | "media" | "record"
+    view: "all",          // "all" | "live" | "draft" | "record"
     typeFilter: null,
     query: "",
     items: [],
@@ -214,12 +228,23 @@
                            // link whenever a tool call has actually supplied one.
     mediaFieldKinds: {},
     mediaAttachmentFields: {}, // { [type]: [{field, kind, multiple}, ...] } from kb_info
+    mediaIndex: {},        // { [material_id]: {id,filename,mime_type,size_bytes,kind,status,url} }
+                           // from kb_read's _meta["xchats/media"] — see unwrapToolResult.
     record: null,          // { type, key, entries: [{type,source,data}, ...] }
     recordBack: "all",
     loading: false,
     error: null,
     pendingOpen: null,
-    media: freshMediaState(),
+    // Two-step delete. null until the Удалить button arms it; {type,key} while
+    // an inline confirmation is showing. window.confirm is unusable here: MCP
+    // hosts embed this widget in a SANDBOXED iframe, where the browser blocks
+    // modal dialogs and confirm() returns false without ever showing anything —
+    // which is precisely why the delete button did nothing at all.
+    confirmDelete: null,
+    deleting: false,       // a kb_delete is in flight; disables the confirm button
+    uploads: {},           // { [field]: [uploadItem, ...] } — see the upload queue
+    uploadNotes: {},       // { [field]: string } — per-field advisory notes
+    uploadSeq: 0,
   };
 
   function esc(s) {
@@ -276,7 +301,10 @@
     // required for the widget's own core flows to work.
     if (data.method === "notifications/tools/result" && data.params &&
         MUTATING_TOOLS.indexOf(data.params.name) !== -1 && state.bridgeKind) {
-      loadForView(state.view);
+      // Never reload out from under an upload in flight — a model-driven write
+      // arriving mid-batch would otherwise discard the queue and the user's
+      // remaining files with it.
+      if (!hasActiveUploads()) loadForView(state.view);
     }
   });
   function callToolViaPostMessage(name, args) {
@@ -301,6 +329,18 @@
       // passes through, so no individual call site needs to know about it.
       if (result._meta && typeof result._meta === "object" && result._meta["xchats/reviewUrl"]) {
         state.reviewUrl = result._meta["xchats/reviewUrl"];
+      }
+      // kb_read carries per-material preview metadata (filename, mime, size,
+      // kind and a short-lived signed URL) in _meta rather than in
+      // structuredContent, because kb_read's declared outputSchema is
+      // additionalProperties:false and a host validating against its CACHED
+      // copy would start rejecting kb_read itself. Captured at the same choke
+      // point as reviewUrl. Absent _meta simply means no previews.
+      if (result._meta && typeof result._meta === "object" && result._meta["xchats/media"]) {
+        var idx = result._meta["xchats/media"];
+        if (idx && typeof idx === "object") {
+          Object.keys(idx).forEach(function (id) { state.mediaIndex[id] = idx[id]; });
+        }
       }
       if ("structuredContent" in result) return result.structuredContent;
     }
@@ -358,8 +398,22 @@
     });
   }
 
+  // registerGlobalKeys installs the ONE document-level keyboard listener, at
+  // startup — never in wireEvents(), which runs after every render(): a
+  // document listener survives the innerHTML rebuild that discards per-element
+  // ones, so registering it there would stack a fresh duplicate per render.
+  function registerGlobalKeys() {
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape") return;
+      if (!state.confirmDelete || state.deleting) return;
+      state.confirmDelete = null;
+      render();
+    });
+  }
+
   async function boot() {
     applyTheme();
+    registerGlobalKeys();
     seedFromInitialOutput();
     render();
     var info = await connect();
@@ -445,6 +499,10 @@
   async function openRecord(type, key, backView) {
     state.recordBack = backView || (state.view === "record" ? "all" : state.view);
     state.view = "record";
+    disarmDelete();
+    // Uploads are per-record; keep only items that FAILED, so a user can still
+    // see and retry them, and drop everything that already landed.
+    state.uploads = keepFailedUploads(state.uploads);
     state.loading = true; state.error = null; state.record = null; render();
     try {
       var page = await callTool("kb_read", { types: [type], source: "both", key: key });
@@ -455,14 +513,26 @@
     state.loading = false; render();
   }
 
+  // disarmDelete clears any armed confirmation. Called on every navigation
+  // (back, tab switch, opening another record) so a confirmation armed on one
+  // record can never be confirmed against a different one.
+  function disarmDelete() {
+    if (state.confirmDelete) state.confirmDelete = null;
+  }
+
+  // deleteRecord is now ONLY the tool call plus loading/error handling — all
+  // arming and disarming lives in the confirmDelete state machine (see
+  // renderRecordView and wireEvents). It never prompts.
   async function deleteRecord(type, key) {
-    if (!window.confirm("Пометить «" + key + "» на удаление в черновике? Запись останется опубликованной до подтверждения в Xchats.")) return;
-    state.loading = true; render();
+    state.deleting = true;
+    state.loading = true; state.error = null; render();
     try {
       await callTool("kb_delete", { type: type, key: key });
+      state.deleting = false;
       state.view = state.recordBack || "all";
       await loadForView(state.view);
     } catch (e) {
+      state.deleting = false;
       state.error = String((e && e.message) || e);
       state.loading = false; render();
     }
@@ -516,8 +586,6 @@
       html += renderDisconnected();
     } else if (state.view === "record") {
       html += renderRecordView();
-    } else if (state.view === "media") {
-      html += renderMediaView();
     } else {
       html += renderListView();
     }
@@ -557,7 +625,10 @@
   }
 
   function renderTabs() {
-    var tabs = [["all", "Все"], ["live", "Опубликовано"], ["draft", "Черновик"], ["media", "Медиа"]];
+    // No "Медиа" tab: uploading now happens on the record itself, next to the
+    // field the file is going into, so there is no standalone upload screen
+    // and therefore no way to upload a file that attaches to nothing.
+    var tabs = [["all", "Все"], ["live", "Опубликовано"], ["draft", "Черновик"]];
     var html = '<nav class="tabs">';
     tabs.forEach(function (t) {
       var active = (state.view === t[0]) || (state.view === "record" && state.recordBack === t[0]);
@@ -648,9 +719,32 @@
       html += renderFields(rec.data || {});
       html += '</div>';
     });
-    html += '<div style="margin-top:10px"><button class="btn btn-danger" data-delete-type="' + esc(state.record.type) +
-      '" data-delete-key="' + esc(state.record.key) + '">Удалить (пометить в черновике)</button></div>';
+    // The media section is rendered ONCE per record, never once per source
+    // block: renderFields runs for the draft AND live entries, so anything
+    // carrying an id or a data-attribute inside it would be emitted twice and
+    // the singular querySelector wiring would only ever reach the first copy.
+    html += renderMediaSection();
+    html += renderDeleteControl();
     return html;
+  }
+
+  // renderDeleteControl is the two-step confirmation. Step one arms
+  // state.confirmDelete and re-renders; only step two calls kb_delete.
+  function renderDeleteControl() {
+    if (!state.confirmDelete) {
+      return '<div style="margin-top:10px"><button class="btn btn-danger" data-delete-type="' + esc(state.record.type) +
+        '" data-delete-key="' + esc(state.record.key) + '">Удалить (пометить в черновике)</button></div>';
+    }
+    // An inline card rather than an overlay: the style block has no
+    // position:fixed, z-index or backdrop, and the widget's iframe is short.
+    return '<div class="card" id="confirm-delete" style="border-color:var(--danger);margin-top:10px" role="alertdialog" aria-live="polite">' +
+      '<p>Пометить «' + esc(state.confirmDelete.key) + '» на удаление в черновике? ' +
+      'Запись останется опубликованной до подтверждения в Xchats.</p>' +
+      '<button class="btn btn-danger btn-sm" id="confirm-delete-yes" data-confirm-delete="1"' +
+      (state.deleting ? " disabled" : "") + '>' + (state.deleting ? "Удаление…" : "Удалить") + '</button> ' +
+      '<button class="btn btn-sm" id="confirm-delete-no" data-cancel-delete="1"' +
+      (state.deleting ? " disabled" : "") + '>Отмена</button>' +
+      '</div>';
   }
 
   function renderFields(data) {
@@ -661,11 +755,24 @@
       var v = data[k];
       var isMedia = !!state.mediaFieldKinds[k];
       var valueHtml;
+      // isEmpty is tracked explicitly rather than sniffed out of the generated
+      // HTML with indexOf("empty-val") — a filename containing that literal
+      // would otherwise grey out a perfectly populated row.
+      var isEmpty = false;
       if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) {
         valueHtml = '<span class="empty-val">не задано</span>';
+        isEmpty = true;
       } else if (isMedia) {
+        // Deliberately NON-interactive: no ids, no data-attributes, because
+        // renderFields is called once per source block (draft AND live).
+        // Filenames come from the kb_read _meta index when the host passed it
+        // through; the short uuid is the fallback.
         var ids = Array.isArray(v) ? v : [v];
-        valueHtml = ids.map(function (id) { return '<span class="media-chip">' + esc(String(id).slice(0, 8)) + '…</span>'; }).join(" ");
+        valueHtml = ids.map(function (id) {
+          var meta = state.mediaIndex[String(id)];
+          var label = (meta && meta.filename) ? meta.filename : String(id).slice(0, 8) + "…";
+          return '<span class="media-chip">' + esc(label) + '</span>';
+        }).join(" ");
       } else if (typeof v === "boolean") {
         valueHtml = v ? "Да" : "Нет";
       } else if (Array.isArray(v)) {
@@ -676,38 +783,26 @@
         valueHtml = esc(v);
       }
       html += '<div class="field-row"><div class="field-label">' + esc(humanize(k)) + '</div><div class="field-value' +
-        (valueHtml.indexOf("empty-val") >= 0 ? " empty-val" : "") + '">' + valueHtml + '</div></div>';
+        (isEmpty ? " empty-val" : "") + '">' + valueHtml + '</div></div>';
     });
     return html;
   }
 
   // ---------------------------------------------------------------------
-  // Media view: select → stage (kb_media_upload) → PUT → attach
-  // (kb_media_attach). Selecting a file immediately stages AND uploads it —
-  // there is no separate "click to start" step, and no client-side hashing
-  // before staging (the PUT handler re-hashes the real bytes server-side;
-  // reading the whole file into memory first only stalls selection on a
-  // large file for no benefit). Attachment choices (which types/records/
-  // fields accept this file) only appear once the PUT has actually
-  // succeeded, driven entirely by kb_info's media_attachment_fields — this
-  // widget hand-maintains no matrix of its own.
+  // Record media: preview what is attached, upload more.
+  //
+  // Every media control lives HERE, in one section rendered once per record —
+  // never inside renderFields, which runs once per source block (draft AND
+  // live) and would therefore emit duplicate ids and duplicate inputs.
+  //
+  // Only IMAGES render inline. Video, audio and documents render as an icon,
+  // a filename, a size and a link: blob.Store.Get reads a whole file into
+  // server memory (there is no streaming read yet), so nothing but images is
+  // fetched without the user explicitly asking for it.
   // ---------------------------------------------------------------------
-  function freshMediaState() {
-    return {
-      file: null, kind: null,       // "image" | "video" | "audio" | "document", classified from the MIME type
-      status: null,                 // null | "uploading" | "uploaded" | "error"
-      materialId: null, uploadUrl: null, uploadHeaders: null, expiresAt: null,
-      progress: 0, error: null, dragOver: false,
-      attachType: "", attachKey: "", attachField: "",
-      attachRecords: [],            // [{type, key, title}, ...] eligible attach targets for this file's kind
-      attachRecordsLoading: false,
-      attachBusy: false, attachDone: false,
-    };
-  }
-  function resetMedia() {
-    state.media = freshMediaState();
-    render();
-  }
+  var KIND_LABELS = { image: "изображения", video: "видео", audio: "аудио", document: "документы" };
+  var KIND_ICONS = { image: "🖼", video: "🎬", audio: "🎵", document: "📄" };
+  var KIND_ACCEPT = { image: "image/*", video: "video/*", audio: "audio/*", document: "application/*,text/*" };
 
   // classifyMime mirrors kbstore.mimeMatchesKind (mcp_media.go) exactly, so
   // a file the widget accepts is a file the server will too.
@@ -718,267 +813,450 @@
     if (mime.indexOf("application/") === 0 || mime.indexOf("text/") === 0) return "document";
     return null;
   }
-  // typesForKind / fieldsForTypeAndKind read state.mediaAttachmentFields
-  // (kb_info) — the single source of truth for which type/field pairs exist,
-  // so a video never offers an image-only field and a type with no
-  // compatible field is simply absent.
-  function typesForKind(kind) {
+
+  function formatBytes(n) {
+    if (!n && n !== 0) return "";
+    if (n < 1024) return n + " Б";
+    if (n < 1024 * 1024) return Math.round(n / 1024) + " КБ";
+    return (n / (1024 * 1024)).toFixed(1).replace(".", ",") + " МБ";
+  }
+
+  // fieldDefFor resolves ONE {field, kind, multiple} from the type-scoped
+  // registry kb_info publishes. A field absent from it is not attachable —
+  // that is what makes featured_image preview-only in this editor while
+  // remaining a perfectly real, upsert-writable column.
+  function fieldDefFor(type, field) {
+    var fields = (state.mediaAttachmentFields && state.mediaAttachmentFields[type]) || [];
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].field === field) return fields[i];
+    }
+    return null;
+  }
+
+  // primaryEntry picks the draft row when there is one, else live: every
+  // attach writes the draft, so the draft is what the editor must reflect.
+  function primaryEntry() {
+    var entries = (state.record && state.record.entries) || [];
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].source === "draft") return entries[i];
+    }
+    return entries[0] || null;
+  }
+
+  // mediaFieldsFor answers two SEPARATE questions and never conflates them:
+  //
+  //   displayed  — the key is actually present on the record data returned by
+  //                kb_read, and mediaFieldKinds recognises it as media.
+  //   attachable — the field is listed under mediaAttachmentFields[type].
+  //
+  // So a real column can be shown while being non-attachable (featured_image),
+  // and a registry entry can never conjure a UI field for a column the record
+  // does not have.
+  function mediaFieldsFor(type, data) {
     var out = [];
-    var registry = state.mediaAttachmentFields || {};
-    Object.keys(registry).forEach(function (t) {
-      if ((registry[t] || []).some(function (f) { return f.kind === kind; })) out.push(t);
+    if (!data) return out;
+    var registry = (state.mediaAttachmentFields && state.mediaAttachmentFields[type]) || [];
+    var seen = {};
+    registry.forEach(function (def) {
+      if (!Object.prototype.hasOwnProperty.call(data, def.field)) return;
+      if (!state.mediaFieldKinds[def.field]) return;
+      seen[def.field] = true;
+      out.push({ field: def.field, kind: def.kind, multiple: !!def.multiple, attachable: true });
+    });
+    Object.keys(data).forEach(function (k) {
+      if (seen[k]) return;
+      var kind = state.mediaFieldKinds[k];
+      if (!kind) return;
+      out.push({ field: k, kind: kind, multiple: Array.isArray(data[k]), attachable: false });
     });
     return out;
   }
-  function fieldsForTypeAndKind(type, kind) {
-    var fields = (state.mediaAttachmentFields && state.mediaAttachmentFields[type]) || [];
-    return fields.filter(function (f) { return f.kind === kind; });
+
+  function renderMediaSection() {
+    var entry = primaryEntry();
+    if (!entry) return "";
+    var data = entry.data || {};
+    var fields = mediaFieldsFor(state.record.type, data);
+    if (!fields.length) return "";
+
+    var html = '<div class="source-block"><h3>Медиа</h3>' +
+      '<p class="row-sub">Загрузка добавляет файл в черновик — опубликуйте изменения в Xchats.</p>';
+    fields.forEach(function (def) {
+      html += renderMediaField(def, data[def.field]);
+    });
+    html += '</div>';
+    return html;
   }
-  function isUploadExpired() {
-    var raw = state.media.expiresAt;
-    if (!raw) return false;
-    var t = Date.parse(raw);
+
+  function renderMediaField(def, value) {
+    var ids = value === null || value === undefined || value === "" ? []
+      : (Array.isArray(value) ? value : [value]);
+    var label = esc(humanize(def.field));
+    if (!def.attachable) label += ' <span class="row-sub">(только предпросмотр)</span>';
+    else if (!def.multiple) label += ' <span class="row-sub">(один файл, заменяет текущий)</span>';
+
+    var html = '<div class="media-field" data-drop-field="' + esc(def.field) + '">';
+    html += '<div class="field-label">' + label + '</div>';
+
+    if (!ids.length) {
+      html += '<div class="field-value empty-val"><span class="empty-val">не задано</span></div>';
+    } else {
+      html += '<div class="media-grid">';
+      ids.forEach(function (id) { html += renderMediaItem(String(id), def.kind); });
+      html += '</div>';
+      if (def.attachable && !def.multiple) {
+        html += '<p class="row-sub">будет заменено</p>';
+      }
+    }
+
+    if (def.attachable) {
+      html += '<div><input type="file" id="up-input-' + esc(def.field) + '" data-upload-field="' + esc(def.field) + '"' +
+        (def.multiple ? " multiple" : "") + ' accept="' + esc(KIND_ACCEPT[def.kind] || "") + '"></div>';
+      html += '<p class="row-sub">' + esc(KIND_LABELS[def.kind] || "файлы") +
+        ', до ' + formatBytes(MAX_UPLOAD_BYTES) +
+        (def.multiple ? ' · можно выбрать несколько' : '') + '.</p>';
+    } else {
+      html += '<p class="row-sub">задаётся через kb_*_upsert; пусто — берётся первое изображение</p>';
+    }
+
+    if (state.uploadNotes[def.field]) {
+      html += '<p class="row-sub">' + esc(state.uploadNotes[def.field]) + '</p>';
+    }
+    html += renderUploadQueue(def.field);
+    html += '</div>';
+    return html;
+  }
+
+  // renderMediaItem: images inline, everything else an icon + name + size +
+  // link. No <video>/<audio> elements are ever emitted.
+  function renderMediaItem(id, fieldKind) {
+    var meta = state.mediaIndex[id];
+    if (!meta || !meta.url) {
+      return '<span class="media-chip">' + esc(id.slice(0, 8)) + '… · предпросмотр недоступен</span>';
+    }
+    var kind = meta.kind || fieldKind;
+    var name = meta.filename || id;
+    var size = meta.size_bytes ? formatBytes(meta.size_bytes) : "";
+    if (kind === "image") {
+      return '<a class="media-open" href="' + esc(meta.url) + '" target="_blank" rel="noopener" referrerpolicy="no-referrer" title="' + esc(name) + '">' +
+        '<img class="media-thumb" src="' + esc(meta.url) + '" alt="' + esc(name) + '" loading="lazy" referrerpolicy="no-referrer">' +
+        '</a>';
+    }
+    return '<a class="media-doc" href="' + esc(meta.url) + '" target="_blank" rel="noopener" referrerpolicy="no-referrer">' +
+      '<span>' + (KIND_ICONS[kind] || KIND_ICONS.document) + '</span>' +
+      '<span>' + esc(name) + '</span>' +
+      (size ? '<span class="row-sub">' + esc(size) + '</span>' : "") +
+      '</a>';
+  }
+
+  var UPLOAD_STATUS_LABELS = {
+    queued: "В очереди…", staging: "Подготовка…", uploading: "Загрузка…",
+    attaching: "Прикрепление…", done: "Готово", error: "Ошибка",
+  };
+
+  function renderUploadQueue(field) {
+    var items = state.uploads[field] || [];
+    if (!items.length) return "";
+    var html = "";
+    items.forEach(function (item) {
+      html += '<div class="upload-item" id="' + esc(item.id) + '">';
+      html += '<div class="row-sub">' + esc(item.name) + (item.size ? ' · ' + formatBytes(item.size) : "") + '</div>';
+      if (item.status === "uploading") {
+        html += '<div class="progress-bar"><div id="' + esc(item.id) + '-bar" style="width:' + item.progress + '%"></div></div>';
+      }
+      if (item.status === "error") {
+        html += '<div class="error-box">' + esc(item.error || "Не удалось загрузить файл") + '</div>';
+        html += '<button class="btn btn-sm" data-retry-upload="' + esc(item.id) + '">Повторить</button> ' +
+          '<button class="btn btn-sm" data-dismiss-upload="' + esc(item.id) + '">Убрать</button>';
+      } else {
+        html += '<div class="row-sub">' + esc(UPLOAD_STATUS_LABELS[item.status] || item.status) + '</div>';
+      }
+      html += '</div>';
+    });
+    return html;
+  }
+
+  // ---------------------------------------------------------------------
+  // Upload queue. One global worker, strictly sequential: handleMCPUpload
+  // reads each body fully into memory, and every kb_media_attach takes the
+  // organization's draft row lock, so parallel uploads would buy nothing but
+  // server RSS and ErrStale retries.
+  // ---------------------------------------------------------------------
+  function allUploadItems() {
+    var out = [];
+    Object.keys(state.uploads).forEach(function (f) {
+      (state.uploads[f] || []).forEach(function (it) { out.push(it); });
+    });
+    return out;
+  }
+  function findUploadItem(id) {
+    var all = allUploadItems();
+    for (var i = 0; i < all.length; i++) { if (all[i].id === id) return all[i]; }
+    return null;
+  }
+  function hasActiveUploads() {
+    return allUploadItems().some(function (it) {
+      return it.status === "queued" || it.status === "staging" || it.status === "uploading" || it.status === "attaching";
+    });
+  }
+  // keepFailedUploads drops everything that finished cleanly and keeps the
+  // failures, so a refresh after a batch does not silently swallow the one
+  // file that did not make it.
+  function keepFailedUploads(uploads) {
+    var out = {};
+    Object.keys(uploads || {}).forEach(function (f) {
+      var failed = (uploads[f] || []).filter(function (it) { return it.status === "error"; });
+      if (failed.length) out[f] = failed;
+    });
+    return out;
+  }
+
+  function handleFieldFiles(field, fileList) {
+    if (!state.record) return;
+    var def = fieldDefFor(state.record.type, field);
+    if (!def) return;
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) return;
+    delete state.uploadNotes[field];
+    if (!def.multiple && files.length > 1) {
+      files = files.slice(0, 1);
+      state.uploadNotes[field] = "Поле принимает один файл — остальные пропущены.";
+    }
+    var queue = state.uploads[field] || (state.uploads[field] = []);
+    files.forEach(function (file) {
+      var mime = file.type || "application/octet-stream";
+      var kind = classifyMime(mime);
+      var item = {
+        id: "up-" + (++state.uploadSeq), field: field, kind: kind, mime: mime,
+        name: file.name, size: file.size, file: file,
+        recType: state.record.type, recKey: state.record.key,
+        status: "queued", progress: 0, error: null,
+        materialId: null, uploadUrl: null, uploadHeaders: null, expiresAt: null,
+        uploaded: false, // bytes have landed; the signed target is now spent
+      };
+      // Validate per FILE, never globally: one rejected file in a batch of
+      // five must not discard the other four.
+      if (kind !== def.kind) {
+        item.status = "error";
+        item.error = "Поле принимает " + (KIND_LABELS[def.kind] || def.kind) + "; «" + file.name + "» — " +
+          (kind ? KIND_LABELS[kind] : mime) + ".";
+      } else if (!file.size) {
+        item.status = "error"; item.error = "Файл пуст.";
+      } else if (file.size > MAX_UPLOAD_BYTES) {
+        item.status = "error";
+        item.error = "Файл слишком большой: " + formatBytes(file.size) + " (максимум " + formatBytes(MAX_UPLOAD_BYTES) + ").";
+      }
+      queue.push(item);
+    });
+    render();
+    pumpUploadQueue();
+  }
+
+  var uploadPumpRunning = false;
+  async function pumpUploadQueue() {
+    if (uploadPumpRunning) return;
+    uploadPumpRunning = true;
+    var ran = false;
+    try {
+      for (;;) {
+        var next = allUploadItems().filter(function (it) { return it.status === "queued"; })[0];
+        if (!next) break;
+        ran = true;
+        await runUploadItem(next);
+      }
+    } finally {
+      uploadPumpRunning = false;
+    }
+    // Re-read the record once the batch drains: fresh media ids AND fresh
+    // signed preview URLs, both of which only the server can supply.
+    if (ran && state.view === "record" && state.record) {
+      await openRecord(state.record.type, state.record.key, state.recordBack);
+    }
+  }
+
+  // runUploadItem resumes from the first INCOMPLETE phase: stage → PUT →
+  // attach. That matters on retry — a signed upload target is one-shot
+  // server-side (CompleteMaterialUpload's guarded transition), so once the
+  // bytes have landed a second PUT is a hard 409 and the item could never
+  // recover. The common case is exactly that: the PUT succeeded, the ATTACH
+  // failed, and retry must re-attach rather than re-upload.
+  async function runUploadItem(item) {
+    if (item.uploaded) {
+      await attachUploadItem(item);
+      return;
+    }
+    // Re-PUT the SAME signed target on a retry; stage again only when there
+    // is no target yet or the signed one has genuinely expired.
+    if (!item.uploadUrl || isItemExpired(item)) {
+      item.status = "staging"; item.error = null; render();
+      try {
+        // target is declared in kb_media_upload's input schema (tools.go), so
+        // sending it is not a contract change — it makes the server mark the
+        // material customer_visibility='visible' and validate the type/field
+        // pairing at staging time rather than at attach time.
+        var out = await callTool("kb_media_upload", {
+          filename: item.name, mime_type: item.mime, size_bytes: item.size,
+          target: { type: item.recType, field: item.field },
+        });
+        item.materialId = out.material_id;
+        item.uploadUrl = out.upload_url;
+        item.uploadHeaders = out.upload_headers || {};
+        item.expiresAt = out.expires_at || null;
+      } catch (e) {
+        item.status = "error"; item.error = String((e && e.message) || e); render();
+        return;
+      }
+    }
+    item.status = "uploading"; item.progress = 0; item.error = null; render();
+    try {
+      await putUploadBytes(item);
+      // The bytes are now server-side and this target is spent. Recorded
+      // BEFORE the attach, so a failed attach retries the attach alone.
+      item.uploaded = true;
+    } catch (e) {
+      item.status = "error";
+      if (!item.error) item.error = String((e && e.message) || e);
+      render();
+      return;
+    }
+    await attachUploadItem(item);
+  }
+
+  async function attachUploadItem(item) {
+    item.status = "attaching"; item.error = null; render();
+    try {
+      await callTool("kb_media_attach", {
+        material_id: item.materialId, type: item.recType, key: item.recKey, field: item.field,
+      });
+      applyAttachedMaterial(item);
+      item.status = "done"; render();
+    } catch (e) {
+      // ChatGPT caches a connector's tools/list. kb_media_attach was added
+      // after kb_media_upload, so an already-connected app can know how to
+      // stage the bytes but have the host reject the later attach call with
+      // "MCP Resource not found" before it ever reaches Xchats. The typed
+      // upsert tools predate both media tools, so use the matching upsert as
+      // a narrow compatibility path for that host-level stale-manifest error.
+      // Every other attach failure remains visible and retryable.
+      if (isMissingAttachToolError(e)) {
+        try {
+          await attachUploadItemViaUpsert(item);
+          applyAttachedMaterial(item);
+          item.status = "done"; render();
+          return;
+        } catch (fallbackErr) {
+          e = fallbackErr;
+        }
+      }
+      item.status = "error";
+      item.error = "Файл загружен, но не прикреплён: " + String((e && e.message) || e);
+      render();
+    }
+  }
+
+  function isMissingAttachToolError(err) {
+    var message = String((err && err.message) || err || "").toLowerCase();
+    return message.indexOf("mcp resource not found") !== -1 ||
+      message.indexOf("unknown tool: kb_media_attach") !== -1 ||
+      message.indexOf("method not found") !== -1;
+  }
+
+  async function attachUploadItemViaUpsert(item) {
+    var toolByType = {
+      topic: "kb_topic_upsert", product: "kb_product_upsert", tariff: "kb_tariff_upsert",
+      contacts: "kb_contacts_upsert", policies: "kb_policies_upsert",
+    };
+    var tool = toolByType[item.recType];
+    var def = fieldDefFor(item.recType, item.field);
+    var entry = primaryEntry();
+    if (!tool || !def || !entry) throw new Error("нет совместимого инструмента для прикрепления");
+
+    var value = item.materialId;
+    if (def.multiple) {
+      var current = entry.data && entry.data[item.field];
+      value = Array.isArray(current) ? current.slice() : [];
+      if (value.indexOf(item.materialId) === -1) value.push(item.materialId);
+    }
+    var changes = {}; changes[item.field] = value;
+    var args = { changes: changes };
+    if (item.recType === "topic") args.slug = item.recKey;
+    else if (item.recType === "product" || item.recType === "tariff") args.ref = item.recKey;
+    await callTool(tool, args);
+  }
+
+  // Keep the primary record snapshot current between sequential files. This
+  // matters when a stale ChatGPT manifest forces two plural attachments
+  // through the upsert fallback before the batch's final kb_read refresh.
+  function applyAttachedMaterial(item) {
+    var entry = primaryEntry();
+    var def = fieldDefFor(item.recType, item.field);
+    if (!entry || !entry.data || !def) return;
+    if (!def.multiple) {
+      entry.data[item.field] = item.materialId;
+      return;
+    }
+    var current = Array.isArray(entry.data[item.field]) ? entry.data[item.field] : [];
+    if (current.indexOf(item.materialId) === -1) current.push(item.materialId);
+    entry.data[item.field] = current;
+  }
+
+  function isItemExpired(item) {
+    if (!item.expiresAt) return false;
+    var t = Date.parse(item.expiresAt);
     return !isNaN(t) && Date.now() >= t;
   }
 
-  function renderMediaView() {
-    var m = state.media;
-    var html = "";
-    if (m.error) html += '<div class="error-box">' + esc(m.error) + '</div>';
-    if (!m.materialId) {
-      html += '<div class="dropzone' + (m.dragOver ? " drag" : "") + '" id="dropzone">' +
-        '<p>Перетащите файл сюда или</p>' +
-        '<input type="file" id="file-input" style="margin-top:8px">' +
-        '<p class="row-sub" style="margin-top:8px">Изображения, видео, аудио или документы, до ' +
-        Math.round(MAX_UPLOAD_BYTES / (1024 * 1024)) + ' МБ.</p>' +
-        '</div>';
-      if (m.status === "uploading") {
-        html += '<div class="progress-bar"><div style="width:' + m.progress + '%"></div></div><div class="row-sub">Загрузка…</div>';
-      }
-      return html;
-    }
-    html += '<div class="card">';
-    html += '<div class="row-sub">material_id</div><div class="media-chip" style="margin-bottom:8px">' + esc(m.materialId) + '</div>';
-    if (m.status === "uploading") {
-      html += '<div class="progress-bar"><div style="width:' + m.progress + '%"></div></div><div class="row-sub">Загрузка…</div>';
-    } else if (m.status === "uploaded") {
-      html += '<p class="row-sub" style="color:var(--ok)">Файл загружен. Укажите, к какой записи прикрепить.</p>';
-      html += renderAttachForm();
-    } else if (m.status === "error") {
-      html += '<button class="btn btn-primary btn-sm" id="retry-upload">Повторить загрузку</button>';
-    }
-    html += '</div>';
-    if (m.attachDone) {
-      html += '<div class="card" style="border-color:var(--ok)"><p>Материал прикреплён к записи.</p>' +
-        '<button class="btn btn-sm" id="new-upload">Загрузить ещё один файл</button></div>';
-    }
-    return html;
-  }
-
-  function renderAttachForm() {
-    var m = state.media;
-    var eligibleTypes = typesForKind(m.kind);
-    if (m.attachRecordsLoading) {
-      return '<p class="row-sub">Загрузка списка записей…</p>';
-    }
-    if (!eligibleTypes.length) {
-      return '<p class="row-sub">Нет типов записей, поддерживающих этот вид файла.</p>';
-    }
-    var recordsForType = m.attachRecords.filter(function (r) { return r.type === m.attachType; });
-    var fieldsForType = fieldsForTypeAndKind(m.attachType, m.kind);
-    var html = '<div class="form-grid">';
-    html += '<div><label>Тип записи</label><select id="attach-type">';
-    eligibleTypes.forEach(function (t) {
-      html += '<option value="' + t + '"' + (t === m.attachType ? " selected" : "") + '>' + esc(typeLabel(t)) + '</option>';
-    });
-    html += '</select></div>';
-    html += '<div><label>Запись</label>';
-    if (!recordsForType.length) {
-      html += '<p class="row-sub">Нет доступных записей этого типа.</p>';
-    } else {
-      html += '<select id="attach-key">';
-      recordsForType.forEach(function (r) {
-        html += '<option value="' + esc(r.key) + '"' + (r.key === m.attachKey ? " selected" : "") + '>' +
-          esc(r.title) + ' (' + esc(r.key) + ')</option>';
-      });
-      html += '</select>';
-    }
-    html += '</div>';
-    if (fieldsForType.length) {
-      html += '<div><label>Поле</label><select id="attach-field">' +
-        fieldsForType.map(function (f) { return '<option value="' + f.field + '"' + (f.field === m.attachField ? " selected" : "") + '>' + esc(humanize(f.field)) + '</option>'; }).join("") +
-        '</select></div>';
-    }
-    var canAttach = recordsForType.length > 0 && fieldsForType.length > 0 && m.attachKey && m.attachField;
-    html += '<button class="btn btn-primary btn-sm" id="do-attach"' + ((m.attachBusy || !canAttach) ? " disabled" : "") + '>' +
-      (m.attachBusy ? "Прикрепление…" : "Прикрепить") + '</button>';
-    html += '</div>';
-    return html;
-  }
-
-  async function handleFile(file) {
-    if (!file) return;
-    var mimeType = file.type || "application/octet-stream";
-    var kind = classifyMime(mimeType);
-    if (!kind) {
-      state.media = freshMediaState();
-      state.media.error = "Неподдерживаемый тип файла: " + mimeType + ". Поддерживаются изображения, видео, аудио и документы.";
-      render();
-      return;
-    }
-    if (!file.size) {
-      state.media = freshMediaState();
-      state.media.error = "Файл пуст.";
-      render();
-      return;
-    }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      state.media = freshMediaState();
-      state.media.error = "Файл слишком большой: " + Math.round(file.size / (1024 * 1024)) +
-        " МБ (максимум " + Math.round(MAX_UPLOAD_BYTES / (1024 * 1024)) + " МБ).";
-      render();
-      return;
-    }
-    state.media = freshMediaState();
-    state.media.file = file;
-    state.media.kind = kind;
-    state.media.status = "uploading";
-    render();
-    var out;
-    try {
-      // No client-side SHA-256, no arrayBuffer() read: selecting a file
-      // stages it immediately. The server re-hashes the actual bytes at PUT
-      // time (internal/httpapi.handleMCPUpload) — hashing here first only
-      // bought a round of unnecessary work between selection and upload.
-      out = await callTool("kb_media_upload", { filename: file.name, mime_type: mimeType, size_bytes: file.size });
-    } catch (e) {
-      // No upload target was ever staged — nothing to retry, back to the
-      // dropzone (materialId stays unset, so renderMediaView shows it again).
-      state.media.status = null;
-      state.media.error = String((e && e.message) || e);
-      render();
-      return;
-    }
-    state.media.materialId = out.material_id;
-    state.media.uploadUrl = out.upload_url;
-    state.media.uploadHeaders = out.upload_headers || {};
-    state.media.expiresAt = out.expires_at || null;
-    try {
-      await putUploadBytes(file);
-      afterUploadSucceeds();
-    } catch (e) {
-      // putUploadBytes already set status="error" + a specific message and
-      // called render() itself (see its onload/onerror) — the retry button
-      // renderMediaView shows for status="error" re-calls it with the SAME
-      // staged file/uploadUrl, no need to re-stage via kb_media_upload
-      // (unless the signed target has since expired — see the retry wiring).
-    }
-  }
-
-  function putUploadBytes(file) {
+  function putUploadBytes(item) {
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
-      xhr.open("PUT", state.media.uploadUrl, true);
-      var headers = state.media.uploadHeaders || {};
+      xhr.open("PUT", item.uploadUrl, true);
+      var headers = item.uploadHeaders || {};
       Object.keys(headers).forEach(function (h) { xhr.setRequestHeader(h, headers[h]); });
       xhr.upload.onprogress = function (ev) {
-        if (ev.lengthComputable) { state.media.progress = Math.round((ev.loaded / ev.total) * 100); render(); }
+        if (!ev.lengthComputable) return;
+        item.progress = Math.round((ev.loaded / ev.total) * 100);
+        // Paint ONE node. Calling render() here would rebuild the whole
+        // document many times a second and destroy every other field's
+        // in-flight <input type="file"> mid-batch.
+        paintUploadProgress(item);
       };
       xhr.onload = function () {
-        if (xhr.status >= 200 && xhr.status < 300) { state.media.status = "uploaded"; render(); resolve(); }
-        else {
-          state.media.status = "error";
-          // 403 is specifically what an expired/invalid signed token returns
-          // (internal/httpapi/mcp_upload.go) — worth a more specific message
-          // than a bare status code, since it's the one failure retry alone
-          // cannot fix (the retry handler re-stages instead — see wireEvents).
-          state.media.error = xhr.status === 403
-            ? "Срок действия ссылки для загрузки истёк. Нажмите «Повторить загрузку», чтобы начать заново."
-            : "Загрузка не удалась (" + xhr.status + ")";
-          render();
-          reject(new Error("upload failed"));
-        }
+        if (xhr.status >= 200 && xhr.status < 300) { resolve(); return; }
+        // 403 is what an expired/invalid signed token returns
+        // (internal/httpapi/mcp_upload.go) — the one failure a plain re-PUT
+        // cannot fix, so say so and let retry re-stage.
+        item.error = xhr.status === 403
+          ? "Срок действия ссылки для загрузки истёк. Нажмите «Повторить», чтобы начать заново."
+          : "Загрузка не удалась (" + xhr.status + ")";
+        reject(new Error("upload failed"));
       };
-      xhr.onerror = function () { state.media.status = "error"; state.media.error = "Сетевая ошибка при загрузке"; render(); reject(new Error("network error")); };
-      xhr.send(file);
+      xhr.onerror = function () {
+        item.error = "Сетевая ошибка при загрузке";
+        reject(new Error("network error"));
+      };
+      xhr.send(item.file);
     });
   }
 
-  // afterUploadSucceeds loads the attach-target picker's options — only once
-  // the PUT has actually completed (plan: "Show attachment choices only
-  // after the PUT succeeds").
-  function afterUploadSucceeds() {
-    if (state.media.status === "uploaded") loadAttachRecords();
+  function paintUploadProgress(item) {
+    var bar = document.getElementById(item.id + "-bar");
+    if (bar) bar.style.width = item.progress + "%";
   }
 
-  // loadAttachRecords populates state.media.attachRecords: for a SINGLETON
-  // type (contacts/policies — no keyParam) the record is always "main",
-  // whether or not a row exists yet (kb_media_attach's existence check
-  // exempts these two, exactly like the typed upserts already do — an org
-  // that has never touched contacts must still be able to attach its first
-  // contact_card_image). For a keyed type (topic/product/tariff) the record
-  // must already exist, so this loads real candidates via kb_summary,
-  // scoped to only the types eligible for this file's kind (never all seven
-  // — no reason to page through delivery zones for an image upload) and
-  // excluding anything staged for deletion.
-  async function loadAttachRecords() {
-    var m = state.media;
-    var eligibleTypes = typesForKind(m.kind);
-    var keyedTypes = eligibleTypes.filter(function (t) { return TYPE_META[t] && TYPE_META[t].keyParam; });
-    var singletonTypes = eligibleTypes.filter(function (t) { return TYPE_META[t] && !TYPE_META[t].keyParam; });
-
-    m.attachRecordsLoading = true; render();
-    var records = singletonTypes.map(function (t) { return { type: t, key: "main", title: typeLabel(t) }; });
-    if (keyedTypes.length) {
-      try {
-        var page = await loadAllPages("kb_summary", { types: keyedTypes });
-        (page.items || []).forEach(function (it) {
-          if (it.state === "to_delete") return;
-          records.push({ type: it.type, key: it.key, title: it.title || it.key });
-        });
-      } catch (e) {
-        m.error = String((e && e.message) || e);
-      }
-    }
-    m.attachRecords = records;
-    m.attachRecordsLoading = false;
-
-    if (!eligibleTypes.length) {
-      m.attachType = ""; m.attachKey = ""; m.attachField = "";
-      render();
-      return;
-    }
-    if (eligibleTypes.indexOf(m.attachType) === -1) m.attachType = eligibleTypes[0];
-    var recordsForType = records.filter(function (r) { return r.type === m.attachType; });
-    if (!recordsForType.some(function (r) { return r.key === m.attachKey; })) {
-      m.attachKey = recordsForType.length ? recordsForType[0].key : "";
-    }
-    var fieldsForType = fieldsForTypeAndKind(m.attachType, m.kind);
-    if (!fieldsForType.some(function (f) { return f.field === m.attachField; })) {
-      m.attachField = fieldsForType.length ? fieldsForType[0].field : "";
-    }
+  function retryUploadItem(id) {
+    var item = findUploadItem(id);
+    if (!item || !item.file) return;
+    item.status = "queued"; item.error = null; item.progress = 0;
     render();
+    pumpUploadQueue();
   }
 
-  // doAttach is now a single kb_media_attach call — the backend resolves
-  // existence, pending-deletion, ownership, MIME compatibility, and
-  // append-without-duplicates-or-replace atomically (kbstore.MCPAttachMedia).
-  // No more read-modify-upsert: no draft read to go stale, no manual dedup,
-  // and a record that turns out not to exist is a clean, specific error
-  // instead of an accidental "create" attempt failing on an unrelated
-  // required field.
-  async function doAttach() {
-    var m = state.media;
-    if (!m.attachType || !m.attachKey || !m.attachField) return;
-    m.attachBusy = true; m.error = null; render();
-    try {
-      await callTool("kb_media_attach", {
-        material_id: m.materialId, type: m.attachType, key: m.attachKey, field: m.attachField,
-      });
-      m.attachBusy = false; m.attachDone = true; render();
-    } catch (e) {
-      m.attachBusy = false; m.error = String((e && e.message) || e); render();
-    }
+  function dismissUploadItem(id) {
+    Object.keys(state.uploads).forEach(function (f) {
+      state.uploads[f] = (state.uploads[f] || []).filter(function (it) { return it.id !== id; });
+      if (!state.uploads[f].length) delete state.uploads[f];
+    });
+    render();
   }
 
   // ---------------------------------------------------------------------
@@ -992,6 +1270,7 @@
       btn.addEventListener("click", function () {
         state.view = btn.getAttribute("data-tab");
         state.error = null;
+        disarmDelete();
         loadForView(state.view);
       });
     });
@@ -999,6 +1278,7 @@
     var back = app.querySelector("[data-back]");
     if (back) back.addEventListener("click", function () {
       state.view = state.recordBack || "all";
+      disarmDelete();
       loadForView(state.view);
     });
 
@@ -1008,9 +1288,61 @@
       });
     });
 
-    var del = app.querySelector("[data-delete-type]");
-    if (del) del.addEventListener("click", function () {
-      deleteRecord(del.getAttribute("data-delete-type"), del.getAttribute("data-delete-key"));
+    // Two-step delete. Step one only ARMS the confirmation — querySelectorAll,
+    // not querySelector, because singular wiring is exactly how a second
+    // control of the same kind silently stops working.
+    app.querySelectorAll("[data-delete-type]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        state.confirmDelete = { type: el.getAttribute("data-delete-type"), key: el.getAttribute("data-delete-key") };
+        render();
+      });
+    });
+    app.querySelectorAll("[data-confirm-delete]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var target = state.confirmDelete;
+        if (!target || state.deleting) return;
+        state.confirmDelete = null;
+        deleteRecord(target.type, target.key);
+      });
+    });
+    app.querySelectorAll("[data-cancel-delete]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        if (state.deleting) return;
+        state.confirmDelete = null;
+        render();
+      });
+    });
+
+    // Per-field media upload: one input per attachable field, wired plurally
+    // and keyed by the field name rather than a shared id.
+    app.querySelectorAll("[data-upload-field]").forEach(function (input) {
+      input.addEventListener("change", function () {
+        if (input.files && input.files.length) handleFieldFiles(input.getAttribute("data-upload-field"), input.files);
+      });
+    });
+    app.querySelectorAll("[data-drop-field]").forEach(function (zone) {
+      var field = zone.getAttribute("data-drop-field");
+      zone.addEventListener("dragover", function (ev) { ev.preventDefault(); zone.classList.add("drag"); });
+      zone.addEventListener("dragleave", function () { zone.classList.remove("drag"); });
+      zone.addEventListener("drop", function (ev) {
+        ev.preventDefault();
+        zone.classList.remove("drag");
+        if (ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files.length) {
+          handleFieldFiles(field, ev.dataTransfer.files);
+        }
+      });
+    });
+    // A signed preview URL can expire while a record sits open, and a host may
+    // block the request outright — degrade to the alt text instead of a
+    // broken-image glyph. Wired here rather than as an inline onerror.
+    app.querySelectorAll("img.media-thumb").forEach(function (img) {
+      img.addEventListener("error", function () { img.classList.add("media-broken"); });
+    });
+    app.querySelectorAll("[data-retry-upload]").forEach(function (el) {
+      el.addEventListener("click", function () { retryUploadItem(el.getAttribute("data-retry-upload")); });
+    });
+    app.querySelectorAll("[data-dismiss-upload]").forEach(function (el) {
+      el.addEventListener("click", function () { dismissUploadItem(el.getAttribute("data-dismiss-upload")); });
     });
 
     app.querySelectorAll("[data-type-filter]").forEach(function (el) {
@@ -1031,57 +1363,6 @@
       });
     }
 
-    var dropzone = app.querySelector("#dropzone");
-    if (dropzone) {
-      dropzone.addEventListener("dragover", function (ev) { ev.preventDefault(); state.media.dragOver = true; dropzone.classList.add("drag"); });
-      dropzone.addEventListener("dragleave", function () { state.media.dragOver = false; dropzone.classList.remove("drag"); });
-      dropzone.addEventListener("drop", function (ev) {
-        ev.preventDefault();
-        state.media.dragOver = false;
-        var f = ev.dataTransfer.files && ev.dataTransfer.files[0];
-        if (f) handleFile(f);
-      });
-    }
-    var fileInput = app.querySelector("#file-input");
-    if (fileInput) fileInput.addEventListener("change", function () {
-      if (fileInput.files && fileInput.files[0]) handleFile(fileInput.files[0]);
-    });
-
-    var retryUpload = app.querySelector("#retry-upload");
-    if (retryUpload) retryUpload.addEventListener("click", function () {
-      // "do not create another material unless the URL expired": a plain
-      // failure (bad status, network error) re-PUTs the SAME signed target;
-      // only an expired target re-stages via kb_media_upload (handleFile
-      // starts over from the retained File, producing a fresh material).
-      if (isUploadExpired()) {
-        handleFile(state.media.file);
-        return;
-      }
-      state.media.error = null;
-      state.media.status = "uploading";
-      state.media.progress = 0;
-      render();
-      putUploadBytes(state.media.file).then(afterUploadSucceeds).catch(function () { /* status/error already set */ });
-    });
-
-    var attachType = app.querySelector("#attach-type");
-    if (attachType) attachType.addEventListener("change", function () {
-      var m = state.media;
-      m.attachType = attachType.value;
-      var recordsForType = m.attachRecords.filter(function (r) { return r.type === m.attachType; });
-      m.attachKey = recordsForType.length ? recordsForType[0].key : "";
-      var fieldsForType = fieldsForTypeAndKind(m.attachType, m.kind);
-      m.attachField = fieldsForType.length ? fieldsForType[0].field : "";
-      render();
-    });
-    var attachKey = app.querySelector("#attach-key");
-    if (attachKey) attachKey.addEventListener("change", function () { state.media.attachKey = attachKey.value; });
-    var attachField = app.querySelector("#attach-field");
-    if (attachField) attachField.addEventListener("change", function () { state.media.attachField = attachField.value; });
-    var doAttachBtn = app.querySelector("#do-attach");
-    if (doAttachBtn) doAttachBtn.addEventListener("click", doAttach);
-    var newUpload = app.querySelector("#new-upload");
-    if (newUpload) newUpload.addEventListener("click", resetMedia);
   }
 
   boot();

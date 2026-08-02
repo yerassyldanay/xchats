@@ -92,7 +92,7 @@ func (s *Server) handleResourcesList() map[string]any {
 		"resources": []map[string]any{{
 			"uri":         widgetResourceURI,
 			"name":        "KB Manager",
-			"description": "All / Live / Draft / Record / Media / Publish views over the Xchats knowledge base.",
+			"description": "All / Live / Draft / Record views over the Xchats knowledge base, with per-record media preview and upload.",
 			"mimeType":    widgetMimeType,
 			"_meta":       s.widgetResourceMeta(),
 		}},

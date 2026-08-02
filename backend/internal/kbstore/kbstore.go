@@ -290,15 +290,15 @@ type execer interface {
 func upsertTopicRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTopic) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
 		(organization_id, slug, title, body_md, featured_image, illustration_images,
-		 explainer_videos, narration_audio_files, reference_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		 explainer_videos, reference_documents)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (organization_id, slug) DO UPDATE SET
 			title=EXCLUDED.title, body_md=EXCLUDED.body_md,
 			featured_image=EXCLUDED.featured_image, illustration_images=EXCLUDED.illustration_images,
-			explainer_videos=EXCLUDED.explainer_videos, narration_audio_files=EXCLUDED.narration_audio_files,
-			reference_documents=EXCLUDED.reference_documents, updated_at=now()`,
+			explainer_videos=EXCLUDED.explainer_videos, reference_documents=EXCLUDED.reference_documents,
+			updated_at=now()`,
 		orgID, t.Slug, t.Title, t.BodyMD, t.FeaturedImage, nonNilUUIDs(t.IllustrationImages),
-		nonNilUUIDs(t.ExplainerVideos), nonNilUUIDs(t.NarrationAudioFiles), nonNilUUIDs(t.ReferenceDocuments)); err != nil {
+		nonNilUUIDs(t.ExplainerVideos), nonNilUUIDs(t.ReferenceDocuments)); err != nil {
 		return fmt.Errorf("insert topic %s: %w", t.Slug, err)
 	}
 	return nil
@@ -329,21 +329,18 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTar
 func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftProduct) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_products
 		(organization_id, ref, name, price, description, category, in_stock, sales_status,
-		 featured_image, gallery_images, demo_videos, audio_description_files,
-		 certificate_documents, manual_documents, guarantee_documents, specification_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		 featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
 			category=EXCLUDED.category, in_stock=EXCLUDED.in_stock, sales_status=EXCLUDED.sales_status,
 			featured_image=EXCLUDED.featured_image, gallery_images=EXCLUDED.gallery_images,
-			demo_videos=EXCLUDED.demo_videos, audio_description_files=EXCLUDED.audio_description_files,
-			certificate_documents=EXCLUDED.certificate_documents, manual_documents=EXCLUDED.manual_documents,
-			guarantee_documents=EXCLUDED.guarantee_documents, specification_documents=EXCLUDED.specification_documents,
+			demo_videos=EXCLUDED.demo_videos, certificate_documents=EXCLUDED.certificate_documents,
+			guarantee_documents=EXCLUDED.guarantee_documents,
 			updated_at=now()`,
 		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, p.InStock, orDefault(p.SalesStatus, "active"),
-		p.FeaturedImage, nonNilUUIDs(p.GalleryImages), nonNilUUIDs(p.DemoVideos), nonNilUUIDs(p.AudioDescriptionFiles),
-		nonNilUUIDs(p.CertificateDocuments), nonNilUUIDs(p.ManualDocuments), nonNilUUIDs(p.GuaranteeDocuments),
-		nonNilUUIDs(p.SpecificationDocuments)); err != nil {
+		p.FeaturedImage, nonNilUUIDs(p.GalleryImages), nonNilUUIDs(p.DemoVideos),
+		nonNilUUIDs(p.CertificateDocuments), nonNilUUIDs(p.GuaranteeDocuments)); err != nil {
 		return fmt.Errorf("insert product %s: %w", p.Ref, err)
 	}
 	return nil

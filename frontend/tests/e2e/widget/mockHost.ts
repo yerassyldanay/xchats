@@ -16,6 +16,10 @@ const WIDGET_HTML_PATH = path.resolve(
 const HOST_ORIGIN = 'https://mock-widget-host.internal'
 export const WIDGET_URL = `${HOST_ORIGIN}/kb-manager.html`
 export const UPLOAD_URL = `${HOST_ORIGIN}/upload-target`
+// Signed preview URLs live under here. Same origin as the host page so the
+// browser fetches them without CORS friction; page.route intercepts iframe
+// subresources, so an <img src> resolves against this.
+export const MEDIA_URL_BASE = `${HOST_ORIGIN}/media`
 
 function widgetHtml(): string {
   return fs.readFileSync(WIDGET_HTML_PATH, 'utf-8')
@@ -46,17 +50,13 @@ export const DEFAULT_MEDIA_ATTACHMENT_FIELDS: Record<string, Array<{ field: stri
   topic: [
     { field: 'illustration_images', kind: 'image', multiple: true },
     { field: 'explainer_videos', kind: 'video', multiple: true },
-    { field: 'narration_audio_files', kind: 'audio', multiple: true },
     { field: 'reference_documents', kind: 'document', multiple: true },
   ],
   product: [
     { field: 'gallery_images', kind: 'image', multiple: true },
     { field: 'demo_videos', kind: 'video', multiple: true },
-    { field: 'audio_description_files', kind: 'audio', multiple: true },
     { field: 'certificate_documents', kind: 'document', multiple: true },
-    { field: 'manual_documents', kind: 'document', multiple: true },
     { field: 'guarantee_documents', kind: 'document', multiple: true },
-    { field: 'specification_documents', kind: 'document', multiple: true },
   ],
   tariff: [
     { field: 'pricing_images', kind: 'image', multiple: true },
@@ -71,11 +71,26 @@ export const DEFAULT_MEDIA_ATTACHMENT_FIELDS: Record<string, Array<{ field: stri
   policies: [{ field: 'commerce_policy_documents', kind: 'document', multiple: true }],
 }
 
+// DEFAULT_MEDIA_FIELD_KINDS is the flat field→kind view kb_info also
+// publishes, derived from the attachment registry plus featured_image — which
+// is a real, previewable media column that is deliberately NOT an attachment
+// target. The widget gates "is this a media field?" on this map, so leaving it
+// empty (as this harness used to) means no field ever renders as media in the
+// record view.
+export const DEFAULT_MEDIA_FIELD_KINDS: Record<string, string> = {
+  featured_image: 'image',
+  ...Object.fromEntries(
+    Object.values(DEFAULT_MEDIA_ATTACHMENT_FIELDS)
+      .flat()
+      .map((f) => [f.field, f.kind]),
+  ),
+}
+
 function defaultKbInfo() {
   return toolResult({
     types: ['assistant', 'topic', 'product', 'tariff', 'contacts', 'policies', 'delivery_zone'],
     natural_key_main: ['assistant', 'contacts', 'policies'],
-    media_field_kinds: {},
+    media_field_kinds: DEFAULT_MEDIA_FIELD_KINDS,
     media_attachment_fields: DEFAULT_MEDIA_ATTACHMENT_FIELDS,
     frontend_base_url: DEFAULT_FRONTEND_BASE_URL,
   })
@@ -83,6 +98,53 @@ function defaultKbInfo() {
 
 function defaultKbSummary() {
   return toolResult({ draft_version: 1, items: [] })
+}
+
+// recordRead builds a kb_read result for one record — the shape openRecord
+// consumes. Pass mediaIndex to attach _meta["xchats/media"], exactly as
+// handleKBRead does.
+export function recordRead(
+  entries: Array<{ type: string; source: string; data: Record<string, unknown> }>,
+  mediaIndex?: Record<string, unknown>,
+) {
+  return toolResult(
+    { items: entries, draft_version: 1 },
+    mediaIndex ? { 'xchats/media': mediaIndex } : {},
+  )
+}
+
+// mediaMeta builds one _meta["xchats/media"] entry, mirroring
+// mcpserver.mediaIndexFor's wire shape. Omit `url` to simulate a host that
+// stripped _meta's URLs, or a material whose bytes never landed.
+export function mediaMeta(
+  id: string,
+  over: Partial<{ filename: string; mime_type: string; size_bytes: number; kind: string; status: string; url: string }> = {},
+) {
+  const kind = over.kind ?? 'image'
+  return {
+    id,
+    filename: over.filename ?? `${id}.bin`,
+    mime_type: over.mime_type ?? 'image/png',
+    size_bytes: over.size_bytes ?? 2048,
+    kind,
+    status: over.status ?? 'parsed',
+    ...(over.url === undefined ? { url: `${MEDIA_URL_BASE}/${id}?token=t` } : over.url ? { url: over.url } : {}),
+  }
+}
+
+// A real 1×1 PNG. Tests assert naturalWidth > 0, so the bytes have to decode —
+// a placeholder string would leave the <img> broken and the assertion
+// meaningless.
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+// routeMedia serves every signed preview URL with real, decodable bytes.
+export async function routeMedia(page: Page): Promise<void> {
+  await page.route(`${MEDIA_URL_BASE}/**`, (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG }),
+  )
 }
 
 // hostHtml is the mock MCP host page: it implements just enough of the

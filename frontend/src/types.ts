@@ -150,7 +150,6 @@ export interface TopicRow {
   featured_image: string | null
   illustration_images: string[]
   explainer_videos: string[]
-  narration_audio_files: string[]
   reference_documents: string[]
   draft: boolean
   updated_at: string
@@ -190,11 +189,8 @@ export interface ProductRow {
   featured_image: string | null
   gallery_images: string[]
   demo_videos: string[]
-  audio_description_files: string[]
   certificate_documents: string[]
-  manual_documents: string[]
   guarantee_documents: string[]
-  specification_documents: string[]
   draft: boolean
   updated_at: string
 }

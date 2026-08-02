@@ -199,8 +199,6 @@ func topicMediaFieldTarget(t *DraftTopic, field string) (*[]uuid.UUID, bool) {
 		return &t.IllustrationImages, true
 	case "explainer_videos":
 		return &t.ExplainerVideos, true
-	case "narration_audio_files":
-		return &t.NarrationAudioFiles, true
 	case "reference_documents":
 		return &t.ReferenceDocuments, true
 	default:
@@ -214,16 +212,10 @@ func productMediaFieldTarget(p *DraftProduct, field string) (*[]uuid.UUID, bool)
 		return &p.GalleryImages, true
 	case "demo_videos":
 		return &p.DemoVideos, true
-	case "audio_description_files":
-		return &p.AudioDescriptionFiles, true
 	case "certificate_documents":
 		return &p.CertificateDocuments, true
-	case "manual_documents":
-		return &p.ManualDocuments, true
 	case "guarantee_documents":
 		return &p.GuaranteeDocuments, true
-	case "specification_documents":
-		return &p.SpecificationDocuments, true
 	default:
 		return nil, false
 	}

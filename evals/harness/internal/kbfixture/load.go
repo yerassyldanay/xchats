@@ -104,8 +104,7 @@ func toKB(fx *Fixture) (*aiprompt.KB, error) {
 		kb.Topics = append(kb.Topics, aiprompt.Topic{
 			Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD,
 			FeaturedImage: t.FeaturedImage, IllustrationImages: t.IllustrationImages,
-			ExplainerVideos: t.ExplainerVideos, NarrationAudioFiles: t.NarrationAudioFiles,
-			ReferenceDocuments: t.ReferenceDocuments,
+			ExplainerVideos: t.ExplainerVideos, ReferenceDocuments: t.ReferenceDocuments,
 		})
 	}
 
@@ -131,9 +130,8 @@ func toKB(fx *Fixture) (*aiprompt.KB, error) {
 			Ref: p.Ref, Name: p.Name, Price: p.Price, Description: p.Description,
 			Category: p.Category, InStock: bool(*p.InStock), SalesStatus: p.SalesStatus,
 			FeaturedImage: p.FeaturedImage, GalleryImages: p.GalleryImages,
-			DemoVideos: p.DemoVideos, AudioDescriptionFiles: p.AudioDescriptionFiles,
-			CertificateDocuments: p.CertificateDocuments, ManualDocuments: p.ManualDocuments,
-			GuaranteeDocuments: p.GuaranteeDocuments, SpecificationDocuments: p.SpecificationDocuments,
+			DemoVideos: p.DemoVideos, CertificateDocuments: p.CertificateDocuments,
+			GuaranteeDocuments: p.GuaranteeDocuments,
 		})
 	}
 

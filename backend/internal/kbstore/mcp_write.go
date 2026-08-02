@@ -194,9 +194,9 @@ func (s *Store) MCPUpsertAssistant(ctx context.Context, orgID uuid.UUID, userID 
 
 // TopicChanges is kb_topic_upsert's `changes`.
 type TopicChanges struct {
-	Title, BodyMD                                                                *string
-	FeaturedImage                                                                **uuid.UUID
-	IllustrationImages, ExplainerVideos, NarrationAudioFiles, ReferenceDocuments *[]uuid.UUID
+	Title, BodyMD                                           *string
+	FeaturedImage                                           **uuid.UUID
+	IllustrationImages, ExplainerVideos, ReferenceDocuments *[]uuid.UUID
 }
 
 // MCPUpsertTopic creates or patches a topic (plan/mcp.md §5's kb_topic_upsert).
@@ -238,10 +238,6 @@ func (s *Store) MCPUpsertTopic(ctx context.Context, orgID uuid.UUID, userID uuid
 		if ch.ExplainerVideos != nil {
 			cur.ExplainerVideos = nonNilUUIDs(*ch.ExplainerVideos)
 			refs = mergeRefs(refs, map[string][]uuid.UUID{"explainer_videos": cur.ExplainerVideos})
-		}
-		if ch.NarrationAudioFiles != nil {
-			cur.NarrationAudioFiles = nonNilUUIDs(*ch.NarrationAudioFiles)
-			refs = mergeRefs(refs, map[string][]uuid.UUID{"narration_audio_files": cur.NarrationAudioFiles})
 		}
 		if ch.ReferenceDocuments != nil {
 			cur.ReferenceDocuments = nonNilUUIDs(*ch.ReferenceDocuments)
@@ -286,8 +282,7 @@ type ProductChanges struct {
 	InStock                            *bool // required on create
 	SalesStatus                        *string
 	FeaturedImage                      **uuid.UUID
-	GalleryImages, DemoVideos, AudioDescriptionFiles, CertificateDocuments,
-	ManualDocuments, GuaranteeDocuments, SpecificationDocuments *[]uuid.UUID
+	GalleryImages, DemoVideos, CertificateDocuments, GuaranteeDocuments *[]uuid.UUID
 }
 
 // MCPUpsertProduct creates or patches a product (kb_product_upsert).
@@ -348,11 +343,8 @@ func (s *Store) MCPUpsertProduct(ctx context.Context, orgID uuid.UUID, userID uu
 		}
 		applyImageSet("gallery_images", &ch.GalleryImages, &cur.GalleryImages)
 		applyImageSet("demo_videos", &ch.DemoVideos, &cur.DemoVideos)
-		applyImageSet("audio_description_files", &ch.AudioDescriptionFiles, &cur.AudioDescriptionFiles)
 		applyImageSet("certificate_documents", &ch.CertificateDocuments, &cur.CertificateDocuments)
-		applyImageSet("manual_documents", &ch.ManualDocuments, &cur.ManualDocuments)
 		applyImageSet("guarantee_documents", &ch.GuaranteeDocuments, &cur.GuaranteeDocuments)
-		applyImageSet("specification_documents", &ch.SpecificationDocuments, &cur.SpecificationDocuments)
 		if creating && strings.TrimSpace(cur.Name) == "" {
 			return &ErrRequiredFieldMissing{Field: "name"}
 		}

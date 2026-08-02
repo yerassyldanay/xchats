@@ -79,7 +79,6 @@ function del() {
       <MediaChip label="Изображение" :count="mediaCount(row.featured_image)" />
       <MediaChip label="Иллюстрации" :count="mediaCount(row.illustration_images)" />
       <MediaChip label="Видео" :count="mediaCount(row.explainer_videos)" />
-      <MediaChip label="Аудио" :count="mediaCount(row.narration_audio_files)" />
       <MediaChip label="Документы" :count="mediaCount(row.reference_documents)" />
     </div>
   </RecordShell>

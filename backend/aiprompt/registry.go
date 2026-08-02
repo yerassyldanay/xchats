@@ -133,18 +133,14 @@ var mediaColumns = map[string][]MediaColumn{
 		{Column: "featured_image", Label: "главное изображение темы", Kind: MediaImage, Singular: true},
 		{Column: "illustration_images", Label: "иллюстрации", Kind: MediaImage},
 		{Column: "explainer_videos", Label: "видео-объяснения", Kind: MediaVideo},
-		{Column: "narration_audio_files", Label: "аудио-объяснения", Kind: MediaAudio},
 		{Column: "reference_documents", Label: "справочные документы", Kind: MediaDocument},
 	},
 	"products": {
 		{Column: "featured_image", Label: "главное фото товара", Kind: MediaImage, Singular: true},
 		{Column: "gallery_images", Label: "фото товара (галерея)", Kind: MediaImage},
 		{Column: "demo_videos", Label: "видео-демонстрации", Kind: MediaVideo},
-		{Column: "audio_description_files", Label: "аудио-описания", Kind: MediaAudio},
 		{Column: "certificate_documents", Label: "сертификаты", Kind: MediaDocument},
-		{Column: "manual_documents", Label: "инструкции", Kind: MediaDocument},
 		{Column: "guarantee_documents", Label: "гарантийные документы", Kind: MediaDocument},
-		{Column: "specification_documents", Label: "технические характеристики", Kind: MediaDocument},
 	},
 	"tariffs": {
 		{Column: "featured_image", Label: "главное изображение тарифа", Kind: MediaImage, Singular: true},

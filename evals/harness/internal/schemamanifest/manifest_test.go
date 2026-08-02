@@ -61,7 +61,7 @@ func columnsOf(t *testing.T, m Manifest, table string) map[string]ColumnSpec {
 }
 
 // TestBuildManifest_ProductsMediaColumns pins the exact set + typing of
-// ai_products' 8 semantic media columns (1 singular + 7 plural) — the
+// ai_products' 5 semantic media columns (1 singular + 4 plural) — the
 // highest-count table, so the most likely place a registry/kbfixture drift
 // would first surface.
 func TestBuildManifest_ProductsMediaColumns(t *testing.T) {
@@ -73,8 +73,7 @@ func TestBuildManifest_ProductsMediaColumns(t *testing.T) {
 
 	singular := []string{"featured_image"}
 	plural := []string{
-		"gallery_images", "demo_videos", "audio_description_files",
-		"certificate_documents", "manual_documents", "guarantee_documents", "specification_documents",
+		"gallery_images", "demo_videos", "certificate_documents", "guarantee_documents",
 	}
 	for _, name := range singular {
 		c, ok := cols[name]
@@ -117,8 +116,8 @@ func TestBuildManifest_StrictBoolColumns(t *testing.T) {
 // surfaced as a business column — buildTableSpec already errors on this
 // (see the "no matching kbfixture field" branch), so this test only needs to
 // confirm BuildManifest actually reaches that success path today, pinning
-// the total media-column count across all five media-bearing tables (5 + 8 +
-// 4 + 3 + 1 = 21, matching plan/DECISIONS.md's "Concrete media columns").
+// the total media-column count across all five media-bearing tables (4 + 5 +
+// 4 + 3 + 1 = 17, matching plan/DECISIONS.md's "Concrete media columns").
 func TestBuildManifest_AllMediaColumnsAccountedFor(t *testing.T) {
 	m, err := BuildManifest()
 	if err != nil {
@@ -132,8 +131,8 @@ func TestBuildManifest_AllMediaColumnsAccountedFor(t *testing.T) {
 			}
 		}
 	}
-	if total != 21 {
-		t.Fatalf("want 21 semantic media columns across the manifest, got %d", total)
+	if total != 17 {
+		t.Fatalf("want 17 semantic media columns across the manifest, got %d", total)
 	}
 }
 

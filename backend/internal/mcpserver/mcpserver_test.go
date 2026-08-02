@@ -1121,3 +1121,91 @@ func TestKBSummary_AcceptsPluralTypeAliases(t *testing.T) {
 		t.Fatalf("expected isError:true for an unknown type, got %#v", resp.Result)
 	}
 }
+
+// TestKBRead_MediaMetaDoesNotChangeStructuredContent is institutional memory,
+// not a formality. Media preview metadata deliberately travels in _meta rather
+// than in structuredContent, because kb_read's declared outputSchema is
+// additionalProperties:false (readPageOutputSchema, tools.go) and MCP clients
+// cache tools/list. A host validating structuredContent against its CACHED
+// schema copy would begin rejecting kb_read itself — the tool the model and
+// the widget lean on hardest — the moment a new key appeared there. That is a
+// strictly worse failure than the kb_media_attach one that motivated this
+// whole rule, so both halves are asserted here: the payload is unchanged, and
+// the schema is still strict.
+func TestKBRead_MediaMetaDoesNotChangeStructuredContent(t *testing.T) {
+	srv, principal := newTestServer(t)
+	ctx := context.Background()
+
+	callTool(t, srv, principal, "kb_product_upsert", map[string]any{
+		"ref": "meta-1", "changes": map[string]any{"name": "Товар", "in_stock": true},
+	})
+	materialID, err := srv.Deps.KB.CreateUploadMaterial(ctx, principal.OrganizationID, kbstore.UploadMaterialInput{
+		Filename: "снимок.jpg", MimeType: "image/jpeg", SizeBytes: 1234,
+	})
+	if err != nil {
+		t.Fatalf("stage material: %v", err)
+	}
+	if err := srv.Deps.KB.CompleteMaterialUpload(ctx, materialID, "disk", "org/x/"+materialID.String(), 1234, ""); err != nil {
+		t.Fatalf("complete upload: %v", err)
+	}
+	callTool(t, srv, principal, "kb_media_attach", map[string]any{
+		"material_id": materialID.String(), "type": "product", "key": "meta-1", "field": "gallery_images",
+	})
+
+	read := callTool(t, srv, principal, "kb_read", map[string]any{"types": []string{"product"}, "key": "meta-1", "source": "draft"})
+
+	// structuredContent must still be exactly a ReadPage — items + next_cursor
+	// and nothing else. Round-tripping through JSON is the honest check, since
+	// that is what a validating host actually sees on the wire.
+	raw, err := json.Marshal(read["structuredContent"])
+	if err != nil {
+		t.Fatalf("marshal structuredContent: %v", err)
+	}
+	var sc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &sc); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	for k := range sc {
+		if k != "items" && k != "next_cursor" {
+			t.Errorf("structuredContent gained key %q — it must stay exactly ReadPage's shape", k)
+		}
+	}
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(sc["items"], &items); err != nil {
+		t.Fatalf("unmarshal items: %v", err)
+	}
+	if len(items) == 0 {
+		t.Fatal("expected at least one record")
+	}
+	for _, item := range items {
+		for k := range item {
+			if k != "type" && k != "source" && k != "data" {
+				t.Errorf("kb_read item gained key %q — items are declared additionalProperties:false", k)
+			}
+		}
+	}
+
+	// The schema itself must stay strict; relaxing it would quietly remove the
+	// very constraint this test exists to defend.
+	schema := mcpserver.ReadPageOutputSchemaForTest()
+	if schema["additionalProperties"] != false {
+		t.Error("readPageOutputSchema must keep additionalProperties:false")
+	}
+
+	// And the metadata must actually be present — in _meta.
+	meta, ok := read["_meta"].(map[string]any)
+	if !ok {
+		t.Fatal("_meta missing from kb_read result")
+	}
+	index, ok := meta["xchats/media"].(map[string]any)
+	if !ok {
+		t.Fatal(`_meta["xchats/media"] missing — previews would silently degrade to uuid chips`)
+	}
+	entry, ok := index[materialID.String()].(map[string]any)
+	if !ok {
+		t.Fatalf("no media entry for %s; got %+v", materialID, index)
+	}
+	if entry["filename"] != "снимок.jpg" || entry["mime_type"] != "image/jpeg" || entry["kind"] != "image" {
+		t.Errorf("unexpected media entry: %+v", entry)
+	}
+}

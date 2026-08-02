@@ -104,11 +104,8 @@ function del() {
       <MediaChip label="Изображение" :count="mediaCount(row.featured_image)" />
       <MediaChip label="Галерея" :count="mediaCount(row.gallery_images)" />
       <MediaChip label="Видео" :count="mediaCount(row.demo_videos)" />
-      <MediaChip label="Аудио" :count="mediaCount(row.audio_description_files)" />
       <MediaChip label="Сертификаты" :count="mediaCount(row.certificate_documents)" />
-      <MediaChip label="Инструкции" :count="mediaCount(row.manual_documents)" />
       <MediaChip label="Гарантия" :count="mediaCount(row.guarantee_documents)" />
-      <MediaChip label="Спецификации" :count="mediaCount(row.specification_documents)" />
     </div>
   </RecordShell>
 </template>

@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -120,9 +121,11 @@ func newMCPHarness(t *testing.T) *mcpHarness {
 		AuthCodeTTL:     time.Duration(cfg.MCPAuthCodeTTLSeconds) * time.Second,
 	})
 	uploadSigner := mcpauth.NewUploadTokenSigner(key)
+	mediaSigner := mcpauth.NewMediaReadTokenSigner(key)
 	mcpSrv := mcpserver.New(mcpserver.Deps{
 		KB: kb, Blob: blobStore, Log: log,
 		UploadBaseURL: cfg.APIBaseURL, SignUpload: uploadSigner.Sign, UploadTTLSeconds: cfg.MCPUploadTokenTTLSeconds,
+		SignMediaRead: mediaSigner.Sign, MediaTTLSeconds: cfg.MCPMediaTokenTTLSeconds,
 	})
 
 	srv := httpapi.New(httpapi.Deps{
@@ -1100,3 +1103,185 @@ var pngSHA256Hex = func() string {
 	sum := sha256.Sum256(pngBytes)
 	return hex.EncodeToString(sum[:])
 }()
+
+// TestMCPMediaReadEndToEnd walks the whole preview path against real HTTP:
+// stage → PUT → kb_read → pull the signed URL out of _meta["xchats/media"] →
+// GET it. This is the only test that proves the URL the widget actually
+// receives resolves to the bytes that were uploaded.
+func TestMCPMediaReadEndToEnd(t *testing.T) {
+	h := newMCPHarness(t)
+	accessToken, _, _ := h.fullAuthCodeFlow(t, "")
+
+	create := h.rpc(t, accessToken, "tools/call", map[string]any{
+		"name": "kb_product_upsert",
+		"arguments": map[string]any{
+			"ref":     "preview-1",
+			"changes": map[string]any{"name": "Widget", "in_stock": true},
+		},
+	})
+	if create.Error != nil {
+		t.Fatalf("create rpc error: %+v", create.Error)
+	}
+
+	upload := h.rpc(t, accessToken, "tools/call", map[string]any{
+		"name": "kb_media_upload",
+		"arguments": map[string]any{
+			"filename": "снимок.png", "mime_type": "image/png", "size_bytes": len(pngBytes),
+			"sha256_checksum": pngSHA256Hex,
+			"target":          map[string]any{"type": "product", "key": "preview-1", "field": "gallery_images"},
+		},
+	})
+	uploadStructured, _ := toolCallResult(t, upload)["structuredContent"].(map[string]any)
+	materialID, _ := uploadStructured["material_id"].(string)
+	uploadURLRaw, _ := uploadStructured["upload_url"].(string)
+	parsedUpload, err := url.Parse(uploadURLRaw)
+	if err != nil {
+		t.Fatalf("parse upload_url: %v", err)
+	}
+	putReq, _ := http.NewRequest(http.MethodPut, h.srv.URL+"/mcp/uploads/"+materialID+"?token="+url.QueryEscape(parsedUpload.Query().Get("token")), bytes.NewReader(pngBytes))
+	putReq.Header.Set("Content-Type", "image/png")
+	putResp, err := http.DefaultClient.Do(putReq)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	putResp.Body.Close()
+	if putResp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status=%d", putResp.StatusCode)
+	}
+
+	attach := h.rpc(t, accessToken, "tools/call", map[string]any{
+		"name": "kb_media_attach",
+		"arguments": map[string]any{
+			"material_id": materialID, "type": "product", "key": "preview-1", "field": "gallery_images",
+		},
+	})
+	if toolCallResult(t, attach)["isError"] == true {
+		t.Fatalf("attach failed: %#v", toolCallResult(t, attach))
+	}
+
+	read := h.rpc(t, accessToken, "tools/call", map[string]any{
+		"name":      "kb_read",
+		"arguments": map[string]any{"types": []string{"product"}, "source": "draft", "key": "preview-1"},
+	})
+	readResult := toolCallResult(t, read)
+	meta, ok := readResult["_meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("kb_read result has no _meta: %#v", readResult)
+	}
+	index, ok := meta["xchats/media"].(map[string]any)
+	if !ok {
+		t.Fatalf(`kb_read _meta has no "xchats/media": %#v`, meta)
+	}
+	entry, ok := index[materialID].(map[string]any)
+	if !ok {
+		t.Fatalf("no media entry for %s: %#v", materialID, index)
+	}
+	if entry["filename"] != "снимок.png" || entry["kind"] != "image" {
+		t.Errorf("unexpected entry: %#v", entry)
+	}
+	mediaURLRaw, _ := entry["url"].(string)
+	if mediaURLRaw == "" {
+		t.Fatal("media entry has no url")
+	}
+	parsedMedia, err := url.Parse(mediaURLRaw)
+	if err != nil {
+		t.Fatalf("parse media url: %v", err)
+	}
+	mediaPath := parsedMedia.Path + "?" + parsedMedia.RawQuery
+
+	getResp, err := http.Get(h.srv.URL + mediaPath)
+	if err != nil {
+		t.Fatalf("GET media: %v", err)
+	}
+	body, _ := io.ReadAll(getResp.Body)
+	getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET media status=%d body=%s", getResp.StatusCode, body)
+	}
+	if !bytes.Equal(body, pngBytes) {
+		t.Fatalf("served %d bytes, want the %d uploaded", len(body), len(pngBytes))
+	}
+	if ct := getResp.Header.Get("Content-Type"); ct != "image/png" {
+		t.Errorf("Content-Type=%q want image/png", ct)
+	}
+	// nosniff is load-bearing: this serves user bytes from the origin that
+	// holds the app session cookie.
+	if got := getResp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options=%q want nosniff", got)
+	}
+	if got := getResp.Header.Get("Content-Disposition"); !strings.HasPrefix(got, "inline") || !strings.Contains(got, "filename*=UTF-8''") {
+		t.Errorf("Content-Disposition=%q want inline with an RFC 5987 filename", got)
+	}
+	if got := getResp.Header.Get("Cache-Control"); !strings.Contains(got, "max-age") {
+		t.Errorf("Cache-Control=%q want a max-age", got)
+	}
+
+	// The ETag/304 path is what keeps a DOM rebuild from re-reading every
+	// file into server memory.
+	etag := getResp.Header.Get("ETag")
+	if etag == "" {
+		t.Fatal("no ETag on the media response")
+	}
+	condReq, _ := http.NewRequest(http.MethodGet, h.srv.URL+mediaPath, nil)
+	condReq.Header.Set("If-None-Match", etag)
+	condResp, err := http.DefaultClient.Do(condReq)
+	if err != nil {
+		t.Fatalf("conditional GET: %v", err)
+	}
+	condResp.Body.Close()
+	if condResp.StatusCode != http.StatusNotModified {
+		t.Errorf("conditional GET status=%d want 304", condResp.StatusCode)
+	}
+
+	// A missing/garbage token, and an UPLOAD token, must both be refused.
+	for _, c := range []struct{ name, query string }{
+		{"no token", ""},
+		{"garbage token", "?token=nope"},
+		{"upload token", "?token=" + url.QueryEscape(parsedUpload.Query().Get("token"))},
+	} {
+		resp, err := http.Get(h.srv.URL + "/mcp/media/" + materialID + c.query)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s: status=%d want 403", c.name, resp.StatusCode)
+		}
+	}
+}
+
+// TestMCPMediaRead_404sBeforeUploadCompletes: a material that was staged but
+// whose bytes never arrived has no storage_key, and must read as absent.
+func TestMCPMediaRead_404sBeforeUploadCompletes(t *testing.T) {
+	h := newMCPHarness(t)
+	accessToken, _, _ := h.fullAuthCodeFlow(t, "")
+
+	upload := h.rpc(t, accessToken, "tools/call", map[string]any{
+		"name": "kb_media_upload",
+		"arguments": map[string]any{
+			"filename": "pending.png", "mime_type": "image/png", "size_bytes": len(pngBytes),
+		},
+	})
+	structured, _ := toolCallResult(t, upload)["structuredContent"].(map[string]any)
+	materialID, _ := structured["material_id"].(string)
+
+	// Mint a valid read token by asking the server for one the same way the
+	// widget would — there is no attached record, so go direct with a signer
+	// built from the harness's own key.
+	token := h.mediaSigner(t).Sign(materialID, time.Now().Add(time.Hour).Unix())
+	resp, err := http.Get(h.srv.URL + "/mcp/media/" + materialID + "?token=" + url.QueryEscape(token))
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status=%d want 404 for a material whose upload never completed", resp.StatusCode)
+	}
+}
+
+// mediaSigner builds a media-read signer from the harness's own signing key,
+// for the cases where no kb_read result is available to mint a URL.
+func (h *mcpHarness) mediaSigner(t *testing.T) *mcpauth.MediaReadTokenSigner {
+	t.Helper()
+	return mcpauth.NewMediaReadTokenSigner(h.key)
+}

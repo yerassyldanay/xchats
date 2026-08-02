@@ -273,24 +273,20 @@ func resolvedFeaturedImage(explicit string, primaryImages []string) []string {
 // one row, in registry order. Singular columns yield zero or one id.
 func topicMedia(t *Topic) map[string][]string {
 	return map[string][]string{
-		"featured_image":        resolvedFeaturedImage(t.FeaturedImage, t.IllustrationImages),
-		"illustration_images":   t.IllustrationImages,
-		"explainer_videos":      t.ExplainerVideos,
-		"narration_audio_files": t.NarrationAudioFiles,
-		"reference_documents":   t.ReferenceDocuments,
+		"featured_image":       resolvedFeaturedImage(t.FeaturedImage, t.IllustrationImages),
+		"illustration_images":  t.IllustrationImages,
+		"explainer_videos":     t.ExplainerVideos,
+		"reference_documents":  t.ReferenceDocuments,
 	}
 }
 
 func productMedia(p *Product) map[string][]string {
 	return map[string][]string{
-		"featured_image":          resolvedFeaturedImage(p.FeaturedImage, p.GalleryImages),
-		"gallery_images":          p.GalleryImages,
-		"demo_videos":             p.DemoVideos,
-		"audio_description_files": p.AudioDescriptionFiles,
-		"certificate_documents":   p.CertificateDocuments,
-		"manual_documents":        p.ManualDocuments,
-		"guarantee_documents":     p.GuaranteeDocuments,
-		"specification_documents": p.SpecificationDocuments,
+		"featured_image":        resolvedFeaturedImage(p.FeaturedImage, p.GalleryImages),
+		"gallery_images":        p.GalleryImages,
+		"demo_videos":           p.DemoVideos,
+		"certificate_documents": p.CertificateDocuments,
+		"guarantee_documents":   p.GuaranteeDocuments,
 	}
 }
 

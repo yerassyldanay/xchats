@@ -272,7 +272,7 @@ func (s *Server) handleTopicUpsert(ctx context.Context, orgID uuid.UUID, userID 
 		return nil, fmt.Errorf("changes: %w", err)
 	}
 	if err := rejectUnknownFields(changes, "title", "body_md", "featured_image", "illustration_images",
-		"explainer_videos", "narration_audio_files", "reference_documents"); err != nil {
+		"explainer_videos", "reference_documents"); err != nil {
 		return nil, err
 	}
 	ch := kbstore.TopicChanges{}
@@ -289,9 +289,6 @@ func (s *Server) handleTopicUpsert(ctx context.Context, orgID uuid.UUID, userID 
 		return nil, err
 	}
 	if ch.ExplainerVideos, err = optMaterialIDs(changes, "explainer_videos"); err != nil {
-		return nil, err
-	}
-	if ch.NarrationAudioFiles, err = optMaterialIDs(changes, "narration_audio_files"); err != nil {
 		return nil, err
 	}
 	if ch.ReferenceDocuments, err = optMaterialIDs(changes, "reference_documents"); err != nil {
@@ -318,8 +315,7 @@ func (s *Server) handleProductUpsert(ctx context.Context, orgID uuid.UUID, userI
 		return nil, fmt.Errorf("changes: %w", err)
 	}
 	if err := rejectUnknownFields(changes, "name", "price", "description", "category", "in_stock", "sales_status",
-		"featured_image", "gallery_images", "demo_videos", "audio_description_files", "certificate_documents",
-		"manual_documents", "guarantee_documents", "specification_documents"); err != nil {
+		"featured_image", "gallery_images", "demo_videos", "certificate_documents", "guarantee_documents"); err != nil {
 		return nil, err
 	}
 	ch := kbstore.ProductChanges{}
@@ -350,19 +346,10 @@ func (s *Server) handleProductUpsert(ctx context.Context, orgID uuid.UUID, userI
 	if ch.DemoVideos, err = optMaterialIDs(changes, "demo_videos"); err != nil {
 		return nil, err
 	}
-	if ch.AudioDescriptionFiles, err = optMaterialIDs(changes, "audio_description_files"); err != nil {
-		return nil, err
-	}
 	if ch.CertificateDocuments, err = optMaterialIDs(changes, "certificate_documents"); err != nil {
 		return nil, err
 	}
-	if ch.ManualDocuments, err = optMaterialIDs(changes, "manual_documents"); err != nil {
-		return nil, err
-	}
 	if ch.GuaranteeDocuments, err = optMaterialIDs(changes, "guarantee_documents"); err != nil {
-		return nil, err
-	}
-	if ch.SpecificationDocuments, err = optMaterialIDs(changes, "specification_documents"); err != nil {
 		return nil, err
 	}
 	expected, err := optExpectedVersion(args)
@@ -606,7 +593,19 @@ func (s *Server) handleKBRead(ctx context.Context, orgID, userID uuid.UUID, args
 	if err != nil {
 		return nil, err
 	}
-	return s.toolResult(fmt.Sprintf("%d record(s).", len(page.Items)), page, "record", orgID, userID), nil
+	res := s.toolResult(fmt.Sprintf("%d record(s).", len(page.Items)), page, "record", orgID, userID)
+	// Media metadata rides in _meta, NOT in structuredContent. kb_read's
+	// declared outputSchema is additionalProperties:false (readPageOutputSchema
+	// in tools.go), and clients cache tools/list — so a host validating
+	// structuredContent against its cached copy would start rejecting kb_read
+	// itself the moment a new key appeared. _meta is outside outputSchema by
+	// spec, and this widget already reads _meta for xchats/reviewUrl.
+	if meta, ok := res["_meta"].(map[string]any); ok {
+		if index := s.mediaIndexFor(ctx, orgID, page); len(index) > 0 {
+			meta["xchats/media"] = index
+		}
+	}
+	return res, nil
 }
 
 func (s *Server) handleKBDelete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {

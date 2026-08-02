@@ -262,7 +262,7 @@ func mediaUploadOutputSchema() map[string]any {
 		"upload_headers":    map[string]any{"type": "object", "description": "Headers to send with the PUT (at minimum Content-Type)."},
 		"expires_at":        str("RFC 3339 timestamp; the upload_url stops working after this."),
 		"max_size_bytes":    integer("The declared size this upload was staged for — the PUT is rejected above it."),
-		"processing_status": str("The material's current processing status."),
+		"processing_status": str("The material row's database processing status. At this staging step, uploaded means the row is awaiting the file-byte PUT; it does not mean the bytes have arrived. A successful PUT advances it to parsed."),
 	}, "material_id", "upload_url", "upload_method", "upload_headers", "expires_at", "max_size_bytes", "processing_status")
 }
 
@@ -338,7 +338,6 @@ func topicUpsertTool() Tool {
 				"featured_image":        materialID("Single main topic image."),
 				"illustration_images":   materialIDs("Supporting topic illustrations."),
 				"explainer_videos":      materialIDs("Videos that explain the topic."),
-				"narration_audio_files": materialIDs("Customer-sendable spoken explanations."),
 				"reference_documents":   materialIDs("Documents supporting the topic."),
 			}),
 		}, upsertCommon()), "changes"),
@@ -364,11 +363,8 @@ func productUpsertTool() Tool {
 				"featured_image":          materialID("Single main product image."),
 				"gallery_images":          materialIDs("Product gallery images."),
 				"demo_videos":             materialIDs("Product demonstration videos."),
-				"audio_description_files": materialIDs("Spoken product descriptions."),
 				"certificate_documents":   materialIDs("Product certificates."),
-				"manual_documents":        materialIDs("Product user/installation manuals."),
 				"guarantee_documents":     materialIDs("Product guarantee documents."),
-				"specification_documents": materialIDs("Technical product specifications."),
 			}),
 		}, upsertCommon()), "changes"),
 		Meta:         widgetMeta(),

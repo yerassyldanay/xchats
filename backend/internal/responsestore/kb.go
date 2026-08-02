@@ -112,8 +112,7 @@ func mediaArray(ids []uuid.UUID) []string {
 
 func loadTopics(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) ([]aiprompt.Topic, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT slug, title, body_md, featured_image, illustration_images, explainer_videos,
-		       narration_audio_files, reference_documents
+		SELECT slug, title, body_md, featured_image, illustration_images, explainer_videos, reference_documents
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("responsestore: load topics: %w", err)
@@ -123,9 +122,9 @@ func loadTopics(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) ([]aiprompt.Top
 	for rows.Next() {
 		var t aiprompt.Topic
 		var featuredImage uuid.NullUUID
-		var illustration, explainer, narration, reference []uuid.UUID
+		var illustration, explainer, reference []uuid.UUID
 		if err := rows.Scan(&t.Slug, &t.Title, &t.BodyMD, &featuredImage,
-			&illustration, &explainer, &narration, &reference); err != nil {
+			&illustration, &explainer, &reference); err != nil {
 			return nil, fmt.Errorf("responsestore: scan topic: %w", err)
 		}
 		if featuredImage.Valid {
@@ -133,7 +132,6 @@ func loadTopics(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) ([]aiprompt.Top
 		}
 		t.IllustrationImages = mediaArray(illustration)
 		t.ExplainerVideos = mediaArray(explainer)
-		t.NarrationAudioFiles = mediaArray(narration)
 		t.ReferenceDocuments = mediaArray(reference)
 		out = append(out, t)
 	}
@@ -143,8 +141,7 @@ func loadTopics(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) ([]aiprompt.Top
 func loadProducts(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) ([]aiprompt.Product, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT ref, name, price, description, category, sales_status, in_stock,
-		       featured_image, gallery_images, demo_videos, audio_description_files,
-		       certificate_documents, manual_documents, guarantee_documents, specification_documents
+		       featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("responsestore: load products: %w", err)
@@ -154,9 +151,9 @@ func loadProducts(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) ([]aiprompt.P
 	for rows.Next() {
 		var p aiprompt.Product
 		var featuredImage uuid.NullUUID
-		var gallery, demo, audioDesc, cert, manual, guarantee, spec []uuid.UUID
+		var gallery, demo, cert, guarantee []uuid.UUID
 		if err := rows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.SalesStatus, &p.InStock,
-			&featuredImage, &gallery, &demo, &audioDesc, &cert, &manual, &guarantee, &spec); err != nil {
+			&featuredImage, &gallery, &demo, &cert, &guarantee); err != nil {
 			return nil, fmt.Errorf("responsestore: scan product: %w", err)
 		}
 		if featuredImage.Valid {
@@ -164,11 +161,8 @@ func loadProducts(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) ([]aiprompt.P
 		}
 		p.GalleryImages = mediaArray(gallery)
 		p.DemoVideos = mediaArray(demo)
-		p.AudioDescriptionFiles = mediaArray(audioDesc)
 		p.CertificateDocuments = mediaArray(cert)
-		p.ManualDocuments = mediaArray(manual)
 		p.GuaranteeDocuments = mediaArray(guarantee)
-		p.SpecificationDocuments = mediaArray(spec)
 		out = append(out, p)
 	}
 	return out, rows.Err()
