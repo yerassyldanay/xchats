@@ -562,17 +562,25 @@ type ResolvedMaterial struct {
 // delivered, re-validating each reference fail-closed. Evals use it to assert
 // that exactly the right material records would have been sent — without any
 // file bytes existing anywhere.
+//
+// Deduplicates by both TOKEN and resolved MATERIAL ID: two distinct tokens
+// can resolve to the same file (most commonly featured_image's fallback —
+// see resolvedFeaturedImage — landing on the same material as that type's
+// primary image array's first entry), and sending the identical bytes twice
+// in one reply is never correct, so the second token contributes nothing
+// further once its material has already been included under an earlier one.
 func ResolveSend(tokens []string, kb *KB, cat *Catalog) ([]ResolvedMaterial, error) {
 	if kb == nil || cat == nil {
 		return nil, fmt.Errorf("aiprompt: current KB and request catalog are required")
 	}
-	seen := map[string]bool{}
+	seenToken := map[string]bool{}
+	seenMaterial := map[string]bool{}
 	out := []ResolvedMaterial{}
 	for _, tok := range tokens {
-		if seen[tok] {
+		if seenToken[tok] {
 			continue // deduplicate while preserving order
 		}
-		seen[tok] = true
+		seenToken[tok] = true
 		entry := cat.MediaByToken(tok)
 		if entry == nil {
 			return nil, fmt.Errorf("aiprompt: media token %q is not in the catalog", tok)
@@ -596,6 +604,10 @@ func ResolveSend(tokens []string, kb *KB, cat *Catalog) ([]ResolvedMaterial, err
 			if err := validateMaterialRef(kb, id, spec, entry.Table, entry.Ref); err != nil {
 				return nil, err
 			}
+			if seenMaterial[id] {
+				continue
+			}
+			seenMaterial[id] = true
 			out = append(out, ResolvedMaterial{Token: tok, Material: *kb.MaterialByID(id)})
 		}
 	}

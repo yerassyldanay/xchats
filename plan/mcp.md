@@ -320,9 +320,41 @@ widget never loads the entire KB into one MCP result.
 
 ### Media
 
-Provides file selection, drag-and-drop, preview, upload progress, processing
-status, and attachment to a supported semantic field such as
-`tariffs.pricing_images` or `products.featured_image`.
+Media lives **on the record**, not in a separate screen. Opening a record shows
+every media column that record actually has, each with what is currently
+attached and — for columns that are valid attachment targets — its own
+multi-file upload input supporting selection and drag-and-drop. Choosing files
+stages, uploads and attaches them in one motion, with per-file progress and
+per-file errors; one rejected file never discards the rest of a batch.
+
+Uploads run **sequentially**: the signed-PUT handler reads each body fully into
+memory, and every attach takes the organization's draft row lock, so
+parallelism would buy nothing but server memory and lock contention.
+
+Previews come from `kb_read`'s `_meta["xchats/media"]` — per-material filename,
+MIME type, size, kind and a short-lived signed URL served by
+`GET /mcp/media/:id`. That metadata deliberately does **not** ride in
+`structuredContent`: `kb_read`'s declared `outputSchema` is
+`additionalProperties: false` and clients cache `tools/list`, so a new key
+there could make a validating host reject `kb_read` itself. A host that strips
+`_meta` degrades to identifier chips, never to an error.
+
+**Only images render inline.** Video, audio and documents render as an icon,
+filename, size and link, so nothing but an image is fetched without the user
+asking for it. The thumbnail is CSS sizing on the original file — there is no
+server-side resizing yet, so the upload size cap is also the ceiling on a
+single preview allocation. A resizing thumbnail endpoint and a streaming blob
+read are tracked separately.
+
+`featured_image` is **preview-only here**: it is shown with a preview but has
+no upload input, because it is not an attachment target. It remains a real,
+independently writable column — set through the typed upsert tools — and at
+prompt-resolution time an explicit value wins, while a `NULL` falls back to the
+type's first primary image.
+
+Because upload and attach are now one flow, orphaned uploads are much rarer,
+but they are still possible: a PUT can succeed and the attach then fail. Reaping
+unreferenced materials is separate work.
 
 The widget should prefer shared MCP Apps APIs. ChatGPT-specific file-library
 helpers may be used only after capability detection. Hosts without widget or

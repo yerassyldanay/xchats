@@ -51,14 +51,13 @@ func (c DraftConfigPatch) hasPending() bool {
 // (never nil — always at least an empty slice, matching the live column's
 // NOT NULL DEFAULT '{}').
 type DraftTopic struct {
-	Slug                string      `json:"slug"`
-	Title               string      `json:"title"`
-	BodyMD              string      `json:"body_md"`
-	FeaturedImage       *uuid.UUID  `json:"featured_image"`
-	IllustrationImages  []uuid.UUID `json:"illustration_images"`
-	ExplainerVideos     []uuid.UUID `json:"explainer_videos"`
-	NarrationAudioFiles []uuid.UUID `json:"narration_audio_files"`
-	ReferenceDocuments  []uuid.UUID `json:"reference_documents"`
+	Slug               string      `json:"slug"`
+	Title              string      `json:"title"`
+	BodyMD             string      `json:"body_md"`
+	FeaturedImage      *uuid.UUID  `json:"featured_image"`
+	IllustrationImages []uuid.UUID `json:"illustration_images"`
+	ExplainerVideos    []uuid.UUID `json:"explainer_videos"`
+	ReferenceDocuments []uuid.UUID `json:"reference_documents"`
 }
 
 type DraftTariff struct {
@@ -79,21 +78,18 @@ type DraftTariff struct {
 }
 
 type DraftProduct struct {
-	Ref                    string      `json:"ref"`
-	Name                   string      `json:"name"`
-	Price                  string      `json:"price"`
-	Description            string      `json:"description"`
-	Category               string      `json:"category"`
-	InStock                bool        `json:"in_stock"`
-	SalesStatus            string      `json:"sales_status"`
-	FeaturedImage          *uuid.UUID  `json:"featured_image"`
-	GalleryImages          []uuid.UUID `json:"gallery_images"`
-	DemoVideos             []uuid.UUID `json:"demo_videos"`
-	AudioDescriptionFiles  []uuid.UUID `json:"audio_description_files"`
-	CertificateDocuments   []uuid.UUID `json:"certificate_documents"`
-	ManualDocuments        []uuid.UUID `json:"manual_documents"`
-	GuaranteeDocuments     []uuid.UUID `json:"guarantee_documents"`
-	SpecificationDocuments []uuid.UUID `json:"specification_documents"`
+	Ref                  string      `json:"ref"`
+	Name                 string      `json:"name"`
+	Price                string      `json:"price"`
+	Description          string      `json:"description"`
+	Category             string      `json:"category"`
+	InStock              bool        `json:"in_stock"`
+	SalesStatus          string      `json:"sales_status"`
+	FeaturedImage        *uuid.UUID  `json:"featured_image"`
+	GalleryImages        []uuid.UUID `json:"gallery_images"`
+	DemoVideos           []uuid.UUID `json:"demo_videos"`
+	CertificateDocuments []uuid.UUID `json:"certificate_documents"`
+	GuaranteeDocuments   []uuid.UUID `json:"guarantee_documents"`
 }
 
 // DraftContact is the org's single pending support-contact entry — a true
@@ -471,17 +467,16 @@ type DraftConfig struct {
 // draft blob's timestamp for a pending one. ContactRow/PolicyRow (below) are
 // true singletons — one per org, ID a fixed constant.
 type TopicRow struct {
-	ID                  string      `json:"id"`
-	Slug                string      `json:"slug"`
-	Title               string      `json:"title"`
-	BodyMD              string      `json:"body_md"`
-	FeaturedImage       *uuid.UUID  `json:"featured_image"`
-	IllustrationImages  []uuid.UUID `json:"illustration_images"`
-	ExplainerVideos     []uuid.UUID `json:"explainer_videos"`
-	NarrationAudioFiles []uuid.UUID `json:"narration_audio_files"`
-	ReferenceDocuments  []uuid.UUID `json:"reference_documents"`
-	Draft               bool        `json:"draft"`
-	UpdatedAt           time.Time   `json:"updated_at"`
+	ID                 string      `json:"id"`
+	Slug               string      `json:"slug"`
+	Title              string      `json:"title"`
+	BodyMD             string      `json:"body_md"`
+	FeaturedImage      *uuid.UUID  `json:"featured_image"`
+	IllustrationImages []uuid.UUID `json:"illustration_images"`
+	ExplainerVideos    []uuid.UUID `json:"explainer_videos"`
+	ReferenceDocuments []uuid.UUID `json:"reference_documents"`
+	Draft              bool        `json:"draft"`
+	UpdatedAt          time.Time   `json:"updated_at"`
 }
 
 type TariffRow struct {
@@ -505,24 +500,21 @@ type TariffRow struct {
 }
 
 type ProductRow struct {
-	ID                     string      `json:"id"`
-	Ref                    string      `json:"ref"`
-	Name                   string      `json:"name"`
-	Price                  string      `json:"price"`
-	Description            string      `json:"description"`
-	Category               string      `json:"category"`
-	InStock                bool        `json:"in_stock"`
-	SalesStatus            string      `json:"sales_status"`
-	FeaturedImage          *uuid.UUID  `json:"featured_image"`
-	GalleryImages          []uuid.UUID `json:"gallery_images"`
-	DemoVideos             []uuid.UUID `json:"demo_videos"`
-	AudioDescriptionFiles  []uuid.UUID `json:"audio_description_files"`
-	CertificateDocuments   []uuid.UUID `json:"certificate_documents"`
-	ManualDocuments        []uuid.UUID `json:"manual_documents"`
-	GuaranteeDocuments     []uuid.UUID `json:"guarantee_documents"`
-	SpecificationDocuments []uuid.UUID `json:"specification_documents"`
-	Draft                  bool        `json:"draft"`
-	UpdatedAt              time.Time   `json:"updated_at"`
+	ID                   string      `json:"id"`
+	Ref                  string      `json:"ref"`
+	Name                 string      `json:"name"`
+	Price                string      `json:"price"`
+	Description          string      `json:"description"`
+	Category             string      `json:"category"`
+	InStock              bool        `json:"in_stock"`
+	SalesStatus          string      `json:"sales_status"`
+	FeaturedImage        *uuid.UUID  `json:"featured_image"`
+	GalleryImages        []uuid.UUID `json:"gallery_images"`
+	DemoVideos           []uuid.UUID `json:"demo_videos"`
+	CertificateDocuments []uuid.UUID `json:"certificate_documents"`
+	GuaranteeDocuments   []uuid.UUID `json:"guarantee_documents"`
+	Draft                bool        `json:"draft"`
+	UpdatedAt            time.Time   `json:"updated_at"`
 }
 
 type ContactRow struct {
@@ -674,7 +666,7 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 		}
 		v.Topics = append(v.Topics, TopicRow{ID: t.Slug, Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD,
 			FeaturedImage: t.FeaturedImage, IllustrationImages: t.IllustrationImages,
-			ExplainerVideos: t.ExplainerVideos, NarrationAudioFiles: t.NarrationAudioFiles,
+			ExplainerVideos:    t.ExplainerVideos,
 			ReferenceDocuments: t.ReferenceDocuments,
 			Draft:              true, UpdatedAt: updatedAt})
 	}
@@ -696,10 +688,8 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 		v.Products = append(v.Products, ProductRow{ID: p.Ref, Ref: p.Ref, Name: p.Name, Price: p.Price,
 			Description: p.Description, Category: p.Category, InStock: p.InStock, SalesStatus: p.SalesStatus,
 			FeaturedImage: p.FeaturedImage, GalleryImages: p.GalleryImages, DemoVideos: p.DemoVideos,
-			AudioDescriptionFiles: p.AudioDescriptionFiles, CertificateDocuments: p.CertificateDocuments,
-			ManualDocuments: p.ManualDocuments, GuaranteeDocuments: p.GuaranteeDocuments,
-			SpecificationDocuments: p.SpecificationDocuments,
-			Draft:                  true, UpdatedAt: updatedAt})
+			CertificateDocuments: p.CertificateDocuments, GuaranteeDocuments: p.GuaranteeDocuments,
+			Draft: true, UpdatedAt: updatedAt})
 	}
 	if len(blob.Contacts) > 0 && !deleted["contact:"] {
 		c := blob.Contacts[0]
@@ -788,7 +778,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	// topics
 	topicIdx := map[string]int{}
 	trows, err := db.Query(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
-		explainer_videos, narration_audio_files, reference_documents, updated_at
+		explainer_videos, reference_documents, updated_at
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -796,7 +786,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	for trows.Next() {
 		var t TopicRow
 		if err := trows.Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
-			&t.ExplainerVideos, &t.NarrationAudioFiles, &t.ReferenceDocuments, &t.UpdatedAt); err != nil {
+			&t.ExplainerVideos, &t.ReferenceDocuments, &t.UpdatedAt); err != nil {
 			trows.Close()
 			return nil, err
 		}
@@ -811,7 +801,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	for _, bt := range blob.Topics {
 		row := TopicRow{ID: bt.Slug, Slug: bt.Slug, Title: bt.Title, BodyMD: bt.BodyMD,
 			FeaturedImage: bt.FeaturedImage, IllustrationImages: bt.IllustrationImages,
-			ExplainerVideos: bt.ExplainerVideos, NarrationAudioFiles: bt.NarrationAudioFiles,
+			ExplainerVideos:    bt.ExplainerVideos,
 			ReferenceDocuments: bt.ReferenceDocuments,
 			Draft:              true, UpdatedAt: updatedAt}
 		if i, ok := topicIdx[bt.Slug]; ok {
@@ -871,8 +861,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	// products (availability is a dead legacy column — not selected)
 	productIdx := map[string]int{}
 	prows, err := db.Query(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
-		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
-		manual_documents, guarantee_documents, specification_documents, updated_at
+		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents, updated_at
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -880,8 +869,8 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	for prows.Next() {
 		var p ProductRow
 		if err := prows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
-			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.AudioDescriptionFiles, &p.CertificateDocuments,
-			&p.ManualDocuments, &p.GuaranteeDocuments, &p.SpecificationDocuments, &p.UpdatedAt); err != nil {
+			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.CertificateDocuments,
+			&p.GuaranteeDocuments, &p.UpdatedAt); err != nil {
 			prows.Close()
 			return nil, err
 		}
@@ -897,10 +886,8 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 		row := ProductRow{ID: bp.Ref, Ref: bp.Ref, Name: bp.Name, Price: bp.Price,
 			Description: bp.Description, Category: bp.Category, InStock: bp.InStock, SalesStatus: bp.SalesStatus,
 			FeaturedImage: bp.FeaturedImage, GalleryImages: bp.GalleryImages, DemoVideos: bp.DemoVideos,
-			AudioDescriptionFiles: bp.AudioDescriptionFiles, CertificateDocuments: bp.CertificateDocuments,
-			ManualDocuments: bp.ManualDocuments, GuaranteeDocuments: bp.GuaranteeDocuments,
-			SpecificationDocuments: bp.SpecificationDocuments,
-			Draft:                  true, UpdatedAt: updatedAt}
+			CertificateDocuments: bp.CertificateDocuments, GuaranteeDocuments: bp.GuaranteeDocuments,
+			Draft: true, UpdatedAt: updatedAt}
 		if i, ok := productIdx[bp.Ref]; ok {
 			v.Products[i] = row
 		} else {
@@ -1498,10 +1485,10 @@ func (s *Store) currentTopic(ctx context.Context, db dbtx, orgID uuid.UUID, slug
 	}
 	var t DraftTopic
 	err := db.QueryRow(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
-		explainer_videos, narration_audio_files, reference_documents
+		explainer_videos, reference_documents
 		FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`, orgID, slug).
 		Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
-			&t.ExplainerVideos, &t.NarrationAudioFiles, &t.ReferenceDocuments)
+			&t.ExplainerVideos, &t.ReferenceDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftTopic{Slug: slug}, nil
 	}
@@ -1534,12 +1521,10 @@ func (s *Store) currentProduct(ctx context.Context, db dbtx, orgID uuid.UUID, re
 	}
 	var p DraftProduct
 	err := db.QueryRow(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
-		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
-		manual_documents, guarantee_documents, specification_documents
+		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
 		FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).
 		Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
-			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.AudioDescriptionFiles, &p.CertificateDocuments,
-			&p.ManualDocuments, &p.GuaranteeDocuments, &p.SpecificationDocuments)
+			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.CertificateDocuments, &p.GuaranteeDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftProduct{Ref: ref, InStock: true}, nil
 	}

@@ -11,36 +11,121 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// mediaColumnKind classifies every canonical media column (plan/DECISIONS.md
-// "Concrete media-column naming") by broad MIME category — the closed v1
-// list, across all seven KB types. Used both to validate an MCP upsert's
-// media references and to hint kb_media_upload's accept filter for a given
-// `target.field`.
-var mediaColumnKind = map[string]string{
-	"featured_image":            "image",
-	"gallery_images":            "image",
-	"pricing_images":            "image",
-	"illustration_images":       "image",
-	"contact_card_image":        "image",
-	"location_map_image":        "image",
-	"demo_videos":               "video",
-	"explainer_videos":          "video",
-	"narration_audio_files":     "audio",
-	"audio_description_files":   "audio",
-	"reference_documents":       "document",
-	"certificate_documents":     "document",
-	"manual_documents":          "document",
-	"guarantee_documents":       "document",
-	"specification_documents":   "document",
-	"terms_documents":           "document",
-	"company_legal_documents":   "document",
-	"commerce_policy_documents": "document",
+// MediaAttachmentField describes one media column a caller may attach a
+// material to: which broad MIME category it accepts, and whether it holds a
+// list (uuid[]) or a single reference (uuid).
+type MediaAttachmentField struct {
+	Field    string `json:"field"`
+	Kind     string `json:"kind"`     // image | video | audio | document
+	Multiple bool   `json:"multiple"` // plural uuid[] column vs singular uuid column
+}
+
+// mediaAttachmentFields is THE authority for which media field may receive an
+// attachment on which KB type (plan/DECISIONS.md "Concrete media-column
+// naming", scoped per table rather than flattened). kb_info publishes it as
+// media_attachment_fields, kb_media_attach validates against it, and
+// kb_media_upload's optional `target` is checked against it — so the widget
+// no longer hand-maintains a parallel copy of this matrix.
+//
+// featured_image is deliberately ABSENT. It remains a real, readable media
+// column that typed upserts may write, and the response catalog falls back to
+// the first plural image when it is empty. The widget only offers append-style
+// uploads for the attachment targets listed here.
+//
+// assistant and delivery_zone are absent because they have no media columns
+// at all — a type with no entry here offers no attachment targets.
+var mediaAttachmentFields = map[string][]MediaAttachmentField{
+	KBTypeTopic: {
+		{Field: "illustration_images", Kind: "image", Multiple: true},
+		{Field: "explainer_videos", Kind: "video", Multiple: true},
+		{Field: "reference_documents", Kind: "document", Multiple: true},
+	},
+	KBTypeProduct: {
+		{Field: "gallery_images", Kind: "image", Multiple: true},
+		{Field: "demo_videos", Kind: "video", Multiple: true},
+		{Field: "certificate_documents", Kind: "document", Multiple: true},
+		{Field: "guarantee_documents", Kind: "document", Multiple: true},
+	},
+	KBTypeTariff: {
+		{Field: "pricing_images", Kind: "image", Multiple: true},
+		{Field: "explainer_videos", Kind: "video", Multiple: true},
+		{Field: "terms_documents", Kind: "document", Multiple: true},
+	},
+	KBTypeContacts: {
+		{Field: "contact_card_image", Kind: "image", Multiple: false},
+		{Field: "location_map_image", Kind: "image", Multiple: false},
+		{Field: "company_legal_documents", Kind: "document", Multiple: true},
+	},
+	KBTypePolicies: {
+		{Field: "commerce_policy_documents", Kind: "document", Multiple: true},
+	},
+}
+
+// derivedMediaColumnKind holds media columns that are real, validatable
+// storage but not attachment targets — see mediaAttachmentFields' comment.
+var derivedMediaColumnKind = map[string]string{"featured_image": "image"}
+
+// mediaColumnKind is the flat field→kind view every media REFERENCE check
+// works from (validateMediaRef, kb_info.media_field_kinds). It is DERIVED
+// from mediaAttachmentFields plus derivedMediaColumnKind so there is exactly
+// one list to maintain; the same field appearing on two types (e.g.
+// explainer_videos on topic and tariff) necessarily carries the same kind.
+var mediaColumnKind = buildMediaColumnKind()
+
+func buildMediaColumnKind() map[string]string {
+	out := make(map[string]string, len(derivedMediaColumnKind)+16)
+	for field, kind := range derivedMediaColumnKind {
+		out[field] = kind
+	}
+	for _, fields := range mediaAttachmentFields {
+		for _, f := range fields {
+			out[f.Field] = f.Kind
+		}
+	}
+	return out
 }
 
 // MediaFieldKind returns the broad category ("image"|"video"|"audio"|
 // "document") a canonical media column expects, or "" if field is not a
 // recognized media column.
 func MediaFieldKind(field string) string { return mediaColumnKind[field] }
+
+// MediaFieldKinds returns a copy of the flat field→kind map, for
+// kb_info.media_field_kinds. Retained alongside the richer, type-scoped
+// MediaAttachmentFieldsByType for backward compatibility with callers built
+// against the flat shape.
+func MediaFieldKinds() map[string]string {
+	out := make(map[string]string, len(mediaColumnKind))
+	for field, kind := range mediaColumnKind {
+		out[field] = kind
+	}
+	return out
+}
+
+// MediaAttachmentFieldsByType returns a copy of the attachment registry,
+// grouped by KB type — kb_info.media_attachment_fields. Types with no media
+// columns are absent, not present-and-empty, so a caller can offer exactly
+// the types that can receive something.
+func MediaAttachmentFieldsByType() map[string][]MediaAttachmentField {
+	out := make(map[string][]MediaAttachmentField, len(mediaAttachmentFields))
+	for kbType, fields := range mediaAttachmentFields {
+		out[kbType] = append([]MediaAttachmentField(nil), fields...)
+	}
+	return out
+}
+
+// LookupMediaAttachmentField resolves one (KB type, field) pair against the
+// registry. A field that exists on a DIFFERENT type — or featured_image,
+// which exists on no type — comes back ok=false, which is what makes the
+// pairing (not just the field name) the validated thing.
+func LookupMediaAttachmentField(kbType, field string) (MediaAttachmentField, bool) {
+	for _, f := range mediaAttachmentFields[kbType] {
+		if f.Field == field {
+			return f, true
+		}
+	}
+	return MediaAttachmentField{}, false
+}
 
 func mimeMatchesKind(mime, kind string) bool {
 	switch kind {
@@ -193,6 +278,9 @@ func (s *Store) CreateUploadMaterial(ctx context.Context, orgID uuid.UUID, in Up
 }
 
 // UploadMaterial is the signed-upload handler's view of a staged material.
+// StorageKey is empty until CompleteMaterialUpload has run, which is what
+// makes it the single reliable "have the bytes actually arrived?" test — the
+// signed media-read handler uses it exactly that way.
 type UploadMaterial struct {
 	ID                uuid.UUID
 	OrganizationID    uuid.UUID
@@ -201,19 +289,20 @@ type UploadMaterial struct {
 	DeclaredSizeBytes int64
 	DeclaredChecksum  string
 	ProcessingStatus  string
+	StorageKey        string
 }
 
 // GetUploadMaterial reads back a staged material for the signed PUT handler
 // to check the incoming bytes against (declared size/mime/checksum, org
-// ownership).
+// ownership), and for the signed READ handler to locate the stored object.
 func (s *Store) GetUploadMaterial(ctx context.Context, id uuid.UUID) (UploadMaterial, error) {
 	var m UploadMaterial
-	var filename, mimeType, checksum *string
+	var filename, mimeType, checksum, storageKey *string
 	var sizeBytes *int64
 	err := s.pool.QueryRow(ctx, `SELECT id, organization_id, filename, mime_type, size_bytes,
-		sha256_checksum, processing_status
+		sha256_checksum, processing_status, storage_key
 		FROM xchats.kbd_materials WHERE id = $1`, id).
-		Scan(&m.ID, &m.OrganizationID, &filename, &mimeType, &sizeBytes, &checksum, &m.ProcessingStatus)
+		Scan(&m.ID, &m.OrganizationID, &filename, &mimeType, &sizeBytes, &checksum, &m.ProcessingStatus, &storageKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UploadMaterial{}, ErrUnknownKind
 	}
@@ -221,10 +310,76 @@ func (s *Store) GetUploadMaterial(ctx context.Context, id uuid.UUID) (UploadMate
 		return UploadMaterial{}, err
 	}
 	m.Filename, m.MimeType, m.DeclaredChecksum = strOrEmpty(filename), strOrEmpty(mimeType), strOrEmpty(checksum)
+	m.StorageKey = strOrEmpty(storageKey)
 	if sizeBytes != nil {
 		m.DeclaredSizeBytes = *sizeBytes
 	}
 	return m, nil
+}
+
+// MaterialPreview is one material's display metadata, for the KB Manager
+// widget's per-record media section.
+type MaterialPreview struct {
+	ID        uuid.UUID `json:"id"`
+	Filename  string    `json:"filename"`
+	MimeType  string    `json:"mime_type"`
+	SizeBytes int64     `json:"size_bytes"`
+	Kind      string    `json:"kind"`   // image | video | audio | document
+	Status    string    `json:"status"` // processing_status
+}
+
+// MaterialPreviews batch-loads display metadata for ids, scoped to orgID in
+// the WHERE clause rather than filtered in Go, and restricted to materials
+// whose bytes actually landed. Anything foreign, missing, or still incomplete
+// is simply absent from the result — the widget renders those as "preview
+// unavailable", which is the correct outcome for all three cases and leaks
+// nothing about which one applies.
+func (s *Store) MaterialPreviews(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]MaterialPreview, error) {
+	out := map[uuid.UUID]MaterialPreview{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id, filename, mime_type, size_bytes, processing_status
+		FROM xchats.kbd_materials
+		WHERE organization_id = $1 AND id = ANY($2)
+		  AND storage_key IS NOT NULL AND storage_key <> ''`, orgID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p MaterialPreview
+		var filename, mimeType *string
+		var sizeBytes *int64
+		if err := rows.Scan(&p.ID, &filename, &mimeType, &sizeBytes, &p.Status); err != nil {
+			return nil, err
+		}
+		p.Filename, p.MimeType = strOrEmpty(filename), strOrEmpty(mimeType)
+		if sizeBytes != nil {
+			p.SizeBytes = *sizeBytes
+		}
+		p.Kind = KindOfMime(p.MimeType)
+		out[p.ID] = p
+	}
+	return out, rows.Err()
+}
+
+// KindOfMime is the four-way split mimeMatchesKind validates against, in
+// forward form: given a MIME type, which media kind is it? The widget mirrors
+// this exactly (classifyMime in kb-manager.html).
+func KindOfMime(mime string) string {
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return "image"
+	case strings.HasPrefix(mime, "video/"):
+		return "video"
+	case strings.HasPrefix(mime, "audio/"):
+		return "audio"
+	case strings.HasPrefix(mime, "application/"), strings.HasPrefix(mime, "text/"):
+		return "document"
+	default:
+		return ""
+	}
 }
 
 // ErrUploadAlreadyCompleted means the material named by kb_media_upload's

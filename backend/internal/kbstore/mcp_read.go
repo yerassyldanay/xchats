@@ -256,6 +256,58 @@ type ReadPage struct {
 	NextCursor string     `json:"next_cursor,omitempty"`
 }
 
+// MediaIDsIn collects every material id a page's records reference, in first-
+// seen order and de-duplicated. Pure — no database access — so enriching a
+// kb_read result costs exactly one extra query for the whole page, and none
+// at all for a page that references no media.
+//
+// The types here are the *Row structs, NOT the Draft* blob structs — those
+// are two separate families, and flattenRecords puts DraftView's *Row VALUES
+// (not pointers) into KBRecord.Data. Getting that wrong silently collects
+// nothing at all, which is why TestMediaIDsIn_CoversEveryMediaColumn drives
+// this through the real read path rather than through hand-built structs.
+// Every media column is listed, featured_image included — it is displayable
+// even though it is not an attach target.
+func MediaIDsIn(page ReadPage) []uuid.UUID {
+	var out []uuid.UUID
+	seen := map[uuid.UUID]bool{}
+	add := func(ids ...*uuid.UUID) {
+		for _, id := range ids {
+			if id == nil || *id == uuid.Nil || seen[*id] {
+				continue
+			}
+			seen[*id] = true
+			out = append(out, *id)
+		}
+	}
+	addAll := func(groups ...[]uuid.UUID) {
+		for _, ids := range groups {
+			for i := range ids {
+				add(&ids[i])
+			}
+		}
+	}
+	for _, rec := range page.Items {
+		switch d := rec.Data.(type) {
+		case TopicRow:
+			add(d.FeaturedImage)
+			addAll(d.IllustrationImages, d.ExplainerVideos, d.ReferenceDocuments)
+		case ProductRow:
+			add(d.FeaturedImage)
+			addAll(d.GalleryImages, d.DemoVideos, d.CertificateDocuments, d.GuaranteeDocuments)
+		case TariffRow:
+			add(d.FeaturedImage)
+			addAll(d.PricingImages, d.ExplainerVideos, d.TermsDocuments)
+		case ContactRow:
+			add(d.ContactCardImage, d.LocationMapImage)
+			addAll(d.CompanyLegalDocuments)
+		case PolicyRow:
+			addAll(d.CommercePolicyDocuments)
+		}
+	}
+	return out
+}
+
 const (
 	defaultReadLimit = 50
 	maxReadLimit     = 100

@@ -301,6 +301,7 @@ func buildMCPConnector(cfg *config.Config, st *store.Store, kb *kbstore.Store, b
 		AuthCodeTTL:       time.Duration(cfg.MCPAuthCodeTTLSeconds) * time.Second,
 	})
 	uploadSigner := mcpauth.NewUploadTokenSigner(key)
+	mediaSigner := mcpauth.NewMediaReadTokenSigner(key)
 	apiBase := strings.TrimRight(cfg.APIBaseURL, "/")
 	reviewSigner := mcpauth.NewReviewHandoffSigner(key, apiBase, time.Duration(cfg.MCPReviewHandoffTTLSeconds)*time.Second)
 	mcpSrv := mcpserver.New(mcpserver.Deps{
@@ -308,6 +309,8 @@ func buildMCPConnector(cfg *config.Config, st *store.Store, kb *kbstore.Store, b
 		UploadBaseURL:    apiBase,
 		SignUpload:       uploadSigner.Sign,
 		UploadTTLSeconds: cfg.MCPUploadTokenTTLSeconds,
+		SignMediaRead:    mediaSigner.Sign,
+		MediaTTLSeconds:  cfg.MCPMediaTokenTTLSeconds,
 		FrontendBaseURL:  cfg.MCPResolvedFrontendBaseURL(),
 		SignReviewHandoff: func(userID, orgID uuid.UUID) (string, error) {
 			token, _, _, err := reviewSigner.Sign(userID, orgID)
