@@ -1,141 +1,107 @@
 <script setup lang="ts">
-// TariffRecord is the shared /playground (draft) + /knowledge-base (live) row
-// for one tariff (plan Task 14).
-import { computed, reactive, watch } from 'vue'
+// TariffRecord is a read-only display card for one tariff — see
+// TopicRecord.vue's doc comment for the shared props-in/events-out contract.
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Receipt } from 'lucide-vue-next'
-import { usePlayground } from '@/stores/playground'
 import type { TariffRow } from '@/types'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Switch } from '@/components/ui/switch'
+import type { ChangeType } from '@/composables/draftChanges'
+import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
 import MediaChip from './MediaChip.vue'
-import { changedFields, mediaCount, recordState } from './shared'
+import { changedFields, mediaCount, stateForChange } from './shared'
 
 const props = defineProps<{
-  mode: 'draft' | 'live'
-  draftRow?: TariffRow
+  row: TariffRow
   liveRow?: TariffRow
+  changeType?: ChangeType
+  pendingMark?: 'updated' | 'removed'
+  actions: KbAction[]
+  busy?: boolean
+  blockedNote?: string
 }>()
 
-const pg = usePlayground()
+defineEmits<{ edit: []; publish: []; cancel: []; delete: [] }>()
+const { t } = useI18n()
 
-const pricingTypes = [
-  { key: 'fixed', label: 'Фиксированная' },
-  { key: 'percentage', label: 'Процент' },
-  { key: 'tiered', label: 'Пороговая' },
-]
-
-const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
-const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
-const state = computed(() => recordState(props.mode, !!props.liveRow, row.value?.draft))
+const state = computed(() => (props.changeType ? stateForChange(props.changeType) : 'published'))
 const diff = computed(() =>
-  changedFields(props.draftRow, props.liveRow, [
+  changedFields(props.row, props.liveRow, [
     'name', 'price', 'limit_text', 'fee', 'summary', 'pricing_type', 'advantages', 'disadvantages', 'sales_status',
   ])
 )
-
-const buf = reactive({
-  name: '', price: '', limit_text: '', fee: '', summary: '', pricing_type: 'fixed',
-  advantages: '', disadvantages: '', sales_status: 'active',
-})
-let seededFor = ''
-watch(
-  row,
-  (r) => {
-    if (!r || seededFor === r.id) return
-    seededFor = r.id
-    buf.name = r.name
-    buf.price = r.price
-    buf.limit_text = r.limit_text
-    buf.fee = r.fee
-    buf.summary = r.summary
-    buf.pricing_type = r.pricing_type || 'fixed'
-    buf.advantages = r.advantages
-    buf.disadvantages = r.disadvantages
-    buf.sales_status = r.sales_status || 'active'
-  },
-  { immediate: true }
-)
-
-function save() {
-  const r = row.value
-  if (!r) return
-  if (props.mode === 'draft') pg.upsertTariff({ ref: r.ref, ...buf })
-  else pg.liveUpsertTariff({ ref: r.ref, ...buf })
-}
-function approve() {
-  if (row.value) pg.approveEntity('tariffs', row.value.ref)
-}
-function reject() {
-  if (row.value) pg.deleteTariff(row.value.ref)
-}
-function del() {
-  if (row.value) pg.liveDeleteTariff(row.value.ref)
-}
 </script>
 
 <template>
   <RecordShell
-    v-if="row"
     :icon="Receipt"
-    label="Тариф"
+    :label="t('kb.entities.tariffs.singular')"
     :record-key="row.ref"
-    :mode="mode"
     :state="state"
+    :pending-mark="pendingMark"
+    :actions="actions"
     :busy="busy"
-    :pending="row.draft"
-    @save="save"
-    @approve="approve"
-    @reject="reject"
-    @delete="del"
+    :blocked-note="blockedNote"
+    @edit="$emit('edit')"
+    @publish="$emit('publish')"
+    @cancel="$emit('cancel')"
+    @delete="$emit('delete')"
   >
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
       <div>
-        <Input v-model="buf.name" placeholder="Название" class="h-9" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.name') }}</span>
+        <p class="text-sm mt-0.5">{{ row.name || '—' }}</p>
         <FieldDiffNote :show="diff.includes('name')" :was="liveRow?.name ?? ''" />
       </div>
-      <select
-        v-model="buf.pricing_type"
-        class="h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <option v-for="pt in pricingTypes" :key="pt.key" :value="pt.key">{{ pt.label }}</option>
-      </select>
       <div>
-        <Input v-model="buf.price" placeholder="Цена" class="h-9 font-mono" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.pricingType') }}</span>
+        <p class="text-sm mt-0.5">{{ t('kb.pricingType.' + row.pricing_type) }}</p>
+        <FieldDiffNote :show="diff.includes('pricing_type')" :was="liveRow ? t('kb.pricingType.' + liveRow.pricing_type) : ''" />
+      </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.price') }}</span>
+        <p class="text-sm mt-0.5 font-mono">{{ row.price || '—' }}</p>
         <FieldDiffNote :show="diff.includes('price')" :was="liveRow?.price ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.limit_text" placeholder="Лимит" class="h-9 font-mono" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.limitText') }}</span>
+        <p class="text-sm mt-0.5 font-mono">{{ row.limit_text || '—' }}</p>
         <FieldDiffNote :show="diff.includes('limit_text')" :was="liveRow?.limit_text ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.fee" placeholder="Комиссия" class="h-9 font-mono" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.fee') }}</span>
+        <p class="text-sm mt-0.5 font-mono">{{ row.fee || '—' }}</p>
         <FieldDiffNote :show="diff.includes('fee')" :was="liveRow?.fee ?? ''" />
       </div>
-      <label class="flex items-center gap-2 px-1 h-9">
-        <Switch :model-value="buf.sales_status === 'active'" @update:model-value="(v) => (buf.sales_status = v ? 'active' : 'inactive')" />
-        <span class="text-sm text-muted-foreground">Активен для продажи</span>
-      </label>
+      <div class="flex items-center text-sm">
+        <span :class="row.sales_status === 'active' ? 'text-emerald-700' : 'text-muted-foreground'">
+          {{ row.sales_status === 'active' ? t('kb.fields.salesStatusActive') : t('kb.fields.salesStatusInactive') }}
+        </span>
+      </div>
     </div>
-    <Textarea v-model="buf.summary" rows="2" placeholder="Краткое описание тарифа…" class="min-h-0 text-[14px]" />
-    <FieldDiffNote :show="diff.includes('summary')" :was="liveRow?.summary ?? ''" />
+    <div>
+      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.summary') }}</span>
+      <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.summary || '—' }}</p>
+      <FieldDiffNote :show="diff.includes('summary')" :was="liveRow?.summary ?? ''" />
+    </div>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
       <div>
-        <Textarea v-model="buf.advantages" rows="2" placeholder="Преимущества…" class="min-h-0 text-[14px]" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.advantages') }}</span>
+        <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.advantages || '—' }}</p>
         <FieldDiffNote :show="diff.includes('advantages')" :was="liveRow?.advantages ?? ''" />
       </div>
       <div>
-        <Textarea v-model="buf.disadvantages" rows="2" placeholder="Ограничения…" class="min-h-0 text-[14px]" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.disadvantages') }}</span>
+        <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.disadvantages || '—' }}</p>
         <FieldDiffNote :show="diff.includes('disadvantages')" :was="liveRow?.disadvantages ?? ''" />
       </div>
     </div>
     <div class="flex items-center gap-1.5 flex-wrap">
-      <MediaChip label="Изображение" :count="mediaCount(row.featured_image)" />
-      <MediaChip label="Прайс-изображения" :count="mediaCount(row.pricing_images)" />
-      <MediaChip label="Видео" :count="mediaCount(row.explainer_videos)" />
-      <MediaChip label="Условия" :count="mediaCount(row.terms_documents)" />
+      <MediaChip :label="t('kb.media.image')" :count="mediaCount(row.featured_image)" />
+      <MediaChip :label="t('kb.media.pricingImages')" :count="mediaCount(row.pricing_images)" />
+      <MediaChip :label="t('kb.media.videos')" :count="mediaCount(row.explainer_videos)" />
+      <MediaChip :label="t('kb.media.terms')" :count="mediaCount(row.terms_documents)" />
     </div>
   </RecordShell>
 </template>

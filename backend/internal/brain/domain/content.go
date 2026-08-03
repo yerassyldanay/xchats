@@ -25,7 +25,6 @@ type Topic struct {
 	Slug     string
 	Language string
 	Title    string
-	Summary  string
 	BodyMD   string
 }
 

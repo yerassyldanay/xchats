@@ -1,85 +1,68 @@
 <script setup lang="ts">
-// TopicRecord is the shared /playground (draft) + /knowledge-base (live) row
-// for one topic — replaces the two pages' previously independent, duplicated
-// markup (plan Task 14).
-import { computed, reactive, watch } from 'vue'
+// TopicRecord is a read-only display card for one topic — reused by
+// Черновик (a pending ChangeEntry, actions Изменить/Опубликовать/Отменить)
+// and Знаний база (a published row, actions Изменить/Удалить). It never
+// calls the store or holds an edit buffer: editing happens in a modal
+// (forms/TopicForm.vue via useKbModal), this component only displays and
+// relays action clicks.
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ListTree } from 'lucide-vue-next'
-import { usePlayground } from '@/stores/playground'
 import type { TopicRow } from '@/types'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import type { ChangeType } from '@/composables/draftChanges'
+import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
 import MediaChip from './MediaChip.vue'
-import { changedFields, mediaCount, recordState } from './shared'
+import { changedFields, mediaCount, stateForChange } from './shared'
 
 const props = defineProps<{
-  mode: 'draft' | 'live'
-  draftRow?: TopicRow
+  row: TopicRow
   liveRow?: TopicRow
+  changeType?: ChangeType // absent on Знаний база — a published row has no draft context
+  pendingMark?: 'updated' | 'removed' // Знаний база only — see RecordShell's own doc comment
+  actions: KbAction[]
+  busy?: boolean
+  blockedNote?: string
 }>()
 
-const pg = usePlayground()
+defineEmits<{ edit: []; publish: []; cancel: []; delete: [] }>()
+const { t } = useI18n()
 
-const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
-const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
-const state = computed(() => recordState(props.mode, !!props.liveRow, row.value?.draft))
-const diff = computed(() => changedFields(props.draftRow, props.liveRow, ['title', 'body_md']))
-
-const buf = reactive({ title: '', body_md: '' })
-let seededFor = ''
-watch(
-  row,
-  (r) => {
-    if (!r || seededFor === r.id) return
-    seededFor = r.id
-    buf.title = r.title
-    buf.body_md = r.body_md
-  },
-  { immediate: true }
-)
-
-function save() {
-  const r = row.value
-  if (!r) return
-  if (props.mode === 'draft') pg.upsertTopic({ slug: r.slug, ...buf })
-  else pg.liveUpsertTopic({ slug: r.slug, ...buf })
-}
-function approve() {
-  if (row.value) pg.approveEntity('topics', row.value.slug)
-}
-function reject() {
-  if (row.value) pg.deleteTopic(row.value.slug)
-}
-function del() {
-  if (row.value) pg.liveDeleteTopic(row.value.slug)
-}
+const state = computed(() => (props.changeType ? stateForChange(props.changeType) : 'published'))
+const diff = computed(() => changedFields(props.row, props.liveRow, ['title', 'body_md']))
 </script>
 
 <template>
   <RecordShell
-    v-if="row"
     :icon="ListTree"
-    label="Тема"
+    :label="t('kb.entities.topics.singular')"
     :record-key="row.slug"
-    :mode="mode"
     :state="state"
+    :pending-mark="pendingMark"
+    :actions="actions"
     :busy="busy"
-    :pending="row.draft"
-    @save="save"
-    @approve="approve"
-    @reject="reject"
-    @delete="del"
+    :blocked-note="blockedNote"
+    @edit="$emit('edit')"
+    @publish="$emit('publish')"
+    @cancel="$emit('cancel')"
+    @delete="$emit('delete')"
   >
-    <Input v-model="buf.title" placeholder="Название" class="h-9" />
-    <FieldDiffNote :show="diff.includes('title')" :was="liveRow?.title ?? ''" />
-    <Textarea v-model="buf.body_md" rows="3" placeholder="Текст темы…" class="min-h-0 text-[14px]" />
-    <FieldDiffNote :show="diff.includes('body_md')" :was="liveRow?.body_md ?? ''" />
+    <div>
+      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.title') }}</span>
+      <p class="text-sm mt-0.5">{{ row.title || '—' }}</p>
+      <FieldDiffNote :show="diff.includes('title')" :was="liveRow?.title ?? ''" />
+    </div>
+    <div>
+      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.body') }}</span>
+      <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.body_md || '—' }}</p>
+      <FieldDiffNote :show="diff.includes('body_md')" :was="liveRow?.body_md ?? ''" />
+    </div>
     <div class="flex items-center gap-1.5 flex-wrap">
-      <MediaChip label="Изображение" :count="mediaCount(row.featured_image)" />
-      <MediaChip label="Иллюстрации" :count="mediaCount(row.illustration_images)" />
-      <MediaChip label="Видео" :count="mediaCount(row.explainer_videos)" />
-      <MediaChip label="Документы" :count="mediaCount(row.reference_documents)" />
+      <MediaChip :label="t('kb.media.image')" :count="mediaCount(row.featured_image)" />
+      <MediaChip :label="t('kb.media.illustrations')" :count="mediaCount(row.illustration_images)" />
+      <MediaChip :label="t('kb.media.videos')" :count="mediaCount(row.explainer_videos)" />
+      <MediaChip :label="t('kb.media.documents')" :count="mediaCount(row.reference_documents)" />
     </div>
   </RecordShell>
 </template>

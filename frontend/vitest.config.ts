@@ -1,18 +1,40 @@
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vitest/config'
+import vue from '@vitejs/plugin-vue'
 
-// Separate from vite.config.ts on purpose — the unit suite (src/lib/**/*.test.ts) is
-// pure TypeScript logic (no Vue components, no DOM), so it needs neither the Vue
-// plugin nor a browser-like environment; keeping it standalone avoids coupling the
-// test runner's config to the dev-server-focused settings in vite.config.ts.
+// Two projects, opted into by filename suffix:
+//   - unit: pure TypeScript logic (no Vue components, no DOM) — unchanged
+//     from before the Черновик/Knowledge Base component-test infra existed.
+//   - dom: Vue SFC compilation + jsdom, for *.dom.test.ts files that mount
+//     real components with @vue/test-utils.
+// Kept as ONE config (rather than two separate vitest.config files) so
+// `vitest run`/`vitest` picks up both without extra scripting.
 export default defineConfig({
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
-    },
-  },
   test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
+    projects: [
+      {
+        resolve: {
+          alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+        },
+        test: {
+          name: 'unit',
+          environment: 'node',
+          include: ['src/**/*.test.ts'],
+          exclude: ['src/**/*.dom.test.ts'],
+        },
+      },
+      {
+        plugins: [vue()],
+        resolve: {
+          alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+        },
+        test: {
+          name: 'dom',
+          environment: 'jsdom',
+          include: ['src/**/*.dom.test.ts'],
+          setupFiles: ['src/test/setup.ts'],
+        },
+      },
+    ],
   },
 })

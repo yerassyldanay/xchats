@@ -1,111 +1,85 @@
 <script setup lang="ts">
-// ProductRecord is the shared /playground (draft) + /knowledge-base (live)
-// row for one product (plan Task 14).
-import { computed, reactive, watch } from 'vue'
+// ProductRecord is a read-only display card for one product — see
+// TopicRecord.vue's doc comment for the shared props-in/events-out contract.
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Package } from 'lucide-vue-next'
-import { usePlayground } from '@/stores/playground'
 import type { ProductRow } from '@/types'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Switch } from '@/components/ui/switch'
+import type { ChangeType } from '@/composables/draftChanges'
+import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
 import MediaChip from './MediaChip.vue'
-import { changedFields, mediaCount, recordState } from './shared'
+import { changedFields, mediaCount, stateForChange } from './shared'
 
 const props = defineProps<{
-  mode: 'draft' | 'live'
-  draftRow?: ProductRow
+  row: ProductRow
   liveRow?: ProductRow
+  changeType?: ChangeType
+  pendingMark?: 'updated' | 'removed'
+  actions: KbAction[]
+  busy?: boolean
+  blockedNote?: string
 }>()
 
-const pg = usePlayground()
+defineEmits<{ edit: []; publish: []; cancel: []; delete: [] }>()
+const { t } = useI18n()
 
-const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
-const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
-const state = computed(() => recordState(props.mode, !!props.liveRow, row.value?.draft))
-const diff = computed(() =>
-  changedFields(props.draftRow, props.liveRow, ['name', 'price', 'category', 'description', 'sales_status', 'in_stock'])
-)
-
-const buf = reactive({ name: '', price: '', category: '', description: '', sales_status: 'active', in_stock: true })
-let seededFor = ''
-watch(
-  row,
-  (r) => {
-    if (!r || seededFor === r.id) return
-    seededFor = r.id
-    buf.name = r.name
-    buf.price = r.price
-    buf.category = r.category
-    buf.description = r.description
-    buf.sales_status = r.sales_status || 'active'
-    buf.in_stock = r.in_stock
-  },
-  { immediate: true }
-)
-
-function save() {
-  const r = row.value
-  if (!r) return
-  if (props.mode === 'draft') pg.upsertProduct({ ref: r.ref, ...buf })
-  else pg.liveUpsertProduct({ ref: r.ref, ...buf })
-}
-function approve() {
-  if (row.value) pg.approveEntity('products', row.value.ref)
-}
-function reject() {
-  if (row.value) pg.deleteProduct(row.value.ref)
-}
-function del() {
-  if (row.value) pg.liveDeleteProduct(row.value.ref)
-}
+const state = computed(() => (props.changeType ? stateForChange(props.changeType) : 'published'))
+const diff = computed(() => changedFields(props.row, props.liveRow, ['name', 'price', 'category', 'description', 'sales_status', 'in_stock']))
 </script>
 
 <template>
   <RecordShell
-    v-if="row"
     :icon="Package"
-    label="Товар"
+    :label="t('kb.entities.products.singular')"
     :record-key="row.ref"
-    :mode="mode"
     :state="state"
+    :pending-mark="pendingMark"
+    :actions="actions"
     :busy="busy"
-    :pending="row.draft"
-    @save="save"
-    @approve="approve"
-    @reject="reject"
-    @delete="del"
+    :blocked-note="blockedNote"
+    @edit="$emit('edit')"
+    @publish="$emit('publish')"
+    @cancel="$emit('cancel')"
+    @delete="$emit('delete')"
   >
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
       <div>
-        <Input v-model="buf.name" placeholder="Название" class="h-9" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.name') }}</span>
+        <p class="text-sm mt-0.5">{{ row.name || '—' }}</p>
         <FieldDiffNote :show="diff.includes('name')" :was="liveRow?.name ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.price" placeholder="Цена" class="h-9 font-mono" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.price') }}</span>
+        <p class="text-sm mt-0.5 font-mono">{{ row.price || '—' }}</p>
         <FieldDiffNote :show="diff.includes('price')" :was="liveRow?.price ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.category" placeholder="Категория" class="h-9" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.category') }}</span>
+        <p class="text-sm mt-0.5">{{ row.category || '—' }}</p>
         <FieldDiffNote :show="diff.includes('category')" :was="liveRow?.category ?? ''" />
       </div>
-      <label class="flex items-center gap-2 px-1 h-9">
-        <Switch v-model="buf.in_stock" /> <span class="text-sm text-muted-foreground">В наличии</span>
-      </label>
-      <label class="flex items-center gap-2 px-1 h-9">
-        <Switch :model-value="buf.sales_status === 'active'" @update:model-value="(v) => (buf.sales_status = v ? 'active' : 'inactive')" />
-        <span class="text-sm text-muted-foreground">Активен для продажи</span>
-      </label>
+      <div class="flex flex-col justify-center gap-1 text-sm">
+        <span :class="row.in_stock ? 'text-emerald-700' : 'text-muted-foreground'">
+          {{ row.in_stock ? t('kb.fields.inStockYes') : t('kb.fields.inStockNo') }}
+        </span>
+        <span :class="row.sales_status === 'active' ? 'text-emerald-700' : 'text-muted-foreground'">
+          {{ row.sales_status === 'active' ? t('kb.fields.salesStatusActive') : t('kb.fields.salesStatusInactive') }}
+        </span>
+      </div>
     </div>
-    <Textarea v-model="buf.description" rows="2" placeholder="Описание товара…" class="min-h-0 text-[14px]" />
-    <FieldDiffNote :show="diff.includes('description')" :was="liveRow?.description ?? ''" />
+    <div>
+      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.description') }}</span>
+      <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.description || '—' }}</p>
+      <FieldDiffNote :show="diff.includes('description')" :was="liveRow?.description ?? ''" />
+    </div>
     <div class="flex items-center gap-1.5 flex-wrap">
-      <MediaChip label="Изображение" :count="mediaCount(row.featured_image)" />
-      <MediaChip label="Галерея" :count="mediaCount(row.gallery_images)" />
-      <MediaChip label="Видео" :count="mediaCount(row.demo_videos)" />
-      <MediaChip label="Сертификаты" :count="mediaCount(row.certificate_documents)" />
-      <MediaChip label="Гарантия" :count="mediaCount(row.guarantee_documents)" />
+      <MediaChip :label="t('kb.media.image')" :count="mediaCount(row.featured_image)" />
+      <MediaChip :label="t('kb.media.gallery')" :count="mediaCount(row.gallery_images)" />
+      <MediaChip :label="t('kb.media.videos')" :count="mediaCount(row.demo_videos)" />
+      <MediaChip :label="t('kb.media.certificates')" :count="mediaCount(row.certificate_documents)" />
+      <MediaChip :label="t('kb.media.guarantee')" :count="mediaCount(row.guarantee_documents)" />
     </div>
   </RecordShell>
 </template>

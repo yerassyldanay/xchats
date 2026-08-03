@@ -9,20 +9,21 @@ test('login → chatboard (nav rail + chat list)', async ({ page }) => {
 test('NavRail exposes the two Knowledge-Base destinations', async ({ page }) => {
   await login(page)
   // hover the rail icons → tooltips (Reka renders tooltip content as text)
-  await page.getByRole('link', { name: 'Черновик базы знаний' }).first().hover()
+  await page.getByRole('link', { name: 'Черновик' }).first().hover()
   await page.goto('/knowledge-base')
   await expect(page.getByRole('heading', { name: 'База знаний' })).toBeVisible()
 })
 
-// /knowledge-base shows and edits the LIVE tables only — no draft concept, no
-// «Правки» tab (see plan "Playground redesign": drafting lives on /playground).
-test('База знаний: the live KB shows stat cards + tabs, no draft/Правки here', async ({ page }) => {
+// /knowledge-base is the sole creation/edit surface (kb-draft-review-
+// boundaries) — every write here stages into the draft, so there is no
+// "Правки" tab, and the tab row is the fixed seven kinds plus Промпт/Файлы,
+// never dynamic the way Черновик's is.
+test('База знаний: the live KB shows the fixed tab row, no draft/Правки here', async ({ page }) => {
   await login(page)
   await page.goto('/knowledge-base')
   await expect(page.getByRole('heading', { name: 'База знаний' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Темы' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Тарифы' })).toBeVisible()
-  // Зоны доставки + Промпт are this PR's own new tabs (display + edit what the AI reads).
   await expect(page.getByRole('button', { name: 'Зоны доставки' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Промпт' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Правки' })).toHaveCount(0)
@@ -42,15 +43,16 @@ test('База знаний: Промпт tab renders the rendered prompt with i
   await expect(page.getByText('Собран успешно')).toBeVisible()
 })
 
-// /playground mirrors the real KB structure while keeping every edit pending.
-test('Черновик базы знаний mirrors the live knowledge-base tabs', async ({ page }) => {
+// Черновик is review-only (decision 1): no Add button anywhere, no
+// create-form placeholder text of any kind — the opposite of what
+// /knowledge-base offers. This deliberately does NOT assert the page is
+// globally empty (another test may have something staged — see
+// kb-draft.spec.ts's own isolation rules); it only asserts invariants that
+// must hold regardless of what else is pending.
+test('Черновик is review-only: no Add button, no create-form placeholder', async ({ page }) => {
   await login(page)
   await page.goto('/playground')
-  await expect(page.getByRole('heading', { name: 'База знаний' })).toBeVisible()
-  await expect(page.getByText('Черновик', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Темы' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Товары' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Тарифы' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Зоны доставки' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Черновик' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Добавить/ })).toHaveCount(0)
   await expect(page.getByPlaceholder('Вставьте ссылку или опишите продукт, доставку, оплату, тарифы, цены…')).toHaveCount(0)
 })

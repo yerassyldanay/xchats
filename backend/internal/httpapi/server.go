@@ -306,6 +306,7 @@ func (s *Server) Router() *gin.Engine {
 	pg.PATCH("/draft/config", s.handlePlaygroundPatchConfig)
 	pg.POST("/draft/approve", s.handlePlaygroundApprove)
 	pg.POST("/draft/approve/:kind/:id", s.handlePlaygroundApproveEntity)
+	pg.DELETE("/draft/changes/:kind/:key", s.handlePlaygroundCancelChange)
 
 	// KB — the live-only editor (/knowledge-base). Every write here lands
 	// directly in the live ai_ tables: no draft blob, no approve step, so it
