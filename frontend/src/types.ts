@@ -64,6 +64,30 @@ export interface WhatsAppAccount {
   created_at: string | null
 }
 
+// AutoResponseWindow is one non-wrapping [start,end) interval on a single
+// weekday, "HH:MM" clock strings ("24:00" is the one allowed value equal to
+// a full day). weekday follows time.Weekday / Postgres EXTRACT(DOW): Sunday
+// is 0, Saturday is 6 — never ISO's Monday=1.
+export interface AutoResponseWindow {
+  weekday: number
+  start: string
+  end: string
+}
+// AutoResponse is an account's auto-response policy — always present on
+// Account (never null), materialized server-side from a disabled default
+// when the account has no configured row yet.
+export interface AutoResponse {
+  enabled: boolean
+  reply_mode: 'ai' | 'fixed'
+  fixed_text: string
+  timezone: string
+  delay_seconds: number
+  cooldown_seconds: number
+  skip_when_escalated: boolean
+  pause_when_assigned: boolean
+  windows: AutoResponseWindow[]
+}
+
 // Account is the channel-neutral shape GET /accounts returns — one list for
 // every channel. external_handle is the phone number for WhatsApp and
 // "@botname" for Telegram; the webhook_* fields are Telegram health and stay
@@ -85,6 +109,7 @@ export interface Account {
   webhook_registered_at: string | null
   webhook_last_checked_at: string | null
   webhook_last_error: string | null
+  auto_response: AutoResponse
 }
 
 // TelegramAccountResponse is what the /telegram-accounts lifecycle routes

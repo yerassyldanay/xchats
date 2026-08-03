@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/yerassyldanay/xchats/backend/internal/autoresponse"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
@@ -25,6 +27,12 @@ import (
 	"github.com/yerassyldanay/xchats/backend/messaging"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
+
+// maxTriggerAge bounds how old a trigger message may be and still arm an
+// auto-response job. Without it, reconnecting a number (which can replay a
+// backlog of old messages) would auto-answer yesterday's conversations the
+// moment their drafts regenerate.
+const maxTriggerAge = 15 * time.Minute
 
 // OutboundTask sends one part (text OR one media file). Channel selects the
 // messaging.ChannelSender it routes through (Worker.Senders) — text AND media
@@ -59,8 +67,21 @@ type MediaDownloadTask struct {
 }
 
 // AIDraftTask runs the response engine for a chat's latest inbound message.
+// FromDebounce is true only when the debounce timer/sweeper fired this task —
+// handleSuggest's manual "Подсказать ответ" leaves it false, so an operator
+// regenerate can never arm an auto-response job.
 type AIDraftTask struct {
-	ChatID uuid.UUID
+	ChatID       uuid.UUID
+	FromDebounce bool
+}
+
+// DebounceTouchTask records that chatID has a fresh inbound message, resetting
+// its quiet-period timer instead of generating a draft immediately. See
+// debounce.go.
+type DebounceTouchTask struct {
+	ChatID           uuid.UUID
+	Channel          string
+	TriggerMessageID uuid.UUID
 }
 
 // Worker holds the dependencies for all queue handlers.
@@ -74,6 +95,31 @@ type Worker struct {
 	Response *response.Service         // the multichannel response engine's entry point
 	Senders  *messaging.SenderRegistry // channel -> ChannelSender, for outbound text sends
 	Log      *slog.Logger
+
+	// DebounceQuiet/DebounceCap tune the draft debounce (main.go consts,
+	// injected here rather than hardcoded so tests can shrink them). Zero
+	// values are invalid — main.go always sets these in production wiring.
+	DebounceQuiet      time.Duration
+	DebounceCap        time.Duration
+	DebounceSweepBatch int
+
+	// Auto-response sweeper tuning (main.go consts); see autoresponse.go's
+	// defaulting helpers for the fallback a zero value gets.
+	AutoResponseSweepBatch     int
+	AutoResponseClaimTimeout   time.Duration
+	AutoResponseMaxDeliveryLag time.Duration
+	AutoResponseJobRetention   time.Duration
+
+	// debounceTimers holds one in-process timer per chat awaiting a debounced
+	// draft generation, guarded by debounceMu. The chat_draft_debounce row is
+	// the durability guarantee (see RunDebounceSweep); these timers are only a
+	// low-latency optimization on top of it. debounceWG tracks every timer
+	// callback that is armed and has not yet either fired or been cancelled —
+	// StopDebounceTimers waits on it so shutdown can be sure none is still
+	// about to publish on a queue that's about to close.
+	debounceMu     sync.Mutex
+	debounceTimers map[uuid.UUID]*time.Timer
+	debounceWG     sync.WaitGroup
 }
 
 // publishTimeout bounds every enqueue a handler makes. A worker that fans work
@@ -104,6 +150,8 @@ func (w *Worker) Handle(ctx context.Context, m queue.Message) error {
 		return w.handleOutboundSend(ctx, m.Payload.(OutboundTask))
 	case queue.KindAIDraft:
 		return w.handleAIDraft(ctx, m.Payload.(AIDraftTask))
+	case queue.KindDebounceTouch:
+		return w.handleDebounceTouch(ctx, m.Payload.(DebounceTouchTask))
 	}
 	return nil
 }
@@ -184,13 +232,18 @@ func (w *Worker) handleWaEvent(ctx context.Context, raw []byte) error {
 	if m.Media != nil {
 		w.ingestMedia(ctx, res.MessageID, account.InstanceName, m)
 	}
-	// Auto-draft: a brand-new inbound customer message gets a fresh AI suggestion
-	// pushed to the inbox without anyone pressing "Suggest". handleAIDraft's
+	// Auto-draft: a brand-new inbound customer message debounces into a fresh AI
+	// suggestion pushed to the inbox without anyone pressing "Suggest" — see
+	// debounce.go for why a touch, not an immediate generation. handleAIDraft's
 	// WriteDraftSet supersedes the chat's prior pending options, so the panel
 	// always reflects the latest message instead of a stale first draft. Outbound
 	// echoes (direction "out") and dedup hits (handled above) never reach here.
-	if m.Direction == "in" {
-		_ = w.publish(ctx, queue.Message{Kind: queue.KindAIDraft, Payload: AIDraftTask{ChatID: res.ChatID}})
+	// messages.set is Evolution's history backfill, not a live arrival — a
+	// reconnecting number must not debounce (and eventually auto-draft) it.
+	if m.Direction == "in" && env.Event != "messages.set" {
+		_ = w.publish(ctx, queue.Message{Kind: queue.KindDebounceTouch, Payload: DebounceTouchTask{
+			ChatID: res.ChatID, Channel: account.Channel, TriggerMessageID: res.MessageID,
+		}})
 	}
 	return nil
 }
@@ -372,9 +425,15 @@ func (w *Worker) SweepTelegramMedia(ctx context.Context, olderThan time.Duration
 }
 
 // StartTelegramMediaSweeper runs SweepTelegramMedia once at startup (picking up
-// anything a crash left behind) and then on a ticker until ctx is done.
-func (w *Worker) StartTelegramMediaSweeper(ctx context.Context, every, olderThan time.Duration, limit int) {
+// anything a crash left behind) and then on a ticker until ctx is done. The
+// returned channel closes once the goroutine has fully exited, so a caller
+// can bound how long it waits for that before calling queue.Close() —
+// queue.InMem.Publish is a bare channel send outside process's recover, so a
+// sweep publishing mid-shutdown would otherwise race a concurrent Close().
+func (w *Worker) StartTelegramMediaSweeper(ctx context.Context, every, olderThan time.Duration, limit int) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		if _, err := w.SweepTelegramMedia(ctx, 0, limit); err != nil {
 			w.Log.Error("telegram media sweep (startup)", "err", err)
 		}
@@ -391,6 +450,7 @@ func (w *Worker) StartTelegramMediaSweeper(ctx context.Context, every, olderThan
 			}
 		}
 	}()
+	return done
 }
 
 // TelegramBlobID is the deterministic blob key for a Telegram attachment: keyed
@@ -485,6 +545,11 @@ func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
 // channel from the chat's own account (never hardcoded), so the exact same
 // path serves a WhatsApp conversation and a simulator conversation's async
 // ("wait_for_response=false") request — both ride this same queue task.
+//
+// When t.FromDebounce is true, the draft that was just written is guaranteed
+// to exist and be the newest for this chat (debounce.go ensures at most one
+// generation per burst), so this is also the one place that arms the
+// account's auto-response job.
 func (w *Worker) handleAIDraft(ctx context.Context, t AIDraftTask) error {
 	chat, err := w.Store.ChatByID(ctx, t.ChatID)
 	if err != nil {
@@ -498,6 +563,7 @@ func (w *Worker) handleAIDraft(ctx context.Context, t AIDraftTask) error {
 	if err != nil {
 		return err
 	}
+	var primary *store.Draft
 	for _, p := range persisted {
 		id, perr := uuid.Parse(p.ID)
 		if perr != nil {
@@ -510,8 +576,76 @@ func (w *Worker) handleAIDraft(ctx context.Context, t AIDraftTask) error {
 			continue
 		}
 		w.Hub.Broadcast("ai_draft.created", dto.MapDraft(d))
+		if primary == nil || d.OptionOrdinal < primary.OptionOrdinal {
+			dd := d
+			primary = &dd
+		}
+	}
+	if t.FromDebounce && primary != nil {
+		w.armAutoResponse(ctx, account, chat, *primary)
 	}
 	return nil
+}
+
+// armAutoResponse arms the account's auto-response job for draft, if the
+// account has an enabled policy covering the trigger's arrival time. Every
+// guard fails closed: no policy row, a disabled policy, a stale or missing
+// trigger timestamp, or an unparseable timezone all leave the job unarmed —
+// the operator sees exactly today's behaviour, a suggestion nobody auto-sends.
+func (w *Worker) armAutoResponse(ctx context.Context, account store.Account, chat store.Chat, draft store.Draft) {
+	if !account.OrganizationID.Valid {
+		return
+	}
+	policy, err := w.Store.AutoResponsePolicy(ctx, account.ID)
+	if err != nil {
+		if err != store.ErrNotFound {
+			w.Log.Error("auto-response: load policy", "account_id", account.ID, "err", err)
+		}
+		return
+	}
+	if !policy.Enabled {
+		return
+	}
+	if !draft.TriggerMessageID.Valid {
+		return
+	}
+	trigger, err := w.Store.MessageByID(ctx, draft.TriggerMessageID.UUID)
+	if err != nil {
+		w.Log.Error("auto-response: load trigger message", "message_id", draft.TriggerMessageID.UUID, "err", err)
+		return
+	}
+	// A zero provider timestamp fails closed rather than defaulting to "now" —
+	// that would auto-arm on any inbound with no timestamp, provider glitch or
+	// not.
+	if trigger.MessageTS == nil || trigger.MessageTS.IsZero() {
+		return
+	}
+	arrivedAt := *trigger.MessageTS
+	if time.Since(arrivedAt) > maxTriggerAge {
+		return
+	}
+	loc, err := time.LoadLocation(policy.Timezone)
+	if err != nil {
+		// A bad timezone fails closed, never falls back to UTC.
+		w.Log.Error("auto-response: bad timezone", "account_id", account.ID, "timezone", policy.Timezone, "err", err)
+		return
+	}
+	if !autoresponse.Covers(arrivedAt, loc, policy.Windows) {
+		return
+	}
+	arg := store.ArmAutoResponseJobArg{
+		OrganizationID:   account.OrganizationID.UUID,
+		AccountID:        account.ID,
+		ChatID:           chat.ID,
+		Channel:          account.Channel,
+		TriggerMessageID: draft.TriggerMessageID.UUID,
+		TriggerArrivedAt: arrivedAt,
+		DraftID:          draft.ID,
+		DelaySeconds:     policy.DelaySeconds,
+	}
+	if err := w.Store.ArmAutoResponseJob(ctx, arg); err != nil {
+		w.Log.Error("auto-response: arm job", "chat_id", chat.ID, "err", err)
+	}
 }
 
 // --- helpers --------------------------------------------------------------

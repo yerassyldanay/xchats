@@ -251,7 +251,12 @@ func (s *Server) handleGetOrg(c *gin.Context) {
 		fail(c, http.StatusNotFound, ErrNotFound, "no organization")
 		return
 	}
-	ok(c, gin.H{"id": org.ID, "name": org.Name, "auto_response_mode": org.RespondMode})
+	// auto_response_mode intentionally dropped: it was fed by the dead
+	// organizations.respond_mode column, nothing in the frontend read it, and
+	// leaving it next to the real per-account auto-response feature
+	// (PUT /accounts/:id/auto-response) was actively misleading. The column
+	// itself is untouched — that cleanup is separate.
+	ok(c, gin.H{"id": org.ID, "name": org.Name})
 }
 
 func (s *Server) handleListUsers(c *gin.Context) {

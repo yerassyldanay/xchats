@@ -5,6 +5,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 )
@@ -17,6 +18,10 @@ const (
 	KindMediaDownload Kind = "media_download"
 	KindOutboundSend  Kind = "outbound_send"
 	KindAIDraft       Kind = "ai_draft"
+	// KindDebounceTouch coalesces a burst of inbound messages into one
+	// KindAIDraft: touching resets a per-chat quiet timer instead of
+	// generating a draft immediately. See internal/worker/debounce.go.
+	KindDebounceTouch Kind = "debounce_touch"
 )
 
 // Message is one unit of async work. Payload is kind-specific.
@@ -60,13 +65,30 @@ func NewInMem(buffer, workers int, log *slog.Logger) *InMem {
 	return &InMem{ch: make(chan Message, buffer), workers: workers, log: log}
 }
 
+// errQueueClosed is returned by Publish when it loses a race against Close.
+var errQueueClosed = errors.New("queue: closed")
+
 // Publish enqueues a message, tracking it as in-flight so Wait() can drain.
 // When the buffer is full it blocks only until ctx is done, then returns
 // ctx.Err() and undoes the in-flight accounting — so backpressure surfaces as a
 // retryable error at the producer instead of wedging the calling goroutine
 // forever (the send is a plain `q.ch <- m` otherwise).
-func (q *InMem) Publish(ctx context.Context, m Message) error {
+//
+// The recover below is a second, independent guard from process's: process
+// protects consumers from a panicking HANDLER; this protects any PRODUCER —
+// in particular a background goroutine with no request/response to report
+// to, such as a debounce timer's callback (internal/worker/debounce.go) —
+// from a send racing a concurrent Close(). Without it, a producer that loses
+// that race brings down the whole process with an unrecoverable
+// "send on closed channel" panic instead of seeing an ordinary error.
+func (q *InMem) Publish(ctx context.Context, m Message) (err error) {
 	q.wg.Add(1)
+	defer func() {
+		if r := recover(); r != nil {
+			q.wg.Done()
+			err = errQueueClosed
+		}
+	}()
 	select {
 	case q.ch <- m:
 		return nil

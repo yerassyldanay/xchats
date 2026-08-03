@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
@@ -221,7 +222,22 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	jar, _ := cookiejar.New(nil)
 	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, cfg: cfg, fake: fake, tg: tgFake,
 		queue: q, store: st, worker: w, orgID: org.ID, accountID: accountID}
-	t.Cleanup(func() { ts.Close(); q.Close(); st.Close() })
+	t.Cleanup(func() {
+		ts.Close()
+		// Mirror main.go's two-phase shutdown ordering. Phase 1: let any
+		// debounce timer still firing finish its publish. Phase 2, only once
+		// phase 1 is done (so nothing NEW can be published): drain the queue,
+		// so a task a timer just published isn't still mid-process on a
+		// worker goroutine when q.Close()/st.Close() run out from under it.
+		// queue.Publish also recovers from that race now, but this keeps the
+		// common case clean instead of relying on the recover.
+		waitWithTimeout(w.StopDebounceTimers(), 2*time.Second)
+		queueDrained := make(chan struct{})
+		go func() { q.Wait(); close(queueDrained) }()
+		waitWithTimeout(queueDrained, 2*time.Second)
+		q.Close()
+		st.Close()
+	})
 	h.login()
 	return h
 }
@@ -276,6 +292,68 @@ func (h *harness) postJSON(path string, body any) (*http.Response, map[string]js
 	resp.Body.Close()
 	h.queue.Wait()
 	return resp, env
+}
+
+func (h *harness) putJSON(path string, body any) (*http.Response, map[string]json.RawMessage) {
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPut, h.srv.URL+path, bytes.NewReader(b))
+	if err != nil {
+		h.t.Fatalf("PUT %s: %v", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.t.Fatalf("PUT %s: %v", path, err)
+	}
+	var env map[string]json.RawMessage
+	_ = json.NewDecoder(resp.Body).Decode(&env)
+	resp.Body.Close()
+	h.queue.Wait()
+	return resp, env
+}
+
+// waitWithTimeout blocks until done closes or timeout elapses, whichever is
+// first — the bounded-wait building block newHarnessWithLLM's Cleanup uses
+// to mirror main.go's shutdown ordering.
+func waitWithTimeout(done <-chan struct{}, timeout time.Duration) {
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
+}
+
+// waitFor polls cond until it returns true, or fails the test after ~2s.
+// The debounce touch (see internal/worker/debounce.go) arms a real timer on
+// its own goroutine, outside anything h.queue.Wait() tracks — this is the
+// one kind of async work in this harness that a bare postJSON/webhook call
+// cannot wait out, so any assertion that depends on a debounced draft having
+// been generated needs to poll for it instead of reading right away.
+func (h *harness) waitFor(desc string, cond func() bool) {
+	h.t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("timed out waiting for: %s", desc)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// waitForDraftCount polls chatID's ai-drafts list until it holds exactly
+// want items (see waitFor) and returns the final list.
+func (h *harness) waitForDraftCount(chatID string, want int) []map[string]any {
+	h.t.Helper()
+	var drafts struct {
+		Items []map[string]any `json:"items"`
+	}
+	h.waitFor(fmt.Sprintf("chat %s to have %d draft(s)", chatID, want), func() bool {
+		h.get("/xchats/api/v1/chats/"+chatID+"/ai-drafts", &drafts)
+		return len(drafts.Items) == want
+	})
+	return drafts.Items
 }
 
 func (h *harness) patchJSON(path string, body any) (*http.Response, map[string]json.RawMessage) {

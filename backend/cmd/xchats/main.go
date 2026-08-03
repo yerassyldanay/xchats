@@ -15,6 +15,15 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	// tzdata embeds the IANA timezone database in the binary — insurance
+	// against a future scratch base image that doesn't ship
+	// /usr/share/zoneinfo (today's gcr.io/distroless/static-debian12 does).
+	// Auto-response schedules resolve their configured IANA zone through
+	// time.LoadLocation; without this import (or a mounted zoneinfo), that
+	// call would fail on such an image and every schedule would fail closed
+	// with a logged error rather than silently misfiring — but it should
+	// never come to that.
+	_ "time/tzdata"
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
@@ -49,6 +58,28 @@ const (
 	telegramMediaSweepEvery = 5 * time.Minute
 	telegramMediaRetryAfter = 2 * time.Minute
 	telegramMediaSweepBatch = 100
+)
+
+// Draft debounce + auto-response sweeper cadence (plan/auto-response.md).
+// quietPeriod/debounceCap tune the debounce table: quietPeriod is how long a
+// chat must go silent before its draft generates; debounceCap bounds the
+// total wait for a chat that never falls quiet. sweepEvery drives one shared
+// goroutine that recovers due debounce rows, claims+fires due auto-response
+// jobs, reaps stale claims, and purges old terminal rows — see
+// worker.Worker.StartSweeper. maxDeliveryLag is what keeps a deploy that
+// spans the sweep window from flushing a backlog of stale auto-replies the
+// moment it comes back up; claimTimeout is the reaper's cutoff for a worker
+// process that died mid-send; jobRetention is how long a terminal job row
+// survives before purge.
+const (
+	quietPeriod         = 5 * time.Second
+	debounceCap         = 60 * time.Second
+	sweepEvery          = 10 * time.Second
+	sweepBatch          = 50
+	claimTimeout        = 5 * time.Minute
+	maxDeliveryLag      = 10 * time.Minute
+	jobRetention        = 30 * 24 * time.Hour
+	sweeperShutdownWait = 3 * time.Second
 )
 
 func main() {
@@ -179,12 +210,18 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	w := &worker.Worker{
 		Store: st, Queue: q, Evo: evo, TG: tg, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, Log: log,
+		DebounceQuiet: quietPeriod, DebounceCap: debounceCap, DebounceSweepBatch: sweepBatch,
+		AutoResponseSweepBatch: sweepBatch, AutoResponseClaimTimeout: claimTimeout,
+		AutoResponseMaxDeliveryLag: maxDeliveryLag, AutoResponseJobRetention: jobRetention,
 	}
 	q.Start(ctx, w.Handle)
 	// Attachments whose bytes never arrived are retried from their own media
 	// row — the durable work item that replaces an inbound-event table. The
 	// startup pass picks up whatever a crash or an outage left behind.
-	w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
+	mediaSweepDone := w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
+	// One shared goroutine: debounce recovery, auto-response claim/fire, stale
+	// claim reap, terminal-row purge.
+	autoResponseSweepDone := w.StartSweeper(ctx, sweepEvery)
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(cfg, st, kb, blobStore, log)
 
@@ -209,7 +246,37 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+	// Two-phase, both bounded. Phase 1: stop anything that could publish a
+	// NEW task — both sweepers select on ctx.Done() (already cancelled above)
+	// and close their done channel only once fully exited; StopDebounceTimers
+	// cancels every pending timer and waits for any already-firing callback
+	// to finish its publish. Phase 2, only once phase 1 is done: q.Wait()
+	// really does mean "nothing left" once nothing new can be added, so it is
+	// safe to drain before q.Close() — otherwise a task a timer just
+	// published in phase 1 could still be mid-process on a worker goroutine
+	// when q.Close() (and the subsequent st.Close()) runs out from under it.
+	waitSweepers(mediaSweepDone, autoResponseSweepDone, w.StopDebounceTimers())
+	queueDrained := make(chan struct{})
+	go func() { q.Wait(); close(queueDrained) }()
+	waitSweepers(queueDrained)
 	q.Close()
+}
+
+// waitSweepers blocks until every done channel closes, or timeout elapses —
+// whichever comes first. Work still running past the timeout is not fatal
+// (a sweeper will observe ctx.Done() on its next select and exit; an
+// in-flight publish, if any, just races the impending q.Close(), which
+// queue.Publish now recovers from), but in practice this settles in
+// milliseconds, so the bound is rarely if ever hit.
+func waitSweepers(dones ...<-chan struct{}) {
+	deadline := time.After(sweeperShutdownWait)
+	for _, done := range dones {
+		select {
+		case <-done:
+		case <-deadline:
+			return
+		}
+	}
 }
 
 // buildLLMRegistry resolves the configured LLM providers into an llm.Registry

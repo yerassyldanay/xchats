@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/yerassyldanay/xchats/backend/internal/autoresponse"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
 
@@ -151,12 +152,64 @@ type Account struct {
 	WebhookRegisteredAt  *string `json:"webhook_registered_at"`
 	WebhookLastCheckedAt *string `json:"webhook_last_checked_at"`
 	WebhookLastError     *string `json:"webhook_last_error"`
+
+	// AutoResponse is always present (never null) — materialized from
+	// autoresponse.DefaultPolicy() (disabled) when the account has no
+	// configured row yet, so the frontend's type never has to treat it as
+	// optional.
+	AutoResponse AutoResponse `json:"auto_response"`
+}
+
+// AutoResponseWindow is one non-wrapping [Start,End) interval on a single
+// weekday, wire-encoded as "HH:MM" clock strings ("24:00" is the one
+// allowed value equal to a full day).
+type AutoResponseWindow struct {
+	Weekday int    `json:"weekday"` // 0=Sunday..6=Saturday — time.Weekday, matches Postgres EXTRACT(DOW)
+	Start   string `json:"start"`
+	End     string `json:"end"`
+}
+
+// AutoResponse is an account's auto-response policy.
+type AutoResponse struct {
+	Enabled           bool                 `json:"enabled"`
+	ReplyMode         string               `json:"reply_mode"`
+	FixedText         string               `json:"fixed_text"`
+	Timezone          string               `json:"timezone"`
+	DelaySeconds      int                  `json:"delay_seconds"`
+	CooldownSeconds   int                  `json:"cooldown_seconds"`
+	SkipWhenEscalated bool                 `json:"skip_when_escalated"`
+	PauseWhenAssigned bool                 `json:"pause_when_assigned"`
+	Windows           []AutoResponseWindow `json:"windows"`
+}
+
+// MapAutoResponse maps an autoresponse.Policy to its wire shape.
+func MapAutoResponse(p autoresponse.Policy) AutoResponse {
+	windows := make([]AutoResponseWindow, 0, len(p.Windows))
+	for _, w := range p.Windows {
+		windows = append(windows, AutoResponseWindow{
+			Weekday: int(w.Weekday),
+			Start:   autoresponse.FormatClock(w.StartMin),
+			End:     autoresponse.FormatClock(w.EndMin),
+		})
+	}
+	return AutoResponse{
+		Enabled:           p.Enabled,
+		ReplyMode:         p.ReplyMode,
+		FixedText:         p.FixedText,
+		Timezone:          p.Timezone,
+		DelaySeconds:      p.DelaySeconds,
+		CooldownSeconds:   p.CooldownSeconds,
+		SkipWhenEscalated: p.SkipWhenEscalated,
+		PauseWhenAssigned: p.PauseWhenAssigned,
+		Windows:           windows,
+	}
 }
 
 // MapNeutralAccount maps a store.Account (as read from inbox_accounts_v) to the
 // neutral API shape. liveStatus overrides the stored state when a live probe is
-// available, exactly like MapAccount.
-func MapNeutralAccount(a store.Account, liveStatus string) Account {
+// available, exactly like MapAccount. policy is the account's auto-response
+// configuration (autoresponse.DefaultPolicy() when it has none).
+func MapNeutralAccount(a store.Account, liveStatus string, policy autoresponse.Policy) Account {
 	name := a.DisplayName
 	if name == "" {
 		name = a.InstanceName
@@ -178,6 +231,7 @@ func MapNeutralAccount(a store.Account, liveStatus string) Account {
 		InstanceName:    a.InstanceName,
 		LastLiveEventAt: tsPtr(a.LastLiveEventAt),
 		CreatedAt:       tsPtr(&a.CreatedAt),
+		AutoResponse:    MapAutoResponse(policy),
 	}
 	// Only a channel that actually has webhook health reports it; a WhatsApp row
 	// leaves all four null rather than emitting empty strings that read as "set".

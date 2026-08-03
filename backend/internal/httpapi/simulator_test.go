@@ -83,14 +83,12 @@ func TestSimulatorMessage_AsyncPathEnqueuesAndReturns202(t *testing.T) {
 		t.Fatalf("missing ids in async response: %+v", out)
 	}
 
-	// postJSON already drains the queue (h.queue.Wait()); the async ai_draft
-	// task must have completed by now (asserting there's no lingering panic /
-	// unhandled task, not asserting draft content — see the sync test above).
-	var drafts struct{ Items []map[string]any }
-	h.get("/xchats/api/v1/chats/"+out.ConversationID+"/ai-drafts", &drafts)
-	if len(drafts.Items) != 1 {
-		t.Fatalf("want exactly 1 persisted draft after the async task runs, got %d", len(drafts.Items))
-	}
+	// postJSON drains the queue's own backlog (the debounce TOUCH task), but
+	// the draft generation it arms fires on a separate timer goroutine — poll
+	// for it rather than asserting immediately (asserting there's no
+	// lingering panic/unhandled task, not asserting draft content — see the
+	// sync test above).
+	h.waitForDraftCount(out.ConversationID, 1)
 }
 
 func TestSimulatorMessage_ValidationErrors(t *testing.T) {

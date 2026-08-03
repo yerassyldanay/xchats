@@ -2,10 +2,16 @@ import { defineStore } from 'pinia'
 import { api } from '../api/client'
 import type {
   Account,
+  AutoResponse,
   EvolutionInstance,
   QrResponse,
   TelegramAccountResponse,
 } from '../types'
+
+interface AutoResponseResp {
+  account_id: string
+  auto_response: AutoResponse
+}
 
 interface ListAccounts {
   items: Account[]
@@ -100,6 +106,17 @@ export const useAccounts = defineStore('accounts', {
       const path = channel === 'telegram' ? '/telegram-accounts/' : '/whatsapp-accounts/'
       await api.del(path + id)
       await this.load()
+    },
+
+    // saveAutoResponse patches the row in place instead of reload()-ing: a
+    // full GET /accounts re-probes live connection status (an Evolution
+    // round trip) and could downgrade connection_state on the very row this
+    // save is about, for no reason related to what changed.
+    async saveAutoResponse(id: string, policy: AutoResponse) {
+      const res = await api.put<AutoResponseResp>(`/accounts/${id}/auto-response`, policy)
+      const i = this.accounts.findIndex((a) => a.id === id)
+      if (i >= 0) this.accounts[i] = { ...this.accounts[i], auto_response: res.auto_response }
+      return res
     },
 
     async loadInstances() {

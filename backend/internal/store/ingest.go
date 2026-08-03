@@ -251,6 +251,29 @@ func (s *Store) MediaStorageURL(ctx context.Context, id uuid.UUID) (storageURL, 
 // stays NULL until stamped) in the channel's transport table and bumps the chat
 // aggregates. Used by the send pipeline for every channel.
 func (s *Store) InsertOutbound(ctx context.Context, channel string, chatID, accountID uuid.UUID, senderKind string, senderUserID uuid.NullUUID, messageKind, body, preview string) (uuid.UUID, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer tx.Rollback(ctx)
+	id, err := insertOutboundTx(ctx, tx, channel, chatID, accountID, senderKind, senderUserID, messageKind, body, preview, true)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return id, tx.Commit(ctx)
+}
+
+// insertOutboundTx is InsertOutbound's body, extracted so the auto-response
+// send transaction (store/autoresponse.go's SendAutoResponse) can insert the
+// outbound message as part of ITS OWN transaction — atomic with the job/draft
+// state transitions that guard it — rather than opening a second one.
+//
+// resetUnread controls the chat aggregates' unread_count write: every
+// operator-authored send resets it to 0 (InsertOutbound passes true), but an
+// unattended auto-response must leave it alone — clearing it would make the
+// conversation look untouched to the operator who opens the inbox the next
+// morning.
+func insertOutboundTx(ctx context.Context, tx pgx.Tx, channel string, chatID, accountID uuid.UUID, senderKind string, senderUserID uuid.NullUUID, messageKind, body, preview string, resetUnread bool) (uuid.UUID, error) {
 	msgTable, err := messagesTableFor(channel)
 	if err != nil {
 		return uuid.Nil, err
@@ -259,11 +282,6 @@ func (s *Store) InsertOutbound(ctx context.Context, channel string, chatID, acco
 	if err != nil {
 		return uuid.Nil, err
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	defer tx.Rollback(ctx)
 	var id uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO `+msgTable+`
@@ -273,12 +291,16 @@ func (s *Store) InsertOutbound(ctx context.Context, channel string, chatID, acco
 		accountID, chatID, senderKind, senderUserID, messageKind, body).Scan(&id); err != nil {
 		return uuid.Nil, wrap("insert outbound", err)
 	}
+	unreadAssign := "unread_count"
+	if resetUnread {
+		unreadAssign = "0"
+	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE `+chatTable+` SET last_message_at = now(), last_message_preview = $2, unread_count = 0, updated_at = now()
+		UPDATE `+chatTable+` SET last_message_at = now(), last_message_preview = $2, unread_count = `+unreadAssign+`, updated_at = now()
 		WHERE id = $1`, chatID, preview); err != nil {
 		return uuid.Nil, wrap("update aggregates", err)
 	}
-	return id, tx.Commit(ctx)
+	return id, nil
 }
 
 // FindOrCreateChat upserts a contact + chat for an outbound-initiated conversation

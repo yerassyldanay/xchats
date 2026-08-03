@@ -736,15 +736,20 @@ func TestTelegramRedeliveryReenqueuesAMissingDraft(t *testing.T) {
 	}
 	h.tgWebhook(id, body, tgWebhookSecret)
 
-	if n := h.countRows(`SELECT count(*) FROM xchats.ai_drafts`); n == 0 {
-		t.Fatal("the redelivery did not re-enqueue the missing draft")
-	}
+	// The redelivery only re-touched the debounce (reenqueueMissingDraft); the
+	// draft it produces generates on a separate timer goroutine, outside
+	// anything h.tgWebhook's queue.Wait() tracks.
+	h.waitFor("the redelivery to re-enqueue the missing draft", func() bool {
+		return h.countRows(`SELECT count(*) FROM xchats.ai_drafts`) > 0
+	})
 	// And the draft is recorded against the right channel.
 	if n := h.countRows(`SELECT count(*) FROM xchats.ai_drafts WHERE channel = 'telegram'`); n == 0 {
 		t.Fatal("the draft was not stamped with channel='telegram'")
 	}
 
-	// A redelivery that DOES find a draft must not pile on another set.
+	// A redelivery that DOES find a draft must not pile on another set —
+	// HasDraftForTrigger short-circuits reenqueueMissingDraft before it ever
+	// touches the debounce, so this stays a synchronous, immediate check.
 	before := h.countRows(`SELECT count(*) FROM xchats.ai_drafts`)
 	h.tgWebhook(id, body, tgWebhookSecret)
 	if after := h.countRows(`SELECT count(*) FROM xchats.ai_drafts`); after != before {
@@ -905,14 +910,10 @@ func TestTelegramApprovedDraftSendsAndStampsMessageID(t *testing.T) {
 	if chatID == "" {
 		t.Fatalf("no telegram chat: %v", chats.Items)
 	}
-	var drafts struct {
-		Items []map[string]any `json:"items"`
-	}
-	h.get("/xchats/api/v1/chats/"+chatID+"/ai-drafts", &drafts)
-	if len(drafts.Items) == 0 {
-		t.Fatal("the inbound Telegram message produced no draft")
-	}
-	draftID := drafts.Items[0]["id"].(string)
+	// The inbound message only debounced; the draft it produces generates on
+	// a separate timer goroutine h.tgWebhook's queue.Wait() cannot see.
+	drafts := h.waitForDraftCount(chatID, 1)
+	draftID := drafts[0]["id"].(string)
 
 	h.tg.Reset()
 	resp, env := h.postJSON("/xchats/api/v1/ai-drafts/"+draftID+"/approve", map[string]any{})

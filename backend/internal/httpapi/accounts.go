@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/yerassyldanay/xchats/backend/internal/autoresponse"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
@@ -55,12 +56,21 @@ func (s *Server) handleListAccounts(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
+	policies, err := s.store.AutoResponsePoliciesForOrg(ctx(c), org.ID)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
 	// The live probe only exists for the Evolution gateway; a Telegram row keeps
 	// its stored state (its own health lives in the webhook_* columns).
 	live := s.liveStatusByInstance(c)
 	items := make([]dto.Account, 0, len(accts))
 	for _, a := range accts {
-		items = append(items, dto.MapNeutralAccount(a, live[a.InstanceName]))
+		policy, ok := policies[a.ID]
+		if !ok {
+			policy = autoresponse.DefaultPolicy()
+		}
+		items = append(items, dto.MapNeutralAccount(a, live[a.InstanceName], policy))
 	}
 	ok(c, gin.H{"items": items})
 }
@@ -226,6 +236,10 @@ func (s *Server) handleDeleteWhatsAppAccount(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
+	// A disconnected number must never auto-send after the fact.
+	if err := s.store.CancelPendingAutoResponseForAccount(ctx(c), acct.ID, "account_deleted"); err != nil {
+		s.log.Error("cancel pending auto-response on account delete", "account_id", acct.ID, "err", err)
+	}
 	ok(c, gin.H{"id": acct.ID.String(), "deleted": true})
 }
 
@@ -368,6 +382,26 @@ func (s *Server) orgAccount(c *gin.Context, id uuid.UUID) (store.Account, bool) 
 	acct, err := s.store.AccountByID(ctx(c), id)
 	if err != nil || !acct.OrganizationID.Valid || acct.OrganizationID.UUID != org.ID ||
 		acct.Channel == string(messaging.ChannelTelegram) {
+		fail(c, http.StatusNotFound, ErrNotFound, "account not found")
+		return store.Account{}, false
+	}
+	return acct, true
+}
+
+// orgAnyAccount resolves an account of ANY channel and enforces org
+// ownership — unlike orgAccount, it does not refuse Telegram rows. Used by
+// the channel-neutral auto-response route, the one surface that legitimately
+// needs to reach either kind of account by its neutral id.
+// !acct.OrganizationID.Valid is rejected explicitly: wa_accounts.organization_id
+// and tg_accounts.organization_id are both nullable with ON DELETE SET NULL,
+// and AccountByID itself filters only on deleted_at.
+func (s *Server) orgAnyAccount(c *gin.Context, id uuid.UUID) (store.Account, bool) {
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return store.Account{}, false
+	}
+	acct, err := s.store.AccountByID(ctx(c), id)
+	if err != nil || !acct.OrganizationID.Valid || acct.OrganizationID.UUID != org.ID {
 		fail(c, http.StatusNotFound, ErrNotFound, "account not found")
 		return store.Account{}, false
 	}

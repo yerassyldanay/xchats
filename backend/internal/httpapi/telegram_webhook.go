@@ -158,21 +158,24 @@ func (s *Server) handleTelegramWebhook(c *gin.Context) {
 		s.hub.Broadcast(name, dto.MapChat(chat))
 	}
 
-	// The draft enqueue is part of the durable unit as far as the caller is
+	// The debounce enqueue is part of the durable unit as far as the caller is
 	// concerned: a queue that will not accept the task means this delivery has
 	// NOT been fully handled, so refuse to ack and let Telegram bring it back.
 	if err := s.publish(ctx(c), queue.Message{
-		Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: res.ChatID},
+		Kind: queue.KindDebounceTouch, Payload: worker.DebounceTouchTask{
+			ChatID: res.ChatID, Channel: "telegram", TriggerMessageID: res.MessageID,
+		},
 	}); err != nil {
-		s.log.Error("telegram draft enqueue failed; not acking", "chat_id", res.ChatID, "err", err)
+		s.log.Error("telegram debounce enqueue failed; not acking", "chat_id", res.ChatID, "err", err)
 		fail(c, http.StatusInternalServerError, ErrInternal, "enqueue failed")
 		return
 	}
 	c.Status(http.StatusOK)
 }
 
-// reenqueueMissingDraft republishes the draft task for a redelivered inbound
-// message that never got one. It reports whether the request may be acked.
+// reenqueueMissingDraft re-touches the debounce for a redelivered inbound
+// message that never produced a draft. It reports whether the request may be
+// acked.
 func (s *Server) reenqueueMissingDraft(c *gin.Context, res store.TgInboundResult) bool {
 	has, err := s.store.HasDraftForTrigger(ctx(c), res.MessageID)
 	if err != nil {
@@ -183,13 +186,15 @@ func (s *Server) reenqueueMissingDraft(c *gin.Context, res store.TgInboundResult
 		return true
 	}
 	if err := s.publish(ctx(c), queue.Message{
-		Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: res.ChatID},
+		Kind: queue.KindDebounceTouch, Payload: worker.DebounceTouchTask{
+			ChatID: res.ChatID, Channel: "telegram", TriggerMessageID: res.MessageID,
+		},
 	}); err != nil {
-		s.log.Error("telegram duplicate: draft enqueue failed; not acking", "chat_id", res.ChatID, "err", err)
+		s.log.Error("telegram duplicate: debounce enqueue failed; not acking", "chat_id", res.ChatID, "err", err)
 		fail(c, http.StatusInternalServerError, ErrInternal, "enqueue failed")
 		return false
 	}
-	s.log.Info("telegram duplicate: re-enqueued the missing draft", "chat_id", res.ChatID)
+	s.log.Info("telegram duplicate: re-touched the missing draft's debounce", "chat_id", res.ChatID)
 	return true
 }
 

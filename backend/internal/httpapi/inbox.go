@@ -129,6 +129,12 @@ func (s *Server) handleSendMessage(c *gin.Context) {
 	if !okChat {
 		return
 	}
+	// An operator typing a fresh reply is exactly the "someone stepped in"
+	// case auto-response's delay exists to catch — cancel before sending, not
+	// after, so the pending job never gets a chance to race this send.
+	if err := s.store.CancelPendingAutoResponseForChat(ctx(c), chat.ID, "operator_reply"); err != nil {
+		s.log.Error("cancel pending auto-response on send", "chat_id", chat.ID, "err", err)
+	}
 	u := currentUser(c)
 	items, err := s.sendParts(c, chat, "user", uuid.NullUUID{UUID: u.ID, Valid: true}, req.Text, req.MediaIDs)
 	if err != nil {

@@ -48,16 +48,12 @@ func TestWhatsAppInboundProducesGroundedDraftAndApprovalDelivers(t *testing.T) {
 		t.Fatalf("wrong direction/sender on the stored inbound message: %v", msgs[0])
 	}
 
-	// 2. h.webhook already drained the queue, so the auto-triggered AIDraftTask
-	// has run to completion: exactly one grounded draft must be persisted.
-	var drafts struct {
-		Items []map[string]any `json:"items"`
-	}
-	h.get("/xchats/api/v1/chats/"+chatID+"/ai-drafts", &drafts)
-	if len(drafts.Items) != 1 {
-		t.Fatalf("want exactly 1 persisted draft, got %d: %v", len(drafts.Items), drafts.Items)
-	}
-	draft := drafts.Items[0]
+	// 2. h.webhook drained the queue's OWN backlog, but the inbound message
+	// only debounced (see internal/worker/debounce.go) — the AIDraftTask it
+	// eventually produces runs on a separate timer goroutine, so waiting for
+	// exactly one grounded draft has to poll rather than read once.
+	drafts := h.waitForDraftCount(chatID, 1)
+	draft := drafts[0]
 	text, _ := draft["draft_text"].(string)
 	if !strings.Contains(text, "129 900 ₸") {
 		t.Fatalf("draft text = %q, want the substituted real price 129 900 ₸", text)

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
+  CalendarClock,
   CircleAlert,
   CircleCheck,
   KeyRound,
@@ -18,8 +19,10 @@ import {
 import { useAccounts } from '../stores/accounts'
 import { ApiError } from '../api/client'
 import { connStatus, initials, colorFor, type ConnTone } from '../lib/format'
+import { summarizeAutoResponse } from '../lib/autoResponse'
 import AddAccountDialog from '../components/AddAccountDialog.vue'
 import ReplaceTokenDialog from '../components/ReplaceTokenDialog.vue'
+import AutoResponseDialog from '../components/AutoResponseDialog.vue'
 import type { Account } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +33,7 @@ const accounts = useAccounts()
 const showAdd = ref(false)
 const reconnectTarget = ref<{ id: string; instance: string; displayName: string } | null>(null)
 const tokenTarget = ref<Account | null>(null)
+const autoResponseTarget = ref<Account | null>(null)
 const deleting = ref<string | null>(null)
 const working = ref<string | null>(null)
 // actionError surfaces a failed retry/check on the card that caused it, rather
@@ -282,6 +286,16 @@ async function remove(a: Account) {
                   <Button
                     variant="ghost"
                     size="icon"
+                    class="w-8 h-8"
+                    :class="{ 'text-primary': a.auto_response.enabled }"
+                    title="Автоответ"
+                    @click="autoResponseTarget = a"
+                  >
+                    <CalendarClock class="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     class="w-8 h-8 text-destructive hover:bg-destructive/10"
                     :disabled="deleting === a.id"
                     title="Удалить"
@@ -291,6 +305,13 @@ async function remove(a: Account) {
                     <Trash2 v-else class="w-4 h-4" />
                   </Button>
                 </div>
+              </div>
+
+              <div v-if="a.auto_response.enabled" class="mt-2">
+                <Badge variant="secondary" class="bg-primary/10 text-primary font-normal">
+                  <CalendarClock class="w-3 h-3" />
+                  {{ summarizeAutoResponse(a.auto_response) }}
+                </Badge>
               </div>
             </div>
           </div>
@@ -309,6 +330,11 @@ async function remove(a: Account) {
       :account="tokenTarget"
       @close="tokenTarget = null"
       @replaced="onConnected"
+    />
+    <AutoResponseDialog
+      v-if="autoResponseTarget"
+      :account="autoResponseTarget"
+      @close="autoResponseTarget = null"
     />
   </div>
 </template>

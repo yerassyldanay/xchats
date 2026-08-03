@@ -249,6 +249,10 @@ func (s *Server) Router() *gin.Engine {
 	// Channel-neutral account listing — every channel in one shape. The
 	// per-channel routes below own each channel's own lifecycle.
 	auth.GET("/accounts", s.handleListAccounts)
+	// Auto-response policy is the one account setting that is genuinely
+	// channel-neutral (orgAnyAccount, not orgAccount) — a Telegram bot needs
+	// it exactly as much as a WhatsApp number does.
+	auth.PUT("/accounts/:id/auto-response", s.handlePutAutoResponse)
 
 	// WhatsApp accounts manager (Build 1).
 	auth.GET("/whatsapp-accounts", s.handleListWhatsAppAccounts)

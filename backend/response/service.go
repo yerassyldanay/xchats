@@ -14,11 +14,22 @@ import (
 // Engine.Generate already returns verbatim in GenerateResult.FinalText.
 const HoldingText = "Сейчас у меня нет этой информации — передаю ваш вопрос менеджеру и вернусь с точным ответом."
 
+// EngineErrorPrefix marks an escalation_reason holdingDraft produced: a hard
+// Generate/KnowledgeBase.Load failure, never a model's own evaluated
+// escalation (escalation_reason is otherwise free text with no contract).
+// internal/worker/autoresponse.go checks this prefix unconditionally — an
+// engine failure must never be masked by SkipWhenEscalated=false, or an
+// OpenRouter outage would broadcast HoldingText to every customer on every
+// auto-response-enabled account.
+const EngineErrorPrefix = "engine_error: "
+
 // Service is the channel-neutral entry point every channel adapter calls
 // through: given a channel and a conversation id, it loads context and the
 // organization's knowledge base, generates a grounded reply through Engine,
 // and persists exactly one suggested draft. It never sends a message or
-// auto-approves a draft — that stays the existing review/approval flow's job.
+// auto-approves a draft on its own — internal/worker/autoresponse.go is the
+// one place downstream of it that can turn a suggestion into a sent message,
+// and only for accounts an operator explicitly opted into auto-response.
 type Service struct {
 	Conversations ConversationRepository
 	KnowledgeBase KnowledgeBaseRepository
@@ -100,6 +111,6 @@ func holdingDraft(draft DraftToPersist, cause error) DraftToPersist {
 	draft.Text = HoldingText
 	draft.ReplyLanguage = "ru"
 	draft.Escalate = true
-	draft.EscalationReason = "engine_error: " + cause.Error()
+	draft.EscalationReason = EngineErrorPrefix + cause.Error()
 	return draft
 }

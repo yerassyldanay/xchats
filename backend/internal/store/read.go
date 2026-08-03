@@ -322,6 +322,14 @@ func (s *Store) WriteDraftSet(ctx context.Context, channel string, chatID uuid.U
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	// Debounce makes two concurrent generations for the same chat rare, but
+	// handleSuggest's manual regenerate can still race a debounce fire — this
+	// lock (shared with SendAutoResponse/CancelPendingAutoResponseForChat, see
+	// store/autoresponse.go) serializes them so the supersede-then-insert below
+	// can never raise ai_drafts_pending_uq's 23505 under concurrency.
+	if err := lockChat(ctx, tx, chatID); err != nil {
+		return nil, err
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE xchats.ai_drafts SET draft_state='superseded', updated_at=now()
 		WHERE chat_id = $1 AND draft_state='suggested'`, chatID); err != nil {

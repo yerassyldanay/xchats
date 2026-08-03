@@ -102,6 +102,14 @@ func (s *Server) handleApprove(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
+	// An armed auto-response job must not fire the draft the operator is
+	// approving right now. Best-effort: if this loses the race with the
+	// sweeper's claim, SendAutoResponse's own in-transaction guard (this
+	// draft flip already committed above) is the backstop that keeps the
+	// customer from getting the same text twice.
+	if err := s.store.CancelPendingAutoResponseForChat(ctx(c), chat.ID, "approved"); err != nil {
+		s.log.Error("cancel pending auto-response on approve", "chat_id", chat.ID, "err", err)
+	}
 
 	text := claim.DraftText
 	if req.EditedText != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/internal/autoresponse"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -263,6 +264,10 @@ func (s *Server) handleDeleteTelegramAccount(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
+	// A disconnected bot must never auto-send after the fact.
+	if err := s.store.CancelPendingAutoResponseForAccount(ctx(c), acct.ID, "account_deleted"); err != nil {
+		s.log.Error("cancel pending auto-response on account delete", "account_id", acct.ID, "err", err)
+	}
 	s.log.Info("telegram account disconnected", "account_id", acct.ID, "bot", acct.BotUsername)
 	ok(c, gin.H{"id": acct.ID.String(), "deleted": true})
 }
@@ -406,7 +411,11 @@ func (s *Server) telegramAccountWithToken(c *gin.Context) (store.TelegramAccount
 // just-computed connection state, used if the re-read fails.
 func (s *Server) telegramAccountPayload(c *gin.Context, id uuid.UUID, state string) gin.H {
 	if acct, err := s.store.AccountByID(ctx(c), id); err == nil {
-		return gin.H{"account": dto.MapNeutralAccount(acct, ""), "connection_state": acct.ConnectionState}
+		policy, perr := s.store.AutoResponsePolicy(ctx(c), id)
+		if perr != nil {
+			policy = autoresponse.DefaultPolicy()
+		}
+		return gin.H{"account": dto.MapNeutralAccount(acct, "", policy), "connection_state": acct.ConnectionState}
 	}
 	return gin.H{"account": gin.H{"id": id.String(), "channel": "telegram"}, "connection_state": state}
 }
