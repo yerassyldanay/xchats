@@ -43,12 +43,23 @@ func (s *Server) handleKBMediaUpload(ctx context.Context, orgID, userID uuid.UUI
 
 	visibility := "auto"
 	if target, terr := rawObject(args["target"]); terr == nil && len(target) > 0 {
+		targetType := stringField(target, "type")
 		field := stringField(target, "field")
-		if kind := kbstore.MediaFieldKind(field); kind != "" {
-			visibility = "visible" // an explicit target field means this upload is meant for a live/draft KB media column
-			if !mimeRoughlyMatches(mimeType, kind) {
-				return toolError(fmt.Sprintf("mime_type %q does not look like a %s, which target field %q expects", mimeType, kind, field)), nil
-			}
+		// Validated against the SAME registry kb_media_attach enforces (not
+		// just MediaFieldKind's flat field→kind lookup) — a target must name
+		// a real attachment field ON THE NAMED TYPE, so e.g. {type:"topic",
+		// field:"gallery_images"} (a product-only field) or
+		// {type:"product", field:"featured_image"} (not an attachment
+		// target — see mediaAttachmentFields' doc comment) is rejected here,
+		// at staging time, rather than only discovered later when the
+		// eventual kb_media_attach call fails.
+		fieldDef, ok := kbstore.LookupMediaAttachmentField(targetType, field)
+		if !ok {
+			return toolError(fmt.Sprintf("target {type:%q, field:%q} is not a valid attachment target — call kb_info for the current media_attachment_fields", targetType, field)), nil
+		}
+		visibility = "visible" // an explicit, valid target means this upload is meant for a live/draft KB media column
+		if !mimeRoughlyMatches(mimeType, fieldDef.Kind) {
+			return toolError(fmt.Sprintf("mime_type %q does not look like a %s, which target field %q expects", mimeType, fieldDef.Kind, field)), nil
 		}
 	}
 
@@ -82,9 +93,94 @@ func (s *Server) handleKBMediaUpload(ctx context.Context, orgID, userID uuid.UUI
 		"processing_status": "uploaded",
 	}
 	return s.toolResult(
-		fmt.Sprintf("Upload target created (material_id=%s). PUT the file bytes to upload_url within %d seconds, then reference this material_id in a kb_*_upsert call.", materialID, ttl),
+		fmt.Sprintf("Upload target created (material_id=%s), but no file bytes have been uploaded yet. PUT the bytes to upload_url within %d seconds; only a successful PUT completes the upload. Then attach this material_id to the target record.", materialID, ttl),
 		structured, "media", orgID, userID,
 	), nil
+}
+
+// mediaIndexFor builds kb_read's _meta["xchats/media"]: per-material display
+// metadata plus a short-lived signed preview URL, keyed by material id.
+//
+// Costs exactly ZERO extra queries for a page that references no media, and
+// one batch query otherwise — ReadRecords itself stays free of per-record
+// database work. A failure here is logged and swallowed: missing previews are
+// a degradation, but a failed kb_read is an outage.
+func (s *Server) mediaIndexFor(ctx context.Context, orgID uuid.UUID, page kbstore.ReadPage) map[string]any {
+	ids := kbstore.MediaIDsIn(page)
+	if len(ids) == 0 {
+		return nil
+	}
+	previews, err := s.Deps.KB.MaterialPreviews(ctx, orgID, ids)
+	if err != nil {
+		if s.Deps.Log != nil {
+			s.Deps.Log.Warn("mcpserver: media previews failed", "err", err)
+		}
+		return nil
+	}
+	if len(previews) == 0 {
+		return nil
+	}
+	ttl := s.Deps.MediaTTLSeconds
+	if ttl <= 0 {
+		ttl = 3600
+	}
+	expiresAt := time.Now().Add(time.Duration(ttl) * time.Second)
+	out := make(map[string]any, len(previews))
+	for id, p := range previews {
+		entry := map[string]any{
+			"id": p.ID.String(), "filename": p.Filename, "mime_type": p.MimeType,
+			"size_bytes": p.SizeBytes, "kind": p.Kind, "status": p.Status,
+		}
+		if s.Deps.SignMediaRead != nil {
+			// Built against UploadBaseURL, NOT a separate media host: the CSP
+			// resourceDomains the host applies to this widget is derived from
+			// exactly originOf(UploadBaseURL) — see widgetResourceMeta in
+			// resources.go. A different origin here would silently break every
+			// preview.
+			token := s.Deps.SignMediaRead(id.String(), expiresAt.Unix())
+			entry["url"] = fmt.Sprintf("%s/mcp/media/%s?token=%s",
+				strings.TrimRight(s.Deps.UploadBaseURL, "/"), id, url.QueryEscape(token))
+			entry["expires_at"] = expiresAt.UTC().Format(time.RFC3339)
+		}
+		out[id.String()] = entry
+	}
+	return out
+}
+
+// handleKBMediaAttach implements kb_media_attach: attaches an
+// already-uploaded material to one media field of an existing draft/live
+// record. All domain validation (registry pairing, record existence and
+// pending-deletion, material ownership/completeness/visibility/MIME) lives
+// in kbstore.MCPAttachMedia — this handler only parses arguments and maps
+// the outcome to the standard tool-result shape.
+func (s *Server) handleKBMediaAttach(ctx context.Context, orgID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+	materialIDRaw := stringField(args, "material_id")
+	kbType := stringField(args, "type")
+	key := stringField(args, "key")
+	field := stringField(args, "field")
+	if materialIDRaw == "" || kbType == "" || key == "" || field == "" {
+		return nil, fmt.Errorf("material_id, type, key, and field are all required")
+	}
+	materialID, err := uuid.Parse(materialIDRaw)
+	if err != nil {
+		return nil, fmt.Errorf("material_id: invalid material_id %q: %w", materialIDRaw, err)
+	}
+	expected, err := optExpectedVersion(args)
+	if err != nil {
+		return nil, err
+	}
+
+	res, kerr := s.Deps.KB.MCPAttachMedia(ctx, orgID, userID, kbstore.MediaAttachInput{
+		MaterialID: materialID, Type: kbType, Key: key, Field: field,
+	}, expected)
+	if kerr != nil {
+		return mapKBError(kerr), nil
+	}
+	msg := fmt.Sprintf("Attached material %s to %s %s.%s (draft_version=%d).", res.MaterialID, res.Type, res.Key, res.Field, res.DraftVersion)
+	if res.AlreadyPresent {
+		msg = fmt.Sprintf("Material %s was already attached to %s %s.%s — no change (draft_version=%d).", res.MaterialID, res.Type, res.Key, res.Field, res.DraftVersion)
+	}
+	return s.toolResult(msg, res, "draft", orgID, userID), nil
 }
 
 // mimeRoughlyMatches mirrors kbstore's own (unexported) mimeMatchesKind —

@@ -1,16 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { changedFields, mediaCount, recordState } from './shared'
+import { changedFields, mediaCount, stateForChange } from './shared'
 
-describe('recordState', () => {
-  it('is always published in live mode, regardless of the counterpart flag', () => {
-    expect(recordState('live', true)).toBe('published')
-    expect(recordState('live', false)).toBe('published')
+describe('stateForChange', () => {
+  it('maps added -> new', () => {
+    expect(stateForChange('added')).toBe('new')
   })
-  it('is new in draft mode with no live counterpart', () => {
-    expect(recordState('draft', false)).toBe('new')
+  it('maps updated -> changed', () => {
+    expect(stateForChange('updated')).toBe('changed')
   })
-  it('is changed in draft mode with a live counterpart', () => {
-    expect(recordState('draft', true)).toBe('changed')
+  it('maps removed -> to_delete', () => {
+    expect(stateForChange('removed')).toBe('to_delete')
   })
 })
 

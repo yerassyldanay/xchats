@@ -57,18 +57,6 @@ function scenarioExec(over: {
   }
 }
 
-function extractExec(over: { caseID: string; prompt: string; model: string; allChecksPass?: boolean; parseOK?: boolean }): VExecution {
-  return {
-    family: 'extract',
-    subject: { case_id: over.caseID },
-    variant: { model: over.model, setup: over.prompt, prompt: { name: over.prompt.split('@')[0], version: 1 } },
-    output: { parse_ok: over.parseOK ?? true },
-    scores: [],
-    rollups: [{ key: 'all_checks_pass', label: 'All checks pass', pass: over.allChecksPass ?? true }],
-    cost: { tokens_in: 500, tokens_out: 100, estimate_usd: 0.0005, basis: 'measured_split' },
-  }
-}
-
 describe('buildComparisonMatrices — scenario family', () => {
   it('aggregates pass rate, cost, and latency per (setup, model) cell', () => {
     const execs: VExecution[] = [
@@ -180,31 +168,6 @@ describe('buildComparisonMatrices — scenario family', () => {
   })
 })
 
-describe('buildComparisonMatrices — extract family', () => {
-  it('uses all_checks_pass/parse_ok, never contract/behavior metrics', () => {
-    const execs: VExecution[] = [
-      extractExec({ caseID: 'c1', prompt: 'extract@v1', model: 'm1', allChecksPass: true }),
-      extractExec({ caseID: 'c1', prompt: 'extract@v2', model: 'm1', allChecksPass: false, parseOK: true }),
-    ]
-    const groups = buildComparisonMatrices(execs, 'extract')
-    // Different prompt refs => different item sets aren't the issue here (both cover
-    // {c1}), so both v1 and v2 land in ONE comparable matrix, as two setup columns.
-    expect(groups).toHaveLength(1)
-    expect(groups[0].setups.sort()).toEqual(['extract@v1', 'extract@v2'])
-    const v1 = cellFor(groups[0], 'extract@v1', 'm1')!
-    expect(v1.allChecksPass).toBe(1)
-    expect(v1.behaviorPass).toBeNull()
-    expect(v1.contractPass).toBeNull()
-    const v2 = cellFor(groups[0], 'extract@v2', 'm1')!
-    expect(v2.allChecksPass).toBe(0)
-    expect(v2.parsePass).toBe(1)
-  })
-
-  it('returns an empty list for a run with no executions of that family', () => {
-    expect(buildComparisonMatrices([extractExec({ caseID: 'c1', prompt: 'extract@v1', model: 'm1' })], 'scenario')).toEqual([])
-  })
-})
-
 describe('recommendedSetup', () => {
   it('picks the setup with the strictly highest pooled pass rate', () => {
     const execs: VExecution[] = [
@@ -222,15 +185,6 @@ describe('recommendedSetup', () => {
     ]
     const [group] = buildComparisonMatrices(execs, 'scenario')
     expect(recommendedSetup(group)).toBeNull()
-  })
-
-  it('extraction uses allChecksPass, not behaviorPass (family-specific metric, same as the matrix cell)', () => {
-    const execs: VExecution[] = [
-      extractExec({ caseID: 'c1', prompt: 'extract@v1', model: 'm1', allChecksPass: false }),
-      extractExec({ caseID: 'c1', prompt: 'extract@v2', model: 'm1', allChecksPass: true }),
-    ]
-    const [group] = buildComparisonMatrices(execs, 'extract')
-    expect(recommendedSetup(group)).toBe('extract@v2')
   })
 
   it('a group with zero gradeable data returns null rather than an arbitrary first setup', () => {
@@ -259,21 +213,19 @@ describe('setupFrames', () => {
     expect(setupFrames(execs, 'scenario', 'v1')).toHaveLength(1)
   })
 
-  it('only looks within the requested family and setup', () => {
+  it('only looks within the requested setup', () => {
     const execs: VExecution[] = [
       scenarioExec({ testID: 't1', setup: 'v1', scenario: 's1', model: 'm1', promptRef: { name: 'p', version: 1 } }),
       scenarioExec({ testID: 't1', setup: 'v2', scenario: 's2', model: 'm1', promptRef: { name: 'q', version: 1 } }),
-      extractExec({ caseID: 'c1', prompt: 'v1', model: 'm1' }), // different family, same "v1" setup name
     ]
     expect(setupFrames(execs, 'scenario', 'v1')).toHaveLength(1)
   })
 })
 
 describe('execIsPass', () => {
-  it('reads model_behavior_pass for scenario, all_checks_pass for extract', () => {
+  it('reads model_behavior_pass for scenario executions', () => {
     expect(execIsPass(scenarioExec({ testID: 't1', model: 'm1', behaviorPass: true }))).toBe(true)
     expect(execIsPass(scenarioExec({ testID: 't1', model: 'm1', behaviorPass: false }))).toBe(false)
-    expect(execIsPass(extractExec({ caseID: 'c1', prompt: 'extract@v1', model: 'm1', allChecksPass: true }))).toBe(true)
   })
 })
 
@@ -475,14 +427,14 @@ describe('launchListRow', () => {
     const row = launchListRow({
       launchID: 'L1',
       runs: [
-        demoRun({ run_id: 'chat', family: 'scenario', models: ['m1'], scenario_total: 12, scenario_behavior_pass: 11 }),
-        demoRun({ run_id: 'extract', family: 'extract', models: ['m2'], extract_total: 4, extract_checks_pass: 3 }),
+        demoRun({ run_id: 'chat-a', family: 'scenario', models: ['m1'], scenario_total: 12, scenario_behavior_pass: 11 }),
+        demoRun({ run_id: 'chat-b', family: 'scenario', models: ['m2'], scenario_total: 4, scenario_behavior_pass: 3 }),
       ],
     })
     expect(row.pass).toBe(14)
     expect(row.total).toBe(16)
     expect(row.bucket).toBe('green') // 14/16 = 87.5%
-    expect(row.families.sort()).toEqual(['extract', 'scenario'])
+    expect(row.families).toEqual(['scenario'])
     expect(row.models.sort()).toEqual(['m1', 'm2'])
     expect(row.shortId).toBe('L1') // no "-" in this fixture id, falls back to the whole id
   })
@@ -497,7 +449,7 @@ describe('launchListRow', () => {
       launchID: 'L1',
       runs: [
         demoRun({ run_id: 'chat', started_at: '2026-07-14T10:00:00Z', finished_at: '2026-07-14T10:05:00Z' }),
-        demoRun({ run_id: 'extract', started_at: '2026-07-14T10:01:00Z', finished_at: '2026-07-14T10:07:00Z' }),
+        demoRun({ run_id: 'chat-b', started_at: '2026-07-14T10:01:00Z', finished_at: '2026-07-14T10:07:00Z' }),
       ],
     })
     // earliest start 10:00:00, latest finish 10:07:00 -> 7 minutes, NOT 5+6=11.
@@ -509,7 +461,7 @@ describe('launchListRow', () => {
       launchID: 'L1',
       runs: [
         demoRun({ run_id: 'chat', started_at: '2026-07-14T10:00:00Z', finished_at: '2026-07-14T10:05:00Z' }),
-        demoRun({ run_id: 'extract', started_at: '2026-07-14T10:01:00Z' }), // still running — no finished_at
+        demoRun({ run_id: 'chat-b', started_at: '2026-07-14T10:01:00Z' }), // still running — no finished_at
       ],
     })
     expect(row.durationMs).toBeNull()
@@ -519,14 +471,11 @@ describe('launchListRow', () => {
 describe('filterLaunches', () => {
   const rows: LaunchListRow[] = [
     { id: '2026-07-14_a', shortId: 'a', startedAt: '', families: ['scenario'], models: ['m1'], pass: 8, total: 10, bucket: 'green', durationMs: null },
-    { id: '2026-07-10_b', shortId: 'b', startedAt: '', families: ['extract'], models: ['m2'], pass: 1, total: 20, bucket: 'red', durationMs: null },
-    { id: '2026-07-10_c', shortId: 'c', startedAt: '', families: ['scenario', 'extract'], models: ['m1', 'm2'], pass: 4, total: 20, bucket: 'amber', durationMs: null },
+    { id: '2026-07-10_b', shortId: 'b', startedAt: '', families: ['scenario'], models: ['m2'], pass: 1, total: 20, bucket: 'red', durationMs: null },
+    { id: '2026-07-10_c', shortId: 'c', startedAt: '', families: ['scenario'], models: ['m1', 'm2'], pass: 4, total: 20, bucket: 'amber', durationMs: null },
   ]
   it('narrows by launch-id substring', () => {
     expect(filterLaunches(rows, { query: '07-14' }).map((r) => r.id)).toEqual(['2026-07-14_a'])
-  })
-  it('narrows by family membership', () => {
-    expect(filterLaunches(rows, { family: 'extract' }).map((r) => r.id).sort()).toEqual(['2026-07-10_b', '2026-07-10_c'])
   })
   it('narrows by model membership', () => {
     expect(filterLaunches(rows, { model: 'm1' }).map((r) => r.id).sort()).toEqual(['2026-07-10_c', '2026-07-14_a'])

@@ -132,7 +132,3 @@ harness before blaming the model for a bad score.
 ## Not covered here
 
 - **How we test:** see [README.md](README.md) and [VOCABULARY.md](VOCABULARY.md).
-- **Reading photos (image → JSON extraction):** a different job, tested once
-  ([2026-07-14_22-54-51-c53b](runs/2026-07-14_22-54-51-c53b/), 10 cases per model —
-  gemini-2.5-flash did best, 7/10). Too old and too small a sample to conclude
-  anything from. Needs a fresh run before it belongs in this doc.

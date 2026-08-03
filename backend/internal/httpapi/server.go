@@ -16,14 +16,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/yerassyldanay/xchats/backend/internal/assistant"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
-	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -56,12 +54,10 @@ type Server struct {
 	queue    queue.Queue
 	hub      *realtime.Hub
 	blob     blob.Store
-	drafter  assistant.Drafter // dormant: only the disconnected playground hot-swap reads this
 	response *response.Service // the multichannel response engine's entry point (simulator API)
 	evo      evolution.Client
 	tg       telegram.Client // nil when Telegram is not configured; every handler checks
 	kb       *kbstore.Store
-	builder  *playground.Builder
 	orgID    uuid.UUID
 	log      *slog.Logger
 
@@ -73,6 +69,7 @@ type Server struct {
 	mcpAuth         *mcpauth.Authorizer
 	mcpServer       *mcpserver.Server
 	mcpUploadSigner *mcpauth.UploadTokenSigner
+	mcpMediaSigner  *mcpauth.MediaReadTokenSigner
 
 	// kbRepo/kbInvalidator are the response engine's own KB reader — a
 	// CachedKBRepo in production (main.go), the SAME cached build GET
@@ -113,12 +110,10 @@ type Deps struct {
 	Queue         queue.Queue
 	Hub           *realtime.Hub
 	Blob          blob.Store
-	Drafter       assistant.Drafter
 	Response      *response.Service
 	Evo           evolution.Client
 	TG            telegram.Client
 	KB            *kbstore.Store
-	Builder       *playground.Builder
 	KBRepo        response.KnowledgeBaseRepository
 	KBInvalidator kbInvalidator
 	OrgID         uuid.UUID
@@ -133,20 +128,23 @@ type Deps struct {
 // New builds a Server.
 func New(d Deps) *Server {
 	var uploadSigner *mcpauth.UploadTokenSigner
+	var mediaSigner *mcpauth.MediaReadTokenSigner
 	if d.MCPAuth != nil {
 		uploadSigner = mcpauth.NewUploadTokenSigner(d.MCPAuth.Key)
+		mediaSigner = mcpauth.NewMediaReadTokenSigner(d.MCPAuth.Key)
 	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, drafter: d.Drafter, response: d.Response, evo: d.Evo, tg: d.TG, kb: d.KB, builder: d.Builder,
+		blob: d.Blob, response: d.Response, evo: d.Evo, tg: d.TG, kb: d.KB,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
-		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer, mcpUploadSigner: uploadSigner,
+		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer,
+		mcpUploadSigner: uploadSigner, mcpMediaSigner: mediaSigner,
 		pendingNames: map[string]string{},
 		csrfSecret:   randomCSRFFallbackSecret(),
 		// Deliberately generous limits — these are abuse guards, not a
 		// throttle on legitimate usage. See ratelimit.go's doc comment.
-		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),  // 5/min, 5 burst — registration spam is the highest-value target
+		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — registration spam is the highest-value target
 		oauthTokenLimit:     newIPRateLimiter(30.0/60, 10), // 30/min, 10 burst — refresh-heavy legitimate usage needs headroom
 		oauthAuthorizeLimit: newIPRateLimiter(20.0/60, 10), // 20/min, 10 burst
 	}
@@ -225,6 +223,13 @@ func (s *Server) Router() *gin.Engine {
 	upload.PUT("/:material_id", s.handleMCPUpload)
 	upload.OPTIONS("/:material_id", func(c *gin.Context) {}) // uploadCORS aborts+responds before this body runs
 
+	// The signed media-READ target the widget renders previews from — same
+	// reasoning and same shape as the upload group above, opposite direction.
+	media := r.Group("/mcp/media")
+	media.Use(s.mediaCORS())
+	media.GET("/:material_id", s.handleMCPMediaRead)
+	media.OPTIONS("/:material_id", func(c *gin.Context) {})
+
 	api := r.Group("/xchats/api/v1")
 	api.POST("/auth/login", s.handleLogin)
 	api.POST("/auth/logout", s.handleLogout)
@@ -267,6 +272,7 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/chats/:id/messages", s.handleListMessages)
 	auth.POST("/chats/:id/messages", s.handleSendMessage)
 	auth.POST("/chats/:id/read", s.handleReadChat)
+	auth.PATCH("/chats/:id/assignee", s.handleAssignChat)
 
 	auth.GET("/chats/:id/ai-drafts", s.handleListDrafts)
 	auth.POST("/chats/:id/ai-drafts", s.handleSuggest)
@@ -282,9 +288,8 @@ func (s *Server) Router() *gin.Engine {
 		auth.POST("/simulator/messages", s.handleSimulatorMessage)
 	}
 
-	// Playground — the KB builder (chat → materials → draft blob → approve into
-	// the live KB, 15 Decisions 3–4). No more open/publish/rollback: GET always
-	// returns the merged view; approve is the only write path to live.
+	// Playground — a draft copy of the structured knowledge base. Writes remain
+	// pending until the operator approves them into the live KB.
 	pg := auth.Group("/playground")
 	pg.GET("/draft", s.handlePlaygroundDraft)
 	pg.DELETE("/draft", s.handlePlaygroundDiscardDraft)
@@ -299,13 +304,9 @@ func (s *Server) Router() *gin.Engine {
 	pg.PATCH("/draft/contacts", s.handlePlaygroundPatchContacts)
 	pg.PATCH("/draft/policies", s.handlePlaygroundPatchPolicies)
 	pg.PATCH("/draft/config", s.handlePlaygroundPatchConfig)
-	pg.POST("/draft/materials", s.handlePlaygroundCreateMaterial)
-	pg.GET("/draft/materials", s.handlePlaygroundListMaterials)
-	pg.POST("/chat", s.handlePlaygroundChat)
-	pg.GET("/requests", s.handlePlaygroundListRequests)
-	pg.POST("/requests/:id/resolve", s.handlePlaygroundResolveRequest)
 	pg.POST("/draft/approve", s.handlePlaygroundApprove)
 	pg.POST("/draft/approve/:kind/:id", s.handlePlaygroundApproveEntity)
+	pg.DELETE("/draft/changes/:kind/:key", s.handlePlaygroundCancelChange)
 
 	// KB — the live-only editor (/knowledge-base). Every write here lands
 	// directly in the live ai_ tables: no draft blob, no approve step, so it
@@ -393,7 +394,13 @@ func (s *Server) cors() gin.HandlerFunc {
 		// preflight would come back 204 but with no Access-Control-Allow-Origin
 		// at all — which the browser treats as "denied" and silently drops the
 		// real PUT (the server then only ever logs the OPTIONS).
-		if strings.HasPrefix(c.Request.URL.Path, "/mcp/uploads") {
+		//
+		// /mcp/media is the same story in the read direction (mediaCORS).
+		// Kept as two explicit prefixes rather than a blanket "/mcp/" test —
+		// that would silently hand a permissive policy to every future
+		// /mcp/* route somebody adds.
+		if strings.HasPrefix(c.Request.URL.Path, "/mcp/uploads") ||
+			strings.HasPrefix(c.Request.URL.Path, "/mcp/media") {
 			c.Next()
 			return
 		}

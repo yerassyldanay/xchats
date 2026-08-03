@@ -151,6 +151,28 @@ func (s *Store) MarkChatRead(ctx context.Context, id uuid.UUID) (Chat, error) {
 	return chat, nil
 }
 
+// AssignChat sets (or clears) a chat's assignee on the transport-specific chat
+// table and returns the refreshed channel-neutral view row.
+func (s *Store) AssignChat(ctx context.Context, id uuid.UUID, assignee uuid.NullUUID) (Chat, error) {
+	chat, err := s.ChatByID(ctx, id)
+	if err != nil {
+		return Chat{}, err
+	}
+	table, err := chatsTableFor(chat.Channel)
+	if err != nil {
+		return Chat{}, err
+	}
+	var value any
+	if assignee.Valid {
+		value = assignee.UUID
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE `+table+` SET assignee_user_id = $2, updated_at = now() WHERE id = $1`, id, value); err != nil {
+		return Chat{}, err
+	}
+	return s.ChatByID(ctx, id)
+}
+
 // MessagesForChat returns up to limit messages older than `before` (chronological asc),
 // with their media refs attached, plus the next cursor.
 func (s *Store) MessagesForChat(ctx context.Context, chatID uuid.UUID, before time.Time, limit int) ([]Message, *time.Time, error) {

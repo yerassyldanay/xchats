@@ -48,7 +48,6 @@ type Topic struct {
 	FeaturedImage       string
 	IllustrationImages  []string
 	ExplainerVideos     []string
-	NarrationAudioFiles []string
 	ReferenceDocuments  []string
 }
 
@@ -64,11 +63,8 @@ type Product struct {
 	FeaturedImage          string
 	GalleryImages          []string
 	DemoVideos             []string
-	AudioDescriptionFiles  []string
 	CertificateDocuments   []string
-	ManualDocuments        []string
 	GuaranteeDocuments     []string
-	SpecificationDocuments []string
 }
 
 // Tariff mirrors ai_tariffs.

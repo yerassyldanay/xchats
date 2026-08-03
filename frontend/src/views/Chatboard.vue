@@ -10,7 +10,7 @@ const inbox = useInbox()
 const accounts = useAccounts()
 
 onMounted(() => {
-  inbox.loadChats()
+  Promise.allSettled([inbox.loadChats(), inbox.loadUsers()])
   inbox.startRealtime()
   accounts.load() // for the per-chat account labels + the "from number" picker
 })

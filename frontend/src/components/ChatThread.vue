@@ -6,13 +6,15 @@ import {
   CircleCheck,
   Clock,
   Download,
-  EllipsisVertical,
   FileText,
   MessagesSquare,
   TriangleAlert,
   UserPlus,
+  UserRoundCheck,
+  X,
 } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
+import { useAuth } from '../stores/auth'
 import { api } from '../api/client'
 import { shortTime, tick, initials, colorFor, type TickStatus } from '../lib/format'
 import Composer from './Composer.vue'
@@ -27,9 +29,20 @@ import {
 } from '@/components/ui/dropdown-menu'
 
 const inbox = useInbox()
+const auth = useAuth()
 const scroller = ref<HTMLElement | null>(null)
 
 const chat = computed(() => inbox.activeChat)
+const assignee = computed(() => inbox.users.find((user) => user.id === chat.value?.assignee_user_id) ?? null)
+const assignmentLabel = computed(() => {
+  if (!assignee.value) return chat.value?.assignee_user_id ? 'Назначено' : 'Назначить'
+  return assignee.value.id === auth.user?.id ? 'Назначено мне' : assignee.value.name || assignee.value.email
+})
+const otherUsers = computed(() => inbox.users.filter((user) => user.id !== auth.user?.id))
+
+function assign(userId: string | null) {
+  if (chat.value) inbox.assignChat(chat.value.id, userId)
+}
 
 // delivery-tick discriminant -> icon + class (colored for the green out-bubble)
 const tickMeta: Record<TickStatus, { icon: Component; cls: string }> = {
@@ -76,23 +89,55 @@ function isAudio(m: Message['media'][number]) {
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <Button variant="outline" size="sm" title="Назначить">
-            <UserPlus class="w-4 h-4" /> Назначить
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="outline" size="sm" :disabled="inbox.assigning" :title="assignmentLabel">
+                <UserRoundCheck v-if="assignee" class="w-4 h-4 text-primary" />
+                <UserPlus v-else class="w-4 h-4" />
+                <span class="max-w-36 truncate">{{ assignmentLabel }}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-64">
+              <DropdownMenuItem
+                v-if="auth.user"
+                :disabled="chat.assignee_user_id === auth.user.id"
+                @select="assign(auth.user.id)"
+              >
+                <UserRoundCheck class="w-4 h-4" />
+                <span class="min-w-0">
+                  <span class="block truncate">Назначить мне</span>
+                  <span class="block truncate text-xs text-muted-foreground">{{ auth.user.email }}</span>
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                v-for="user in otherUsers"
+                :key="user.id"
+                :disabled="chat.assignee_user_id === user.id"
+                @select="assign(user.id)"
+              >
+                <UserPlus class="w-4 h-4" />
+                <span class="min-w-0">
+                  <span class="block truncate">{{ user.name || user.email }}</span>
+                  <span class="block truncate text-xs text-muted-foreground">{{ user.email }}</span>
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                v-if="chat.assignee_user_id"
+                class="text-destructive focus:text-destructive"
+                @select="assign(null)"
+              >
+                <X class="w-4 h-4" /> Снять назначение
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="sm" title="Решить">
             <CircleCheck class="w-4 h-4 text-wa" /> Решить
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button variant="ghost" size="icon" title="Ещё"><EllipsisVertical class="w-4 h-4" /></Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem>Профиль контакта</DropdownMenuItem>
-              <DropdownMenuItem>Отметить непрочитанным</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </header>
+      <p v-if="inbox.assignmentError" class="border-b border-destructive/20 bg-destructive/5 px-5 py-2 text-xs text-destructive">
+        {{ inbox.assignmentError }}
+      </p>
 
       <div ref="scroller" class="flex-1 overflow-y-auto px-6 py-5 space-y-2.5">
         <div

@@ -40,3 +40,4 @@ frontend/playwright/.cache/
 *.swp
 
 .claude
+.cache

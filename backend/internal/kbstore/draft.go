@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,14 +50,13 @@ func (c DraftConfigPatch) hasPending() bool {
 // (never nil — always at least an empty slice, matching the live column's
 // NOT NULL DEFAULT '{}').
 type DraftTopic struct {
-	Slug                string      `json:"slug"`
-	Title               string      `json:"title"`
-	BodyMD              string      `json:"body_md"`
-	FeaturedImage       *uuid.UUID  `json:"featured_image"`
-	IllustrationImages  []uuid.UUID `json:"illustration_images"`
-	ExplainerVideos     []uuid.UUID `json:"explainer_videos"`
-	NarrationAudioFiles []uuid.UUID `json:"narration_audio_files"`
-	ReferenceDocuments  []uuid.UUID `json:"reference_documents"`
+	Slug               string      `json:"slug"`
+	Title              string      `json:"title"`
+	BodyMD             string      `json:"body_md"`
+	FeaturedImage      *uuid.UUID  `json:"featured_image"`
+	IllustrationImages []uuid.UUID `json:"illustration_images"`
+	ExplainerVideos    []uuid.UUID `json:"explainer_videos"`
+	ReferenceDocuments []uuid.UUID `json:"reference_documents"`
 }
 
 type DraftTariff struct {
@@ -79,21 +77,18 @@ type DraftTariff struct {
 }
 
 type DraftProduct struct {
-	Ref                    string      `json:"ref"`
-	Name                   string      `json:"name"`
-	Price                  string      `json:"price"`
-	Description            string      `json:"description"`
-	Category               string      `json:"category"`
-	InStock                bool        `json:"in_stock"`
-	SalesStatus            string      `json:"sales_status"`
-	FeaturedImage          *uuid.UUID  `json:"featured_image"`
-	GalleryImages          []uuid.UUID `json:"gallery_images"`
-	DemoVideos             []uuid.UUID `json:"demo_videos"`
-	AudioDescriptionFiles  []uuid.UUID `json:"audio_description_files"`
-	CertificateDocuments   []uuid.UUID `json:"certificate_documents"`
-	ManualDocuments        []uuid.UUID `json:"manual_documents"`
-	GuaranteeDocuments     []uuid.UUID `json:"guarantee_documents"`
-	SpecificationDocuments []uuid.UUID `json:"specification_documents"`
+	Ref                  string      `json:"ref"`
+	Name                 string      `json:"name"`
+	Price                string      `json:"price"`
+	Description          string      `json:"description"`
+	Category             string      `json:"category"`
+	InStock              bool        `json:"in_stock"`
+	SalesStatus          string      `json:"sales_status"`
+	FeaturedImage        *uuid.UUID  `json:"featured_image"`
+	GalleryImages        []uuid.UUID `json:"gallery_images"`
+	DemoVideos           []uuid.UUID `json:"demo_videos"`
+	CertificateDocuments []uuid.UUID `json:"certificate_documents"`
+	GuaranteeDocuments   []uuid.UUID `json:"guarantee_documents"`
 }
 
 // DraftContact is the org's single pending support-contact entry — a true
@@ -285,6 +280,22 @@ func (b *DraftBlob) removeDelete(kind, key string) {
 	b.Deletes = out
 }
 
+// removeDeleteMatching is removeDelete's CancelChange-facing counterpart: it
+// drops any delete marker for (singular, key) via deleteMatches — the same
+// singleton-key-is-ignored comparison selectApproved uses — rather than an
+// exact (kind, key) pair, so a marker MCPDelete wrote under NaturalKeyMain
+// and one CancelChange is asked to drop under domain.ContactSlug/PolicySlug
+// are recognized as the SAME marker.
+func (b *DraftBlob) removeDeleteMatching(singular, key string) {
+	out := b.Deletes[:0]
+	for _, d := range b.Deletes {
+		if !deleteMatches(d, singular, key) {
+			out = append(out, d)
+		}
+	}
+	b.Deletes = out
+}
+
 // ---------------------------------------------------------------------------
 // Blob read + read-modify-write (optimistic concurrency via base_version)
 // ---------------------------------------------------------------------------
@@ -349,28 +360,57 @@ func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, userID uuid
 // changed the draft") — uuid.Nil for a caller with no attributable human
 // (there is none today; every write path, MCP or the legacy editor, has an
 // authenticated actor by the time it reaches here).
+//
+// Built on lockDraftBlob/persistDraftBlob — the same lock-read/marshal-write
+// primitives CancelChange uses with its own ordering (CancelChange must
+// decide whether a stale expectedVersion even matters BEFORE the version
+// check runs, which this straight-line check-then-mutate order cannot
+// express — see CancelChange's doc comment).
 func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, expectedVersion *int64, userID uuid.UUID, mutate func(dbtx, *DraftBlob) error) (int64, error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, blob, currentVersion, err := s.lockDraftBlob(ctx, orgID)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
 
-	// A transaction-scoped advisory lock, keyed on the org, serializes EVERY
-	// writer to this org's draft — including the very first one, before any
-	// kbd_draft row exists for "SELECT ... FOR UPDATE" below to lock at all.
-	// Without this: two concurrent first-writers both see "no row, version
-	// 0" (pgx.ErrNoRows locks nothing), both mutate an independently-empty
-	// blob, and whichever's INSERT ... ON CONFLICT below runs second
-	// silently overwrites the first's already-committed content — a lost
-	// update the row lock alone cannot prevent, because there is no row yet
-	// to lock against. draftLockSeed namespaces this codebase's one
-	// advisory-lock use; a future unrelated advisory lock added elsewhere
-	// should pick a different seed to avoid needlessly serializing against
-	// this one. The _xact_ variant releases automatically at commit/
-	// rollback, so it can never leak on an early return or a panic.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, $2))`, orgID.String(), draftLockSeed); err != nil {
+	if expectedVersion != nil && *expectedVersion != currentVersion {
+		return 0, ErrStale
+	}
+
+	if err := mutate(tx, &blob); err != nil {
 		return 0, err
+	}
+
+	return persistDraftBlob(ctx, tx, orgID, userID, blob)
+}
+
+// lockDraftBlob begins a transaction, takes the org's advisory lock, and
+// reads the current blob + base_version under FOR UPDATE — the shared
+// preamble every draft-blob writer needs. The caller owns the returned
+// transaction on success (commit or rollback it); on error the transaction
+// is already rolled back and the returned tx is nil.
+//
+// The advisory lock, keyed on the org, serializes EVERY writer to this org's
+// draft — including the very first one, before any kbd_draft row exists for
+// "SELECT ... FOR UPDATE" below to lock at all. Without this: two concurrent
+// first-writers both see "no row, version 0" (pgx.ErrNoRows locks nothing),
+// both mutate an independently-empty blob, and whichever's INSERT ... ON
+// CONFLICT in persistDraftBlob runs second silently overwrites the first's
+// already-committed content — a lost update the row lock alone cannot
+// prevent, because there is no row yet to lock against. draftLockSeed
+// namespaces this codebase's one advisory-lock use; a future unrelated
+// advisory lock added elsewhere should pick a different seed to avoid
+// needlessly serializing against this one. The _xact_ variant releases
+// automatically at commit/rollback, so it can never leak on an early return
+// or a panic.
+func (s *Store) lockDraftBlob(ctx context.Context, orgID uuid.UUID) (pgx.Tx, DraftBlob, int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, DraftBlob{}, 0, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, $2))`, orgID.String(), draftLockSeed); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, DraftBlob{}, 0, err
 	}
 
 	var raw []byte
@@ -383,29 +423,30 @@ func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, ex
 		// no row yet — version 0; the advisory lock above already rules out
 		// a concurrent first-writer racing this exact branch.
 	case err != nil:
-		return 0, err
+		_ = tx.Rollback(ctx)
+		return nil, DraftBlob{}, 0, err
 	case len(raw) > 0:
 		if err := json.Unmarshal(raw, &blob); err != nil {
-			return 0, err
+			_ = tx.Rollback(ctx)
+			return nil, DraftBlob{}, 0, err
 		}
 	}
-	if expectedVersion != nil && *expectedVersion != currentVersion {
-		return 0, ErrStale
-	}
+	return tx, blob, currentVersion, nil
+}
 
-	if err := mutate(tx, &blob); err != nil {
-		return 0, err
-	}
-
+// persistDraftBlob marshals blob, writes it as the org's new kbd_draft row
+// (bumping base_version), and commits tx — the write half of every draft
+// mutation, shared by writeDraftBlobVersioned and CancelChange.
+func persistDraftBlob(ctx context.Context, tx pgx.Tx, orgID, userID uuid.UUID, blob DraftBlob) (int64, error) {
 	out, err := json.Marshal(blob)
 	if err != nil {
 		return 0, err
 	}
 	// RETURNING the row's ACTUAL stored base_version, rather than computing
 	// currentVersion+1 locally, so the reported version can never disagree
-	// with what is really persisted — belt-and-suspenders alongside the
-	// advisory lock above, which already makes currentVersion itself
-	// trustworthy by the time we get here.
+	// with what is really persisted — belt-and-suspenders alongside
+	// lockDraftBlob's advisory lock, which already makes the version this
+	// increments from trustworthy by the time we get here.
 	var newVersion int64
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO xchats.kbd_draft (organization_id, draft, base_version, updated_at, updated_by)
@@ -448,6 +489,217 @@ func (s *Store) ClearDraft(ctx context.Context, orgID uuid.UUID, actor uuid.UUID
 }
 
 // ---------------------------------------------------------------------------
+// CancelChange — «Отменить изменение» on a Черновик card: drop ONE pending
+// change without touching live. Genuinely idempotent (15's own bar for any
+// mutation reachable by a client retry): a repeat call performs NO write,
+// does NOT advance base_version, and reports Changed:false.
+// ---------------------------------------------------------------------------
+
+// CancelResult reports whether a CancelChange call actually changed
+// anything. A cancel whose outcome already holds performs no write and
+// leaves BaseVersion exactly as it was — repeating a cancellation is free,
+// so a client retry after a lost response can never inflate base_version
+// and stale every other open tab.
+type CancelResult struct {
+	Changed     bool
+	BaseVersion int64
+}
+
+// CancelChange drops ONE pending change addressed by the same (kind, key)
+// pair a card's Publish (ApproveVersioned/ApproveSelector) uses: the staged
+// blob entry (an addition or an update) AND any delete marker for it (a
+// staged removal), returning that entity to exactly whatever live says.
+// kind == "config" takes a FIELD name as key
+// (persona|mission|guardrails|language_policy|reply_max_words) and clears
+// just that pointer; key == NaturalKeyMain clears the whole pending config
+// patch ("Отменить все изменения ассистента"). ErrUnknownKind for any other
+// kind, or an unrecognized config field name. Live tables are never
+// touched, so no KB-cache invalidation.
+//
+// Ordering — why this cannot be built on writeDraftBlobVersioned's
+// straight-line check-then-mutate order:
+//  1. Read the blob under the advisory lock (lockDraftBlob).
+//  2. Determine whether the target is still present.
+//  3. Target absent -> return {Changed: false, BaseVersion: current} with NO
+//     write, regardless of expectedVersion. A stale If-Match is not an error
+//     here: 409 exists to stop one writer clobbering another's payload, and
+//     cancellation is convergent — there is no payload to clobber and no
+//     lost update to prevent. The caller's response carries the current
+//     version and the fresh change set, so a stale client resyncs anyway.
+//  4. Target present and expectedVersion stale -> ErrStale -> 409. A real
+//     write is about to happen, so the conflict is genuine and is surfaced.
+//  5. Target present, version matches -> remove, persist, return
+//     {Changed: true, BaseVersion: new}.
+//
+// Cancelling an unknown key never lazily creates an empty kbd_draft row —
+// step 3 returns before any write, and lockDraftBlob already tolerates
+// pgx.ErrNoRows.
+func (s *Store) CancelChange(ctx context.Context, orgID, actor uuid.UUID, kind, key string, expectedVersion *int64) (CancelResult, error) {
+	if kind == "config" {
+		if key != NaturalKeyMain && !isConfigField(key) {
+			return CancelResult{}, ErrUnknownKind
+		}
+		return s.cancelWithinLock(ctx, orgID, actor, expectedVersion,
+			func(b DraftBlob) bool { return configFieldPending(b.Config, key) },
+			func(b *DraftBlob) {
+				if key == NaturalKeyMain {
+					b.Config = DraftConfigPatch{}
+				} else {
+					clearConfigField(&b.Config, key)
+				}
+			})
+	}
+	singular, ok := SingularDeleteKind(kind)
+	if !ok {
+		return CancelResult{}, ErrUnknownKind
+	}
+	return s.cancelWithinLock(ctx, orgID, actor, expectedVersion,
+		func(b DraftBlob) bool { return entityChangePresent(b, singular, key) },
+		func(b *DraftBlob) {
+			switch singular {
+			case "topic":
+				b.removeTopic(key)
+			case "tariff":
+				b.removeTariff(key)
+			case "product":
+				b.removeProduct(key)
+			case "delivery_zone":
+				b.removeZone(key)
+			case "contact":
+				b.removeContact()
+			case "policy":
+				b.removePolicy()
+			}
+			b.removeDeleteMatching(singular, key)
+		})
+}
+
+// cancelWithinLock implements CancelChange's 5-step ordering (see its doc
+// comment), parameterized by present (step 2) and apply (step 5's mutation)
+// so the config and entity branches above share one transaction and one set
+// of concurrency rules instead of reimplementing them twice.
+func (s *Store) cancelWithinLock(
+	ctx context.Context, orgID, actor uuid.UUID, expectedVersion *int64,
+	present func(DraftBlob) bool, apply func(*DraftBlob),
+) (CancelResult, error) {
+	tx, blob, currentVersion, err := s.lockDraftBlob(ctx, orgID)
+	if err != nil {
+		return CancelResult{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	if !present(blob) {
+		if err := tx.Commit(ctx); err != nil {
+			return CancelResult{}, err
+		}
+		return CancelResult{Changed: false, BaseVersion: currentVersion}, nil
+	}
+	if expectedVersion != nil && *expectedVersion != currentVersion {
+		return CancelResult{}, ErrStale
+	}
+
+	apply(&blob)
+
+	newVersion, err := persistDraftBlob(ctx, tx, orgID, actor, blob)
+	if err != nil {
+		return CancelResult{}, err
+	}
+	return CancelResult{Changed: true, BaseVersion: newVersion}, nil
+}
+
+// entityChangePresent reports whether the blob has a pending upsert entry OR
+// a delete marker for (singular, key) — CancelChange's step 2 for every kind
+// except config.
+func entityChangePresent(blob DraftBlob, singular, key string) bool {
+	for _, d := range blob.Deletes {
+		if deleteMatches(d, singular, key) {
+			return true
+		}
+	}
+	switch singular {
+	case "topic":
+		for _, t := range blob.Topics {
+			if t.Slug == key {
+				return true
+			}
+		}
+	case "tariff":
+		for _, t := range blob.Tariffs {
+			if t.Ref == key {
+				return true
+			}
+		}
+	case "product":
+		for _, p := range blob.Products {
+			if p.Ref == key {
+				return true
+			}
+		}
+	case "delivery_zone":
+		for _, z := range blob.DeliveryZones {
+			if z.Ref == key {
+				return true
+			}
+		}
+	case "contact":
+		return len(blob.Contacts) > 0
+	case "policy":
+		return len(blob.Policies) > 0
+	}
+	return false
+}
+
+// isConfigField reports whether key names one of DraftConfigPatch's fields —
+// CancelChange("config", key)'s per-field vocabulary.
+func isConfigField(key string) bool {
+	switch key {
+	case "persona", "mission", "guardrails", "language_policy", "reply_max_words":
+		return true
+	}
+	return false
+}
+
+// configFieldPending reports whether the given config key has a pending
+// edit: NaturalKeyMain asks "any field at all" (hasPending), a field name
+// asks about just that pointer.
+func configFieldPending(c DraftConfigPatch, key string) bool {
+	if key == NaturalKeyMain {
+		return c.hasPending()
+	}
+	switch key {
+	case "persona":
+		return c.Persona != nil
+	case "mission":
+		return c.Mission != nil
+	case "guardrails":
+		return c.Guardrails != nil
+	case "language_policy":
+		return c.LanguagePolicy != nil
+	case "reply_max_words":
+		return c.ReplyMaxWords != nil
+	}
+	return false
+}
+
+// clearConfigField nils out one DraftConfigPatch field by name — the
+// per-field twin of a whole `*c = DraftConfigPatch{}` reset. Caller
+// (CancelChange) has already validated key via isConfigField.
+func clearConfigField(c *DraftConfigPatch, key string) {
+	switch key {
+	case "persona":
+		c.Persona = nil
+	case "mission":
+		c.Mission = nil
+	case "guardrails":
+		c.Guardrails = nil
+	case "language_policy":
+		c.LanguagePolicy = nil
+	case "reply_max_words":
+		c.ReplyMaxWords = nil
+	}
+}
+
+// ---------------------------------------------------------------------------
 // The merged DraftView — live rows overlaid by pending blob entries. Every
 // entity is flagged Draft: true|false; there is no more open/no-draft state —
 // the view always exists (possibly with nothing pending).
@@ -471,17 +723,16 @@ type DraftConfig struct {
 // draft blob's timestamp for a pending one. ContactRow/PolicyRow (below) are
 // true singletons — one per org, ID a fixed constant.
 type TopicRow struct {
-	ID                  string      `json:"id"`
-	Slug                string      `json:"slug"`
-	Title               string      `json:"title"`
-	BodyMD              string      `json:"body_md"`
-	FeaturedImage       *uuid.UUID  `json:"featured_image"`
-	IllustrationImages  []uuid.UUID `json:"illustration_images"`
-	ExplainerVideos     []uuid.UUID `json:"explainer_videos"`
-	NarrationAudioFiles []uuid.UUID `json:"narration_audio_files"`
-	ReferenceDocuments  []uuid.UUID `json:"reference_documents"`
-	Draft               bool        `json:"draft"`
-	UpdatedAt           time.Time   `json:"updated_at"`
+	ID                 string      `json:"id"`
+	Slug               string      `json:"slug"`
+	Title              string      `json:"title"`
+	BodyMD             string      `json:"body_md"`
+	FeaturedImage      *uuid.UUID  `json:"featured_image"`
+	IllustrationImages []uuid.UUID `json:"illustration_images"`
+	ExplainerVideos    []uuid.UUID `json:"explainer_videos"`
+	ReferenceDocuments []uuid.UUID `json:"reference_documents"`
+	Draft              bool        `json:"draft"`
+	UpdatedAt          time.Time   `json:"updated_at"`
 }
 
 type TariffRow struct {
@@ -505,24 +756,21 @@ type TariffRow struct {
 }
 
 type ProductRow struct {
-	ID                     string      `json:"id"`
-	Ref                    string      `json:"ref"`
-	Name                   string      `json:"name"`
-	Price                  string      `json:"price"`
-	Description            string      `json:"description"`
-	Category               string      `json:"category"`
-	InStock                bool        `json:"in_stock"`
-	SalesStatus            string      `json:"sales_status"`
-	FeaturedImage          *uuid.UUID  `json:"featured_image"`
-	GalleryImages          []uuid.UUID `json:"gallery_images"`
-	DemoVideos             []uuid.UUID `json:"demo_videos"`
-	AudioDescriptionFiles  []uuid.UUID `json:"audio_description_files"`
-	CertificateDocuments   []uuid.UUID `json:"certificate_documents"`
-	ManualDocuments        []uuid.UUID `json:"manual_documents"`
-	GuaranteeDocuments     []uuid.UUID `json:"guarantee_documents"`
-	SpecificationDocuments []uuid.UUID `json:"specification_documents"`
-	Draft                  bool        `json:"draft"`
-	UpdatedAt              time.Time   `json:"updated_at"`
+	ID                   string      `json:"id"`
+	Ref                  string      `json:"ref"`
+	Name                 string      `json:"name"`
+	Price                string      `json:"price"`
+	Description          string      `json:"description"`
+	Category             string      `json:"category"`
+	InStock              bool        `json:"in_stock"`
+	SalesStatus          string      `json:"sales_status"`
+	FeaturedImage        *uuid.UUID  `json:"featured_image"`
+	GalleryImages        []uuid.UUID `json:"gallery_images"`
+	DemoVideos           []uuid.UUID `json:"demo_videos"`
+	CertificateDocuments []uuid.UUID `json:"certificate_documents"`
+	GuaranteeDocuments   []uuid.UUID `json:"guarantee_documents"`
+	Draft                bool        `json:"draft"`
+	UpdatedAt            time.Time   `json:"updated_at"`
 }
 
 type ContactRow struct {
@@ -648,6 +896,17 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 	if err != nil {
 		return nil, err
 	}
+	return draftRowsFromBlob(orgID, blob, ver, updatedAt), nil
+}
+
+// draftRowsFromBlob is draftOnly's pure core: exactly what the given blob has
+// staged, with every row's origin explicit (Draft: true) and a staged
+// deletion suppressed for every kind — no database access, no error return,
+// since everything it needs is already in blob. Split out so DraftChanges
+// (the Черновик review payload) and draftOnly (kb_read(source=draft), the KB
+// Manager widget) can never disagree about what "pending" means — both call
+// this SAME function over the SAME blob read.
+func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt time.Time) *DraftView {
 	v := &DraftView{Config: DraftConfig{OrganizationID: orgID, BaseVersion: ver, UpdatedAt: updatedAt}}
 	deleted := map[string]bool{}
 	for _, d := range blob.Deletes {
@@ -674,7 +933,7 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 		}
 		v.Topics = append(v.Topics, TopicRow{ID: t.Slug, Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD,
 			FeaturedImage: t.FeaturedImage, IllustrationImages: t.IllustrationImages,
-			ExplainerVideos: t.ExplainerVideos, NarrationAudioFiles: t.NarrationAudioFiles,
+			ExplainerVideos:    t.ExplainerVideos,
 			ReferenceDocuments: t.ReferenceDocuments,
 			Draft:              true, UpdatedAt: updatedAt})
 	}
@@ -696,12 +955,10 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 		v.Products = append(v.Products, ProductRow{ID: p.Ref, Ref: p.Ref, Name: p.Name, Price: p.Price,
 			Description: p.Description, Category: p.Category, InStock: p.InStock, SalesStatus: p.SalesStatus,
 			FeaturedImage: p.FeaturedImage, GalleryImages: p.GalleryImages, DemoVideos: p.DemoVideos,
-			AudioDescriptionFiles: p.AudioDescriptionFiles, CertificateDocuments: p.CertificateDocuments,
-			ManualDocuments: p.ManualDocuments, GuaranteeDocuments: p.GuaranteeDocuments,
-			SpecificationDocuments: p.SpecificationDocuments,
-			Draft:                  true, UpdatedAt: updatedAt})
+			CertificateDocuments: p.CertificateDocuments, GuaranteeDocuments: p.GuaranteeDocuments,
+			Draft: true, UpdatedAt: updatedAt})
 	}
-	if len(blob.Contacts) > 0 && !deleted["contact:"] {
+	if len(blob.Contacts) > 0 && !deletedSingleton(blob, "contact") {
 		c := blob.Contacts[0]
 		v.Contacts = append(v.Contacts, ContactRow{ID: domain.ContactSlug, Slug: domain.ContactSlug,
 			WhatsApp: c.WhatsApp, Email: c.Email, Address: c.Address, LegalInformation: c.LegalInformation,
@@ -710,7 +967,7 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 			CompanyLegalDocuments: c.CompanyLegalDocuments,
 			Draft:                 true, UpdatedAt: updatedAt})
 	}
-	if len(blob.Policies) > 0 && !deleted["policy:"] {
+	if len(blob.Policies) > 0 && !deletedSingleton(blob, "policy") {
 		p := blob.Policies[0]
 		v.Policies = append(v.Policies, PolicyRow{ID: domain.PolicySlug, Slug: domain.PolicySlug,
 			DeliveryCost: p.DeliveryCost, DeliveryInDays: p.DeliveryInDays, FreeDeliveryFrom: p.FreeDeliveryFrom,
@@ -748,7 +1005,71 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 	if v.Zones == nil {
 		v.Zones = []ZoneRow{}
 	}
-	return v, nil
+	return v
+}
+
+// ---------------------------------------------------------------------------
+// DraftChanges — the Черновик review payload. Unlike Draft()'s merged view,
+// this carries ONLY what kbd_draft has staged, plus explicit deletion
+// entries, so an unchanged published row can never appear in it. The
+// published counterpart a reviewer diffs a pending row against comes from
+// LiveView/GET /kb, never from this payload.
+// ---------------------------------------------------------------------------
+
+// DraftChangeSet is the review payload behind GET /playground/draft.
+// Config is nil when there is no pending config edit at all (as opposed to
+// DraftView.Config, which always carries a full, possibly-live-only value).
+type DraftChangeSet struct {
+	BaseVersion int64               `json:"base_version"`
+	UpdatedAt   time.Time           `json:"updated_at"`
+	Config      *DraftConfigPatch   `json:"config"`
+	Topics      []TopicRow          `json:"topics"`
+	Tariffs     []TariffRow         `json:"tariffs"`
+	Products    []ProductRow        `json:"products"`
+	Contacts    []ContactRow        `json:"contacts"`
+	Policies    []PolicyRow         `json:"policies"`
+	Zones       []ZoneRow           `json:"zones"`
+	Deletes     []DraftChangeDelete `json:"deletes"`
+}
+
+// DraftChangeDelete is one staged removal, addressed in the SAME
+// HTTP-facing plural vocabulary POST /playground/draft/approve/:kind/:id and
+// DELETE /playground/draft/changes/:kind/:key use — never the blob's own
+// singular DraftDelete.Kind (bridged via PluralChangeKind).
+type DraftChangeDelete struct {
+	Kind string `json:"kind"` // topics|tariffs|products|contacts|policies|delivery_zones
+	Key  string `json:"key"`
+}
+
+// DraftChanges returns the org's pending change set: one blob read, no live
+// query, built from the SAME draftRowsFromBlob draftOnly uses — so this
+// payload and kb_read(source=draft) can never disagree about what "pending"
+// means.
+func (s *Store) DraftChanges(ctx context.Context, orgID uuid.UUID) (*DraftChangeSet, error) {
+	blob, ver, updatedAt, err := s.readDraftBlob(ctx, s.pool, orgID)
+	if err != nil {
+		return nil, err
+	}
+	rows := draftRowsFromBlob(orgID, blob, ver, updatedAt)
+	out := &DraftChangeSet{
+		BaseVersion: ver,
+		UpdatedAt:   updatedAt,
+		Topics:      rows.Topics,
+		Tariffs:     rows.Tariffs,
+		Products:    rows.Products,
+		Contacts:    rows.Contacts,
+		Policies:    rows.Policies,
+		Zones:       rows.Zones,
+		Deletes:     make([]DraftChangeDelete, 0, len(blob.Deletes)),
+	}
+	if blob.Config.hasPending() {
+		cfg := blob.Config
+		out.Config = &cfg
+	}
+	for _, d := range blob.Deletes {
+		out.Deletes = append(out.Deletes, DraftChangeDelete{Kind: PluralChangeKind(d.Kind), Key: d.Key})
+	}
+	return out, nil
 }
 
 // mergedView loads live rows and overlays the given blob's pending entries —
@@ -788,7 +1109,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	// topics
 	topicIdx := map[string]int{}
 	trows, err := db.Query(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
-		explainer_videos, narration_audio_files, reference_documents, updated_at
+		explainer_videos, reference_documents, updated_at
 		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -796,7 +1117,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	for trows.Next() {
 		var t TopicRow
 		if err := trows.Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
-			&t.ExplainerVideos, &t.NarrationAudioFiles, &t.ReferenceDocuments, &t.UpdatedAt); err != nil {
+			&t.ExplainerVideos, &t.ReferenceDocuments, &t.UpdatedAt); err != nil {
 			trows.Close()
 			return nil, err
 		}
@@ -811,7 +1132,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	for _, bt := range blob.Topics {
 		row := TopicRow{ID: bt.Slug, Slug: bt.Slug, Title: bt.Title, BodyMD: bt.BodyMD,
 			FeaturedImage: bt.FeaturedImage, IllustrationImages: bt.IllustrationImages,
-			ExplainerVideos: bt.ExplainerVideos, NarrationAudioFiles: bt.NarrationAudioFiles,
+			ExplainerVideos:    bt.ExplainerVideos,
 			ReferenceDocuments: bt.ReferenceDocuments,
 			Draft:              true, UpdatedAt: updatedAt}
 		if i, ok := topicIdx[bt.Slug]; ok {
@@ -871,8 +1192,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	// products (availability is a dead legacy column — not selected)
 	productIdx := map[string]int{}
 	prows, err := db.Query(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
-		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
-		manual_documents, guarantee_documents, specification_documents, updated_at
+		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents, updated_at
 		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -880,8 +1200,8 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	for prows.Next() {
 		var p ProductRow
 		if err := prows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
-			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.AudioDescriptionFiles, &p.CertificateDocuments,
-			&p.ManualDocuments, &p.GuaranteeDocuments, &p.SpecificationDocuments, &p.UpdatedAt); err != nil {
+			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.CertificateDocuments,
+			&p.GuaranteeDocuments, &p.UpdatedAt); err != nil {
 			prows.Close()
 			return nil, err
 		}
@@ -897,10 +1217,8 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 		row := ProductRow{ID: bp.Ref, Ref: bp.Ref, Name: bp.Name, Price: bp.Price,
 			Description: bp.Description, Category: bp.Category, InStock: bp.InStock, SalesStatus: bp.SalesStatus,
 			FeaturedImage: bp.FeaturedImage, GalleryImages: bp.GalleryImages, DemoVideos: bp.DemoVideos,
-			AudioDescriptionFiles: bp.AudioDescriptionFiles, CertificateDocuments: bp.CertificateDocuments,
-			ManualDocuments: bp.ManualDocuments, GuaranteeDocuments: bp.GuaranteeDocuments,
-			SpecificationDocuments: bp.SpecificationDocuments,
-			Draft:                  true, UpdatedAt: updatedAt}
+			CertificateDocuments: bp.CertificateDocuments, GuaranteeDocuments: bp.GuaranteeDocuments,
+			Draft: true, UpdatedAt: updatedAt}
 		if i, ok := productIdx[bp.Ref]; ok {
 			v.Products[i] = row
 		} else {
@@ -956,7 +1274,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			v.Contacts = append(v.Contacts, row)
 		}
 	}
-	if deleted["contact:"] {
+	if deletedSingleton(blob, "contact") {
 		v.Contacts = nil
 	}
 
@@ -1000,7 +1318,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			v.Policies = append(v.Policies, row)
 		}
 	}
-	if deleted["policy:"] {
+	if deletedSingleton(blob, "policy") {
 		v.Policies = nil
 	}
 
@@ -1498,10 +1816,10 @@ func (s *Store) currentTopic(ctx context.Context, db dbtx, orgID uuid.UUID, slug
 	}
 	var t DraftTopic
 	err := db.QueryRow(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
-		explainer_videos, narration_audio_files, reference_documents
+		explainer_videos, reference_documents
 		FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`, orgID, slug).
 		Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
-			&t.ExplainerVideos, &t.NarrationAudioFiles, &t.ReferenceDocuments)
+			&t.ExplainerVideos, &t.ReferenceDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftTopic{Slug: slug}, nil
 	}
@@ -1534,12 +1852,10 @@ func (s *Store) currentProduct(ctx context.Context, db dbtx, orgID uuid.UUID, re
 	}
 	var p DraftProduct
 	err := db.QueryRow(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
-		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
-		manual_documents, guarantee_documents, specification_documents
+		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
 		FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).
 		Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
-			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.AudioDescriptionFiles, &p.CertificateDocuments,
-			&p.ManualDocuments, &p.GuaranteeDocuments, &p.SpecificationDocuments)
+			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.CertificateDocuments, &p.GuaranteeDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftProduct{Ref: ref, InStock: true}, nil
 	}
@@ -1771,14 +2087,19 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 		// same as every other singleton — so set.config is true either for a
 		// whole-draft approve that happens to include a pending config edit, or
 		// for an entity-scoped approve of kind "config".
+		//
+		// Must be upsertConfigRow, not a bare UPDATE: an org with no live
+		// ai_assistants row yet (nothing auto-seeds it — see kbstore/seed_demo.go)
+		// matches zero rows on a plain UPDATE, which silently no-ops while the
+		// pending patch is still cleared from the draft below regardless — a
+		// first-ever config approve looked like it worked and lost the edit
+		// entirely. live.go's PatchLiveConfig already carries this exact fix;
+		// this path just never got the same one.
 		if set.config {
-			if _, err := db.Exec(ctx, `UPDATE xchats.ai_assistants SET
-				persona = COALESCE($2, persona), mission = COALESCE($3, mission),
-				guardrails = COALESCE($4, guardrails), language_policy = COALESCE($5, language_policy),
-				reply_max_words = COALESCE($6, reply_max_words), updated_at = now()
-				WHERE organization_id = $1`,
-				orgID, b.Config.Persona, b.Config.Mission, b.Config.Guardrails,
-				b.Config.LanguagePolicy, b.Config.ReplyMaxWords); err != nil {
+			if err := upsertConfigRow(ctx, db, orgID, ConfigPatch{
+				Persona: b.Config.Persona, Mission: b.Config.Mission, Guardrails: b.Config.Guardrails,
+				LanguagePolicy: b.Config.LanguagePolicy, ReplyMaxWords: b.Config.ReplyMaxWords,
+			}); err != nil {
 				return err
 			}
 		}
@@ -1856,7 +2177,11 @@ func applyDelete(ctx context.Context, tx execer, orgID uuid.UUID, d DraftDelete)
 
 func approveNote(sel ApproveSelector, set approveSet) string {
 	if sel.Kind != "" {
-		return fmt.Sprintf("approved %s %s", strings.TrimSuffix(sel.Kind, "s"), sel.Key)
+		singular := sel.Kind
+		if s, ok := SingularDeleteKind(sel.Kind); ok {
+			singular = s
+		}
+		return fmt.Sprintf("approved %s %s", singular, sel.Key)
 	}
 	return fmt.Sprintf("approved %d topic(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d zone(s), %d deletion(s)",
 		len(set.topics), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.zones), len(set.deletes))
@@ -1873,10 +2198,11 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 		}
 	}
 	var set approveSet
-	singular := strings.TrimSuffix(sel.Kind, "s")
-	for _, d := range b.Deletes {
-		if d.Kind == singular && d.Key == sel.Key {
-			set.deletes = append(set.deletes, d)
+	if singular, ok := SingularDeleteKind(sel.Kind); ok {
+		for _, d := range b.Deletes {
+			if deleteMatches(d, singular, sel.Key) {
+				set.deletes = append(set.deletes, d)
+			}
 		}
 	}
 	switch sel.Kind {
@@ -1899,11 +2225,11 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 			}
 		}
 	case "contacts":
-		if sel.Key == domain.ContactSlug {
+		if sel.Key == domain.ContactSlug || sel.Key == NaturalKeyMain {
 			set.contacts = b.Contacts
 		}
 	case "policies":
-		if sel.Key == domain.PolicySlug {
+		if sel.Key == domain.PolicySlug || sel.Key == NaturalKeyMain {
 			set.policies = b.Policies
 		}
 	case "delivery_zones":

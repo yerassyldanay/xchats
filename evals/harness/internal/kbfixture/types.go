@@ -80,7 +80,6 @@ type AITopic struct {
 	FeaturedImage       string   `yaml:"featured_image"`
 	IllustrationImages  []string `yaml:"illustration_images"`
 	ExplainerVideos     []string `yaml:"explainer_videos"`
-	NarrationAudioFiles []string `yaml:"narration_audio_files"`
 	ReferenceDocuments  []string `yaml:"reference_documents"`
 }
 
@@ -121,11 +120,8 @@ type AIProduct struct {
 	FeaturedImage          string      `yaml:"featured_image"`
 	GalleryImages          []string    `yaml:"gallery_images"`
 	DemoVideos             []string    `yaml:"demo_videos"`
-	AudioDescriptionFiles  []string    `yaml:"audio_description_files"`
 	CertificateDocuments   []string    `yaml:"certificate_documents"`
-	ManualDocuments        []string    `yaml:"manual_documents"`
 	GuaranteeDocuments     []string    `yaml:"guarantee_documents"`
-	SpecificationDocuments []string    `yaml:"specification_documents"`
 }
 
 // AITariff mirrors one ai_tariffs row.

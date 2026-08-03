@@ -255,8 +255,12 @@ func (s *Server) handleGetOrg(c *gin.Context) {
 }
 
 func (s *Server) handleListUsers(c *gin.Context) {
+	org, proceed := s.orgOf(c)
+	if !proceed {
+		return
+	}
 	limit, offset, pageNum, pageSize := s.pageParams(c)
-	users, total, err := s.store.ListUsers(ctx(c), limit, offset)
+	users, total, err := s.store.ListUsersForOrg(ctx(c), org.ID, limit, offset)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return

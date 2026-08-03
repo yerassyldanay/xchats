@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"image"
-	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -415,71 +413,12 @@ func TestResolveCatalogTests_RejectsExclusiveWithoutAnyOf(t *testing.T) {
 	}
 }
 
-func writeCatalogFixtureImage(t *testing.T, path string, w, h int) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	if err := png.Encode(f, img); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestBuildCatalogExtractCases_ImagePathAndGroundTruthCarried(t *testing.T) {
-	root := t.TempDir()
-	extractDir := filepath.Join(root, "extract")
-	writeCatalogFixtureImage(t, filepath.Join(root, "assets", "infographic.png"), 200, 100)
-
-	casesYAML := `
-cases:
-  - id: infographic
-    file: ../assets/infographic.png
-    fields:
-      content_kind: infographic
-    text_contains_all: ["старт", "рост"]
-    allowed_numbers: ["10 000"]
-`
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	casesPath := filepath.Join(extractDir, "cases.yaml")
-	if err := os.WriteFile(casesPath, []byte(casesYAML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runsRoot := filepath.Join(root, "runs")
-
-	cases, err := buildCatalogExtractCases(runsRoot, casesPath)
-	if err != nil {
-		t.Fatalf("buildCatalogExtractCases: %v", err)
-	}
-	if len(cases) != 1 {
-		t.Fatalf("want 1 case, got %d", len(cases))
-	}
-	c := cases[0]
-	if c.ID != "infographic" || c.Source != casesPath {
-		t.Errorf("want id=infographic source=%s, got %+v", casesPath, c)
-	}
-	if c.Image != filepath.ToSlash(filepath.Join("catalog", "inputs", "infographic.jpg")) {
-		t.Errorf("want served image path catalog/inputs/infographic.jpg, got %s", c.Image)
-	}
-	if c.Fields["content_kind"] != "infographic" || len(c.TextContainsAll) != 2 || len(c.AllowedNumbers) != 1 {
-		t.Errorf("want ground truth carried through, got %+v", c)
-	}
-	// The preprocessed (downscaled/re-encoded) image must actually be written where Image claims.
-	if _, err := os.Stat(filepath.Join(runsRoot, "catalog", "inputs", "infographic.jpg")); err != nil {
-		t.Errorf("want the processed image written to disk: %v", err)
-	}
-}
-
 func TestWriteCatalogJSON_SkipsScenarioDirsWithoutScenarioYAML(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
+	if err := os.MkdirAll("runs", 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	data := Data{FactTables: []FactTable{{Table: "product", Fields: []FieldSpec{{Name: "price"}}, Rows: []FactRow{{Ref: "p1", Values: map[string]string{"price": "1"}}}}}}
 	writeCatalogFixtureScenario(t, root, "real-scenario", ScenarioConfig{Data: "data.yaml", Tests: "tests.yaml"}, data, "tests:\n")
@@ -491,14 +430,6 @@ func TestWriteCatalogJSON_SkipsScenarioDirsWithoutScenarioYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(noScenarioDir, "data.yaml"), []byte("fact_tables: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	writeCatalogFixtureImage(t, filepath.Join(root, "assets", "x.png"), 10, 10)
-	if err := os.MkdirAll(filepath.Join(root, "extract"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "extract", "cases.yaml"), []byte("cases:\n  - id: x\n    file: ../assets/x.png\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -520,7 +451,7 @@ func TestWriteCatalogJSON_SkipsScenarioDirsWithoutScenarioYAML(t *testing.T) {
 	if file.GeneratedAt == "" {
 		t.Error("want GeneratedAt populated")
 	}
-	if len(file.ExtractCases) != 1 {
-		t.Errorf("want the extract case carried too, got %d", len(file.ExtractCases))
+	if len(file.ExtractCases) != 0 {
+		t.Errorf("want no extract cases without a configured extraction suite, got %d", len(file.ExtractCases))
 	}
 }

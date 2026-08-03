@@ -58,10 +58,10 @@ func (s *Store) PutLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 func currentLiveTopicTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, slug string) (DraftTopic, error) {
 	t := DraftTopic{Slug: slug}
 	err := tx.QueryRow(ctx, `SELECT title, body_md, featured_image, illustration_images,
-		explainer_videos, narration_audio_files, reference_documents
+		explainer_videos, reference_documents
 		FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2 FOR UPDATE`, orgID, slug).
 		Scan(&t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
-			&t.ExplainerVideos, &t.NarrationAudioFiles, &t.ReferenceDocuments)
+			&t.ExplainerVideos, &t.ReferenceDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftTopic{Slug: slug}, nil
 	}
@@ -174,12 +174,10 @@ func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.
 func currentLiveProductTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, ref string) (DraftProduct, error) {
 	p := DraftProduct{Ref: ref, InStock: true}
 	err := tx.QueryRow(ctx, `SELECT name, price, description, category, in_stock, sales_status,
-		featured_image, gallery_images, demo_videos, audio_description_files, certificate_documents,
-		manual_documents, guarantee_documents, specification_documents
+		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
 		FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2 FOR UPDATE`, orgID, ref).
 		Scan(&p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
-			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.AudioDescriptionFiles, &p.CertificateDocuments,
-			&p.ManualDocuments, &p.GuaranteeDocuments, &p.SpecificationDocuments)
+			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.CertificateDocuments, &p.GuaranteeDocuments)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DraftProduct{Ref: ref, InStock: true}, nil
 	}

@@ -4,17 +4,17 @@ SHELL := /bin/bash
 BACKEND := backend
 FRONTEND := frontend
 # Use the root .env and the local host-port override when present (this dev box
-# remaps backend→8090, frontend→8081, db→5433 to dodge port conflicts) under a
+# remaps backend→8090, frontend→8081, db→5434 to dodge port conflicts) under a
 # stable project name; a clean checkout without them falls back to compose
 # defaults (backend→8080, frontend→8081, db→5432).
 COMPOSE := docker compose -p xchats $(if $(wildcard .env),--env-file .env,) -f deploy/docker-compose.yaml $(if $(wildcard deploy/docker-compose.override.yaml),-f deploy/docker-compose.override.yaml,)
-DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/xchats?sslmode=disable
+DATABASE_URL ?= postgres://postgres:postgres@localhost:5434/xchats?sslmode=disable
 GORUN := go run ./cmd/xchats -env ../.env -config ../config.yaml
 
 # Ports kill-ports frees (override: make kill-ports PORTS="8080 5173")
 PORTS ?= 8080 8090 5173 8081
 
-.PHONY: help up up-fg down logs ps kill-ports migrate seed webhook-set dev-backend dev-frontend \
+.PHONY: help up up-fg down logs ps kill-ports migrate seed seed-kb-demo webhook-set dev-backend dev-frontend \
         test test-backend test-frontend test-e2e build smoke
 
 help: ## Show this help
@@ -50,6 +50,9 @@ migrate: ## Apply DB migrations
 
 seed: ## Seed org + admin + the single WhatsApp account
 	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) seed
+
+seed-kb-demo: ## Seed demo KB content (topics/products/tariffs/zones/contacts/policies) — opt-in, for test cases only; no-ops if the org already has KB content
+	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) seed-kb-demo
 
 webhook-set: ## Register our webhook on the live Evolution instance
 	cd $(BACKEND) && $(GORUN) webhook-set

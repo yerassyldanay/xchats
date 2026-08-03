@@ -56,9 +56,7 @@ providers:
   - id: openrouter:google/gemini-2.5-flash-lite
     temperature: 0.3
     max_tokens: 500
-    # Verified directly against the OpenRouter API on 2026-07-10 (see
-    # evals/parsing-costs.md) — cheaper than gemini-2.5-flash and a candidate vision
-    # model for the extraction eval; compare its extraction quality, not just its price.
+    # Verified directly against the OpenRouter API on 2026-07-10.
     input_per_mtok: 0.10
     output_per_mtok: 0.40
   # --- Comparison candidates added 2026-07-18, verified directly against each model's

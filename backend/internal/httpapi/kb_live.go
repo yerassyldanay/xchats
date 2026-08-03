@@ -41,8 +41,7 @@ func (s *Server) invalidateKBCache(orgID uuid.UUID) {
 }
 
 // kbLiveChanged is the /kb/* write epilogue: invalidate the response engine's
-// cached prompt KB (the only REAL invalidation left on this path — see below),
-// hot-reload the brain, broadcast, and return the refreshed live view.
+// cached prompt KB, broadcast, and return the refreshed live view.
 func (s *Server) kbLiveChanged(c *gin.Context, orgID uuid.UUID) {
 	// The response engine (backend/response, the production reply path) reads
 	// the KB through responsestore.CachedKBRepo, a per-org cache with its own
@@ -50,14 +49,6 @@ func (s *Server) kbLiveChanged(c *gin.Context, orgID uuid.UUID) {
 	// visible to the NEXT customer reply (and to GET /kb/prompt) immediately
 	// instead of up to a minute later.
 	s.invalidateKBCache(orgID)
-	// reloadBrain is a production no-op: main.go no longer constructs a drafter
-	// implementing brainReloader/SetSnapshot (the response engine above replaced
-	// it), so s.drafter is nil here in every real deployment. It survives only
-	// for the dormant Playground hot-swap path (assistant.RealDrafter, unused
-	// outside that disconnected flow) — left untouched, not because it does
-	// anything on the response path, but because removing it is a Playground
-	// change, out of scope for this PR.
-	s.reloadBrain(c, orgID)
 	view, err := s.kb.LiveView(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)

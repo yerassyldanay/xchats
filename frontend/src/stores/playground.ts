@@ -1,38 +1,42 @@
 import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { connectRealtime } from '../lib/sse'
-import { log } from '../lib/logfmt'
-import type { DraftView, KbMaterial, PromptView } from '../types'
+import type { CancelChangeResponse, DraftChangeSet, DraftView, PromptView } from '../types'
+import type { ChangeKind } from '@/composables/draftChanges'
+import type {
+  ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, TariffPayload, TopicPayload,
+} from '@/components/kb/forms/payloads'
 
-// usePlayground backs the two KB pages — Конструктор (/playground) and Редактор
-// (/knowledge-base) — over the same underlying KB. WRITES stay DELIBERATELY
-// SEPARATE, never mixed:
-//   - `draft` (Конструктор): materials → builder → the pending kbd_draft blob,
-//     merged with live rows and flagged `draft: true`. Approve materializes it.
-//   - `live` (Редактор): the live ai_ tables only, via GET/POST/PATCH/DELETE
-//     /kb/* — every write there is immediately final, no draft step, and it
-//     never shows or touches pending Playground work.
-// Конструктор additionally READS `live` (never writes it) — the draft view's
-// pending rows overlay/replace their live counterpart rather than listing both
-// (see kbstore.mergedView), so telling a brand-new draft entity from an edit to
-// an already-published one, and showing recent published activity alongside
-// pending changes, needs the live slice loaded too.
+// usePlayground backs the two KB pages — Черновик (/playground) and Знаний
+// база (/knowledge-base) — over the same underlying structured KB:
+//   - `changes`: the Черновик review payload (kbstore.DraftChangeSet) — ONLY
+//     what is staged in kbd_draft, plus explicit deletion entries. Never a
+//     merged live-plus-draft view, so an unchanged published row can never
+//     appear in it.
+//   - `live` (Знаний база): the live ai_ tables only, via GET /kb. Читается,
+//     never written directly — every write on /knowledge-base now STAGES
+//     into the draft (stageChange/stageDelete below), matching the MCP
+//     connector's own rule that every write lands in the draft only.
+// Both pages load BOTH slices: Черновик needs `live` to render a `changed`
+// entry's "Было: …" and a `removed` entry's published snapshot
+// (composables/draftChanges.ts); Знаний база needs `changes` to mark a
+// published row with a pending change (usePendingIndex).
 export const usePlayground = defineStore('playground', {
   state: () => ({
-    // --- draft slice (Конструктор) ------------------------------------------
-    draft: null as DraftView | null,
+    // --- draft slice (Черновик) ---------------------------------------------
+    changes: null as DraftChangeSet | null,
     loading: false,
-    busy: false, // a write/chat is in flight
-    approving: false,
+    busy: false, // a structured draft write is in flight
+    approving: false, // an approve (whole-draft or entity) is in flight
+    publishingKey: '' as string, // `${kind}:${key}` of the card whose Publish is in flight right now — always cleared once the request settles
     error: '' as string,
-    gateReasons: '' as string, // last approve-gate (422) message
-    lastInstruction: 'Импортированные материалы', // reused by maybeBuild so a
-    // straggler material lands under the SAME topic as the last explicit build.
+    draftStale: false, // true when the LAST write() failed on DRAFT_STALE — see write()'s doc comment
+    gateReasons: '' as string, // last approve-gate (422) message — rendered at PAGE level only (the gate validates the whole resulting KB, never just the selected entity — see approveWith's doc comment)
+    gateBlockedKey: '' as string, // `${kind}:${key}` of the card whose attempt produced gateReasons — cleared by the NEXT publish attempt (success or not), so only the card that triggered it shows a neutral "blocked" pointer, never "this record is invalid"
 
-    // --- live slice (Редактор) -----------------------------------------------
+    // --- live slice (Знаний база — the comparison baseline, read-only here) -
     live: null as DraftView | null,
     liveLoading: false,
-    liveBusy: false,
     liveError: '' as string,
 
     // --- prompt (Промпт tab) — the rendered prompt GET /kb/prompt returns,
@@ -47,41 +51,27 @@ export const usePlayground = defineStore('playground', {
     reloadTimer: undefined as number | undefined,
   }),
   getters: {
-    // counts power the stat cards / overview tiles (draft slice)
-    counts(s) {
-      const d = s.draft
-      return {
-        topics: d?.topics?.length ?? 0,
-        products: d?.products?.length ?? 0,
-        tariffs: d?.tariffs?.length ?? 0,
-        contacts: d?.contacts?.length ?? 0,
-        policies: d?.policies?.length ?? 0,
-        zones: d?.zones?.length ?? 0,
-        materials: d?.materials?.length ?? 0,
-        requests: (d?.requests ?? []).filter((r) => r.state === 'pending').length,
-      }
-    },
-    // pending review = entities present in the draft blob across kinds — this
-    // IS the Черновик list on /playground.
-    pending(s) {
-      const d = s.draft
-      if (!d) return 0
-      const p = (xs?: { draft: boolean }[]) => (xs ?? []).filter((x) => x.draft).length
-      return (
-        p(d.topics) + p(d.tariffs) + p(d.products) + p(d.contacts) + p(d.policies) + p(d.zones) +
-        (d.config?.draft ? 1 : 0)
-      )
-    },
-    openRequests(s) {
-      return (s.draft?.requests ?? []).filter((r) => r.state === 'pending')
+    // pendingTotal is the Черновик badge count: every staged row across all
+    // kinds, plus staged deletions, plus how many individual config fields
+    // are pending — every array in `changes` already contains ONLY pending
+    // rows (unlike the old merged-view `draft`), so this is a plain sum, no
+    // per-row `.draft` filter needed anymore.
+    pendingTotal(s): number {
+      const c = s.changes
+      if (!c) return 0
+      const rows = c.topics.length + c.tariffs.length + c.products.length + c.contacts.length + c.policies.length + c.zones.length
+      const configFields = c.config
+        ? (['persona', 'mission', 'guardrails', 'language_policy', 'reply_max_words'] as const).filter((k) => c.config![k] !== undefined).length
+        : 0
+      return rows + c.deletes.length + configFields
     },
   },
   actions: {
-    setDraft(v: DraftView) {
-      this.draft = v
+    setChanges(v: DraftChangeSet) {
+      this.changes = v
     },
     ifMatch(): Record<string, string> {
-      const v = this.draft?.config.base_version
+      const v = this.changes?.base_version
       return v !== undefined ? { 'If-Match': String(v) } : {}
     },
 
@@ -89,36 +79,34 @@ export const usePlayground = defineStore('playground', {
     async load() {
       this.loading = true
       try {
-        this.setDraft(await api.get<DraftView>('/playground/draft'))
+        this.setChanges(await api.get<DraftChangeSet>('/playground/draft'))
       } finally {
         this.loading = false
       }
     },
-    // Catch materials that finished extraction asynchronously (a URL/PDF job,
-    // or an operator's describe_file answer) after the user's own explicit
-    // build — run the SAME instruction again so it lands under the same topic.
-    // Never called mid-send (that would race an in-flight explicit chat()).
-    async maybeBuild() {
-      const d = this.draft
-      if (!d || this.busy || this.approving) return
-      if (!d.materials.some((m) => m.status === 'ready')) return
-      await this.chat(this.lastInstruction)
-    },
-    // discard every pending edit ("Отменить всё") — live rows untouched.
+    // discard every pending edit ("Отклонить всё") — live rows untouched.
     async discard() {
       await api.del('/playground/draft')
       await this.load()
     },
 
     // --- a guarded write: run fn, capture DRAFT_STALE / errors uniformly -----
+    // draftStale is a distinct signal from `error` (a message string) so a
+    // caller — useKbModal's submit(), specifically — can react to "this was
+    // a version conflict" without parsing error text. This method already
+    // reloads `changes` to the fresh version on staleness, so a caller's own
+    // "reload and retry" is just calling the same write again: the new
+    // ifMatch() reads the just-refreshed base_version automatically.
     async write<T>(fn: () => Promise<T>): Promise<T | undefined> {
       this.busy = true
       this.error = ''
+      this.draftStale = false
       try {
         return await fn()
       } catch (e) {
         if (e instanceof ApiError && e.errcode === 'DRAFT_STALE') {
           this.error = 'Черновик изменился — обновляю…'
+          this.draftStale = true
           await this.load()
         } else {
           this.error = e instanceof ApiError ? e.message : 'Не удалось сохранить изменение.'
@@ -131,10 +119,10 @@ export const usePlayground = defineStore('playground', {
 
     // --- draft topics ---------------------------------------------------------
     upsertTopic(input: { slug: string; title?: string; body_md?: string }) {
-      return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/topics', input, this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.post<DraftChangeSet>('/playground/draft/topics', input, this.ifMatch())))
     },
     deleteTopic(slug: string) {
-      return this.write(async () => this.setDraft(await api.del<DraftView>('/playground/draft/topics/' + encodeURIComponent(slug), this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.del<DraftChangeSet>('/playground/draft/topics/' + encodeURIComponent(slug), this.ifMatch())))
     },
 
     // --- draft tariffs (typed facts: verbatim price/limit/fee columns) --------
@@ -150,10 +138,10 @@ export const usePlayground = defineStore('playground', {
       disadvantages?: string
       sales_status?: string
     }) {
-      return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/tariffs', input, this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.post<DraftChangeSet>('/playground/draft/tariffs', input, this.ifMatch())))
     },
     deleteTariff(ref: string) {
-      return this.write(async () => this.setDraft(await api.del<DraftView>('/playground/draft/tariffs/' + encodeURIComponent(ref), this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.del<DraftChangeSet>('/playground/draft/tariffs/' + encodeURIComponent(ref), this.ifMatch())))
     },
 
     // --- draft products (typed facts: verbatim price column) ------------------
@@ -166,10 +154,10 @@ export const usePlayground = defineStore('playground', {
       sales_status?: string
       in_stock?: boolean
     }) {
-      return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/products', input, this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.post<DraftChangeSet>('/playground/draft/products', input, this.ifMatch())))
     },
     deleteProduct(ref: string) {
-      return this.write(async () => this.setDraft(await api.del<DraftView>('/playground/draft/products/' + encodeURIComponent(ref), this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.del<DraftChangeSet>('/playground/draft/products/' + encodeURIComponent(ref), this.ifMatch())))
     },
 
     // --- draft delivery zones -------------------------------------------------
@@ -184,10 +172,10 @@ export const usePlayground = defineStore('playground', {
       notes?: string
       sales_status?: string
     }) {
-      return this.write(async () => this.setDraft(await api.post<DraftView>('/playground/draft/zones', input, this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.post<DraftChangeSet>('/playground/draft/zones', input, this.ifMatch())))
     },
     deleteZone(ref: string) {
-      return this.write(async () => this.setDraft(await api.del<DraftView>('/playground/draft/zones/' + encodeURIComponent(ref), this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.del<DraftChangeSet>('/playground/draft/zones/' + encodeURIComponent(ref), this.ifMatch())))
     },
 
     // --- draft contacts (the 'support' singleton — one org, one PATCH) -------
@@ -195,93 +183,135 @@ export const usePlayground = defineStore('playground', {
       whatsapp?: string; email?: string; address?: string; legal_information?: string; callback_time?: string
       working_hours?: string; phone?: string; website?: string; instagram?: string
     }) {
-      return this.write(async () => this.setDraft(await api.patch<DraftView>('/playground/draft/contacts', patch, this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.patch<DraftChangeSet>('/playground/draft/contacts', patch, this.ifMatch())))
     },
 
     // --- draft policies (the 'main' singleton — one org, one PATCH) ----------
     patchPolicies(patch: {
       delivery_cost?: string; delivery_in_days?: string; free_delivery_from?: string; min_order?: string
-      prepayment?: string; installment?: string; return_period_in_days?: string; warranty?: string
+      prepayment?: string; installment?: string; return_period_in_days?: string; warranty?: string; outside_zones_note?: string
     }) {
-      return this.write(async () => this.setDraft(await api.patch<DraftView>('/playground/draft/policies', patch, this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.patch<DraftChangeSet>('/playground/draft/policies', patch, this.ifMatch())))
     },
 
     // --- draft config -----------------------------------------------------------
     patchConfig(patch: { persona?: string; mission?: string; guardrails?: string; language_policy?: string; reply_max_words?: number }) {
-      return this.write(async () => this.setDraft(await api.patch<DraftView>('/playground/draft/config', patch, this.ifMatch())))
+      return this.write(async () => this.setChanges(await api.patch<DraftChangeSet>('/playground/draft/config', patch, this.ifMatch())))
     },
 
-    // --- materials (staged inputs) — description is the operator's parsing
-    // comment: for a file/media material it substitutes for auto-extraction
-    // entirely (born ready immediately, no popup); for a URL it is kept only as
-    // a fallback if the fetch fails. Uploads never happen implicitly — the
-    // composer calls these only from its own explicit "Отправить".
-    addTextMaterial(text: string) {
-      return this.write(async () => {
-        await api.post<KbMaterial>('/playground/draft/materials', { source_type: 'text', text }, this.ifMatch())
-        await this.load()
-      })
+    // --- stage dispatchers — /knowledge-base's forms call these instead of
+    // knowing which specific upsert*/patch*/delete* method their kind maps
+    // to. `kind` strips its own discriminant before forwarding: the wire
+    // payload for e.g. a topic upsert has no `kind` field, only slug/title/
+    // body_md. -------------------------------------------------------------
+    stageChange(kind: Exclude<ChangeKind, 'config'>, payload: KbFormPayload) {
+      switch (kind) {
+        case 'topics': {
+          const { kind: _k, ...rest } = payload as TopicPayload
+          return this.upsertTopic(rest).then(() => !this.error)
+        }
+        case 'tariffs': {
+          const { kind: _k, ...rest } = payload as TariffPayload
+          return this.upsertTariff(rest).then(() => !this.error)
+        }
+        case 'products': {
+          const { kind: _k, ...rest } = payload as ProductPayload
+          return this.upsertProduct(rest).then(() => !this.error)
+        }
+        case 'delivery_zones': {
+          const { kind: _k, ...rest } = payload as DeliveryZonePayload
+          return this.upsertZone(rest).then(() => !this.error)
+        }
+        case 'contacts': {
+          const { kind: _k, ...rest } = payload as ContactsPayload
+          return this.patchContacts(rest).then(() => !this.error)
+        }
+        case 'policies': {
+          const { kind: _k, ...rest } = payload as PoliciesPayload
+          return this.patchPolicies(rest).then(() => !this.error)
+        }
+      }
     },
-    addUrlMaterial(url: string, description?: string) {
-      return this.write(async () => {
-        await api.post<KbMaterial>('/playground/draft/materials', { source_type: 'url', url, description }, this.ifMatch())
-        await this.load()
-      })
-    },
-    addFileMaterial(file: File, description?: string) {
-      return this.write(async () => {
-        const form = new FormData()
-        form.append('file', file)
-        if (description) form.append('description', description)
-        await api.postForm<KbMaterial>('/playground/draft/materials', form, this.ifMatch())
-        await this.load()
-      })
+    async stageDelete(kind: 'topics' | 'tariffs' | 'products' | 'delivery_zones', key: string): Promise<boolean> {
+      switch (kind) {
+        case 'topics':
+          await this.deleteTopic(key)
+          break
+        case 'tariffs':
+          await this.deleteTariff(key)
+          break
+        case 'products':
+          await this.deleteProduct(key)
+          break
+        case 'delivery_zones':
+          await this.deleteZone(key)
+          break
+      }
+      return !this.error
     },
 
-    // --- builder chat (synthesize ready materials into the draft) -----------
-    async chat(instruction: string): Promise<Record<string, unknown> | undefined> {
-      this.lastInstruction = instruction || this.lastInstruction
-      return this.write(async () => {
-        const res = await api.post<{ result: Record<string, unknown>; draft: DraftView }>(
-          '/playground/chat',
-          { instruction },
-          this.ifMatch()
-        )
-        this.setDraft(res.draft)
-        return res.result
-      })
+    // --- cancel ("Отменить изменение" on a Черновик card) --------------------
+    // Drops ONE pending change without touching live — kbstore.CancelChange's
+    // frontend counterpart. Genuinely idempotent: a repeated cancel returns
+    // changed:false and leaves base_version untouched (never throws, never
+    // reloads) — see backend/internal/kbstore/changes_test.go's
+    // TestCancelChange_RepeatDoesNotAdvanceVersion.
+    async cancelChange(kind: ChangeKind, key: string): Promise<boolean> {
+      this.busy = true
+      this.error = ''
+      try {
+        const res = await api.del<CancelChangeResponse>(`/playground/draft/changes/${kind}/${encodeURIComponent(key)}`, this.ifMatch())
+        this.setChanges(res.changes)
+        return res.changed
+      } catch (e) {
+        if (e instanceof ApiError && e.errcode === 'DRAFT_STALE') {
+          this.error = 'Черновик изменился — обновляю…'
+          await this.load()
+        } else {
+          this.error = e instanceof ApiError ? e.message : 'Не удалось отменить изменение.'
+        }
+        return false
+      } finally {
+        this.busy = false
+      }
     },
 
-    // --- requests (popups) --------------------------------------------------
-    resolveRequest(id: string, body: { state?: 'resolved' | 'dismissed'; resolution?: Record<string, unknown> }) {
-      return this.write(async () => this.setDraft(await api.post<DraftView>(`/playground/requests/${id}/resolve`, body, this.ifMatch())))
-    },
-
-    // --- approve ("Принять всё" / "Принять") ------------------------
+    // --- approve ("Опубликовать всё" / "Опубликовать") ------------------
     // approve(): the WHOLE pending draft. approveEntity(kind,key): one row —
     // kind ∈ topics|tariffs|products|contacts|policies|delivery_zones|config;
     // key = the row's natural id (slug for topics, ref for
     // tariffs/products/delivery_zones, the fixed singleton slug for
-    // contacts/policies/config — see kbstore.NaturalKeyMain for config's).
+    // contacts/policies, kbEntities.NATURAL_KEY_MAIN for config).
     async approve(): Promise<boolean> {
       return this.approveWith('/playground/draft/approve')
     },
-    async approveEntity(
-      kind: 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies' | 'delivery_zones' | 'config',
-      key: string
-    ): Promise<boolean> {
-      return this.approveWith(`/playground/draft/approve/${kind}/${encodeURIComponent(key)}`)
+    async approveEntity(kind: ChangeKind, key: string): Promise<boolean> {
+      return this.approveWith(`/playground/draft/approve/${kind}/${encodeURIComponent(key)}`, `${kind}:${key}`)
     },
-    async approveWith(path: string): Promise<boolean> {
+    // approveWith's 422 handling is the one place §2.7's rule is enforced:
+    // the publish gate validates the ENTIRE resulting KB even for a
+    // single-row selector (an unrelated staged policy can 422 a valid
+    // tariff's publish), so the failure message is never attributed to
+    // "this record" — it renders at page level (gateReasons), while
+    // gateBlockedKey lets ONLY the card that was actually clicked show a
+    // neutral pointer back to that page-level message. publishingKey
+    // (the spinner) always clears once the request settles; gateBlockedKey
+    // deliberately does not — it persists until the NEXT publish attempt
+    // (this method's own entry clears it), so the note stays attached to
+    // the right card even after the spinner stops.
+    async approveWith(path: string, publishingKey = ''): Promise<boolean> {
       this.approving = true
+      this.publishingKey = publishingKey
       this.error = ''
       this.gateReasons = ''
+      this.gateBlockedKey = ''
       try {
-        this.setDraft(await api.post<DraftView>(path, {}, this.ifMatch()))
+        this.setChanges(await api.post<DraftChangeSet>(path, {}, this.ifMatch()))
         return true
       } catch (e) {
         if (e instanceof ApiError && e.status === 422) {
-          this.gateReasons = e.message // "publish gate failed: …"
+          this.gateReasons = e.message
+          this.gateBlockedKey = publishingKey
         } else if (e instanceof ApiError && e.errcode === 'DRAFT_STALE') {
           this.error = 'Черновик изменился — обновляю…'
           await this.load()
@@ -291,126 +321,23 @@ export const usePlayground = defineStore('playground', {
         return false
       } finally {
         this.approving = false
+        this.publishingKey = ''
       }
     },
 
-    // --- live (Редактор — /knowledge-base): every write lands directly in the
-    // live tables via /kb/*, no draft step, and never touches the blob above.
+    // --- live (Знаний база — /knowledge-base): read-only baseline, GET /kb.
+    // Never written directly — every write on this page stages into the
+    // draft (stageChange/stageDelete above).
     async loadLive() {
       this.liveLoading = true
+      this.liveError = ''
       try {
         this.live = await api.get<DraftView>('/kb')
+      } catch (e) {
+        this.liveError = e instanceof ApiError ? e.message : 'Не удалось загрузить базу знаний.'
       } finally {
         this.liveLoading = false
       }
-    },
-    async writeLive<T>(fn: () => Promise<T>): Promise<T | undefined> {
-      this.liveBusy = true
-      this.liveError = ''
-      try {
-        return await fn()
-      } catch (e) {
-        this.liveError = e instanceof ApiError ? e.message : 'Не удалось сохранить изменение.'
-        return undefined
-      } finally {
-        this.liveBusy = false
-      }
-    },
-    liveUpsertTopic(input: { slug: string; title?: string; body_md?: string }) {
-      return this.writeLive(async () => {
-        this.live = await api.post<DraftView>('/kb/topics', input)
-      })
-    },
-    liveDeleteTopic(slug: string) {
-      return this.writeLive(async () => {
-        this.live = await api.del<DraftView>('/kb/topics/' + encodeURIComponent(slug))
-      })
-    },
-    liveUpsertTariff(input: {
-      ref: string
-      name?: string
-      price?: string
-      limit_text?: string
-      fee?: string
-      summary?: string
-      pricing_type?: string
-      advantages?: string
-      disadvantages?: string
-      sales_status?: string
-    }) {
-      return this.writeLive(async () => {
-        this.live = await api.post<DraftView>('/kb/tariffs', input)
-      })
-    },
-    liveDeleteTariff(ref: string) {
-      return this.writeLive(async () => {
-        this.live = await api.del<DraftView>('/kb/tariffs/' + encodeURIComponent(ref))
-      })
-    },
-    liveUpsertProduct(input: {
-      ref: string
-      name?: string
-      price?: string
-      description?: string
-      category?: string
-      sales_status?: string
-      in_stock?: boolean
-    }) {
-      return this.writeLive(async () => {
-        this.live = await api.post<DraftView>('/kb/products', input)
-      })
-    },
-    liveDeleteProduct(ref: string) {
-      return this.writeLive(async () => {
-        this.live = await api.del<DraftView>('/kb/products/' + encodeURIComponent(ref))
-      })
-    },
-
-    // --- live delivery zones (Зоны доставки) — no draft/Playground
-    // counterpart yet (draft milestone later); the org's whole zone/policy
-    // world is re-validated server-side on every write (a 422 surfaces as
-    // liveError, same as every other live write's GateError).
-    liveUpsertZone(input: {
-      ref: string
-      name?: string
-      zone_level: string
-      parent_ref?: string
-      delivery_available?: boolean
-      delivery_cost?: string
-      delivery_in_days?: string
-      notes?: string
-      sales_status?: string
-    }) {
-      return this.writeLive(async () => {
-        this.live = await api.post<DraftView>('/kb/zones', input)
-      })
-    },
-    liveDeleteZone(ref: string) {
-      return this.writeLive(async () => {
-        this.live = await api.del<DraftView>('/kb/zones/' + encodeURIComponent(ref))
-      })
-    },
-
-    livePatchContacts(patch: {
-      whatsapp?: string; email?: string; address?: string; legal_information?: string; callback_time?: string
-      working_hours?: string; phone?: string; website?: string; instagram?: string
-    }) {
-      return this.writeLive(async () => {
-        this.live = await api.patch<DraftView>('/kb/contacts', patch)
-      })
-    },
-    livePatchPolicies(patch: {
-      delivery_cost?: string; delivery_in_days?: string; free_delivery_from?: string; min_order?: string
-      prepayment?: string; installment?: string; return_period_in_days?: string; warranty?: string; outside_zones_note?: string
-    }) {
-      return this.writeLive(async () => {
-        this.live = await api.patch<DraftView>('/kb/policies', patch)
-      })
-    },
-    livePatchConfig(patch: { persona?: string; mission?: string; guardrails?: string; language_policy?: string; reply_max_words?: number }) {
-      return this.writeLive(async () => {
-        this.live = await api.patch<DraftView>('/kb/config', patch)
-      })
     },
 
     // --- prompt (Промпт tab) — GET /kb/prompt renders the exact prompt the
@@ -435,19 +362,21 @@ export const usePlayground = defineStore('playground', {
 
     // --- realtime -----------------------------------------------------------
     // Refreshes whichever slice(s) this page has actually loaded — a page that
-    // never called load()/loadLive() never fetches that slice.
+    // never called load()/loadLive() never fetches that slice. MCP kb_*_upsert
+    // tools write the SAME draft blob, so an open Черновик must reflect what
+    // gets staged via Claude, not just via this page's own writes.
     startRealtime() {
       if (this.disconnect) return
       const refresh = () => {
         window.clearTimeout(this.reloadTimer)
         this.reloadTimer = window.setTimeout(() => {
-          // Defer while any write is in flight so an SSE reload can't move state
-          // mid-write (which would stale our If-Match, or race a live write).
-          if (this.busy || this.approving || this.liveBusy) {
+          // Defer while any write is in flight so an SSE reload can't move
+          // state mid-write (which would stale our If-Match).
+          if (this.busy || this.approving) {
             refresh()
             return
           }
-          if (this.draft) this.load().then(() => this.maybeBuild())
+          if (this.changes) this.load()
           if (this.live) this.loadLive()
           // promptView starts null and is only ever set by loadPrompt() (the
           // Промпт tab's own onMounted/"Обновить"), so this is a no-op until
@@ -456,11 +385,8 @@ export const usePlayground = defineStore('playground', {
         }, 250)
       }
       this.disconnect = connectRealtime({
-        kbMaterialUpdated: refresh,
         kbRowChanged: refresh,
         kbApproved: refresh,
-        kbRequestCreated: refresh,
-        kbRequestResolved: refresh,
       })
     },
     stopRealtime() {
@@ -470,42 +396,3 @@ export const usePlayground = defineStore('playground', {
     },
   },
 })
-
-// small helper: safely parse a Request's JSON `context`/`target` string
-export function parseJSON(raw: string | null | undefined): Record<string, unknown> {
-  if (!raw) return {}
-  try {
-    return JSON.parse(raw)
-  } catch {
-    log.warn('kb: bad json blob')
-    return {}
-  }
-}
-
-export interface KbAction {
-  key: 'save' | 'approve' | 'reject' | 'delete'
-  label: string
-  variant: 'default' | 'outline' | 'ghost'
-  destructive?: boolean
-}
-
-// kbActions is the action row RecordShell.vue renders for every kb/records/*
-// component. A live row (final, no draft step) offers Сохранить/Удалить; a
-// draft row offers Сохранить (stage the edit) / Принять (approveEntity —
-// materialize just this row) / Отклонить (discard the pending edit). Both
-// destructive actions are dropped for a singleton (contacts/policies/config
-// have no natural key and no delete affordance at all — there is nothing to
-// "reject back to" or delete, only ever edit again).
-export function kbActions(mode: 'draft' | 'live', opts: { singleton?: boolean } = {}): KbAction[] {
-  if (mode === 'live') {
-    const actions: KbAction[] = [{ key: 'save', label: 'Сохранить', variant: 'default' }]
-    if (!opts.singleton) actions.push({ key: 'delete', label: 'Удалить', variant: 'ghost', destructive: true })
-    return actions
-  }
-  const actions: KbAction[] = [
-    { key: 'save', label: 'Сохранить', variant: 'outline' },
-    { key: 'approve', label: 'Принять', variant: 'default' },
-  ]
-  if (!opts.singleton) actions.push({ key: 'reject', label: 'Отклонить', variant: 'ghost', destructive: true })
-  return actions
-}

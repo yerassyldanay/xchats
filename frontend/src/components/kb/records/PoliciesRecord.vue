@@ -1,144 +1,110 @@
 <script setup lang="ts">
-// PoliciesRecord is the shared /playground (draft) + /knowledge-base (live)
-// singleton row for the org's one commerce-policy row (plan Task 14) — a
-// structural clone of ContactsRecord.
-import { computed, reactive, watch } from 'vue'
+// PoliciesRecord is a read-only display card for the org's one commerce-
+// policy singleton — a structural clone of ContactsRecord.vue. `zonesExist`
+// is passed in (not read from the store — this component has no store
+// access) because delivery_cost/delivery_in_days are governed by «Зоны
+// доставки» the moment any zone exists (kbstore.zoneGateReasons enforces
+// this at publish time in both draft and live).
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Truck } from 'lucide-vue-next'
-import { usePlayground } from '@/stores/playground'
 import type { PolicyRow } from '@/types'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import type { ChangeType } from '@/composables/draftChanges'
+import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
 import MediaChip from './MediaChip.vue'
-import { changedFields, mediaCount, recordState } from './shared'
+import { changedFields, mediaCount, stateForChange } from './shared'
 
 const props = defineProps<{
-  mode: 'draft' | 'live'
-  draftRow?: PolicyRow
+  row?: PolicyRow
   liveRow?: PolicyRow
+  changeType?: ChangeType
+  zonesExist: boolean
+  pendingMark?: 'updated' | 'removed'
+  actions: KbAction[]
+  busy?: boolean
+  blockedNote?: string
 }>()
 
-const pg = usePlayground()
+defineEmits<{ edit: []; publish: []; cancel: []; delete: [] }>()
+const { t } = useI18n()
 
-const row = computed(() => (props.mode === 'draft' ? props.draftRow : props.liveRow))
-const visible = computed(() => props.mode === 'live' || !!row.value)
-const busy = computed(() => (props.mode === 'draft' ? pg.busy : pg.liveBusy))
-const state = computed(() => recordState(props.mode, !!props.liveRow))
+const state = computed(() => (props.changeType ? stateForChange(props.changeType) : 'published'))
 const diff = computed(() =>
-  changedFields(props.draftRow, props.liveRow, [
+  changedFields(props.row, props.liveRow, [
     'delivery_cost', 'delivery_in_days', 'free_delivery_from', 'min_order',
     'prepayment', 'installment', 'return_period_in_days', 'warranty', 'outside_zones_note',
   ])
 )
-
-// delivery_cost/delivery_in_days are the flat KB-wide delivery answer — the AI
-// reads them ONLY when no delivery zone exists; the moment a zone exists,
-// per-zone cost/days take over (kbstore.zoneGateReasons enforces this at
-// save/approve time in BOTH modes, so the same disabled-with-hint treatment
-// applies here that KnowledgeBase.vue's live-only policy form already used).
-const zonesExist = computed(() => (pg.live?.zones.length ?? 0) > 0)
-
-const buf = reactive({
-  delivery_cost: '', delivery_in_days: '', free_delivery_from: '', min_order: '',
-  prepayment: '', installment: '', return_period_in_days: '', warranty: '', outside_zones_note: '',
-})
-function seed(p: PolicyRow | undefined) {
-  buf.delivery_cost = p?.delivery_cost ?? ''
-  buf.delivery_in_days = p?.delivery_in_days ?? ''
-  buf.free_delivery_from = p?.free_delivery_from ?? ''
-  buf.min_order = p?.min_order ?? ''
-  buf.prepayment = p?.prepayment ?? ''
-  buf.installment = p?.installment ?? ''
-  buf.return_period_in_days = p?.return_period_in_days ?? ''
-  buf.warranty = p?.warranty ?? ''
-  buf.outside_zones_note = p?.outside_zones_note ?? ''
-}
-let seededFor = ''
-watch(
-  row,
-  (p) => {
-    if (seededFor === (p?.id ?? '')) return
-    seededFor = p?.id ?? ''
-    seed(p)
-  },
-  { immediate: true }
-)
-
-function save() {
-  if (props.mode === 'draft') pg.patchPolicies({ ...buf })
-  else pg.livePatchPolicies({ ...buf })
-}
-function approve() {
-  if (props.draftRow) pg.approveEntity('policies', props.draftRow.id)
-}
 </script>
 
 <template>
   <RecordShell
-    v-if="visible"
     :icon="Truck"
-    label="Политики"
-    :mode="mode"
+    :label="t('kb.entities.policies.singular')"
     :state="state"
+    :pending-mark="pendingMark"
+    :actions="actions"
     :busy="busy"
-    singleton
-    @save="save"
-    @approve="approve"
+    :blocked-note="blockedNote"
+    @edit="$emit('edit')"
+    @publish="$emit('publish')"
+    @cancel="$emit('cancel')"
+    @delete="$emit('delete')"
   >
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
       <div>
-        <Input
-          v-model="buf.delivery_cost" placeholder="Стоимость доставки" class="h-9 font-mono"
-          :disabled="zonesExist" :title="zonesExist ? 'Управляется в «Зонах доставки»' : undefined"
-        />
-        <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-1">Управляется в «Зонах доставки»</p>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryCost') }}</span>
+        <p class="text-sm mt-0.5 font-mono">{{ row?.delivery_cost || '—' }}</p>
+        <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-0.5">{{ t('kb.fields.managedByZones') }}</p>
         <FieldDiffNote :show="diff.includes('delivery_cost')" :was="liveRow?.delivery_cost ?? ''" />
       </div>
       <div>
-        <Input
-          v-model="buf.delivery_in_days" placeholder="Срок доставки" class="h-9 font-mono"
-          :disabled="zonesExist" :title="zonesExist ? 'Управляется в «Зонах доставки»' : undefined"
-        />
-        <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-1">Управляется в «Зонах доставки»</p>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryInDays') }}</span>
+        <p class="text-sm mt-0.5 font-mono">{{ row?.delivery_in_days || '—' }}</p>
+        <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-0.5">{{ t('kb.fields.managedByZones') }}</p>
         <FieldDiffNote :show="diff.includes('delivery_in_days')" :was="liveRow?.delivery_in_days ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.free_delivery_from" placeholder="Бесплатная доставка от" class="h-9 font-mono" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.freeDeliveryFrom') }}</span>
+        <p class="text-sm mt-0.5 font-mono">{{ row?.free_delivery_from || '—' }}</p>
         <FieldDiffNote :show="diff.includes('free_delivery_from')" :was="liveRow?.free_delivery_from ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.min_order" placeholder="Минимальный заказ" class="h-9 font-mono" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.minOrder') }}</span>
+        <p class="text-sm mt-0.5 font-mono">{{ row?.min_order || '—' }}</p>
         <FieldDiffNote :show="diff.includes('min_order')" :was="liveRow?.min_order ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.prepayment" placeholder="Предоплата" class="h-9" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.prepayment') }}</span>
+        <p class="text-sm mt-0.5">{{ row?.prepayment || '—' }}</p>
         <FieldDiffNote :show="diff.includes('prepayment')" :was="liveRow?.prepayment ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.installment" placeholder="Рассрочка" class="h-9" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.installment') }}</span>
+        <p class="text-sm mt-0.5">{{ row?.installment || '—' }}</p>
         <FieldDiffNote :show="diff.includes('installment')" :was="liveRow?.installment ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.return_period_in_days" placeholder="Срок возврата" class="h-9 font-mono" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.returnPeriod') }}</span>
+        <p class="text-sm mt-0.5 font-mono">{{ row?.return_period_in_days || '—' }}</p>
         <FieldDiffNote :show="diff.includes('return_period_in_days')" :was="liveRow?.return_period_in_days ?? ''" />
       </div>
       <div>
-        <Input v-model="buf.warranty" placeholder="Гарантия" class="h-9" />
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.warranty') }}</span>
+        <p class="text-sm mt-0.5">{{ row?.warranty || '—' }}</p>
         <FieldDiffNote :show="diff.includes('warranty')" :was="liveRow?.warranty ?? ''" />
       </div>
       <div class="sm:col-span-2">
-        <Textarea
-          v-model="buf.outside_zones_note" rows="2"
-          placeholder="В города и страны за пределами списка зон доставки мы не доставляем."
-          class="min-h-0 text-[14px]"
-        />
-        <p class="text-xs text-muted-foreground mt-1">Ответ ассистента, когда направление клиента не входит ни в одну зону доставки.</p>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.outsideZonesNote') }}</span>
+        <p class="text-sm mt-0.5 whitespace-pre-line">{{ row?.outside_zones_note || '—' }}</p>
+        <p class="text-xs text-muted-foreground mt-0.5">{{ t('kb.fields.outsideZonesHint') }}</p>
         <FieldDiffNote :show="diff.includes('outside_zones_note')" :was="liveRow?.outside_zones_note ?? ''" />
       </div>
     </div>
     <div v-if="row" class="flex items-center gap-1.5 flex-wrap">
-      <MediaChip label="Документы" :count="mediaCount(row.commerce_policy_documents)" />
+      <MediaChip :label="t('kb.media.documents')" :count="mediaCount(row.commerce_policy_documents)" />
     </div>
   </RecordShell>
 </template>

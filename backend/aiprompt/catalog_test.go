@@ -178,6 +178,84 @@ func TestBuildCatalog_MediaAbsenceRule(t *testing.T) {
 	}
 }
 
+// TestBuildCatalog_FeaturedImageOverrideWithFallback covers
+// resolvedFeaturedImage's rule: an explicit featured_image always wins; a
+// blank featured_image resolves to the type's primary plural image column's
+// first entry when that is non-empty; with neither, there is no token at
+// all. Exercised across all three types that carry featured_image
+// (products, topics, tariffs) — the rule is not product-specific.
+func TestBuildCatalog_FeaturedImageOverrideWithFallback(t *testing.T) {
+	t.Run("product: explicit value wins over gallery_images[0]", func(t *testing.T) {
+		kb := baseKB() // coffee-machine: FeaturedImage=m-cm-featured, GalleryImages=[m-cm-gallery-1, m-cm-gallery-2]
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("BuildCatalog: %v", err)
+		}
+		entry := cat.MediaByToken("products.coffee-machine.featured_image")
+		if entry == nil || entry.Count != 1 {
+			t.Fatalf("expected featured_image present with count 1, got %+v", entry)
+		}
+		resolved, err := ResolveSend([]string{"products.coffee-machine.featured_image"}, kb, cat)
+		if err != nil || len(resolved) != 1 || resolved[0].Material.ID != "m-cm-featured" {
+			t.Fatalf("expected the EXPLICIT material, got %+v (err=%v)", resolved, err)
+		}
+	})
+
+	t.Run("product: blank featured_image falls back to gallery_images[0]", func(t *testing.T) {
+		kb := baseKB()
+		kb.Products[0].FeaturedImage = ""
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("BuildCatalog: %v", err)
+		}
+		entry := cat.MediaByToken("products.coffee-machine.featured_image")
+		if entry == nil || entry.Count != 1 {
+			t.Fatalf("expected featured_image present (via fallback) with count 1, got %+v", entry)
+		}
+		resolved, err := ResolveSend([]string{"products.coffee-machine.featured_image"}, kb, cat)
+		if err != nil || len(resolved) != 1 || resolved[0].Material.ID != "m-cm-gallery-1" {
+			t.Fatalf("expected the FALLBACK material (gallery_images[0]), got %+v (err=%v)", resolved, err)
+		}
+	})
+
+	t.Run("product: blank featured_image AND empty gallery_images means no token", func(t *testing.T) {
+		kb := baseKB()
+		kb.Products[0].FeaturedImage = ""
+		kb.Products[0].GalleryImages = nil
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("BuildCatalog: %v", err)
+		}
+		if got := cat.MediaByToken("products.coffee-machine.featured_image"); got != nil {
+			t.Fatalf("expected no featured_image token with neither an explicit value nor a fallback, got %+v", got)
+		}
+	})
+
+	t.Run("topic: blank featured_image falls back to illustration_images[0]", func(t *testing.T) {
+		kb := baseKB()
+		kb.Topics[0].IllustrationImages = []string{"m-cm-gallery-1"}
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("BuildCatalog: %v", err)
+		}
+		if got := cat.MediaByToken("topics.delivery.featured_image"); got == nil {
+			t.Fatalf("expected topics.delivery.featured_image via illustration_images fallback")
+		}
+	})
+
+	t.Run("tariff: blank featured_image falls back to pricing_images[0]", func(t *testing.T) {
+		kb := baseKB()
+		kb.Tariffs[0].PricingImages = []string{"m-cm-gallery-1"}
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("BuildCatalog: %v", err)
+		}
+		if got := cat.MediaByToken("tariffs.basic.featured_image"); got == nil {
+			t.Fatalf("expected tariffs.basic.featured_image via pricing_images fallback")
+		}
+	})
+}
+
 // TestBuildCatalog_BlankExactFactsProduceNoPlaceholder: a missing or
 // whitespace-only exact value must not generate a fact-catalog entry.
 func TestBuildCatalog_BlankExactFactsProduceNoPlaceholder(t *testing.T) {

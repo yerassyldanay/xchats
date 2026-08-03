@@ -16,6 +16,10 @@ const WIDGET_HTML_PATH = path.resolve(
 const HOST_ORIGIN = 'https://mock-widget-host.internal'
 export const WIDGET_URL = `${HOST_ORIGIN}/kb-manager.html`
 export const UPLOAD_URL = `${HOST_ORIGIN}/upload-target`
+// Signed preview URLs live under here. Same origin as the host page so the
+// browser fetches them without CORS friction; page.route intercepts iframe
+// subresources, so an <img src> resolves against this.
+export const MEDIA_URL_BASE = `${HOST_ORIGIN}/media`
 
 function widgetHtml(): string {
   return fs.readFileSync(WIDGET_HTML_PATH, 'utf-8')
@@ -36,17 +40,111 @@ export function toolResult(structuredContent: unknown, meta: Record<string, unkn
 
 const DEFAULT_FRONTEND_BASE_URL = 'https://xchats.test'
 
+// DEFAULT_MEDIA_ATTACHMENT_FIELDS mirrors the real, backend-authoritative
+// registry (kbstore.mediaAttachmentFields, mcp_media.go) — the widget fetches
+// this from kb_info and drives its entire attach form from it, so a test that
+// wants a realistic attach flow should build on this rather than redefine the
+// matrix per-test. featured_image deliberately does not appear anywhere here
+// — it is never an attachment target (see the Go registry's doc comment).
+export const DEFAULT_MEDIA_ATTACHMENT_FIELDS: Record<string, Array<{ field: string; kind: string; multiple: boolean }>> = {
+  topic: [
+    { field: 'illustration_images', kind: 'image', multiple: true },
+    { field: 'explainer_videos', kind: 'video', multiple: true },
+    { field: 'reference_documents', kind: 'document', multiple: true },
+  ],
+  product: [
+    { field: 'gallery_images', kind: 'image', multiple: true },
+    { field: 'demo_videos', kind: 'video', multiple: true },
+    { field: 'certificate_documents', kind: 'document', multiple: true },
+    { field: 'guarantee_documents', kind: 'document', multiple: true },
+  ],
+  tariff: [
+    { field: 'pricing_images', kind: 'image', multiple: true },
+    { field: 'explainer_videos', kind: 'video', multiple: true },
+    { field: 'terms_documents', kind: 'document', multiple: true },
+  ],
+  contacts: [
+    { field: 'contact_card_image', kind: 'image', multiple: false },
+    { field: 'location_map_image', kind: 'image', multiple: false },
+    { field: 'company_legal_documents', kind: 'document', multiple: true },
+  ],
+  policies: [{ field: 'commerce_policy_documents', kind: 'document', multiple: true }],
+}
+
+// DEFAULT_MEDIA_FIELD_KINDS is the flat field→kind view kb_info also
+// publishes, derived from the attachment registry plus featured_image — which
+// is a real, previewable media column that is deliberately NOT an attachment
+// target. The widget gates "is this a media field?" on this map, so leaving it
+// empty (as this harness used to) means no field ever renders as media in the
+// record view.
+export const DEFAULT_MEDIA_FIELD_KINDS: Record<string, string> = {
+  featured_image: 'image',
+  ...Object.fromEntries(
+    Object.values(DEFAULT_MEDIA_ATTACHMENT_FIELDS)
+      .flat()
+      .map((f) => [f.field, f.kind]),
+  ),
+}
+
 function defaultKbInfo() {
   return toolResult({
     types: ['assistant', 'topic', 'product', 'tariff', 'contacts', 'policies', 'delivery_zone'],
     natural_key_main: ['assistant', 'contacts', 'policies'],
-    media_field_kinds: {},
+    media_field_kinds: DEFAULT_MEDIA_FIELD_KINDS,
+    media_attachment_fields: DEFAULT_MEDIA_ATTACHMENT_FIELDS,
     frontend_base_url: DEFAULT_FRONTEND_BASE_URL,
   })
 }
 
 function defaultKbSummary() {
   return toolResult({ draft_version: 1, items: [] })
+}
+
+// recordRead builds a kb_read result for one record — the shape openRecord
+// consumes. Pass mediaIndex to attach _meta["xchats/media"], exactly as
+// handleKBRead does.
+export function recordRead(
+  entries: Array<{ type: string; source: string; data: Record<string, unknown> }>,
+  mediaIndex?: Record<string, unknown>,
+) {
+  return toolResult(
+    { items: entries, draft_version: 1 },
+    mediaIndex ? { 'xchats/media': mediaIndex } : {},
+  )
+}
+
+// mediaMeta builds one _meta["xchats/media"] entry, mirroring
+// mcpserver.mediaIndexFor's wire shape. Omit `url` to simulate a host that
+// stripped _meta's URLs, or a material whose bytes never landed.
+export function mediaMeta(
+  id: string,
+  over: Partial<{ filename: string; mime_type: string; size_bytes: number; kind: string; status: string; url: string }> = {},
+) {
+  const kind = over.kind ?? 'image'
+  return {
+    id,
+    filename: over.filename ?? `${id}.bin`,
+    mime_type: over.mime_type ?? 'image/png',
+    size_bytes: over.size_bytes ?? 2048,
+    kind,
+    status: over.status ?? 'parsed',
+    ...(over.url === undefined ? { url: `${MEDIA_URL_BASE}/${id}?token=t` } : over.url ? { url: over.url } : {}),
+  }
+}
+
+// A real 1×1 PNG. Tests assert naturalWidth > 0, so the bytes have to decode —
+// a placeholder string would leave the <img> broken and the assertion
+// meaningless.
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+// routeMedia serves every signed preview URL with real, decodable bytes.
+export async function routeMedia(page: Page): Promise<void> {
+  await page.route(`${MEDIA_URL_BASE}/**`, (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG }),
+  )
 }
 
 // hostHtml is the mock MCP host page: it implements just enough of the
@@ -57,7 +155,7 @@ function defaultKbSummary() {
 // can never race a test's setToolResponse() call — see mountWidget's doc.
 function hostHtml(seeded: Record<string, unknown[]>): string {
   return `<!doctype html>
-<html><body style="margin:0">
+<html><head><meta charset="utf-8"></head><body style="margin:0">
 <iframe id="widget" src="${WIDGET_URL}" style="width:100vw;height:100vh;border:0"></iframe>
 <script>
   window.__calls = [];
@@ -114,8 +212,14 @@ export async function mountWidget(
     kb_summary: [defaultKbSummary()],
     ...responses,
   }
-  await page.route(WIDGET_URL, (route) => route.fulfill({ contentType: 'text/html', body: widgetHtml() }))
-  await page.route(`${HOST_ORIGIN}/`, (route) => route.fulfill({ contentType: 'text/html', body: hostHtml(seeded) }))
+  // charset=utf-8 explicit on both: kb-manager.html carries its own <meta
+  // charset> so it was never at risk, but the mock HOST page's inline
+  // window.__toolResponses JSON (any Cyrillic mock title/label a test
+  // seeds) previously depended on the browser's un-declared-charset
+  // guess — right up until it guessed wrong and every non-ASCII test
+  // fixture came out as mojibake.
+  await page.route(WIDGET_URL, (route) => route.fulfill({ contentType: 'text/html; charset=utf-8', body: widgetHtml() }))
+  await page.route(`${HOST_ORIGIN}/`, (route) => route.fulfill({ contentType: 'text/html; charset=utf-8', body: hostHtml(seeded) }))
   await page.goto(HOST_ORIGIN + '/')
   return page.frameLocator('#widget')
 }

@@ -17,9 +17,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
-	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/normalize"
-	"github.com/yerassyldanay/xchats/backend/internal/playground"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -65,12 +63,6 @@ type AIDraftTask struct {
 	ChatID uuid.UUID
 }
 
-// ExtractMaterialTask runs a Stage-1 ingest adapter for one dropped material.
-type ExtractMaterialTask struct {
-	MaterialID uuid.UUID
-	OrgID      uuid.UUID
-}
-
 // Worker holds the dependencies for all queue handlers.
 type Worker struct {
 	Store    *store.Store
@@ -81,8 +73,6 @@ type Worker struct {
 	Hub      *realtime.Hub
 	Response *response.Service         // the multichannel response engine's entry point
 	Senders  *messaging.SenderRegistry // channel -> ChannelSender, for outbound text sends
-	KB       *kbstore.Store            // playground KB (nil in transport-only setups)
-	Extract  *playground.Extractor     // Stage-1 ingest adapters (nil when KB is nil)
 	Log      *slog.Logger
 }
 
@@ -114,18 +104,8 @@ func (w *Worker) Handle(ctx context.Context, m queue.Message) error {
 		return w.handleOutboundSend(ctx, m.Payload.(OutboundTask))
 	case queue.KindAIDraft:
 		return w.handleAIDraft(ctx, m.Payload.(AIDraftTask))
-	case queue.KindExtractMaterial:
-		return w.handleExtractMaterial(ctx, m.Payload.(ExtractMaterialTask))
 	}
 	return nil
-}
-
-// handleExtractMaterial runs the Stage-1 ingest adapter for one dropped material.
-func (w *Worker) handleExtractMaterial(ctx context.Context, t ExtractMaterialTask) error {
-	if w.KB == nil || w.Extract == nil {
-		return nil
-	}
-	return w.Extract.Extract(ctx, w.KB, w.Blob, w.Hub, t.OrgID, t.MaterialID)
 }
 
 // --- inbound events -------------------------------------------------------

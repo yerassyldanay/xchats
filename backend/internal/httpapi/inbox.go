@@ -373,6 +373,55 @@ func (s *Server) handleReadChat(c *gin.Context) {
 	ok(c, gin.H{"unread_count": 0})
 }
 
+type assignChatReq struct {
+	AssigneeUserID *string `json:"assignee_user_id"`
+}
+
+func (s *Server) handleAssignChat(c *gin.Context) {
+	chatID, okID := parseUUID(c, "id")
+	if !okID {
+		return
+	}
+	if _, ok := s.orgChat(c, chatID); !ok {
+		return
+	}
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
+	var req assignChatReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "invalid request")
+		return
+	}
+	assignee := uuid.NullUUID{}
+	if req.AssigneeUserID != nil && strings.TrimSpace(*req.AssigneeUserID) != "" {
+		id, err := uuid.Parse(strings.TrimSpace(*req.AssigneeUserID))
+		if err != nil {
+			fail(c, http.StatusBadRequest, ErrValidation, "invalid assignee_user_id")
+			return
+		}
+		member, err := s.store.UserInOrg(ctx(c), id, org.ID)
+		if err != nil {
+			fail(c, http.StatusInternalServerError, ErrInternal, "membership check failed")
+			return
+		}
+		if !member {
+			fail(c, http.StatusBadRequest, ErrValidation, "assignee is not an organization member")
+			return
+		}
+		assignee = uuid.NullUUID{UUID: id, Valid: true}
+	}
+	chat, err := s.store.AssignChat(ctx(c), chatID, assignee)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "failed to update assignee")
+		return
+	}
+	mapped := dto.MapChat(chat)
+	s.hub.Broadcast("chat.updated", mapped)
+	ok(c, mapped)
+}
+
 func (s *Server) handleUploadMedia(c *gin.Context) {
 	fh, err := c.FormFile("file")
 	if err != nil {

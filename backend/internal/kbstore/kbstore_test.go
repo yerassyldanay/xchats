@@ -692,6 +692,76 @@ func TestPatchLiveConfig_UpsertsMissingRow(t *testing.T) {
 	}
 }
 
+// ApproveVersioned's config branch had the exact same historical bug
+// PatchLiveConfig above was already fixed for, in a second, never-updated
+// copy: a bare UPDATE against a fresh org (no ai_assistants row yet) touches
+// zero rows, but the pending patch is unconditionally cleared from the draft
+// right after — approving a first-ever assistant config silently discarded
+// it instead of publishing it. Covers both call shapes that hit the same
+// set.config branch: an entity-scoped approve (Kind:"config") and a
+// whole-draft approve (Kind:"") that happens to include a pending config edit.
+func TestApproveVersioned_ConfigUpsertsMissingRow_EntityScoped(t *testing.T) {
+	kb, orgID, st := newTestKB(t)
+	ctx := context.Background()
+
+	var before int
+	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_assistants WHERE organization_id=$1`, orgID).Scan(&before); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if before != 0 {
+		t.Fatalf("sanity: fresh org should have no ai_assistants row yet, got %d", before)
+	}
+
+	persona := "Ассистент xPayment — эксперт по Kaspi Pay API"
+	if err := kb.PatchConfig(ctx, orgID, uuid.Nil, kbstore.ConfigPatch{Persona: &persona}); err != nil {
+		t.Fatalf("stage config patch: %v", err)
+	}
+
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{Kind: "config", Key: kbstore.NaturalKeyMain}); err != nil {
+		t.Fatalf("approve config: %v", err)
+	}
+
+	var got string
+	if err := st.Pool().QueryRow(ctx, `SELECT persona FROM xchats.ai_assistants WHERE organization_id=$1`, orgID).Scan(&got); err != nil {
+		t.Fatalf("approving config should have created the ai_assistants row: %v", err)
+	}
+	if got != persona {
+		t.Fatalf("persona = %q, want %q", got, persona)
+	}
+
+	// The pending patch must actually be gone from the draft now that it
+	// truly made it live — not cleared-but-lost.
+	view, err := kb.Draft(ctx, orgID)
+	if err != nil {
+		t.Fatalf("read draft: %v", err)
+	}
+	if view.Config.Draft {
+		t.Fatalf("draft config still marked pending after a successful approve")
+	}
+}
+
+func TestApproveVersioned_ConfigUpsertsMissingRow_WholeDraft(t *testing.T) {
+	kb, orgID, st := newTestKB(t)
+	ctx := context.Background()
+
+	persona := "Ассистент xPayment — эксперт по Kaspi Pay API"
+	if err := kb.PatchConfig(ctx, orgID, uuid.Nil, kbstore.ConfigPatch{Persona: &persona}); err != nil {
+		t.Fatalf("stage config patch: %v", err)
+	}
+
+	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}); err != nil {
+		t.Fatalf("whole-draft approve: %v", err)
+	}
+
+	var got string
+	if err := st.Pool().QueryRow(ctx, `SELECT persona FROM xchats.ai_assistants WHERE organization_id=$1`, orgID).Scan(&got); err != nil {
+		t.Fatalf("whole-draft approve should have created the ai_assistants row: %v", err)
+	}
+	if got != persona {
+		t.Fatalf("persona = %q, want %q", got, persona)
+	}
+}
+
 // zoneCompatiblePolicy makes orgID's '*' policy row zone-compatible (blank
 // flat delivery fields, a non-blank outside_zones_note) — the precondition
 // PutLiveZone's validateZoneWorld requires before any zone can be added.

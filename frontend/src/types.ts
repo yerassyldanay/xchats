@@ -126,7 +126,7 @@ export interface AiDraft {
   created_at: string
 }
 
-// --- Knowledge Base (Playground) — see plan/7.1-endpoints.md, plan/15 ---
+// --- Knowledge Base draft + live views ---
 // An entity is either LIVE (a row in a live ai_ table) or «Черновик» — present
 // in the kbd_draft blob, flagged `draft: true` here. There is no more
 // review_state/proposed-approved-rejected: a pending entity IS the "Правки" set.
@@ -150,7 +150,6 @@ export interface TopicRow {
   featured_image: string | null
   illustration_images: string[]
   explainer_videos: string[]
-  narration_audio_files: string[]
   reference_documents: string[]
   draft: boolean
   updated_at: string
@@ -190,11 +189,8 @@ export interface ProductRow {
   featured_image: string | null
   gallery_images: string[]
   demo_videos: string[]
-  audio_description_files: string[]
   certificate_documents: string[]
-  manual_documents: string[]
   guarantee_documents: string[]
-  specification_documents: string[]
   draft: boolean
   updated_at: string
 }
@@ -285,6 +281,52 @@ export interface DraftView {
   zones: DeliveryZoneRow[]
   materials: KbMaterial[]
   requests: KbRequest[]
+}
+
+// DraftConfigPatch mirrors kbstore.DraftConfigPatch — an omitted field has no
+// pending edit at all (as opposed to DraftConfig above, which always carries
+// a full, possibly-live-only value). Every field is optional for exactly
+// that reason: `omitempty` on the wire means an untouched field is simply
+// absent from the JSON, not present-and-null.
+export interface DraftConfigPatch {
+  persona?: string
+  mission?: string
+  guardrails?: string
+  language_policy?: string
+  reply_max_words?: number
+}
+
+// DraftChangeSet mirrors kbstore.DraftChangeSet — the Черновик review
+// payload behind GET /playground/draft. Unlike DraftView it carries ONLY
+// what kbd_draft has staged, plus explicit deletion entries: an unchanged
+// published row can never appear here. The published counterpart a reviewer
+// diffs a pending row against comes from GET /kb (DraftView), never from
+// this payload.
+export interface DraftChangeSet {
+  base_version: number
+  updated_at: string
+  config: DraftConfigPatch | null // null = no pending config edit at all
+  topics: TopicRow[]
+  tariffs: TariffRow[]
+  products: ProductRow[]
+  contacts: ContactRow[]
+  policies: PolicyRow[]
+  zones: DeliveryZoneRow[]
+  deletes: DraftChangeDelete[]
+}
+
+// DraftChangeDelete is one staged removal, addressed in the SAME plural
+// vocabulary POST /playground/draft/approve/:kind/:id and DELETE
+// /playground/draft/changes/:kind/:key use.
+export interface DraftChangeDelete {
+  kind: string // topics|tariffs|products|contacts|policies|delivery_zones
+  key: string
+}
+
+// CancelChangeResponse mirrors handlePlaygroundCancelChange's response body.
+export interface CancelChangeResponse {
+  changed: boolean
+  changes: DraftChangeSet
 }
 
 // PromptView mirrors GET /kb/prompt (backend/internal/httpapi/kb_prompt.go) —

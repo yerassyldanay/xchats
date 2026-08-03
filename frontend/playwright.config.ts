@@ -10,6 +10,13 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 7_000 },
   fullyParallel: false, // tests share one backend draft/state; keep them ordered
+  // fullyParallel:false only orders tests WITHIN a file — Playwright still
+  // schedules separate FILES onto separate workers by default, so e.g.
+  // smoke.spec.ts's read-only Промпт assertion could race kb-draft.spec.ts
+  // actively staging/publishing/cancelling against the SAME shared org (no
+  // per-test tenant isolation exists here). workers:1 makes the whole
+  // suite — every file — run strictly one test at a time.
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {

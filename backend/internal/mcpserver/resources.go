@@ -18,6 +18,8 @@ package mcpserver
 
 import (
 	_ "embed"
+	"net/url"
+	"strings"
 )
 
 // widgetResourceURI is the one reusable fullscreen widget resource
@@ -32,22 +34,56 @@ const widgetMimeType = "text/html;profile=mcp-app"
 //go:embed widget/kb-manager.html
 var widgetHTML string
 
-// widgetResourceMeta is the CSP metadata a host should apply to the widget's
-// iframe (plan Task 9). The widget only ever talks to its host via
-// postMessage/window.openai (no network calls of its own — every KB read or
-// write goes through callTool, see kb-manager.html), so both connect-src and
-// frame-src stay locked to 'none'; images/media it renders are same-origin
-// resource references the host itself resolves, not fetched by the widget.
-// Keyed under BOTH the emerging ChatGPT Apps SDK convention and a generic
-// "ui" key, same defensive-dual-key caveat as tools.go's widgetMeta.
-func widgetResourceMeta() map[string]any {
-	csp := map[string]any{
-		"connect-src": []string{"'none'"},
-		"frame-src":   []string{"'none'"},
+// originOf reduces a configured base URL to a bare scheme://host origin —
+// the only shape a CSP domain list accepts. Returns "" for an empty or
+// unparseable value (a test/dev server constructed without an upload base),
+// which callers turn into an empty domain list rather than a bogus entry.
+func originOf(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// widgetResourceMeta is the CSP metadata a host applies to the widget's
+// iframe (plan Task 9).
+//
+// This USED to declare connect-src/frame-src 'none', on the stated premise
+// that the widget "only ever talks to its host via postMessage/window.openai
+// (no network calls of its own)". That premise was false from the moment the
+// media upload landed: kb-manager.html PUTs file bytes straight to the signed
+// target kb_media_upload returns (Deps.UploadBaseURL's origin), a real
+// cross-origin request, and a host enforcing the declared policy blocked
+// every upload before it left the iframe. Commit 0afda9b fixed the CORS half
+// of the same failure; this is the CSP half.
+//
+// So the domain lists are DERIVED from the configured upload origin rather
+// than hard-coded, and use the domain-list field names the component-resource
+// contract actually reads — connectDomains/resourceDomains under the generic
+// "ui" key, connect_domains/resource_domains under the legacy ChatGPT Apps
+// SDK key — not raw CSP directive names, which nothing consumed. Same
+// defensive-dual-key caveat as tools.go's widgetMeta.
+//
+// Only the upload origin is listed. The "Review and publish in Xchats" link
+// is an <a href> navigation, which neither field governs, so FrontendBaseURL
+// does not belong here.
+func (s *Server) widgetResourceMeta() map[string]any {
+	// Non-nil so an unconfigured server serializes [] rather than null — a
+	// host reading null as "no policy object" would be a different bug.
+	domains := []string{}
+	if origin := originOf(s.Deps.UploadBaseURL); origin != "" {
+		domains = append(domains, origin)
 	}
 	return map[string]any{
-		"openai/widgetCSP": csp,
-		"ui":               map[string]any{"csp": csp},
+		"ui": map[string]any{"csp": map[string]any{
+			"connectDomains":  domains,
+			"resourceDomains": domains,
+		}},
+		"openai/widgetCSP": map[string]any{
+			"connect_domains":  domains,
+			"resource_domains": domains,
+		},
 	}
 }
 
@@ -56,9 +92,9 @@ func (s *Server) handleResourcesList() map[string]any {
 		"resources": []map[string]any{{
 			"uri":         widgetResourceURI,
 			"name":        "KB Manager",
-			"description": "All / Live / Draft / Record / Media / Publish views over the Xchats knowledge base.",
+			"description": "All / Live / Draft / Record views over the Xchats knowledge base, with per-record media preview and upload.",
 			"mimeType":    widgetMimeType,
-			"_meta":       widgetResourceMeta(),
+			"_meta":       s.widgetResourceMeta(),
 		}},
 	}
 }
@@ -78,7 +114,7 @@ func (s *Server) dispatchResourcesRead(req Request) Response {
 			"uri":      widgetResourceURI,
 			"mimeType": widgetMimeType,
 			"text":     widgetHTML,
-			"_meta":    widgetResourceMeta(),
+			"_meta":    s.widgetResourceMeta(),
 		}},
 	})
 }

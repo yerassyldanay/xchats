@@ -109,3 +109,44 @@ func TestCORS_UploadPreflightAllowsAnyWidgetOrigin(t *testing.T) {
 		t.Fatalf("Access-Control-Allow-Credentials=%q must not be set when echoing arbitrary origins", got)
 	}
 }
+
+// TestCORS_MediaPreflightAllowsAnyWidgetOrigin is the read-direction twin of
+// the upload test above, and guards the same trap: /mcp/media needs its own
+// entry in cors()'s early-bail, or the global OPTIONS branch aborts the chain
+// before the permissive group middleware runs and every preview image is
+// blocked with a 204-and-no-Allow-Origin.
+func TestCORS_MediaPreflightAllowsAnyWidgetOrigin(t *testing.T) {
+	srv := httpapi.New(httpapi.Deps{
+		Cfg: &config.Config{CORSOrigins: []string{"http://localhost:8081"}},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const widgetOrigin = "https://asdk_app_6a6dc61062a081918ebdc3b4f2aeca5f.web-sandbox.oaiusercontent.com"
+
+	req, err := http.NewRequest(http.MethodOptions, ts.URL+"/mcp/media/09bc4a59-10d6-465c-bfd7-d9da4b01f2fe", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Origin", widgetOrigin)
+	req.Header.Set("Access-Control-Request-Method", "GET")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != widgetOrigin {
+		t.Fatalf("Access-Control-Allow-Origin=%q, want the widget origin %q echoed back", got, widgetOrigin)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Methods"); !strings.Contains(got, "GET") {
+		t.Fatalf("Access-Control-Allow-Methods=%q must include GET", got)
+	}
+	// Same rule as uploads: an arbitrary echoed origin must never be paired
+	// with credentials.
+	if got := resp.Header.Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("Access-Control-Allow-Credentials=%q must not be set when echoing arbitrary origins", got)
+	}
+}

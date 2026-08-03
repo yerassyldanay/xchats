@@ -23,8 +23,8 @@ func TestBuildCatalog_InvalidRef(t *testing.T) {
 	}
 }
 
-// TestBuildCatalog_MimeMismatchAcrossKinds exercises mimeMatches' video,
-// audio, and document branches (image is already covered elsewhere).
+// TestBuildCatalog_MimeMismatchAcrossKinds exercises mimeMatches' video and
+// document branches (image is already covered elsewhere).
 func TestBuildCatalog_MimeMismatchAcrossKinds(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -32,7 +32,6 @@ func TestBuildCatalog_MimeMismatchAcrossKinds(t *testing.T) {
 		mime   string
 	}{
 		{"video column gets an image", "demo_videos", "image/png"},
-		{"audio column gets a pdf", "audio_description_files", "application/pdf"},
 		{"document column gets a video", "certificate_documents", "video/mp4"},
 	}
 	for _, tc := range cases {
@@ -45,8 +44,6 @@ func TestBuildCatalog_MimeMismatchAcrossKinds(t *testing.T) {
 			switch tc.column {
 			case "demo_videos":
 				kb.Products[0].DemoVideos = []string{matID}
-			case "audio_description_files":
-				kb.Products[0].AudioDescriptionFiles = []string{matID}
 			case "certificate_documents":
 				kb.Products[0].CertificateDocuments = []string{matID}
 			}
@@ -58,7 +55,7 @@ func TestBuildCatalog_MimeMismatchAcrossKinds(t *testing.T) {
 }
 
 // TestBuildCatalog_DocumentAndVideoAccepted confirms valid non-image kinds
-// (document, video, audio) resolve successfully — the fail-closed tests only
+// (document and video) resolve successfully — the fail-closed tests only
 // ever broke image columns; this proves the happy path for the other kinds.
 func TestBuildCatalog_DocumentAndVideoAccepted(t *testing.T) {
 	kb := baseKB()

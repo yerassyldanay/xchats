@@ -93,12 +93,16 @@ func TestClassifyRetry_UnknownMediaTokenIsMediaNotFound(t *testing.T) {
 func TestClassifyRetry_StaleMediaTokenIsMediaNotFound(t *testing.T) {
 	kb, cat := retryTestCatalog(t)
 	// The model saw a catalog where products.coffee-machine.featured_image existed;
-	// the KB has since gone stale (the image was removed) — cat still lists the
-	// token (it reflects what the model was shown), but ResolveSend against the
-	// CURRENT kb must now fail.
+	// the KB has since gone stale (the image AND its gallery_images fallback
+	// were both removed — featured_image alone is override-with-fallback, so
+	// clearing just the explicit value would re-resolve to gallery_images[0]
+	// instead of going stale, see resolvedFeaturedImage) — cat still lists
+	// the token (it reflects what the model was shown), but ResolveSend
+	// against the CURRENT kb must now fail.
 	for i := range kb.Products {
 		if kb.Products[i].Ref == "coffee-machine" {
 			kb.Products[i].FeaturedImage = ""
+			kb.Products[i].GalleryImages = nil
 		}
 	}
 	raw := `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["products.coffee-machine.featured_image"],"escalate":false}`

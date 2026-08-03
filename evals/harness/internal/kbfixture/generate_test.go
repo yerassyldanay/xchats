@@ -167,11 +167,8 @@ func allProductMaterialIDs(p aiprompt.Product) []string {
 	}
 	ids = append(ids, p.GalleryImages...)
 	ids = append(ids, p.DemoVideos...)
-	ids = append(ids, p.AudioDescriptionFiles...)
 	ids = append(ids, p.CertificateDocuments...)
-	ids = append(ids, p.ManualDocuments...)
 	ids = append(ids, p.GuaranteeDocuments...)
-	ids = append(ids, p.SpecificationDocuments...)
 	return ids
 }
 

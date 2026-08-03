@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
 
@@ -27,12 +26,6 @@ func (s *Server) kbFail(c *gin.Context, err error) {
 	default:
 		fail(c, http.StatusInternalServerError, ErrInternal, "kb: "+err.Error())
 	}
-}
-
-// brainReloader is implemented by the real drafter: it hot-swaps the live KB
-// the brain drafts from. The stub drafter does not implement it (no-op reload).
-type brainReloader interface {
-	SetSnapshot(*domain.Snapshot)
 }
 
 // kbReady fails the request if the KB layer isn't wired (stub/no-DB boot).
@@ -53,26 +46,13 @@ func (s *Server) pgOrg(c *gin.Context) (uuid.UUID, bool) {
 	return org.ID, true
 }
 
-// reloadBrain reloads the live KB into the drafter after an approve.
-func (s *Server) reloadBrain(c *gin.Context, orgID uuid.UUID) {
-	r, ok := s.drafter.(brainReloader)
-	if !ok {
-		return
-	}
-	snap, err := s.kb.LoadLive(ctx(c), orgID)
-	if err != nil {
-		s.log.Warn("reload brain after approve failed", "err", err)
-		return
-	}
-	r.SetSnapshot(snap)
-	s.log.Info("brain KB reloaded", "topics", len(snap.Topics))
-}
-
 // --- draft read / discard ---------------------------------------------------
 
-// handlePlaygroundDraft is a side-effect-free read: it always returns the
-// merged working view — live rows overlaid by any pending blob entries. There
-// is no more "open a draft" step; the blob is created lazily on first write.
+// handlePlaygroundDraft is a side-effect-free read: it returns the Черновик
+// review payload — ONLY what is staged in kbd_draft, plus explicit deletion
+// entries. There is no more "open a draft" step; the blob is created lazily
+// on first write. An unchanged published row never appears here; the
+// published counterpart a reviewer diffs against comes from GET /kb.
 func (s *Server) handlePlaygroundDraft(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -81,12 +61,12 @@ func (s *Server) handlePlaygroundDraft(c *gin.Context) {
 	if !proceed {
 		return
 	}
-	view, err := s.kb.Draft(ctx(c), orgID)
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
-	ok(c, view)
+	ok(c, changes)
 }
 
 // handlePlaygroundDiscardDraft clears every pending edit ("Отменить изменения").
@@ -413,14 +393,13 @@ func (s *Server) handlePlaygroundApprove(c *gin.Context) {
 		return
 	}
 	s.invalidateKBCache(orgID)
-	s.reloadBrain(c, orgID)
-	view, err := s.kb.Draft(ctx(c), orgID)
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
 	s.hub.Broadcast("kb.approved", gin.H{})
-	ok(c, view)
+	ok(c, changes)
 }
 
 // handlePlaygroundApproveEntity approves ONE pending entity by natural key
@@ -453,14 +432,47 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 		return
 	}
 	s.invalidateKBCache(orgID)
-	s.reloadBrain(c, orgID)
-	view, err := s.kb.Draft(ctx(c), orgID)
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
 	s.hub.Broadcast("kb.approved", gin.H{"kind": kind})
-	ok(c, view)
+	ok(c, changes)
+}
+
+// handlePlaygroundCancelChange cancels ONE pending addition, update, or
+// removal — «Отменить изменение» on a Черновик card. If-Match is compared
+// ATOMICALLY inside CancelChange's own locked transaction (unlike pgWrite's
+// pre-check), and is deliberately not enforced when the requested outcome
+// already holds (kbstore.CancelChange's doc comment).
+func (s *Server) handlePlaygroundCancelChange(c *gin.Context) {
+	if !s.kbReady(c) {
+		return
+	}
+	orgID, proceed := s.pgOrg(c)
+	if !proceed {
+		return
+	}
+	expected, ok2 := ifMatchVersion(c)
+	if !ok2 {
+		fail(c, http.StatusBadRequest, ErrValidation, "If-Match must be an integer draft_version")
+		return
+	}
+	result, err := s.kb.CancelChange(ctx(c), orgID, currentUser(c).ID, c.Param("kind"), c.Param("key"), expected)
+	if err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
+	if err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	if result.Changed {
+		s.hub.Broadcast("kb.row.changed", gin.H{"base_version": changes.BaseVersion})
+	}
+	ok(c, gin.H{"changed": result.Changed, "changes": changes})
 }
 
 // ifMatchVersion parses an optional If-Match header (a bare integer
@@ -515,13 +527,13 @@ func (s *Server) pgWrite(c *gin.Context) (uuid.UUID, bool) {
 }
 
 // kbChanged is the common write epilogue: it broadcasts the row change and
-// returns the refreshed draft view so the editor and the chat stay in sync.
+// returns the refreshed change set so Черновик and the chat stay in sync.
 func (s *Server) kbChanged(c *gin.Context, orgID uuid.UUID) {
-	view, err := s.kb.Draft(ctx(c), orgID)
+	changes, err := s.kb.DraftChanges(ctx(c), orgID)
 	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
-	s.hub.Broadcast("kb.row.changed", gin.H{"base_version": view.Config.BaseVersion})
-	ok(c, view)
+	s.hub.Broadcast("kb.row.changed", gin.H{"base_version": changes.BaseVersion})
+	ok(c, changes)
 }

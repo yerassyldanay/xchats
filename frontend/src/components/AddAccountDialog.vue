@@ -144,7 +144,7 @@ onBeforeUnmount(stopPolling)
 
 <template>
   <Dialog :open="open" @update:open="onOpenChange">
-    <DialogContent>
+    <DialogContent :class="step === 'channel' ? 'max-w-2xl' : 'max-w-md'">
       <DialogHeader>
         <DialogTitle>
           <span
@@ -165,32 +165,53 @@ onBeforeUnmount(stopPolling)
 
       <div class="px-5 py-5">
         <!-- step 0: pick the channel -->
-        <div v-if="step === 'channel'" class="space-y-3">
-          <p class="text-sm text-muted-foreground">Какой канал подключаем?</p>
-          <button
-            class="w-full flex items-center gap-3 rounded-lg border border-border p-4 text-left transition hover:border-wa hover:bg-wa/5"
-            @click="pickChannel('whatsapp')"
-          >
-            <span class="w-11 h-11 rounded-xl bg-wa grid place-items-center text-white shrink-0">
-              <WhatsappIcon class="w-6 h-6" />
-            </span>
-            <span class="min-w-0">
-              <span class="block font-semibold">WhatsApp</span>
-              <span class="block text-xs text-muted-foreground">Номер телефона — подключение по QR-коду</span>
-            </span>
-          </button>
-          <button
-            class="w-full flex items-center gap-3 rounded-lg border border-border p-4 text-left transition hover:border-[#229ED9] hover:bg-[#229ED9]/5"
-            @click="pickChannel('telegram')"
-          >
-            <span class="w-11 h-11 rounded-xl bg-[#229ED9] grid place-items-center text-white shrink-0">
-              <TelegramIcon class="w-6 h-6" />
-            </span>
-            <span class="min-w-0">
-              <span class="block font-semibold">Telegram-бот</span>
-              <span class="block text-xs text-muted-foreground">Токен от @BotFather</span>
-            </span>
-          </button>
+        <div v-if="step === 'channel'" class="space-y-4">
+          <p class="text-sm text-muted-foreground">Выберите канал. Инструкция продолжится внутри выбранного способа.</p>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <button
+              class="group rounded-xl border border-border p-4 text-left transition hover:border-wa hover:bg-wa/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wa/40"
+              @click="pickChannel('whatsapp')"
+            >
+              <span class="flex items-center gap-3">
+                <span class="w-11 h-11 rounded-xl bg-wa grid place-items-center text-white shrink-0">
+                  <WhatsappIcon class="w-6 h-6" />
+                </span>
+                <span class="min-w-0">
+                  <span class="block font-semibold">WhatsApp через Evolution</span>
+                  <span class="block text-xs text-muted-foreground">Подключение номера по QR-коду</span>
+                </span>
+              </span>
+              <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
+                <li class="flex gap-2"><span class="font-semibold text-wa">01</span><span>Задайте понятное название и уникальное имя Evolution-инстанса.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-wa">02</span><span>Создайте инстанс и откройте WhatsApp → «Связанные устройства».</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-wa">03</span><span>Отсканируйте QR-код — входящие чаты появятся автоматически.</span></li>
+              </ol>
+              <span class="mt-4 block text-sm font-medium text-wa">Продолжить с WhatsApp →</span>
+            </button>
+            <button
+              class="group rounded-xl border border-border p-4 text-left transition hover:border-[#229ED9] hover:bg-[#229ED9]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#229ED9]/40"
+              @click="pickChannel('telegram')"
+            >
+              <span class="flex items-center gap-3">
+                <span class="w-11 h-11 rounded-xl bg-[#229ED9] grid place-items-center text-white shrink-0">
+                  <TelegramIcon class="w-6 h-6" />
+                </span>
+                <span class="min-w-0">
+                  <span class="block font-semibold">Telegram-бот</span>
+                  <span class="block text-xs text-muted-foreground">Подключение токеном @BotFather</span>
+                </span>
+              </span>
+              <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
+                <li class="flex gap-2"><span class="font-semibold text-[#229ED9]">01</span><span>Откройте @BotFather и отправьте команду <span class="font-mono text-foreground">/newbot</span>.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#229ED9]">02</span><span>Задайте имя бота и скопируйте выданный секретный токен.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#229ED9]">03</span><span>Вставьте токен здесь — вебхук настроится автоматически.</span></li>
+              </ol>
+              <span class="mt-4 block text-sm font-medium text-[#229ED9]">Продолжить с Telegram →</span>
+            </button>
+          </div>
+          <p class="rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+            QR-код не сохраняется. Токен Telegram хранится в зашифрованном виде и не показывается повторно.
+          </p>
         </div>
 
         <!-- WhatsApp step 1: name the instance -->

@@ -1,6 +1,6 @@
 // Command xchats is the xchats backend: API edge + webhook ingress + in-process
 // workers + the multichannel response service. Subcommands: serve (default),
-// migrate, webhook-set, seed.
+// migrate, webhook-set, seed, seed-kb-demo.
 package main
 
 import (
@@ -76,6 +76,10 @@ func main() {
 		st := mustStore(cfg, log)
 		defer st.Close()
 		seed(context.Background(), cfg, st, log)
+	case "seed-kb-demo":
+		st := mustStore(cfg, log)
+		defer st.Close()
+		runSeedKBDemo(context.Background(), cfg, st, log)
 	case "webhook-set":
 		runWebhookSet(cfg, log)
 	case "simulate-message":
@@ -122,10 +126,8 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	orgID := seededOrgID(ctx, cfg, st, log)
 
 	// kb (internal/kbstore) is unrelated to the response service's own KB loader
-	// (internal/responsestore, below) — it backs the still-active /kb/* live
-	// editor and the disconnected Playground's dormant-but-compiling fields
-	// (KB/Extract/Builder are nil here; Playground routes stay registered but
-	// unreachable from any production entry point). No demo/seed content is
+	// (internal/responsestore, below) — it backs the /kb live editor and the
+	// structured draft editor at /playground. No demo/seed content is
 	// written here: SeedLiveIfEmpty(brain.SeedSnapshot()) is intentionally not
 	// called — migration 0008 is the only source of temporary demo KB data.
 	kb := kbstore.New(st.Pool())
@@ -180,7 +182,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	w := &worker.Worker{
 		Store: st, Queue: q, Evo: evo, TG: tg, Blob: blobStore, Hub: hub,
-		Response: responseService, Senders: senders, KB: kb, Log: log,
+		Response: responseService, Senders: senders, Log: log,
 	}
 	q.Start(ctx, w.Handle)
 	// Attachments whose bytes never arrived are retried from their own media
@@ -303,6 +305,7 @@ func buildMCPConnector(cfg *config.Config, st *store.Store, kb *kbstore.Store, b
 		AuthCodeTTL:       time.Duration(cfg.MCPAuthCodeTTLSeconds) * time.Second,
 	})
 	uploadSigner := mcpauth.NewUploadTokenSigner(key)
+	mediaSigner := mcpauth.NewMediaReadTokenSigner(key)
 	apiBase := strings.TrimRight(cfg.APIBaseURL, "/")
 	reviewSigner := mcpauth.NewReviewHandoffSigner(key, apiBase, time.Duration(cfg.MCPReviewHandoffTTLSeconds)*time.Second)
 	mcpSrv := mcpserver.New(mcpserver.Deps{
@@ -310,6 +313,8 @@ func buildMCPConnector(cfg *config.Config, st *store.Store, kb *kbstore.Store, b
 		UploadBaseURL:    apiBase,
 		SignUpload:       uploadSigner.Sign,
 		UploadTTLSeconds: cfg.MCPUploadTokenTTLSeconds,
+		SignMediaRead:    mediaSigner.Sign,
+		MediaTTLSeconds:  cfg.MCPMediaTokenTTLSeconds,
 		FrontendBaseURL:  cfg.MCPResolvedFrontendBaseURL(),
 		SignReviewHandoff: func(userID, orgID uuid.UUID) (string, error) {
 			token, _, _, err := reviewSigner.Sign(userID, orgID)
@@ -330,6 +335,29 @@ func seededOrgID(ctx context.Context, cfg *config.Config, st *store.Store, log *
 		return uuid.Nil
 	}
 	return org.ID
+}
+
+// runSeedKBDemo inserts the fixed "Demo Shop" KB dataset (kbstore.SeedDemoKB)
+// into the seeded org — explicit and opt-in only ("xchats seed-kb-demo" /
+// "make seed-kb-demo"), never called from runServe or RunMigrations. Requires
+// an org to already exist (run the "seed" command first on a fresh database);
+// unlike migration 0008's old auto-run version this has no reason to no-op
+// quietly on a missing org, so it fails loudly instead.
+func runSeedKBDemo(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) {
+	orgID := seededOrgID(ctx, cfg, st, log)
+	if orgID == uuid.Nil {
+		fatal("seed-kb-demo", fmt.Errorf("no organization found — run the \"seed\" command first"))
+	}
+	kb := kbstore.New(st.Pool())
+	inserted, err := kb.SeedDemoKB(ctx, orgID)
+	if err != nil {
+		fatal("seed-kb-demo", err)
+	}
+	if !inserted {
+		log.Info("seed-kb-demo: org already has KB content — skipped", "org_id", orgID)
+		return
+	}
+	log.Info("seed-kb-demo: demo KB content inserted", "org_id", orgID)
 }
 
 func runMigrate(cfg *config.Config, log *slog.Logger) {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref, type Component } from 'vue'
+import { computed, onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Blocks, Check, FlaskConical, Inbox, Library, LogOut, BookOpen, Radio } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
@@ -20,6 +21,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 const auth = useAuth()
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 
 // The "Эвалы" item only appears once /evals-data/ actually resolves — the local-dev
 // -only volume mount (deploy/docker-compose.override.yaml) is deliberately absent
@@ -31,12 +33,12 @@ onMounted(async () => {
   evalsAvailable.value = await evalsApi.probeAvailable()
 })
 
-const baseNav: { name: string; icon: Component; label: string; match: string[] }[] = [
+const baseNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
   { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
   { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts', 'instances'] },
-  { name: 'playground', icon: Blocks, label: 'Конструктор', match: ['playground'] },
+  { name: 'playground', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
-]
+])
 // Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
 // and rendered in its own bottom cluster (separated by a divider, above the avatar)
 // so it never reads as one more product feature.
@@ -80,6 +82,7 @@ async function switchOrg(orgId: string) {
           <TooltipTrigger as-child>
             <RouterLink
               :to="{ name: item.name }"
+              :aria-label="item.label"
               class="w-11 h-11 rounded-lg grid place-items-center transition"
               :class="isActive(item.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
             >

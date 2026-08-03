@@ -66,6 +66,13 @@ type Config struct {
 	MCPAuthCodeTTLSeconds int `yaml:"mcp_auth_code_ttl_seconds" env:"MCP_AUTH_CODE_TTL_SECONDS"`
 	// MCPUploadTokenTTLSeconds bounds a kb_media_upload signed upload URL.
 	MCPUploadTokenTTLSeconds int `yaml:"mcp_upload_token_ttl_seconds" env:"MCP_UPLOAD_TOKEN_TTL_SECONDS"`
+	// MCPMediaTokenTTLSeconds bounds a signed media-READ URL (the widget's
+	// preview thumbnails and open/download links). Longer than the upload TTL
+	// on purpose: expiry here means a broken <img> in a record the user left
+	// open, the grant is read-only and single-object, and every kb_read mints
+	// fresh URLs anyway — so the practical window is one navigation, not an
+	// hour.
+	MCPMediaTokenTTLSeconds int `yaml:"mcp_media_token_ttl_seconds" env:"MCP_MEDIA_TOKEN_TTL_SECONDS"`
 	// MCPReviewHandoffTTLSeconds bounds the one-time signed URL a tool result
 	// hands the KB Manager widget for "Review and publish in Xchats" (plan
 	// Task 15) — short-lived: it only needs to survive the click.
@@ -112,15 +119,14 @@ type Config struct {
 
 	// --- LLM / AI brain (key is a secret via .env; the rest are tunables) ---
 	// When LLMAPIKey is empty the app falls back to the hardcoded Stub drafter.
-	LLMProvider    string  `yaml:"llm_provider" env:"LLM_PROVIDER"`         // openrouter|openai|gemini
-	LLMAPIKey      string  `env:"LLM_API_KEY"`                              // secret
-	LLMBaseURL     string  `yaml:"llm_base_url" env:"LLM_BASE_URL"`         // overrides the provider default
-	LLMFastModel   string  `yaml:"llm_fast_model" env:"LLM_FAST_MODEL"`     // drafting model
-	LLMVisionModel string  `yaml:"llm_vision_model" env:"LLM_VISION_MODEL"` // multimodal model for KB media extraction (empty → describe popups)
+	LLMProvider    string  `yaml:"llm_provider" env:"LLM_PROVIDER"`     // openrouter|openai|gemini
+	LLMAPIKey      string  `env:"LLM_API_KEY"`                          // secret
+	LLMBaseURL     string  `yaml:"llm_base_url" env:"LLM_BASE_URL"`     // overrides the provider default
+	LLMFastModel   string  `yaml:"llm_fast_model" env:"LLM_FAST_MODEL"` // drafting model
 	LLMMaxTokens   int     `yaml:"llm_max_tokens" env:"LLM_MAX_TOKENS"`
 	LLMTemperature float64 `yaml:"llm_temperature" env:"LLM_TEMPERATURE"`
-	// KBAllowPrivateFetch lets the playground URL adapter fetch private/loopback
-	// hosts. Default false (SSRF-safe); enable only for trusted self-hosted setups.
+	// KBAllowPrivateFetch lets trusted local connector metadata discovery fetch
+	// private/loopback hosts. Default false (SSRF-safe).
 	KBAllowPrivateFetch bool `yaml:"kb_allow_private_fetch" env:"KB_ALLOW_PRIVATE_FETCH"`
 
 	// --- multichannel response-service LLM layer (backend/llm + internal/llmprovider) ---
@@ -190,7 +196,8 @@ func defaults() Config {
 		MCPAccessTokenTTLSeconds:   900, // 15 minutes
 		MCPRefreshTokenTTLDays:     30,
 		MCPAuthCodeTTLSeconds:      300, // 5 minutes
-		MCPUploadTokenTTLSeconds:   900, // 15 minutes
+		MCPUploadTokenTTLSeconds:   900,  // 15 minutes
+		MCPMediaTokenTTLSeconds:    3600, // 1 hour
 		MCPReviewHandoffTTLSeconds: 300, // 5 minutes
 
 		LLMDefaultProvider:     "openrouter",

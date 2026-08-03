@@ -234,11 +234,23 @@ func summaryPageOutputSchema() map[string]any {
 // kbInfoOutputSchema documents handleKBInfo's structuredContent.
 func kbInfoOutputSchema() map[string]any {
 	return obj(map[string]any{
-		"types":             strArray("Every KB type this connector supports."),
-		"natural_key_main":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "KB types whose natural key is the literal string \"main\" (singletons)."},
-		"media_field_kinds": map[string]any{"type": "object", "description": "Maps each media field name to its kind (image/video/audio/document)."},
+		"types":            strArray("Every KB type this connector supports."),
+		"natural_key_main": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "KB types whose natural key is the literal string \"main\" (singletons)."},
+		"media_attachment_fields": map[string]any{
+			"type": "object",
+			"additionalProperties": map[string]any{
+				"type": "array",
+				"items": obj(map[string]any{
+					"field":    str("The media column's name."),
+					"kind":     enumStr("The broad MIME category this field accepts.", "image", "video", "audio", "document"),
+					"multiple": boolean("True when the field holds a list and an attach appends; false when it holds one reference and an attach replaces."),
+				}, "field", "kind", "multiple"),
+			},
+			"description": "Attachable media fields grouped by KB type — what kb_media_attach accepts. Types with no media columns are absent.",
+		},
+		"media_field_kinds": map[string]any{"type": "object", "description": "Maps each media field name to its kind (image/video/audio/document). Superseded by media_attachment_fields, which is type-scoped and excludes derived columns."},
 		"frontend_base_url": str("The Xchats app's own origin, for a fallback plain /playground link when no per-call review URL is available."),
-	}, "types", "natural_key_main", "media_field_kinds", "frontend_base_url")
+	}, "types", "natural_key_main", "media_attachment_fields", "media_field_kinds", "frontend_base_url")
 }
 
 // mediaUploadOutputSchema documents handleKBMediaUpload's structuredContent.
@@ -250,7 +262,7 @@ func mediaUploadOutputSchema() map[string]any {
 		"upload_headers":    map[string]any{"type": "object", "description": "Headers to send with the PUT (at minimum Content-Type)."},
 		"expires_at":        str("RFC 3339 timestamp; the upload_url stops working after this."),
 		"max_size_bytes":    integer("The declared size this upload was staged for — the PUT is rejected above it."),
-		"processing_status": str("The material's current processing status."),
+		"processing_status": str("The material row's database processing status. At this staging step, uploaded means the row is awaiting the file-byte PUT; it does not mean the bytes have arrived. A successful PUT advances it to parsed."),
 	}, "material_id", "upload_url", "upload_method", "upload_headers", "expires_at", "max_size_bytes", "processing_status")
 }
 
@@ -265,7 +277,8 @@ func merge(a, b map[string]any) map[string]any {
 	return out
 }
 
-// Tools is the closed, ordered 12-tool contract (plan/mcp.md §5).
+// Tools is the closed, ordered 13-tool contract (plan/mcp.md §5 plus
+// kb_media_attach).
 func Tools() []Tool {
 	tools := []Tool{
 		assistantUpsertTool(),
@@ -280,6 +293,7 @@ func Tools() []Tool {
 		kbSummaryTool(),
 		kbInfoTool(),
 		kbMediaUploadTool(),
+		kbMediaAttachTool(),
 	}
 	// SecuritySchemes is derived from requiredScope (handlers.go) — the SAME
 	// map dispatchToolsCall enforces against — rather than repeated as a
@@ -324,7 +338,6 @@ func topicUpsertTool() Tool {
 				"featured_image":        materialID("Single main topic image."),
 				"illustration_images":   materialIDs("Supporting topic illustrations."),
 				"explainer_videos":      materialIDs("Videos that explain the topic."),
-				"narration_audio_files": materialIDs("Customer-sendable spoken explanations."),
 				"reference_documents":   materialIDs("Documents supporting the topic."),
 			}),
 		}, upsertCommon()), "changes"),
@@ -350,11 +363,8 @@ func productUpsertTool() Tool {
 				"featured_image":          materialID("Single main product image."),
 				"gallery_images":          materialIDs("Product gallery images."),
 				"demo_videos":             materialIDs("Product demonstration videos."),
-				"audio_description_files": materialIDs("Spoken product descriptions."),
 				"certificate_documents":   materialIDs("Product certificates."),
-				"manual_documents":        materialIDs("Product user/installation manuals."),
 				"guarantee_documents":     materialIDs("Product guarantee documents."),
-				"specification_documents": materialIDs("Technical product specifications."),
 			}),
 		}, upsertCommon()), "changes"),
 		Meta:         widgetMeta(),
@@ -536,10 +546,39 @@ func kbMediaUploadTool() Tool {
 			"target": obj(map[string]any{
 				"type":  enumStr("KB type the media will be attached to.", "topic", "product", "tariff", "contacts", "policies"),
 				"key":   str("The record's ref/slug/\"main\", if known."),
-				"field": str("The semantic media field this upload is intended for, e.g. featured_image, gallery_images."),
+				"field": str("The semantic media field this upload is intended for, e.g. gallery_images, illustration_images — must be one of kb_info.media_attachment_fields' entries for type."),
 			}, "type", "field"),
 		}, "filename", "mime_type", "size_bytes"),
 		Meta:         appOnlyMeta(),
 		OutputSchema: mediaUploadOutputSchema(),
 	}
+}
+
+func kbMediaAttachTool() Tool {
+	return Tool{
+		Name:        "kb_media_attach",
+		Description: "App-only, widget-invoked tool: attaches an already-uploaded material (kb_media_upload's material_id, with a completed PUT) to one media field of an EXISTING draft or live record. Never creates a record — an unknown key is rejected, not created. A plural field appends (no duplicates); a singular field replaces. Writes only the draft. The model never calls this tool itself.",
+		InputSchema: obj(map[string]any{
+			"material_id":            str("A kb_media_upload material_id whose PUT has completed."),
+			"type":                   enumStr("KB type owning the field.", "topic", "product", "tariff", "contacts", "policies"),
+			"key":                    str("The record's ref/slug/\"main\". The record must already exist (live or draft) and must not be staged for deletion."),
+			"field":                  str("The media field to attach to — must be one of kb_info.media_attachment_fields' entries for type. Never featured_image, which is not an attachment target."),
+			"expected_draft_version": integer("Optional optimistic-concurrency token from a prior kb_summary/kb_read/upsert result."),
+		}, "material_id", "type", "key", "field"),
+		Meta:         appOnlyMeta(),
+		OutputSchema: mediaAttachOutputSchema(),
+	}
+}
+
+// mediaAttachOutputSchema documents handleKBMediaAttach's structuredContent
+// (kbstore.MediaAttachResult).
+func mediaAttachOutputSchema() map[string]any {
+	return obj(map[string]any{
+		"type":            str("The KB type attached to."),
+		"key":             str("The record's natural key (ref/slug/\"main\")."),
+		"field":           str("The media field attached to."),
+		"material_id":     str("The attached material_id."),
+		"draft_version":   integer("The draft's new base_version — pass as expected_draft_version on the next write to this org's draft."),
+		"already_present": boolean("true if this exact material was already attached to this field (a no-op for a plural field, a same-value replace for a singular one)."),
+	}, "type", "key", "field", "material_id", "draft_version", "already_present")
 }
