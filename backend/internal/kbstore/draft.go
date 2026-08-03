@@ -2087,14 +2087,19 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 		// same as every other singleton — so set.config is true either for a
 		// whole-draft approve that happens to include a pending config edit, or
 		// for an entity-scoped approve of kind "config".
+		//
+		// Must be upsertConfigRow, not a bare UPDATE: an org with no live
+		// ai_assistants row yet (nothing auto-seeds it — see kbstore/seed_demo.go)
+		// matches zero rows on a plain UPDATE, which silently no-ops while the
+		// pending patch is still cleared from the draft below regardless — a
+		// first-ever config approve looked like it worked and lost the edit
+		// entirely. live.go's PatchLiveConfig already carries this exact fix;
+		// this path just never got the same one.
 		if set.config {
-			if _, err := db.Exec(ctx, `UPDATE xchats.ai_assistants SET
-				persona = COALESCE($2, persona), mission = COALESCE($3, mission),
-				guardrails = COALESCE($4, guardrails), language_policy = COALESCE($5, language_policy),
-				reply_max_words = COALESCE($6, reply_max_words), updated_at = now()
-				WHERE organization_id = $1`,
-				orgID, b.Config.Persona, b.Config.Mission, b.Config.Guardrails,
-				b.Config.LanguagePolicy, b.Config.ReplyMaxWords); err != nil {
+			if err := upsertConfigRow(ctx, db, orgID, ConfigPatch{
+				Persona: b.Config.Persona, Mission: b.Config.Mission, Guardrails: b.Config.Guardrails,
+				LanguagePolicy: b.Config.LanguagePolicy, ReplyMaxWords: b.Config.ReplyMaxWords,
+			}); err != nil {
 				return err
 			}
 		}

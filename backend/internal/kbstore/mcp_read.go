@@ -110,7 +110,18 @@ func (s *Store) identityIndex(ctx context.Context, db dbtx, orgID uuid.UUID, typ
 	if typeWanted(want, KBTypeAssistant) {
 		e := get(KBTypeAssistant, NaturalKeyMain)
 		e.Title = "Ассистент"
-		e.ExistsInLive = true // ai_assistants is seeded for every org; always live
+		// Nothing auto-seeds ai_assistants (kbstore/seed_demo.go is opt-in only,
+		// never called from serve's boot path) — a fresh org, or any org whose
+		// assistant config has only ever been staged and never approved, has no
+		// live row yet. Was hardcoded true under the old assumption that 0008's
+		// migration always seeded one; that pair nets to zero today.
+		var existsLive bool
+		if err := db.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM xchats.ai_assistants WHERE organization_id = $1)`, orgID).
+			Scan(&existsLive); err != nil {
+			return nil, err
+		}
+		e.ExistsInLive = existsLive
 		e.ExistsInDraft = draft.Config.Draft
 	}
 	if typeWanted(want, KBTypeTopic) {

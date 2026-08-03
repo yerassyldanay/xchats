@@ -7,8 +7,8 @@ import { chromium } from '@playwright/test';
   const page = await context.newPage();
 
   await page.goto('http://localhost:8081/login', { waitUntil: 'domcontentloaded' });
-  await page.locator('input[type=email]').fill('admin@xchats.test');
-  await page.locator('input[type=password]').fill('change-me-strong-password');
+  await page.locator('input[type=email]').fill('admin@example.com');
+  await page.locator('input[type=password]').fill('password123');
   await page.getByRole('button', { name: 'Войти' }).click();
   await page.waitForTimeout(3000);
   console.log("Current URL after login:", page.url());

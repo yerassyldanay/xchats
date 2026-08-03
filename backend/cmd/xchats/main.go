@@ -1,6 +1,6 @@
 // Command xchats is the xchats backend: API edge + webhook ingress + in-process
 // workers + the multichannel response service. Subcommands: serve (default),
-// migrate, webhook-set, seed.
+// migrate, webhook-set, seed, seed-kb-demo.
 package main
 
 import (
@@ -76,6 +76,10 @@ func main() {
 		st := mustStore(cfg, log)
 		defer st.Close()
 		seed(context.Background(), cfg, st, log)
+	case "seed-kb-demo":
+		st := mustStore(cfg, log)
+		defer st.Close()
+		runSeedKBDemo(context.Background(), cfg, st, log)
 	case "webhook-set":
 		runWebhookSet(cfg, log)
 	case "simulate-message":
@@ -331,6 +335,29 @@ func seededOrgID(ctx context.Context, cfg *config.Config, st *store.Store, log *
 		return uuid.Nil
 	}
 	return org.ID
+}
+
+// runSeedKBDemo inserts the fixed "Demo Shop" KB dataset (kbstore.SeedDemoKB)
+// into the seeded org — explicit and opt-in only ("xchats seed-kb-demo" /
+// "make seed-kb-demo"), never called from runServe or RunMigrations. Requires
+// an org to already exist (run the "seed" command first on a fresh database);
+// unlike migration 0008's old auto-run version this has no reason to no-op
+// quietly on a missing org, so it fails loudly instead.
+func runSeedKBDemo(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) {
+	orgID := seededOrgID(ctx, cfg, st, log)
+	if orgID == uuid.Nil {
+		fatal("seed-kb-demo", fmt.Errorf("no organization found — run the \"seed\" command first"))
+	}
+	kb := kbstore.New(st.Pool())
+	inserted, err := kb.SeedDemoKB(ctx, orgID)
+	if err != nil {
+		fatal("seed-kb-demo", err)
+	}
+	if !inserted {
+		log.Info("seed-kb-demo: org already has KB content — skipped", "org_id", orgID)
+		return
+	}
+	log.Info("seed-kb-demo: demo KB content inserted", "org_id", orgID)
 }
 
 func runMigrate(cfg *config.Config, log *slog.Logger) {
