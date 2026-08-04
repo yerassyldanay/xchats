@@ -95,7 +95,7 @@ func mediaUpdate(updateID, messageID, chatID int64, caption string) []byte {
 func (h *harness) countRows(query string, args ...any) int {
 	h.t.Helper()
 	var n int
-	if err := h.store.Pool().QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+	if err := h.db.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
 		h.t.Fatalf("count: %v", err)
 	}
 	return n
@@ -134,8 +134,8 @@ func TestTelegramConnectRegistersWebhookAndStoresTokenEncrypted(t *testing.T) {
 
 	// The token is at rest as ciphertext, and decrypts back through the store.
 	var enc []byte
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT bot_token_enc FROM xchats.tg_credentials WHERE account_id = $1`, id).Scan(&enc); err != nil {
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT bot_token_enc FROM tg_credentials WHERE account_id = $1`, id).Scan(&enc); err != nil {
 		t.Fatalf("read credential: %v", err)
 	}
 	if bytes.Contains(enc, []byte(testBotToken)) {
@@ -221,10 +221,10 @@ func TestTelegramConnectRejectedTokenStoresNothing(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400; body %s", resp.StatusCode, env["message"])
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_accounts`); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_accounts`); n != 0 {
 		t.Fatalf("a rejected token left %d account rows behind", n)
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_credentials`); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_credentials`); n != 0 {
 		t.Fatalf("a rejected token left %d credential rows behind", n)
 	}
 }
@@ -244,7 +244,7 @@ func TestTelegramConnectRequiresHTTPSBaseURL(t *testing.T) {
 	if !strings.Contains(msg, "https") {
 		t.Fatalf("message %q does not explain the https requirement", msg)
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_accounts`); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_accounts`); n != 0 {
 		t.Fatalf("an unusable base URL still created %d accounts", n)
 	}
 }
@@ -272,7 +272,7 @@ func TestTelegramConcurrentConnectsConvergeOnOneAccount(t *testing.T) {
 	}
 	wg.Wait()
 
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_accounts`); n != 1 {
+	if n := h.countRows(`SELECT count(*) FROM tg_accounts`); n != 1 {
 		t.Fatalf("concurrent connects produced %d accounts, want exactly 1 (codes %v)", n, codes)
 	}
 	for _, code := range codes {
@@ -288,13 +288,13 @@ func TestTelegramConnectRefusesAnotherOrgsBot(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	var otherOrg uuid.UUID
-	if err := h.store.Pool().QueryRow(ctx,
-		`INSERT INTO xchats.organizations (name) VALUES ('other-tenant') RETURNING id`).Scan(&otherOrg); err != nil {
+	if err := h.db.QueryRow(ctx,
+		`INSERT INTO organizations (name) VALUES ('other-tenant') RETURNING id`).Scan(&otherOrg); err != nil {
 		t.Fatalf("seed other org: %v", err)
 	}
 	id := config.ChannelAccountID(config.TelegramOwnerRef(testBotID))
-	if _, err := h.store.Pool().Exec(ctx, `
-		INSERT INTO xchats.tg_accounts (id, organization_id, display_name, bot_id, bot_username, connection_state)
+	if _, err := h.db.Exec(ctx, `
+		INSERT INTO tg_accounts (id, organization_id, display_name, bot_id, bot_username, connection_state)
 		VALUES ($1, $2, 'Чужой бот', $3, $4, 'connected')`,
 		id, otherOrg, testBotID, testBotUsername); err != nil {
 		t.Fatalf("seed foreign account: %v", err)
@@ -305,14 +305,14 @@ func TestTelegramConnectRefusesAnotherOrgsBot(t *testing.T) {
 		t.Fatalf("status %d, want 409", resp.StatusCode)
 	}
 	var owner uuid.UUID
-	if err := h.store.Pool().QueryRow(ctx,
-		`SELECT organization_id FROM xchats.tg_accounts WHERE id = $1`, id).Scan(&owner); err != nil {
+	if err := h.db.QueryRow(ctx,
+		`SELECT organization_id FROM tg_accounts WHERE id = $1`, id).Scan(&owner); err != nil {
 		t.Fatalf("re-read account: %v", err)
 	}
 	if owner != otherOrg {
 		t.Fatal("the other organization's bot was taken over")
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_credentials`); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_credentials`); n != 0 {
 		t.Fatal("a refused claim still wrote a credential row")
 	}
 }
@@ -323,8 +323,8 @@ func TestTelegramConnectRefusesOrphanedBot(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	id := config.ChannelAccountID(config.TelegramOwnerRef(testBotID))
-	if _, err := h.store.Pool().Exec(ctx, `
-		INSERT INTO xchats.tg_accounts (id, organization_id, display_name, bot_id, bot_username, connection_state)
+	if _, err := h.db.Exec(ctx, `
+		INSERT INTO tg_accounts (id, organization_id, display_name, bot_id, bot_username, connection_state)
 		VALUES ($1, NULL, 'Осиротевший бот', $2, $3, 'disconnected')`,
 		id, testBotID, testBotUsername); err != nil {
 		t.Fatalf("seed orphan: %v", err)
@@ -334,8 +334,8 @@ func TestTelegramConnectRefusesOrphanedBot(t *testing.T) {
 		t.Fatalf("status %d, want 409 for an orphaned account", resp.StatusCode)
 	}
 	var org *uuid.UUID
-	if err := h.store.Pool().QueryRow(ctx,
-		`SELECT organization_id FROM xchats.tg_accounts WHERE id = $1`, id).Scan(&org); err != nil {
+	if err := h.db.QueryRow(ctx,
+		`SELECT organization_id FROM tg_accounts WHERE id = $1`, id).Scan(&org); err != nil {
 		t.Fatalf("re-read: %v", err)
 	}
 	if org != nil {
@@ -361,8 +361,8 @@ func TestTelegramSetWebhookRejectionIsVisible(t *testing.T) {
 		t.Fatalf("connection_state = %q, want webhook_error", payload.ConnectionState)
 	}
 	var state, lastErr string
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT connection_state, webhook_last_error FROM xchats.tg_accounts WHERE bot_id = $1`,
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT connection_state, webhook_last_error FROM tg_accounts WHERE bot_id = $1`,
 		testBotID).Scan(&state, &lastErr); err != nil {
 		t.Fatalf("read state: %v", err)
 	}
@@ -376,8 +376,8 @@ func TestTelegramSetWebhookRejectionIsVisible(t *testing.T) {
 	if resp, _ := h.postJSON("/xchats/api/v1/telegram-accounts/"+id.String()+"/retry-webhook", map[string]any{}); resp.StatusCode != 200 {
 		t.Fatalf("retry status %d", resp.StatusCode)
 	}
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT connection_state, webhook_last_error FROM xchats.tg_accounts WHERE bot_id = $1`,
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT connection_state, webhook_last_error FROM tg_accounts WHERE bot_id = $1`,
 		testBotID).Scan(&state, &lastErr); err != nil {
 		t.Fatalf("read state: %v", err)
 	}
@@ -549,8 +549,8 @@ func TestTelegramDeleteFailureKeepsTokenAndRetrySucceeds(t *testing.T) {
 	}
 	var state string
 	var deletedAt *string
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT connection_state, deleted_at::text FROM xchats.tg_accounts WHERE id = $1`, id).
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT connection_state, deleted_at FROM tg_accounts WHERE id = $1`, id).
 		Scan(&state, &deletedAt); err != nil {
 		t.Fatalf("read state: %v", err)
 	}
@@ -571,11 +571,11 @@ func TestTelegramDeleteFailureKeepsTokenAndRetrySucceeds(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("retry status %d", resp.StatusCode)
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_credentials WHERE account_id = $1`, id); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_credentials WHERE account_id = $1`, id); n != 0 {
 		t.Fatal("the token survived a confirmed disconnect")
 	}
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT deleted_at::text FROM xchats.tg_accounts WHERE id = $1`, id).Scan(&deletedAt); err != nil {
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT deleted_at FROM tg_accounts WHERE id = $1`, id).Scan(&deletedAt); err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	if deletedAt == nil {
@@ -621,7 +621,7 @@ func TestTelegramReconnectRevivesTheSameAccountAndHistory(t *testing.T) {
 	if !found {
 		t.Fatal("the history did not come back with the revived account")
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 1 {
+	if n := h.countRows(`SELECT count(*) FROM tg_messages`); n != 1 {
 		t.Fatalf("tg_messages = %d, want the original message preserved", n)
 	}
 }
@@ -642,16 +642,16 @@ func TestTelegramWebhookIngestsTextCaptionAndBareMedia(t *testing.T) {
 		t.Fatalf("caption-less photo status %d", got)
 	}
 
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 3 {
+	if n := h.countRows(`SELECT count(*) FROM tg_messages`); n != 3 {
 		t.Fatalf("tg_messages = %d, want 3 (text, captioned media, bare media)", n)
 	}
 	// The caption IS the body — the AI must see the question under the photo.
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages WHERE body = 'это подойдёт?'`); n != 1 {
+	if n := h.countRows(`SELECT count(*) FROM tg_messages WHERE body = 'это подойдёт?'`); n != 1 {
 		t.Fatal("the caption was not stored as the message body")
 	}
 	// A caption-less attachment still becomes a row, with a placeholder preview.
 	if n := h.countRows(
-		`SELECT count(*) FROM xchats.tg_chats WHERE last_message_preview = '📷 Фото'`); n != 1 {
+		`SELECT count(*) FROM tg_chats WHERE last_message_preview = '📷 Фото'`); n != 1 {
 		t.Fatal("the caption-less photo did not produce a placeholder preview")
 	}
 	// Both media messages carry a media row keyed by the LARGEST rendition's
@@ -660,12 +660,12 @@ func TestTelegramWebhookIngestsTextCaptionAndBareMedia(t *testing.T) {
 	// the download attempt fails and the row stays retryable, which is exactly
 	// the state a real outage would leave behind.
 	if n := h.countRows(
-		`SELECT count(*) FROM xchats.tg_message_media WHERE file_id = 'AgACbig' AND file_unique_id = 'bu'`); n != 2 {
+		`SELECT count(*) FROM tg_message_media WHERE file_id = 'AgACbig' AND file_unique_id = 'bu'`); n != 2 {
 		t.Fatalf("media rows with the largest rendition's handles = %d, want 2 (total rows: %d)", n,
-			h.countRows(`SELECT count(*) FROM xchats.tg_message_media`))
+			h.countRows(`SELECT count(*) FROM tg_message_media`))
 	}
 	if n := h.countRows(
-		`SELECT count(*) FROM xchats.tg_message_media WHERE download_status <> 'ready'`); n != 2 {
+		`SELECT count(*) FROM tg_message_media WHERE download_status <> 'ready'`); n != 2 {
 		t.Fatal("a media row reported ready without any bytes ever being fetched")
 	}
 
@@ -709,12 +709,12 @@ func TestTelegramWebhookRedeliveryIsANoOp(t *testing.T) {
 	if got := h.tgWebhook(id, body, tgWebhookSecret); got != 200 {
 		t.Fatalf("redelivery status %d", got)
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 1 {
+	if n := h.countRows(`SELECT count(*) FROM tg_messages`); n != 1 {
 		t.Fatalf("tg_messages = %d after a redelivery, want 1", n)
 	}
 	var unread int
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT unread_count FROM xchats.tg_chats WHERE account_id = $1`, id).Scan(&unread); err != nil {
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT unread_count FROM tg_chats WHERE account_id = $1`, id).Scan(&unread); err != nil {
 		t.Fatalf("read unread: %v", err)
 	}
 	if unread != 1 {
@@ -731,23 +731,23 @@ func TestTelegramRedeliveryReenqueuesAMissingDraft(t *testing.T) {
 
 	h.tgWebhook(id, body, tgWebhookSecret)
 	// Simulate "the first attempt died before the draft was written".
-	if _, err := h.store.Pool().Exec(context.Background(), `DELETE FROM xchats.ai_drafts`); err != nil {
+	if _, err := h.db.Exec(context.Background(), `DELETE FROM ai_drafts`); err != nil {
 		t.Fatalf("clear drafts: %v", err)
 	}
 	h.tgWebhook(id, body, tgWebhookSecret)
 
-	if n := h.countRows(`SELECT count(*) FROM xchats.ai_drafts`); n == 0 {
+	if n := h.countRows(`SELECT count(*) FROM ai_drafts`); n == 0 {
 		t.Fatal("the redelivery did not re-enqueue the missing draft")
 	}
 	// And the draft is recorded against the right channel.
-	if n := h.countRows(`SELECT count(*) FROM xchats.ai_drafts WHERE channel = 'telegram'`); n == 0 {
+	if n := h.countRows(`SELECT count(*) FROM ai_drafts WHERE channel = 'telegram'`); n == 0 {
 		t.Fatal("the draft was not stamped with channel='telegram'")
 	}
 
 	// A redelivery that DOES find a draft must not pile on another set.
-	before := h.countRows(`SELECT count(*) FROM xchats.ai_drafts`)
+	before := h.countRows(`SELECT count(*) FROM ai_drafts`)
 	h.tgWebhook(id, body, tgWebhookSecret)
-	if after := h.countRows(`SELECT count(*) FROM xchats.ai_drafts`); after != before {
+	if after := h.countRows(`SELECT count(*) FROM ai_drafts`); after != before {
 		t.Fatalf("drafts %d -> %d: a redelivery regenerated despite an existing draft", before, after)
 	}
 }
@@ -764,7 +764,7 @@ func TestTelegramWebhookRejectsWrongSecret(t *testing.T) {
 	if got := h.tgWebhook(id, textUpdate(2, 101, 500100, "hi"), webhookToken); got != http.StatusUnauthorized {
 		t.Fatalf("status %d using the Evolution token, want 401", got)
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_messages`); n != 0 {
 		t.Fatal("an unauthenticated update was stored")
 	}
 }
@@ -796,7 +796,7 @@ func TestTelegramWebhookDiscardsUnknownAndDisconnectedAccounts(t *testing.T) {
 	if got := h.tgWebhook(uuid.New(), textUpdate(1, 100, 500100, "hi"), tgWebhookSecret); got != 200 {
 		t.Fatalf("unknown account status %d, want 200", got)
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_messages`); n != 0 {
 		t.Fatal("an update for an unknown account was stored")
 	}
 
@@ -808,7 +808,7 @@ func TestTelegramWebhookDiscardsUnknownAndDisconnectedAccounts(t *testing.T) {
 	if got := h.tgWebhook(id, textUpdate(2, 101, 500100, "hi"), tgWebhookSecret); got != 200 {
 		t.Fatalf("disconnected account status %d, want 200", got)
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_messages`); n != 0 {
 		t.Fatal("an update for a disconnected account was stored")
 	}
 }
@@ -848,10 +848,10 @@ func TestTelegramWebhookIgnoresGroupsAndServiceMessages(t *testing.T) {
 		t.Fatalf("edited_message status %d, want 200", got)
 	}
 
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_messages`); n != 0 {
 		t.Fatalf("tg_messages = %d — an ignorable update was stored", n)
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_chats`); n != 0 {
+	if n := h.countRows(`SELECT count(*) FROM tg_chats`); n != 0 {
 		t.Fatalf("tg_chats = %d — an ignorable update created a conversation", n)
 	}
 }
@@ -862,25 +862,30 @@ func TestTelegramWebhookAnswers500WhenIngestFails(t *testing.T) {
 	h := newHarness(t)
 	id := h.connectBot(t, "Бот", false)
 
-	// Break the write path in a way only the ingest touches.
-	if _, err := h.store.Pool().Exec(context.Background(),
-		`ALTER TABLE xchats.tg_messages ADD CONSTRAINT tg_messages_force_fail CHECK (false) NOT VALID`); err != nil {
-		t.Fatalf("install failing constraint: %v", err)
+	// Break the write path in a way only the ingest touches, then heal it.
+	// This used to be ALTER TABLE ... ADD CONSTRAINT CHECK (false) NOT VALID,
+	// which SQLite cannot express: it supports neither ADD CONSTRAINT nor DROP
+	// CONSTRAINT. A BEFORE INSERT trigger that RAISEs is the equivalent that is
+	// actually more surgical — it fails inserts into this one table and nothing
+	// else, and DROP TRIGGER cleanly reverses it.
+	if _, err := h.db.Exec(context.Background(),
+		`CREATE TRIGGER tg_messages_force_fail BEFORE INSERT ON tg_messages
+		 BEGIN SELECT RAISE(ABORT, 'forced ingest failure'); END`); err != nil {
+		t.Fatalf("install failing trigger: %v", err)
 	}
 	got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), tgWebhookSecret)
 	if got != http.StatusInternalServerError {
 		t.Fatalf("status %d, want 500 so Telegram redelivers", got)
 	}
-	if _, err := h.store.Pool().Exec(context.Background(),
-		`ALTER TABLE xchats.tg_messages DROP CONSTRAINT tg_messages_force_fail`); err != nil {
-		t.Fatalf("drop constraint: %v", err)
+	if _, err := h.db.Exec(context.Background(), `DROP TRIGGER tg_messages_force_fail`); err != nil {
+		t.Fatalf("drop trigger: %v", err)
 	}
 
 	// Once the database is healthy, the redelivery lands.
 	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), tgWebhookSecret); got != 200 {
 		t.Fatalf("redelivery after recovery: status %d", got)
 	}
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_messages`); n != 1 {
+	if n := h.countRows(`SELECT count(*) FROM tg_messages`); n != 1 {
 		t.Fatalf("tg_messages = %d after recovery, want 1", n)
 	}
 }
@@ -936,8 +941,8 @@ func TestTelegramApprovedDraftSendsAndStampsMessageID(t *testing.T) {
 
 	var state string
 	var tgMsgID *int64
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT delivery_state, telegram_message_id FROM xchats.tg_messages WHERE direction = 'out'`).
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT delivery_state, telegram_message_id FROM tg_messages WHERE direction = 'out'`).
 		Scan(&state, &tgMsgID); err != nil {
 		t.Fatalf("read outbound: %v", err)
 	}
@@ -984,11 +989,11 @@ func TestTelegramMediaSendGoesThroughTheRegistry(t *testing.T) {
 
 	// The outbound row landed in the Telegram media table (its FK would have
 	// rejected the WhatsApp one) and was stamped from the send response.
-	if n := h.countRows(`SELECT count(*) FROM xchats.tg_message_media WHERE download_status = 'ready' AND file_id = ''`); n != 1 {
+	if n := h.countRows(`SELECT count(*) FROM tg_message_media WHERE download_status = 'ready' AND file_id = ''`); n != 1 {
 		t.Fatal("the outbound attachment was not recorded in tg_message_media")
 	}
 	if n := h.countRows(
-		`SELECT count(*) FROM xchats.tg_messages WHERE direction = 'out' AND delivery_state = 'sent' AND telegram_message_id IS NOT NULL`); n != 1 {
+		`SELECT count(*) FROM tg_messages WHERE direction = 'out' AND delivery_state = 'sent' AND telegram_message_id IS NOT NULL`); n != 1 {
 		t.Fatal("the outbound media row was not stamped as sent")
 	}
 }
@@ -1005,8 +1010,8 @@ func TestTelegramInboundMediaIsDownloadedAndServed(t *testing.T) {
 
 	var status, storageKey string
 	var size int
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT download_status, storage_key, size FROM xchats.tg_message_media`).
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT download_status, storage_key, size FROM tg_message_media`).
 		Scan(&status, &storageKey, &size); err != nil {
 		t.Fatalf("read media row: %v", err)
 	}
@@ -1047,8 +1052,8 @@ func TestTelegramMediaSweeperRetriesAFailedDownload(t *testing.T) {
 	h.tgWebhook(id, mediaUpdate(1, 100, 500100, ""), tgWebhookSecret)
 
 	var status, storageKey string
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT download_status, storage_key FROM xchats.tg_message_media`).Scan(&status, &storageKey); err != nil {
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT download_status, storage_key FROM tg_message_media`).Scan(&status, &storageKey); err != nil {
 		t.Fatalf("read media row: %v", err)
 	}
 	if status == "ready" {
@@ -1069,8 +1074,8 @@ func TestTelegramMediaSweeperRetriesAFailedDownload(t *testing.T) {
 	}
 	h.queue.Wait()
 
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT download_status FROM xchats.tg_message_media`).Scan(&status); err != nil {
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT download_status FROM tg_message_media`).Scan(&status); err != nil {
 		t.Fatalf("read media row: %v", err)
 	}
 	if status != "ready" {

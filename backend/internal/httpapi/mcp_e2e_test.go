@@ -214,8 +214,8 @@ func TestMCPAccessToken_ScopedToMintOrgRegardlessOfActiveSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed org B: %v", err)
 	}
-	if _, err := h.store.Pool().Exec(ctx, `
-		INSERT INTO xchats.organization_users (organization_id, user_id)
+	if _, err := h.db.Exec(ctx, `
+		INSERT INTO organization_users (organization_id, user_id)
 		VALUES ($1, $2) ON CONFLICT DO NOTHING`, orgB.ID, h.userID); err != nil {
 		t.Fatalf("add membership to org B: %v", err)
 	}

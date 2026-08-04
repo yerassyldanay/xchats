@@ -12,12 +12,11 @@ import (
 	"testing"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
-	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // promptPayload mirrors httpapi's (unexported) promptView JSON shape — this is
@@ -159,21 +158,12 @@ type promptHarness struct {
 
 func newPromptHarness(t *testing.T) *promptHarness {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping DB integration test")
-	}
 	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	// Fresh, migrated database per test — see newHarnessWithLLM's own comment
+	// in integration_test.go for why the DATABASE_URL gate is gone. This
+	// harness deliberately does NOT call kb.SeedLiveIfEmpty: the org starting
+	// with no ai_assistants row is this suite's whole precondition.
+	st, db := dbtest.Open(t)
 
 	cfg := &config.Config{SessionTTLHours: 1, MinPasswordLen: 8, PageSize: 50, CORSOrigins: []string{"*"}}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -187,8 +177,17 @@ func newPromptHarness(t *testing.T) *promptHarness {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	kb := kbstore.New(st.Pool())
-	cached := responsestore.NewCachedKBRepo(&responsestore.KnowledgeBaseRepo{Pool: st.Pool()})
+	kb, err := kbstore.New(ctx, db.Path())
+	if err != nil {
+		t.Fatalf("kbstore: %v", err)
+	}
+	t.Cleanup(kb.Close)
+	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, db.Path())
+	if err != nil {
+		t.Fatalf("kb repo: %v", err)
+	}
+	t.Cleanup(kbRepo.Close)
+	cached := responsestore.NewCachedKBRepo(kbRepo)
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Hub: realtime.NewHub(), KB: kb,
 		KBRepo: cached, KBInvalidator: cached,
@@ -197,7 +196,8 @@ func newPromptHarness(t *testing.T) *promptHarness {
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &promptHarness{t: t, srv: ts, client: &http.Client{Jar: jar}}
-	t.Cleanup(func() { ts.Close(); st.Close() })
+	// st/db are closed by dbtest's own t.Cleanup registrations.
+	t.Cleanup(func() { ts.Close() })
 	h.login()
 	return h
 }

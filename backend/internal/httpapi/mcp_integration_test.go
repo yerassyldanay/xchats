@@ -34,12 +34,13 @@ import (
 
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 const (
@@ -55,10 +56,13 @@ const (
 // and others need one that stops at the first to inspect the Location
 // header — see decide()'s callers.
 type mcpHarness struct {
-	t      *testing.T
-	srv    *httptest.Server
-	cfg    *config.Config
-	store  *store.Store
+	t     *testing.T
+	srv   *httptest.Server
+	cfg   *config.Config
+	store *store.Store
+	// db is the raw handle for assertions no exported method covers — see the
+	// harness struct in integration_test.go.
+	db     *dbx.DB
 	blob   blob.Store
 	kb     *kbstore.Store
 	key    *mcpauth.SigningKey
@@ -68,21 +72,10 @@ type mcpHarness struct {
 
 func newMCPHarness(t *testing.T) *mcpHarness {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping MCP DB integration test")
-	}
 	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	// Fresh, migrated database per test — see newHarnessWithLLM's own comment
+	// in integration_test.go for why the DATABASE_URL gate is gone.
+	st, db := dbtest.Open(t)
 
 	cfg := &config.Config{
 		SessionTTLHours: 1, MinPasswordLen: 8, PageSize: 50, CORSOrigins: []string{"*"},
@@ -106,14 +99,22 @@ func newMCPHarness(t *testing.T) *mcpHarness {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	kb := kbstore.New(st.Pool())
+	kb, err := kbstore.New(ctx, db.Path())
+	if err != nil {
+		t.Fatalf("kbstore: %v", err)
+	}
+	t.Cleanup(kb.Close)
 	blobStore, err := blob.NewDisk(t.TempDir())
 	if err != nil {
 		t.Fatalf("blob: %v", err)
 	}
 
 	key := mcpauth.NewEphemeralSigningKey()
-	mcpStore := mcpauth.NewStore(st.Pool())
+	mcpStore, err := mcpauth.NewStore(ctx, db.Path())
+	if err != nil {
+		t.Fatalf("mcpauth store: %v", err)
+	}
+	t.Cleanup(mcpStore.Close)
 	authorizer := mcpauth.New(mcpStore, key, mcpauth.Config{
 		Issuer: cfg.APIBaseURL, Audience: cfg.MCPResourceURL(),
 		AccessTokenTTL:  time.Duration(cfg.MCPAccessTokenTTLSeconds) * time.Second,
@@ -135,9 +136,10 @@ func newMCPHarness(t *testing.T) *mcpHarness {
 	})
 	ts := httptest.NewServer(srv.Router())
 	h := &mcpHarness{
-		t: t, srv: ts, cfg: cfg, store: st, blob: blobStore, kb: kb, key: key, orgID: org.ID, userID: user.ID,
+		t: t, srv: ts, cfg: cfg, store: st, db: db, blob: blobStore, kb: kb, key: key, orgID: org.ID, userID: user.ID,
 	}
-	t.Cleanup(func() { ts.Close(); st.Close() })
+	// st/db are closed by dbtest's own t.Cleanup registrations.
+	t.Cleanup(func() { ts.Close() })
 	return h
 }
 
@@ -765,7 +767,7 @@ func TestMCPAccessToken_TenantRecheckRejectsRemovedUser(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if _, err := h.store.Pool().Exec(ctx, `DELETE FROM xchats.organization_users WHERE user_id = $1 AND organization_id = $2`, h.userID, h.orgID); err != nil {
+	if _, err := h.db.Exec(ctx, `DELETE FROM organization_users WHERE user_id = $1 AND organization_id = $2`, h.userID, h.orgID); err != nil {
 		t.Fatalf("remove membership: %v", err)
 	}
 
@@ -988,8 +990,8 @@ func TestMCPMediaUpload_ReplayAfterSuccessRejected(t *testing.T) {
 	}
 
 	var storageKey string
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT storage_key FROM xchats.kbd_materials WHERE id = $1`, materialID).Scan(&storageKey); err != nil {
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT storage_key FROM kbd_materials WHERE id = $1`, materialID).Scan(&storageKey); err != nil {
 		t.Fatalf("read storage_key: %v", err)
 	}
 	stored, _, err := h.blob.Get(storageKey)
@@ -1081,8 +1083,8 @@ func TestMCPMediaUpload_ConcurrentPUTsOnlyOneWins(t *testing.T) {
 	}
 
 	var storageKey string
-	if err := h.store.Pool().QueryRow(context.Background(),
-		`SELECT storage_key FROM xchats.kbd_materials WHERE id = $1`, materialID).Scan(&storageKey); err != nil {
+	if err := h.db.QueryRow(context.Background(),
+		`SELECT storage_key FROM kbd_materials WHERE id = $1`, materialID).Scan(&storageKey); err != nil {
 		t.Fatalf("read storage_key: %v", err)
 	}
 	stored, _, err := h.blob.Get(storageKey)

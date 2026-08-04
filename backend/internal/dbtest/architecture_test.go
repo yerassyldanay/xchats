@@ -44,6 +44,23 @@ var persistenceBoundary = map[string]bool{
 	modulePrefix + "cmd/xchats-import": true,
 }
 
+// dbtestConsumers may import internal/dbx from their TEST files only — never
+// from production code. These are packages whose tests legitimately assert on
+// database state that no exported method surfaces, and internal/dbtest's
+// fixtures hand them a *dbx.DB for exactly that (see NewKB/Open's own doc
+// comments). Their production code is still held to the full rule above: an
+// import of dbx from a non-test file in any of these fails the test.
+//
+// The distinction is the point. The boundary exists so that PRODUCTION code
+// cannot know which database engine is underneath it. A test asserting "this
+// row landed in wa_messages" is a different concern, and forcing it through an
+// exported method would mean growing the production API surface to serve tests.
+var dbtestConsumers = map[string]bool{
+	modulePrefix + "internal/httpapi":   true,
+	modulePrefix + "internal/mcpserver": true,
+	modulePrefix + "cmd/xchats":         true,
+}
+
 const dbxImportPath = modulePrefix + "internal/dbx"
 
 // driverOnlyPackages may import database/sql and modernc.org/sqlite
@@ -113,21 +130,41 @@ func TestArchitectureBoundary(t *testing.T) {
 		}
 		checked++
 
-		allImports := append(append(append([]string{}, pkg.Imports...), pkg.TestImports...), pkg.XTestImports...)
-		for _, imp := range allImports {
-			switch {
-			case imp == "database/sql":
-				t.Errorf("%s imports database/sql directly — only internal/dbx may; route through the dbx facade instead", pkg.ImportPath)
-			case imp == "modernc.org/sqlite":
-				t.Errorf("%s imports modernc.org/sqlite directly — only internal/dbx may; route through the dbx facade instead", pkg.ImportPath)
-			case imp == dbxImportPath && !persistenceBoundary[pkg.ImportPath]:
-				t.Errorf("%s imports %s but is outside the persistence boundary (%v) — dbx is internal plumbing of the repository packages only",
+		// Production imports and test-only imports are checked separately: the
+		// dbx rule is relaxed for the test files of dbtestConsumers, the
+		// database/sql and modernc.org/sqlite rules never are.
+		testOnlyImports := append(append([]string{}, pkg.TestImports...), pkg.XTestImports...)
+		for _, imp := range pkg.Imports {
+			checkDriverImports(t, pkg.ImportPath, imp, "")
+			if imp == dbxImportPath && !persistenceBoundary[pkg.ImportPath] {
+				t.Errorf("%s imports %s from production code but is outside the persistence boundary (%v) — dbx is internal plumbing of the repository packages only",
 					pkg.ImportPath, dbxImportPath, boundaryList())
+			}
+		}
+		for _, imp := range testOnlyImports {
+			checkDriverImports(t, pkg.ImportPath, imp, " (test files)")
+			if imp == dbxImportPath && !persistenceBoundary[pkg.ImportPath] && !dbtestConsumers[pkg.ImportPath] {
+				t.Errorf("%s's test files import %s, but it is neither inside the persistence boundary nor a declared dbtest consumer — get the handle from internal/dbtest's fixtures instead",
+					pkg.ImportPath, dbxImportPath)
 			}
 		}
 	}
 	if checked == 0 {
 		t.Fatal("architecture check inspected zero packages — go list produced no output, the check is not actually running")
+	}
+}
+
+// checkDriverImports flags a direct database/sql or modernc.org/sqlite import.
+// This rule has no exceptions anywhere in the module — not for the persistence
+// packages, not for test files — so that exactly one package knows which
+// database engine this is.
+func checkDriverImports(t *testing.T, pkgPath, imp, where string) {
+	t.Helper()
+	switch imp {
+	case "database/sql":
+		t.Errorf("%s%s imports database/sql directly — only internal/dbx may; route through the dbx facade instead", pkgPath, where)
+	case "modernc.org/sqlite":
+		t.Errorf("%s%s imports modernc.org/sqlite directly — only internal/dbx may; route through the dbx facade instead", pkgPath, where)
 	}
 }
 

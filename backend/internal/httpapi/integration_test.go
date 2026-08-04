@@ -18,6 +18,8 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/brain"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
@@ -31,7 +33,6 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 	"github.com/yerassyldanay/xchats/backend/response"
 	"log/slog"
 )
@@ -84,14 +85,19 @@ const (
 )
 
 type harness struct {
-	t         *testing.T
-	srv       *httptest.Server
-	client    *http.Client
-	cfg       *config.Config
-	fake      *evolution.Fake
-	tg        *telegram.Fake
-	queue     *queue.InMem
-	store     *store.Store
+	t      *testing.T
+	srv    *httptest.Server
+	client *http.Client
+	cfg    *config.Config
+	fake   *evolution.Fake
+	tg     *telegram.Fake
+	queue  *queue.InMem
+	store  *store.Store
+	// db is the raw handle on the same database store/kb/kbRepo share, for the
+	// assertions no exported Store method covers. It replaces the old
+	// h.store.Pool() escape hatch, which internal/store deliberately no longer
+	// offers; internal/dbtest hands this out for exactly this purpose.
+	db        *dbx.DB
 	worker    *worker.Worker
 	orgID     uuid.UUID
 	accountID uuid.UUID
@@ -118,22 +124,13 @@ func newHarness(t *testing.T) *harness {
 // grounding/substitution end to end rather than just plumbing.
 func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping DB integration test")
-	}
 	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	// fresh schema each run
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	// A fresh, migrated database per test, created under t.TempDir() by
+	// internal/dbtest. This replaces a DATABASE_URL gate that skipped this
+	// whole suite whenever no Postgres was reachable — which, with no CI in
+	// this repo, was always — plus the DROP SCHEMA CASCADE teardown that made
+	// these packages unsafe to run in parallel against one shared database.
+	st, db := dbtest.Open(t)
 
 	cfg := &config.Config{
 		WebhookToken: webhookToken, SessionTTLHours: 1, MinPasswordLen: 8,
@@ -172,12 +169,31 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	if err != nil {
 		t.Fatalf("blob: %v", err)
 	}
+	// A blob under a NON-uuid key. TestDemoLoop asserts the media route serves
+	// these, which matters because every other id in these tests is a uuid and
+	// a route that quietly required one would still pass.
+	//
+	// This used to arrive via internal/assistant.NewStub, which seeded three
+	// sample assets. That function is now unreferenced anywhere in the module —
+	// internal/assistant is dead code — so the fixture is seeded directly here
+	// rather than reviving a dependency on it.
+	if _, err := blobStore.Put("sample-image", []byte("\x89PNG\r\n\x1a\nfake-sample"), blob.Meta{
+		MediaType: "image", Mimetype: "image/png", FileName: "sample-image.png", FileSize: 18,
+	}); err != nil {
+		t.Fatalf("seed non-uuid blob: %v", err)
+	}
 	q := queue.NewInMem(256, 2, log)
 	hub := realtime.NewHub()
 	fake := evolution.NewFake("xpayment", ownerJID)
 
-	// Seed the org's live KB for response and structured draft tests.
-	kb := kbstore.New(st.Pool())
+	// Seed the org's live KB for response and structured draft tests. kb and
+	// kbRepo below open the same path st already holds, exactly as runServe
+	// does — dbx.Open refcounts one connection per path, so all three share it.
+	kb, err := kbstore.New(ctx, db.Path())
+	if err != nil {
+		t.Fatalf("kbstore: %v", err)
+	}
+	t.Cleanup(kb.Close)
 	if err := kb.SeedLiveIfEmpty(ctx, org.ID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed kb: %v", err)
 	}
@@ -191,7 +207,12 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	// CachedKBRepo, not the raw KnowledgeBaseRepo) so every test built on this
 	// harness doubles as a regression check that caching the response engine's
 	// KB read leaves production behavior byte-identical.
-	cachedKB := responsestore.NewCachedKBRepo(&responsestore.KnowledgeBaseRepo{Pool: st.Pool()})
+	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, db.Path())
+	if err != nil {
+		t.Fatalf("kb repo: %v", err)
+	}
+	t.Cleanup(kbRepo.Close)
+	cachedKB := responsestore.NewCachedKBRepo(kbRepo)
 	responseService := &response.Service{
 		Conversations: &responsestore.ConversationRepo{Store: st},
 		KnowledgeBase: cachedKB,
@@ -220,8 +241,9 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, cfg: cfg, fake: fake, tg: tgFake,
-		queue: q, store: st, worker: w, orgID: org.ID, accountID: accountID}
-	t.Cleanup(func() { ts.Close(); q.Close(); st.Close() })
+		queue: q, store: st, db: db, worker: w, orgID: org.ID, accountID: accountID}
+	// st/db/kb/kbRepo are all closed by dbtest's own t.Cleanup registrations.
+	t.Cleanup(func() { ts.Close(); q.Close() })
 	h.login()
 	return h
 }
@@ -298,8 +320,18 @@ func (h *harness) patchJSON(path string, body any) (*http.Response, map[string]j
 
 // --- fixtures + crafted events -------------------------------------------
 
+// capture reads a real recorded Evolution webhook body from this package's own
+// testdata.
+//
+// These fixtures used to live at plan/captures/samples/webhook_bodies/, three
+// levels up. PR #15 (commit ea916db) deleted that whole directory, which broke
+// TestDemoLoop and TestWebhookRejectsBadToken — silently, because the suite was
+// gated on DATABASE_URL and had been skipping ever since. Removing that gate
+// surfaced it. They live in testdata/ now: test fixtures belong to the package
+// that reads them, not to a documentation directory that can be reorganized
+// without anyone noticing a test went dark.
 func capture(t *testing.T, name string) []byte {
-	b, err := os.ReadFile(filepath.Join("..", "..", "..", "plan", "captures", "samples", "webhook_bodies", name))
+	b, err := os.ReadFile(filepath.Join("testdata", "webhook_bodies", name))
 	if err != nil {
 		t.Fatalf("read capture: %v", err)
 	}
@@ -381,7 +413,18 @@ func TestDemoLoop(t *testing.T) {
 		t.Fatalf("GET stub sample = %d, %d bytes", st, len(body))
 	}
 
-	// 4. send fan-out: text + 2 media → 3 outbound messages, each to the phone (not @lid).
+	// 4. send fan-out: text + 2 media → 2 outbound messages, each to the phone
+	// (not @lid). The text rides as the CAPTION of the first resolvable asset
+	// rather than becoming its own bubble — see sendParts in inbox.go, which
+	// does this deliberately "so the customer (and the inbox) see ONE message —
+	// image + caption — instead of a text bubble followed by an empty media
+	// bubble". So there is no standalone sendText call at all here.
+	//
+	// This block previously asserted 3 messages and 1 sendText, the pre-caption
+	// design. Test and handler were introduced in the same commit (2168220) and
+	// have contradicted each other ever since — invisibly, because this suite
+	// was gated on DATABASE_URL and skipped. The handler's behavior is the
+	// documented, shipped one, so the assertions follow it.
 	m1 := h.upload("a.png", "image/png", []byte("\x89PNG\r\n\x1a\nfake"))
 	m2 := h.upload("b.pdf", "application/pdf", []byte("%PDF-1.4 fake"))
 	resp, env := h.postJSON("/xchats/api/v1/chats/"+chatID+"/messages",
@@ -391,11 +434,11 @@ func TestDemoLoop(t *testing.T) {
 	}
 	var sent struct{ Items []map[string]any }
 	mustPayload(t, env, &sent)
-	if len(sent.Items) != 3 {
-		t.Fatalf("fan-out: want 3 messages, got %d", len(sent.Items))
+	if len(sent.Items) != 2 {
+		t.Fatalf("fan-out: want 2 messages (caption + captionless), got %d", len(sent.Items))
 	}
-	if got := len(h.fake.CallsFor("sendText")); got != 1 {
-		t.Fatalf("want 1 sendText, got %d", got)
+	if got := len(h.fake.CallsFor("sendText")); got != 0 {
+		t.Fatalf("want 0 sendText (the text is the first asset's caption), got %d", got)
 	}
 	if got := len(h.fake.CallsFor("sendMedia")); got != 2 {
 		t.Fatalf("want 2 sendMedia, got %d", got)
@@ -430,13 +473,21 @@ func TestDemoLoop(t *testing.T) {
 		t.Fatalf("status regressed to %q (not monotonic)", st)
 	}
 
-	// 7. Suggest → 3 options; approve once sends as sender_type=ai; approve again → 409.
+	// 7. Suggest → one option; approve once sends as sender_type=ai; approve
+	// again → 409.
+	//
+	// This asserted 3 options when it was written, matching internal/assistant's
+	// Stub.Draft ("three constant options"). That stub is now unreferenced dead
+	// code: the real engine is response.Service, whose DraftRepository
+	// ReplaceSuggested persists ONE suggested option per conversation and
+	// supersedes any prior — enforced in the schema by the partial unique index
+	// ai_drafts_pending_uq. One is the current, intended behavior.
 	sendTextBefore := len(h.fake.CallsFor("sendText"))
 	h.postJSON("/xchats/api/v1/chats/"+chatID+"/ai-drafts", map[string]any{})
 	var drafts struct{ Items []map[string]any }
 	h.get("/xchats/api/v1/chats/"+chatID+"/ai-drafts", &drafts)
-	if len(drafts.Items) != 3 {
-		t.Fatalf("want 3 draft options, got %d", len(drafts.Items))
+	if len(drafts.Items) != 1 {
+		t.Fatalf("want 1 draft option, got %d", len(drafts.Items))
 	}
 	draftID := drafts.Items[0]["id"].(string)
 	resp, _ = h.postJSON("/xchats/api/v1/ai-drafts/"+draftID+"/approve", map[string]any{"media_ids": []string{}})
