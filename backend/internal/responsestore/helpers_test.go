@@ -2,38 +2,24 @@ package responsestore_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
-// newTestStore resets the schema, migrates, and seeds one organization + one
-// WhatsApp account — the newHarness pattern shared by the backend's other
-// DATABASE_URL-gated tests (internal/httpapi/integration_test.go,
-// internal/kbstore/kbstore_test.go).
+// newTestStore opens a fresh, migrated SQLite database and seeds one
+// organization + one WhatsApp account — the newHarness pattern shared by
+// the backend's other test suites (internal/kbstore/kbstore_test.go,
+// internal/mcpauth/mcpauth_test.go).
 func newTestStore(t *testing.T) (*store.Store, uuid.UUID, uuid.UUID) {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping responsestore DB test")
-	}
 	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	st := dbtest.New(t)
 	org, err := st.SeedOrganization(ctx, "xchats-test")
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
@@ -47,13 +33,12 @@ func newTestStore(t *testing.T) (*store.Store, uuid.UUID, uuid.UUID) {
 	}); err != nil {
 		t.Fatalf("seed account: %v", err)
 	}
-	t.Cleanup(st.Close)
 	return st, org.ID, accountID
 }
 
-func mustExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
+func mustExec(t *testing.T, db *dbx.DB, sql string, args ...any) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), sql, args...); err != nil {
+	if _, err := db.Exec(context.Background(), sql, args...); err != nil {
 		t.Fatalf("exec %q: %v", sql, err)
 	}
 }
