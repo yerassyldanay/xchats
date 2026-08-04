@@ -24,7 +24,7 @@ import (
 // itself (the architecture and contract tests in this package) rather than
 // exercising a repository package. Repository package tests want New (added
 // in Phase 2 alongside internal/store), not this.
-func OpenRaw(t *testing.T) *dbx.DB {
+func OpenRaw(t testing.TB) *dbx.DB {
 	t.Helper()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "xchats.db")
@@ -46,7 +46,7 @@ func OpenRaw(t *testing.T) *dbx.DB {
 // reapplyMigrations re-runs the migration runner against an already-
 // migrated database — for tests asserting idempotency (a second run must be
 // a no-op, not an error and not a duplicate insert).
-func reapplyMigrations(t *testing.T, db *dbx.DB) error {
+func reapplyMigrations(t testing.TB, db *dbx.DB) error {
 	t.Helper()
 	return dbx.RunMigrations(context.Background(), db, sqlitemigrations.FS)
 }
@@ -55,7 +55,7 @@ func reapplyMigrations(t *testing.T, db *dbx.DB) error {
 // used by tests in this package that need a stable filesystem anchor
 // (schema_contract.json, `go list` for the architecture check) independent
 // of the working directory `go test` happens to run from.
-func moduleRoot(t *testing.T) string {
+func moduleRoot(t testing.TB) string {
 	t.Helper()
 	out, err := exec.Command("go", "env", "GOMOD").Output()
 	if err != nil {

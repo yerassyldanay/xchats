@@ -15,7 +15,7 @@ import (
 // test, st to seed organizations/users (kbstore has no such concept of its
 // own — every kbstore row is keyed on an orgID a caller already has), and db
 // for assertions no exported Store method covers.
-func NewKB(t *testing.T) (*kbstore.Store, *store.Store, *dbx.DB) {
+func NewKB(t testing.TB) (*kbstore.Store, *store.Store, *dbx.DB) {
 	t.Helper()
 	st, db := Open(t)
 	kb, err := kbstore.New(context.Background(), db.Path())

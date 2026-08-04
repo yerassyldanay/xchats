@@ -36,7 +36,7 @@ func newTestStore(t *testing.T) (*store.Store, uuid.UUID, uuid.UUID) {
 	return st, org.ID, accountID
 }
 
-func mustExec(t *testing.T, db *dbx.DB, sql string, args ...any) {
+func mustExec(t testing.TB, db *dbx.DB, sql string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(context.Background(), sql, args...); err != nil {
 		t.Fatalf("exec %q: %v", sql, err)

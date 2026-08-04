@@ -15,7 +15,7 @@ import (
 // mcpauth). responsestore tests need st to seed organizations/accounts and
 // db for the direct ai_* table writes KnowledgeBaseRepo itself has no
 // exported write path for (it is read-only — see kb.go).
-func NewKBRepo(t *testing.T) (*responsestore.KnowledgeBaseRepo, *store.Store, *dbx.DB) {
+func NewKBRepo(t testing.TB) (*responsestore.KnowledgeBaseRepo, *store.Store, *dbx.DB) {
 	t.Helper()
 	st, db := Open(t)
 	repo, err := responsestore.NewKnowledgeBaseRepo(context.Background(), db.Path())

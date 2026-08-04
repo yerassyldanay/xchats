@@ -14,7 +14,7 @@ import (
 // and admin user already exist (migration 0006_init_admin); callers seed
 // only their own per-test extras via the ordinary Store API (SeedOrganization,
 // SeedAccount, ...).
-func New(t *testing.T) *store.Store {
+func New(t testing.TB) *store.Store {
 	t.Helper()
 	st, _ := Open(t)
 	return st
@@ -27,7 +27,7 @@ func New(t *testing.T) *store.Store {
 // consumer packages reaching for one). dbx.Open's path-based sharing (see
 // its package doc) means db and the *dbx.DB inside st are the SAME
 // connection, not a second one racing it.
-func Open(t *testing.T) (*store.Store, *dbx.DB) {
+func Open(t testing.TB) (*store.Store, *dbx.DB) {
 	t.Helper()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "xchats.db")

@@ -16,7 +16,7 @@ import (
 // mcpauth.Authorizer around the returned Store with whatever signing
 // key/Config the test needs — those aren't persistence concerns, so this
 // helper stops at the Store.
-func NewMCPAuthStore(t *testing.T) (*mcpauth.Store, *store.Store, *dbx.DB) {
+func NewMCPAuthStore(t testing.TB) (*mcpauth.Store, *store.Store, *dbx.DB) {
 	t.Helper()
 	st, db := Open(t)
 	ms, err := mcpauth.NewStore(context.Background(), db.Path())
