@@ -39,7 +39,7 @@ func mkImageMaterial(t *testing.T, kb *kbstore.Store, org uuid.UUID) uuid.UUID {
 // featured_image, which belongs to no type (it is never an attachment
 // target — see mediaAttachmentFields' doc comment).
 func TestMCPAttachMedia_RejectsInvalidFieldPairing(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	material := mkImageMaterial(t, kb, orgID)
 
@@ -70,7 +70,7 @@ func TestMCPAttachMedia_RejectsInvalidFieldPairing(t *testing.T) {
 // behavior that used to surface as "pricing_type is required to create this
 // record" when the widget's old read-modify-upsert flow guessed wrong).
 func TestMCPAttachMedia_RejectsMissingRecord(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	material := mkImageMaterial(t, kb, orgID)
 
@@ -95,7 +95,7 @@ func TestMCPAttachMedia_RejectsMissingRecord(t *testing.T) {
 // that has been marked for deletion in the draft — kb_media_attach must
 // refuse it exactly like a nonexistent record, not silently resurrect it.
 func TestMCPAttachMedia_RejectsRecordStagedForDeletion(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "doomed", kbstore.ProductChanges{
 		Name: strp("Товар"), InStock: boolp(true),
@@ -125,7 +125,7 @@ func TestMCPAttachMedia_RejectsRecordStagedForDeletion(t *testing.T) {
 // as ErrMediaReference — not ErrAttachTarget, which is reserved for problems
 // with the TARGET, not the material.
 func TestMCPAttachMedia_MediaValidation(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, st, _ := newTestKB(t)
 	ctx := context.Background()
 	otherOrg, err := st.SeedOrganization(ctx, "other-org")
 	if err != nil {
@@ -162,7 +162,7 @@ func TestMCPAttachMedia_MediaValidation(t *testing.T) {
 // TestMCPAttachMedia_PluralAppendsWithoutDuplicates covers the first,
 // subsequent, and duplicate attach to the same plural field.
 func TestMCPAttachMedia_PluralAppendsWithoutDuplicates(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p", kbstore.ProductChanges{
 		Name: strp("Товар"), InStock: boolp(true),
@@ -223,7 +223,7 @@ func TestMCPAttachMedia_PluralAppendsWithoutDuplicates(t *testing.T) {
 // works on a fresh org that has never written a contacts row before — the
 // singleton is not required to pre-exist (see MCPAttachMedia's doc comment).
 func TestMCPAttachMedia_SingularReplaces(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	first := mkImageMaterial(t, kb, orgID)
 	second := mkImageMaterial(t, kb, orgID)
@@ -269,7 +269,7 @@ func TestMCPAttachMedia_SingularReplaces(t *testing.T) {
 // case as TestMCPAttachMedia_SingularReplaces, for policies' one plural
 // field — the singleton exemption applies regardless of cardinality.
 func TestMCPAttachMedia_PoliciesSingletonFirstWrite(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	material := mkAttachMaterial(t, kb, orgID, "application/pdf", "visible", true)
 
@@ -284,7 +284,7 @@ func TestMCPAttachMedia_PoliciesSingletonFirstWrite(t *testing.T) {
 // lands in kbd_draft only (the live row is untouched until Approve) and the
 // returned draft_version matches the store's own counter.
 func TestMCPAttachMedia_WritesOnlyDraftAndReturnsNewVersion(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p", kbstore.ProductChanges{
 		Name: strp("Товар"), InStock: boolp(true),
@@ -347,7 +347,7 @@ func readProductGallery(t *testing.T, kb *kbstore.Store, orgID uuid.UUID, ref st
 // "preview unavailable" rather than leaking a filename across a tenant
 // boundary.
 func TestMaterialPreviews_ScopedToOrg(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, st, _ := newTestKB(t)
 	ctx := context.Background()
 
 	otherOrg, err := st.SeedOrganization(ctx, "other-org")
@@ -377,7 +377,6 @@ func TestMaterialPreviews_ScopedToOrg(t *testing.T) {
 	}
 }
 
-
 // TestMediaIDsIn_CoversEveryMediaColumn drives real records through the real
 // read path and asserts every recognised media column is collected.
 //
@@ -387,7 +386,7 @@ func TestMaterialPreviews_ScopedToOrg(t *testing.T) {
 // passed green against a MediaIDsIn that in fact collected nothing at all.
 // Going through ReadRecords is what makes the test able to fail.
 func TestMediaIDsIn_CoversEveryMediaColumn(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 
 	// One material per kind — validateMediaRef enforces the pairing, so a

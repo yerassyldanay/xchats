@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
 // MediaAttachmentField describes one media column a caller may attach a
@@ -151,19 +152,19 @@ type materialRef struct {
 	CustomerVisibility string
 }
 
-// lookupMaterialRef takes db (not s.pool): every caller runs inside
+// lookupMaterialRef takes db (not s.db): every caller runs inside
 // writeDraftBlobVersioned's already-locked transaction (see
 // identityIndex's doc comment in mcp_read.go for the pool-exhaustion
 // deadlock this avoids — c8c0774 fixed that class for identityIndex but
-// left this exact same pattern here, still calling s.pool from inside a
+// left this exact same pattern here, still calling s.db from inside a
 // held row lock, until this fix).
 func lookupMaterialRef(ctx context.Context, db dbtx, id uuid.UUID) (materialRef, bool, error) {
 	var m materialRef
 	var mime, storageKey, vis *string
 	err := db.QueryRow(ctx, `SELECT organization_id, mime_type, storage_key, customer_visibility
-		FROM xchats.kbd_materials WHERE id = $1`, id).
+		FROM kbd_materials WHERE id = $1`, id).
 		Scan(&m.OrganizationID, &mime, &storageKey, &vis)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return materialRef{}, false, nil
 	}
 	if err != nil {
@@ -266,7 +267,7 @@ type UploadMaterialInput struct {
 // bytes have not arrived yet.
 func (s *Store) CreateUploadMaterial(ctx context.Context, orgID uuid.UUID, in UploadMaterialInput) (uuid.UUID, error) {
 	var id uuid.UUID
-	err := s.pool.QueryRow(ctx, `INSERT INTO xchats.kbd_materials
+	err := s.db.QueryRow(ctx, `INSERT INTO kbd_materials
 		(organization_id, source_type, filename, mime_type, size_bytes, sha256_checksum,
 		 processing_status, customer_visibility)
 		VALUES ($1,'file',$2,$3,$4,$5,'uploaded',$6)
@@ -299,11 +300,11 @@ func (s *Store) GetUploadMaterial(ctx context.Context, id uuid.UUID) (UploadMate
 	var m UploadMaterial
 	var filename, mimeType, checksum, storageKey *string
 	var sizeBytes *int64
-	err := s.pool.QueryRow(ctx, `SELECT id, organization_id, filename, mime_type, size_bytes,
+	err := s.db.QueryRow(ctx, `SELECT id, organization_id, filename, mime_type, size_bytes,
 		sha256_checksum, processing_status, storage_key
-		FROM xchats.kbd_materials WHERE id = $1`, id).
+		FROM kbd_materials WHERE id = $1`, id).
 		Scan(&m.ID, &m.OrganizationID, &filename, &mimeType, &sizeBytes, &checksum, &m.ProcessingStatus, &storageKey)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return UploadMaterial{}, ErrUnknownKind
 	}
 	if err != nil {
@@ -339,10 +340,10 @@ func (s *Store) MaterialPreviews(ctx context.Context, orgID uuid.UUID, ids []uui
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id, filename, mime_type, size_bytes, processing_status
-		FROM xchats.kbd_materials
-		WHERE organization_id = $1 AND id = ANY($2)
-		  AND storage_key IS NOT NULL AND storage_key <> ''`, orgID, ids)
+	rows, err := s.db.Query(ctx, `SELECT id, filename, mime_type, size_bytes, processing_status
+		FROM kbd_materials
+		WHERE organization_id = $1 AND id IN (SELECT value FROM json_each($2))
+		  AND storage_key IS NOT NULL AND storage_key <> ''`, orgID, dbx.UUIDArray(ids))
 	if err != nil {
 		return nil, err
 	}
@@ -403,9 +404,9 @@ var ErrUploadAlreadyCompleted = errors.New("kbstore: material upload already com
 // ErrUploadAlreadyCompleted, never overwriting the winner's already-recorded
 // storage_key.
 func (s *Store) CompleteMaterialUpload(ctx context.Context, id uuid.UUID, storageBackend, storageKey string, sizeBytes int64, sha256Checksum string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE xchats.kbd_materials SET
+	tag, err := s.db.Exec(ctx, `UPDATE kbd_materials SET
 		storage_backend = $2, storage_key = $3, size_bytes = $4, sha256_checksum = $5,
-		processing_status = 'parsed', updated_at = now()
+		processing_status = 'parsed', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE id = $1 AND processing_status = 'uploaded'`, id, storageBackend, storageKey, sizeBytes, nullIfEmpty(sha256Checksum))
 	if err != nil {
 		return err
@@ -460,10 +461,40 @@ type MCPProvenance struct {
 
 func (p MCPProvenance) empty() bool { return p.SourceURL == "" && len(p.MaterialIDs) == 0 }
 
+// jsonShallowMerge replicates Postgres's jsonb `||` operator in Go: a
+// top-level shallow merge where patch's keys overwrite base's, every other
+// base key is preserved untouched, and a key patch sets to JSON null stays
+// present with a null value rather than being removed. This is deliberately
+// NOT RFC 7396 json_patch semantics (which treats a null value as "delete
+// this key") — jsonb || never deletes anything, it only ever adds or
+// replaces top-level keys. base/patch "" is treated as "{}".
+func jsonShallowMerge(base, patch string) (string, error) {
+	baseMap := map[string]json.RawMessage{}
+	if base != "" {
+		if err := json.Unmarshal([]byte(base), &baseMap); err != nil {
+			return "", fmt.Errorf("jsonShallowMerge: unmarshal base: %w", err)
+		}
+	}
+	var patchMap map[string]json.RawMessage
+	if patch != "" {
+		if err := json.Unmarshal([]byte(patch), &patchMap); err != nil {
+			return "", fmt.Errorf("jsonShallowMerge: unmarshal patch: %w", err)
+		}
+	}
+	for k, v := range patchMap {
+		baseMap[k] = v
+	}
+	out, err := json.Marshal(baseMap)
+	if err != nil {
+		return "", fmt.Errorf("jsonShallowMerge: marshal: %w", err)
+	}
+	return string(out), nil
+}
+
 // recordProvenance implements the association described above, called from
 // inside an MCPUpsert*'s writeDraftBlobVersioned closure — after the
 // record's key is resolved, so the association names the actual key the
-// content landed under — on that SAME already-locked db, never s.pool (the
+// content landed under — on that SAME already-locked db, never s.db (the
 // pool-exhaustion deadlock identityIndex's doc comment describes, mcp_read.go,
 // applies here exactly the same way it did to media validation before c8c0774
 // and this file's own dbtx threading fixed it).
@@ -486,23 +517,39 @@ func (s *Store) recordProvenance(ctx context.Context, db dbtx, orgID uuid.UUID, 
 		return err
 	}
 	if prov.SourceURL != "" {
-		if _, err := db.Exec(ctx, `INSERT INTO xchats.kbd_materials
+		if _, err := db.Exec(ctx, `INSERT INTO kbd_materials
 			(organization_id, source_type, source_ref, extraction_metadata, processing_status, customer_visibility)
-			VALUES ($1, 'url', $2, $3::jsonb, 'parsed', 'invisible')`,
+			VALUES ($1, 'url', $2, $3, 'parsed', 'invisible')`,
 			orgID, prov.SourceURL, string(target)); err != nil {
 			return fmt.Errorf("record source_url provenance: %w", err)
 		}
 	}
 	for _, id := range prov.MaterialIDs {
-		tag, err := db.Exec(ctx, `UPDATE xchats.kbd_materials
-			SET extraction_metadata = extraction_metadata || $3::jsonb
-			WHERE id = $1 AND organization_id = $2`,
-			id, orgID, string(target))
-		if err != nil {
-			return fmt.Errorf("tag material_id %s with provenance: %w", id, err)
-		}
-		if tag.RowsAffected() == 0 {
+		// SQLite has no jsonb `||`: read the current value and merge in Go
+		// (jsonShallowMerge) instead of merging inside the UPDATE statement.
+		// Safe without an explicit row lock — this always runs inside the
+		// caller's already-open write transaction (see doc comment above),
+		// which under internal/dbx's single-connection design already holds
+		// the database's one write lock for its whole duration, so no
+		// concurrent writer can observe or race this read-modify-write.
+		var current string
+		err := db.QueryRow(ctx, `SELECT extraction_metadata FROM kbd_materials
+			WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&current)
+		if errors.Is(err, dbx.ErrNoRows) {
 			return &ErrMediaReference{MaterialID: id, Field: "provenance.material_ids", Reason: "not found or belongs to a different organization"}
+		}
+		if err != nil {
+			return fmt.Errorf("read material_id %s extraction_metadata: %w", id, err)
+		}
+		merged, err := jsonShallowMerge(current, string(target))
+		if err != nil {
+			return fmt.Errorf("merge provenance into material_id %s: %w", id, err)
+		}
+		if _, err := db.Exec(ctx, `UPDATE kbd_materials
+			SET extraction_metadata = $3
+			WHERE id = $1 AND organization_id = $2`,
+			id, orgID, merged); err != nil {
+			return fmt.Errorf("tag material_id %s with provenance: %w", id, err)
 		}
 	}
 	return nil

@@ -6,7 +6,7 @@ import (
 )
 
 func TestSeedDemoKB_InsertsFullDataset(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	inserted, err := kb.SeedDemoKB(ctx, orgID)
@@ -20,8 +20,8 @@ func TestSeedDemoKB_InsertsFullDataset(t *testing.T) {
 	count := func(table string) int {
 		t.Helper()
 		var n int
-		if err := st.Pool().QueryRow(ctx,
-			"SELECT count(*) FROM xchats."+table+" WHERE organization_id = $1", orgID).Scan(&n); err != nil {
+		if err := db.QueryRow(ctx,
+			"SELECT count(*) FROM "+table+" WHERE organization_id = $1", orgID).Scan(&n); err != nil {
 			t.Fatalf("count %s: %v", table, err)
 		}
 		return n
@@ -46,8 +46,8 @@ func TestSeedDemoKB_InsertsFullDataset(t *testing.T) {
 	}
 
 	var inStock int
-	if err := st.Pool().QueryRow(ctx,
-		"SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1 AND in_stock", orgID).Scan(&inStock); err != nil {
+	if err := db.QueryRow(ctx,
+		"SELECT count(*) FROM ai_products WHERE organization_id = $1 AND in_stock", orgID).Scan(&inStock); err != nil {
 		t.Fatalf("count in-stock products: %v", err)
 	}
 	if inStock != 3 {
@@ -55,8 +55,8 @@ func TestSeedDemoKB_InsertsFullDataset(t *testing.T) {
 	}
 
 	var baikonurAvailable bool
-	if err := st.Pool().QueryRow(ctx,
-		"SELECT delivery_available FROM xchats.ai_delivery_zones WHERE organization_id = $1 AND ref = 'demo_baikonur'",
+	if err := db.QueryRow(ctx,
+		"SELECT delivery_available FROM ai_delivery_zones WHERE organization_id = $1 AND ref = 'demo_baikonur'",
 		orgID).Scan(&baikonurAvailable); err != nil {
 		t.Fatalf("read demo_baikonur zone: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestSeedDemoKB_InsertsFullDataset(t *testing.T) {
 // explicit CLI command an operator can run more than once, or against the
 // wrong org by accident, and it must never clobber or duplicate data either way.
 func TestSeedDemoKB_NoopWhenOrgAlreadyHasContent(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	if inserted, err := kb.SeedDemoKB(ctx, orgID); err != nil || !inserted {
@@ -86,8 +86,8 @@ func TestSeedDemoKB_NoopWhenOrgAlreadyHasContent(t *testing.T) {
 	}
 
 	var topics int
-	if err := st.Pool().QueryRow(ctx,
-		"SELECT count(*) FROM xchats.ai_topics WHERE organization_id = $1", orgID).Scan(&topics); err != nil {
+	if err := db.QueryRow(ctx,
+		"SELECT count(*) FROM ai_topics WHERE organization_id = $1", orgID).Scan(&topics); err != nil {
 		t.Fatalf("count topics: %v", err)
 	}
 	if topics != 3 {
@@ -96,11 +96,11 @@ func TestSeedDemoKB_NoopWhenOrgAlreadyHasContent(t *testing.T) {
 }
 
 func TestSeedDemoKB_NoopWhenOrgHasPreexistingRealTopic(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
-	if _, err := st.Pool().Exec(ctx,
-		`INSERT INTO xchats.ai_topics (organization_id, slug, title, body_md) VALUES ($1, 'real_topic', 'Real', 'Real content.')`,
+	if _, err := db.Exec(ctx,
+		`INSERT INTO ai_topics (organization_id, slug, title, body_md) VALUES ($1, 'real_topic', 'Real', 'Real content.')`,
 		orgID); err != nil {
 		t.Fatalf("seed a real topic: %v", err)
 	}
@@ -114,8 +114,8 @@ func TestSeedDemoKB_NoopWhenOrgHasPreexistingRealTopic(t *testing.T) {
 	}
 
 	var products int
-	if err := st.Pool().QueryRow(ctx,
-		"SELECT count(*) FROM xchats.ai_products WHERE organization_id = $1", orgID).Scan(&products); err != nil {
+	if err := db.QueryRow(ctx,
+		"SELECT count(*) FROM ai_products WHERE organization_id = $1", orgID).Scan(&products); err != nil {
 		t.Fatalf("count products: %v", err)
 	}
 	if products != 0 {

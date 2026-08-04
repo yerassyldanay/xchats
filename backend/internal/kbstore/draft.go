@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
 // ---------------------------------------------------------------------------
@@ -309,9 +309,9 @@ func (s *Store) readDraftBlob(ctx context.Context, db dbtx, orgID uuid.UUID) (Dr
 	var raw []byte
 	var ver int64
 	var updatedAt time.Time
-	err := db.QueryRow(ctx, `SELECT draft, base_version, updated_at FROM xchats.kbd_draft WHERE organization_id = $1`, orgID).
+	err := db.QueryRow(ctx, `SELECT draft, base_version, updated_at FROM kbd_draft WHERE organization_id = $1`, orgID).
 		Scan(&raw, &ver, &updatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftBlob{}, 0, time.Time{}, nil
 	}
 	if err != nil {
@@ -330,18 +330,18 @@ func (s *Store) readDraftBlob(ctx context.Context, db dbtx, orgID uuid.UUID) (Dr
 // concurrency token clients echo via If-Match (doc 9 · kbd_draft.base_version).
 // 0 if no draft activity has happened yet.
 func (s *Store) DraftBaseVersion(ctx context.Context, orgID uuid.UUID) (int64, error) {
-	_, ver, _, err := s.readDraftBlob(ctx, s.pool, orgID)
+	_, ver, _, err := s.readDraftBlob(ctx, s.db, orgID)
 	return ver, err
 }
 
-// writeDraftBlob runs mutate over the org's draft blob inside a row-locked
-// transaction (SELECT ... FOR UPDATE), so concurrent writers serialize instead
+// writeDraftBlob runs mutate over the org's draft blob inside a locked
+// transaction (lockDraftBlob), so concurrent writers serialize instead
 // of racing, then persists the result and bumps base_version. This is the ONLY
 // way the blob is written for every pre-existing (non-MCP) caller. mutate
 // receives the transaction itself (as a dbtx) so a closure that needs to read
 // something else (currentTopic and friends, IdentityIndex) can run that read
 // on the SAME already-locked connection — see identityIndex's doc comment for
-// why reaching for s.pool instead, mid-transaction, is a deadlock risk under
+// why reaching for s.db instead, mid-transaction, is a deadlock risk under
 // concurrent writers.
 func (s *Store) writeDraftBlob(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, mutate func(dbtx, *DraftBlob) error) error {
 	_, err := s.writeDraftBlobVersioned(ctx, orgID, nil, userID, mutate)
@@ -384,42 +384,39 @@ func (s *Store) writeDraftBlobVersioned(ctx context.Context, orgID uuid.UUID, ex
 	return persistDraftBlob(ctx, tx, orgID, userID, blob)
 }
 
-// lockDraftBlob begins a transaction, takes the org's advisory lock, and
-// reads the current blob + base_version under FOR UPDATE — the shared
-// preamble every draft-blob writer needs. The caller owns the returned
-// transaction on success (commit or rollback it); on error the transaction
-// is already rolled back and the returned tx is nil.
+// lockDraftBlob begins a transaction and reads the current blob +
+// base_version — the shared preamble every draft-blob writer needs. The
+// caller owns the returned transaction on success (commit or rollback it);
+// on error the transaction is already rolled back and the returned tx is
+// nil.
 //
-// The advisory lock, keyed on the org, serializes EVERY writer to this org's
-// draft — including the very first one, before any kbd_draft row exists for
-// "SELECT ... FOR UPDATE" below to lock at all. Without this: two concurrent
-// first-writers both see "no row, version 0" (pgx.ErrNoRows locks nothing),
-// both mutate an independently-empty blob, and whichever's INSERT ... ON
-// CONFLICT in persistDraftBlob runs second silently overwrites the first's
-// already-committed content — a lost update the row lock alone cannot
-// prevent, because there is no row yet to lock against. draftLockSeed
-// namespaces this codebase's one advisory-lock use; a future unrelated
-// advisory lock added elsewhere should pick a different seed to avoid
-// needlessly serializing against this one. The _xact_ variant releases
-// automatically at commit/rollback, so it can never leak on an early return
-// or a panic.
-func (s *Store) lockDraftBlob(ctx context.Context, orgID uuid.UUID) (pgx.Tx, DraftBlob, int64, error) {
-	tx, err := s.pool.Begin(ctx)
+// The pgx/Postgres original also took an org-keyed advisory lock here,
+// because a plain "SELECT ... FOR UPDATE" locks nothing when no kbd_draft
+// row exists yet: two concurrent first-writers could both see "no row,
+// version 0", both mutate an independently-empty blob, and whichever's
+// INSERT ... ON CONFLICT in persistDraftBlob ran second would silently
+// overwrite the first's already-committed content. That race is
+// structurally impossible here instead of merely locked against: this
+// package's *dbx.DB is the process's ONE connection to the database
+// (MaxOpenConns(1)), and every Begin acquires SQLite's write lock
+// immediately (_txlock=immediate, see internal/dbx's package doc) — so a
+// second writer's Begin cannot even start running until the first writer's
+// transaction has fully committed or rolled back and returned the
+// connection to the pool. There is never a moment where two "first
+// writers" are both mid-transaction against an empty blob at once.
+func (s *Store) lockDraftBlob(ctx context.Context, orgID uuid.UUID) (*dbx.Tx, DraftBlob, int64, error) {
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return nil, DraftBlob{}, 0, err
-	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, $2))`, orgID.String(), draftLockSeed); err != nil {
-		_ = tx.Rollback(ctx)
 		return nil, DraftBlob{}, 0, err
 	}
 
 	var raw []byte
 	var currentVersion int64
-	err = tx.QueryRow(ctx, `SELECT draft, base_version FROM xchats.kbd_draft WHERE organization_id = $1 FOR UPDATE`, orgID).
+	err = tx.QueryRow(ctx, `SELECT draft, base_version FROM kbd_draft WHERE organization_id = $1`, orgID).
 		Scan(&raw, &currentVersion)
 	blob := DraftBlob{}
 	switch {
-	case errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, dbx.ErrNoRows):
 		// no row yet — version 0; the advisory lock above already rules out
 		// a concurrent first-writer racing this exact branch.
 	case err != nil:
@@ -437,7 +434,7 @@ func (s *Store) lockDraftBlob(ctx context.Context, orgID uuid.UUID) (pgx.Tx, Dra
 // persistDraftBlob marshals blob, writes it as the org's new kbd_draft row
 // (bumping base_version), and commits tx — the write half of every draft
 // mutation, shared by writeDraftBlobVersioned and CancelChange.
-func persistDraftBlob(ctx context.Context, tx pgx.Tx, orgID, userID uuid.UUID, blob DraftBlob) (int64, error) {
+func persistDraftBlob(ctx context.Context, tx *dbx.Tx, orgID, userID uuid.UUID, blob DraftBlob) (int64, error) {
 	out, err := json.Marshal(blob)
 	if err != nil {
 		return 0, err
@@ -449,10 +446,10 @@ func persistDraftBlob(ctx context.Context, tx pgx.Tx, orgID, userID uuid.UUID, b
 	// increments from trustworthy by the time we get here.
 	var newVersion int64
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO xchats.kbd_draft (organization_id, draft, base_version, updated_at, updated_by)
-		VALUES ($1, $2::jsonb, 1, now(), $3)
+		INSERT INTO kbd_draft (organization_id, draft, base_version, updated_at, updated_by)
+		VALUES ($1, $2, 1, strftime('%Y-%m-%d %H:%M:%f','now'), $3)
 		ON CONFLICT (organization_id) DO UPDATE SET
-			draft = EXCLUDED.draft, base_version = xchats.kbd_draft.base_version + 1, updated_at = now(), updated_by = EXCLUDED.updated_by
+			draft = EXCLUDED.draft, base_version = kbd_draft.base_version + 1, updated_at = strftime('%Y-%m-%d %H:%M:%f','now'), updated_by = EXCLUDED.updated_by
 		RETURNING base_version`,
 		orgID, string(out), nullIfNilUUID(userID)).Scan(&newVersion); err != nil {
 		return 0, err
@@ -462,11 +459,6 @@ func persistDraftBlob(ctx context.Context, tx pgx.Tx, orgID, userID uuid.UUID, b
 	}
 	return newVersion, nil
 }
-
-// draftLockSeed is the hashtextextended seed for writeDraftBlobVersioned's
-// advisory lock — an arbitrary constant distinguishing this lock's key space
-// from any other advisory lock this codebase might add later.
-const draftLockSeed int64 = 0x6b626472616674 // "kbdraft" in hex, just a memorable distinct constant
 
 // nullIfNilUUID converts the zero uuid.UUID (no attributable actor) to SQL
 // NULL — kbd_draft.updated_by is a nullable FK (ON DELETE SET NULL), so a
@@ -533,7 +525,7 @@ type CancelResult struct {
 //
 // Cancelling an unknown key never lazily creates an empty kbd_draft row —
 // step 3 returns before any write, and lockDraftBlob already tolerates
-// pgx.ErrNoRows.
+// dbx.ErrNoRows.
 func (s *Store) CancelChange(ctx context.Context, orgID, actor uuid.UUID, kind, key string, expectedVersion *int64) (CancelResult, error) {
 	if kind == "config" {
 		if key != NaturalKeyMain && !isConfigField(key) {
@@ -831,11 +823,11 @@ type DraftView struct {
 // Draft assembles the merged working view: live rows, overlaid by pending blob
 // entries, with entities under a Deletes[] marker suppressed. Side-effect-free.
 func (s *Store) Draft(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
-	blob, ver, updatedAt, err := s.readDraftBlob(ctx, s.pool, orgID)
+	blob, ver, updatedAt, err := s.readDraftBlob(ctx, s.db, orgID)
 	if err != nil {
 		return nil, err
 	}
-	v, err := s.mergedView(ctx, s.pool, orgID, blob, ver, updatedAt)
+	v, err := s.mergedView(ctx, s.db, orgID, blob, ver, updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -862,12 +854,12 @@ func (s *Store) Draft(ctx context.Context, orgID uuid.UUID) (*DraftView, error) 
 // Playground work — the two flows stay fully separate (see plan "Playground
 // redesign").
 func (s *Store) LiveView(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
-	return s.liveView(ctx, s.pool, orgID)
+	return s.liveView(ctx, s.db, orgID)
 }
 
 // liveView is LiveView's db-parameterized core — see identityIndex's doc
 // comment for why a caller already inside writeDraftBlobVersioned's
-// transaction must pass tx here instead of letting this reach for s.pool.
+// transaction must pass tx here instead of letting this reach for s.db.
 func (s *Store) liveView(ctx context.Context, db dbtx, orgID uuid.UUID) (*DraftView, error) {
 	v, err := s.mergedView(ctx, db, orgID, DraftBlob{}, 0, time.Time{})
 	if err != nil {
@@ -887,7 +879,7 @@ func (s *Store) liveView(ctx context.Context, db dbtx, orgID uuid.UUID) (*DraftV
 // time it is written (the common-write-behavior contract every MCP upsert
 // follows), so presenting it standalone needs no live read at all.
 func (s *Store) DraftOnly(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
-	return s.draftOnly(ctx, s.pool, orgID)
+	return s.draftOnly(ctx, s.db, orgID)
 }
 
 // draftOnly is DraftOnly's db-parameterized core (see liveView).
@@ -1046,7 +1038,7 @@ type DraftChangeDelete struct {
 // payload and kb_read(source=draft) can never disagree about what "pending"
 // means.
 func (s *Store) DraftChanges(ctx context.Context, orgID uuid.UUID) (*DraftChangeSet, error) {
-	blob, ver, updatedAt, err := s.readDraftBlob(ctx, s.pool, orgID)
+	blob, ver, updatedAt, err := s.readDraftBlob(ctx, s.db, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -1080,9 +1072,9 @@ func (s *Store) DraftChanges(ctx context.Context, orgID uuid.UUID) (*DraftChange
 func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt time.Time) (*DraftView, error) {
 	v := &DraftView{Config: DraftConfig{OrganizationID: orgID, ReplyMaxWords: 120, BaseVersion: ver, UpdatedAt: updatedAt}}
 	err := db.QueryRow(ctx, `SELECT persona, mission, guardrails, language_policy, reply_max_words
-		FROM xchats.ai_assistants WHERE organization_id = $1`, orgID).
+		FROM ai_assistants WHERE organization_id = $1`, orgID).
 		Scan(&v.Config.Persona, &v.Config.Mission, &v.Config.Guardrails, &v.Config.LanguagePolicy, &v.Config.ReplyMaxWords)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil && !errors.Is(err, dbx.ErrNoRows) {
 		return nil, err
 	}
 	if p := blob.Config.Persona; p != nil {
@@ -1110,14 +1102,14 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	topicIdx := map[string]int{}
 	trows, err := db.Query(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
 		explainer_videos, reference_documents, updated_at
-		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for trows.Next() {
 		var t TopicRow
-		if err := trows.Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
-			&t.ExplainerVideos, &t.ReferenceDocuments, &t.UpdatedAt); err != nil {
+		if err := trows.Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, (*dbx.UUIDArray)(&t.IllustrationImages),
+			(*dbx.UUIDArray)(&t.ExplainerVideos), (*dbx.UUIDArray)(&t.ReferenceDocuments), &t.UpdatedAt); err != nil {
 			trows.Close()
 			return nil, err
 		}
@@ -1148,14 +1140,14 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	tariffIdx := map[string]int{}
 	trrows, err := db.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
 		disadvantages, sales_status, featured_image, pricing_images, explainer_videos, terms_documents, updated_at
-		FROM xchats.ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for trrows.Next() {
 		var t TariffRow
 		if err := trrows.Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages,
-			&t.Disadvantages, &t.SalesStatus, &t.FeaturedImage, &t.PricingImages, &t.ExplainerVideos, &t.TermsDocuments,
+			&t.Disadvantages, &t.SalesStatus, &t.FeaturedImage, (*dbx.UUIDArray)(&t.PricingImages), (*dbx.UUIDArray)(&t.ExplainerVideos), (*dbx.UUIDArray)(&t.TermsDocuments),
 			&t.UpdatedAt); err != nil {
 			trrows.Close()
 			return nil, err
@@ -1193,15 +1185,15 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	productIdx := map[string]int{}
 	prows, err := db.Query(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
 		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents, updated_at
-		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for prows.Next() {
 		var p ProductRow
 		if err := prows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
-			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.CertificateDocuments,
-			&p.GuaranteeDocuments, &p.UpdatedAt); err != nil {
+			&p.FeaturedImage, (*dbx.UUIDArray)(&p.GalleryImages), (*dbx.UUIDArray)(&p.DemoVideos), (*dbx.UUIDArray)(&p.CertificateDocuments),
+			(*dbx.UUIDArray)(&p.GuaranteeDocuments), &p.UpdatedAt); err != nil {
 			prows.Close()
 			return nil, err
 		}
@@ -1239,7 +1231,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	crows, err := db.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram, contact_card_image, location_map_image,
 		company_legal_documents, updated_at
-		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -1248,7 +1240,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 		var legalInfo *string
 		if err := crows.Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.ContactCardImage, &c.LocationMapImage,
-			&c.CompanyLegalDocuments, &c.UpdatedAt); err != nil {
+			(*dbx.UUIDArray)(&c.CompanyLegalDocuments), &c.UpdatedAt); err != nil {
 			crows.Close()
 			return nil, err
 		}
@@ -1283,7 +1275,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	polrows, err := db.Query(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		prepayment, installment, return_period_in_days, warranty, outside_zones_note,
 		commerce_policy_documents, updated_at
-		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -1292,7 +1284,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 		var deliveryInDays, returnPeriodInDays *string
 		if err := polrows.Scan(&p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
 			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty, &p.OutsideZonesNote,
-			&p.CommercePolicyDocuments, &p.UpdatedAt); err != nil {
+			(*dbx.UUIDArray)(&p.CommercePolicyDocuments), &p.UpdatedAt); err != nil {
 			polrows.Close()
 			return nil, err
 		}
@@ -1532,7 +1524,7 @@ func (s *Store) DeleteProduct(ctx context.Context, orgID uuid.UUID, actor uuid.U
 // Playground/draft counterpart to zones.go's live-only ZoneInput.
 type DeliveryZoneInput struct {
 	Ref, Name, ZoneLevel, ParentRef, DeliveryCost, DeliveryInDays, Notes, SalesStatus string
-	DeliveryAvailable                                                                bool
+	DeliveryAvailable                                                                 bool
 }
 
 // UpsertZone stages a delivery-zone create/update in the draft blob, by ref.
@@ -1817,10 +1809,10 @@ func (s *Store) currentTopic(ctx context.Context, db dbtx, orgID uuid.UUID, slug
 	var t DraftTopic
 	err := db.QueryRow(ctx, `SELECT slug, title, body_md, featured_image, illustration_images,
 		explainer_videos, reference_documents
-		FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`, orgID, slug).
-		Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, &t.IllustrationImages,
-			&t.ExplainerVideos, &t.ReferenceDocuments)
-	if errors.Is(err, pgx.ErrNoRows) {
+		FROM ai_topics WHERE organization_id=$1 AND slug=$2`, orgID, slug).
+		Scan(&t.Slug, &t.Title, &t.BodyMD, &t.FeaturedImage, (*dbx.UUIDArray)(&t.IllustrationImages),
+			(*dbx.UUIDArray)(&t.ExplainerVideos), (*dbx.UUIDArray)(&t.ReferenceDocuments))
+	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftTopic{Slug: slug}, nil
 	}
 	return t, err
@@ -1835,10 +1827,10 @@ func (s *Store) currentTariff(ctx context.Context, db dbtx, orgID uuid.UUID, ref
 	var t DraftTariff
 	err := db.QueryRow(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
 		disadvantages, sales_status, featured_image, pricing_images, explainer_videos, terms_documents
-		FROM xchats.ai_tariffs WHERE organization_id=$1 AND ref=$2`, orgID, ref).
+		FROM ai_tariffs WHERE organization_id=$1 AND ref=$2`, orgID, ref).
 		Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages,
-			&t.Disadvantages, &t.SalesStatus, &t.FeaturedImage, &t.PricingImages, &t.ExplainerVideos, &t.TermsDocuments)
-	if errors.Is(err, pgx.ErrNoRows) {
+			&t.Disadvantages, &t.SalesStatus, &t.FeaturedImage, (*dbx.UUIDArray)(&t.PricingImages), (*dbx.UUIDArray)(&t.ExplainerVideos), (*dbx.UUIDArray)(&t.TermsDocuments))
+	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftTariff{Ref: ref, PricingType: "fixed"}, nil
 	}
 	return t, err
@@ -1853,10 +1845,10 @@ func (s *Store) currentProduct(ctx context.Context, db dbtx, orgID uuid.UUID, re
 	var p DraftProduct
 	err := db.QueryRow(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
 		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
-		FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).
+		FROM ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).
 		Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
-			&p.FeaturedImage, &p.GalleryImages, &p.DemoVideos, &p.CertificateDocuments, &p.GuaranteeDocuments)
-	if errors.Is(err, pgx.ErrNoRows) {
+			&p.FeaturedImage, (*dbx.UUIDArray)(&p.GalleryImages), (*dbx.UUIDArray)(&p.DemoVideos), (*dbx.UUIDArray)(&p.CertificateDocuments), (*dbx.UUIDArray)(&p.GuaranteeDocuments))
+	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftProduct{Ref: ref, InStock: true}, nil
 	}
 	return p, err
@@ -1873,10 +1865,10 @@ func (s *Store) currentZone(ctx context.Context, db dbtx, orgID uuid.UUID, ref s
 	var z DraftDeliveryZone
 	err := db.QueryRow(ctx, `SELECT ref, name, zone_level, parent_ref, delivery_available, delivery_cost,
 		delivery_in_days, notes, sales_status
-		FROM xchats.ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, ref).
+		FROM ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, ref).
 		Scan(&z.Ref, &z.Name, &z.ZoneLevel, &z.ParentRef, &z.DeliveryAvailable, &z.DeliveryCost,
 			&z.DeliveryInDays, &z.Notes, &z.SalesStatus)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftDeliveryZone{Ref: ref}, nil
 	}
 	return z, err
@@ -1894,11 +1886,11 @@ func (s *Store) currentContact(ctx context.Context, db dbtx, orgID uuid.UUID, b 
 	err := db.QueryRow(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram, contact_card_image, location_map_image,
 		company_legal_documents
-		FROM xchats.ai_contacts WHERE organization_id = $1`, orgID).
+		FROM ai_contacts WHERE organization_id = $1`, orgID).
 		Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.ContactCardImage, &c.LocationMapImage,
-			&c.CompanyLegalDocuments)
-	if errors.Is(err, pgx.ErrNoRows) {
+			(*dbx.UUIDArray)(&c.CompanyLegalDocuments))
+	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftContact{}, nil
 	}
 	c.LegalInformation = strOrEmpty(legalInfo)
@@ -1915,11 +1907,11 @@ func (s *Store) currentPolicy(ctx context.Context, db dbtx, orgID uuid.UUID, b *
 	var deliveryInDays, returnPeriodInDays *string
 	err := db.QueryRow(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		prepayment, installment, return_period_in_days, warranty, outside_zones_note, commerce_policy_documents
-		FROM xchats.ai_policies WHERE organization_id = $1`, orgID).
+		FROM ai_policies WHERE organization_id = $1`, orgID).
 		Scan(&p.DeliveryCost, &deliveryInDays, &p.FreeDeliveryFrom, &p.MinOrder,
 			&p.Prepayment, &p.Installment, &returnPeriodInDays, &p.Warranty, &p.OutsideZonesNote,
-			&p.CommercePolicyDocuments)
-	if errors.Is(err, pgx.ErrNoRows) {
+			(*dbx.UUIDArray)(&p.CommercePolicyDocuments))
+	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftPolicy{}, nil
 	}
 	p.DeliveryInDays = strOrEmpty(deliveryInDays)
@@ -1989,7 +1981,7 @@ func (s *Store) Approve(ctx context.Context, orgID uuid.UUID, sel ApproveSelecto
 // row-locks kbd_draft under for its whole duration.
 //
 // This closes a real data-loss bug the previous version had: it read the
-// blob UNLOCKED (a plain s.pool query, no FOR UPDATE), computed the gate and
+// blob UNLOCKED (a plain s.db query, no FOR UPDATE), computed the gate and
 // materialized into live in one transaction, and only THEN cleared the
 // approved entries from the blob in a SECOND, separately-committed
 // transaction — by natural key, not by the value that was actually
@@ -2149,27 +2141,27 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 
 // applyDelete removes a live entity by its natural key at approve time.
 // contact/policy are singletons — the whole org row goes, Key unused. Takes
-// execer (not pgx.Tx): ApproveVersioned calls it with the dbtx its enclosing
-// writeDraftBlobVersioned closure was handed, not a concrete pgx.Tx.
+// execer (not a concrete *dbx.Tx): ApproveVersioned calls it with the dbtx
+// its enclosing writeDraftBlobVersioned closure was handed.
 func applyDelete(ctx context.Context, tx execer, orgID uuid.UUID, d DraftDelete) error {
 	switch d.Kind {
 	case "topic":
-		_, err := tx.Exec(ctx, `DELETE FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`, orgID, d.Key)
+		_, err := tx.Exec(ctx, `DELETE FROM ai_topics WHERE organization_id=$1 AND slug=$2`, orgID, d.Key)
 		return err
 	case "tariff":
-		_, err := tx.Exec(ctx, `DELETE FROM xchats.ai_tariffs WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
+		_, err := tx.Exec(ctx, `DELETE FROM ai_tariffs WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
 		return err
 	case "product":
-		_, err := tx.Exec(ctx, `DELETE FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
+		_, err := tx.Exec(ctx, `DELETE FROM ai_products WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
 		return err
 	case "contact":
-		_, err := tx.Exec(ctx, `DELETE FROM xchats.ai_contacts WHERE organization_id=$1`, orgID)
+		_, err := tx.Exec(ctx, `DELETE FROM ai_contacts WHERE organization_id=$1`, orgID)
 		return err
 	case "policy":
-		_, err := tx.Exec(ctx, `DELETE FROM xchats.ai_policies WHERE organization_id=$1`, orgID)
+		_, err := tx.Exec(ctx, `DELETE FROM ai_policies WHERE organization_id=$1`, orgID)
 		return err
 	case "delivery_zone":
-		_, err := tx.Exec(ctx, `DELETE FROM xchats.ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
+		_, err := tx.Exec(ctx, `DELETE FROM ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
 		return err
 	}
 	return nil

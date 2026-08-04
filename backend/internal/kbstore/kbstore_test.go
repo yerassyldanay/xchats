@@ -4,42 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/yerassyldanay/xchats/backend/internal/brain"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
-// newTestKB resets the schema, migrates, seeds an org, and returns a KBStore.
-func newTestKB(t *testing.T) (*kbstore.Store, uuid.UUID, *store.Store) {
+// newTestKB opens a fresh, migrated SQLite database and seeds an org.
+func newTestKB(t *testing.T) (*kbstore.Store, uuid.UUID, *store.Store, *dbx.DB) {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping kbstore DB test")
-	}
-	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	org, err := st.SeedOrganization(ctx, "xchats")
+	kb, st, db := dbtest.NewKB(t)
+	org, err := st.SeedOrganization(context.Background(), "xchats")
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
 	}
-	t.Cleanup(st.Close)
-	return kbstore.New(st.Pool()), org.ID, st
+	return kb, org.ID, st, db
 }
 
 // The brain's snapshot must round-trip through the DB unchanged: seed → load →
@@ -47,7 +32,7 @@ func newTestKB(t *testing.T) (*kbstore.Store, uuid.UUID, *store.Store) {
 // resolves to the SAME verbatim value from the DB snapshot as from the literal —
 // INCLUDING unit-bearing amounts the old typed PriceBook/formatTenge path dropped.
 func TestRoundTrip_RendersIdentically(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	seed := brain.SeedSnapshot()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, seed); err != nil {
@@ -103,7 +88,7 @@ func TestRoundTrip_RendersIdentically(t *testing.T) {
 // verbatim — the regression the old int-tenge PriceBook silently dropped. The
 // amount now lives in a typed ai_tariffs.price column, quoted by its 3-part token.
 func TestRoundTrip_UnitBearingValue(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -132,7 +117,7 @@ func TestRoundTrip_UnitBearingValue(t *testing.T) {
 // Editing the draft blob overlays live rows with pending entries (flagged
 // Draft: true); approving materializes them and the blob is emptied.
 func TestDraftEditAndApprove(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -205,7 +190,7 @@ func TestDraftEditAndApprove(t *testing.T) {
 // (LiveView) only staged-not-yet-approved for a deletion, gone from live only
 // once the deletion itself is approved.
 func TestUpsertZone_DraftRoundTripThroughApprove(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -297,7 +282,7 @@ func findZoneRow(zones []kbstore.ZoneRow, ref string) *kbstore.ZoneRow {
 // longer pending — then confirm a second entity-scoped approve is a
 // no-op (nothing pending), never an error.
 func TestApprove_ConfigKindMaterializesJustConfig(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -340,7 +325,7 @@ func TestApprove_ConfigKindMaterializesJustConfig(t *testing.T) {
 // directly, so a nil slice (→ null) would crash the /playground /knowledge-base
 // pages. (Regression: the typed-facts rewrite left empty slices nil.)
 func TestDraft_CollectionsNeverNull(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	// No seed → every table AND the blob is empty; the worst case for nil slices.
 	view, err := kb.Draft(ctx, orgID)
@@ -372,7 +357,7 @@ func TestDraft_CollectionsNeverNull(t *testing.T) {
 // (Approve → LoadLive → mergeForGate → gate) — the pure-unit
 // gate_internal_test.go does not go through the DB.
 func TestApproveGateBlocks(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -403,7 +388,7 @@ func TestApproveGateBlocks(t *testing.T) {
 // (/playground). Every row it returns is Draft:false; materials/requests are
 // always empty (they are playground-only concepts).
 func TestLiveView_IgnoresDraftBlob(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -450,7 +435,7 @@ func TestLiveView_IgnoresDraftBlob(t *testing.T) {
 // PutLiveTopic is held to the same content bar as the approve gate: a body
 // carrying a fact token is rejected immediately (no silent bad write).
 func TestPutLiveTopic_RejectsNonProseBody(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	err := kb.PutLiveTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
 		Slug: "broken", BodyMD: "Цена {{tariff.unknown.price}}",
@@ -464,7 +449,7 @@ func TestPutLiveTopic_RejectsNonProseBody(t *testing.T) {
 // A live write is immediately final — no draft, no approve step: it must be
 // visible via LoadLive (the brain's own read path) right away.
 func TestPutLiveTariff_VisibleViaLoadLiveImmediately(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.PutLiveTariff(ctx, orgID, uuid.Nil, kbstore.TariffInput{
 		Ref: "instant", Name: "Мгновенный", Price: "5 000 ₸",
@@ -491,7 +476,7 @@ func TestPutLiveTariff_VisibleViaLoadLiveImmediately(t *testing.T) {
 // /kb/tariffs and /kb/products live editor silently could not change it,
 // mirroring the OutsideZonesNote gap PatchPolicies had before Task 13.
 func TestPutLiveTariffAndProduct_SalesStatusIsWired(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 
 	if err := kb.PutLiveTariff(ctx, orgID, uuid.Nil, kbstore.TariffInput{
@@ -530,7 +515,7 @@ func TestPutLiveTariffAndProduct_SalesStatusIsWired(t *testing.T) {
 // A per-entity approve must not be held hostage by an unrelated unanswered
 // popup — only the whole-draft approve is blocked by pending requests.
 func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -580,7 +565,7 @@ func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
 // every write, and a concurrent writer is serialized (not lost) by the row
 // lock in writeDraftBlob.
 func TestDraftBaseVersionAdvances(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	v0, err := kb.DraftBaseVersion(ctx, orgID)
 	if err != nil {
@@ -614,11 +599,11 @@ func TestDraftBaseVersionAdvances(t *testing.T) {
 // queryInStock reads ai_products.in_stock directly, bypassing kbstore's own
 // view builders — the tests below are asserting on the COLUMN upsertProductRow
 // actually wrote, not on a read path that could hide the same bug.
-func queryInStock(t *testing.T, st *store.Store, orgID uuid.UUID, ref string) bool {
+func queryInStock(t *testing.T, db *dbx.DB, orgID uuid.UUID, ref string) bool {
 	t.Helper()
 	var v bool
-	if err := st.Pool().QueryRow(context.Background(),
-		`SELECT in_stock FROM xchats.ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).Scan(&v); err != nil {
+	if err := db.QueryRow(context.Background(),
+		`SELECT in_stock FROM ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).Scan(&v); err != nil {
 		t.Fatalf("query in_stock: %v", err)
 	}
 	return v
@@ -628,7 +613,7 @@ func queryInStock(t *testing.T, st *store.Store, orgID uuid.UUID, ref string) bo
 // default on insert, PRESERVE the existing value on update); only an explicit
 // pointer overwrites it.
 func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	// insert, InStock nil -> schema default true.
@@ -637,7 +622,7 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 	}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	if !queryInStock(t, st, orgID, "kettle") {
+	if !queryInStock(t, db, orgID, "kettle") {
 		t.Fatal("insert with nil InStock should default to true")
 	}
 
@@ -648,7 +633,7 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 	}); err != nil {
 		t.Fatalf("update explicit false: %v", err)
 	}
-	if queryInStock(t, st, orgID, "kettle") {
+	if queryInStock(t, db, orgID, "kettle") {
 		t.Fatal("explicit false InStock should persist as false")
 	}
 
@@ -659,7 +644,7 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 	}); err != nil {
 		t.Fatalf("update nil InStock: %v", err)
 	}
-	if queryInStock(t, st, orgID, "kettle") {
+	if queryInStock(t, db, orgID, "kettle") {
 		t.Fatal("update with nil InStock should preserve the existing false value, not reset to true")
 	}
 }
@@ -668,11 +653,11 @@ func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testi
 // fresh org with no ai_assistants row yet touched zero rows and reported
 // success anyway. upsertConfigRow's ON CONFLICT DO UPDATE creates the row.
 func TestPatchLiveConfig_UpsertsMissingRow(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	var before int
-	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_assistants WHERE organization_id=$1`, orgID).Scan(&before); err != nil {
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM ai_assistants WHERE organization_id=$1`, orgID).Scan(&before); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if before != 0 {
@@ -684,7 +669,7 @@ func TestPatchLiveConfig_UpsertsMissingRow(t *testing.T) {
 		t.Fatalf("patch config: %v", err)
 	}
 	var got string
-	if err := st.Pool().QueryRow(ctx, `SELECT persona FROM xchats.ai_assistants WHERE organization_id=$1`, orgID).Scan(&got); err != nil {
+	if err := db.QueryRow(ctx, `SELECT persona FROM ai_assistants WHERE organization_id=$1`, orgID).Scan(&got); err != nil {
 		t.Fatalf("PatchLiveConfig should have created the ai_assistants row: %v", err)
 	}
 	if got != persona {
@@ -701,11 +686,11 @@ func TestPatchLiveConfig_UpsertsMissingRow(t *testing.T) {
 // set.config branch: an entity-scoped approve (Kind:"config") and a
 // whole-draft approve (Kind:"") that happens to include a pending config edit.
 func TestApproveVersioned_ConfigUpsertsMissingRow_EntityScoped(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	var before int
-	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_assistants WHERE organization_id=$1`, orgID).Scan(&before); err != nil {
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM ai_assistants WHERE organization_id=$1`, orgID).Scan(&before); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if before != 0 {
@@ -722,7 +707,7 @@ func TestApproveVersioned_ConfigUpsertsMissingRow_EntityScoped(t *testing.T) {
 	}
 
 	var got string
-	if err := st.Pool().QueryRow(ctx, `SELECT persona FROM xchats.ai_assistants WHERE organization_id=$1`, orgID).Scan(&got); err != nil {
+	if err := db.QueryRow(ctx, `SELECT persona FROM ai_assistants WHERE organization_id=$1`, orgID).Scan(&got); err != nil {
 		t.Fatalf("approving config should have created the ai_assistants row: %v", err)
 	}
 	if got != persona {
@@ -741,7 +726,7 @@ func TestApproveVersioned_ConfigUpsertsMissingRow_EntityScoped(t *testing.T) {
 }
 
 func TestApproveVersioned_ConfigUpsertsMissingRow_WholeDraft(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	persona := "Ассистент xPayment — эксперт по Kaspi Pay API"
@@ -754,7 +739,7 @@ func TestApproveVersioned_ConfigUpsertsMissingRow_WholeDraft(t *testing.T) {
 	}
 
 	var got string
-	if err := st.Pool().QueryRow(ctx, `SELECT persona FROM xchats.ai_assistants WHERE organization_id=$1`, orgID).Scan(&got); err != nil {
+	if err := db.QueryRow(ctx, `SELECT persona FROM ai_assistants WHERE organization_id=$1`, orgID).Scan(&got); err != nil {
 		t.Fatalf("whole-draft approve should have created the ai_assistants row: %v", err)
 	}
 	if got != persona {
@@ -780,7 +765,7 @@ func zoneCompatiblePolicy(t *testing.T, kb *kbstore.Store, orgID uuid.UUID) {
 // parent_ref, and deleting a zone another zone's parent_ref still points to
 // are all rejected with a *GateError.
 func TestZoneWrites_EnforceInvariant(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	zoneCompatiblePolicy(t, kb, orgID)
 
@@ -836,7 +821,7 @@ func TestZoneWrites_EnforceInvariant(t *testing.T) {
 // a zone exists, setting a non-blank flat delivery_cost/delivery_time is
 // rejected, and the rejected write must not land (atomic with the gate check).
 func TestPatchLivePolicies_BlockedWhileZonesExist(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 	zoneCompatiblePolicy(t, kb, orgID)
 	if err := kb.PutLiveZone(ctx, orgID, uuid.Nil, kbstore.ZoneInput{
@@ -854,7 +839,7 @@ func TestPatchLivePolicies_BlockedWhileZonesExist(t *testing.T) {
 	}
 
 	var gotCost string
-	if err := st.Pool().QueryRow(ctx, `SELECT delivery_cost FROM xchats.ai_policies WHERE organization_id=$1`, orgID).Scan(&gotCost); err != nil {
+	if err := db.QueryRow(ctx, `SELECT delivery_cost FROM ai_policies WHERE organization_id=$1`, orgID).Scan(&gotCost); err != nil {
 		t.Fatalf("read policy: %v", err)
 	}
 	if gotCost != "" {
@@ -866,7 +851,7 @@ func TestPatchLivePolicies_BlockedWhileZonesExist(t *testing.T) {
 // id, atomically with the write itself (auditRow runs in the same
 // transaction as PutLiveTopic/DeleteLiveTopic's own statement).
 func TestLiveWrites_AuditActor(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, st, db := newTestKB(t)
 	ctx := context.Background()
 	user, err := st.SeedUser(ctx, orgID, "editor@xchats.test", "hash", "Editor")
 	if err != nil {
@@ -880,7 +865,7 @@ func TestLiveWrites_AuditActor(t *testing.T) {
 		t.Fatalf("delete topic: %v", err)
 	}
 
-	rows, err := st.Pool().Query(ctx, `SELECT action, actor_user_id, note FROM xchats.ai_audit_log
+	rows, err := db.Query(ctx, `SELECT action, actor_user_id, note FROM ai_audit_log
 		WHERE organization_id=$1 ORDER BY created_at`, orgID)
 	if err != nil {
 		t.Fatalf("query audit log: %v", err)

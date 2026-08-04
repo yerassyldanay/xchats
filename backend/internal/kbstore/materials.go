@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
 // ---------------------------------------------------------------------------
@@ -71,10 +72,10 @@ func (s *Store) CreateMaterial(ctx context.Context, orgID uuid.UUID, in Material
 		extraction = `{"method":"operator"}`
 	}
 	var m Material
-	err := s.pool.QueryRow(ctx, `INSERT INTO xchats.kbd_materials
+	err := s.db.QueryRow(ctx, `INSERT INTO kbd_materials
 		(organization_id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
-		RETURNING id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction::text, created_at, updated_at`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		RETURNING id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction, created_at, updated_at`,
 		orgID, in.SourceType, in.SourceRef, in.BlobID, text, in.MediaKind, status, extraction).
 		Scan(&m.ID, &m.SourceType, &m.SourceRef, &m.BlobID, &m.ExtractedText, &m.MediaKind, &m.Status, &m.Extraction, &m.CreatedAt, &m.UpdatedAt)
 	return m, err
@@ -105,10 +106,10 @@ func OperatorComment(extractionJSON string) string {
 // GetMaterial returns one material by id.
 func (s *Store) GetMaterial(ctx context.Context, id uuid.UUID) (Material, error) {
 	var m Material
-	err := s.pool.QueryRow(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction::text, created_at, updated_at
-		FROM xchats.kbd_materials WHERE id = $1`, id).
+	err := s.db.QueryRow(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction, created_at, updated_at
+		FROM kbd_materials WHERE id = $1`, id).
 		Scan(&m.ID, &m.SourceType, &m.SourceRef, &m.BlobID, &m.ExtractedText, &m.MediaKind, &m.Status, &m.Extraction, &m.CreatedAt, &m.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return m, ErrUnknownKind
 	}
 	return m, err
@@ -124,9 +125,9 @@ type MaterialExtraction struct {
 
 // UpdateMaterialExtraction records an adapter's output on a material.
 func (s *Store) UpdateMaterialExtraction(ctx context.Context, id uuid.UUID, ex MaterialExtraction) error {
-	_, err := s.pool.Exec(ctx, `UPDATE xchats.kbd_materials SET
+	_, err := s.db.Exec(ctx, `UPDATE kbd_materials SET
 		status = $2, extracted_text = $3, media_kind = COALESCE(NULLIF($4,''), media_kind),
-		extraction = $5::jsonb, updated_at = now() WHERE id = $1`,
+		extraction = $5, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`,
 		id, ex.Status, ex.ExtractedText, ex.MediaKind, orDefault(ex.Extraction, "{}"))
 	return err
 }
@@ -154,8 +155,9 @@ func (s *Store) MarkMaterialsBuilt(ctx context.Context, ids []uuid.UUID) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE xchats.kbd_materials
-		SET status = 'built', updated_at = now() WHERE id = ANY($1) AND status = 'ready'`, ids)
+	_, err := s.db.Exec(ctx, `UPDATE kbd_materials
+		SET status = 'built', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id IN (SELECT value FROM json_each($1)) AND status = 'ready'`, dbx.UUIDArray(ids))
 	return err
 }
 
@@ -177,8 +179,8 @@ func (s *Store) ListLiveMaterials(ctx context.Context, orgID uuid.UUID) ([]Mater
 }
 
 func (s *Store) listMaterials(ctx context.Context, orgID uuid.UUID) ([]Material, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction::text, created_at, updated_at
-		FROM xchats.kbd_materials WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	rows, err := s.db.Query(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction, created_at, updated_at
+		FROM kbd_materials WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -225,10 +227,10 @@ type RequestInput struct {
 // CreateRequest raises a popup for the org.
 func (s *Store) CreateRequest(ctx context.Context, orgID uuid.UUID, in RequestInput) (Request, error) {
 	var r Request
-	err := s.pool.QueryRow(ctx, `INSERT INTO xchats.kbd_requests
+	err := s.db.QueryRow(ctx, `INSERT INTO kbd_requests
 		(organization_id, material_id, req_type, prompt, context, target)
-		VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb)
-		RETURNING id, material_id, req_type, prompt, context::text, target::text, state, resolution::text, created_at, resolved_at`,
+		VALUES ($1,$2,$3,$4,$5,$6)
+		RETURNING id, material_id, req_type, prompt, context, target, state, resolution, created_at, resolved_at`,
 		orgID, in.MaterialID, in.ReqType, in.Prompt, orDefault(in.Context, "{}"), orDefault(in.Target, "{}")).
 		Scan(&r.ID, &r.MaterialID, &r.ReqType, &r.Prompt, &r.Context, &r.Target, &r.State, &r.Resolution, &r.CreatedAt, &r.ResolvedAt)
 	return r, err
@@ -237,10 +239,10 @@ func (s *Store) CreateRequest(ctx context.Context, orgID uuid.UUID, in RequestIn
 // GetRequest returns one popup by id.
 func (s *Store) GetRequest(ctx context.Context, id uuid.UUID) (Request, error) {
 	var r Request
-	err := s.pool.QueryRow(ctx, `SELECT id, material_id, req_type, prompt, context::text, target::text, state, resolution::text, created_at, resolved_at
-		FROM xchats.kbd_requests WHERE id = $1`, id).
+	err := s.db.QueryRow(ctx, `SELECT id, material_id, req_type, prompt, context, target, state, resolution, created_at, resolved_at
+		FROM kbd_requests WHERE id = $1`, id).
 		Scan(&r.ID, &r.MaterialID, &r.ReqType, &r.Prompt, &r.Context, &r.Target, &r.State, &r.Resolution, &r.CreatedAt, &r.ResolvedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return r, ErrUnknownKind
 	}
 	return r, err
@@ -249,15 +251,15 @@ func (s *Store) GetRequest(ctx context.Context, id uuid.UUID) (Request, error) {
 // ResolveRequest marks a popup resolved (or dismissed) with the operator's answer.
 // The caller applies the resulting draft mutation separately.
 func (s *Store) ResolveRequest(ctx context.Context, id uuid.UUID, state, resolution string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE xchats.kbd_requests SET
-		state = $2, resolution = $3::jsonb, resolved_at = now() WHERE id = $1`,
+	_, err := s.db.Exec(ctx, `UPDATE kbd_requests SET
+		state = $2, resolution = $3, resolved_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`,
 		id, orDefault(state, "resolved"), orDefault(resolution, "{}"))
 	return err
 }
 
 func (s *Store) listRequests(ctx context.Context, orgID uuid.UUID) ([]Request, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, material_id, req_type, prompt, context::text, target::text, state, resolution::text, created_at, resolved_at
-		FROM xchats.kbd_requests WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	rows, err := s.db.Query(ctx, `SELECT id, material_id, req_type, prompt, context, target, state, resolution, created_at, resolved_at
+		FROM kbd_requests WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}

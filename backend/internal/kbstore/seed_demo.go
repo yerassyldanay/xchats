@@ -24,7 +24,7 @@ import (
 // a safe no-op, never a silent overwrite of real data.
 func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool, err error) {
 	var exists bool
-	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM xchats.ai_topics WHERE organization_id = $1)`,
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ai_topics WHERE organization_id = $1)`,
 		orgID).Scan(&exists); err != nil {
 		return false, err
 	}
@@ -32,7 +32,7 @@ func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool,
 		return false, nil
 	}
 
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return false, err
 	}

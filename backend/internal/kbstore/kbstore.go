@@ -20,11 +20,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
+	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
 )
 
 // ErrStale is returned when an optimistic-concurrency check (If-Match) fails: the
@@ -34,13 +33,34 @@ var ErrStale = errors.New("kbstore: stale draft write")
 // ErrUnknownKind is returned for an unrecognized entity kind.
 var ErrUnknownKind = errors.New("kbstore: unknown row kind")
 
-// Store wraps the pgx pool with KB operations.
-type Store struct {
-	pool *pgxpool.Pool
+// dbtx is satisfied by both *dbx.DB and *dbx.Tx — an alias, not a new type,
+// so every "db dbtx" / "tx dbtx" parameter declared across this package
+// resolves structurally with zero further changes.
+type dbtx = dbx.DBTX
+
+// New opens (or attaches to an already shared-by-path) dbPath and returns a
+// ready Store. Safe to call more than once for the same path within this
+// process — see internal/store.New's doc comment for how the persistence
+// packages end up sharing one physical connection via internal/dbx.Open.
+func New(ctx context.Context, dbPath string) (*Store, error) {
+	db, err := dbx.Open(ctx, dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &Store{db: db}, nil
 }
 
-// New builds a KBStore over an existing pool.
-func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+// Store wraps the SQLite pool with KB operations.
+type Store struct {
+	db *dbx.DB
+}
+
+// Close releases this Store's reference to the pool.
+func (s *Store) Close() { _ = s.db.Close() }
 
 // ---------------------------------------------------------------------------
 // Live load (the brain's source) + seed
@@ -49,7 +69,7 @@ func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // LoadLive returns the org's live KB as a brain-ready *domain.Snapshot. Live
 // tables hold live rows only, so there is no review/version filter to apply.
 func (s *Store) LoadLive(ctx context.Context, orgID uuid.UUID) (*domain.Snapshot, error) {
-	return loadLive(ctx, s.pool, orgID)
+	return loadLive(ctx, s.db, orgID)
 }
 
 // loadLive is LoadLive's dbtx-parameterized core. ApproveVersioned
@@ -63,10 +83,10 @@ func loadLive(ctx context.Context, db dbtx, orgID uuid.UUID) (*domain.Snapshot, 
 	snap := &domain.Snapshot{Loaded: time.Now()}
 	err := db.QueryRow(ctx, `
 		SELECT persona, mission, guardrails, language_policy, reply_max_words
-		FROM xchats.ai_assistants WHERE organization_id = $1`, orgID).
+		FROM ai_assistants WHERE organization_id = $1`, orgID).
 		Scan(&snap.Config.Persona, &snap.Config.Mission, &snap.Config.Guardrails,
 			&snap.Config.LanguagePolicy, &snap.Config.ReplyMaxWords)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil && !errors.Is(err, dbx.ErrNoRows) {
 		return nil, err
 	}
 	if err := loadLiveContent(ctx, db, orgID, snap); err != nil {
@@ -79,7 +99,7 @@ func loadLive(ctx context.Context, db dbtx, orgID uuid.UUID) (*domain.Snapshot, 
 // tables for an org.
 func loadLiveContent(ctx context.Context, db dbtx, orgID uuid.UUID, snap *domain.Snapshot) error {
 	trows, err := db.Query(ctx, `SELECT slug, title, body_md
-		FROM xchats.ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_topics WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
@@ -97,7 +117,7 @@ func loadLiveContent(ctx context.Context, db dbtx, orgID uuid.UUID, snap *domain
 	}
 
 	trows2, err := db.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages
-		FROM xchats.ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
@@ -118,7 +138,7 @@ func loadLiveContent(ctx context.Context, db dbtx, orgID uuid.UUID, snap *domain
 	// of the target) — no longer read; domain.Product.Availability stays
 	// permanently empty for a DB-backed snapshot.
 	prows, err := db.Query(ctx, `SELECT ref, name, price, description, category
-		FROM xchats.ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
@@ -137,7 +157,7 @@ func loadLiveContent(ctx context.Context, db dbtx, orgID uuid.UUID, snap *domain
 
 	crows, err := db.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram
-		FROM xchats.ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
@@ -159,7 +179,7 @@ func loadLiveContent(ctx context.Context, db dbtx, orgID uuid.UUID, snap *domain
 
 	polrows, err := db.Query(ctx, `SELECT delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		prepayment, installment, return_period_in_days, warranty
-		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return err
 	}
@@ -189,25 +209,25 @@ func loadLiveContent(ctx context.Context, db dbtx, orgID uuid.UUID, snap *domain
 // a no-op once the org has any live topic.
 func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *domain.Snapshot) error {
 	var exists bool
-	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM xchats.ai_topics WHERE organization_id = $1)`,
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ai_topics WHERE organization_id = $1)`,
 		orgID).Scan(&exists); err != nil {
 		return err
 	}
 	if exists {
 		return nil
 	}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_assistants
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_assistants
 		(organization_id, persona, mission, guardrails, language_policy, reply_max_words)
 		VALUES ($1,$2,$3,$4,$5,$6)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			persona = EXCLUDED.persona, mission = EXCLUDED.mission, guardrails = EXCLUDED.guardrails,
-			language_policy = EXCLUDED.language_policy, reply_max_words = EXCLUDED.reply_max_words, updated_at = now()`,
+			language_policy = EXCLUDED.language_policy, reply_max_words = EXCLUDED.reply_max_words, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, seed.Config.Persona, seed.Config.Mission, seed.Config.Guardrails,
 		seed.Config.LanguagePolicy, orDefaultInt(seed.Config.ReplyMaxWords, 120)); err != nil {
 		return err
@@ -226,7 +246,7 @@ func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *doma
 // snapshot carries no media/sales_status/in_stock opinion, so this seeds the
 // schema defaults (true / 'active' / no media) exactly as before this file
 // gained those columns.
-func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *domain.Snapshot) error {
+func insertLiveContent(ctx context.Context, tx execer, orgID uuid.UUID, snap *domain.Snapshot) error {
 	for _, t := range snap.Topics {
 		if err := upsertTopicRow(ctx, tx, orgID, DraftTopic{Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD}); err != nil {
 			return err
@@ -270,14 +290,12 @@ func insertLiveContent(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, snap *do
 	return nil
 }
 
-// execer is satisfied by both *pgxpool.Pool and pgx.Tx (same Exec shape), so the
+// execer is satisfied by both *dbx.DB and *dbx.Tx (same Exec shape), so the
 // row-upsert helpers below run identically inside a multi-statement transaction
 // (Approve, SeedLiveIfEmpty) or directly on the pool (the /kb/* live-write path,
 // where each call is its own single-statement write — no cross-row atomicity to
 // preserve).
-type execer interface {
-	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
-}
+type execer = dbx.DBTX
 
 // upsertTopicRow / upsertTariffRow / upsertProductRow / upsertContactRow /
 // upsertPolicyRow write one complete typed-fact row (verbatim columns,
@@ -288,7 +306,7 @@ type execer interface {
 // currentProduct for the draft path, currentLive*Tx for the live-write path),
 // so these helpers never need a "leave unchanged" sentinel of their own.
 func upsertTopicRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTopic) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_topics
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_topics
 		(organization_id, slug, title, body_md, featured_image, illustration_images,
 		 explainer_videos, reference_documents)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -296,16 +314,16 @@ func upsertTopicRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTopi
 			title=EXCLUDED.title, body_md=EXCLUDED.body_md,
 			featured_image=EXCLUDED.featured_image, illustration_images=EXCLUDED.illustration_images,
 			explainer_videos=EXCLUDED.explainer_videos, reference_documents=EXCLUDED.reference_documents,
-			updated_at=now()`,
-		orgID, t.Slug, t.Title, t.BodyMD, t.FeaturedImage, nonNilUUIDs(t.IllustrationImages),
-		nonNilUUIDs(t.ExplainerVideos), nonNilUUIDs(t.ReferenceDocuments)); err != nil {
+			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+		orgID, t.Slug, t.Title, t.BodyMD, t.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(t.IllustrationImages)),
+		dbx.UUIDArray(nonNilUUIDs(t.ExplainerVideos)), dbx.UUIDArray(nonNilUUIDs(t.ReferenceDocuments))); err != nil {
 		return fmt.Errorf("insert topic %s: %w", t.Slug, err)
 	}
 	return nil
 }
 
 func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTariff) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_tariffs
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_tariffs
 		(organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages,
 		 sales_status, featured_image, pricing_images, explainer_videos, terms_documents)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
@@ -314,10 +332,10 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTar
 			summary=EXCLUDED.summary, pricing_type=EXCLUDED.pricing_type, advantages=EXCLUDED.advantages,
 			disadvantages=EXCLUDED.disadvantages, sales_status=EXCLUDED.sales_status,
 			featured_image=EXCLUDED.featured_image, pricing_images=EXCLUDED.pricing_images,
-			explainer_videos=EXCLUDED.explainer_videos, terms_documents=EXCLUDED.terms_documents, updated_at=now()`,
+			explainer_videos=EXCLUDED.explainer_videos, terms_documents=EXCLUDED.terms_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, t.Ref, t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
 		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages, orDefault(t.SalesStatus, "active"),
-		t.FeaturedImage, nonNilUUIDs(t.PricingImages), nonNilUUIDs(t.ExplainerVideos), nonNilUUIDs(t.TermsDocuments)); err != nil {
+		t.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(t.PricingImages)), dbx.UUIDArray(nonNilUUIDs(t.ExplainerVideos)), dbx.UUIDArray(nonNilUUIDs(t.TermsDocuments))); err != nil {
 		return fmt.Errorf("insert tariff %s: %w", t.Ref, err)
 	}
 	return nil
@@ -327,7 +345,7 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTar
 // column (plan/database-schema.md: not part of the target) and is no longer
 // written.
 func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftProduct) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_products
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_products
 		(organization_id, ref, name, price, description, category, in_stock, sales_status,
 		 featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
@@ -337,17 +355,17 @@ func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPr
 			featured_image=EXCLUDED.featured_image, gallery_images=EXCLUDED.gallery_images,
 			demo_videos=EXCLUDED.demo_videos, certificate_documents=EXCLUDED.certificate_documents,
 			guarantee_documents=EXCLUDED.guarantee_documents,
-			updated_at=now()`,
+			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, p.InStock, orDefault(p.SalesStatus, "active"),
-		p.FeaturedImage, nonNilUUIDs(p.GalleryImages), nonNilUUIDs(p.DemoVideos),
-		nonNilUUIDs(p.CertificateDocuments), nonNilUUIDs(p.GuaranteeDocuments)); err != nil {
+		p.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(p.GalleryImages)), dbx.UUIDArray(nonNilUUIDs(p.DemoVideos)),
+		dbx.UUIDArray(nonNilUUIDs(p.CertificateDocuments)), dbx.UUIDArray(nonNilUUIDs(p.GuaranteeDocuments))); err != nil {
 		return fmt.Errorf("insert product %s: %w", p.Ref, err)
 	}
 	return nil
 }
 
 func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftContact) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_contacts
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_contacts
 		(organization_id, whatsapp, email, address, legal_information, callback_time,
 		 working_hours, phone, website, instagram, contact_card_image, location_map_image,
 		 company_legal_documents)
@@ -358,10 +376,10 @@ func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftCo
 			working_hours=EXCLUDED.working_hours, phone=EXCLUDED.phone,
 			website=EXCLUDED.website, instagram=EXCLUDED.instagram,
 			contact_card_image=EXCLUDED.contact_card_image, location_map_image=EXCLUDED.location_map_image,
-			company_legal_documents=EXCLUDED.company_legal_documents, updated_at=now()`,
+			company_legal_documents=EXCLUDED.company_legal_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, c.WhatsApp, c.Email, c.Address, c.LegalInformation, c.CallbackTime,
 		c.WorkingHours, c.Phone, c.Website, c.Instagram, c.ContactCardImage, c.LocationMapImage,
-		nonNilUUIDs(c.CompanyLegalDocuments)); err != nil {
+		dbx.UUIDArray(nonNilUUIDs(c.CompanyLegalDocuments))); err != nil {
 		return fmt.Errorf("insert contact: %w", err)
 	}
 	return nil
@@ -369,7 +387,7 @@ func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftCo
 
 // upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow.
 func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPolicy) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO xchats.ai_policies
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_policies
 		(organization_id, delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		 prepayment, installment, return_period_in_days, warranty, outside_zones_note,
 		 commerce_policy_documents)
@@ -380,10 +398,10 @@ func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPol
 			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
 			return_period_in_days=EXCLUDED.return_period_in_days, warranty=EXCLUDED.warranty,
 			outside_zones_note=EXCLUDED.outside_zones_note,
-			commerce_policy_documents=EXCLUDED.commerce_policy_documents, updated_at=now()`,
+			commerce_policy_documents=EXCLUDED.commerce_policy_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, p.DeliveryCost, p.DeliveryInDays, p.FreeDeliveryFrom, p.MinOrder,
 		p.Prepayment, p.Installment, p.ReturnPeriodInDays, p.Warranty, p.OutsideZonesNote,
-		nonNilUUIDs(p.CommercePolicyDocuments)); err != nil {
+		dbx.UUIDArray(nonNilUUIDs(p.CommercePolicyDocuments))); err != nil {
 		return fmt.Errorf("insert policy: %w", err)
 	}
 	return nil
@@ -407,27 +425,27 @@ func nonNilUUIDs(v []uuid.UUID) []uuid.UUID {
 // "only non-nil fields change" contract on the insert path too, using each
 // column's own schema default when the row is being created for the first time.
 func upsertConfigRow(ctx context.Context, tx execer, orgID uuid.UUID, p ConfigPatch) error {
-	_, err := tx.Exec(ctx, `INSERT INTO xchats.ai_assistants
+	_, err := tx.Exec(ctx, `INSERT INTO ai_assistants
 		(organization_id, persona, mission, guardrails, language_policy, reply_max_words)
 		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), COALESCE($5,''), COALESCE($6,120))
 		ON CONFLICT (organization_id) DO UPDATE SET
-			persona = COALESCE($2, xchats.ai_assistants.persona),
-			mission = COALESCE($3, xchats.ai_assistants.mission),
-			guardrails = COALESCE($4, xchats.ai_assistants.guardrails),
-			language_policy = COALESCE($5, xchats.ai_assistants.language_policy),
-			reply_max_words = COALESCE($6, xchats.ai_assistants.reply_max_words),
-			updated_at = now()`,
+			persona = COALESCE($2, ai_assistants.persona),
+			mission = COALESCE($3, ai_assistants.mission),
+			guardrails = COALESCE($4, ai_assistants.guardrails),
+			language_policy = COALESCE($5, ai_assistants.language_policy),
+			reply_max_words = COALESCE($6, ai_assistants.reply_max_words),
+			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, p.Persona, p.Mission, p.Guardrails, p.LanguagePolicy, p.ReplyMaxWords)
 	return err
 }
 
-// auditRow appends one xchats.ai_audit_log row — action is 'edit'|'delete' for
+// auditRow appends one ai_audit_log row — action is 'edit'|'delete' for
 // the /kb/* live-write path (no CHECK constraint pins the vocabulary; 'approve'
 // remains the Playground Approve's own action). actor is nil-able: a zero
 // uuid.UUID (no authenticated user in context) is stored as SQL NULL rather
 // than a literal zero UUID, since actor_user_id's FK would otherwise reject it.
 func auditRow(ctx context.Context, tx execer, orgID uuid.UUID, actor uuid.UUID, action, note string) error {
-	_, err := tx.Exec(ctx, `INSERT INTO xchats.ai_audit_log (organization_id, action, actor_user_id, note)
+	_, err := tx.Exec(ctx, `INSERT INTO ai_audit_log (organization_id, action, actor_user_id, note)
 		VALUES ($1,$2,$3,$4)`,
 		orgID, action, uuid.NullUUID{UUID: actor, Valid: actor != uuid.Nil}, note)
 	return err
@@ -482,10 +500,10 @@ func gateTopicBody(slug, bodyMD string) []string {
 var rawCurrencyRE = regexp.MustCompile(`(?:[0-9][0-9 \x{00a0}.,]*\s*(?:₸|₽|€|£|тг|тенге|руб)|[$€£]\s*[0-9])`)
 
 // pendingRequestCount is dbtx-parameterized for the same reason loadLive is
-// — ApproveVersioned calls it on its own locked transaction, never s.pool.
+// — ApproveVersioned calls it on its own locked transaction, never s.db.
 func pendingRequestCount(ctx context.Context, db dbtx, orgID uuid.UUID) (int, error) {
 	var n int
-	err := db.QueryRow(ctx, `SELECT count(*) FROM xchats.kbd_requests
+	err := db.QueryRow(ctx, `SELECT count(*) FROM kbd_requests
 		WHERE organization_id = $1 AND state = 'pending'`, orgID).Scan(&n)
 	return n, err
 }

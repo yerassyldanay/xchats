@@ -278,10 +278,10 @@ func (s *Store) MCPUpsertTopic(ctx context.Context, orgID uuid.UUID, userID uuid
 
 // ProductChanges is kb_product_upsert's `changes`.
 type ProductChanges struct {
-	Name, Price, Description, Category *string
-	InStock                            *bool // required on create
-	SalesStatus                        *string
-	FeaturedImage                      **uuid.UUID
+	Name, Price, Description, Category                                  *string
+	InStock                                                             *bool // required on create
+	SalesStatus                                                         *string
+	FeaturedImage                                                       **uuid.UUID
 	GalleryImages, DemoVideos, CertificateDocuments, GuaranteeDocuments *[]uuid.UUID
 }
 
