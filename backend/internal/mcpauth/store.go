@@ -174,31 +174,39 @@ func (s *Store) ConsumeAuthorizationCode(ctx context.Context, clientID, redirect
 	}
 	defer tx.Rollback(ctx)
 
+	// Claim the code and read it in ONE statement. The "is it still unclaimed?"
+	// test has to be part of the write, not a separate SELECT before it:
+	// read-then-write leaves a window where two concurrent token requests both
+	// observe consumed_at IS NULL, both pass PKCE, and both mint a token off one
+	// code — an OAuth 2.1 single-use violation. Matching zero rows here means
+	// the code does not exist or someone else already claimed it; either way the
+	// answer is the same deliberately indistinguishable ErrInvalidGrant.
+	//
+	// Validation still runs after the claim, and a failure still rolls the whole
+	// transaction back, so a code rejected for a bad client/redirect/PKCE is
+	// left unconsumed exactly as before. Only the race is gone.
 	var row authorizationCodeRow
 	var expiresAt time.Time
-	var consumedAt *time.Time
-	err = tx.QueryRow(ctx, `SELECT client_id, redirect_uri, code_challenge, code_challenge_method,
-		user_id, organization_id, scope, resource, expires_at, consumed_at
-		FROM mcp_authorization_codes WHERE code_hash = $1`, sha256Hex(code)).
+	err = tx.QueryRow(ctx, `UPDATE mcp_authorization_codes
+		SET consumed_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE code_hash = $1 AND consumed_at IS NULL
+		RETURNING client_id, redirect_uri, code_challenge, code_challenge_method,
+			user_id, organization_id, scope, resource, expires_at`, sha256Hex(code)).
 		Scan(&row.ClientID, &row.RedirectURI, &row.CodeChallenge, &row.CodeChallengeMethod,
-			&row.UserID, &row.OrganizationID, &row.Scope, &row.Resource, &expiresAt, &consumedAt)
+			&row.UserID, &row.OrganizationID, &row.Scope, &row.Resource, &expiresAt)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return authorizationCodeRow{}, ErrInvalidGrant
 	}
 	if err != nil {
 		return authorizationCodeRow{}, err
 	}
-	if consumedAt != nil || time.Now().After(expiresAt) ||
+	if time.Now().After(expiresAt) ||
 		row.ClientID != clientID || row.RedirectURI != redirectURI ||
 		(resource != "" && row.Resource != resource) {
 		return authorizationCodeRow{}, ErrInvalidGrant
 	}
 	if !VerifyPKCE(codeVerifier, row.CodeChallenge, row.CodeChallengeMethod) {
 		return authorizationCodeRow{}, ErrInvalidGrant
-	}
-	if _, err := tx.Exec(ctx, `UPDATE mcp_authorization_codes SET consumed_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE code_hash = $1`,
-		sha256Hex(code)); err != nil {
-		return authorizationCodeRow{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return authorizationCodeRow{}, err
@@ -243,27 +251,33 @@ func (s *Store) RotateRefreshToken(ctx context.Context, clientID, token string, 
 	}
 	defer tx.Rollback(ctx)
 
+	// Revoke and read in ONE statement, for the same reason
+	// ConsumeAuthorizationCode does — see its comment. Read-then-write here
+	// means two concurrent refreshes both see revoked_at IS NULL and both
+	// rotate, turning one refresh token into two live ones and defeating the
+	// point of rotation (a replayed stolen token should be detectably dead).
+	// Zero rows matched means unknown or already-rotated: ErrInvalidRefreshToken
+	// either way. Validation after the claim still rolls back on failure, so an
+	// expired or wrong-client token is left unrevoked exactly as before.
+	newToken := randomID(32)
 	var row refreshTokenRow
 	var expiresAt time.Time
-	var revokedAt *time.Time
-	err = tx.QueryRow(ctx, `SELECT client_id, user_id, organization_id, scope, resource, expires_at, revoked_at
-		FROM mcp_refresh_tokens WHERE token_hash = $1`, sha256Hex(token)).
-		Scan(&row.ClientID, &row.UserID, &row.OrganizationID, &row.Scope, &row.Resource, &expiresAt, &revokedAt)
+	err = tx.QueryRow(ctx, `UPDATE mcp_refresh_tokens
+		SET revoked_at = strftime('%Y-%m-%d %H:%M:%f','now'), replaced_by = $2
+		WHERE token_hash = $1 AND revoked_at IS NULL
+		RETURNING client_id, user_id, organization_id, scope, resource, expires_at`,
+		sha256Hex(token), sha256Hex(newToken)).
+		Scan(&row.ClientID, &row.UserID, &row.OrganizationID, &row.Scope, &row.Resource, &expiresAt)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return refreshTokenRow{}, "", ErrInvalidRefreshToken
 	}
 	if err != nil {
 		return refreshTokenRow{}, "", err
 	}
-	if revokedAt != nil || time.Now().After(expiresAt) || row.ClientID != clientID {
+	if time.Now().After(expiresAt) || row.ClientID != clientID {
 		return refreshTokenRow{}, "", ErrInvalidRefreshToken
 	}
 
-	newToken := randomID(32)
-	if _, err := tx.Exec(ctx, `UPDATE mcp_refresh_tokens SET revoked_at = strftime('%Y-%m-%d %H:%M:%f','now'), replaced_by = $2
-		WHERE token_hash = $1`, sha256Hex(token), sha256Hex(newToken)); err != nil {
-		return refreshTokenRow{}, "", err
-	}
 	if _, err := tx.Exec(ctx, `INSERT INTO mcp_refresh_tokens
 		(token_hash, client_id, user_id, organization_id, scope, resource, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
