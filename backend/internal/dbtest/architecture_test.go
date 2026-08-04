@@ -74,9 +74,10 @@ type goListPackage struct {
 // internal/mcpauth, and internal/dbtest may import internal/dbx, and NO
 // package anywhere (including those five) may import database/sql or
 // modernc.org/sqlite directly — that stays confined to internal/dbx. This
-// is the same shape of check that, run before this branch, would have
-// flagged the stray backend/force-user.go (root package main, a direct pgx
-// dependency outside the persistence layer of its era).
+// is the same shape of check that, had it existed earlier, would have flagged
+// the stray backend/force-user.go — a root package main holding its own pgx
+// pool and a hardcoded local DSN, outside the persistence layer of its era.
+// That file is now deleted; migration 0006_init_admin does its job.
 func TestArchitectureBoundary(t *testing.T) {
 	root := moduleRoot(t)
 

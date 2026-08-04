@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/yerassyldanay/xchats/backend/internal/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"golang.org/x/crypto/argon2"
 )
@@ -328,6 +330,16 @@ func newSessionID() string {
 	return hex.EncodeToString(b)
 }
 
+// isUniqueViolation reports whether err is the persistence layer's
+// "a unique constraint rejected this write" signal.
+//
+// This used to string-match "23505", PostgreSQL's SQLSTATE for a unique
+// violation as it appeared inside a pgx error message. That made an HTTP
+// handler depend on which database engine happened to be underneath it, and it
+// silently stopped matching the moment one wasn't PostgreSQL — turning a 409
+// into a 500 with no test to catch it. internal/store already translates driver
+// errors into the domain vocabulary at its own exported boundary (see
+// store.CreateUser), so the engine-neutral sentinel is what to compare against.
 func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "23505")
+	return errors.Is(err, domain.ErrDuplicate)
 }

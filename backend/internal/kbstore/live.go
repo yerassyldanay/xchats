@@ -361,3 +361,46 @@ func (s *Store) PatchLiveConfig(ctx context.Context, orgID uuid.UUID, actor uuid
 	}
 	return tx.Commit(ctx)
 }
+
+// DeleteLiveConfig, DeleteLiveContacts and DeleteLivePolicies remove the org's
+// single ai_assistants / ai_contacts / ai_policies row. Unlike topics, tariffs,
+// products and zones there is no natural key to select on: these three tables
+// hold at most one row per organization, so "delete the org's row" is the whole
+// operation.
+//
+// They exist because "xchats kb-load -remove" needs exactly this and previously
+// reached around the store with raw SQL against a pgx pool. A cmd/ package
+// cannot hold a database handle of its own — internal/dbtest's architecture
+// test restricts internal/dbx to the persistence packages — so the capability
+// belongs here, next to the DeleteLive* methods it is used alongside.
+func (s *Store) DeleteLiveConfig(ctx context.Context, orgID uuid.UUID, actor uuid.UUID) error {
+	return s.deleteLiveSingleton(ctx, orgID, actor, "ai_assistants", "config")
+}
+
+// DeleteLiveContacts removes the org's live contacts row.
+func (s *Store) DeleteLiveContacts(ctx context.Context, orgID uuid.UUID, actor uuid.UUID) error {
+	return s.deleteLiveSingleton(ctx, orgID, actor, "ai_contacts", "contacts")
+}
+
+// DeleteLivePolicies removes the org's live policies row.
+func (s *Store) DeleteLivePolicies(ctx context.Context, orgID uuid.UUID, actor uuid.UUID) error {
+	return s.deleteLiveSingleton(ctx, orgID, actor, "ai_policies", "policies")
+}
+
+// deleteLiveSingleton is the shared body of the three above. table is never
+// caller-supplied — each exported wrapper passes a fixed literal — so the
+// interpolation cannot carry untrusted input.
+func (s *Store) deleteLiveSingleton(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, table, auditTarget string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE organization_id=$1`, orgID); err != nil {
+		return err
+	}
+	if err := auditRow(ctx, tx, orgID, actor, "delete", auditTarget); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

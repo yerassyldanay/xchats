@@ -12,7 +12,6 @@ import (
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
-	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
 
 // kbLoadDoc is the on-disk shape `kb-load` reads — see testdata/demo_kb.json.
@@ -136,10 +135,14 @@ func runKBLoad(cfg *config.Config, log *slog.Logger, args []string) {
 	if err != nil {
 		fatal("kb-load: resolve organization", err)
 	}
-	kb := kbstore.New(st.Pool())
+	kb, err := kbstore.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fatal("kb-load: open knowledge base", err)
+	}
+	defer kb.Close()
 
 	if *remove {
-		removeKBLoadDoc(ctx, st, kb, org.ID, doc, log)
+		removeKBLoadDoc(ctx, kb, org.ID, doc, log)
 		return
 	}
 	applyKBLoadDoc(ctx, kb, org.ID, doc, log)
@@ -227,7 +230,7 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 // returns to its honest "not configured" error state, so this deletes those
 // rows directly via SQL rather than growing kbstore's live-editor surface
 // with delete methods the UI itself would have no use for.
-func removeKBLoadDoc(ctx context.Context, st *store.Store, kb *kbstore.Store, orgID uuid.UUID, doc kbLoadDoc, log *slog.Logger) {
+func removeKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc kbLoadDoc, log *slog.Logger) {
 	if err := removeZones(ctx, kb, orgID, doc.Zones); err != nil {
 		fatal("kb-load -remove: zones", err)
 	}
@@ -247,17 +250,17 @@ func removeKBLoadDoc(ctx context.Context, st *store.Store, kb *kbstore.Store, or
 		}
 	}
 	if doc.Assistant != nil {
-		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_assistants WHERE organization_id=$1`, orgID); err != nil {
+		if err := kb.DeleteLiveConfig(ctx, orgID, uuid.Nil); err != nil {
 			fatal("kb-load -remove: assistant", err)
 		}
 	}
 	if doc.Contacts != nil {
-		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_contacts WHERE organization_id=$1`, orgID); err != nil {
+		if err := kb.DeleteLiveContacts(ctx, orgID, uuid.Nil); err != nil {
 			fatal("kb-load -remove: contacts", err)
 		}
 	}
 	if doc.Policies != nil {
-		if _, err := st.Pool().Exec(ctx, `DELETE FROM xchats.ai_policies WHERE organization_id=$1`, orgID); err != nil {
+		if err := kb.DeleteLivePolicies(ctx, orgID, uuid.Nil); err != nil {
 			fatal("kb-load -remove: policies", err)
 		}
 	}

@@ -463,8 +463,8 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 // CreateUser inserts a new user and joins them to orgID. A duplicate email
 // (users.email is UNIQUE COLLATE NOCASE, citext's SQLite equivalent) comes
 // back as domain.ErrDuplicate — the exported-boundary translation that
-// replaces the old pgx "23505" string match (internal/httpapi/auth.go's
-// isUniqueViolation; that call site itself is a coordinator-owned handoff).
+// replaces the old pgx "23505" string match, which internal/httpapi/auth.go's
+// isUniqueViolation now compares against with errors.Is.
 func (s *Store) CreateUser(ctx context.Context, orgID uuid.UUID, email, passwordHash, displayName string) (User, error) {
 	var u User
 	err := s.db.QueryRow(ctx, `

@@ -893,3 +893,72 @@ func TestLiveWrites_AuditActor(t *testing.T) {
 		t.Fatalf("audit actions = %v, want [edit delete]", actions)
 	}
 }
+
+// DeleteLiveConfig/DeleteLiveContacts/DeleteLivePolicies remove the org's one
+// row from each singleton live table and, like every other /kb/* live write,
+// record an audit row in the same transaction. "xchats kb-load -remove" is the
+// caller these exist for; before they existed it reached past the store with
+// raw SQL against a pgx pool.
+func TestDeleteLiveSingletons(t *testing.T) {
+	kb, orgID, st, db := newTestKB(t)
+	ctx := context.Background()
+	user, err := st.SeedUser(ctx, orgID, "remover@xchats.test", "hash", "Remover")
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	persona, whatsapp, cost := "Помощник", "+7 700 000 00 00", "1000 ₸"
+	if err := kb.PatchLiveConfig(ctx, orgID, user.ID, kbstore.ConfigPatch{Persona: &persona}); err != nil {
+		t.Fatalf("patch config: %v", err)
+	}
+	if err := kb.PatchLiveContacts(ctx, orgID, user.ID, kbstore.ContactPatch{WhatsApp: &whatsapp}); err != nil {
+		t.Fatalf("patch contacts: %v", err)
+	}
+	if err := kb.PatchLivePolicies(ctx, orgID, user.ID, kbstore.PolicyPatch{DeliveryCost: &cost}); err != nil {
+		t.Fatalf("patch policies: %v", err)
+	}
+
+	countRows := func(table string) int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE organization_id=$1`, orgID).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		return n
+	}
+	for _, table := range []string{"ai_assistants", "ai_contacts", "ai_policies"} {
+		if got := countRows(table); got != 1 {
+			t.Fatalf("setup: %s has %d rows, want 1", table, got)
+		}
+	}
+
+	if err := kb.DeleteLiveConfig(ctx, orgID, user.ID); err != nil {
+		t.Fatalf("delete config: %v", err)
+	}
+	if err := kb.DeleteLiveContacts(ctx, orgID, user.ID); err != nil {
+		t.Fatalf("delete contacts: %v", err)
+	}
+	if err := kb.DeleteLivePolicies(ctx, orgID, user.ID); err != nil {
+		t.Fatalf("delete policies: %v", err)
+	}
+	for _, table := range []string{"ai_assistants", "ai_contacts", "ai_policies"} {
+		if got := countRows(table); got != 0 {
+			t.Fatalf("%s has %d rows after delete, want 0", table, got)
+		}
+	}
+
+	// Deleting again is not an error: kb-load -remove is expected to be
+	// re-runnable, and a DELETE matching zero rows is not a failure.
+	if err := kb.DeleteLiveConfig(ctx, orgID, user.ID); err != nil {
+		t.Fatalf("second delete config: %v", err)
+	}
+
+	var deletes int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM ai_audit_log
+		WHERE organization_id=$1 AND action='delete' AND actor_user_id=$2`, orgID, user.ID).Scan(&deletes); err != nil {
+		t.Fatalf("count audit deletes: %v", err)
+	}
+	if deletes != 4 {
+		t.Fatalf("audit delete rows = %d, want 4 (three deletes plus the idempotent repeat)", deletes)
+	}
+}

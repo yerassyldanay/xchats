@@ -1,6 +1,6 @@
 // Command xchats is the xchats backend: API edge + webhook ingress + in-process
 // workers + the multichannel response service. Subcommands: serve (default),
-// migrate, webhook-set, seed, seed-kb-demo.
+// migrate, webhook-set, seed, seed-kb-demo, simulate-message, kb-load.
 package main
 
 import (
@@ -37,7 +37,6 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
 
@@ -117,11 +116,11 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		}
 	}
 
+	// mustStore -> store.New already applies every pending migration on open
+	// (see internal/store.New's doc comment), so there is no separate migrate
+	// step here any more.
 	st := mustStore(cfg, log)
 	defer st.Close()
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		fatal("migrate", err)
-	}
 	accountID := seed(ctx, cfg, st, log)
 	orgID := seededOrgID(ctx, cfg, st, log)
 
@@ -130,7 +129,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// structured draft editor at /playground. No demo/seed content is
 	// written here: SeedLiveIfEmpty(brain.SeedSnapshot()) is intentionally not
 	// called — migration 0008 is the only source of temporary demo KB data.
-	kb := kbstore.New(st.Pool())
+	// Opening the same path mustStore already opened is deliberate and cheap:
+	// internal/dbx.Open refcounts one connection per path, so kb shares st's
+	// connection rather than racing a second one against the same file.
+	kb, err := kbstore.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fatal("kbstore", err)
+	}
+	defer kb.Close()
 
 	blobStore, err := blob.NewDisk(cfg.BlobDir)
 	if err != nil {
@@ -149,7 +155,11 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// response engine's hot path (every customer reply) and GET /kb/prompt
 	// (the /knowledge-base "Промпт" tab) both read through it, so the tab is
 	// never a second, possibly-divergent rendering of the same data.
-	cachedKB := responsestore.NewCachedKBRepo(&responsestore.KnowledgeBaseRepo{Pool: st.Pool()})
+	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fatal("kb repo", err)
+	}
+	cachedKB := responsestore.NewCachedKBRepo(kbRepo)
 	responseService := &response.Service{
 		Conversations: &responsestore.ConversationRepo{Store: st},
 		KnowledgeBase: cachedKB,
@@ -190,7 +200,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// startup pass picks up whatever a crash or an outage left behind.
 	w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
 
-	mcpAuthorizer, mcpSrv := buildMCPConnector(cfg, st, kb, blobStore, log)
+	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
@@ -288,14 +298,19 @@ func isLocalBaseURL(raw string) bool {
 // use; the cost is that every token issued before a restart stops verifying
 // after one, which is unacceptable only in a real deployment (where the
 // operator is expected to set the env var).
-func buildMCPConnector(cfg *config.Config, st *store.Store, kb *kbstore.Store, blobStore blob.Store, log *slog.Logger) (*mcpauth.Authorizer, *mcpserver.Server) {
+func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Store, blobStore blob.Store, log *slog.Logger) (*mcpauth.Authorizer, *mcpserver.Server) {
 	key, err := mcpauth.NewSigningKeyFromSeed(cfg.MCPJWTSigningKey)
 	if err != nil {
 		log.Warn("MCP_JWT_SIGNING_KEY not set; using an ephemeral key for this process — issued MCP tokens will not survive a restart",
 			"reason", err.Error())
 		key = mcpauth.NewEphemeralSigningKey()
 	}
-	mcpStore := mcpauth.NewStore(st.Pool())
+	// Shares runServe's connection via dbx.Open's per-path refcounting, same
+	// as kb above — this is not a second pool against the same file.
+	mcpStore, err := mcpauth.NewStore(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fatal("mcpauth store", err)
+	}
 	authorizer := mcpauth.New(mcpStore, key, mcpauth.Config{
 		Issuer:            strings.TrimRight(cfg.APIBaseURL, "/"),
 		Audience:          cfg.MCPResourceURL(),
@@ -348,7 +363,11 @@ func runSeedKBDemo(ctx context.Context, cfg *config.Config, st *store.Store, log
 	if orgID == uuid.Nil {
 		fatal("seed-kb-demo", fmt.Errorf("no organization found — run the \"seed\" command first"))
 	}
-	kb := kbstore.New(st.Pool())
+	kb, err := kbstore.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fatal("seed-kb-demo", err)
+	}
+	defer kb.Close()
 	inserted, err := kb.SeedDemoKB(ctx, orgID)
 	if err != nil {
 		fatal("seed-kb-demo", err)
@@ -360,13 +379,15 @@ func runSeedKBDemo(ctx context.Context, cfg *config.Config, st *store.Store, log
 	log.Info("seed-kb-demo: demo KB content inserted", "org_id", orgID)
 }
 
+// runMigrate applies every pending migration and exits. Opening the store IS
+// the migration (store.New migrates on open), so this subcommand is now a way
+// to run migrations without starting the server — useful as a deploy step
+// before the first serve, and as a check that the schema is current. It stays
+// a distinct subcommand rather than being removed precisely because callers
+// (the Makefile, deploy scripts) treat "migrate then serve" as two steps.
 func runMigrate(cfg *config.Config, log *slog.Logger) {
-	ctx := context.Background()
 	st := mustStore(cfg, log)
 	defer st.Close()
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		fatal("migrate", err)
-	}
 	log.Info("migrations applied")
 }
 
