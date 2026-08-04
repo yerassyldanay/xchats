@@ -95,10 +95,9 @@ lid_jid, push_name`. For Telegram, `phone_number` is empty and `phone_jid`
 carries the Telegram numeric user id as a string — there is no phone number.
 
 **Message** (`MapMessage`): `id, chat_id, direction, sender_type,
-evolution_message_id, message_type, content, media, status, source,
-timestamp`. `evolution_message_id` is a legacy field name kept for
-compatibility — for a Telegram message it holds the Telegram message id, not
-an Evolution one.
+external_message_id, message_type, content, media, status, source,
+timestamp`. `external_message_id` is provider-neutral — for a Telegram
+message it holds the Telegram message id, for WhatsApp the whatsmeow message id.
 
 **Media** (each entry in a Message's `media[]`): `id, url, media_type,
 mimetype, file_name, file_size`.
@@ -225,7 +224,7 @@ In rough order of likelihood:
    DNS) or `http://localhost:...` (resolves to the container itself). It
    must be the public tunnel/domain in front of whatever reverse-proxies
    into the compose stack. A container log showing `dial tcp ...: connection
-   refused` for an *outbound* call (e.g. to Evolution, to the LLM provider)
-   is a different problem — that's the container failing to reach something
+   refused` for an *outbound* call (e.g. to WhatsApp's servers, to the LLM
+   provider) is a different problem — that's the container failing to reach something
    *it* calls out to, not Telegram failing to reach the container's inbound
    webhook; don't conflate the two when debugging.

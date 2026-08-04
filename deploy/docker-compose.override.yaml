@@ -12,11 +12,6 @@ services:
     ports: !override
       - "8090:8080"   # host 8080 is taken
     environment:
-      # The Evolution webhook UI has no custom-header field, so it can't echo the
-      # X-Webhook-Token xchats expects. Empty token => skip the header check and
-      # accept events (the URL's account_id is the only guard). Set a token +
-      # webhook header for production.
-      WEBHOOK_TOKEN: ""
       # The base file's default assumes the base port mapping (8080:8080); this
       # override republishes the backend on 8090, so the self-advertised
       # discovery origin has to follow. Still overridable from .env — set

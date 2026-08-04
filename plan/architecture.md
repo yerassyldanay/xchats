@@ -35,8 +35,8 @@ verification, webhook normalization, provider media download, outbound sending,
 delivery-status mapping, and provider capability checks. Provider payloads and
 identifiers stay in the adapter and channel-prefixed transport tables.
 
-WhatsApp uses Evolution and `wa_*`. Adding a number creates an Evolution
-instance, displays its QR, and idempotently materializes `wa_accounts` when the
+WhatsApp connects directly via `go.mau.fi/whatsmeow` and `wa_*`. Pairing a
+number displays its QR, and idempotently materializes `wa_accounts` when the
 connection event arrives. A future Instagram or Telegram adapter adds `ig_*` or
 `tg_*` transport state but reuses the shared inbox, knowledge, suggestion,
 approval, and audit paths.
