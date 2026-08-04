@@ -52,8 +52,8 @@ func TestLoadContract_ExcludesViews(t *testing.T) {
 			t.Fatalf("loadContract returned a view (%s) as if it were an importable base table", tbl.Name)
 		}
 	}
-	if len(tables) != 31 {
-		t.Fatalf("loadContract returned %d tables, want 31 (the schema's base table count as of this writing — if a migration legitimately added/removed a table, update this number)", len(tables))
+	if len(tables) != 32 {
+		t.Fatalf("loadContract returned %d tables, want 32 (the schema's base table count as of this writing — if a migration legitimately added/removed a table, update this number)", len(tables))
 	}
 }
 

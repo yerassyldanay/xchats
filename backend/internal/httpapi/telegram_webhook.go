@@ -19,8 +19,8 @@ import (
 // telegramSecretHeader is the header Telegram echoes back the secret_token in.
 const telegramSecretHeader = "X-Telegram-Bot-Api-Secret-Token"
 
-// handleTelegramWebhook is the Telegram ingress. Unlike the Evolution webhook it
-// does NOT enqueue-and-ack: the normalized rows are committed BEFORE the 200.
+// handleTelegramWebhook is the Telegram ingress. It does NOT enqueue-and-ack:
+// the normalized rows are committed BEFORE the 200.
 //
 // That is the entire at-least-once story. Telegram redelivers any update it
 // does not get a 2xx for, so:

@@ -15,8 +15,6 @@ CREATE TABLE wa_accounts (
     display_name            TEXT NOT NULL DEFAULT '',
     owner_jid               TEXT NOT NULL UNIQUE,
     phone_number            TEXT NOT NULL DEFAULT '',
-    evolution_instance_name TEXT NOT NULL DEFAULT '',
-    evolution_instance_id   TEXT NOT NULL DEFAULT '',
     connection_state        TEXT NOT NULL DEFAULT 'connected',
     last_live_event_at      TEXT,
     created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
@@ -25,6 +23,17 @@ CREATE TABLE wa_accounts (
     channel                 TEXT NOT NULL DEFAULT 'whatsapp' CHECK (channel IN ('whatsapp','simulator'))
 );
 CREATE INDEX wa_accounts_org_idx ON wa_accounts(organization_id) WHERE deleted_at IS NULL;
+
+-- wa_credentials maps a wa_accounts row to whatsmeow's own device session (kept
+-- in a SEPARATE SQLite file — whatsmeow's sqlstore manages its own schema there).
+-- This table only stores the mapping needed to reconnect a saved account after
+-- restart; keys/identity/session material never live here or in xchats.db.
+CREATE TABLE wa_credentials (
+    account_id  TEXT PRIMARY KEY NOT NULL REFERENCES wa_accounts(id) ON DELETE CASCADE,
+    device_jid  TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
+);
 
 CREATE TABLE wa_contacts (
     id           TEXT PRIMARY KEY NOT NULL DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab',abs(random()) % 4 + 1,1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6)))),
@@ -66,10 +75,10 @@ CREATE TABLE wa_messages (
     direction            TEXT NOT NULL,
     sender_kind          TEXT NOT NULL,
     sender_user_id       TEXT REFERENCES users(id) ON DELETE SET NULL,
-    -- nullable: a queued outbound row has no Evolution id until SendText
+    -- nullable: a queued outbound row has no provider id until the send
     -- returns. SQLite, like Postgres, treats NULL as distinct in a UNIQUE
     -- constraint, so many queued rows for the same account may coexist.
-    evolution_message_id TEXT,
+    external_message_id TEXT,
     participant_jid      TEXT NOT NULL DEFAULT '',
     message_kind         TEXT NOT NULL DEFAULT '',
     body                 TEXT NOT NULL DEFAULT '',
@@ -79,7 +88,7 @@ CREATE TABLE wa_messages (
     message_ts           TEXT,
     created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
     updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
-    UNIQUE (account_id, evolution_message_id)
+    UNIQUE (account_id, external_message_id)
 );
 CREATE INDEX wa_messages_chat_ts_idx ON wa_messages(chat_id, message_ts);
 
@@ -204,7 +213,6 @@ SELECT a.id,
     a.display_name,
     a.phone_number AS external_handle,
     a.owner_jid AS external_account_ref,
-    a.evolution_instance_name AS instance_name,
     a.connection_state,
     a.last_live_event_at,
     a.deleted_at,
@@ -221,7 +229,6 @@ SELECT t.id,
     t.display_name,
     ('@' || t.bot_username) AS external_handle,
     ('telegram:bot:' || CAST(t.bot_id AS TEXT)) AS external_account_ref,
-    '' AS instance_name,
     t.connection_state,
     t.last_live_event_at,
     t.deleted_at,
@@ -316,7 +323,7 @@ SELECT m.id,
     m.direction,
     m.sender_kind,
     m.sender_user_id,
-    COALESCE(m.evolution_message_id, '') AS external_message_id,
+    COALESCE(m.external_message_id, '') AS external_message_id,
     m.message_kind,
     m.body,
     m.delivery_state,

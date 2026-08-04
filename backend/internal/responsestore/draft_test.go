@@ -16,7 +16,7 @@ func TestDraftRepo_ReplaceSuggested_PersistsAndSupersedes(t *testing.T) {
 	res, err := st.UpsertInbound(ctx, store.InboundUpsert{
 		AccountID: accountID, PhoneJID: "77000000000@s.whatsapp.net", RemoteJID: "77000000000@s.whatsapp.net",
 		PhoneNumber: "77000000000", Direction: "in", SenderKind: "contact",
-		EvolutionMessageID: "TRIG1", MessageKind: "conversation", Body: "Привет", Source: "live_webhook",
+		ExternalMessageID: "TRIG1", MessageKind: "conversation", Body: "Привет", Source: "live_webhook",
 	})
 	if err != nil {
 		t.Fatalf("seed message: %v", err)

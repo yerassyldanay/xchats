@@ -11,7 +11,6 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -20,7 +19,6 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
-	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
@@ -30,6 +28,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
@@ -62,12 +61,11 @@ func (r fakeLLMRegistry) Client(ref llm.ModelRef) (llm.ChatClient, error) {
 }
 
 const (
-	ownerJID     = "77011111111@s.whatsapp.net"
-	customerJID  = "77000000000@s.whatsapp.net"
-	customerNum  = "77000000000"
-	webhookToken = "test-token"
-	adminEmail   = "admin@xchats.test"
-	adminPass    = "password123"
+	ownerJID    = "77011111111@s.whatsapp.net"
+	customerJID = "77000000000@s.whatsapp.net"
+	customerNum = "77000000000"
+	adminEmail  = "admin@xchats.test"
+	adminPass   = "password123"
 
 	// Telegram fixtures. The base URL must be https:// — the provisioning flow
 	// refuses anything else, because Telegram itself does.
@@ -77,10 +75,6 @@ const (
 	testBotUsername = "xchats_test_bot"
 	testBotToken    = "8123456789:AAH-test-token_never-logged"
 
-	// tgWebhookSecret is deliberately DIFFERENT from webhookToken: Telegram gets
-	// its own TG_WEBHOOK_SECRET, distinct from Evolution's shared WEBHOOK_TOKEN.
-	// Any code that resolves the wrong one fails these tests instead of passing
-	// by coincidence.
 	tgWebhookSecret = "tg-secret_distinct-1"
 )
 
@@ -89,7 +83,7 @@ type harness struct {
 	srv    *httptest.Server
 	client *http.Client
 	cfg    *config.Config
-	fake   *evolution.Fake
+	fake   *whatsapp.Fake
 	tg     *telegram.Fake
 	queue  *queue.InMem
 	store  *store.Store
@@ -133,7 +127,7 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	st, db := dbtest.Open(t)
 
 	cfg := &config.Config{
-		WebhookToken: webhookToken, SessionTTLHours: 1, MinPasswordLen: 8,
+		SessionTTLHours: 1, MinPasswordLen: 8,
 		PageSize: 50, CORSOrigins: []string{"*"}, SimulatorEnabled: true,
 		TelegramWebhookPublicBaseURL: telegramBaseURL,
 		TelegramWebhookSecret:        tgWebhookSecret,
@@ -160,7 +154,7 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	if _, err := st.SeedAccount(ctx, store.Account{
 		ID: accountID, OrganizationID: uuid.NullUUID{UUID: org.ID, Valid: true},
 		DisplayName: "WhatsApp", ExternalAccountRef: config.CanonicalJID(ownerJID),
-		ExternalHandle: config.PhoneFromJID(ownerJID), InstanceName: "xpayment", ConnectionState: "connected",
+		ExternalHandle: config.PhoneFromJID(ownerJID), ConnectionState: "connected",
 	}); err != nil {
 		t.Fatalf("seed account: %v", err)
 	}
@@ -184,7 +178,7 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	}
 	q := queue.NewInMem(256, 2, log)
 	hub := realtime.NewHub()
-	fake := evolution.NewFake("xpayment", ownerJID)
+	fake := whatsapp.NewFake(st, hub, q)
 
 	// Seed the org's live KB for response and structured draft tests. kb and
 	// kbRepo below open the same path st already holds, exactly as runServe
@@ -224,17 +218,17 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	}
 	tgFake := telegram.NewFake(testBotID, testBotUsername)
 	senders := messaging.NewSenderRegistry()
-	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(fake, blobStore))
+	senders.Register(messaging.ChannelWhatsApp, fake.ChannelSender())
 	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
 	senders.Register(messaging.ChannelTelegram, telegram.NewChannelSender(tgFake, st, blobStore))
 
-	w := &worker.Worker{Store: st, Queue: q, Evo: fake, TG: tgFake, Blob: blobStore, Hub: hub,
+	w := &worker.Worker{Store: st, Queue: q, TG: tgFake, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, Log: log}
 	q.Start(context.Background(), w.Handle)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, Evo: fake, TG: tgFake, KB: kb,
+		Response: responseService, WA: fake, TG: tgFake, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: org.ID, Log: log,
 	})
@@ -257,12 +251,36 @@ func (h *harness) login() {
 	}
 }
 
-func (h *harness) webhook(rawBody []byte) {
-	req, _ := http.NewRequest("POST", h.srv.URL+"/evolution/api/v1/webhook/"+h.accountID.String(), bytes.NewReader(rawBody))
-	req.Header.Set("X-Webhook-Token", webhookToken)
-	resp, err := h.client.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		h.t.Fatalf("webhook: %v status=%v", err, statusOf(resp))
+// inject feeds one synthetic WhatsApp message through the exact same
+// ingest path a real whatsmeow event (or a POST /debug/wa-event call) takes
+// — see whatsapp.Fake.InjectDebugEvent. senderJID is the customer's JID for
+// both an inbound message and the fromMe echo of our own send (the contact
+// identity never changes with direction — see internal/whatsmeow/jid.go).
+func (h *harness) inject(senderJID, externalID, text string, fromMe bool) (chatID, messageID string) {
+	return h.injectFor(h.accountID.String(), senderJID, externalID, text, fromMe)
+}
+
+// injectFor is inject, parameterized on the account — for multi-account tests.
+func (h *harness) injectFor(accountID, senderJID, externalID, text string, fromMe bool) (chatID, messageID string) {
+	res, err := h.fake.InjectDebugEvent(context.Background(), whatsapp.DebugEvent{
+		EventType: "message", AccountID: accountID, SenderJID: senderJID,
+		ExternalID: externalID, Text: text, IsFromMe: fromMe,
+	})
+	if err != nil {
+		h.t.Fatalf("inject message: %v", err)
+	}
+	h.queue.Wait()
+	return res.ChatID, res.MessageID
+}
+
+// injectReceipt advances the delivery ladder for externalID — receiptType is
+// "" (delivered), "read", or "played", matching whatsapp.DebugEvent's own
+// ReceiptType contract.
+func (h *harness) injectReceipt(externalID, receiptType string) {
+	if _, err := h.fake.InjectDebugEvent(context.Background(), whatsapp.DebugEvent{
+		EventType: "receipt", AccountID: h.accountID.String(), ExternalID: externalID, ReceiptType: receiptType,
+	}); err != nil {
+		h.t.Fatalf("inject receipt: %v", err)
 	}
 	h.queue.Wait()
 }
@@ -318,113 +336,38 @@ func (h *harness) patchJSON(path string, body any) (*http.Response, map[string]j
 	return resp, env
 }
 
-// --- fixtures + crafted events -------------------------------------------
-
-// capture reads a real recorded Evolution webhook body from this package's own
-// testdata.
-//
-// These fixtures used to live at plan/captures/samples/webhook_bodies/, three
-// levels up. PR #15 (commit ea916db) deleted that whole directory, which broke
-// TestDemoLoop and TestWebhookRejectsBadToken — silently, because the suite was
-// gated on DATABASE_URL and had been skipping ever since. Removing that gate
-// surfaced it. They live in testdata/ now: test fixtures belong to the package
-// that reads them, not to a documentation directory that can be reorganized
-// without anyone noticing a test went dark.
-func capture(t *testing.T, name string) []byte {
-	b, err := os.ReadFile(filepath.Join("testdata", "webhook_bodies", name))
-	if err != nil {
-		t.Fatalf("read capture: %v", err)
-	}
-	return b
-}
-
-func craftEcho(keyID, text string) []byte {
-	ev := map[string]any{
-		"event": "send.message", "instance": "xpayment", "sender": ownerJID,
-		"data": map[string]any{
-			"key":         map[string]any{"remoteJid": customerJID, "fromMe": true, "id": keyID},
-			"status":      "PENDING",
-			"message":     map[string]any{"conversation": text},
-			"messageType": "conversation", "messageTimestamp": 1781460000,
-		},
-	}
-	b, _ := json.Marshal(ev)
-	return b
-}
-
-func craftStatus(keyID, status string) []byte {
-	ev := map[string]any{
-		"event": "messages.update", "instance": "xpayment", "sender": ownerJID,
-		"data": map[string]any{"keyId": keyID, "remoteJid": "5200000000000@lid", "fromMe": true, "status": status},
-	}
-	b, _ := json.Marshal(ev)
-	return b
-}
-
 // --- the demo loop --------------------------------------------------------
 
 func TestDemoLoop(t *testing.T) {
 	h := newHarness(t)
 
 	// 1. inbound text appears, and survives a "refresh" (GET hydrates).
-	h.webhook(capture(t, "messages_upsert_text.json"))
+	h.inject(customerJID, "WA-TEXT-1", "привет от клиента", false)
 	chats := h.listChats()
 	if len(chats) != 1 {
 		t.Fatalf("want 1 chat, got %d", len(chats))
 	}
 	chatID := chats[0]["id"].(string)
 	msgs := h.listMessages(chatID)
-	if len(msgs) != 1 || msgs[0]["content"] != "[snapshot] webhook capture - text" {
+	if len(msgs) != 1 || msgs[0]["content"] != "привет от клиента" {
 		t.Fatalf("inbound text not stored: %v", msgs)
 	}
 	if msgs[0]["direction"] != "in" || msgs[0]["sender_type"] != "contact" {
 		t.Fatalf("wrong direction/sender: %v", msgs[0])
 	}
 
-	// 2. dedup: the SAME event delivered twice is a no-op.
-	h.webhook(capture(t, "messages_upsert_text.json"))
+	// 2. dedup: the SAME external id delivered twice is a no-op.
+	h.inject(customerJID, "WA-TEXT-1", "привет от клиента", false)
 	if got := len(h.listMessages(chatID)); got != 1 {
 		t.Fatalf("dedup failed: %d messages after replay", got)
 	}
 
-	// 3. inbound image → a media row appears (list of urls non-empty).
-	h.webhook(capture(t, "messages_upsert_image.json"))
-	msgs = h.listMessages(chatID)
-	var imageMsg map[string]any
-	for _, m := range msgs {
-		if m["message_type"] == "imageMessage" {
-			imageMsg = m
-		}
-	}
-	if imageMsg == nil {
-		t.Fatalf("image message missing")
-	}
-	mediaList, _ := imageMsg["media"].([]any)
-	if len(mediaList) == 0 {
-		t.Fatalf("image message has no media urls")
-	}
-	// the media URL streams real bytes (downloaded via the fake getBase64 fallback).
-	imgURL := mediaList[0].(map[string]any)["url"].(string)
-	if st, body := h.getBytes(imgURL); st != 200 || len(body) == 0 {
-		t.Fatalf("GET %s = %d, %d bytes", imgURL, st, len(body))
-	}
-	// the stub sample asset (a non-uuid blob id) also serves.
-	if st, body := h.getBytes("/xchats/api/v1/media/sample-image"); st != 200 || len(body) == 0 {
-		t.Fatalf("GET stub sample = %d, %d bytes", st, len(body))
-	}
-
-	// 4. send fan-out: text + 2 media → 2 outbound messages, each to the phone
+	// 3. send fan-out: text + 2 media → 2 outbound messages, each to the phone
 	// (not @lid). The text rides as the CAPTION of the first resolvable asset
 	// rather than becoming its own bubble — see sendParts in inbox.go, which
 	// does this deliberately "so the customer (and the inbox) see ONE message —
 	// image + caption — instead of a text bubble followed by an empty media
-	// bubble". So there is no standalone sendText call at all here.
-	//
-	// This block previously asserted 3 messages and 1 sendText, the pre-caption
-	// design. Test and handler were introduced in the same commit (2168220) and
-	// have contradicted each other ever since — invisibly, because this suite
-	// was gated on DATABASE_URL and skipped. The handler's behavior is the
-	// documented, shipped one, so the assertions follow it.
+	// bubble". So there is no standalone text-only send at all here.
 	m1 := h.upload("a.png", "image/png", []byte("\x89PNG\r\n\x1a\nfake"))
 	m2 := h.upload("b.pdf", "application/pdf", []byte("%PDF-1.4 fake"))
 	resp, env := h.postJSON("/xchats/api/v1/chats/"+chatID+"/messages",
@@ -437,52 +380,49 @@ func TestDemoLoop(t *testing.T) {
 	if len(sent.Items) != 2 {
 		t.Fatalf("fan-out: want 2 messages (caption + captionless), got %d", len(sent.Items))
 	}
-	if got := len(h.fake.CallsFor("sendText")); got != 0 {
-		t.Fatalf("want 0 sendText (the text is the first asset's caption), got %d", got)
+	if got := len(h.fake.TextCalls()); got != 0 {
+		t.Fatalf("want 0 text-only sends (the text is the first asset's caption), got %d", got)
 	}
-	if got := len(h.fake.CallsFor("sendMedia")); got != 2 {
-		t.Fatalf("want 2 sendMedia, got %d", got)
+	if got := len(h.fake.MediaCalls()); got != 2 {
+		t.Fatalf("want 2 media sends, got %d", got)
 	}
 	for _, call := range h.fake.Calls {
-		if call.Number != customerNum {
-			t.Fatalf("send went to %q, want the phone %q (not @lid)", call.Number, customerNum)
+		if call.To != customerNum {
+			t.Fatalf("send went to %q, want the phone %q (not @lid)", call.To, customerNum)
 		}
 	}
 
-	// the outbound text row was stamped with the gateway key id.
+	// the outbound text row was stamped with the provider's own message id.
 	stampedID := stampedKeyOf(t, h, chatID, "привет")
 
-	// 5. echo: the fromMe=true echo of our own send collapses onto the row — no dup.
+	// 4. echo: the fromMe=true echo of our own send collapses onto the row — no dup.
 	before := len(h.listMessages(chatID))
-	h.webhook(craftEcho(stampedID, "привет"))
+	h.inject(customerJID, stampedID, "привет", true)
 	if after := len(h.listMessages(chatID)); after != before {
 		t.Fatalf("echo created a duplicate bubble: %d -> %d", before, after)
 	}
 
-	// 6. status advances monotonically: delivered, then read, then a stale ack is ignored.
-	h.webhook(craftStatus(stampedID, "DELIVERY_ACK"))
+	// 5. status advances monotonically: delivered, then read, then a stale ack is ignored.
+	h.injectReceipt(stampedID, "")
 	if st := deliveryOf(t, h, chatID, stampedID); st != "delivered" {
-		t.Fatalf("status after DELIVERY_ACK = %q", st)
+		t.Fatalf("status after delivered receipt = %q", st)
 	}
-	h.webhook(craftStatus(stampedID, "READ"))
+	h.injectReceipt(stampedID, "read")
 	if st := deliveryOf(t, h, chatID, stampedID); st != "read" {
-		t.Fatalf("status after READ = %q", st)
+		t.Fatalf("status after read receipt = %q", st)
 	}
-	h.webhook(craftStatus(stampedID, "DELIVERY_ACK")) // backwards — must be ignored
+	h.injectReceipt(stampedID, "") // backwards — must be ignored
 	if st := deliveryOf(t, h, chatID, stampedID); st != "read" {
 		t.Fatalf("status regressed to %q (not monotonic)", st)
 	}
 
-	// 7. Suggest → one option; approve once sends as sender_type=ai; approve
+	// 6. Suggest → one option; approve once sends as sender_type=ai; approve
 	// again → 409.
 	//
-	// This asserted 3 options when it was written, matching internal/assistant's
-	// Stub.Draft ("three constant options"). That stub is now unreferenced dead
-	// code: the real engine is response.Service, whose DraftRepository
-	// ReplaceSuggested persists ONE suggested option per conversation and
-	// supersedes any prior — enforced in the schema by the partial unique index
-	// ai_drafts_pending_uq. One is the current, intended behavior.
-	sendTextBefore := len(h.fake.CallsFor("sendText"))
+	// response.Service's DraftRepository ReplaceSuggested persists ONE
+	// suggested option per conversation and supersedes any prior — enforced
+	// in the schema by the partial unique index ai_drafts_pending_uq.
+	sendTextBefore := len(h.fake.TextCalls())
 	h.postJSON("/xchats/api/v1/chats/"+chatID+"/ai-drafts", map[string]any{})
 	var drafts struct{ Items []map[string]any }
 	h.get("/xchats/api/v1/chats/"+chatID+"/ai-drafts", &drafts)
@@ -494,7 +434,7 @@ func TestDemoLoop(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("approve status %d", resp.StatusCode)
 	}
-	if got := len(h.fake.CallsFor("sendText")); got != sendTextBefore+1 {
+	if got := len(h.fake.TextCalls()); got != sendTextBefore+1 {
 		t.Fatalf("approve should have sent exactly one text; before=%d after=%d", sendTextBefore, got)
 	}
 	if !aiMessageExists(t, h, chatID) {
@@ -505,18 +445,8 @@ func TestDemoLoop(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("second approve status = %d, want 409", resp.StatusCode)
 	}
-	if got := len(h.fake.CallsFor("sendText")); got != sendTextBefore+1 {
+	if got := len(h.fake.TextCalls()); got != sendTextBefore+1 {
 		t.Fatalf("double approve double-sent: %d", got)
-	}
-}
-
-func TestWebhookRejectsBadToken(t *testing.T) {
-	h := newHarness(t)
-	req, _ := http.NewRequest("POST", h.srv.URL+"/evolution/api/v1/webhook/"+h.accountID.String(), bytes.NewReader(capture(t, "messages_upsert_text.json")))
-	req.Header.Set("X-Webhook-Token", "wrong")
-	resp, _ := h.client.Do(req)
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("bad token status = %d, want 401", resp.StatusCode)
 	}
 }
 
@@ -595,7 +525,7 @@ func mustPayload(t *testing.T, env map[string]json.RawMessage, out any) {
 func stampedKeyOf(t *testing.T, h *harness, chatID, text string) string {
 	for _, m := range h.listMessages(chatID) {
 		if m["content"] == text && m["direction"] == "out" {
-			if id, _ := m["evolution_message_id"].(string); id != "" {
+			if id, _ := m["external_message_id"].(string); id != "" {
 				return id
 			}
 		}
@@ -604,13 +534,13 @@ func stampedKeyOf(t *testing.T, h *harness, chatID, text string) string {
 	return ""
 }
 
-func deliveryOf(t *testing.T, h *harness, chatID, evID string) string {
+func deliveryOf(t *testing.T, h *harness, chatID, extID string) string {
 	for _, m := range h.listMessages(chatID) {
-		if m["evolution_message_id"] == evID {
+		if m["external_message_id"] == extID {
 			return m["status"].(string)
 		}
 	}
-	t.Fatalf("message %s not found", evID)
+	t.Fatalf("message %s not found", extID)
 	return ""
 }
 

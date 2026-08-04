@@ -23,11 +23,11 @@ func TestInMemDrainsAndSurvivesPanic(t *testing.T) {
 	})
 	ctx := context.Background()
 	for i := 0; i < 10; i++ {
-		_ = q.Publish(ctx, Message{Kind: KindWaEvent, Payload: i})
+		_ = q.Publish(ctx, Message{Kind: KindAIDraft, Payload: i})
 	}
-	_ = q.Publish(ctx, Message{Kind: KindWaEvent, Payload: "boom"})
+	_ = q.Publish(ctx, Message{Kind: KindAIDraft, Payload: "boom"})
 	for i := 0; i < 10; i++ {
-		_ = q.Publish(ctx, Message{Kind: KindWaEvent, Payload: i})
+		_ = q.Publish(ctx, Message{Kind: KindAIDraft, Payload: i})
 	}
 	q.Wait() // drain-and-assert
 	if got := processed.Load(); got != 20 {

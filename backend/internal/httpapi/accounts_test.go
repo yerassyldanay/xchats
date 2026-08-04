@@ -1,115 +1,166 @@
 package httpapi_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
-	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
-	"github.com/yerassyldanay/xchats/backend/internal/evolution"
+	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
 
 const (
-	sales2Instance = "sales2"
-	sales2Owner    = "77022222222@s.whatsapp.net" // evolution.Fake.NewOwnerJID
+	sales2Owner    = "77022222222@s.whatsapp.net"
 	sales2Customer = "77033333333@s.whatsapp.net"
 )
 
-// TestAccountsManager drives the Build 1 manager loop end-to-end against the fake
-// Evolution: add → QR → connected, the multi-account inbox, reconnect, clean
-// (soft-delete), and revive-on-re-add with history intact.
-func TestAccountsManager(t *testing.T) {
+// seedConnectedAccount adds a second live WhatsApp account directly (bypassing
+// the QR pairing flow, which internal/whatsmeow — not httpapi — now owns end
+// to end; see TestPairWhatsAppAccount for the pairing HTTP contract itself).
+func (h *harness) seedConnectedAccount(t *testing.T, ownerJID, displayName string) string {
+	t.Helper()
+	id := config.AccountID(ownerJID)
+	if _, err := h.store.UpsertConnectedAccount(context.Background(), store.Account{
+		ID:                 id,
+		OrganizationID:     uuid.NullUUID{UUID: h.orgID, Valid: true},
+		DisplayName:        displayName,
+		ExternalAccountRef: config.CanonicalJID(ownerJID),
+		ExternalHandle:     config.PhoneFromJID(ownerJID),
+		ConnectionState:    "connected",
+	}); err != nil {
+		t.Fatalf("seed connected account: %v", err)
+	}
+	return id.String()
+}
+
+// TestPairWhatsAppAccount drives the QR pairing HTTP contract: start ->
+// poll (qr_required, a rendered code) -> the phone finishes pairing
+// out-of-band (CompletePair stands in for that, since a real QR scan cannot
+// happen in a test) -> poll again (connected, with the account id).
+func TestPairWhatsAppAccount(t *testing.T) {
 	h := newHarness(t)
 
-	// 1. Add a second account: an instance is created on Evolution, no row yet.
-	resp, _ := h.postJSON("/xchats/api/v1/whatsapp-accounts",
-		map[string]any{"display_name": "Sales 2", "instance_name": sales2Instance})
+	resp, env := h.postJSON("/xchats/api/v1/wa-accounts/pair", map[string]any{})
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("add account status = %d", resp.StatusCode)
+		t.Fatalf("pair status = %d", resp.StatusCode)
 	}
-	if got := join(h.fake.Created); got != sales2Instance {
-		t.Fatalf("CreateInstance recorded %q, want %q", got, sales2Instance)
+	var started struct {
+		SessionID string `json:"session_id"`
+		Status    string `json:"status"`
 	}
-
-	// 2. Poll the QR → the fake reports "open" → the row is written/connected,
-	//    its id derived from the learned owner_jid.
-	var qr struct {
-		Status      string `json:"status"`
-		WaAccountID string `json:"wa_account_id"`
-	}
-	h.get("/xchats/api/v1/whatsapp-accounts/qr?instance="+sales2Instance, &qr)
-	if qr.Status != "connected" {
-		t.Fatalf("qr poll status = %q, want connected", qr.Status)
-	}
-	sales2ID := config.AccountID(sales2Owner).String()
-	if qr.WaAccountID != sales2ID {
-		t.Fatalf("connected account id = %q, want uuidv5(owner) %q", qr.WaAccountID, sales2ID)
+	mustPayload(t, env, &started)
+	if started.SessionID == "" || started.Status != "qr_required" {
+		t.Fatalf("pair response = %+v", started)
 	}
 
-	// 3. The accounts list now has both numbers, both connected (live status).
+	var poll struct {
+		Status   string `json:"status"`
+		QRCode   string `json:"qr_code"`
+		QRBase64 string `json:"qr_base64"`
+	}
+	h.get("/xchats/api/v1/wa-accounts/pair/"+started.SessionID, &poll)
+	if poll.Status != "qr_required" || poll.QRCode == "" || poll.QRBase64 == "" {
+		t.Fatalf("pair poll before scan = %+v", poll)
+	}
+
+	sales2ID := h.seedConnectedAccount(t, sales2Owner, "Sales 2")
+	h.fake.CompletePair(sales2ID)
+
+	var polled struct {
+		Status    string `json:"status"`
+		AccountID string `json:"account_id"`
+	}
+	h.get("/xchats/api/v1/wa-accounts/pair/"+started.SessionID, &polled)
+	if polled.Status != "connected" || polled.AccountID != sales2ID {
+		t.Fatalf("pair poll after scan = %+v, want connected/%s", polled, sales2ID)
+	}
+
+	// The newly paired account shows up in both the WhatsApp-only and the
+	// channel-neutral listings.
 	accts := h.listAccounts()
 	if len(accts) != 2 {
 		t.Fatalf("want 2 accounts, got %d", len(accts))
 	}
-	s2 := findAccount(accts, sales2Instance)
-	if s2 == nil || s2["connection_status"] != "connected" || s2["display_name"] != "Sales 2" {
-		t.Fatalf("sales2 not connected/named: %v", s2)
+	s2 := findAccountByHandle(accts, "77022222222")
+	if s2 == nil || s2["connection_status"] != "connected" {
+		t.Fatalf("sales2 not connected: %v", s2)
 	}
+}
 
-	// 4. Multi-account inbox: an inbound to sales2 shows up org-wide and is
-	//    filterable by account.
-	h.webhook(craftInbound(sales2Owner, sales2Customer, "S2MSG1", "привет от клиента"))
-	all := h.listChats()
-	if len(all) != 1 || all[0]["wa_account_id"] != sales2ID {
-		t.Fatalf("inbound to sales2 not in org inbox: %v", all)
+// TestPairStatusUnknownSession asserts polling a session id nobody started
+// (or one that has already expired out of the registry) is a 404, not a
+// zero-value 200 that would read as "still pending forever".
+func TestPairStatusUnknownSession(t *testing.T) {
+	h := newHarness(t)
+	resp, env := h.getRaw("/xchats/api/v1/wa-accounts/pair/" + uuid.NewString())
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
-	if got := len(h.listChatsFor(sales2ID)); got != 1 {
-		t.Fatalf("filter by sales2 = %d chats, want 1", got)
+	if errcodeOf(env) != "NOT_FOUND" {
+		t.Fatalf("errcode = %q, want NOT_FOUND", errcodeOf(env))
 	}
-	if got := len(h.listChatsFor(h.accountID.String())); got != 0 {
-		t.Fatalf("filter by xpayment = %d chats, want 0", got)
-	}
+}
 
-	// 5. Reconnect a broken session → a fresh QR is returned (same account row).
-	h.fake.ConnState = "close"
-	var rc struct {
-		Status string `json:"status"`
-		QRCode string `json:"qr_code"`
-	}
-	resp, renv := h.postJSON("/xchats/api/v1/whatsapp-accounts/"+sales2ID+"/reconnect", map[string]any{})
+// TestLogoutWhatsAppAccount disconnects an account without hiding it: the
+// row stays listed (status logged_out) so the same number can be re-paired.
+func TestLogoutWhatsAppAccount(t *testing.T) {
+	h := newHarness(t)
+
+	resp, _ := h.postJSON("/xchats/api/v1/wa-accounts/"+h.accountID.String()+"/logout", map[string]any{})
 	if resp.StatusCode != 200 {
-		t.Fatalf("reconnect status = %d", resp.StatusCode)
+		t.Fatalf("logout status = %d", resp.StatusCode)
 	}
-	mustPayload(t, renv, &rc)
-	if rc.Status != "qr_required" || rc.QRCode == "" {
-		t.Fatalf("reconnect did not return a QR: %+v", rc)
+	if len(h.fake.LoggedOut) != 1 || h.fake.LoggedOut[0] != h.accountID.String() {
+		t.Fatalf("manager.Logout not called for the right account: %v", h.fake.LoggedOut)
 	}
-	h.fake.ConnState = "open"
 
-	// 6. Clean: the instance is deleted on Evolution and the row soft-deleted —
-	//    it drops from the accounts list and its chats leave the inbox.
+	var status struct {
+		ConnectionState string `json:"connection_state"`
+	}
+	h.get("/xchats/api/v1/wa-accounts/"+h.accountID.String()+"/status", &status)
+	if status.ConnectionState != "logged_out" {
+		t.Fatalf("connection_state = %q, want logged_out", status.ConnectionState)
+	}
+
+	accts := h.listAccounts()
+	if len(accts) != 1 {
+		t.Fatalf("logged-out account should still be listed, got %d accounts", len(accts))
+	}
+}
+
+// TestDeleteWhatsAppAccount is a "clean": best-effort logout + soft-delete —
+// the row (and its chats) drop from the org's view, and re-adding the same
+// number later revives the SAME row (uuidv5(owner_jid)) with history intact.
+func TestDeleteWhatsAppAccount(t *testing.T) {
+	h := newHarness(t)
+	sales2ID := h.seedConnectedAccount(t, sales2Owner, "Sales 2")
+	h.injectFor(sales2ID, sales2Customer, "S2MSG1", "привет от клиента", false)
+
+	if got := len(h.listChatsFor(sales2ID)); got != 1 {
+		t.Fatalf("setup: want 1 chat for sales2, got %d", got)
+	}
+
 	st, _ := h.del("/xchats/api/v1/whatsapp-accounts/" + sales2ID)
 	if st != 200 {
 		t.Fatalf("delete account status = %d", st)
 	}
-	if !contains(h.fake.Deleted, sales2Instance) {
-		t.Fatalf("DeleteInstance not called for %q (got %v)", sales2Instance, h.fake.Deleted)
+	if len(h.fake.LoggedOut) != 1 || h.fake.LoggedOut[0] != sales2ID {
+		t.Fatalf("delete did not call manager.Logout for sales2: %v", h.fake.LoggedOut)
 	}
 	if len(h.listAccounts()) != 1 {
-		t.Fatalf("soft-deleted account still listed")
+		t.Fatal("soft-deleted account still listed")
 	}
-	if len(h.listChats()) != 0 {
-		t.Fatalf("soft-deleted account's chats still in the inbox")
+	if got := len(h.listChatsFor(sales2ID)); got != 0 {
+		t.Fatalf("soft-deleted account's chats still in the inbox: %d", got)
 	}
 
-	// 7. Revive: re-adding the same number lands on the SAME row (uuidv5(owner)),
-	//    so its history reappears intact.
-	h.postJSON("/xchats/api/v1/whatsapp-accounts",
-		map[string]any{"display_name": "Sales 2 again", "instance_name": sales2Instance})
-	h.get("/xchats/api/v1/whatsapp-accounts/qr?instance="+sales2Instance, &qr)
-	if qr.Status != "connected" || qr.WaAccountID != sales2ID {
-		t.Fatalf("revive did not reconnect the same id: %+v", qr)
+	// Revive: re-seeding the same owner_jid lands on the SAME row id, history intact.
+	revivedID := h.seedConnectedAccount(t, sales2Owner, "Sales 2 again")
+	if revivedID != sales2ID {
+		t.Fatalf("revive landed on a different id: %s vs %s", revivedID, sales2ID)
 	}
 	if got := len(h.listChatsFor(sales2ID)); got != 1 {
 		t.Fatalf("revived account lost its history: %d chats", got)
@@ -117,56 +168,21 @@ func TestAccountsManager(t *testing.T) {
 }
 
 // TestComposeRequiresAccountWhenMany asserts the "from number" guard: with more
-// than one connected account, composing without wa_account_id is a VALIDATION_ERROR.
+// than one connected account, composing without an account_id is a VALIDATION_ERROR.
 func TestComposeRequiresAccountWhenMany(t *testing.T) {
 	h := newHarness(t)
-	h.postJSON("/xchats/api/v1/whatsapp-accounts",
-		map[string]any{"display_name": "Sales 2", "instance_name": sales2Instance})
-	var qr struct {
-		WaAccountID string `json:"wa_account_id"`
-	}
-	h.get("/xchats/api/v1/whatsapp-accounts/qr?instance="+sales2Instance, &qr)
+	sales2ID := h.seedConnectedAccount(t, sales2Owner, "Sales 2")
 
 	resp, env := h.postJSON("/xchats/api/v1/chats",
 		map[string]any{"phone": "77044444444", "text": "hi"})
 	if resp.StatusCode != http.StatusBadRequest || errcodeOf(env) != "VALIDATION_ERROR" {
 		t.Fatalf("ambiguous compose status=%d errcode=%q, want 400 VALIDATION_ERROR", resp.StatusCode, errcodeOf(env))
 	}
-	// With an explicit wa_account_id it proceeds (the fake says the number exists).
+	// With an explicit account_id it proceeds.
 	resp, _ = h.postJSON("/xchats/api/v1/chats",
-		map[string]any{"phone": "77044444444", "text": "hi", "wa_account_id": qr.WaAccountID})
+		map[string]any{"phone": "77044444444", "text": "hi", "account_id": sales2ID})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("explicit-account compose status = %d, want 201", resp.StatusCode)
-	}
-}
-
-// TestInstancesMaintenance covers managed/stale flags and the managed-delete guard.
-func TestInstancesMaintenance(t *testing.T) {
-	h := newHarness(t)
-	// A stale stray instance Evolution still knows about (old + not connected).
-	h.fake.Instances = append(h.fake.Instances, instanceWithAge("strayold", "close", 30))
-
-	var out struct {
-		Items []map[string]any `json:"items"`
-	}
-	h.get("/xchats/api/v1/whatsapp-instances", &out)
-	xpay := findByName(out.Items, "xpayment")
-	stray := findByName(out.Items, "strayold")
-	if xpay == nil || xpay["managed"] != true {
-		t.Fatalf("seeded xpayment should be managed: %v", xpay)
-	}
-	if stray == nil || stray["managed"] != false || stray["stale"] != true {
-		t.Fatalf("strayold should be unmanaged + stale: %v", stray)
-	}
-
-	// Refuse to delete a managed instance (delete the account instead).
-	st, env := h.del("/xchats/api/v1/whatsapp-instances/xpayment")
-	if st != http.StatusConflict || errcodeOf(env) != "CONFLICT" {
-		t.Fatalf("delete managed instance status=%d errcode=%q, want 409 CONFLICT", st, errcodeOf(env))
-	}
-	// A stray instance deletes fine.
-	if st, _ := h.del("/xchats/api/v1/whatsapp-instances/strayold"); st != 200 {
-		t.Fatalf("delete stray status = %d", st)
 	}
 }
 
@@ -184,7 +200,7 @@ func (h *harness) listChatsFor(accountID string) []map[string]any {
 	var out struct {
 		Items []map[string]any `json:"items"`
 	}
-	h.get("/xchats/api/v1/chats?wa_account_id="+accountID, &out)
+	h.get("/xchats/api/v1/chats?account_id="+accountID, &out)
 	return out.Items
 }
 
@@ -200,42 +216,22 @@ func (h *harness) del(path string) (int, map[string]json.RawMessage) {
 	return resp.StatusCode, env
 }
 
-// craftInbound is an inbound (fromMe=false) text from a customer to the account
-// whose owner_jid is `owner` (the envelope top-level sender).
-func craftInbound(owner, customer, keyID, text string) []byte {
-	ev := map[string]any{
-		"event": "messages.upsert", "instance": "any", "sender": owner,
-		"data": map[string]any{
-			"key":              map[string]any{"remoteJid": customer, "remoteJidAlt": customer, "fromMe": false, "id": keyID},
-			"pushName":         "Клиент",
-			"message":          map[string]any{"conversation": text},
-			"messageType":      "conversation",
-			"messageTimestamp": 1781460000,
-		},
+// getRaw is like h.get but returns the raw response + envelope instead of
+// decoding into a caller-supplied shape, for asserting on non-2xx status.
+func (h *harness) getRaw(path string) (*http.Response, map[string]json.RawMessage) {
+	resp, err := h.client.Get(h.srv.URL + path)
+	if err != nil {
+		h.t.Fatalf("GET %s: %v", path, err)
 	}
-	b, _ := json.Marshal(ev)
-	return b
+	defer resp.Body.Close()
+	var env map[string]json.RawMessage
+	_ = json.NewDecoder(resp.Body).Decode(&env)
+	return resp, env
 }
 
-func instanceWithAge(name, status string, daysOld int) evolution.Instance {
-	return evolution.Instance{
-		Name: name, ConnectionStatus: status,
-		CreatedAt: time.Now().UTC().Add(-time.Duration(daysOld) * 24 * time.Hour),
-	}
-}
-
-func findAccount(items []map[string]any, instance string) map[string]any {
+func findAccountByHandle(items []map[string]any, handle string) map[string]any {
 	for _, it := range items {
-		if it["instance_name"] == instance {
-			return it
-		}
-	}
-	return nil
-}
-
-func findByName(items []map[string]any, name string) map[string]any {
-	for _, it := range items {
-		if it["name"] == name {
+		if it["phone_number"] == handle {
 			return it
 		}
 	}
@@ -246,20 +242,4 @@ func errcodeOf(env map[string]json.RawMessage) string {
 	var s string
 	_ = json.Unmarshal(env["errcode"], &s)
 	return s
-}
-
-func join(ss []string) string {
-	if len(ss) == 0 {
-		return ""
-	}
-	return ss[0]
-}
-
-func contains(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
