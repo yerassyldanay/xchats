@@ -5,38 +5,24 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
-	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
-// newTestAuthorizer resets the schema, migrates, seeds an org+user, and
-// returns a ready Authorizer — the same pattern kbstore_test.go's newTestKB
-// uses.
+// newTestAuthorizer opens a fresh, migrated SQLite database, seeds an
+// org+user, and returns a ready Authorizer — the same pattern
+// kbstore_test.go's newTestKB uses.
 func newTestAuthorizer(t *testing.T) (*mcpauth.Authorizer, uuid.UUID, uuid.UUID) {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping mcpauth DB test")
-	}
 	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	ms, st, _ := dbtest.NewMCPAuthStore(t)
+
 	org, err := st.SeedOrganization(ctx, "xchats")
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
@@ -45,9 +31,8 @@ func newTestAuthorizer(t *testing.T) (*mcpauth.Authorizer, uuid.UUID, uuid.UUID)
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	t.Cleanup(st.Close)
 
-	authz := mcpauth.New(mcpauth.NewStore(st.Pool()), mcpauth.NewEphemeralSigningKey(), mcpauth.Config{
+	authz := mcpauth.New(ms, mcpauth.NewEphemeralSigningKey(), mcpauth.Config{
 		Issuer: "https://xchats.kz/mcp", Audience: "https://xchats.kz/mcp",
 		AccessTokenTTL: time.Minute, RefreshTokenTTL: time.Hour, AuthCodeTTL: time.Minute,
 	})

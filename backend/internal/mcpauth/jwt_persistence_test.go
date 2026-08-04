@@ -36,7 +36,7 @@ func TestSigningKey_PersistentSeedSurvivesRestartAndMultipleReplicas(t *testing.
 
 	claims := mcpauth.Claims{
 		Issuer: "https://xchats.test", Audience: "https://xchats.test/mcp",
-		Subject: "11111111-1111-1111-1111-111111111111",
+		Subject:  "11111111-1111-1111-1111-111111111111",
 		IssuedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix(),
 		JTI: "persistence-check-jti",
 	}
@@ -64,7 +64,7 @@ func TestSigningKey_EphemeralKeysAreProcessLocal(t *testing.T) {
 
 	claims := mcpauth.Claims{
 		Issuer: "https://xchats.test", Audience: "https://xchats.test/mcp",
-		Subject: "11111111-1111-1111-1111-111111111111",
+		Subject:  "11111111-1111-1111-1111-111111111111",
 		IssuedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix(),
 		JTI: "ephemeral-check-jti",
 	}

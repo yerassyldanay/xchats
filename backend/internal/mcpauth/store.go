@@ -11,22 +11,39 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
+	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
 )
 
-// Store owns the four mcp_oauth_* tables (migration 0014) — client
+// Store owns the four mcp_oauth_* tables (migration 0005) — client
 // registrations, authorization codes, refresh tokens, and the access-token
-// denylist. It never touches xchats.users/organizations directly: resolving
+// denylist. It never touches users/organizations directly: resolving
 // "who is this user" and "does this user still belong to this org" is the
 // HTTP layer's job (internal/httpapi), composed with internal/store — see
 // Principal's doc comment.
 type Store struct {
-	pool *pgxpool.Pool
+	db *dbx.DB
 }
 
-// NewStore builds a Store over an existing pool.
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+// NewStore opens (or attaches to an already shared-by-path) dbPath and
+// returns a ready Store — see internal/store.New's doc comment for how the
+// persistence packages end up sharing one physical connection via
+// internal/dbx.Open.
+func NewStore(ctx context.Context, dbPath string) (*Store, error) {
+	db, err := dbx.Open(ctx, dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
+// Close releases this Store's reference to the pool.
+func (s *Store) Close() { _ = s.db.Close() }
 
 // ---------------------------------------------------------------------------
 // Clients — Dynamic Client Registration + Client ID Metadata Documents.
@@ -46,10 +63,10 @@ func (s *Store) RegisterClient(ctx context.Context, clientName string, redirectU
 		}
 	}
 	clientID := "dcr_" + randomID(16)
-	_, err := s.pool.Exec(ctx, `INSERT INTO xchats.mcp_oauth_clients
+	_, err := s.db.Exec(ctx, `INSERT INTO mcp_oauth_clients
 		(client_id, client_name, redirect_uris, registration_source, token_endpoint_auth_method)
 		VALUES ($1,$2,$3,'dcr','none')`,
-		clientID, clientName, redirectURIs)
+		clientID, clientName, dbx.StringArray(redirectURIs))
 	if err != nil {
 		return Client{}, fmt.Errorf("mcpauth: register client: %w", err)
 	}
@@ -66,7 +83,7 @@ func (s *Store) ResolveClient(ctx context.Context, clientID string, allowPrivate
 	if err == nil {
 		return c, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if !errors.Is(err, dbx.ErrNoRows) {
 		return Client{}, err
 	}
 	if !looksLikeCIMDClientID(clientID) {
@@ -76,12 +93,12 @@ func (s *Store) ResolveClient(ctx context.Context, clientID string, allowPrivate
 	if ferr != nil {
 		return Client{}, fmt.Errorf("%w: %s", ErrClientNotFound, ferr)
 	}
-	if _, err := s.pool.Exec(ctx, `INSERT INTO xchats.mcp_oauth_clients
+	if _, err := s.db.Exec(ctx, `INSERT INTO mcp_oauth_clients
 		(client_id, client_name, redirect_uris, registration_source, token_endpoint_auth_method)
 		VALUES ($1,$2,$3,'cimd','none')
 		ON CONFLICT (client_id) DO UPDATE SET
-			client_name=EXCLUDED.client_name, redirect_uris=EXCLUDED.redirect_uris, updated_at=now()`,
-		fetched.ClientID, fetched.ClientName, fetched.RedirectURIs); err != nil {
+			client_name=EXCLUDED.client_name, redirect_uris=EXCLUDED.redirect_uris, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+		fetched.ClientID, fetched.ClientName, dbx.StringArray(fetched.RedirectURIs)); err != nil {
 		return Client{}, fmt.Errorf("mcpauth: cache CIMD client: %w", err)
 	}
 	return fetched, nil
@@ -89,9 +106,9 @@ func (s *Store) ResolveClient(ctx context.Context, clientID string, allowPrivate
 
 func (s *Store) getClient(ctx context.Context, clientID string) (Client, error) {
 	var c Client
-	err := s.pool.QueryRow(ctx, `SELECT client_id, client_name, redirect_uris, registration_source
-		FROM xchats.mcp_oauth_clients WHERE client_id = $1`, clientID).
-		Scan(&c.ClientID, &c.ClientName, &c.RedirectURIs, &c.Source)
+	err := s.db.QueryRow(ctx, `SELECT client_id, client_name, redirect_uris, registration_source
+		FROM mcp_oauth_clients WHERE client_id = $1`, clientID).
+		Scan(&c.ClientID, &c.ClientName, (*dbx.StringArray)(&c.RedirectURIs), &c.Source)
 	return c, err
 }
 
@@ -118,7 +135,7 @@ type AuthorizationCodeInput struct {
 // raw code for the one redirect back to the client.
 func (s *Store) IssueAuthorizationCode(ctx context.Context, in AuthorizationCodeInput) (string, error) {
 	code := randomID(32)
-	_, err := s.pool.Exec(ctx, `INSERT INTO xchats.mcp_authorization_codes
+	_, err := s.db.Exec(ctx, `INSERT INTO mcp_authorization_codes
 		(code_hash, client_id, redirect_uri, code_challenge, code_challenge_method,
 		 user_id, organization_id, scope, resource, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
@@ -151,7 +168,7 @@ type authorizationCodeRow struct {
 // was bound there; omitting it is not an error (the code's own bound resource
 // still governs the minted token).
 func (s *Store) ConsumeAuthorizationCode(ctx context.Context, clientID, redirectURI, resource, code, codeVerifier string) (authorizationCodeRow, error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return authorizationCodeRow{}, err
 	}
@@ -162,10 +179,10 @@ func (s *Store) ConsumeAuthorizationCode(ctx context.Context, clientID, redirect
 	var consumedAt *time.Time
 	err = tx.QueryRow(ctx, `SELECT client_id, redirect_uri, code_challenge, code_challenge_method,
 		user_id, organization_id, scope, resource, expires_at, consumed_at
-		FROM xchats.mcp_authorization_codes WHERE code_hash = $1 FOR UPDATE`, sha256Hex(code)).
+		FROM mcp_authorization_codes WHERE code_hash = $1`, sha256Hex(code)).
 		Scan(&row.ClientID, &row.RedirectURI, &row.CodeChallenge, &row.CodeChallengeMethod,
 			&row.UserID, &row.OrganizationID, &row.Scope, &row.Resource, &expiresAt, &consumedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return authorizationCodeRow{}, ErrInvalidGrant
 	}
 	if err != nil {
@@ -179,7 +196,7 @@ func (s *Store) ConsumeAuthorizationCode(ctx context.Context, clientID, redirect
 	if !VerifyPKCE(codeVerifier, row.CodeChallenge, row.CodeChallengeMethod) {
 		return authorizationCodeRow{}, ErrInvalidGrant
 	}
-	if _, err := tx.Exec(ctx, `UPDATE xchats.mcp_authorization_codes SET consumed_at = now() WHERE code_hash = $1`,
+	if _, err := tx.Exec(ctx, `UPDATE mcp_authorization_codes SET consumed_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE code_hash = $1`,
 		sha256Hex(code)); err != nil {
 		return authorizationCodeRow{}, err
 	}
@@ -205,7 +222,7 @@ type refreshTokenRow struct {
 // value (only its hash is persisted).
 func (s *Store) IssueRefreshToken(ctx context.Context, clientID string, userID, orgID uuid.UUID, scope, resource string, ttl time.Duration) (string, error) {
 	token := randomID(32)
-	_, err := s.pool.Exec(ctx, `INSERT INTO xchats.mcp_refresh_tokens
+	_, err := s.db.Exec(ctx, `INSERT INTO mcp_refresh_tokens
 		(token_hash, client_id, user_id, organization_id, scope, resource, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		sha256Hex(token), clientID, userID, orgID, scope, resource, time.Now().Add(ttl))
@@ -220,7 +237,7 @@ func (s *Store) IssueRefreshToken(ctx context.Context, clientID string, userID, 
 // replacement — refresh token rotation, so a stolen-and-later-replayed old
 // token is detectably dead rather than silently still valid.
 func (s *Store) RotateRefreshToken(ctx context.Context, clientID, token string, newTTL time.Duration) (refreshTokenRow, string, error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return refreshTokenRow{}, "", err
 	}
@@ -230,9 +247,9 @@ func (s *Store) RotateRefreshToken(ctx context.Context, clientID, token string, 
 	var expiresAt time.Time
 	var revokedAt *time.Time
 	err = tx.QueryRow(ctx, `SELECT client_id, user_id, organization_id, scope, resource, expires_at, revoked_at
-		FROM xchats.mcp_refresh_tokens WHERE token_hash = $1 FOR UPDATE`, sha256Hex(token)).
+		FROM mcp_refresh_tokens WHERE token_hash = $1`, sha256Hex(token)).
 		Scan(&row.ClientID, &row.UserID, &row.OrganizationID, &row.Scope, &row.Resource, &expiresAt, &revokedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return refreshTokenRow{}, "", ErrInvalidRefreshToken
 	}
 	if err != nil {
@@ -243,11 +260,11 @@ func (s *Store) RotateRefreshToken(ctx context.Context, clientID, token string, 
 	}
 
 	newToken := randomID(32)
-	if _, err := tx.Exec(ctx, `UPDATE xchats.mcp_refresh_tokens SET revoked_at = now(), replaced_by = $2
+	if _, err := tx.Exec(ctx, `UPDATE mcp_refresh_tokens SET revoked_at = strftime('%Y-%m-%d %H:%M:%f','now'), replaced_by = $2
 		WHERE token_hash = $1`, sha256Hex(token), sha256Hex(newToken)); err != nil {
 		return refreshTokenRow{}, "", err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO xchats.mcp_refresh_tokens
+	if _, err := tx.Exec(ctx, `INSERT INTO mcp_refresh_tokens
 		(token_hash, client_id, user_id, organization_id, scope, resource, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		sha256Hex(newToken), row.ClientID, row.UserID, row.OrganizationID, row.Scope, row.Resource,
@@ -265,7 +282,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, clientID, token string, 
 // already revoked (RFC 7009 §2.2: revocation is idempotent and never signals
 // whether a token existed).
 func (s *Store) RevokeRefreshToken(ctx context.Context, token string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE xchats.mcp_refresh_tokens SET revoked_at = now()
+	_, err := s.db.Exec(ctx, `UPDATE mcp_refresh_tokens SET revoked_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE token_hash = $1 AND revoked_at IS NULL`, sha256Hex(token))
 	return err
 }
@@ -278,7 +295,7 @@ func (s *Store) RevokeRefreshToken(ctx context.Context, token string) error {
 // DenylistJTI records an early revocation; expiresAt should mirror the
 // token's own exp so a cleanup job can eventually prune the row.
 func (s *Store) DenylistJTI(ctx context.Context, jti string, expiresAt time.Time) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO xchats.mcp_access_token_denylist (jti, expires_at)
+	_, err := s.db.Exec(ctx, `INSERT INTO mcp_access_token_denylist (jti, expires_at)
 		VALUES ($1,$2) ON CONFLICT (jti) DO NOTHING`, jti, expiresAt)
 	return err
 }
@@ -287,7 +304,7 @@ func (s *Store) DenylistJTI(ctx context.Context, jti string, expiresAt time.Time
 // expiry.
 func (s *Store) IsJTIDenied(ctx context.Context, jti string) (bool, error) {
 	var exists bool
-	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM xchats.mcp_access_token_denylist WHERE jti = $1)`,
+	err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM mcp_access_token_denylist WHERE jti = $1)`,
 		jti).Scan(&exists)
 	return exists, err
 }
