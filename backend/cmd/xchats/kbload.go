@@ -135,7 +135,7 @@ func runKBLoad(cfg *config.Config, log *slog.Logger, args []string) {
 	if err != nil {
 		fatal("kb-load: resolve organization", err)
 	}
-	kb, err := kbstore.New(ctx, cfg.DatabaseURL)
+	kb, err := kbstore.New(ctx, cfg.DBPath)
 	if err != nil {
 		fatal("kb-load: open knowledge base", err)
 	}

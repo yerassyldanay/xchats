@@ -1,32 +1,13 @@
-# One-command stack: Postgres + xchats backend + xchats frontend.
+# One-command stack: xchats backend + xchats frontend (SQLite — no Postgres needed).
 # Evolution is REUSED (not bundled) — point EVOLUTION_BASE_URL at the running
 # instance (host.docker.internal:9700 reaches an Evolution on the host).
 services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: xchats
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d xchats"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
-
   backend:
     build:
       context: ../backend
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       HTTP_ADDR: ":8080"
-      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/xchats?sslmode=disable"
+      DB_PATH: "/data/xchats.db"
       BLOB_DIR: "/data/blob"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,http://localhost:8081}"
       # --- MCP connector (plan/mcp.md) ---
@@ -57,9 +38,6 @@ services:
       TG_WEBHOOK_SECRET: "${TG_WEBHOOK_SECRET:-}"
       TG_CREDENTIALS_ENC_KEY: "${TG_CREDENTIALS_ENC_KEY:-}"
       SESSION_SECRET: "${SESSION_SECRET:-change-me-random}"
-      SECURE_COOKIES: "false"
-      SEED_ADMIN_EMAIL: "${SEED_ADMIN_EMAIL:-admin@example.com}"
-      SEED_ADMIN_PASSWORD: "${SEED_ADMIN_PASSWORD:-change-me-strong-password}"
       WA_OWNER_JID: "${WA_OWNER_JID:-}"
       # Legacy brain/playground config — those packages stay compiled but are no
       # longer constructed by main.go; kept only for internal/kbstore consumers.
@@ -90,6 +68,7 @@ services:
       - "8080:8080"
     volumes:
       - blobdata:/data/blob
+      - sqlitedata:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -102,5 +81,5 @@ services:
       - "8081:80"
 
 volumes:
-  pgdata:
   blobdata:
+  sqlitedata:

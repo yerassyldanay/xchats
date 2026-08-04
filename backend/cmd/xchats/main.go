@@ -132,7 +132,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// Opening the same path mustStore already opened is deliberate and cheap:
 	// internal/dbx.Open refcounts one connection per path, so kb shares st's
 	// connection rather than racing a second one against the same file.
-	kb, err := kbstore.New(ctx, cfg.DatabaseURL)
+	kb, err := kbstore.New(ctx, cfg.DBPath)
 	if err != nil {
 		fatal("kbstore", err)
 	}
@@ -155,7 +155,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// response engine's hot path (every customer reply) and GET /kb/prompt
 	// (the /knowledge-base "Промпт" tab) both read through it, so the tab is
 	// never a second, possibly-divergent rendering of the same data.
-	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.DatabaseURL)
+	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.DBPath)
 	if err != nil {
 		fatal("kb repo", err)
 	}
@@ -307,7 +307,7 @@ func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Stor
 	}
 	// Shares runServe's connection via dbx.Open's per-path refcounting, same
 	// as kb above — this is not a second pool against the same file.
-	mcpStore, err := mcpauth.NewStore(ctx, cfg.DatabaseURL)
+	mcpStore, err := mcpauth.NewStore(ctx, cfg.DBPath)
 	if err != nil {
 		fatal("mcpauth store", err)
 	}
@@ -363,7 +363,7 @@ func runSeedKBDemo(ctx context.Context, cfg *config.Config, st *store.Store, log
 	if orgID == uuid.Nil {
 		fatal("seed-kb-demo", fmt.Errorf("no organization found — run the \"seed\" command first"))
 	}
-	kb, err := kbstore.New(ctx, cfg.DatabaseURL)
+	kb, err := kbstore.New(ctx, cfg.DBPath)
 	if err != nil {
 		fatal("seed-kb-demo", err)
 	}
@@ -406,21 +406,13 @@ func runWebhookSet(cfg *config.Config, log *slog.Logger) {
 	log.Info("webhook registered", "url", url)
 }
 
-// seed upserts the org, admin user, and the single pre-connected account; returns
-// the derived account id.
+// seed resolves the seeded org and the single pre-connected WA account.
+// Admin user credentials are created by migration 0006_init_admin — no
+// boot-time user creation is performed here.
 func seed(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) (accountID uuid.UUID) {
 	org, err := st.SeedOrganization(ctx, cfg.OrgName)
 	if err != nil {
 		fatal("seed org", err)
-	}
-	if cfg.SeedAdminEmail != "" && cfg.SeedAdminPassword != "" {
-		hash, herr := httpapi.HashPassword(cfg.SeedAdminPassword)
-		if herr != nil {
-			fatal("hash admin", herr)
-		}
-		if _, err := st.SeedUser(ctx, org.ID, strings.TrimSpace(cfg.SeedAdminEmail), hash, "Admin"); err != nil {
-			fatal("seed user", err)
-		}
 	}
 	ownerJID := resolveOwnerJID(ctx, cfg, log)
 	if ownerJID == "" {
@@ -474,10 +466,10 @@ func resolveOwnerJID(ctx context.Context, cfg *config.Config, log *slog.Logger) 
 // --- small helpers --------------------------------------------------------
 
 func mustStore(cfg *config.Config, log *slog.Logger) *store.Store {
-	if cfg.DatabaseURL == "" {
-		fatal("config", errString("DATABASE_URL is required"))
+	if cfg.DBPath == "" {
+		fatal("config", errString("DB_PATH is required"))
 	}
-	st, err := store.New(context.Background(), cfg.DatabaseURL)
+	st, err := store.New(context.Background(), cfg.DBPath)
 	if err != nil {
 		fatal("connect db", err)
 	}

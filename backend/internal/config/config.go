@@ -79,7 +79,7 @@ type Config struct {
 	MCPReviewHandoffTTLSeconds int `yaml:"mcp_review_handoff_ttl_seconds" env:"MCP_REVIEW_HANDOFF_TTL_SECONDS"`
 
 	// --- secrets (.env only) ---
-	DatabaseURL          string `env:"DATABASE_URL"`
+	DBPath                string `env:"DB_PATH"`
 	EvolutionBaseURL     string `env:"EVOLUTION_BASE_URL"`
 	EvolutionAPIKey      string `env:"EVOLUTION_API_KEY"`
 	EvolutionInstance    string `yaml:"evolution_instance" env:"EVOLUTION_INSTANCE"`
@@ -161,12 +161,14 @@ type Config struct {
 	LangfuseSecretKey       string `env:"LANGFUSE_SECRET_KEY"`
 	LangfuseFlushIntervalMS int    `env:"LANGFUSE_FLUSH_INTERVAL_MS"` // span batch timeout; 0 → OTel default
 
-	// --- seed + account identity (config.yaml, secrets via env) ---
+	// --- seed + account identity (config.yaml, overridable by env) ---
+	// SeedAdminEmail and SeedAdminPassword are intentionally removed: the
+	// initial admin user (admin@xchat.kz) is created by migration
+	// 0006_init_admin.up.sql with a precomputed argon2id hash. No boot-time
+	// seeding is performed.
 	OrgName              string `yaml:"org_name" env:"ORG_NAME"`
 	WaAccountDisplayName string `yaml:"wa_account_display_name"`
 	WaOwnerJID           string `yaml:"wa_owner_jid" env:"WA_OWNER_JID"`
-	SeedAdminEmail       string `yaml:"seed_admin_email" env:"SEED_ADMIN_EMAIL"`
-	SeedAdminPassword    string `yaml:"seed_admin_password" env:"SEED_ADMIN_PASSWORD"`
 
 	PageSize int `yaml:"page_size"`
 }
