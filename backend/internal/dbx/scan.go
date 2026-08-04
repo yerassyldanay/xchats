@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+// Scanner is satisfied by both *Row and *Rows — for helpers that scan one
+// row's columns regardless of whether it came from QueryRow or mid-loop from
+// a Query's *Rows (mirroring pgx.Row, an interface pgx.Rows also satisfies;
+// dbx.Row and dbx.Rows are distinct concrete types instead, so callers that
+// need to accept either — e.g. a scan helper shared between a single-row
+// lookup and a list query's loop — take Scanner rather than either concrete
+// type).
+type Scanner interface {
+	Scan(dest ...any) error
+}
+
 // Row wraps *sql.Row. Its only extra behavior over the stdlib type is
 // Scan's time-awareness — see timeTarget.
 type Row struct {

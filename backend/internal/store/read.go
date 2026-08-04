@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
 // ChatFilter holds the inbox list filters. Build 1 scopes the inbox to an org
@@ -80,14 +81,14 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 			" OR c.external_contact_ref LIKE $"+i+")")
 	}
 	clause := strings.Join(where, " AND ")
-	const from = `xchats.inbox_chats_v c`
+	const from = `inbox_chats_v c`
 
 	args = append(args, f.Limit, f.Offset)
 	q := `SELECT ` + chatCols + ` FROM ` + from + `
 		WHERE ` + clause + `
 		ORDER BY c.last_message_at DESC NULLS LAST
 		LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
-	rows, err := s.pool.Query(ctx, q, args...)
+	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -101,16 +102,16 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 		out = append(out, c)
 	}
 	var total int
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM `+from+` WHERE `+clause, args[:len(args)-2]...).Scan(&total)
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM `+from+` WHERE `+clause, args[:len(args)-2]...).Scan(&total)
 	return out, total, rows.Err()
 }
 
 // ChatByID returns a chat with its contact, on any channel.
 func (s *Store) ChatByID(ctx context.Context, id uuid.UUID) (Chat, error) {
 	var c Chat
-	err := s.pool.QueryRow(ctx, `SELECT `+chatCols+`
-		FROM xchats.inbox_chats_v c WHERE c.id = $1`, id).Scan(scanChatDst(&c)...)
-	if errors.Is(err, pgx.ErrNoRows) {
+	err := s.db.QueryRow(ctx, `SELECT `+chatCols+`
+		FROM inbox_chats_v c WHERE c.id = $1`, id).Scan(scanChatDst(&c)...)
+	if errors.Is(err, dbx.ErrNoRows) {
 		return c, ErrNotFound
 	}
 	return c, err
@@ -121,11 +122,11 @@ func (s *Store) ChatByID(ctx context.Context, id uuid.UUID) (Chat, error) {
 // otherwise (a cross-org id is indistinguishable from a missing one).
 func (s *Store) ChatByIDForOrg(ctx context.Context, id, orgID uuid.UUID) (Chat, error) {
 	var c Chat
-	err := s.pool.QueryRow(ctx, `SELECT `+chatCols+`
-		FROM xchats.inbox_chats_v c
+	err := s.db.QueryRow(ctx, `SELECT `+chatCols+`
+		FROM inbox_chats_v c
 		WHERE c.id = $1 AND c.organization_id = $2 AND c.account_deleted_at IS NULL`, id, orgID).
 		Scan(scanChatDst(&c)...)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return c, ErrNotFound
 	}
 	return c, err
@@ -143,8 +144,8 @@ func (s *Store) MarkChatRead(ctx context.Context, id uuid.UUID) (Chat, error) {
 	if err != nil {
 		return Chat{}, err
 	}
-	if _, err := s.pool.Exec(ctx,
-		`UPDATE `+table+` SET unread_count = 0, updated_at = now() WHERE id = $1`, id); err != nil {
+	if _, err := s.db.Exec(ctx,
+		`UPDATE `+table+` SET unread_count = 0, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, id); err != nil {
 		return Chat{}, err
 	}
 	chat.UnreadCount = 0
@@ -166,8 +167,8 @@ func (s *Store) AssignChat(ctx context.Context, id uuid.UUID, assignee uuid.Null
 	if assignee.Valid {
 		value = assignee.UUID
 	}
-	if _, err := s.pool.Exec(ctx,
-		`UPDATE `+table+` SET assignee_user_id = $2, updated_at = now() WHERE id = $1`, id, value); err != nil {
+	if _, err := s.db.Exec(ctx,
+		`UPDATE `+table+` SET assignee_user_id = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, id, value); err != nil {
 		return Chat{}, err
 	}
 	return s.ChatByID(ctx, id)
@@ -183,9 +184,9 @@ func (s *Store) MessagesForChat(ctx context.Context, chatID uuid.UUID, before ti
 	if before.IsZero() {
 		beforeArg = nil
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+messageCols+`
-		FROM xchats.inbox_messages_v
-		WHERE chat_id = $1 AND ($2::timestamptz IS NULL OR message_ts < $2)
+	rows, err := s.db.Query(ctx, `SELECT `+messageCols+`
+		FROM inbox_messages_v
+		WHERE chat_id = $1 AND ($2 IS NULL OR message_ts < $2)
 		ORDER BY message_ts DESC, id DESC
 		LIMIT $3`, chatID, beforeArg, limit+1)
 	if err != nil {
@@ -237,10 +238,10 @@ func scanMessageDst(m *Message) []any {
 // MessageByID returns one message with media (used for send responses + SSE).
 func (s *Store) MessageByID(ctx context.Context, id uuid.UUID) (Message, error) {
 	var m Message
-	err := s.pool.QueryRow(ctx, `SELECT `+messageCols+`
-		FROM xchats.inbox_messages_v WHERE id = $1`, id).
+	err := s.db.QueryRow(ctx, `SELECT `+messageCols+`
+		FROM inbox_messages_v WHERE id = $1`, id).
 		Scan(scanMessageDst(&m)...)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return m, ErrNotFound
 	}
 	if err != nil {
@@ -263,9 +264,13 @@ func (s *Store) attachMedia(ctx context.Context, msgs []Message) error {
 		ids[i] = m.ID
 		idx[m.ID] = i
 	}
-	rows, err := s.pool.Query(ctx, `
+	// = ANY($1) -> IN (SELECT value FROM json_each($1)), binding the id list
+	// as a dbx.UUIDArray (JSON array in TEXT) — see the per-PG-ism table.
+	rows, err := s.db.Query(ctx, `
 		SELECT message_id, id, media_type, mimetype, filename, size
-		FROM xchats.inbox_message_media_v WHERE message_id = ANY($1) ORDER BY created_at`, ids)
+		FROM inbox_message_media_v
+		WHERE message_id IN (SELECT value FROM json_each($1))
+		ORDER BY created_at`, dbx.UUIDArray(ids))
 	if err != nil {
 		return err
 	}
@@ -317,13 +322,13 @@ func (s *Store) WriteDraftSet(ctx context.Context, channel string, chatID uuid.U
 	if channel == "" {
 		channel = "whatsapp"
 	}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `
-		UPDATE xchats.ai_drafts SET draft_state='superseded', updated_at=now()
+		UPDATE ai_drafts SET draft_state='superseded', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE chat_id = $1 AND draft_state='suggested'`, chatID); err != nil {
 		return nil, err
 	}
@@ -331,7 +336,7 @@ func (s *Store) WriteDraftSet(ctx context.Context, channel string, chatID uuid.U
 	for _, o := range opts {
 		var d Draft
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO xchats.ai_drafts (chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, confidence, escalate, escalation_reason, draft_state)
+			INSERT INTO ai_drafts (chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, confidence, escalate, escalation_reason, draft_state)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'suggested')
 			RETURNING id, chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at`,
 			chatID, channel, trigger, o.Ordinal, o.Text, o.ReplyLanguage, o.Confidence, o.Escalate, o.EscalationReason).
@@ -350,17 +355,17 @@ func (s *Store) WriteDraftSet(ctx context.Context, channel string, chatID uuid.U
 // supersede semantics make a rare double-generation harmless).
 func (s *Store) HasDraftForTrigger(ctx context.Context, triggerMessageID uuid.UUID) (bool, error) {
 	var exists bool
-	err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM xchats.ai_drafts WHERE trigger_message_id = $1)`, triggerMessageID).
+	err := s.db.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM ai_drafts WHERE trigger_message_id = $1)`, triggerMessageID).
 		Scan(&exists)
 	return exists, err
 }
 
 // PendingDrafts returns the chat's suggested options.
 func (s *Store) PendingDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT `+draftCols+`
-		FROM xchats.ai_drafts WHERE chat_id = $1 AND draft_state='suggested'
+		FROM ai_drafts WHERE chat_id = $1 AND draft_state='suggested'
 		ORDER BY option_ordinal`, chatID)
 	if err != nil {
 		return nil, err
@@ -383,11 +388,11 @@ func (s *Store) PendingDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, e
 // DraftByID loads one draft.
 func (s *Store) DraftByID(ctx context.Context, id uuid.UUID) (Draft, error) {
 	var d Draft
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT `+draftCols+`
-		FROM xchats.ai_drafts WHERE id = $1`, id).
+		FROM ai_drafts WHERE id = $1`, id).
 		Scan(scanDraftDst(&d)...)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return d, ErrNotFound
 	}
 	if err != nil {
@@ -400,25 +405,25 @@ func (s *Store) DraftByID(ctx context.Context, id uuid.UUID) (Draft, error) {
 // 'sent' and supersedes its siblings, atomically. ErrNotFound means the guard lost
 // (already approved or superseded) — the caller classifies via DraftByID.
 func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Draft{}, err
 	}
 	defer tx.Rollback(ctx)
 	var d Draft
 	err = tx.QueryRow(ctx, `
-		UPDATE xchats.ai_drafts SET draft_state='sent', updated_at=now()
+		UPDATE ai_drafts SET draft_state='sent', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE id = $1 AND draft_state='suggested'
 		RETURNING `+draftCols+``,
 		draftID).Scan(scanDraftDst(&d)...)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return d, ErrNotFound
 	}
 	if err != nil {
 		return d, err
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE xchats.ai_drafts SET draft_state='superseded', updated_at=now()
+		UPDATE ai_drafts SET draft_state='superseded', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE chat_id = $1 AND id <> $2 AND draft_state='suggested'`, d.ChatID, draftID); err != nil {
 		return d, err
 	}
@@ -430,13 +435,13 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 
 // SetDraftSent records the message a draft actually produced.
 func (s *Store) SetDraftSent(ctx context.Context, draftID, sentMessageID uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `UPDATE xchats.ai_drafts SET sent_message_id = $2, updated_at = now() WHERE id = $1`, draftID, sentMessageID)
+	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET sent_message_id = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, draftID, sentMessageID)
 	return err
 }
 
 // ReopenDraft puts a claimed draft back to suggested (used when the send fails).
 func (s *Store) ReopenDraft(ctx context.Context, draftID uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `UPDATE xchats.ai_drafts SET draft_state='suggested', updated_at=now() WHERE id=$1`, draftID)
+	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET draft_state='suggested', updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE id=$1`, draftID)
 	return err
 }
 
@@ -444,10 +449,10 @@ func (s *Store) ReopenDraft(ctx context.Context, draftID uuid.UUID) error {
 // trigger the stub answers).
 func (s *Store) LatestInboundMessageID(ctx context.Context, chatID uuid.UUID) (uuid.NullUUID, error) {
 	var id uuid.NullUUID
-	err := s.pool.QueryRow(ctx, `
-		SELECT id FROM xchats.inbox_messages_v WHERE chat_id = $1 AND direction='in'
+	err := s.db.QueryRow(ctx, `
+		SELECT id FROM inbox_messages_v WHERE chat_id = $1 AND direction='in'
 		ORDER BY message_ts DESC NULLS LAST, created_at DESC LIMIT 1`, chatID).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return id, nil
 	}
 	return id, err

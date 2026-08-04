@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
@@ -105,8 +106,7 @@ func seedThreeChannels(t *testing.T, st *store.Store) (orgID, waChat, simChat, t
 // inbox must contain all three channels' conversations, each labelled, with the
 // simulator NOT lost to a stray channel filter on the WhatsApp leg.
 func TestInboxViewsCarryEveryChannel(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 	orgID, waChat, simChat, tgChat := seedThreeChannels(t, st)
 
@@ -159,8 +159,7 @@ func TestInboxViewsCarryEveryChannel(t *testing.T) {
 }
 
 func TestChatByIDAndOrgGuardSpanChannels(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 	orgID, waChat, _, tgChat := seedThreeChannels(t, st)
 
@@ -174,11 +173,11 @@ func TestChatByIDAndOrgGuardSpanChannels(t *testing.T) {
 	}
 
 	// A different organization must not see either chat.
-	var otherOrg uuid.UUID
-	if err := st.Pool().QueryRow(ctx,
-		`INSERT INTO xchats.organizations (name) VALUES ('views-other') RETURNING id`).Scan(&otherOrg); err != nil {
+	other, err := st.SeedOrganization(ctx, "views-other")
+	if err != nil {
 		t.Fatalf("seed other org: %v", err)
 	}
+	otherOrg := other.ID
 	for _, id := range []uuid.UUID{waChat, tgChat} {
 		if _, err := st.ChatByIDForOrg(ctx, id, otherOrg); err != store.ErrNotFound {
 			t.Fatalf("cross-org read of %s returned %v, want ErrNotFound", id, err)
@@ -192,8 +191,7 @@ func TestChatByIDAndOrgGuardSpanChannels(t *testing.T) {
 // A soft-deleted account's chats drop out of the inbox on EVERY channel — the
 // view carries the owning account's deleted_at for exactly this.
 func TestSoftDeletedAccountsHideTheirChatsOnEveryChannel(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 	orgID, _, _, tgChat := seedThreeChannels(t, st)
 
@@ -222,8 +220,7 @@ func TestSoftDeletedAccountsHideTheirChatsOnEveryChannel(t *testing.T) {
 }
 
 func TestAccountListingsSplitNeutralFromWhatsAppOnly(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 	orgID, _, _, tgChat := seedThreeChannels(t, st)
 
@@ -276,8 +273,7 @@ func TestAccountListingsSplitNeutralFromWhatsAppOnly(t *testing.T) {
 }
 
 func TestMessagesAndDraftsAreChannelAware(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 	_, waChat, _, tgChat := seedThreeChannels(t, st)
 
@@ -323,8 +319,7 @@ func TestMessagesAndDraftsAreChannelAware(t *testing.T) {
 }
 
 func TestMarkChatReadDispatchesByChannel(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 	_, waChat, _, tgChat := seedThreeChannels(t, st)
 
@@ -355,8 +350,7 @@ func TestMarkChatReadDispatchesByChannel(t *testing.T) {
 }
 
 func TestAssignChatDispatchesByChannelAndCanClear(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 	orgID, waChat, _, tgChat := seedThreeChannels(t, st)
 	user, err := st.SeedUser(ctx, orgID, "assignee@example.com", "hash", "Assignee")
@@ -385,8 +379,7 @@ func TestAssignChatDispatchesByChannelAndCanClear(t *testing.T) {
 // A re-claim of the same bot by the same org must revive the row (and its
 // history) rather than create a second account.
 func TestClaimTelegramAccountRevivesTheSameRow(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 	orgID, _, _, tgChat := seedThreeChannels(t, st)
 
@@ -440,8 +433,7 @@ func TestClaimTelegramAccountRevivesTheSameRow(t *testing.T) {
 // Without an encryption key, credential paths must fail loudly rather than
 // storing a plaintext token.
 func TestTelegramCredentialsRequireAnEncryptionKey(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st, db := dbtest.Open(t)
 	ctx := context.Background()
 
 	org, err := st.SeedOrganization(ctx, "no-key-org")
@@ -456,7 +448,7 @@ func TestTelegramCredentialsRequireAnEncryptionKey(t *testing.T) {
 		t.Fatalf("claim without a key = %v, want ErrNoCredentialsKey", err)
 	}
 	var n int
-	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.tg_accounts`).Scan(&n); err != nil {
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM tg_accounts`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {

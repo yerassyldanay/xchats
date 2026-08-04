@@ -2,36 +2,13 @@ package store_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
-	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"github.com/yerassyldanay/xchats/backend/migrations"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 )
 
-func newTestStoreForSimulator(t *testing.T) (*store.Store, func()) {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping store DB test")
-	}
-	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return st, st.Close
-}
-
 func TestGetOrCreateSimulatorAccount_IdempotentPerOrg(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 
 	org, err := st.SeedOrganization(ctx, "sim-org")
@@ -60,8 +37,7 @@ func TestGetOrCreateSimulatorAccount_IdempotentPerOrg(t *testing.T) {
 }
 
 func TestGetOrCreateSimulatorAccount_DistinctPerOrg(t *testing.T) {
-	st, closeFn := newTestStoreForSimulator(t)
-	defer closeFn()
+	st := dbtest.New(t)
 	ctx := context.Background()
 
 	org1, err := st.SeedOrganization(ctx, "sim-org-1")
