@@ -23,6 +23,11 @@ var persistenceBoundary = map[string]bool{
 	modulePrefix + "internal/responsestore": true,
 	modulePrefix + "internal/mcpauth":       true,
 	modulePrefix + "internal/dbtest":        true,
+	// dbops is durability tooling (backup/restore/integrity-check), not a
+	// repository package — but it is the one other place in this module
+	// that legitimately holds a *dbx.DB and runs raw SQL against it, so it
+	// belongs on this list too.
+	modulePrefix + "internal/dbops": true,
 }
 
 const dbxImportPath = modulePrefix + "internal/dbx"

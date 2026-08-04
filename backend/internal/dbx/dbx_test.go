@@ -2,6 +2,8 @@ package dbx
 
 import (
 	"context"
+	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -143,6 +145,152 @@ func TestSingleProcessLock(t *testing.T) {
 	}
 	if !IsSingleProcessLockErr(err) {
 		t.Errorf("Open error = %v, want IsSingleProcessLockErr", err)
+	}
+}
+
+// TestLockPathMatchesOpensActualLockFile pins LockPath to Open's own,
+// unexported lock-file naming: external tooling (internal/dbops) that needs
+// to probe or hold the same exclusion Open enforces must compute the exact
+// same path Open itself locks, not a close approximation.
+func TestLockPathMatchesOpensActualLockFile(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sub", "test.db")
+
+	want, err := LockPath(path)
+	if err != nil {
+		t.Fatalf("LockPath: %v", err)
+	}
+	if _, err := os.Stat(want); !os.IsNotExist(err) {
+		t.Fatalf("sanity: lock file should not exist before Open, stat err = %v", err)
+	}
+
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("LockPath(%q) = %q, but Open did not create a lock file there: %v", path, want, err)
+	}
+}
+
+func TestLockPathResolvesRelativePaths(t *testing.T) {
+	rel := filepath.Join(t.TempDir(), "x.db")
+	abs1, err := LockPath(rel)
+	if err != nil {
+		t.Fatalf("LockPath: %v", err)
+	}
+	if !filepath.IsAbs(abs1) {
+		t.Fatalf("LockPath(%q) = %q, want an absolute path", rel, abs1)
+	}
+	if abs1 != rel+".lock" {
+		t.Fatalf("LockPath(%q) = %q, want %q", rel, abs1, rel+".lock")
+	}
+}
+
+// TestOpenReadOnlyDoesNotMutateJournalMode pins the exact regression
+// OpenReadOnly exists to avoid: connecting to a plain rollback-journal-mode
+// file with Open's own DSN (journal_mode=WAL in a _pragma param) silently
+// upgrades that file to WAL mode as a side effect of Ping alone, with no
+// write ever explicitly requested — verified empirically before this
+// function existed. A file OpenReadOnly has inspected must come back out
+// byte-for-byte the same journal mode it went in as.
+func TestOpenReadOnlyDoesNotMutateJournalMode(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "plain.db")
+
+	// A plain (non-WAL) database, the shape VACUUM INTO produces.
+	plain, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := plain.ExecContext(ctx, `CREATE TABLE t (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	var before string
+	if err := plain.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&before); err != nil {
+		t.Fatalf("journal_mode before: %v", err)
+	}
+	if err := plain.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if before != "delete" {
+		t.Fatalf("sanity: fresh db journal_mode = %q, want delete", before)
+	}
+
+	ro, err := OpenReadOnly(ctx, path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	if _, err := ro.Query(ctx, `PRAGMA integrity_check`); err != nil {
+		t.Fatalf("integrity_check via OpenReadOnly: %v", err)
+	}
+	if err := ro.Close(); err != nil {
+		t.Fatalf("close read-only handle: %v", err)
+	}
+	if _, err := os.Stat(path + "-wal"); !os.IsNotExist(err) {
+		t.Fatalf("a -wal side file appeared after OpenReadOnly: stat err = %v", err)
+	}
+
+	after, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer after.Close()
+	var got string
+	if err := after.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&got); err != nil {
+		t.Fatalf("journal_mode after: %v", err)
+	}
+	if got != "delete" {
+		t.Fatalf("journal_mode after OpenReadOnly = %q, want unchanged %q", got, before)
+	}
+}
+
+func TestOpenReadOnlyFailsForMissingFile(t *testing.T) {
+	_, err := OpenReadOnly(context.Background(), filepath.Join(t.TempDir(), "nope.db"))
+	if err == nil {
+		t.Fatal("OpenReadOnly of a nonexistent file unexpectedly succeeded")
+	}
+}
+
+func TestOpenReadOnlyFailsForNonSQLiteFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "garbage.db")
+	if err := os.WriteFile(path, []byte("not a sqlite file"), 0o644); err != nil {
+		t.Fatalf("write garbage file: %v", err)
+	}
+	_, err := OpenReadOnly(context.Background(), path)
+	if err == nil {
+		t.Fatal("OpenReadOnly of a non-SQLite file unexpectedly succeeded")
+	}
+}
+
+// TestOpenReadOnlyRejectsWrites is a narrower, in-process confirmation of
+// the same read-only guarantee OpenReadOnly's doc comment relies on:
+// whatever the destination file's actual content, a write through this
+// handle must fail, never silently succeed.
+func TestOpenReadOnlyRejectsWrites(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "ro-write.db")
+
+	seed, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := seed.Exec(ctx, `CREATE TABLE t (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close seed handle: %v", err)
+	}
+
+	ro, err := OpenReadOnly(ctx, path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer ro.Close()
+	if _, err := ro.Exec(ctx, `INSERT INTO t (id) VALUES (1)`); err == nil {
+		t.Fatal("write through a read-only handle unexpectedly succeeded")
 	}
 }
 
