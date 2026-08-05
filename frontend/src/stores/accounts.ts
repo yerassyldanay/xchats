@@ -2,21 +2,13 @@ import { defineStore } from 'pinia'
 import { api } from '../api/client'
 import type {
   Account,
-  EvolutionInstance,
-  QrResponse,
+  WaPairSession,
+  WaPairStatus,
   TelegramAccountResponse,
 } from '../types'
 
 interface ListAccounts {
   items: Account[]
-}
-interface ListInstances {
-  items: EvolutionInstance[]
-}
-interface CreateResp {
-  instance_name: string
-  display_name: string
-  connection_status: string
 }
 
 // useAccounts is the channels manager. The list is channel-neutral (GET
@@ -26,7 +18,6 @@ interface CreateResp {
 export const useAccounts = defineStore('accounts', {
   state: () => ({
     accounts: [] as Account[],
-    instances: [] as EvolutionInstance[],
     loading: false,
   }),
   getters: {
@@ -50,18 +41,12 @@ export const useAccounts = defineStore('accounts', {
       }
     },
 
-    // --- WhatsApp (QR lifecycle) ------------------------------------------
-    create(displayName: string, instanceName: string) {
-      return api.post<CreateResp>('/whatsapp-accounts', {
-        display_name: displayName,
-        instance_name: instanceName,
-      })
+    // --- WhatsApp (QR pairing lifecycle, via internal/whatsmeow) -----------
+    pair() {
+      return api.post<WaPairSession>('/wa-accounts/pair', {})
     },
-    pollQR(instance: string) {
-      return api.get<QrResponse>('/whatsapp-accounts/qr?instance=' + encodeURIComponent(instance))
-    },
-    reconnect(id: string) {
-      return api.post<QrResponse>(`/whatsapp-accounts/${id}/reconnect`)
+    pairStatus(sessionId: string) {
+      return api.get<WaPairStatus>(`/wa-accounts/pair/${encodeURIComponent(sessionId)}`)
     },
 
     // --- Telegram (bot-token lifecycle) -----------------------------------
@@ -94,21 +79,13 @@ export const useAccounts = defineStore('accounts', {
 
     // --- shared ------------------------------------------------------------
     // remove routes to the channel's own delete: each tears down a different
-    // provider-side registration (an Evolution instance vs. a Telegram webhook).
+    // provider-side registration (a whatsmeow logout + soft-delete vs. a
+    // Telegram webhook teardown).
     async remove(id: string) {
       const channel = this.accounts.find((a) => a.id === id)?.channel
       const path = channel === 'telegram' ? '/telegram-accounts/' : '/whatsapp-accounts/'
       await api.del(path + id)
       await this.load()
-    },
-
-    async loadInstances() {
-      const p = await api.get<ListInstances>('/whatsapp-instances')
-      this.instances = p.items
-    },
-    async deleteInstance(name: string) {
-      await api.del(`/whatsapp-instances/${encodeURIComponent(name)}`)
-      await this.loadInstances()
     },
   },
 })

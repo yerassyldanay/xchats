@@ -44,7 +44,7 @@ export interface Message {
   chat_id: string
   direction: 'in' | 'out'
   sender_type: string
-  evolution_message_id: string
+  external_message_id: string
   message_type: string
   content: string
   media: Media[]
@@ -54,9 +54,8 @@ export interface Message {
 }
 export interface WhatsAppAccount {
   id: string
-  instance_name: string
   display_name: string
-  connection_status: string // connecting | qr_required | connected | disconnected | error
+  connection_status: string // connected | disconnected | logged_out
   assigned: boolean
   owner_jid: string
   phone_number: string
@@ -67,18 +66,17 @@ export interface WhatsAppAccount {
 // Account is the channel-neutral shape GET /accounts returns — one list for
 // every channel. external_handle is the phone number for WhatsApp and
 // "@botname" for Telegram; the webhook_* fields are Telegram health and stay
-// null everywhere else, as instance_name does for Telegram.
+// null everywhere else.
 export interface Account {
   id: string
   channel: ChannelName
   display_name: string
   external_handle: string
-  // whatsapp: connecting | qr_required | connected | disconnected
+  // whatsapp: connected | disconnected | logged_out
   // telegram: connecting | connected | webhook_error | token_error
   //         | disconnect_pending | disconnect_error | disconnected
   connection_state: string
   assigned: boolean
-  instance_name: string
   last_live_event_at: string | null
   created_at: string | null
   webhook_url: string | null
@@ -95,22 +93,20 @@ export interface TelegramAccountResponse {
   pending_update_count?: number
   expected_webhook_url?: string
 }
-export interface QrResponse {
-  status: string // qr_required | connecting | connected
+// WaPairSession is POST /wa-accounts/pair's response: a session id to poll
+// via GET /wa-accounts/pair/:session_id.
+export interface WaPairSession {
+  session_id: string
+  status: string // qr_required
+}
+// WaPairStatus is one poll's result. account_id is only set once status is
+// "connected"; qr_code/qr_base64 refresh on every new code whatsmeow issues.
+export interface WaPairStatus {
+  status: string // qr_required | connected | timeout | error
   qr_code?: string | null
   qr_base64?: string | null
-  pairing_code?: string | null
-  wa_account_id?: string
-  instance_name?: string
-}
-export interface EvolutionInstance {
-  name: string
-  connection_status: string
-  owner_jid: string
-  phone_number: string
-  created_at: string | null
-  managed: boolean
-  stale: boolean
+  account_id?: string
+  message?: string
 }
 export interface AiDraft {
   id: string

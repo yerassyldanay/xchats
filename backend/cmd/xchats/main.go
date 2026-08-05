@@ -1,6 +1,6 @@
 // Command xchats is the xchats backend: API edge + webhook ingress + in-process
 // workers + the multichannel response service. Subcommands: serve (default),
-// migrate, webhook-set, seed, seed-kb-demo.
+// migrate, webhook-set, seed, seed-kb-demo, simulate-message, kb-load.
 package main
 
 import (
@@ -20,7 +20,6 @@ import (
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
-	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
@@ -34,14 +33,12 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsmeow"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
-
-const webhookTokenHeader = "X-Webhook-Token"
 
 // Telegram media sweep cadence. The retry delay is what keeps a permanently
 // broken file_id from becoming a hot loop; the batch bounds one pass.
@@ -80,8 +77,6 @@ func main() {
 		st := mustStore(cfg, log)
 		defer st.Close()
 		runSeedKBDemo(context.Background(), cfg, st, log)
-	case "webhook-set":
-		runWebhookSet(cfg, log)
 	case "simulate-message":
 		runSimulateMessage(flag.Args()[1:])
 	case "kb-load":
@@ -117,12 +112,12 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		}
 	}
 
+	// mustStore -> store.New already applies every pending migration on open
+	// (see internal/store.New's doc comment), so there is no separate migrate
+	// step here any more.
 	st := mustStore(cfg, log)
 	defer st.Close()
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		fatal("migrate", err)
-	}
-	accountID := seed(ctx, cfg, st, log)
+	seed(ctx, cfg, st, log)
 	orgID := seededOrgID(ctx, cfg, st, log)
 
 	// kb (internal/kbstore) is unrelated to the response service's own KB loader
@@ -130,7 +125,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// structured draft editor at /playground. No demo/seed content is
 	// written here: SeedLiveIfEmpty(brain.SeedSnapshot()) is intentionally not
 	// called — migration 0008 is the only source of temporary demo KB data.
-	kb := kbstore.New(st.Pool())
+	// Opening the same path mustStore already opened is deliberate and cheap:
+	// internal/dbx.Open refcounts one connection per path, so kb shares st's
+	// connection rather than racing a second one against the same file.
+	kb, err := kbstore.New(ctx, cfg.DBPath)
+	if err != nil {
+		fatal("kbstore", err)
+	}
+	defer kb.Close()
 
 	blobStore, err := blob.NewDisk(cfg.BlobDir)
 	if err != nil {
@@ -149,7 +151,11 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// response engine's hot path (every customer reply) and GET /kb/prompt
 	// (the /knowledge-base "Промпт" tab) both read through it, so the tab is
 	// never a second, possibly-divergent rendering of the same data.
-	cachedKB := responsestore.NewCachedKBRepo(&responsestore.KnowledgeBaseRepo{Pool: st.Pool()})
+	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.DBPath)
+	if err != nil {
+		fatal("kb repo", err)
+	}
+	cachedKB := responsestore.NewCachedKBRepo(kbRepo)
 	responseService := &response.Service{
 		Conversations: &responsestore.ConversationRepo{Store: st},
 		KnowledgeBase: cachedKB,
@@ -161,7 +167,6 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	q := queue.NewInMem(2048, cfg.QueueWorkers, log)
 	hub := realtime.NewHub()
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
 	tg := telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
 
 	// Credentials at rest. Without a key the Telegram lifecycle refuses to store
@@ -175,13 +180,26 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		log.Info("credentials encryption enabled", "key_version", secretbox.KeyVersion)
 	}
 
+	waMgr, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
+		DeviceDBPath: cfg.WADeviceDBPath,
+		Store:        st,
+		Blob:         blobStore,
+		Queue:        q,
+		Hub:          hub,
+		Log:          log,
+	})
+	if err != nil {
+		fatal("whatsmeow", err)
+	}
+	defer waMgr.Close()
+
 	senders := messaging.NewSenderRegistry()
-	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(evo, blobStore))
+	senders.Register(messaging.ChannelWhatsApp, waMgr.ChannelSender())
 	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
 	senders.Register(messaging.ChannelTelegram, telegram.NewChannelSender(tg, st, blobStore))
 
 	w := &worker.Worker{
-		Store: st, Queue: q, Evo: evo, TG: tg, Blob: blobStore, Hub: hub,
+		Store: st, Queue: q, TG: tg, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, Log: log,
 	}
 	q.Start(ctx, w.Handle)
@@ -189,12 +207,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// row — the durable work item that replaces an inbound-event table. The
 	// startup pass picks up whatever a crash or an outage left behind.
 	w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
+	// Reconnects every saved WhatsApp account without re-scanning a QR code.
+	go waMgr.Start(ctx)
 
-	mcpAuthorizer, mcpSrv := buildMCPConnector(cfg, st, kb, blobStore, log)
+	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, Evo: evo, TG: tg, KB: kb,
+		Response: responseService, WA: waMgr, TG: tg, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
@@ -202,7 +222,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
 
 	go func() {
-		log.Info("backend listening", "addr", cfg.HTTPAddr, "account_id", accountID)
+		log.Info("backend listening", "addr", cfg.HTTPAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fatal("listen", err)
 		}
@@ -288,14 +308,19 @@ func isLocalBaseURL(raw string) bool {
 // use; the cost is that every token issued before a restart stops verifying
 // after one, which is unacceptable only in a real deployment (where the
 // operator is expected to set the env var).
-func buildMCPConnector(cfg *config.Config, st *store.Store, kb *kbstore.Store, blobStore blob.Store, log *slog.Logger) (*mcpauth.Authorizer, *mcpserver.Server) {
+func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Store, blobStore blob.Store, log *slog.Logger) (*mcpauth.Authorizer, *mcpserver.Server) {
 	key, err := mcpauth.NewSigningKeyFromSeed(cfg.MCPJWTSigningKey)
 	if err != nil {
 		log.Warn("MCP_JWT_SIGNING_KEY not set; using an ephemeral key for this process — issued MCP tokens will not survive a restart",
 			"reason", err.Error())
 		key = mcpauth.NewEphemeralSigningKey()
 	}
-	mcpStore := mcpauth.NewStore(st.Pool())
+	// Shares runServe's connection via dbx.Open's per-path refcounting, same
+	// as kb above — this is not a second pool against the same file.
+	mcpStore, err := mcpauth.NewStore(ctx, cfg.DBPath)
+	if err != nil {
+		fatal("mcpauth store", err)
+	}
 	authorizer := mcpauth.New(mcpStore, key, mcpauth.Config{
 		Issuer:            strings.TrimRight(cfg.APIBaseURL, "/"),
 		Audience:          cfg.MCPResourceURL(),
@@ -348,7 +373,11 @@ func runSeedKBDemo(ctx context.Context, cfg *config.Config, st *store.Store, log
 	if orgID == uuid.Nil {
 		fatal("seed-kb-demo", fmt.Errorf("no organization found — run the \"seed\" command first"))
 	}
-	kb := kbstore.New(st.Pool())
+	kb, err := kbstore.New(ctx, cfg.DBPath)
+	if err != nil {
+		fatal("seed-kb-demo", err)
+	}
+	defer kb.Close()
 	inserted, err := kb.SeedDemoKB(ctx, orgID)
 	if err != nil {
 		fatal("seed-kb-demo", err)
@@ -360,103 +389,37 @@ func runSeedKBDemo(ctx context.Context, cfg *config.Config, st *store.Store, log
 	log.Info("seed-kb-demo: demo KB content inserted", "org_id", orgID)
 }
 
+// runMigrate applies every pending migration and exits. Opening the store IS
+// the migration (store.New migrates on open), so this subcommand is now a way
+// to run migrations without starting the server — useful as a deploy step
+// before the first serve, and as a check that the schema is current. It stays
+// a distinct subcommand rather than being removed precisely because callers
+// (the Makefile, deploy scripts) treat "migrate then serve" as two steps.
 func runMigrate(cfg *config.Config, log *slog.Logger) {
-	ctx := context.Background()
 	st := mustStore(cfg, log)
 	defer st.Close()
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		fatal("migrate", err)
-	}
 	log.Info("migrations applied")
 }
 
-func runWebhookSet(cfg *config.Config, log *slog.Logger) {
-	ctx := context.Background()
-	ownerJID := resolveOwnerJID(ctx, cfg, log)
-	if ownerJID == "" {
-		fatal("webhook-set", errString("owner_jid unknown — set wa_owner_jid"))
-	}
-	accountID := config.AccountID(ownerJID)
-	url := strings.TrimRight(cfg.WebhookPublicBaseURL, "/") + "/evolution/api/v1/webhook/" + accountID.String()
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
-	if err := evo.SetWebhook(ctx, cfg.EvolutionInstance, url, webhookTokenHeader, cfg.WebhookToken, evolution.WebhookEvents); err != nil {
-		fatal("set webhook", err)
-	}
-	log.Info("webhook registered", "url", url)
-}
-
-// seed upserts the org, admin user, and the single pre-connected account; returns
-// the derived account id.
-func seed(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) (accountID uuid.UUID) {
-	org, err := st.SeedOrganization(ctx, cfg.OrgName)
-	if err != nil {
+// seed ensures the configured organization exists. WhatsApp accounts are no
+// longer pre-configured or seeded here — they are paired dynamically via the
+// UI (internal/whatsmeow), so the derived account id only ever comes into
+// existence once a phone actually completes pairing. Admin user credentials
+// are created by migration 0006_init_admin — no boot-time user creation is
+// performed here either.
+func seed(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) {
+	if _, err := st.SeedOrganization(ctx, cfg.OrgName); err != nil {
 		fatal("seed org", err)
 	}
-	if cfg.SeedAdminEmail != "" && cfg.SeedAdminPassword != "" {
-		hash, herr := httpapi.HashPassword(cfg.SeedAdminPassword)
-		if herr != nil {
-			fatal("hash admin", herr)
-		}
-		if _, err := st.SeedUser(ctx, org.ID, strings.TrimSpace(cfg.SeedAdminEmail), hash, "Admin"); err != nil {
-			fatal("seed user", err)
-		}
-	}
-	ownerJID := resolveOwnerJID(ctx, cfg, log)
-	if ownerJID == "" {
-		log.Warn("no owner_jid — account not seeded (set wa_owner_jid)")
-		return accountID
-	}
-	id := config.AccountID(ownerJID)
-	acct, err := st.SeedAccount(ctx, store.Account{
-		ID:                 id,
-		OrganizationID:     nullUUID(org.ID),
-		DisplayName:        orDefault(cfg.WaAccountDisplayName, "WhatsApp"),
-		ExternalAccountRef: config.CanonicalJID(ownerJID),
-		ExternalHandle:     config.PhoneFromJID(config.CanonicalJID(ownerJID)),
-		InstanceName:       cfg.EvolutionInstance,
-		ConnectionState:    "connected",
-	})
-	if err != nil {
-		fatal("seed account", err)
-	}
-	log.Info("account seeded", "id", acct.ID, "owner_jid", acct.ExternalAccountRef)
-	return acct.ID
-}
-
-// resolveOwnerJID prefers config; otherwise learns it once from FetchInstances.
-func resolveOwnerJID(ctx context.Context, cfg *config.Config, log *slog.Logger) string {
-	if cfg.WaOwnerJID != "" {
-		return cfg.WaOwnerJID
-	}
-	if cfg.EvolutionBaseURL == "" || cfg.EvolutionAPIKey == "" {
-		return ""
-	}
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
-	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	insts, err := evo.FetchInstances(cctx)
-	if err != nil {
-		log.Warn("fetchInstances failed", "err", err)
-		return ""
-	}
-	for _, in := range insts {
-		if in.Name == cfg.EvolutionInstance && in.OwnerJID != "" {
-			return in.OwnerJID
-		}
-	}
-	if len(insts) == 1 {
-		return insts[0].OwnerJID
-	}
-	return ""
 }
 
 // --- small helpers --------------------------------------------------------
 
 func mustStore(cfg *config.Config, log *slog.Logger) *store.Store {
-	if cfg.DatabaseURL == "" {
-		fatal("config", errString("DATABASE_URL is required"))
+	if cfg.DBPath == "" {
+		fatal("config", errString("DB_PATH is required"))
 	}
-	st, err := store.New(context.Background(), cfg.DatabaseURL)
+	st, err := store.New(context.Background(), cfg.DBPath)
 	if err != nil {
 		fatal("connect db", err)
 	}
@@ -490,8 +453,6 @@ func orDefault(v, def string) string {
 	}
 	return v
 }
-
-func nullUUID(u uuid.UUID) uuid.NullUUID { return uuid.NullUUID{UUID: u, Valid: true} }
 
 func fatal(msg string, err error) {
 	slog.Error(msg, "err", err)

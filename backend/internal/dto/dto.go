@@ -63,18 +63,18 @@ type Media struct {
 
 // Message is the API message shape.
 type Message struct {
-	ID                 string  `json:"id"`
-	ChatID             string  `json:"chat_id"`
-	Direction          string  `json:"direction"`
-	SenderType         string  `json:"sender_type"`
-	SenderUserID       *string `json:"sender_user_id"`
-	EvolutionMessageID string  `json:"evolution_message_id"`
-	MessageType        string  `json:"message_type"`
-	Content            string  `json:"content"`
-	Media              []Media `json:"media"`
-	Status             string  `json:"status"`
-	Source             string  `json:"source"`
-	Timestamp          *string `json:"timestamp"`
+	ID                string  `json:"id"`
+	ChatID            string  `json:"chat_id"`
+	Direction         string  `json:"direction"`
+	SenderType        string  `json:"sender_type"`
+	SenderUserID      *string `json:"sender_user_id"`
+	ExternalMessageID string  `json:"external_message_id"`
+	MessageType       string  `json:"message_type"`
+	Content           string  `json:"content"`
+	Media             []Media `json:"media"`
+	Status            string  `json:"status"`
+	Source            string  `json:"source"`
+	Timestamp         *string `json:"timestamp"`
 }
 
 // AiDraft is one suggested option.
@@ -93,11 +93,10 @@ type AiDraft struct {
 	CreatedAt        string   `json:"created_at"`
 }
 
-// WhatsAppAccount is the API shape for one connected number (mirrors an Evolution
-// instance). "assigned" is derived (organization_id IS NOT NULL), never stored.
+// WhatsAppAccount is the API shape for one connected number. "assigned" is
+// derived (organization_id IS NOT NULL), never stored.
 type WhatsAppAccount struct {
 	ID               string  `json:"id"`
-	InstanceName     string  `json:"instance_name"`
 	DisplayName      string  `json:"display_name"`
 	ConnectionStatus string  `json:"connection_status"`
 	Assigned         bool    `json:"assigned"`
@@ -108,12 +107,12 @@ type WhatsAppAccount struct {
 }
 
 // MapAccount maps a store.Account. liveStatus overrides the stored connection_state
-// when a live FetchInstances/connection.update is available (else pass the stored
-// state). A blank display_name falls back to the instance name for the UI.
+// when a live probe is available (else pass the stored state). A blank
+// display_name falls back to the phone number for the UI.
 func MapAccount(a store.Account, liveStatus string) WhatsAppAccount {
 	name := a.DisplayName
 	if name == "" {
-		name = a.InstanceName
+		name = a.ExternalHandle
 	}
 	status := liveStatus
 	if status == "" {
@@ -121,7 +120,6 @@ func MapAccount(a store.Account, liveStatus string) WhatsAppAccount {
 	}
 	return WhatsAppAccount{
 		ID:               a.ID.String(),
-		InstanceName:     a.InstanceName,
 		DisplayName:      name,
 		ConnectionStatus: status,
 		Assigned:         a.OrganizationID.Valid,
@@ -134,16 +132,14 @@ func MapAccount(a store.Account, liveStatus string) WhatsAppAccount {
 
 // Account is the channel-neutral account shape GET /accounts returns — the one
 // list the UI renders for every channel. The webhook_* fields are Telegram
-// health and stay null on a WhatsApp row; instance_name is the reverse.
+// health and stay null on a WhatsApp row.
 type Account struct {
-	ID              string `json:"id"`
-	Channel         string `json:"channel"`
-	DisplayName     string `json:"display_name"`
-	ExternalHandle  string `json:"external_handle"`
-	ConnectionState string `json:"connection_state"`
-	Assigned        bool   `json:"assigned"`
-	// InstanceName is the Evolution instance (wa_* gateway only).
-	InstanceName    string  `json:"instance_name"`
+	ID              string  `json:"id"`
+	Channel         string  `json:"channel"`
+	DisplayName     string  `json:"display_name"`
+	ExternalHandle  string  `json:"external_handle"`
+	ConnectionState string  `json:"connection_state"`
+	Assigned        bool    `json:"assigned"`
 	LastLiveEventAt *string `json:"last_live_event_at"`
 	CreatedAt       *string `json:"created_at"`
 
@@ -159,9 +155,6 @@ type Account struct {
 func MapNeutralAccount(a store.Account, liveStatus string) Account {
 	name := a.DisplayName
 	if name == "" {
-		name = a.InstanceName
-	}
-	if name == "" {
 		name = a.ExternalHandle
 	}
 	status := liveStatus
@@ -175,7 +168,6 @@ func MapNeutralAccount(a store.Account, liveStatus string) Account {
 		ExternalHandle:  a.ExternalHandle,
 		ConnectionState: status,
 		Assigned:        a.OrganizationID.Valid,
-		InstanceName:    a.InstanceName,
 		LastLiveEventAt: tsPtr(a.LastLiveEventAt),
 		CreatedAt:       tsPtr(&a.CreatedAt),
 	}
@@ -262,18 +254,18 @@ func MapMessage(m store.Message) Message {
 		})
 	}
 	return Message{
-		ID:                 m.ID.String(),
-		ChatID:             m.ChatID.String(),
-		Direction:          m.Direction,
-		SenderType:         m.SenderKind,
-		SenderUserID:       nullUUIDPtr(m.SenderUserID),
-		EvolutionMessageID: m.ExternalMessageID,
-		MessageType:        m.MessageKind,
-		Content:            m.Body,
-		Media:              media,
-		Status:             m.DeliveryState,
-		Source:             m.Source,
-		Timestamp:          tsPtr(m.MessageTS),
+		ID:                m.ID.String(),
+		ChatID:            m.ChatID.String(),
+		Direction:         m.Direction,
+		SenderType:        m.SenderKind,
+		SenderUserID:      nullUUIDPtr(m.SenderUserID),
+		ExternalMessageID: m.ExternalMessageID,
+		MessageType:       m.MessageKind,
+		Content:           m.Body,
+		Media:             media,
+		Status:            m.DeliveryState,
+		Source:            m.Source,
+		Timestamp:         tsPtr(m.MessageTS),
 	}
 }
 

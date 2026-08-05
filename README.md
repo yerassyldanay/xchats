@@ -17,25 +17,28 @@ end-to-end plumbing of the inbound→draft→approve→send→status loop. Follo
 schema, `{payload, errcode}` envelope, in-memory queue, and deterministic `wa_accounts.id`.
 
 ```bash
-cp .env.example .env            # secrets (Evolution key, webhook token, DB DSN, admin login)
+cp .env.example .env            # secrets (DB paths, session secret, LLM keys, admin login)
 cp config.example.yaml config.yaml
-make up                         # Postgres + backend (:8080) + frontend (:8081), one command
-make webhook-set                # register our webhook on the live Evolution instance (once)
+make up                         # backend (:8080) + frontend (:8081), one command
 ```
+
+WhatsApp connects directly via [`go.mau.fi/whatsmeow`](https://github.com/tulir/whatsmeow) — no
+separate gateway to run or configure. Pair a number from the UI's QR flow (`/accounts` →
+**add**).
 
 Local dev (no Docker): `make dev-backend` (`:8080`) and `make dev-frontend` (`:5173`).
 
-## Build 1 — WhatsApp accounts manager (add via QR · reconnect · clean)
+## Build 1 — WhatsApp accounts manager (pair via QR · logout · clean)
 
 On top of Build 0's single seeded number, a logged-in user can **manage numbers from the UI**
-(`/accounts`): **add** a number (create an Evolution instance → scan a live-polled **QR** → the row
-is written on connect with `id = uuidv5(owner_jid)`), see **all numbers' chats together** in one
-inbox (labelled + filterable by number, with a "from number" picker in the composer),
-**reconnect** a broken session (same row, history intact), and **clean** a number (delete the
-instance + soft-delete the row — re-adding the same number **revives** it with its history). A
-separate **`/instances`** view sweeps stray/stale Evolution instances. Identity is the WhatsApp
-number, so instance churn never loses chats. Endpoints: `GET/POST /whatsapp-accounts`,
-`GET …/qr`, `POST …/{id}/reconnect`, `DELETE …/{id}`, `GET/DELETE /whatsapp-instances`.
+(`/accounts`): **pair** a number (scan a live-polled **QR**, rendered by `internal/whatsmeow` —
+the row is written on connect with `id = uuidv5(owner_jid)`), see **all numbers' chats together**
+in one inbox (labelled + filterable by number, with a "from number" picker in the composer),
+**logout** a session (same row, history intact, ready to re-pair), and **clean** a number
+(logout + soft-delete the row — re-adding the same number **revives** it with its history).
+Identity is the WhatsApp number, so a logout/re-pair cycle never loses chats. Endpoints:
+`GET /whatsapp-accounts`, `POST /wa-accounts/pair`, `GET /wa-accounts/pair/{session_id}`,
+`POST /wa-accounts/{id}/logout`, `GET /wa-accounts/{id}/status`, `DELETE /whatsapp-accounts/{id}`.
 
 ```bash
 make test        # Go unit/component + normalizer-vs-captures + frontend typecheck/build
@@ -46,10 +49,10 @@ make test-e2e    # full demo loop against a Postgres (DATABASE_URL=...): ingest�
 ### Layout
 
 ```
-backend/    Go: cmd/xchats + internal/{config,store,queue,blob,evolution,normalize,
-            webhook→httpapi,worker,realtime,assistant,dto} + migrations/ (embedded)
+backend/    Go: cmd/xchats + internal/{config,store,queue,blob,whatsapp,whatsmeow,
+            httpapi,worker,realtime,assistant,dto} + migrations/ (embedded)
 frontend/   Vue 3 + TS (Vite, Pinia, Tailwind): Login + Chatboard (list · thread · assistant)
-deploy/     docker-compose.yaml (Postgres + backend + frontend; Evolution reused)
+deploy/     docker-compose.yaml (backend + frontend; WhatsApp via whatsmeow, no gateway)
 plan/       five design docs + reference captures and images
 ```
 
@@ -75,7 +78,7 @@ plan/
 
 ## What this describes (in one line)
 
-Reuse a running **Evolution** WhatsApp gateway; build a Go **backend** (webhook ingest + UI API +
-workers + AI) and a Vue **frontend** as separate env-addressed services; **PostgreSQL** for all
-state; **suggest-and-approve** AI; everything brought up by one
+Connect WhatsApp directly via **whatsmeow** (no external gateway); build a Go **backend**
+(direct WhatsApp connection + UI API + workers + AI) and a Vue **frontend** as separate
+env-addressed services; **SQLite** for all state; **suggest-and-approve** AI; everything brought up by one
 orchestration and verifiable by an isolated, one-command test harness.

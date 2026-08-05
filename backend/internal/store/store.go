@@ -1,5 +1,8 @@
-// Package store is the PostgreSQL data layer (pgx v5, plain SQL, no ORM).
-// All tables live in the xchats schema; the pool sets search_path=xchats,public.
+// Package store is xchats' core data layer (SQLite via internal/dbx, plain
+// SQL, no ORM): organizations, users, sessions, and the WhatsApp/Telegram
+// transport tables' shared read/write surface. New opens (or attaches to
+// an already-open, shared-by-path) database and migrates it — there is no
+// separate migration step or DB handle for callers to manage.
 package store
 
 import (
@@ -9,46 +12,53 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
+	"github.com/yerassyldanay/xchats/backend/internal/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
+	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
 )
 
-// ErrNotFound is returned when a lookup matches no row.
-var ErrNotFound = errors.New("not found")
+// ErrNotFound is returned when a lookup matches no row. It is the exact
+// same sentinel as domain.ErrNotFound (not a new error) — kept as a
+// store-local name so existing errors.Is(err, store.ErrNotFound) call
+// sites keep working unchanged; new code should prefer domain.ErrNotFound
+// directly.
+var ErrNotFound = domain.ErrNotFound
 
-// Store wraps the pgx pool.
+// Store wraps the SQLite pool.
 type Store struct {
-	pool *pgxpool.Pool
+	db *dbx.DB
 	// creds protects provider credentials at rest (see UseCredentialsBox). nil
 	// until the composition root installs one; every credential path then fails
 	// with ErrNoCredentialsKey rather than storing plaintext.
 	creds *secretbox.Box
 }
 
-// New opens a pool against dsn and pins search_path to the xchats schema.
-func New(ctx context.Context, dsn string) (*Store, error) {
-	cfg, err := pgxpool.ParseConfig(dsn)
+// New opens dbPath (creating it, and its parent directory, if needed),
+// applies every pending migration, and returns a ready Store. Safe to call
+// more than once for the same path from within this process: every caller
+// shares the one underlying connection (see internal/dbx.Open) — this is
+// how kbstore.New, mcpauth.NewStore, and responsestore's DB-backed repos
+// end up on the same pool as this Store without either side importing dbx
+// types into an exported signature outside the persistence boundary.
+func New(ctx context.Context, dbPath string) (*Store, error) {
+	db, err := dbx.Open(ctx, dbPath)
 	if err != nil {
 		return nil, err
 	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = "xchats,public"
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
+	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
-	return &Store{pool: pool}, nil
+	return &Store{db: db}, nil
 }
 
-// Pool exposes the underlying pool (migrations, health checks).
-func (s *Store) Pool() *pgxpool.Pool { return s.pool }
-
 // Ping verifies the DB is reachable (readyz).
-func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+func (s *Store) Ping(ctx context.Context) error { return s.db.Ping(ctx) }
 
-// Close releases the pool.
-func (s *Store) Close() { s.pool.Close() }
+// Close releases this Store's reference to the pool.
+func (s *Store) Close() { _ = s.db.Close() }
 
 // ---------------------------------------------------------------------------
 // Domain types (API-facing shapes are assembled in the httpapi layer)
@@ -82,12 +92,7 @@ type Account struct {
 	ExternalAccountRef string
 	// ExternalHandle is what an operator recognizes the account by: the phone
 	// number for WhatsApp, "@botusername" for Telegram.
-	ExternalHandle string
-	// InstanceName is the Evolution instance (wa_* gateway only; "" elsewhere).
-	InstanceName string
-	// InstanceID is Evolution's own instance id. Write-side only: it is not
-	// carried by inbox_accounts_v, so view-backed reads leave it empty.
-	InstanceID      string
+	ExternalHandle  string
 	ConnectionState string
 	LastLiveEventAt *time.Time
 	CreatedAt       time.Time
@@ -138,8 +143,8 @@ type Message struct {
 	Direction    string
 	SenderKind   string
 	SenderUserID uuid.NullUUID
-	// ExternalMessageID is the provider's id for this message: Evolution's
-	// key.id for WhatsApp, the numeric message_id for Telegram.
+	// ExternalMessageID is the provider's id for this message: whatsmeow's
+	// message id for WhatsApp, the numeric message_id for Telegram.
 	ExternalMessageID string
 	MessageKind       string
 	Body              string
@@ -177,8 +182,8 @@ type Draft struct {
 // messaging account — where the chats live. It must cover every channel's
 // account table, not just wa_accounts: a Telegram-only organization is just as
 // real, and ignoring tg_accounts would let a stray duplicate org shadow it.
-const orgOwnsAccountExpr = `(EXISTS (SELECT 1 FROM xchats.wa_accounts a WHERE a.organization_id = o.id)
-	 OR EXISTS (SELECT 1 FROM xchats.tg_accounts t WHERE t.organization_id = o.id))`
+const orgOwnsAccountExpr = `(EXISTS (SELECT 1 FROM wa_accounts a WHERE a.organization_id = o.id)
+	 OR EXISTS (SELECT 1 FROM tg_accounts t WHERE t.organization_id = o.id))`
 
 // ---------------------------------------------------------------------------
 // Seeding (idempotent, on boot)
@@ -192,16 +197,16 @@ func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization
 	// the oldest) and only insert when none exists. The old code used `ON CONFLICT
 	// DO NOTHING` with no conflict target, so every boot inserted a fresh "xchats"
 	// — this stops that at the source without deleting the historical duplicates.
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT o.id, o.name, o.respond_mode
-		FROM xchats.organizations o
+		FROM organizations o
 		WHERE o.name = $1
 		ORDER BY `+orgOwnsAccountExpr+` DESC,
 		         o.created_at ASC
 		LIMIT 1`, name).Scan(&o.ID, &o.Name, &o.RespondMode)
-	if errors.Is(err, pgx.ErrNoRows) {
-		err = s.pool.QueryRow(ctx, `
-			INSERT INTO xchats.organizations (name) VALUES ($1)
+	if errors.Is(err, dbx.ErrNoRows) {
+		err = s.db.QueryRow(ctx, `
+			INSERT INTO organizations (name) VALUES ($1)
 			RETURNING id, name, respond_mode`, name).Scan(&o.ID, &o.Name, &o.RespondMode)
 	}
 	return o, err
@@ -210,17 +215,17 @@ func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization
 // SeedUser upserts a user by (case-insensitive) email and joins them to the org.
 func (s *Store) SeedUser(ctx context.Context, orgID uuid.UUID, email, passwordHash, displayName string) (User, error) {
 	var u User
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO xchats.users (email, password_hash, display_name)
+	err := s.db.QueryRow(ctx, `
+		INSERT INTO users (email, password_hash, display_name)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = now()
+		ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		RETURNING id, email, password_hash, display_name, created_at`,
 		email, passwordHash, displayName).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt)
 	if err != nil {
 		return u, err
 	}
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO xchats.organization_users (organization_id, user_id)
+	_, err = s.db.Exec(ctx, `
+		INSERT INTO organization_users (organization_id, user_id)
 		VALUES ($1, $2) ON CONFLICT DO NOTHING`, orgID, u.ID)
 	return u, err
 }
@@ -228,19 +233,18 @@ func (s *Store) SeedUser(ctx context.Context, orgID uuid.UUID, email, passwordHa
 // SeedAccount upserts the pre-connected xpayment account by its derived id. Kept
 // for the Build 0 seed; the manager (B1) connects further accounts via QR.
 func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO xchats.wa_accounts
-			(id, organization_id, display_name, owner_jid, phone_number, evolution_instance_name, connection_state)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	err := s.db.QueryRow(ctx, `
+		INSERT INTO wa_accounts
+			(id, organization_id, display_name, owner_jid, phone_number, connection_state)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (id) DO UPDATE SET
 			organization_id = EXCLUDED.organization_id,
 			display_name = EXCLUDED.display_name,
-			evolution_instance_name = EXCLUDED.evolution_instance_name,
 			connection_state = EXCLUDED.connection_state,
 			deleted_at = NULL,
-			updated_at = now()
+			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		RETURNING `+waAccountCols,
-		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle, a.InstanceName, a.ConnectionState).
+		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle, a.ConnectionState).
 		Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
@@ -253,13 +257,13 @@ func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 // write paths that RETURN the row they just wrote. Reads go through
 // accountViewCols below instead, so they see every channel.
 const waAccountCols = `id, organization_id, display_name, owner_jid, phone_number,
-	evolution_instance_name, evolution_instance_id, connection_state, channel,
+	connection_state, channel,
 	last_live_event_at, created_at, deleted_at`
 
 func scanWaAccountDst(a *Account) []any {
 	return []any{
 		&a.ID, &a.OrganizationID, &a.DisplayName, &a.ExternalAccountRef, &a.ExternalHandle,
-		&a.InstanceName, &a.InstanceID, &a.ConnectionState, &a.Channel,
+		&a.ConnectionState, &a.Channel,
 		&a.LastLiveEventAt, &a.CreatedAt, &a.DeletedAt,
 	}
 }
@@ -267,19 +271,19 @@ func scanWaAccountDst(a *Account) []any {
 // accountViewCols is the canonical inbox_accounts_v projection — every channel's
 // accounts under one neutral shape; scanAccountDst pairs with it.
 const accountViewCols = `id, organization_id, display_name, channel,
-	external_account_ref, external_handle, instance_name, connection_state,
+	external_account_ref, external_handle, connection_state,
 	last_live_event_at, created_at, deleted_at,
 	webhook_url, webhook_registered_at, webhook_last_checked_at, webhook_last_error`
 
 // scanAccountView reads one inbox_accounts_v row. webhook_url and
 // webhook_last_error are NULL on the WhatsApp leg, so they land in pointers
 // first and fold to "" — the struct keeps plain strings for its callers.
-func scanAccountView(row pgx.Row) (Account, error) {
+func scanAccountView(row dbx.Scanner) (Account, error) {
 	var a Account
 	var url, lastErr *string
 	err := row.Scan(
 		&a.ID, &a.OrganizationID, &a.DisplayName, &a.Channel,
-		&a.ExternalAccountRef, &a.ExternalHandle, &a.InstanceName, &a.ConnectionState,
+		&a.ExternalAccountRef, &a.ExternalHandle, &a.ConnectionState,
 		&a.LastLiveEventAt, &a.CreatedAt, &a.DeletedAt,
 		&url, &a.WebhookRegisteredAt, &a.WebhookLastCheckedAt, &lastErr)
 	if err != nil {
@@ -299,9 +303,9 @@ func deref(s *string) string {
 // AccountByID returns a live (non-deleted) account of ANY channel by its
 // derived id, read through inbox_accounts_v.
 func (s *Store) AccountByID(ctx context.Context, id uuid.UUID) (Account, error) {
-	a, err := scanAccountView(s.pool.QueryRow(ctx, `SELECT `+accountViewCols+`
-		FROM xchats.inbox_accounts_v WHERE id = $1 AND deleted_at IS NULL`, id))
-	if errors.Is(err, pgx.ErrNoRows) {
+	a, err := scanAccountView(s.db.QueryRow(ctx, `SELECT `+accountViewCols+`
+		FROM inbox_accounts_v WHERE id = $1 AND deleted_at IS NULL`, id))
+	if errors.Is(err, dbx.ErrNoRows) {
 		return a, ErrNotFound
 	}
 	return a, err
@@ -310,8 +314,8 @@ func (s *Store) AccountByID(ctx context.Context, id uuid.UUID) (Account, error) 
 // ListAccountsForOrg returns the org's live (non-deleted) accounts across every
 // channel, oldest first — the neutral GET /accounts listing.
 func (s *Store) ListAccountsForOrg(ctx context.Context, orgID uuid.UUID) ([]Account, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+accountViewCols+`
-		FROM xchats.inbox_accounts_v
+	rows, err := s.db.Query(ctx, `SELECT `+accountViewCols+`
+		FROM inbox_accounts_v
 		WHERE organization_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at`, orgID)
 	if err != nil {
@@ -335,8 +339,8 @@ func (s *Store) ListAccountsForOrg(ctx context.Context, orgID uuid.UUID) ([]Acco
 // number" picker) read: a Telegram bot has no QR lifecycle and cannot start a
 // conversation, so it must never appear there.
 func (s *Store) ListWaAccountsForOrg(ctx context.Context, orgID uuid.UUID) ([]Account, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+waAccountCols+`
-		FROM xchats.wa_accounts
+	rows, err := s.db.Query(ctx, `SELECT `+waAccountCols+`
+		FROM wa_accounts
 		WHERE organization_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at`, orgID)
 	if err != nil {
@@ -359,77 +363,90 @@ func (s *Store) ListWaAccountsForOrg(ctx context.Context, orgID uuid.UUID) ([]Ac
 // row — its chats/messages stay attached and deleted_at is cleared. A blank
 // display_name keeps the existing one (so reconnect doesn't clobber the label).
 func (s *Store) UpsertConnectedAccount(ctx context.Context, a Account) (Account, error) {
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO xchats.wa_accounts
+	err := s.db.QueryRow(ctx, `
+		INSERT INTO wa_accounts
 			(id, organization_id, display_name, owner_jid, phone_number,
-			 evolution_instance_name, evolution_instance_id, connection_state, last_live_event_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+			 connection_state, last_live_event_at)
+		VALUES ($1, $2, $3, $4, $5, $6, strftime('%Y-%m-%d %H:%M:%f','now'))
 		ON CONFLICT (id) DO UPDATE SET
 			organization_id = EXCLUDED.organization_id,
-			display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name ELSE xchats.wa_accounts.display_name END,
+			display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name ELSE wa_accounts.display_name END,
 			phone_number = EXCLUDED.phone_number,
-			evolution_instance_name = EXCLUDED.evolution_instance_name,
-			evolution_instance_id = EXCLUDED.evolution_instance_id,
 			connection_state = EXCLUDED.connection_state,
-			last_live_event_at = now(),
+			last_live_event_at = strftime('%Y-%m-%d %H:%M:%f','now'),
 			deleted_at = NULL,
-			updated_at = now()
+			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		RETURNING `+waAccountCols,
 		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle,
-		a.InstanceName, a.InstanceID, a.ConnectionState).
+		a.ConnectionState).
 		Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
 
 // SetAccountState updates a live account's connection_state (and stamps activity).
 func (s *Store) SetAccountState(ctx context.Context, id uuid.UUID, state string) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE xchats.wa_accounts SET connection_state = $2, last_live_event_at = now(), updated_at = now()
+	_, err := s.db.Exec(ctx, `
+		UPDATE wa_accounts SET connection_state = $2, last_live_event_at = strftime('%Y-%m-%d %H:%M:%f','now'), updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE id = $1 AND deleted_at IS NULL`, id, state)
 	return err
-}
-
-// SetAccountStateByInstance maps a connection.update (which carries the instance
-// name, not the id) to its account and updates the state. Returns the account id,
-// or ErrNotFound for an unknown/pre-connect/deleted instance.
-func (s *Store) SetAccountStateByInstance(ctx context.Context, instanceName, state string) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := s.pool.QueryRow(ctx, `
-		UPDATE xchats.wa_accounts SET connection_state = $2, last_live_event_at = now(), updated_at = now()
-		WHERE evolution_instance_name = $1 AND deleted_at IS NULL
-		RETURNING id`, instanceName, state).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return id, ErrNotFound
-	}
-	return id, err
 }
 
 // SoftDeleteAccount hides an account (a "clean"): its chats drop out of the inbox
 // but the rows stay, so re-adding the number revives everything.
 func (s *Store) SoftDeleteAccount(ctx context.Context, id uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE xchats.wa_accounts SET deleted_at = now(), connection_state = 'disconnected', updated_at = now()
+	_, err := s.db.Exec(ctx, `
+		UPDATE wa_accounts SET deleted_at = strftime('%Y-%m-%d %H:%M:%f','now'), connection_state = 'disconnected', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE id = $1 AND deleted_at IS NULL`, id)
 	return err
 }
 
-// ManagedInstanceNames returns the instance names of all live (non-deleted)
-// accounts — the maintenance view flags everything else as a stray instance.
-func (s *Store) ManagedInstanceNames(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT evolution_instance_name FROM xchats.wa_accounts
-		WHERE deleted_at IS NULL AND evolution_instance_name <> ''`)
+// ---------------------------------------------------------------------------
+// WhatsApp (whatsmeow) device credentials
+// ---------------------------------------------------------------------------
+// wa_credentials maps an account to whatsmeow's own device JID, so the manager
+// can find which saved accounts to reconnect after a restart. The actual
+// session (keys, identity) lives in whatsmeow's own device database, never here.
+
+// WaCredential is one account's whatsmeow device mapping.
+type WaCredential struct {
+	AccountID uuid.UUID
+	DeviceJID string
+}
+
+// SaveWaCredentials records (or replaces) the whatsmeow device JID for an
+// account — called once pairing succeeds.
+func (s *Store) SaveWaCredentials(ctx context.Context, accountID uuid.UUID, deviceJID string) error {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO wa_credentials (account_id, device_jid)
+		VALUES ($1, $2)
+		ON CONFLICT (account_id) DO UPDATE SET
+			device_jid = EXCLUDED.device_jid,
+			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`, accountID, deviceJID)
+	return err
+}
+
+// DeleteWaCredentials drops an account's device mapping — called on logout, so
+// a subsequent boot does not try to reconnect a session that no longer exists.
+func (s *Store) DeleteWaCredentials(ctx context.Context, accountID uuid.UUID) error {
+	_, err := s.db.Exec(ctx, `DELETE FROM wa_credentials WHERE account_id = $1`, accountID)
+	return err
+}
+
+// ListWaCredentials returns every saved account->device mapping, for the
+// manager's boot-time reconnect-all pass.
+func (s *Store) ListWaCredentials(ctx context.Context) ([]WaCredential, error) {
+	rows, err := s.db.Query(ctx, `SELECT account_id, device_jid FROM wa_credentials`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]bool{}
+	var out []WaCredential
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var c WaCredential
+		if err := rows.Scan(&c.AccountID, &c.DeviceJID); err != nil {
 			return nil, err
 		}
-		out[name] = true
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }
@@ -440,37 +457,45 @@ func (s *Store) ManagedInstanceNames(ctx context.Context) (map[string]bool, erro
 
 func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 	var u User
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id, email, password_hash, display_name, created_at
-		FROM xchats.users WHERE email = $1`, email).
+		FROM users WHERE email = $1`, email).
 		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return u, ErrNotFound
 	}
 	return u, err
 }
 
+// CreateUser inserts a new user and joins them to orgID. A duplicate email
+// (users.email is UNIQUE COLLATE NOCASE, citext's SQLite equivalent) comes
+// back as domain.ErrDuplicate — the exported-boundary translation that
+// replaces the old pgx "23505" string match, which internal/httpapi/auth.go's
+// isUniqueViolation now compares against with errors.Is.
 func (s *Store) CreateUser(ctx context.Context, orgID uuid.UUID, email, passwordHash, displayName string) (User, error) {
 	var u User
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO xchats.users (email, password_hash, display_name)
+	err := s.db.QueryRow(ctx, `
+		INSERT INTO users (email, password_hash, display_name)
 		VALUES ($1, $2, $3)
 		RETURNING id, email, password_hash, display_name, created_at`,
 		email, passwordHash, displayName).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt)
 	if err != nil {
+		if dbx.IsUniqueViolation(err) {
+			return u, domain.ErrDuplicate
+		}
 		return u, err
 	}
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO xchats.organization_users (organization_id, user_id)
+	_, err = s.db.Exec(ctx, `
+		INSERT INTO organization_users (organization_id, user_id)
 		VALUES ($1, $2) ON CONFLICT DO NOTHING`, orgID, u.ID)
 	return u, err
 }
 
 func (s *Store) ListUsersForOrg(ctx context.Context, orgID uuid.UUID, limit, offset int) ([]User, int, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT u.id, u.email, u.display_name, u.created_at
-		FROM xchats.users u
-		JOIN xchats.organization_users ou ON ou.user_id = u.id
+		FROM users u
+		JOIN organization_users ou ON ou.user_id = u.id
 		WHERE ou.organization_id = $1
 		ORDER BY u.created_at LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	if err != nil {
@@ -486,8 +511,8 @@ func (s *Store) ListUsersForOrg(ctx context.Context, orgID uuid.UUID, limit, off
 		out = append(out, u)
 	}
 	var total int
-	_ = s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM xchats.organization_users WHERE organization_id = $1`, orgID).Scan(&total)
+	_ = s.db.QueryRow(ctx, `
+		SELECT count(*) FROM organization_users WHERE organization_id = $1`, orgID).Scan(&total)
 	return out, total, rows.Err()
 }
 
@@ -496,15 +521,15 @@ func (s *Store) OrgForUser(ctx context.Context, userID uuid.UUID) (Organization,
 	// Deterministic pick: prefer an org that actually owns a messaging account on
 	// any channel (where the chats live), then the oldest. Guards against a stray
 	// duplicate org silently shadowing the real one (see migration 0003).
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT o.id, o.name, o.respond_mode
-		FROM xchats.organizations o
-		JOIN xchats.organization_users ou ON ou.organization_id = o.id
+		FROM organizations o
+		JOIN organization_users ou ON ou.organization_id = o.id
 		WHERE ou.user_id = $1
 		ORDER BY `+orgOwnsAccountExpr+` DESC,
 		         o.created_at ASC
 		LIMIT 1`, userID).Scan(&o.ID, &o.Name, &o.RespondMode)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return o, ErrNotFound
 	}
 	return o, err
@@ -517,10 +542,10 @@ func (s *Store) OrgForUser(ctx context.Context, userID uuid.UUID) (Organization,
 // page's organization picker (plan/mcp.md §3: "the user selects an
 // organization").
 func (s *Store) OrgsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT o.id, o.name, o.respond_mode
-		FROM xchats.organizations o
-		JOIN xchats.organization_users ou ON ou.organization_id = o.id
+		FROM organizations o
+		JOIN organization_users ou ON ou.organization_id = o.id
 		WHERE ou.user_id = $1
 		ORDER BY o.created_at ASC`, userID)
 	if err != nil {
@@ -544,9 +569,9 @@ func (s *Store) OrgsForUser(ctx context.Context, userID uuid.UUID) ([]Organizati
 // first.
 func (s *Store) OrgByID(ctx context.Context, orgID uuid.UUID) (Organization, error) {
 	var o Organization
-	err := s.pool.QueryRow(ctx, `SELECT id, name, respond_mode FROM xchats.organizations WHERE id = $1`, orgID).
+	err := s.db.QueryRow(ctx, `SELECT id, name, respond_mode FROM organizations WHERE id = $1`, orgID).
 		Scan(&o.ID, &o.Name, &o.RespondMode)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return o, ErrNotFound
 	}
 	return o, err
@@ -557,15 +582,15 @@ func (s *Store) OrgByID(ctx context.Context, orgID uuid.UUID) (Organization, err
 // "The backend must still verify that the user is active and belongs to
 // the bound organization on every request"), re-derived from the live
 // organization_users/users tables rather than trusted from the token's own
-// claims alone. There is no separate "active" flag on xchats.users today
+// claims alone. There is no separate "active" flag on users today
 // (no soft-delete concept for users yet); membership plus the row existing
 // is the whole of "active" this schema can currently express.
 func (s *Store) UserInOrg(ctx context.Context, userID, orgID uuid.UUID) (bool, error) {
 	var exists bool
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT EXISTS(
-			SELECT 1 FROM xchats.organization_users ou
-			JOIN xchats.users u ON u.id = ou.user_id
+			SELECT 1 FROM organization_users ou
+			JOIN users u ON u.id = ou.user_id
 			WHERE ou.user_id = $1 AND ou.organization_id = $2
 		)`, userID, orgID).Scan(&exists)
 	return exists, err
@@ -576,8 +601,8 @@ func (s *Store) UserInOrg(ctx context.Context, userID, orgID uuid.UUID) (bool, e
 // ---------------------------------------------------------------------------
 
 func (s *Store) CreateSession(ctx context.Context, id string, userID uuid.UUID, ttl time.Duration) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO xchats.sessions (id, user_id, expires_at) VALUES ($1, $2, $3)`,
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)`,
 		id, userID, time.Now().Add(ttl).UTC())
 	return err
 }
@@ -585,19 +610,19 @@ func (s *Store) CreateSession(ctx context.Context, id string, userID uuid.UUID, 
 // UserForSession returns the user for a non-expired session id.
 func (s *Store) UserForSession(ctx context.Context, sessionID string) (User, error) {
 	var u User
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT u.id, u.email, u.display_name, u.created_at
-		FROM xchats.sessions s JOIN xchats.users u ON u.id = s.user_id
-		WHERE s.id = $1 AND s.expires_at > now()`, sessionID).
+		FROM sessions s JOIN users u ON u.id = s.user_id
+		WHERE s.id = $1 AND s.expires_at > strftime('%Y-%m-%d %H:%M:%f','now')`, sessionID).
 		Scan(&u.ID, &u.Email, &u.DisplayName, &u.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, dbx.ErrNoRows) {
 		return u, ErrNotFound
 	}
 	return u, err
 }
 
 func (s *Store) DeleteSession(ctx context.Context, sessionID string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM xchats.sessions WHERE id = $1`, sessionID)
+	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, sessionID)
 	return err
 }
 
@@ -609,10 +634,10 @@ func (s *Store) DeleteSession(ctx context.Context, sessionID string) error {
 // OrgForUser's deterministic default.
 func (s *Store) ActiveOrganizationForSession(ctx context.Context, sessionID string) (orgID uuid.UUID, ok bool, err error) {
 	var id *uuid.UUID
-	err = s.pool.QueryRow(ctx, `
-		SELECT active_organization_id FROM xchats.sessions
-		WHERE id = $1 AND expires_at > now()`, sessionID).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	err = s.db.QueryRow(ctx, `
+		SELECT active_organization_id FROM sessions
+		WHERE id = $1 AND expires_at > strftime('%Y-%m-%d %H:%M:%f','now')`, sessionID).Scan(&id)
+	if errors.Is(err, dbx.ErrNoRows) {
 		return uuid.UUID{}, false, ErrNotFound
 	}
 	if err != nil {
@@ -629,15 +654,9 @@ func (s *Store) ActiveOrganizationForSession(ctx context.Context, sessionID stri
 // read, so this alone never grants access to an org the caller was removed
 // from after the fact.
 func (s *Store) SetActiveOrganization(ctx context.Context, sessionID string, orgID uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE xchats.sessions SET active_organization_id = $2 WHERE id = $1`, sessionID, orgID)
+	_, err := s.db.Exec(ctx, `
+		UPDATE sessions SET active_organization_id = $2 WHERE id = $1`, sessionID, orgID)
 	return err
-}
-
-// inserted reports whether a row returned by an upsert was freshly inserted
-// (xmax = 0) rather than updated.
-func scanInserted(row pgx.Row, id *uuid.UUID, inserted *bool) error {
-	return row.Scan(id, inserted)
 }
 
 func wrap(op string, err error) error {

@@ -5,37 +5,44 @@ import (
 	"testing"
 
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 )
 
 func TestKnowledgeBaseRepo_NotConfigured(t *testing.T) {
-	st, orgID, _ := newTestStore(t)
-	repo := &responsestore.KnowledgeBaseRepo{Pool: st.Pool()}
+	repo, st, _ := dbtest.NewKBRepo(t)
+	org, err := st.SeedOrganization(context.Background(), "xchats-test")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
 
-	if _, err := repo.Load(context.Background(), orgID.String()); err != responsestore.ErrKBNotConfigured {
+	if _, err := repo.Load(context.Background(), org.ID.String()); err != responsestore.ErrKBNotConfigured {
 		t.Fatalf("Load() error = %v, want ErrKBNotConfigured", err)
 	}
 }
 
 func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
-	st, orgID, _ := newTestStore(t)
+	repo, st, db := dbtest.NewKBRepo(t)
 	ctx := context.Background()
-	pool := st.Pool()
+	org, err := st.SeedOrganization(ctx, "xchats-test")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	orgID := org.ID
 
-	mustExec(t, pool, `INSERT INTO xchats.ai_assistants (organization_id, persona, mission, guardrails, language_policy, reply_max_words)
+	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, persona, mission, guardrails, language_policy, reply_max_words)
 		VALUES ($1, 'Персона', 'Миссия', 'Правила', 'Языковая политика', 100)`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_topics (organization_id, slug, title, body_md)
+	mustExec(t, db, `INSERT INTO ai_topics (organization_id, slug, title, body_md)
 		VALUES ($1, 'delivery', 'Доставка', 'Доставляем по городу.')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_products (organization_id, ref, name, price, description, category, in_stock)
+	mustExec(t, db, `INSERT INTO ai_products (organization_id, ref, name, price, description, category, in_stock)
 		VALUES ($1, 'widget', 'Виджет', '1 000 ₸', 'Описание', '', true)`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_tariffs (organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
+	mustExec(t, db, `INSERT INTO ai_tariffs (organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
 		VALUES ($1, 'basic', 'Базовый', '5 000 ₸', '', '', '', 'fixed', '', '')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_contacts (organization_id, phone, working_hours)
+	mustExec(t, db, `INSERT INTO ai_contacts (organization_id, phone, working_hours)
 		VALUES ($1, '+7 700 000 00 00', '9:00-18:00')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_policies (organization_id, delivery_cost, delivery_in_days, outside_zones_note)
+	mustExec(t, db, `INSERT INTO ai_policies (organization_id, delivery_cost, delivery_in_days, outside_zones_note)
 		VALUES ($1, '1 000 ₸', '1-2', '')`, orgID)
 
-	repo := &responsestore.KnowledgeBaseRepo{Pool: pool}
 	kb, err := repo.Load(ctx, orgID.String())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -69,16 +76,19 @@ func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
 }
 
 func TestKnowledgeBaseRepo_LoadsDeliveryZones(t *testing.T) {
-	st, orgID, _ := newTestStore(t)
+	repo, st, db := dbtest.NewKBRepo(t)
 	ctx := context.Background()
-	pool := st.Pool()
+	org, err := st.SeedOrganization(ctx, "xchats-test")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	orgID := org.ID
 
-	mustExec(t, pool, `INSERT INTO xchats.ai_assistants (organization_id, persona) VALUES ($1, 'p')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_policies (organization_id, outside_zones_note) VALUES ($1, 'Вне зон не доставляем.')`, orgID)
-	mustExec(t, pool, `INSERT INTO xchats.ai_delivery_zones (organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, sales_status)
+	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, persona) VALUES ($1, 'p')`, orgID)
+	mustExec(t, db, `INSERT INTO ai_policies (organization_id, outside_zones_note) VALUES ($1, 'Вне зон не доставляем.')`, orgID)
+	mustExec(t, db, `INSERT INTO ai_delivery_zones (organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, sales_status)
 		VALUES ($1, 'kz', 'Казахстан', 'country', '', true, '10 000 ₸', '3-4', 'active')`, orgID)
 
-	repo := &responsestore.KnowledgeBaseRepo{Pool: pool}
 	kb, err := repo.Load(ctx, orgID.String())
 	if err != nil {
 		t.Fatalf("Load: %v", err)

@@ -47,13 +47,13 @@ func TestValidateProductionConfig_PartialMisconfiguration(t *testing.T) {
 
 func TestIsLocalBaseURL(t *testing.T) {
 	cases := map[string]bool{
-		"":                          true,
-		"not a url at all \x7f":     true,
-		"http://localhost:5173":     true,
-		"http://127.0.0.1:8080":     true,
-		"http://[::1]:8080":         true,
+		"":                           true,
+		"not a url at all \x7f":      true,
+		"http://localhost:5173":      true,
+		"http://127.0.0.1:8080":      true,
+		"http://[::1]:8080":          true,
 		"https://api.xchats.example": false,
-		"https://xchats.example":    false,
+		"https://xchats.example":     false,
 	}
 	for raw, want := range cases {
 		if got := isLocalBaseURL(raw); got != want {

@@ -1,7 +1,7 @@
 // Package messaging defines the channel-neutral contracts every inbound
 // message is decoded into and every outbound send is expressed through.
 // Neither this package nor its Message/OutboundMessage/SendResult types
-// depend on any specific provider (Evolution, OpenRouter, ...), on PostgreSQL,
+// depend on any specific provider (whatsmeow, OpenRouter, ...), on PostgreSQL,
 // or on an HTTP framework — channel adapters implementing InboundDecoder and
 // ChannelSender live in backend/internal and are wired together only at the
 // composition root (cmd/xchats). Adding a channel means registering a new
@@ -33,11 +33,12 @@ type Message struct {
 }
 
 // OutboundMessage is a message approved for delivery through a channel's
-// ChannelSender. To and Route are opaque, channel-specific routing hints (for
-// WhatsApp: the destination JID/phone number and the sending Evolution
-// instance name) resolved by the caller before Send is called — a channel that
-// doesn't need them (the simulator) simply ignores them, so no provider-
-// specific concept has to leak into this type itself.
+// ChannelSender. To is an opaque, channel-specific routing hint (for
+// WhatsApp: the destination JID/phone number) resolved by the caller before
+// Send is called; AccountID is what an adapter resolves ITS OWN sending
+// identity from (a live whatsmeow client, a Telegram bot token, ...) — a
+// channel that needs neither (the simulator) simply ignores them, so no
+// provider-specific concept has to leak into this type itself.
 type OutboundMessage struct {
 	MessageID      string // the already-persisted outbound message row's own id
 	ConversationID string
@@ -45,7 +46,6 @@ type OutboundMessage struct {
 	Channel        Channel
 	Text           string
 	To             string
-	Route          string
 	// Media, when set, makes this an attachment send rather than a text send.
 	Media *OutboundMedia
 }

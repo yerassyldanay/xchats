@@ -3,15 +3,13 @@ package mcpserver_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
-	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // testUploadBaseURL is the API origin newTestServer configures — used by
@@ -21,21 +19,11 @@ const testUploadBaseURL = "https://api.xchats.test"
 
 func newTestServer(t *testing.T) (*mcpserver.Server, mcpauth.Principal) {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping mcpserver DB test")
-	}
 	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	// Fresh, migrated database per test via internal/dbtest — no DATABASE_URL
+	// gate (this suite used to skip whenever no Postgres was reachable) and no
+	// shared-schema teardown.
+	kb, st, _ := dbtest.NewKB(t)
 	org, err := st.SeedOrganization(ctx, "xchats")
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
@@ -44,9 +32,7 @@ func newTestServer(t *testing.T) (*mcpserver.Server, mcpauth.Principal) {
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	t.Cleanup(st.Close)
-
-	srv := mcpserver.New(mcpserver.Deps{KB: kbstore.New(st.Pool()), UploadBaseURL: testUploadBaseURL})
+	srv := mcpserver.New(mcpserver.Deps{KB: kb, UploadBaseURL: testUploadBaseURL})
 	principal := mcpauth.Principal{
 		UserID: user.ID, OrganizationID: org.ID, ClientID: "test-client",
 		Scopes: []string{mcpauth.ScopeKBRead, mcpauth.ScopeKBDraftWrite, mcpauth.ScopeMediaWrite},
@@ -140,11 +126,11 @@ func TestToolsList_DeclaresSecuritySchemes(t *testing.T) {
 	tools := resp.Result.(map[string]any)["tools"].([]mcpserver.Tool)
 	wantScope := map[string]string{
 		"kb_read":         mcpauth.ScopeKBRead,
-		"kb_summary":       mcpauth.ScopeKBRead,
-		"kb_info":          mcpauth.ScopeKBRead,
-		"kb_topic_upsert":  mcpauth.ScopeKBDraftWrite,
-		"kb_delete":        mcpauth.ScopeKBDraftWrite,
-		"kb_media_upload":  mcpauth.ScopeMediaWrite,
+		"kb_summary":      mcpauth.ScopeKBRead,
+		"kb_info":         mcpauth.ScopeKBRead,
+		"kb_topic_upsert": mcpauth.ScopeKBDraftWrite,
+		"kb_delete":       mcpauth.ScopeKBDraftWrite,
+		"kb_media_upload": mcpauth.ScopeMediaWrite,
 	}
 	found := map[string]bool{}
 	for _, tool := range tools {
@@ -527,10 +513,6 @@ func TestKBSummary_SourceAndQueryFilter(t *testing.T) {
 // TestKBMediaUpload_ReturnsSignedTarget confirms the upload tool creates a
 // material and returns a usable target shape, wiring SignUpload through.
 func TestKBMediaUpload_ReturnsSignedTarget(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set")
-	}
 	srv, principal := newTestServer(t)
 	res := callTool(t, srv, principal, "kb_media_upload", map[string]any{
 		"filename": "hero.jpg", "mime_type": "image/jpeg", "size_bytes": 12345,
@@ -872,21 +854,8 @@ func assertDomainList(t *testing.T, raw any, path string) {
 // entry — a server/test setup that never wired UploadBaseURL must not crash
 // or produce a CSP a host can't parse.
 func TestResources_WidgetCSPEmptyWithoutUploadBaseURL(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping mcpserver DB test")
-	}
 	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	kb, st, _ := dbtest.NewKB(t)
 	org, err := st.SeedOrganization(ctx, "xchats")
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
@@ -895,9 +864,7 @@ func TestResources_WidgetCSPEmptyWithoutUploadBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	t.Cleanup(st.Close)
-
-	srv := mcpserver.New(mcpserver.Deps{KB: kbstore.New(st.Pool())}) // UploadBaseURL left empty, deliberately
+	srv := mcpserver.New(mcpserver.Deps{KB: kb}) // UploadBaseURL left empty, deliberately
 	principal := mcpauth.Principal{
 		UserID: user.ID, OrganizationID: org.ID, ClientID: "test-client",
 		Scopes: []string{mcpauth.ScopeKBRead, mcpauth.ScopeKBDraftWrite, mcpauth.ScopeMediaWrite},

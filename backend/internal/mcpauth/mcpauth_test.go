@@ -5,38 +5,25 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
-	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
-// newTestAuthorizer resets the schema, migrates, seeds an org+user, and
-// returns a ready Authorizer — the same pattern kbstore_test.go's newTestKB
-// uses.
+// newTestAuthorizer opens a fresh, migrated SQLite database, seeds an
+// org+user, and returns a ready Authorizer — the same pattern
+// kbstore_test.go's newTestKB uses.
 func newTestAuthorizer(t *testing.T) (*mcpauth.Authorizer, uuid.UUID, uuid.UUID) {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping mcpauth DB test")
-	}
 	ctx := context.Background()
-	st, err := store.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `DROP SCHEMA IF EXISTS xchats CASCADE; DROP TABLE IF EXISTS public.xchats_schema_migrations`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := store.RunMigrations(ctx, st.Pool(), migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	ms, st, _ := dbtest.NewMCPAuthStore(t)
+
 	org, err := st.SeedOrganization(ctx, "xchats")
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
@@ -45,9 +32,8 @@ func newTestAuthorizer(t *testing.T) (*mcpauth.Authorizer, uuid.UUID, uuid.UUID)
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	t.Cleanup(st.Close)
 
-	authz := mcpauth.New(mcpauth.NewStore(st.Pool()), mcpauth.NewEphemeralSigningKey(), mcpauth.Config{
+	authz := mcpauth.New(ms, mcpauth.NewEphemeralSigningKey(), mcpauth.Config{
 		Issuer: "https://xchats.kz/mcp", Audience: "https://xchats.kz/mcp",
 		AccessTokenTTL: time.Minute, RefreshTokenTTL: time.Hour, AuthCodeTTL: time.Minute,
 	})
@@ -381,4 +367,107 @@ func TestReviewHandoffSigner_RoundTrip(t *testing.T) {
 	if _, err := key.Verify(token, "https://xchats.kz", "https://xchats.kz/mcp"); !errors.Is(err, mcpauth.ErrInvalidToken) {
 		t.Fatalf("expected a review-handoff token to fail verification against the MCP resource audience, got %v", err)
 	}
+}
+
+// TestConcurrentRedemption_ExactlyOneWins is the regression guard for OAuth
+// 2.1's single-use requirement under concurrency.
+//
+// ConsumeAuthorizationCode and RotateRefreshToken used to SELECT the row, check
+// consumed_at/revoked_at in Go, and then UPDATE. Between the read and the write
+// there is a window where two simultaneous POST /oauth/token requests both see
+// "not yet used", both pass validation, and both commit — one authorization
+// code minting two access tokens, one refresh token rotating into two live
+// ones. The guard is now part of the UPDATE's own WHERE clause, so the database
+// decides the winner.
+//
+// Against SQLite this passes either way: internal/dbx holds a single connection
+// (MaxOpenConns(1)) so writers already serialize, and the race cannot be
+// observed. It is written now so it is in place for a connection-pooled engine,
+// where it fails without the fix.
+func TestConcurrentRedemption_ExactlyOneWins(t *testing.T) {
+	const racers = 8
+
+	t.Run("authorization code", func(t *testing.T) {
+		authz, orgID, userID := newTestAuthorizer(t)
+		ctx := context.Background()
+		client, err := authz.Store.RegisterClient(ctx, "Racer", []string{"https://host.example/callback"})
+		if err != nil {
+			t.Fatalf("register client: %v", err)
+		}
+		verifier, challenge := pkcePair()
+		code, err := authz.Store.IssueAuthorizationCode(ctx, mcpauth.AuthorizationCodeInput{
+			ClientID: client.ClientID, RedirectURI: "https://host.example/callback",
+			CodeChallenge: challenge, CodeChallengeMethod: "S256",
+			UserID: userID, OrganizationID: orgID, Scope: "kb:read", TTL: time.Minute,
+		})
+		if err != nil {
+			t.Fatalf("issue code: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		results := make([]error, racers)
+		wg.Add(racers)
+		for i := range racers {
+			go func() {
+				defer wg.Done()
+				_, results[i] = authz.ExchangeAuthorizationCode(ctx,
+					client.ClientID, "https://host.example/callback", "", code, verifier)
+			}()
+		}
+		wg.Wait()
+
+		wins := 0
+		for _, err := range results {
+			switch {
+			case err == nil:
+				wins++
+			case errors.Is(err, mcpauth.ErrInvalidGrant):
+				// expected loser
+			default:
+				t.Fatalf("unexpected error from a concurrent exchange: %v", err)
+			}
+		}
+		if wins != 1 {
+			t.Fatalf("%d of %d concurrent exchanges succeeded, want exactly 1 — one code minted %d access tokens", wins, racers, wins)
+		}
+	})
+
+	t.Run("refresh token", func(t *testing.T) {
+		authz, orgID, userID := newTestAuthorizer(t)
+		ctx := context.Background()
+		client, err := authz.Store.RegisterClient(ctx, "Racer", []string{"https://host.example/callback"})
+		if err != nil {
+			t.Fatalf("register client: %v", err)
+		}
+		refresh, err := authz.Store.IssueRefreshToken(ctx, client.ClientID, userID, orgID, "kb:read", "", time.Hour)
+		if err != nil {
+			t.Fatalf("issue refresh token: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		results := make([]error, racers)
+		wg.Add(racers)
+		for i := range racers {
+			go func() {
+				defer wg.Done()
+				_, results[i] = authz.RefreshTokenPair(ctx, client.ClientID, refresh)
+			}()
+		}
+		wg.Wait()
+
+		wins := 0
+		for _, err := range results {
+			switch {
+			case err == nil:
+				wins++
+			case errors.Is(err, mcpauth.ErrInvalidRefreshToken):
+				// expected loser
+			default:
+				t.Fatalf("unexpected error from a concurrent refresh: %v", err)
+			}
+		}
+		if wins != 1 {
+			t.Fatalf("%d of %d concurrent refreshes succeeded, want exactly 1 — one token rotated into %d live ones", wins, racers, wins)
+		}
+	})
 }

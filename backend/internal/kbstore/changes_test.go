@@ -78,7 +78,7 @@ func TestIsSingletonKind(t *testing.T) {
 // entity-scoped approve of it silently no-op'd (errApproveNothingPending ->
 // nil -> HTTP 200, live row untouched).
 func TestApproveEntity_PoliciesDeleteMarkerApplies(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	if err := kb.PatchPolicies(ctx, orgID, uuid.Nil, kbstore.PolicyPatch{Warranty: strp("12 месяцев")}); err != nil {
@@ -100,7 +100,7 @@ func TestApproveEntity_PoliciesDeleteMarkerApplies(t *testing.T) {
 	}
 
 	var n int
-	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_policies WHERE organization_id = $1`, orgID).Scan(&n); err != nil {
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM ai_policies WHERE organization_id = $1`, orgID).Scan(&n); err != nil {
 		t.Fatalf("count ai_policies: %v", err)
 	}
 	if n != 0 {
@@ -115,7 +115,7 @@ func TestApproveEntity_PoliciesDeleteMarkerApplies(t *testing.T) {
 // two different, both legitimate, spellings of "the one contact singleton"
 // that must be treated as the same entity.
 func TestApproveEntity_ContactsDeleteMarkerWrittenByMCPKeyApplies(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	if err := kb.PatchContacts(ctx, orgID, uuid.Nil, kbstore.ContactPatch{Phone: strp("+7 700 000 00 00")}); err != nil {
@@ -134,7 +134,7 @@ func TestApproveEntity_ContactsDeleteMarkerWrittenByMCPKeyApplies(t *testing.T) 
 	}
 
 	var n int
-	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_contacts WHERE organization_id = $1`, orgID).Scan(&n); err != nil {
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM ai_contacts WHERE organization_id = $1`, orgID).Scan(&n); err != nil {
 		t.Fatalf("count ai_contacts: %v", err)
 	}
 	if n != 0 {
@@ -146,7 +146,7 @@ func TestApproveEntity_ContactsDeleteMarkerWrittenByMCPKeyApplies(t *testing.T) 
 // the same TrimSuffix bug also wrote "approved policie main" to
 // ai_audit_log.note.
 func TestApproveSummary_SaysPolicyNotPolicie(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	if err := kb.PatchPolicies(ctx, orgID, uuid.Nil, kbstore.PolicyPatch{Warranty: strp("6 месяцев")}); err != nil {
@@ -157,7 +157,7 @@ func TestApproveSummary_SaysPolicyNotPolicie(t *testing.T) {
 	}
 
 	var note string
-	if err := st.Pool().QueryRow(ctx, `SELECT note FROM xchats.ai_audit_log
+	if err := db.QueryRow(ctx, `SELECT note FROM ai_audit_log
 		WHERE organization_id = $1 AND action = 'approve' ORDER BY created_at DESC LIMIT 1`, orgID).
 		Scan(&note); err != nil {
 		t.Fatalf("read ai_audit_log: %v", err)
@@ -171,7 +171,7 @@ func TestApproveSummary_SaysPolicyNotPolicie(t *testing.T) {
 // --- DraftChanges: the Черновик review payload ------------------------------
 
 func TestDraftChanges_EmptyDraftHasNoEntries(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -191,7 +191,7 @@ func TestDraftChanges_EmptyDraftHasNoEntries(t *testing.T) {
 }
 
 func TestDraftChanges_ReturnsOnlyPendingRowsNeverLive(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.SeedLiveIfEmpty(ctx, orgID, brain.SeedSnapshot()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -210,7 +210,7 @@ func TestDraftChanges_ReturnsOnlyPendingRowsNeverLive(t *testing.T) {
 }
 
 func TestDraftChanges_SurfacesDeleteMarkersInPluralKind(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.DeleteTopic(ctx, orgID, uuid.Nil, "pricing"); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -226,7 +226,7 @@ func TestDraftChanges_SurfacesDeleteMarkersInPluralKind(t *testing.T) {
 }
 
 func TestDraftChanges_ConfigIsNilWithoutAPendingPatch(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 
 	changes, err := kb.DraftChanges(ctx, orgID)
@@ -239,7 +239,7 @@ func TestDraftChanges_ConfigIsNilWithoutAPendingPatch(t *testing.T) {
 }
 
 func TestDraftChanges_ConfigCarriesOnlyPatchedFields(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.PatchConfig(ctx, orgID, uuid.Nil, kbstore.ConfigPatch{Persona: strp("Дружелюбный")}); err != nil {
 		t.Fatalf("patch config: %v", err)
@@ -263,7 +263,7 @@ func TestDraftChanges_ConfigCarriesOnlyPatchedFields(t *testing.T) {
 // --- CancelChange -------------------------------------------------------
 
 func TestCancelChange_CancelsAnAddition(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{Slug: "e2e-cancel-addition", Title: "T", BodyMD: "B"}); err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -286,7 +286,7 @@ func TestCancelChange_CancelsAnAddition(t *testing.T) {
 }
 
 func TestCancelChange_CancelsAnUpdateLeavingLiveIntact(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{Slug: "e2e-cancel-update", Title: "Original", BodyMD: "B"}); err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -307,7 +307,7 @@ func TestCancelChange_CancelsAnUpdateLeavingLiveIntact(t *testing.T) {
 	}
 
 	var liveTitle string
-	if err := st.Pool().QueryRow(ctx, `SELECT title FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`,
+	if err := db.QueryRow(ctx, `SELECT title FROM ai_topics WHERE organization_id=$1 AND slug=$2`,
 		orgID, "e2e-cancel-update").Scan(&liveTitle); err != nil {
 		t.Fatalf("read live topic: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestCancelChange_CancelsAnUpdateLeavingLiveIntact(t *testing.T) {
 }
 
 func TestCancelChange_CancelsAStagedRemoval(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{Slug: "e2e-cancel-removal", Title: "T", BodyMD: "B"}); err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -345,7 +345,7 @@ func TestCancelChange_CancelsAStagedRemoval(t *testing.T) {
 	}
 
 	var n int
-	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.ai_topics WHERE organization_id=$1 AND slug=$2`,
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM ai_topics WHERE organization_id=$1 AND slug=$2`,
 		orgID, "e2e-cancel-removal").Scan(&n); err != nil {
 		t.Fatalf("count live topic: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestCancelChange_CancelsAStagedRemoval(t *testing.T) {
 }
 
 func TestCancelChange_ConfigSingleFieldLeavesOtherFields(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.PatchConfig(ctx, orgID, uuid.Nil, kbstore.ConfigPatch{
 		Persona: strp("Персона"), Mission: strp("Миссия"),
@@ -393,7 +393,7 @@ func TestCancelChange_ConfigSingleFieldLeavesOtherFields(t *testing.T) {
 }
 
 func TestCancelChange_ConfigMainClearsWholePatch(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.PatchConfig(ctx, orgID, uuid.Nil, kbstore.ConfigPatch{
 		Persona: strp("Персона"), Mission: strp("Миссия"),
@@ -418,7 +418,7 @@ func TestCancelChange_ConfigMainClearsWholePatch(t *testing.T) {
 }
 
 func TestCancelChange_UnknownKindIsErrUnknownKind(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.CancelChange(ctx, orgID, uuid.Nil, "bogus", "whatever", nil); !errors.Is(err, kbstore.ErrUnknownKind) {
 		t.Fatalf("err = %v, want ErrUnknownKind", err)
@@ -426,7 +426,7 @@ func TestCancelChange_UnknownKindIsErrUnknownKind(t *testing.T) {
 }
 
 func TestCancelChange_UnknownConfigFieldIsErrUnknownKind(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.CancelChange(ctx, orgID, uuid.Nil, "config", "not-a-real-field", nil); !errors.Is(err, kbstore.ErrUnknownKind) {
 		t.Fatalf("err = %v, want ErrUnknownKind", err)
@@ -439,7 +439,7 @@ func TestCancelChange_UnknownConfigFieldIsErrUnknownKind(t *testing.T) {
 // version, and must report changed:false"). ---------------------------------
 
 func TestCancelChange_RepeatDoesNotAdvanceVersion(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{Slug: "e2e-repeat-cancel", Title: "T", BodyMD: "B"}); err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -466,7 +466,7 @@ func TestCancelChange_RepeatDoesNotAdvanceVersion(t *testing.T) {
 }
 
 func TestCancelChange_AlreadyAbsentIgnoresStaleIfMatch(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	stale := int64(999999)
 
@@ -480,7 +480,7 @@ func TestCancelChange_AlreadyAbsentIgnoresStaleIfMatch(t *testing.T) {
 }
 
 func TestCancelChange_PresentTargetWithStaleVersionIsErrStale(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{Slug: "e2e-stale-cancel", Title: "T", BodyMD: "B"}); err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -493,14 +493,14 @@ func TestCancelChange_PresentTargetWithStaleVersionIsErrStale(t *testing.T) {
 }
 
 func TestCancelChange_UnknownKeyDoesNotCreateAnEmptyDraftRow(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	if _, err := kb.CancelChange(ctx, orgID, uuid.Nil, "topics", "never-existed", nil); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	var n int
-	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.kbd_draft WHERE organization_id=$1`, orgID).Scan(&n); err != nil {
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM kbd_draft WHERE organization_id=$1`, orgID).Scan(&n); err != nil {
 		t.Fatalf("count kbd_draft: %v", err)
 	}
 	if n != 0 {
@@ -515,7 +515,7 @@ func TestCancelChange_UnknownKeyDoesNotCreateAnEmptyDraftRow(t *testing.T) {
 // Draft:true, no live rows, deletions suppressed per kind including the two
 // singletons.
 func TestDraftOnly_ContractUnchangedAfterRefactor(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 
 	if err := kb.UpsertTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{Slug: "e2e-draftonly-topic", Title: "T", BodyMD: "B"}); err != nil {

@@ -45,8 +45,8 @@ func (h *mcpHarness) browserClient(t *testing.T) *http.Client {
 // insert.
 func (h *mcpHarness) addUserToOrg(t *testing.T, userID, orgID uuid.UUID) {
 	t.Helper()
-	_, err := h.store.Pool().Exec(context.Background(), `
-		INSERT INTO xchats.organization_users (organization_id, user_id)
+	_, err := h.db.Exec(context.Background(), `
+		INSERT INTO organization_users (organization_id, user_id)
 		VALUES ($1, $2) ON CONFLICT DO NOTHING`, orgID, userID)
 	if err != nil {
 		t.Fatalf("addUserToOrg: %v", err)
@@ -58,8 +58,8 @@ func (h *mcpHarness) addUserToOrg(t *testing.T, userID, orgID uuid.UUID) {
 // CURRENT membership rather than trust the token's claim.
 func (h *mcpHarness) removeUserFromOrg(t *testing.T, userID, orgID uuid.UUID) {
 	t.Helper()
-	_, err := h.store.Pool().Exec(context.Background(), `
-		DELETE FROM xchats.organization_users WHERE user_id = $1 AND organization_id = $2`, userID, orgID)
+	_, err := h.db.Exec(context.Background(), `
+		DELETE FROM organization_users WHERE user_id = $1 AND organization_id = $2`, userID, orgID)
 	if err != nil {
 		t.Fatalf("removeUserFromOrg: %v", err)
 	}

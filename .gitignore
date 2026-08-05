@@ -9,18 +9,21 @@ frontend/.env
 
 cookies.txt
 
-# local-only deploy helpers (machine-specific host ports; restore script holds a
-# local Evolution API key) — keep out of git
+# local-only deploy helpers (machine-specific host ports) — keep out of git
 deploy/docker-compose.override.yaml
-deploy/restore-evolution-webhook.sh
 
 # blob store (local-disk media bytes)
 blobdata/
 backend/blobdata/
 
 # build output
+# One entry per backend/cmd/* package: `go build ./...` run from backend/
+# writes a binary named after each main package into the working directory,
+# which is how backend/promptpreview once got committed (PR #15).
 backend/bin/
 backend/xchats
+backend/xchats-import
+backend/promptpreview
 frontend/dist/
 frontend/dist-ssr/
 frontend/node_modules/

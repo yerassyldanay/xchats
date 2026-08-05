@@ -13,7 +13,6 @@ import (
 type Kind string
 
 const (
-	KindWaEvent       Kind = "wa_event"
 	KindMediaDownload Kind = "media_download"
 	KindOutboundSend  Kind = "outbound_send"
 	KindAIDraft       Kind = "ai_draft"

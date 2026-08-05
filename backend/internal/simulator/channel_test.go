@@ -81,7 +81,7 @@ func TestChannelSender_PackageHasNoNetworkingCapability(t *testing.T) {
 		"net/http":   "no HTTP client",
 		"net/rpc":    "no RPC client",
 		"crypto/tls": "no TLS dialing",
-		"github.com/yerassyldanay/xchats/backend/internal/evolution": "must never call the WhatsApp provider",
+		"github.com/yerassyldanay/xchats/backend/internal/whatsmeow": "must never call the WhatsApp provider",
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)

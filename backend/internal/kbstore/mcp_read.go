@@ -55,7 +55,7 @@ func typeWanted(want map[string]bool, t string) bool {
 // draft-shadowed) Title case-insensitively contains it, the same
 // normalizeTitle+Contains match kb_read's flattenRecords uses.
 func (s *Store) IdentityIndex(ctx context.Context, orgID uuid.UUID, types []string, source, query string) ([]Identity, error) {
-	return s.identityIndex(ctx, s.pool, orgID, types, source, query)
+	return s.identityIndex(ctx, s.db, orgID, types, source, query)
 }
 
 // identityIndex is IdentityIndex's db-parameterized core. Every MCPUpsert*
@@ -117,7 +117,7 @@ func (s *Store) identityIndex(ctx context.Context, db dbtx, orgID uuid.UUID, typ
 		// migration always seeded one; that pair nets to zero today.
 		var existsLive bool
 		if err := db.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM xchats.ai_assistants WHERE organization_id = $1)`, orgID).
+			`SELECT EXISTS(SELECT 1 FROM ai_assistants WHERE organization_id = $1)`, orgID).
 			Scan(&existsLive); err != nil {
 			return nil, err
 		}

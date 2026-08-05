@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ---------------------------------------------------------------------------
@@ -21,16 +19,6 @@ import (
 // write time, so a live edit can never leave the KB in a shape the response
 // path would later fail closed on.
 // ---------------------------------------------------------------------------
-
-// dbtx is satisfied by both *pgxpool.Pool and pgx.Tx — the zone/policy reads
-// below run identically as a side-effect-free lookup (e.g. LiveView's zone
-// list, straight off the pool) or inside the very transaction a write is
-// re-validating (validateZoneWorld, called before that transaction commits).
-type dbtx interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
-}
 
 // ZoneInput is an upsert payload for a live delivery zone.
 type ZoneInput struct {
@@ -72,7 +60,7 @@ type ZoneRow struct {
 // policy row incompatible (non-blank flat delivery fields) is rejected
 // atomically, never landing half-written.
 func (s *Store) PutLiveZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ZoneInput) error {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -93,12 +81,12 @@ func (s *Store) PutLiveZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUI
 // zone another zone's parent_ref still points to is rejected, same as
 // creating that dangling reference in the first place would be.
 func (s *Store) DeleteLiveZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM xchats.ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, ref); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, ref); err != nil {
 		return err
 	}
 	if err := validateZoneWorld(ctx, tx, orgID); err != nil {
@@ -111,13 +99,13 @@ func (s *Store) DeleteLiveZone(ctx context.Context, orgID uuid.UUID, actor uuid.
 }
 
 func upsertZoneRow(ctx context.Context, db dbtx, orgID uuid.UUID, in ZoneInput) error {
-	if _, err := db.Exec(ctx, `INSERT INTO xchats.ai_delivery_zones
+	if _, err := db.Exec(ctx, `INSERT INTO ai_delivery_zones
 		(organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, notes, sales_status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, zone_level=EXCLUDED.zone_level, parent_ref=EXCLUDED.parent_ref,
 			delivery_available=EXCLUDED.delivery_available, delivery_cost=EXCLUDED.delivery_cost,
-			delivery_in_days=EXCLUDED.delivery_in_days, notes=EXCLUDED.notes, sales_status=EXCLUDED.sales_status, updated_at=now()`,
+			delivery_in_days=EXCLUDED.delivery_in_days, notes=EXCLUDED.notes, sales_status=EXCLUDED.sales_status, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, in.Ref, in.Name, in.ZoneLevel, in.ParentRef, in.DeliveryAvailable, in.DeliveryCost, in.DeliveryInDays,
 		in.Notes, orDefault(in.SalesStatus, "active")); err != nil {
 		return fmt.Errorf("insert zone %s: %w", in.Ref, err)
@@ -127,12 +115,12 @@ func upsertZoneRow(ctx context.Context, db dbtx, orgID uuid.UUID, in ZoneInput) 
 
 // loadZoneRows reads every zone for the org, live-only (no draft concept).
 // Free function (not a *Store method): db is always passed explicitly —
-// either s.pool for a side-effect-free read, or a pgx.Tx when the read must
+// either s.db for a side-effect-free read, or a tx when the read must
 // see that same transaction's own uncommitted write (validateZoneWorld).
 func loadZoneRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]ZoneRow, error) {
 	rows, err := db.Query(ctx, `SELECT ref, name, zone_level, parent_ref, delivery_available, delivery_cost,
 		delivery_in_days, notes, sales_status, updated_at
-		FROM xchats.ai_delivery_zones WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_delivery_zones WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +143,7 @@ func loadZoneRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]ZoneRow, err
 // Slug/ID convenience fields), used only to feed zoneGateReasons.
 func loadPolicyRowsForGate(ctx context.Context, db dbtx, orgID uuid.UUID) ([]PolicyRow, error) {
 	rows, err := db.Query(ctx, `SELECT delivery_cost, delivery_in_days, outside_zones_note
-		FROM xchats.ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
+		FROM ai_policies WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +213,7 @@ func resultingPolicyForGate(ctx context.Context, db dbtx, orgID uuid.UUID, upser
 // given transaction (so it sees that same transaction's own uncommitted
 // write) and wraps any zoneGateReasons violation into a *GateError — the
 // existing 422 mapping (httpapi.kbFail) every other live write already uses.
-func validateZoneWorld(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) error {
+func validateZoneWorld(ctx context.Context, tx dbtx, orgID uuid.UUID) error {
 	zones, err := loadZoneRows(ctx, tx, orgID)
 	if err != nil {
 		return err

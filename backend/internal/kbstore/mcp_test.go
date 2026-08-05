@@ -24,7 +24,7 @@ func uuidpp(u uuid.UUID) **uuid.UUID {
 // TestMCPUpsertProduct_CreateRequiresInStock enforces plan/mcp.md §5's
 // "in_stock is required on create".
 func TestMCPUpsertProduct_CreateRequiresInStock(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	_, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "", kbstore.ProductChanges{Name: strp("Кофемашина")}, nil, kbstore.MCPProvenance{})
 	var missing *kbstore.ErrRequiredFieldMissing
@@ -37,7 +37,7 @@ func TestMCPUpsertProduct_CreateRequiresInStock(t *testing.T) {
 // missing-key create path end to end: a Russian name becomes a stable ASCII
 // ref, and the record is readable back with every field intact.
 func TestMCPUpsertProduct_CreateDerivesSlugFromCyrillicTitle(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	res, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "", kbstore.ProductChanges{
 		Name: strp("Кофемашина DeLonghi"), Price: strp("129 900 ₸"), InStock: boolp(true),
@@ -70,7 +70,7 @@ func TestMCPUpsertProduct_CreateDerivesSlugFromCyrillicTitle(t *testing.T) {
 // TestMCPUpsertProduct_UpdateByKeyPreservesOmittedFields is the core partial-
 // patch contract: "Omitted fields remain unchanged."
 func TestMCPUpsertProduct_UpdateByKeyPreservesOmittedFields(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	res, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "coffee-machine", kbstore.ProductChanges{
 		Name: strp("Кофемашина"), Price: strp("100000"), Category: strp("Кухня"), InStock: boolp(true),
@@ -98,7 +98,7 @@ func TestMCPUpsertProduct_UpdateByKeyPreservesOmittedFields(t *testing.T) {
 // TestMCPUpsertTariff_ExactTitleMatchUnderAnotherKeyIsConflict is plan/
 // mcp.md §4 step 2.
 func TestMCPUpsertTariff_ExactTitleMatchUnderAnotherKeyIsConflict(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "biz", kbstore.TariffChanges{Name: strp("Business"), PricingType: strp("fixed")}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("seed tariff: %v", err)
@@ -115,7 +115,7 @@ func TestMCPUpsertTariff_ExactTitleMatchUnderAnotherKeyIsConflict(t *testing.T) 
 
 // TestMCPUpsertTariff_SimilarTitleUnderAnotherKeyIsAmbiguous is step 3.
 func TestMCPUpsertTariff_SimilarTitleUnderAnotherKeyIsAmbiguous(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "biz", kbstore.TariffChanges{Name: strp("Business"), PricingType: strp("fixed")}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("seed tariff: %v", err)
@@ -133,7 +133,7 @@ func TestMCPUpsertTariff_SimilarTitleUnderAnotherKeyIsAmbiguous(t *testing.T) {
 // TestMCPUpsertTariff_DistinctTitleCreatesCleanly ensures the duplicate
 // checks don't false-positive on ordinary distinct names.
 func TestMCPUpsertTariff_DistinctTitleCreatesCleanly(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "biz", kbstore.TariffChanges{Name: strp("Business"), PricingType: strp("fixed")}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("seed tariff: %v", err)
@@ -150,7 +150,7 @@ func TestMCPUpsertTariff_DistinctTitleCreatesCleanly(t *testing.T) {
 // TestMCPUpsertZone_CreateRequiresDeliveryAvailable enforces the third
 // create-required field.
 func TestMCPUpsertZone_CreateRequiresDeliveryAvailable(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	_, err := kb.MCPUpsertDeliveryZone(ctx, orgID, uuid.Nil, "almaty", kbstore.DeliveryZoneChanges{
 		Name: strp("Алматы"), ZoneLevel: strp("city"),
@@ -165,7 +165,7 @@ func TestMCPUpsertZone_CreateRequiresDeliveryAvailable(t *testing.T) {
 // rejects a zone that violates the delivery_available/cost/days invariant,
 // even though it was accepted as a syntactically valid draft write.
 func TestMCPUpsertAndApprove_ZoneWorldStillEnforcedAtApprove(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertDeliveryZone(ctx, orgID, uuid.Nil, "almaty", kbstore.DeliveryZoneChanges{
 		Name: strp("Алматы"), ZoneLevel: strp("city"), DeliveryAvailable: boolp(true),
@@ -183,7 +183,7 @@ func TestMCPUpsertAndApprove_ZoneWorldStillEnforcedAtApprove(t *testing.T) {
 // TestMCPUpsertZone_ApprovePublishesCompleteRow is the full happy path: a
 // valid zone draft materializes into ai_delivery_zones with every field.
 func TestMCPUpsertZone_ApprovePublishesCompleteRow(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 	// A zone world needs a zone-compatible policy first (blank flat delivery
 	// fields + a non-blank outside_zones_note) — same invariant zones.go
@@ -205,7 +205,7 @@ func TestMCPUpsertZone_ApprovePublishesCompleteRow(t *testing.T) {
 	}
 	var name, cost string
 	var available bool
-	if err := st.Pool().QueryRow(ctx, `SELECT name, delivery_available, delivery_cost FROM xchats.ai_delivery_zones
+	if err := db.QueryRow(ctx, `SELECT name, delivery_available, delivery_cost FROM ai_delivery_zones
 		WHERE organization_id=$1 AND ref=$2`, orgID, res.Key).Scan(&name, &available, &cost); err != nil {
 		t.Fatalf("read back live zone: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestMCPUpsertZone_ApprovePublishesCompleteRow(t *testing.T) {
 // TestMCPUpsertProduct_MediaValidation_RejectsCrossOrgAndWrongMimeAndInvisible
 // covers plan/mcp.md §9's "same-organization media references" backstop.
 func TestMCPUpsertProduct_MediaValidation_Rejects(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, st, _ := newTestKB(t)
 	ctx := context.Background()
 	otherOrg, err := st.SeedOrganization(ctx, "other-org")
 	if err != nil {
@@ -275,7 +275,7 @@ func TestMCPUpsertProduct_MediaValidation_Rejects(t *testing.T) {
 
 // TestMCPUpsert_OptimisticConcurrency covers expected_draft_version.
 func TestMCPUpsert_OptimisticConcurrency(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	res, err := kb.MCPUpsertTopic(ctx, orgID, uuid.Nil, "how-to-order", kbstore.TopicChanges{
 		Title: strp("Как заказать"), BodyMD: strp("Напишите нам."),
@@ -303,7 +303,7 @@ func TestMCPUpsert_OptimisticConcurrency(t *testing.T) {
 // TestIdentityIndex_StateTransitions exercises published/new/changed/
 // to_delete across live+draft.
 func TestIdentityIndex_StateTransitions(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	// live-only ("published"): write directly then approve.
 	if _, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "published-only", kbstore.TariffChanges{Name: strp("Опубликован"), PricingType: strp("fixed")}, nil, kbstore.MCPProvenance{}); err != nil {
@@ -360,7 +360,7 @@ func TestIdentityIndex_StateTransitions(t *testing.T) {
 // TestReadRecords_SourceBothKeepsLiveAndDraftSeparate is plan/mcp.md §5's
 // explicit requirement: "There is no `effective` source."
 func TestReadRecords_SourceBothKeepsLiveAndDraftSeparate(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "biz", kbstore.TariffChanges{Name: strp("Business"), Price: strp("v1"), PricingType: strp("fixed")}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("create: %v", err)
@@ -394,7 +394,7 @@ func TestReadRecords_SourceBothKeepsLiveAndDraftSeparate(t *testing.T) {
 // TestMCPDelete_RejectsAssistantAndWrongSingletonKey covers kb_delete's
 // validation ("blocks a delete that would make the publishable KB invalid").
 func TestMCPDelete_RejectsAssistantAndWrongSingletonKey(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPDelete(ctx, orgID, uuid.Nil, kbstore.KBTypeAssistant, kbstore.NaturalKeyMain, nil); err == nil {
 		t.Fatal("expected the assistant singleton to be non-deletable")
@@ -408,7 +408,7 @@ func TestMCPDelete_RejectsAssistantAndWrongSingletonKey(t *testing.T) {
 // the draft.go/live.go merge-instead-of-replace fix: an old-UI-style plain
 // text edit must not blank out media an MCP tool already staged.
 func TestLegacyUpsertTopic_PreservesMCPAuthoredMedia(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	materialID, err := kb.CreateUploadMaterial(ctx, orgID, kbstore.UploadMaterialInput{
 		Filename: "hero.jpg", MimeType: "image/jpeg", SizeBytes: 5, CustomerVisibility: "visible",
@@ -449,7 +449,7 @@ func TestLegacyUpsertTopic_PreservesMCPAuthoredMedia(t *testing.T) {
 // organization's draft or live records, even though both share the same
 // kbd_draft/ai_* tables keyed only by organization_id.
 func TestReadRecords_CrossOrgIsolation(t *testing.T) {
-	kb, orgA, st := newTestKB(t)
+	kb, orgA, st, _ := newTestKB(t)
 	ctx := context.Background()
 	orgBRow, err := st.SeedOrganization(ctx, "org-b")
 	if err != nil {
@@ -520,7 +520,7 @@ func TestReadRecords_CrossOrgIsolation(t *testing.T) {
 // "pagination" validation item: following next_cursor to the end must
 // return every record exactly once with no gaps or repeats.
 func TestReadRecords_PaginationCoversAllItemsExactlyOnce(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	const n = 7
 	for i := 0; i < n; i++ {
@@ -570,7 +570,7 @@ func TestReadRecords_PaginationCoversAllItemsExactlyOnce(t *testing.T) {
 // to the SAME draft row must all serialize through it and every write must
 // land — none silently lost to a lost-update race.
 func TestMCPUpsert_ConcurrentWritesSerializeWithoutLostUpdates(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertTopic(ctx, orgID, uuid.Nil, "faq", kbstore.TopicChanges{
 		Title: strp("FAQ"), BodyMD: strp("v0"),
@@ -636,7 +636,7 @@ func TestMCPUpsert_ConcurrentWritesSerializeWithoutLostUpdates(t *testing.T) {
 // the fix makes read-validate-materialize-clear one indivisible operation
 // under the kbd_draft row lock, closing the gap the bug lived in.
 func TestApproveVersioned_ConcurrentUpsertNeverSilentlyLost(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -715,7 +715,7 @@ func TestApproveVersioned_ConcurrentUpsertNeverSilentlyLost(t *testing.T) {
 // function returns, which can wedge unrelated later tests in the same
 // binary too.
 func TestMCPUpsert_ConcurrentMediaWritesDoNotDeadlock(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	setupCtx := context.Background()
 
 	const n = 20 // comfortably above any default pgxpool pool size
@@ -784,7 +784,7 @@ func TestMCPUpsert_ConcurrentMediaWritesDoNotDeadlock(t *testing.T) {
 // above, seeds one write first specifically to exercise the
 // already-exists path instead).
 func TestMCPUpsert_ConcurrentFirstWritesToNewOrgNeverLoseAnEntry(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 
 	const n = 10
@@ -853,7 +853,7 @@ func TestMCPUpsert_ConcurrentFirstWritesToNewOrgNeverLoseAnEntry(t *testing.T) {
 // columns only"). Confirms the material survives Approve (materialization
 // must not delete it) and that it belongs to the authoring organization.
 func TestMCPUpsert_SourceURLProvenanceCreatesDurableMaterial(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	res, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "coffee-machine", kbstore.ProductChanges{
@@ -866,14 +866,14 @@ func TestMCPUpsert_SourceURLProvenanceCreatesDurableMaterial(t *testing.T) {
 	var count int
 	var materialOrgID uuid.UUID
 	var extractionMetadata []byte
-	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.kbd_materials
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM kbd_materials
 		WHERE source_type = 'url' AND source_ref = $1`, "https://shop.example/coffee-machine").Scan(&count); err != nil {
 		t.Fatalf("count materials: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("expected exactly 1 kbd_materials row for the source_url, got %d", count)
 	}
-	if err := st.Pool().QueryRow(ctx, `SELECT organization_id, extraction_metadata FROM xchats.kbd_materials
+	if err := db.QueryRow(ctx, `SELECT organization_id, extraction_metadata FROM kbd_materials
 		WHERE source_type = 'url' AND source_ref = $1`, "https://shop.example/coffee-machine").
 		Scan(&materialOrgID, &extractionMetadata); err != nil {
 		t.Fatalf("read material: %v", err)
@@ -899,7 +899,7 @@ func TestMCPUpsert_SourceURLProvenanceCreatesDurableMaterial(t *testing.T) {
 	if err := kb.Approve(ctx, orgID, kbstore.ApproveSelector{}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if err := st.Pool().QueryRow(ctx, `SELECT count(*) FROM xchats.kbd_materials
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM kbd_materials
 		WHERE source_type = 'url' AND source_ref = $1`, "https://shop.example/coffee-machine").Scan(&count); err != nil {
 		t.Fatalf("count materials after approve: %v", err)
 	}
@@ -929,7 +929,7 @@ func TestMCPUpsert_SourceURLProvenanceCreatesDurableMaterial(t *testing.T) {
 // material as provenance is rejected, not silently ignored, since silently
 // accepting it would let one organization tag/probe another's rows.
 func TestMCPUpsert_CrossOrgMaterialIDProvenanceRejected(t *testing.T) {
-	kb, orgA, st := newTestKB(t)
+	kb, orgA, st, _ := newTestKB(t)
 	ctx := context.Background()
 	orgBRow, err := st.SeedOrganization(ctx, "org-b")
 	if err != nil {
@@ -958,7 +958,7 @@ func TestMCPUpsert_CrossOrgMaterialIDProvenanceRejected(t *testing.T) {
 // JSON-Schema enum (tools.go) but, before this fix, nothing checked that
 // server-side — the enum was advisory only.
 func TestMCPUpsert_InvalidEnumValueRejected(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 
 	_, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "biz", kbstore.TariffChanges{
@@ -986,7 +986,7 @@ func TestMCPUpsert_InvalidEnumValueRejected(t *testing.T) {
 // whether the NEW title collides with a DIFFERENT key — silently letting a
 // rename merge two records' display identity.
 func TestMCPUpsert_RenameOntoAnotherKeysTitleIsConflict(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 
 	if _, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "biz", kbstore.TariffChanges{
@@ -1028,7 +1028,7 @@ func TestMCPUpsert_RenameOntoAnotherKeysTitleIsConflict(t *testing.T) {
 // record is an idempotent no-op; and a nonexistent key is rejected outright
 // instead of silently accepted.
 func TestMCPDelete_TransitionMatrix(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 
 	// --- nonexistent key: rejected, not silently accepted -----------------
@@ -1125,7 +1125,7 @@ func TestMCPDelete_TransitionMatrix(t *testing.T) {
 // and then IMMEDIATELY deleted it again (deletes apply after upserts in
 // Approve's materialization order) — the update was silently discarded.
 func TestMCPUpsert_CancelsPendingDeleteMarker(t *testing.T) {
-	kb, orgID, _ := newTestKB(t)
+	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 
 	if _, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "biz", kbstore.TariffChanges{
@@ -1180,7 +1180,7 @@ func TestMCPUpsert_CancelsPendingDeleteMarker(t *testing.T) {
 // MCP-authenticated write's verified Principal.UserID lands in updated_by,
 // and the human who approves lands in the audit row.
 func TestOperatorAttribution_UpdatedByAndActorUserID(t *testing.T) {
-	kb, orgID, st := newTestKB(t)
+	kb, orgID, st, db := newTestKB(t)
 	ctx := context.Background()
 
 	writer, err := st.SeedUser(ctx, orgID, "writer@example.com", "hash", "Writer")
@@ -1199,7 +1199,7 @@ func TestOperatorAttribution_UpdatedByAndActorUserID(t *testing.T) {
 	}
 
 	var updatedBy uuid.UUID
-	if err := st.Pool().QueryRow(ctx, `SELECT updated_by FROM xchats.kbd_draft WHERE organization_id = $1`, orgID).Scan(&updatedBy); err != nil {
+	if err := db.QueryRow(ctx, `SELECT updated_by FROM kbd_draft WHERE organization_id = $1`, orgID).Scan(&updatedBy); err != nil {
 		t.Fatalf("read kbd_draft.updated_by: %v", err)
 	}
 	if updatedBy != writer.ID {
@@ -1211,7 +1211,7 @@ func TestOperatorAttribution_UpdatedByAndActorUserID(t *testing.T) {
 	}
 	var actorUserID uuid.UUID
 	var note string
-	if err := st.Pool().QueryRow(ctx, `SELECT actor_user_id, note FROM xchats.ai_audit_log
+	if err := db.QueryRow(ctx, `SELECT actor_user_id, note FROM ai_audit_log
 		WHERE organization_id = $1 AND action = 'approve' ORDER BY created_at DESC LIMIT 1`, orgID).
 		Scan(&actorUserID, &note); err != nil {
 		t.Fatalf("read ai_audit_log: %v", err)
@@ -1225,7 +1225,7 @@ func TestOperatorAttribution_UpdatedByAndActorUserID(t *testing.T) {
 	// identity for whatever remains pending — reuse the approver's own id
 	// here since ApproveVersioned's internal cleanup write is attributed to
 	// whoever approved.
-	if err := st.Pool().QueryRow(ctx, `SELECT updated_by FROM xchats.kbd_draft WHERE organization_id = $1`, orgID).Scan(&updatedBy); err != nil {
+	if err := db.QueryRow(ctx, `SELECT updated_by FROM kbd_draft WHERE organization_id = $1`, orgID).Scan(&updatedBy); err != nil {
 		t.Fatalf("read kbd_draft.updated_by after approve: %v", err)
 	}
 	if updatedBy != approver.ID {
