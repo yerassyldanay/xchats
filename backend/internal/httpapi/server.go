@@ -22,6 +22,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
+	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
@@ -47,9 +48,10 @@ type Server struct {
 	queue    queue.Queue
 	hub      *realtime.Hub
 	blob     blob.Store
-	response *response.Service // the multichannel response engine's entry point (simulator API)
-	wa       whatsapp.Manager  // nil when WhatsApp is not configured; every handler checks
-	tg       telegram.Client   // nil when Telegram is not configured; every handler checks
+	response *response.Service   // the multichannel response engine's entry point (simulator API)
+	wa       whatsapp.Manager    // nil when WhatsApp is not configured; every handler checks
+	tg       telegram.Client     // nil when Telegram is not configured; every handler checks
+	tgProc   *tgingest.Processor // the Telegram webhook ingress's shared ingest core (internal/tgingest) — also used by internal/tgpoller in polling mode
 	kb       *kbstore.Store
 	orgID    uuid.UUID
 	log      *slog.Logger
@@ -99,6 +101,7 @@ type Deps struct {
 	Response      *response.Service
 	WA            whatsapp.Manager
 	TG            telegram.Client
+	TGProcessor   *tgingest.Processor
 	KB            *kbstore.Store
 	KBRepo        response.KnowledgeBaseRepository
 	KBInvalidator kbInvalidator
@@ -121,7 +124,7 @@ func New(d Deps) *Server {
 	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, response: d.Response, wa: d.WA, tg: d.TG, kb: d.KB,
+		blob: d.Blob, response: d.Response, wa: d.WA, tg: d.TG, tgProc: d.TGProcessor, kb: d.KB,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
 		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer,

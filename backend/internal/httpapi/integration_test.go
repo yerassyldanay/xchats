@@ -28,6 +28,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
+	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -226,9 +227,15 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 		Response: responseService, Senders: senders, Log: log}
 	q.Start(context.Background(), w.Handle)
 
+	// tgProc is the webhook ingress's shared ingest core (internal/tgingest)
+	// — production wiring (main.go) always constructs one, so the harness
+	// must too, over the SAME store/queue/hub every other dependency above
+	// shares.
+	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Log: log})
+
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, WA: fake, TG: tgFake, KB: kb,
+		Response: responseService, WA: fake, TG: tgFake, TGProcessor: tgProc, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: org.ID, Log: log,
 	})
