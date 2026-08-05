@@ -17,6 +17,12 @@ type Field struct {
 	Label string
 }
 
+// KeyNgrokAuthtoken is the ngrok Provider's one credential field — exported
+// (unlike every other provider's field keys, which live only inline in the
+// providers list below) because internal/tunnel needs to look it up by name
+// without duplicating the literal and risking it drifting out of sync.
+const KeyNgrokAuthtoken Key = "ngrok.authtoken"
+
 // Provider is the static metadata and validation logic for one integration
 // the Settings UI can configure a credential for.
 type Provider struct {
@@ -72,7 +78,7 @@ var providers = []Provider{
 	},
 	{
 		ID: "ngrok", DisplayName: "ngrok",
-		Fields:        []Field{{Key: "ngrok.authtoken", Label: "Authtoken"}},
+		Fields:        []Field{{Key: KeyNgrokAuthtoken, Label: "Authtoken"}},
 		CredentialURL: "https://dashboard.ngrok.com/get-started/your-authtoken",
 		DocsURL:       "https://ngrok.com/docs",
 		HasBaseURL:    false,
