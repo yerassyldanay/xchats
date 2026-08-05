@@ -334,5 +334,17 @@ export default {
         "Credentials are stored in an encrypted local file rather than your OS keychain on this deployment. This is a weaker guarantee than a keychain — anyone with filesystem access and the app's key could decrypt them.",
       credentialStorageAccept: 'I understand and accept this trade-off',
     },
+    wizard: {
+      title: 'Welcome to xchats',
+      skipAll: 'Skip setup',
+      back: 'Back',
+      next: 'Next',
+      finish: 'Finish',
+      aiProviderBody: 'Add an API key so the assistant can draft replies. You can add more providers later in Settings → AI Engine.',
+      channelsBody: 'Connect a WhatsApp number or a Telegram bot to start receiving messages.',
+      goToChannels: 'Go to Channels',
+      teamBody: 'Invite a teammate now, or do it later from Settings → Team Management.',
+      invited: 'Invitation sent.',
+    },
   },
 }
