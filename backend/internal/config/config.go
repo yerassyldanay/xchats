@@ -9,12 +9,15 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
+
+	"github.com/yerassyldanay/xchats/backend/internal/appdirs"
 )
 
 // xchatsWaNS is the fixed namespace for deriving wa_accounts.id from owner_jid.
@@ -360,18 +363,26 @@ func (c *Config) LangfuseTracingEnabled() bool {
 
 // ResolveConfigPath implements the config file resolution order: an explicit
 // path (the -config flag, when set) wins; else $XCHATS_CONFIG; else
-// ./config.yaml, the repo/dev-checkout default. A future change adds a
-// fourth leg — the OS-appropriate config directory (internal/appdirs),
-// where an installed (non-repo) binary or an installer would place it —
-// once that package exists. A config.yaml missing at the resolved path is
-// not an error: Load treats that as "use defaults" (config.yaml is
-// optional; the app boots on defaults with nothing on disk at all).
+// ./config.yaml if that file exists in the current working directory (the
+// repo/dev-checkout default — this repo commits one at its root); else the
+// OS-appropriate per-user config directory (internal/appdirs.ConfigDir),
+// where an installed (non-repo) binary or an installer places it. A
+// config.yaml missing at the finally resolved path is still not an error:
+// Load treats that as "use defaults" (config.yaml is optional; the app
+// boots on defaults with nothing on disk at all) — this resolution order
+// only decides where to look, never whether something has to be there.
 func ResolveConfigPath(explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
 	if v := os.Getenv("XCHATS_CONFIG"); v != "" {
 		return v
+	}
+	if _, err := os.Stat("config.yaml"); err == nil {
+		return "config.yaml"
+	}
+	if dir, err := appdirs.ConfigDir("xchats"); err == nil {
+		return filepath.Join(dir, "config.yaml")
 	}
 	return "config.yaml"
 }

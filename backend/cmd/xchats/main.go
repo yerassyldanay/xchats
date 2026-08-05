@@ -53,7 +53,7 @@ const (
 )
 
 func main() {
-	cfgPath := flag.String("config", "", "path to config.yaml (default: $XCHATS_CONFIG, then ./config.yaml)")
+	cfgPath := flag.String("config", "", "path to config.yaml (default: $XCHATS_CONFIG, then ./config.yaml, then the OS config directory)")
 	envPath := flag.String("env", envOr("XCHATS_ENV", ".env"), "path to .env")
 	flag.Parse()
 
