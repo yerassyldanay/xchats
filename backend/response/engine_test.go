@@ -56,13 +56,19 @@ func responseJSON(replyText string, media []string, escalate bool, reason string
 	return string(b)
 }
 
-func testEngine(client llm.ChatClient) *Engine {
-	return &Engine{
-		LLMs:         &fakeRegistry{client: client},
+func testParams() LLMParams {
+	return LLMParams{
 		DefaultModel: llm.ModelRef{Provider: "openrouter", Model: "test-model"},
 		MaxTokens:    500,
 		Temperature:  0.3,
 		RetryEnabled: true,
+	}
+}
+
+func testEngine(client llm.ChatClient) *Engine {
+	return &Engine{
+		LLMs:   &fakeRegistry{client: client},
+		Params: testParams,
 	}
 }
 
@@ -190,7 +196,11 @@ func TestEngine_Generate_NoRetryWhenDisabled(t *testing.T) {
 		{Text: "not json"}, {Text: responseJSON("ok", nil, false, "")},
 	}}
 	e := testEngine(client)
-	e.RetryEnabled = false
+	e.Params = func() LLMParams {
+		p := testParams()
+		p.RetryEnabled = false
+		return p
+	}
 
 	if _, err := e.Generate(context.Background(), GenerateRequest{KB: testKB(), IncomingText: "Привет"}); err == nil {
 		t.Fatal("want an error — retry disabled means a bad response fails immediately")

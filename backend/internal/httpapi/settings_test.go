@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,14 +79,15 @@ func (f *fakeTunnelController) Status() tunnel.Status {
 var _ tunnel.Tunnel = (*fakeTunnelController)(nil)
 
 type settingsHarness struct {
-	t      *testing.T
-	srv    *httptest.Server
-	client *http.Client
-	store  *store.Store
-	orgID  uuid.UUID
-	creds  *credentials.Chain
-	sets   *settings.Store
-	tun    *fakeTunnelController
+	t               *testing.T
+	srv             *httptest.Server
+	client          *http.Client
+	store           *store.Store
+	orgID           uuid.UUID
+	creds           *credentials.Chain
+	sets            *settings.Store
+	tun             *fakeTunnelController
+	llmRefreshCalls *int32
 }
 
 // newSettingsHarness builds a harness with a REAL credentials.Chain
@@ -121,17 +123,19 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 	}
 	sets := settings.NewStore(t.TempDir())
 	tun := &fakeTunnelController{}
+	var llmRefreshCalls int32
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, OrgID: org.ID, Log: log,
 		Credentials: creds, Settings: sets, Tunnel: tun,
+		LLMRefresh: func() { atomic.AddInt32(&llmRefreshCalls, 1) },
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &settingsHarness{
 		t: t, srv: ts, client: &http.Client{Jar: jar}, store: st, orgID: org.ID,
-		creds: creds, sets: sets, tun: tun,
+		creds: creds, sets: sets, tun: tun, llmRefreshCalls: &llmRefreshCalls,
 	}
 	t.Cleanup(ts.Close)
 	h.login(h.client, adminEmail, adminPass)
@@ -167,6 +171,10 @@ func (h *settingsHarness) createMemberClient(email, password string) *http.Clien
 	client := &http.Client{Jar: jar}
 	h.login(client, email, password)
 	return client
+}
+
+func (h *settingsHarness) llmRefreshCallCount() int32 {
+	return atomic.LoadInt32(h.llmRefreshCalls)
 }
 
 func (h *settingsHarness) get(path string) (*http.Response, map[string]json.RawMessage) {

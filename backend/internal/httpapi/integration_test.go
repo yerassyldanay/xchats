@@ -217,8 +217,13 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 		KnowledgeBase: cachedKB,
 		Drafts:        &responsestore.DraftRepo{Store: st},
 		Engine: &response.Engine{
-			LLMs: fakeLLMRegistry{client: llmClient}, DefaultModel: llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
-			MaxTokens: 500, Temperature: 0.3, RetryEnabled: true,
+			LLMs: fakeLLMRegistry{client: llmClient},
+			Params: func() response.LLMParams {
+				return response.LLMParams{
+					DefaultModel: llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
+					MaxTokens:    500, Temperature: 0.3, RetryEnabled: true,
+				}
+			},
 		},
 	}
 	tgFake := telegram.NewFake(testBotID, testBotUsername)

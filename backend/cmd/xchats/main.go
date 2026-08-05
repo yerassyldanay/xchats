@@ -33,12 +33,14 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
+	"github.com/yerassyldanay/xchats/backend/internal/settings"
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
 	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
 	"github.com/yerassyldanay/xchats/backend/internal/tgpoller"
+	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsmeow"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -109,7 +111,8 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	provisionSystemSecrets(ctx, cfg, log)
+	credsChain := openCredentialsAndProvisionSecrets(ctx, cfg, log)
+	settingsStore := settings.NewStore(resolveConfigDir(log))
 
 	// Langfuse LLM tracing (best-effort): install a global OTel TracerProvider so
 	// the LLM clients export each call as a generation. Never fatal.
@@ -153,13 +156,24 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		fatal("blob", err)
 	}
 
-	llms, defaultModel := buildLLMRegistry(cfg)
-	engine := &response.Engine{
-		LLMs:         llms,
-		DefaultModel: defaultModel,
-		MaxTokens:    cfg.LLMDraftMaxTokens,
-		Temperature:  cfg.LLMDraftTemperature,
-		RetryEnabled: cfg.LLMDraftRetry,
+	llmRegistry := llmprovider.NewRegistry()
+	populateLLMRegistry(ctx, llmRegistry, credsChain, settingsStore, cfg)
+	// llmRefresh re-resolves every provider's client from scratch — the
+	// Settings UI's save/delete-credential handlers call this (httpapi.Deps.
+	// LLMRefresh) so a just-saved key (or a just-deleted one) takes effect
+	// on the very next draft, with no restart. context.Background(): this
+	// runs on whatever goroutine an HTTP handler triggers it from, well
+	// after that request's own context is a meaningful deadline for a
+	// background maintenance op like this one.
+	llmRefresh := func() {
+		populateLLMRegistry(context.Background(), llmRegistry, credsChain, settingsStore, cfg)
+	}
+	llmParams := func() response.LLMParams { return resolveLLMParams(settingsStore, cfg) }
+	engine := &response.Engine{LLMs: llmRegistry, Params: llmParams}
+	startupParams := llmParams()
+	if _, err := llmRegistry.Client(startupParams.DefaultModel); err != nil {
+		log.Warn("no API key configured for the default LLM provider; AI drafts will fail until one is added via Settings",
+			"provider", startupParams.DefaultModel.Provider, "err", err)
 	}
 	// cachedKB is the ONE shared, cached build of the prompt-facing KB: the
 	// response engine's hot path (every customer reply) and GET /kb/prompt
@@ -177,7 +191,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Engine:        engine,
 	}
 	log.Info("response service active",
-		"provider", defaultModel.Provider, "model", defaultModel.Model, "prompt_ref", aiprompt.PromptRefShopKBV4)
+		"provider", startupParams.DefaultModel.Provider, "model", startupParams.DefaultModel.Model, "prompt_ref", aiprompt.PromptRefShopKBV4)
 
 	q := queue.NewInMem(2048, cfg.System.QueueWorkers, log)
 	hub := realtime.NewHub()
@@ -244,14 +258,35 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
+	// The tunnel needs to serve the SAME router httpapi.New's Server owns —
+	// but httpapi.Deps also needs the tunnel (for /settings/tunnel/*)
+	// before that router exists. Broken by constructing the Server with no
+	// tunnel, building its router, THEN constructing the tunnel manager
+	// against that exact router and handing it back via SetTunnel — routes
+	// only read s.tunnel at REQUEST time, never at Router()-build time, so
+	// this ordering is safe.
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
 		Response: responseService, WA: waMgr, TG: tg, TGProcessor: tgProc, TGPoller: tgMgr, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
+		Credentials: credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
 	})
-	httpServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: srv.Router()}
+	router := srv.Router()
+
+	// Only constructed when a secure credential store is available — with
+	// none, the tunnel has no way to ever retrieve an authtoken, so it is
+	// absent (nil) rather than present-but-guaranteed-to-fail; every
+	// /settings/tunnel/* route already handles a nil Tunnel as "feature not
+	// available" (503 ErrTunnelUnavailable).
+	var tunnelMgr tunnel.Tunnel
+	if credsChain != nil {
+		tunnelMgr = tunnel.NewManager(tunnel.Deps{Creds: credsChain, Settings: settingsStore, Handler: router, Log: log})
+	}
+	srv.SetTunnel(tunnelMgr)
+
+	httpServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: router}
 
 	go func() {
 		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
@@ -265,6 +300,9 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+	if tunnelMgr != nil {
+		_ = tunnelMgr.Stop(shutdownCtx)
+	}
 	// tgMgr before q: the poller publishes to the queue via tgProc, so it
 	// must stop producing before the queue stops accepting. Explicit here
 	// (not a defer) so the ordering relative to q.Close() is guaranteed
@@ -273,26 +311,48 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	q.Close()
 }
 
-// provisionSystemSecrets resolves xchats' four internally-managed secrets —
-// the MCP OAuth CSRF signing key (cfg.SessionSecret), the Telegram
-// bot-token-at-rest encryption key (cfg.TelegramCredentialsEncKey), the MCP
-// JWT signing key (cfg.MCPJWTSigningKey), and the Telegram webhook
-// secret_token (cfg.TelegramWebhookSecret) — through internal/credentials
-// and writes the resolved values straight back into cfg, so every existing
-// consumer of those four fields (secretbox.FromEnvValue below,
-// mcpauth.NewSigningKeyFromSeed in buildMCPConnector, httpapi's CSRF secret,
-// TelegramResolvedWebhookSecret) picks them up completely unchanged.
+// resolveConfigDir resolves the OS-appropriate per-user config directory
+// settings.Store persists settings.json under. A resolution failure (only
+// on the exotic $HOME/%APPDATA%-unset edge case — see appdirs.ConfigDir)
+// falls back to "." rather than refusing to boot over what is fundamentally
+// a non-essential feature: Settings still works for this run, just written
+// wherever the process's current directory happens to be.
+func resolveConfigDir(log *slog.Logger) string {
+	dir, err := appdirs.ConfigDir("xchats")
+	if err != nil {
+		log.Warn("could not resolve the OS application config directory; Settings will be written to the current directory instead", "err", err)
+		return "."
+	}
+	return dir
+}
+
+// openCredentialsAndProvisionSecrets opens the credential store (the OS
+// keychain, or a file store the deployment opted into — see
+// credentials.Open) and, when one is available, resolves xchats' four
+// internally-managed secrets through it — the MCP OAuth CSRF signing key
+// (cfg.SessionSecret), the Telegram bot-token-at-rest encryption key
+// (cfg.TelegramCredentialsEncKey), the MCP JWT signing key
+// (cfg.MCPJWTSigningKey), and the Telegram webhook secret_token
+// (cfg.TelegramWebhookSecret) — writing the resolved values straight back
+// into cfg, so every existing consumer of those four fields
+// (secretbox.FromEnvValue below, mcpauth.NewSigningKeyFromSeed in
+// buildMCPConnector, httpapi's CSRF secret, TelegramResolvedWebhookSecret)
+// picks them up completely unchanged.
 //
-// When a secure credential store is available (the OS keychain, or a file
-// store the deployment opted into — see credentials.Open), each of the four
-// is durably generated once and reused on every later boot: this is what
-// turns "set TG_CREDENTIALS_ENC_KEY/MCP_JWT_SIGNING_KEY by hand before first
-// boot" from a required step into a zero-config default. When no store is
-// available, cfg keeps whatever raw config/env value it already had (most
-// likely empty), and every downstream consumer's own existing
-// warn-and-degrade behavior (an ephemeral MCP key, credentials-at-rest
-// disabled, ...) applies exactly as it did before this function existed.
-func provisionSystemSecrets(ctx context.Context, cfg *config.Config, log *slog.Logger) {
+// Each of the four is durably generated once and reused on every later
+// boot: this is what turns "set TG_CREDENTIALS_ENC_KEY/MCP_JWT_SIGNING_KEY
+// by hand before first boot" from a required step into a zero-config
+// default. When no store is available, cfg keeps whatever raw config/env
+// value it already had (most likely empty), and every downstream
+// consumer's own existing warn-and-degrade behavior (an ephemeral MCP key,
+// credentials-at-rest disabled, ...) applies exactly as it did before this
+// function existed.
+//
+// The returned *credentials.Chain is nil exactly when no secure store was
+// available — callers (runServe, for the LLM registry and the Settings/
+// tunnel surfaces) must treat that as "the credential-backed features are
+// unavailable this boot," never dereference it unconditionally.
+func openCredentialsAndProvisionSecrets(ctx context.Context, cfg *config.Config, log *slog.Logger) *credentials.Chain {
 	dataDir, err := appdirs.DataDir("xchats")
 	if err != nil {
 		log.Warn("could not resolve the OS application data directory; the file-based credential fallback is unavailable", "err", err)
@@ -302,42 +362,107 @@ func provisionSystemSecrets(ctx context.Context, cfg *config.Config, log *slog.L
 		AllowFile: credentials.AllowFileFromEnv(),
 	})
 	if err != nil {
-		log.Warn("no secure credential store available; internally-managed secrets are only as durable as config/env",
+		log.Warn("no secure credential store available; internally-managed secrets are only as durable as config/env, and the Settings/tunnel surfaces are disabled",
 			"reason", err.Error())
-		return
+		return nil
 	}
 	secrets, err := credentials.Provision(ctx, store)
 	if err != nil {
 		log.Warn("provisioning internal secrets failed; falling back to config/env", "err", err)
-		return
+		return store
 	}
 	cfg.SessionSecret = secrets.SessionSecret
 	cfg.TelegramCredentialsEncKey = secrets.TGCredentialsEncKey
 	cfg.MCPJWTSigningKey = secrets.MCPJWTSigningKey
 	cfg.TelegramWebhookSecret = secrets.WebhookSecret
+	return store
 }
 
-// buildLLMRegistry resolves the configured LLM providers into an llm.Registry
-// and the default ModelRef the response engine calls. Missing configuration
-// for the DEFAULT provider (LLM_DEFAULT_PROVIDER, default "openrouter") is a
-// startup failure with a clear message — there is no stub-LLM fallback.
-func buildLLMRegistry(cfg *config.Config) (llm.Registry, llm.ModelRef) {
-	provider := orDefault(cfg.LLMDefaultProvider, "openrouter")
-	model := orDefault(cfg.LLMDefaultModel, "google/gemini-2.5-flash")
-	if cfg.LLMProviderKey(provider) == "" {
-		fatal("llm config", fmt.Errorf(
-			"missing API key for LLM_DEFAULT_PROVIDER=%q — set OPENROUTER_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY to match", provider))
+// llmProviderCfg is one provider's static config-side fallback — its raw,
+// env-sourced API key and base URL, read only when creds has nothing for it
+// (no secure store, or the key was never saved through the Settings UI).
+var llmProviderCfg = []struct {
+	name, credKey string
+	apiKey        func(*config.Config) string
+	baseURL       func(*config.Config) string
+}{
+	{"openrouter", "openrouter.api_key", func(c *config.Config) string { return c.OpenRouterAPIKey }, func(c *config.Config) string { return c.OpenRouterBaseURL }},
+	{"openai", "openai.api_key", func(c *config.Config) string { return c.OpenAIAPIKey }, func(c *config.Config) string { return c.OpenAIBaseURL }},
+	{"gemini", "gemini.api_key", func(c *config.Config) string { return c.GeminiAPIKey }, func(c *config.Config) string { return c.GeminiBaseURL }},
+}
+
+// populateLLMRegistry (re)registers one OpenAICompatible client per known
+// LLM provider that has a resolvable API key, IN PLACE on reg — called once
+// at boot and again by the LLMRefresh closure after any credential
+// save/delete (internal/httpapi/settings.go), so response.Engine — which
+// holds this exact *llmprovider.Registry as its llm.Registry, safe for
+// concurrent Register/Deregister alongside Client via its own RWMutex —
+// picks up the change on its very next Generate call, no restart.
+//
+// Per provider, in order: creds (fresh on every call — a Settings-UI-saved
+// value, the OS keychain, or creds' own env-var overlay) when creds is
+// non-nil, else cfg's raw env-sourced field. The base URL follows the same
+// idea: settingsStore's ProviderSettings.BaseURL when set, else cfg's own
+// *_BASE_URL field, else llmprovider.DefaultBaseURL. A provider with no key
+// anywhere is deregistered — never left holding a stale client for a
+// credential that was just deleted.
+func populateLLMRegistry(ctx context.Context, reg *llmprovider.Registry, creds *credentials.Chain, settingsStore *settings.Store, cfg *config.Config) {
+	var providerSettings map[string]settings.ProviderSettings
+	if st, err := settingsStore.Load(); err == nil {
+		providerSettings = st.Providers
 	}
 	timeoutSeconds := cfg.LLMDraftTimeoutSeconds
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 60
 	}
-	reg := llmprovider.BuildRegistry([]llmprovider.ProviderConfig{
-		{Name: "openrouter", APIKey: cfg.OpenRouterAPIKey, BaseURL: cfg.OpenRouterBaseURL},
-		{Name: "openai", APIKey: cfg.OpenAIAPIKey, BaseURL: cfg.OpenAIBaseURL},
-		{Name: "gemini", APIKey: cfg.GeminiAPIKey, BaseURL: cfg.GeminiBaseURL},
-	}, time.Duration(timeoutSeconds)*time.Second)
-	return reg, llm.ModelRef{Provider: provider, Model: model}
+	timeout := time.Duration(timeoutSeconds) * time.Second
+
+	for _, p := range llmProviderCfg {
+		key := p.apiKey(cfg)
+		if creds != nil {
+			if v, err := creds.Get(ctx, credentials.Key(p.credKey)); err == nil && v != "" {
+				key = v
+			}
+		}
+		if strings.TrimSpace(key) == "" {
+			reg.Deregister(p.name)
+			continue
+		}
+		baseURL := p.baseURL(cfg)
+		if ps, ok := providerSettings[p.name]; ok && ps.BaseURL != "" {
+			baseURL = ps.BaseURL
+		}
+		if baseURL == "" {
+			baseURL = llmprovider.DefaultBaseURL(p.name)
+		}
+		reg.Register(p.name, llmprovider.NewOpenAICompatible(baseURL, key, p.name, timeout))
+	}
+}
+
+// resolveLLMParams reads the response engine's CURRENT model configuration
+// from settingsStore — response.Engine calls this fresh on every Generate
+// (see Engine.Params), so a Settings UI change takes effect on the very
+// next request. A settings.Store.Load failure (a transient read problem —
+// Load itself already treats a merely-missing file as "use defaults") falls
+// back to cfg's own raw env-sourced fields rather than blocking a customer
+// response over it.
+func resolveLLMParams(settingsStore *settings.Store, cfg *config.Config) response.LLMParams {
+	st, err := settingsStore.Load()
+	if err != nil {
+		return response.LLMParams{
+			DefaultModel: llm.ModelRef{
+				Provider: orDefault(cfg.LLMDefaultProvider, "openrouter"),
+				Model:    orDefault(cfg.LLMDefaultModel, "google/gemini-2.5-flash"),
+			},
+			MaxTokens: cfg.LLMDraftMaxTokens, Temperature: cfg.LLMDraftTemperature, RetryEnabled: cfg.LLMDraftRetry,
+		}
+	}
+	return response.LLMParams{
+		DefaultModel: llm.ModelRef{Provider: st.LLM.DefaultProvider, Model: st.LLM.DefaultModel},
+		MaxTokens:    st.LLM.MaxTokens,
+		Temperature:  st.LLM.Temperature,
+		RetryEnabled: st.LLM.Retry,
+	}
 }
 
 // validateProductionConfig returns every reason cfg is unsafe to run with

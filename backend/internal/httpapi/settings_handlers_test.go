@@ -476,6 +476,49 @@ func TestTunnelStartFailureReturnsStatusWithLastError(t *testing.T) {
 	}
 }
 
+func TestLLMRefreshCalledOnCredentialSaveDeleteAndSettingsChanges(t *testing.T) {
+	h := newSettingsHarness(t)
+
+	resp, env := h.do(http.MethodPut, "/xchats/api/v1/settings/integrations/ngrok/credential", map[string]any{
+		"values": map[string]string{"ngrok.authtoken": "tok"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	if got := h.llmRefreshCallCount(); got != 1 {
+		t.Errorf("llmRefresh calls after save = %d, want 1", got)
+	}
+
+	resp, env = h.do(http.MethodDelete, "/xchats/api/v1/settings/integrations/ngrok/credential", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	if got := h.llmRefreshCallCount(); got != 2 {
+		t.Errorf("llmRefresh calls after delete = %d, want 2", got)
+	}
+
+	resp, env = h.do(http.MethodPut, "/xchats/api/v1/settings/integrations/openai", map[string]any{
+		"base_url": "https://proxy.example",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update provider settings: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	if got := h.llmRefreshCallCount(); got != 3 {
+		t.Errorf("llmRefresh calls after provider settings update = %d, want 3", got)
+	}
+
+	resp, env = h.do(http.MethodPut, "/xchats/api/v1/settings/llm", map[string]any{
+		"default_provider": "openrouter", "default_model": "m",
+		"max_tokens": 500, "temperature": 0.3, "timeout_seconds": 60,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update llm settings: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	if got := h.llmRefreshCallCount(); got != 4 {
+		t.Errorf("llmRefresh calls after LLM settings update = %d, want 4", got)
+	}
+}
+
 func TestSettingsRoutesRequireAdmin(t *testing.T) {
 	h := newSettingsHarness(t)
 	member := h.createMemberClient("member@xchats.test", "password123")

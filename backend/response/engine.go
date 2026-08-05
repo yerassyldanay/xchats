@@ -17,16 +17,30 @@ import (
 	"github.com/yerassyldanay/xchats/backend/messaging"
 )
 
+// LLMParams is the response engine's per-request model configuration:
+// which provider/model to call by default, and the sampling/retry knobs.
+type LLMParams struct {
+	DefaultModel llm.ModelRef
+	MaxTokens    int
+	Temperature  float64
+	RetryEnabled bool
+}
+
 // Engine renders the evaluated prompt, calls the configured LLM, and
 // validates/grounds its response. It has no database, channel-send, or
 // provider-HTTP dependency, and constructs no fake knowledge-base data —
 // GenerateRequest.KB must already be a real, loaded knowledge base.
 type Engine struct {
-	LLMs         llm.Registry
-	DefaultModel llm.ModelRef
-	MaxTokens    int
-	Temperature  float64
-	RetryEnabled bool
+	LLMs llm.Registry
+	// Params returns the CURRENT LLMParams — called once per Generate,
+	// never cached across calls or frozen at construction. This is what
+	// lets a composition root's runtime-configurable settings (xchats'
+	// Settings UI, internal/settings, wired in at cmd/xchats) take effect
+	// on the very next request with no restart; a composition root with no
+	// such thing can just close over a fixed LLMParams value. response
+	// itself has no internal/settings dependency — see this package's own
+	// doc comment on why it stays composition-root-agnostic.
+	Params func() LLMParams
 }
 
 // GenerateRequest is one channel-neutral request to produce a draft reply.
@@ -83,7 +97,8 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	}
 	prompt := rendered + aiprompt.ConversationTail(aiprompt.RenderHistory(req.History), req.IncomingText)
 
-	modelRef := e.DefaultModel
+	params := e.Params()
+	modelRef := params.DefaultModel
 	if req.ModelOverride != nil {
 		modelRef = *req.ModelOverride
 	}
@@ -92,14 +107,14 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 		return nil, fmt.Errorf("response: resolve model client: %w", err)
 	}
 
-	raw, err := e.complete(ctx, client, modelRef, prompt)
+	raw, err := e.complete(ctx, client, modelRef, prompt, params)
 	if err != nil {
 		return nil, fmt.Errorf("response: llm call: %w", err)
 	}
 
-	if reason := aiprompt.ClassifyRetry(raw, req.KB, cat); reason != aiprompt.RetryReasonNone && e.RetryEnabled {
+	if reason := aiprompt.ClassifyRetry(raw, req.KB, cat); reason != aiprompt.RetryReasonNone && params.RetryEnabled {
 		retryPrompt := prompt + aiprompt.RetryFeedback(raw, req.KB, cat)
-		retryRaw, err := e.complete(ctx, client, modelRef, retryPrompt)
+		retryRaw, err := e.complete(ctx, client, modelRef, retryPrompt, params)
 		if err != nil {
 			return nil, fmt.Errorf("response: llm retry call: %w", err)
 		}
@@ -156,12 +171,12 @@ func PromptRefFor(channel messaging.Channel) string {
 	return aiprompt.PromptRefShopKBV4
 }
 
-func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string) (string, error) {
+func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string, params LLMParams) (string, error) {
 	resp, err := client.Complete(ctx, llm.ChatRequest{
 		Model:       modelRef.Model,
 		Messages:    []llm.Message{{Role: "user", Content: prompt}},
-		Temperature: e.Temperature,
-		MaxTokens:   e.MaxTokens,
+		Temperature: params.Temperature,
+		MaxTokens:   params.MaxTokens,
 	})
 	if err != nil {
 		return "", err

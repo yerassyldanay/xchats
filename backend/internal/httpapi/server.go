@@ -176,6 +176,18 @@ func New(d Deps) *Server {
 	}
 }
 
+// SetTunnel installs the tunnel controller after construction — the
+// composition root's escape hatch for the circular dependency between the
+// tunnel (which must serve THIS Server's own router) and Deps.Tunnel (read
+// by settings.go's handlers, which the router references). Every settings.go
+// tunnel route reads s.tunnel lazily at REQUEST time, never at Router()-build
+// time, so calling this any time before the server actually starts accepting
+// requests is safe — including nil, restoring the same "feature not
+// configured" behavior Deps.Tunnel being nil at construction already has.
+func (s *Server) SetTunnel(t tunnel.Tunnel) {
+	s.tunnel = t
+}
+
 // Router builds the gin engine with all routes mounted.
 func (s *Server) Router() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
