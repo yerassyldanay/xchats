@@ -29,7 +29,7 @@ func benchAccount(b *testing.B) (*store.Store, uuid.UUID) {
 	if _, err := st.SeedAccount(ctx, store.Account{
 		ID: accountID, OrganizationID: uuid.NullUUID{UUID: org.ID, Valid: true},
 		DisplayName: "Bench", ExternalAccountRef: config.CanonicalJID(ownerJID),
-		ExternalHandle: config.PhoneFromJID(ownerJID), InstanceName: "bench", ConnectionState: "connected",
+		ExternalHandle: config.PhoneFromJID(ownerJID), ConnectionState: "connected",
 	}); err != nil {
 		b.Fatalf("seed account: %v", err)
 	}
@@ -50,14 +50,14 @@ func BenchmarkUpsertInbound_NewChat(b *testing.B) {
 		phone := fmt.Sprintf("7700%07d", i)
 		if _, err := st.UpsertInbound(ctx, store.InboundUpsert{
 			AccountID: accountID, PhoneJID: phone + "@s.whatsapp.net", RemoteJID: phone + "@s.whatsapp.net",
-			PhoneNumber:        phone,
-			Direction:          "in",
-			SenderKind:         "contact",
-			EvolutionMessageID: fmt.Sprintf("BENCH-NEW-%d", i),
-			MessageKind:        "conversation",
-			Body:               "Здравствуйте, сколько стоит доставка?",
-			Source:             "live_webhook",
-			MessageTS:          time.Now(),
+			PhoneNumber:       phone,
+			Direction:         "in",
+			SenderKind:        "contact",
+			ExternalMessageID: fmt.Sprintf("BENCH-NEW-%d", i),
+			MessageKind:       "conversation",
+			Body:              "Здравствуйте, сколько стоит доставка?",
+			Source:            "live_webhook",
+			MessageTS:         time.Now(),
 		}); err != nil {
 			b.Fatalf("UpsertInbound: %v", err)
 		}
@@ -75,7 +75,7 @@ func BenchmarkUpsertInbound_ExistingChat(b *testing.B) {
 	if _, err := st.UpsertInbound(ctx, store.InboundUpsert{
 		AccountID: accountID, PhoneJID: phone + "@s.whatsapp.net", RemoteJID: phone + "@s.whatsapp.net",
 		PhoneNumber: phone, Direction: "in", SenderKind: "contact",
-		EvolutionMessageID: "BENCH-SEED", MessageKind: "conversation", Body: "seed", Source: "live_webhook",
+		ExternalMessageID: "BENCH-SEED", MessageKind: "conversation", Body: "seed", Source: "live_webhook",
 		MessageTS: time.Now(),
 	}); err != nil {
 		b.Fatalf("seed chat: %v", err)
@@ -85,14 +85,14 @@ func BenchmarkUpsertInbound_ExistingChat(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if _, err := st.UpsertInbound(ctx, store.InboundUpsert{
 			AccountID: accountID, PhoneJID: phone + "@s.whatsapp.net", RemoteJID: phone + "@s.whatsapp.net",
-			PhoneNumber:        phone,
-			Direction:          "in",
-			SenderKind:         "contact",
-			EvolutionMessageID: fmt.Sprintf("BENCH-EXISTING-%d", i),
-			MessageKind:        "conversation",
-			Body:               "А в наличии есть?",
-			Source:             "live_webhook",
-			MessageTS:          time.Now(),
+			PhoneNumber:       phone,
+			Direction:         "in",
+			SenderKind:        "contact",
+			ExternalMessageID: fmt.Sprintf("BENCH-EXISTING-%d", i),
+			MessageKind:       "conversation",
+			Body:              "А в наличии есть?",
+			Source:            "live_webhook",
+			MessageTS:         time.Now(),
 		}); err != nil {
 			b.Fatalf("UpsertInbound: %v", err)
 		}
@@ -113,7 +113,7 @@ func BenchmarkUpsertInbound_ExistingChat_Parallel(b *testing.B) {
 	if _, err := st.UpsertInbound(ctx, store.InboundUpsert{
 		AccountID: accountID, PhoneJID: phone + "@s.whatsapp.net", RemoteJID: phone + "@s.whatsapp.net",
 		PhoneNumber: phone, Direction: "in", SenderKind: "contact",
-		EvolutionMessageID: "BENCH-SEED", MessageKind: "conversation", Body: "seed", Source: "live_webhook",
+		ExternalMessageID: "BENCH-SEED", MessageKind: "conversation", Body: "seed", Source: "live_webhook",
 		MessageTS: time.Now(),
 	}); err != nil {
 		b.Fatalf("seed chat: %v", err)
@@ -126,14 +126,14 @@ func BenchmarkUpsertInbound_ExistingChat_Parallel(b *testing.B) {
 			id := atomic.AddInt64(&n, 1)
 			if _, err := st.UpsertInbound(ctx, store.InboundUpsert{
 				AccountID: accountID, PhoneJID: phone + "@s.whatsapp.net", RemoteJID: phone + "@s.whatsapp.net",
-				PhoneNumber:        phone,
-				Direction:          "in",
-				SenderKind:         "contact",
-				EvolutionMessageID: fmt.Sprintf("BENCH-PAR-%d", id),
-				MessageKind:        "conversation",
-				Body:               "А в наличии есть?",
-				Source:             "live_webhook",
-				MessageTS:          time.Now(),
+				PhoneNumber:       phone,
+				Direction:         "in",
+				SenderKind:        "contact",
+				ExternalMessageID: fmt.Sprintf("BENCH-PAR-%d", id),
+				MessageKind:       "conversation",
+				Body:              "А в наличии есть?",
+				Source:            "live_webhook",
+				MessageTS:         time.Now(),
 			}); err != nil {
 				b.Fatalf("UpsertInbound: %v", err)
 			}
@@ -150,7 +150,7 @@ func BenchmarkChatByID(b *testing.B) {
 	res, err := st.UpsertInbound(ctx, store.InboundUpsert{
 		AccountID: accountID, PhoneJID: phone + "@s.whatsapp.net", RemoteJID: phone + "@s.whatsapp.net",
 		PhoneNumber: phone, Direction: "in", SenderKind: "contact",
-		EvolutionMessageID: "BENCH-SEED", MessageKind: "conversation", Body: "seed", Source: "live_webhook",
+		ExternalMessageID: "BENCH-SEED", MessageKind: "conversation", Body: "seed", Source: "live_webhook",
 		MessageTS: time.Now(),
 	})
 	if err != nil {
@@ -173,14 +173,14 @@ func BenchmarkMessagesForChat(b *testing.B) {
 	for i := 0; i < 50; i++ {
 		res, err := st.UpsertInbound(ctx, store.InboundUpsert{
 			AccountID: accountID, PhoneJID: phone + "@s.whatsapp.net", RemoteJID: phone + "@s.whatsapp.net",
-			PhoneNumber:        phone,
-			Direction:          "in",
-			SenderKind:         "contact",
-			EvolutionMessageID: fmt.Sprintf("BENCH-HIST-%d", i),
-			MessageKind:        "conversation",
-			Body:               "история сообщений",
-			Source:             "live_webhook",
-			MessageTS:          time.Now(),
+			PhoneNumber:       phone,
+			Direction:         "in",
+			SenderKind:        "contact",
+			ExternalMessageID: fmt.Sprintf("BENCH-HIST-%d", i),
+			MessageKind:       "conversation",
+			Body:              "история сообщений",
+			Source:            "live_webhook",
+			MessageTS:         time.Now(),
 		})
 		if err != nil {
 			b.Fatalf("seed message %d: %v", i, err)

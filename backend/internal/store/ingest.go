@@ -58,21 +58,21 @@ const (
 
 // InboundUpsert is the worker's normalized input for one message event.
 type InboundUpsert struct {
-	AccountID          uuid.UUID
-	PhoneJID           string
-	LidJID             string
-	RemoteJID          string
-	PhoneNumber        string
-	PushName           string
-	Direction          string // in|out
-	SenderKind         string // contact|external_account
-	EvolutionMessageID string
-	MessageKind        string
-	Body               string
-	Preview            string // chat-list preview (media → placeholder)
-	Source             string
-	Raw                []byte
-	MessageTS          time.Time
+	AccountID         uuid.UUID
+	PhoneJID          string
+	LidJID            string
+	RemoteJID         string
+	PhoneNumber       string
+	PushName          string
+	Direction         string // in|out
+	SenderKind        string // contact|external_account
+	ExternalMessageID string
+	MessageKind       string
+	Body              string
+	Preview           string // chat-list preview (media → placeholder)
+	Source            string
+	Raw               []byte
+	MessageTS         time.Time
 }
 
 // InboundResult reports what the upsert did, so the worker knows which SSE to emit.
@@ -85,7 +85,7 @@ type InboundResult struct {
 }
 
 // UpsertInbound idempotently upserts contact → chat → message and maintains the
-// chat aggregates, all in one transaction. Re-delivery (same evolution_message_id)
+// chat aggregates, all in one transaction. Re-delivery (same external_message_id)
 // is a no-op upsert (MessageInserted=false).
 func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundResult, error) {
 	var res InboundResult
@@ -121,9 +121,9 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 	}
 
 	// message (dedup on the natural key; preserves sender_kind on conflict)
-	var evID any
-	if in.EvolutionMessageID != "" {
-		evID = in.EvolutionMessageID
+	var extID any
+	if in.ExternalMessageID != "" {
+		extID = in.ExternalMessageID
 	}
 	var ts any
 	if !in.MessageTS.IsZero() {
@@ -131,11 +131,11 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO wa_messages
-			(account_id, chat_id, direction, sender_kind, evolution_message_id, message_kind, body, delivery_state, source, raw, message_ts)
+			(account_id, chat_id, direction, sender_kind, external_message_id, message_kind, body, delivery_state, source, raw, message_ts)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (account_id, evolution_message_id) DO NOTHING
+		ON CONFLICT (account_id, external_message_id) DO NOTHING
 		RETURNING id`,
-		in.AccountID, res.ChatID, in.Direction, in.SenderKind, evID, in.MessageKind, in.Body,
+		in.AccountID, res.ChatID, in.Direction, in.SenderKind, extID, in.MessageKind, in.Body,
 		deliveryStateFor(in.Direction), in.Source, jsonbOrNil(in.Raw), ts).Scan(&res.MessageID)
 	switch {
 	case err == nil:
@@ -147,9 +147,9 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 			UPDATE wa_messages SET
 				body = CASE WHEN body = '' THEN $3 ELSE body END,
 				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-			WHERE account_id = $1 AND evolution_message_id = $2
+			WHERE account_id = $1 AND external_message_id = $2
 			RETURNING id`,
-			in.AccountID, evID, in.Body).Scan(&res.MessageID); err != nil {
+			in.AccountID, extID, in.Body).Scan(&res.MessageID); err != nil {
 			return res, wrap("update duplicate message", err)
 		}
 	default:
@@ -209,16 +209,16 @@ func deliveryStateFor(direction string) string {
 
 // AdvanceDeliveryState applies a status update, monotonically (never backwards).
 // Returns the message + chat id on a real change, ErrNotFound otherwise.
-func (s *Store) AdvanceDeliveryState(ctx context.Context, accountID uuid.UUID, evolutionMessageID, newState string, newRank int) (uuid.UUID, uuid.UUID, error) {
+func (s *Store) AdvanceDeliveryState(ctx context.Context, accountID uuid.UUID, externalMessageID, newState string, newRank int) (uuid.UUID, uuid.UUID, error) {
 	var msgID, chatID uuid.UUID
 	err := s.db.QueryRow(ctx, `
 		UPDATE wa_messages SET delivery_state = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE account_id = $1 AND evolution_message_id = $2
+		WHERE account_id = $1 AND external_message_id = $2
 		  AND (CASE delivery_state
 				WHEN 'queued' THEN 0 WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2
 				WHEN 'read' THEN 3 WHEN 'failed' THEN 4 ELSE 0 END) < $4
 		RETURNING id, chat_id`,
-		accountID, evolutionMessageID, newState, newRank).Scan(&msgID, &chatID)
+		accountID, externalMessageID, newState, newRank).Scan(&msgID, &chatID)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return msgID, chatID, ErrNotFound
 	}
@@ -380,7 +380,7 @@ func (s *Store) StampOutboundSent(ctx context.Context, channel string, messageID
 		return err
 	}
 	_, err = s.db.Exec(ctx, `
-		UPDATE `+table+` SET evolution_message_id = $2, delivery_state = 'sent', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE `+table+` SET external_message_id = $2, delivery_state = 'sent', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE id = $1`, messageID, externalID)
 	return err
 }

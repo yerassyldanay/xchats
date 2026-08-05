@@ -70,8 +70,18 @@ const dbxImportPath = modulePrefix + "internal/dbx"
 // only the SQLite-side database/sql and modernc.org/sqlite, and dbx
 // itself, are), writes its SQLite side through dbx like every other
 // persistenceBoundary package instead of opening its own connection.
+//
+// internal/whatsmeow is the one deliberate exception: go.mau.fi/whatsmeow's
+// sqlstore.NewWithDB requires a raw *sql.DB to manage its OWN schema (device
+// sessions, in a separate whatsmeow.db file) via its own Upgrade() migrator —
+// that is a third-party library's persistence, not xchats' own, so routing it
+// through internal/dbx (built around xchats' schema and multi-package pool
+// sharing) would not fit. internal/whatsmeow is the sole place in the module
+// that knows whatsmeow needs modernc.org/sqlite, mirroring dbx's own role for
+// xchats' schema.
 var driverOnlyPackages = map[string]bool{
-	dbxImportPath: true,
+	dbxImportPath:                       true,
+	modulePrefix + "internal/whatsmeow": true,
 }
 
 type goListPackage struct {

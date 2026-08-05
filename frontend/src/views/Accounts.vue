@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
 import {
   CircleAlert,
   CircleCheck,
@@ -10,10 +9,8 @@ import {
   QrCode,
   RefreshCw,
   RotateCw,
-  Server,
   Trash2,
   Unplug,
-  Wrench,
 } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
 import { ApiError } from '../api/client'
@@ -28,7 +25,7 @@ import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 
 const accounts = useAccounts()
 const showAdd = ref(false)
-const reconnectTarget = ref<{ id: string; instance: string; displayName: string } | null>(null)
+const addStartChannel = ref<'whatsapp' | null>(null)
 const tokenTarget = ref<Account | null>(null)
 const deleting = ref<string | null>(null)
 const working = ref<string | null>(null)
@@ -72,11 +69,14 @@ const stats = computed(() => {
 })
 
 function openAdd() {
-  reconnectTarget.value = null
+  addStartChannel.value = null
   showAdd.value = true
 }
-function openReconnect(a: Account) {
-  reconnectTarget.value = { id: a.id, instance: a.instance_name, displayName: a.display_name }
+// openReconnect re-pairs the same number from scratch (whatsmeow has no
+// partial-reconnect concept): a fresh QR scan lands on this SAME account row
+// (id = uuidv5(owner_jid) is deterministic), reviving it with history intact.
+function openReconnect(_a: Account) {
+  addStartChannel.value = 'whatsapp'
   showAdd.value = true
 }
 async function onConnected() {
@@ -131,11 +131,6 @@ async function remove(a: Account) {
           <p class="text-sm text-muted-foreground">Подключайте номера WhatsApp и Telegram-ботов</p>
         </div>
         <div class="flex items-center gap-3">
-          <Button as-child variant="outline" size="sm">
-            <RouterLink :to="{ name: 'instances' }">
-              <Wrench class="w-4 h-4" /> Обслуживание инстансов
-            </RouterLink>
-          </Button>
           <Button @click="openAdd">
             <Plus class="w-4 h-4" /> Подключить канал
           </Button>
@@ -210,12 +205,6 @@ async function remove(a: Account) {
                 <div class="min-w-0 flex-1">
                   <div class="font-semibold truncate">{{ a.display_name }}</div>
                   <div class="text-sm text-muted-foreground truncate">{{ handle(a) }}</div>
-                  <div
-                    v-if="!isTelegram(a) && a.instance_name"
-                    class="text-xs text-muted-foreground flex items-center gap-1 mt-0.5 truncate"
-                  >
-                    <Server class="w-2.5 h-2.5" /> {{ a.instance_name }}
-                  </div>
                 </div>
               </div>
 
@@ -300,7 +289,7 @@ async function remove(a: Account) {
 
     <AddAccountDialog
       v-if="showAdd"
-      :reconnect="reconnectTarget"
+      :start-channel="addStartChannel"
       @close="showAdd = false"
       @connected="onConnected"
     />

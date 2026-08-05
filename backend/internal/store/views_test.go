@@ -42,7 +42,7 @@ func seedThreeChannels(t *testing.T, st *store.Store) (orgID, waChat, simChat, t
 	if _, err := st.SeedAccount(ctx, store.Account{
 		ID: waAccount, OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 		DisplayName: "WhatsApp", ExternalAccountRef: ownerJID,
-		ExternalHandle: "77011111111", InstanceName: "xpayment", ConnectionState: "connected",
+		ExternalHandle: "77011111111", ConnectionState: "connected",
 	}); err != nil {
 		t.Fatalf("seed wa account: %v", err)
 	}
@@ -50,7 +50,7 @@ func seedThreeChannels(t *testing.T, st *store.Store) (orgID, waChat, simChat, t
 		AccountID: waAccount, PhoneJID: "77000000000@s.whatsapp.net",
 		RemoteJID: "77000000000@s.whatsapp.net", PhoneNumber: "77000000000",
 		PushName: "WA Клиент", Direction: "in", SenderKind: "contact",
-		EvolutionMessageID: "WA1", MessageKind: "conversation", Body: "привет из whatsapp",
+		ExternalMessageID: "WA1", MessageKind: "conversation", Body: "привет из whatsapp",
 		Preview: "привет из whatsapp", Source: "live_webhook", MessageTS: time.Now(),
 	})
 	if err != nil {
@@ -66,7 +66,7 @@ func seedThreeChannels(t *testing.T, st *store.Store) (orgID, waChat, simChat, t
 	simRes, err := st.UpsertInbound(ctx, store.InboundUpsert{
 		AccountID: simAccount.ID, PhoneJID: "sim-contact", RemoteJID: "sim-conv",
 		PhoneNumber: "sim-contact", PushName: "Sim Клиент", Direction: "in", SenderKind: "contact",
-		EvolutionMessageID: uuid.NewString(), MessageKind: "conversation", Body: "привет из симулятора",
+		ExternalMessageID: uuid.NewString(), MessageKind: "conversation", Body: "привет из симулятора",
 		Preview: "привет из симулятора", Source: "simulator", MessageTS: time.Now(),
 	})
 	if err != nil {

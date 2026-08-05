@@ -139,27 +139,21 @@ func (s *Server) handleSendMessage(c *gin.Context) {
 }
 
 // sendParts is the fan-out: text is one message, each media_id is its own
-// message (one Evolution call each). It inserts the row, broadcasts
+// message (one provider call each). It inserts the row, broadcasts
 // message.created, then enqueues the outbound_send task — shared by manual send
 // (sender_kind=user) and AI approve (sender_kind=ai).
 func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, senderUserID uuid.NullUUID, text string, mediaIDs []string) ([]dto.Message, error) {
 	var out []dto.Message
-	// Resolve the chat's account once → its Evolution instance, so the send goes
-	// out from the right number (multi-account). Empty instance falls back to the
-	// client's default instance in the worker. The channel comes from the chat
-	// itself (the view already carries it), so it is never guessed.
+	// The channel comes from the chat itself (the view already carries it) when
+	// set; falling back to a fresh account lookup only covers rows written
+	// before the channel column existed.
 	channel := chat.Channel
-	instance := ""
-	if acct, err := s.store.AccountByID(ctx(c), chat.AccountID); err == nil {
-		instance = acct.InstanceName
-		if channel == "" {
+	if channel == "" {
+		if acct, err := s.store.AccountByID(ctx(c), chat.AccountID); err == nil {
 			channel = acct.Channel
+		} else {
+			s.log.Warn("send: account lookup failed", "chat_id", chat.ID, "account_id", chat.AccountID, "err", err)
 		}
-	} else {
-		// No account row → the worker falls back to the default Evolution instance.
-		// If that default is wrong, sends go nowhere; make the fallback visible.
-		s.log.Warn("send: account lookup failed; using default instance",
-			"chat_id", chat.ID, "account_id", chat.AccountID, "err", err)
 	}
 
 	text = strings.TrimSpace(text)
@@ -174,10 +168,10 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
 		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
-			Instance: instance, PhoneJID: chat.ExternalConversationRef, Text: text,
+			Destination: chat.ExternalConversationRef, Text: text,
 		}})
 		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "channel", channel,
-			"instance", instance, "sender_kind", senderKind, "kind", "text")
+			"sender_kind", senderKind, "kind", "text")
 		out = append(out, dto.MapMessage(msg))
 		return nil
 	}
@@ -221,9 +215,9 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
 		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
-			Instance: instance, PhoneJID: chat.ExternalConversationRef, MediaID: mid, Caption: caption,
+			Destination: chat.ExternalConversationRef, MediaID: mid, Caption: caption,
 		}})
-		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "instance", instance,
+		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID,
 			"sender_kind", senderKind, "kind", kind, "media_id", mid)
 		out = append(out, dto.MapMessage(msg))
 	}
@@ -317,21 +311,6 @@ func (s *Server) handleCreateChat(c *gin.Context) {
 	acct, okAcct := s.selectComposeAccount(c, req.accountID())
 	if !okAcct {
 		return
-	}
-
-	// Pre-flight: fail fast with a clear reason if the number isn't on WhatsApp,
-	// instead of creating a chat whose first message silently fails to send.
-	if s.evo != nil {
-		exists, err := s.evo.OnWhatsApp(ctx(c), acct.InstanceName, phone)
-		if err != nil {
-			fail(c, http.StatusBadGateway, ErrEvolution, "could not verify the number: "+err.Error())
-			return
-		}
-		if !exists {
-			fail(c, http.StatusBadRequest, ErrNotOnWhatsApp,
-				"Этот номер не зарегистрирован в WhatsApp. Укажите номер с кодом страны, например 77001234567.")
-			return
-		}
 	}
 	jid := config.CanonicalJID(phone) // phone -> phone@s.whatsapp.net
 

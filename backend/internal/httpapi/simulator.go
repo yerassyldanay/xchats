@@ -79,19 +79,19 @@ func (s *Server) handleSimulatorMessage(c *gin.Context) {
 	// contact_ref and conversation_ref are independent identities (PhoneJID vs.
 	// RemoteJID) so one contact can hold multiple simulator conversations.
 	res, err := s.store.UpsertInbound(ctx(c), store.InboundUpsert{
-		AccountID:          acct.ID,
-		PhoneJID:           req.ContactRef,
-		RemoteJID:          req.ConversationRef,
-		PhoneNumber:        req.ContactRef,
-		PushName:           req.ContactRef,
-		Direction:          "in",
-		SenderKind:         "contact",
-		EvolutionMessageID: uuid.NewString(),
-		MessageKind:        "conversation",
-		Body:               req.Text,
-		Preview:            preview(req.Text),
-		Source:             "simulator",
-		MessageTS:          time.Now(),
+		AccountID:         acct.ID,
+		PhoneJID:          req.ContactRef,
+		RemoteJID:         req.ConversationRef,
+		PhoneNumber:       req.ContactRef,
+		PushName:          req.ContactRef,
+		Direction:         "in",
+		SenderKind:        "contact",
+		ExternalMessageID: uuid.NewString(),
+		MessageKind:       "conversation",
+		Body:              req.Text,
+		Preview:           preview(req.Text),
+		Source:            "simulator",
+		MessageTS:         time.Now(),
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())

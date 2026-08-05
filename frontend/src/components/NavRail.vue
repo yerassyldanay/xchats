@@ -35,7 +35,7 @@ onMounted(async () => {
 
 const baseNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
   { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
-  { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts', 'instances'] },
+  { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts'] },
   { name: 'playground', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
 ])

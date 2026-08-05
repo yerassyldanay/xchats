@@ -9,10 +9,8 @@ frontend/.env
 
 cookies.txt
 
-# local-only deploy helpers (machine-specific host ports; restore script holds a
-# local Evolution API key) — keep out of git
+# local-only deploy helpers (machine-specific host ports) — keep out of git
 deploy/docker-compose.override.yaml
-deploy/restore-evolution-webhook.sh
 
 # blob store (local-disk media bytes)
 blobdata/

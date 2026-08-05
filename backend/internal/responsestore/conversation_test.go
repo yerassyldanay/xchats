@@ -38,14 +38,14 @@ func TestConversationRepo_LoadForResponse(t *testing.T) {
 	for i, turn := range turns {
 		res, err := st.UpsertInbound(ctx, store.InboundUpsert{
 			AccountID: accountID, PhoneJID: "77000000000@s.whatsapp.net", RemoteJID: "77000000000@s.whatsapp.net",
-			PhoneNumber:        "77000000000",
-			Direction:          turn.direction,
-			SenderKind:         sendKindFor(turn.direction),
-			EvolutionMessageID: fmt.Sprintf("MSG%d", i),
-			MessageKind:        "conversation",
-			Body:               turn.text,
-			Source:             "live_webhook",
-			MessageTS:          base.Add(time.Duration(i) * time.Minute),
+			PhoneNumber:       "77000000000",
+			Direction:         turn.direction,
+			SenderKind:        sendKindFor(turn.direction),
+			ExternalMessageID: fmt.Sprintf("MSG%d", i),
+			MessageKind:       "conversation",
+			Body:              turn.text,
+			Source:            "live_webhook",
+			MessageTS:         base.Add(time.Duration(i) * time.Minute),
 		})
 		if err != nil {
 			t.Fatalf("seed message %d: %v", i, err)

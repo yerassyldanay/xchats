@@ -92,12 +92,7 @@ type Account struct {
 	ExternalAccountRef string
 	// ExternalHandle is what an operator recognizes the account by: the phone
 	// number for WhatsApp, "@botusername" for Telegram.
-	ExternalHandle string
-	// InstanceName is the Evolution instance (wa_* gateway only; "" elsewhere).
-	InstanceName string
-	// InstanceID is Evolution's own instance id. Write-side only: it is not
-	// carried by inbox_accounts_v, so view-backed reads leave it empty.
-	InstanceID      string
+	ExternalHandle  string
 	ConnectionState string
 	LastLiveEventAt *time.Time
 	CreatedAt       time.Time
@@ -148,8 +143,8 @@ type Message struct {
 	Direction    string
 	SenderKind   string
 	SenderUserID uuid.NullUUID
-	// ExternalMessageID is the provider's id for this message: Evolution's
-	// key.id for WhatsApp, the numeric message_id for Telegram.
+	// ExternalMessageID is the provider's id for this message: whatsmeow's
+	// message id for WhatsApp, the numeric message_id for Telegram.
 	ExternalMessageID string
 	MessageKind       string
 	Body              string
@@ -240,17 +235,16 @@ func (s *Store) SeedUser(ctx context.Context, orgID uuid.UUID, email, passwordHa
 func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO wa_accounts
-			(id, organization_id, display_name, owner_jid, phone_number, evolution_instance_name, connection_state)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+			(id, organization_id, display_name, owner_jid, phone_number, connection_state)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (id) DO UPDATE SET
 			organization_id = EXCLUDED.organization_id,
 			display_name = EXCLUDED.display_name,
-			evolution_instance_name = EXCLUDED.evolution_instance_name,
 			connection_state = EXCLUDED.connection_state,
 			deleted_at = NULL,
 			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		RETURNING `+waAccountCols,
-		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle, a.InstanceName, a.ConnectionState).
+		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle, a.ConnectionState).
 		Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
@@ -263,13 +257,13 @@ func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 // write paths that RETURN the row they just wrote. Reads go through
 // accountViewCols below instead, so they see every channel.
 const waAccountCols = `id, organization_id, display_name, owner_jid, phone_number,
-	evolution_instance_name, evolution_instance_id, connection_state, channel,
+	connection_state, channel,
 	last_live_event_at, created_at, deleted_at`
 
 func scanWaAccountDst(a *Account) []any {
 	return []any{
 		&a.ID, &a.OrganizationID, &a.DisplayName, &a.ExternalAccountRef, &a.ExternalHandle,
-		&a.InstanceName, &a.InstanceID, &a.ConnectionState, &a.Channel,
+		&a.ConnectionState, &a.Channel,
 		&a.LastLiveEventAt, &a.CreatedAt, &a.DeletedAt,
 	}
 }
@@ -277,7 +271,7 @@ func scanWaAccountDst(a *Account) []any {
 // accountViewCols is the canonical inbox_accounts_v projection — every channel's
 // accounts under one neutral shape; scanAccountDst pairs with it.
 const accountViewCols = `id, organization_id, display_name, channel,
-	external_account_ref, external_handle, instance_name, connection_state,
+	external_account_ref, external_handle, connection_state,
 	last_live_event_at, created_at, deleted_at,
 	webhook_url, webhook_registered_at, webhook_last_checked_at, webhook_last_error`
 
@@ -289,7 +283,7 @@ func scanAccountView(row dbx.Scanner) (Account, error) {
 	var url, lastErr *string
 	err := row.Scan(
 		&a.ID, &a.OrganizationID, &a.DisplayName, &a.Channel,
-		&a.ExternalAccountRef, &a.ExternalHandle, &a.InstanceName, &a.ConnectionState,
+		&a.ExternalAccountRef, &a.ExternalHandle, &a.ConnectionState,
 		&a.LastLiveEventAt, &a.CreatedAt, &a.DeletedAt,
 		&url, &a.WebhookRegisteredAt, &a.WebhookLastCheckedAt, &lastErr)
 	if err != nil {
@@ -372,21 +366,19 @@ func (s *Store) UpsertConnectedAccount(ctx context.Context, a Account) (Account,
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO wa_accounts
 			(id, organization_id, display_name, owner_jid, phone_number,
-			 evolution_instance_name, evolution_instance_id, connection_state, last_live_event_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, strftime('%Y-%m-%d %H:%M:%f','now'))
+			 connection_state, last_live_event_at)
+		VALUES ($1, $2, $3, $4, $5, $6, strftime('%Y-%m-%d %H:%M:%f','now'))
 		ON CONFLICT (id) DO UPDATE SET
 			organization_id = EXCLUDED.organization_id,
 			display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name ELSE wa_accounts.display_name END,
 			phone_number = EXCLUDED.phone_number,
-			evolution_instance_name = EXCLUDED.evolution_instance_name,
-			evolution_instance_id = EXCLUDED.evolution_instance_id,
 			connection_state = EXCLUDED.connection_state,
 			last_live_event_at = strftime('%Y-%m-%d %H:%M:%f','now'),
 			deleted_at = NULL,
 			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		RETURNING `+waAccountCols,
 		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle,
-		a.InstanceName, a.InstanceID, a.ConnectionState).
+		a.ConnectionState).
 		Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
@@ -399,21 +391,6 @@ func (s *Store) SetAccountState(ctx context.Context, id uuid.UUID, state string)
 	return err
 }
 
-// SetAccountStateByInstance maps a connection.update (which carries the instance
-// name, not the id) to its account and updates the state. Returns the account id,
-// or ErrNotFound for an unknown/pre-connect/deleted instance.
-func (s *Store) SetAccountStateByInstance(ctx context.Context, instanceName, state string) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := s.db.QueryRow(ctx, `
-		UPDATE wa_accounts SET connection_state = $2, last_live_event_at = strftime('%Y-%m-%d %H:%M:%f','now'), updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE evolution_instance_name = $1 AND deleted_at IS NULL
-		RETURNING id`, instanceName, state).Scan(&id)
-	if errors.Is(err, dbx.ErrNoRows) {
-		return id, ErrNotFound
-	}
-	return id, err
-}
-
 // SoftDeleteAccount hides an account (a "clean"): its chats drop out of the inbox
 // but the rows stay, so re-adding the number revives everything.
 func (s *Store) SoftDeleteAccount(ctx context.Context, id uuid.UUID) error {
@@ -423,23 +400,53 @@ func (s *Store) SoftDeleteAccount(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-// ManagedInstanceNames returns the instance names of all live (non-deleted)
-// accounts — the maintenance view flags everything else as a stray instance.
-func (s *Store) ManagedInstanceNames(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.Query(ctx, `
-		SELECT evolution_instance_name FROM wa_accounts
-		WHERE deleted_at IS NULL AND evolution_instance_name <> ''`)
+// ---------------------------------------------------------------------------
+// WhatsApp (whatsmeow) device credentials
+// ---------------------------------------------------------------------------
+// wa_credentials maps an account to whatsmeow's own device JID, so the manager
+// can find which saved accounts to reconnect after a restart. The actual
+// session (keys, identity) lives in whatsmeow's own device database, never here.
+
+// WaCredential is one account's whatsmeow device mapping.
+type WaCredential struct {
+	AccountID uuid.UUID
+	DeviceJID string
+}
+
+// SaveWaCredentials records (or replaces) the whatsmeow device JID for an
+// account — called once pairing succeeds.
+func (s *Store) SaveWaCredentials(ctx context.Context, accountID uuid.UUID, deviceJID string) error {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO wa_credentials (account_id, device_jid)
+		VALUES ($1, $2)
+		ON CONFLICT (account_id) DO UPDATE SET
+			device_jid = EXCLUDED.device_jid,
+			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`, accountID, deviceJID)
+	return err
+}
+
+// DeleteWaCredentials drops an account's device mapping — called on logout, so
+// a subsequent boot does not try to reconnect a session that no longer exists.
+func (s *Store) DeleteWaCredentials(ctx context.Context, accountID uuid.UUID) error {
+	_, err := s.db.Exec(ctx, `DELETE FROM wa_credentials WHERE account_id = $1`, accountID)
+	return err
+}
+
+// ListWaCredentials returns every saved account->device mapping, for the
+// manager's boot-time reconnect-all pass.
+func (s *Store) ListWaCredentials(ctx context.Context) ([]WaCredential, error) {
+	rows, err := s.db.Query(ctx, `SELECT account_id, device_jid FROM wa_credentials`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]bool{}
+	var out []WaCredential
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var c WaCredential
+		if err := rows.Scan(&c.AccountID, &c.DeviceJID); err != nil {
 			return nil, err
 		}
-		out[name] = true
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }

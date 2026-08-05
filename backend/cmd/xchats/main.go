@@ -20,7 +20,6 @@ import (
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
-	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
@@ -34,13 +33,12 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsmeow"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
-
-const webhookTokenHeader = "X-Webhook-Token"
 
 // Telegram media sweep cadence. The retry delay is what keeps a permanently
 // broken file_id from becoming a hot loop; the batch bounds one pass.
@@ -79,8 +77,6 @@ func main() {
 		st := mustStore(cfg, log)
 		defer st.Close()
 		runSeedKBDemo(context.Background(), cfg, st, log)
-	case "webhook-set":
-		runWebhookSet(cfg, log)
 	case "simulate-message":
 		runSimulateMessage(flag.Args()[1:])
 	case "kb-load":
@@ -121,7 +117,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// step here any more.
 	st := mustStore(cfg, log)
 	defer st.Close()
-	accountID := seed(ctx, cfg, st, log)
+	seed(ctx, cfg, st, log)
 	orgID := seededOrgID(ctx, cfg, st, log)
 
 	// kb (internal/kbstore) is unrelated to the response service's own KB loader
@@ -171,7 +167,6 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	q := queue.NewInMem(2048, cfg.QueueWorkers, log)
 	hub := realtime.NewHub()
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
 	tg := telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
 
 	// Credentials at rest. Without a key the Telegram lifecycle refuses to store
@@ -185,13 +180,26 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		log.Info("credentials encryption enabled", "key_version", secretbox.KeyVersion)
 	}
 
+	waMgr, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
+		DeviceDBPath: cfg.WADeviceDBPath,
+		Store:        st,
+		Blob:         blobStore,
+		Queue:        q,
+		Hub:          hub,
+		Log:          log,
+	})
+	if err != nil {
+		fatal("whatsmeow", err)
+	}
+	defer waMgr.Close()
+
 	senders := messaging.NewSenderRegistry()
-	senders.Register(messaging.ChannelWhatsApp, evolution.NewChannelSender(evo, blobStore))
+	senders.Register(messaging.ChannelWhatsApp, waMgr.ChannelSender())
 	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
 	senders.Register(messaging.ChannelTelegram, telegram.NewChannelSender(tg, st, blobStore))
 
 	w := &worker.Worker{
-		Store: st, Queue: q, Evo: evo, TG: tg, Blob: blobStore, Hub: hub,
+		Store: st, Queue: q, TG: tg, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, Log: log,
 	}
 	q.Start(ctx, w.Handle)
@@ -199,12 +207,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// row — the durable work item that replaces an inbound-event table. The
 	// startup pass picks up whatever a crash or an outage left behind.
 	w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
+	// Reconnects every saved WhatsApp account without re-scanning a QR code.
+	go waMgr.Start(ctx)
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, Evo: evo, TG: tg, KB: kb,
+		Response: responseService, WA: waMgr, TG: tg, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
@@ -212,7 +222,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
 
 	go func() {
-		log.Info("backend listening", "addr", cfg.HTTPAddr, "account_id", accountID)
+		log.Info("backend listening", "addr", cfg.HTTPAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fatal("listen", err)
 		}
@@ -391,76 +401,16 @@ func runMigrate(cfg *config.Config, log *slog.Logger) {
 	log.Info("migrations applied")
 }
 
-func runWebhookSet(cfg *config.Config, log *slog.Logger) {
-	ctx := context.Background()
-	ownerJID := resolveOwnerJID(ctx, cfg, log)
-	if ownerJID == "" {
-		fatal("webhook-set", errString("owner_jid unknown — set wa_owner_jid"))
-	}
-	accountID := config.AccountID(ownerJID)
-	url := strings.TrimRight(cfg.WebhookPublicBaseURL, "/") + "/evolution/api/v1/webhook/" + accountID.String()
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
-	if err := evo.SetWebhook(ctx, cfg.EvolutionInstance, url, webhookTokenHeader, cfg.WebhookToken, evolution.WebhookEvents); err != nil {
-		fatal("set webhook", err)
-	}
-	log.Info("webhook registered", "url", url)
-}
-
-// seed resolves the seeded org and the single pre-connected WA account.
-// Admin user credentials are created by migration 0006_init_admin — no
-// boot-time user creation is performed here.
-func seed(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) (accountID uuid.UUID) {
-	org, err := st.SeedOrganization(ctx, cfg.OrgName)
-	if err != nil {
+// seed ensures the configured organization exists. WhatsApp accounts are no
+// longer pre-configured or seeded here — they are paired dynamically via the
+// UI (internal/whatsmeow), so the derived account id only ever comes into
+// existence once a phone actually completes pairing. Admin user credentials
+// are created by migration 0006_init_admin — no boot-time user creation is
+// performed here either.
+func seed(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) {
+	if _, err := st.SeedOrganization(ctx, cfg.OrgName); err != nil {
 		fatal("seed org", err)
 	}
-	ownerJID := resolveOwnerJID(ctx, cfg, log)
-	if ownerJID == "" {
-		log.Warn("no owner_jid — account not seeded (set wa_owner_jid)")
-		return accountID
-	}
-	id := config.AccountID(ownerJID)
-	acct, err := st.SeedAccount(ctx, store.Account{
-		ID:                 id,
-		OrganizationID:     nullUUID(org.ID),
-		DisplayName:        orDefault(cfg.WaAccountDisplayName, "WhatsApp"),
-		ExternalAccountRef: config.CanonicalJID(ownerJID),
-		ExternalHandle:     config.PhoneFromJID(config.CanonicalJID(ownerJID)),
-		InstanceName:       cfg.EvolutionInstance,
-		ConnectionState:    "connected",
-	})
-	if err != nil {
-		fatal("seed account", err)
-	}
-	log.Info("account seeded", "id", acct.ID, "owner_jid", acct.ExternalAccountRef)
-	return acct.ID
-}
-
-// resolveOwnerJID prefers config; otherwise learns it once from FetchInstances.
-func resolveOwnerJID(ctx context.Context, cfg *config.Config, log *slog.Logger) string {
-	if cfg.WaOwnerJID != "" {
-		return cfg.WaOwnerJID
-	}
-	if cfg.EvolutionBaseURL == "" || cfg.EvolutionAPIKey == "" {
-		return ""
-	}
-	evo := evolution.NewHTTP(cfg.EvolutionBaseURL, cfg.EvolutionAPIKey, cfg.EvolutionInstance, log)
-	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	insts, err := evo.FetchInstances(cctx)
-	if err != nil {
-		log.Warn("fetchInstances failed", "err", err)
-		return ""
-	}
-	for _, in := range insts {
-		if in.Name == cfg.EvolutionInstance && in.OwnerJID != "" {
-			return in.OwnerJID
-		}
-	}
-	if len(insts) == 1 {
-		return insts[0].OwnerJID
-	}
-	return ""
 }
 
 // --- small helpers --------------------------------------------------------
@@ -503,8 +453,6 @@ func orDefault(v, def string) string {
 	}
 	return v
 }
-
-func nullUUID(u uuid.UUID) uuid.NullUUID { return uuid.NullUUID{UUID: u, Valid: true} }
 
 func fatal(msg string, err error) {
 	slog.Error(msg, "err", err)

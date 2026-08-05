@@ -28,11 +28,6 @@ llm_max_tokens: 1024
 llm_temperature: 0.3
 # llm_base_url: ""                    # override the provider default (self-host/in-region)
 
-# the single pre-connected WhatsApp account
-evolution_instance: "xpayment"
-wa_account_display_name: "Sales WhatsApp"
-# wa_owner_jid: "77011111111@s.whatsapp.net"   # or learned via FetchInstances
-
 # seed: default organization + admin login (passwords better set via .env)
 org_name: "xchats"
 # seed_admin_email: "admin@example.com"

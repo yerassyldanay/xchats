@@ -32,10 +32,13 @@ organization_users — tenant membership
 sessions — authentication (`id` is text)
   id, user_id, created_at, expires_at
 
-wa_accounts — WhatsApp numbers and Evolution instances
+wa_accounts — WhatsApp numbers
   id, organization_id, display_name, owner_jid, phone_number,
-  evolution_instance_name, evolution_instance_id, connection_state,
-  last_live_event_at, deleted_at, created_at, updated_at
+  connection_state, last_live_event_at, deleted_at, created_at, updated_at
+
+wa_credentials — whatsmeow device-session mapping (session material itself
+lives in whatsmeow's own, separate SQLite file)
+  account_id, device_jid, created_at, updated_at
 
 wa_contacts — account-scoped WhatsApp contacts
   id, account_id, phone_number, phone_jid, lid_jid, push_name, display_name,
@@ -48,7 +51,7 @@ wa_chats — WhatsApp conversations
 
 wa_messages — normalized WhatsApp messages plus provider audit payload
   id, account_id, chat_id, direction, sender_kind, sender_user_id,
-  evolution_message_id, participant_jid, message_kind, body, delivery_state,
+  external_message_id, participant_jid, message_kind, body, delivery_state,
   source, raw, message_ts, created_at, updated_at
 
 message_media — media belonging to a conversation message

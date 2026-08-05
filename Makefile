@@ -14,8 +14,8 @@ GORUN := go run ./cmd/xchats -env ../.env -config ../config.yaml
 # Ports kill-ports frees (override: make kill-ports PORTS="8080 5173")
 PORTS ?= 8080 8090 5173 8081
 
-.PHONY: help up up-fg down logs ps kill-ports migrate seed seed-kb-demo webhook-set dev-backend dev-frontend \
-        test test-backend test-frontend test-e2e build smoke
+.PHONY: help up up-fg down logs ps kill-ports migrate seed seed-kb-demo dev-backend dev-frontend \
+        test test-backend test-frontend test-e2e build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -48,14 +48,11 @@ kill-ports: ## Free backend/frontend ports (default 8080 8090 5173 8081; overrid
 migrate: ## Apply DB migrations
 	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) migrate
 
-seed: ## Seed org + admin + the single WhatsApp account
+seed: ## Seed the default organization + admin login
 	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) seed
 
 seed-kb-demo: ## Seed demo KB content (topics/products/tariffs/zones/contacts/policies) — opt-in, for test cases only; no-ops if the org already has KB content
 	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) seed-kb-demo
-
-webhook-set: ## Register our webhook on the live Evolution instance
-	cd $(BACKEND) && $(GORUN) webhook-set
 
 dev-backend: ## Run the backend (go) on :8080
 	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) serve
@@ -81,6 +78,3 @@ test-e2e: ## Full demo loop + KB/playground/response service vs a real Postgres 
 build: ## Build backend binary + frontend bundle
 	cd $(BACKEND) && go build -o bin/xchats ./cmd/xchats
 	cd $(FRONTEND) && npm ci && npm run build
-
-smoke: webhook-set ## Manual: register webhook for a live round-trip test
-	@echo "Webhook registered. Send a WhatsApp message to the connected number."

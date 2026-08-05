@@ -758,34 +758,8 @@ func TestTelegramWebhookRejectsWrongSecret(t *testing.T) {
 	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "hi"), "not-the-secret"); got != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401", got)
 	}
-	// The Evolution webhook's own token must NOT double as the Telegram
-	// secret: this pins the two ingresses to distinct config values (a
-	// regression that resolved the wrong one would let this through).
-	if got := h.tgWebhook(id, textUpdate(2, 101, 500100, "hi"), webhookToken); got != http.StatusUnauthorized {
-		t.Fatalf("status %d using the Evolution token, want 401", got)
-	}
 	if n := h.countRows(`SELECT count(*) FROM tg_messages`); n != 0 {
 		t.Fatal("an unauthenticated update was stored")
-	}
-}
-
-// TestTelegramWebhookSecretFallsBackToWebhookToken covers a deployment that has
-// not set TG_WEBHOOK_SECRET yet: the shared WEBHOOK_TOKEN must still work, both
-// for registration and for the ingress check.
-func TestTelegramWebhookSecretFallsBackToWebhookToken(t *testing.T) {
-	h := newHarness(t)
-	h.cfg.TelegramWebhookSecret = ""
-	id := h.connectBot(t, "Бот", false)
-
-	calls := h.tg.CallsFor("setWebhook")
-	if len(calls) != 1 || calls[0].Secret != webhookToken {
-		t.Fatalf("setWebhook secret = %v, want the fallback WEBHOOK_TOKEN", calls)
-	}
-	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "hi"), webhookToken); got != 200 {
-		t.Fatalf("status %d using the fallback secret, want 200", got)
-	}
-	if got := h.tgWebhook(id, textUpdate(2, 101, 500100, "hi"), tgWebhookSecret); got != http.StatusUnauthorized {
-		t.Fatalf("status %d using the unset TG secret, want 401", got)
 	}
 }
 
@@ -936,7 +910,7 @@ func TestTelegramApprovedDraftSendsAndStampsMessageID(t *testing.T) {
 		t.Fatal("the send did not resolve the account's stored token")
 	}
 	if len(h.fake.Calls) != 0 {
-		t.Fatal("approving a Telegram draft called Evolution")
+		t.Fatal("approving a Telegram draft called the WhatsApp sender")
 	}
 
 	var state string
@@ -955,7 +929,7 @@ func TestTelegramApprovedDraftSendsAndStampsMessageID(t *testing.T) {
 }
 
 // Outbound media rides the same sender registry as text, so a Telegram
-// attachment reaches sendPhoto rather than the Evolution client.
+// attachment reaches sendPhoto rather than the WhatsApp sender.
 func TestTelegramMediaSendGoesThroughTheRegistry(t *testing.T) {
 	h := newHarness(t)
 	id := h.connectBot(t, "Бот", false)
@@ -983,8 +957,8 @@ func TestTelegramMediaSendGoesThroughTheRegistry(t *testing.T) {
 	if len(photos[0].Upload.Data) == 0 {
 		t.Fatal("no bytes were uploaded")
 	}
-	if len(h.fake.CallsFor("sendMedia")) != 0 {
-		t.Fatal("a Telegram attachment was sent through Evolution")
+	if len(h.fake.Calls) != 0 {
+		t.Fatal("a Telegram attachment was sent through the WhatsApp sender")
 	}
 
 	// The outbound row landed in the Telegram media table (its FK would have

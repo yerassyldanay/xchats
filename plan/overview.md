@@ -6,9 +6,9 @@
 > plan/code must be corrected. The target is not necessarily implemented yet.
 
 xchats is a multi-tenant social inbox with reusable, channel-neutral AI
-assistance. WhatsApp through Evolution is the first transport. Future Instagram,
-Telegram, and other adapters reuse the normalized conversation, AI suggestion,
-approval, knowledge-authoring, and audit paths.
+assistance. WhatsApp, connected directly via whatsmeow, is the first transport.
+Future Instagram, Telegram, and other adapters reuse the normalized
+conversation, AI suggestion, approval, knowledge-authoring, and audit paths.
 
 ## One implementation vision
 

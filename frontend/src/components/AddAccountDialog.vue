@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { CircleAlert, CircleCheck, LoaderCircle, QrCode, RotateCw, Link2 } from 'lucide-vue-next'
+import { CircleAlert, CircleCheck, LoaderCircle, RotateCw, Link2 } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
 import { ApiError } from '../api/client'
 import { log } from '../lib/logfmt'
-import type { QrResponse } from '../types'
+import type { WaPairStatus } from '../types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,28 +12,25 @@ import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 
 // AddAccountDialog drives every "connect a channel" flow:
-//   channel picker → WhatsApp: create instance, poll the QR every ~2.5s, render
+//   channel picker → WhatsApp: start pairing, poll the QR every ~2.5s, render
 //                              the PNG, close on `connected`
 //                  → Telegram: paste the @BotFather token, one POST, done
-// Reconnect (WhatsApp only — a bot has no session to re-scan) skips both the
-// picker and the name form and seeds the first QR from the reconnect response.
-const props = defineProps<{
-  reconnect?: { id: string; instance: string; displayName: string } | null
-}>()
+// startChannel pre-selects WhatsApp and skips the picker — used to re-pair an
+// existing broken/logged-out number (same deterministic account id, so it
+// revives that row rather than creating a new one).
+const props = defineProps<{ startChannel?: 'whatsapp' | null }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'connected'): void }>()
 const accounts = useAccounts()
 
-type Step = 'channel' | 'form' | 'qr' | 'telegram' | 'connected'
+type Step = 'channel' | 'qr' | 'telegram' | 'connected'
 type Channel = 'whatsapp' | 'telegram'
 
-// Reconnect goes straight to QR (it auto-starts onMounted).
-const step = ref<Step>(props.reconnect ? 'qr' : 'channel')
+const step = ref<Step>('channel')
 const channel = ref<Channel>('whatsapp')
-const displayName = ref(props.reconnect?.displayName || '')
-const instanceName = ref(props.reconnect?.instance || '')
+const displayName = ref('')
 const botToken = ref('')
 const dropBacklog = ref(false)
-const qr = ref<QrResponse | null>(null)
+const qr = ref<WaPairStatus | null>(null)
 const error = ref('')
 // telegramState carries a connection that was CREATED but whose webhook failed:
 // the account exists and is listed, so the dialog explains it rather than
@@ -42,41 +39,31 @@ const telegramState = ref('')
 const busy = ref(false)
 const open = ref(true)
 let timer: number | undefined
+let sessionId = ''
 
 function onOpenChange(v: boolean) {
   if (!v) emit('close')
 }
 
-function slugOk(s: string) {
-  return /^[A-Za-z0-9_-]+$/.test(s)
-}
-
 function pickChannel(c: Channel) {
   channel.value = c
   error.value = ''
-  step.value = c === 'whatsapp' ? 'form' : 'telegram'
+  if (c === 'whatsapp') startPairing()
+  else step.value = 'telegram'
 }
 
-async function start() {
+async function startPairing() {
   error.value = ''
-  const inst = instanceName.value.trim()
-  if (!slugOk(inst)) {
-    error.value = 'Имя инстанса: латиница, цифры, «-» и «_».'
-    return
-  }
+  qr.value = null
   busy.value = true
   try {
-    if (props.reconnect) {
-      qr.value = await accounts.reconnect(props.reconnect.id)
-      if (qr.value.status === 'connected') return finish()
-    } else {
-      await accounts.create(displayName.value.trim(), inst)
-    }
+    const started = await accounts.pair()
+    sessionId = started.session_id
     step.value = 'qr'
     poll() // immediate, then on an interval
     timer = window.setInterval(poll, 2500)
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось создать инстанс.'
+    error.value = e instanceof ApiError ? e.message : 'Не удалось начать подключение.'
   } finally {
     busy.value = false
   }
@@ -111,10 +98,27 @@ async function connectTelegram() {
 
 async function poll() {
   try {
-    const r = await accounts.pollQR(instanceName.value.trim())
+    const r = await accounts.pairStatus(sessionId)
     if (r.status === 'connected') return finish()
-    if (r.qr_code || r.qr_base64 || r.pairing_code) qr.value = r
+    if (r.status === 'timeout' || r.status === 'error') {
+      stopPolling()
+      error.value = r.message || (r.status === 'timeout' ? 'Время ожидания истекло.' : 'Не удалось подключиться.')
+      qr.value = null
+      return
+    }
+    if (r.qr_code || r.qr_base64) qr.value = r
   } catch (e) {
+    // A session the backend no longer knows about — expired out of the
+    // pairing registry, or lost to a backend restart — is terminal. Without
+    // this the dialog would sit behind a spinner polling a dead session
+    // forever, since a 404 here is otherwise indistinguishable from a
+    // transient network blip.
+    if (e instanceof ApiError && e.status === 404) {
+      stopPolling()
+      error.value = 'Сессия подключения истекла. Попробуйте снова.'
+      qr.value = null
+      return
+    }
     log.warn('qr poll failed', { err: String(e) })
   }
 }
@@ -137,7 +141,7 @@ function qrSrc(b64: string) {
 }
 
 onMounted(() => {
-  if (props.reconnect) start()
+  if (props.startChannel === 'whatsapp') pickChannel('whatsapp')
 })
 onBeforeUnmount(stopPolling)
 </script>
@@ -148,7 +152,7 @@ onBeforeUnmount(stopPolling)
       <DialogHeader>
         <DialogTitle>
           <span
-            v-if="channel === 'telegram' && !reconnect"
+            v-if="channel === 'telegram'"
             class="w-8 h-8 rounded-lg bg-[#229ED9]/10 text-[#229ED9] grid place-items-center"
           >
             <TelegramIcon class="w-4 h-4" />
@@ -156,7 +160,7 @@ onBeforeUnmount(stopPolling)
           <span v-else class="w-8 h-8 rounded-lg bg-wa/10 text-wa grid place-items-center">
             <WhatsappIcon class="w-4 h-4" />
           </span>
-          <template v-if="reconnect">Переподключить номер</template>
+          <template v-if="startChannel === 'whatsapp'">Переподключить номер</template>
           <template v-else-if="step === 'channel'">Подключить канал</template>
           <template v-else-if="channel === 'telegram'">Добавить Telegram-бота</template>
           <template v-else>Добавить номер WhatsApp</template>
@@ -169,7 +173,8 @@ onBeforeUnmount(stopPolling)
           <p class="text-sm text-muted-foreground">Выберите канал. Инструкция продолжится внутри выбранного способа.</p>
           <div class="grid gap-3 sm:grid-cols-2">
             <button
-              class="group rounded-xl border border-border p-4 text-left transition hover:border-wa hover:bg-wa/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wa/40"
+              class="group rounded-xl border border-border p-4 text-left transition hover:border-wa hover:bg-wa/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wa/40 disabled:pointer-events-none disabled:opacity-60"
+              :disabled="busy"
               @click="pickChannel('whatsapp')"
             >
               <span class="flex items-center gap-3">
@@ -177,14 +182,14 @@ onBeforeUnmount(stopPolling)
                   <WhatsappIcon class="w-6 h-6" />
                 </span>
                 <span class="min-w-0">
-                  <span class="block font-semibold">WhatsApp через Evolution</span>
+                  <span class="block font-semibold">WhatsApp</span>
                   <span class="block text-xs text-muted-foreground">Подключение номера по QR-коду</span>
                 </span>
               </span>
               <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
-                <li class="flex gap-2"><span class="font-semibold text-wa">01</span><span>Задайте понятное название и уникальное имя Evolution-инстанса.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-wa">02</span><span>Создайте инстанс и откройте WhatsApp → «Связанные устройства».</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-wa">03</span><span>Отсканируйте QR-код — входящие чаты появятся автоматически.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-wa">01</span><span>Откройте WhatsApp → «Связанные устройства».</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-wa">02</span><span>Отсканируйте QR-код, который появится на следующем шаге.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-wa">03</span><span>Входящие чаты появятся автоматически.</span></li>
               </ol>
               <span class="mt-4 block text-sm font-medium text-wa">Продолжить с WhatsApp →</span>
             </button>
@@ -212,33 +217,6 @@ onBeforeUnmount(stopPolling)
           <p class="rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
             QR-код не сохраняется. Токен Telegram хранится в зашифрованном виде и не показывается повторно.
           </p>
-        </div>
-
-        <!-- WhatsApp step 1: name the instance -->
-        <div v-else-if="step === 'form'" class="space-y-4">
-          <div>
-            <label class="text-xs font-medium text-muted-foreground">Название (для вас)</label>
-            <Input v-model="displayName" placeholder="Например, Отдел продаж" class="mt-1.5" />
-          </div>
-          <div>
-            <label class="text-xs font-medium text-muted-foreground">Имя инстанса</label>
-            <Input
-              v-model="instanceName"
-              placeholder="sales"
-              :disabled="!!reconnect"
-              class="mt-1.5 disabled:bg-muted disabled:text-muted-foreground"
-              @keydown.enter.prevent="start"
-            />
-            <p class="mt-1 text-[11px] text-muted-foreground">Латиница, цифры, «-» и «_».</p>
-          </div>
-          <p v-if="error" class="flex items-center gap-2 text-sm text-destructive">
-            <CircleAlert class="w-4 h-4 shrink-0" /> {{ error }}
-          </p>
-          <Button :disabled="busy" class="w-full" @click="start">
-            <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
-            <QrCode v-else class="w-4 h-4" />
-            {{ busy ? 'Создание…' : 'Создать и показать QR' }}
-          </Button>
         </div>
 
         <!-- Telegram: paste the token -->
@@ -287,30 +265,38 @@ onBeforeUnmount(stopPolling)
 
         <!-- WhatsApp step 2: scan the QR -->
         <div v-else-if="step === 'qr'" class="text-center space-y-4">
-          <p class="text-sm text-muted-foreground leading-relaxed">
-            Откройте WhatsApp → <span class="font-medium text-foreground">«Связанные устройства»</span> →
-            «Привязать устройство» и отсканируйте код.
-          </p>
-          <div class="grid place-items-center">
-            <div class="p-3 rounded-xl bg-card border border-border">
-              <img
-                v-if="qr?.qr_base64 || qr?.qr_code"
-                :src="qrSrc(qr.qr_base64 || qr.qr_code || '')"
-                alt="QR"
-                class="w-52 h-52 rounded-lg object-contain"
-              />
-              <div v-else class="w-52 h-52 rounded-lg grid place-items-center text-muted-foreground">
-                <LoaderCircle class="w-8 h-8 animate-spin" />
+          <template v-if="error">
+            <p class="flex items-center justify-center gap-2 text-sm text-destructive">
+              <CircleAlert class="w-4 h-4 shrink-0" /> {{ error }}
+            </p>
+            <Button :disabled="busy" class="w-full" @click="startPairing">
+              <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
+              {{ busy ? 'Подключение…' : 'Попробовать снова' }}
+            </Button>
+          </template>
+          <template v-else>
+            <p class="text-sm text-muted-foreground leading-relaxed">
+              Откройте WhatsApp → <span class="font-medium text-foreground">«Связанные устройства»</span> →
+              «Привязать устройство» и отсканируйте код.
+            </p>
+            <div class="grid place-items-center">
+              <div class="p-3 rounded-xl bg-card border border-border">
+                <img
+                  v-if="qr?.qr_base64 || qr?.qr_code"
+                  :src="qrSrc(qr.qr_base64 || qr.qr_code || '')"
+                  alt="QR"
+                  class="w-52 h-52 rounded-lg object-contain"
+                />
+                <div v-else class="w-52 h-52 rounded-lg grid place-items-center text-muted-foreground">
+                  <LoaderCircle class="w-8 h-8 animate-spin" />
+                </div>
               </div>
             </div>
-          </div>
-          <p v-if="qr?.pairing_code" class="text-sm">
-            Код привязки: <span class="font-mono font-semibold tracking-widest text-primary">{{ qr.pairing_code }}</span>
-          </p>
-          <p class="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-            <RotateCw class="w-3.5 h-3.5 animate-spin" style="animation-duration: 3s" />
-            Код обновляется автоматически. Ожидание сканирования…
-          </p>
+            <p class="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <RotateCw class="w-3.5 h-3.5 animate-spin" style="animation-duration: 3s" />
+              Код обновляется автоматически. Ожидание сканирования…
+            </p>
+          </template>
         </div>
 
         <!-- step 3: connected -->

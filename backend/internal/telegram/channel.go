@@ -22,8 +22,8 @@ type TokenSource interface {
 
 // ChannelSender wraps a Client behind messaging.ChannelSender. out.To is the
 // numeric Telegram chat id (as text — the channel-neutral contract carries an
-// opaque string), out.Route is unused: Telegram has no per-account gateway
-// instance, only a per-account token.
+// opaque string); the sending bot's token is resolved from out.AccountID via
+// Tokens, never carried on OutboundMessage itself.
 type ChannelSender struct {
 	Client Client
 	Tokens TokenSource

@@ -1,24 +1,20 @@
-// Package httpapi is the UI-facing API edge + the Evolution webhook ingress.
-// Every /xchats/api/v1 response uses the unified {payload, errcode, message}
-// envelope; ops and the webhook are the only routes outside it (per 7-api-contracts).
+// Package httpapi is the UI-facing API edge. Every /xchats/api/v1 response
+// uses the unified {payload, errcode, message} envelope; ops routes are the
+// only ones outside it (per 7-api-contracts).
 package httpapi
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
-	"github.com/yerassyldanay/xchats/backend/internal/evolution"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
@@ -26,12 +22,9 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
-
-// webhookTokenHeader is the header Evolution echoes back so we can verify it
-// (header only — never a query param, so it never lands in access logs).
-const webhookTokenHeader = "X-Webhook-Token"
 
 // publishTimeout bounds every enqueue from an HTTP handler. queue.Publish blocks
 // while the buffer is full; without a deadline that turns backpressure into a
@@ -55,8 +48,8 @@ type Server struct {
 	hub      *realtime.Hub
 	blob     blob.Store
 	response *response.Service // the multichannel response engine's entry point (simulator API)
-	evo      evolution.Client
-	tg       telegram.Client // nil when Telegram is not configured; every handler checks
+	wa       whatsapp.Manager  // nil when WhatsApp is not configured; every handler checks
+	tg       telegram.Client   // nil when Telegram is not configured; every handler checks
 	kb       *kbstore.Store
 	orgID    uuid.UUID
 	log      *slog.Logger
@@ -81,13 +74,6 @@ type Server struct {
 	kbRepo        response.KnowledgeBaseRepository
 	kbInvalidator kbInvalidator
 
-	// pendingNames carries the display_name from "add account" (POST) to the QR
-	// connect step (where the wa_accounts row is finally written): pre-connect
-	// there is no row to hold it. Keyed by instance name; best-effort (process-
-	// local) — a lost entry just falls back to the instance name.
-	pendingMu    sync.Mutex
-	pendingNames map[string]string
-
 	// csrfSecret HMAC-signs the /oauth/authorize/decision CSRF token (see
 	// mcp_oauth_csrf.go) — cfg.SessionSecret when configured, else a
 	// per-process random fallback generated once here. The fallback is safe
@@ -111,7 +97,7 @@ type Deps struct {
 	Hub           *realtime.Hub
 	Blob          blob.Store
 	Response      *response.Service
-	Evo           evolution.Client
+	WA            whatsapp.Manager
 	TG            telegram.Client
 	KB            *kbstore.Store
 	KBRepo        response.KnowledgeBaseRepository
@@ -135,13 +121,12 @@ func New(d Deps) *Server {
 	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, response: d.Response, evo: d.Evo, tg: d.TG, kb: d.KB,
+		blob: d.Blob, response: d.Response, wa: d.WA, tg: d.TG, kb: d.KB,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
 		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer,
 		mcpUploadSigner: uploadSigner, mcpMediaSigner: mediaSigner,
-		pendingNames: map[string]string{},
-		csrfSecret:   randomCSRFFallbackSecret(),
+		csrfSecret: randomCSRFFallbackSecret(),
 		// Deliberately generous limits — these are abuse guards, not a
 		// throttle on legitimate usage. See ratelimit.go's doc comment.
 		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — registration spam is the highest-value target
@@ -176,12 +161,10 @@ func (s *Server) Router() *gin.Engine {
 		c.String(http.StatusOK, "ready")
 	})
 
-	// Evolution webhook ingress.
-	r.POST("/evolution/api/v1/webhook/:account_id", s.handleWebhook)
-	r.POST("/evolution/api/v1/webhook/:account_id/*event", s.handleWebhook)
-
-	// Telegram webhook ingress. Unlike Evolution's, this one commits the
-	// normalized rows before it acks — see handleTelegramWebhook.
+	// Telegram webhook ingress — commits the normalized rows before it acks;
+	// see handleTelegramWebhook. WhatsApp has no webhook ingress: whatsmeow
+	// connects out directly (internal/whatsmeow), so there is nothing for an
+	// inbound HTTP route to receive.
 	r.POST("/telegram/api/v1/webhook/:account_id", s.handleTelegramWebhook)
 
 	// MCP connector (plan/mcp.md) — discovery, OAuth 2.1 + PKCE, and the
@@ -250,17 +233,17 @@ func (s *Server) Router() *gin.Engine {
 	// per-channel routes below own each channel's own lifecycle.
 	auth.GET("/accounts", s.handleListAccounts)
 
-	// WhatsApp accounts manager (Build 1).
+	// WhatsApp accounts manager: connect via whatsmeow's own QR pairing
+	// (internal/whatsmeow), no external gateway involved.
 	auth.GET("/whatsapp-accounts", s.handleListWhatsAppAccounts)
-	auth.POST("/whatsapp-accounts", s.handleCreateWhatsAppAccount)
-	auth.GET("/whatsapp-accounts/qr", s.handleWhatsAppAccountQR)
-	auth.POST("/whatsapp-accounts/:id/reconnect", s.handleReconnectWhatsAppAccount)
 	auth.DELETE("/whatsapp-accounts/:id", s.handleDeleteWhatsAppAccount)
-	auth.GET("/whatsapp-instances", s.handleListInstances)
-	auth.DELETE("/whatsapp-instances/:name", s.handleDeleteInstance)
+	auth.POST("/wa-accounts/pair", s.handlePairWhatsAppAccount)
+	auth.GET("/wa-accounts/pair/:session_id", s.handlePairStatus)
+	auth.POST("/wa-accounts/:id/logout", s.handleLogoutWhatsAppAccount)
+	auth.GET("/wa-accounts/:id/status", s.handleWhatsAppAccountStatus)
 
-	// Telegram accounts manager. A bot has no QR and no Evolution instance, so
-	// it gets its own lifecycle routes rather than sharing /whatsapp-accounts.
+	// Telegram accounts manager. A bot has no QR pairing, so it gets its own
+	// lifecycle routes rather than sharing /whatsapp-accounts.
 	auth.POST("/telegram-accounts", s.handleCreateTelegramAccount)
 	auth.POST("/telegram-accounts/:id/retry-webhook", s.handleRetryTelegramWebhook)
 	auth.POST("/telegram-accounts/:id/check", s.handleCheckTelegramAccount)
@@ -286,6 +269,11 @@ func (s *Server) Router() *gin.Engine {
 	// explicitly enabled (SIMULATOR_ENABLED, default false outside dev).
 	if s.cfg.SimulatorEnabled {
 		auth.POST("/simulator/messages", s.handleSimulatorMessage)
+		// Injects a synthetic whatsmeow-shaped event through the real
+		// translate -> store -> queue -> worker chain, for automated testing
+		// of the WhatsApp ingestion path without a phone — see
+		// handleDebugWaEvent's doc comment.
+		auth.POST("/debug/wa-event", s.handleDebugWaEvent)
 	}
 
 	// Playground — a draft copy of the structured knowledge base. Writes remain
@@ -328,52 +316,6 @@ func (s *Server) Router() *gin.Engine {
 	kb.GET("/materials", s.handleKBListMaterials)
 	kb.PATCH("/config", s.handleKBPatchConfig)
 	return r
-}
-
-// handleWebhook verifies the shared token (header only), enqueues the raw event,
-// and returns 200 fast — no DB write at the edge.
-func (s *Server) handleWebhook(c *gin.Context) {
-	accountID := c.Param("account_id")
-	if s.cfg.WebhookToken != "" {
-		tok := c.GetHeader(webhookTokenHeader)
-		if tok == "" {
-			tok = c.GetHeader("apikey")
-		}
-		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.cfg.WebhookToken)) != 1 {
-			s.log.Warn("webhook auth rejected", "account_id", accountID, "reason", "bad token")
-			fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook token")
-			return
-		}
-	}
-	raw, err := c.GetRawData()
-	if err != nil {
-		s.log.Warn("webhook unreadable body", "account_id", accountID, "err", err)
-		fail(c, http.StatusBadRequest, ErrValidation, "unreadable body")
-		return
-	}
-	cp := make([]byte, len(raw))
-	copy(cp, raw)
-	queued := s.publish(ctx(c), queue.Message{Kind: queue.KindWaEvent, Payload: cp}) == nil
-
-	// Cheap top-level peek for the event type + instance (no full parse). The full
-	// body is only logged at debug to keep customer PII out of info logs.
-	var peek struct {
-		Event    string `json:"event"`
-		Instance string `json:"instance"`
-	}
-	_ = json.Unmarshal(raw, &peek)
-	s.log.Info("webhook received",
-		"account_id", accountID, "event", peek.Event, "instance", peek.Instance,
-		"bytes", len(raw), "queued", queued)
-	s.log.Debug("webhook body", "account_id", accountID, "body", string(raw))
-
-	// Evolution's retry semantics are not Telegram's — a 5xx here would have it
-	// hammer the same event — so a dropped enqueue stays a logged 200 (the
-	// pre-existing Build-0 loss window), now at least visible in the log line.
-	if !queued {
-		s.log.Error("webhook event dropped: queue full", "account_id", accountID, "event", peek.Event)
-	}
-	ok(c, nil)
 }
 
 // --- middleware -----------------------------------------------------------
