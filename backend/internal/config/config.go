@@ -1,12 +1,12 @@
 // Package config loads the merged application configuration: a committed,
-// secrets-free config.yaml for boot/infra tunables, plus environment
-// variables — a legacy .env file for now (loadDotenv) and, always, real
-// process env vars — as overrides/secrets on top of it. It also owns the
+// secrets-free config.yaml for boot/infra tunables, plus real process env
+// vars as overrides/secrets on top of it (internal/credentials.EnvStore
+// reads the same process env, so an operator's existing export keeps
+// working — see that package's own doc comment). It also owns the
 // deterministic wa_accounts.id derivation (uuidv5(XCHATS_WA_NS, owner_jid)).
 package config
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -387,13 +387,8 @@ func ResolveConfigPath(explicit string) string {
 	return "config.yaml"
 }
 
-// Load reads optional .env then config.yaml, then applies env overrides.
-func Load(configPath, envPath string) (*Config, error) {
-	if envPath != "" {
-		if err := loadDotenv(envPath); err != nil {
-			return nil, fmt.Errorf("load .env: %w", err)
-		}
-	}
+// Load reads config.yaml, then applies process env overrides.
+func Load(configPath string) (*Config, error) {
 	cfg := defaults()
 	if configPath != "" {
 		b, err := os.ReadFile(configPath)
@@ -410,36 +405,6 @@ func Load(configPath, envPath string) (*Config, error) {
 		return nil, fmt.Errorf("parse env: %w", err)
 	}
 	return &cfg, nil
-}
-
-// loadDotenv loads KEY=VALUE pairs from a file, without clobbering already-set env.
-func loadDotenv(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
-		if _, exists := os.LookupEnv(k); !exists {
-			_ = os.Setenv(k, v)
-		}
-	}
-	return sc.Err()
 }
 
 // TelegramResolvedAPIBaseURL returns the Bot API root to call.

@@ -3,11 +3,12 @@
 // (brain.BuildSystem / brain.BuildUser), imitates a customer asking about a
 // product, and with -call sends it through the production LLM client and
 // post-processes the draft exactly like the server does. When LANGFUSE_* is
-// enabled in .env the call is exported to Langfuse as a generation span.
+// set in the process environment the call is exported to Langfuse as a
+// generation span.
 //
 // Usage (from repo root):
 //
-//	cd backend && go run ./cmd/promptpreview -config ../config.yaml -env ../.env [-call]
+//	cd backend && LLM_API_KEY=... go run ./cmd/promptpreview -config ../config.yaml [-call]
 package main
 
 import (
@@ -28,7 +29,6 @@ import (
 
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config.yaml")
-	envPath := flag.String("env", ".env", "path to .env")
 	call := flag.Bool("call", false, "also call the LLM and post-process the draft")
 	flag.Parse()
 
@@ -57,7 +57,7 @@ func main() {
 		return
 	}
 
-	cfg, err := config.Load(*cfgPath, *envPath)
+	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "load config:", err)
 		os.Exit(1)

@@ -58,7 +58,6 @@ const (
 
 func main() {
 	cfgPath := flag.String("config", "", "path to config.yaml (default: $XCHATS_CONFIG, then ./config.yaml, then the OS config directory)")
-	envPath := flag.String("env", envOr("XCHATS_ENV", ".env"), "path to .env")
 	flag.Parse()
 
 	cmd := "serve"
@@ -66,7 +65,7 @@ func main() {
 		cmd = flag.Arg(0)
 	}
 
-	cfg, err := config.Load(config.ResolveConfigPath(*cfgPath), *envPath)
+	cfg, err := config.Load(config.ResolveConfigPath(*cfgPath))
 	if err != nil {
 		fatal("load config", err)
 	}
@@ -706,13 +705,6 @@ func newLogger(cfg *config.Config) *slog.Logger {
 	}
 	// logfmt == slog's TextHandler (key=value).
 	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
 }
 
 func orDefault(v, def string) string {

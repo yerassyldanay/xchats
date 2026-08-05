@@ -10,7 +10,7 @@ FRONTEND := frontend
 # a clean checkout without either falls back to the compose file's own
 # defaults (backend→8080, frontend→8081).
 COMPOSE := docker compose -p xchats -f deploy/docker-compose.yaml $(if $(wildcard deploy/docker-compose.override.yaml),-f deploy/docker-compose.override.yaml,)
-GORUN := go run ./cmd/xchats -env ../.env -config ../config.yaml
+GORUN := go run ./cmd/xchats -config ../config.yaml
 
 # Ports kill-ports frees (override: make kill-ports PORTS="8080 5173")
 PORTS ?= 8080 8090 5173 8081

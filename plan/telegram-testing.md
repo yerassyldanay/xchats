@@ -10,23 +10,26 @@ it works*.
 
 ## Env vars needed to boot
 
-Authoritative source: [`.env.example`](../.env.example) and
-[`backend/internal/config/config.go`](../backend/internal/config/config.go).
+Authoritative source: [`backend/internal/config/config.go`](../backend/internal/config/config.go)
+(boot/infra fields) and [`backend/internal/credentials/provider.go`](../backend/internal/credentials/provider.go)
+(the Settings-UI-managed integration credentials). There is no `.env` file —
+xchats reads config.yaml plus whatever is in the real process environment;
+see the root [`README.md`](../README.md) for how secrets are provisioned.
 The ones specific to Telegram:
 
 | Var | Purpose |
 |---|---|
 | `TG_WEBHOOK_PUBLIC_BASE_URL` | The public HTTPS URL Telegram will POST updates to. **Must be real public HTTPS** — Telegram's `setWebhook` refuses anything else, including `http://localhost`. For local testing without a real bot, point this at whatever base URL your fake Bot API expects to have been registered with (it doesn't have to be reachable — nothing calls back into it except the real Telegram, which you won't be using in that mode). |
 | `TG_API_BASE_URL` | Overrides `https://api.telegram.org`. Point this at `http://127.0.0.1:<port>` to redirect the Bot API client at a fake server instead. Empty = talk to the real Telegram. |
-| `TG_WEBHOOK_SECRET` | The `secret_token` registered with `setWebhook` and checked on every inbound webhook call (header `X-Telegram-Bot-Api-Secret-Token`). Falls back to `WEBHOOK_TOKEN` if unset. Telegram's charset rule applies: `A-Za-z0-9_-`, max 256 chars. |
-| `TG_CREDENTIALS_ENC_KEY` | AES-256-GCM key encrypting bot tokens at rest (`xchats.tg_credentials`). Generate with `openssl rand -hex 32`. Without it, connecting a bot 400s. |
-| `OPENROUTER_API_KEY` (or `OPENAI_API_KEY`/`GEMINI_API_KEY` matching `LLM_DEFAULT_PROVIDER`) | Boot fatals without *some* value here — see `buildLLMRegistry` in `backend/cmd/xchats/main.go`. A dummy string boots fine; AI-draft generation will then fail server-side and only be logged (see "AI drafts" below), which is not a sign the Telegram channel itself is broken. |
+| `TG_WEBHOOK_SECRET` | The `secret_token` registered with `setWebhook` and checked on every inbound webhook call (header `X-Telegram-Bot-Api-Secret-Token`). Auto-provisioned and durably persisted on first boot (`internal/credentials.Provision`) — set this only to pin a specific value (e.g. matching a fake Bot API's expectations) or to adopt a pre-Settings deployment's existing value. Telegram's charset rule applies: `A-Za-z0-9_-`, max 256 chars. |
+| `TG_CREDENTIALS_ENC_KEY` | AES-256-GCM key encrypting bot tokens at rest (`xchats.tg_credentials`). Same auto-provisioning as `TG_WEBHOOK_SECRET` above — generate with `openssl rand -hex 32` only if you need a specific value; otherwise leave it unset and let boot generate one. |
+| `OPENROUTER_API_KEY` (or `OPENAI_API_KEY`/`GEMINI_API_KEY` matching `LLM_DEFAULT_PROVIDER`) | No longer required to boot — see `populateLLMRegistry` in `backend/cmd/xchats/main.go`. With none configured (here, in the credential store, or via the Settings UI) boot logs a warning and continues; AI-draft generation then fails server-side and only logs (see "AI drafts" below), which is not a sign the Telegram channel itself is broken. |
 
-Booting from just exported env vars with no host `.env`/`config.yaml`
-interference: `go run ./cmd/xchats -env /dev/null -config /dev/null serve`
-(both flags default to reading `.env`/`config.yaml` relative to cwd if
-present — pointing them at `/dev/null` gives a clean, reproducible boot from
-only what you export).
+Booting from just exported env vars with no host `config.yaml` interference:
+`go run ./cmd/xchats -config /dev/null serve` (`-config` defaults to reading
+`config.yaml` relative to cwd if present — pointing it at `/dev/null` gives a
+clean, reproducible boot from only what you export, `defaults()`, and
+whatever auto-provisions).
 
 ## The endpoint catalogue
 

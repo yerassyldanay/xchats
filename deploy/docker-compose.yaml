@@ -14,9 +14,14 @@ services:
     environment:
       # Boot/infra tunables (listen address, on-disk paths, logging, worker
       # counts) live in the mounted config.docker.yaml, not here — this block
-      # is only what genuinely needs a per-deployment override or is still a
-      # secret (Track 2 auto-provisions those into the credential store
-      # instead; until then they stay here).
+      # is only what genuinely needs a per-deployment override. Every secret
+      # (session/CSRF signing, Telegram token encryption, MCP JWT signing,
+      # the Telegram webhook secret_token) is auto-provisioned into the file-
+      # backed credential store on first boot (internal/credentials.Provision)
+      # and persisted under the /data volume below — there is nothing to set
+      # here for them anymore. LLM provider keys and the default provider/
+      # model are likewise configured after first boot, from the Settings UI
+      # (or its first-run setup wizard) — never here.
       XCHATS_CONFIG: "/config.yaml"
       # internal/credentials' file-backed fallback (Keyring has no OS session
       # to run in inside a container) and internal/settings' JSON store both
@@ -39,38 +44,11 @@ services:
       # in Xchats" link lands — the frontend service below, as reachable from
       # the operator's own browser (a host-published port, never "frontend:80").
       FRONTEND_BASE_URL: "${FRONTEND_BASE_URL:-http://localhost:${FRONTEND_PORT:-8081}}"
-      # Unset => an ephemeral per-process key: every MCP token stops verifying
-      # on restart, and no two replicas agree. Fine for a throwaway local run,
-      # never for anything an LLM host stays connected to.
-      MCP_JWT_SIGNING_KEY: "${MCP_JWT_SIGNING_KEY:-}"
-      # --- Telegram (Bot API) ---
+      # --- Telegram (Bot API) — not secrets, so still a per-deployment
+      # override here rather than a Settings UI field. Empty => polling mode
+      # (see config.yaml's telegram.mode comment). ---
       TG_WEBHOOK_PUBLIC_BASE_URL: "${TG_WEBHOOK_PUBLIC_BASE_URL:-}"
       TG_API_BASE_URL: "${TG_API_BASE_URL:-}"
-      TG_WEBHOOK_SECRET: "${TG_WEBHOOK_SECRET:-}"
-      TG_CREDENTIALS_ENC_KEY: "${TG_CREDENTIALS_ENC_KEY:-}"
-      SESSION_SECRET: "${SESSION_SECRET:-change-me-random}"
-      # Legacy brain/playground config — those packages stay compiled but are no
-      # longer constructed by main.go; kept only for internal/kbstore consumers.
-      LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
-      LLM_API_KEY: "${LLM_API_KEY:-}"
-      LLM_BASE_URL: "${LLM_BASE_URL:-}"
-      LLM_FAST_MODEL: "${LLM_FAST_MODEL:-openai/gpt-4o-mini}"
-      LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-1024}"
-      LLM_TEMPERATURE: "${LLM_TEMPERATURE:-0.3}"
-      # response.Service's LLM layer — required; boot fails fast without a key
-      # for LLM_DEFAULT_PROVIDER (no stub fallback, by design).
-      LLM_DEFAULT_PROVIDER: "${LLM_DEFAULT_PROVIDER:-openrouter}"
-      LLM_DEFAULT_MODEL: "${LLM_DEFAULT_MODEL:-google/gemini-2.5-flash}"
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
-      OPENROUTER_BASE_URL: "${OPENROUTER_BASE_URL:-}"
-      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
-      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
-      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
-      GEMINI_BASE_URL: "${GEMINI_BASE_URL:-}"
-      LLM_DRAFT_MAX_TOKENS: "${LLM_DRAFT_MAX_TOKENS:-500}"
-      LLM_DRAFT_TEMPERATURE: "${LLM_DRAFT_TEMPERATURE:-0.3}"
-      LLM_DRAFT_TIMEOUT_SECONDS: "${LLM_DRAFT_TIMEOUT_SECONDS:-60}"
-      LLM_DRAFT_RETRY: "${LLM_DRAFT_RETRY:-true}"
       # Simulator HTTP API (Phase 10) — gates whether the route is registered
       # at all. Default false; set true to test without a WhatsApp number.
       SIMULATOR_ENABLED: "${SIMULATOR_ENABLED:-false}"

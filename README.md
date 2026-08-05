@@ -17,13 +17,20 @@ end-to-end plumbing of the inbound→draft→approve→send→status loop. Follo
 schema, `{payload, errcode}` envelope, in-memory queue, and deterministic `wa_accounts.id`.
 
 ```bash
-cp .env.example .env            # secrets (DB paths, session secret, LLM keys, admin login)
 make up                         # backend (:8080) + frontend (:8081), one command
 ```
 
 The committed root [`config.yaml`](config.yaml) carries only non-secret boot/infra tunables
 (listen address, on-disk paths, logging, worker counts) — copy it only if you want to change one
-of those from its defaults; `.env` is still where secrets and provider keys live for now.
+of those from its defaults. There is no `.env` file to set up: xchats generates and durably stores
+its own internal secrets (session signing, Telegram token encryption, MCP signing, the Telegram
+webhook secret) on first boot, and everything else an operator configures — the AI provider and
+its API key, ngrok, Langfuse, team members — lives in the Settings UI (gated to admins, with a
+first-run wizard for the essentials) once the app is running. Log in with the default admin
+account migration `0006_init_admin` seeds on an empty database — `admin@xchat.kz` /
+`xchat-admin-change-me` — then add your own admin account from Settings → Team Management right
+after (there is no self-service password change yet, so treat the seeded login as a bootstrap
+credential, not a permanent one).
 
 WhatsApp connects directly via [`go.mau.fi/whatsmeow`](https://github.com/tulir/whatsmeow) — no
 separate gateway to run or configure. Pair a number from the UI's QR flow (`/accounts` →
