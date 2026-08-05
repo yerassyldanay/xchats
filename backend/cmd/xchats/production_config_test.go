@@ -10,27 +10,30 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 )
 
-func TestValidateProductionConfig_RejectsEphemeralKeyAndLocalURLs(t *testing.T) {
+func TestValidateProductionConfig_RejectsLocalURLs(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			APIBaseURL:      "http://localhost:8080",
 			FrontendBaseURL: "http://localhost:5173",
 		},
-		// MCPJWTSigningKey left empty — the ephemeral-fallback case.
 	}
 	problems := validateProductionConfig(cfg)
-	if len(problems) != 3 {
-		t.Fatalf("expected 3 problems (key, api base, frontend base), got %d: %v", len(problems), problems)
+	if len(problems) != 2 {
+		t.Fatalf("expected 2 problems (api base, frontend base), got %d: %v", len(problems), problems)
 	}
 }
 
-func TestValidateProductionConfig_AcceptsPersistentKeyAndPublicURLs(t *testing.T) {
+func TestValidateProductionConfig_AcceptsPublicURLs(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			APIBaseURL:      "https://api.xchats.example",
 			FrontendBaseURL: "https://app.xchats.example",
 		},
-		MCPJWTSigningKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		// MCPJWTSigningKey deliberately left empty: an ephemeral/missing MCP
+		// signing key is no longer a production-blocking problem — see
+		// validateProductionConfig's own doc comment (provisionSystemSecrets
+		// durably provisions it before this function runs, whenever a secure
+		// credential store is available).
 	}
 	if problems := validateProductionConfig(cfg); len(problems) != 0 {
 		t.Fatalf("expected no problems for a fully configured production setup, got: %v", problems)
@@ -43,7 +46,6 @@ func TestValidateProductionConfig_PartialMisconfiguration(t *testing.T) {
 			APIBaseURL:      "https://api.xchats.example",
 			FrontendBaseURL: "http://localhost:5173", // forgot to update this one
 		},
-		MCPJWTSigningKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	}
 	problems := validateProductionConfig(cfg)
 	if len(problems) != 1 {

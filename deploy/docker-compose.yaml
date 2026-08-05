@@ -18,6 +18,13 @@ services:
       # secret (Track 2 auto-provisions those into the credential store
       # instead; until then they stay here).
       XCHATS_CONFIG: "/config.yaml"
+      # internal/credentials' file-backed fallback (Keyring has no OS session
+      # to run in inside a container) and internal/settings' JSON store both
+      # live under the persistent /data volume already mounted below, not
+      # the container's own (ephemeral, throwaway-on-recreate) $HOME.
+      XCHATS_ALLOW_FILE_CREDENTIALS: "1"
+      XCHATS_DATA_DIR: "/data/appdata"
+      XCHATS_CONFIG_DIR: "/data/appconfig"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,http://localhost:${FRONTEND_PORT:-8081}}"
       # --- MCP connector (plan/mcp.md) ---
       # API_BASE_URL is the backend's own PUBLIC origin, and it is the single

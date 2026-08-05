@@ -19,8 +19,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
+	"github.com/yerassyldanay/xchats/backend/internal/appdirs"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
@@ -106,6 +108,8 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	provisionSystemSecrets(ctx, cfg, log)
 
 	// Langfuse LLM tracing (best-effort): install a global OTel TracerProvider so
 	// the LLM clients export each call as a generation. Never fatal.
@@ -269,6 +273,50 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	q.Close()
 }
 
+// provisionSystemSecrets resolves xchats' four internally-managed secrets —
+// the MCP OAuth CSRF signing key (cfg.SessionSecret), the Telegram
+// bot-token-at-rest encryption key (cfg.TelegramCredentialsEncKey), the MCP
+// JWT signing key (cfg.MCPJWTSigningKey), and the Telegram webhook
+// secret_token (cfg.TelegramWebhookSecret) — through internal/credentials
+// and writes the resolved values straight back into cfg, so every existing
+// consumer of those four fields (secretbox.FromEnvValue below,
+// mcpauth.NewSigningKeyFromSeed in buildMCPConnector, httpapi's CSRF secret,
+// TelegramResolvedWebhookSecret) picks them up completely unchanged.
+//
+// When a secure credential store is available (the OS keychain, or a file
+// store the deployment opted into — see credentials.Open), each of the four
+// is durably generated once and reused on every later boot: this is what
+// turns "set TG_CREDENTIALS_ENC_KEY/MCP_JWT_SIGNING_KEY by hand before first
+// boot" from a required step into a zero-config default. When no store is
+// available, cfg keeps whatever raw config/env value it already had (most
+// likely empty), and every downstream consumer's own existing
+// warn-and-degrade behavior (an ephemeral MCP key, credentials-at-rest
+// disabled, ...) applies exactly as it did before this function existed.
+func provisionSystemSecrets(ctx context.Context, cfg *config.Config, log *slog.Logger) {
+	dataDir, err := appdirs.DataDir("xchats")
+	if err != nil {
+		log.Warn("could not resolve the OS application data directory; the file-based credential fallback is unavailable", "err", err)
+	}
+	store, err := credentials.Open(credentials.OpenOptions{
+		DataDir:   dataDir,
+		AllowFile: credentials.AllowFileFromEnv(),
+	})
+	if err != nil {
+		log.Warn("no secure credential store available; internally-managed secrets are only as durable as config/env",
+			"reason", err.Error())
+		return
+	}
+	secrets, err := credentials.Provision(ctx, store)
+	if err != nil {
+		log.Warn("provisioning internal secrets failed; falling back to config/env", "err", err)
+		return
+	}
+	cfg.SessionSecret = secrets.SessionSecret
+	cfg.TelegramCredentialsEncKey = secrets.TGCredentialsEncKey
+	cfg.MCPJWTSigningKey = secrets.MCPJWTSigningKey
+	cfg.TelegramWebhookSecret = secrets.WebhookSecret
+}
+
 // buildLLMRegistry resolves the configured LLM providers into an llm.Registry
 // and the default ModelRef the response engine calls. Missing configuration
 // for the DEFAULT provider (LLM_DEFAULT_PROVIDER, default "openrouter") is a
@@ -293,18 +341,25 @@ func buildLLMRegistry(cfg *config.Config) (llm.Registry, llm.ModelRef) {
 }
 
 // validateProductionConfig returns every reason cfg is unsafe to run with
-// ENVIRONMENT=production (plan Task 17's release gate): an ephemeral MCP
-// signing key (MCPJWTSigningKey unset or otherwise invalid — every replica
-// would then mint tokens no other replica, and no restart, can verify), or a
-// base URL still pointing at localhost/loopback. Development (the default —
-// anything other than the literal "production") never calls this: those are
-// legitimate conveniences there, not misconfigurations. An empty return means
-// clear to boot.
+// ENVIRONMENT=production (plan Task 17's release gate): a base URL still
+// pointing at localhost/loopback. Development (the default — anything other
+// than the literal "production") never calls this: those are legitimate
+// conveniences there, not misconfigurations. An empty return means clear to
+// boot.
+//
+// This used to also fatal on an ephemeral MCP signing key
+// (MCPJWTSigningKey unset or otherwise invalid — every replica would then
+// mint tokens no other replica, and no restart, can verify). That check is
+// gone: provisionSystemSecrets now durably generates and persists
+// MCPJWTSigningKey (and the other three internally-managed secrets) through
+// internal/credentials before this function ever runs, whenever a secure
+// credential store is available — which the Docker image always opts into
+// (XCHATS_ALLOW_FILE_CREDENTIALS=1). The remaining edge case (no OS
+// keychain AND no opt-in) degrades to the same warn-and-continue posture
+// every other credential-store consumer already has, rather than refusing
+// to boot.
 func validateProductionConfig(cfg *config.Config) []string {
 	var problems []string
-	if _, err := mcpauth.NewSigningKeyFromSeed(cfg.MCPJWTSigningKey); err != nil {
-		problems = append(problems, "MCP_JWT_SIGNING_KEY is unset or invalid — production would mint an ephemeral per-process key that a restart or a second replica can never verify")
-	}
 	if isLocalBaseURL(cfg.Server.APIBaseURL) {
 		problems = append(problems, fmt.Sprintf("API_BASE_URL=%q still points at localhost/loopback", cfg.Server.APIBaseURL))
 	}
