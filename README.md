@@ -3,7 +3,7 @@
 A WhatsApp-first **team inbox with an AI assistant**, runnable from one place.
 
 The concise target design lives under [`plan/`](plan/), with
-[`DECISIONS.md`](DECISIONS.md) authoritative;
+[`DECISIONS.md`](plan/DECISIONS.md) authoritative;
 **Build 0** — the runnable first version — is implemented in [`backend/`](backend/) (Go) and
 [`frontend/`](frontend/) (Vue 3), orchestrated by [`deploy/`](deploy/) + the [`Makefile`](Makefile).
 
@@ -44,9 +44,9 @@ Identity is the WhatsApp number, so a logout/re-pair cycle never loses chats. En
 `POST /wa-accounts/{id}/logout`, `GET /wa-accounts/{id}/status`, `DELETE /whatsapp-accounts/{id}`.
 
 ```bash
-make test        # Go unit/component + normalizer-vs-captures + frontend typecheck/build
-make test-e2e    # full demo loop against a Postgres (DATABASE_URL=...): ingest→dedup→media,
-                 # send fan-out to the phone JID, echo-collapse, monotonic status, suggest→approve guard
+make test        # Go unit/component (SQLite, a fresh database per test) + frontend typecheck/build
+make test-e2e    # the DB-backed suites in isolation: ingest→dedup→media, send fan-out to the
+                 # phone JID, echo-collapse, monotonic status, suggest→approve guard
 ```
 
 ### Layout

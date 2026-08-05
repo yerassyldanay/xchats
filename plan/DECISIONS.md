@@ -7,6 +7,40 @@ It is the single
 authoritative decision record: it merges and **supersedes** `DECISION-BY-CLAUDE.md`
 and `DECISION-BY-CODEX.md` (merged 2026-07-10).
 
+**2026-08 amendment — SQLite, not PostgreSQL.** The database cutover (#31,
+"Port database layer from PostgreSQL to SQLite") landed on `main`, and the
+whatsmeow migration (#32) was merged into #31's branch before that PR closed
+— so both landed as one squash commit. Every "PostgreSQL"/"pg_catalog"/`uuid`
+column-type reference below is historical: it describes the schema as
+originally designed and is still the right mental model for the *shape* of
+the data, but the engine underneath is now SQLite via `internal/dbx`
+(`modernc.org/sqlite`, one physical connection per database file, WAL,
+`$N`-style bound placeholders translated from the `pgx` originals — see
+`backend/migrations/sqlite/` and its `schema_contract.json`, which pins the
+ported schema column-for-column against the frozen pre-cutover Postgres
+contract). `uuid` is `TEXT`, `timestamptz` is `TEXT` in
+`internal/dbx.TimeLayout`'s canonical format, `jsonb` is `TEXT` with a
+`json_valid` CHECK, and `citext` is `TEXT COLLATE NOCASE`. The handful of
+sentences below that assert data "lives in PostgreSQL" or reason about a
+PostgreSQL-specific limitation are corrected in place rather than left to
+silently mislead a reader of this file.
+
+**2026-08 amendment — tunnel exposure deviates from an MCP-only public
+surface.** The repo's implicit assumption for exposing the MCP connector
+publicly was a narrowly allowlisted router (only the MCP discovery/OAuth/
+JSON-RPC routes reachable from outside the machine). Per an explicit user
+decision recorded for the Settings/credentials work (embedded ngrok via
+`golang.ngrok.com/ngrok`, `internal/tunnel`), the tunnel instead serves the
+**full application router** — the same `gin.Engine` `internal/httpapi.New`
+already builds, login page included — because standing up a second,
+narrower router solely for the tunnel was judged not worth the complexity
+for this stage. This is a deliberate, recorded deviation, not an oversight:
+mitigations are cookies gaining `Secure` when served over the tunnel's HTTPS
+origin, and an explicit, unmissable UI warning (the Settings "Remote Access"
+section) that starting the tunnel exposes the whole app — including the
+login page — to the public internet while it runs. An MCP-only allowlisted
+router remains a documented future hardening option, not a commitment.
+
 ---
 
 ## Part 1 — the idea, in plain words
@@ -86,7 +120,8 @@ and `DECISION-BY-CODEX.md` (merged 2026-07-10).
 
 ### Physical table names and boundaries
 
-All tables live in the PostgreSQL schema `xchats`. Prefixes describe ownership
+All tables live in the SQLite database (the pre-cutover design's `xchats`
+PostgreSQL schema — see the amendment at the top of this file). Prefixes describe ownership
 and lifecycle; they are part of the table name, not optional documentation:
 
 ```text
@@ -129,8 +164,10 @@ must use these exact names. Aliases are rejected: for example, use
 and `gallery_images`, never generic `images`. There is no generic business
 `data`, `values`, `media`, `files`, `assets`, or `attachments` bag.
 
-All tables are in PostgreSQL schema `xchats`. All tenant-owned rows include
-`organization_id uuid`; identifiers are `uuid`; timestamps are `timestamptz`.
+All tables are in the one SQLite database (see the amendment at the top of
+this file — `xchats` was the pre-cutover PostgreSQL schema name). All
+tenant-owned rows include `organization_id uuid`; identifiers are `uuid`
+(`TEXT` on SQLite); timestamps are `timestamptz` (`TEXT`, `internal/dbx.TimeLayout`).
 V1 has no `lang` columns: trusted prose is Russian, while exact values are stored
 once. A missing scalar is SQL `NULL`, never an empty or whitespace-only string.
 A missing singular media reference is `NULL`; a missing plural media reference
@@ -146,7 +183,7 @@ stored as an exact live fact and must not be hidden in prose or JSON.
 #### `kbd_materials` — source and uploaded-file registry
 
 This is the only material registry. It stores text/URL/instruction content or a
-file's metadata and storage locator; it never stores file bytes in PostgreSQL.
+file's metadata and storage locator; it never stores file bytes in the database.
 
 | Column | Type | Null/default | Short description |
 |---|---|---|---|
@@ -681,11 +718,15 @@ Draft patch out (trimmed example):
 
 - Despite their semantic names, the physical values are internal references:
   singular columns such as `featured_image` are nullable `uuid`; group columns
-  such as `gallery_images` are `uuid[] NOT NULL DEFAULT '{}'`. Every stored UUID
-  is a `kbd_materials.id`; no KB media column stores a path, storage key, URL, or
-  model token. Scalar columns can use a normal foreign key; PostgreSQL cannot
-  apply an element-level foreign key to an array, so code validates every array
-  element before draft write, approval, and runtime delivery.
+  such as `gallery_images` are `uuid[] NOT NULL DEFAULT '{}'` in the original
+  design (SQLite has no array type — the ported column is `TEXT` holding a
+  JSON array of ids, with a `json_valid` CHECK; see the amendment at the top
+  of this file). Every stored UUID is a `kbd_materials.id`; no KB media column
+  stores a path, storage key, URL, or model token. Scalar columns can use a
+  normal foreign key; neither engine can apply an element-level foreign key
+  to an array (PostgreSQL) or a JSON-array-in-`TEXT` column (SQLite), so code
+  validates every array element before draft write, approval, and runtime
+  delivery.
 - Validation requires each referenced material to belong to the same org, have
   `source_type=file`, contain a storage locator, match the media type named by
   the column, and be customer-sendable. A URL, text, instruction, invisible

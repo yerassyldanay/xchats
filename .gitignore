@@ -16,6 +16,15 @@ deploy/docker-compose.override.yaml
 blobdata/
 backend/blobdata/
 
+# SQLite data directory (xchats.db + whatsmeow.db and their WAL/lock
+# sidecars) — config.yaml's committed storage.db_path/wa_device_db_path
+# defaults both live under ./data.
+data/
+*.db
+*.db-wal
+*.db-shm
+*.db.lock
+
 # build output
 # One entry per backend/cmd/* package: `go build ./...` run from backend/
 # writes a binary named after each main package into the working directory,
