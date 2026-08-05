@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -191,5 +192,33 @@ func TestBackupZip_NeverIncludesCredentialFiles(t *testing.T) {
 		default:
 			t.Errorf("unexpected zip entry %q — BackupZip must only ever produce manifest.json/xchats.db/settings.json/blob/*", name)
 		}
+	}
+}
+
+// failAfterWriter errors once more than `remaining` bytes have been written
+// through it — simulates an HTTP client disconnecting mid-download (the
+// real-world way BackupZip's destination writer fails, since
+// handleDownloadBackup streams straight to c.Writer) or a full disk.
+type failAfterWriter struct{ remaining int }
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.remaining <= 0 {
+		return 0, errors.New("simulated write failure")
+	}
+	if len(p) <= w.remaining {
+		w.remaining -= len(p)
+		return len(p), nil
+	}
+	n := w.remaining
+	w.remaining = 0
+	return n, errors.New("simulated write failure")
+}
+
+func TestBackupZip_DestinationWriteFailureIsReturnedAsError(t *testing.T) {
+	ctx := context.Background()
+	db, _ := openSeeded(t, "live.db")
+
+	if _, err := dbops.BackupZip(ctx, db, "", nil, &failAfterWriter{remaining: 10}); err == nil {
+		t.Fatal("want an error when the destination writer fails partway through")
 	}
 }

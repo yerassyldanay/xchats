@@ -687,3 +687,51 @@ func TestSettingsRoutesRequireAdmin(t *testing.T) {
 		})
 	}
 }
+
+// TestSettingsRoutesDegradeGracefullyWithNoOptionalDepsWired exercises every
+// settings route against newNilDepsSettingsHarness, where Credentials/
+// Settings/Tunnel are all unset — the deployment shape a minimal build (or a
+// misconfigured one) produces. Every handler's own doc comment promises a
+// clear 503 rather than a panic when its dependency is missing; this is what
+// actually proves that over real HTTP instead of trusting the comment.
+// "openrouter" stands in for :provider throughout because it has a
+// non-nil Validate — the one case (test credential) where a nil Validate
+// would short-circuit to 400 before ever reaching the nil-dependency check
+// this test is trying to exercise. backup/download is deliberately absent:
+// s.store is never nil in this harness, since the store IS how login
+// authenticates, so that particular nil branch can't be reached this way.
+func TestSettingsRoutesDegradeGracefullyWithNoOptionalDepsWired(t *testing.T) {
+	h := newNilDepsSettingsHarness(t)
+
+	cases := []struct {
+		name       string
+		method     string
+		path       string
+		body       any
+		wantStatus int
+	}{
+		{"get settings", http.MethodGet, "/xchats/api/v1/settings", nil, http.StatusServiceUnavailable},
+		{"list integrations", http.MethodGet, "/xchats/api/v1/settings/integrations", nil, http.StatusOK},
+		{"update integration settings", http.MethodPut, "/xchats/api/v1/settings/integrations/openrouter", map[string]any{"base_url": "x"}, http.StatusServiceUnavailable},
+		{"save credential", http.MethodPut, "/xchats/api/v1/settings/integrations/openrouter/credential", map[string]any{"values": map[string]string{"openrouter.api_key": "x"}}, http.StatusServiceUnavailable},
+		{"delete credential", http.MethodDelete, "/xchats/api/v1/settings/integrations/openrouter/credential", nil, http.StatusServiceUnavailable},
+		{"test credential", http.MethodPost, "/xchats/api/v1/settings/integrations/openrouter/test", nil, http.StatusServiceUnavailable},
+		{"update llm settings", http.MethodPut, "/xchats/api/v1/settings/llm", map[string]any{"default_provider": "openrouter", "default_model": "m", "max_tokens": 500, "temperature": 0.3, "timeout_seconds": 60}, http.StatusServiceUnavailable},
+		{"update credential storage", http.MethodPut, "/xchats/api/v1/settings/credential-storage", map[string]any{"credential_file_fallback_accepted": true}, http.StatusServiceUnavailable},
+		{"setup complete", http.MethodPost, "/xchats/api/v1/settings/setup-complete", nil, http.StatusServiceUnavailable},
+		{"update ngrok settings", http.MethodPut, "/xchats/api/v1/settings/ngrok", map[string]any{"region": "eu"}, http.StatusServiceUnavailable},
+		{"provider health", http.MethodGet, "/xchats/api/v1/settings/provider-health", nil, http.StatusOK},
+		{"update check", http.MethodGet, "/xchats/api/v1/settings/update-check", nil, http.StatusOK},
+		{"tunnel status", http.MethodGet, "/xchats/api/v1/settings/tunnel", nil, http.StatusServiceUnavailable},
+		{"tunnel start", http.MethodPost, "/xchats/api/v1/settings/tunnel/start", nil, http.StatusServiceUnavailable},
+		{"tunnel stop", http.MethodPost, "/xchats/api/v1/settings/tunnel/stop", nil, http.StatusServiceUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, env := h.do(tc.method, tc.path, tc.body)
+			if resp.StatusCode != tc.wantStatus {
+				t.Errorf("status = %d, want %d; body=%s", resp.StatusCode, tc.wantStatus, env["message"])
+			}
+		})
+	}
+}

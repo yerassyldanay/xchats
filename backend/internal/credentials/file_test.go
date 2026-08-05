@@ -200,4 +200,14 @@ func TestFileKeyEnvOverrideRejectsInvalidValue(t *testing.T) {
 	}
 }
 
+func TestWriteFileAtomicFailsWhenParentDirectoryIsMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist", "credentials.enc")
+	if err := writeFileAtomic(path, []byte("data"), 0o600); err == nil {
+		t.Fatal("want an error when the parent directory does not exist")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("target file should not have been created; stat err = %v", err)
+	}
+}
+
 var _ CredentialStore = (*FileStore)(nil)

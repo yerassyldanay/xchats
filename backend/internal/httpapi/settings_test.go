@@ -148,6 +148,42 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 	return h
 }
 
+// newNilDepsSettingsHarness builds a Server the way a deployment with no
+// secure credential store at all would (Credentials/Settings/Tunnel/
+// ProviderHealth/UpdateChecker/LLMRefresh all left at their zero value) —
+// every settings.go handler's own doc comments promise this degrades to a
+// clear response rather than a panic; this harness is what actually proves
+// it end to end, over real HTTP, instead of trusting the promise.
+func newNilDepsSettingsHarness(t *testing.T) *settingsHarness {
+	t.Helper()
+	ctx := context.Background()
+	st, _ := dbtest.Open(t)
+
+	cfg := &config.Config{
+		System:   config.SystemConfig{SessionTTLHours: 1, MinPasswordLen: 8},
+		PageSize: 50,
+		Server:   config.ServerConfig{CORSOrigins: []string{"*"}},
+	}
+
+	org, err := st.SeedOrganization(ctx, "xchats")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	hash, _ := httpapi.HashPassword(adminPass)
+	if _, err := st.SeedUser(ctx, org.ID, adminEmail, hash, "Admin"); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	srv := httpapi.New(httpapi.Deps{Cfg: cfg, Store: st, OrgID: org.ID, Log: log})
+	ts := httptest.NewServer(srv.Router())
+	jar, _ := cookiejar.New(nil)
+	h := &settingsHarness{t: t, srv: ts, client: &http.Client{Jar: jar}, store: st, orgID: org.ID}
+	t.Cleanup(ts.Close)
+	h.login(h.client, adminEmail, adminPass)
+	return h
+}
+
 func (h *settingsHarness) login(client *http.Client, email, password string) {
 	h.t.Helper()
 	body, _ := json.Marshal(map[string]string{"email": email, "password": password})

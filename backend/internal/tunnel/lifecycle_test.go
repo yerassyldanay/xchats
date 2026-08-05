@@ -392,6 +392,16 @@ func TestTunnelOptionsNilSettingsIsFine(t *testing.T) {
 	}
 }
 
+func TestNewManagerDefaultsLogAndConnectWhenUnset(t *testing.T) {
+	m := NewManager(Deps{})
+	if m.log == nil {
+		t.Error("log should default to slog.Default() when Deps.Log is unset")
+	}
+	if m.deps.connect == nil {
+		t.Error("connect should default to realConnect when Deps.connect is unset")
+	}
+}
+
 func TestServeLoopFailureIsRecordedAsLastError(t *testing.T) {
 	tun := &erroringTunnel{err: errors.New("session terminated by ngrok")}
 	rc := &recordingConnect{tunnel: tun}
