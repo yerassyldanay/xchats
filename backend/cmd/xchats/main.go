@@ -35,6 +35,8 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
+	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
+	"github.com/yerassyldanay/xchats/backend/internal/tgpoller"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsmeow"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -188,6 +190,24 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		log.Info("credentials encryption enabled", "key_version", secretbox.KeyVersion)
 	}
 
+	// tgProc is the shared Telegram ingest core: both the webhook handler
+	// (internal/httpapi) and the long-poll manager below feed updates
+	// through the exact same Process call, so a bot's history is identical
+	// regardless of which ingress delivered it.
+	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Log: log})
+	// tgMgr is constructed unconditionally (its own Close is a cheap no-op
+	// with nothing registered) so webhook-mode deployments can still flip
+	// TG_MODE later without a restart-time wiring change; only Start is
+	// gated on the resolved mode.
+	tgMgr := tgpoller.NewManager(tgpoller.Deps{
+		TG: tg, Tokens: st, Offsets: st, Processor: tgProc, State: st, Bots: st, Log: log,
+	})
+	telegramMode := cfg.TelegramResolvedMode()
+	if telegramMode == "polling" {
+		log.Info("telegram polling mode active — no public URL required")
+		go tgMgr.Start(ctx)
+	}
+
 	waMgr, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
 		DeviceDBPath: cfg.Storage.WADeviceDBPath,
 		Store:        st,
@@ -222,7 +242,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, WA: waMgr, TG: tg, KB: kb,
+		Response: responseService, WA: waMgr, TG: tg, TGProcessor: tgProc, TGPoller: tgMgr, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
@@ -241,6 +261,11 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+	// tgMgr before q: the poller publishes to the queue via tgProc, so it
+	// must stop producing before the queue stops accepting. Explicit here
+	// (not a defer) so the ordering relative to q.Close() is guaranteed
+	// rather than left to defer's LIFO stacking.
+	tgMgr.Close()
 	q.Close()
 }
 

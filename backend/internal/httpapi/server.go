@@ -41,6 +41,18 @@ type kbInvalidator interface {
 	Invalidate(orgID uuid.UUID)
 }
 
+// tgPoller is the narrow slice of *tgpoller.Manager the telegram accounts
+// lifecycle needs in polling mode — declared inline (rather than importing
+// internal/tgpoller here) for the same "no new package edge" reason as
+// kbInvalidator above. Production (main.go) always constructs and passes
+// one, in either mode; every call site here still checks
+// TelegramResolvedMode() first, so a test harness exercising only webhook
+// mode (the existing 28 telegram tests) can safely leave Deps.TGPoller nil.
+type tgPoller interface {
+	Upsert(spec store.TelegramPollBot)
+	Remove(id uuid.UUID)
+}
+
 // Server wires the HTTP edges to their dependencies.
 type Server struct {
 	cfg      *config.Config
@@ -52,6 +64,7 @@ type Server struct {
 	wa       whatsapp.Manager    // nil when WhatsApp is not configured; every handler checks
 	tg       telegram.Client     // nil when Telegram is not configured; every handler checks
 	tgProc   *tgingest.Processor // the Telegram webhook ingress's shared ingest core (internal/tgingest) — also used by internal/tgpoller in polling mode
+	tgPoller tgPoller            // the long-poll manager (polling mode only — see tgPoller's own doc comment)
 	kb       *kbstore.Store
 	orgID    uuid.UUID
 	log      *slog.Logger
@@ -102,6 +115,7 @@ type Deps struct {
 	WA            whatsapp.Manager
 	TG            telegram.Client
 	TGProcessor   *tgingest.Processor
+	TGPoller      tgPoller
 	KB            *kbstore.Store
 	KBRepo        response.KnowledgeBaseRepository
 	KBInvalidator kbInvalidator
@@ -124,7 +138,8 @@ func New(d Deps) *Server {
 	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, response: d.Response, wa: d.WA, tg: d.TG, tgProc: d.TGProcessor, kb: d.KB,
+		blob: d.Blob, response: d.Response, wa: d.WA, tg: d.TG,
+		tgProc: d.TGProcessor, tgPoller: d.TGPoller, kb: d.KB,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
 		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer,

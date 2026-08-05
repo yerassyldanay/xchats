@@ -95,6 +95,10 @@ type harness struct {
 	worker    *worker.Worker
 	orgID     uuid.UUID
 	accountID uuid.UUID
+	// tgPoller records every Upsert/Remove the telegram accounts lifecycle
+	// makes in polling mode (see telegram_polling_test.go) — nil-tolerant
+	// production behavior means the 26 webhook-mode tests never touch it.
+	tgPoller *fakeTGPoller
 }
 
 // setTelegramBase rewrites the configured public base URL mid-test. The Server
@@ -232,17 +236,18 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	// must too, over the SAME store/queue/hub every other dependency above
 	// shares.
 	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Log: log})
+	tgPoller := &fakeTGPoller{}
 
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, WA: fake, TG: tgFake, TGProcessor: tgProc, KB: kb,
+		Response: responseService, WA: fake, TG: tgFake, TGProcessor: tgProc, TGPoller: tgPoller, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: org.ID, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, cfg: cfg, fake: fake, tg: tgFake,
-		queue: q, store: st, db: db, worker: w, orgID: org.ID, accountID: accountID}
+		queue: q, store: st, db: db, worker: w, orgID: org.ID, accountID: accountID, tgPoller: tgPoller}
 	// st/db/kb/kbRepo are all closed by dbtest's own t.Cleanup registrations.
 	t.Cleanup(func() { ts.Close(); q.Close() })
 	h.login()
