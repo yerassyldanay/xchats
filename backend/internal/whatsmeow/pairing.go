@@ -42,10 +42,28 @@ func newPairingRegistry() *pairingRegistry {
 	return &pairingRegistry{sessions: make(map[string]whatsapp.PairingUpdate)}
 }
 
+// isTerminalPairing reports whether a status is a final outcome — one that
+// later updates for the same session must not overwrite.
+func isTerminalPairing(status string) bool {
+	switch status {
+	case "connected", "error", "timeout":
+		return true
+	}
+	return false
+}
+
 func (r *pairingRegistry) set(update whatsapp.PairingUpdate) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	// A terminal outcome is final. consumeQR runs concurrently with the
+	// PairSuccess handling and can still be draining a QR code whatsmeow
+	// buffered before the scan landed; without this guard that late code
+	// overwrites "connected" back to "qr_required", and the frontend keeps
+	// polling (and showing a QR for) a session that already succeeded.
+	if cur, ok := r.sessions[update.SessionID]; ok && isTerminalPairing(cur.Status) {
+		return
+	}
 	r.sessions[update.SessionID] = update
-	r.mu.Unlock()
 }
 
 // finish records a terminal update and schedules its own removal — the
@@ -96,12 +114,31 @@ func (m *Manager) Pair(ctx context.Context, orgID string) (string, error) {
 	// dispatches every event to every registered handler, so both coexist
 	// harmlessly; this one only ever reacts to PairSuccess/PairError, which
 	// cannot recur once the client is fully registered.
+	//
+	// `outcome` makes that last part structural rather than assumed: exactly
+	// one terminal result is ever recorded for a pairing session, even if
+	// whatsmeow were to dispatch a second PairSuccess (which would otherwise
+	// register a second managed client for the same account).
+	var outcome sync.Once
 	cli.AddEventHandler(func(evt any) {
 		switch e := evt.(type) {
 		case *events.PairSuccess:
-			m.completePairing(cli, oid, sessionID, e.ID)
+			// MUST run off this goroutine. whatsmeow holds
+			// eventHandlersLock.RLock() for the entire duration of every
+			// handler call (Client.dispatchEvent), and completePairing ends
+			// up in AddEventHandler — which wants the write lock on that
+			// same RWMutex. Calling it inline deadlocks this client's
+			// dispatch goroutine permanently: pairing never completes, and
+			// no message, receipt, or ack is ever delivered again. (The same
+			// hazard whatsmeow documents on RemoveEventHandler.)
+			deviceJID := e.ID
+			outcome.Do(func() { go m.completePairing(cli, oid, sessionID, deviceJID) })
 		case *events.PairError:
-			m.pairings.finish(whatsapp.PairingUpdate{SessionID: sessionID, Status: "error", Message: e.Error.Error()})
+			// Safe inline: this path never touches the handler list.
+			msg := e.Error.Error()
+			outcome.Do(func() {
+				m.pairings.finish(whatsapp.PairingUpdate{SessionID: sessionID, Status: "error", Message: msg})
+			})
 		}
 	})
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -286,6 +287,16 @@ func TestPair_Lifecycle(t *testing.T) {
 	ownerJID := types.JID{User: "77099999999", Server: types.DefaultUserServer, Device: 12}
 	created[0].fire(&events.PairSuccess{ID: ownerJID})
 
+	// Completion is deliberately asynchronous: finishing the pairing
+	// registers a second event handler, which cannot happen on whatsmeow's
+	// dispatch goroutine (see pairing.go's PairSuccess case and
+	// fakeWAClient.AddEventHandler). Waiting here is what makes a regression
+	// to the inline call show up as a timeout rather than a silent hang.
+	waitFor(t, "pairing to reach a terminal status", func() bool {
+		u, ok := mgr.PairStatus(sessionID)
+		return ok && isTerminalPairing(u.Status)
+	})
+
 	update, ok = mgr.PairStatus(sessionID)
 	if !ok || update.Status != "connected" || update.AccountID == "" {
 		t.Fatalf("pair status after scan = %+v, ok=%v", update, ok)
@@ -334,6 +345,39 @@ func TestPair_ErrorEvent(t *testing.T) {
 	if !ok || update.Status != "error" || update.Message == "" {
 		t.Fatalf("pair status after error = %+v, ok=%v", update, ok)
 	}
+}
+
+// TestPair_LateQRCodeCannotUnsetConnected pins the ordering guarantee the
+// pairing registry makes. consumeQR runs concurrently with PairSuccess
+// handling and can still be holding a QR code whatsmeow buffered just before
+// the scan landed; if that late code were allowed to overwrite the terminal
+// status, the frontend would keep polling — and keep showing a QR for — a
+// session that had already connected.
+func TestPair_LateQRCodeCannotUnsetConnected(t *testing.T) {
+	r := newPairingRegistry()
+	r.set(whatsapp.PairingUpdate{SessionID: "s1", Status: "qr_required", QRCode: "first"})
+	r.finish(whatsapp.PairingUpdate{SessionID: "s1", Status: "connected", AccountID: "acct-1"})
+
+	r.set(whatsapp.PairingUpdate{SessionID: "s1", Status: "qr_required", QRCode: "late"})
+
+	got, ok := r.get("s1")
+	if !ok || got.Status != "connected" || got.AccountID != "acct-1" {
+		t.Fatalf("a late QR code overwrote the terminal status: %+v", got)
+	}
+}
+
+// waitFor polls cond until it holds, failing with what was being waited on
+// rather than hanging until the whole test binary times out.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
 }
 
 // TestReconnect_UsesSavedCredentials is the boot-time restore path: a
@@ -441,6 +485,68 @@ func TestLogout(t *testing.T) {
 	if status.State != "logged_out" {
 		t.Fatalf("state = %q, want logged_out", status.State)
 	}
+}
+
+// TestHandleLoggedOut_ReleasesTheClient covers the EXTERNAL logout (the phone
+// or the server ending the session), as opposed to Manager.Logout above.
+// The session is dead server-side, so our end must be released too rather
+// than left holding a consumer goroutine and a websocket for an account that
+// can never receive anything again.
+func TestHandleLoggedOut_ReleasesTheClient(t *testing.T) {
+	mgr, st := newTestManager(t)
+	ctx := context.Background()
+	_, accountID := seedAccount(t, st, "77055555555@s.whatsapp.net")
+	if err := st.SaveWaCredentials(ctx, accountID, "77055555555:1@s.whatsapp.net"); err != nil {
+		t.Fatalf("SaveWaCredentials: %v", err)
+	}
+	fake := newFakeWAClient()
+	mgr.registerClient(accountID.String(), fake)
+	if err := fake.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	mgr.handleEvent(accountID.String(), &events.LoggedOut{OnConnect: false})
+
+	if fake.IsConnected() {
+		t.Error("an external logout left the websocket connected")
+	}
+	if _, ok := mgr.clientFor(accountID.String()); ok {
+		t.Error("an external logout left the client in the registry")
+	}
+	creds, err := st.ListWaCredentials(ctx)
+	if err != nil {
+		t.Fatalf("ListWaCredentials: %v", err)
+	}
+	if len(creds) != 0 {
+		t.Errorf("credentials not deleted on external logout: %+v", creds)
+	}
+	status, err := mgr.Status(ctx, accountID.String())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.State != "logged_out" {
+		t.Errorf("state = %q, want logged_out", status.State)
+	}
+}
+
+// TestManagedClientStopIsIdempotent: Logout, Close, registerClient's
+// replacement of a stale entry, and an external LoggedOut can all reach the
+// same managedClient. A plain close(done) would panic on the second one and
+// take the process down over a shutdown race.
+func TestManagedClientStopIsIdempotent(t *testing.T) {
+	mgr, st := newTestManager(t)
+	_, accountID := seedAccount(t, st, "77044444444@s.whatsapp.net")
+	mc := mgr.registerClient(accountID.String(), newFakeWAClient())
+
+	mc.stop()
+	mc.stop() // must not panic
+
+	// The same client reached through both of the manager's own teardown
+	// paths, in the order a logout-during-shutdown would hit them.
+	if err := mgr.Logout(context.Background(), accountID.String()); err != nil {
+		t.Fatalf("Logout: %v", err)
+	}
+	mgr.Close()
 }
 
 type simpleErr string

@@ -436,7 +436,16 @@ func (m *Manager) handleLoggedOut(ctx context.Context, accountID string, evt *ev
 	if err := m.cfg.Store.DeleteWaCredentials(ctx, id); err != nil {
 		m.log.Error("whatsmeow: delete credentials on logout failed", "account_id", accountID, "err", err)
 	}
-	m.removeClient(accountID)
+	// The session is dead server-side, so drop our end too rather than
+	// leaving the consumer goroutine and websocket alive for an account that
+	// can never receive anything again. stop() is safe to call from this
+	// goroutine (it IS the consumer, and the loop exits on the next turn)
+	// and safe to race with Logout/Close — see managedClient.stop.
+	if mc, ok := m.clientFor(accountID); ok {
+		m.removeClient(accountID)
+		mc.stop()
+		mc.client.Disconnect()
+	}
 	m.setConnectionState(ctx, accountID, "logged_out",
 		fmt.Sprintf("external logout (on_connect=%v reason=%v)", evt.OnConnect, evt.Reason))
 }

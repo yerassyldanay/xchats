@@ -108,6 +108,17 @@ async function poll() {
     }
     if (r.qr_code || r.qr_base64) qr.value = r
   } catch (e) {
+    // A session the backend no longer knows about — expired out of the
+    // pairing registry, or lost to a backend restart — is terminal. Without
+    // this the dialog would sit behind a spinner polling a dead session
+    // forever, since a 404 here is otherwise indistinguishable from a
+    // transient network blip.
+    if (e instanceof ApiError && e.status === 404) {
+      stopPolling()
+      error.value = 'Сессия подключения истекла. Попробуйте снова.'
+      qr.value = null
+      return
+    }
     log.warn('qr poll failed', { err: String(e) })
   }
 }

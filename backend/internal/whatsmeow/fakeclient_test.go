@@ -14,8 +14,16 @@ import (
 // recorded, event delivery driven entirely by fire() — so a test can play
 // PairSuccess/Message/Receipt/... exactly as whatsmeow's own dispatch would.
 type fakeWAClient struct {
-	mu         sync.Mutex
+	// handlersMu mirrors whatsmeow's own eventHandlersLock exactly: an
+	// RWMutex guarding ONLY the handler list, read-locked for the whole
+	// duration of a dispatch and write-locked to register. Keeping it
+	// separate from mu is what the real client does too, so a handler can
+	// freely call SendMessage/IsConnected/... while still being unable to
+	// register a new handler mid-dispatch. See AddEventHandler.
+	handlersMu sync.RWMutex
 	handlers   []wm.EventHandler
+
+	mu         sync.Mutex
 	connected  bool
 	connectErr error
 	logoutErr  error
@@ -66,21 +74,32 @@ func (f *fakeWAClient) Logout(ctx context.Context) error {
 }
 
 // AddEventHandler records the handler; fire() is what actually invokes it.
+//
+// Registering a handler from INSIDE a dispatch deadlocks the real client:
+// whatsmeow's dispatchEvent holds eventHandlersLock.RLock() for the whole
+// callback while AddEventHandler wants the write lock on that same RWMutex,
+// so the dispatch goroutine wedges permanently and the account stops
+// receiving everything (whatsmeow documents this hazard on
+// RemoveEventHandler). This fake originally copied the handler slice and
+// released its lock BEFORE dispatching, which made the illegal call legal
+// here and let exactly that deadlock ship green. Reproducing whatsmeow's
+// locking verbatim is what gives the pairing tests below their teeth —
+// see waitFor's failure message.
 func (f *fakeWAClient) AddEventHandler(h wm.EventHandler) uint32 {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.handlersMu.Lock()
+	defer f.handlersMu.Unlock()
 	f.handlers = append(f.handlers, h)
 	return uint32(len(f.handlers))
 }
 
-// fire delivers evt to every handler registered so far, synchronously — the
-// same guarantee whatsmeow's own dispatch makes to a *single* handler, which
-// is what lets a test assert on state immediately after calling fire.
+// fire delivers evt to every handler registered so far, synchronously and
+// while holding the read lock — matching whatsmeow's dispatchEvent both in
+// the ordering guarantee (a test can assert on state right after fire
+// returns) and in the locking that makes mid-dispatch registration illegal.
 func (f *fakeWAClient) fire(evt any) {
-	f.mu.Lock()
-	hs := append([]wm.EventHandler(nil), f.handlers...)
-	f.mu.Unlock()
-	for _, h := range hs {
+	f.handlersMu.RLock()
+	defer f.handlersMu.RUnlock()
+	for _, h := range f.handlers {
 		h(evt)
 	}
 }

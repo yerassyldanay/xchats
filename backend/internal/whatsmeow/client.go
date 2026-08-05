@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	wm "go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -48,8 +49,9 @@ type managedClient struct {
 	client    waClient
 	log       *slog.Logger
 
-	events chan any
-	done   chan struct{}
+	events   chan any
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // newManagedClient wires cli's event handler to a bounded queue, starts the
@@ -94,6 +96,12 @@ func (mc *managedClient) loop(mgr *Manager) {
 
 // stop ends the consumer goroutine. It does not disconnect the underlying
 // client — callers that also want that call client.Disconnect() themselves.
+//
+// Idempotent and safe to call concurrently: Manager.Logout, Manager.Close,
+// registerClient's replacement of a stale entry, and an external LoggedOut
+// event can all reach the same managedClient, and a plain close() would
+// panic on the second one ("close of closed channel") — taking the whole
+// process down over a shutdown race.
 func (mc *managedClient) stop() {
-	close(mc.done)
+	mc.stopOnce.Do(func() { close(mc.done) })
 }
