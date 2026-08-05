@@ -38,8 +38,37 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	region, domain := m.tunnelOptions()
-	tun, err := m.deps.connect(ctx, connectOptions{Authtoken: token, Region: region, Domain: domain})
+	// The ngrok SDK keeps the context passed to Connect for the entire
+	// session lifetime. Start is called from an HTTP handler, whose request
+	// context is cancelled as soon as the response is written, so handing
+	// that context directly to ngrok tears the new listener down
+	// immediately. Preserve request-scoped values while giving the session
+	// its own cancellation lifetime; the small watcher still lets a client
+	// cancellation abort the connection attempt, then exits before Start
+	// returns so it cannot leak into the running session.
+	sessionCtx, cancelSession := context.WithCancel(context.WithoutCancel(ctx))
+	setupDone := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-ctx.Done():
+			cancelSession()
+		case <-setupDone:
+		}
+	}()
+
+	tun, err := m.deps.connect(sessionCtx, connectOptions{Authtoken: token, Region: region, Domain: domain})
+	close(setupDone)
+	<-watcherDone
+	if err == nil {
+		err = sessionCtx.Err()
+		if err != nil {
+			_ = tun.Close()
+		}
+	}
 	if err != nil {
+		cancelSession()
 		reason, msg := classifyConnectError(err)
 		m.log.Warn("ngrok tunnel failed to start", "reason", reason)
 		m.setStatus(Status{LastError: sanitizeMessage(msg, token)})
@@ -56,22 +85,27 @@ func (m *Manager) Start(ctx context.Context) error {
 		// clobbering the winner's state.
 		m.mu.Unlock()
 		_ = tun.Close()
+		cancelSession()
 		return nil
 	}
 	m.tun = tun
 	m.done = done
+	m.stopping = false
 	m.status = Status{Running: true, PublicURL: tun.URL(), StartedAt: &now}
 	m.mu.Unlock()
 
-	go m.serve(tun, done, token)
+	go m.serve(tun, done, token, cancelSession)
 
 	return nil
 }
 
 // serve runs the tunnel's HTTP server until tun is closed (by Stop, or by
 // the ngrok session itself failing) and then reconciles Status.
-func (m *Manager) serve(tun ngrokTunnel, done chan struct{}, token string) {
-	defer close(done)
+func (m *Manager) serve(tun ngrokTunnel, done chan struct{}, token string, cancelSession context.CancelFunc) {
+	defer func() {
+		cancelSession()
+		close(done)
+	}()
 	err := http.Serve(tun, m.deps.Handler)
 
 	m.mu.Lock()
@@ -79,6 +113,13 @@ func (m *Manager) serve(tun ngrokTunnel, done chan struct{}, token string) {
 	if m.tun != tun {
 		// Stop() already replaced/cleared this tunnel; its own call owns
 		// the resulting status, not this now-stale goroutine.
+		return
+	}
+	if m.stopping {
+		// Stop deliberately closed the listener and owns the final zero
+		// status. The ngrok SDK does not wrap its "Listener closed" Accept
+		// error with net.ErrClosed, so checking the error alone would report
+		// every normal stop as an unexpected session failure.
 		return
 	}
 	m.tun = nil
@@ -98,6 +139,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	tun := m.tun
 	done := m.done
+	if tun != nil {
+		m.stopping = true
+	}
 	m.mu.Unlock()
 	if tun == nil {
 		return nil
@@ -112,6 +156,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	if m.tun == tun {
 		m.tun = nil
 	}
+	m.stopping = false
 	m.status = Status{}
 	m.mu.Unlock()
 

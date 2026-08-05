@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -50,6 +51,30 @@ func (e *erroringTunnel) Accept() (net.Conn, error) { return nil, e.err }
 func (e *erroringTunnel) Close() error              { return nil }
 func (e *erroringTunnel) Addr() net.Addr            { return fakeAddr{} }
 func (e *erroringTunnel) URL() string               { return "https://fake.ngrok.app" }
+
+// sdkClosingTunnel reproduces the ngrok SDK's deliberate-close behavior:
+// Accept returns a plain "Listener closed" error which does not wrap
+// net.ErrClosed, so Manager must use its own lifecycle state to distinguish a
+// normal Stop from an unexpected session failure.
+type sdkClosingTunnel struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newSDKClosingTunnel() *sdkClosingTunnel {
+	return &sdkClosingTunnel{closed: make(chan struct{})}
+}
+
+func (s *sdkClosingTunnel) Accept() (net.Conn, error) {
+	<-s.closed
+	return nil, errors.New("failed to accept connection: Listener closed")
+}
+func (s *sdkClosingTunnel) Close() error {
+	s.once.Do(func() { close(s.closed) })
+	return nil
+}
+func (s *sdkClosingTunnel) Addr() net.Addr { return fakeAddr{} }
+func (s *sdkClosingTunnel) URL() string    { return "https://fake.ngrok.app" }
 
 type fakeAddr struct{}
 
@@ -179,6 +204,37 @@ func TestStartServesHandlerOverTheTunnel(t *testing.T) {
 	}
 }
 
+func TestStartDetachesTunnelLifetimeFromRequestContext(t *testing.T) {
+	tun := newFakeTunnel(t)
+	var sessionCtx context.Context
+	m := newTestManager(t, fakeTokenReader{token: "tok"}, nil, func(ctx context.Context, _ connectOptions) (ngrokTunnel, error) {
+		sessionCtx = ctx
+		return tun, nil
+	})
+
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	if err := m.Start(requestCtx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	cancelRequest()
+
+	if err := sessionCtx.Err(); err != nil {
+		t.Fatalf("ngrok session context after request completed = %v, want it to remain active", err)
+	}
+	if !m.Status().Running {
+		t.Fatal("Running = false after request completed, want the tunnel to outlive the request")
+	}
+
+	if err := m.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	select {
+	case <-sessionCtx.Done():
+	default:
+		t.Fatal("ngrok session context is still active after Stop")
+	}
+}
+
 func TestStartIsIdempotentWhileRunning(t *testing.T) {
 	tun := newFakeTunnel(t)
 	rc := &recordingConnect{tunnel: tun}
@@ -299,6 +355,27 @@ func TestStopClosesListenerAndResetsStatus(t *testing.T) {
 	// must fail rather than reach the (now-defunct) handler.
 	if _, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
 		t.Error("dial succeeded against a stopped tunnel's address, want a connection failure")
+	}
+}
+
+func TestStopDoesNotLogSDKListenerCloseAsUnexpected(t *testing.T) {
+	var logs bytes.Buffer
+	tun := newSDKClosingTunnel()
+	m := NewManager(Deps{
+		Creds:   fakeTokenReader{token: "tok"},
+		Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+		Log:     slog.New(slog.NewTextHandler(&logs, nil)),
+		connect: func(context.Context, connectOptions) (ngrokTunnel, error) { return tun, nil },
+	})
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := m.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if strings.Contains(logs.String(), "exited unexpectedly") {
+		t.Fatalf("normal Stop logged an unexpected tunnel failure: %s", logs.String())
 	}
 }
 

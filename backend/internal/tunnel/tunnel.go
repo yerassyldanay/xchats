@@ -84,10 +84,11 @@ type Manager struct {
 	deps Deps
 	log  *slog.Logger
 
-	mu     sync.Mutex
-	tun    ngrokTunnel
-	done   chan struct{} // closed when the current serve goroutine exits
-	status Status
+	mu       sync.Mutex
+	tun      ngrokTunnel
+	done     chan struct{} // closed when the current serve goroutine exits
+	stopping bool          // Stop owns status while the current listener unwinds
+	status   Status
 }
 
 // NewManager builds a Manager. It does not connect anything — call Start.
