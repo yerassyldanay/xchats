@@ -23,16 +23,18 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
 )
 
-// Status is a snapshot of the tunnel's current state.
+// Status is a snapshot of the tunnel's current state. JSON-tagged (snake_case,
+// matching every other httpapi response) since internal/httpapi/settings.go
+// serializes it directly as GET /settings/tunnel's payload.
 type Status struct {
-	Running   bool
-	PublicURL string
-	StartedAt *time.Time
+	Running   bool       `json:"running"`
+	PublicURL string     `json:"public_url,omitempty"`
+	StartedAt *time.Time `json:"started_at,omitempty"`
 	// LastError is the most recent failure, sanitized (the ngrok authtoken
 	// is never present in it even if the underlying error happened to
 	// otherwise echo it back) — "" means no failure since the last
 	// successful Start, or none has ever been attempted.
-	LastError string
+	LastError string `json:"last_error,omitempty"`
 }
 
 // Tunnel starts, stops, and reports on a single embedded ngrok tunnel.

@@ -414,9 +414,25 @@ func (s *Server) setSessionCookie(c *gin.Context, value string, maxAge int) {
 		Path:     "/",
 		MaxAge:   maxAge,
 		HttpOnly: true,
-		Secure:   s.cfg.Server.SecureCookies,
+		Secure:   s.requestIsSecure(c),
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+// requestIsSecure reports whether this request's origin is HTTPS: the
+// static SecureCookies config flag (an operator's permanent setting), a
+// direct TLS connection, or X-Forwarded-Proto: https — how a TLS-terminating
+// front door (a reverse proxy, or the embedded ngrok tunnel's own edge —
+// internal/tunnel, plan/DECISIONS.md's tunnel-exposure amendment) tells the
+// app it did. Unlike ClientIP's TrustedProxies-gated trust, this header is
+// honored unconditionally: the downside of a spoofed one is low (a Secure
+// cookie the browser then withholds on a later plain-HTTP request, breaking
+// that one session) and never a leak, so no separate trust gate is needed.
+func (s *Server) requestIsSecure(c *gin.Context) bool {
+	if s.cfg.Server.SecureCookies || c.Request.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 }
 
 func newSessionID() string {

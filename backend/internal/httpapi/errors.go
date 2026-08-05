@@ -20,4 +20,10 @@ const (
 	ErrAIUnavailable       = "AI_UNAVAILABLE"
 	ErrDraftStale          = "DRAFT_STALE"
 	ErrInternal            = "INTERNAL"
+
+	// Settings surface (internal/credentials, internal/settings, internal/tunnel).
+	ErrCredentialInvalid    = "CREDENTIAL_INVALID"    // the provider's own API rejected it (bad key)
+	ErrCredentialUnverified = "CREDENTIAL_UNVERIFIED" // could not be checked; caller must resubmit with force=true to save anyway
+	ErrCredentialStore      = "CREDENTIAL_STORE"      // no credential store available, or a store read/write failed
+	ErrTunnelUnavailable    = "TUNNEL_UNAVAILABLE"    // the tunnel feature is not configured, or Start/Stop itself failed
 )

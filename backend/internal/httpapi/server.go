@@ -15,14 +15,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
+	"github.com/yerassyldanay/xchats/backend/internal/settings"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
+	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
@@ -102,6 +105,18 @@ type Server struct {
 	oauthRegisterLimit  *ipRateLimiter
 	oauthTokenLimit     *ipRateLimiter
 	oauthAuthorizeLimit *ipRateLimiter
+
+	// Settings surface (settings.go). Every one of these four is
+	// nil-tolerant — a deployment with no secure credential store, or one
+	// running without the tunnel feature wired up, still serves everything
+	// else unaffected; each settings.go handler checks before using them.
+	credentials *credentials.Chain
+	settings    *settings.Store
+	tunnel      tunnel.Tunnel
+	// llmRefresh re-resolves the response engine's LLM provider registry
+	// (internal/llmprovider.Registry) after a credential or LLM setting
+	// changes — nil in any test/deployment that never constructs one.
+	llmRefresh func()
 }
 
 // Deps is the constructor input.
@@ -126,6 +141,13 @@ type Deps struct {
 	// route checks mcpAuthEnabled() first).
 	MCPAuth   *mcpauth.Authorizer
 	MCPServer *mcpserver.Server
+
+	// Settings surface — see Server's own field doc comments; all four are
+	// nil-tolerant.
+	Credentials *credentials.Chain
+	Settings    *settings.Store
+	Tunnel      tunnel.Tunnel
+	LLMRefresh  func()
 }
 
 // New builds a Server.
@@ -144,7 +166,8 @@ func New(d Deps) *Server {
 		orgID: d.OrgID, log: d.Log,
 		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer,
 		mcpUploadSigner: uploadSigner, mcpMediaSigner: mediaSigner,
-		csrfSecret: randomCSRFFallbackSecret(),
+		csrfSecret:  randomCSRFFallbackSecret(),
+		credentials: d.Credentials, settings: d.Settings, tunnel: d.Tunnel, llmRefresh: d.LLMRefresh,
 		// Deliberately generous limits — these are abuse guards, not a
 		// throttle on legitimate usage. See ratelimit.go's doc comment.
 		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — registration spam is the highest-value target
@@ -336,6 +359,26 @@ func (s *Server) Router() *gin.Engine {
 	kb.DELETE("/zones/:ref", s.handleKBDeleteZone)
 	kb.GET("/materials", s.handleKBListMaterials)
 	kb.PATCH("/config", s.handleKBPatchConfig)
+
+	// Settings (settings.go) — every route here is admin-only. Handlers are
+	// individually nil-tolerant for Credentials/Settings/Tunnel, but the
+	// group itself is always registered: a deployment missing one of those
+	// still gets a clear 503 from the affected routes rather than a 404
+	// that would look like the feature doesn't exist at all.
+	set := auth.Group("/settings")
+	set.Use(s.RequireAdmin())
+	set.GET("", s.handleGetSettings)
+	set.GET("/integrations", s.handleListIntegrations)
+	set.PUT("/integrations/:provider", s.handleUpdateIntegrationSettings)
+	set.PUT("/integrations/:provider/credential", s.handleSaveIntegrationCredential)
+	set.DELETE("/integrations/:provider/credential", s.handleDeleteIntegrationCredential)
+	set.POST("/integrations/:provider/test", s.handleTestIntegrationCredential)
+	set.PUT("/llm", s.handleUpdateLLMSettings)
+	set.PUT("/credential-storage", s.handleUpdateCredentialStorage)
+	set.POST("/setup-complete", s.handleSetupComplete)
+	set.GET("/tunnel", s.handleGetTunnelStatus)
+	set.POST("/tunnel/start", s.handleStartTunnel)
+	set.POST("/tunnel/stop", s.handleStopTunnel)
 	return r
 }
 
@@ -414,6 +457,14 @@ func accepted(c *gin.Context, payload any) {
 }
 func fail(c *gin.Context, status int, code, msg string) {
 	c.AbortWithStatusJSON(status, envelope{nil, code, msg})
+}
+
+// failWithPayload is fail with a non-nil payload attached — for the rare
+// error response that still has something useful to show alongside the
+// failure (e.g. handleStartTunnel returning the tunnel's Status, LastError
+// included, even when Start itself failed).
+func failWithPayload(c *gin.Context, status int, code, msg string, payload any) {
+	c.AbortWithStatusJSON(status, envelope{payload, code, msg})
 }
 
 type page struct {
