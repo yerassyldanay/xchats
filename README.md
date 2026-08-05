@@ -77,6 +77,11 @@ plan/
   knowledge-base.md          approved-KB prompt and response example
   telegram-testing.md        verifying the Telegram channel: env vars, endpoints,
                              response contracts, curl walkthrough, no committed tooling
+
+docs/release/               installing, deploying, backing up, and upgrading a
+                             real deployment — start at installation.md
+  proposals/                 draft LICENSE/SECURITY/PRIVACY/CONTRIBUTING/
+                             CHANGELOG docs awaiting a maintainer decision
 ```
 
 ## Reading order
