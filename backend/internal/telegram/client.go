@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -134,14 +135,27 @@ type SentMessage struct {
 
 // APIError is a Bot API `ok: false` response. Code is what distinguishes a bad
 // token (401) from a blocked bot (403) from rate limiting (429), which the
-// account state machine and the send path both branch on.
+// account state machine and the send path both branch on. RetryAfter is
+// Telegram's own `parameters.retry_after` (seconds), present on a 429 and
+// occasionally a 5xx; 0 means Telegram did not specify one.
 type APIError struct {
 	Code        int
 	Description string
+	RetryAfter  int
 }
 
 func (e *APIError) Error() string {
 	return fmt.Sprintf("telegram: api error %d: %s", e.Code, e.Description)
+}
+
+// RetryAfter reports the Bot API's requested backoff for err, if any — true
+// only when err is an *APIError carrying a positive parameters.retry_after.
+func RetryAfter(err error) (time.Duration, bool) {
+	var ae *APIError
+	if errors.As(err, &ae) && ae.RetryAfter > 0 {
+		return time.Duration(ae.RetryAfter) * time.Second, true
+	}
+	return 0, false
 }
 
 // IsUnauthorized reports whether err is a Bot API rejection of the token.
@@ -200,6 +214,45 @@ type Client interface {
 	GetFile(ctx context.Context, token, fileID string) (FileInfo, error)
 	// DownloadFile fetches the bytes at a path returned by GetFile.
 	DownloadFile(ctx context.Context, token, filePath string) ([]byte, error)
+	// GetUpdates long-polls for updates strictly after Offset — the
+	// internal/tgpoller transport, an alternative to the webhook ingress for
+	// an install with no public URL. See HTTP.GetUpdates's doc comment.
+	GetUpdates(ctx context.Context, token string, req GetUpdatesRequest) ([]RawUpdate, error)
+}
+
+// GetUpdatesRequest is one long-poll call's parameters.
+type GetUpdatesRequest struct {
+	// Offset is the lowest update_id to return; 0 requests whatever Telegram
+	// currently has queued (the parameter is omitted from the call entirely,
+	// same as Telegram's own "unset" meaning).
+	Offset int64
+	// Limit caps how many updates come back in one call; <= 0 means the
+	// package default (100).
+	Limit int
+	// TimeoutSeconds is how long the call may block server-side waiting for
+	// at least one update before returning empty. 0 is a valid short poll.
+	TimeoutSeconds int
+	// AllowedUpdates is passed through verbatim; empty means
+	// DefaultAllowedUpdates.
+	AllowedUpdates []string
+}
+
+// RawUpdate pairs a parsed Update with the exact bytes Telegram sent for it.
+// Raw feeds the store's raw column independently of which fields Update
+// happens to decode — the same role ParseUpdate's caller-preserved raw body
+// plays on the webhook ingress path.
+type RawUpdate struct {
+	UpdateID int64
+	Update   *Update
+	Raw      json.RawMessage
+}
+
+// RawFrom builds a RawUpdate from an already-decoded Update by re-encoding
+// it — a test helper (see fake.go) for constructing PendingUpdates without
+// hand-writing JSON; production code always gets Raw from the wire.
+func RawFrom(u Update) RawUpdate {
+	raw, _ := json.Marshal(u)
+	return RawUpdate{UpdateID: u.UpdateID, Update: &u, Raw: raw}
 }
 
 // MediaMethod maps our media vocabulary to the Bot API method and its file
@@ -224,11 +277,20 @@ func MediaMethod(kind string) (method, field string) {
 // an update type here without an ingest path for it just burns webhook traffic.
 var DefaultAllowedUpdates = []string{"message"}
 
+var _ Client = (*HTTP)(nil)
+
 // HTTP is the real Bot API client.
 type HTTP struct {
 	base string
 	hc   *http.Client
-	log  *slog.Logger
+	// lp is the long-poll transport getUpdates uses: no client-side timeout
+	// at all, since a single call may legitimately block server-side for up
+	// to the caller's requested TimeoutSeconds — GetUpdates bounds each call
+	// itself via the passed-in context instead (see its doc comment). Every
+	// other method keeps using hc's fixed 20s timeout; getUpdates is the one
+	// call shaped completely differently from the rest of the port.
+	lp  *http.Client
+	log *slog.Logger
 }
 
 // NewHTTP builds a client against base (default https://api.telegram.org).
@@ -243,6 +305,7 @@ func NewHTTP(base string, log *slog.Logger) *HTTP {
 	return &HTTP{
 		base: strings.TrimRight(base, "/"),
 		hc:   &http.Client{Timeout: 20 * time.Second},
+		lp:   &http.Client{Timeout: 0},
 		log:  log,
 	}
 }
@@ -397,8 +460,18 @@ func (h *HTTP) call(ctx context.Context, token, method string, body any, out any
 	return h.callRaw(ctx, token, method, contentType, raw, out)
 }
 
-// callRaw is call's transport half, shared with the multipart upload path.
+// callRaw is call's transport half, shared with the multipart upload path —
+// callVia's fixed-timeout (hc) form.
 func (h *HTTP) callRaw(ctx context.Context, token, method, contentType string, body []byte, out any) error {
+	return h.callVia(h.hc, ctx, token, method, contentType, body, out)
+}
+
+// callVia is callRaw generalized over which *http.Client makes the request:
+// hc for every ordinary call (fixed 20s timeout), lp for getUpdates (no
+// client-side timeout — see HTTP.lp's doc comment). Everything past request
+// construction — envelope decode, error mapping, redaction — is identical
+// either way.
+func (h *HTTP) callVia(hc *http.Client, ctx context.Context, token, method, contentType string, body []byte, out any) error {
 	endpoint := h.base + "/bot" + token + "/" + method
 
 	var reader io.Reader
@@ -413,8 +486,19 @@ func (h *HTTP) callRaw(ctx context.Context, token, method, contentType string, b
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	resp, err := h.hc.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
+		// Classify a context cancellation/deadline BEFORE redacting: ctx.Err()
+		// is already token-free (redaction is only ever needed for an error
+		// that embeds the request URL), and redactErr's one-level Unwrap can
+		// leave errors.Is(err, context.Canceled) unreliable for some transport
+		// error shapes. This matters most for getUpdates: a long-poll call
+		// blocked for up to ~60s is the primary place a caller (the tgpoller
+		// manager, stopping a runner) cancels an in-flight request, not a
+		// rare edge case.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("telegram: %s: %w", method, ctxErr)
+		}
 		// The URL carries the token, and net/http puts the URL in its errors.
 		return fmt.Errorf("telegram: %s: %w", method, redactErr(err, token))
 	}
@@ -429,6 +513,10 @@ func (h *HTTP) callRaw(ctx context.Context, token, method, contentType string, b
 		Result      json.RawMessage `json:"result"`
 		Description string          `json:"description"`
 		ErrorCode   int             `json:"error_code"`
+		Parameters  *struct {
+			RetryAfter      int   `json:"retry_after"`
+			MigrateToChatID int64 `json:"migrate_to_chat_id"`
+		} `json:"parameters"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		h.log.Warn("telegram: unparsable response", "method", method, "status", resp.StatusCode)
@@ -439,8 +527,12 @@ func (h *HTTP) callRaw(ctx context.Context, token, method, contentType string, b
 		if code == 0 {
 			code = resp.StatusCode
 		}
-		h.log.Warn("telegram: api error", "method", method, "code", code, "description", env.Description)
-		return &APIError{Code: code, Description: env.Description}
+		ae := &APIError{Code: code, Description: env.Description}
+		if env.Parameters != nil {
+			ae.RetryAfter = env.Parameters.RetryAfter
+		}
+		h.log.Warn("telegram: api error", "method", method, "code", code, "description", env.Description, "retry_after", ae.RetryAfter)
+		return ae
 	}
 	h.log.Debug("telegram: call ok", "method", method, "status", resp.StatusCode)
 	if out == nil || len(env.Result) == 0 {
@@ -450,6 +542,65 @@ func (h *HTTP) callRaw(ctx context.Context, token, method, contentType string, b
 		return fmt.Errorf("telegram: %s: decode result: %w", method, err)
 	}
 	return nil
+}
+
+// GetUpdates long-polls the Bot API for updates strictly after Offset (0
+// requests whatever Telegram currently has queued — the parameter is
+// omitted entirely, same as leaving it unset). It blocks up to
+// TimeoutSeconds server-side waiting for at least one update, returning as
+// soon as any arrive; the call's own deadline is TimeoutSeconds+10s of
+// headroom, so this client never times out the request before Telegram's
+// long-poll wait has a chance to return an empty batch.
+//
+// Updates come back in ascending update_id order (the Bot API's own
+// guarantee, re-sorted here defensively rather than merely assumed) with Raw
+// preserving each element's exact bytes for the store's raw column. A
+// single unparseable element fails the WHOLE batch: the caller
+// (internal/tgpoller) does not advance its offset on error, so a
+// deterministically malformed update stalls that bot under backoff rather
+// than being silently dropped — the same "never silently discard" stance
+// the webhook ingress takes by answering non-2xx.
+func (h *HTTP) GetUpdates(ctx context.Context, token string, req GetUpdatesRequest) ([]RawUpdate, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	allowedUpdates := req.AllowedUpdates
+	if len(allowedUpdates) == 0 {
+		allowedUpdates = DefaultAllowedUpdates
+	}
+	body := map[string]any{
+		"limit":           limit,
+		"timeout":         req.TimeoutSeconds,
+		"allowed_updates": allowedUpdates,
+	}
+	if req.Offset != 0 {
+		body["offset"] = req.Offset
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("telegram: marshal getUpdates: %w", err)
+	}
+
+	deadline := time.Duration(req.TimeoutSeconds)*time.Second + 10*time.Second
+	cctx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+
+	var elements []json.RawMessage
+	if err := h.callVia(h.lp, cctx, token, "getUpdates", "application/json", raw, &elements); err != nil {
+		return nil, err
+	}
+
+	out := make([]RawUpdate, 0, len(elements))
+	for i, el := range elements {
+		var u Update
+		if err := json.Unmarshal(el, &u); err != nil {
+			return nil, fmt.Errorf("telegram: getUpdates: decode element %d: %w", i, err)
+		}
+		out = append(out, RawUpdate{UpdateID: u.UpdateID, Update: &u, Raw: el})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdateID < out[j].UpdateID })
+	return out, nil
 }
 
 // --- parsing ---------------------------------------------------------------
