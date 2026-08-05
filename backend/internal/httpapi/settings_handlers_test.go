@@ -399,6 +399,36 @@ func TestUpdateCredentialStorage(t *testing.T) {
 	}
 }
 
+func TestUpdateNgrokSettingsRoundTrips(t *testing.T) {
+	h := newSettingsHarness(t)
+	resp, env := h.do(http.MethodPut, "/xchats/api/v1/settings/ngrok", map[string]any{
+		"region": "eu", "domain": "chat.example.com",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var got struct {
+		Region string `json:"region"`
+		Domain string `json:"domain"`
+	}
+	mustDecode(t, env, &got)
+	if got.Region != "eu" || got.Domain != "chat.example.com" {
+		t.Errorf("got = %+v, want Region=eu Domain=chat.example.com", got)
+	}
+
+	_, settingsEnv := h.get("/xchats/api/v1/settings")
+	var full struct {
+		Ngrok struct {
+			Region string `json:"region"`
+			Domain string `json:"domain"`
+		} `json:"ngrok"`
+	}
+	mustDecode(t, settingsEnv, &full)
+	if full.Ngrok.Region != "eu" || full.Ngrok.Domain != "chat.example.com" {
+		t.Errorf("GET /settings after PUT /settings/ngrok = %+v, want Region=eu Domain=chat.example.com", full.Ngrok)
+	}
+}
+
 func TestSetupComplete(t *testing.T) {
 	h := newSettingsHarness(t)
 	resp, env := h.do(http.MethodPost, "/xchats/api/v1/settings/setup-complete", nil)
@@ -529,6 +559,7 @@ func TestSettingsRoutesRequireAdmin(t *testing.T) {
 		{http.MethodGet, "/xchats/api/v1/settings"},
 		{http.MethodGet, "/xchats/api/v1/settings/integrations"},
 		{http.MethodPut, "/xchats/api/v1/settings/llm"},
+		{http.MethodPut, "/xchats/api/v1/settings/ngrok"},
 		{http.MethodGet, "/xchats/api/v1/settings/tunnel"},
 		{http.MethodPost, "/xchats/api/v1/settings/tunnel/start"},
 	}

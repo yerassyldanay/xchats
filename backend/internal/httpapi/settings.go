@@ -484,6 +484,41 @@ func (s *Server) handleSetupComplete(c *gin.Context) {
 	ok(c, gin.H{"setup_completed": updated.SetupCompleted})
 }
 
+// --- PUT /settings/ngrok ---------------------------------------------------
+
+type updateNgrokSettingsReq struct {
+	Region string `json:"region"`
+	Domain string `json:"domain"`
+}
+
+// handleUpdateNgrokSettings sets the embedded tunnel's region/reserved-domain
+// preference. Takes effect on the next Start (tunnel.Manager.tunnelOptions
+// reads Settings fresh every time it connects) — never a restart of an
+// already-running tunnel, since a live ngrok session isn't reconfigurable
+// in place.
+func (s *Server) handleUpdateNgrokSettings(c *gin.Context) {
+	if s.settings == nil {
+		fail(c, http.StatusServiceUnavailable, ErrInternal, "settings store is unavailable")
+		return
+	}
+	var req updateNgrokSettingsReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "invalid body")
+		return
+	}
+	updated, err := s.settings.Update(func(st *settings.Settings) {
+		st.Ngrok = settings.NgrokSettings{
+			Region: strings.TrimSpace(req.Region),
+			Domain: strings.TrimSpace(req.Domain),
+		}
+	})
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	ok(c, updated.Ngrok)
+}
+
 // --- tunnel ---------------------------------------------------------------
 
 func (s *Server) handleGetTunnelStatus(c *gin.Context) {

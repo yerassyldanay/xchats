@@ -387,6 +387,7 @@ func (s *Server) Router() *gin.Engine {
 	set.POST("/integrations/:provider/test", s.handleTestIntegrationCredential)
 	set.PUT("/llm", s.handleUpdateLLMSettings)
 	set.PUT("/credential-storage", s.handleUpdateCredentialStorage)
+	set.PUT("/ngrok", s.handleUpdateNgrokSettings)
 	set.POST("/setup-complete", s.handleSetupComplete)
 	set.GET("/tunnel", s.handleGetTunnelStatus)
 	set.POST("/tunnel/start", s.handleStartTunnel)
