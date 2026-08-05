@@ -89,8 +89,8 @@ func TestWhatsAppInboundProducesGroundedDraftAndApprovalDelivers(t *testing.T) {
 	if !strings.Contains(last.Text, "129 900 ₸") {
 		t.Fatalf("delivered text = %q, want the substituted price", last.Text)
 	}
-	if last.To != customerNum {
-		t.Fatalf("delivered to %q, want the customer phone %q (not the @lid)", last.To, customerNum)
+	if last.To != customerJID {
+		t.Fatalf("delivered to %q, want the original conversation ref %q", last.To, customerJID)
 	}
 	if !aiMessageExists(t, h, chatID) {
 		t.Fatalf("approved send was not recorded as sender_kind='ai'")

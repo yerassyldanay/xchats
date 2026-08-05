@@ -168,7 +168,7 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
 		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
-			PhoneJID: chat.ExternalConversationRef, Text: text,
+			Destination: chat.ExternalConversationRef, Text: text,
 		}})
 		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID, "channel", channel,
 			"sender_kind", senderKind, "kind", "text")
@@ -215,7 +215,7 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 		s.hub.Broadcast("message.created", dto.MapMessage(msg))
 		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
-			PhoneJID: chat.ExternalConversationRef, MediaID: mid, Caption: caption,
+			Destination: chat.ExternalConversationRef, MediaID: mid, Caption: caption,
 		}})
 		s.log.Info("send queued", "chat_id", chat.ID, "message_id", msgID,
 			"sender_kind", senderKind, "kind", kind, "media_id", mid)

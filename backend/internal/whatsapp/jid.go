@@ -19,7 +19,7 @@ func IsGroupJID(jid string) bool { return strings.HasSuffix(jid, "@g.us") }
 
 // ChatKey picks the identity a chat is keyed on: the LID when the contact has
 // one (WhatsApp's default under its privacy scheme), else the phone JID. The
-// phone JID is always carried alongside as the alt identity — see SendTarget.
+// phone JID is always carried alongside as the alternate contact identity.
 func ChatKey(phoneJID, lidJID string) string {
 	if lidJID != "" {
 		return lidJID
@@ -27,15 +27,14 @@ func ChatKey(phoneJID, lidJID string) string {
 	return phoneJID
 }
 
-// SendTarget returns the JID an outbound message must actually be addressed
-// to. WhatsApp does not accept sends to an "@lid" address, so the phone JID
-// always wins when both are known; a LID-only contact (no phone on file) is a
-// known limitation — see the integration plan's Risks section.
+// SendTarget returns the JID an outbound message should be addressed to. A
+// known LID is the native conversation address and avoids forcing whatsmeow
+// to recover it from a phone JID; the phone JID remains the fallback.
 func SendTarget(phoneJID, lidJID string) string {
-	if phoneJID != "" {
-		return phoneJID
+	if lidJID != "" {
+		return lidJID
 	}
-	return lidJID
+	return phoneJID
 }
 
 // CanonicalJID lowercases/trims a JID and coerces a bare phone number to

@@ -63,7 +63,6 @@ func (r fakeLLMRegistry) Client(ref llm.ModelRef) (llm.ChatClient, error) {
 const (
 	ownerJID    = "77011111111@s.whatsapp.net"
 	customerJID = "77000000000@s.whatsapp.net"
-	customerNum = "77000000000"
 	adminEmail  = "admin@xchats.test"
 	adminPass   = "password123"
 
@@ -362,8 +361,9 @@ func TestDemoLoop(t *testing.T) {
 		t.Fatalf("dedup failed: %d messages after replay", got)
 	}
 
-	// 3. send fan-out: text + 2 media → 2 outbound messages, each to the phone
-	// (not @lid). The text rides as the CAPTION of the first resolvable asset
+	// 3. send fan-out: text + 2 media → 2 outbound messages, each to the
+	// provider's original conversation address. The text rides as the CAPTION
+	// of the first resolvable asset
 	// rather than becoming its own bubble — see sendParts in inbox.go, which
 	// does this deliberately "so the customer (and the inbox) see ONE message —
 	// image + caption — instead of a text bubble followed by an empty media
@@ -387,8 +387,8 @@ func TestDemoLoop(t *testing.T) {
 		t.Fatalf("want 2 media sends, got %d", got)
 	}
 	for _, call := range h.fake.Calls {
-		if call.To != customerNum {
-			t.Fatalf("send went to %q, want the phone %q (not @lid)", call.To, customerNum)
+		if call.To != customerJID {
+			t.Fatalf("send went to %q, want the original conversation ref %q", call.To, customerJID)
 		}
 	}
 

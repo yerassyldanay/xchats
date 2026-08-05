@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
-	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
@@ -31,10 +30,13 @@ type OutboundTask struct {
 	MessageID uuid.UUID
 	AccountID uuid.UUID
 	Channel   messaging.Channel
-	PhoneJID  string
-	Text      string
-	MediaID   string // blob id; empty => text send
-	Caption   string
+	// Destination is the provider's opaque conversation address. The worker
+	// must not normalize it: doing so can turn a WhatsApp LID or group JID into
+	// a different phone JID before the channel adapter sees it.
+	Destination string
+	Text        string
+	MediaID     string // blob id; empty => text send
+	Caption     string
 }
 
 // MediaDownloadTask fetches a Telegram attachment's bytes when they weren't
@@ -205,13 +207,18 @@ func TelegramBlobID(messageID uuid.UUID) string { return "tg-" + messageID.Strin
 
 // --- outbound sends -------------------------------------------------------
 
-// maskPhone keeps only the last 4 digits for logs (PII redaction): "77058686509"
-// → "*******6509". Short/empty values are returned as-is.
-func maskPhone(p string) string {
-	if len(p) <= 4 {
-		return p
+// maskDestination keeps only the last four characters of the provider's user
+// part for logs while preserving an address suffix that is useful to diagnose
+// routing (for example, @lid versus @s.whatsapp.net).
+func maskDestination(destination string) string {
+	user, server, hasServer := strings.Cut(destination, "@")
+	if len(user) > 4 {
+		user = strings.Repeat("*", len(user)-4) + user[len(user)-4:]
 	}
-	return strings.Repeat("*", len(p)-4) + p[len(p)-4:]
+	if hasServer {
+		return user + "@" + server
+	}
+	return user
 }
 
 // handleOutboundSend routes EVERY send — text and media alike — through the
@@ -222,15 +229,13 @@ func maskPhone(p string) string {
 // only as the opaque To routing hint a channel-neutral OutboundMessage
 // carries; each adapter resolves the sending account itself from AccountID.
 func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
-	// PhoneFromJID passes a non-JID string straight through, so a numeric
-	// Telegram chat id survives untouched.
-	destination := config.PhoneFromJID(t.PhoneJID) // phone, never the @lid
+	destination := t.Destination
 	kind := "text"
 	if t.MediaID != "" {
 		kind = "media"
 	}
 	w.Log.Info("outbound send start", "message_id", t.MessageID, "account_id", t.AccountID,
-		"channel", t.Channel, "to", maskPhone(destination), "kind", kind)
+		"channel", t.Channel, "to", maskDestination(destination), "kind", kind)
 
 	sender, err := w.Senders.Sender(t.Channel)
 	if err != nil {
@@ -257,7 +262,7 @@ func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
 	res, err := sender.Send(ctx, out)
 	if err != nil {
 		w.Log.Error("outbound send failed", "message_id", t.MessageID, "channel", t.Channel,
-			"to", maskPhone(destination), "kind", kind, "err", err)
+			"to", maskDestination(destination), "kind", kind, "err", err)
 		_ = w.Store.SetDeliveryStateFor(ctx, string(t.Channel), t.MessageID, "failed")
 		w.emitMessage(ctx, "message.updated", t.MessageID)
 		return err
@@ -266,7 +271,7 @@ func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
 		// A success with no provider id means the gateway accepted the request but
 		// produced no message; the bubble would silently stay unconfirmed.
 		w.Log.Warn("outbound send returned no external id", "message_id", t.MessageID,
-			"channel", t.Channel, "to", maskPhone(destination))
+			"channel", t.Channel, "to", maskDestination(destination))
 	} else {
 		w.Log.Info("outbound send ok", "message_id", t.MessageID, "channel", t.Channel,
 			"external_id", res.ExternalID)

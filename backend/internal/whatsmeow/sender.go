@@ -23,10 +23,8 @@ var _ messaging.ChannelSender = (*Sender)(nil)
 
 // Send delivers out as a WhatsApp message — text, or one attachment when
 // out.Media is set. out.AccountID selects which live client to send
-// through; out.To is the destination phone number (worker.handleOutboundSend
-// resolves it via config.PhoneFromJID before calling here, so a "@lid"
-// address never reaches this far — see the integration plan's dual-identity
-// rule: a send always targets the phone JID).
+// through; out.To is the provider's original conversation address. It may be
+// a phone JID, LID, or group JID and must reach whatsmeow unchanged.
 //
 // The message id is pre-generated (SendRequestExtra.ID) rather than left to
 // whatsmeow, because that same id is what lets the fromMe echo of this send
