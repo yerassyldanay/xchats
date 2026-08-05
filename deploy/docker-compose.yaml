@@ -1,16 +1,24 @@
 # One-command stack: xchats backend + xchats frontend (SQLite — no Postgres needed).
 # WhatsApp connects directly via go.mau.fi/whatsmeow (internal/whatsmeow) — no
 # external gateway to run or point at; pair a number from the UI's QR flow.
+#
+# Host port mappings are parametric — override BACKEND_PORT/FRONTEND_PORT
+# (shell env, or a root .env compose auto-loads) when the defaults collide
+# with something else already running; the internal container ports (8080 /
+# 80) and the service-to-service addressing (frontend -> backend:8080) never
+# change, only what's published to the host. See docs/release/docker.md.
 services:
   backend:
     build:
       context: ../backend
     environment:
-      HTTP_ADDR: ":8080"
-      DB_PATH: "/data/xchats.db"
-      WA_DEVICE_DB_PATH: "/data/whatsmeow.db"
-      BLOB_DIR: "/data/blob"
-      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,http://localhost:8081}"
+      # Boot/infra tunables (listen address, on-disk paths, logging, worker
+      # counts) live in the mounted config.docker.yaml, not here — this block
+      # is only what genuinely needs a per-deployment override or is still a
+      # secret (Track 2 auto-provisions those into the credential store
+      # instead; until then they stay here).
+      XCHATS_CONFIG: "/config.yaml"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,http://localhost:${FRONTEND_PORT:-8081}}"
       # --- MCP connector (plan/mcp.md) ---
       # API_BASE_URL is the backend's own PUBLIC origin, and it is the single
       # source of every OAuth/MCP discovery URL this server advertises (issuer,
@@ -19,11 +27,11 @@ services:
       # request's Host header, so it must be set to whatever an MCP host
       # actually dials — a tunnel/public HTTPS URL when the connector is reached
       # from outside this machine, not the in-container port.
-      API_BASE_URL: "${API_BASE_URL:-http://localhost:8080}"
+      API_BASE_URL: "${API_BASE_URL:-http://localhost:${BACKEND_PORT:-8080}}"
       # FRONTEND_BASE_URL is where the KB Manager widget's "Review and publish
       # in Xchats" link lands — the frontend service below, as reachable from
       # the operator's own browser (a host-published port, never "frontend:80").
-      FRONTEND_BASE_URL: "${FRONTEND_BASE_URL:-http://localhost:8081}"
+      FRONTEND_BASE_URL: "${FRONTEND_BASE_URL:-http://localhost:${FRONTEND_PORT:-8081}}"
       # Unset => an ephemeral per-process key: every MCP token stops verifying
       # on restart, and no two replicas agree. Fine for a throwaway local run,
       # never for anything an LLM host stays connected to.
@@ -60,8 +68,9 @@ services:
       # at all. Default false; set true to test without a WhatsApp number.
       SIMULATOR_ENABLED: "${SIMULATOR_ENABLED:-false}"
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8080}:8080"
     volumes:
+      - ./config.docker.yaml:/config.yaml:ro
       - blobdata:/data/blob
       - sqlitedata:/data
 
@@ -71,7 +80,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "8081:80"
+      - "${FRONTEND_PORT:-8081}:80"
 
 volumes:
   blobdata:

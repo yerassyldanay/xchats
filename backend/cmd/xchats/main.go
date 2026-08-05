@@ -51,7 +51,7 @@ const (
 )
 
 func main() {
-	cfgPath := flag.String("config", envOr("XCHATS_CONFIG", "config.yaml"), "path to config.yaml")
+	cfgPath := flag.String("config", "", "path to config.yaml (default: $XCHATS_CONFIG, then ./config.yaml)")
 	envPath := flag.String("env", envOr("XCHATS_ENV", ".env"), "path to .env")
 	flag.Parse()
 
@@ -60,7 +60,7 @@ func main() {
 		cmd = flag.Arg(0)
 	}
 
-	cfg, err := config.Load(*cfgPath, *envPath)
+	cfg, err := config.Load(config.ResolveConfigPath(*cfgPath), *envPath)
 	if err != nil {
 		fatal("load config", err)
 	}
@@ -136,13 +136,13 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// Opening the same path mustStore already opened is deliberate and cheap:
 	// internal/dbx.Open refcounts one connection per path, so kb shares st's
 	// connection rather than racing a second one against the same file.
-	kb, err := kbstore.New(ctx, cfg.DBPath)
+	kb, err := kbstore.New(ctx, cfg.Storage.DBPath)
 	if err != nil {
 		fatal("kbstore", err)
 	}
 	defer kb.Close()
 
-	blobStore, err := blob.NewDisk(cfg.BlobDir)
+	blobStore, err := blob.NewDisk(cfg.Storage.BlobDir)
 	if err != nil {
 		fatal("blob", err)
 	}
@@ -159,7 +159,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// response engine's hot path (every customer reply) and GET /kb/prompt
 	// (the /knowledge-base "Промпт" tab) both read through it, so the tab is
 	// never a second, possibly-divergent rendering of the same data.
-	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.DBPath)
+	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.Storage.DBPath)
 	if err != nil {
 		fatal("kb repo", err)
 	}
@@ -173,7 +173,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	log.Info("response service active",
 		"provider", defaultModel.Provider, "model", defaultModel.Model, "prompt_ref", aiprompt.PromptRefShopKBV4)
 
-	q := queue.NewInMem(2048, cfg.QueueWorkers, log)
+	q := queue.NewInMem(2048, cfg.System.QueueWorkers, log)
 	hub := realtime.NewHub()
 	tg := telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
 
@@ -189,7 +189,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	}
 
 	waMgr, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
-		DeviceDBPath: cfg.WADeviceDBPath,
+		DeviceDBPath: cfg.Storage.WADeviceDBPath,
 		Store:        st,
 		Blob:         blobStore,
 		Queue:        q,
@@ -227,10 +227,10 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
 	})
-	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
+	httpServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: srv.Router()}
 
 	go func() {
-		log.Info("backend listening", "addr", cfg.HTTPAddr)
+		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fatal("listen", err)
 		}
@@ -280,11 +280,11 @@ func validateProductionConfig(cfg *config.Config) []string {
 	if _, err := mcpauth.NewSigningKeyFromSeed(cfg.MCPJWTSigningKey); err != nil {
 		problems = append(problems, "MCP_JWT_SIGNING_KEY is unset or invalid — production would mint an ephemeral per-process key that a restart or a second replica can never verify")
 	}
-	if isLocalBaseURL(cfg.APIBaseURL) {
-		problems = append(problems, fmt.Sprintf("API_BASE_URL=%q still points at localhost/loopback", cfg.APIBaseURL))
+	if isLocalBaseURL(cfg.Server.APIBaseURL) {
+		problems = append(problems, fmt.Sprintf("API_BASE_URL=%q still points at localhost/loopback", cfg.Server.APIBaseURL))
 	}
-	if isLocalBaseURL(cfg.FrontendBaseURL) {
-		problems = append(problems, fmt.Sprintf("FRONTEND_BASE_URL=%q still points at localhost/loopback", cfg.FrontendBaseURL))
+	if isLocalBaseURL(cfg.Server.FrontendBaseURL) {
+		problems = append(problems, fmt.Sprintf("FRONTEND_BASE_URL=%q still points at localhost/loopback", cfg.Server.FrontendBaseURL))
 	}
 	return problems
 }
@@ -325,29 +325,29 @@ func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Stor
 	}
 	// Shares runServe's connection via dbx.Open's per-path refcounting, same
 	// as kb above — this is not a second pool against the same file.
-	mcpStore, err := mcpauth.NewStore(ctx, cfg.DBPath)
+	mcpStore, err := mcpauth.NewStore(ctx, cfg.Storage.DBPath)
 	if err != nil {
 		fatal("mcpauth store", err)
 	}
 	authorizer := mcpauth.New(mcpStore, key, mcpauth.Config{
-		Issuer:            strings.TrimRight(cfg.APIBaseURL, "/"),
+		Issuer:            cfg.ResolvedAPIBaseURL(),
 		Audience:          cfg.MCPResourceURL(),
 		AllowPrivateHosts: cfg.KBAllowPrivateFetch,
-		AccessTokenTTL:    time.Duration(cfg.MCPAccessTokenTTLSeconds) * time.Second,
-		RefreshTokenTTL:   time.Duration(cfg.MCPRefreshTokenTTLDays) * 24 * time.Hour,
-		AuthCodeTTL:       time.Duration(cfg.MCPAuthCodeTTLSeconds) * time.Second,
+		AccessTokenTTL:    time.Duration(cfg.MCP.AccessTokenTTLSeconds) * time.Second,
+		RefreshTokenTTL:   time.Duration(cfg.MCP.RefreshTokenTTLDays) * 24 * time.Hour,
+		AuthCodeTTL:       time.Duration(cfg.MCP.AuthCodeTTLSeconds) * time.Second,
 	})
 	uploadSigner := mcpauth.NewUploadTokenSigner(key)
 	mediaSigner := mcpauth.NewMediaReadTokenSigner(key)
-	apiBase := strings.TrimRight(cfg.APIBaseURL, "/")
-	reviewSigner := mcpauth.NewReviewHandoffSigner(key, apiBase, time.Duration(cfg.MCPReviewHandoffTTLSeconds)*time.Second)
+	apiBase := cfg.ResolvedAPIBaseURL()
+	reviewSigner := mcpauth.NewReviewHandoffSigner(key, apiBase, time.Duration(cfg.MCP.ReviewHandoffTTLSeconds)*time.Second)
 	mcpSrv := mcpserver.New(mcpserver.Deps{
 		KB: kb, Blob: blobStore, Log: log,
 		UploadBaseURL:    apiBase,
 		SignUpload:       uploadSigner.Sign,
-		UploadTTLSeconds: cfg.MCPUploadTokenTTLSeconds,
+		UploadTTLSeconds: cfg.MCP.UploadTokenTTLSeconds,
 		SignMediaRead:    mediaSigner.Sign,
-		MediaTTLSeconds:  cfg.MCPMediaTokenTTLSeconds,
+		MediaTTLSeconds:  cfg.MCP.MediaTokenTTLSeconds,
 		FrontendBaseURL:  cfg.MCPResolvedFrontendBaseURL(),
 		SignReviewHandoff: func(userID, orgID uuid.UUID) (string, error) {
 			token, _, _, err := reviewSigner.Sign(userID, orgID)
@@ -381,7 +381,7 @@ func runSeedKBDemo(ctx context.Context, cfg *config.Config, st *store.Store, log
 	if orgID == uuid.Nil {
 		fatal("seed-kb-demo", fmt.Errorf("no organization found — run the \"seed\" command first"))
 	}
-	kb, err := kbstore.New(ctx, cfg.DBPath)
+	kb, err := kbstore.New(ctx, cfg.Storage.DBPath)
 	if err != nil {
 		fatal("seed-kb-demo", err)
 	}
@@ -479,10 +479,10 @@ func seed(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Lo
 // --- small helpers --------------------------------------------------------
 
 func mustStore(cfg *config.Config, log *slog.Logger) *store.Store {
-	if cfg.DBPath == "" {
+	if cfg.Storage.DBPath == "" {
 		fatal("config", errString("DB_PATH is required"))
 	}
-	st, err := store.New(context.Background(), cfg.DBPath)
+	st, err := store.New(context.Background(), cfg.Storage.DBPath)
 	if err != nil {
 		fatal("connect db", err)
 	}
@@ -491,7 +491,7 @@ func mustStore(cfg *config.Config, log *slog.Logger) *store.Store {
 
 func newLogger(cfg *config.Config) *slog.Logger {
 	level := slog.LevelInfo
-	switch strings.ToLower(cfg.LogLevel) {
+	switch strings.ToLower(cfg.System.LogLevel) {
 	case "debug":
 		level = slog.LevelDebug
 	case "warn":

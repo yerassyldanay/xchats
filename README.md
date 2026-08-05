@@ -18,9 +18,12 @@ schema, `{payload, errcode}` envelope, in-memory queue, and deterministic `wa_ac
 
 ```bash
 cp .env.example .env            # secrets (DB paths, session secret, LLM keys, admin login)
-cp config.example.yaml config.yaml
 make up                         # backend (:8080) + frontend (:8081), one command
 ```
+
+The committed root [`config.yaml`](config.yaml) carries only non-secret boot/infra tunables
+(listen address, on-disk paths, logging, worker counts) — copy it only if you want to change one
+of those from its defaults; `.env` is still where secrets and provider keys live for now.
 
 WhatsApp connects directly via [`go.mau.fi/whatsmeow`](https://github.com/tulir/whatsmeow) — no
 separate gateway to run or configure. Pair a number from the UI's QR flow (`/accounts` →

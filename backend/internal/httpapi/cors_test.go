@@ -68,7 +68,7 @@ func TestCORS_UploadPreflightAllowsAnyWidgetOrigin(t *testing.T) {
 	// an OPTIONS preflight is answered by middleware and never reaches a
 	// handler that touches the store.
 	srv := httpapi.New(httpapi.Deps{
-		Cfg: &config.Config{CORSOrigins: []string{"http://localhost:8081"}},
+		Cfg: &config.Config{Server: config.ServerConfig{CORSOrigins: []string{"http://localhost:8081"}}},
 		// requestLog() logs unconditionally on every request, so a nil Log
 		// panics (gin.Recovery would swallow it, leaving a confusing trace in
 		// otherwise-passing output). Discard it — this test asserts on headers.
@@ -117,7 +117,7 @@ func TestCORS_UploadPreflightAllowsAnyWidgetOrigin(t *testing.T) {
 // blocked with a 204-and-no-Allow-Origin.
 func TestCORS_MediaPreflightAllowsAnyWidgetOrigin(t *testing.T) {
 	srv := httpapi.New(httpapi.Deps{
-		Cfg: &config.Config{CORSOrigins: []string{"http://localhost:8081"}},
+		Cfg: &config.Config{Server: config.ServerConfig{CORSOrigins: []string{"http://localhost:8081"}}},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	ts := httptest.NewServer(srv.Router())

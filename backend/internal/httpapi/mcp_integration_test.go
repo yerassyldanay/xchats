@@ -78,11 +78,17 @@ func newMCPHarness(t *testing.T) *mcpHarness {
 	st, db := dbtest.Open(t)
 
 	cfg := &config.Config{
-		SessionTTLHours: 1, MinPasswordLen: 8, PageSize: 50, CORSOrigins: []string{"*"},
-		APIBaseURL:               mcpAPIBase,
-		MCPAccessTokenTTLSeconds: 900, MCPRefreshTokenTTLDays: 30, MCPAuthCodeTTLSeconds: 300,
-		MCPUploadTokenTTLSeconds: 900, MCPReviewHandoffTTLSeconds: 300,
-		FrontendBaseURL: "https://frontend.test",
+		System:   config.SystemConfig{SessionTTLHours: 1, MinPasswordLen: 8},
+		PageSize: 50,
+		Server: config.ServerConfig{
+			CORSOrigins:     []string{"*"},
+			APIBaseURL:      mcpAPIBase,
+			FrontendBaseURL: "https://frontend.test",
+		},
+		MCP: config.MCPConfig{
+			AccessTokenTTLSeconds: 900, RefreshTokenTTLDays: 30, AuthCodeTTLSeconds: 300,
+			UploadTokenTTLSeconds: 900, ReviewHandoffTTLSeconds: 300,
+		},
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -116,17 +122,17 @@ func newMCPHarness(t *testing.T) *mcpHarness {
 	}
 	t.Cleanup(mcpStore.Close)
 	authorizer := mcpauth.New(mcpStore, key, mcpauth.Config{
-		Issuer: cfg.APIBaseURL, Audience: cfg.MCPResourceURL(),
-		AccessTokenTTL:  time.Duration(cfg.MCPAccessTokenTTLSeconds) * time.Second,
-		RefreshTokenTTL: time.Duration(cfg.MCPRefreshTokenTTLDays) * 24 * time.Hour,
-		AuthCodeTTL:     time.Duration(cfg.MCPAuthCodeTTLSeconds) * time.Second,
+		Issuer: cfg.Server.APIBaseURL, Audience: cfg.MCPResourceURL(),
+		AccessTokenTTL:  time.Duration(cfg.MCP.AccessTokenTTLSeconds) * time.Second,
+		RefreshTokenTTL: time.Duration(cfg.MCP.RefreshTokenTTLDays) * 24 * time.Hour,
+		AuthCodeTTL:     time.Duration(cfg.MCP.AuthCodeTTLSeconds) * time.Second,
 	})
 	uploadSigner := mcpauth.NewUploadTokenSigner(key)
 	mediaSigner := mcpauth.NewMediaReadTokenSigner(key)
 	mcpSrv := mcpserver.New(mcpserver.Deps{
 		KB: kb, Blob: blobStore, Log: log,
-		UploadBaseURL: cfg.APIBaseURL, SignUpload: uploadSigner.Sign, UploadTTLSeconds: cfg.MCPUploadTokenTTLSeconds,
-		SignMediaRead: mediaSigner.Sign, MediaTTLSeconds: cfg.MCPMediaTokenTTLSeconds,
+		UploadBaseURL: cfg.Server.APIBaseURL, SignUpload: uploadSigner.Sign, UploadTTLSeconds: cfg.MCP.UploadTokenTTLSeconds,
+		SignMediaRead: mediaSigner.Sign, MediaTTLSeconds: cfg.MCP.MediaTokenTTLSeconds,
 	})
 
 	srv := httpapi.New(httpapi.Deps{

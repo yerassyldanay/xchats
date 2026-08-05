@@ -42,7 +42,7 @@ func (s *Server) handleReviewHandoff(c *gin.Context) {
 		return
 	}
 
-	signer := mcpauth.NewReviewHandoffSigner(s.mcpAuth.Key, s.mcpIssuer(), time.Duration(s.cfg.MCPReviewHandoffTTLSeconds)*time.Second)
+	signer := mcpauth.NewReviewHandoffSigner(s.mcpAuth.Key, s.mcpIssuer(), time.Duration(s.cfg.MCP.ReviewHandoffTTLSeconds)*time.Second)
 	claims, err := signer.Verify(token)
 	if err != nil {
 		s.renderOAuthError(c, "Ссылка недействительна или истекла. Запросите новую ссылку из ИИ-помощника.")

@@ -3,12 +3,13 @@ SHELL := /bin/bash
 
 BACKEND := backend
 FRONTEND := frontend
-# Use the root .env and the local host-port override when present (this dev box
-# remaps backend→8090, frontend→8081, db→5434 to dodge port conflicts) under a
-# stable project name; a clean checkout without them falls back to compose
-# defaults (backend→8080, frontend→8081, db→5432).
-COMPOSE := docker compose -p xchats $(if $(wildcard .env),--env-file .env,) -f deploy/docker-compose.yaml $(if $(wildcard deploy/docker-compose.override.yaml),-f deploy/docker-compose.override.yaml,)
-DATABASE_URL ?= postgres://postgres:postgres@localhost:5434/xchats?sslmode=disable
+# docker compose auto-loads a root .env for ${VAR:-default} interpolation
+# (BACKEND_PORT, FRONTEND_PORT, CORS_ORIGINS, ...) with no --env-file flag
+# needed; the local host-port override applies when present (this dev box
+# remaps backend→8090 to dodge a port conflict) under a stable project name —
+# a clean checkout without either falls back to the compose file's own
+# defaults (backend→8080, frontend→8081).
+COMPOSE := docker compose -p xchats -f deploy/docker-compose.yaml $(if $(wildcard deploy/docker-compose.override.yaml),-f deploy/docker-compose.override.yaml,)
 GORUN := go run ./cmd/xchats -env ../.env -config ../config.yaml
 
 # Ports kill-ports frees (override: make kill-ports PORTS="8080 5173")
@@ -21,7 +22,7 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-up: ## Rebuild + run the whole stack detached (Postgres + backend + frontend)
+up: ## Rebuild + run the whole stack detached (SQLite — backend + frontend, no separate database service)
 	$(COMPOSE) up -d --build
 	@echo "✅ up — frontend: http://localhost:8081 · backend: http://localhost:8090 · logs: make logs"
 
@@ -46,33 +47,31 @@ kill-ports: ## Free backend/frontend ports (default 8080 8090 5173 8081; overrid
 	done
 
 migrate: ## Apply DB migrations
-	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) migrate
+	cd $(BACKEND) && $(GORUN) migrate
 
 seed: ## Seed the default organization + admin login
-	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) seed
+	cd $(BACKEND) && $(GORUN) seed
 
 seed-kb-demo: ## Seed demo KB content (topics/products/tariffs/zones/contacts/policies) — opt-in, for test cases only; no-ops if the org already has KB content
-	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) seed-kb-demo
+	cd $(BACKEND) && $(GORUN) seed-kb-demo
 
 dev-backend: ## Run the backend (go) on :8080
-	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" $(GORUN) serve
+	cd $(BACKEND) && $(GORUN) serve
 
 dev-frontend: ## Run the frontend (vite) on :5173
 	cd $(FRONTEND) && npm run dev
 
 test: test-backend test-frontend ## Unit + component (offline, deterministic)
 
-test-backend: ## Go unit tests (DB tests skip unless DATABASE_URL is set)
+test-backend: ## Go unit tests (SQLite — every DB test gets its own fresh database, see internal/dbtest)
 	cd $(BACKEND) && go test ./...
 
 test-frontend: ## Frontend typecheck + build
 	cd $(FRONTEND) && npm run build
 
-test-e2e: ## Full demo loop + KB/playground/response service vs a real Postgres (set DATABASE_URL)
-	# -p 1: these packages each reset the shared xchats schema, so they must not
-	# run concurrently against the same database.
-	cd $(BACKEND) && DATABASE_URL="$(DATABASE_URL)" go test -p 1 -count=1 \
-		./internal/httpapi/ ./internal/kbstore/ ./internal/playground/ \
+test-e2e: ## Full demo loop + KB/response service DB-backed suites (subset of test-backend, run in isolation)
+	cd $(BACKEND) && go test -count=1 \
+		./internal/httpapi/ ./internal/kbstore/ \
 		./internal/responsestore/ ./internal/store/
 
 build: ## Build backend binary + frontend bundle

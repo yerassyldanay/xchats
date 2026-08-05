@@ -142,11 +142,12 @@ func (s *Server) Router() *gin.Engine {
 	// Trust NO proxy unless explicitly configured (plan Task 17): gin's own
 	// zero-value default trusts every peer's X-Forwarded-* headers, which
 	// would let any direct, unproxied caller spoof its own client IP. Every
-	// discovery URL this server emits is already built from cfg.APIBaseURL /
-	// cfg.FrontendBaseURL, never from the request's Host or X-Forwarded-*
+	// discovery URL this server emits is already built from
+	// cfg.ResolvedAPIBaseURL()/cfg.ResolvedFrontendBaseURL(), never from the
+	// request's Host or X-Forwarded-*
 	// (see mcpIssuer/MCPResourceURL) — this only affects c.ClientIP(), used
 	// by the rate limiters.
-	if err := r.SetTrustedProxies(s.cfg.TrustedProxies); err != nil {
+	if err := r.SetTrustedProxies(s.cfg.Server.TrustedProxies); err != nil {
 		panic("httpapi: invalid TRUSTED_PROXIES: " + err.Error())
 	}
 	r.Use(gin.Recovery(), s.requestLog(), s.cors())
@@ -267,7 +268,7 @@ func (s *Server) Router() *gin.Engine {
 
 	// Simulator API (Phase 10) — gated: the route does not exist at all unless
 	// explicitly enabled (SIMULATOR_ENABLED, default false outside dev).
-	if s.cfg.SimulatorEnabled {
+	if s.cfg.System.SimulatorEnabled {
 		auth.POST("/simulator/messages", s.handleSimulatorMessage)
 		// Injects a synthetic whatsmeow-shaped event through the real
 		// translate -> store -> queue -> worker chain, for automated testing
@@ -322,7 +323,7 @@ func (s *Server) Router() *gin.Engine {
 
 func (s *Server) cors() gin.HandlerFunc {
 	allowed := map[string]bool{}
-	for _, o := range s.cfg.CORSOrigins {
+	for _, o := range s.cfg.Server.CORSOrigins {
 		allowed[o] = true
 	}
 	return func(c *gin.Context) {

@@ -12,8 +12,10 @@ import (
 
 func TestValidateProductionConfig_RejectsEphemeralKeyAndLocalURLs(t *testing.T) {
 	cfg := &config.Config{
-		APIBaseURL:      "http://localhost:8080",
-		FrontendBaseURL: "http://localhost:5173",
+		Server: config.ServerConfig{
+			APIBaseURL:      "http://localhost:8080",
+			FrontendBaseURL: "http://localhost:5173",
+		},
 		// MCPJWTSigningKey left empty — the ephemeral-fallback case.
 	}
 	problems := validateProductionConfig(cfg)
@@ -24,8 +26,10 @@ func TestValidateProductionConfig_RejectsEphemeralKeyAndLocalURLs(t *testing.T) 
 
 func TestValidateProductionConfig_AcceptsPersistentKeyAndPublicURLs(t *testing.T) {
 	cfg := &config.Config{
-		APIBaseURL:       "https://api.xchats.example",
-		FrontendBaseURL:  "https://app.xchats.example",
+		Server: config.ServerConfig{
+			APIBaseURL:      "https://api.xchats.example",
+			FrontendBaseURL: "https://app.xchats.example",
+		},
 		MCPJWTSigningKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	}
 	if problems := validateProductionConfig(cfg); len(problems) != 0 {
@@ -35,8 +39,10 @@ func TestValidateProductionConfig_AcceptsPersistentKeyAndPublicURLs(t *testing.T
 
 func TestValidateProductionConfig_PartialMisconfiguration(t *testing.T) {
 	cfg := &config.Config{
-		APIBaseURL:       "https://api.xchats.example",
-		FrontendBaseURL:  "http://localhost:5173", // forgot to update this one
+		Server: config.ServerConfig{
+			APIBaseURL:      "https://api.xchats.example",
+			FrontendBaseURL: "http://localhost:5173", // forgot to update this one
+		},
 		MCPJWTSigningKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	}
 	problems := validateProductionConfig(cfg)

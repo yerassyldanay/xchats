@@ -1,0 +1,50 @@
+# xchats — committed, secrets-free boot/infra configuration.
+#
+# This file is checked into the repo on purpose: it carries only what the app
+# needs to allocate resources and boot (listen address, on-disk paths,
+# logging, worker counts) — never a secret and never a runtime-editable
+# setting. System secrets (session signing, credential encryption, MCP
+# signing, the Telegram webhook secret) are generated on first boot and
+# persisted in the credential store; LLM provider/model, ngrok, Langfuse,
+# and Telegram bot tokens live in the Settings UI once the app is running.
+# Org name, users, and roles live in the Team management UI.
+#
+# Resolution order: -config flag -> $XCHATS_CONFIG -> ./config.yaml (this
+# file, for a repo/dev checkout) -> the OS config directory (an installed
+# binary). Every value below can still be overridden by a process
+# environment variable of the matching name (see internal/config.Config's
+# `env:` tags) — that's how Docker/Kubernetes pins values; it is an advanced
+# mechanism, not a setup step.
+
+server:
+  http_addr: ":8080"
+  api_base_url: ""          # empty => derived as http://localhost:8080 for internal link construction
+  frontend_base_url: ""     # empty => derived as http://localhost:5173
+  cors_origins:
+    - "http://localhost:5173"
+  trusted_proxies: []
+  secure_cookies: false     # set true once served over HTTPS (native reverse proxy, or the ngrok tunnel)
+
+storage:
+  db_path: "./data/xchats.db"
+  wa_device_db_path: "./data/whatsmeow.db"
+  blob_dir: "./blobdata"
+
+system:
+  log_level: "info"
+  log_format: "logfmt"
+  queue_workers: 4
+  session_ttl_hours: 720
+  min_password_len: 8
+  simulator_enabled: false
+
+telegram:
+  mode: ""    # "" auto (webhook if a public base URL is configured, else polling) | webhook | polling
+
+mcp:
+  access_token_ttl_seconds: 900
+  refresh_token_ttl_days: 30
+  auth_code_ttl_seconds: 300
+  upload_token_ttl_seconds: 900
+  media_token_ttl_seconds: 3600
+  review_handoff_ttl_seconds: 300

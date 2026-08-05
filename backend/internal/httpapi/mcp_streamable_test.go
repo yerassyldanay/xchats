@@ -74,7 +74,7 @@ func TestMCP_RejectsDisallowedOrigin(t *testing.T) {
 	// design, for the rest of this file's tests) — restrict it here to
 	// exercise the actual rejection path, the same live-config-mutation
 	// pattern setTelegramBase already uses elsewhere in this package.
-	h.cfg.CORSOrigins = []string{"https://allowed.example"}
+	h.cfg.Server.CORSOrigins = []string{"https://allowed.example"}
 
 	req, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/mcp", bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)))
 	req.Header.Set("Content-Type", "application/json")

@@ -23,7 +23,7 @@ import (
 func newKBLoadTestStore(t *testing.T) (*config.Config, *store.Store, *dbx.DB) {
 	t.Helper()
 	st, db := dbtest.Open(t)
-	return &config.Config{OrgName: "kb-load-test-org", DBPath: db.Path()}, st, db
+	return &config.Config{OrgName: "kb-load-test-org", Storage: config.StorageConfig{DBPath: db.Path()}}, st, db
 }
 
 func kbCounts(t *testing.T, db *dbx.DB, orgID any) (assistants, contacts, policies, topics, products, tariffs, zones int) {

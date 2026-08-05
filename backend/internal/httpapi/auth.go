@@ -166,7 +166,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 	sid := newSessionID()
-	ttl := time.Duration(s.cfg.SessionTTLHours) * time.Hour
+	ttl := time.Duration(s.cfg.System.SessionTTLHours) * time.Hour
 	if err := s.store.CreateSession(ctx(c), sid, u.ID, ttl); err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, "session")
 		return
@@ -286,8 +286,8 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "email required")
 		return
 	}
-	if len(req.Password) < s.cfg.MinPasswordLen {
-		fail(c, http.StatusBadRequest, ErrValidation, fmt.Sprintf("password must be >= %d chars", s.cfg.MinPasswordLen))
+	if len(req.Password) < s.cfg.System.MinPasswordLen {
+		fail(c, http.StatusBadRequest, ErrValidation, fmt.Sprintf("password must be >= %d chars", s.cfg.System.MinPasswordLen))
 		return
 	}
 	org, err := s.store.OrgForUser(ctx(c), currentUser(c).ID)
@@ -319,7 +319,7 @@ func (s *Server) setSessionCookie(c *gin.Context, value string, maxAge int) {
 		Path:     "/",
 		MaxAge:   maxAge,
 		HttpOnly: true,
-		Secure:   s.cfg.SecureCookies,
+		Secure:   s.cfg.Server.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
 }

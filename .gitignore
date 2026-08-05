@@ -1,8 +1,8 @@
 feedback
 
-# secrets / local config (commit only the *.example.* files)
+# secrets / local config. The root config.yaml is committed on purpose (see
+# its own header comment) — it carries no secrets, only boot/infra tunables.
 .env
-config.yaml
 backend/.env
 backend/config.yaml
 frontend/.env

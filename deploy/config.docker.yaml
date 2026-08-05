@@ -1,0 +1,39 @@
+# xchats — committed boot/infra configuration for the Docker Compose stack.
+# Same schema as the repo-root config.yaml; only the on-disk paths differ,
+# pointed at this container's mounted volumes (see deploy/docker-compose.yaml
+# — sqlitedata:/data, blobdata:/data/blob). Mounted read-only into the
+# container as /config.yaml and selected with `-config /config.yaml`.
+
+server:
+  http_addr: ":8080"
+  api_base_url: ""          # empty => derived; set API_BASE_URL for a public/tunnel origin
+  frontend_base_url: ""     # empty => derived; set FRONTEND_BASE_URL to the published frontend origin
+  cors_origins:
+    - "http://localhost:5173"
+    - "http://localhost:8081"
+  trusted_proxies: []
+  secure_cookies: false
+
+storage:
+  db_path: "/data/xchats.db"
+  wa_device_db_path: "/data/whatsmeow.db"
+  blob_dir: "/data/blob"
+
+system:
+  log_level: "info"
+  log_format: "json"
+  queue_workers: 4
+  session_ttl_hours: 720
+  min_password_len: 8
+  simulator_enabled: false
+
+telegram:
+  mode: ""
+
+mcp:
+  access_token_ttl_seconds: 900
+  refresh_token_ttl_days: 30
+  auth_code_ttl_seconds: 300
+  upload_token_ttl_seconds: 900
+  media_token_ttl_seconds: 3600
+  review_handoff_ttl_seconds: 300

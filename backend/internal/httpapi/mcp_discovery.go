@@ -6,7 +6,6 @@ package httpapi
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -66,7 +65,7 @@ func (s *Server) handleJWKS(c *gin.Context) {
 // as (RFC 8414's "issuer") — distinct from MCPResourceURL(), which is the
 // specific /mcp RESOURCE the access token's audience is bound to (RFC 8707).
 func (s *Server) mcpIssuer() string {
-	return strings.TrimRight(s.cfg.APIBaseURL, "/")
+	return s.cfg.ResolvedAPIBaseURL()
 }
 
 // unauthorizedMCP answers 401 with the WWW-Authenticate challenge pointing

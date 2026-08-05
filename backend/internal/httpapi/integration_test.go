@@ -126,8 +126,9 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	st, db := dbtest.Open(t)
 
 	cfg := &config.Config{
-		SessionTTLHours: 1, MinPasswordLen: 8,
-		PageSize: 50, CORSOrigins: []string{"*"}, SimulatorEnabled: true,
+		System:                       config.SystemConfig{SessionTTLHours: 1, MinPasswordLen: 8, SimulatorEnabled: true},
+		PageSize:                     50,
+		Server:                       config.ServerConfig{CORSOrigins: []string{"*"}},
 		TelegramWebhookPublicBaseURL: telegramBaseURL,
 		TelegramWebhookSecret:        tgWebhookSecret,
 	}
