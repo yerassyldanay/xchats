@@ -329,6 +329,10 @@ export default {
     },
     backup: {
       title: 'Data & backup',
+      downloadTitle: 'Download a backup',
+      downloadBody:
+        'A zip with a consistent database snapshot, uploaded media, and your non-secret settings — everything needed to restore this deployment elsewhere. Provider API keys and system secrets are never included; re-add those from Settings after restoring.',
+      downloadAction: 'Download backup',
       credentialStorageTitle: 'Credential storage',
       credentialStorageBody:
         "Credentials are stored in an encrypted local file rather than your OS keychain on this deployment. This is a weaker guarantee than a keychain — anyone with filesystem access and the app's key could decrypt them.",

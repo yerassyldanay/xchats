@@ -19,6 +19,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
+	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
@@ -117,6 +118,11 @@ type Server struct {
 	// (internal/llmprovider.Registry) after a credential or LLM setting
 	// changes — nil in any test/deployment that never constructs one.
 	llmRefresh func()
+	// providerHealth is the self-healing status surface (internal/
+	// providerhealth) — nil in any test/deployment that never constructs
+	// one, in which case GET /settings/provider-health reports no providers
+	// rather than failing.
+	providerHealth *providerhealth.Tracker
 }
 
 // Deps is the constructor input.
@@ -142,12 +148,13 @@ type Deps struct {
 	MCPAuth   *mcpauth.Authorizer
 	MCPServer *mcpserver.Server
 
-	// Settings surface — see Server's own field doc comments; all four are
+	// Settings surface — see Server's own field doc comments; all five are
 	// nil-tolerant.
-	Credentials *credentials.Chain
-	Settings    *settings.Store
-	Tunnel      tunnel.Tunnel
-	LLMRefresh  func()
+	Credentials    *credentials.Chain
+	Settings       *settings.Store
+	Tunnel         tunnel.Tunnel
+	LLMRefresh     func()
+	ProviderHealth *providerhealth.Tracker
 }
 
 // New builds a Server.
@@ -168,6 +175,7 @@ func New(d Deps) *Server {
 		mcpUploadSigner: uploadSigner, mcpMediaSigner: mediaSigner,
 		csrfSecret:  randomCSRFFallbackSecret(),
 		credentials: d.Credentials, settings: d.Settings, tunnel: d.Tunnel, llmRefresh: d.LLMRefresh,
+		providerHealth: d.ProviderHealth,
 		// Deliberately generous limits — these are abuse guards, not a
 		// throttle on legitimate usage. See ratelimit.go's doc comment.
 		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — registration spam is the highest-value target
@@ -389,6 +397,8 @@ func (s *Server) Router() *gin.Engine {
 	set.PUT("/credential-storage", s.handleUpdateCredentialStorage)
 	set.PUT("/ngrok", s.handleUpdateNgrokSettings)
 	set.POST("/setup-complete", s.handleSetupComplete)
+	set.GET("/backup/download", s.handleDownloadBackup)
+	set.GET("/provider-health", s.handleProviderHealth)
 	set.GET("/tunnel", s.handleGetTunnelStatus)
 	set.POST("/tunnel/start", s.handleStartTunnel)
 	set.POST("/tunnel/stop", s.handleStopTunnel)

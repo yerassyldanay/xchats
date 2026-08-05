@@ -28,6 +28,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
@@ -88,6 +89,7 @@ type settingsHarness struct {
 	sets            *settings.Store
 	tun             *fakeTunnelController
 	llmRefreshCalls *int32
+	health          *providerhealth.Tracker
 }
 
 // newSettingsHarness builds a harness with a REAL credentials.Chain
@@ -125,17 +127,21 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 	tun := &fakeTunnelController{}
 	var llmRefreshCalls int32
 
+	health := providerhealth.NewTracker(nil)
+
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, OrgID: org.ID, Log: log,
 		Credentials: creds, Settings: sets, Tunnel: tun,
-		LLMRefresh: func() { atomic.AddInt32(&llmRefreshCalls, 1) },
+		LLMRefresh:     func() { atomic.AddInt32(&llmRefreshCalls, 1) },
+		ProviderHealth: health,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &settingsHarness{
 		t: t, srv: ts, client: &http.Client{Jar: jar}, store: st, orgID: org.ID,
 		creds: creds, sets: sets, tun: tun, llmRefreshCalls: &llmRefreshCalls,
+		health: health,
 	}
 	t.Cleanup(ts.Close)
 	h.login(h.client, adminEmail, adminPass)

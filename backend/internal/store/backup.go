@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"io"
 
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
 )
@@ -19,4 +20,14 @@ func (s *Store) Backup(ctx context.Context, destPath string) error {
 // consistent.
 func (s *Store) IntegrityCheck(ctx context.Context) ([]string, error) {
 	return dbops.IntegrityCheck(ctx, s.db)
+}
+
+// BackupZip streams a complete disaster-recovery archive to w — see
+// dbops.BackupZip's own doc comment for exactly what it contains (and, just
+// as importantly, what it deliberately never includes). Thin wrapper for
+// the same persistence-boundary reason as Backup/IntegrityCheck above:
+// internal/httpapi's "Download Backup" handler calls this, never dbops
+// directly.
+func (s *Store) BackupZip(ctx context.Context, blobDir string, settingsJSON []byte, w io.Writer) (dbops.BackupManifest, error) {
+	return dbops.BackupZip(ctx, s.db, blobDir, settingsJSON, w)
 }

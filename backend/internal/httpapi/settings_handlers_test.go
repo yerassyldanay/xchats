@@ -1,10 +1,17 @@
 package httpapi_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/yerassyldanay/xchats/backend/llm"
 )
 
 var errBoom = errors.New("boom")
@@ -445,6 +452,87 @@ func TestSetupComplete(t *testing.T) {
 	}
 }
 
+func TestDownloadBackup(t *testing.T) {
+	h := newSettingsHarness(t)
+
+	resp, err := h.client.Get(h.srv.URL + "/xchats/api/v1/settings/backup/download")
+	if err != nil {
+		t.Fatalf("GET backup/download: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/zip" {
+		t.Errorf("Content-Type = %q, want application/zip", ct)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "attachment") || !strings.Contains(cd, ".zip") {
+		t.Errorf("Content-Disposition = %q, want an attachment ending in .zip", cd)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("body is not a valid zip: %v", err)
+	}
+	names := map[string]bool{}
+	for _, f := range zr.File {
+		names[f.Name] = true
+	}
+	if !names["manifest.json"] {
+		t.Error("zip missing manifest.json")
+	}
+	if !names["xchats.db"] {
+		t.Error("zip missing xchats.db")
+	}
+}
+
+func TestProviderHealth_EmptyWhenNothingReportedYet(t *testing.T) {
+	h := newSettingsHarness(t)
+	_, env := h.get("/xchats/api/v1/settings/provider-health")
+	var got struct {
+		Providers []struct {
+			Provider string `json:"provider"`
+			Healthy  bool   `json:"healthy"`
+		} `json:"providers"`
+	}
+	mustDecode(t, env, &got)
+	if len(got.Providers) != 0 {
+		t.Errorf("providers = %+v, want none before anything is reported", got.Providers)
+	}
+}
+
+func TestProviderHealth_ReflectsTrackerState(t *testing.T) {
+	h := newSettingsHarness(t)
+	h.health.Report("openrouter", nil)
+	h.health.Report("openai", fmt.Errorf("wrapped: %w", llm.ErrProviderAuth))
+
+	_, env := h.get("/xchats/api/v1/settings/provider-health")
+	var got struct {
+		Providers []struct {
+			Provider string `json:"provider"`
+			Healthy  bool   `json:"healthy"`
+		} `json:"providers"`
+	}
+	mustDecode(t, env, &got)
+	byProvider := map[string]bool{}
+	for _, p := range got.Providers {
+		byProvider[p.Provider] = p.Healthy
+	}
+	if len(got.Providers) != 2 {
+		t.Fatalf("providers = %+v, want 2 entries", got.Providers)
+	}
+	if !byProvider["openrouter"] {
+		t.Error("openrouter should report healthy")
+	}
+	if byProvider["openai"] {
+		t.Error("openai should report unhealthy")
+	}
+}
+
 func TestTunnelStatusStartStop(t *testing.T) {
 	h := newSettingsHarness(t)
 
@@ -560,6 +648,8 @@ func TestSettingsRoutesRequireAdmin(t *testing.T) {
 		{http.MethodGet, "/xchats/api/v1/settings/integrations"},
 		{http.MethodPut, "/xchats/api/v1/settings/llm"},
 		{http.MethodPut, "/xchats/api/v1/settings/ngrok"},
+		{http.MethodGet, "/xchats/api/v1/settings/backup/download"},
+		{http.MethodGet, "/xchats/api/v1/settings/provider-health"},
 		{http.MethodGet, "/xchats/api/v1/settings/tunnel"},
 		{http.MethodPost, "/xchats/api/v1/settings/tunnel/start"},
 	}

@@ -41,6 +41,14 @@ type Engine struct {
 	// itself has no internal/settings dependency — see this package's own
 	// doc comment on why it stays composition-root-agnostic.
 	Params func() LLMParams
+	// StatusHook, if set, is called after every LLM Complete attempt (the
+	// initial call and, if it runs, the retry) with the provider that was
+	// called and the resulting error (nil on success). Best-effort and
+	// synchronous but never fatal to Generate — a nil StatusHook is simply
+	// not called. This is the composition root's seam for self-healing
+	// status reporting (internal/providerhealth) without response itself
+	// depending on internal/realtime or any other internal/ package.
+	StatusHook func(provider string, err error)
 }
 
 // GenerateRequest is one channel-neutral request to produce a draft reply.
@@ -178,6 +186,9 @@ func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef l
 		Temperature: params.Temperature,
 		MaxTokens:   params.MaxTokens,
 	})
+	if e.StatusHook != nil {
+		e.StatusHook(modelRef.Provider, err)
+	}
 	if err != nil {
 		return "", err
 	}

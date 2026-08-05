@@ -29,6 +29,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
+	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
@@ -194,6 +195,18 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	q := queue.NewInMem(2048, cfg.System.QueueWorkers, log)
 	hub := realtime.NewHub()
+
+	// providerHealth is the self-healing status surface: every LLM call the
+	// engine makes reports through it (engine.StatusHook, set below), and
+	// every genuine health transition (not routine transient errors — see
+	// Tracker.Report's own doc comment) broadcasts live over hub for the
+	// NavRail badge, on top of the on-demand snapshot GET /settings/
+	// provider-health serves a client that connects after the fact.
+	providerHealth := providerhealth.NewTracker(func(s providerhealth.Status) {
+		hub.Broadcast("integration.status_changed", s)
+	})
+	engine.StatusHook = providerHealth.Report
+
 	tg := telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
 
 	// Credentials at rest. Without a key the Telegram lifecycle refuses to store
@@ -271,6 +284,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
 		Credentials: credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
+		ProviderHealth: providerHealth,
 	})
 	router := srv.Router()
 

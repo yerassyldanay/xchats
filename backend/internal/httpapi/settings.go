@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
+	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
 )
 
@@ -517,6 +519,58 @@ func (s *Server) handleUpdateNgrokSettings(c *gin.Context) {
 		return
 	}
 	ok(c, updated.Ngrok)
+}
+
+// --- GET /settings/backup/download -----------------------------------------
+
+// handleDownloadBackup streams a complete disaster-recovery archive — see
+// store.BackupZip/dbops.BackupZip's own doc comments for exactly what it
+// contains (a DB snapshot, media, non-secret settings) and what it
+// deliberately never does (the credential store). Errors are only reported
+// as a normal envelope if they happen BEFORE any bytes are written — once
+// streaming starts, headers are already committed 200 OK, so a mid-stream
+// failure can only be logged, not turned into an error response.
+func (s *Server) handleDownloadBackup(c *gin.Context) {
+	if s.store == nil {
+		fail(c, http.StatusServiceUnavailable, ErrInternal, "the database is unavailable")
+		return
+	}
+	var settingsJSON []byte
+	if s.settings != nil {
+		if st, err := s.settings.Load(); err == nil {
+			settingsJSON, _ = json.Marshal(st)
+		}
+	}
+
+	filename := fmt.Sprintf("xchats-backup-%s.zip", time.Now().UTC().Format("20060102-150405"))
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+	c.Status(http.StatusOK)
+
+	blobDir := ""
+	if s.cfg != nil {
+		blobDir = s.cfg.Storage.BlobDir
+	}
+	if _, err := s.store.BackupZip(ctx(c), blobDir, settingsJSON, c.Writer); err != nil {
+		s.log.Error("backup zip failed mid-stream", "err", err)
+	}
+}
+
+// --- GET /settings/provider-health -----------------------------------------
+
+// handleProviderHealth reports every LLM provider's live, in-production
+// health (internal/providerhealth) — the on-demand hydration for a client
+// that opens Settings (or just connects to /realtime) after a provider
+// already flipped unhealthy, complementing the "integration.status_changed"
+// event Track 2K broadcasts live on every transition.
+func (s *Server) handleProviderHealth(c *gin.Context) {
+	providers := []providerhealth.Status{}
+	if s.providerHealth != nil {
+		if snap := s.providerHealth.Snapshot(); snap != nil {
+			providers = snap
+		}
+	}
+	ok(c, gin.H{"providers": providers})
 }
 
 // --- tunnel ---------------------------------------------------------------
