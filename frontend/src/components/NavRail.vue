@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Blocks, Check, FlaskConical, Inbox, Library, LogOut, BookOpen, Radio } from 'lucide-vue-next'
+import { Blocks, Check, FlaskConical, Inbox, Library, LogOut, BookOpen, Radio, Settings } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { initials, colorFor } from '../lib/format'
 import { evalsApi } from '../api/evals'
@@ -120,6 +120,23 @@ async function switchOrg(orgId: string) {
               </RouterLink>
             </TooltipTrigger>
             <TooltipContent side="right">{{ evalsItem.label }}</TooltipContent>
+          </Tooltip>
+        </template>
+
+        <template v-if="auth.isAdmin">
+          <div class="h-px w-8 bg-white/10" aria-hidden="true" />
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <RouterLink
+                :to="{ name: 'settings' }"
+                aria-label="Настройки"
+                class="w-11 h-11 rounded-lg grid place-items-center transition"
+                :class="isActive(['settings']) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
+              >
+                <Settings class="w-5 h-5" />
+              </RouterLink>
+            </TooltipTrigger>
+            <TooltipContent side="right">Настройки</TooltipContent>
           </Tooltip>
         </template>
 
