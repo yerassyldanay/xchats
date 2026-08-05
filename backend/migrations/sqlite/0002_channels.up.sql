@@ -191,6 +191,21 @@ CREATE TABLE tg_message_media (
 );
 CREATE INDEX tg_message_media_pending_idx ON tg_message_media(updated_at) WHERE download_status <> 'ready';
 
+-- tg_poll_state is the long-polling ingress's (internal/tgpoller) own
+-- bookkeeping: the highest update_id successfully processed for each bot, so
+-- a restart resumes with GetUpdates{Offset: last_update_id+1} instead of
+-- replaying (or dropping) history. One row per account, upserted with a
+-- monotonic guard (see store.AdvanceTelegramPollOffset) so an
+-- out-of-order/duplicate advance from a stale caller can never move it
+-- backwards. Pre-release in-place migration philosophy (see
+-- plan/DECISIONS.md and CONTRIBUTING) — added directly to this file rather
+-- than a new numbered migration.
+CREATE TABLE tg_poll_state (
+    account_id      TEXT PRIMARY KEY NOT NULL REFERENCES tg_accounts(id) ON DELETE CASCADE,
+    last_update_id  INTEGER NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
+);
+
 -- ---------------------------------------------------------------------------
 -- Unified read views — one neutral shape across the WhatsApp and Telegram
 -- legs. TRIM(BOTH FROM x) (Postgres's verbose SQL-standard spelling) becomes

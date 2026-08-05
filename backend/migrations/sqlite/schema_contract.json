@@ -3491,6 +3491,50 @@
         }
       ]
     },
+    "tg_poll_state": {
+      "columns": [
+        {
+          "name": "account_id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "last_update_id",
+          "position": 2,
+          "pg_type": "bigint",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "updated_at",
+          "position": 3,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "account_id"
+      ],
+      "foreign_keys": [
+        {
+          "name": "tg_poll_state_account_id_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "ref_table": "tg_accounts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
     "users": {
       "columns": [
         {
