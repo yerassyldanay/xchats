@@ -28,20 +28,10 @@ var persistenceBoundary = map[string]bool{
 	// that legitimately holds a *dbx.DB and runs raw SQL against it, so it
 	// belongs on this list too.
 	modulePrefix + "internal/dbops": true,
-	// pgimport is the standalone Postgres->SQLite data migration tool
-	// (cmd/xchats-import). It is also pgx-linked (see driverOnlyPackages'
-	// own doc comment) — that's a SEPARATE axis from this one: pgx is
-	// never restricted by this test at all, only database/sql/
-	// modernc.org/sqlite and dbx are. pgimport writes its SQLite side
-	// through dbx like dbops does, rather than duplicating dbx's own
-	// time/array type-conversion helpers (dbx.FormatTime, dbx.UUIDArray/
-	// StringArray) a second time.
-	modulePrefix + "internal/pgimport": true,
-	// cmd/xchats-import is pgimport's own standalone binary (never
-	// cmd/xchats — the packaged server never carries a pgx dependency): it
-	// calls dbx.Open/dbx.RunMigrations itself to prepare the destination
-	// SQLite file before handing it to pgimport.Import.
-	modulePrefix + "cmd/xchats-import": true,
+	// tgpoller/tgingest are explicitly NOT here: they may import
+	// internal/store (a normal store consumer, like httpapi) but never
+	// internal/dbx directly — see the sqlite-cutover plan's Layering
+	// section, which this test enforces at build-graph level.
 }
 
 // dbtestConsumers may import internal/dbx from their TEST files only — never
@@ -65,11 +55,7 @@ const dbxImportPath = modulePrefix + "internal/dbx"
 
 // driverOnlyPackages may import database/sql and modernc.org/sqlite
 // directly — internal/dbx itself is the only one today (the whole point of
-// the facade). Nothing else needs to: even internal/pgimport, which reads
-// from Postgres via pgx (a driver this test does not restrict at all —
-// only the SQLite-side database/sql and modernc.org/sqlite, and dbx
-// itself, are), writes its SQLite side through dbx like every other
-// persistenceBoundary package instead of opening its own connection.
+// the facade). Nothing else needs to.
 //
 // internal/whatsmeow is the one deliberate exception: go.mau.fi/whatsmeow's
 // sqlstore.NewWithDB requires a raw *sql.DB to manage its OWN schema (device

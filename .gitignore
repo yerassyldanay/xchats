@@ -22,7 +22,6 @@ backend/blobdata/
 # which is how backend/promptpreview once got committed (PR #15).
 backend/bin/
 backend/xchats
-backend/xchats-import
 backend/promptpreview
 frontend/dist/
 frontend/dist-ssr/
