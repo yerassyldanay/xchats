@@ -27,6 +27,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
 	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
+	"github.com/yerassyldanay/xchats/backend/internal/updatecheck"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
@@ -123,6 +124,11 @@ type Server struct {
 	// one, in which case GET /settings/provider-health reports no providers
 	// rather than failing.
 	providerHealth *providerhealth.Tracker
+	// updateChecker is the update notifier (internal/updatecheck) — nil in
+	// any test/deployment that never constructs one, in which case GET
+	// /settings/update-check reports no update information rather than
+	// failing.
+	updateChecker *updatecheck.Checker
 }
 
 // Deps is the constructor input.
@@ -148,13 +154,14 @@ type Deps struct {
 	MCPAuth   *mcpauth.Authorizer
 	MCPServer *mcpserver.Server
 
-	// Settings surface — see Server's own field doc comments; all five are
+	// Settings surface — see Server's own field doc comments; all six are
 	// nil-tolerant.
 	Credentials    *credentials.Chain
 	Settings       *settings.Store
 	Tunnel         tunnel.Tunnel
 	LLMRefresh     func()
 	ProviderHealth *providerhealth.Tracker
+	UpdateChecker  *updatecheck.Checker
 }
 
 // New builds a Server.
@@ -175,7 +182,7 @@ func New(d Deps) *Server {
 		mcpUploadSigner: uploadSigner, mcpMediaSigner: mediaSigner,
 		csrfSecret:  randomCSRFFallbackSecret(),
 		credentials: d.Credentials, settings: d.Settings, tunnel: d.Tunnel, llmRefresh: d.LLMRefresh,
-		providerHealth: d.ProviderHealth,
+		providerHealth: d.ProviderHealth, updateChecker: d.UpdateChecker,
 		// Deliberately generous limits — these are abuse guards, not a
 		// throttle on legitimate usage. See ratelimit.go's doc comment.
 		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — registration spam is the highest-value target
@@ -399,6 +406,7 @@ func (s *Server) Router() *gin.Engine {
 	set.POST("/setup-complete", s.handleSetupComplete)
 	set.GET("/backup/download", s.handleDownloadBackup)
 	set.GET("/provider-health", s.handleProviderHealth)
+	set.GET("/update-check", s.handleUpdateCheck)
 	set.GET("/tunnel", s.handleGetTunnelStatus)
 	set.POST("/tunnel/start", s.handleStartTunnel)
 	set.POST("/tunnel/stop", s.handleStopTunnel)

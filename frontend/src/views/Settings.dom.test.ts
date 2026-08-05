@@ -38,6 +38,8 @@ function mockGet() {
         return { items: [] }
       case '/users':
         return { items: [], page: 1, page_size: 50, total: 0 }
+      case '/settings/update-check':
+        return { current_version: '0.1.0', update_available: false }
       default:
         throw new Error(`unexpected GET ${path}`)
     }

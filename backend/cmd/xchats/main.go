@@ -42,6 +42,8 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
 	"github.com/yerassyldanay/xchats/backend/internal/tgpoller"
 	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
+	"github.com/yerassyldanay/xchats/backend/internal/updatecheck"
+	"github.com/yerassyldanay/xchats/backend/internal/version"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsmeow"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -207,6 +209,11 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	})
 	engine.StatusHook = providerHealth.Report
 
+	// updateChecker asks GitHub's public releases API, cached well past any
+	// single request — see internal/updatecheck's own doc comment for why a
+	// failed/empty check is never treated as an error.
+	updateChecker := updatecheck.NewChecker("yerassyldanay/xchats", version.Version)
+
 	tg := telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
 
 	// Credentials at rest. Without a key the Telegram lifecycle refuses to store
@@ -284,7 +291,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
 		Credentials: credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
-		ProviderHealth: providerHealth,
+		ProviderHealth: providerHealth, UpdateChecker: updateChecker,
 	})
 	router := srv.Router()
 

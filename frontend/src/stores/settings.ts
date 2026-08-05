@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api } from '../api/client'
-import type { IntegrationSummary, LLMSettings, NgrokSettings, Page, ProviderHealthStatus, Settings, TunnelStatus, User } from '../types'
+import type { IntegrationSummary, LLMSettings, NgrokSettings, Page, ProviderHealthStatus, Settings, TunnelStatus, UpdateCheckResult, User } from '../types'
 
 interface IntegrationsResponse {
   credential_store_available: boolean
@@ -36,6 +36,8 @@ export const useSettings = defineStore('settings', {
     // update (never mutated in place) so Pinia's reactivity picks up the
     // change unconditionally.
     unhealthyProviders: new Set<string>(),
+    updateCheck: null as UpdateCheckResult | null,
+    updateCheckLoading: false,
   }),
   getters: {
     hasUnhealthyProvider: (s) => s.unhealthyProviders.size > 0,
@@ -54,6 +56,14 @@ export const useSettings = defineStore('settings', {
       if (status.healthy) next.delete(status.provider)
       else next.add(status.provider)
       this.unhealthyProviders = next
+    },
+    async checkForUpdates() {
+      this.updateCheckLoading = true
+      try {
+        this.updateCheck = await api.get<UpdateCheckResult>('/settings/update-check')
+      } finally {
+        this.updateCheckLoading = false
+      }
     },
     async load() {
       this.loading = true

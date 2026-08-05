@@ -13,6 +13,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
+	"github.com/yerassyldanay/xchats/backend/internal/version"
 )
 
 // --- GET /settings ----------------------------------------------------
@@ -571,6 +572,19 @@ func (s *Server) handleProviderHealth(c *gin.Context) {
 		}
 	}
 	ok(c, gin.H{"providers": providers})
+}
+
+// --- GET /settings/update-check ---------------------------------------------
+
+// handleUpdateCheck reports whether a newer xchats release exists
+// (internal/updatecheck) — cached well past this one request, so this is
+// cheap to call on every Settings page load.
+func (s *Server) handleUpdateCheck(c *gin.Context) {
+	if s.updateChecker == nil {
+		ok(c, gin.H{"current_version": version.Version, "update_available": false})
+		return
+	}
+	ok(c, s.updateChecker.Check(ctx(c)))
 }
 
 // --- tunnel ---------------------------------------------------------------

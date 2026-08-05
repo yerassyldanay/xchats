@@ -533,6 +533,22 @@ func TestProviderHealth_ReflectsTrackerState(t *testing.T) {
 	}
 }
 
+func TestUpdateCheck_NilCheckerFallsBackGracefully(t *testing.T) {
+	h := newSettingsHarness(t)
+	_, env := h.get("/xchats/api/v1/settings/update-check")
+	var got struct {
+		CurrentVersion  string `json:"current_version"`
+		UpdateAvailable bool   `json:"update_available"`
+	}
+	mustDecode(t, env, &got)
+	if got.CurrentVersion == "" {
+		t.Error("current_version is empty")
+	}
+	if got.UpdateAvailable {
+		t.Error("update_available = true, want false with no checker wired")
+	}
+}
+
 func TestTunnelStatusStartStop(t *testing.T) {
 	h := newSettingsHarness(t)
 
@@ -650,6 +666,7 @@ func TestSettingsRoutesRequireAdmin(t *testing.T) {
 		{http.MethodPut, "/xchats/api/v1/settings/ngrok"},
 		{http.MethodGet, "/xchats/api/v1/settings/backup/download"},
 		{http.MethodGet, "/xchats/api/v1/settings/provider-health"},
+		{http.MethodGet, "/xchats/api/v1/settings/update-check"},
 		{http.MethodGet, "/xchats/api/v1/settings/tunnel"},
 		{http.MethodPost, "/xchats/api/v1/settings/tunnel/start"},
 	}

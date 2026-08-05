@@ -94,6 +94,16 @@ export interface ProviderHealthStatus {
   healthy: boolean
   at: string
 }
+
+// UpdateCheckResult mirrors internal/updatecheck.Result — GET /settings/
+// update-check's payload.
+export interface UpdateCheckResult {
+  current_version: string
+  latest_version?: string
+  update_available: boolean
+  release_url?: string
+  checked_at?: string
+}
 export interface Contact {
   id: string
   display_name: string
