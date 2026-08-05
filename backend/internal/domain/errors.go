@@ -25,4 +25,9 @@ var (
 	// (an If-Match / base_version guard) fails because the row moved since
 	// the caller last read it.
 	ErrVersionConflict = errors.New("version conflict")
+
+	// ErrLastAdmin is returned when a role change or removal would leave an
+	// organization with zero admin members — the RBAC invariant that at
+	// least one member of every organization must be able to manage it.
+	ErrLastAdmin = errors.New("last admin")
 )

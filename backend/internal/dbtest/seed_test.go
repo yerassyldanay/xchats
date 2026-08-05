@@ -67,6 +67,16 @@ func TestInitAdminMigration(t *testing.T) {
 		t.Errorf("organization_users membership rows = %d, want 1", membershipCount)
 	}
 
+	var role string
+	if err := db.QueryRow(ctx, `
+		SELECT role FROM organization_users WHERE organization_id = $1 AND user_id = $2`,
+		orgID, adminID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if role != "admin" {
+		t.Errorf("sentinel admin's membership role = %q, want %q", role, "admin")
+	}
+
 	// Re-running migrations (the runner's own idempotency, exercised again
 	// here specifically against 0006) must not create a second org/user/
 	// membership row nor error on the fixed-PK re-insert.

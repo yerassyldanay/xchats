@@ -348,6 +348,24 @@ func (h *harness) patchJSON(path string, body any) (*http.Response, map[string]j
 	return resp, env
 }
 
+func (h *harness) putJSON(path string, body any) (*http.Response, map[string]json.RawMessage) {
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPut, h.srv.URL+path, bytes.NewReader(b))
+	if err != nil {
+		h.t.Fatalf("PUT %s: %v", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.t.Fatalf("PUT %s: %v", path, err)
+	}
+	var env map[string]json.RawMessage
+	_ = json.NewDecoder(resp.Body).Decode(&env)
+	resp.Body.Close()
+	h.queue.Wait()
+	return resp, env
+}
+
 // --- the demo loop --------------------------------------------------------
 
 func TestDemoLoop(t *testing.T) {

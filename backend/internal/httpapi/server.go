@@ -240,8 +240,10 @@ func (s *Server) Router() *gin.Engine {
 	auth.Use(s.requireSession())
 	auth.GET("/me", s.handleMe)
 	auth.GET("/users", s.handleListUsers)
-	auth.POST("/users", s.handleCreateUser)
+	auth.POST("/users", s.RequireAdmin(), s.handleCreateUser)
+	auth.PUT("/users/:id/role", s.RequireAdmin(), s.handleUpdateUserRole)
 	auth.GET("/organization", s.handleGetOrg)
+	auth.PUT("/organization", s.RequireAdmin(), s.handleUpdateOrg)
 	// Task 15: explicit active-organization switch (the frontend selector) —
 	// distinct from the MCP review-handoff redirect below, which sets the
 	// SAME session field via a verified signed token instead of a direct

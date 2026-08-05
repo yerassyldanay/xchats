@@ -43,6 +43,15 @@ func TestEnumChecksEnforced(t *testing.T) {
 		mustReject(t, db, ctx, `INSERT INTO mcp_oauth_clients (client_id, registration_source) VALUES ('c3', 'other')`)
 	})
 
+	t.Run("organization_users.role", func(t *testing.T) {
+		mustExec(t, db, ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u2', 'u2@example.com', 'x')`)
+		mustExec(t, db, ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u3', 'u3@example.com', 'x')`)
+		mustExec(t, db, ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u4', 'u4@example.com', 'x')`)
+		mustExec(t, db, ctx, `INSERT INTO organization_users (organization_id, user_id, role) VALUES ('11111111-1111-1111-1111-111111111111', 'u2', 'admin')`)
+		mustExec(t, db, ctx, `INSERT INTO organization_users (organization_id, user_id, role) VALUES ('11111111-1111-1111-1111-111111111111', 'u3', 'member')`)
+		mustReject(t, db, ctx, `INSERT INTO organization_users (organization_id, user_id, role) VALUES ('11111111-1111-1111-1111-111111111111', 'u4', 'owner')`)
+	})
+
 	t.Run("mcp_authorization_codes.code_challenge_method", func(t *testing.T) {
 		mustExec(t, db, ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u1', 'u1@example.com', 'x')`)
 		mustExec(t, db, ctx, `INSERT INTO mcp_oauth_clients (client_id) VALUES ('c4')`)
