@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api } from '../api/client'
-import type { IntegrationSummary, LLMSettings, NgrokSettings, Page, Settings, TunnelStatus, User } from '../types'
+import type { IntegrationSummary, LLMSettings, NgrokSettings, Page, ProviderHealthStatus, Settings, TunnelStatus, User } from '../types'
 
 interface IntegrationsResponse {
   credential_store_available: boolean
@@ -9,6 +9,9 @@ interface IntegrationsResponse {
 interface SaveCredentialResponse {
   id: string
   verified: boolean
+}
+interface ProviderHealthResponse {
+  providers: ProviderHealthStatus[]
 }
 
 // useSettings is the Settings UI's (Track 2H) data layer — every /settings/**
@@ -26,8 +29,32 @@ export const useSettings = defineStore('settings', {
     users: [] as User[],
     usersTotal: 0,
     usersLoading: false,
+    // unhealthyProviders is the self-healing status surface (Track 2K) —
+    // hydrated once via loadProviderHealth() and kept live by App.vue's
+    // realtime listener calling applyProviderHealthEvent on every
+    // "integration.status_changed" broadcast. Always a FRESH Set on
+    // update (never mutated in place) so Pinia's reactivity picks up the
+    // change unconditionally.
+    unhealthyProviders: new Set<string>(),
   }),
+  getters: {
+    hasUnhealthyProvider: (s) => s.unhealthyProviders.size > 0,
+  },
   actions: {
+    async loadProviderHealth() {
+      const p = await api.get<ProviderHealthResponse>('/settings/provider-health')
+      const next = new Set<string>()
+      for (const status of p.providers) {
+        if (!status.healthy) next.add(status.provider)
+      }
+      this.unhealthyProviders = next
+    },
+    applyProviderHealthEvent(status: ProviderHealthStatus) {
+      const next = new Set(this.unhealthyProviders)
+      if (status.healthy) next.delete(status.provider)
+      else next.add(status.provider)
+      this.unhealthyProviders = next
+    },
     async load() {
       this.loading = true
       try {

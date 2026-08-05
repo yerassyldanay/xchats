@@ -85,6 +85,15 @@ export interface TunnelStatus {
   started_at?: string
   last_error?: string
 }
+
+// ProviderHealthStatus mirrors internal/providerhealth.Status — one
+// provider's live, in-production health (GET /settings/provider-health,
+// and the "integration.status_changed" realtime event carry the same shape).
+export interface ProviderHealthStatus {
+  provider: string
+  healthy: boolean
+  at: string
+}
 export interface Contact {
   id: string
   display_name: string

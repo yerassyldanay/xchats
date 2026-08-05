@@ -5,6 +5,7 @@ import NavRail from './components/NavRail.vue'
 import SetupWizard from './components/settings/SetupWizard.vue'
 import { useAuth } from './stores/auth'
 import { useSettings } from './stores/settings'
+import { connectRealtime } from './lib/sse'
 
 const route = useRoute()
 const auth = useAuth()
@@ -29,6 +30,26 @@ watch(
       // Best-effort — a failed check just skips onboarding for this session;
       // Settings itself will surface the real error if something's wrong.
     }
+  },
+  { immediate: true },
+)
+
+// Self-healing provider status (Track 2K): hydrate the current snapshot
+// once, then keep it live for the rest of the session via the SAME realtime
+// mechanism the inbox/KB pages use — a SEPARATE EventSource connection, but
+// App.vue is the one place guaranteed mounted for as long as the SPA is,
+// which is what a NavRail-level badge needs. Admin-only, like the wizard
+// check above (GET /settings/provider-health is RequireAdmin).
+const healthWired = ref(false)
+watch(
+  () => auth.isAdmin,
+  (isAdmin) => {
+    if (!isAdmin || healthWired.value) return
+    healthWired.value = true
+    settingsStore.loadProviderHealth().catch(() => {
+      // Best-effort — the badge just stays unset for this session.
+    })
+    connectRealtime({ providerHealthChanged: (s) => settingsStore.applyProviderHealthEvent(s) })
   },
   { immediate: true },
 )
