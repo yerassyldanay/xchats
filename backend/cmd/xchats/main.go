@@ -1,6 +1,7 @@
 // Command xchats is the xchats backend: API edge + webhook ingress + in-process
 // workers + the multichannel response service. Subcommands: serve (default),
-// migrate, webhook-set, seed, seed-kb-demo, simulate-message, kb-load.
+// migrate, seed, seed-kb-demo, simulate-message, kb-load, backup, check,
+// restore.
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/dbops"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
@@ -81,6 +83,12 @@ func main() {
 		runSimulateMessage(flag.Args()[1:])
 	case "kb-load":
 		runKBLoad(cfg, log, flag.Args()[1:])
+	case "backup":
+		runBackup(cfg, log, flag.Args()[1:])
+	case "check":
+		runCheck(cfg, log)
+	case "restore":
+		runRestore(log, flag.Args()[1:])
 	default:
 		log.Error("unknown command", "cmd", cmd)
 		os.Exit(2)
@@ -399,6 +407,61 @@ func runMigrate(cfg *config.Config, log *slog.Logger) {
 	st := mustStore(cfg, log)
 	defer st.Close()
 	log.Info("migrations applied")
+}
+
+// runBackup writes a consistent, compacted snapshot of DB_PATH to the given
+// destination path (VACUUM INTO; the destination must not already exist).
+// Opening the store acquires internal/dbx's single-process lock, so this
+// subcommand — like "check" below — cannot run against a DB_PATH that
+// "xchats serve" already has open; stop the server first, or use the
+// in-app "Download Backup" action (internal/httpapi's settings surface),
+// which runs inside the already-open server process instead.
+func runBackup(cfg *config.Config, log *slog.Logger, args []string) {
+	if len(args) != 1 {
+		fatal("backup", errString("usage: xchats backup <dest-path>"))
+	}
+	st := mustStore(cfg, log)
+	defer st.Close()
+	if err := st.Backup(context.Background(), args[0]); err != nil {
+		fatal("backup", err)
+	}
+	log.Info("backup complete", "dest", args[0])
+}
+
+// runCheck runs SQLite's own consistency check against DB_PATH and reports
+// every problem found, if any. See runBackup's doc comment for why this
+// needs the server stopped (or run the "Download Backup" flow instead,
+// whose zip manifest records the same check).
+func runCheck(cfg *config.Config, log *slog.Logger) {
+	st := mustStore(cfg, log)
+	defer st.Close()
+	problems, err := st.IntegrityCheck(context.Background())
+	if err != nil {
+		fatal("check", err)
+	}
+	if len(problems) > 0 {
+		for _, p := range problems {
+			log.Error("integrity check problem", "detail", p)
+		}
+		fatal("check", fmt.Errorf("%d integrity problem(s) found", len(problems)))
+	}
+	log.Info("integrity check passed")
+}
+
+// runRestore atomically replaces destPath with backupPath's contents. Pure
+// path arguments, no config/store involved: it is an offline operation that
+// validates backupPath's integrity before touching anything at destPath (see
+// dbops.Restore), and calls dbops directly rather than going through a Store
+// — there is nothing at destPath to open yet, and mustStore would just
+// contend with Restore's own flock (internal/dbx.LockPath) for no reason.
+func runRestore(log *slog.Logger, args []string) {
+	if len(args) != 2 {
+		fatal("restore", errString("usage: xchats restore <backup-path> <dest-path>"))
+	}
+	if err := dbops.Restore(context.Background(), args[0], args[1]); err != nil {
+		fatal("restore", err)
+	}
+	log.Info("restore complete", "backup", args[0], "dest", args[1])
 }
 
 // seed ensures the configured organization exists. WhatsApp accounts are no
