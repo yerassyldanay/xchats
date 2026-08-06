@@ -43,7 +43,6 @@ ai_topics:
       featured_image: ""
       illustration_images: []
       explainer_videos: []
-      narration_audio_files: []
       reference_documents: []
     - slug: delivery
       title: Доставка
@@ -52,7 +51,6 @@ ai_topics:
       illustration_images:
         - 3495594b-d3cc-5696-9149-fe4ecc377447
       explainer_videos: []
-      narration_audio_files: []
       reference_documents: []
     - slug: payment
       title: Оплата
@@ -60,7 +58,6 @@ ai_topics:
       featured_image: ""
       illustration_images: []
       explainer_videos: []
-      narration_audio_files: []
       reference_documents: []
     - slug: how_to_order
       title: Как заказать
@@ -68,7 +65,6 @@ ai_topics:
       featured_image: ""
       illustration_images: []
       explainer_videos: []
-      narration_audio_files: []
       reference_documents: []
     - slug: warranty
       title: Гарантия
@@ -76,7 +72,6 @@ ai_topics:
       featured_image: ""
       illustration_images: []
       explainer_videos: []
-      narration_audio_files: []
       reference_documents: []
     - slug: returns
       title: Возврат
@@ -84,7 +79,6 @@ ai_topics:
       featured_image: ""
       illustration_images: []
       explainer_videos: []
-      narration_audio_files: []
       reference_documents: []
     - slug: promo
       title: Акции
@@ -92,7 +86,6 @@ ai_topics:
       featured_image: ""
       illustration_images: []
       explainer_videos: []
-      narration_audio_files: []
       reference_documents: []
     - slug: support
       title: Поддержка
@@ -100,7 +93,6 @@ ai_topics:
       featured_image: ""
       illustration_images: []
       explainer_videos: []
-      narration_audio_files: []
       reference_documents: []
     - slug: pickup
       title: Самовывоз
@@ -108,7 +100,6 @@ ai_topics:
       featured_image: ""
       illustration_images: []
       explainer_videos: []
-      narration_audio_files: []
       reference_documents: []
 ai_products:
     - ref: coffee-machine
@@ -125,12 +116,9 @@ ai_products:
         - 780c212c-155f-508a-9385-ba92810b9203
       demo_videos:
         - f7601811-55db-5216-bc74-99108b0dc034
-      audio_description_files: []
       certificate_documents:
         - 06a1a46b-089b-57a1-8e73-e8624cc77c8c
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: cookware-set
       name: Набор посуды
       price: 24 900 ₸
@@ -143,11 +131,8 @@ ai_products:
         - a898396d-bb87-5f2f-b471-6a0d5d225620
         - 6f8f97dd-8954-5214-b9c6-441fdc6d2ebd
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: blender-bosch
       name: Блендер Bosch
       price: 11 200 ₸
@@ -158,11 +143,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: blender-philips
       name: Блендер Philips
       price: 15 400 ₸
@@ -175,11 +157,8 @@ ai_products:
         - 4950a261-d666-553a-af54-4b51e0f2bdf0
         - cb88fdec-1322-57a4-9df6-8fc4fa2e131b
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: blender-xiaomi
       name: Блендер Xiaomi
       price: 19 500 ₸
@@ -190,11 +169,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: blender-tefal
       name: Блендер Tefal
       price: 23 600 ₸
@@ -208,11 +184,8 @@ ai_products:
         - 83e71492-d8b6-516a-8cbe-01bcf95a62ca
       demo_videos:
         - dafe8281-9766-535f-8257-cc9d9f8cd6f8
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: blender-redmond
       name: Блендер Redmond
       price: 27 800 ₸
@@ -223,11 +196,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: blender-panasonic
       name: Блендер Panasonic
       price: 31 900 ₸
@@ -240,12 +210,9 @@ ai_products:
         - d0d2236b-585a-5e77-a259-e82e7d7421d3
         - 346e6eb1-ddc6-580d-bf7d-5ed863b7ed12
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - 71775776-3b31-5ff8-9e75-7c832f592060
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: blender-samsung
       name: Блендер Samsung
       price: 36 000 ₸
@@ -256,11 +223,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: kettle-bosch
       name: Чайник Bosch
       price: 40 200 ₸
@@ -271,11 +235,8 @@ ai_products:
       featured_image: 51455145-7ec4-5ba0-873a-613167eccc60
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: kettle-philips
       name: Чайник Philips
       price: 44 300 ₸
@@ -286,11 +247,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: kettle-xiaomi
       name: Чайник Xiaomi
       price: 48 500 ₸
@@ -303,11 +261,8 @@ ai_products:
         - 4dedf7d5-bba3-51a1-8409-799eb9b75a4e
         - cdd15261-64fa-5c8c-97da-5d7f7d827ab7
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: kettle-tefal
       name: Чайник Tefal
       price: 52 600 ₸
@@ -318,11 +273,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: kettle-redmond
       name: Чайник Redmond
       price: 56 700 ₸
@@ -336,11 +288,8 @@ ai_products:
         - 1aa0aa5f-beb9-5c91-931f-eba652a85756
       demo_videos:
         - 7d1aa04e-28eb-5fcd-b533-21349040da27
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: kettle-panasonic
       name: Чайник Panasonic
       price: 60 900 ₸
@@ -351,11 +300,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: kettle-samsung
       name: Чайник Samsung
       price: 65 000 ₸
@@ -368,12 +314,9 @@ ai_products:
         - 8b74f47f-4010-5fc9-8b6f-5fd1804d314d
         - 6b0965fe-c489-5337-a90d-2b91e1a2dd1c
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - 806a283c-f084-50a6-9469-8375b221b09c
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: toaster-bosch
       name: Тостер Bosch
       price: 69 100 ₸
@@ -384,11 +327,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: toaster-philips
       name: Тостер Philips
       price: 73 300 ₸
@@ -399,11 +339,8 @@ ai_products:
       featured_image: f565f409-7250-5d7b-b2dc-792b7397fbe7
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: toaster-xiaomi
       name: Тостер Xiaomi
       price: 77 400 ₸
@@ -414,11 +351,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: toaster-tefal
       name: Тостер Tefal
       price: 81 600 ₸
@@ -431,11 +365,8 @@ ai_products:
         - 107d9574-c9f5-5a25-8623-d75954f2b0d0
         - d9d7a1ea-f605-5417-9dd7-39753afdbd42
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: toaster-redmond
       name: Тостер Redmond
       price: 85 700 ₸
@@ -446,11 +377,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: toaster-panasonic
       name: Тостер Panasonic
       price: 89 800 ₸
@@ -464,11 +392,8 @@ ai_products:
         - d5d3beb2-c164-5a97-931c-197bce882339
       demo_videos:
         - faafa91e-4986-5b77-8f61-d6fc6f55cd1f
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: toaster-samsung
       name: Тостер Samsung
       price: 94 000 ₸
@@ -479,11 +404,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: multicooker-bosch
       name: Мультиварка Bosch
       price: 98 100 ₸
@@ -496,12 +418,9 @@ ai_products:
         - b59ffae7-3d91-5d56-a475-d82efeefd6bb
         - ee1d9b88-7e97-5119-887b-9a9c90231874
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - 97029a0b-99b8-56e6-8888-366ac7bd965d
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: multicooker-philips
       name: Мультиварка Philips
       price: 5 200 ₸
@@ -512,11 +431,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: multicooker-xiaomi
       name: Мультиварка Xiaomi
       price: 9 400 ₸
@@ -527,11 +443,8 @@ ai_products:
       featured_image: a9e5b6a7-47f7-5bc7-b8e8-ea98beb7e752
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: multicooker-tefal
       name: Мультиварка Tefal
       price: 13 500 ₸
@@ -542,11 +455,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: multicooker-redmond
       name: Мультиварка Redmond
       price: 17 600 ₸
@@ -559,11 +469,8 @@ ai_products:
         - 22e24780-c831-5abd-90ca-224b23c87dad
         - 710898e4-33e9-54cf-a602-a8c812fe3a48
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: multicooker-panasonic
       name: Мультиварка Panasonic
       price: 21 800 ₸
@@ -574,11 +481,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: multicooker-samsung
       name: Мультиварка Samsung
       price: 25 900 ₸
@@ -592,11 +496,8 @@ ai_products:
         - 89a92723-7ea9-5d1f-90b9-845a29a3d47f
       demo_videos:
         - 1f64ea69-f851-5b0d-b0e1-9ef3b8b84f0c
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: microwave-bosch
       name: Микроволновая печь Bosch
       price: 30 100 ₸
@@ -607,11 +508,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: microwave-philips
       name: Микроволновая печь Philips
       price: 34 200 ₸
@@ -624,12 +522,9 @@ ai_products:
         - 23636bfb-48f8-570e-931b-d705f09d44b8
         - f4488dbc-965e-50c1-9fa8-ca13d70e1ee5
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - 21f7c2fc-9ea2-5d7d-a6bd-36a19c6276c9
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: microwave-xiaomi
       name: Микроволновая печь Xiaomi
       price: 38 300 ₸
@@ -640,11 +535,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: microwave-tefal
       name: Микроволновая печь Tefal
       price: 42 500 ₸
@@ -655,11 +547,8 @@ ai_products:
       featured_image: 0becd3a9-a2ac-52cd-877d-f634d257fb61
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: microwave-redmond
       name: Микроволновая печь Redmond
       price: 46 600 ₸
@@ -670,11 +559,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: microwave-panasonic
       name: Микроволновая печь Panasonic
       price: 50 700 ₸
@@ -687,11 +573,8 @@ ai_products:
         - 9b0974c5-a223-5a1b-af19-83c3e3b7c101
         - e1ae43f2-360c-595a-933c-0e8cb194de9a
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: microwave-samsung
       name: Микроволновая печь Samsung
       price: 54 900 ₸
@@ -702,11 +585,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: vacuum-bosch
       name: Пылесос Bosch
       price: 59 000 ₸
@@ -720,11 +600,8 @@ ai_products:
         - 9babeed6-ae8b-575c-885c-4581eb8d9abd
       demo_videos:
         - ce143c84-8459-5c6e-8ea7-a84e876b5a2b
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: vacuum-philips
       name: Пылесос Philips
       price: 63 200 ₸
@@ -735,11 +612,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: vacuum-xiaomi
       name: Пылесос Xiaomi
       price: 67 300 ₸
@@ -752,12 +626,9 @@ ai_products:
         - fc7d5e3a-2f22-553d-aaf4-6521bdf17aab
         - 54ebb200-5e73-5818-a603-149cd2bf9885
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - d36a17c4-80ac-5b3c-bb7c-832886d6303a
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: vacuum-tefal
       name: Пылесос Tefal
       price: 71 400 ₸
@@ -768,11 +639,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: vacuum-redmond
       name: Пылесос Redmond
       price: 75 600 ₸
@@ -783,11 +651,8 @@ ai_products:
       featured_image: cddf2010-a849-5b59-ade9-e28359a5af12
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: vacuum-panasonic
       name: Пылесос Panasonic
       price: 79 700 ₸
@@ -798,11 +663,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: vacuum-samsung
       name: Пылесос Samsung
       price: 83 800 ₸
@@ -815,11 +677,8 @@ ai_products:
         - a090db12-c5c7-515e-9330-468675b28c46
         - b6a191d5-92e2-500a-8e90-0efb09994ce3
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: iron-bosch
       name: Утюг Bosch
       price: 88 000 ₸
@@ -830,11 +689,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: iron-philips
       name: Утюг Philips
       price: 92 100 ₸
@@ -848,11 +704,8 @@ ai_products:
         - 9539056b-4e63-5aac-bb03-fab65194aa8f
       demo_videos:
         - 1f683369-32d7-50a1-a52a-e4af0a9c96b8
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: iron-xiaomi
       name: Утюг Xiaomi
       price: 96 300 ₸
@@ -863,11 +716,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: iron-tefal
       name: Утюг Tefal
       price: 3 400 ₸
@@ -880,12 +730,9 @@ ai_products:
         - 27af1b83-fe28-5e90-8d34-2318cc1118d7
         - bc53da3c-47d9-5450-a5f9-6f6b6d220555
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - d8b427a8-a716-53b2-8c70-221dd01fa534
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: iron-redmond
       name: Утюг Redmond
       price: 7 500 ₸
@@ -896,11 +743,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: iron-panasonic
       name: Утюг Panasonic
       price: 11 700 ₸
@@ -911,11 +755,8 @@ ai_products:
       featured_image: ff3d71fd-6c44-5e17-a576-1f5044666ce8
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: iron-samsung
       name: Утюг Samsung
       price: 15 800 ₸
@@ -926,11 +767,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: fan-bosch
       name: Вентилятор Bosch
       price: 19 900 ₸
@@ -943,11 +781,8 @@ ai_products:
         - 1be2c01d-c6e0-5263-86e0-a24e1c553aa9
         - 7e565429-c089-5c07-9c54-5e47af15cc3c
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: fan-philips
       name: Вентилятор Philips
       price: 24 100 ₸
@@ -958,11 +793,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: fan-xiaomi
       name: Вентилятор Xiaomi
       price: 28 200 ₸
@@ -976,11 +808,8 @@ ai_products:
         - e52f1c32-06ca-55ca-a8f1-b53acb9afe22
       demo_videos:
         - e9d3dcf2-9c00-5804-9fd4-0287688dbf8b
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: fan-tefal
       name: Вентилятор Tefal
       price: 32 300 ₸
@@ -991,11 +820,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: fan-redmond
       name: Вентилятор Redmond
       price: 36 500 ₸
@@ -1008,12 +834,9 @@ ai_products:
         - 9331ced7-403d-5559-9a14-05817ca9cc79
         - 94ca6cdd-7a93-5101-948a-fd931f1609e7
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - 64bbb22e-94e7-5816-a233-a6c4d1ce50ad
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: fan-panasonic
       name: Вентилятор Panasonic
       price: 40 600 ₸
@@ -1024,11 +847,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: fan-samsung
       name: Вентилятор Samsung
       price: 44 800 ₸
@@ -1039,11 +859,8 @@ ai_products:
       featured_image: 3d87f274-3166-531d-a769-c994cba2ac5c
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: heater-bosch
       name: Обогреватель Bosch
       price: 48 900 ₸
@@ -1054,11 +871,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: heater-philips
       name: Обогреватель Philips
       price: 53 000 ₸
@@ -1071,11 +885,8 @@ ai_products:
         - 31f285d7-973e-50d4-a9af-fded2e0a4b32
         - e03de3e7-ea4b-511a-8e4d-05181fc8866e
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: heater-xiaomi
       name: Обогреватель Xiaomi
       price: 57 200 ₸
@@ -1086,11 +897,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: heater-tefal
       name: Обогреватель Tefal
       price: 61 300 ₸
@@ -1104,11 +912,8 @@ ai_products:
         - 610cfdda-9d02-5ec6-8021-85b04e09fe09
       demo_videos:
         - 06d91d6f-9d61-504e-88cb-20e37063f41f
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: heater-redmond
       name: Обогреватель Redmond
       price: 65 400 ₸
@@ -1119,11 +924,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: heater-panasonic
       name: Обогреватель Panasonic
       price: 69 600 ₸
@@ -1136,12 +938,9 @@ ai_products:
         - 8578cfa5-cd52-59eb-99cd-d7969ef00485
         - 66297042-9d9b-53a1-83c2-71c908ae6cd9
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - 2619d234-aa78-5918-845b-3226aefb1d81
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: heater-samsung
       name: Обогреватель Samsung
       price: 73 700 ₸
@@ -1152,11 +951,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: air-purifier-bosch
       name: Очиститель воздуха Bosch
       price: 77 900 ₸
@@ -1167,11 +963,8 @@ ai_products:
       featured_image: 7a77be63-c832-5c9c-8a41-fe3cdb76f3e1
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: air-purifier-philips
       name: Очиститель воздуха Philips
       price: 82 000 ₸
@@ -1182,11 +975,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: air-purifier-xiaomi
       name: Очиститель воздуха Xiaomi
       price: 86 100 ₸
@@ -1199,11 +989,8 @@ ai_products:
         - e9bd1ba2-287b-5f41-a353-1aa09c1e47dd
         - d43f3022-fc7f-5883-a168-03910b99426a
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: air-purifier-tefal
       name: Очиститель воздуха Tefal
       price: 90 300 ₸
@@ -1214,11 +1001,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: air-purifier-redmond
       name: Очиститель воздуха Redmond
       price: 94 400 ₸
@@ -1232,11 +1016,8 @@ ai_products:
         - 9357cd93-3799-57ed-a25f-585a801cee5b
       demo_videos:
         - 8e463fe4-5d60-54b2-b2eb-c8e3fa62a226
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: air-purifier-panasonic
       name: Очиститель воздуха Panasonic
       price: 98 500 ₸
@@ -1247,11 +1028,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: air-purifier-samsung
       name: Очиститель воздуха Samsung
       price: 5 700 ₸
@@ -1264,12 +1042,9 @@ ai_products:
         - e2bdb016-5fad-57e1-a261-6806f4e8c367
         - 5cb191c9-fefa-5a8e-af4a-9120c44cb73a
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - 3ecb1066-f3ed-530e-93ca-ffeff60bc2bc
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: juicer-bosch
       name: Соковыжималка Bosch
       price: 9 800 ₸
@@ -1280,11 +1055,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: juicer-philips
       name: Соковыжималка Philips
       price: 14 000 ₸
@@ -1295,11 +1067,8 @@ ai_products:
       featured_image: 8cd02f03-bce7-5148-9ec8-6ecf885913a2
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: juicer-xiaomi
       name: Соковыжималка Xiaomi
       price: 18 100 ₸
@@ -1310,11 +1079,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: juicer-tefal
       name: Соковыжималка Tefal
       price: 22 200 ₸
@@ -1327,11 +1093,8 @@ ai_products:
         - d73281d1-c877-5ad7-8492-d609cef7af90
         - b4b6a2e3-b218-52dc-af00-96e10637a6bd
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: juicer-redmond
       name: Соковыжималка Redmond
       price: 26 400 ₸
@@ -1342,11 +1105,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: juicer-panasonic
       name: Соковыжималка Panasonic
       price: 30 500 ₸
@@ -1360,11 +1120,8 @@ ai_products:
         - 552e9b8d-aa20-57cd-b729-f251824b3ded
       demo_videos:
         - 7b6a67e6-0548-511e-baee-c1e1e2116124
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: juicer-samsung
       name: Соковыжималка Samsung
       price: 34 600 ₸
@@ -1375,11 +1132,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: food-processor-bosch
       name: Кухонный комбайн Bosch
       price: 38 800 ₸
@@ -1392,12 +1146,9 @@ ai_products:
         - 65e6cb45-1a2a-5786-ad1e-54e3f1853437
         - 4e066d8c-d31d-5b0e-a396-03be8a16d1ad
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - bc952f6a-5199-5f61-b48b-11d38c095cc2
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: food-processor-philips
       name: Кухонный комбайн Philips
       price: 42 900 ₸
@@ -1408,11 +1159,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: food-processor-xiaomi
       name: Кухонный комбайн Xiaomi
       price: 47 000 ₸
@@ -1423,11 +1171,8 @@ ai_products:
       featured_image: a2c7af23-6b67-5559-a43c-5baea19904cb
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: food-processor-tefal
       name: Кухонный комбайн Tefal
       price: 51 200 ₸
@@ -1438,11 +1183,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: food-processor-redmond
       name: Кухонный комбайн Redmond
       price: 55 300 ₸
@@ -1455,11 +1197,8 @@ ai_products:
         - 7127bef7-d675-53e0-ab39-18c6d4feb6d3
         - 1550d98b-023c-5941-ab8d-95b1a9be014e
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: food-processor-panasonic
       name: Кухонный комбайн Panasonic
       price: 59 500 ₸
@@ -1470,11 +1209,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: food-processor-samsung
       name: Кухонный комбайн Samsung
       price: 63 600 ₸
@@ -1488,11 +1224,8 @@ ai_products:
         - 91d7e6be-3f7c-52a5-b12c-e8825e19e3aa
       demo_videos:
         - a48d87d5-a87e-5c81-99cf-25928a84c5ec
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: waffle-maker-bosch
       name: Вафельница Bosch
       price: 67 700 ₸
@@ -1503,11 +1236,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: waffle-maker-philips
       name: Вафельница Philips
       price: 71 900 ₸
@@ -1520,12 +1250,9 @@ ai_products:
         - 5d414a3e-a3ea-5fa4-a3ef-8893804e026c
         - 44ca68ec-abea-5e7a-9eed-b667da19a571
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - 8d6cc8e4-6aec-502f-bcf2-fbc5e1750134
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: waffle-maker-xiaomi
       name: Вафельница Xiaomi
       price: 76 000 ₸
@@ -1536,11 +1263,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: waffle-maker-tefal
       name: Вафельница Tefal
       price: 80 100 ₸
@@ -1551,11 +1275,8 @@ ai_products:
       featured_image: aa255089-7a06-57da-894a-a98fd6275204
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: waffle-maker-redmond
       name: Вафельница Redmond
       price: 84 300 ₸
@@ -1566,11 +1287,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: waffle-maker-panasonic
       name: Вафельница Panasonic
       price: 88 400 ₸
@@ -1583,11 +1301,8 @@ ai_products:
         - 0456a6ee-4982-524d-a50f-562f8ceecde5
         - c8c3ed8e-0fbe-5fa9-83d6-50dc41076c31
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: waffle-maker-samsung
       name: Вафельница Samsung
       price: 92 600 ₸
@@ -1598,11 +1313,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: sandwich-maker-bosch
       name: Сэндвичница Bosch
       price: 96 700 ₸
@@ -1616,11 +1328,8 @@ ai_products:
         - 531ec4fc-234f-562e-ae39-7624cdcf417d
       demo_videos:
         - 93ede760-23dd-5d4e-89cd-7dea8be4fe02
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: sandwich-maker-philips
       name: Сэндвичница Philips
       price: 3 800 ₸
@@ -1631,11 +1340,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: sandwich-maker-xiaomi
       name: Сэндвичница Xiaomi
       price: 8 000 ₸
@@ -1648,12 +1354,9 @@ ai_products:
         - 6d497526-54c2-5555-8c53-c13591794d23
         - c8aa4d07-3dbf-59d4-ba0e-f2bdbde6f73e
       demo_videos: []
-      audio_description_files: []
       certificate_documents:
         - ec878baf-a6a6-535a-b6d4-9f485b6fad6c
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: sandwich-maker-tefal
       name: Сэндвичница Tefal
       price: 12 100 ₸
@@ -1664,11 +1367,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: sandwich-maker-redmond
       name: Сэндвичница Redmond
       price: 16 200 ₸
@@ -1679,11 +1379,8 @@ ai_products:
       featured_image: 3f05ea68-501e-5996-8ae2-e8a50cccfe46
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: sandwich-maker-panasonic
       name: Сэндвичница Panasonic
       price: 20 400 ₸
@@ -1694,11 +1391,8 @@ ai_products:
       featured_image: ""
       gallery_images: []
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
     - ref: sandwich-maker-samsung
       name: Сэндвичница Samsung
       price: 24 500 ₸
@@ -1711,11 +1405,8 @@ ai_products:
         - 90b58f02-b9e9-5c82-949a-9398a4f3f82f
         - b7d73cac-92bc-5255-92ca-7a4e86ad0199
       demo_videos: []
-      audio_description_files: []
       certificate_documents: []
-      manual_documents: []
       guarantee_documents: []
-      specification_documents: []
 ai_tariffs: []
 ai_contacts:
     whatsapp: ""
