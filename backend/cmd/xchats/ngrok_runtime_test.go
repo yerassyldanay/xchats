@@ -77,6 +77,42 @@ func (f *fakeNgrokDomainLister) ListReservedDomains(context.Context, string) ([]
 	return f.domains, f.err
 }
 
+func TestNgrokCredsFrom(t *testing.T) {
+	if got := ngrokCredsFrom(nil); got != nil {
+		t.Fatalf("ngrokCredsFrom(nil) = %#v, want a true nil interface", got)
+	}
+
+	var nilChain *credentials.Chain
+	// Sanity-check the gotcha this helper exists to avoid: boxing a nil
+	// *credentials.Chain directly into the interface produces a non-nil
+	// interface value, unlike ngrokCredsFrom(nil) above.
+	var naive ngrokCredentialReader = nilChain
+	if naive == nil {
+		t.Fatal("boxing a nil *credentials.Chain directly produced a nil interface; the gotcha this test guards no longer applies, ngrokCredsFrom may be unnecessary")
+	}
+
+	if got := ngrokCredsFrom(&credentials.Chain{}); got == nil {
+		t.Fatal("ngrokCredsFrom(non-nil chain) = nil, want a non-nil reader")
+	}
+}
+
+func TestApplyNgrokPublicOriginNilCredsFromChain(t *testing.T) {
+	// Reproduces the real call-site shape from runServe: a nil
+	// *credentials.Chain routed through ngrokCredsFrom must not panic.
+	cfg := &config.Config{Server: config.ServerConfig{APIBaseURL: "http://localhost:8090"}}
+	var nilChain *credentials.Chain
+	gotAuto, err := applyNgrokPublicOrigin(context.Background(), cfg, ngrokCredsFrom(nilChain), &fakeNgrokSettingsStore{}, nil)
+	if err != nil {
+		t.Fatalf("applyNgrokPublicOrigin error = %v", err)
+	}
+	if gotAuto {
+		t.Error("auto-start = true, want false")
+	}
+	if cfg.Server.APIBaseURL != "http://localhost:8090" {
+		t.Errorf("APIBaseURL = %q, want unchanged", cfg.Server.APIBaseURL)
+	}
+}
+
 func TestApplyNgrokPublicOrigin(t *testing.T) {
 	tests := []struct {
 		name       string

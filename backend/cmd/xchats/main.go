@@ -110,7 +110,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	credsChain := openCredentialsAndProvisionSecrets(ctx, cfg, log)
 	settingsStore := settings.NewStore(resolveConfigDir(log))
-	autoStartTunnel, err := applyNgrokPublicOrigin(ctx, cfg, credsChain, settingsStore, ngrokapi.NewClient())
+	autoStartTunnel, err := applyNgrokPublicOrigin(ctx, cfg, ngrokCredsFrom(credsChain), settingsStore, ngrokapi.NewClient())
 	if err != nil {
 		log.Warn("ngrok static domain is not usable as the MCP public origin", "err", err)
 	}
