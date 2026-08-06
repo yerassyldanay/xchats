@@ -1,18 +1,25 @@
 # Third-party notices — proposal
 
-**Status: proposal, and a starting point only — not a verified legal
-document.** This list was compiled from `backend/go.mod`'s direct
+**Superseded.** The real, tool-generated file now lives at
+[`../../../THIRD_PARTY_NOTICES.md`](../../../THIRD_PARTY_NOTICES.md),
+produced with `google/go-licenses` (Go) and `license-checker-rseidelsohn`
+(npm) reading actual `LICENSE` files from the module cache rather than from
+recall. **This draft's own manual, direct-dependency-only approach is what
+caused the error below** — it never walked the transitive tree, so it
+missed `go.mau.fi/libsignal`, and the tooling-generated file is kept as
+current going forward. This document is retained for its historical record
+of the mistake, not as a source of truth.
+
+<details>
+<summary>Original draft text (superseded, kept for context)</summary>
+
+This list was compiled from `backend/go.mod`'s direct
 requirements and `frontend/package.json`'s `dependencies`, with license
 identifiers filled in from general knowledge of these (well-known, widely
 used) packages rather than by fetching and checking each project's actual
-`LICENSE` file in this pass. **Before publishing a real
-`THIRD_PARTY_NOTICES` file, regenerate and verify this with tooling** —
-[`google/go-licenses`](https://github.com/google/go-licenses) for the Go
-module graph, [`license-checker`](https://github.com/davglass/license-checker)
-or `npx license-checker-rseidelsohn` for npm — which read the actual
-license files rather than relying on recall, and will also surface the full
-*transitive* dependency tree (this list is direct/first-order dependencies
-only).
+`LICENSE` file in this pass.
+
+</details>
 
 ## Why this exists
 
@@ -75,16 +82,32 @@ wanted regardless.
 | `tailwind-merge` | MIT |
 | `yaml` | ISC |
 
-## No copyleft-incompatible findings
+## Correction: this finding was wrong
 
-At a glance, every direct dependency above is permissively licensed
-(MIT/BSD/Apache-2.0/ISC) except `whatsmeow`'s file-level MPL-2.0 — none
-create an obligation incompatible with shipping xchats itself under a
-permissive license, and (per the flag above) none appear incompatible with
-the AGPL-3.0 proposal either. This is not a substitute for running the
-verification tooling linked above, particularly for the full transitive
-tree, which is meaningfully larger than this direct-dependency list (see
-`go.mod`'s `// indirect` block and `package-lock.json`).
+This section originally claimed every dependency was permissively licensed
+and that nothing here was incompatible with shipping xchats under a
+permissive (MIT/Apache-2.0) license. **That was wrong**, and it was wrong
+specifically because this draft only looked at *direct* dependencies:
+`go.mau.fi/libsignal` — pulled in transitively through `go.mau.fi/whatsmeow`
+— is **GPL-3.0**, and roughly two dozen of its packages
+(`go.mau.fi/libsignal/{ecc,groups,kdf,cipher,...}`) are statically linked
+into `cmd/xchats` the moment WhatsApp connectivity is built in. Confirmed via
+`go list -deps ./cmd/xchats | grep libsignal` and reading
+`go.mau.fi/libsignal@v0.2.2/LICENSE` directly from the module cache.
+
+That finding is why the project license is AGPL-3.0-only rather than
+MIT/Apache-2.0 — see [`LICENSE-proposal.md`](LICENSE-proposal.md)'s own
+correction. GPL-3.0 and AGPL-3.0 are explicitly compatible with each other
+(the [FSF's GPL/AGPL FAQ
+entry](https://www.gnu.org/licenses/gpl-faq.en.html#AGPLGPL)), so this is
+not a conflict blocking the project's own license — it's the reason
+MIT/Apache-2.0 were never actually on the table for the distributed binary.
+
+The generated [`THIRD_PARTY_NOTICES.md`](../../../THIRD_PARTY_NOTICES.md)
+lists `go.mau.fi/libsignal` (GPL-3.0) and `go.mau.fi/util` (MPL-2.0)
+explicitly, alongside `whatsmeow`'s own file-level MPL-2.0, and is generated
+from the real transitive build graph of the one distributed binary
+(`./cmd/xchats`), not hand-maintained.
 
 ## Maintaining this file
 

@@ -1,0 +1,332 @@
+# Third-party notices
+
+xchats is distributed under [AGPL-3.0-only](LICENSE). It incorporates
+third-party open-source software, listed below by license. This file is
+**generated from the actual build graph**, not hand-maintained:
+
+- **Go** — `google/go-licenses report ./cmd/xchats` and
+  `google/go-licenses save ./cmd/xchats --save_path=third_party_licenses/`,
+  scoped to the one distributed binary (`backend/cmd/xchats`) rather than
+  `./...`, so it doesn't pull in dev-only tools like `cmd/promptpreview`.
+  Every license below was read from the actual `LICENSE` file in the module
+  cache, not inferred from the package name.
+- **npm** — `license-checker-rseidelsohn --production`, which walks the full
+  transitive dependency tree of what ships in the built frontend bundle
+  (`devDependencies` — Vite, TypeScript, Vitest, Playwright, Tailwind — are
+  excluded; their own code never ships, only their output does).
+
+To regenerate: see [Maintaining this file](#maintaining-this-file) below.
+
+## Copyleft dependencies — read this section first
+
+Two dependencies are not permissively licensed. Both come in through
+[`go.mau.fi/whatsmeow`](https://github.com/tulir/whatsmeow) (MPL-2.0, WhatsApp
+connectivity):
+
+### `go.mau.fi/libsignal` — GPL-3.0
+
+Pulled in transitively by whatsmeow (not a direct dependency of this repo).
+Confirmed via `go list -deps ./cmd/xchats | grep libsignal`: roughly two
+dozen of its packages (`ecc`, `groups`, `cipher`, `kdf`, `session`, `state`,
+...) are statically linked into the `xchats` binary whenever WhatsApp
+connectivity is built in — which is always, in this repo's default build.
+
+This is the reason xchats is licensed AGPL-3.0-only rather than
+MIT/Apache-2.0: a GPL-3.0 dependency statically linked into a distributed
+binary rules out permissive licensing of that binary, regardless of this
+project's own license preference. GPL-3.0 and AGPL-3.0 are explicitly
+compatible with each other (see the FSF's [GPL/AGPL compatibility FAQ
+entry](https://www.gnu.org/licenses/gpl-faq.en.html#AGPLGPL)), so this
+dependency did not force AGPL specifically — GPL-3.0-only would also have
+been legally workable. AGPL-3.0 was chosen as project policy for its
+network-service reasoning; see
+[`docs/release/proposals/LICENSE-proposal.md`](docs/release/proposals/LICENSE-proposal.md).
+
+Full source is vendored at
+[`third_party_licenses/go.mau.fi/libsignal/`](third_party_licenses/go.mau.fi/libsignal/)
+to satisfy GPL-3.0's corresponding-source requirement. Since xchats ships its
+own complete source publicly, this requirement is already met independent of
+the vendored copy — the copy exists for convenience and auditability.
+
+### `go.mau.fi/whatsmeow` and `go.mau.fi/util` — MPL-2.0
+
+File-level weak copyleft: modifications to MPL-licensed *files themselves*
+must stay MPL-2.0 and be made available, but this does not extend to other
+files that merely import them (unlike GPL/AGPL). xchats does not currently
+modify either module (no `replace` directive in `backend/go.mod`), so the
+practical obligation is limited to reproducing the license text and pointing
+at the upstream source, both satisfied by this file and the vendored copies
+at
+[`third_party_licenses/go.mau.fi/whatsmeow/`](third_party_licenses/go.mau.fi/whatsmeow/)
+and
+[`third_party_licenses/go.mau.fi/util/`](third_party_licenses/go.mau.fi/util/).
+
+## Go dependencies (`backend/cmd/xchats` build graph)
+
+<!-- GO_LICENSE_TABLE_START -->
+### GPL-3.0 (1)
+
+| Package | Source |
+|---|---|
+| `go.mau.fi/libsignal` | <https://github.com/tulir/libsignal-protocol-go/blob/v0.2.2/LICENSE> |
+
+### MPL-2.0 (2)
+
+| Package | Source |
+|---|---|
+| `go.mau.fi/util` | <https://github.com/mautrix/go-util/blob/f9ffa7eca58d/LICENSE> |
+| `go.mau.fi/whatsmeow` | <https://github.com/tulir/whatsmeow/blob/e229058e14eb/LICENSE> |
+
+### Apache-2.0 (19)
+
+| Package | Source |
+|---|---|
+| `github.com/go-logr/logr` | <https://github.com/go-logr/logr/blob/v1.4.3/LICENSE> |
+| `github.com/go-logr/stdr` | <https://github.com/go-logr/stdr/blob/v1.2.2/LICENSE> |
+| `github.com/inconshreveable/log15` | <https://github.com/inconshreveable/log15> (verified manually — short-form notice not auto-classified) |
+| `github.com/inconshreveable/log15/v3` | <https://github.com/inconshreveable/log15> (verified manually — short-form notice not auto-classified) |
+| `github.com/inconshreveable/log15/v3/ext` | <https://github.com/inconshreveable/log15> (verified manually — short-form notice not auto-classified) |
+| `github.com/petermattis/goid` | <https://github.com/petermattis/goid/blob/97594f28f5ca/LICENSE> |
+| `go.mongodb.org/mongo-driver/v2` | <https://github.com/mongodb/mongo-go-driver/blob/v2.5.0/LICENSE> |
+| `go.opentelemetry.io/auto/sdk` | <https://github.com/open-telemetry/opentelemetry-go-instrumentation/blob/sdk/v1.2.1/sdk/LICENSE> |
+| `go.opentelemetry.io/otel` | <https://github.com/open-telemetry/opentelemetry-go/blob/v1.43.0/LICENSE> |
+| `go.opentelemetry.io/otel/exporters/otlp/otlptrace` | <https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.43.0/exporters/otlp/otlptrace/LICENSE> |
+| `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` | <https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.43.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE> |
+| `go.opentelemetry.io/otel/metric` | <https://github.com/open-telemetry/opentelemetry-go/blob/metric/v1.43.0/metric/LICENSE> |
+| `go.opentelemetry.io/otel/sdk` | <https://github.com/open-telemetry/opentelemetry-go/blob/sdk/v1.43.0/sdk/LICENSE> |
+| `go.opentelemetry.io/otel/trace` | <https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.43.0/trace/LICENSE> |
+| `go.opentelemetry.io/proto/otlp` | <https://github.com/open-telemetry/opentelemetry-proto-go/blob/otlp/v1.10.0/otlp/LICENSE> |
+| `google.golang.org/genproto/googleapis/api/httpbody` | <https://github.com/googleapis/go-genproto/blob/9d38bb4040a9/googleapis/api/LICENSE> |
+| `google.golang.org/genproto/googleapis/rpc/status` | <https://github.com/googleapis/go-genproto/blob/9d38bb4040a9/googleapis/rpc/LICENSE> |
+| `google.golang.org/grpc` | <https://github.com/grpc/grpc-go/blob/v1.80.0/LICENSE> |
+| `gopkg.in/yaml.v2` | <https://github.com/go-yaml/yaml/blob/v2.4.0/LICENSE> |
+
+### BSD-3-Clause (23)
+
+| Package | Source |
+|---|---|
+| `filippo.io/edwards25519` | <https://github.com/FiloSottile/edwards25519/blob/v1.2.0/LICENSE> |
+| `github.com/gofrs/flock` | <https://github.com/gofrs/flock/blob/v0.13.0/LICENSE> |
+| `github.com/google/uuid` | <https://github.com/google/uuid/blob/v1.6.0/LICENSE> |
+| `github.com/grpc-ecosystem/grpc-gateway/v2` | <https://github.com/grpc-ecosystem/grpc-gateway/blob/v2.28.0/LICENSE> |
+| `github.com/remyoudompheng/bigfft` | <https://github.com/remyoudompheng/bigfft/blob/24d4a6f8daec/LICENSE> |
+| `go.opentelemetry.io/otel` | <https://github.com/open-telemetry/opentelemetry-go/blob/v1.43.0/LICENSE> |
+| `go.opentelemetry.io/otel/exporters/otlp/otlptrace` | <https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.43.0/exporters/otlp/otlptrace/LICENSE> |
+| `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` | <https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.43.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE> |
+| `go.opentelemetry.io/otel/metric` | <https://github.com/open-telemetry/opentelemetry-go/blob/metric/v1.43.0/metric/LICENSE> |
+| `go.opentelemetry.io/otel/sdk` | <https://github.com/open-telemetry/opentelemetry-go/blob/sdk/v1.43.0/sdk/LICENSE> |
+| `go.opentelemetry.io/otel/trace` | <https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.43.0/trace/LICENSE> |
+| `golang.org/x/crypto` | <https://cs.opensource.google/go/x/crypto/+/v0.54.0:LICENSE> |
+| `golang.org/x/exp/constraints` | <https://cs.opensource.google/go/x/exp/+/9ea1abe5:LICENSE> |
+| `golang.org/x/net` | <https://cs.opensource.google/go/x/net/+/v0.57.0:LICENSE> |
+| `golang.org/x/sync` | <https://cs.opensource.google/go/x/sync/+/v0.22.0:LICENSE> |
+| `golang.org/x/sys` | <https://cs.opensource.google/go/x/sys/+/v0.47.0:LICENSE> |
+| `golang.org/x/term` | <https://cs.opensource.google/go/x/term/+/v0.45.0:LICENSE> |
+| `golang.org/x/text` | <https://cs.opensource.google/go/x/text/+/v0.40.0:LICENSE> |
+| `google.golang.org/protobuf` | <https://github.com/protocolbuffers/protobuf-go/blob/v1.36.11/LICENSE> |
+| `modernc.org/libc` | <https://gitlab.com/cznic/libc/-/blob/v1.74.4/LICENSE> |
+| `modernc.org/mathutil` | <https://gitlab.com/cznic/mathutil/-/blob/v1.7.1/LICENSE> |
+| `modernc.org/memory` | <https://gitlab.com/cznic/memory/-/blob/v1.11.0/LICENSE> |
+| `modernc.org/sqlite` | <https://gitlab.com/cznic/sqlite/-/blob/v1.56.0/LICENSE> |
+
+### BSD-2-Clause (1)
+
+| Package | Source |
+|---|---|
+| `github.com/godbus/dbus/v5` | <https://github.com/godbus/dbus/blob/v5.2.2/LICENSE> |
+
+### MIT (30)
+
+| Package | Source |
+|---|---|
+| `github.com/beeper/argo-go` | <https://github.com/beeper/argo-go/blob/v1.1.2/LICENSE> |
+| `github.com/caarlos0/env/v11` | <https://github.com/caarlos0/env/blob/v11.4.1/LICENSE.md> |
+| `github.com/cenkalti/backoff/v5` | <https://github.com/cenkalti/backoff/blob/v5.0.3/LICENSE> |
+| `github.com/cespare/xxhash/v2` | <https://github.com/cespare/xxhash/blob/v2.3.0/LICENSE.txt> |
+| `github.com/dustin/go-humanize` | <https://github.com/dustin/go-humanize/blob/v1.0.1/LICENSE> |
+| `github.com/elliotchance/orderedmap/v3` | <https://github.com/elliotchance/orderedmap/blob/v3.1.0/v3/LICENSE> |
+| `github.com/gabriel-vasile/mimetype` | <https://github.com/gabriel-vasile/mimetype/blob/v1.4.12/LICENSE> |
+| `github.com/gin-contrib/sse` | <https://github.com/gin-contrib/sse/blob/v1.1.0/LICENSE> |
+| `github.com/gin-gonic/gin` | <https://github.com/gin-gonic/gin/blob/v1.12.0/LICENSE> |
+| `github.com/go-playground/locales` | <https://github.com/go-playground/locales/blob/v0.14.1/LICENSE> |
+| `github.com/go-playground/universal-translator` | <https://github.com/go-playground/universal-translator/blob/v0.18.1/LICENSE> |
+| `github.com/go-playground/validator/v10` | <https://github.com/go-playground/validator/blob/v10.30.1/LICENSE> |
+| `github.com/go-stack/stack` | <https://github.com/go-stack/stack/blob/v1.8.1/LICENSE.md> |
+| `github.com/goccy/go-yaml` | <https://github.com/goccy/go-yaml/blob/v1.19.2/LICENSE> |
+| `github.com/jpillora/backoff` | <https://github.com/jpillora/backoff/blob/v1.0.0/LICENSE> |
+| `github.com/leodido/go-urn` | <https://github.com/leodido/go-urn/blob/v1.4.0/LICENSE> |
+| `github.com/mattn/go-colorable` | <https://github.com/mattn/go-colorable/blob/v0.1.14/LICENSE> |
+| `github.com/mattn/go-isatty` | <https://github.com/mattn/go-isatty/blob/v0.0.24/LICENSE> |
+| `github.com/pelletier/go-toml/v2` | <https://github.com/pelletier/go-toml/blob/v2.2.4/LICENSE> |
+| `github.com/quic-go/qpack` | <https://github.com/quic-go/qpack/blob/v0.6.0/LICENSE.md> |
+| `github.com/quic-go/quic-go` | <https://github.com/quic-go/quic-go/blob/v0.59.0/LICENSE> |
+| `github.com/rs/zerolog` | <https://github.com/rs/zerolog/blob/v1.35.1/LICENSE> |
+| `github.com/skip2/go-qrcode` | <https://github.com/skip2/go-qrcode/blob/da1b6568686e/LICENSE> |
+| `github.com/ugorji/go/codec` | <https://github.com/ugorji/go/blob/codec/v1.3.1/codec/LICENSE> |
+| `github.com/vektah/gqlparser/v2/ast` | <https://github.com/vektah/gqlparser/blob/v2.5.27/LICENSE> |
+| `github.com/zalando/go-keyring` | <https://github.com/zalando/go-keyring/blob/v0.2.8/LICENSE> |
+| `go.uber.org/multierr` | <https://github.com/uber-go/multierr/blob/v1.11.0/LICENSE.txt> |
+| `golang.ngrok.com/muxado/v2` | <https://github.com/ngrok/muxado-go/blob/v2.0.1/LICENSE> |
+| `golang.ngrok.com/ngrok` | <https://github.com/ngrok/ngrok-go/blob/v1.13.0/LICENSE.txt> |
+| `gopkg.in/yaml.v3` | <https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE> |
+
+### ISC (1)
+
+| Package | Source |
+|---|---|
+| `github.com/coder/websocket` | <https://github.com/coder/websocket/blob/v1.8.15/LICENSE.txt> |
+<!-- GO_LICENSE_TABLE_END -->
+
+## Frontend dependencies (npm, production only)
+
+<!-- NPM_LICENSE_TABLE_START -->
+### Apache-2.0 (5)
+
+| Package | Repository |
+|---|---|
+| `@internationalized/date@3.12.2` | <https://github.com/adobe/react-spectrum.git#main> |
+| `@internationalized/number@3.6.7` | <https://github.com/adobe/react-spectrum> |
+| `@swc/helpers@0.5.23` | <https://github.com/swc-project/swc> |
+| `class-variance-authority@0.7.1` | <https://github.com/joe-bell/cva> |
+| `typescript@5.9.3` | <https://github.com/microsoft/TypeScript> |
+
+### BSD-3-Clause (2)
+
+| Package | Repository |
+|---|---|
+| `source-map-js@1.2.1` | <https://github.com/7rulnik/source-map-js> |
+| `sprintf-js@1.0.3` | <https://github.com/alexei/sprintf.js> |
+
+### BSD-2-Clause (3)
+
+| Package | Repository |
+|---|---|
+| `entities@4.5.0` | <https://github.com/fb55/entities> |
+| `entities@7.0.1` | <https://github.com/fb55/entities> |
+| `esprima@4.0.1` | <https://github.com/jquery/esprima> |
+
+### MIT (59)
+
+| Package | Repository |
+|---|---|
+| `@babel/helper-string-parser@7.29.7` | <https://github.com/babel/babel> |
+| `@babel/helper-validator-identifier@7.29.7` | <https://github.com/babel/babel> |
+| `@babel/parser@7.29.7` | <https://github.com/babel/babel> |
+| `@babel/types@7.29.7` | <https://github.com/babel/babel> |
+| `@floating-ui/core@1.7.5` | <https://github.com/floating-ui/floating-ui> |
+| `@floating-ui/dom@1.7.6` | <https://github.com/floating-ui/floating-ui> |
+| `@floating-ui/utils@0.2.11` | <https://github.com/floating-ui/floating-ui> |
+| `@floating-ui/vue@1.1.11` | <https://github.com/floating-ui/floating-ui> |
+| `@intlify/core-base@11.4.2` | <https://github.com/intlify/vue-i18n> |
+| `@intlify/devtools-types@11.4.2` | <https://github.com/intlify/vue-i18n> |
+| `@intlify/message-compiler@11.4.2` | <https://github.com/intlify/vue-i18n> |
+| `@intlify/shared@11.4.2` | <https://github.com/intlify/vue-i18n> |
+| `@jridgewell/sourcemap-codec@1.5.5` | <https://github.com/jridgewell/sourcemaps> |
+| `@tanstack/virtual-core@3.17.1` | <https://github.com/TanStack/virtual> |
+| `@tanstack/vue-virtual@3.13.29` | <https://github.com/TanStack/virtual> |
+| `@types/web-bluetooth@0.0.21` | <https://github.com/DefinitelyTyped/DefinitelyTyped> |
+| `@vue/compiler-core@3.5.38` | <https://github.com/vuejs/core> |
+| `@vue/compiler-dom@3.5.38` | <https://github.com/vuejs/core> |
+| `@vue/compiler-sfc@3.5.38` | <https://github.com/vuejs/core> |
+| `@vue/compiler-ssr@3.5.38` | <https://github.com/vuejs/core> |
+| `@vue/devtools-api@6.6.4` | <https://github.com/vuejs/vue-devtools> |
+| `@vue/reactivity@3.5.38` | <https://github.com/vuejs/core> |
+| `@vue/runtime-core@3.5.38` | <https://github.com/vuejs/core> |
+| `@vue/runtime-dom@3.5.38` | <https://github.com/vuejs/core> |
+| `@vue/server-renderer@3.5.38` | <https://github.com/vuejs/core> |
+| `@vue/shared@3.5.38` | <https://github.com/vuejs/core> |
+| `@vueuse/core@14.3.0` | <https://github.com/vueuse/vueuse> |
+| `@vueuse/metadata@14.3.0` | <https://github.com/vueuse/vueuse> |
+| `@vueuse/shared@14.3.0` | <https://github.com/vueuse/vueuse> |
+| `argparse@1.0.10` | <https://github.com/nodeca/argparse> |
+| `aria-hidden@1.2.6` | <https://github.com/theKashey/aria-hidden> |
+| `clsx@2.1.1` | <https://github.com/lukeed/clsx> |
+| `csstype@3.2.3` | <https://github.com/frenic/csstype> |
+| `defu@6.1.7` | <https://github.com/unjs/defu> |
+| `estree-walker@2.0.2` | <https://github.com/Rich-Harris/estree-walker> |
+| `extend-shallow@2.0.1` | <https://github.com/jonschlinkert/extend-shallow> |
+| `gray-matter@4.0.3` | <https://github.com/jonschlinkert/gray-matter> |
+| `is-extendable@0.1.1` | <https://github.com/jonschlinkert/is-extendable> |
+| `js-yaml@3.15.0` | <https://github.com/nodeca/js-yaml> |
+| `kind-of@6.0.3` | <https://github.com/jonschlinkert/kind-of> |
+| `linkify-it@5.0.2` | <https://github.com/markdown-it/linkify-it> |
+| `magic-string@0.30.21` | <https://github.com/Rich-Harris/magic-string> |
+| `markdown-it@14.3.0` | <https://github.com/markdown-it/markdown-it> |
+| `mdurl@2.1.0` | <https://github.com/markdown-it/mdurl> |
+| `nanoid@3.3.16` | <https://github.com/ai/nanoid> |
+| `nanoid@5.1.16` | <https://github.com/ai/nanoid> |
+| `ohash@2.0.11` | <https://github.com/unjs/ohash> |
+| `pinia@2.3.1` | <https://github.com/vuejs/pinia> |
+| `postcss@8.5.15` | <https://github.com/postcss/postcss> |
+| `punycode.js@2.3.1` | <https://github.com/mathiasbynens/punycode.js> |
+| `reka-ui@2.9.10` | <https://github.com/unovue/reka-ui> |
+| `section-matter@1.0.0` | <https://github.com/jonschlinkert/section-matter> |
+| `strip-bom-string@1.0.0` | <https://github.com/jonschlinkert/strip-bom-string> |
+| `tailwind-merge@2.6.1` | <https://github.com/dcastil/tailwind-merge> |
+| `uc.micro@2.1.0` | <https://github.com/markdown-it/uc.micro> |
+| `vue-demi@0.14.10` | <https://github.com/antfu/vue-demi> |
+| `vue-i18n@11.4.2` | <https://github.com/intlify/vue-i18n> |
+| `vue-router@4.6.4` | <https://github.com/vuejs/router> |
+| `vue@3.5.38` | <https://github.com/vuejs/core> |
+
+### ISC (3)
+
+| Package | Repository |
+|---|---|
+| `lucide-vue-next@1.0.0` | <https://github.com/lucide-icons/lucide> |
+| `picocolors@1.1.1` | <https://github.com/alexeyraspopov/picocolors> |
+| `yaml@2.9.0` | <https://github.com/eemeli/yaml> |
+
+### 0BSD (1)
+
+| Package | Repository |
+|---|---|
+| `tslib@2.8.1` | <https://github.com/Microsoft/tslib> |
+
+### Python-2.0 (1)
+
+| Package | Repository |
+|---|---|
+| `argparse@2.0.1` | <https://github.com/nodeca/argparse> |
+<!-- NPM_LICENSE_TABLE_END -->
+
+## Attribution notes
+
+- **Apache-2.0** dependencies (OTel, gRPC, `class-variance-authority`,
+  TypeScript, Playwright, and others above) carry an explicit patent grant.
+  `gopkg.in/yaml.v2` ships its own `NOTICE` file; its text is reproduced in
+  [`third_party_licenses/gopkg.in/yaml.v2/`](third_party_licenses/gopkg.in/yaml.v2/).
+- **`gopkg.in/yaml.v3`** is dual MIT/Apache-2.0 (historical from the
+  go-yaml project); listed under MIT above per its primary `LICENSE` file.
+- All BSD/MIT/ISC dependencies require reproducing their copyright and
+  license text in distributions, which this file plus
+  `third_party_licenses/` satisfies.
+
+## Maintaining this file
+
+Regenerate whenever dependencies change meaningfully (a new direct
+dependency, a major version bump, especially anything touching
+`go.mau.fi/*`):
+
+```bash
+cd backend
+go install github.com/google/go-licenses/v2@latest
+go-licenses save ./cmd/xchats --save_path=../third_party_licenses/ --force
+go-licenses report ./cmd/xchats > /tmp/report.csv   # then regenerate the tables above
+
+cd ../frontend
+NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes license-checker-rseidelsohn \
+  --production --excludePrivatePackages --json > /tmp/npm-report.json
+```
+
+`go-licenses save`'s built-in `check` step treats any license it can't
+classify as fatal — as of this writing, `github.com/inconshreveable/log15`
+(pulled in by `golang.ngrok.com/ngrok`) has a short-form Apache-2.0 notice
+its text-similarity classifier doesn't match against the canonical text.
+Its actual `LICENSE` file was read directly from the module cache and
+copied in manually; re-verify this if the tool's classifier improves or the
+dependency changes.
+
+A CI job that regenerates and diffs this file against what's committed
+(failing the build on drift) is planned — see the CI workflow in this same
+release-prep pass.
