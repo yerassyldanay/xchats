@@ -22,18 +22,18 @@ answers in every 100.
    (see "Approach beats model choice" below) — not just editing one config line.
 2. **The prompt behind these numbers is not live either.** These scores come from
    prompt v3, which lives in `backend/aiprompt`, used only by `evals/harness`.
-   Production drafts replies through `internal/brain`
-   ([real.go:82-84](../backend/internal/assistant/real.go#L82-L84)), a separate,
-   older English-language prompt. The +12-point prompt gain described below does
-   not reach customers today.
+   Production drafts replies through [`internal/brain`](../backend/internal/brain/), a
+   separate, older English-language prompt. The +12-point prompt gain described below
+   does not reach customers today.
 
 This document records what we *should* run. Neither fact above is fixed by writing
 it down — someone still has to ship the change.
 
 ## Table A — models we are choosing between
 
-Source: [2026-07-26_22-10-50-9064](runs/2026-07-26_22-10-50-9064/) and
-[2026-07-26_22-30-10-bd13](runs/2026-07-26_22-30-10-bd13/), both on prompt v3.
+Source: `2026-07-26_22-10-50-9064` and `2026-07-26_22-30-10-bd13`, both on prompt v3.
+Most run directories cited in this document, including these two, are not kept in
+git — see [runs/INDEX.md](runs/INDEX.md) for what's actually still present.
 
 **Same footing — all three ran the same 76 questions (10- and 50-product catalogs):**
 
@@ -75,12 +75,12 @@ numbers are from older runs the latest launches didn't repeat:
 
 | model | correct | why rejected | measured in |
 |---|---|---|---|
-| gemini-2.5-flash-lite | 66% | too many mistakes | [b325](runs/2026-07-24_04-24-34-b325/) |
-| gpt-4o-mini | 55% | too many mistakes — **and this is what production runs today** | [b325](runs/2026-07-24_04-24-34-b325/) |
-| claude-haiku-4.5 | 74% | slow (4.7s) and expensive | [diagfix](runs/2026-07-23_10-23-53-diagfix/) |
-| minimax-m2.5 | 68% | slow (8.6s) | [diagfix](runs/2026-07-23_10-23-53-diagfix/) |
-| kimi-k2.5 | 77% | too expensive for the result; archived 2026-07-23 | [diagfix](runs/2026-07-23_10-23-53-diagfix/) |
-| kimi-k2.6 | 52% | every reply cut off mid-thought; 60s | [diagfix](runs/2026-07-23_10-23-53-diagfix/) |
+| gemini-2.5-flash-lite | 66% | too many mistakes | `b325` |
+| gpt-4o-mini | 55% | too many mistakes — **and this is what production runs today** | `b325` |
+| claude-haiku-4.5 | 74% | slow (4.7s) and expensive | `diagfix` |
+| minimax-m2.5 | 68% | slow (8.6s) | `diagfix` |
+| kimi-k2.5 | 77% | too expensive for the result; archived 2026-07-23 | `diagfix` |
+| kimi-k2.6 | 52% | every reply cut off mid-thought; 60s | `diagfix` |
 
 The bottom four ran on an **older prompt (v0)**, so their scores are not directly
 comparable to Table A. They were rejected on speed, price, or broken output — not
@@ -91,10 +91,10 @@ on a narrow quality margin.
 Three times, changing *how we ask* moved the numbers more than changing *who we ask*:
 
 - **Prompt v2 → v3, same models, same questions**
-  ([31c0](runs/2026-07-24_02-07-24-31c0/) → [0ab4](runs/2026-07-24_04-32-15-0ab4/)):
+  (`31c0` → `0ab4`):
   deepseek 80% → 87%, gemini-2.5-flash 67% → **79%**. Twelve points, zero extra cost.
 - **One settings line saved 3.5-flash from being archived.** On default settings
-  it scored 65% at 9.2 seconds ([diagfix](runs/2026-07-23_10-23-53-diagfix/)) and
+  it scored 65% at 9.2 seconds (`diagfix`) and
   we nearly dropped it. Setting `reasoning: effort: minimal, exclude: true`
   ([models.yaml:84-87](models.yaml#L84-L87)) took it to 95%+ at 2.0 seconds.
   **Our pick only works with that setting — shipping 3.5-flash without it ships
@@ -104,7 +104,7 @@ Three times, changing *how we ask* moved the numbers more than changing *who we 
   holds 97% → 92% → 97%.
 
 One honesty note, not a model or prompt finding: run
-[94b6](runs/2026-07-22_23-37-42-94b6/) first reported 3 correct out of 217. Same
+`94b6` first reported 3 correct out of 217. Same
 replies, after fixing a bug in our own scoring code: 112, then 148. Check the test
 harness before blaming the model for a bad score.
 

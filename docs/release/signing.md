@@ -23,7 +23,7 @@ the cheapest step and the foundation everything else can point back to —
 maintainer actually signed.
 
 **2. Container image signing (Docker Hub / GHCR).** [Sigstore
-cosign](https://docs.sigstore.dev/cosign/overview/), keyless mode via OIDC
+cosign](https://docs.sigstore.dev/cosign/signing/overview/), keyless mode via OIDC
 from GitHub Actions — no long-lived signing key to manage or leak. Once CI
 exists:
 

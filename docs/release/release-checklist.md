@@ -19,7 +19,7 @@ automation should do once it's built.
       reality — a stale doc claiming something the code no longer does is
       worse than no doc.
 - [ ] Changelog entry written for the release (see
-      [`proposals/CHANGELOG-format-proposal.md`](proposals/CHANGELOG-format-proposal.md)).
+      `proposals/CHANGELOG-format-proposal.md`).
 
 ## Version the build
 

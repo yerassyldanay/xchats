@@ -136,7 +136,7 @@ flowchart LR
 
 [AGPL-3.0-only](LICENSE) — тәуелділіктерді тексеру нәтижесінде жоба саясаты
 ретінде таңдалды: GPL-3.0 лицензиялы тәуелділік табылды
-([`go.mau.fi/libsignal`](https://github.com/tulir/libsignal-go), whatsmeow
+([`go.mau.fi/libsignal`](https://github.com/tulir/libsignal-protocol-go), whatsmeow
 арқылы транзитивті түрде қосылады) және ол backend бинарнигіне статикалық
 түрде байланысады — толығырақ
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) құжатында. GPL-3.0 да
