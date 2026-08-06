@@ -107,6 +107,12 @@ type Server struct {
 	oauthRegisterLimit  *ipRateLimiter
 	oauthTokenLimit     *ipRateLimiter
 	oauthAuthorizeLimit *ipRateLimiter
+	// loginLimit bounds POST /auth/login and /auth/password — the two
+	// routes that run argon2id against attacker-controlled input before any
+	// session exists. Burst is deliberately low: at m=64 MiB per hash
+	// (internal/password's argon2id params), unlimited concurrent attempts
+	// are also a memory-exhaustion amplifier, not just a brute-force risk.
+	loginLimit *ipRateLimiter
 
 	// Settings surface (settings.go). Every one of these four is
 	// nil-tolerant — a deployment with no secure credential store, or one
@@ -188,6 +194,7 @@ func New(d Deps) *Server {
 		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — registration spam is the highest-value target
 		oauthTokenLimit:     newIPRateLimiter(30.0/60, 10), // 30/min, 10 burst — refresh-heavy legitimate usage needs headroom
 		oauthAuthorizeLimit: newIPRateLimiter(20.0/60, 10), // 20/min, 10 burst
+		loginLimit:          newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — see the field's own doc comment
 	}
 }
 
@@ -204,9 +211,20 @@ func (s *Server) SetTunnel(t tunnel.Tunnel) {
 }
 
 // Router builds the gin engine with all routes mounted.
+// maxUploadBytes bounds POST /xchats/api/v1/media (A9) — matches
+// frontend/nginx.conf's client_max_body_size, so a request that gets past
+// the proxy either succeeds or fails the same way behind it.
+const maxUploadBytes = 64 << 20 // 64 MiB
+
 func (s *Server) Router() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	// A9: gin's own zero-value default (32 MiB) only controls multipart
+	// parsing's memory/disk spill point, not a hard cap on the total
+	// upload — handleUploadMedia's http.MaxBytesReader below is the actual
+	// limit; this just keeps a large-but-under-the-limit upload from
+	// spilling to a temp file unnecessarily.
+	r.MaxMultipartMemory = maxUploadBytes
 	// Trust NO proxy unless explicitly configured (plan Task 17): gin's own
 	// zero-value default trusts every peer's X-Forwarded-* headers, which
 	// would let any direct, unproxied caller spoof its own client IP. Every
@@ -283,12 +301,14 @@ func (s *Server) Router() *gin.Engine {
 	media.OPTIONS("/:material_id", func(c *gin.Context) {})
 
 	api := r.Group("/xchats/api/v1")
-	api.POST("/auth/login", s.handleLogin)
+	api.POST("/auth/login", rateLimit(s.loginLimit), s.handleLogin)
 	api.POST("/auth/logout", s.handleLogout)
 
 	auth := api.Group("")
 	auth.Use(s.requireSession())
+	auth.Use(s.requirePasswordChanged())
 	auth.GET("/me", s.handleMe)
+	auth.POST("/auth/password", rateLimit(s.loginLimit), s.handleChangePassword)
 	auth.GET("/users", s.handleListUsers)
 	auth.POST("/users", s.RequireAdmin(), s.handleCreateUser)
 	auth.PUT("/users/:id/role", s.RequireAdmin(), s.handleUpdateUserRole)
@@ -442,9 +462,24 @@ func (s *Server) cors() gin.HandlerFunc {
 			return
 		}
 		origin := c.GetHeader("Origin")
-		if origin != "" && (allowed[origin] || allowed["*"]) {
+		switch {
+		case origin == "":
+			// no Origin header — not a CORS request at all.
+		case allowed[origin]:
+			// An exact, configured allowlist entry — a same-deployment
+			// frontend the operator explicitly trusts. This is the only
+			// case where riding the session cookie cross-origin is safe.
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
+			c.Header("Vary", "Origin")
+		case allowed["*"]:
+			// A7: a wildcard CORSOrigins config (dev/test convenience —
+			// see config.yaml's own comment) must NEVER be paired with
+			// credentials: that combination would let any website ride an
+			// authenticated session simply by echoing its own Origin back.
+			// Echo the origin (so the response is at least usable for a
+			// non-credentialed fetch) but never Allow-Credentials.
+			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Vary", "Origin")
 		}
 		if c.Request.Method == http.MethodOptions {

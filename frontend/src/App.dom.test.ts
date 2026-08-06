@@ -51,7 +51,7 @@ describe('App — first-run setup wizard gate', () => {
     const { wrapper, auth } = mountApp()
     expect(wrapper.findComponent({ name: 'SetupWizard' }).exists()).toBe(false)
 
-    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin' }
+    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin', must_change_password: false }
     await flushPromises()
 
     expect(api.get).toHaveBeenCalledWith('/settings')
@@ -63,7 +63,7 @@ describe('App — first-run setup wizard gate', () => {
     vi.mocked(api.get).mockResolvedValue({ setup_completed: false, llm: {}, providers: {}, ngrok: {} })
 
     const { wrapper, auth } = mountApp()
-    auth.user = { id: '1', email: 'a@b.c', name: 'Member', role: 'member' }
+    auth.user = { id: '1', email: 'a@b.c', name: 'Member', role: 'member', must_change_password: false }
     await flushPromises()
 
     expect(api.get).not.toHaveBeenCalled()
@@ -80,7 +80,7 @@ describe('App — first-run setup wizard gate', () => {
     )
 
     const { wrapper, auth } = mountApp()
-    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin' }
+    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin', must_change_password: false }
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('Добро пожаловать в xchats')
@@ -103,7 +103,7 @@ describe('App — self-healing provider status gate', () => {
     const { auth, settingsStore } = mountApp()
     expect(connectRealtime).not.toHaveBeenCalled()
 
-    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin' }
+    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin', must_change_password: false }
     await flushPromises()
 
     expect(api.get).toHaveBeenCalledWith('/settings/provider-health')
@@ -122,7 +122,7 @@ describe('App — self-healing provider status gate', () => {
     )
 
     const { auth, settingsStore } = mountApp()
-    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin' }
+    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin', must_change_password: false }
     await flushPromises()
     expect(settingsStore.hasUnhealthyProvider).toBe(true)
 
@@ -138,7 +138,7 @@ describe('App — self-healing provider status gate', () => {
     vi.mocked(api.get).mockResolvedValue({ providers: [] })
 
     const { auth } = mountApp()
-    auth.user = { id: '1', email: 'a@b.c', name: 'Member', role: 'member' }
+    auth.user = { id: '1', email: 'a@b.c', name: 'Member', role: 'member', must_change_password: false }
     await flushPromises()
 
     expect(api.get).not.toHaveBeenCalledWith('/settings/provider-health')

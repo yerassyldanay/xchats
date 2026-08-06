@@ -3271,7 +3271,7 @@
             "updated_at"
           ],
           "unique": false,
-          "where": "(download_status \u003c\u003e 'ready'::text)",
+          "where": "(download_status <> 'ready'::text)",
           "backs_constraint": false
         }
       ],
@@ -3601,6 +3601,15 @@
           "has_default": true,
           "default_kind": "now",
           "default_raw": "now()"
+        },
+        {
+          "name": "must_change_password",
+          "position": 7,
+          "pg_type": "boolean",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "bool:false",
+          "default_raw": "false"
         }
       ],
       "primary_key": [

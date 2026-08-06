@@ -17,6 +17,18 @@ type ngrokCredentialReader interface {
 	Get(ctx context.Context, key credentials.Key) (string, error)
 }
 
+// ngrokCredsFrom adapts a possibly-nil *credentials.Chain to
+// ngrokCredentialReader. Assigning a nil *credentials.Chain to the interface
+// directly would box it into a non-nil interface value (non-nil type, nil
+// data pointer), so applyNgrokPublicOrigin's "creds == nil" guard would not
+// catch it and the first creds.Get call would panic on the nil receiver.
+func ngrokCredsFrom(chain *credentials.Chain) ngrokCredentialReader {
+	if chain == nil {
+		return nil
+	}
+	return chain
+}
+
 type ngrokSettingsStore interface {
 	Load() (settings.Settings, error)
 	Update(func(*settings.Settings)) (settings.Settings, error)

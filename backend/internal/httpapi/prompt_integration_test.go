@@ -15,6 +15,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
+	"github.com/yerassyldanay/xchats/backend/internal/password"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 )
@@ -176,7 +177,7 @@ func newPromptHarness(t *testing.T) *promptHarness {
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
 	}
-	hash, _ := httpapi.HashPassword(adminPass)
+	hash, _ := password.Hash(adminPass)
 	if _, err := st.SeedUser(ctx, org.ID, adminEmail, hash, "Admin"); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}

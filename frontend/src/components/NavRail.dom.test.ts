@@ -23,7 +23,7 @@ function mountNavRail() {
   const pinia = testPinia()
   const auth = useAuth()
   const settingsStore = useSettings()
-  auth.user = { id: '1', email: 'admin@x.test', name: 'Admin', role: 'admin' }
+  auth.user = { id: '1', email: 'admin@x.test', name: 'Admin', role: 'admin', must_change_password: false }
   const wrapper = mountKb(NavRail, { pinia, global: { plugins: [testRouter()] } })
   return { wrapper, settingsStore }
 }
@@ -44,7 +44,7 @@ describe('NavRail — self-healing status badge', () => {
   it('the Settings link is not rendered at all for a non-admin', () => {
     const pinia = testPinia()
     const auth = useAuth()
-    auth.user = { id: '1', email: 'm@x.test', name: 'Member', role: 'member' }
+    auth.user = { id: '1', email: 'm@x.test', name: 'Member', role: 'member', must_change_password: false }
     const wrapper = mountKb(NavRail, { pinia, global: { plugins: [testRouter()] } })
     expect(wrapper.find('a[aria-label="Настройки"]').exists()).toBe(false)
   })

@@ -40,6 +40,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
+	"github.com/yerassyldanay/xchats/backend/internal/password"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
 
@@ -96,7 +97,7 @@ func newMCPHarness(t *testing.T) *mcpHarness {
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
 	}
-	hash, err := httpapi.HashPassword(mcpAdminPass)
+	hash, err := password.Hash(mcpAdminPass)
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}

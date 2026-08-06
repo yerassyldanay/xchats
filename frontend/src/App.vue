@@ -10,18 +10,29 @@ import { connectRealtime } from './lib/sse'
 const route = useRoute()
 const auth = useAuth()
 const settingsStore = useSettings()
-// The rail shows on every authenticated page and never on login.
-const showRail = computed(() => !!route.meta.requiresAuth)
+// The rail shows on every authenticated page and never on login — nor
+// while a forced password change is pending (A1): every settings/inbox API
+// call 403s until that's resolved (see requirePasswordChanged, backend
+// server.go), so a clickable rail here would just bounce back to
+// /change-password.
+const showRail = computed(() => !!route.meta.requiresAuth && !auth.mustChangePassword)
 
 // First-run onboarding gate (Track 2I): checked once per admin session, the
-// moment auth.isAdmin first becomes true — never on every navigation, and
-// never for a non-admin (every wizard step needs RequireAdmin anyway).
+// moment onboardingReady first becomes true — never on every navigation,
+// never for a non-admin (every wizard step needs RequireAdmin anyway), and
+// never while a forced password change is pending — GET /settings is
+// blocked until then, so this would otherwise just 403. onboardingReady
+// (rather than watching auth.isAdmin directly) is what lets this correctly
+// re-fire the moment a just-forced password change resolves for an admin
+// who was already isAdmin=true throughout: the WATCHED VALUE flips
+// false -> true at that point even though isAdmin itself never changed.
+const onboardingReady = computed(() => auth.isAdmin && !auth.mustChangePassword)
 const showWizard = ref(false)
 const checkedSetup = ref(false)
 watch(
-  () => auth.isAdmin,
-  async (isAdmin) => {
-    if (!isAdmin || checkedSetup.value) return
+  onboardingReady,
+  async (ready) => {
+    if (!ready || checkedSetup.value) return
     checkedSetup.value = true
     try {
       await settingsStore.load()
@@ -38,13 +49,14 @@ watch(
 // once, then keep it live for the rest of the session via the SAME realtime
 // mechanism the inbox/KB pages use — a SEPARATE EventSource connection, but
 // App.vue is the one place guaranteed mounted for as long as the SPA is,
-// which is what a NavRail-level badge needs. Admin-only, like the wizard
-// check above (GET /settings/provider-health is RequireAdmin).
+// which is what a NavRail-level badge needs. Gated on onboardingReady for
+// the same reason as the wizard check above: GET /settings/provider-health
+// is also blocked until a pending forced password change resolves.
 const healthWired = ref(false)
 watch(
-  () => auth.isAdmin,
-  (isAdmin) => {
-    if (!isAdmin || healthWired.value) return
+  onboardingReady,
+  (ready) => {
+    if (!ready || healthWired.value) return
     healthWired.value = true
     settingsStore.loadProviderHealth().catch(() => {
       // Best-effort — the badge just stays unset for this session.

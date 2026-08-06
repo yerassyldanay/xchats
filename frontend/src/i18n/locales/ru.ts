@@ -363,4 +363,25 @@ export default {
       invited: 'Приглашение отправлено.',
     },
   },
+  // A1: the forced first-login password change (/change-password) — the
+  // migration-seeded admin's one-time bootstrap password must be replaced
+  // before anything else in the app becomes reachable (backend gate:
+  // requirePasswordChanged, server.go).
+  changePassword: {
+    title: 'Смена пароля',
+    subtitle: 'Прежде чем продолжить, задайте новый пароль для этой учётной записи',
+    currentPasswordLabel: 'Текущий пароль',
+    newPasswordLabel: 'Новый пароль',
+    confirmPasswordLabel: 'Повторите новый пароль',
+    submit: 'Сменить пароль',
+    submitting: 'Сохранение…',
+    logout: 'Выйти',
+    errors: {
+      wrongCurrent: 'Текущий пароль указан неверно',
+      sameAsCurrent: 'Новый пароль должен отличаться от текущего',
+      mismatch: 'Пароли не совпадают',
+      rateLimited: 'Слишком много попыток. Подождите немного и повторите.',
+      generic: 'Не удалось сменить пароль. Попробуйте ещё раз.',
+    },
+  },
 }

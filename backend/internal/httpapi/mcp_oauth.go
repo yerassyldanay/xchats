@@ -93,6 +93,14 @@ func (s *Server) handleOAuthAuthorize(c *gin.Context) {
 		s.renderOAuthLogin(c, client)
 		return
 	}
+	// A must-change-password user reuses this same browser session — do not
+	// let them grant an MCP client access before setting a real password
+	// (see requirePasswordChanged's doc comment for the equivalent guard on
+	// the /xchats/api/v1 surface).
+	if user.MustChangePassword {
+		s.renderOAuthError(c, "Сначала войдите в приложение и смените пароль, затем повторите авторизацию MCP.")
+		return
+	}
 	orgs, err := s.store.OrgsForUser(ctx(c), user.ID)
 	if err != nil || len(orgs) == 0 {
 		s.renderOAuthError(c, "У вашей учётной записи нет организации.")

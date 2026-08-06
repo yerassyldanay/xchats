@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,64 +12,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/domain"
+	"github.com/yerassyldanay/xchats/backend/internal/password"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"golang.org/x/crypto/argon2"
 )
 
 const sessionCookie = "xchats_session"
 
 type ctxUserKey struct{}
-
-// --- argon2id password hashing (explicitly not sha256) --------------------
-
-type argonParams struct {
-	memory, time uint32
-	threads      uint8
-	keyLen       uint32
-}
-
-var defaultArgon = argonParams{memory: 64 * 1024, time: 1, threads: 4, keyLen: 32}
-
-// HashPassword returns an encoded argon2id hash string.
-func HashPassword(password string) (string, error) {
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	p := defaultArgon
-	key := argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, p.keyLen)
-	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
-		argon2.Version, p.memory, p.time, p.threads,
-		base64.RawStdEncoding.EncodeToString(salt),
-		base64.RawStdEncoding.EncodeToString(key)), nil
-}
-
-// VerifyPassword checks a password against an encoded argon2id hash.
-func VerifyPassword(password, encoded string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
-		return false
-	}
-	var p argonParams
-	var version int
-	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil {
-		return false
-	}
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &p.memory, &p.time, &p.threads); err != nil {
-		return false
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
-		return false
-	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil {
-		return false
-	}
-	p.keyLen = uint32(len(want))
-	got := argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, p.keyLen)
-	return subtle.ConstantTimeCompare(got, want) == 1
-}
 
 // --- session middleware ---------------------------------------------------
 
@@ -169,6 +116,34 @@ func (s *Server) RequireAdmin() gin.HandlerFunc {
 	}
 }
 
+// passwordChangeExemptPaths are reachable on the `auth` group even while
+// requirePasswordChanged is blocking everything else — just enough surface
+// for the frontend's forced-change screen to work: read who's logged in,
+// let them log out, and let them actually change the password.
+var passwordChangeExemptPaths = map[string]bool{
+	"/xchats/api/v1/me":            true,
+	"/xchats/api/v1/auth/password": true,
+}
+
+// requirePasswordChanged chains after requireSession on the `auth` group
+// (server.go) and blocks every route but the three in
+// passwordChangeExemptPaths while the current user's MustChangePassword is
+// set — the enforcement side of A1's bootstrap-admin hardening: the
+// migration-seeded admin (and, going forward, any future forced-reset
+// account) gets a working one-time password, but cannot touch the rest of
+// the app until they set a real one. See handleChangePassword for the
+// other half, and mcp_oauth.go's equivalent guard on /oauth/authorize,
+// which sits outside this group entirely and so needs its own check.
+func (s *Server) requirePasswordChanged() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if currentUser(c).MustChangePassword && !passwordChangeExemptPaths[c.Request.URL.Path] {
+			fail(c, http.StatusForbidden, ErrPasswordChangeRequired, "you must set a new password before continuing")
+			return
+		}
+		c.Next()
+	}
+}
+
 // --- handlers -------------------------------------------------------------
 
 type loginReq struct {
@@ -183,7 +158,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 	u, err := s.store.UserByEmail(ctx(c), strings.TrimSpace(req.Email))
-	if err != nil || !VerifyPassword(req.Password, u.PasswordHash) {
+	if err != nil || !password.Verify(req.Password, u.PasswordHash) {
 		fail(c, http.StatusUnauthorized, ErrUnauthorized, "invalid credentials")
 		return
 	}
@@ -209,6 +184,64 @@ func (s *Server) handleMe(c *gin.Context) {
 	ok(c, s.mePayload(c, currentUser(c)))
 }
 
+type changePasswordReq struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// handleChangePassword is the enforcement side of A1's bootstrap-admin
+// hardening — see requirePasswordChanged's doc comment for the gate this
+// unblocks. Not gated to the must-change-password case alone: any logged-in
+// user can change their own password here, any time.
+//
+// current_password is verified even when the caller is in the forced-change
+// state — the user just authenticated with it seconds ago (via handleLogin
+// or the one-time bootstrap password), so this costs them nothing, and it
+// stops a stolen SESSION (cookie theft, an unattended browser) from being
+// enough to lock the real owner out by changing their password out from
+// under them.
+func (s *Server) handleChangePassword(c *gin.Context) {
+	var req changePasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.CurrentPassword == "" || req.NewPassword == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "current_password and new_password required")
+		return
+	}
+	if len(req.NewPassword) < s.cfg.System.MinPasswordLen {
+		fail(c, http.StatusBadRequest, ErrValidation, fmt.Sprintf("new_password must be >= %d chars", s.cfg.System.MinPasswordLen))
+		return
+	}
+	if req.NewPassword == req.CurrentPassword {
+		fail(c, http.StatusBadRequest, ErrValidation, "new_password must differ from current_password")
+		return
+	}
+	u := currentUser(c)
+	// currentUser(c) (from UserForSession) never carries PasswordHash by
+	// design — re-fetch by email for the one check that needs it, rather
+	// than growing that shared query's result for every other caller.
+	withHash, err := s.store.UserByEmail(ctx(c), u.Email)
+	if err != nil || !password.Verify(req.CurrentPassword, withHash.PasswordHash) {
+		fail(c, http.StatusUnauthorized, ErrUnauthorized, "current password is incorrect")
+		return
+	}
+	hash, err := password.Hash(req.NewPassword)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "hash")
+		return
+	}
+	if err := s.store.SetUserPassword(ctx(c), u.ID, hash); err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "failed to save new password")
+		return
+	}
+	// Evict every OTHER session for this user — a password change is exactly
+	// the moment an attacker with a stolen session must be logged out, and
+	// the half of that most implementations forget.
+	if err := s.store.DeleteOtherSessions(ctx(c), u.ID, currentSessionID(c)); err != nil {
+		s.log.Warn("password changed but failed to evict other sessions", "user_id", u.ID, "err", err)
+	}
+	u.MustChangePassword = false
+	ok(c, s.mePayload(c, u))
+}
+
 func (s *Server) mePayload(c *gin.Context, u store.User) gin.H {
 	// u.ID, never currentUser(c).ID: handleLogin calls this for the
 	// just-authenticated user before requireSession has ever populated gin
@@ -229,7 +262,7 @@ func (s *Server) mePayload(c *gin.Context, u store.User) gin.H {
 		orgList = append(orgList, gin.H{"id": o.ID, "name": o.Name})
 	}
 	return gin.H{
-		"user":         gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName, "role": role},
+		"user":         gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName, "role": role, "must_change_password": u.MustChangePassword},
 		"organization": gin.H{"id": org.ID, "name": org.Name},
 		// organizations is the full membership set, for the frontend's
 		// active-organization switcher (Task 15) — omitted entirely from
@@ -352,7 +385,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, "no org")
 		return
 	}
-	hash, err := HashPassword(req.Password)
+	hash, err := password.Hash(req.Password)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, "hash")
 		return

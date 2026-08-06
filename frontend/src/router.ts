@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Home from './views/Home.vue'
 import Login from './views/Login.vue'
+import ChangePassword from './views/ChangePassword.vue'
 import Chatboard from './views/Chatboard.vue'
 import Accounts from './views/Accounts.vue'
 import Playground from './views/Playground.vue'
@@ -16,6 +17,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: Login },
+    { path: '/change-password', name: 'change-password', component: ChangePassword, meta: { requiresAuth: true } },
     { path: '/', name: 'home', component: Home },
     { path: '/chatboard', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
     { path: '/accounts', name: 'accounts', component: Accounts, meta: { requiresAuth: true } },
@@ -36,6 +38,20 @@ router.beforeEach(async (to) => {
   if (!auth.ready) await auth.fetchMe()
   if (to.meta.requiresAuth && !auth.isAuthed) return { name: 'login' }
   if (to.name === 'login' && auth.isAuthed) return { name: 'chatboard' }
+  // A1: force through the change-password screen before any other
+  // authenticated page — mirrors the backend's requirePasswordChanged gate
+  // (server.go), which blocks the underlying API calls regardless; this
+  // just steers the user there directly instead of a page loading into a
+  // wall of 403s. Scoped to requiresAuth routes only — the public marketing/
+  // blog pages need no such redirect, since they never call a gated API.
+  if (to.meta.requiresAuth && auth.mustChangePassword && to.name !== 'change-password') {
+    return { name: 'change-password' }
+  }
+  // And the reverse: nothing to do on /change-password once it's resolved
+  // (or if navigated to directly without ever needing it).
+  if (to.name === 'change-password' && !auth.mustChangePassword) {
+    return { name: 'chatboard' }
+  }
   if (to.meta.requiresAdmin && !auth.isAdmin) return { name: 'chatboard' }
   return true
 })
