@@ -150,3 +150,54 @@ func TestCORS_MediaPreflightAllowsAnyWidgetOrigin(t *testing.T) {
 		t.Fatalf("Access-Control-Allow-Credentials=%q must not be set when echoing arbitrary origins", got)
 	}
 }
+
+// TestCORS_WildcardNeverPairsWithCredentials is A7's regression guard on
+// the GLOBAL cors() middleware (not the signed-token /mcp/uploads or
+// /mcp/media groups above, which are correct by a different mechanism —
+// they never set Allow-Credentials at all). A CORSOrigins:["*"] config
+// (a supported dev/test convenience) must still never combine an echoed,
+// attacker-controlled Origin with Access-Control-Allow-Credentials: true —
+// that combination is a full session-riding hole from any website. An
+// EXACT allowlist entry, by contrast, is what the operator explicitly
+// trusts and must keep getting credentials, or every existing cross-origin
+// deployment (frontend and backend on different origins, cookie-based
+// auth) breaks.
+func TestCORS_WildcardNeverPairsWithCredentials(t *testing.T) {
+	srv := httpapi.New(httpapi.Deps{
+		Cfg: &config.Config{Server: config.ServerConfig{CORSOrigins: []string{"*", "https://trusted.example"}}},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	get := func(origin string) *http.Response {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/healthz", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Origin", origin)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		return resp
+	}
+
+	arbitrary := get("https://attacker.example")
+	defer arbitrary.Body.Close()
+	if got := arbitrary.Header.Get("Access-Control-Allow-Origin"); got != "https://attacker.example" {
+		t.Errorf("wildcard-matched Allow-Origin=%q, want the origin echoed back (still usable non-credentialed)", got)
+	}
+	if got := arbitrary.Header.Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Errorf("wildcard-matched Allow-Credentials=%q, want unset — this is the actual vulnerability", got)
+	}
+
+	trusted := get("https://trusted.example")
+	defer trusted.Body.Close()
+	if got := trusted.Header.Get("Access-Control-Allow-Origin"); got != "https://trusted.example" {
+		t.Errorf("exact-allowlist Allow-Origin=%q, want the origin echoed back", got)
+	}
+	if got := trusted.Header.Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Errorf("exact-allowlist Allow-Credentials=%q, want \"true\" — an explicitly trusted origin must keep working", got)
+	}
+}

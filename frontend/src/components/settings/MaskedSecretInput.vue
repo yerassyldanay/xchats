@@ -9,8 +9,13 @@ withDefaults(
     modelValue: string
     placeholder?: string
     disabled?: boolean
+    // Not forwarded via $attrs fallthrough: this component's template root
+    // is the wrapping <div>, not the inner <Input>, so an attribute passed
+    // by a caller would otherwise land on the div (autocomplete on a div
+    // does nothing, and native browsers never see it for autofill).
+    autocomplete?: string
   }>(),
-  { placeholder: '', disabled: false },
+  { placeholder: '', disabled: false, autocomplete: 'off' },
 )
 const emit = defineEmits<{ 'update:modelValue': [string] }>()
 const { t } = useI18n()
@@ -23,7 +28,7 @@ const visible = ref(false)
     <Input
       :model-value="modelValue"
       :type="visible ? 'text' : 'password'"
-      autocomplete="off"
+      :autocomplete="autocomplete"
       :placeholder="placeholder"
       :disabled="disabled"
       class="pr-9 font-mono"

@@ -82,6 +82,12 @@ type User struct {
 	// (UserByEmail, UserForSession), which callers resolve separately via
 	// MembershipRole once they have an organization id.
 	Role string
+	// MustChangePassword gates every route but /me, /auth/logout, and
+	// /auth/password (internal/httpapi's requirePasswordChanged) until the
+	// user sets a real password — true for the migration-seeded sentinel
+	// admin from first boot until its first password change (see
+	// SetUserPassword, BootstrapSentinelAdminPassword).
+	MustChangePassword bool
 }
 
 // Account is the channel-neutral account shape the unified read layer returns
@@ -473,13 +479,71 @@ func (s *Store) ListWaCredentials(ctx context.Context) ([]WaCredential, error) {
 func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 	var u User
 	err := s.db.QueryRow(ctx, `
-		SELECT id, email, password_hash, display_name, created_at
+		SELECT id, email, password_hash, display_name, created_at, must_change_password
 		FROM users WHERE email = $1`, email).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt)
+		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt, &u.MustChangePassword)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return u, ErrNotFound
 	}
 	return u, err
+}
+
+// SetUserPassword sets id's password hash and clears must_change_password —
+// the user (or an admin acting for them, once that surface exists) has just
+// set a real password, so the forced-change gate no longer applies. This is
+// the general path; BootstrapSentinelAdminPassword below is the distinct
+// first-boot path that deliberately leaves must_change_password set.
+func (s *Store) SetUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	_, err := s.db.Exec(ctx, `
+		UPDATE users SET password_hash = $2, must_change_password = 0,
+			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id = $1`, id, passwordHash)
+	return err
+}
+
+// DeleteOtherSessions removes every session for userID except keepSessionID
+// — called right after a successful password change so a stolen session
+// elsewhere is evicted immediately, not just on its own natural expiry.
+func (s *Store) DeleteOtherSessions(ctx context.Context, userID uuid.UUID, keepSessionID string) error {
+	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1 AND id != $2`, userID, keepSessionID)
+	return err
+}
+
+// sentinelAdminID is migration 0006_init_admin.up.sql's fixed seeded-admin
+// user id — the one row BootstrapSentinelAdminPassword and
+// ResetSentinelAdminPassword ever touch.
+var sentinelAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
+
+// BootstrapSentinelAdminPassword mints the sentinel admin's first real
+// password on boot (cmd/xchats' first-boot bootstrap). It writes
+// passwordHash ONLY if the row still carries 0008_bootstrap_admin's blanked
+// "" sentinel — the same WHERE-guarded idempotency pattern that migration
+// uses — and deliberately leaves must_change_password set, so the operator
+// is still forced through the change-password flow on first login even
+// though the one-time password now works. minted reports whether this call
+// actually wrote it (false on every boot after the first, or if an
+// operator has since changed it some other way) — cmd/xchats uses that to
+// decide whether to print/persist the one-time credential file at all.
+func (s *Store) BootstrapSentinelAdminPassword(ctx context.Context, passwordHash string) (minted bool, err error) {
+	tag, err := s.db.Exec(ctx, `
+		UPDATE users SET password_hash = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id = $1 AND password_hash = ''`, sentinelAdminID, passwordHash)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// ResetSentinelAdminPassword re-blanks the sentinel admin's password hash
+// and re-sets must_change_password — the "xchats reset-admin-password"
+// recovery path for a lost/never-read one-time credential. The next boot's
+// BootstrapSentinelAdminPassword call re-mints a fresh one.
+func (s *Store) ResetSentinelAdminPassword(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `
+		UPDATE users SET password_hash = '', must_change_password = 1,
+			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id = $1`, sentinelAdminID)
+	return err
 }
 
 // CreateUser inserts a new user and joins them to orgID with the given role
@@ -703,10 +767,10 @@ func (s *Store) CreateSession(ctx context.Context, id string, userID uuid.UUID, 
 func (s *Store) UserForSession(ctx context.Context, sessionID string) (User, error) {
 	var u User
 	err := s.db.QueryRow(ctx, `
-		SELECT u.id, u.email, u.display_name, u.created_at
+		SELECT u.id, u.email, u.display_name, u.created_at, u.must_change_password
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id = $1 AND s.expires_at > strftime('%Y-%m-%d %H:%M:%f','now')`, sessionID).
-		Scan(&u.ID, &u.Email, &u.DisplayName, &u.CreatedAt)
+		Scan(&u.ID, &u.Email, &u.DisplayName, &u.CreatedAt, &u.MustChangePassword)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return u, ErrNotFound
 	}

@@ -402,8 +402,20 @@ func (s *Server) handleAssignChat(c *gin.Context) {
 }
 
 func (s *Server) handleUploadMedia(c *gin.Context) {
+	// A9: gin's MaxMultipartMemory (server.go's Router) only bounds the
+	// memory/disk spill point during multipart parsing — with no cap on the
+	// body itself, an attacker could stream an arbitrarily large request
+	// and have it fully read into memory below. MaxBytesReader is the
+	// actual hard limit; it must wrap the body before any parsing touches
+	// it, since c.FormFile below is what triggers the read.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadBytes)
 	fh, err := c.FormFile("file")
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			fail(c, http.StatusRequestEntityTooLarge, ErrValidation, "upload exceeds the maximum allowed size")
+			return
+		}
 		fail(c, http.StatusBadRequest, ErrValidation, "file part required")
 		return
 	}
@@ -419,6 +431,15 @@ func (s *Server) handleUploadMedia(c *gin.Context) {
 		return
 	}
 	mediaType, mimetype := detectMedia(fh.Filename, fh.Header.Get("Content-Type"))
+	// A3: reject a payload that sniffs as HTML unless HTML was actually
+	// declared — the classic stored-XSS-via-mislabeled-upload vector this
+	// route serves back on the app's own origin (see handleServeMedia's
+	// header block below, its actual defense in depth). Same check the MCP
+	// upload path already applies (mcp_upload.go); reused, not reimplemented.
+	if reason := mimeSanityCheck(mimetype, data); reason != "" {
+		fail(c, http.StatusBadRequest, ErrValidation, reason)
+		return
+	}
 	mid := uuid.NewString()
 	if _, err := s.blob.Put(mid, data, blob.Meta{MediaType: mediaType, Mimetype: mimetype, FileName: fh.Filename, FileSize: int64(len(data))}); err != nil {
 		fail(c, http.StatusBadGateway, ErrMediaUnavailable, "store failed")
@@ -433,10 +454,15 @@ func (s *Server) handleUploadMedia(c *gin.Context) {
 
 func (s *Server) handleServeMedia(c *gin.Context) {
 	raw := c.Param("id")
-	// A public media id is usually a message_media.id (uuid). Parse leniently —
-	// pending uploads and stub samples are keyed directly by their blob id.
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
+	// A public media id is usually a message_media.id (uuid), scoped to the
+	// caller's own organization — see MediaStorageURL's own doc comment for
+	// why (A4: this is what closes the cross-org media IDOR).
 	if id, err := uuid.Parse(raw); err == nil {
-		if storageURL, mimetype, _, merr := s.store.MediaStorageURL(ctx(c), id); merr == nil {
+		if storageURL, mimetype, fileName, merr := s.store.MediaStorageURL(ctx(c), org.ID, id); merr == nil {
 			data, meta, gerr := s.blob.Get(storageURL)
 			if gerr != nil {
 				fail(c, http.StatusBadGateway, ErrMediaUnavailable, "blob missing")
@@ -446,19 +472,45 @@ func (s *Server) handleServeMedia(c *gin.Context) {
 			if ct == "" {
 				ct = meta.Mimetype
 			}
-			c.Data(http.StatusOK, ctOrDefault(ct), data)
+			s.writeMediaResponse(c, ct, filenameOr(fileName, meta.FileName), data)
 			return
 		} else if !errors.Is(merr, store.ErrNotFound) {
 			fail(c, http.StatusInternalServerError, ErrInternal, merr.Error())
 			return
 		}
 	}
-	// fall back: a pending upload or a stub sample, keyed directly by the blob id.
+	// Fall back: a pending upload not yet attached to any message.
+	// handleUploadMedia returns this exact blob key as the media id, so a
+	// composer can preview it before the user hits send — there is no
+	// message_media row, and so no organization, to scope this against
+	// until UpsertOutboundMedia runs (at which point the row gets its OWN,
+	// different id — see MediaStorageURL's doc comment — so this fallback
+	// stops being reachable for it at all). What bounds exposure here
+	// instead: the key is a v4 UUID (122 bits of randomness) minted by the
+	// uploader and never listed or enumerated anywhere, and every upload is
+	// already MIME-sanity-checked at write time (handleUploadMedia).
 	if data, meta, err := s.blob.Get(raw); err == nil {
-		c.Data(http.StatusOK, ctOrDefault(meta.Mimetype), data)
+		s.writeMediaResponse(c, meta.Mimetype, meta.FileName, data)
 		return
 	}
 	fail(c, http.StatusNotFound, ErrNotFound, "media not found")
+}
+
+// writeMediaResponse is handleServeMedia's shared response tail for both
+// the org-scoped and pending-upload-fallback paths above — A3's hardening
+// applies uniformly to both: nosniff, a locked-down CSP, and a
+// Content-Disposition that renders images/video/audio inline and
+// everything else as an attachment. contentDisposition is mcp_media.go's
+// (reused, not reimplemented — same defense, same reasoning: this serves
+// user-supplied bytes from the same origin that holds the app's session
+// cookie).
+func (s *Server) writeMediaResponse(c *gin.Context, mimetype, fileName string, data []byte) {
+	ct := ctOrDefault(mimetype)
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Security-Policy", "default-src 'none'; sandbox")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("Content-Disposition", contentDisposition(ct, fileName))
+	c.Data(http.StatusOK, ct, data)
 }
 
 // --- small helpers --------------------------------------------------------

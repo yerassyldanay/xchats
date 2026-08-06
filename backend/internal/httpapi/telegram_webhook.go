@@ -39,12 +39,25 @@ func (s *Server) handleTelegramWebhook(c *gin.Context) {
 
 	// Secret check first: an attacker who guesses the URL must not be able to
 	// probe which account ids exist.
-	if secret := s.cfg.TelegramResolvedWebhookSecret(); secret != "" {
-		if subtle.ConstantTimeCompare([]byte(c.GetHeader(telegramSecretHeader)), []byte(secret)) != 1 {
-			s.log.Warn("telegram webhook auth rejected", "account_id", rawID, "reason", "bad secret token")
-			fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook secret")
-			return
-		}
+	//
+	// An UNCONFIGURED secret rejects too — it used to skip this check
+	// entirely, which meant a deployment that ended up here with no secret
+	// resolvable (main.go's openCredentialsAndProvisionSecrets degrading
+	// silently on a from-source install with no OS keychain, before that was
+	// itself hardened to fail loudly) served every webhook call
+	// unauthenticated with no signal anything was wrong. Failing closed here
+	// is the backstop: a real deployment now gets a loud, continuous 401
+	// instead of quietly accepting spoofed updates.
+	secret := s.cfg.TelegramResolvedWebhookSecret()
+	if secret == "" {
+		s.log.Error("telegram webhook rejected: no webhook secret configured", "account_id", rawID)
+		fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "webhook secret not configured")
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(c.GetHeader(telegramSecretHeader)), []byte(secret)) != 1 {
+		s.log.Warn("telegram webhook auth rejected", "account_id", rawID, "reason", "bad secret token")
+		fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook secret")
+		return
 	}
 
 	accountID, err := uuid.Parse(rawID)

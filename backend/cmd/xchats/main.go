@@ -118,8 +118,8 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		log.Info("using ngrok static domain as the MCP public origin", "public_origin", cfg.ResolvedAPIBaseURL())
 	}
 
-	if cfg.IsProduction() {
-		if problems := validateProductionConfig(cfg); len(problems) > 0 {
+	if shouldValidateProductionConfig(cfg) {
+		if problems := validateProductionConfig(cfg, credsChain != nil); len(problems) > 0 {
 			fatal("production config", fmt.Errorf("%s", strings.Join(problems, "; ")))
 		}
 	}
@@ -314,7 +314,22 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	}
 	srv.SetTunnel(tunnelMgr)
 
-	httpServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: router}
+	httpServer := &http.Server{
+		Addr:    cfg.Server.HTTPAddr,
+		Handler: router,
+		// A8: an unauthenticated peer that opens a connection and trickles
+		// headers/body one byte at a time (Slowloris) previously tied up a
+		// connection indefinitely — net/http's zero-value Server has no
+		// timeouts at all. WriteTimeout is deliberately left at its zero
+		// value (unlimited): GET /xchats/api/v1/realtime is a long-lived SSE
+		// stream (internal/httpapi/sse.go) that must not be cut off mid-
+		// stream, and frontend/nginx.conf's proxy already assumes exactly
+		// that (proxy_read_timeout 1h).
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MiB
+	}
 
 	go func() {
 		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
@@ -406,13 +421,12 @@ func openCredentialsAndProvisionSecrets(ctx context.Context, cfg *config.Config,
 		AllowFile: credentials.AllowFileFromEnv(),
 	})
 	if err != nil {
-		log.Warn("no secure credential store available; internally-managed secrets are only as durable as config/env, and the Settings/tunnel surfaces are disabled",
-			"reason", err.Error())
+		logDegradedSecrets(log, cfg, "no secure credential store available", err)
 		return nil
 	}
 	secrets, err := credentials.Provision(ctx, store)
 	if err != nil {
-		log.Warn("provisioning internal secrets failed; falling back to config/env", "err", err)
+		logDegradedSecrets(log, cfg, "provisioning internal secrets failed", err)
 		return store
 	}
 	cfg.SessionSecret = secrets.SessionSecret
@@ -420,6 +434,35 @@ func openCredentialsAndProvisionSecrets(ctx context.Context, cfg *config.Config,
 	cfg.MCPJWTSigningKey = secrets.MCPJWTSigningKey
 	cfg.TelegramWebhookSecret = secrets.WebhookSecret
 	return store
+}
+
+// logDegradedSecrets is the shared A5 hardening for both ways
+// openCredentialsAndProvisionSecrets can end up with cfg's four
+// internally-managed secrets left empty: no store at all (credentials.Open
+// failed) or a store that opened but couldn't provision (credentials.
+// Provision failed). Both used to log a single Warn line and continue
+// silently; this escalates to Error and enumerates exactly what stops
+// working — and, the actual hardening rather than just louder logging,
+// refuses to boot at all when Telegram webhook mode is configured. A6 makes
+// an unconfigured webhook secret reject every call, so booting into that
+// exact combination would silently and permanently break the Telegram
+// channel instead of failing at the one moment an operator would see why.
+func logDegradedSecrets(log *slog.Logger, cfg *config.Config, reason string, err error) {
+	log.Error(reason+"; internally-managed secrets are only as durable as config/env, and several features are now OFF",
+		"err", err,
+		"disabled", []string{
+			"Settings UI credential storage and the ngrok tunnel (no session/CSRF signing key)",
+			"Telegram bot token encryption at rest (no encryption key)",
+			"MCP connector token persistence across restarts (ephemeral signing key)",
+			"the Telegram webhook (A6 rejects every call with no secret configured)",
+		})
+	if cfg.TelegramResolvedMode() == "webhook" {
+		fatal("credentials", fmt.Errorf(
+			"%s, and Telegram webhook mode is configured (a public webhook base URL is set) — "+
+				"the webhook secret can never be provisioned, so every inbound Telegram update would be "+
+				"rejected forever; set XCHATS_ALLOW_FILE_CREDENTIALS=1 (see docs/release/credentials.md) "+
+				"or switch Telegram to polling mode", reason))
+	}
 }
 
 // llmProviderCfg is one provider's static config-side fallback — its raw,
@@ -509,12 +552,28 @@ func resolveLLMParams(settingsStore *settings.Store, cfg *config.Config) respons
 	}
 }
 
-// validateProductionConfig returns every reason cfg is unsafe to run with
-// ENVIRONMENT=production (plan Task 17's release gate): a base URL still
-// pointing at localhost/loopback. Development (the default — anything other
-// than the literal "production") never calls this: those are legitimate
-// conveniences there, not misconfigurations. An empty return means clear to
-// boot.
+// shouldValidateProductionConfig (A10) reports whether runServe should run
+// validateProductionConfig's safety gate: an explicit ENVIRONMENT=production,
+// OR a real (non-localhost) API_BASE_URL or FRONTEND_BASE_URL configured
+// regardless of ENVIRONMENT.
+//
+// The second condition is the actual A10 hardening. Before it, the gate only
+// ever ran when an operator BOTH configured real public URLs AND remembered
+// to also set ENVIRONMENT=production — and deploy/docker-compose.yaml never
+// sets the latter (its shipped API_BASE_URL/FRONTEND_BASE_URL default to
+// localhost precisely so the stock `docker compose up` stays a safe, ungated
+// local quickstart), so a real deployment that only did the former — set
+// real URLs, never touched ENVIRONMENT — silently skipped every check below.
+// Configuring a real public URL is itself a strong enough signal of intent
+// to deploy for real that it should trigger the gate on its own.
+func shouldValidateProductionConfig(cfg *config.Config) bool {
+	return cfg.IsProduction() || !isLocalBaseURL(cfg.Server.APIBaseURL) || !isLocalBaseURL(cfg.Server.FrontendBaseURL)
+}
+
+// validateProductionConfig returns every reason cfg is unsafe to run for
+// real (plan Task 17's release gate, extended by A10): a base URL still
+// pointing at localhost/loopback, a wildcard CORS origin, or no secure
+// credential store available. An empty return means clear to boot.
 //
 // This used to also fatal on an ephemeral MCP signing key
 // (MCPJWTSigningKey unset or otherwise invalid — every replica would then
@@ -523,17 +582,38 @@ func resolveLLMParams(settingsStore *settings.Store, cfg *config.Config) respons
 // MCPJWTSigningKey (and the other three internally-managed secrets) through
 // internal/credentials before this function ever runs, whenever a secure
 // credential store is available — which the Docker image always opts into
-// (XCHATS_ALLOW_FILE_CREDENTIALS=1). The remaining edge case (no OS
-// keychain AND no opt-in) degrades to the same warn-and-continue posture
-// every other credential-store consumer already has, rather than refusing
-// to boot.
-func validateProductionConfig(cfg *config.Config) []string {
+// (XCHATS_ALLOW_FILE_CREDENTIALS=1). hasCredentialStore is exactly that
+// condition, checked independently below rather than folded into the two
+// base-URL checks: A5 already fatals immediately on no-store-plus-webhook-
+// mode, but a production deployment with Telegram in polling mode (or no
+// Telegram at all) would otherwise never learn its Settings UI credential
+// storage and ngrok tunnel are silently disabled until an operator went
+// looking for why.
+//
+// secure_cookies is deliberately NOT checked here: internal/httpapi's
+// requestIsSecure already marks the session cookie Secure dynamically from
+// X-Forwarded-Proto (the common case — a reverse proxy or the embedded
+// ngrok tunnel terminates TLS in front of the app), so a plain-HTTP-behind-
+// a-trusted-proxy deployment with the static flag left false is correctly
+// configured, not a misconfiguration this gate should fail on.
+func validateProductionConfig(cfg *config.Config, hasCredentialStore bool) []string {
 	var problems []string
 	if isLocalBaseURL(cfg.Server.APIBaseURL) {
 		problems = append(problems, fmt.Sprintf("API_BASE_URL=%q still points at localhost/loopback", cfg.Server.APIBaseURL))
 	}
 	if isLocalBaseURL(cfg.Server.FrontendBaseURL) {
 		problems = append(problems, fmt.Sprintf("FRONTEND_BASE_URL=%q still points at localhost/loopback", cfg.Server.FrontendBaseURL))
+	}
+	for _, o := range cfg.Server.CORSOrigins {
+		if o == "*" {
+			problems = append(problems, `CORS_ORIGINS contains "*" — list the real frontend origin(s) instead`)
+			break
+		}
+	}
+	if !hasCredentialStore {
+		problems = append(problems, "no secure credential store is available — session signing, Telegram token "+
+			"encryption, and MCP token persistence are only as durable as config/env (see docs/release/credentials.md); "+
+			"set XCHATS_ALLOW_FILE_CREDENTIALS=1 or run where an OS keychain is reachable")
 	}
 	return problems
 }

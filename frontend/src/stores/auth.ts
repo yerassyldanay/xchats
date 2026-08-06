@@ -21,6 +21,13 @@ export const useAuth = defineStore('auth', {
     // "" (no membership resolved, or a lookup error — see mePayload's own
     // doc comment) never matches 'admin': fail closed, never open.
     isAdmin: (s) => s.user?.role === 'admin',
+    // A1: mirrors the backend's requirePasswordChanged gate (server.go) —
+    // true for the migration-seeded admin (and any future forced-reset
+    // account) until its first password change. router.ts redirects to
+    // /change-password while this holds; that's a UX convenience, not the
+    // actual enforcement boundary (the backend blocks the underlying API
+    // calls regardless of what the frontend does).
+    mustChangePassword: (s) => s.user?.must_change_password === true,
   },
   actions: {
     async login(email: string, password: string) {
@@ -29,6 +36,16 @@ export const useAuth = defineStore('auth', {
       this.org = p.organization
       this.orgs = p.organizations
       log.info('login ok', { user: p.user.email })
+    },
+    async changePassword(currentPassword: string, newPassword: string) {
+      const p = await api.post<MePayload>('/auth/password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+      })
+      this.user = p.user
+      this.org = p.organization
+      this.orgs = p.organizations
+      log.info('password changed', { user: p.user.email })
     },
     async fetchMe() {
       try {

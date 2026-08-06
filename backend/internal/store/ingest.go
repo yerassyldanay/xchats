@@ -280,10 +280,28 @@ func (s *Store) SetMediaReady(ctx context.Context, messageID uuid.UUID, fileSize
 	return err
 }
 
-// MediaStorageURL resolves a public media id to its blob key, on any channel.
-func (s *Store) MediaStorageURL(ctx context.Context, id uuid.UUID) (storageURL, mimetype, fileName string, err error) {
+// MediaStorageURL resolves a public media id to its blob key, on any
+// channel, SCOPED to orgID — a media row belonging to a different
+// organization (or no row at all) is indistinguishable from ErrNotFound to
+// the caller, by design: this is the query that closes the cross-org media
+// IDOR (an authenticated user of one org could otherwise fetch any other
+// org's media by guessing/enumerating uuids). Written directly against the
+// base tables rather than inbox_message_media_v: that view has no
+// organization_id column (it was never meant to carry authorization scope),
+// and adding one there would change a view several other read paths share.
+func (s *Store) MediaStorageURL(ctx context.Context, orgID, id uuid.UUID) (storageURL, mimetype, fileName string, err error) {
 	err = s.db.QueryRow(ctx, `
-		SELECT storage_key, mimetype, filename FROM inbox_message_media_v WHERE id = $1`, id).
+		SELECT mm.storage_url, mm.mimetype, mm.file_name
+		FROM message_media mm
+		JOIN wa_messages m ON m.id = mm.message_id
+		JOIN wa_accounts a ON a.id = m.account_id
+		WHERE mm.id = $1 AND a.organization_id = $2
+		UNION ALL
+		SELECT tm.storage_key, tm.mimetype, tm.filename
+		FROM tg_message_media tm
+		JOIN tg_messages m ON m.id = tm.message_id
+		JOIN tg_accounts a ON a.id = m.account_id
+		WHERE tm.id = $1 AND a.organization_id = $2`, id, orgID).
 		Scan(&storageURL, &mimetype, &fileName)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return "", "", "", ErrNotFound

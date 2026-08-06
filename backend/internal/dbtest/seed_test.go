@@ -12,14 +12,17 @@ import (
 )
 
 // TestInitAdminMigration pins the "Seeding & bootstrap" decision: required
-// initial state comes 100% from migration 0006_init_admin, never from Go
-// code. A fresh, freshly-migrated database — nothing else — must already
-// have the default organization, the default admin user, and their
-// membership link, and the stored password hash must actually verify
-// against the documented default password with internal/httpapi/auth.go's
-// exact argon2id parameters (reimplemented locally rather than importing
-// internal/httpapi, which sits outside the persistence boundary this
-// package belongs to).
+// initial state comes 100% from migrations 0006_init_admin +
+// 0008_bootstrap_admin, never from Go code. A fresh, freshly-migrated
+// database — nothing else — must already have the default organization,
+// the default admin user, and their membership link.
+//
+// The admin's password_hash must be BLANK and must_change_password set —
+// 0008 retires 0006's committed default-password hash immediately, so
+// nothing (not even the old documented default password) verifies against
+// it. cmd/xchats' first-boot bootstrap is what mints a real, unique
+// password on top of this — see TestBootstrapAdminPassword in
+// cmd/xchats for that half.
 func TestInitAdminMigration(t *testing.T) {
 	db := OpenRaw(t)
 	ctx := context.Background()
@@ -28,10 +31,9 @@ func TestInitAdminMigration(t *testing.T) {
 		orgID   = "00000000-0000-0000-0000-000000000001"
 		adminID = "00000000-0000-0000-0000-000000000002"
 		email   = "admin@xchat.kz"
-		// The one place this literal is allowed to live outside the
-		// migration file and README/handoff docs: what proves the
-		// migration's precomputed hash actually opens with it.
-		defaultPassword = "xchat-admin-change-me"
+		// The password 0006's precomputed hash used to open with, before
+		// 0008 retired it — kept only to prove it no longer verifies.
+		formerDefaultPassword = "xchat-admin-change-me"
 	)
 
 	var orgName string
@@ -43,18 +45,25 @@ func TestInitAdminMigration(t *testing.T) {
 	}
 
 	var gotEmail, hash string
-	if err := db.QueryRow(ctx, `SELECT email, password_hash FROM users WHERE id = $1`, adminID).
-		Scan(&gotEmail, &hash); err != nil {
+	var mustChangePassword bool
+	if err := db.QueryRow(ctx, `SELECT email, password_hash, must_change_password FROM users WHERE id = $1`, adminID).
+		Scan(&gotEmail, &hash, &mustChangePassword); err != nil {
 		t.Fatalf("default admin user missing: %v", err)
 	}
 	if gotEmail != email {
 		t.Errorf("admin email = %q, want %q", gotEmail, email)
 	}
-	if !verifyArgon2id(defaultPassword, hash) {
-		t.Errorf("stored password hash does not verify against the documented default password %q", defaultPassword)
+	if hash != "" {
+		t.Errorf("sentinel admin's password_hash = %q, want \"\" (0008 must blank 0006's committed hash)", hash)
 	}
-	if verifyArgon2id("definitely-the-wrong-password", hash) {
-		t.Error("stored password hash verified against a wrong password")
+	if !mustChangePassword {
+		t.Error("sentinel admin's must_change_password = false, want true")
+	}
+	if verifyArgon2id(formerDefaultPassword, hash) {
+		t.Error("the former default password still verifies — 0008 failed to retire the committed hash")
+	}
+	if verifyArgon2id("", hash) {
+		t.Error("an empty password verified against the blanked hash — must fail closed")
 	}
 
 	var membershipCount int
