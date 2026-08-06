@@ -19,15 +19,24 @@ comment for the isolation rules).
    In a locked-down sandbox this needs egress to `cdn.playwright.dev` and
    `playwright.download.prss.microsoft.com` (allowlist them, or run where a
    browser is available).
-2. **The backend stack running** (Playwright only starts the frontend):
+2. **The backend stack running** (Playwright only starts the frontend; no
+   separate database service to start — SQLite migrates and seeds itself
+   on boot):
    ```bash
-   # from repo root — Postgres up, then:
-   make migrate && make seed && make dev-backend     # :8080
+   # from repo root:
+   make dev-backend     # :8080
    ```
-   The tests log in as the seeded admin. Point them at the seeded credentials:
+   The tests log in as the migration-seeded admin, `admin@xchat.kz`. Its
+   password is one-time and randomly generated per database — retrieve it,
+   log in once through the browser, and set your own password (the first
+   login forces this before anything else is reachable):
    ```bash
-   export E2E_EMAIL=admin@example.com
-   export E2E_PASSWORD='<your SEED_ADMIN_PASSWORD>'
+   cd backend && go run ./cmd/xchats admin-credential show
+   ```
+   Then point the tests at the password you just set:
+   ```bash
+   export E2E_EMAIL=admin@xchat.kz
+   export E2E_PASSWORD='<the password you set after the forced change>'
    ```
 
 ## Run

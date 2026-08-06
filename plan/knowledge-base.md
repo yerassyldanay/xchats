@@ -1,6 +1,6 @@
 # Live Knowledge Base and Customer Prompt
 
-[`DECISIONS.md`](../DECISIONS.md) is authoritative. This document covers only
+[`DECISIONS.md`](DECISIONS.md) is authoritative. This document covers only
 the customer-response path. Builder prompts and pending knowledge are described
 in [`playground.md`](playground.md) and must never cross this trust boundary.
 

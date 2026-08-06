@@ -1,6 +1,6 @@
 # Playground and Knowledge Authoring
 
-[`DECISIONS.md`](../DECISIONS.md) is authoritative. The Playground is the
+[`DECISIONS.md`](DECISIONS.md) is authoritative. The Playground is the
 authoring UI for pending knowledge. It may propose and accumulate changes, but
 only the explicit draft-to-live approval transaction writes `ai_*`.
 
