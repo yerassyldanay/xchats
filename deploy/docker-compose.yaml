@@ -32,13 +32,10 @@ services:
       XCHATS_CONFIG_DIR: "/data/appconfig"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,http://localhost:${FRONTEND_PORT:-8081}}"
       # --- MCP connector (plan/mcp.md) ---
-      # API_BASE_URL is the backend's own PUBLIC origin, and it is the single
-      # source of every OAuth/MCP discovery URL this server advertises (issuer,
-      # authorize/token/jwks endpoints, and the RFC 8707 resource the access
-      # token's audience is bound to). It is deliberately NOT derived from the
-      # request's Host header, so it must be set to whatever an MCP host
-      # actually dials — a tunnel/public HTTPS URL when the connector is reached
-      # from outside this machine, not the in-container port.
+      # API_BASE_URL is the fallback public origin for deployments that do not
+      # use embedded ngrok. A saved ngrok authtoken plus API key discovers and
+      # persists the account's assigned domain; xchats then uses that HTTPS
+      # origin for every MCP/OAuth issuer, audience, discovery, and callback.
       API_BASE_URL: "${API_BASE_URL:-http://localhost:${BACKEND_PORT:-8080}}"
       # FRONTEND_BASE_URL is where the KB Manager widget's "Review and publish
       # in Xchats" link lands — the frontend service below, as reachable from

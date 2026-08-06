@@ -47,13 +47,16 @@ func TestProviderByID(t *testing.T) {
 	}
 }
 
-func TestNgrokHasNoValidator(t *testing.T) {
+func TestNgrokHasAPIKeyValidator(t *testing.T) {
 	p, ok := ProviderByID("ngrok")
 	if !ok {
 		t.Fatal("ngrok provider not found")
 	}
-	if p.Validate != nil {
-		t.Error("ngrok Provider.Validate is non-nil, want nil (no lightweight validity check exists)")
+	if p.Validate == nil {
+		t.Fatal("ngrok Provider.Validate is nil, want account API-key validation")
+	}
+	if len(p.Fields) != 2 || p.Fields[0].Key != KeyNgrokAuthtoken || p.Fields[1].Key != KeyNgrokAPIKey {
+		t.Errorf("ngrok fields = %#v, want authtoken and API key", p.Fields)
 	}
 }
 
@@ -216,6 +219,29 @@ func TestValidateGeminiSendsKeyAsQueryParam(t *testing.T) {
 	}
 	if gotQuery != "AIza-test" {
 		t.Errorf("key query param = %q, want %q", gotQuery, "AIza-test")
+	}
+}
+
+func TestValidateNgrokSendsAPIKeyAsBearer(t *testing.T) {
+	var gotAuth, gotVersion, gotLimit string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotVersion = r.Header.Get("ngrok-version")
+		gotLimit = r.URL.Query().Get("limit")
+		if r.URL.Path != "/reserved_domains" {
+			t.Errorf("path = %q, want %q", r.URL.Path, "/reserved_domains")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	err := validateNgrok(context.Background(), map[Key]string{
+		KeyNgrokAPIKey: "ngrok-api-test", "ngrok.base_url": srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("validateNgrok: %v", err)
+	}
+	if gotAuth != "Bearer ngrok-api-test" || gotVersion != "2" || gotLimit != "1" {
+		t.Errorf("request auth/version/limit = (%q, %q, %q)", gotAuth, gotVersion, gotLimit)
 	}
 }
 

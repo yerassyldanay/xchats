@@ -54,8 +54,9 @@ type ProviderSettings struct {
 	LastError      string     `json:"last_error,omitempty"`
 }
 
-// NgrokSettings is the embedded tunnel's non-secret configuration — the
-// authtoken lives in internal/credentials under "ngrok.authtoken".
+// NgrokSettings is the embedded tunnel's non-secret configuration. The
+// authtoken and account API key live in internal/credentials; Domain may be
+// entered manually or discovered from the account API during startup.
 type NgrokSettings struct {
 	Region string `json:"region,omitempty"`
 	Domain string `json:"domain,omitempty"`

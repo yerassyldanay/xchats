@@ -297,9 +297,9 @@ export default {
       region: 'Region',
       regionPlaceholder: 'Nearest available',
       domain: 'Reserved domain',
-      domainPlaceholder: 'Random subdomain',
+      domainPlaceholder: 'Auto-detected from API key',
       saveOptions: 'Save',
-      optionsHint: 'Takes effect the next time the tunnel starts.',
+      optionsHint: 'Leave the domain empty to discover the account’s assigned domain on the next backend restart.',
     },
     channels: {
       title: 'Communication channels',

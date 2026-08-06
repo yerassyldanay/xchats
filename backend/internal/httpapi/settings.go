@@ -135,13 +135,12 @@ func (s *Server) integrationProvider(c *gin.Context) (credentials.Provider, bool
 	return p, true
 }
 
-// baseURLValueFor adds "<id>.base_url" to values when the provider has one
-// configured in Settings — the one piece of non-secret ProviderSettings a
-// Validate call needs alongside the secret Fields themselves (self-hosted
-// Langfuse, a proxied OpenAI-compatible gateway, ...). "" (unset) is left
-// out entirely; every validator already defaults to its public endpoint.
+// baseURLValueFor adds "<id>.base_url" to values when one is configured in
+// Settings. HasBaseURL controls whether the UI exposes that setting, but the
+// hidden override remains a useful HTTP-test seam for fixed-origin providers
+// such as ngrok. "" (unset) is left out; validators use their public default.
 func (s *Server) baseURLValueFor(p credentials.Provider, values map[credentials.Key]string) {
-	if !p.HasBaseURL || s.settings == nil {
+	if s.settings == nil {
 		return
 	}
 	cur, err := s.settings.Load()
@@ -238,9 +237,9 @@ type saveCredentialReq struct {
 // handleSaveIntegrationCredential validates then saves a provider's
 // credential fields: a confirmed-invalid credential (ErrInvalidCredential)
 // is NEVER saved, regardless of Force — "invalid never becomes configured."
-// An unverifiable one (ErrValidationUnavailable, or no Validate at all —
-// ngrok) is saved only when Force is set, or when there is no check to
-// run in the first place.
+// An unverifiable one (ErrValidationUnavailable, or a provider with no
+// Validate function) is saved only when Force is set, or when there is no
+// check to run in the first place.
 func (s *Server) handleSaveIntegrationCredential(c *gin.Context) {
 	provider, okProvider := s.integrationProvider(c)
 	if !okProvider {
@@ -260,8 +259,15 @@ func (s *Server) handleSaveIntegrationCredential(c *gin.Context) {
 	for _, f := range provider.Fields {
 		v := strings.TrimSpace(req.Values[string(f.Key)])
 		if v == "" {
-			fail(c, http.StatusBadRequest, ErrValidation, fmt.Sprintf("missing value for %q", f.Key))
-			return
+			// Secret fields are never echoed to the UI. Preserve an already
+			// stored sibling when adding/replacing one field of a multi-field
+			// credential (notably adding ngrok.api_key to an existing token).
+			existing, err := s.credentials.Get(ctx(c), f.Key)
+			if err != nil {
+				fail(c, http.StatusBadRequest, ErrValidation, fmt.Sprintf("missing value for %q", f.Key))
+				return
+			}
+			v = existing
 		}
 		values[f.Key] = v
 	}
@@ -349,9 +355,8 @@ func (s *Server) handleTestIntegrationCredential(c *gin.Context) {
 	}
 	// A static fact about the provider, independent of what (if anything)
 	// is configured yet — checked before the stored-credential lookup below
-	// so ngrok (no Validate at all) always reports "no check exists" rather
-	// than a misleading "not configured" for a provider that can never be
-	// tested regardless of configuration state.
+	// so a provider with no check reports that fact instead of a misleading
+	// "not configured" response.
 	if provider.Validate == nil {
 		fail(c, http.StatusBadRequest, ErrValidation, "this integration has no credential check")
 		return

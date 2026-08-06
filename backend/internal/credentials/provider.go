@@ -17,11 +17,14 @@ type Field struct {
 	Label string
 }
 
-// KeyNgrokAuthtoken is the ngrok Provider's one credential field — exported
-// (unlike every other provider's field keys, which live only inline in the
-// providers list below) because internal/tunnel needs to look it up by name
-// without duplicating the literal and risking it drifting out of sync.
-const KeyNgrokAuthtoken Key = "ngrok.authtoken"
+// The ngrok integration has two distinct credentials. The authtoken connects
+// the embedded agent; the API key lists account resources such as the assigned
+// static development domain. Both are exported because tunnel/runtime wiring
+// consumes them without duplicating credential-name literals.
+const (
+	KeyNgrokAuthtoken Key = "ngrok.authtoken"
+	KeyNgrokAPIKey    Key = "ngrok.api_key"
+)
 
 // Provider is the static metadata and validation logic for one integration
 // the Settings UI can configure a credential for.
@@ -38,7 +41,7 @@ type Provider struct {
 	HasModel   bool
 	// Validate checks the given field values against the live provider API.
 	// nil for providers with no lightweight "is this credential valid" call
-	// to make (ngrok — the only real check is opening a tunnel with it).
+	// to make.
 	// values is keyed by this Provider's own Field.Key values, plus (for
 	// providers with HasBaseURL) an optional "<id>.base_url" entry the
 	// caller may set to validate against a self-hosted/proxied endpoint
@@ -78,12 +81,15 @@ var providers = []Provider{
 	},
 	{
 		ID: "ngrok", DisplayName: "ngrok",
-		Fields:        []Field{{Key: KeyNgrokAuthtoken, Label: "Authtoken"}},
-		CredentialURL: "https://dashboard.ngrok.com/get-started/your-authtoken",
+		Fields: []Field{
+			{Key: KeyNgrokAuthtoken, Label: "Authtoken"},
+			{Key: KeyNgrokAPIKey, Label: "API Key"},
+		},
+		CredentialURL: "https://dashboard.ngrok.com/api",
 		DocsURL:       "https://ngrok.com/docs",
 		HasBaseURL:    false,
 		HasModel:      false,
-		Validate:      nil,
+		Validate:      validateNgrok,
 	},
 	{
 		ID: "langfuse", DisplayName: "Langfuse",
@@ -209,6 +215,20 @@ func validateGemini(ctx context.Context, values map[Key]string) error {
 		return ErrValidationUnavailable
 	}
 	return classify(resp, isGeminiInvalidKeyBody)
+}
+
+// validateNgrok verifies the account API key by listing reserved domains.
+// The agent authtoken is independently verified when a tunnel is opened.
+func validateNgrok(ctx context.Context, values map[Key]string) error {
+	base := baseURLFor(values, "ngrok", "https://api.ngrok.com")
+	resp, err := doGet(ctx, base+"/reserved_domains?limit=1", func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+values[KeyNgrokAPIKey])
+		r.Header.Set("ngrok-version", "2")
+	})
+	if err != nil {
+		return ErrValidationUnavailable
+	}
+	return classify(resp, nil)
 }
 
 // isGeminiInvalidKeyBody recognizes Gemini's own shape for a rejected key:

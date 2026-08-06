@@ -6,7 +6,7 @@
 
 server:
   http_addr: ":8080"
-  api_base_url: ""          # empty => derived; set API_BASE_URL for a public/tunnel origin
+  api_base_url: ""          # fallback only; configured ngrok discovers its own public origin
   frontend_base_url: ""     # empty => derived; set FRONTEND_BASE_URL to the published frontend origin
   cors_origins:
     - "http://localhost:5173"

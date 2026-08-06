@@ -16,6 +16,7 @@ func TestEnvNameConversion(t *testing.T) {
 		{"openrouter.api_key", "OPENROUTER_API_KEY"},
 		{"langfuse.public_key", "LANGFUSE_PUBLIC_KEY"},
 		{"ngrok.authtoken", "NGROK_AUTHTOKEN"},
+		{"ngrok.api_key", "NGROK_API_KEY"},
 		{"system.session_secret", "SYSTEM_SESSION_SECRET"},
 	}
 	for _, tc := range cases {

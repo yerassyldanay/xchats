@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/llm"
 )
 
@@ -76,10 +78,17 @@ func TestListIntegrationsShowsAllProvidersNoneConfigured(t *testing.T) {
 	}
 }
 
-func TestSaveIntegrationCredentialNoValidatorProviderSavesImmediately(t *testing.T) {
+func TestSaveNgrokCredentialsValidatesAndSaves(t *testing.T) {
 	h := newSettingsHarness(t)
+	withTestProviderBaseURL(t, h, "ngrok", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ngrok-api-123" || r.Header.Get("ngrok-version") != "2" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	resp, env := h.do(http.MethodPut, "/xchats/api/v1/settings/integrations/ngrok/credential", map[string]any{
-		"values": map[string]string{"ngrok.authtoken": "ngrok-tok-123"},
+		"values": map[string]string{"ngrok.authtoken": "ngrok-tok-123", "ngrok.api_key": "ngrok-api-123"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save ngrok credential: status=%d body=%s", resp.StatusCode, env["message"])
@@ -88,8 +97,8 @@ func TestSaveIntegrationCredentialNoValidatorProviderSavesImmediately(t *testing
 		Verified bool `json:"verified"`
 	}
 	mustDecode(t, env, &got)
-	if got.Verified {
-		t.Error("Verified = true for a provider with no Validate func, want false")
+	if !got.Verified {
+		t.Error("Verified = false for a valid ngrok API key, want true")
 	}
 
 	_, listEnv := h.get("/xchats/api/v1/settings/integrations")
@@ -140,8 +149,11 @@ func TestSaveIntegrationCredentialUnknownProvider404s(t *testing.T) {
 
 func TestDeleteIntegrationCredential(t *testing.T) {
 	h := newSettingsHarness(t)
+	withTestProviderBaseURL(t, h, "ngrok", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 	resp, _ := h.do(http.MethodPut, "/xchats/api/v1/settings/integrations/ngrok/credential", map[string]any{
-		"values": map[string]string{"ngrok.authtoken": "ngrok-tok-123"},
+		"values": map[string]string{"ngrok.authtoken": "ngrok-tok-123", "ngrok.api_key": "ngrok-api-123"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save: status=%d", resp.StatusCode)
@@ -177,11 +189,32 @@ func TestDeleteIntegrationCredentialManagedByEnvRefuses(t *testing.T) {
 	}
 }
 
-func TestTestIntegrationCredentialNoValidatorProvider(t *testing.T) {
+func TestTestNgrokIntegrationRequiresConfiguredCredentials(t *testing.T) {
 	h := newSettingsHarness(t)
 	resp, _ := h.do(http.MethodPost, "/xchats/api/v1/settings/integrations/ngrok/test", nil)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 (ngrok has no credential check)", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (ngrok credentials are not configured)", resp.StatusCode)
+	}
+}
+
+func TestSaveNgrokAPIKeyPreservesStoredAuthtoken(t *testing.T) {
+	h := newSettingsHarness(t)
+	withTestProviderBaseURL(t, h, "ngrok", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	if err := h.creds.Set(context.Background(), credentials.KeyNgrokAuthtoken, "existing-authtoken"); err != nil {
+		t.Fatalf("seed authtoken: %v", err)
+	}
+
+	resp, env := h.do(http.MethodPut, "/xchats/api/v1/settings/integrations/ngrok/credential", map[string]any{
+		"values": map[string]string{"ngrok.api_key": "new-api-key"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save API key: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	got, err := h.creds.Get(context.Background(), credentials.KeyNgrokAuthtoken)
+	if err != nil || got != "existing-authtoken" {
+		t.Fatalf("authtoken after partial save = %q, %v", got, err)
 	}
 }
 
@@ -612,9 +645,13 @@ func TestTunnelStartFailureReturnsStatusWithLastError(t *testing.T) {
 
 func TestLLMRefreshCalledOnCredentialSaveDeleteAndSettingsChanges(t *testing.T) {
 	h := newSettingsHarness(t)
+	withTestProviderBaseURL(t, h, "ngrok", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	*h.llmRefreshCalls = 0 // exclude the test-only base URL setup above
 
 	resp, env := h.do(http.MethodPut, "/xchats/api/v1/settings/integrations/ngrok/credential", map[string]any{
-		"values": map[string]string{"ngrok.authtoken": "tok"},
+		"values": map[string]string{"ngrok.authtoken": "tok", "ngrok.api_key": "api-key"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save: status=%d body=%s", resp.StatusCode, env["message"])

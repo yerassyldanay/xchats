@@ -29,6 +29,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
+	"github.com/yerassyldanay/xchats/backend/internal/ngrokapi"
 	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
@@ -104,17 +105,24 @@ func main() {
 }
 
 func runServe(cfg *config.Config, log *slog.Logger) {
-	if cfg.IsProduction() {
-		if problems := validateProductionConfig(cfg); len(problems) > 0 {
-			fatal("production config", fmt.Errorf("%s", strings.Join(problems, "; ")))
-		}
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	credsChain := openCredentialsAndProvisionSecrets(ctx, cfg, log)
 	settingsStore := settings.NewStore(resolveConfigDir(log))
+	autoStartTunnel, err := applyNgrokPublicOrigin(ctx, cfg, credsChain, settingsStore, ngrokapi.NewClient())
+	if err != nil {
+		log.Warn("ngrok static domain is not usable as the MCP public origin", "err", err)
+	}
+	if autoStartTunnel {
+		log.Info("using ngrok static domain as the MCP public origin", "public_origin", cfg.ResolvedAPIBaseURL())
+	}
+
+	if cfg.IsProduction() {
+		if problems := validateProductionConfig(cfg); len(problems) > 0 {
+			fatal("production config", fmt.Errorf("%s", strings.Join(problems, "; ")))
+		}
+	}
 
 	// Langfuse LLM tracing (best-effort): install a global OTel TracerProvider so
 	// the LLM clients export each call as a generation. Never fatal.
@@ -315,11 +323,27 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		}
 	}()
 
+	var tunnelStartDone chan struct{}
+	if autoStartTunnel && tunnelMgr != nil {
+		tunnelStartDone = make(chan struct{})
+		go func() {
+			defer close(tunnelStartDone)
+			if err := tunnelMgr.Start(ctx); err != nil {
+				log.Warn("automatic ngrok tunnel start failed", "last_error", tunnelMgr.Status().LastError)
+				return
+			}
+			log.Info("ngrok tunnel started automatically", "public_url", tunnelMgr.Status().PublicURL)
+		}()
+	}
+
 	<-ctx.Done()
 	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+	if tunnelStartDone != nil {
+		<-tunnelStartDone
+	}
 	if tunnelMgr != nil {
 		_ = tunnelMgr.Stop(shutdownCtx)
 	}

@@ -303,9 +303,9 @@ export default {
       region: 'Регион',
       regionPlaceholder: 'Ближайший доступный',
       domain: 'Закреплённый домен',
-      domainPlaceholder: 'Случайный поддомен',
+      domainPlaceholder: 'Определяется по API-ключу',
       saveOptions: 'Сохранить',
-      optionsHint: 'Применится при следующем запуске туннеля.',
+      optionsHint: 'Оставьте домен пустым, чтобы определить назначенный домен при следующем перезапуске сервера.',
     },
     channels: {
       title: 'Каналы связи',
