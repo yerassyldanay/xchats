@@ -6,18 +6,14 @@ title = "xchats gitleaks config"
 useDefault = true
 
 [allowlist]
-description = "vendored third-party source and known-fake test fixtures"
+description = "revoked historical credential, and known-fake test fixtures"
 paths = [
-  # go-licenses save's output (see THIRD_PARTY_NOTICES.md) — full vendored
-  # source of GPL-3.0/MPL-2.0 dependencies for license-compliance purposes,
-  # not this project's own code. The one hit this ever produced:
-  # whatsmeow's binary/token/token.go embeds WhatsApp's official client's
-  # protocol token dictionary verbatim (that's how an unofficial
-  # reverse-engineered client obtains it) — including a Google API key
-  # string that is WhatsApp's own, already public upstream, and not ours
-  # to rotate. Excluding the whole directory rather than that one line:
-  # nothing under it is code this project wrote or can act on regardless.
-  '''^third_party_licenses/''',
+  # deploy/restore-evolution-webhook.sh carried a hardcoded Evolution API
+  # key in an earlier commit. The key has been revoked at the provider —
+  # dead, not live — so it deliberately stays in history rather than being
+  # rewritten out; without this entry, a history-ranged `gitleaks` run
+  # (fetch-depth: 0 in secret-scan.yml) would red-fail on it forever.
+  '''^deploy/restore-evolution-webhook\.sh$''',
   # This specific eval run's manifest.json has a "repair_key" field — a
   # harness-generated idempotency token correlating a repair-retry run to
   # its original (evals/harness/retry.go), not a credential. Flagged only

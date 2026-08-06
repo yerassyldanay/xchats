@@ -87,11 +87,10 @@ lint-backend: ## golangci-lint over the backend module (see .golangci.yml)
 lint-frontend: ## eslint over the frontend (see frontend/eslint.config.js)
 	cd $(FRONTEND) && npx eslint .
 
-notices: ## Regenerate THIRD_PARTY_NOTICES.md + third_party_licenses/ from the actual dependency graph
-	cd $(BACKEND) && go-licenses save ./cmd/xchats --save_path=../third_party_licenses/ --force
-	@echo "Go license texts refreshed under third_party_licenses/ — see THIRD_PARTY_NOTICES.md's own"
-	@echo "'Maintaining this file' section for the report command that regenerates its tables, and the"
-	@echo "npm-side license-checker-rseidelsohn invocation."
+notices: ## Regenerate THIRD_PARTY_LICENSES.txt from the shipped dependency graph (pinned tools — see scripts/notices.sh)
+	./scripts/notices.sh
+	@echo "If the dependency set changed, also refresh the inventory tables in"
+	@echo "THIRD_PARTY_NOTICES.md (see its 'Maintaining this file' section)."
 
 ruleset-apply: ## Apply .github/rulesets/*.json to the repo via the GitHub API (does nothing until they exist — see the release plan's ruleset stage)
 	@for f in .github/rulesets/*.json; do \

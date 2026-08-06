@@ -56,6 +56,13 @@ frontend/playwright/.cache/
 coverage.out
 *.prof
 
+# `go mod vendor` output — only ever populated by the release workflow's
+# source-bundle job, in its own ephemeral checkout (see release.yml). A
+# leftover local copy must never get committed, and must never sit around
+# silently flipping local `go` commands to -mod=vendor (scripts/notices.sh
+# depends on that not happening).
+backend/vendor/
+
 # credentials / keys — never legitimately committed anywhere in this repo
 *.pem
 *.key
