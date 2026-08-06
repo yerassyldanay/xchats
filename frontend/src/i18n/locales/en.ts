@@ -356,6 +356,63 @@ export default {
       invited: 'Invitation sent.',
     },
   },
+  // Channel-level debounce + scheduled auto-reply (Accounts.vue's
+  // Automation button/badge/dialog).
+  automation: {
+    button: 'Automation',
+    badge: {
+      off: 'Automation off',
+      suggestions: 'Suggestions',
+      scheduledAuto: 'Scheduled auto-reply',
+    },
+    dialog: {
+      title: 'Automation — {name}',
+      modeLabel: 'Mode',
+      mode: {
+        off: 'Off',
+        offHint: 'No draft replies are generated — automatically or manually.',
+        suggestions: 'Suggestions',
+        suggestionsHint: 'A draft reply is generated for the operator to review and is never sent automatically.',
+        scheduled_auto: 'Scheduled auto-reply',
+        scheduled_autoHint: 'A draft is generated and sent automatically during the schedule below; outside it, only a suggestion is shown.',
+      },
+      waitLabel: 'Message wait',
+      waitHint: 'How long a chat must go quiet after a customer message before a reply is generated.',
+      waitDefault: 'Default ({seconds}s)',
+      waitCustom: 'Custom',
+      waitSecondsUnit: 'sec',
+      scheduleLabel: 'Schedule (scheduled auto-reply only)',
+      scheduleTimezoneHint: "Times shown in your browser's time zone ({offset}).",
+      presets: {
+        always: 'Always',
+        nights: 'Nights',
+        weekends: 'Weekends',
+        custom: 'Custom',
+      },
+      weekday: {
+        sun: 'Sunday',
+        mon: 'Monday',
+        tue: 'Tuesday',
+        wed: 'Wednesday',
+        thu: 'Thursday',
+        fri: 'Friday',
+        sat: 'Saturday',
+      },
+      rangeTo: 'to',
+      addWindow: 'Add time range',
+      removeWindow: 'Remove',
+      overnightHint: 'An end time earlier than the start time continues into the next day.',
+      noWindows: 'No schedule configured — scheduled auto-reply will only ever show a suggestion until you add at least one time range.',
+      save: 'Save',
+      saving: 'Saving…',
+      cancel: 'Cancel',
+      errors: {
+        invalidWait: 'The custom wait must be a whole number from 0 to 60 seconds.',
+        invalidWindow: 'Each time range needs a different start and end time.',
+        saveFailed: 'Could not save automation settings.',
+      },
+    },
+  },
   // A1: the forced first-login password change (/change-password) — the
   // migration-seeded admin's one-time bootstrap password must be replaced
   // before anything else in the app becomes reachable (backend gate:

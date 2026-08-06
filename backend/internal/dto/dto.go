@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/yerassyldanay/xchats/backend/automation"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
 
@@ -147,6 +148,60 @@ type Account struct {
 	WebhookRegisteredAt  *string `json:"webhook_registered_at"`
 	WebhookLastCheckedAt *string `json:"webhook_last_checked_at"`
 	WebhookLastError     *string `json:"webhook_last_error"`
+
+	// Automation is this channel's effective (resolved) debounce/scheduled
+	// auto-reply configuration — see MapAccountAutomation.
+	Automation AccountAutomation `json:"automation"`
+}
+
+// ScheduleWindow is one recurring UTC weekday/time-of-day range — the wire
+// shape of store.AutomationWindow (minus its id/account, which the API never
+// exposes: a save always replaces the whole set, so there is nothing to
+// address an individual window by).
+type ScheduleWindow struct {
+	// Weekday is 0=Sunday..6=Saturday in UTC (time.Weekday's own numbering).
+	Weekday     int `json:"weekday"`
+	StartMinute int `json:"start_minute"`
+	EndMinute   int `json:"end_minute"`
+}
+
+// AccountAutomation is one channel's automation settings, wire-ready:
+// WaitSeconds is always the EFFECTIVE (resolved) wait so the UI never has to
+// duplicate the override-vs-default resolution logic itself;
+// WaitSecondsOverride is the raw stored value (null means "using the
+// system default") so the dialog can still distinguish "explicitly set to
+// the same number as the default" from "not customized".
+type AccountAutomation struct {
+	Mode                string           `json:"mode"`
+	WaitSeconds         int              `json:"wait_seconds"`
+	WaitSecondsOverride *int             `json:"wait_seconds_override"`
+	DefaultWaitSeconds  int              `json:"default_wait_seconds"`
+	Schedule            []ScheduleWindow `json:"schedule"`
+}
+
+// MapAccountAutomation resolves store.AutomationSettings/AutomationWindow
+// into the wire shape. settings zero-valued (Mode=="") is treated as the
+// implicit default automation.DefaultMode — store.AutomationSettingsForAccount
+// already returns that default for an unconfigured account, but callers
+// bulk-loading via AutomationSettingsForAccounts get a zero value for an
+// absent map entry instead, so resolving the default here too means every
+// caller gets the same answer regardless of which path it took.
+func MapAccountAutomation(settings store.AutomationSettings, windows []store.AutomationWindow, systemDefaultWait int) AccountAutomation {
+	mode := settings.Mode
+	if mode == "" {
+		mode = string(automation.DefaultMode)
+	}
+	sched := make([]ScheduleWindow, 0, len(windows))
+	for _, w := range windows {
+		sched = append(sched, ScheduleWindow{Weekday: w.Weekday, StartMinute: w.StartMinute, EndMinute: w.EndMinute})
+	}
+	return AccountAutomation{
+		Mode:                mode,
+		WaitSeconds:         automation.EffectiveWaitSeconds(systemDefaultWait, settings.WaitSecondsOverride),
+		WaitSecondsOverride: settings.WaitSecondsOverride,
+		DefaultWaitSeconds:  systemDefaultWait,
+		Schedule:            sched,
+	}
 }
 
 // MapNeutralAccount maps a store.Account (as read from inbox_accounts_v) to the

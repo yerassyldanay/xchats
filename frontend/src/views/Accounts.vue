@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   CircleAlert,
   CircleCheck,
+  Clock,
   KeyRound,
   LoaderCircle,
   Plus,
@@ -17,16 +19,20 @@ import { ApiError } from '../api/client'
 import { connStatus, initials, colorFor, type ConnTone } from '../lib/format'
 import AddAccountDialog from '../components/AddAccountDialog.vue'
 import ReplaceTokenDialog from '../components/ReplaceTokenDialog.vue'
+import AutomationStatusBadge from '../components/AutomationStatusBadge.vue'
+import AutomationSettingsDialog from '../components/AutomationSettingsDialog.vue'
 import type { Account } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 
+const { t } = useI18n()
 const accounts = useAccounts()
 const showAdd = ref(false)
 const addStartChannel = ref<'whatsapp' | null>(null)
 const tokenTarget = ref<Account | null>(null)
+const automationTarget = ref<Account | null>(null)
 const deleting = ref<string | null>(null)
 const working = ref<string | null>(null)
 // actionError surfaces a failed retry/check on the card that caused it, rather
@@ -217,12 +223,24 @@ async function remove(a: Account) {
                 <span class="min-w-0 break-words">{{ actionError[a.id] || a.webhook_last_error }}</span>
               </p>
 
-              <div class="mt-4 flex items-center justify-between border-t border-border pt-3">
-                <Badge variant="secondary" :class="conn(a.connection_state).badge">
-                  <span class="w-1.5 h-1.5 rounded-full" :class="conn(a.connection_state).dot" />
-                  {{ conn(a.connection_state).label }}
-                </Badge>
+              <div class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <Badge variant="secondary" :class="conn(a.connection_state).badge">
+                    <span class="w-1.5 h-1.5 rounded-full" :class="conn(a.connection_state).dot" />
+                    {{ conn(a.connection_state).label }}
+                  </Badge>
+                  <AutomationStatusBadge :mode="a.automation.mode" />
+                </div>
                 <div class="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="w-8 h-8"
+                    :title="t('automation.button')"
+                    @click="automationTarget = a"
+                  >
+                    <Clock class="w-4 h-4" />
+                  </Button>
                   <!-- Telegram: retry the webhook / probe health / rotate the token -->
                   <template v-if="isTelegram(a)">
                     <Button
@@ -298,6 +316,12 @@ async function remove(a: Account) {
       :account="tokenTarget"
       @close="tokenTarget = null"
       @replaced="onConnected"
+    />
+    <AutomationSettingsDialog
+      v-if="automationTarget"
+      :account="automationTarget"
+      @close="automationTarget = null"
+      @saved="automationTarget = null"
     />
   </div>
 </template>

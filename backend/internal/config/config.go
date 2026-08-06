@@ -71,6 +71,14 @@ type SystemConfig struct {
 	// not registered at all when false. Defaults false — only a dev/staging
 	// deployment should set SIMULATOR_ENABLED=true.
 	SimulatorEnabled bool `yaml:"simulator_enabled" env:"SIMULATOR_ENABLED"`
+	// CustomerMessageWaitSeconds is the system-wide default debounce wait for
+	// channel-level automation (internal/automation): how long a chat must go
+	// quiet after a customer message before a response is generated. Each
+	// channel may override this within [automation.MinWaitSeconds,
+	// automation.MaxWaitSeconds] via PUT /accounts/:id/automation — see
+	// automation.EffectiveWaitSeconds, the one place default-vs-override
+	// resolution happens.
+	CustomerMessageWaitSeconds int `yaml:"customer_message_wait_seconds" env:"CUSTOMER_MESSAGE_WAIT_SECONDS"`
 }
 
 // TelegramModeConfig is the long-polling-vs-webhook switch (Track 1). It is
@@ -236,11 +244,12 @@ func defaults() Config {
 			BlobDir:        "./blobdata",
 		},
 		System: SystemConfig{
-			LogFormat:       "logfmt",
-			LogLevel:        "info",
-			QueueWorkers:    4,
-			SessionTTLHours: 720,
-			MinPasswordLen:  8,
+			LogFormat:                  "logfmt",
+			LogLevel:                   "info",
+			QueueWorkers:               4,
+			SessionTTLHours:            720,
+			MinPasswordLen:             8,
+			CustomerMessageWaitSeconds: 5,
 		},
 		MCP: MCPConfig{
 			AccessTokenTTLSeconds:   900, // 15 minutes

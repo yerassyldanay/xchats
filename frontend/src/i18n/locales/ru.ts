@@ -363,6 +363,63 @@ export default {
       invited: 'Приглашение отправлено.',
     },
   },
+  // Channel-level debounce + scheduled auto-reply (Accounts.vue's
+  // Automation button/badge/dialog).
+  automation: {
+    button: 'Автоматизация',
+    badge: {
+      off: 'Автоматизация выключена',
+      suggestions: 'Подсказки',
+      scheduledAuto: 'Автоответ по расписанию',
+    },
+    dialog: {
+      title: 'Автоматизация — {name}',
+      modeLabel: 'Режим',
+      mode: {
+        off: 'Выключено',
+        offHint: 'Черновики ответов не создаются — ни автоматически, ни вручную.',
+        suggestions: 'Подсказки',
+        suggestionsHint: 'Черновик ответа создаётся для проверки оператором и никогда не отправляется автоматически.',
+        scheduled_auto: 'Автоответ по расписанию',
+        scheduled_autoHint: 'Черновик создаётся и отправляется автоматически в указанное ниже время; вне расписания показывается только подсказка.',
+      },
+      waitLabel: 'Ожидание сообщений',
+      waitHint: 'Сколько времени чат должен молчать после сообщения клиента, прежде чем будет создан ответ.',
+      waitDefault: 'По умолчанию ({seconds} с)',
+      waitCustom: 'Своё значение',
+      waitSecondsUnit: 'сек.',
+      scheduleLabel: 'Расписание (только для автоответа)',
+      scheduleTimezoneHint: 'Время указано в часовом поясе браузера ({offset}).',
+      presets: {
+        always: 'Всегда',
+        nights: 'Ночи',
+        weekends: 'Выходные',
+        custom: 'Своё',
+      },
+      weekday: {
+        sun: 'Воскресенье',
+        mon: 'Понедельник',
+        tue: 'Вторник',
+        wed: 'Среда',
+        thu: 'Четверг',
+        fri: 'Пятница',
+        sat: 'Суббота',
+      },
+      rangeTo: 'до',
+      addWindow: 'Добавить период',
+      removeWindow: 'Удалить',
+      overnightHint: 'Если время окончания раньше времени начала, период продолжается на следующий день.',
+      noWindows: 'Расписание не задано — в режиме автоответа будет показываться только подсказка, пока вы не добавите хотя бы один период.',
+      save: 'Сохранить',
+      saving: 'Сохранение…',
+      cancel: 'Отмена',
+      errors: {
+        invalidWait: 'Своё значение ожидания должно быть целым числом от 0 до 60 секунд.',
+        invalidWindow: 'У каждого периода время начала и окончания должно отличаться.',
+        saveFailed: 'Не удалось сохранить настройки автоматизации.',
+      },
+    },
+  },
   // A1: the forced first-login password change (/change-password) — the
   // migration-seeded admin's one-time bootstrap password must be replaced
   // before anything else in the app becomes reachable (backend gate:

@@ -57,12 +57,26 @@ type Broadcaster interface {
 	Broadcast(name string, data any)
 }
 
+// Automation is the narrow surface Process needs from
+// internal/automation.Scheduler to hand off a fresh (or redelivered but
+// never-drafted) inbound customer message — satisfied with zero adapter
+// code.
+type Automation interface {
+	OnInboundMessage(ctx context.Context, chatID, accountID uuid.UUID, channel string, lastMessageAt time.Time) error
+}
+
 // Deps is Processor's construction input.
 type Deps struct {
 	Store Ingestor
 	Queue Publisher
 	Hub   Broadcaster
-	Log   *slog.Logger
+	// Automation replaces a direct KindAIDraft enqueue with an
+	// arm/reset-the-debounce-deadline call, so Telegram traffic gets the
+	// exact same mode gating and debounce as WhatsApp. Optional: nil (as in
+	// most of this package's own tests) falls back to the pre-automation
+	// behavior of enqueueing an AI draft immediately.
+	Automation Automation
+	Log        *slog.Logger
 	// PublishTimeout bounds every enqueue; <= 0 defaults to 2s.
 	PublishTimeout time.Duration
 }
@@ -72,6 +86,7 @@ type Processor struct {
 	store          Ingestor
 	queue          Publisher
 	hub            Broadcaster
+	automation     Automation
 	log            *slog.Logger
 	publishTimeout time.Duration
 }
@@ -86,7 +101,7 @@ func New(d Deps) *Processor {
 	if timeout <= 0 {
 		timeout = defaultPublishTimeout
 	}
-	return &Processor{store: d.Store, queue: d.Queue, hub: d.Hub, log: log, publishTimeout: timeout}
+	return &Processor{store: d.Store, queue: d.Queue, hub: d.Hub, automation: d.Automation, log: log, publishTimeout: timeout}
 }
 
 // Outcome reports what Process did with one update.
@@ -168,7 +183,7 @@ func (p *Processor) Process(ctx context.Context, acct store.TelegramAccount, upd
 		// trigger, publish again. WriteDraftSet's supersede semantics make a
 		// rare double generation harmless.
 		p.emitMessage(ctx, "message.updated", res.MessageID)
-		if err := p.reenqueueMissingDraft(ctx, res); err != nil {
+		if err := p.reenqueueMissingDraft(ctx, res, acct.ID); err != nil {
 			return Outcome{Status: "duplicate", Result: res}, fmt.Errorf("%w: %v", ErrEnqueue, err)
 		}
 		return Outcome{Status: "duplicate", Result: res}, nil
@@ -193,21 +208,36 @@ func (p *Processor) Process(ctx context.Context, acct store.TelegramAccount, upd
 		p.hub.Broadcast(name, dto.MapChat(chat))
 	}
 
-	// The draft enqueue is part of the durable unit as far as the caller is
-	// concerned: a queue that will not accept the task means this update has
-	// NOT been fully handled.
-	if err := p.publish(ctx, queue.Message{
-		Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: res.ChatID},
-	}); err != nil {
-		p.log.Error("tgingest: draft enqueue failed; not acking", "chat_id", res.ChatID, "err", err)
+	// Handing this off to automation is part of the durable unit as far as
+	// the caller is concerned: a failure here means this update has NOT
+	// been fully handled (an armed debounce deadline, or a fallback direct
+	// enqueue, is exactly as durable/required as the old unconditional
+	// enqueue was).
+	if err := p.armAutomation(ctx, res.ChatID, acct.ID, in.MessageTS); err != nil {
+		p.log.Error("tgingest: automation arm failed; not acking", "chat_id", res.ChatID, "err", err)
 		return Outcome{Status: "stored", Result: res}, fmt.Errorf("%w: %v", ErrEnqueue, err)
 	}
 	return Outcome{Status: "stored", Result: res}, nil
 }
 
-// reenqueueMissingDraft republishes the draft task for a redelivered inbound
-// message that never got one.
-func (p *Processor) reenqueueMissingDraft(ctx context.Context, res store.TgInboundResult) error {
+// armAutomation hands a genuinely new (or never-drafted-redelivered)
+// inbound customer message to p.automation, replacing a direct KindAIDraft
+// enqueue. p.automation is nil only in tests that don't wire one up, in
+// which case this falls back to that original immediate-enqueue behavior.
+func (p *Processor) armAutomation(ctx context.Context, chatID, accountID uuid.UUID, lastMessageAt time.Time) error {
+	if p.automation == nil {
+		return p.publish(ctx, queue.Message{Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: chatID}})
+	}
+	return p.automation.OnInboundMessage(ctx, chatID, accountID, string(messaging.ChannelTelegram), lastMessageAt)
+}
+
+// reenqueueMissingDraft hands off a redelivered inbound message that never
+// produced a draft the first time around — the automation-arm equivalent of
+// the original direct re-enqueue. There is no original message timestamp
+// available here (only TgInboundResult, not the full TgInbound); using the
+// current time as "last message" is a reasonable choice for this rare
+// crash-recovery path.
+func (p *Processor) reenqueueMissingDraft(ctx context.Context, res store.TgInboundResult, accountID uuid.UUID) error {
 	has, err := p.store.HasDraftForTrigger(ctx, res.MessageID)
 	if err != nil {
 		// The message itself is durably stored; a lookup failure here is
@@ -218,9 +248,7 @@ func (p *Processor) reenqueueMissingDraft(ctx context.Context, res store.TgInbou
 	if has {
 		return nil
 	}
-	if err := p.publish(ctx, queue.Message{
-		Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: res.ChatID},
-	}); err != nil {
+	if err := p.armAutomation(ctx, res.ChatID, accountID, time.Now()); err != nil {
 		p.log.Error("tgingest: duplicate: draft enqueue failed", "chat_id", res.ChatID, "err", err)
 		return err
 	}

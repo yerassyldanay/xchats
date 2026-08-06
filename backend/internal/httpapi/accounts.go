@@ -37,7 +37,8 @@ func (s *Server) handleListWhatsAppAccounts(c *gin.Context) {
 }
 
 // handleListAccounts is the channel-neutral account listing: every connected
-// account the org owns, on every channel, in one shape. It is what the UI's
+// account the org owns, on every channel, in one shape — including each
+// channel's effective (resolved) automation settings. It is what the UI's
 // «Каналы» page renders. /whatsapp-accounts stays alongside it, WhatsApp-only,
 // because the pairing lifecycle it drives has no meaning for any other channel.
 func (s *Server) handleListAccounts(c *gin.Context) {
@@ -51,8 +52,29 @@ func (s *Server) handleListAccounts(c *gin.Context) {
 		return
 	}
 	items := make([]dto.Account, 0, len(accts))
+	if len(accts) == 0 {
+		ok(c, gin.H{"items": items})
+		return
+	}
+	ids := make([]uuid.UUID, len(accts))
+	for i, a := range accts {
+		ids[i] = a.ID
+	}
+	settingsByAccount, err := s.store.AutomationSettingsForAccounts(ctx(c), ids)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	windowsByAccount, err := s.store.AutomationWindowsForAccounts(ctx(c), ids)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	defaultWait := s.cfg.System.CustomerMessageWaitSeconds
 	for _, a := range accts {
-		items = append(items, dto.MapNeutralAccount(a, ""))
+		item := dto.MapNeutralAccount(a, "")
+		item.Automation = dto.MapAccountAutomation(settingsByAccount[a.ID], windowsByAccount[a.ID], defaultWait)
+		items = append(items, item)
 	}
 	ok(c, gin.H{"items": items})
 }

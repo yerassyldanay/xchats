@@ -323,6 +323,10 @@ func (s *Server) Router() *gin.Engine {
 	// Channel-neutral account listing — every channel in one shape. The
 	// per-channel routes below own each channel's own lifecycle.
 	auth.GET("/accounts", s.handleListAccounts)
+	// Channel-level debounce + scheduled auto-reply settings — one channel-
+	// neutral route for every channel (see orgAnyAccount's own doc comment
+	// on why it does not exclude Telegram the way orgAccount does).
+	auth.PUT("/accounts/:id/automation", s.handleUpdateAccountAutomation)
 
 	// WhatsApp accounts manager: connect via whatsmeow's own QR pairing
 	// (internal/whatsmeow), no external gateway involved.

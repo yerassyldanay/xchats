@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/appdirs"
+	"github.com/yerassyldanay/xchats/backend/internal/automation"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
@@ -58,6 +59,18 @@ const (
 	telegramMediaSweepEvery = 5 * time.Minute
 	telegramMediaRetryAfter = 2 * time.Minute
 	telegramMediaSweepBatch = 100
+)
+
+// Channel automation (internal/automation) cadence. claimEvery is short —
+// debounce waits are single-digit-to-60 seconds, so polling latency should
+// be too. recoverEvery/stuckAfter bound the crash-recovery reconcile pass
+// (also run once at startup): a dispatch job still 'processing' longer than
+// stuckAfter is assumed orphaned by a crash and re-published.
+const (
+	automationDispatchWorkers = 4
+	automationClaimEvery      = 1 * time.Second
+	automationRecoverEvery    = 1 * time.Minute
+	automationStuckAfter      = 2 * time.Minute
 )
 
 func main() {
@@ -206,6 +219,19 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	q := queue.NewInMem(2048, cfg.System.QueueWorkers, log)
 	hub := realtime.NewHub()
 
+	// automationScheduler is channel-level debounce + scheduled auto-reply
+	// (internal/automation): whatsmeow and tgingest hand every genuinely new
+	// inbound customer message to it instead of enqueueing an AI draft
+	// directly, and its Runner reuses responseService's own
+	// Conversations/KnowledgeBase/Engine (swapping in a version-gated
+	// Drafts writer per generation) so a debounced/scheduled reply is
+	// generated through the exact same grounded pipeline as every other
+	// draft.
+	automationRunner := &automation.Runner{Store: st, Response: responseService, Queue: q, Hub: hub, Log: log}
+	automationScheduler := automation.NewScheduler(st,
+		automation.Config{SystemDefaultWaitSeconds: cfg.System.CustomerMessageWaitSeconds},
+		automationRunner, log, 0)
+
 	// providerHealth is the self-healing status surface: every LLM call the
 	// engine makes reports through it (engine.StatusHook, set below), and
 	// every genuine health transition (not routine transient errors — see
@@ -239,7 +265,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// (internal/httpapi) and the long-poll manager below feed updates
 	// through the exact same Process call, so a bot's history is identical
 	// regardless of which ingress delivered it.
-	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Log: log})
+	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Automation: automationScheduler, Log: log})
 	// tgMgr is constructed unconditionally (its own Close is a cheap no-op
 	// with nothing registered) so webhook-mode deployments can still flip
 	// TG_MODE later without a restart-time wiring change; only Start is
@@ -259,6 +285,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Blob:         blobStore,
 		Queue:        q,
 		Hub:          hub,
+		Automation:   automationScheduler,
 		Log:          log,
 	})
 	if err != nil {
@@ -282,6 +309,10 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
 	// Reconnects every saved WhatsApp account without re-scanning a QR code.
 	go waMgr.Start(ctx)
+	// Claims due debounce deadlines into dispatch jobs and runs them; its
+	// own startup pass re-publishes whatever a crash left mid-flight, the
+	// same recovery philosophy as the Telegram media sweeper above.
+	automationScheduler.Start(ctx, automationDispatchWorkers, automationClaimEvery, automationRecoverEvery, automationStuckAfter)
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
@@ -362,11 +393,13 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	if tunnelMgr != nil {
 		_ = tunnelMgr.Stop(shutdownCtx)
 	}
-	// tgMgr before q: the poller publishes to the queue via tgProc, so it
-	// must stop producing before the queue stops accepting. Explicit here
-	// (not a defer) so the ordering relative to q.Close() is guaranteed
-	// rather than left to defer's LIFO stacking.
+	// tgMgr and automationScheduler before q: the poller (via tgProc) and a
+	// scheduled_auto auto-send (via Runner.dispatchSend) both publish to the
+	// queue, so both producers must stop before the queue stops accepting.
+	// Explicit here (not a defer) so the ordering relative to q.Close() is
+	// guaranteed rather than left to defer's LIFO stacking.
 	tgMgr.Close()
+	automationScheduler.Stop()
 	q.Close()
 }
 

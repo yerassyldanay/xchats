@@ -19,6 +19,7 @@ const (
 	ErrTelegramToken          = "TELEGRAM_TOKEN_REJECTED"
 	ErrAIUnavailable          = "AI_UNAVAILABLE"
 	ErrDraftStale             = "DRAFT_STALE"
+	ErrAutomationOff          = "AUTOMATION_OFF"
 	ErrInternal               = "INTERNAL"
 	ErrPasswordChangeRequired = "PASSWORD_CHANGE_REQUIRED"
 
