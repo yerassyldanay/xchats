@@ -402,6 +402,10 @@ func (s *Server) handleAssignChat(c *gin.Context) {
 }
 
 func (s *Server) handleUploadMedia(c *gin.Context) {
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
 	// A9: gin's MaxMultipartMemory (server.go's Router) only bounds the
 	// memory/disk spill point during multipart parsing — with no cap on the
 	// body itself, an attacker could stream an arbitrarily large request
@@ -441,7 +445,10 @@ func (s *Server) handleUploadMedia(c *gin.Context) {
 		return
 	}
 	mid := uuid.NewString()
-	if _, err := s.blob.Put(mid, data, blob.Meta{MediaType: mediaType, Mimetype: mimetype, FileName: fh.Filename, FileSize: int64(len(data))}); err != nil {
+	if _, err := s.blob.Put(mid, data, blob.Meta{
+		MediaType: mediaType, Mimetype: mimetype, FileName: fh.Filename, FileSize: int64(len(data)),
+		OrgID: org.ID.String(),
+	}); err != nil {
 		fail(c, http.StatusBadGateway, ErrMediaUnavailable, "store failed")
 		return
 	}
@@ -482,14 +489,16 @@ func (s *Server) handleServeMedia(c *gin.Context) {
 	// Fall back: a pending upload not yet attached to any message.
 	// handleUploadMedia returns this exact blob key as the media id, so a
 	// composer can preview it before the user hits send — there is no
-	// message_media row, and so no organization, to scope this against
-	// until UpsertOutboundMedia runs (at which point the row gets its OWN,
-	// different id — see MediaStorageURL's doc comment — so this fallback
-	// stops being reachable for it at all). What bounds exposure here
-	// instead: the key is a v4 UUID (122 bits of randomness) minted by the
-	// uploader and never listed or enumerated anywhere, and every upload is
-	// already MIME-sanity-checked at write time (handleUploadMedia).
-	if data, meta, err := s.blob.Get(raw); err == nil {
+	// message_media row, and so no organization, to scope this against via
+	// SQL. UpsertOutboundMedia later gives the message its OWN, different
+	// id (see MediaStorageURL's doc comment) but never deletes or rekeys
+	// the underlying blob, so this raw key would otherwise stay a
+	// permanently valid, completely unscoped fetch for the file's whole
+	// lifetime — not just during the pending-preview window — which is
+	// exactly the cross-org path A4 closed for the DB-row lookup above.
+	// meta.OrgID (stamped at upload time) is what closes it here too: a v4
+	// UUID key is unguessable, but "unguessable" isn't "access-controlled."
+	if data, meta, err := s.blob.Get(raw); err == nil && meta.OrgID == org.ID.String() {
 		s.writeMediaResponse(c, meta.Mimetype, meta.FileName, data)
 		return
 	}

@@ -16,6 +16,11 @@ type Meta struct {
 	Mimetype  string `json:"mimetype"`
 	FileName  string `json:"file_name"`
 	FileSize  int64  `json:"file_size"`
+	// OrgID scopes access for stores fetched by raw blob key rather than
+	// through an organization-scoped DB row (see httpapi.handleServeMedia's
+	// pending-upload fallback) — empty for callers that don't set it, which
+	// a raw-key fetch must treat as "no organization ever authorized this."
+	OrgID string `json:"org_id,omitempty"`
 }
 
 // Store is the blob port.
