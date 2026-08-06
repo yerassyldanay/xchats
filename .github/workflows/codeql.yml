@@ -1,0 +1,69 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Catches new advisories against code that hasn't changed, not just new
+    # code — a Tuesday-morning cadence that doesn't collide with anyone's
+    # Monday.
+    - cron: "17 4 * * 2"
+
+permissions:
+  contents: read
+
+jobs:
+  # Two explicit jobs, not one job with a `language: [go, javascript]`
+  # matrix — a matrix job's required-check name renders as "codeql (go)" /
+  # "codeql (javascript)" (with the parentheses), which is a common source
+  # of drift against a branch ruleset's required-status-check strings.
+  codeql-go:
+    name: codeql-go
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          build-mode: manual
+
+      # Explicit build, not autobuild: this repo has two Go modules
+      # (backend/, evals/harness/) at different toolchain versions —
+      # autobuild's single `go build ./...` at the repo root would not
+      # correctly resolve either.
+      - name: Build
+        working-directory: backend
+        run: go build ./...
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:go"
+
+  codeql-javascript:
+    name: codeql-javascript
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

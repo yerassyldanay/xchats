@@ -1,6 +1,5 @@
-// Mirrors ru.ts key-for-key — see locales.test.ts for the parity check that enforces
-// it. Only evalCatalog.* exists here; the rest of the app's chrome stays hardcoded
-// Russian for now (see ru.ts's own comment).
+// Mirrors ru.ts key-for-key — see locales.test.ts for the parity check that
+// enforces it, and ru.ts's own top comment for which namespaces exist here.
 export default {
   evalCatalog: {
     langToggle: {

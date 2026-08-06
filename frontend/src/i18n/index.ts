@@ -3,9 +3,9 @@ import { watch } from 'vue'
 import ru from './locales/ru'
 import en from './locales/en'
 
-// App-wide i18n foundation (see MEMORY.md "Frontend direction" for why vue-i18n was
-// adopted over a one-off toggle: this is meant to grow beyond the catalog page).
-// Composition API only (legacy: false) — no Options API $t() usage anywhere.
+// App-wide i18n foundation — vue-i18n over a one-off toggle because this is
+// meant to grow beyond the catalog page. Composition API only (legacy:
+// false) — no Options API $t() usage anywhere.
 const stored = localStorage.getItem('locale')
 const initialLocale = stored === 'en' ? 'en' : 'ru' // garbage-safe: anything else falls back to ru
 

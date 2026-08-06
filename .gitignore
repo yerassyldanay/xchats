@@ -2,7 +2,13 @@ feedback
 
 # secrets / local config. The root config.yaml is committed on purpose (see
 # its own header comment) — it carries no secrets, only boot/infra tunables.
+# .env.* (not just a bare .env) so a real .env.local/.env.production is
+# never accidentally trackable either; the two .example files are the
+# templates and must stay committed.
 .env
+.env.*
+!.env.example
+!*/.env.example
 backend/.env
 backend/config.yaml
 frontend/.env
@@ -32,6 +38,8 @@ data/
 backend/bin/
 backend/xchats
 backend/promptpreview
+backend/ngrok-credential-probe
+backend/ngrok-v2-probe
 frontend/dist/
 frontend/dist-ssr/
 frontend/node_modules/
@@ -45,10 +53,21 @@ frontend/playwright/.cache/
 
 # go
 *.test
+coverage.out
+*.prof
+
+# credentials / keys — never legitimately committed anywhere in this repo
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
 
 # editor / os
 .DS_Store
 *.swp
+.idea/
+.vscode/
 
 .claude
 .cache

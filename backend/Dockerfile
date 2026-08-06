@@ -4,7 +4,14 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/xchats ./cmd/xchats
+# VERSION defaults to "dev" for a local/CI build; release.yml passes the
+# actual tag so internal/version.Version (the Settings page's "what am I
+# running" surface, and GET /settings/update-check's comparison point)
+# reflects the real release instead of its hardcoded source default.
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags "-X github.com/yerassyldanay/xchats/backend/internal/version.Version=${VERSION}" \
+    -o /out/xchats ./cmd/xchats
 
 FROM gcr.io/distroless/static-debian12
 WORKDIR /

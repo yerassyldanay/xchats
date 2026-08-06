@@ -440,9 +440,9 @@ const currentYear = new Date().getFullYear()
                 <WhatsappIcon class="w-5 h-5 text-emerald-500" />
                 <span class="font-medium">+7 702 976 65 09</span>
               </a>
-              <a href="mailto:yerassyl.danay.abc@gmail.com" class="flex items-center gap-3 text-sm text-slate-600 hover:text-indigo-600 transition-colors">
+              <a href="mailto:hello@xpayment.kz" class="flex items-center gap-3 text-sm text-slate-600 hover:text-indigo-600 transition-colors">
                 <Mail class="w-5 h-5 text-blue-500" />
-                <span class="font-medium">yerassyl.danay.abc@gmail.com</span>
+                <span class="font-medium">hello@xpayment.kz</span>
               </a>
               <a href="https://www.instagram.com/xpayment.kz/" target="_blank" class="flex items-center gap-3 text-sm text-slate-600 hover:text-indigo-600 transition-colors">
                 <Instagram class="w-5 h-5 text-pink-500" />

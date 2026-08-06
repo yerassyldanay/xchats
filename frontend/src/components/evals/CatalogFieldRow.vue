@@ -4,10 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { CircleHelp } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
-// One raw tests.yaml field, shown as its actual key (never a renamed label) with a
-// (?) tooltip carrying its evaluator-role explanation — see MEMORY.md "Frontend
-// direction" for why: this page shows exact schema fields for a developer audience,
-// not friendly abstractions. Requires an ancestor <TooltipProvider> (EvalCatalog.vue
+// One raw tests.yaml field, shown as its actual key (never a renamed label)
+// with a (?) tooltip carrying its evaluator-role explanation: this page
+// shows exact schema fields for a developer audience, not friendly
+// abstractions. Requires an ancestor <TooltipProvider> (EvalCatalog.vue
 // provides one for the whole page).
 const props = defineProps<{ fieldKey: string }>()
 const { t, te } = useI18n()

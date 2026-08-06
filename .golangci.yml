@@ -1,0 +1,46 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - misspell
+
+  settings:
+    gosec:
+      # G104 (unchecked error) overlaps errcheck above; excluded to avoid
+      # double-reporting the same finding under two different linters.
+      # G101 (potential hardcoded credentials) is a bare string-pattern
+      # match on identifier/literal names — it fires on things like a
+      # constant NAMED "...Secret" or a test password literal, not on
+      # anything it actually inspected the value of. Real secrets-in-git
+      # detection is gitleaks' job (secret-scan.yml), which reads content,
+      # not names.
+      excludes:
+        - G104
+        - G101
+    errcheck:
+      # Unchecked Close()/io.Copy(io.Discard, ...) on an httptest response
+      # body in test cleanup is a standard, low-risk Go convention (the
+      # process is about to tear the test down regardless) — excluded only
+      # for _test.go files, not production code.
+      exclude-functions:
+        - (*net/http.Response).Body.Close
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

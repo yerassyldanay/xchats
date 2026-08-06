@@ -3,9 +3,8 @@
  * class-based dark mode (that class is set by JS in src/main.ts). This file
  * defines its own tokens and switches them purely via `prefers-color-scheme`,
  * and shares nothing with the app's tailwind.config.js color tokens — the
- * public bundle no longer depends on the internal app's design system at all.
- * See MEMORY.md-style plan doc for why: "Blog components stop importing from
- * the SPA."
+ * public bundle no longer depends on the internal app's design system at all —
+ * blog components deliberately stop importing anything from the SPA.
  */
 
 /* ---------- reset (Tailwind's Preflight doesn't apply here) ---------- */

@@ -1,0 +1,40 @@
+title = "xchats gitleaks config"
+
+# Layer our own allowlist on top of gitleaks' full built-in rule set, rather
+# than replacing it — see https://github.com/gitleaks/gitleaks#configuration.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "vendored third-party source and known-fake test fixtures"
+paths = [
+  # go-licenses save's output (see THIRD_PARTY_NOTICES.md) — full vendored
+  # source of GPL-3.0/MPL-2.0 dependencies for license-compliance purposes,
+  # not this project's own code. The one hit this ever produced:
+  # whatsmeow's binary/token/token.go embeds WhatsApp's official client's
+  # protocol token dictionary verbatim (that's how an unofficial
+  # reverse-engineered client obtains it) — including a Google API key
+  # string that is WhatsApp's own, already public upstream, and not ours
+  # to rotate. Excluding the whole directory rather than that one line:
+  # nothing under it is code this project wrote or can act on regardless.
+  '''^third_party_licenses/''',
+  # This specific eval run's manifest.json has a "repair_key" field — a
+  # harness-generated idempotency token correlating a repair-retry run to
+  # its original (evals/harness/retry.go), not a credential. Flagged only
+  # because gitleaks' generic-api-key rule pattern-matches the field name
+  # against "*_key". Scoped to this one file rather than a broader
+  # evals/runs/**/manifest.json glob, since it's the only run in history
+  # that happens to carry a repair_key at all; add further entries here the
+  # same way if a future repair run's manifest.json trips the same rule.
+  '''^evals/runs/2026-07-19_02-44-27-436a/manifest\.json$''',
+]
+regexes = [
+  # internal/httpapi/integration_test.go's testEncKey (secretbox test key)
+  # and testBotToken (a shaped-but-fake Telegram bot token) — both named
+  # and commented as test fixtures where they're declared.
+  '''0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef''',
+  '''8123456789:AAH-test-token_never-logged''',
+  # settings_handlers_test.go's fake ngrok credentials (settings-save round
+  # trip fixtures).
+  '''ngrok-api-123''',
+]
