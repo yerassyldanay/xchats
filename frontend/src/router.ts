@@ -9,6 +9,7 @@ import EvalRuns from './views/EvalRuns.vue'
 import EvalLaunchDetail from './views/EvalLaunchDetail.vue'
 import EvalCatalog from './views/EvalCatalog.vue'
 import Blog from './views/Blog.vue'
+import Settings from './views/Settings.vue'
 import { useAuth } from './stores/auth'
 
 const router = createRouter({
@@ -26,6 +27,7 @@ const router = createRouter({
     { path: '/evals/catalog', name: 'eval-catalog', component: EvalCatalog, meta: { requiresAuth: true } },
     { path: '/evals/:launchId', name: 'eval-launch', component: EvalLaunchDetail, meta: { requiresAuth: true } },
     { path: '/blog', name: 'blog', component: Blog },
+    { path: '/settings', name: 'settings', component: Settings, meta: { requiresAuth: true, requiresAdmin: true } },
   ],
 })
 
@@ -34,6 +36,7 @@ router.beforeEach(async (to) => {
   if (!auth.ready) await auth.fetchMe()
   if (to.meta.requiresAuth && !auth.isAuthed) return { name: 'login' }
   if (to.name === 'login' && auth.isAuthed) return { name: 'chatboard' }
+  if (to.meta.requiresAdmin && !auth.isAdmin) return { name: 'chatboard' }
   return true
 })
 

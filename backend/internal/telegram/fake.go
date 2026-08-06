@@ -22,6 +22,13 @@ type Call struct {
 	FileID         string
 	FilePath       string
 	Upload         Upload
+
+	// Offset/LimitN/TimeoutSeconds are getUpdates' own parameters (LimitN
+	// rather than Limit — Call already has no field collision risk, but the
+	// name pairs visibly with GetUpdatesRequest.Limit's test assertions).
+	Offset         int64
+	LimitN         int
+	TimeoutSeconds int
 }
 
 // Fake is an in-process Client for component tests. It records every call and
@@ -49,6 +56,17 @@ type Fake struct {
 	// FailGetFile / FailDownload make the media download path fail.
 	FailGetFile  error
 	FailDownload error
+
+	// GetUpdatesFn, when set, gives a test full control over GetUpdates —
+	// including blocking until ctx is done, to exercise a poller's
+	// cancellation handling directly. Takes priority over PendingUpdates.
+	GetUpdatesFn func(ctx context.Context, token string, req GetUpdatesRequest) ([]RawUpdate, error)
+	// PendingUpdates is popped one batch per GetUpdates call (FIFO, only
+	// when GetUpdatesFn is unset). Once empty, GetUpdates returns an empty,
+	// non-error batch immediately — as if Telegram's long-poll simply timed
+	// out with nothing queued — rather than blocking; a test that wants
+	// blocking behavior sets GetUpdatesFn instead.
+	PendingUpdates [][]RawUpdate
 }
 
 // NewFake returns a Fake whose GetMe reports the given bot.
@@ -216,3 +234,31 @@ func (f *Fake) SendMessage(ctx context.Context, token string, chatID int64, text
 	}
 	return SentMessage{MessageID: id, ChatID: chatID}, nil
 }
+
+// GetUpdates is the long-poll fake: GetUpdatesFn (if set) gets full control,
+// else the next PendingUpdates batch is popped and returned, else an empty
+// batch — never a real block, so a test that wants GetUpdates to hang until
+// ctx is canceled must use GetUpdatesFn explicitly.
+func (f *Fake) GetUpdates(ctx context.Context, token string, req GetUpdatesRequest) ([]RawUpdate, error) {
+	f.record(Call{Method: "getUpdates", Token: token,
+		Offset: req.Offset, LimitN: req.Limit, TimeoutSeconds: req.TimeoutSeconds})
+	if err := f.reject(token); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	fn := f.GetUpdatesFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, token, req)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.PendingUpdates) == 0 {
+		return nil, nil
+	}
+	batch := f.PendingUpdates[0]
+	f.PendingUpdates = f.PendingUpdates[1:]
+	return batch, nil
+}
+
+var _ Client = (*Fake)(nil)

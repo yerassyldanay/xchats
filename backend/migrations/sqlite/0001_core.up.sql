@@ -51,6 +51,7 @@ CREATE TABLE users (
 CREATE TABLE organization_users (
     organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role            TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin','member')),
     joined_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
     PRIMARY KEY (organization_id, user_id)
 );

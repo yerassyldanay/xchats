@@ -76,6 +76,12 @@ type User struct {
 	PasswordHash string
 	DisplayName  string
 	CreatedAt    time.Time
+	// Role is the user's role ("admin" or "member") within a specific
+	// organization — only populated by org-scoped queries (CreateUser,
+	// ListUsersForOrg); left "" by lookups with no org in scope
+	// (UserByEmail, UserForSession), which callers resolve separately via
+	// MembershipRole once they have an organization id.
+	Role string
 }
 
 // Account is the channel-neutral account shape the unified read layer returns
@@ -212,7 +218,14 @@ func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization
 	return o, err
 }
 
-// SeedUser upserts a user by (case-insensitive) email and joins them to the org.
+// SeedUser upserts a user by (case-insensitive) email and joins them to the
+// org as its admin. Every existing caller (test harnesses across the module,
+// via internal/dbtest and its own package-local Stores) uses this to create
+// the one operator for a freshly seeded org, mirroring migration 0006's own
+// sentinel-admin seed — never a second, lesser-privileged user in the same
+// org — so hardcoding "admin" here needs no role parameter threaded through
+// every call site. Tests that specifically need a "member" for an RBAC
+// boundary check create one with CreateUser or SetMembershipRole instead.
 func (s *Store) SeedUser(ctx context.Context, orgID uuid.UUID, email, passwordHash, displayName string) (User, error) {
 	var u User
 	err := s.db.QueryRow(ctx, `
@@ -225,8 +238,10 @@ func (s *Store) SeedUser(ctx context.Context, orgID uuid.UUID, email, passwordHa
 		return u, err
 	}
 	_, err = s.db.Exec(ctx, `
-		INSERT INTO organization_users (organization_id, user_id)
-		VALUES ($1, $2) ON CONFLICT DO NOTHING`, orgID, u.ID)
+		INSERT INTO organization_users (organization_id, user_id, role)
+		VALUES ($1, $2, 'admin')
+		ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'admin'`, orgID, u.ID)
+	u.Role = "admin"
 	return u, err
 }
 
@@ -467,12 +482,18 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 	return u, err
 }
 
-// CreateUser inserts a new user and joins them to orgID. A duplicate email
-// (users.email is UNIQUE COLLATE NOCASE, citext's SQLite equivalent) comes
-// back as domain.ErrDuplicate — the exported-boundary translation that
-// replaces the old pgx "23505" string match, which internal/httpapi/auth.go's
-// isUniqueViolation now compares against with errors.Is.
-func (s *Store) CreateUser(ctx context.Context, orgID uuid.UUID, email, passwordHash, displayName string) (User, error) {
+// CreateUser inserts a new user and joins them to orgID with the given role
+// ("admin" or "member"; "" defaults to "member" — the safe default for a
+// freshly created team member, promoted later via SetMembershipRole). A
+// duplicate email (users.email is UNIQUE COLLATE NOCASE, citext's SQLite
+// equivalent) comes back as domain.ErrDuplicate — the exported-boundary
+// translation that replaces the old pgx "23505" string match, which
+// internal/httpapi/auth.go's isUniqueViolation now compares against with
+// errors.Is.
+func (s *Store) CreateUser(ctx context.Context, orgID uuid.UUID, email, passwordHash, displayName, role string) (User, error) {
+	if role == "" {
+		role = "member"
+	}
 	var u User
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO users (email, password_hash, display_name)
@@ -486,14 +507,15 @@ func (s *Store) CreateUser(ctx context.Context, orgID uuid.UUID, email, password
 		return u, err
 	}
 	_, err = s.db.Exec(ctx, `
-		INSERT INTO organization_users (organization_id, user_id)
-		VALUES ($1, $2) ON CONFLICT DO NOTHING`, orgID, u.ID)
+		INSERT INTO organization_users (organization_id, user_id, role)
+		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, orgID, u.ID, role)
+	u.Role = role
 	return u, err
 }
 
 func (s *Store) ListUsersForOrg(ctx context.Context, orgID uuid.UUID, limit, offset int) ([]User, int, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT u.id, u.email, u.display_name, u.created_at
+		SELECT u.id, u.email, u.display_name, u.created_at, ou.role
 		FROM users u
 		JOIN organization_users ou ON ou.user_id = u.id
 		WHERE ou.organization_id = $1
@@ -505,7 +527,7 @@ func (s *Store) ListUsersForOrg(ctx context.Context, orgID uuid.UUID, limit, off
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.CreatedAt, &u.Role); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, u)
@@ -514,6 +536,76 @@ func (s *Store) ListUsersForOrg(ctx context.Context, orgID uuid.UUID, limit, off
 	_ = s.db.QueryRow(ctx, `
 		SELECT count(*) FROM organization_users WHERE organization_id = $1`, orgID).Scan(&total)
 	return out, total, rows.Err()
+}
+
+// MembershipRole returns userID's role ("admin" or "member") within orgID.
+// It is the live source RequireAdmin gates on — re-queried on every request,
+// never cached on the session, so a demotion or removal takes effect
+// immediately mid-session.
+func (s *Store) MembershipRole(ctx context.Context, orgID, userID uuid.UUID) (string, error) {
+	var role string
+	err := s.db.QueryRow(ctx, `
+		SELECT role FROM organization_users WHERE organization_id = $1 AND user_id = $2`,
+		orgID, userID).Scan(&role)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return role, err
+}
+
+// SetMembershipRole changes userID's role within orgID. It refuses to demote
+// (or otherwise change away) an organization's LAST remaining admin —
+// domain.ErrLastAdmin — so the Team management UI's role toggle can never
+// leave an organization with nobody able to manage it. The admin-count check
+// and the update happen in the same transaction to stay correct under
+// concurrent role changes.
+func (s *Store) SetMembershipRole(ctx context.Context, orgID, userID uuid.UUID, role string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var current string
+	err = tx.QueryRow(ctx, `
+		SELECT role FROM organization_users WHERE organization_id = $1 AND user_id = $2`,
+		orgID, userID).Scan(&current)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if current == role {
+		return tx.Commit(ctx)
+	}
+	if current == "admin" {
+		var adminCount int
+		if err := tx.QueryRow(ctx, `
+			SELECT count(*) FROM organization_users WHERE organization_id = $1 AND role = 'admin'`,
+			orgID).Scan(&adminCount); err != nil {
+			return err
+		}
+		if adminCount <= 1 {
+			return domain.ErrLastAdmin
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE organization_users SET role = $3 WHERE organization_id = $1 AND user_id = $2`,
+		orgID, userID, role); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// RenameOrganization updates an organization's display name (the Team
+// management UI's "org rename" action — the only organization field that UI
+// exposes; auto_response_mode has no editor yet).
+func (s *Store) RenameOrganization(ctx context.Context, orgID uuid.UUID, name string) error {
+	_, err := s.db.Exec(ctx, `
+		UPDATE organizations SET name = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id = $1`, orgID, name)
+	return err
 }
 
 func (s *Store) OrgForUser(ctx context.Context, userID uuid.UUID) (Organization, error) {

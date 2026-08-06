@@ -248,7 +248,7 @@ func (s *Server) handleOAuthDecision(c *gin.Context) {
 		return
 	}
 	scope := mcpauth.FormatScope(requestedScopes)
-	ttl := time.Duration(s.cfg.MCPAuthCodeTTLSeconds) * time.Second
+	ttl := time.Duration(s.cfg.MCP.AuthCodeTTLSeconds) * time.Second
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}

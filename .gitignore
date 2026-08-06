@@ -1,8 +1,8 @@
 feedback
 
-# secrets / local config (commit only the *.example.* files)
+# secrets / local config. The root config.yaml is committed on purpose (see
+# its own header comment) — it carries no secrets, only boot/infra tunables.
 .env
-config.yaml
 backend/.env
 backend/config.yaml
 frontend/.env
@@ -16,13 +16,21 @@ deploy/docker-compose.override.yaml
 blobdata/
 backend/blobdata/
 
+# SQLite data directory (xchats.db + whatsmeow.db and their WAL/lock
+# sidecars) — config.yaml's committed storage.db_path/wa_device_db_path
+# defaults both live under ./data.
+data/
+*.db
+*.db-wal
+*.db-shm
+*.db.lock
+
 # build output
 # One entry per backend/cmd/* package: `go build ./...` run from backend/
 # writes a binary named after each main package into the working directory,
 # which is how backend/promptpreview once got committed (PR #15).
 backend/bin/
 backend/xchats
-backend/xchats-import
 backend/promptpreview
 frontend/dist/
 frontend/dist-ssr/

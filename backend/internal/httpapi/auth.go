@@ -147,6 +147,28 @@ func (s *Server) orgOf(c *gin.Context) (store.Organization, bool) {
 	return org, true
 }
 
+// RequireAdmin gates admin-only surfaces — Settings, organization rename,
+// user creation, and role changes — behind the caller's live membership role
+// in their current organization. Chained after requireSession on every route
+// it guards; the role is re-derived from organization_users on each request,
+// never cached on the session, so a demotion takes effect immediately even
+// mid-session — the same freshness guarantee orgOf's own membership re-check
+// already gives every org-scoped route.
+func (s *Server) RequireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		org, okOrg := s.orgOf(c)
+		if !okOrg {
+			return
+		}
+		role, err := s.store.MembershipRole(ctx(c), org.ID, currentUser(c).ID)
+		if err != nil || role != "admin" {
+			fail(c, http.StatusForbidden, ErrForbidden, "admin role required")
+			return
+		}
+		c.Next()
+	}
+}
+
 // --- handlers -------------------------------------------------------------
 
 type loginReq struct {
@@ -166,7 +188,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 	sid := newSessionID()
-	ttl := time.Duration(s.cfg.SessionTTLHours) * time.Hour
+	ttl := time.Duration(s.cfg.System.SessionTTLHours) * time.Hour
 	if err := s.store.CreateSession(ctx(c), sid, u.ID, ttl); err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, "session")
 		return
@@ -192,6 +214,12 @@ func (s *Server) mePayload(c *gin.Context, u store.User) gin.H {
 	// just-authenticated user before requireSession has ever populated gin
 	// context for this request (see resolveOrg's doc comment).
 	org, _ := s.resolveOrg(c, u.ID, currentSessionID(c))
+	// role is scoped to THIS organization — a user's role can differ across
+	// their memberships, so it is re-resolved here rather than trusted from
+	// any cached User.Role (u itself carries none: UserForSession/UserByEmail
+	// are not org-scoped). Left "" on error/no-membership, which the
+	// frontend's isAdmin treats as non-admin — fail closed, never open.
+	role, _ := s.store.MembershipRole(ctx(c), org.ID, u.ID)
 	orgs, err := s.store.OrgsForUser(ctx(c), u.ID)
 	if err != nil {
 		orgs = nil
@@ -201,7 +229,7 @@ func (s *Server) mePayload(c *gin.Context, u store.User) gin.H {
 		orgList = append(orgList, gin.H{"id": o.ID, "name": o.Name})
 	}
 	return gin.H{
-		"user":         gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName},
+		"user":         gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName, "role": role},
 		"organization": gin.H{"id": org.ID, "name": org.Name},
 		// organizations is the full membership set, for the frontend's
 		// active-organization switcher (Task 15) — omitted entirely from
@@ -256,6 +284,35 @@ func (s *Server) handleGetOrg(c *gin.Context) {
 	ok(c, gin.H{"id": org.ID, "name": org.Name, "auto_response_mode": org.RespondMode})
 }
 
+type updateOrgReq struct {
+	Name string `json:"name"`
+}
+
+// handleUpdateOrg renames the current organization — the Team management
+// UI's "org rename" action, and (per RequireAdmin, which gates this route)
+// an admin-only one.
+func (s *Server) handleUpdateOrg(c *gin.Context) {
+	var req updateOrgReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "invalid body")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "name is required")
+		return
+	}
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
+	if err := s.store.RenameOrganization(ctx(c), org.ID, name); err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	ok(c, gin.H{"id": org.ID, "name": name, "auto_response_mode": org.RespondMode})
+}
+
 func (s *Server) handleListUsers(c *gin.Context) {
 	org, proceed := s.orgOf(c)
 	if !proceed {
@@ -269,7 +326,7 @@ func (s *Server) handleListUsers(c *gin.Context) {
 	}
 	items := make([]gin.H, 0, len(users))
 	for _, u := range users {
-		items = append(items, gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName, "created_at": u.CreatedAt})
+		items = append(items, gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName, "created_at": u.CreatedAt, "role": u.Role})
 	}
 	ok(c, page{Items: items, Page: pageNum, PageSize: pageSize, Total: total})
 }
@@ -286,8 +343,8 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "email required")
 		return
 	}
-	if len(req.Password) < s.cfg.MinPasswordLen {
-		fail(c, http.StatusBadRequest, ErrValidation, fmt.Sprintf("password must be >= %d chars", s.cfg.MinPasswordLen))
+	if len(req.Password) < s.cfg.System.MinPasswordLen {
+		fail(c, http.StatusBadRequest, ErrValidation, fmt.Sprintf("password must be >= %d chars", s.cfg.System.MinPasswordLen))
 		return
 	}
 	org, err := s.store.OrgForUser(ctx(c), currentUser(c).ID)
@@ -300,7 +357,9 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, "hash")
 		return
 	}
-	u, err := s.store.CreateUser(ctx(c), org.ID, strings.TrimSpace(req.Email), hash, req.Name)
+	// New team members always start as "member" — promote them afterward via
+	// PUT /users/:id/role (Team management UI's role toggle).
+	u, err := s.store.CreateUser(ctx(c), org.ID, strings.TrimSpace(req.Email), hash, req.Name, "member")
 	if err != nil {
 		if isUniqueViolation(err) {
 			fail(c, http.StatusConflict, ErrConflict, "email already exists")
@@ -309,7 +368,43 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	created(c, gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName})
+	created(c, gin.H{"id": u.ID, "email": u.Email, "name": u.DisplayName, "role": u.Role})
+}
+
+type updateUserRoleReq struct {
+	Role string `json:"role"`
+}
+
+// handleUpdateUserRole is the Team management UI's role toggle. Gated by
+// RequireAdmin like the rest of this file's admin-only routes; the store
+// layer additionally refuses to demote an organization's last admin
+// (domain.ErrLastAdmin), so this can 409 even for an authorized admin caller.
+func (s *Server) handleUpdateUserRole(c *gin.Context) {
+	id, okID := parseUUID(c, "id")
+	if !okID {
+		return
+	}
+	var req updateUserRoleReq
+	if err := c.ShouldBindJSON(&req); err != nil || (req.Role != "admin" && req.Role != "member") {
+		fail(c, http.StatusBadRequest, ErrValidation, `role must be "admin" or "member"`)
+		return
+	}
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
+	if err := s.store.SetMembershipRole(ctx(c), org.ID, id, req.Role); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrLastAdmin):
+			fail(c, http.StatusConflict, ErrConflict, "cannot change the role of an organization's last admin")
+		case errors.Is(err, store.ErrNotFound):
+			fail(c, http.StatusNotFound, ErrNotFound, "not a member of this organization")
+		default:
+			fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		}
+		return
+	}
+	ok(c, gin.H{"id": id, "role": req.Role})
 }
 
 func (s *Server) setSessionCookie(c *gin.Context, value string, maxAge int) {
@@ -319,9 +414,25 @@ func (s *Server) setSessionCookie(c *gin.Context, value string, maxAge int) {
 		Path:     "/",
 		MaxAge:   maxAge,
 		HttpOnly: true,
-		Secure:   s.cfg.SecureCookies,
+		Secure:   s.requestIsSecure(c),
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+// requestIsSecure reports whether this request's origin is HTTPS: the
+// static SecureCookies config flag (an operator's permanent setting), a
+// direct TLS connection, or X-Forwarded-Proto: https — how a TLS-terminating
+// front door (a reverse proxy, or the embedded ngrok tunnel's own edge —
+// internal/tunnel, plan/DECISIONS.md's tunnel-exposure amendment) tells the
+// app it did. Unlike ClientIP's TrustedProxies-gated trust, this header is
+// honored unconditionally: the downside of a spoofed one is low (a Secure
+// cookie the browser then withholds on a later plain-HTTP request, breaking
+// that one session) and never a leak, so no separate trust gate is needed.
+func (s *Server) requestIsSecure(c *gin.Context) bool {
+	if s.cfg.Server.SecureCookies || c.Request.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 }
 
 func newSessionID() string {

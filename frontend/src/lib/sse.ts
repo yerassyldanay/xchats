@@ -13,6 +13,10 @@ export interface SSEHandlers {
   // the DraftView on any of them.
   kbRowChanged?: (d: { base_version: number }) => void
   kbApproved?: (d: Record<string, unknown>) => void
+  // Self-healing provider status (Track 2K) — a live transition, not a
+  // full resync; the client merges it into whatever GET /settings/
+  // provider-health already hydrated.
+  providerHealthChanged?: (d: { provider: string; healthy: boolean; at: string }) => void
 }
 
 // connectRealtime opens the SSE stream and dispatches each named event. Returns
@@ -37,6 +41,7 @@ export function connectRealtime(h: SSEHandlers): () => void {
   bind('ai_draft.updated', h.draftUpdated)
   bind('kb.row.changed', h.kbRowChanged)
   bind('kb.approved', h.kbApproved)
+  bind('integration.status_changed', h.providerHealthChanged)
   es.onopen = () => log.info('sse connected')
   es.onerror = () => log.warn('sse error; browser will retry')
   return () => es.close()

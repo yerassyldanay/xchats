@@ -3,6 +3,7 @@ package llmprovider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -103,6 +104,38 @@ func TestComplete_PropagatesHTTPError(t *testing.T) {
 	_, err := c.Complete(context.Background(), llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "x"}}})
 	if err == nil {
 		t.Fatal("want an error for a non-200 response")
+	}
+}
+
+func TestComplete_ClassifiesUnauthorizedAsErrProviderAuth(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				io.WriteString(w, `{"error":{"message":"invalid api key"}}`)
+			}))
+			defer srv.Close()
+
+			c := NewOpenAICompatible(srv.URL, "k", "openrouter", 5*time.Second)
+			_, err := c.Complete(context.Background(), llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "x"}}})
+			if !errors.Is(err, llm.ErrProviderAuth) {
+				t.Fatalf("err = %v, want errors.Is(err, llm.ErrProviderAuth)", err)
+			}
+		})
+	}
+}
+
+func TestComplete_OtherHTTPErrorsAreNotErrProviderAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		io.WriteString(w, "rate limited")
+	}))
+	defer srv.Close()
+
+	c := NewOpenAICompatible(srv.URL, "k", "openrouter", 5*time.Second)
+	_, err := c.Complete(context.Background(), llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "x"}}})
+	if errors.Is(err, llm.ErrProviderAuth) {
+		t.Fatalf("a 429 must never classify as ErrProviderAuth: %v", err)
 	}
 }
 

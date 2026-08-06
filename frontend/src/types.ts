@@ -2,10 +2,107 @@ export interface User {
   id: string
   email: string
   name: string
+  role: string
 }
 export interface Organization {
   id: string
   name: string
+}
+
+// Page mirrors internal/httpapi.page — the generic list-pagination envelope
+// (backend/internal/httpapi/server.go).
+export interface Page<T> {
+  items: T[]
+  page: number
+  page_size: number
+  total: number
+}
+
+// --- Settings (Track 2) ---
+
+// LLMSettings mirrors internal/settings.LLMSettings.
+export interface LLMSettings {
+  default_provider: string
+  default_model: string
+  vision_model: string
+  max_tokens: number
+  temperature: number
+  timeout_seconds: number
+  retry: boolean
+}
+// ProviderSettings mirrors internal/settings.ProviderSettings.
+export interface ProviderSettings {
+  base_url?: string
+  default_model?: string
+  disabled: boolean
+  last_verified_at?: string
+  last_error?: string
+}
+// NgrokSettings mirrors internal/settings.NgrokSettings.
+export interface NgrokSettings {
+  region?: string
+  domain?: string
+}
+// Settings mirrors internal/settings.Settings — GET /settings's payload.
+export interface Settings {
+  version: number
+  llm: LLMSettings
+  providers: Record<string, ProviderSettings>
+  ngrok: NgrokSettings
+  credential_file_fallback_accepted: boolean
+  setup_completed: boolean
+}
+
+// IntegrationField mirrors internal/httpapi.fieldSummary.
+export interface IntegrationField {
+  key: string
+  label: string
+}
+// IntegrationSummary mirrors internal/httpapi.integrationSummary — one entry
+// of GET /settings/integrations' payload.providers.
+export interface IntegrationSummary {
+  id: string
+  display_name: string
+  credential_url: string
+  docs_url: string
+  has_base_url: boolean
+  has_model: boolean
+  fields: IntegrationField[]
+  validatable: boolean
+  configured: boolean
+  source?: string // "env" | "keyring" | "file"
+  base_url?: string
+  default_model?: string
+  disabled: boolean
+  last_verified_at?: string
+  last_error?: string
+}
+
+// TunnelStatus mirrors internal/tunnel.Status.
+export interface TunnelStatus {
+  running: boolean
+  public_url?: string
+  started_at?: string
+  last_error?: string
+}
+
+// ProviderHealthStatus mirrors internal/providerhealth.Status — one
+// provider's live, in-production health (GET /settings/provider-health,
+// and the "integration.status_changed" realtime event carry the same shape).
+export interface ProviderHealthStatus {
+  provider: string
+  healthy: boolean
+  at: string
+}
+
+// UpdateCheckResult mirrors internal/updatecheck.Result — GET /settings/
+// update-check's payload.
+export interface UpdateCheckResult {
+  current_version: string
+  latest_version?: string
+  update_available: boolean
+  release_url?: string
+  checked_at?: string
 }
 export interface Contact {
   id: string

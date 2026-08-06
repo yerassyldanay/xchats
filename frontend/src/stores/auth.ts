@@ -18,6 +18,9 @@ export const useAuth = defineStore('auth', {
   }),
   getters: {
     isAuthed: (s) => s.user !== null,
+    // "" (no membership resolved, or a lookup error — see mePayload's own
+    // doc comment) never matches 'admin': fail closed, never open.
+    isAdmin: (s) => s.user?.role === 'admin',
   },
   actions: {
     async login(email: string, password: string) {

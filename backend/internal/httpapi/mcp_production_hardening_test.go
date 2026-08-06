@@ -3,7 +3,7 @@ package httpapi_test
 // mcp_production_hardening_test.go covers the remaining piece of Task 17
 // exercisable without spinning up a second process/replica: discovery
 // output must be derived ONLY from the configured base URLs
-// (cfg.APIBaseURL / cfg.FrontendBaseURL), never from a request's Host or
+// (cfg.Server.APIBaseURL / cfg.Server.FrontendBaseURL), never from a request's Host or
 // X-Forwarded-* headers — those are attacker-controlled on any request that
 // didn't actually arrive through a configured trusted proxy. A forged Host
 // plus an untrusted X-Forwarded-Proto must leave every discovery response

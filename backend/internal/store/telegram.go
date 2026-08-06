@@ -542,6 +542,92 @@ func (s *Store) PendingTelegramMedia(ctx context.Context, olderThan time.Duratio
 	return out, rows.Err()
 }
 
+// --- long-poll ingress (internal/tgpoller) ----------------------------------
+
+// TelegramPollOffset returns the highest update_id already durably processed
+// for accountID (the resume point after a restart), and whether a row
+// exists at all. A fresh bot that has never been polled has none — that is
+// not an error: the caller starts from offset 0 (whatever Telegram
+// currently has queued), exactly like omitting getUpdates' offset parameter.
+func (s *Store) TelegramPollOffset(ctx context.Context, accountID uuid.UUID) (int64, bool, error) {
+	var last int64
+	err := s.db.QueryRow(ctx,
+		`SELECT last_update_id FROM tg_poll_state WHERE account_id = $1`, accountID).Scan(&last)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return last, true, nil
+}
+
+// AdvanceTelegramPollOffset records the highest update_id internal/tgpoller
+// has durably processed for accountID. The WHERE clause makes the upsert
+// monotonic: an update_id that is not strictly greater than what is already
+// stored is a silent no-op, so an out-of-order or duplicate advance can
+// never move the offset backwards.
+func (s *Store) AdvanceTelegramPollOffset(ctx context.Context, accountID uuid.UUID, updateID int64) error {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO tg_poll_state (account_id, last_update_id)
+		VALUES ($1, $2)
+		ON CONFLICT (account_id) DO UPDATE SET
+			last_update_id = excluded.last_update_id,
+			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE excluded.last_update_id > tg_poll_state.last_update_id`,
+		accountID, updateID)
+	return err
+}
+
+// TelegramPollBot is one bot internal/tgpoller's manager should keep a live
+// long-poll runner for.
+type TelegramPollBot struct {
+	Account TelegramAccount
+	// TokenVersion is tg_credentials.updated_at's raw text: a replaced token
+	// changes it, which is exactly what the manager's Upsert uses to decide
+	// whether an existing runner needs replacing (see internal/tgpoller).
+	TokenVersion string
+}
+
+// ListTelegramPollBots lists every bot the poller manager should run: not
+// soft-deleted, not permanently broken (token_error) or mid-disconnect
+// (disconnect_pending/disconnect_error — "disconnected" itself needs no
+// separate exclusion, since ConfirmTelegramDisconnect sets deleted_at in the
+// same write). webhook_error is deliberately NOT excluded: the poller
+// itself can record that state after a run of transient failures (see
+// internal/tgpoller's backoff), and the bot must still get a fresh runner on
+// the next boot rather than being treated as permanently dead. The INNER
+// JOIN against tg_credentials skips a tokenless account outright — there is
+// nothing to poll with.
+func (s *Store) ListTelegramPollBots(ctx context.Context) ([]TelegramPollBot, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT a.id, a.organization_id, a.display_name, a.bot_id, a.bot_username, a.connection_state,
+		       a.webhook_url, a.webhook_registered_at, a.webhook_last_checked_at, a.webhook_last_error,
+		       a.last_live_event_at, a.deleted_at, a.created_at, c.updated_at
+		FROM tg_accounts a
+		JOIN tg_credentials c ON c.account_id = a.id
+		WHERE a.deleted_at IS NULL
+		  AND a.connection_state NOT IN ('token_error', 'disconnect_pending', 'disconnect_error')
+		ORDER BY a.created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TelegramPollBot
+	for rows.Next() {
+		var b TelegramPollBot
+		if err := rows.Scan(&b.Account.ID, &b.Account.OrganizationID, &b.Account.DisplayName,
+			&b.Account.BotID, &b.Account.BotUsername, &b.Account.ConnectionState,
+			&b.Account.WebhookURL, &b.Account.WebhookRegisteredAt, &b.Account.WebhookLastCheckedAt,
+			&b.Account.WebhookLastError, &b.Account.LastLiveEventAt, &b.Account.DeletedAt,
+			&b.Account.CreatedAt, &b.TokenVersion); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // nullableInt64 keeps a zero id out of the column so the (chat_id,
 // telegram_message_id) unique key stays free for other rows.
 func nullableInt64(v int64) any {

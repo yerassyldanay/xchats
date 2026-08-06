@@ -3,6 +3,8 @@ package response
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -56,13 +58,19 @@ func responseJSON(replyText string, media []string, escalate bool, reason string
 	return string(b)
 }
 
-func testEngine(client llm.ChatClient) *Engine {
-	return &Engine{
-		LLMs:         &fakeRegistry{client: client},
+func testParams() LLMParams {
+	return LLMParams{
 		DefaultModel: llm.ModelRef{Provider: "openrouter", Model: "test-model"},
 		MaxTokens:    500,
 		Temperature:  0.3,
 		RetryEnabled: true,
+	}
+}
+
+func testEngine(client llm.ChatClient) *Engine {
+	return &Engine{
+		LLMs:   &fakeRegistry{client: client},
+		Params: testParams,
 	}
 }
 
@@ -190,7 +198,11 @@ func TestEngine_Generate_NoRetryWhenDisabled(t *testing.T) {
 		{Text: "not json"}, {Text: responseJSON("ok", nil, false, "")},
 	}}
 	e := testEngine(client)
-	e.RetryEnabled = false
+	e.Params = func() LLMParams {
+		p := testParams()
+		p.RetryEnabled = false
+		return p
+	}
 
 	if _, err := e.Generate(context.Background(), GenerateRequest{KB: testKB(), IncomingText: "Привет"}); err == nil {
 		t.Fatal("want an error — retry disabled means a bad response fails immediately")
@@ -207,5 +219,58 @@ func TestEngine_Generate_RequiresKB(t *testing.T) {
 	}
 	if len(e.LLMs.(*fakeRegistry).client.(*fakeClient).calls) != 0 {
 		t.Fatal("must not call the LLM when the KB is missing")
+	}
+}
+
+// erroringClient always fails — the StatusHook tests' failure-path double.
+type erroringClient struct{ err error }
+
+func (c *erroringClient) Complete(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, c.err
+}
+
+func TestEngine_StatusHook_CalledWithProviderAndNilErrOnSuccess(t *testing.T) {
+	client := &fakeClient{responses: []llm.ChatResponse{
+		{Text: responseJSON("ok", nil, false, "")},
+	}}
+	e := testEngine(client)
+	var gotProvider string
+	var gotErr error
+	calls := 0
+	e.StatusHook = func(provider string, err error) {
+		calls++
+		gotProvider, gotErr = provider, err
+	}
+
+	if _, err := e.Generate(context.Background(), GenerateRequest{KB: testKB(), IncomingText: "hi"}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("StatusHook called %d times, want 1 (no retry needed)", calls)
+	}
+	if gotProvider != "openrouter" || gotErr != nil {
+		t.Errorf("StatusHook(provider=%q, err=%v), want (openrouter, nil)", gotProvider, gotErr)
+	}
+}
+
+func TestEngine_StatusHook_CalledWithErrProviderAuthOnAuthFailure(t *testing.T) {
+	authErr := fmt.Errorf("llmprovider: http 401: %w", llm.ErrProviderAuth)
+	e := testEngine(&erroringClient{err: authErr})
+	var gotErr error
+	e.StatusHook = func(provider string, err error) { gotErr = err }
+
+	if _, err := e.Generate(context.Background(), GenerateRequest{KB: testKB(), IncomingText: "hi"}); err == nil {
+		t.Fatal("want Generate to fail when the LLM call fails")
+	}
+	if !errors.Is(gotErr, llm.ErrProviderAuth) {
+		t.Errorf("StatusHook's err = %v, want errors.Is(_, llm.ErrProviderAuth)", gotErr)
+	}
+}
+
+func TestEngine_StatusHook_NilIsSafeToLeaveUnset(t *testing.T) {
+	client := &fakeClient{responses: []llm.ChatResponse{{Text: responseJSON("ok", nil, false, "")}}}
+	e := testEngine(client) // StatusHook left nil
+	if _, err := e.Generate(context.Background(), GenerateRequest{KB: testKB(), IncomingText: "hi"}); err != nil {
+		t.Fatalf("Generate with a nil StatusHook: %v", err)
 	}
 }

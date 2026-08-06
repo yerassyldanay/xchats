@@ -3,7 +3,7 @@
 A WhatsApp-first **team inbox with an AI assistant**, runnable from one place.
 
 The concise target design lives under [`plan/`](plan/), with
-[`DECISIONS.md`](DECISIONS.md) authoritative;
+[`DECISIONS.md`](plan/DECISIONS.md) authoritative;
 **Build 0** — the runnable first version — is implemented in [`backend/`](backend/) (Go) and
 [`frontend/`](frontend/) (Vue 3), orchestrated by [`deploy/`](deploy/) + the [`Makefile`](Makefile).
 
@@ -17,10 +17,20 @@ end-to-end plumbing of the inbound→draft→approve→send→status loop. Follo
 schema, `{payload, errcode}` envelope, in-memory queue, and deterministic `wa_accounts.id`.
 
 ```bash
-cp .env.example .env            # secrets (DB paths, session secret, LLM keys, admin login)
-cp config.example.yaml config.yaml
 make up                         # backend (:8080) + frontend (:8081), one command
 ```
+
+The committed root [`config.yaml`](config.yaml) carries only non-secret boot/infra tunables
+(listen address, on-disk paths, logging, worker counts) — copy it only if you want to change one
+of those from its defaults. There is no `.env` file to set up: xchats generates and durably stores
+its own internal secrets (session signing, Telegram token encryption, MCP signing, the Telegram
+webhook secret) on first boot, and everything else an operator configures — the AI provider and
+its API key, ngrok, Langfuse, team members — lives in the Settings UI (gated to admins, with a
+first-run wizard for the essentials) once the app is running. Log in with the default admin
+account migration `0006_init_admin` seeds on an empty database — `admin@xchat.kz` /
+`xchat-admin-change-me` — then add your own admin account from Settings → Team Management right
+after (there is no self-service password change yet, so treat the seeded login as a bootstrap
+credential, not a permanent one).
 
 WhatsApp connects directly via [`go.mau.fi/whatsmeow`](https://github.com/tulir/whatsmeow) — no
 separate gateway to run or configure. Pair a number from the UI's QR flow (`/accounts` →
@@ -41,9 +51,9 @@ Identity is the WhatsApp number, so a logout/re-pair cycle never loses chats. En
 `POST /wa-accounts/{id}/logout`, `GET /wa-accounts/{id}/status`, `DELETE /whatsapp-accounts/{id}`.
 
 ```bash
-make test        # Go unit/component + normalizer-vs-captures + frontend typecheck/build
-make test-e2e    # full demo loop against a Postgres (DATABASE_URL=...): ingest→dedup→media,
-                 # send fan-out to the phone JID, echo-collapse, monotonic status, suggest→approve guard
+make test        # Go unit/component (SQLite, a fresh database per test) + frontend typecheck/build
+make test-e2e    # the DB-backed suites in isolation: ingest→dedup→media, send fan-out to the
+                 # phone JID, echo-collapse, monotonic status, suggest→approve guard
 ```
 
 ### Layout
@@ -67,6 +77,11 @@ plan/
   knowledge-base.md          approved-KB prompt and response example
   telegram-testing.md        verifying the Telegram channel: env vars, endpoints,
                              response contracts, curl walkthrough, no committed tooling
+
+docs/release/               installing, deploying, backing up, and upgrading a
+                             real deployment — start at installation.md
+  proposals/                 draft LICENSE/SECURITY/PRIVACY/CONTRIBUTING/
+                             CHANGELOG docs awaiting a maintainer decision
 ```
 
 ## Reading order

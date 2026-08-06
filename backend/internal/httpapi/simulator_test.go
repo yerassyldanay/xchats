@@ -126,7 +126,7 @@ func TestSimulatorMessage_UnregisteredProviderRejected(t *testing.T) {
 // since an unregistered route never reaches per-group middleware.
 func TestSimulatorMessage_DisabledByDefault(t *testing.T) {
 	srv := httpapi.New(httpapi.Deps{
-		Cfg: &config.Config{SimulatorEnabled: false, CORSOrigins: []string{"*"}},
+		Cfg: &config.Config{System: config.SystemConfig{SimulatorEnabled: false}, Server: config.ServerConfig{CORSOrigins: []string{"*"}}},
 		Log: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
 	ts := httptest.NewServer(srv.Router())

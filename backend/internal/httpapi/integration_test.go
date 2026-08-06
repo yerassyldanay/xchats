@@ -28,6 +28,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
+	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -94,6 +95,10 @@ type harness struct {
 	worker    *worker.Worker
 	orgID     uuid.UUID
 	accountID uuid.UUID
+	// tgPoller records every Upsert/Remove the telegram accounts lifecycle
+	// makes in polling mode (see telegram_polling_test.go) — nil-tolerant
+	// production behavior means the 26 webhook-mode tests never touch it.
+	tgPoller *fakeTGPoller
 }
 
 // setTelegramBase rewrites the configured public base URL mid-test. The Server
@@ -126,8 +131,9 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	st, db := dbtest.Open(t)
 
 	cfg := &config.Config{
-		SessionTTLHours: 1, MinPasswordLen: 8,
-		PageSize: 50, CORSOrigins: []string{"*"}, SimulatorEnabled: true,
+		System:                       config.SystemConfig{SessionTTLHours: 1, MinPasswordLen: 8, SimulatorEnabled: true},
+		PageSize:                     50,
+		Server:                       config.ServerConfig{CORSOrigins: []string{"*"}},
 		TelegramWebhookPublicBaseURL: telegramBaseURL,
 		TelegramWebhookSecret:        tgWebhookSecret,
 	}
@@ -211,8 +217,13 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 		KnowledgeBase: cachedKB,
 		Drafts:        &responsestore.DraftRepo{Store: st},
 		Engine: &response.Engine{
-			LLMs: fakeLLMRegistry{client: llmClient}, DefaultModel: llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
-			MaxTokens: 500, Temperature: 0.3, RetryEnabled: true,
+			LLMs: fakeLLMRegistry{client: llmClient},
+			Params: func() response.LLMParams {
+				return response.LLMParams{
+					DefaultModel: llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
+					MaxTokens:    500, Temperature: 0.3, RetryEnabled: true,
+				}
+			},
 		},
 	}
 	tgFake := telegram.NewFake(testBotID, testBotUsername)
@@ -225,16 +236,23 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 		Response: responseService, Senders: senders, Log: log}
 	q.Start(context.Background(), w.Handle)
 
+	// tgProc is the webhook ingress's shared ingest core (internal/tgingest)
+	// — production wiring (main.go) always constructs one, so the harness
+	// must too, over the SAME store/queue/hub every other dependency above
+	// shares.
+	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Log: log})
+	tgPoller := &fakeTGPoller{}
+
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, WA: fake, TG: tgFake, KB: kb,
+		Response: responseService, WA: fake, TG: tgFake, TGProcessor: tgProc, TGPoller: tgPoller, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: org.ID, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, cfg: cfg, fake: fake, tg: tgFake,
-		queue: q, store: st, db: db, worker: w, orgID: org.ID, accountID: accountID}
+		queue: q, store: st, db: db, worker: w, orgID: org.ID, accountID: accountID, tgPoller: tgPoller}
 	// st/db/kb/kbRepo are all closed by dbtest's own t.Cleanup registrations.
 	t.Cleanup(func() { ts.Close(); q.Close() })
 	h.login()
@@ -327,6 +345,24 @@ func (h *harness) patchJSON(path string, body any) (*http.Response, map[string]j
 	resp, err := h.client.Do(req)
 	if err != nil {
 		h.t.Fatalf("PATCH %s: %v", path, err)
+	}
+	var env map[string]json.RawMessage
+	_ = json.NewDecoder(resp.Body).Decode(&env)
+	resp.Body.Close()
+	h.queue.Wait()
+	return resp, env
+}
+
+func (h *harness) putJSON(path string, body any) (*http.Response, map[string]json.RawMessage) {
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPut, h.srv.URL+path, bytes.NewReader(b))
+	if err != nil {
+		h.t.Fatalf("PUT %s: %v", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.t.Fatalf("PUT %s: %v", path, err)
 	}
 	var env map[string]json.RawMessage
 	_ = json.NewDecoder(resp.Body).Decode(&env)

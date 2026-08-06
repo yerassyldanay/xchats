@@ -6,7 +6,18 @@
 // here or in the engine.
 package llm
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrProviderAuth is the sentinel a ChatClient wraps into its returned error
+// when a provider rejects a call as unauthorized (an invalid or revoked API
+// key) — as opposed to a transient network error, a rate limit, or a
+// malformed request, none of which say anything about whether the
+// credential itself still works. Callers use errors.Is(err, ErrProviderAuth)
+// to distinguish "this integration needs a new key" from "try again later."
+var ErrProviderAuth = errors.New("llm: provider rejected the request as unauthorized")
 
 // Message is one chat turn. The evaluated schema_kb_v1 pipeline sends exactly
 // one "user" message containing the whole rendered prompt (no system message,

@@ -1,39 +1,41 @@
-// Package config loads the two-file config model: secrets from .env (environment)
-// and non-secret tunables + seed from config.yaml. It also owns the deterministic
-// wa_accounts.id derivation (uuidv5(XCHATS_WA_NS, owner_jid)).
+// Package config loads the merged application configuration: a committed,
+// secrets-free config.yaml for boot/infra tunables, plus real process env
+// vars as overrides/secrets on top of it (internal/credentials.EnvStore
+// reads the same process env, so an operator's existing export keeps
+// working — see that package's own doc comment). It also owns the
+// deterministic wa_accounts.id derivation (uuidv5(XCHATS_WA_NS, owner_jid)).
 package config
 
 import (
-	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
+
+	"github.com/yerassyldanay/xchats/backend/internal/appdirs"
 )
 
 // xchatsWaNS is the fixed namespace for deriving wa_accounts.id from owner_jid.
 // It must never change — the account id is uuidv5(xchatsWaNS, canonical(owner_jid)).
 var xchatsWaNS = uuid.MustParse("a3f1d2c4-5e6b-47a8-9c0d-1e2f3a4b5c6d")
 
-// Config is the merged application configuration.
-type Config struct {
-	// --- server / logging (config.yaml, overridable by env) ---
-	HTTPAddr    string   `yaml:"http_addr" env:"HTTP_ADDR"`
-	CORSOrigins []string `yaml:"cors_origins" env:"CORS_ORIGINS" envSeparator:","`
-	LogFormat   string   `yaml:"log_format" env:"LOG_FORMAT"`
-	LogLevel    string   `yaml:"log_level" env:"LOG_LEVEL"`
-	APIBaseURL  string   `yaml:"api_base_url" env:"API_BASE_URL"`
-	// Environment is "development" (the default) or "production" — the
-	// switch that turns dev-only conveniences (an ephemeral MCP signing key,
-	// a localhost base URL) into hard startup failures instead of warnings
-	// (plan Task 17). Anything other than the literal "production" is
-	// treated as development, so an unset/misspelled value never accidentally
-	// disables the checks it's supposed to enable.
-	Environment string `yaml:"environment" env:"ENVIRONMENT"`
+// ServerConfig is the HTTP edge's own boot/infra shape: listen address,
+// discovery/link base URLs, and the CORS/proxy trust lists. Every field here
+// is safe to commit — none of it is a secret.
+type ServerConfig struct {
+	HTTPAddr   string `yaml:"http_addr" env:"HTTP_ADDR"`
+	APIBaseURL string `yaml:"api_base_url" env:"API_BASE_URL"`
+	// FrontendBaseURL is the deployed Vue SPA's own public origin (a separate
+	// service from the backend — see deploy/docker-compose.yaml). The MCP KB
+	// Manager widget's "Review and publish in Xchats" link and the OAuth
+	// consent page both need it to build a real URL into /playground.
+	FrontendBaseURL string   `yaml:"frontend_base_url" env:"FRONTEND_BASE_URL"`
+	CORSOrigins     []string `yaml:"cors_origins" env:"CORS_ORIGINS" envSeparator:","`
 	// TrustedProxies lists the reverse-proxy IPs/CIDRs gin should trust
 	// X-Forwarded-* headers from (gin's SetTrustedProxies). Empty means trust
 	// NONE — c.ClientIP() falls back to the raw connection address rather
@@ -42,58 +44,116 @@ type Config struct {
 	// attacker-controlled on any request that doesn't actually come through
 	// a configured proxy (plan Task 17).
 	TrustedProxies []string `yaml:"trusted_proxies" env:"TRUSTED_PROXIES" envSeparator:","`
-	// FrontendBaseURL is the deployed Vue SPA's own public origin (a separate
-	// service from the backend — see deploy/docker-compose.yaml). The MCP KB
-	// Manager widget's "Review and publish in Xchats" link and the OAuth
-	// consent page both need it to build a real URL into /playground.
-	FrontendBaseURL string `yaml:"frontend_base_url" env:"FRONTEND_BASE_URL"`
+	SecureCookies  bool     `yaml:"secure_cookies" env:"SECURE_COOKIES"`
+}
 
-	// --- MCP connector (plan/mcp.md) ---
+// StorageConfig is where every on-disk file this process owns lives.
+// db_path has a committed default now (./data/xchats.db) — a fresh clone
+// boots without DB_PATH set at all.
+type StorageConfig struct {
+	DBPath string `yaml:"db_path" env:"DB_PATH"`
+	// WADeviceDBPath is whatsmeow's own device-session SQLite file — kept
+	// separate from DBPath since whatsmeow's sqlstore manages that schema
+	// entirely on its own (see internal/whatsmeow/store.go).
+	WADeviceDBPath string `yaml:"wa_device_db_path" env:"WA_DEVICE_DB_PATH"`
+	BlobDir        string `yaml:"blob_dir" env:"BLOB_DIR"`
+}
+
+// SystemConfig is process-wide operational tunables: logging, the queue's
+// worker pool, session/auth limits, and feature gates.
+type SystemConfig struct {
+	LogLevel        string `yaml:"log_level" env:"LOG_LEVEL"`
+	LogFormat       string `yaml:"log_format" env:"LOG_FORMAT"`
+	QueueWorkers    int    `yaml:"queue_workers" env:"QUEUE_WORKERS"`
+	SessionTTLHours int    `yaml:"session_ttl_hours" env:"SESSION_TTL_HOURS"`
+	MinPasswordLen  int    `yaml:"min_password_len"`
+	// SimulatorEnabled gates the /simulator/messages API (Phase 10): the route is
+	// not registered at all when false. Defaults false — only a dev/staging
+	// deployment should set SIMULATOR_ENABLED=true.
+	SimulatorEnabled bool `yaml:"simulator_enabled" env:"SIMULATOR_ENABLED"`
+}
+
+// TelegramModeConfig is the long-polling-vs-webhook switch (Track 1). It is
+// its own group (rather than folded into the flat Telegram* secret fields
+// below) because it is the one Telegram setting that is boot/infra shaped —
+// safe to commit — rather than a credential or a runtime-editable setting.
+type TelegramModeConfig struct {
+	// Mode is "webhook" | "polling" | "" (auto — see TelegramResolvedMode).
+	Mode string `yaml:"mode" env:"TG_MODE"`
+}
+
+// MCPConfig groups the MCP connector's TTL tunables (plan/mcp.md §3) — every
+// field here is a lifetime in seconds/days, never a secret.
+type MCPConfig struct {
+	// AccessTokenTTLSeconds / RefreshTokenTTLDays: short-lived access tokens,
+	// long-lived rotated-on-use refresh tokens.
+	AccessTokenTTLSeconds int `yaml:"access_token_ttl_seconds" env:"MCP_ACCESS_TOKEN_TTL_SECONDS"`
+	RefreshTokenTTLDays   int `yaml:"refresh_token_ttl_days" env:"MCP_REFRESH_TOKEN_TTL_DAYS"`
+	// AuthCodeTTLSeconds bounds the PKCE authorization code's lifetime
+	// between /oauth/authorize and the POST /oauth/token exchange.
+	AuthCodeTTLSeconds int `yaml:"auth_code_ttl_seconds" env:"MCP_AUTH_CODE_TTL_SECONDS"`
+	// UploadTokenTTLSeconds bounds a kb_media_upload signed upload URL.
+	UploadTokenTTLSeconds int `yaml:"upload_token_ttl_seconds" env:"MCP_UPLOAD_TOKEN_TTL_SECONDS"`
+	// MediaTokenTTLSeconds bounds a signed media-READ URL (the widget's
+	// preview thumbnails and open/download links). Longer than the upload TTL
+	// on purpose: expiry here means a broken <img> in a record the user left
+	// open, the grant is read-only and single-object, and every kb_read mints
+	// fresh URLs anyway — so the practical window is one navigation, not an
+	// hour.
+	MediaTokenTTLSeconds int `yaml:"media_token_ttl_seconds" env:"MCP_MEDIA_TOKEN_TTL_SECONDS"`
+	// ReviewHandoffTTLSeconds bounds the one-time signed URL a tool result
+	// hands the KB Manager widget for "Review and publish in Xchats" (plan
+	// Task 15) — short-lived: it only needs to survive the click.
+	ReviewHandoffTTLSeconds int `yaml:"review_handoff_ttl_seconds" env:"MCP_REVIEW_HANDOFF_TTL_SECONDS"`
+}
+
+// Config is the merged application configuration. Server/Storage/System/
+// Telegram/MCP are the committed config.yaml's own nested shape (see the
+// repo root config.yaml) — every env tag on their fields is unchanged from
+// before this grouping, so existing env-var overrides (Docker/k8s pins)
+// keep working unchanged; only the Go access path grew a `.Server`/
+// `.Storage`/... prefix. Everything below them is either a secret (env-only,
+// never in config.yaml) or a runtime setting Track 2 moves into the
+// Settings UI/credential store — both stay flat and largely dormant here.
+type Config struct {
+	Server   ServerConfig       `yaml:"server"`
+	Storage  StorageConfig      `yaml:"storage"`
+	System   SystemConfig       `yaml:"system"`
+	Telegram TelegramModeConfig `yaml:"telegram"`
+	MCP      MCPConfig          `yaml:"mcp"`
+
+	// Environment is "development" (the default) or "production" — the
+	// switch that turns dev-only conveniences (an ephemeral MCP signing key,
+	// a localhost base URL) into hard startup failures instead of warnings
+	// (plan Task 17). Anything other than the literal "production" is
+	// treated as development, so an unset/misspelled value never accidentally
+	// disables the checks it's supposed to enable.
+	Environment string `yaml:"environment" env:"ENVIRONMENT"`
+
+	// --- MCP connector secret (plan/mcp.md) ---
 	// MCPJWTSigningKey seeds the Ed25519 keypair that signs MCP OAuth access
 	// tokens (internal/mcpauth), parsed the same three ways as
 	// TG_CREDENTIALS_ENC_KEY (64 hex chars, base64, or a 32-char literal). Unset
 	// in dev falls back to an ephemeral in-memory key (logged loudly): every
 	// previously issued token stops verifying on restart, and every replica in
 	// a multi-instance deployment would mint tokens no other replica can check
-	// — set this for anything beyond a single local process.
+	// — set this for anything beyond a single local process. Track 2C
+	// auto-provisions and persists this once the credential store exists;
+	// until then it is env-only.
 	MCPJWTSigningKey string `env:"MCP_JWT_SIGNING_KEY"`
-	// MCPAccessTokenTTLSeconds / MCPRefreshTokenTTLDays: short-lived access
-	// tokens, long-lived rotated-on-use refresh tokens (plan/mcp.md §3).
-	MCPAccessTokenTTLSeconds int `yaml:"mcp_access_token_ttl_seconds" env:"MCP_ACCESS_TOKEN_TTL_SECONDS"`
-	MCPRefreshTokenTTLDays   int `yaml:"mcp_refresh_token_ttl_days" env:"MCP_REFRESH_TOKEN_TTL_DAYS"`
-	// MCPAuthCodeTTLSeconds bounds the PKCE authorization code's lifetime
-	// between /oauth/authorize and the POST /oauth/token exchange.
-	MCPAuthCodeTTLSeconds int `yaml:"mcp_auth_code_ttl_seconds" env:"MCP_AUTH_CODE_TTL_SECONDS"`
-	// MCPUploadTokenTTLSeconds bounds a kb_media_upload signed upload URL.
-	MCPUploadTokenTTLSeconds int `yaml:"mcp_upload_token_ttl_seconds" env:"MCP_UPLOAD_TOKEN_TTL_SECONDS"`
-	// MCPMediaTokenTTLSeconds bounds a signed media-READ URL (the widget's
-	// preview thumbnails and open/download links). Longer than the upload TTL
-	// on purpose: expiry here means a broken <img> in a record the user left
-	// open, the grant is read-only and single-object, and every kb_read mints
-	// fresh URLs anyway — so the practical window is one navigation, not an
-	// hour.
-	MCPMediaTokenTTLSeconds int `yaml:"mcp_media_token_ttl_seconds" env:"MCP_MEDIA_TOKEN_TTL_SECONDS"`
-	// MCPReviewHandoffTTLSeconds bounds the one-time signed URL a tool result
-	// hands the KB Manager widget for "Review and publish in Xchats" (plan
-	// Task 15) — short-lived: it only needs to survive the click.
-	MCPReviewHandoffTTLSeconds int `yaml:"mcp_review_handoff_ttl_seconds" env:"MCP_REVIEW_HANDOFF_TTL_SECONDS"`
 
-	// --- secrets (.env only) ---
-	DBPath string `env:"DB_PATH"`
-	// WADeviceDBPath is whatsmeow's own device-session SQLite file — kept
-	// separate from DBPath since whatsmeow's sqlstore manages that schema
-	// entirely on its own (see internal/whatsmeow/store.go).
-	WADeviceDBPath string `yaml:"wa_device_db_path" env:"WA_DEVICE_DB_PATH"`
-	SessionSecret  string `env:"SESSION_SECRET"`
+	// --- secrets (env only; Track 2C auto-provisions/persists these) ---
+	SessionSecret string `env:"SESSION_SECRET"`
 
 	// --- Telegram (Bot API) ---
 	// TelegramWebhookPublicBaseURL must be a public HTTPS origin — Telegram
 	// refuses to register a webhook that is anything else. Validated at
-	// provisioning time.
+	// provisioning time. Irrelevant in polling mode.
 	TelegramWebhookPublicBaseURL string `env:"TG_WEBHOOK_PUBLIC_BASE_URL"`
 	// TelegramAPIBaseURL overrides https://api.telegram.org (a local Bot API
-	// server, or a test double).
-	TelegramAPIBaseURL string `yaml:"tg_api_base_url" env:"TG_API_BASE_URL"`
+	// server, or a test double) — an advanced override, env-only rather than
+	// part of the committed config.yaml.
+	TelegramAPIBaseURL string `env:"TG_API_BASE_URL"`
 	// TelegramCredentialsEncKey is the AES-256-GCM key protecting stored bot
 	// tokens (internal/secretbox, xchats.tg_credentials). Losing it means
 	// re-pasting every bot token; it is never logged.
@@ -104,52 +164,41 @@ type Config struct {
 	// TelegramResolvedWebhookSecret to read the effective value.
 	TelegramWebhookSecret string `env:"TG_WEBHOOK_SECRET"`
 
-	// --- auth / session (config.yaml) ---
-	SessionTTLHours int  `yaml:"session_ttl_hours" env:"SESSION_TTL_HOURS"`
-	SecureCookies   bool `yaml:"secure_cookies" env:"SECURE_COOKIES"`
-	MinPasswordLen  int  `yaml:"min_password_len"`
-
-	// --- blob / queue (config.yaml) ---
-	BlobDir      string `yaml:"blob_dir" env:"BLOB_DIR"`
-	QueueDriver  string `yaml:"queue_driver" env:"QUEUE_DRIVER"`
-	QueueWorkers int    `yaml:"queue_workers" env:"QUEUE_WORKERS"`
-
-	// --- LLM / AI brain (key is a secret via .env; the rest are tunables) ---
-	// When LLMAPIKey is empty the app falls back to the hardcoded Stub drafter.
-	LLMProvider    string  `yaml:"llm_provider" env:"LLM_PROVIDER"`     // openrouter|openai|gemini
-	LLMAPIKey      string  `env:"LLM_API_KEY"`                          // secret
-	LLMBaseURL     string  `yaml:"llm_base_url" env:"LLM_BASE_URL"`     // overrides the provider default
-	LLMFastModel   string  `yaml:"llm_fast_model" env:"LLM_FAST_MODEL"` // drafting model
-	LLMMaxTokens   int     `yaml:"llm_max_tokens" env:"LLM_MAX_TOKENS"`
-	LLMTemperature float64 `yaml:"llm_temperature" env:"LLM_TEMPERATURE"`
+	// --- LLM / AI brain (key is a secret via env; the rest are dormant legacy
+	// tunables — response.Service's own provider/model/tunables below are the
+	// live path). When LLMAPIKey is empty the app falls back to the hardcoded
+	// Stub drafter. ---
+	LLMProvider    string  `env:"LLM_PROVIDER"`   // openrouter|openai|gemini
+	LLMAPIKey      string  `env:"LLM_API_KEY"`    // secret
+	LLMBaseURL     string  `env:"LLM_BASE_URL"`   // overrides the provider default
+	LLMFastModel   string  `env:"LLM_FAST_MODEL"` // drafting model
+	LLMMaxTokens   int     `env:"LLM_MAX_TOKENS"`
+	LLMTemperature float64 `env:"LLM_TEMPERATURE"`
 	// KBAllowPrivateFetch lets trusted local connector metadata discovery fetch
 	// private/loopback hosts. Default false (SSRF-safe).
 	KBAllowPrivateFetch bool `yaml:"kb_allow_private_fetch" env:"KB_ALLOW_PRIVATE_FETCH"`
 
 	// --- multichannel response-service LLM layer (backend/llm + internal/llmprovider) ---
 	// Provider-neutral: LLMDefaultProvider/LLMDefaultModel select WHICH configured
-	// provider/model the response engine calls; switching either is configuration
-	// only. Distinct from the legacy LLMProvider/LLMAPIKey/... fields above, which
-	// the dormant internal/brain path still reads — the two must never be conflated.
-	LLMDefaultProvider     string  `yaml:"llm_default_provider" env:"LLM_DEFAULT_PROVIDER"`
-	LLMDefaultModel        string  `yaml:"llm_default_model" env:"LLM_DEFAULT_MODEL"`
+	// provider/model the response engine calls. As of Track 2D/2G these are seed
+	// values only: internal/settings.Store (settings.json + the Settings UI) is
+	// the live source of truth on every boot after the first, so config.yaml no
+	// longer carries this block at all — these fields stay env-only, for a
+	// from-scratch first boot or a scripted/CI deployment with no settings.json yet.
+	LLMDefaultProvider     string  `env:"LLM_DEFAULT_PROVIDER"`
+	LLMDefaultModel        string  `env:"LLM_DEFAULT_MODEL"`
 	OpenRouterAPIKey       string  `env:"OPENROUTER_API_KEY"`
-	OpenRouterBaseURL      string  `yaml:"openrouter_base_url" env:"OPENROUTER_BASE_URL"`
+	OpenRouterBaseURL      string  `env:"OPENROUTER_BASE_URL"`
 	OpenAIAPIKey           string  `env:"OPENAI_API_KEY"`
-	OpenAIBaseURL          string  `yaml:"openai_base_url" env:"OPENAI_BASE_URL"`
+	OpenAIBaseURL          string  `env:"OPENAI_BASE_URL"`
 	GeminiAPIKey           string  `env:"GEMINI_API_KEY"`
-	GeminiBaseURL          string  `yaml:"gemini_base_url" env:"GEMINI_BASE_URL"`
-	LLMDraftMaxTokens      int     `yaml:"llm_draft_max_tokens" env:"LLM_DRAFT_MAX_TOKENS"`
-	LLMDraftTemperature    float64 `yaml:"llm_draft_temperature" env:"LLM_DRAFT_TEMPERATURE"`
-	LLMDraftTimeoutSeconds int     `yaml:"llm_draft_timeout_seconds" env:"LLM_DRAFT_TIMEOUT_SECONDS"`
-	LLMDraftRetry          bool    `yaml:"llm_draft_retry" env:"LLM_DRAFT_RETRY"`
+	GeminiBaseURL          string  `env:"GEMINI_BASE_URL"`
+	LLMDraftMaxTokens      int     `env:"LLM_DRAFT_MAX_TOKENS"`
+	LLMDraftTemperature    float64 `env:"LLM_DRAFT_TEMPERATURE"`
+	LLMDraftTimeoutSeconds int     `env:"LLM_DRAFT_TIMEOUT_SECONDS"`
+	LLMDraftRetry          bool    `env:"LLM_DRAFT_RETRY"`
 
-	// SimulatorEnabled gates the /simulator/messages API (Phase 10): the route is
-	// not registered at all when false. Defaults false — only a dev/staging
-	// deployment should set SIMULATOR_ENABLED=true.
-	SimulatorEnabled bool `yaml:"simulator_enabled" env:"SIMULATOR_ENABLED"`
-
-	// --- Langfuse (LLM observability; secrets via .env) ---
+	// --- Langfuse (LLM observability; secrets via env) ---
 	// Tracing is best-effort: when disabled or keys are missing the LLM clients
 	// emit to OTel's no-op tracer (≈ free). See internal/telemetry.NewLangfuseProvider.
 	LangfuseEnabled         bool   `env:"LANGFUSE_ENABLED"`
@@ -158,46 +207,58 @@ type Config struct {
 	LangfuseSecretKey       string `env:"LANGFUSE_SECRET_KEY"`
 	LangfuseFlushIntervalMS int    `env:"LANGFUSE_FLUSH_INTERVAL_MS"` // span batch timeout; 0 → OTel default
 
-	// --- seed (config.yaml, overridable by env) ---
-	// SeedAdminEmail and SeedAdminPassword are intentionally removed: the
-	// initial admin user (admin@xchat.kz) is created by migration
-	// 0006_init_admin.up.sql with a precomputed argon2id hash. No boot-time
-	// seeding is performed. WhatsApp accounts are no longer pre-configured
-	// either — they are paired dynamically via the UI (see WADeviceDBPath).
-	OrgName string `yaml:"org_name" env:"ORG_NAME"`
+	// QueueDriver selects the queue backend ("inmem" is the only one built).
+	// Not part of the committed config.yaml schema (nothing else to pick
+	// today) but kept configurable for a future driver.
+	QueueDriver string `env:"QUEUE_DRIVER"`
+
+	// OrgName seeds the single default organization's display name on an
+	// empty database. Renaming an existing org happens in-app (PUT
+	// /organization, Track 2J's Team management UI) — this is a first-boot
+	// value only, not re-applied afterward.
+	OrgName string `env:"ORG_NAME"`
 
 	PageSize int `yaml:"page_size"`
 }
 
 func defaults() Config {
 	return Config{
-		HTTPAddr:        ":8080",
-		CORSOrigins:     []string{"http://localhost:5173"},
-		LogFormat:       "logfmt",
-		LogLevel:        "info",
-		APIBaseURL:      "http://localhost:8080",
-		SessionTTLHours: 720,
-		SecureCookies:   false,
-		MinPasswordLen:  8,
-		BlobDir:         "./blobdata",
-		QueueDriver:     "inmem",
-		QueueWorkers:    4,
-		LLMProvider:     "openrouter",
-		LLMFastModel:    "openai/gpt-4o-mini",
-		LLMMaxTokens:    1024,
-		LLMTemperature:  0.3,
-		OrgName:         "xchats",
-		PageSize:        50,
-		FrontendBaseURL: "http://localhost:5173",
-		Environment:     "development",
-		WADeviceDBPath:  "/data/whatsmeow.db",
+		Server: ServerConfig{
+			HTTPAddr:        ":8080",
+			APIBaseURL:      "http://localhost:8080",
+			FrontendBaseURL: "http://localhost:5173",
+			CORSOrigins:     []string{"http://localhost:5173"},
+			SecureCookies:   false,
+		},
+		Storage: StorageConfig{
+			DBPath:         "./data/xchats.db",
+			WADeviceDBPath: "./data/whatsmeow.db",
+			BlobDir:        "./blobdata",
+		},
+		System: SystemConfig{
+			LogFormat:       "logfmt",
+			LogLevel:        "info",
+			QueueWorkers:    4,
+			SessionTTLHours: 720,
+			MinPasswordLen:  8,
+		},
+		MCP: MCPConfig{
+			AccessTokenTTLSeconds:   900, // 15 minutes
+			RefreshTokenTTLDays:     30,
+			AuthCodeTTLSeconds:      300,  // 5 minutes
+			UploadTokenTTLSeconds:   900,  // 15 minutes
+			MediaTokenTTLSeconds:    3600, // 1 hour
+			ReviewHandoffTTLSeconds: 300,  // 5 minutes
+		},
 
-		MCPAccessTokenTTLSeconds:   900, // 15 minutes
-		MCPRefreshTokenTTLDays:     30,
-		MCPAuthCodeTTLSeconds:      300,  // 5 minutes
-		MCPUploadTokenTTLSeconds:   900,  // 15 minutes
-		MCPMediaTokenTTLSeconds:    3600, // 1 hour
-		MCPReviewHandoffTTLSeconds: 300,  // 5 minutes
+		Environment: "development",
+
+		LLMProvider:    "openrouter",
+		LLMFastModel:   "openai/gpt-4o-mini",
+		LLMMaxTokens:   1024,
+		LLMTemperature: 0.3,
+		OrgName:        "xchats",
+		PageSize:       50,
 
 		LLMDefaultProvider:     "openrouter",
 		LLMDefaultModel:        "google/gemini-2.5-flash",
@@ -205,6 +266,8 @@ func defaults() Config {
 		LLMDraftTemperature:    0.3,
 		LLMDraftTimeoutSeconds: 60,
 		LLMDraftRetry:          true,
+
+		QueueDriver: "inmem",
 	}
 }
 
@@ -237,18 +300,51 @@ func (c *Config) LLMResolvedBaseURL() string {
 	}
 }
 
-// MCPResourceURL is the canonical MCP resource identifier every OAuth access
-// token must be audience-bound to (RFC 8707) — the exact `/mcp` endpoint URL,
-// derived from APIBaseURL rather than a separate setting so it can never
-// drift from where POST /mcp actually listens.
-func (c *Config) MCPResourceURL() string {
-	return strings.TrimRight(c.APIBaseURL, "/") + "/mcp"
+// ResolvedAPIBaseURL returns Server.APIBaseURL with no trailing slash, or —
+// when left empty, the committed config.yaml's own zero-config default — a
+// same-host origin derived from Server.HTTPAddr (":8080" ->
+// "http://localhost:8080"). Every discovery/link URL this server emits
+// (MCPResourceURL, the OAuth issuer, upload/media link bases) reads through
+// this rather than the raw field, so a fresh clone with nothing configured
+// still advertises a URL that actually resolves; validateProductionConfig
+// (cmd/xchats) deliberately checks the RAW field instead — an empty value is
+// exactly the "you forgot to set this for production" case it exists to
+// catch, and its derived fallback is a localhost URL anyway, so checking
+// either produces the same verdict there.
+func (c *Config) ResolvedAPIBaseURL() string {
+	if c.Server.APIBaseURL != "" {
+		return strings.TrimRight(c.Server.APIBaseURL, "/")
+	}
+	addr := c.Server.HTTPAddr
+	if !strings.HasPrefix(addr, ":") {
+		addr = ":8080"
+	}
+	return "http://localhost" + addr
 }
 
-// MCPResolvedFrontendBaseURL returns the frontend origin with no trailing
-// slash, for building links like {base}/playground.
+// ResolvedFrontendBaseURL returns Server.FrontendBaseURL with no trailing
+// slash, or the zero-config Vite dev-server default when left empty. See
+// ResolvedAPIBaseURL's doc comment for the same reasoning.
+func (c *Config) ResolvedFrontendBaseURL() string {
+	if c.Server.FrontendBaseURL != "" {
+		return strings.TrimRight(c.Server.FrontendBaseURL, "/")
+	}
+	return "http://localhost:5173"
+}
+
+// MCPResourceURL is the canonical MCP resource identifier every OAuth access
+// token must be audience-bound to (RFC 8707) — the exact `/mcp` endpoint URL,
+// derived from ResolvedAPIBaseURL rather than a separate setting so it can
+// never drift from where POST /mcp actually listens.
+func (c *Config) MCPResourceURL() string {
+	return c.ResolvedAPIBaseURL() + "/mcp"
+}
+
+// MCPResolvedFrontendBaseURL is an alias for ResolvedFrontendBaseURL, kept
+// under its original name for existing call sites (the MCP widget's "Review
+// and publish in Xchats" link, the OAuth consent page).
 func (c *Config) MCPResolvedFrontendBaseURL() string {
-	return strings.TrimRight(c.FrontendBaseURL, "/")
+	return c.ResolvedFrontendBaseURL()
 }
 
 // IsProduction reports whether Environment is explicitly set to
@@ -265,13 +361,34 @@ func (c *Config) LangfuseTracingEnabled() bool {
 	return c.LangfuseEnabled && c.LangfusePublicKey != "" && c.LangfuseSecretKey != ""
 }
 
-// Load reads optional .env then config.yaml, then applies env overrides.
-func Load(configPath, envPath string) (*Config, error) {
-	if envPath != "" {
-		if err := loadDotenv(envPath); err != nil {
-			return nil, fmt.Errorf("load .env: %w", err)
-		}
+// ResolveConfigPath implements the config file resolution order: an explicit
+// path (the -config flag, when set) wins; else $XCHATS_CONFIG; else
+// ./config.yaml if that file exists in the current working directory (the
+// repo/dev-checkout default — this repo commits one at its root); else the
+// OS-appropriate per-user config directory (internal/appdirs.ConfigDir),
+// where an installed (non-repo) binary or an installer places it. A
+// config.yaml missing at the finally resolved path is still not an error:
+// Load treats that as "use defaults" (config.yaml is optional; the app
+// boots on defaults with nothing on disk at all) — this resolution order
+// only decides where to look, never whether something has to be there.
+func ResolveConfigPath(explicit string) string {
+	if explicit != "" {
+		return explicit
 	}
+	if v := os.Getenv("XCHATS_CONFIG"); v != "" {
+		return v
+	}
+	if _, err := os.Stat("config.yaml"); err == nil {
+		return "config.yaml"
+	}
+	if dir, err := appdirs.ConfigDir("xchats"); err == nil {
+		return filepath.Join(dir, "config.yaml")
+	}
+	return "config.yaml"
+}
+
+// Load reads config.yaml, then applies process env overrides.
+func Load(configPath string) (*Config, error) {
 	cfg := defaults()
 	if configPath != "" {
 		b, err := os.ReadFile(configPath)
@@ -290,36 +407,6 @@ func Load(configPath, envPath string) (*Config, error) {
 	return &cfg, nil
 }
 
-// loadDotenv loads KEY=VALUE pairs from a file, without clobbering already-set env.
-func loadDotenv(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
-		if _, exists := os.LookupEnv(k); !exists {
-			_ = os.Setenv(k, v)
-		}
-	}
-	return sc.Err()
-}
-
 // TelegramResolvedAPIBaseURL returns the Bot API root to call.
 func (c *Config) TelegramResolvedAPIBaseURL() string {
 	if c.TelegramAPIBaseURL != "" {
@@ -334,6 +421,25 @@ func (c *Config) TelegramResolvedAPIBaseURL() string {
 // never for a public deployment.
 func (c *Config) TelegramResolvedWebhookSecret() string {
 	return c.TelegramWebhookSecret
+}
+
+// TelegramResolvedMode resolves the long-polling-vs-webhook switch (Track 1):
+// an explicit Telegram.Mode always wins; otherwise a configured public
+// webhook base URL means an operator already set up webhook delivery
+// (unchanged behavior for every existing deployment), and its absence means
+// polling — the zero-config path for a local/native install with no public
+// URL at all.
+func (c *Config) TelegramResolvedMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Telegram.Mode)) {
+	case "webhook":
+		return "webhook"
+	case "polling":
+		return "polling"
+	}
+	if c.TelegramWebhookPublicBaseURL != "" {
+		return "webhook"
+	}
+	return "polling"
 }
 
 // xchatsChannelNS is the fixed namespace for deriving a non-WhatsApp channel

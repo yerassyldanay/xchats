@@ -142,7 +142,7 @@ func TestDebugWaEventHTTP_ValidationErrors(t *testing.T) {
 // /simulator/messages makes (see TestSimulatorMessage_DisabledByDefault).
 func TestDebugWaEventHTTP_DisabledByDefault(t *testing.T) {
 	srv := httpapi.New(httpapi.Deps{
-		Cfg: &config.Config{SimulatorEnabled: false, CORSOrigins: []string{"*"}},
+		Cfg: &config.Config{System: config.SystemConfig{SimulatorEnabled: false}, Server: config.ServerConfig{CORSOrigins: []string{"*"}}},
 		Log: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
 	ts := httptest.NewServer(srv.Router())

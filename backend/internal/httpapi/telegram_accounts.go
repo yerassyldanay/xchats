@@ -66,14 +66,23 @@ func (s *Server) handleCreateTelegramAccount(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "bot_token required (получите его у @BotFather)")
 		return
 	}
-	baseURL, err := s.telegramWebhookBase()
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, err.Error())
-		return
-	}
-	if err := s.telegramSecretUsable(); err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, err.Error())
-		return
+
+	// Polling mode needs no public URL or webhook secret at all — that is
+	// its whole point (Track 1's zero-config path). Only webhook mode
+	// validates them, and only webhook mode needs baseURL below.
+	polling := s.cfg.TelegramResolvedMode() == "polling"
+	var baseURL string
+	if !polling {
+		var err error
+		baseURL, err = s.telegramWebhookBase()
+		if err != nil {
+			fail(c, http.StatusBadRequest, ErrValidation, err.Error())
+			return
+		}
+		if err := s.telegramSecretUsable(); err != nil {
+			fail(c, http.StatusBadRequest, ErrValidation, err.Error())
+			return
+		}
 	}
 
 	tctx, cancel := context.WithTimeout(ctx(c), telegramConnectTimeout)
@@ -108,16 +117,28 @@ func (s *Server) handleCreateTelegramAccount(c *gin.Context) {
 		return
 	}
 
-	state := s.registerTelegramWebhook(c, acct.ID, token, baseURL, req.DropPendingBacklog)
+	var state string
+	if polling {
+		state = s.startTelegramPolling(c, acct.ID)
+	} else {
+		state = s.registerTelegramWebhook(c, acct.ID, token, baseURL, req.DropPendingBacklog)
+	}
 	created(c, s.telegramAccountPayload(c, acct.ID, state))
 }
 
 // handleRetryTelegramWebhook re-runs setWebhook with the STORED token. It never
 // drops the pending backlog: by definition this runs after a failure, and those
 // pending updates are the messages that failed to arrive.
+//
+// In polling mode there is no webhook to re-register — see
+// telegramPollingStatus's own doc comment for what "retry" means there.
 func (s *Server) handleRetryTelegramWebhook(c *gin.Context) {
 	acct, token, okAcct := s.telegramAccountWithToken(c)
 	if !okAcct {
+		return
+	}
+	if s.cfg.TelegramResolvedMode() == "polling" {
+		ok(c, s.telegramAccountPayload(c, acct.ID, s.telegramPollingStatus(c, acct, token)))
 		return
 	}
 	baseURL, err := s.telegramWebhookBase()
@@ -132,9 +153,16 @@ func (s *Server) handleRetryTelegramWebhook(c *gin.Context) {
 // handleCheckTelegramAccount is the health probe: ask Telegram what it thinks
 // the webhook is, and whether the token still works, then reconcile our state
 // with the answer.
+//
+// In polling mode there is no webhook to ask about at all — see
+// telegramPollingStatus's own doc comment for the polling-mode equivalent.
 func (s *Server) handleCheckTelegramAccount(c *gin.Context) {
 	acct, token, okAcct := s.telegramAccountWithToken(c)
 	if !okAcct {
+		return
+	}
+	if s.cfg.TelegramResolvedMode() == "polling" {
+		ok(c, s.telegramAccountPayload(c, acct.ID, s.telegramPollingStatus(c, acct, token)))
 		return
 	}
 	tctx, cancel := context.WithTimeout(ctx(c), telegramConnectTimeout)
@@ -216,12 +244,23 @@ func (s *Server) handleReplaceTelegramToken(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	baseURL, err := s.telegramWebhookBase()
-	if err != nil {
-		fail(c, http.StatusBadRequest, ErrValidation, err.Error())
-		return
+
+	var state string
+	if s.cfg.TelegramResolvedMode() == "polling" {
+		// The stored token changed, so tg_credentials.updated_at (the
+		// TokenVersion ListTelegramPollBots reports) changed with it —
+		// Upsert sees a version mismatch against whatever runner is
+		// currently registered (including a 401-stopped one) and replaces
+		// it, exactly like a fresh connect.
+		state = s.startTelegramPolling(c, acct.ID)
+	} else {
+		baseURL, err := s.telegramWebhookBase()
+		if err != nil {
+			fail(c, http.StatusBadRequest, ErrValidation, err.Error())
+			return
+		}
+		state = s.registerTelegramWebhook(c, acct.ID, token, baseURL, false)
 	}
-	state := s.registerTelegramWebhook(c, acct.ID, token, baseURL, false)
 	ok(c, s.telegramAccountPayload(c, acct.ID, state))
 }
 
@@ -237,6 +276,14 @@ func (s *Server) handleDeleteTelegramAccount(c *gin.Context) {
 	if !okAcct {
 		return
 	}
+	polling := s.cfg.TelegramResolvedMode() == "polling"
+	if polling {
+		// Stop the live runner FIRST: it must not still be mid-getUpdates
+		// (or about to start one) when ConfirmTelegramDisconnect below
+		// deletes the very credentials row TelegramBotToken would resolve.
+		s.tgPoller.Remove(acct.ID)
+	}
+
 	if err := s.store.SetTelegramWebhookState(ctx(c), acct.ID, store.TelegramWebhookState{
 		State: "disconnect_pending",
 	}); err != nil {
@@ -244,20 +291,25 @@ func (s *Server) handleDeleteTelegramAccount(c *gin.Context) {
 		return
 	}
 
-	tctx, cancel := context.WithTimeout(ctx(c), telegramConnectTimeout)
-	defer cancel()
-	if err := s.tg.DeleteWebhook(tctx, token, false); err != nil && !telegram.IsUnauthorized(err) {
-		// Not unauthorized => Telegram may still be delivering. Keep the token.
-		_ = s.store.SetTelegramWebhookState(ctx(c), acct.ID, store.TelegramWebhookState{
-			State: "disconnect_error", LastError: err.Error(),
-		})
-		s.log.Warn("telegram deleteWebhook failed", "account_id", acct.ID, "err", err)
-		fail(c, http.StatusBadGateway, ErrTelegram,
-			"Не удалось отключить вебхук в Telegram — попробуйте ещё раз. "+err.Error())
-		return
+	// Polling mode never registered a webhook, so there is nothing to tear
+	// down here — go straight to confirming the disconnect.
+	if !polling {
+		tctx, cancel := context.WithTimeout(ctx(c), telegramConnectTimeout)
+		defer cancel()
+		if err := s.tg.DeleteWebhook(tctx, token, false); err != nil && !telegram.IsUnauthorized(err) {
+			// Not unauthorized => Telegram may still be delivering. Keep the token.
+			_ = s.store.SetTelegramWebhookState(ctx(c), acct.ID, store.TelegramWebhookState{
+				State: "disconnect_error", LastError: err.Error(),
+			})
+			s.log.Warn("telegram deleteWebhook failed", "account_id", acct.ID, "err", err)
+			fail(c, http.StatusBadGateway, ErrTelegram,
+				"Не удалось отключить вебхук в Telegram — попробуйте ещё раз. "+err.Error())
+			return
+		}
+		// An unauthorized token means the bot is already unusable: there is
+		// nothing left to deliver to us, so the disconnect is effectively
+		// confirmed.
 	}
-	// An unauthorized token means the bot is already unusable: there is nothing
-	// left to deliver to us, so the disconnect is effectively confirmed.
 
 	if err := s.store.ConfirmTelegramDisconnect(ctx(c), acct.ID); err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
@@ -316,6 +368,78 @@ func (s *Server) registerTelegramWebhook(c *gin.Context, accountID uuid.UUID, to
 	})
 	s.log.Warn("telegram setWebhook failed", "account_id", accountID, "err", err)
 	return "webhook_error"
+}
+
+// startTelegramPolling is registerTelegramWebhook's polling-mode
+// counterpart: instead of registering a webhook URL with Telegram, it hands
+// the account to the poller manager (internal/tgpoller) and returns the
+// account's current connection_state. Unlike registerTelegramWebhook this
+// does not itself connect anything synchronously — Upsert just spawns (or
+// replaces) the runner goroutine, which is what actually clears any stale
+// webhook and starts polling — so the returned state is whatever
+// ClaimTelegramAccount/ReplaceTelegramToken already set ("connecting"),
+// not a premature "connected".
+func (s *Server) startTelegramPolling(c *gin.Context, accountID uuid.UUID) string {
+	spec, ok := s.telegramPollSpecFor(ctx(c), accountID)
+	if !ok {
+		s.log.Error("telegram: could not resolve a poll spec right after claiming", "account_id", accountID)
+		return "webhook_error"
+	}
+	s.tgPoller.Upsert(spec)
+	if acct, err := s.store.TgAccountByID(ctx(c), accountID); err == nil {
+		return acct.ConnectionState
+	}
+	return "connecting"
+}
+
+// telegramPollingStatus is the polling-mode equivalent of a webhook health
+// check (handleRetryTelegramWebhook/handleCheckTelegramAccount): there is no
+// webhook to inspect or re-register in this mode, so it validates the token
+// with GetMe, ensures a runner is actually registered for it (covering a
+// boot race or a previously failed Upsert), and reports the account's
+// current connection_state — which the poller runner itself keeps current
+// via SetTelegramWebhookState as it works.
+func (s *Server) telegramPollingStatus(c *gin.Context, acct store.TelegramAccount, token string) string {
+	tctx, cancel := context.WithTimeout(ctx(c), telegramConnectTimeout)
+	defer cancel()
+	if _, err := s.tg.GetMe(tctx, token); err != nil {
+		if telegram.IsUnauthorized(err) {
+			_ = s.store.SetTelegramWebhookState(ctx(c), acct.ID, store.TelegramWebhookState{
+				State: "token_error", LastError: err.Error(), Checked: true,
+			})
+			return "token_error"
+		}
+		s.log.Warn("telegram polling status: getMe failed", "account_id", acct.ID, "err", err)
+		return acct.ConnectionState
+	}
+	if spec, ok := s.telegramPollSpecFor(ctx(c), acct.ID); ok {
+		s.tgPoller.Upsert(spec)
+	}
+	if fresh, err := s.store.TgAccountByID(ctx(c), acct.ID); err == nil {
+		return fresh.ConnectionState
+	}
+	return acct.ConnectionState
+}
+
+// telegramPollSpecFor resolves the store.TelegramPollBot Upsert needs for
+// accountID — the exact same shape ListTelegramPollBots produces at boot,
+// so a direct Upsert from an HTTP handler and a later boot/Reconcile from
+// ListTelegramPollBots can never disagree about the bot's current
+// TokenVersion. Scans the full eligible-bots list rather than adding a
+// narrower store method: this only runs on a rare, operator-triggered
+// action (connect/replace-token/retry), never a hot path.
+func (s *Server) telegramPollSpecFor(ctx context.Context, accountID uuid.UUID) (store.TelegramPollBot, bool) {
+	bots, err := s.store.ListTelegramPollBots(ctx)
+	if err != nil {
+		s.log.Warn("telegram: list poll bots failed", "account_id", accountID, "err", err)
+		return store.TelegramPollBot{}, false
+	}
+	for _, b := range bots {
+		if b.Account.ID == accountID {
+			return b, true
+		}
+	}
+	return store.TelegramPollBot{}, false
 }
 
 // telegramFailState separates "your token is dead" from "your URL is wrong":

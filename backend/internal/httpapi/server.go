@@ -15,13 +15,19 @@ import (
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
+	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
+	"github.com/yerassyldanay/xchats/backend/internal/settings"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
+	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
+	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
+	"github.com/yerassyldanay/xchats/backend/internal/updatecheck"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
@@ -40,6 +46,18 @@ type kbInvalidator interface {
 	Invalidate(orgID uuid.UUID)
 }
 
+// tgPoller is the narrow slice of *tgpoller.Manager the telegram accounts
+// lifecycle needs in polling mode — declared inline (rather than importing
+// internal/tgpoller here) for the same "no new package edge" reason as
+// kbInvalidator above. Production (main.go) always constructs and passes
+// one, in either mode; every call site here still checks
+// TelegramResolvedMode() first, so a test harness exercising only webhook
+// mode (the existing 28 telegram tests) can safely leave Deps.TGPoller nil.
+type tgPoller interface {
+	Upsert(spec store.TelegramPollBot)
+	Remove(id uuid.UUID)
+}
+
 // Server wires the HTTP edges to their dependencies.
 type Server struct {
 	cfg      *config.Config
@@ -47,9 +65,11 @@ type Server struct {
 	queue    queue.Queue
 	hub      *realtime.Hub
 	blob     blob.Store
-	response *response.Service // the multichannel response engine's entry point (simulator API)
-	wa       whatsapp.Manager  // nil when WhatsApp is not configured; every handler checks
-	tg       telegram.Client   // nil when Telegram is not configured; every handler checks
+	response *response.Service   // the multichannel response engine's entry point (simulator API)
+	wa       whatsapp.Manager    // nil when WhatsApp is not configured; every handler checks
+	tg       telegram.Client     // nil when Telegram is not configured; every handler checks
+	tgProc   *tgingest.Processor // the Telegram webhook ingress's shared ingest core (internal/tgingest) — also used by internal/tgpoller in polling mode
+	tgPoller tgPoller            // the long-poll manager (polling mode only — see tgPoller's own doc comment)
 	kb       *kbstore.Store
 	orgID    uuid.UUID
 	log      *slog.Logger
@@ -87,6 +107,28 @@ type Server struct {
 	oauthRegisterLimit  *ipRateLimiter
 	oauthTokenLimit     *ipRateLimiter
 	oauthAuthorizeLimit *ipRateLimiter
+
+	// Settings surface (settings.go). Every one of these four is
+	// nil-tolerant — a deployment with no secure credential store, or one
+	// running without the tunnel feature wired up, still serves everything
+	// else unaffected; each settings.go handler checks before using them.
+	credentials *credentials.Chain
+	settings    *settings.Store
+	tunnel      tunnel.Tunnel
+	// llmRefresh re-resolves the response engine's LLM provider registry
+	// (internal/llmprovider.Registry) after a credential or LLM setting
+	// changes — nil in any test/deployment that never constructs one.
+	llmRefresh func()
+	// providerHealth is the self-healing status surface (internal/
+	// providerhealth) — nil in any test/deployment that never constructs
+	// one, in which case GET /settings/provider-health reports no providers
+	// rather than failing.
+	providerHealth *providerhealth.Tracker
+	// updateChecker is the update notifier (internal/updatecheck) — nil in
+	// any test/deployment that never constructs one, in which case GET
+	// /settings/update-check reports no update information rather than
+	// failing.
+	updateChecker *updatecheck.Checker
 }
 
 // Deps is the constructor input.
@@ -99,6 +141,8 @@ type Deps struct {
 	Response      *response.Service
 	WA            whatsapp.Manager
 	TG            telegram.Client
+	TGProcessor   *tgingest.Processor
+	TGPoller      tgPoller
 	KB            *kbstore.Store
 	KBRepo        response.KnowledgeBaseRepository
 	KBInvalidator kbInvalidator
@@ -109,6 +153,15 @@ type Deps struct {
 	// route checks mcpAuthEnabled() first).
 	MCPAuth   *mcpauth.Authorizer
 	MCPServer *mcpserver.Server
+
+	// Settings surface — see Server's own field doc comments; all six are
+	// nil-tolerant.
+	Credentials    *credentials.Chain
+	Settings       *settings.Store
+	Tunnel         tunnel.Tunnel
+	LLMRefresh     func()
+	ProviderHealth *providerhealth.Tracker
+	UpdateChecker  *updatecheck.Checker
 }
 
 // New builds a Server.
@@ -121,18 +174,33 @@ func New(d Deps) *Server {
 	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
-		blob: d.Blob, response: d.Response, wa: d.WA, tg: d.TG, kb: d.KB,
+		blob: d.Blob, response: d.Response, wa: d.WA, tg: d.TG,
+		tgProc: d.TGProcessor, tgPoller: d.TGPoller, kb: d.KB,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
 		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer,
 		mcpUploadSigner: uploadSigner, mcpMediaSigner: mediaSigner,
-		csrfSecret: randomCSRFFallbackSecret(),
+		csrfSecret:  randomCSRFFallbackSecret(),
+		credentials: d.Credentials, settings: d.Settings, tunnel: d.Tunnel, llmRefresh: d.LLMRefresh,
+		providerHealth: d.ProviderHealth, updateChecker: d.UpdateChecker,
 		// Deliberately generous limits — these are abuse guards, not a
 		// throttle on legitimate usage. See ratelimit.go's doc comment.
 		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — registration spam is the highest-value target
 		oauthTokenLimit:     newIPRateLimiter(30.0/60, 10), // 30/min, 10 burst — refresh-heavy legitimate usage needs headroom
 		oauthAuthorizeLimit: newIPRateLimiter(20.0/60, 10), // 20/min, 10 burst
 	}
+}
+
+// SetTunnel installs the tunnel controller after construction — the
+// composition root's escape hatch for the circular dependency between the
+// tunnel (which must serve THIS Server's own router) and Deps.Tunnel (read
+// by settings.go's handlers, which the router references). Every settings.go
+// tunnel route reads s.tunnel lazily at REQUEST time, never at Router()-build
+// time, so calling this any time before the server actually starts accepting
+// requests is safe — including nil, restoring the same "feature not
+// configured" behavior Deps.Tunnel being nil at construction already has.
+func (s *Server) SetTunnel(t tunnel.Tunnel) {
+	s.tunnel = t
 }
 
 // Router builds the gin engine with all routes mounted.
@@ -142,11 +210,12 @@ func (s *Server) Router() *gin.Engine {
 	// Trust NO proxy unless explicitly configured (plan Task 17): gin's own
 	// zero-value default trusts every peer's X-Forwarded-* headers, which
 	// would let any direct, unproxied caller spoof its own client IP. Every
-	// discovery URL this server emits is already built from cfg.APIBaseURL /
-	// cfg.FrontendBaseURL, never from the request's Host or X-Forwarded-*
+	// discovery URL this server emits is already built from
+	// cfg.ResolvedAPIBaseURL()/cfg.ResolvedFrontendBaseURL(), never from the
+	// request's Host or X-Forwarded-*
 	// (see mcpIssuer/MCPResourceURL) — this only affects c.ClientIP(), used
 	// by the rate limiters.
-	if err := r.SetTrustedProxies(s.cfg.TrustedProxies); err != nil {
+	if err := r.SetTrustedProxies(s.cfg.Server.TrustedProxies); err != nil {
 		panic("httpapi: invalid TRUSTED_PROXIES: " + err.Error())
 	}
 	r.Use(gin.Recovery(), s.requestLog(), s.cors())
@@ -221,8 +290,10 @@ func (s *Server) Router() *gin.Engine {
 	auth.Use(s.requireSession())
 	auth.GET("/me", s.handleMe)
 	auth.GET("/users", s.handleListUsers)
-	auth.POST("/users", s.handleCreateUser)
+	auth.POST("/users", s.RequireAdmin(), s.handleCreateUser)
+	auth.PUT("/users/:id/role", s.RequireAdmin(), s.handleUpdateUserRole)
 	auth.GET("/organization", s.handleGetOrg)
+	auth.PUT("/organization", s.RequireAdmin(), s.handleUpdateOrg)
 	// Task 15: explicit active-organization switch (the frontend selector) —
 	// distinct from the MCP review-handoff redirect below, which sets the
 	// SAME session field via a verified signed token instead of a direct
@@ -267,7 +338,7 @@ func (s *Server) Router() *gin.Engine {
 
 	// Simulator API (Phase 10) — gated: the route does not exist at all unless
 	// explicitly enabled (SIMULATOR_ENABLED, default false outside dev).
-	if s.cfg.SimulatorEnabled {
+	if s.cfg.System.SimulatorEnabled {
 		auth.POST("/simulator/messages", s.handleSimulatorMessage)
 		// Injects a synthetic whatsmeow-shaped event through the real
 		// translate -> store -> queue -> worker chain, for automated testing
@@ -315,6 +386,30 @@ func (s *Server) Router() *gin.Engine {
 	kb.DELETE("/zones/:ref", s.handleKBDeleteZone)
 	kb.GET("/materials", s.handleKBListMaterials)
 	kb.PATCH("/config", s.handleKBPatchConfig)
+
+	// Settings (settings.go) — every route here is admin-only. Handlers are
+	// individually nil-tolerant for Credentials/Settings/Tunnel, but the
+	// group itself is always registered: a deployment missing one of those
+	// still gets a clear 503 from the affected routes rather than a 404
+	// that would look like the feature doesn't exist at all.
+	set := auth.Group("/settings")
+	set.Use(s.RequireAdmin())
+	set.GET("", s.handleGetSettings)
+	set.GET("/integrations", s.handleListIntegrations)
+	set.PUT("/integrations/:provider", s.handleUpdateIntegrationSettings)
+	set.PUT("/integrations/:provider/credential", s.handleSaveIntegrationCredential)
+	set.DELETE("/integrations/:provider/credential", s.handleDeleteIntegrationCredential)
+	set.POST("/integrations/:provider/test", s.handleTestIntegrationCredential)
+	set.PUT("/llm", s.handleUpdateLLMSettings)
+	set.PUT("/credential-storage", s.handleUpdateCredentialStorage)
+	set.PUT("/ngrok", s.handleUpdateNgrokSettings)
+	set.POST("/setup-complete", s.handleSetupComplete)
+	set.GET("/backup/download", s.handleDownloadBackup)
+	set.GET("/provider-health", s.handleProviderHealth)
+	set.GET("/update-check", s.handleUpdateCheck)
+	set.GET("/tunnel", s.handleGetTunnelStatus)
+	set.POST("/tunnel/start", s.handleStartTunnel)
+	set.POST("/tunnel/stop", s.handleStopTunnel)
 	return r
 }
 
@@ -322,7 +417,7 @@ func (s *Server) Router() *gin.Engine {
 
 func (s *Server) cors() gin.HandlerFunc {
 	allowed := map[string]bool{}
-	for _, o := range s.cfg.CORSOrigins {
+	for _, o := range s.cfg.Server.CORSOrigins {
 		allowed[o] = true
 	}
 	return func(c *gin.Context) {
@@ -393,6 +488,14 @@ func accepted(c *gin.Context, payload any) {
 }
 func fail(c *gin.Context, status int, code, msg string) {
 	c.AbortWithStatusJSON(status, envelope{nil, code, msg})
+}
+
+// failWithPayload is fail with a non-nil payload attached — for the rare
+// error response that still has something useful to show alongside the
+// failure (e.g. handleStartTunnel returning the tunnel's Status, LastError
+// included, even when Start itself failed).
+func failWithPayload(c *gin.Context, status int, code, msg string, payload any) {
+	c.AbortWithStatusJSON(status, envelope{payload, code, msg})
 }
 
 type page struct {

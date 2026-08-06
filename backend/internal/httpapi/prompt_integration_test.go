@@ -165,7 +165,11 @@ func newPromptHarness(t *testing.T) *promptHarness {
 	// with no ai_assistants row is this suite's whole precondition.
 	st, db := dbtest.Open(t)
 
-	cfg := &config.Config{SessionTTLHours: 1, MinPasswordLen: 8, PageSize: 50, CORSOrigins: []string{"*"}}
+	cfg := &config.Config{
+		System:   config.SystemConfig{SessionTTLHours: 1, MinPasswordLen: 8},
+		Server:   config.ServerConfig{CORSOrigins: []string{"*"}},
+		PageSize: 50,
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	org, err := st.SeedOrganization(ctx, "prompt-not-configured-org")

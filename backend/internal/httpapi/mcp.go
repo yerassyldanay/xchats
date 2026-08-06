@@ -148,7 +148,7 @@ func (s *Server) mcpAllowedOrigin(origin string) bool {
 	if origin == "" {
 		return true
 	}
-	for _, o := range s.cfg.CORSOrigins {
+	for _, o := range s.cfg.Server.CORSOrigins {
 		if o == "*" || o == origin {
 			return true
 		}

@@ -139,6 +139,9 @@ func (c *OpenAICompatible) complete(ctx context.Context, wreq wireRequest) (llm.
 	if err != nil {
 		return llm.ChatResponse{}, err
 	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return llm.ChatResponse{}, fmt.Errorf("llmprovider: http %d: %w: %s", resp.StatusCode, llm.ErrProviderAuth, string(respBody))
+	}
 	if resp.StatusCode != http.StatusOK {
 		return llm.ChatResponse{}, fmt.Errorf("llmprovider: http %d: %s", resp.StatusCode, string(respBody))
 	}

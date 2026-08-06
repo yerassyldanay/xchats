@@ -1,6 +1,7 @@
 // Command xchats is the xchats backend: API edge + webhook ingress + in-process
 // workers + the multichannel response service. Subcommands: serve (default),
-// migrate, webhook-set, seed, seed-kb-demo, simulate-message, kb-load.
+// migrate, seed, seed-kb-demo, simulate-message, kb-load, backup, check,
+// restore.
 package main
 
 import (
@@ -18,21 +19,32 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
+	"github.com/yerassyldanay/xchats/backend/internal/appdirs"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/credentials"
+	"github.com/yerassyldanay/xchats/backend/internal/dbops"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
+	"github.com/yerassyldanay/xchats/backend/internal/ngrokapi"
+	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
+	"github.com/yerassyldanay/xchats/backend/internal/settings"
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
+	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
+	"github.com/yerassyldanay/xchats/backend/internal/tgpoller"
+	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
+	"github.com/yerassyldanay/xchats/backend/internal/updatecheck"
+	"github.com/yerassyldanay/xchats/backend/internal/version"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsmeow"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -49,8 +61,7 @@ const (
 )
 
 func main() {
-	cfgPath := flag.String("config", envOr("XCHATS_CONFIG", "config.yaml"), "path to config.yaml")
-	envPath := flag.String("env", envOr("XCHATS_ENV", ".env"), "path to .env")
+	cfgPath := flag.String("config", "", "path to config.yaml (default: $XCHATS_CONFIG, then ./config.yaml, then the OS config directory)")
 	flag.Parse()
 
 	cmd := "serve"
@@ -58,7 +69,7 @@ func main() {
 		cmd = flag.Arg(0)
 	}
 
-	cfg, err := config.Load(*cfgPath, *envPath)
+	cfg, err := config.Load(config.ResolveConfigPath(*cfgPath))
 	if err != nil {
 		fatal("load config", err)
 	}
@@ -81,6 +92,12 @@ func main() {
 		runSimulateMessage(flag.Args()[1:])
 	case "kb-load":
 		runKBLoad(cfg, log, flag.Args()[1:])
+	case "backup":
+		runBackup(cfg, log, flag.Args()[1:])
+	case "check":
+		runCheck(cfg, log)
+	case "restore":
+		runRestore(log, flag.Args()[1:])
 	default:
 		log.Error("unknown command", "cmd", cmd)
 		os.Exit(2)
@@ -88,14 +105,24 @@ func main() {
 }
 
 func runServe(cfg *config.Config, log *slog.Logger) {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	credsChain := openCredentialsAndProvisionSecrets(ctx, cfg, log)
+	settingsStore := settings.NewStore(resolveConfigDir(log))
+	autoStartTunnel, err := applyNgrokPublicOrigin(ctx, cfg, credsChain, settingsStore, ngrokapi.NewClient())
+	if err != nil {
+		log.Warn("ngrok static domain is not usable as the MCP public origin", "err", err)
+	}
+	if autoStartTunnel {
+		log.Info("using ngrok static domain as the MCP public origin", "public_origin", cfg.ResolvedAPIBaseURL())
+	}
+
 	if cfg.IsProduction() {
 		if problems := validateProductionConfig(cfg); len(problems) > 0 {
 			fatal("production config", fmt.Errorf("%s", strings.Join(problems, "; ")))
 		}
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	// Langfuse LLM tracing (best-effort): install a global OTel TracerProvider so
 	// the LLM clients export each call as a generation. Never fatal.
@@ -128,30 +155,41 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// Opening the same path mustStore already opened is deliberate and cheap:
 	// internal/dbx.Open refcounts one connection per path, so kb shares st's
 	// connection rather than racing a second one against the same file.
-	kb, err := kbstore.New(ctx, cfg.DBPath)
+	kb, err := kbstore.New(ctx, cfg.Storage.DBPath)
 	if err != nil {
 		fatal("kbstore", err)
 	}
 	defer kb.Close()
 
-	blobStore, err := blob.NewDisk(cfg.BlobDir)
+	blobStore, err := blob.NewDisk(cfg.Storage.BlobDir)
 	if err != nil {
 		fatal("blob", err)
 	}
 
-	llms, defaultModel := buildLLMRegistry(cfg)
-	engine := &response.Engine{
-		LLMs:         llms,
-		DefaultModel: defaultModel,
-		MaxTokens:    cfg.LLMDraftMaxTokens,
-		Temperature:  cfg.LLMDraftTemperature,
-		RetryEnabled: cfg.LLMDraftRetry,
+	llmRegistry := llmprovider.NewRegistry()
+	populateLLMRegistry(ctx, llmRegistry, credsChain, settingsStore, cfg)
+	// llmRefresh re-resolves every provider's client from scratch — the
+	// Settings UI's save/delete-credential handlers call this (httpapi.Deps.
+	// LLMRefresh) so a just-saved key (or a just-deleted one) takes effect
+	// on the very next draft, with no restart. context.Background(): this
+	// runs on whatever goroutine an HTTP handler triggers it from, well
+	// after that request's own context is a meaningful deadline for a
+	// background maintenance op like this one.
+	llmRefresh := func() {
+		populateLLMRegistry(context.Background(), llmRegistry, credsChain, settingsStore, cfg)
+	}
+	llmParams := func() response.LLMParams { return resolveLLMParams(settingsStore, cfg) }
+	engine := &response.Engine{LLMs: llmRegistry, Params: llmParams}
+	startupParams := llmParams()
+	if _, err := llmRegistry.Client(startupParams.DefaultModel); err != nil {
+		log.Warn("no API key configured for the default LLM provider; AI drafts will fail until one is added via Settings",
+			"provider", startupParams.DefaultModel.Provider, "err", err)
 	}
 	// cachedKB is the ONE shared, cached build of the prompt-facing KB: the
 	// response engine's hot path (every customer reply) and GET /kb/prompt
 	// (the /knowledge-base "Промпт" tab) both read through it, so the tab is
 	// never a second, possibly-divergent rendering of the same data.
-	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.DBPath)
+	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.Storage.DBPath)
 	if err != nil {
 		fatal("kb repo", err)
 	}
@@ -163,10 +201,27 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Engine:        engine,
 	}
 	log.Info("response service active",
-		"provider", defaultModel.Provider, "model", defaultModel.Model, "prompt_ref", aiprompt.PromptRefShopKBV4)
+		"provider", startupParams.DefaultModel.Provider, "model", startupParams.DefaultModel.Model, "prompt_ref", aiprompt.PromptRefShopKBV4)
 
-	q := queue.NewInMem(2048, cfg.QueueWorkers, log)
+	q := queue.NewInMem(2048, cfg.System.QueueWorkers, log)
 	hub := realtime.NewHub()
+
+	// providerHealth is the self-healing status surface: every LLM call the
+	// engine makes reports through it (engine.StatusHook, set below), and
+	// every genuine health transition (not routine transient errors — see
+	// Tracker.Report's own doc comment) broadcasts live over hub for the
+	// NavRail badge, on top of the on-demand snapshot GET /settings/
+	// provider-health serves a client that connects after the fact.
+	providerHealth := providerhealth.NewTracker(func(s providerhealth.Status) {
+		hub.Broadcast("integration.status_changed", s)
+	})
+	engine.StatusHook = providerHealth.Report
+
+	// updateChecker asks GitHub's public releases API, cached well past any
+	// single request — see internal/updatecheck's own doc comment for why a
+	// failed/empty check is never treated as an error.
+	updateChecker := updatecheck.NewChecker("yerassyldanay/xchats", version.Version)
+
 	tg := telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
 
 	// Credentials at rest. Without a key the Telegram lifecycle refuses to store
@@ -180,8 +235,26 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		log.Info("credentials encryption enabled", "key_version", secretbox.KeyVersion)
 	}
 
+	// tgProc is the shared Telegram ingest core: both the webhook handler
+	// (internal/httpapi) and the long-poll manager below feed updates
+	// through the exact same Process call, so a bot's history is identical
+	// regardless of which ingress delivered it.
+	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Log: log})
+	// tgMgr is constructed unconditionally (its own Close is a cheap no-op
+	// with nothing registered) so webhook-mode deployments can still flip
+	// TG_MODE later without a restart-time wiring change; only Start is
+	// gated on the resolved mode.
+	tgMgr := tgpoller.NewManager(tgpoller.Deps{
+		TG: tg, Tokens: st, Offsets: st, Processor: tgProc, State: st, Bots: st, Log: log,
+	})
+	telegramMode := cfg.TelegramResolvedMode()
+	if telegramMode == "polling" {
+		log.Info("telegram polling mode active — no public URL required")
+		go tgMgr.Start(ctx)
+	}
+
 	waMgr, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
-		DeviceDBPath: cfg.WADeviceDBPath,
+		DeviceDBPath: cfg.Storage.WADeviceDBPath,
 		Store:        st,
 		Blob:         blobStore,
 		Queue:        q,
@@ -212,71 +285,255 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
+	// The tunnel needs to serve the SAME router httpapi.New's Server owns —
+	// but httpapi.Deps also needs the tunnel (for /settings/tunnel/*)
+	// before that router exists. Broken by constructing the Server with no
+	// tunnel, building its router, THEN constructing the tunnel manager
+	// against that exact router and handing it back via SetTunnel — routes
+	// only read s.tunnel at REQUEST time, never at Router()-build time, so
+	// this ordering is safe.
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
-		Response: responseService, WA: waMgr, TG: tg, KB: kb,
+		Response: responseService, WA: waMgr, TG: tg, TGProcessor: tgProc, TGPoller: tgMgr, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
+		Credentials: credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
+		ProviderHealth: providerHealth, UpdateChecker: updateChecker,
 	})
-	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Router()}
+	router := srv.Router()
+
+	// Only constructed when a secure credential store is available — with
+	// none, the tunnel has no way to ever retrieve an authtoken, so it is
+	// absent (nil) rather than present-but-guaranteed-to-fail; every
+	// /settings/tunnel/* route already handles a nil Tunnel as "feature not
+	// available" (503 ErrTunnelUnavailable).
+	var tunnelMgr tunnel.Tunnel
+	if credsChain != nil {
+		tunnelMgr = tunnel.NewManager(tunnel.Deps{Creds: credsChain, Settings: settingsStore, Handler: router, Log: log})
+	}
+	srv.SetTunnel(tunnelMgr)
+
+	httpServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: router}
 
 	go func() {
-		log.Info("backend listening", "addr", cfg.HTTPAddr)
+		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fatal("listen", err)
 		}
 	}()
+
+	var tunnelStartDone chan struct{}
+	if autoStartTunnel && tunnelMgr != nil {
+		tunnelStartDone = make(chan struct{})
+		go func() {
+			defer close(tunnelStartDone)
+			if err := tunnelMgr.Start(ctx); err != nil {
+				log.Warn("automatic ngrok tunnel start failed", "last_error", tunnelMgr.Status().LastError)
+				return
+			}
+			log.Info("ngrok tunnel started automatically", "public_url", tunnelMgr.Status().PublicURL)
+		}()
+	}
 
 	<-ctx.Done()
 	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+	if tunnelStartDone != nil {
+		<-tunnelStartDone
+	}
+	if tunnelMgr != nil {
+		_ = tunnelMgr.Stop(shutdownCtx)
+	}
+	// tgMgr before q: the poller publishes to the queue via tgProc, so it
+	// must stop producing before the queue stops accepting. Explicit here
+	// (not a defer) so the ordering relative to q.Close() is guaranteed
+	// rather than left to defer's LIFO stacking.
+	tgMgr.Close()
 	q.Close()
 }
 
-// buildLLMRegistry resolves the configured LLM providers into an llm.Registry
-// and the default ModelRef the response engine calls. Missing configuration
-// for the DEFAULT provider (LLM_DEFAULT_PROVIDER, default "openrouter") is a
-// startup failure with a clear message — there is no stub-LLM fallback.
-func buildLLMRegistry(cfg *config.Config) (llm.Registry, llm.ModelRef) {
-	provider := orDefault(cfg.LLMDefaultProvider, "openrouter")
-	model := orDefault(cfg.LLMDefaultModel, "google/gemini-2.5-flash")
-	if cfg.LLMProviderKey(provider) == "" {
-		fatal("llm config", fmt.Errorf(
-			"missing API key for LLM_DEFAULT_PROVIDER=%q — set OPENROUTER_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY to match", provider))
+// resolveConfigDir resolves the OS-appropriate per-user config directory
+// settings.Store persists settings.json under. A resolution failure (only
+// on the exotic $HOME/%APPDATA%-unset edge case — see appdirs.ConfigDir)
+// falls back to "." rather than refusing to boot over what is fundamentally
+// a non-essential feature: Settings still works for this run, just written
+// wherever the process's current directory happens to be.
+func resolveConfigDir(log *slog.Logger) string {
+	dir, err := appdirs.ConfigDir("xchats")
+	if err != nil {
+		log.Warn("could not resolve the OS application config directory; Settings will be written to the current directory instead", "err", err)
+		return "."
+	}
+	return dir
+}
+
+// openCredentialsAndProvisionSecrets opens the credential store (the OS
+// keychain, or a file store the deployment opted into — see
+// credentials.Open) and, when one is available, resolves xchats' four
+// internally-managed secrets through it — the MCP OAuth CSRF signing key
+// (cfg.SessionSecret), the Telegram bot-token-at-rest encryption key
+// (cfg.TelegramCredentialsEncKey), the MCP JWT signing key
+// (cfg.MCPJWTSigningKey), and the Telegram webhook secret_token
+// (cfg.TelegramWebhookSecret) — writing the resolved values straight back
+// into cfg, so every existing consumer of those four fields
+// (secretbox.FromEnvValue below, mcpauth.NewSigningKeyFromSeed in
+// buildMCPConnector, httpapi's CSRF secret, TelegramResolvedWebhookSecret)
+// picks them up completely unchanged.
+//
+// Each of the four is durably generated once and reused on every later
+// boot: this is what turns "set TG_CREDENTIALS_ENC_KEY/MCP_JWT_SIGNING_KEY
+// by hand before first boot" from a required step into a zero-config
+// default. When no store is available, cfg keeps whatever raw config/env
+// value it already had (most likely empty), and every downstream
+// consumer's own existing warn-and-degrade behavior (an ephemeral MCP key,
+// credentials-at-rest disabled, ...) applies exactly as it did before this
+// function existed.
+//
+// The returned *credentials.Chain is nil exactly when no secure store was
+// available — callers (runServe, for the LLM registry and the Settings/
+// tunnel surfaces) must treat that as "the credential-backed features are
+// unavailable this boot," never dereference it unconditionally.
+func openCredentialsAndProvisionSecrets(ctx context.Context, cfg *config.Config, log *slog.Logger) *credentials.Chain {
+	dataDir, err := appdirs.DataDir("xchats")
+	if err != nil {
+		log.Warn("could not resolve the OS application data directory; the file-based credential fallback is unavailable", "err", err)
+	}
+	store, err := credentials.Open(credentials.OpenOptions{
+		DataDir:   dataDir,
+		AllowFile: credentials.AllowFileFromEnv(),
+	})
+	if err != nil {
+		log.Warn("no secure credential store available; internally-managed secrets are only as durable as config/env, and the Settings/tunnel surfaces are disabled",
+			"reason", err.Error())
+		return nil
+	}
+	secrets, err := credentials.Provision(ctx, store)
+	if err != nil {
+		log.Warn("provisioning internal secrets failed; falling back to config/env", "err", err)
+		return store
+	}
+	cfg.SessionSecret = secrets.SessionSecret
+	cfg.TelegramCredentialsEncKey = secrets.TGCredentialsEncKey
+	cfg.MCPJWTSigningKey = secrets.MCPJWTSigningKey
+	cfg.TelegramWebhookSecret = secrets.WebhookSecret
+	return store
+}
+
+// llmProviderCfg is one provider's static config-side fallback — its raw,
+// env-sourced API key and base URL, read only when creds has nothing for it
+// (no secure store, or the key was never saved through the Settings UI).
+var llmProviderCfg = []struct {
+	name, credKey string
+	apiKey        func(*config.Config) string
+	baseURL       func(*config.Config) string
+}{
+	{"openrouter", "openrouter.api_key", func(c *config.Config) string { return c.OpenRouterAPIKey }, func(c *config.Config) string { return c.OpenRouterBaseURL }},
+	{"openai", "openai.api_key", func(c *config.Config) string { return c.OpenAIAPIKey }, func(c *config.Config) string { return c.OpenAIBaseURL }},
+	{"gemini", "gemini.api_key", func(c *config.Config) string { return c.GeminiAPIKey }, func(c *config.Config) string { return c.GeminiBaseURL }},
+}
+
+// populateLLMRegistry (re)registers one OpenAICompatible client per known
+// LLM provider that has a resolvable API key, IN PLACE on reg — called once
+// at boot and again by the LLMRefresh closure after any credential
+// save/delete (internal/httpapi/settings.go), so response.Engine — which
+// holds this exact *llmprovider.Registry as its llm.Registry, safe for
+// concurrent Register/Deregister alongside Client via its own RWMutex —
+// picks up the change on its very next Generate call, no restart.
+//
+// Per provider, in order: creds (fresh on every call — a Settings-UI-saved
+// value, the OS keychain, or creds' own env-var overlay) when creds is
+// non-nil, else cfg's raw env-sourced field. The base URL follows the same
+// idea: settingsStore's ProviderSettings.BaseURL when set, else cfg's own
+// *_BASE_URL field, else llmprovider.DefaultBaseURL. A provider with no key
+// anywhere is deregistered — never left holding a stale client for a
+// credential that was just deleted.
+func populateLLMRegistry(ctx context.Context, reg *llmprovider.Registry, creds *credentials.Chain, settingsStore *settings.Store, cfg *config.Config) {
+	var providerSettings map[string]settings.ProviderSettings
+	if st, err := settingsStore.Load(); err == nil {
+		providerSettings = st.Providers
 	}
 	timeoutSeconds := cfg.LLMDraftTimeoutSeconds
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 60
 	}
-	reg := llmprovider.BuildRegistry([]llmprovider.ProviderConfig{
-		{Name: "openrouter", APIKey: cfg.OpenRouterAPIKey, BaseURL: cfg.OpenRouterBaseURL},
-		{Name: "openai", APIKey: cfg.OpenAIAPIKey, BaseURL: cfg.OpenAIBaseURL},
-		{Name: "gemini", APIKey: cfg.GeminiAPIKey, BaseURL: cfg.GeminiBaseURL},
-	}, time.Duration(timeoutSeconds)*time.Second)
-	return reg, llm.ModelRef{Provider: provider, Model: model}
+	timeout := time.Duration(timeoutSeconds) * time.Second
+
+	for _, p := range llmProviderCfg {
+		key := p.apiKey(cfg)
+		if creds != nil {
+			if v, err := creds.Get(ctx, credentials.Key(p.credKey)); err == nil && v != "" {
+				key = v
+			}
+		}
+		if strings.TrimSpace(key) == "" {
+			reg.Deregister(p.name)
+			continue
+		}
+		baseURL := p.baseURL(cfg)
+		if ps, ok := providerSettings[p.name]; ok && ps.BaseURL != "" {
+			baseURL = ps.BaseURL
+		}
+		if baseURL == "" {
+			baseURL = llmprovider.DefaultBaseURL(p.name)
+		}
+		reg.Register(p.name, llmprovider.NewOpenAICompatible(baseURL, key, p.name, timeout))
+	}
+}
+
+// resolveLLMParams reads the response engine's CURRENT model configuration
+// from settingsStore — response.Engine calls this fresh on every Generate
+// (see Engine.Params), so a Settings UI change takes effect on the very
+// next request. A settings.Store.Load failure (a transient read problem —
+// Load itself already treats a merely-missing file as "use defaults") falls
+// back to cfg's own raw env-sourced fields rather than blocking a customer
+// response over it.
+func resolveLLMParams(settingsStore *settings.Store, cfg *config.Config) response.LLMParams {
+	st, err := settingsStore.Load()
+	if err != nil {
+		return response.LLMParams{
+			DefaultModel: llm.ModelRef{
+				Provider: orDefault(cfg.LLMDefaultProvider, "openrouter"),
+				Model:    orDefault(cfg.LLMDefaultModel, "google/gemini-2.5-flash"),
+			},
+			MaxTokens: cfg.LLMDraftMaxTokens, Temperature: cfg.LLMDraftTemperature, RetryEnabled: cfg.LLMDraftRetry,
+		}
+	}
+	return response.LLMParams{
+		DefaultModel: llm.ModelRef{Provider: st.LLM.DefaultProvider, Model: st.LLM.DefaultModel},
+		MaxTokens:    st.LLM.MaxTokens,
+		Temperature:  st.LLM.Temperature,
+		RetryEnabled: st.LLM.Retry,
+	}
 }
 
 // validateProductionConfig returns every reason cfg is unsafe to run with
-// ENVIRONMENT=production (plan Task 17's release gate): an ephemeral MCP
-// signing key (MCPJWTSigningKey unset or otherwise invalid — every replica
-// would then mint tokens no other replica, and no restart, can verify), or a
-// base URL still pointing at localhost/loopback. Development (the default —
-// anything other than the literal "production") never calls this: those are
-// legitimate conveniences there, not misconfigurations. An empty return means
-// clear to boot.
+// ENVIRONMENT=production (plan Task 17's release gate): a base URL still
+// pointing at localhost/loopback. Development (the default — anything other
+// than the literal "production") never calls this: those are legitimate
+// conveniences there, not misconfigurations. An empty return means clear to
+// boot.
+//
+// This used to also fatal on an ephemeral MCP signing key
+// (MCPJWTSigningKey unset or otherwise invalid — every replica would then
+// mint tokens no other replica, and no restart, can verify). That check is
+// gone: provisionSystemSecrets now durably generates and persists
+// MCPJWTSigningKey (and the other three internally-managed secrets) through
+// internal/credentials before this function ever runs, whenever a secure
+// credential store is available — which the Docker image always opts into
+// (XCHATS_ALLOW_FILE_CREDENTIALS=1). The remaining edge case (no OS
+// keychain AND no opt-in) degrades to the same warn-and-continue posture
+// every other credential-store consumer already has, rather than refusing
+// to boot.
 func validateProductionConfig(cfg *config.Config) []string {
 	var problems []string
-	if _, err := mcpauth.NewSigningKeyFromSeed(cfg.MCPJWTSigningKey); err != nil {
-		problems = append(problems, "MCP_JWT_SIGNING_KEY is unset or invalid — production would mint an ephemeral per-process key that a restart or a second replica can never verify")
+	if isLocalBaseURL(cfg.Server.APIBaseURL) {
+		problems = append(problems, fmt.Sprintf("API_BASE_URL=%q still points at localhost/loopback", cfg.Server.APIBaseURL))
 	}
-	if isLocalBaseURL(cfg.APIBaseURL) {
-		problems = append(problems, fmt.Sprintf("API_BASE_URL=%q still points at localhost/loopback", cfg.APIBaseURL))
-	}
-	if isLocalBaseURL(cfg.FrontendBaseURL) {
-		problems = append(problems, fmt.Sprintf("FRONTEND_BASE_URL=%q still points at localhost/loopback", cfg.FrontendBaseURL))
+	if isLocalBaseURL(cfg.Server.FrontendBaseURL) {
+		problems = append(problems, fmt.Sprintf("FRONTEND_BASE_URL=%q still points at localhost/loopback", cfg.Server.FrontendBaseURL))
 	}
 	return problems
 }
@@ -317,29 +574,29 @@ func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Stor
 	}
 	// Shares runServe's connection via dbx.Open's per-path refcounting, same
 	// as kb above — this is not a second pool against the same file.
-	mcpStore, err := mcpauth.NewStore(ctx, cfg.DBPath)
+	mcpStore, err := mcpauth.NewStore(ctx, cfg.Storage.DBPath)
 	if err != nil {
 		fatal("mcpauth store", err)
 	}
 	authorizer := mcpauth.New(mcpStore, key, mcpauth.Config{
-		Issuer:            strings.TrimRight(cfg.APIBaseURL, "/"),
+		Issuer:            cfg.ResolvedAPIBaseURL(),
 		Audience:          cfg.MCPResourceURL(),
 		AllowPrivateHosts: cfg.KBAllowPrivateFetch,
-		AccessTokenTTL:    time.Duration(cfg.MCPAccessTokenTTLSeconds) * time.Second,
-		RefreshTokenTTL:   time.Duration(cfg.MCPRefreshTokenTTLDays) * 24 * time.Hour,
-		AuthCodeTTL:       time.Duration(cfg.MCPAuthCodeTTLSeconds) * time.Second,
+		AccessTokenTTL:    time.Duration(cfg.MCP.AccessTokenTTLSeconds) * time.Second,
+		RefreshTokenTTL:   time.Duration(cfg.MCP.RefreshTokenTTLDays) * 24 * time.Hour,
+		AuthCodeTTL:       time.Duration(cfg.MCP.AuthCodeTTLSeconds) * time.Second,
 	})
 	uploadSigner := mcpauth.NewUploadTokenSigner(key)
 	mediaSigner := mcpauth.NewMediaReadTokenSigner(key)
-	apiBase := strings.TrimRight(cfg.APIBaseURL, "/")
-	reviewSigner := mcpauth.NewReviewHandoffSigner(key, apiBase, time.Duration(cfg.MCPReviewHandoffTTLSeconds)*time.Second)
+	apiBase := cfg.ResolvedAPIBaseURL()
+	reviewSigner := mcpauth.NewReviewHandoffSigner(key, apiBase, time.Duration(cfg.MCP.ReviewHandoffTTLSeconds)*time.Second)
 	mcpSrv := mcpserver.New(mcpserver.Deps{
 		KB: kb, Blob: blobStore, Log: log,
 		UploadBaseURL:    apiBase,
 		SignUpload:       uploadSigner.Sign,
-		UploadTTLSeconds: cfg.MCPUploadTokenTTLSeconds,
+		UploadTTLSeconds: cfg.MCP.UploadTokenTTLSeconds,
 		SignMediaRead:    mediaSigner.Sign,
-		MediaTTLSeconds:  cfg.MCPMediaTokenTTLSeconds,
+		MediaTTLSeconds:  cfg.MCP.MediaTokenTTLSeconds,
 		FrontendBaseURL:  cfg.MCPResolvedFrontendBaseURL(),
 		SignReviewHandoff: func(userID, orgID uuid.UUID) (string, error) {
 			token, _, _, err := reviewSigner.Sign(userID, orgID)
@@ -373,7 +630,7 @@ func runSeedKBDemo(ctx context.Context, cfg *config.Config, st *store.Store, log
 	if orgID == uuid.Nil {
 		fatal("seed-kb-demo", fmt.Errorf("no organization found — run the \"seed\" command first"))
 	}
-	kb, err := kbstore.New(ctx, cfg.DBPath)
+	kb, err := kbstore.New(ctx, cfg.Storage.DBPath)
 	if err != nil {
 		fatal("seed-kb-demo", err)
 	}
@@ -401,6 +658,61 @@ func runMigrate(cfg *config.Config, log *slog.Logger) {
 	log.Info("migrations applied")
 }
 
+// runBackup writes a consistent, compacted snapshot of DB_PATH to the given
+// destination path (VACUUM INTO; the destination must not already exist).
+// Opening the store acquires internal/dbx's single-process lock, so this
+// subcommand — like "check" below — cannot run against a DB_PATH that
+// "xchats serve" already has open; stop the server first, or use the
+// in-app "Download Backup" action (internal/httpapi's settings surface),
+// which runs inside the already-open server process instead.
+func runBackup(cfg *config.Config, log *slog.Logger, args []string) {
+	if len(args) != 1 {
+		fatal("backup", errString("usage: xchats backup <dest-path>"))
+	}
+	st := mustStore(cfg, log)
+	defer st.Close()
+	if err := st.Backup(context.Background(), args[0]); err != nil {
+		fatal("backup", err)
+	}
+	log.Info("backup complete", "dest", args[0])
+}
+
+// runCheck runs SQLite's own consistency check against DB_PATH and reports
+// every problem found, if any. See runBackup's doc comment for why this
+// needs the server stopped (or run the "Download Backup" flow instead,
+// whose zip manifest records the same check).
+func runCheck(cfg *config.Config, log *slog.Logger) {
+	st := mustStore(cfg, log)
+	defer st.Close()
+	problems, err := st.IntegrityCheck(context.Background())
+	if err != nil {
+		fatal("check", err)
+	}
+	if len(problems) > 0 {
+		for _, p := range problems {
+			log.Error("integrity check problem", "detail", p)
+		}
+		fatal("check", fmt.Errorf("%d integrity problem(s) found", len(problems)))
+	}
+	log.Info("integrity check passed")
+}
+
+// runRestore atomically replaces destPath with backupPath's contents. Pure
+// path arguments, no config/store involved: it is an offline operation that
+// validates backupPath's integrity before touching anything at destPath (see
+// dbops.Restore), and calls dbops directly rather than going through a Store
+// — there is nothing at destPath to open yet, and mustStore would just
+// contend with Restore's own flock (internal/dbx.LockPath) for no reason.
+func runRestore(log *slog.Logger, args []string) {
+	if len(args) != 2 {
+		fatal("restore", errString("usage: xchats restore <backup-path> <dest-path>"))
+	}
+	if err := dbops.Restore(context.Background(), args[0], args[1]); err != nil {
+		fatal("restore", err)
+	}
+	log.Info("restore complete", "backup", args[0], "dest", args[1])
+}
+
 // seed ensures the configured organization exists. WhatsApp accounts are no
 // longer pre-configured or seeded here — they are paired dynamically via the
 // UI (internal/whatsmeow), so the derived account id only ever comes into
@@ -416,10 +728,10 @@ func seed(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Lo
 // --- small helpers --------------------------------------------------------
 
 func mustStore(cfg *config.Config, log *slog.Logger) *store.Store {
-	if cfg.DBPath == "" {
+	if cfg.Storage.DBPath == "" {
 		fatal("config", errString("DB_PATH is required"))
 	}
-	st, err := store.New(context.Background(), cfg.DBPath)
+	st, err := store.New(context.Background(), cfg.Storage.DBPath)
 	if err != nil {
 		fatal("connect db", err)
 	}
@@ -428,7 +740,7 @@ func mustStore(cfg *config.Config, log *slog.Logger) *store.Store {
 
 func newLogger(cfg *config.Config) *slog.Logger {
 	level := slog.LevelInfo
-	switch strings.ToLower(cfg.LogLevel) {
+	switch strings.ToLower(cfg.System.LogLevel) {
 	case "debug":
 		level = slog.LevelDebug
 	case "warn":
@@ -438,13 +750,6 @@ func newLogger(cfg *config.Config) *slog.Logger {
 	}
 	// logfmt == slog's TextHandler (key=value).
 	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
 }
 
 func orDefault(v, def string) string {

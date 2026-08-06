@@ -14,9 +14,8 @@ services:
     environment:
       # The base file's default assumes the base port mapping (8080:8080); this
       # override republishes the backend on 8090, so the self-advertised
-      # discovery origin has to follow. Still overridable from .env — set
-      # API_BASE_URL to a public tunnel URL when an external MCP host
-      # (ChatGPT/Claude) needs to reach the connector.
+      # discovery fallback has to follow. Configured ngrok credentials
+      # discover a static domain and override this for external MCP hosts.
       API_BASE_URL: "${API_BASE_URL:-http://localhost:8090}"
   frontend:
     ports: !override
