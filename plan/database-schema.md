@@ -1,8 +1,14 @@
 # Target Database Schema
 
-[`DECISIONS.md`](../DECISIONS.md) is authoritative. All tables are in PostgreSQL
-schema `xchats`; timestamps are `timestamptz`; application-generated identifiers
-are UUID unless a column says otherwise. Every tenant-owned query and unique key
+[`DECISIONS.md`](DECISIONS.md) is authoritative. This document predates the
+SQLite port (`refactor: migrate from Postgres to SQLite` — see
+[`backend/migrations/sqlite/`](../backend/migrations/sqlite/) for the actual,
+current schema) and still describes tables and types in PostgreSQL terms —
+`timestamptz` reads as SQLite `TEXT` (ISO 8601), and a Postgres `uuid[]`
+column reads as a JSON array in `TEXT` (see `internal/dbx.UUIDArray`). The
+*shapes and relationships* below remain the design target; the *exact
+column-type syntax* does not. Application-generated identifiers are UUID
+unless a column says otherwise. Every tenant-owned query and unique key
 includes `organization_id` (directly or through an owning row).
 
 This is the target contract. Existing migrations may lag and must migrate toward

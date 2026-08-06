@@ -80,9 +80,9 @@ const END_OF_LIST_DESCRIPTION: Record<Locale, string> = {
   kk: 'Біз қызықты мәселелерді тапқан сайын жаңа мақалалар жариялап отырамыз.',
 }
 const COPYRIGHT_SUFFIX: Record<Locale, string> = {
-  ru: 'MIT License.',
-  en: 'MIT License.',
-  kk: 'MIT License.',
+  ru: 'AGPL-3.0 License.',
+  en: 'AGPL-3.0 License.',
+  kk: 'AGPL-3.0 License.',
 }
 const NOT_FOUND_TITLE: Record<Locale, string> = {
   ru: 'Страница не найдена',

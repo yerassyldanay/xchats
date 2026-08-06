@@ -1,6 +1,6 @@
 # xchats Target Overview
 
-> This directory is an implementation plan. [`DECISIONS.md`](../DECISIONS.md)
+> This directory is an implementation plan. [`DECISIONS.md`](DECISIONS.md)
 > is the authoritative product and technical decision record. If this plan,
 > current code, or a migration disagrees with it, `DECISIONS.md` wins and the
 > plan/code must be corrected. The target is not necessarily implemented yet.
@@ -34,8 +34,10 @@ approved ai_* → cached prompt prefix → {reply_text, media_files_to_send}
 
 The Vue application talks to one Go backend. The backend is a modular monolith
 with interfaces at channel, queue, blob-storage, and model-provider boundaries.
-PostgreSQL is the transactional source of truth. File bytes live behind a
-storage adapter; `kbd_materials` is their only registry.
+SQLite is the transactional source of truth (ported from an earlier
+PostgreSQL design — see [`database-schema.md`](database-schema.md)'s own
+note on where the two diverge). File bytes live behind a storage adapter;
+`kbd_materials` is their only registry.
 
 ## Non-negotiable invariants
 

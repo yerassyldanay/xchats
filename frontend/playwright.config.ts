@@ -1,8 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
 
 // Browser e2e for the Vue SPA. The frontend is started automatically (Vite);
-// the BACKEND (+ a migrated/seeded Postgres) must be running separately — see
-// tests/e2e/README.md. Override the target with E2E_BASE_URL.
+// the BACKEND (SQLite, migrated + seeded automatically on boot) must be
+// running separately — see tests/e2e/README.md. Override the target with
+// E2E_BASE_URL.
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:5173'
 
 export default defineConfig({
@@ -26,7 +27,8 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // Reuse a running dev server if present, else start one. Does NOT start the
-  // backend — run `make dev-backend` (+ Postgres, migrate, seed) first.
+  // backend — run `make dev-backend` first (migrations + seed happen
+  // automatically on boot, no separate database service to start).
   webServer: {
     command: 'npm run dev',
     url: BASE_URL,

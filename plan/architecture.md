@@ -1,6 +1,6 @@
 # Target Architecture
 
-[`DECISIONS.md`](../DECISIONS.md) is authoritative. This document connects its
+[`DECISIONS.md`](DECISIONS.md) is authoritative. This document connects its
 decisions into implementable component and data-flow boundaries.
 
 ## System context

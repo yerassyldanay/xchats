@@ -1,99 +1,132 @@
+<div align="center">
+
 # xchats
 
-A WhatsApp-first **team inbox with an AI assistant**, runnable from one place.
+**A self-hosted team inbox for WhatsApp and Telegram, with a draft-and-approve AI assistant.**
 
-The concise target design lives under [`plan/`](plan/), with
-[`DECISIONS.md`](plan/DECISIONS.md) authoritative;
-**Build 0** — the runnable first version — is implemented in [`backend/`](backend/) (Go) and
-[`frontend/`](frontend/) (Vue 3), orchestrated by [`deploy/`](deploy/) + the [`Makefile`](Makefile).
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![CI](https://github.com/yerassyldanay/xchats/actions/workflows/ci.yml/badge.svg)](https://github.com/yerassyldanay/xchats/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/yerassyldanay/xchats/actions/workflows/codeql.yml/badge.svg)](https://github.com/yerassyldanay/xchats/actions/workflows/codeql.yml)
 
-Plan entry point → **[`plan/overview.md`](plan/overview.md)**.
+**English** · [Русский](README.ru.md) · [Қазақша](README.kk.md)
 
-## Build 0 — run it
+</div>
 
-A logged-in user sees **live** WhatsApp chats/messages (text + media), can **send** replies
-(text + media), and the AI is a **hardcoded stub** returning 1–3 constant draft options — the
-end-to-end plumbing of the inbound→draft→approve→send→status loop. Follows the plan's `xchats`
-schema, `{payload, errcode}` envelope, in-memory queue, and deterministic `wa_accounts.id`.
+xchats connects WhatsApp and Telegram to one team inbox, and gives every
+agent an AI-drafted reply grounded in a curated knowledge base — the AI
+never sends on its own; a human always approves first. The knowledge base,
+the assistant's behavior, and every draft it produces are all editable from
+the same app, either through the web UI or directly from ChatGPT/Claude via
+the built-in MCP connector.
+
+![xchats chatboard](frontend/public/app-screenshot.png)
+
+## Quickstart
 
 ```bash
+git clone https://github.com/yerassyldanay/xchats.git
+cd xchats
 make up                         # backend (:8080) + frontend (:8081), one command
 ```
 
-The committed root [`config.yaml`](config.yaml) carries only non-secret boot/infra tunables
-(listen address, on-disk paths, logging, worker counts) — copy it only if you want to change one
-of those from its defaults. There is no `.env` file to set up: xchats generates and durably stores
-its own internal secrets (session signing, Telegram token encryption, MCP signing, the Telegram
-webhook secret) on first boot, and everything else an operator configures — the AI provider and
-its API key, ngrok, Langfuse, team members — lives in the Settings UI (gated to admins, with a
-first-run wizard for the essentials) once the app is running. Log in with the default admin
-account migration `0006_init_admin` seeds on an empty database — `admin@xchat.kz` /
-`xchat-admin-change-me` — then add your own admin account from Settings → Team Management right
-after (there is no self-service password change yet, so treat the seeded login as a bootstrap
-credential, not a permanent one).
+`make up` builds and starts both services with Docker Compose — nothing
+else to install. There's no `.env` file to prepare first: xchats generates
+and durably stores its own internal secrets on first boot, and everything
+an operator configures (the AI provider and its API key, ngrok, Langfuse,
+team members) lives in the Settings UI once the app is running.
 
-WhatsApp connects directly via [`go.mau.fi/whatsmeow`](https://github.com/tulir/whatsmeow) — no
-separate gateway to run or configure. Pair a number from the UI's QR flow (`/accounts` →
-**add**).
-
-Local dev (no Docker): `make dev-backend` (`:8080`) and `make dev-frontend` (`:5173`).
-
-## Build 1 — WhatsApp accounts manager (pair via QR · logout · clean)
-
-On top of Build 0's single seeded number, a logged-in user can **manage numbers from the UI**
-(`/accounts`): **pair** a number (scan a live-polled **QR**, rendered by `internal/whatsmeow` —
-the row is written on connect with `id = uuidv5(owner_jid)`), see **all numbers' chats together**
-in one inbox (labelled + filterable by number, with a "from number" picker in the composer),
-**logout** a session (same row, history intact, ready to re-pair), and **clean** a number
-(logout + soft-delete the row — re-adding the same number **revives** it with its history).
-Identity is the WhatsApp number, so a logout/re-pair cycle never loses chats. Endpoints:
-`GET /whatsapp-accounts`, `POST /wa-accounts/pair`, `GET /wa-accounts/pair/{session_id}`,
-`POST /wa-accounts/{id}/logout`, `GET /wa-accounts/{id}/status`, `DELETE /whatsapp-accounts/{id}`.
+Open http://localhost:8081, then retrieve the one-time bootstrap admin
+password and log in:
 
 ```bash
-make test        # Go unit/component (SQLite, a fresh database per test) + frontend typecheck/build
-make test-e2e    # the DB-backed suites in isolation: ingest→dedup→media, send fan-out to the
-                 # phone JID, echo-collapse, monotonic status, suggest→approve guard
+docker compose exec backend /xchats admin-credential show
 ```
 
-### Layout
+The first login forces a password change before anything else is
+reachable. After that, the setup wizard walks you through adding an LLM
+provider API key, then **Accounts → add** to pair a WhatsApp number by
+scanning a QR code, or **Settings → Integrations** to connect a Telegram
+bot.
 
+No Docker? `make dev-backend` (Go, `:8080`) and `make dev-frontend` (Vite,
+`:5173`) run the same app as two local processes — see
+[`docs/release/installation.md`](docs/release/installation.md) for both
+paths in full.
+
+> **WhatsApp connectivity is unofficial.** xchats talks to WhatsApp directly
+> via [whatsmeow](https://github.com/tulir/whatsmeow), a reverse-engineered
+> client — not WhatsApp's official Business API. A connected number can be
+> banned by WhatsApp at their discretion, with no recourse. Don't pair a
+> number you can't afford to lose; consider a dedicated test number first.
+
+## Features
+
+- **WhatsApp and Telegram in one inbox** — WhatsApp connects directly (no
+  gateway to run); Telegram supports both webhook and long-polling
+  delivery, auto-selected based on whether a public base URL is configured.
+- **Draft-and-approve AI, never auto-send** — every AI reply is a draft an
+  agent reviews, edits, or discards before it goes out. Replies are
+  generated from a structured knowledge base (products, tariffs, delivery
+  zones, policies), not freeform generation, so the assistant can't
+  improvise facts it wasn't given.
+- **MCP connector** — connect ChatGPT or Claude directly to the knowledge
+  base over [MCP](https://modelcontextprotocol.io/): read and edit
+  products/tariffs/policies, manage delivery zones, and stage draft
+  changes for review, from inside the LLM client you already use. OAuth
+  2.1 + PKCE, no shared API key.
+- **A conversation simulator** — exercise the assistant against realistic
+  customer messages without touching a real WhatsApp/Telegram account,
+  from **Playground**.
+- **An evaluation harness** (`evals/`) — a standalone Go tool that runs the
+  assistant against a curated scenario set and grades the output, for
+  measuring prompt/model changes instead of guessing.
+- **Self-hosted, single binary + SQLite** — one Go backend, one SQLite
+  database, no separate services beyond the two containers `make up`
+  starts. Your data stays on your infrastructure.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    WA[WhatsApp\nwhatsmeow] --> ING[Ingest]
+    TG[Telegram\nwebhook / long-poll] --> ING
+    ING --> Q[(Queue)]
+    Q --> ENG[Response Engine]
+    KB[(Knowledge Base)] --> ENG
+    ENG --> DR[Draft]
+    DR -->|agent approves| SEND[Send]
+    SEND --> WA
+    SEND --> TG
+    MCP[MCP client\nChatGPT / Claude] <-->|OAuth 2.1| KB
+    UI[Web UI] --> DR
+    UI --> KB
 ```
-backend/    Go: cmd/xchats + internal/{config,store,queue,blob,whatsapp,whatsmeow,
-            httpapi,worker,realtime,assistant,dto} + migrations/ (embedded)
-frontend/   Vue 3 + TS (Vite, Pinia, Tailwind): Login + Chatboard (list · thread · assistant)
-deploy/     docker-compose.yaml (backend + frontend; WhatsApp via whatsmeow, no gateway)
-plan/       five design docs + reference captures and images
-```
 
-## What's in here
+One Go backend (`backend/`) serves the HTTP API, runs the channel
+adapters, and hosts the MCP server; one Vue 3 + TypeScript frontend
+(`frontend/`) is the team's UI. SQLite is the only datastore. See
+[`plan/architecture.md`](plan/architecture.md) for the full design and
+[`plan/DECISIONS.md`](plan/DECISIONS.md) for the record of why it's shaped
+this way.
 
-```
-plan/
-  overview.md                purpose, boundaries, terms, and document map
-  architecture.md            channel adapters, workers, storage, and AI boundaries
-  database-schema.md         target tables, responsibilities, and columns
-  playground.md              material-to-draft-to-live authoring flow
-  knowledge-base.md          approved-KB prompt and response example
-  telegram-testing.md        verifying the Telegram channel: env vars, endpoints,
-                             response contracts, curl walkthrough, no committed tooling
+## Documentation
 
-docs/release/               installing, deploying, backing up, and upgrading a
-                             real deployment — start at installation.md
-  proposals/                 draft LICENSE/SECURITY/PRIVACY/CONTRIBUTING/
-                             CHANGELOG docs awaiting a maintainer decision
-```
+- [`docs/release/installation.md`](docs/release/installation.md) — Docker
+  and from-source setup, first-run walkthrough.
+- [`docs/release/`](docs/release/) — deploying, credentials, backups,
+  upgrades, troubleshooting a real deployment.
+- [`plan/`](plan/) — the design record this project was built from; start
+  at [`plan/README.md`](plan/README.md).
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — development setup, conventions,
+  how to open a PR.
+- [`SECURITY.md`](SECURITY.md) — how to report a vulnerability.
 
-## Reading order
+## License
 
-[`overview`](plan/overview.md) → [`architecture`](plan/architecture.md) →
-[`database schema`](plan/database-schema.md) → [`playground`](plan/playground.md)
-→ [`knowledge base`](plan/knowledge-base.md) →
-[`telegram testing`](plan/telegram-testing.md).
-
-## What this describes (in one line)
-
-Connect WhatsApp directly via **whatsmeow** (no external gateway); build a Go **backend**
-(direct WhatsApp connection + UI API + workers + AI) and a Vue **frontend** as separate
-env-addressed services; **SQLite** for all state; **suggest-and-approve** AI; everything brought up by one
-orchestration and verifiable by an isolated, one-command test harness.
+[AGPL-3.0-only](LICENSE), selected as project policy after a dependency
+review found a GPL-3.0 dependency ([`go.mau.fi/libsignal`](https://github.com/tulir/libsignal-go),
+pulled in transitively through whatsmeow) statically linked into the
+backend binary — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+GPL-3.0 would also have been a compatible choice; AGPL-3.0 was chosen so
+that running a modified version as a network service carries the same
+share-back obligation as distributing it does.

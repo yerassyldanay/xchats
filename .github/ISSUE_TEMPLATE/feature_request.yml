@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a change or new capability for xchats.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything beyond a small change, this issue is meant to start the
+        discussion [CONTRIBUTING.md](../../CONTRIBUTING.md) asks for before
+        code gets written — especially if it touches something recorded in
+        [`plan/DECISIONS.md`](../../plan/DECISIONS.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The gap or friction you're hitting today, not the solution yet.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: If you have one in mind. Sketch it — this isn't a commitment.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

@@ -50,18 +50,27 @@ actually means under the hood. On first boot:
 
 1. Migrations run automatically (`internal/store.New` applies every pending
    migration on open — embedded in the binary, nothing to run by hand).
-2. Migration `0006_init_admin` seeds one admin login on an empty database:
-   `admin@xchat.kz` / `xchat-admin-change-me`.
+2. A one-time admin login, `admin@xchat.kz`, is created with a randomly
+   generated password — never a shared default. The plaintext is written
+   once to `<DataDir>/bootstrap-admin-password`, mode `0600`, owner-only,
+   and never logged.
 3. Four internal secrets (session signing, Telegram token encryption, MCP
    signing, the Telegram webhook secret) are generated and durably stored —
    see [`credentials.md`](credentials.md).
 
-Log in with the seeded admin account, then:
+Retrieve the bootstrap password, then log in:
 
-1. **Change the bootstrap credential.** There is no self-service password
-   change yet — add your own admin account from **Settings → Team
-   Management** and treat `admin@xchat.kz` as a bootstrap login to retire,
-   not a permanent one.
+```bash
+xchats admin-credential show
+# Docker: docker compose exec backend /xchats admin-credential show
+```
+
+1. **Change the bootstrap password.** The first login forces a password
+   change before anything else is reachable — set your own password there.
+   The bootstrap file is deleted once you do, so it never lingers on disk
+   as a second copy of a live credential. (Lost or need to re-mint it?
+   `xchats reset-admin-password` blanks the hash so the next boot generates
+   a fresh one.)
 2. **Complete the first-run setup wizard** (shown automatically to an admin
    until dismissed): pick an LLM provider and paste its API key. Every other
    integration (ngrok, Langfuse, additional providers) is optional and
