@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,64 +12,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/domain"
+	"github.com/yerassyldanay/xchats/backend/internal/password"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
-	"golang.org/x/crypto/argon2"
 )
 
 const sessionCookie = "xchats_session"
 
 type ctxUserKey struct{}
-
-// --- argon2id password hashing (explicitly not sha256) --------------------
-
-type argonParams struct {
-	memory, time uint32
-	threads      uint8
-	keyLen       uint32
-}
-
-var defaultArgon = argonParams{memory: 64 * 1024, time: 1, threads: 4, keyLen: 32}
-
-// HashPassword returns an encoded argon2id hash string.
-func HashPassword(password string) (string, error) {
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	p := defaultArgon
-	key := argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, p.keyLen)
-	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
-		argon2.Version, p.memory, p.time, p.threads,
-		base64.RawStdEncoding.EncodeToString(salt),
-		base64.RawStdEncoding.EncodeToString(key)), nil
-}
-
-// VerifyPassword checks a password against an encoded argon2id hash.
-func VerifyPassword(password, encoded string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
-		return false
-	}
-	var p argonParams
-	var version int
-	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil {
-		return false
-	}
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &p.memory, &p.time, &p.threads); err != nil {
-		return false
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
-		return false
-	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil {
-		return false
-	}
-	p.keyLen = uint32(len(want))
-	got := argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, p.keyLen)
-	return subtle.ConstantTimeCompare(got, want) == 1
-}
 
 // --- session middleware ---------------------------------------------------
 
@@ -183,7 +130,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 	u, err := s.store.UserByEmail(ctx(c), strings.TrimSpace(req.Email))
-	if err != nil || !VerifyPassword(req.Password, u.PasswordHash) {
+	if err != nil || !password.Verify(req.Password, u.PasswordHash) {
 		fail(c, http.StatusUnauthorized, ErrUnauthorized, "invalid credentials")
 		return
 	}
@@ -352,7 +299,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, "no org")
 		return
 	}
-	hash, err := HashPassword(req.Password)
+	hash, err := password.Hash(req.Password)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, "hash")
 		return

@@ -28,6 +28,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/internal/password"
 	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -113,7 +114,7 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
 	}
-	hash, _ := httpapi.HashPassword(adminPass)
+	hash, _ := password.Hash(adminPass)
 	if _, err := st.SeedUser(ctx, org.ID, adminEmail, hash, "Admin"); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
@@ -169,7 +170,7 @@ func newNilDepsSettingsHarness(t *testing.T) *settingsHarness {
 	if err != nil {
 		t.Fatalf("seed org: %v", err)
 	}
-	hash, _ := httpapi.HashPassword(adminPass)
+	hash, _ := password.Hash(adminPass)
 	if _, err := st.SeedUser(ctx, org.ID, adminEmail, hash, "Admin"); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
@@ -200,9 +201,9 @@ func (h *settingsHarness) login(client *http.Client, email, password string) {
 // createMemberClient creates a "member"-role (non-admin) user in h's org
 // and returns a client logged in as them — how RBAC-boundary tests exercise
 // the "blocked" side of RequireAdmin.
-func (h *settingsHarness) createMemberClient(email, password string) *http.Client {
+func (h *settingsHarness) createMemberClient(email, plaintext string) *http.Client {
 	h.t.Helper()
-	hash, err := httpapi.HashPassword(password)
+	hash, err := password.Hash(plaintext)
 	if err != nil {
 		h.t.Fatalf("hash: %v", err)
 	}
@@ -211,7 +212,7 @@ func (h *settingsHarness) createMemberClient(email, password string) *http.Clien
 	}
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
-	h.login(client, email, password)
+	h.login(client, email, plaintext)
 	return client
 }
 

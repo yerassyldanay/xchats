@@ -22,8 +22,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
+	"github.com/yerassyldanay/xchats/backend/internal/password"
 )
 
 // browserClient returns an http.Client with a fresh cookie jar that stops at
@@ -230,7 +230,7 @@ func TestReviewHandoff_WrongUserRejected(t *testing.T) {
 	h := newMCPHarness(t)
 	client := h.browserClient(t) // logged in as h.userID
 
-	hash, err := httpapi.HashPassword("password123")
+	hash, err := password.Hash("password123")
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}

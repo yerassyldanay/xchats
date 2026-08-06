@@ -15,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/internal/password"
 )
 
 const (
@@ -44,9 +44,9 @@ func (h *harness) loginAs(t *testing.T, email, password string) *http.Client {
 
 // createMember creates a "member"-role user in h's organization and returns
 // their id.
-func (h *harness) createMember(t *testing.T, email, password, name string) uuid.UUID {
+func (h *harness) createMember(t *testing.T, email, plaintext, name string) uuid.UUID {
 	t.Helper()
-	hash, err := httpapi.HashPassword(password)
+	hash, err := password.Hash(plaintext)
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
