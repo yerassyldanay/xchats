@@ -16,15 +16,16 @@ GORUN := go run ./cmd/xchats -config ../config.yaml
 PORTS ?= 8080 8090 5173 8081
 
 .PHONY: help up up-fg down logs ps kill-ports migrate seed seed-kb-demo dev-backend dev-frontend \
-        test test-backend test-frontend test-e2e build
+        test test-backend test-frontend test-e2e build lint lint-backend lint-frontend notices ruleset-apply
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 up: ## Rebuild + run the whole stack detached (SQLite — backend + frontend, no separate database service)
 	$(COMPOSE) up -d --build
-	@echo "✅ up — frontend: http://localhost:8081 · backend: http://localhost:8090 · logs: make logs"
+	@echo "✅ up — frontend: http://localhost:$${FRONTEND_PORT:-8081} · backend: http://localhost:$${BACKEND_PORT:-8080}"
+	@echo "   (deploy/docker-compose.yaml's own defaults — a local docker-compose.override.yaml can remap either; run 'make ps' to confirm the actual bound ports)"
 
 up-fg: ## Same as up but foreground (Ctrl-C to stop, attached logs)
 	$(COMPOSE) up --build
@@ -64,10 +65,10 @@ dev-frontend: ## Run the frontend (vite) on :5173
 test: test-backend test-frontend ## Unit + component (offline, deterministic)
 
 test-backend: ## Go unit tests (SQLite — every DB test gets its own fresh database, see internal/dbtest)
-	cd $(BACKEND) && go test ./...
+	cd $(BACKEND) && go test -race -count=1 ./...
 
-test-frontend: ## Frontend typecheck + build
-	cd $(FRONTEND) && npm run build
+test-frontend: ## Frontend typecheck + unit tests + build
+	cd $(FRONTEND) && npm run typecheck && npm run test:unit && npm run build
 
 test-e2e: ## Full demo loop + KB/response service DB-backed suites (subset of test-backend, run in isolation)
 	cd $(BACKEND) && go test -count=1 \
@@ -77,3 +78,24 @@ test-e2e: ## Full demo loop + KB/response service DB-backed suites (subset of te
 build: ## Build backend binary + frontend bundle
 	cd $(BACKEND) && go build -o bin/xchats ./cmd/xchats
 	cd $(FRONTEND) && npm ci && npm run build
+
+lint: lint-backend lint-frontend ## Run every linter (same checks as CI's lint jobs)
+
+lint-backend: ## golangci-lint over the backend module (see .golangci.yml)
+	cd $(BACKEND) && golangci-lint run ./...
+
+lint-frontend: ## eslint over the frontend (see frontend/eslint.config.js)
+	cd $(FRONTEND) && npx eslint .
+
+notices: ## Regenerate THIRD_PARTY_LICENSES.txt from the shipped dependency graph (pinned tools — see scripts/notices.sh)
+	./scripts/notices.sh
+	@echo "If the dependency set changed, also refresh the inventory tables in"
+	@echo "THIRD_PARTY_NOTICES.md (see its 'Maintaining this file' section)."
+
+ruleset-apply: ## Apply .github/rulesets/*.json to the repo via the GitHub API (does nothing until they exist — see the release plan's ruleset stage)
+	@for f in .github/rulesets/*.json; do \
+		[ -f "$$f" ] || continue; \
+		echo "applying $$f"; \
+		gh api -X POST repos/yerassyldanay/xchats/rulesets --input "$$f" >/dev/null || \
+		gh api -X PUT  repos/yerassyldanay/xchats/rulesets/$$(gh api repos/yerassyldanay/xchats/rulesets --jq ".[] | select(.name==\"$$(basename $$f .json)\") | .id") --input "$$f" >/dev/null; \
+	done

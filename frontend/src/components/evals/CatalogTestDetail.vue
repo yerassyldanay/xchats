@@ -9,9 +9,9 @@ import CatalogFieldRow from './CatalogFieldRow.vue'
 import FieldLegend from './FieldLegend.vue'
 import CopyButton from './CopyButton.vue'
 
-// The requirements centerpiece — every tests.yaml key shown RAW, in its authored
-// order, with a (?) tooltip explaining what it evaluates (see MEMORY.md "Frontend
-// direction": developer audience, exact schema over friendly renamed abstractions).
+// The requirements centerpiece — every tests.yaml key shown RAW, in its
+// authored order, with a (?) tooltip explaining what it evaluates: this is a
+// developer audience, so exact schema over friendly renamed abstractions.
 // Resolved fact values / broken-ref flags are ANNOTATIONS beneath the raw value, never
 // a replacement for it. Read-only review, never a run/results view.
 const props = defineProps<{ test: CatalogTestCase; scenario: CatalogScenario }>()

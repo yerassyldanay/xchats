@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: backend-test
+    runs-on: ubuntu-latest
+    env:
+      # Pin the toolchain to exactly what backend/go.mod declares — with the
+      # default GOTOOLCHAIN=auto, a future go.mod bump would silently
+      # download a different compiler mid-CI instead of failing visibly.
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Build
+        working-directory: backend
+        run: go build ./...
+
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
+
+      # -race -count=1: every DB test gets its own fresh SQLite file under
+      # t.TempDir() (see internal/dbtest), so the suite is parallel-safe and
+      # needs no external service — nothing here reads an API key or shells
+      # out to a live network call.
+      - name: Test
+        working-directory: backend
+        run: go test -race -count=1 ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: backend
+          # This is a mature, previously-unlinted codebase — gate new code
+          # only, not the existing backlog (see .golangci.yml's own header
+          # comment). Requires full history for the base-ref diff.
+          only-new-issues: true
+
+  # A separate job, not a step in backend-test: evals/harness/go.mod
+  # declares go 1.26.4, newer than backend/go.mod's 1.25.0. Under the
+  # default GOTOOLCHAIN=auto a single job could build both by silently
+  # downloading 1.26.4 partway through — pinning each job to its own
+  # go-version-file (and GOTOOLCHAIN: local) makes the version split
+  # explicit instead of invisible.
+  #
+  # Scope: harness tests are hermetic (no os.Getenv/exec.Command, all HTTP
+  # via httptest). `harness run` (promptfoo, real billed OpenRouter calls)
+  # is a separate subcommand nothing here invokes.
+  evals-harness:
+    name: evals-harness
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: evals/harness/go.mod
+          cache-dependency-path: evals/harness/go.sum
+
+      - name: Build
+        working-directory: evals/harness
+        run: go build ./...
+
+      - name: Vet
+        working-directory: evals/harness
+        run: go vet ./...
+
+      - name: Test
+        working-directory: evals/harness
+        run: go test ./...
+
+  frontend-test:
+    name: frontend-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
+      - run: npm run typecheck
+        working-directory: frontend
+
+      - run: npx eslint .
+        working-directory: frontend
+
+      - run: npm run test:unit
+        working-directory: frontend
+
+      # Includes the vue-tsc typecheck again (cheap, already-warm) plus the
+      # blog static-site build — see package.json's build script.
+      - run: npm run build
+        working-directory: frontend
+
+  docker-build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  links:
+    name: links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --no-progress
+            --exclude-path evals/runs
+            --exclude-path third_party_licenses
+            '**/*.md'
+          fail: true

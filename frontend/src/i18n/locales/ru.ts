@@ -1,6 +1,6 @@
-// evalCatalog.* is currently the ONLY content wired through vue-i18n — the app's UI
-// chrome stays hardcoded Russian everywhere else (see MEMORY.md "Frontend direction"
-// for why: this page is the pilot, not a full i18n rollout). Migrate more of the app
+// evalCatalog.*, kb.*, settings.*, and changePassword.* are wired through
+// vue-i18n; the rest of the app's UI chrome stays hardcoded Russian for now
+// (evalCatalog was the pilot, not a full rollout). Migrate more of the app
 // into this file/en.ts as it grows, rather than starting a second mechanism.
 export default {
   evalCatalog: {

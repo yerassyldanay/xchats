@@ -26,7 +26,15 @@ assets/*.MP4
 # from the committed *.judged.json/manifest.json via `harness export -all`, never a
 # second source of truth. runs/launches/*.json is DIFFERENT and deliberately NOT
 # listed here — see the comment there.
+#
+# runs/*/index.html and runs/*/*.results.json are the NESTED forms of the same
+# rule — runs/*.html and runs/*.json above only match directly under runs/, not
+# one level down under each launch directory, which is where these actually
+# live. Their absence here (rather than the pattern itself) is what let a raw
+# promptfoo dump get force-added instead of the derived *.judged.json.
 runs/*/executions.json
+runs/*/index.html
+runs/*/*.results.json
 runs/runs.json
 
 # The requirements-catalog export (evals/harness/catalog.go) — same regenerable status:

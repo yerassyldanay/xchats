@@ -1,0 +1,36 @@
+title = "xchats gitleaks config"
+
+# Layer our own allowlist on top of gitleaks' full built-in rule set, rather
+# than replacing it — see https://github.com/gitleaks/gitleaks#configuration.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "revoked historical credential, and known-fake test fixtures"
+paths = [
+  # deploy/restore-evolution-webhook.sh carried a hardcoded Evolution API
+  # key in an earlier commit. The key has been revoked at the provider —
+  # dead, not live — so it deliberately stays in history rather than being
+  # rewritten out; without this entry, a history-ranged `gitleaks` run
+  # (fetch-depth: 0 in secret-scan.yml) would red-fail on it forever.
+  '''^deploy/restore-evolution-webhook\.sh$''',
+  # This specific eval run's manifest.json has a "repair_key" field — a
+  # harness-generated idempotency token correlating a repair-retry run to
+  # its original (evals/harness/retry.go), not a credential. Flagged only
+  # because gitleaks' generic-api-key rule pattern-matches the field name
+  # against "*_key". Scoped to this one file rather than a broader
+  # evals/runs/**/manifest.json glob, since it's the only run in history
+  # that happens to carry a repair_key at all; add further entries here the
+  # same way if a future repair run's manifest.json trips the same rule.
+  '''^evals/runs/2026-07-19_02-44-27-436a/manifest\.json$''',
+]
+regexes = [
+  # internal/httpapi/integration_test.go's testEncKey (secretbox test key)
+  # and testBotToken (a shaped-but-fake Telegram bot token) — both named
+  # and commented as test fixtures where they're declared.
+  '''0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef''',
+  '''8123456789:AAH-test-token_never-logged''',
+  # settings_handlers_test.go's fake ngrok credentials (settings-save round
+  # trip fixtures).
+  '''ngrok-api-123''',
+]

@@ -1,0 +1,138 @@
+name: Release
+
+# Tag-triggered only — never a required status check (see .github/rulesets/).
+# Staged deliberately: this v1 covers build + publish + provenance
+# attestation. cosign image signing and a full SBOM are tracked as v1.1 (see
+# docs/release/signing.md and docs/release/sbom-checksums-provenance.md,
+# both still "not implemented yet" as of this workflow) — following
+# docs/release/release-checklist.md's own build-artifacts section without
+# also blocking this on tooling that doesn't exist yet.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push images to ghcr.io
+      id-token: write # required by actions/attest-build-provenance
+      attestations: write
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-${{ matrix.component }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.component }}
+          file: ${{ matrix.component }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # internal/version.Version — see backend/Dockerfile's own comment;
+          # the frontend image doesn't read this build-arg (no ARG VERSION
+          # in frontend/Dockerfile), so it's a harmless no-op there.
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      # SLSA build provenance — free, no external service, unlike cosign
+      # signing (deferred to v1.1, see this file's header comment).
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-${{ matrix.component }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  # AGPL-3.0/GPL-3.0 sec 6 — every release that publishes binaries/images also
+  # publishes complete corresponding source: the repo at this tag plus the
+  # source of every Go module statically linked into the backend binary
+  # (go.mau.fi/libsignal is GPL-3.0-only; whatsmeow + go.mau.fi/util are
+  # MPL-2.0). The npm side needs no vendoring: all frontend deps are
+  # permissive and exactly pinned by frontend/package-lock.json, which is in
+  # the tarball. evals/harness is a separate Go module that is never built
+  # into an image (see backend/Dockerfile — it COPYs only backend/) — its
+  # source rides along in the tarball, but its own dependency graph is
+  # deliberately not vendored.
+  source-bundle:
+    runs-on: ubuntu-latest
+    needs: build-and-push # only cut a release once the images actually shipped
+    permissions:
+      contents: write # create the Release + upload assets — job-level block replaces the workflow-level `contents: read` for this job only
+    env:
+      # Same pin rationale as ci.yml — vendor with exactly backend/go.mod's
+      # toolchain instead of silently downloading a newer one.
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # vendor/ carries every transitively imported package across all
+      # GOOS/GOARCH (go mod vendor loads with all build tags) plus each
+      # module's LICENSE/NOTICE/PATENTS/COPYING files — with it present,
+      # `go build -mod=vendor ./cmd/xchats` rebuilds the shipped binary
+      # fully offline.
+      - name: Vendor Go dependency source
+        working-directory: backend
+        run: |
+          go mod verify
+          go mod vendor
+
+      - name: Build corresponding-source tarball
+        run: |
+          TAG='${{ github.ref_name }}'
+          OUT="$RUNNER_TEMP/xchats-${TAG}-corresponding-source.tar.gz"
+          # Deterministic archive: stable order, neutral ownership, mtimes
+          # pinned to the tag's commit date, gzip without embedded timestamp
+          # — regenerating from the same tag is byte-identical. Output goes
+          # to RUNNER_TEMP so tar never tries to archive its own output.
+          # --exclude='./.git' rather than --exclude-vcs: the latter also
+          # strips .gitignore/.gitattributes, which are part of the source.
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+              --mtime="$(git log -1 --format=%cI)" \
+              --exclude='./.git' \
+              --transform "s|^\./|xchats-${TAG}/|" \
+              -cf - . | gzip -n -9 > "$OUT"
+          (cd "$RUNNER_TEMP" && sha256sum "$(basename "$OUT")" > "${OUT}.sha256")
+          ls -l "$OUT" "${OUT}.sha256"
+
+      - name: Create GitHub Release and attach source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG='${{ github.ref_name }}'
+          OUT="$RUNNER_TEMP/xchats-${TAG}-corresponding-source.tar.gz"
+          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes \
+            --repo "$GITHUB_REPOSITORY" \
+            || echo "release for $TAG already exists — uploading assets only"
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY" \
+            "$OUT" "${OUT}.sha256"

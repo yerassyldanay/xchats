@@ -261,7 +261,7 @@ export async function postFromImpostorWindow(page: Page, message: unknown) {
     const impostor = document.createElement('iframe')
     impostor.srcdoc = `<script>
       parent.document.getElementById("widget").contentWindow.postMessage(${JSON.stringify(message)}, "*");
-    <\/script>`
+    <\/script>` // eslint-disable-line no-useless-escape -- \/ avoids a literal </script> inside this srcdoc template literal
     document.body.appendChild(impostor)
   }, message)
 }
