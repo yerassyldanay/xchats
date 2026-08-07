@@ -1,5 +1,15 @@
 version: "2"
 
+# Keep this file at the repo root — do not move it into backend/. CI (see
+# .github/workflows/ci.yml's backend-test job) runs golangci-lint from
+# backend/ but points --config at this root file explicitly. With
+# run.relative-path-mode defaulting to "cfg", issue paths come out relative
+# to *this file's* directory (e.g. backend/internal/x.go), matching the
+# shape `git diff --new-from-merge-base` reports. Moving this file into
+# backend/ would make issue paths relative to backend/ instead
+# (internal/x.go) — silently breaking the diff match and turning the
+# new-code-only gate into a no-op that always passes.
+
 run:
   timeout: 5m
 

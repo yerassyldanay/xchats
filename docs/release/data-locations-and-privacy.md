@@ -3,7 +3,7 @@
 xchats is self-hosted: your data stays on whatever disk/volume you point it
 at, and the only outbound network calls it makes on its own are the small
 set documented below. This page is a factual inventory, not a legal privacy
-policy — see [`proposals/PRIVACY-proposal.md`](proposals/PRIVACY-proposal.md)
+policy — see `proposals/PRIVACY-proposal.md`
 for a starting point toward one.
 
 ## Where things live

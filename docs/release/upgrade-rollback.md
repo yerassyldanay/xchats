@@ -24,7 +24,7 @@ backward," it's always **restore the pre-upgrade backup** (see below).
    automatically and irreversibly on next boot; the backup is what makes
    that safe to attempt.
 2. **Read the changelog** for the version you're moving to (see
-   [`proposals/CHANGELOG-format-proposal.md`](proposals/CHANGELOG-format-proposal.md))
+   `proposals/CHANGELOG-format-proposal.md`)
    for anything that needs action beyond "start the new version" — a new
    required Setting, a changed default, a deprecation.
 3. **Deploy the new version.**

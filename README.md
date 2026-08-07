@@ -124,7 +124,7 @@ this way.
 ## License
 
 [AGPL-3.0-only](LICENSE), selected as project policy after a dependency
-review found a GPL-3.0 dependency ([`go.mau.fi/libsignal`](https://github.com/tulir/libsignal-go),
+review found a GPL-3.0 dependency ([`go.mau.fi/libsignal`](https://github.com/tulir/libsignal-protocol-go),
 pulled in transitively through whatsmeow) statically linked into the
 backend binary — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 GPL-3.0 would also have been a compatible choice; AGPL-3.0 was chosen so

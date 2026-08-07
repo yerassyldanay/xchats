@@ -36,7 +36,7 @@ cd frontend && npm ls --all --json > deps-frontend.json
 
 — not a real SBOM (no license data, no CPE/PURL identifiers a scanner can
 match CVEs against), but accurate as a starting point, and exactly what
-[`proposals/THIRD_PARTY_NOTICES-proposal.md`](proposals/THIRD_PARTY_NOTICES-proposal.md)
+`proposals/THIRD_PARTY_NOTICES-proposal.md`
 was generated from.
 
 ## Checksums

@@ -23,6 +23,10 @@ jobs:
       GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The Lint step's --new-from-merge-base diff needs the merge-base
+          # commit in history — the default depth-1 checkout only has the tip.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -45,15 +49,28 @@ jobs:
         working-directory: backend
         run: go test -race -count=1 ./...
 
-      - name: Lint
-        uses: golangci/golangci-lint-action@v6
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
-          working-directory: backend
-          # This is a mature, previously-unlinted codebase — gate new code
-          # only, not the existing backlog (see .golangci.yml's own header
-          # comment). Requires full history for the base-ref diff.
-          only-new-issues: true
+          # Minor-pinned, not `latest`: this is a required check with no
+          # admin bypass, so it must not go red just because upstream shipped
+          # a release. Bump deliberately (Dependabot won't touch this input).
+          version: v2.12
+          install-only: true
+
+      # Git-local diff, not the action's `only-new-issues: true`: that mode
+      # fetches the diff from the GitHub API and, on any failure, silently
+      # lints the whole tree instead — 142 pre-existing findings would go red
+      # for reasons unrelated to the PR. `--new-from-merge-base` only looks at
+      # history already on disk (fetch-depth: 0 above), so it can only fail
+      # for something the PR actually introduced. Config is named explicitly
+      # since this job's working-directory isn't the config's directory.
+      - name: Lint
+        working-directory: backend
+        run: |
+          golangci-lint run \
+            --config="$GITHUB_WORKSPACE/.golangci.yml" \
+            --new-from-merge-base=origin/${{ github.base_ref || 'master' }}
 
   # A separate job, not a step in backend-test: evals/harness/go.mod
   # declares go 1.26.4, newer than backend/go.mod's 1.25.0. Under the
@@ -93,6 +110,15 @@ jobs:
   frontend-test:
     name: frontend-test
     runs-on: ubuntu-latest
+    env:
+      # No production domain exists yet. build-blog.ts refuses to *silently*
+      # default to the placeholder in CI — so choose it explicitly here. That
+      # is the guard working as intended: an explicit decision, not a silent
+      # one. When a real domain exists, change it here AND in
+      # frontend/Dockerfile + release.yml — published images currently bake
+      # this same placeholder in today, with no warning at all (Dockerfile
+      # sets neither CI nor SITE_ORIGIN, so the guard never fires there).
+      SITE_ORIGIN: https://xchats.example
     steps:
       - uses: actions/checkout@v4
 
@@ -145,6 +171,10 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
+  # Offline only, deliberately: external sites reorganise for reasons no PR
+  # here can fix, and this is a required check with no admin bypass. The
+  # scheduled sweep in link-check-external.yml covers the network case
+  # separately, without blocking merges — see that file's header comment.
   links:
     name: links
     runs-on: ubuntu-latest
@@ -153,9 +183,14 @@ jobs:
 
       - uses: lycheeverse/lychee-action@v2
         with:
+          # Minor-pinned for the same reason as golangci-lint above: a
+          # required check with no bypass must not go red from an upstream
+          # release. Bump deliberately.
+          lycheeVersion: v0.24.2
           args: >-
+            --offline
             --no-progress
-            --exclude-path evals/runs
-            --exclude-path third_party_licenses
-            '**/*.md'
+            './**/*.md'
           fail: true
+          failIfEmpty: true
+          jobSummary: true

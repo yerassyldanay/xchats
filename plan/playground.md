@@ -74,7 +74,7 @@ evidence and does not choose KB tables or produce live/draft entities.
 
 All model calls use the single configured OpenAI-compatible aggregator. Model
 selection is configuration, and relative/absolute parsing cost assumptions live
-in [`evals/parsing-costs.md`](../evals/parsing-costs.md) rather than this
+in `evals/parsing-costs.md` rather than this
 contract. In v1, model-facing authoring instructions, trusted KB prose, and
 generated customer replies are Russian; exact values are stored once and are
 not translated.

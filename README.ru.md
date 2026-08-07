@@ -133,7 +133,7 @@ flowchart LR
 
 [AGPL-3.0-only](LICENSE) — выбрана как политика проекта после проверки
 зависимостей: обнаружена зависимость с лицензией GPL-3.0
-([`go.mau.fi/libsignal`](https://github.com/tulir/libsignal-go),
+([`go.mau.fi/libsignal`](https://github.com/tulir/libsignal-protocol-go),
 подключается транзитивно через whatsmeow) и статически линкуется в
 backend-бинарник — подробности в
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). GPL-3.0 также была бы
