@@ -3,7 +3,7 @@ import { DOMWrapper, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { usePlayground } from '@/stores/playground'
 import { mountKb, testPinia } from '@/test/mount'
 import KnowledgeBase from './KnowledgeBase.vue'
-import type { DraftChangeSet, DraftView, TopicRow } from '@/types'
+import type { DraftChangeSet, DraftView, KbMaterial, TopicRow } from '@/types'
 
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
 vi.mock('@/api/client', async (importOriginal) => {
@@ -32,6 +32,16 @@ function emptyLive(over: Partial<DraftView> = {}): DraftView {
     ...over,
   }
 }
+function material(over: Partial<KbMaterial> = {}): KbMaterial {
+  return {
+    id: 'mat-1', source_type: 'file', source_ref: '', blob_id: '', extracted_text: '',
+    media_kind: '', status: 'ready', extraction: '{}', created_at: '2026-01-01', updated_at: '2026-01-02',
+    filename: 'product-photo.png', mime_type: 'image/png', size_bytes: 204800,
+    processing_status: 'parsed', customer_visibility: 'visible', visual_summary: '', transcript_text: '',
+    operator_note: '', has_content: true,
+    ...over,
+  }
+}
 function emptyChanges(over: Partial<DraftChangeSet> = {}): DraftChangeSet {
   return {
     base_version: 1, updated_at: '', config: null,
@@ -45,7 +55,6 @@ async function mountWith(changes: DraftChangeSet, live: DraftView) {
   vi.mocked(api.get).mockImplementation(async (path: string) => {
     if (path === '/playground/draft') return changes as any
     if (path === '/kb') return live as any
-    if (path === '/kb/materials') return { materials: [] } as any
     throw new Error(`unexpected GET ${path}`)
   })
   const pinia = testPinia()
@@ -170,5 +179,45 @@ describe('KnowledgeBase — singleton toolbars', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('Изменить политики')
     expect(wrapper.text()).not.toContain('Добавить политики')
+  })
+})
+
+// Файлы (материалы): GET /kb already returns the whole materials table
+// (pg.live.materials) — no separate GET /kb/materials call, no lazy
+// fetch-on-tab-open. See KnowledgeBase.vue's own doc comment on `materials`.
+describe('KnowledgeBase — Файлы (материалы) reads pg.live.materials with no extra fetch', () => {
+  it('renders filename, size, and a ready image as a thumbnail with no GET /kb/materials call', async () => {
+    const { wrapper, api } = await mountWith(emptyChanges(), emptyLive({ materials: [material()] }))
+    await switchTab(wrapper, 'Файлы (материалы)')
+
+    expect(wrapper.text()).toContain('product-photo.png')
+    expect(wrapper.text()).toContain('204.8 KB')
+    const img = wrapper.find('img[src*="/kb/materials/mat-1/content"]')
+    expect(img.exists()).toBe(true)
+    expect(api.get).not.toHaveBeenCalledWith('/kb/materials')
+  })
+
+  it('shows a processing placeholder (no thumbnail, no download link) while has_content is false', async () => {
+    const { wrapper } = await mountWith(
+      emptyChanges(),
+      emptyLive({ materials: [material({ id: 'mat-2', has_content: false, processing_status: 'uploaded' })] })
+    )
+    await switchTab(wrapper, 'Файлы (материалы)')
+
+    expect(wrapper.find('img[src*="/kb/materials/mat-2/content"]').exists()).toBe(false)
+    expect(wrapper.find('a[href*="/kb/materials/mat-2/content"]').exists()).toBe(false)
+  })
+
+  it('a document material shows a download link instead of a thumbnail', async () => {
+    const { wrapper } = await mountWith(
+      emptyChanges(),
+      emptyLive({ materials: [material({ id: 'mat-3', filename: 'terms.pdf', mime_type: 'application/pdf' })] })
+    )
+    await switchTab(wrapper, 'Файлы (материалы)')
+
+    expect(wrapper.text()).toContain('terms.pdf')
+    const link = wrapper.find('a[href*="/kb/materials/mat-3/content"]')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toContain('Скачать')
   })
 })

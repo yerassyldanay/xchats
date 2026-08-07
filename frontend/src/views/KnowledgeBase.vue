@@ -13,11 +13,11 @@ import { usePlayground } from '@/stores/playground'
 import { useEntityTabs } from '@/composables/useEntityTabs'
 import { usePendingIndex } from '@/composables/usePendingIndex'
 import { useKbModal } from '@/composables/useKbModal'
-import { shortTime } from '@/lib/format'
-import { api, ApiError } from '@/api/client'
+import { shortTime, formatBytes } from '@/lib/format'
 import type { ContactRow, KbMaterial, PolicyRow } from '@/types'
 import { CONFIG_SECTIONS } from '@/components/kb/kbEntities'
 import { kbActions, LIVE_CONFIG_ACTIONS } from '@/components/kb/records/actions'
+import { kindOfMime, materialContentURL } from '@/components/kb/records/shared'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import PromptTab from '@/components/kb/PromptTab.vue'
@@ -99,29 +99,16 @@ async function confirmDelete() {
 // --- Зоны доставки: needs allZones (parent picker labels) + pending marks.
 const zonesExist = computed(() => (pg.live?.zones.length ?? 0) > 0)
 
-// --- Файлы (материалы): read-only list of kbd_materials (GET /kb/materials).
-// No draft/attach/edit here — unrelated to this redesign.
-const materials = ref<KbMaterial[]>([])
-const materialsLoading = ref(false)
-const materialsError = ref('')
-async function loadMaterials() {
-  materialsLoading.value = true
-  materialsError.value = ''
-  try {
-    const res = await api.get<{ materials: KbMaterial[] }>('/kb/materials')
-    materials.value = res.materials
-  } catch (e) {
-    materialsError.value = e instanceof ApiError ? e.message : 'Не удалось загрузить материалы.'
-  } finally {
-    materialsLoading.value = false
-  }
-}
-function materialPreviewURL(m: KbMaterial): string | null {
-  return m.media_kind === 'image' && m.blob_id ? api.mediaURL('/xchats/api/v1/media/' + m.blob_id) : null
+// --- Файлы (материалы): read-only list of kbd_materials. GET /kb already
+// returns the org's whole materials table (kbstore.LiveView), and this page
+// already loads it into pg.live in onMounted — no separate fetch needed, and
+// nothing here is gated behind the tab being opened for the first time.
+const materials = computed<KbMaterial[]>(() => pg.live?.materials ?? [])
+function materialKind(m: KbMaterial): string {
+  return m.media_kind || kindOfMime(m.mime_type)
 }
 
 watch(active, (a) => {
-  if (a === 'materials' && !materials.value.length) loadMaterials()
   if (a === 'prompt' && !pg.promptView) pg.loadPrompt()
 })
 </script>
@@ -224,26 +211,50 @@ watch(active, (a) => {
 
       <div v-show="active === 'materials'" class="space-y-3">
         <p class="text-xs text-muted-foreground">{{ t('kb.page.materialsHint') }}</p>
-        <div v-if="materialsLoading && !materials.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.materialsLoading') }}</div>
-        <div v-else-if="materialsError" class="flex items-center gap-2 text-sm text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
-          <CircleAlert class="w-4 h-4 shrink-0" /> {{ materialsError }}
-          <Button size="sm" variant="outline" class="ml-auto" @click="loadMaterials">{{ t('kb.page.materialsRetry') }}</Button>
-        </div>
-        <p v-else-if="!materials.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.materialsEmpty') }}</p>
-        <div v-for="m in materials" :key="m.id" class="rounded-lg border border-border bg-card p-4 flex items-center gap-4">
+        <p v-if="!materials.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.materialsEmpty') }}</p>
+        <div
+          v-for="m in materials"
+          :key="m.id"
+          class="rounded-lg border border-border bg-card p-4 flex items-start gap-4"
+          :class="{ 'opacity-60': !m.has_content }"
+        >
           <div class="w-14 h-14 rounded-lg border border-border overflow-hidden shrink-0 grid place-items-center bg-muted">
-            <img v-if="materialPreviewURL(m)" :src="materialPreviewURL(m) ?? ''" class="w-full h-full object-cover" />
+            <img
+              v-if="m.has_content && materialKind(m) === 'image'"
+              :src="materialContentURL(m.id)"
+              loading="lazy"
+              decoding="async"
+              class="w-full h-full object-cover"
+            />
             <FileText v-else class="w-6 h-6 text-muted-foreground" />
           </div>
-          <div class="flex-1 min-w-0">
+          <div class="flex-1 min-w-0 space-y-1">
             <div class="flex items-center gap-2 flex-wrap">
+              <p class="text-sm font-medium truncate">{{ m.filename || m.source_ref || '—' }}</p>
               <Badge variant="secondary" class="text-[11px]">{{ m.source_type }}</Badge>
-              <Badge v-if="m.media_kind" variant="secondary" class="text-[11px]">{{ m.media_kind }}</Badge>
-              <span class="text-xs text-muted-foreground">{{ m.status }}</span>
+              <Badge v-if="materialKind(m)" variant="secondary" class="text-[11px]">{{ materialKind(m) }}</Badge>
+              <Badge variant="outline" class="text-[11px]">{{ m.status }}</Badge>
+              <Badge v-if="m.processing_status && m.processing_status !== m.status" variant="outline" class="text-[11px]">{{ m.processing_status }}</Badge>
+              <Badge v-if="m.customer_visibility" variant="outline" class="text-[11px]">{{ m.customer_visibility }}</Badge>
             </div>
-            <p class="text-sm truncate mt-1">{{ m.source_ref || '—' }}</p>
+            <p v-if="m.mime_type || m.size_bytes" class="text-xs text-muted-foreground">
+              <span v-if="m.mime_type">{{ m.mime_type }}</span>
+              <span v-if="m.size_bytes">{{ m.mime_type ? ' · ' : '' }}{{ formatBytes(m.size_bytes) }}</span>
+            </p>
+            <p v-if="m.visual_summary || m.operator_note" class="text-xs text-muted-foreground truncate">{{ m.visual_summary || m.operator_note }}</p>
+            <p class="text-[11px] text-muted-foreground">
+              {{ t('kb.page.materialsCreated') }} {{ shortTime(m.created_at) }} · {{ t('kb.fields.updatedAt') }} {{ shortTime(m.updated_at) }}
+            </p>
           </div>
-          <span class="text-xs text-muted-foreground shrink-0 whitespace-nowrap">{{ shortTime(m.created_at) }}</span>
+          <a
+            v-if="m.has_content"
+            :href="materialContentURL(m.id)"
+            target="_blank"
+            rel="noopener"
+            class="shrink-0 text-xs font-medium text-primary hover:underline"
+          >
+            {{ t('kb.page.materialsDownload') }}
+          </a>
         </div>
       </div>
 

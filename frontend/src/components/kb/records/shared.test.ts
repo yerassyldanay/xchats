@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changedFields, mediaCount, stateForChange } from './shared'
+import { changedFields, kindOfMime, materialContentURL, mediaIds, stateForChange } from './shared'
 
 describe('stateForChange', () => {
   it('maps added -> new', () => {
@@ -25,16 +25,36 @@ describe('changedFields', () => {
   })
 })
 
-describe('mediaCount', () => {
-  it('is 0 for null/undefined', () => {
-    expect(mediaCount(null)).toBe(0)
-    expect(mediaCount(undefined)).toBe(0)
+describe('mediaIds', () => {
+  it('is [] for null/undefined', () => {
+    expect(mediaIds(null)).toEqual([])
+    expect(mediaIds(undefined)).toEqual([])
   })
-  it('is 1 for a single attached id', () => {
-    expect(mediaCount('abc-123')).toBe(1)
+  it('wraps a single attached id', () => {
+    expect(mediaIds('abc-123')).toEqual(['abc-123'])
   })
-  it('is the array length for a multi-value media field', () => {
-    expect(mediaCount(['a', 'b', 'c'])).toBe(3)
-    expect(mediaCount([])).toBe(0)
+  it('passes an array through as-is', () => {
+    expect(mediaIds(['a', 'b', 'c'])).toEqual(['a', 'b', 'c'])
+    expect(mediaIds([])).toEqual([])
+  })
+})
+
+describe('kindOfMime', () => {
+  it('classifies the four recognised prefixes', () => {
+    expect(kindOfMime('image/png')).toBe('image')
+    expect(kindOfMime('video/mp4')).toBe('video')
+    expect(kindOfMime('audio/mpeg')).toBe('audio')
+    expect(kindOfMime('application/pdf')).toBe('document')
+    expect(kindOfMime('text/plain')).toBe('document')
+  })
+  it('is empty for anything unrecognised', () => {
+    expect(kindOfMime('')).toBe('')
+    expect(kindOfMime('font/woff2')).toBe('')
+  })
+})
+
+describe('materialContentURL', () => {
+  it('points at the session-authenticated content endpoint', () => {
+    expect(materialContentURL('abc-123')).toBe('/xchats/api/v1/kb/materials/abc-123/content')
   })
 })

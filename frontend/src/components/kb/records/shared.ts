@@ -4,6 +4,7 @@
 // RecordShell.vue for the chrome every *Record.vue wraps its own field body
 // in.
 import type { ChangeType } from '@/composables/draftChanges'
+import { api } from '@/api/client'
 
 // published: a live row shown with no draft context at all (Знаний база).
 // new: a pending draft row with no live counterpart yet.
@@ -50,11 +51,32 @@ export function changedFields<T>(draftRow: T | undefined, liveRow: T | undefined
   return keys.filter((k) => draftRow[k] !== liveRow[k]).map(String)
 }
 
-// mediaCount reads a media field that is either a single nullable id
+// mediaIds normalizes a media field that is either a single nullable id
 // (`string | null`, e.g. featured_image) or an array of ids (e.g.
-// gallery_images) and reports how many materials are actually attached — the
-// uniform shape every canonical media column needs for a read-only chip.
-export function mediaCount(v: string | string[] | null | undefined): number {
-  if (!v) return 0
-  return Array.isArray(v) ? v.length : 1
+// gallery_images) into the uniform shape MediaStrip iterates over.
+export function mediaIds(v: string | string[] | null | undefined): string[] {
+  if (!v) return []
+  return Array.isArray(v) ? v : [v]
+}
+
+// kindOfMime mirrors the backend's kbstore.KindOfMime (internal/kbstore/
+// mcp_media.go) exactly — media_kind is only ever populated by the legacy
+// text-extraction pipeline (materials.go's UpdateMaterialExtraction), so
+// every material the MCP upload/attach lineage creates has an empty
+// media_kind and MediaStrip must derive the same "how do I render this"
+// answer from mime_type instead.
+export function kindOfMime(mime: string): 'image' | 'video' | 'audio' | 'document' | '' {
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('video/')) return 'video'
+  if (mime.startsWith('audio/')) return 'audio'
+  if (mime.startsWith('application/') || mime.startsWith('text/')) return 'document'
+  return ''
+}
+
+// materialContentURL points at the session-authenticated byte stream for one
+// kbd_materials row (GET /kb/materials/:id/content, kb_media.go) — safe to
+// use directly as an <img>/<video> src or <a href>, cookies travel
+// same-origin automatically.
+export function materialContentURL(id: string): string {
+  return api.mediaURL('/xchats/api/v1/kb/materials/' + id + '/content')
 }

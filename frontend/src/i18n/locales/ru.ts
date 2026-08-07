@@ -108,6 +108,7 @@ export default {
       salesStatus: 'Активен для продажи',
       inStock: 'В наличии',
       deliveryAvailable: 'Доставка доступна',
+      updatedAt: 'Обновлено:',
     },
     media: {
       image: 'Изображение',
@@ -122,6 +123,11 @@ export default {
       businessCard: 'Визитка',
       map: 'Карта',
       legalDocuments: 'Реквизиты',
+    },
+    mediaStrip: {
+      unavailable: 'Недоступно',
+      processing: 'Обрабатывается…',
+      openImage: 'Открыть изображение',
     },
     pricingType: { fixed: 'Фиксированная', percentage: 'Процент', tiered: 'Пороговая' },
     zoneLevel: { city: 'Город', region: 'Регион', country: 'Страна' },
@@ -177,9 +183,9 @@ export default {
       promptTab: 'Промпт',
       materialsTab: 'Файлы (материалы)',
       materialsHint: 'Материалы, добавленные через интеграции базы знаний, доступны здесь только для просмотра.',
-      materialsLoading: 'Загрузка…',
-      materialsRetry: 'Повторить',
       materialsEmpty: 'Материалов пока нет.',
+      materialsCreated: 'Создано:',
+      materialsDownload: 'Скачать',
     },
     forms: {
       save: 'Сохранить',

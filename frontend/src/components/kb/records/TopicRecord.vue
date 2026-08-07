@@ -13,8 +13,8 @@ import type { ChangeType } from '@/composables/draftChanges'
 import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
-import MediaChip from './MediaChip.vue'
-import { changedFields, mediaCount, stateForChange } from './shared'
+import MediaStrip from './MediaStrip.vue'
+import { changedFields, stateForChange } from './shared'
 
 const props = defineProps<{
   row: TopicRow
@@ -43,6 +43,7 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['title', 'b
     :actions="actions"
     :busy="busy"
     :blocked-note="blockedNote"
+    :updated-at="row.updated_at"
     @edit="$emit('edit')"
     @publish="$emit('publish')"
     @cancel="$emit('cancel')"
@@ -58,11 +59,11 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['title', 'b
       <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.body_md || '—' }}</p>
       <FieldDiffNote :show="diff.includes('body_md')" :was="liveRow?.body_md ?? ''" />
     </div>
-    <div class="flex items-center gap-1.5 flex-wrap">
-      <MediaChip :label="t('kb.media.image')" :count="mediaCount(row.featured_image)" />
-      <MediaChip :label="t('kb.media.illustrations')" :count="mediaCount(row.illustration_images)" />
-      <MediaChip :label="t('kb.media.videos')" :count="mediaCount(row.explainer_videos)" />
-      <MediaChip :label="t('kb.media.documents')" :count="mediaCount(row.reference_documents)" />
+    <div class="flex flex-col gap-2">
+      <MediaStrip :label="t('kb.media.image')" :ids="row.featured_image" />
+      <MediaStrip :label="t('kb.media.illustrations')" :ids="row.illustration_images" />
+      <MediaStrip :label="t('kb.media.videos')" :ids="row.explainer_videos" />
+      <MediaStrip :label="t('kb.media.documents')" :ids="row.reference_documents" />
     </div>
   </RecordShell>
 </template>

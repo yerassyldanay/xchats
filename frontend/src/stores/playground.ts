@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { connectRealtime } from '../lib/sse'
-import type { CancelChangeResponse, DraftChangeSet, DraftView, PromptView } from '../types'
+import type { CancelChangeResponse, DraftChangeSet, DraftView, KbMaterial, PromptView } from '../types'
 import type { ChangeKind } from '@/composables/draftChanges'
 import type {
   ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, TariffPayload, TopicPayload,
@@ -64,6 +64,19 @@ export const usePlayground = defineStore('playground', {
         ? (['persona', 'mission', 'guardrails', 'language_policy', 'reply_max_words'] as const).filter((k) => c.config![k] !== undefined).length
         : 0
       return rows + c.deletes.length + configFields
+    },
+    // materialsById indexes GET /kb's `materials` array (kbstore.LiveView
+    // already returns the org's whole kbd_materials table — see
+    // draft.go's mergedView) — materials themselves have no draft/live
+    // split at all, so a draft row's media field (e.g. a staged product's
+    // gallery_images) resolves against this the same as a published one's.
+    // Both /knowledge-base and /playground already call loadLive() on
+    // mount and re-call it on every kb.row.changed SSE event, so this
+    // getter needs no fetch or refresh logic of its own.
+    materialsById(s): Record<string, KbMaterial> {
+      const out: Record<string, KbMaterial> = {}
+      for (const m of s.live?.materials ?? []) out[m.id] = m
+      return out
     },
   },
   actions: {

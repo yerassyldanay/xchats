@@ -66,6 +66,17 @@ export function channelLabel(channel: string): string {
   }
 }
 
+// formatBytes renders a byte count the way file managers do (1000-based
+// decimal units, IEC abbreviations left untranslated like every OS does) —
+// used by the KB materials tab and MediaStrip's document rows.
+export function formatBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1000)), units.length - 1)
+  const value = bytes / 1000 ** i
+  return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`
+}
+
 // tick maps a message delivery status to a UI-agnostic discriminant. The
 // component maps the discriminant to an icon + class, keeping this module pure.
 export type TickStatus = 'queued' | 'sent' | 'delivered' | 'read' | 'failed'

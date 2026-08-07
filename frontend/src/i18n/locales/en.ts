@@ -102,6 +102,7 @@ export default {
       salesStatus: 'Active for sale',
       inStock: 'In stock',
       deliveryAvailable: 'Delivery available',
+      updatedAt: 'Updated:',
     },
     media: {
       image: 'Image',
@@ -116,6 +117,11 @@ export default {
       businessCard: 'Business card',
       map: 'Map',
       legalDocuments: 'Legal documents',
+    },
+    mediaStrip: {
+      unavailable: 'Unavailable',
+      processing: 'Processing…',
+      openImage: 'Open image',
     },
     pricingType: { fixed: 'Fixed', percentage: 'Percentage', tiered: 'Tiered' },
     zoneLevel: { city: 'City', region: 'Region', country: 'Country' },
@@ -171,9 +177,9 @@ export default {
       promptTab: 'Prompt',
       materialsTab: 'Files (materials)',
       materialsHint: 'Materials added through knowledge base integrations are shown here for viewing only.',
-      materialsLoading: 'Loading…',
-      materialsRetry: 'Retry',
       materialsEmpty: 'No materials yet.',
+      materialsCreated: 'Created:',
+      materialsDownload: 'Download',
     },
     forms: {
       save: 'Save',

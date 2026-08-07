@@ -391,6 +391,21 @@ export interface KbMaterial {
   extraction: string
   created_at: string
   updated_at: string
+  // The fields below belong to the upload-material lineage (MCP kb_media_upload
+  // → PUT /mcp/uploads/:id) — empty/zero for a material still on the legacy
+  // text/url path above (blob_id/extracted_text/etc.).
+  filename: string
+  mime_type: string
+  size_bytes: number
+  processing_status: string // uploaded | parsed (see kbstore.CompleteMaterialUpload)
+  customer_visibility: string
+  visual_summary: string
+  transcript_text: string
+  operator_note: string
+  // has_content reports whether bytes are actually retrievable at
+  // GET /kb/materials/:id/content — false while an upload is still in
+  // flight, or for a legacy material that never had bytes at all.
+  has_content: boolean
 }
 export interface KbRequest {
   id: string
@@ -460,6 +475,19 @@ export interface DraftChangeDelete {
 export interface CancelChangeResponse {
   changed: boolean
   changes: DraftChangeSet
+}
+
+// McpConnectionInfo mirrors GET /mcp-connection (backend/internal/httpapi/mcp_info.go)
+// — the session-level (non-admin) view of what URL to paste into a ChatGPT or
+// Claude MCP connector. public_url/tunnel_running are only meaningful when
+// tunnel_available is true.
+export interface McpConnectionInfo {
+  mcp_url: string
+  auth_enabled: boolean
+  tunnel_available: boolean
+  tunnel_running: boolean
+  public_url?: string
+  scopes: string[]
 }
 
 // PromptView mirrors GET /kb/prompt (backend/internal/httpapi/kb_prompt.go) —
