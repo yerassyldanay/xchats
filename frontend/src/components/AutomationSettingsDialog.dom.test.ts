@@ -165,13 +165,8 @@ describe('AutomationSettingsDialog', () => {
 })
 
 // This describe block runs at UTC+5 instead of the file's pinned UTC, to
-// cover the one thing a zero offset can never exercise: reopening the
-// dialog on a channel already saved as "Always" (or "Weekends"). See
-// schedule.test.ts's "detects Always/Weekends after a UTC round trip at a
-// non-zero offset" — utcToLocal splits each full-day UTC window into two at
-// any non-zero offset, so localWindows.ts's setup-time
-// utcToLocal(props.account.automation.schedule, offsetMinutes) call
-// produces 14 rows instead of 7, and detectPreset no longer recognizes it.
+// cover reopening a timezone-neutral "Always" schedule after the generic
+// UTC-to-local conversion has crossed midnight boundaries.
 describe('AutomationSettingsDialog at a non-UTC offset', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -183,7 +178,7 @@ describe('AutomationSettingsDialog at a non-UTC offset', () => {
     vi.stubEnv('TZ', 'UTC') // restore for every other test in this file
   })
 
-  it('BUG: reopening a channel already saved as Always no longer shows 7 rows', async () => {
+  it('reopens a channel saved as Always with one row per weekday', async () => {
     await mountDialog({
       account: account({
         automation: { mode: 'scheduled_auto', wait_seconds: 5, wait_seconds_override: null, default_wait_seconds: 5, schedule: alwaysWindows() },

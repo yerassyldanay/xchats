@@ -142,9 +142,8 @@ func (s *Store) AutomationWindowsForAccount(ctx context.Context, accountID uuid.
 // and dispatch job for its chats is deleted, so a channel switched off does
 // not go on to generate (or auto-send) a draft that was already queued up
 // before the switch. A dispatch job already 'processing' (a live goroutine
-// mid-generation) is deliberately left alone here; its own atomic recheck
-// (see WriteDraftSetIfVersionCurrent / ClaimDraftForAutoSend) is the second,
-// defense-in-depth layer that catches it instead.
+// mid-generation) is deliberately left alone here; its own mode and atomic
+// send rechecks are the defense-in-depth layer that catches it instead.
 func (s *Store) SetAutomationSettings(ctx context.Context, accountID uuid.UUID, mode string, waitOverride *int, windows []AutomationWindowInput) (AutomationSettings, []AutomationWindow, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -199,16 +198,6 @@ func (s *Store) SetAutomationSettings(ctx context.Context, accountID uuid.UUID, 
 // Durable debounce jobs
 // ---------------------------------------------------------------------------
 
-// DebounceJob is one chat's durable "when should we next act" row.
-type DebounceJob struct {
-	ChatID       uuid.UUID
-	AccountID    uuid.UUID
-	Channel      string
-	DeadlineAt   time.Time
-	BurstVersion int64
-	Status       string
-}
-
 // ArmDebounce resets chatID's debounce deadline to deadline and bumps its
 // burst version, creating the row on the first call for a chat. There is no
 // maximum burst cap: every call — however many arrive back to back — simply
@@ -230,14 +219,12 @@ func (s *Store) ArmDebounce(ctx context.Context, chatID, accountID uuid.UUID, ch
 	return err
 }
 
-// ClaimDueDebounceJobs atomically flips up to limit 'pending' rows whose
-// deadline has passed to 'claimed' and returns them — the scheduler's
-// hand-off point into automation_dispatch_jobs. A chat claimed here that
-// receives a new inbound message before its dispatch job finishes is
-// unaffected: ArmDebounce's upsert flips this same row back to 'pending'
-// with a fresh deadline and a higher burst_version regardless of its
-// current status, so it becomes claimable again once IT goes quiet.
-func (s *Store) ClaimDueDebounceJobs(ctx context.Context, now time.Time, limit int) ([]DebounceJob, error) {
+// ClaimDueDispatchJobs atomically claims due debounce rows and creates their
+// durable dispatch jobs in the same transaction. If any dispatch insert
+// fails, the claim is rolled back too, so no burst can become permanently
+// stranded between the two tables. A newer inbound message still re-arms
+// the debounce row with a higher burst version and is claimed independently.
+func (s *Store) ClaimDueDispatchJobs(ctx context.Context, now time.Time, limit int) ([]DispatchJob, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -276,22 +263,46 @@ func (s *Store) ClaimDueDebounceJobs(ctx context.Context, now time.Time, limit i
 	claimed, err := tx.Query(ctx, `
 		UPDATE automation_debounce_jobs SET status = 'claimed', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE status = 'pending' AND chat_id IN (SELECT value FROM json_each($1))
-		RETURNING chat_id, account_id, channel, deadline_at, burst_version, status`,
+		RETURNING chat_id, account_id, channel, burst_version`,
 		dbx.UUIDArray(ids))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = claimed.Close() }()
-	var out []DebounceJob
+	type dueDebounce struct {
+		chatID       uuid.UUID
+		accountID    uuid.UUID
+		channel      string
+		burstVersion int64
+	}
+	var due []dueDebounce
 	for claimed.Next() {
-		var j DebounceJob
-		if err := claimed.Scan(&j.ChatID, &j.AccountID, &j.Channel, &j.DeadlineAt, &j.BurstVersion, &j.Status); err != nil {
+		var d dueDebounce
+		if err := claimed.Scan(&d.chatID, &d.accountID, &d.channel, &d.burstVersion); err != nil {
+			_ = claimed.Close()
 			return nil, err
 		}
-		out = append(out, j)
+		due = append(due, d)
 	}
 	if err := claimed.Err(); err != nil {
+		_ = claimed.Close()
 		return nil, err
+	}
+	if err := claimed.Close(); err != nil {
+		return nil, err
+	}
+
+	out := make([]DispatchJob, 0, len(due))
+	for _, d := range due {
+		var j DispatchJob
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO automation_dispatch_jobs (chat_id, account_id, channel, burst_version, status)
+			VALUES ($1, $2, $3, $4, 'pending')
+			RETURNING id, chat_id, account_id, channel, burst_version, status, attempts, last_error`,
+			d.chatID, d.accountID, d.channel, d.burstVersion).
+			Scan(&j.ID, &j.ChatID, &j.AccountID, &j.Channel, &j.BurstVersion, &j.Status, &j.Attempts, &j.LastError); err != nil {
+			return nil, wrap("promote debounce to dispatch job", err)
+		}
+		out = append(out, j)
 	}
 	return out, tx.Commit(ctx)
 }
@@ -327,15 +338,19 @@ type DispatchJob struct {
 	LastError    string
 }
 
-// CreateDispatchJob durably records that a claimed debounce burst is about
-// to generate (and possibly auto-send) a response — the restart-safe
-// hand-off the scheduler performs the moment it claims a due debounce job,
-// before ever publishing to the (non-durable, in-memory) queue.
+// CreateDispatchJob durably records a dispatch job for callers that already
+// have a burst version. It is idempotent per (chat, burst): duplicate calls
+// return the existing id instead of creating two independently executable
+// rows. Scheduler promotion uses ClaimDueDispatchJobs so its claim and
+// insert are atomic.
 func (s *Store) CreateDispatchJob(ctx context.Context, chatID, accountID uuid.UUID, channel string, version int64) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO automation_dispatch_jobs (chat_id, account_id, channel, burst_version, status)
 		VALUES ($1, $2, $3, $4, 'pending')
+		ON CONFLICT (chat_id, burst_version) DO UPDATE SET
+			account_id = excluded.account_id,
+			channel = excluded.channel
 		RETURNING id`, chatID, accountID, channel, version).Scan(&id)
 	return id, err
 }
@@ -367,6 +382,19 @@ func (s *Store) MarkDispatchProcessing(ctx context.Context, id uuid.UUID) error 
 	return err
 }
 
+// ClaimDispatchJob grants one worker ownership by atomically moving a job
+// from pending to processing. A duplicate queue delivery sees false and
+// exits without generating or sending a second response.
+func (s *Store) ClaimDispatchJob(ctx context.Context, id uuid.UUID) (bool, error) {
+	tag, err := s.db.Exec(ctx, `
+		UPDATE automation_dispatch_jobs SET status = 'processing', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id = $1 AND status = 'pending'`, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // DeleteDispatchJob removes a settled dispatch job — success, a stale
 // (superseded) discard, or a permanent give-up all end the same way: there
 // is no terminal status worth keeping a row around for.
@@ -391,21 +419,42 @@ func (s *Store) RecordDispatchFailure(ctx context.Context, id uuid.UUID, cause s
 	return attempts, err
 }
 
-// RecoverableDispatchJobs returns dispatch jobs that need a boot-time (or
-// periodic) re-publish: still 'pending' (the process died before ever
-// starting them) or 'processing' since before stuckSince (the process died
-// mid-generation). Mirrors PendingTelegramMedia's exact recovery shape —
-// the row IS the durable queue.
+// RecoverableDispatchJobs claims dispatch jobs for a boot-time or periodic
+// re-publish. Pending jobs must be older than stuckSince, so a job just
+// enqueued by claimDue is not immediately delivered twice. Stale processing
+// jobs are first returned to pending; selected rows have their recovery
+// timestamp refreshed so another recovery tick does not enqueue them again
+// before a worker starts. The worker still acquires final ownership through
+// ClaimDispatchJob.
 func (s *Store) RecoverableDispatchJobs(ctx context.Context, stuckSince time.Time, limit int) ([]DispatchJob, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.Query(ctx, `
-		SELECT id, chat_id, account_id, channel, burst_version, status, attempts, last_error
-		FROM automation_dispatch_jobs
-		WHERE status = 'pending' OR (status = 'processing' AND updated_at < $1)
-		ORDER BY updated_at
-		LIMIT $2`, stuckSince, limit)
+	// updated_at is produced by SQLite's UTC strftime default. Bind the
+	// cutoff in the identical representation so comparisons do not depend
+	// on database/sql's time.Time serialization or the host time zone.
+	cutoff := stuckSince.UTC().Format("2006-01-02 15:04:05.000")
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE automation_dispatch_jobs SET status = 'pending'
+		WHERE status = 'processing' AND updated_at <= $1`, cutoff); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `
+		UPDATE automation_dispatch_jobs
+		SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id IN (
+			SELECT id FROM automation_dispatch_jobs
+			WHERE status = 'pending' AND updated_at <= $1
+			ORDER BY updated_at
+			LIMIT $2
+		)
+		RETURNING id, chat_id, account_id, channel, burst_version, status, attempts, last_error`, cutoff, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +467,13 @@ func (s *Store) RecoverableDispatchJobs(ctx context.Context, stuckSince time.Tim
 		}
 		out = append(out, j)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, tx.Commit(ctx)
 }
 
 // ---------------------------------------------------------------------------

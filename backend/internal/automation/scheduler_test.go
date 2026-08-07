@@ -104,17 +104,10 @@ func TestSchedulerRecoverDispatchJobsRepublishesStuckAndPending(t *testing.T) {
 	}
 }
 
-// TestRecoverDispatchJobsCanDuplicateAnAlreadyClaimedJob pins Finding #1: a
-// dispatch job claimDue already enqueued sits at status='pending' from
-// CreateDispatchJob until the worker that dequeues it calls
-// MarkDispatchProcessing — which can be arbitrarily delayed if the worker
-// pool is busy (the job just waits in the buffered s.dispatch channel).
-// RecoverableDispatchJobs' `status = 'pending'` clause has NO age filter
-// (unlike its 'processing' branch, which is gated by stuckSince), so a
-// recovery tick landing in that window re-enqueues the SAME dispatch job id
-// a second time — handing it to two workers concurrently. Version fencing
-// does not catch this: both copies carry the identical burst_version.
-func TestRecoverDispatchJobsCanDuplicateAnAlreadyClaimedJob(t *testing.T) {
+// Recovery only republishes pending jobs older than its cutoff. A dispatch
+// just created and enqueued by claimDue must therefore remain queued once,
+// even if a recovery tick runs before a worker acquires it.
+func TestRecoverDispatchJobsDoesNotDuplicateFreshlyEnqueuedJob(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
 	accountID, chatID := seedRunnerChat(t, st)
@@ -129,7 +122,7 @@ func TestRecoverDispatchJobsCanDuplicateAnAlreadyClaimedJob(t *testing.T) {
 	firstID := <-s.dispatch
 
 	// The dispatch worker that would normally dequeue firstID and call
-	// MarkDispatchProcessing hasn't run yet (nothing in this test drains
+	// ClaimDispatchJob hasn't run yet (nothing in this test drains
 	// s.dispatch further) — the job is still 'pending' in the DB. A
 	// recovery tick landing right now (e.g. the 1-minute periodic pass, or
 	// the boot-time recovery pass racing a slow claim) sees exactly that.
@@ -137,18 +130,8 @@ func TestRecoverDispatchJobsCanDuplicateAnAlreadyClaimedJob(t *testing.T) {
 
 	select {
 	case secondID := <-s.dispatch:
-		if secondID != firstID {
-			t.Fatalf("recovery enqueued a different job (%s) than claimDue's (%s) — that's fine on its own, "+
-				"but doesn't match the scenario this test targets", secondID, firstID)
-		}
-		t.Fatalf("BUG (scheduler.go recoverDispatchJobs / store.RecoverableDispatchJobs' unfiltered "+
-			"status='pending' clause): dispatch job %s was handed to the worker pool twice before either "+
-			"delivery was even started — two workers can now run HandleRun on it concurrently, both pass "+
-			"the same burst_version fence, and (in scheduled_auto) both can independently win "+
-			"ClaimDraftForAutoSend since it only excludes human/AI replies newer than the trigger, not a "+
-			"sibling draft generated from the same trigger", firstID)
+		t.Fatalf("fresh dispatch job %s was unexpectedly recovered as %s before the cutoff", firstID, secondID)
 	default:
-		// No bug: only one enqueue happened.
 	}
 }
 

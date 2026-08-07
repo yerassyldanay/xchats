@@ -45,7 +45,7 @@ CREATE INDEX automation_schedule_windows_account_idx ON automation_schedule_wind
 -- last_message + effective_wait and burst_version increments — there is no
 -- maximum burst cap, so a chat that never goes quiet simply never comes due.
 -- The scheduler claims rows whose deadline has passed (status
--- 'pending' -> 'claimed', see store.ClaimDueDebounceJobs) and promotes each
+-- 'pending' -> 'claimed', see store.ClaimDueDispatchJobs) and promotes each
 -- into automation_dispatch_jobs; a new inbound message arriving after a
 -- claim still upserts this same row (chat_id is the primary key), flipping
 -- it back to 'pending' with a fresh deadline and a bumped version, which is

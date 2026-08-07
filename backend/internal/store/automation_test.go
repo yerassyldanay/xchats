@@ -163,9 +163,9 @@ func TestSetAutomationSettingsOffInvalidatesPendingWork(t *testing.T) {
 		t.Fatalf("SetAutomationSettings(off): %v", err)
 	}
 
-	due, err := st.ClaimDueDebounceJobs(ctx, time.Now().Add(time.Hour), 10)
+	due, err := st.ClaimDueDispatchJobs(ctx, time.Now().Add(time.Hour), 10)
 	if err != nil {
-		t.Fatalf("ClaimDueDebounceJobs: %v", err)
+		t.Fatalf("ClaimDueDispatchJobs: %v", err)
 	}
 	for _, j := range due {
 		if j.ChatID == chatID {
@@ -215,16 +215,16 @@ func TestArmDebounceResetsDeadlineAndBumpsVersion(t *testing.T) {
 		t.Fatalf("version after second arm = %d, want 2", v2)
 	}
 
-	due, err := st.ClaimDueDebounceJobs(ctx, first.Add(time.Millisecond), 10)
+	due, err := st.ClaimDueDispatchJobs(ctx, first.Add(time.Millisecond), 10)
 	if err != nil {
-		t.Fatalf("ClaimDueDebounceJobs: %v", err)
+		t.Fatalf("ClaimDueDispatchJobs: %v", err)
 	}
 	if len(due) != 0 {
 		t.Fatalf("the reset deadline should not be due yet at the OLD deadline: got %d due jobs", len(due))
 	}
-	due, err = st.ClaimDueDebounceJobs(ctx, second.Add(time.Millisecond), 10)
+	due, err = st.ClaimDueDispatchJobs(ctx, second.Add(time.Millisecond), 10)
 	if err != nil {
-		t.Fatalf("ClaimDueDebounceJobs at the new deadline: %v", err)
+		t.Fatalf("ClaimDueDispatchJobs at the new deadline: %v", err)
 	}
 	if len(due) != 1 || due[0].ChatID != chatID || due[0].BurstVersion != 2 {
 		t.Fatalf("due jobs = %+v, want exactly chat %s at version 2", due, chatID)
@@ -271,9 +271,9 @@ func TestDebounceChannelIsolation(t *testing.T) {
 
 	// Only chat A's deadline has passed; chat B's independent, much later
 	// deadline must not be affected by (or claimable alongside) it.
-	due, err := st.ClaimDueDebounceJobs(ctx, now.Add(2*time.Second), 10)
+	due, err := st.ClaimDueDispatchJobs(ctx, now.Add(2*time.Second), 10)
 	if err != nil {
-		t.Fatalf("ClaimDueDebounceJobs: %v", err)
+		t.Fatalf("ClaimDueDispatchJobs: %v", err)
 	}
 	if len(due) != 1 || due[0].ChatID != chatA {
 		t.Fatalf("due jobs = %+v, want exactly chat A", due)
@@ -581,21 +581,11 @@ func TestInsertAutomationOutboundDoesNotClearUnread(t *testing.T) {
 	}
 }
 
-// TestClaimedDebounceJobIsUnrecoverableIfDispatchJobCreationFails pins a
-// real hole in the "restart-safe" story: internal/automation/scheduler.go's
-// claimDue commits ClaimDueDebounceJobs (status 'pending' -> 'claimed') in
-// one transaction, then calls CreateDispatchJob in a SEPARATE transaction.
-// If that second call fails for any reason, claimDue just logs and
-// `continue`s — it does not revert the claim. This test simulates exactly
-// that failure (by simply never calling CreateDispatchJob after the claim)
-// and shows the row is then permanently stuck: ClaimDueDebounceJobs only
-// ever selects status='pending', so it can never reclaim this row, and
-// RecoverableDispatchJobs only reads automation_dispatch_jobs, which has no
-// row for this burst. The customer gets no reply for this burst until a
-// brand-new inbound message re-arms the debounce (ArmDebounce forces
-// status='pending' unconditionally) — silently dropped, not retried.
-func TestClaimedDebounceJobIsUnrecoverableIfDispatchJobCreationFails(t *testing.T) {
-	st := dbtest.New(t)
+// Claiming the debounce row and inserting its dispatch row is one atomic
+// promotion. A failed insert must roll the claim back so the same due burst
+// can be retried instead of remaining stranded in status='claimed'.
+func TestClaimDueDispatchJobsRollsBackIfDispatchCreationFails(t *testing.T) {
+	st, db := dbtest.Open(t)
 	ctx := context.Background()
 	_, accountID, chatID := seedOneChat(t, st)
 
@@ -604,49 +594,27 @@ func TestClaimedDebounceJobIsUnrecoverableIfDispatchJobCreationFails(t *testing.
 		t.Fatalf("ArmDebounce: %v", err)
 	}
 
-	claimed, err := st.ClaimDueDebounceJobs(ctx, time.Now(), 10)
-	if err != nil {
-		t.Fatalf("ClaimDueDebounceJobs: %v", err)
-	}
-	found := false
-	for _, j := range claimed {
-		if j.ChatID == chatID {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected the due debounce job to be claimed: %+v", claimed)
-	}
-	// Deliberately do NOT call CreateDispatchJob here — this is
-	// scheduler.go's unhandled failure path.
-
-	again, err := st.ClaimDueDebounceJobs(ctx, time.Now().Add(time.Hour), 10)
-	if err != nil {
-		t.Fatalf("ClaimDueDebounceJobs (retry): %v", err)
-	}
-	for _, j := range again {
-		if j.ChatID == chatID {
-			t.Fatalf("a 'claimed' debounce row must not be re-claimable — got %+v", j)
-		}
+	if _, err := db.Exec(ctx, `
+		CREATE TRIGGER fail_dispatch_insert
+		BEFORE INSERT ON automation_dispatch_jobs
+		BEGIN
+			SELECT RAISE(ABORT, 'forced dispatch insert failure');
+		END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
 	}
 
-	recoverable, err := st.RecoverableDispatchJobs(ctx, time.Now().Add(time.Hour), 10)
-	if err != nil {
-		t.Fatalf("RecoverableDispatchJobs: %v", err)
+	if jobs, err := st.ClaimDueDispatchJobs(ctx, time.Now(), 10); err == nil {
+		t.Fatalf("ClaimDueDispatchJobs = %+v, nil; want forced insert error", jobs)
 	}
-	for _, j := range recoverable {
-		if j.ChatID == chatID {
-			t.Fatalf("no dispatch job was ever created for this burst, so nothing should be recoverable, got %+v", j)
-		}
+	if _, err := db.Exec(ctx, `DROP TRIGGER fail_dispatch_insert`); err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
 	}
 
-	// The bug: nothing in the store layer can ever surface this chat's due
-	// burst again. A correct implementation would give a 'claimed' row with
-	// no matching dispatch job some other recovery path (e.g. a stuck-claim
-	// timeout mirroring RecoverableDispatchJobs' 'processing' cutoff); today
-	// there isn't one, so this assertion fails.
-	t.Fatalf("BUG (scheduler.go claimDue, see internal/store/automation.go's ClaimDueDebounceJobs/"+
-		"RecoverableDispatchJobs): a debounce job claimed but never promoted to a dispatch job is "+
-		"permanently unrecoverable — chat_id=%s will get no automated reply for this burst until an "+
-		"unrelated new customer message re-arms it", chatID)
+	jobs, err := st.ClaimDueDispatchJobs(ctx, time.Now().Add(time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ClaimDueDispatchJobs retry: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].ChatID != chatID {
+		t.Fatalf("retried promotion = %+v, want one dispatch job for chat %s", jobs, chatID)
+	}
 }

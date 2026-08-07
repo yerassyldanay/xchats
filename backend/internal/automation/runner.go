@@ -64,8 +64,27 @@ func (r *Runner) HandleRun(ctx context.Context, dispatchJobID uuid.UUID) {
 		r.Log.Error("automation: load dispatch job failed", "dispatch_job_id", dispatchJobID, "err", err)
 		return
 	}
-	if err := r.Store.MarkDispatchProcessing(ctx, job.ID); err != nil {
-		r.Log.Error("automation: mark dispatch processing failed", "dispatch_job_id", job.ID, "err", err)
+	// A duplicate delivery that observes an existing owner must not run the
+	// job again. It may still clean up work that was already processing when
+	// an operator switched the account off.
+	if job.Status == "processing" {
+		settings, settingsErr := r.Store.AutomationSettingsForAccount(ctx, job.AccountID)
+		if settingsErr != nil {
+			r.Log.Error("automation: load settings for owned dispatch job failed", "dispatch_job_id", job.ID, "err", settingsErr)
+			return
+		}
+		if settings.Mode == string(pureautomation.ModeOff) {
+			_ = r.Store.DeleteDispatchJob(ctx, job.ID)
+		}
+		return
+	}
+	claimed, err := r.Store.ClaimDispatchJob(ctx, job.ID)
+	if err != nil {
+		r.Log.Error("automation: claim dispatch job failed", "dispatch_job_id", job.ID, "err", err)
+		return
+	}
+	if !claimed {
+		return // another worker already owns this queue delivery
 	}
 
 	settings, err := r.Store.AutomationSettingsForAccount(ctx, job.AccountID)

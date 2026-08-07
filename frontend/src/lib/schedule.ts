@@ -67,8 +67,31 @@ function shiftOne(w: ScheduleWindow, deltaMinutes: number): ScheduleWindow[] {
   return [{ weekday, start_minute: startMinute, end_minute: rawEnd }]
 }
 
+// Shifting a full-day range must temporarily split it at midnight. Merge
+// adjacent same-day pieces again after the whole schedule has moved so a
+// semantic full day returns to the canonical 00:00-24:00 representation.
+// This also makes local -> UTC -> local a structural round trip for the
+// full-day presets, instead of accumulating extra editor rows.
+function coalesceSameDay(windows: ScheduleWindow[]): ScheduleWindow[] {
+  const sorted = windows
+    .map((w) => ({ ...w }))
+    .sort((a, b) => a.weekday - b.weekday || a.start_minute - b.start_minute || a.end_minute - b.end_minute)
+  const out: ScheduleWindow[] = []
+
+  for (const current of sorted) {
+    const previous = out[out.length - 1]
+    const bothNonWrapping = previous?.end_minute > previous?.start_minute && current.end_minute > current.start_minute
+    if (previous && previous.weekday === current.weekday && bothNonWrapping && current.start_minute <= previous.end_minute) {
+      previous.end_minute = Math.max(previous.end_minute, current.end_minute)
+    } else {
+      out.push(current)
+    }
+  }
+  return out
+}
+
 function shiftAll(windows: ScheduleWindow[], deltaMinutes: number): ScheduleWindow[] {
-  return windows.flatMap((w) => shiftOne(w, deltaMinutes))
+  return coalesceSameDay(windows.flatMap((w) => shiftOne(w, deltaMinutes)))
 }
 
 // utcToLocal converts stored UTC windows into the browser's local time zone
@@ -118,10 +141,9 @@ export type PresetName = 'always' | 'nights' | 'weekends' | 'custom'
 
 // alwaysWindows covers the whole week. It is deliberately timezone-neutral
 // (every minute of every day, in ANY zone, is still every minute of every
-// day in any other) — used directly as both the local display shape and
-// the UTC save payload, bypassing localToUtc/utcToLocal entirely, so it is
-// always exactly 7 rows instead of the up-to-14 shiftOne's split rule would
-// otherwise produce for a non-hour-aligned offset.
+// day in any other) — used directly as both the local preset shape and the
+// UTC save payload. shiftAll's canonicalization preserves the same 7-row
+// shape when an already-stored schedule is opened at a non-zero offset.
 export function alwaysWindows(): ScheduleWindow[] {
   return [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, start_minute: 0, end_minute: MINUTES_PER_DAY }))
 }

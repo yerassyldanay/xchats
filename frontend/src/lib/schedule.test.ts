@@ -124,14 +124,12 @@ describe('localToUtc / utcToLocal round trip', () => {
       { weekday: 0, start_minute: 19 * 60, end_minute: 1440 }, // Sunday 19:00-24:00
       { weekday: 1, start_minute: 0, end_minute: 19 * 60 }, // Monday 00:00-19:00
     ])
-    // Converting back splits differently but still covers exactly Monday:
+    // Converting back initially splits differently but canonicalization
+    // joins the adjacent pieces into the original full-day row:
     // Sunday-UTC 19:00-24:00 + 5h = Monday-local 00:00-05:00, and
     // Monday-UTC 00:00-19:00 + 5h = Monday-local 05:00-24:00.
     const backToLocal = utcToLocal(utc, 300)
-    expect(backToLocal).toEqual([
-      { weekday: 1, start_minute: 0, end_minute: 5 * 60 },
-      { weekday: 1, start_minute: 5 * 60, end_minute: 1440 },
-    ])
+    expect(backToLocal).toEqual(local)
   })
 
   it('does not split when the offset is a whole-day multiple (rare, but should stay 1:1)', () => {
@@ -195,23 +193,14 @@ describe('detectPreset', () => {
     expect(detectPreset([...nightsWindows(), { weekday: 1, start_minute: 0, end_minute: 60 }])).toBe('custom')
   })
 
-  // BUG (see AutomationSettingsDialog.vue / schedule.ts alwaysWindows'
-  // doc comment): alwaysWindows() and weekendsWindows() are saved to the
-  // backend as UTC directly (bypassing localToUtc), but the dialog always
-  // runs utcToLocal on the STORED schedule when it reopens. At any offset
-  // that is not a whole multiple of 1440 minutes off midnight-alignment —
-  // i.e. any non-zero offset, since these are full-day windows —
-  // shiftOne's "a full 24h window landing on a non-midnight boundary must
-  // become two rows" rule (schedule.ts's dur === MINUTES_PER_DAY branch)
-  // splits each 24h window into two, so the round trip no longer matches
-  // the preset it started as. Every other test in this file pins TZ/offset
-  // 0, the one value at which this cannot happen.
+  // Full-day windows split at UTC midnight during conversion, then merge
+  // back to their canonical local representation when reopened.
   it('detects Always after a UTC round trip at a non-zero offset', () => {
     const roundTripped = utcToLocal(alwaysWindows(), 300) // UTC+5
     expect(detectPreset(roundTripped)).toBe('always')
   })
   it('detects Weekends after a UTC round trip at a non-zero offset', () => {
-    const roundTripped = utcToLocal(weekendsWindows(), 300) // UTC+5
+    const roundTripped = utcToLocal(localToUtc(weekendsWindows(), 300), 300) // UTC+5
     expect(detectPreset(roundTripped)).toBe('weekends')
   })
 })

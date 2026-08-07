@@ -144,18 +144,13 @@ func (s *Scheduler) Stop() {
 // claimDue promotes every currently-due debounce deadline into a durable
 // dispatch job and hands it to a worker.
 func (s *Scheduler) claimDue(ctx context.Context) {
-	due, err := s.Store.ClaimDueDebounceJobs(ctx, time.Now(), 200)
+	jobs, err := s.Store.ClaimDueDispatchJobs(ctx, time.Now(), 200)
 	if err != nil {
 		s.Log.Error("automation: claim due debounce jobs failed", "err", err)
 		return
 	}
-	for _, j := range due {
-		id, err := s.Store.CreateDispatchJob(ctx, j.ChatID, j.AccountID, j.Channel, j.BurstVersion)
-		if err != nil {
-			s.Log.Error("automation: create dispatch job failed", "chat_id", j.ChatID, "err", err)
-			continue
-		}
-		s.enqueue(ctx, id)
+	for _, j := range jobs {
+		s.enqueue(ctx, j.ID)
 	}
 }
 
