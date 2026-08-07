@@ -1,0 +1,748 @@
+/* Landing page (/) styles — deliberately in the blog's visual language, not
+ * the app's Tailwind/shadcn one: imports the same tokens.css + chrome.css
+ * the prerendered blog uses (nav/footer/shells/badges), then adds
+ * landing-only classes for the hero and the four showcase sections. Colors
+ * always go through var(--blog-*) — never a Tailwind color utility — so
+ * dark mode (prefers-color-scheme, same as the blog) comes for free. This
+ * is intentionally a DIFFERENT dark-mode mechanism than the rest of the
+ * SPA's `.dark`-class toggle (see src/main.ts) — the landing page is public,
+ * unauthenticated, and lives in the same visual family as the blog, not the
+ * authenticated app shell.
+ *
+ * Scoped under `.landing` (Home.vue's root element) throughout, so nothing
+ * here ever leaks into an authenticated page even though this file is part
+ * of the same SPA bundle.
+ */
+@import '../../blog/tokens.css';
+@import '../../blog/chrome.css';
+
+.landing {
+  background: var(--blog-bg);
+  color: var(--blog-text);
+  font-family:
+    'Inter',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+.landing a {
+  color: inherit;
+}
+.landing img {
+  max-width: 100%;
+  display: block;
+}
+
+/* The lang switcher renders <button>s (it sets i18n locale, it doesn't
+   navigate) using chrome.css's .lang-links__link visuals — reset the
+   button-specific defaults chrome.css never had to account for. */
+.landing .lang-links__link {
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* ---------- hero ---------- */
+.landing-hero {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 56px;
+  align-items: center;
+  padding: 64px 32px 96px;
+}
+.landing-hero__title {
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  margin: 20px 0;
+}
+.landing-hero__title em {
+  font-style: normal;
+  color: var(--blog-accent);
+}
+.landing-hero__subtitle {
+  font-size: 18px;
+  color: var(--blog-muted);
+  line-height: 1.6;
+  max-width: 52ch;
+  margin-bottom: 32px;
+}
+.landing-hero__ctas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.landing-hero__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: 10px;
+  background: var(--blog-accent);
+  color: var(--blog-accent-contrast);
+  font-size: 15px;
+  font-weight: 650;
+  text-decoration: none;
+  box-shadow: 0 10px 24px rgba(91, 92, 235, 0.22);
+  transition:
+    transform 160ms ease,
+    filter 160ms ease;
+}
+.landing-hero__cta:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.landing-hero__cta--ghost {
+  background: var(--blog-card);
+  color: var(--blog-text);
+  border: 1px solid var(--blog-border);
+  box-shadow: none;
+}
+.landing-hero__cta--ghost:hover {
+  border-color: var(--blog-accent);
+  filter: none;
+}
+.landing-hero__trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  font-size: 14px;
+  color: var(--blog-muted);
+}
+.landing-hero__trust-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.landing-hero__trust-item svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.landing-hero__panel {
+  border-radius: 20px;
+  border: 1px solid var(--blog-border);
+  background: var(--blog-hero-panel);
+  padding: 14px;
+}
+.landing-hero__panel img {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  box-shadow: var(--blog-shadow);
+}
+@media (prefers-color-scheme: dark) {
+  .landing-hero__panel img {
+    filter: brightness(0.94) saturate(0.96);
+  }
+}
+@media (max-width: 900px) {
+  .landing-hero {
+    grid-template-columns: 1fr;
+    padding: 40px 20px 64px;
+    gap: 36px;
+  }
+  .landing-hero__panel {
+    order: -1;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  .landing-hero__title {
+    font-size: 36px;
+  }
+}
+
+/* ---------- generic section shell ---------- */
+.landing-section {
+  padding: 80px 0;
+  border-top: 1px solid var(--blog-border);
+}
+.landing-section--muted {
+  background: var(--blog-card);
+}
+.landing-section__head {
+  max-width: 640px;
+  margin: 0 0 48px;
+}
+.landing-section__head--center {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+.landing-section__eyebrow {
+  margin-bottom: 16px;
+}
+.landing-section__title {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+}
+.landing-section__description {
+  font-size: 16px;
+  color: var(--blog-muted);
+  line-height: 1.65;
+}
+@media (max-width: 640px) {
+  .landing-section {
+    padding: 56px 0;
+  }
+  .landing-section__title {
+    font-size: 26px;
+  }
+}
+
+/* ---------- reveal-on-scroll (useRevealOnScroll composable) ---------- */
+.landing-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 560ms ease,
+    transform 560ms ease;
+}
+.landing-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.landing-reveal--d1.is-visible {
+  transition-delay: 90ms;
+}
+.landing-reveal--d2.is-visible {
+  transition-delay: 180ms;
+}
+.landing-reveal--d3.is-visible {
+  transition-delay: 270ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing * {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* ---------- showcase 1: platforms ---------- */
+.landing-platforms {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 20px;
+  max-width: 880px;
+  margin: 0 auto;
+}
+.landing-channel-card {
+  border: 1px solid var(--blog-border);
+  background: var(--blog-card);
+  border-radius: 16px;
+  padding: 24px;
+}
+.landing-channel-card__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 16px;
+}
+.landing-channel-card__icon svg {
+  width: 24px;
+  height: 24px;
+}
+.landing-channel-card__icon--wa {
+  background: rgba(34, 197, 94, 0.14);
+  color: var(--blog-success);
+}
+.landing-channel-card__icon--tg {
+  background: rgba(59, 130, 246, 0.14);
+  color: #3b82f6;
+}
+.landing-channel-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.landing-channel-card__desc {
+  font-size: 14px;
+  color: var(--blog-muted);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+.landing-channel-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.landing-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px;
+}
+.landing-connector__line {
+  width: 56px;
+  height: 2px;
+  background-image: repeating-linear-gradient(90deg, var(--blog-accent) 0 6px, transparent 6px 12px);
+  background-size: 200% 100%;
+  animation: landing-dash 1.6s linear infinite;
+}
+.landing-connector__hub {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--blog-accent);
+  color: var(--blog-accent-contrast);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 8px 20px rgba(91, 92, 235, 0.25);
+}
+.landing-connector__hub svg {
+  width: 18px;
+  height: 18px;
+}
+@keyframes landing-dash {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: -24px 0;
+  }
+}
+.landing-footnote {
+  margin-top: 28px;
+  font-size: 13px;
+  color: var(--blog-muted);
+  text-align: center;
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+@media (max-width: 720px) {
+  .landing-platforms {
+    grid-template-columns: 1fr;
+  }
+  .landing-connector {
+    flex-direction: row;
+    justify-content: center;
+    padding: 4px 0;
+  }
+  .landing-connector__line {
+    width: 2px;
+    height: 32px;
+    background-image: repeating-linear-gradient(180deg, var(--blog-accent) 0 6px, transparent 6px 12px);
+    background-size: 100% 200%;
+  }
+}
+
+/* ---------- showcase 2: team ---------- */
+.landing-team-card {
+  max-width: 640px;
+  margin: 0 auto;
+  border: 1px solid var(--blog-border);
+  background: var(--blog-card);
+  border-radius: 16px;
+  padding: 20px;
+}
+.landing-team-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.landing-role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--blog-border);
+  color: var(--blog-muted);
+}
+.landing-role-badge--admin {
+  background: var(--blog-accent-tint);
+  color: var(--blog-accent);
+  border-color: transparent;
+}
+.landing-filter-pills {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.landing-filter-pill {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--blog-border);
+  color: var(--blog-muted);
+}
+.landing-filter-pill--active {
+  background: var(--blog-accent-tint);
+  color: var(--blog-accent);
+  border-color: transparent;
+}
+.landing-chat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--blog-bg);
+}
+.landing-chat-row__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--blog-hero-panel);
+  color: var(--blog-accent);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.landing-chat-row__body {
+  flex: 1;
+  min-width: 0;
+}
+.landing-chat-row__name {
+  font-size: 14px;
+  font-weight: 600;
+}
+.landing-chat-row__preview {
+  font-size: 13px;
+  color: var(--blog-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.landing-assign-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--blog-accent-tint);
+  color: var(--blog-accent);
+  font-size: 12px;
+  font-weight: 600;
+  flex: 0 0 auto;
+  opacity: 0;
+  transform: scale(0.85);
+  animation: landing-assign-in 600ms ease forwards;
+  animation-delay: 900ms;
+}
+@keyframes landing-assign-in {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ---------- showcase 3: templates (anti-hallucination demo) ---------- */
+.landing-chat-demo {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.landing-bubble {
+  max-width: 82%;
+  padding: 12px 16px;
+  border-radius: 16px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.landing-bubble--customer {
+  align-self: flex-start;
+  background: var(--blog-card);
+  border: 1px solid var(--blog-border);
+  border-bottom-left-radius: 4px;
+}
+.landing-bubble--assistant {
+  align-self: flex-end;
+  background: var(--blog-accent-tint);
+  color: var(--blog-text);
+  border-bottom-right-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+}
+.landing-token {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--blog-card);
+  border: 1px dashed var(--blog-accent);
+  color: var(--blog-accent);
+  transition:
+    background 300ms ease,
+    color 300ms ease,
+    border-color 300ms ease;
+}
+.landing-token.is-resolved {
+  background: var(--blog-success);
+  border-style: solid;
+  border-color: var(--blog-success);
+  color: #fff;
+  font-weight: 700;
+}
+.landing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  vertical-align: -0.15em;
+  background: var(--blog-accent);
+  animation: landing-blink 900ms steps(1) infinite;
+}
+@keyframes landing-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.landing-note {
+  max-width: 640px;
+  margin: 20px auto 0;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: var(--blog-card);
+  border: 1px solid var(--blog-border);
+  font-size: 13px;
+  color: var(--blog-muted);
+  text-align: center;
+}
+
+/* ---------- showcase 4: MCP configuration demo ---------- */
+.landing-mcp-demo {
+  max-width: 640px;
+  margin: 0 auto;
+  border: 1px solid var(--blog-border);
+  background: var(--blog-card);
+  border-radius: 16px;
+  padding: 20px;
+}
+.landing-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.landing-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--blog-hero-panel);
+  border: 1px solid var(--blog-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--blog-text);
+}
+.landing-attachment-chip svg {
+  width: 13px;
+  height: 13px;
+}
+.landing-tool-calls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+.landing-tool-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--blog-bg);
+  border: 1px solid var(--blog-border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  opacity: 0;
+  transform: translateX(-8px);
+  animation: landing-tool-in 420ms ease forwards;
+}
+.landing-tool-chip svg {
+  width: 14px;
+  height: 14px;
+  color: var(--blog-success);
+  flex: 0 0 auto;
+}
+@keyframes landing-tool-in {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.landing-result-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--blog-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.landing-result-card svg {
+  width: 18px;
+  height: 18px;
+  color: var(--blog-success);
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+/* ---------- how-it-works strip ---------- */
+.landing-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.landing-step {
+  text-align: center;
+}
+.landing-step__num {
+  width: 36px;
+  height: 36px;
+  margin: 0 auto 12px;
+  border-radius: 999px;
+  background: var(--blog-accent-tint);
+  color: var(--blog-accent);
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 700;
+}
+.landing-step__title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.landing-step__desc {
+  font-size: 13px;
+  color: var(--blog-muted);
+  line-height: 1.5;
+}
+@media (max-width: 760px) {
+  .landing-steps {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ---------- links cards (blog / evals) ---------- */
+.landing-links {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  max-width: 880px;
+  margin: 0 auto;
+}
+.landing-link-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px;
+  border: 1px solid var(--blog-border);
+  background: var(--blog-card);
+  border-radius: 16px;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+.landing-link-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--blog-accent);
+  box-shadow: var(--blog-shadow);
+}
+.landing-link-card__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--blog-accent-tint);
+  color: var(--blog-accent);
+  display: grid;
+  place-items: center;
+}
+.landing-link-card__title {
+  font-size: 17px;
+  font-weight: 700;
+}
+.landing-link-card__desc {
+  font-size: 14px;
+  color: var(--blog-muted);
+  line-height: 1.55;
+}
+.landing-link-card__cta {
+  margin-top: auto;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--blog-accent);
+}
+@media (max-width: 640px) {
+  .landing-links {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- final CTA panel ---------- */
+.landing-cta-panel {
+  max-width: 1000px;
+  margin: 0 auto;
+  border-radius: 24px;
+  padding: 56px 40px;
+  text-align: center;
+  background: var(--blog-text);
+  color: var(--blog-bg);
+}
+.landing-cta-panel__title {
+  font-size: 30px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.landing-cta-panel__desc {
+  font-size: 16px;
+  opacity: 0.75;
+  max-width: 52ch;
+  margin: 0 auto 28px;
+}
+.landing-cta-panel__ctas {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.landing-cta-panel .landing-hero__cta--ghost {
+  background: transparent;
+  color: var(--blog-bg);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+@media (max-width: 640px) {
+  .landing-cta-panel {
+    padding: 40px 24px;
+    border-radius: 18px;
+  }
+}

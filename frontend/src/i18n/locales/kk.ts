@@ -1,0 +1,116 @@
+// kk.ts is deliberately partial: it carries ONLY the landing.* namespace
+// (the public marketing page, /), the one surface this repo ships in
+// Kazakh today. Every other key falls back to ru via i18n/index.ts's
+// fallbackLocale: 'ru' — an app screen a kk-locale user opens after
+// logging in (there is no Kazakh login flow) renders in Russian, not a
+// missing-key warning wall. locales.test.ts asserts this file's key set is
+// both landing-only and identical in shape to ru.landing/en.landing.
+export default {
+  landing: {
+    nav: {
+      platforms: 'Платформалар',
+      team: 'Топ',
+      templates: 'Үлгілер',
+      mcp: 'MCP',
+      howItWorks: 'Қалай жұмыс істейді',
+      blog: 'Блог',
+      github: 'GitHub',
+      login: 'Кіру',
+    },
+    hero: {
+      eyebrow: 'АШЫҚ КОД · ТЕГІН',
+      titlePrefix: 'Ешқашан',
+      titleHighlight: 'ойдан шығармайтын',
+      titleSuffix: 'AI-көмекші',
+      subtitle:
+        'xchats — WhatsApp пен Telegram-ға арналған тегін, ашық бастапқы кодты AI-көмекші. Ол тек тексерілген деректерге негізделген үлгілер арқылы жауап береді және ChatGPT немесе Claude чатынан MCP арқылы тікелей бапталады.',
+      ctaPrimary: 'Тегін бастау',
+      ctaSecondary: 'GitHub',
+      trust1: 'Ашық бастапқы код (AGPL-3.0)',
+      trust2: 'Өз серверлеріңізде жұмыс істейді',
+      trust3: 'ChatGPT пен Claude арқылы бапталады',
+      screenshotAlt: 'xchats интерфейсі',
+    },
+    platforms: {
+      eyebrow: 'ПЛАТФОРМАЛАР',
+      title: 'Бірнеше әлеуметтік желі — бір инбокс',
+      description: 'Архитектура кез келген санда арнаны қолдайды. Бүгін екеуі қосылған — екеуі де тегін және бірнеше минутта бапталады.',
+      waTitle: 'WhatsApp',
+      waBadge: 'Тегін',
+      waDesc: 'Байланысқан құрылғы — WhatsApp Web-тегідей QR-кодты сканерлейсіз. Business API және диалог үшін төлем жоқ.',
+      tgTitle: 'Telegram',
+      tgBadge: 'Тегін',
+      tgDesc: '@BotFather-дан алынған токенді енгізесіз. Жария адрес міндетті емес — бот polling арқылы жұмыс істей алады.',
+      footnote: 'WhatsApp қосылымы бейресми: Meta нөмірді өз қалауы бойынша бұғаттай алады. Жоғалтқыңыз келмейтін нөмірді қоспаңыз — тест нөмірінен бастаңыз.',
+      hubLabel: 'xchats инбоксы',
+    },
+    team: {
+      eyebrow: 'ТОП',
+      title: 'Рөлдермен бірге жұмыс',
+      description: 'Әкімшілер мен қатысушылар бір инбоксты көреді. Диалогты өзіңізге немесе әріптесіңізге тағайындауға болады — ештеңе жоғалмайды.',
+      roleAdmin: 'Әкімші',
+      roleMember: 'Қатысушы',
+      filterMine: 'Менікі',
+      filterUnassigned: 'Тағайындалмаған',
+      filterAll: 'Барлығы',
+      customerName: 'Клиент · Алия',
+      messagePreview: 'Сәлеметсіз бе, Алматыға жеткізу қанша тұрады?',
+      assignedTo: 'Тағайындалды: Дана',
+      note: 'Рөлдер мен диалогты тағайындау — нақты өнімнен: «Арналар» және «Инбокс».',
+    },
+    templates: {
+      eyebrow: 'ЖАУАП ҮЛГІЛЕРІ',
+      title: 'Бірде-бір ойдан шығарылған сан жоқ',
+      description: 'Модельге сан жазуға тыйым салынған. Ол орынбасарды қояды — кодтан білім базасындағы нақты мән алмастырылады.',
+      question: 'DeLonghi кофе машинасы қанша тұрады және Астанаға қашан жеткізесіздер?',
+      sentence: 'DeLonghi кофе машинасы {price} тұрады. Астанаға жеткізу — {days}.',
+      resolvedPrice: '129 900 ₸',
+      resolvedDays: '2 күн',
+      note: 'Модель ешқашан сан жазбайды — оны кодтан алмастырады. Белгісіз орынбасар — қате және диалогты адамға беру, ойдан шығару емес.',
+    },
+    mcp: {
+      eyebrow: 'MCP АРҚЫЛЫ БАПТАУ',
+      title: 'Білім базасын тікелей чатта толтырыңыз',
+      description: 'xchats-ты ChatGPT немесе Claude-та MCP-коннектор ретінде қосыңыз — және көмекшімен әңгімелесу арқылы білім базасын баптаңыз.',
+      userMessage: 'Осы құжаттарды түсініп, тарифтерді, тауарларды және жеткізу ақпаратын сақта.',
+      pdfLabel: 'баға-тізімі.pdf',
+      urlLabel: 'shop.example.com/delivery',
+      resultTitle: 'Жоба жаңартылды',
+      resultBody: 'Өзгерістер тексеру үшін Жобаға түсті — адам растамайынша ештеңе жарияланбайды.',
+      note: 'xchats файлдар мен сайттарды өзі жүктемейді — оларды ChatGPT немесе Claude моделі оқып, 13 MCP-құралы арқылы деректерді сақтайды.',
+    },
+    how: {
+      title: 'Бұл қалай жұмыс істейді',
+      step1Title: 'Арналарды қосыңыз',
+      step1Desc: 'WhatsApp — QR-код арқылы, Telegram — бот токені арқылы.',
+      step2Title: 'Білім базасын толтырыңыз',
+      step2Desc: 'Қолмен немесе ChatGPT/Claude арқылы MCP бойынша.',
+      step3Title: 'Жобаны тексеріңіз',
+      step3Desc: 'Әр өзгеріс адамның растауын күтеді.',
+      step4Title: 'Дәл жауаптар алыңыз',
+      step4Desc: 'Көмекші тек тексерілген деректермен жауап береді.',
+    },
+    links: {
+      blogTitle: 'Инженерлік блог',
+      blogDesc: 'AI-көмекшілерді, бағалау құбырларын және ішкі құралдарды жасау кезінде шешімдерді қалай қабылдайтынымыз.',
+      blogCta: 'Мақалаларды оқу',
+      evalsTitle: 'Ашық эвалдар',
+      evalsDesc: 'Жауап сапасын автоматты тексеру — сценарийлер, күтулер және ережелер ашық түрде.',
+      evalsCta: 'GitHub-та қарау',
+    },
+    cta: {
+      title: 'Байқап көруге дайынсыз ба?',
+      description: 'xchats-ты бірнеше минутта іске қосып, бүгін бірінші арнаны қосыңыз.',
+      ctaPrimary: 'Тегін бастау',
+      ctaSecondary: 'GitHub',
+    },
+    footer: {
+      description:
+        'WhatsApp пен Telegram-ға арналған, ойдан шығармайтын үлгілі жауаптары бар және ChatGPT пен Claude арқылы бапталатын тегін, ашық бастапқы кодты AI-көмекші.',
+      productHeading: 'Өнім',
+      communityHeading: 'Қауымдастық',
+      contactsHeading: 'Бізбен байланысыңыз',
+      copyrightSuffix: 'AGPL-3.0 License.',
+    },
+  },
+}
