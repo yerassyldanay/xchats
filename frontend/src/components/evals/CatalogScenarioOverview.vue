@@ -25,7 +25,7 @@ const { t } = useI18n()
       </Badge>
       <Badge v-if="scenario.tests_path" variant="outline" class="text-[11px] font-mono inline-flex items-center gap-1">
         {{ scenario.tests_path }}
-        <CopyButton :text="scenario.tests_path" label-key="path" />
+        <CopyButton :text="scenario.tests_path" :label="t('evalCatalog.copy.path')" />
       </Badge>
     </div>
 

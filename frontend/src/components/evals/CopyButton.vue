@@ -4,9 +4,11 @@ import { useI18n } from 'vue-i18n'
 import { Check, Copy } from 'lucide-vue-next'
 
 // Small reusable clipboard button — same navigator.clipboard.writeText + timed-reset
-// pattern as TestCaseCard.vue's copyText, just packaged as its own component since the
-// catalog page needs it in several places (test id, tests_path, deep link).
-const props = defineProps<{ text: string; labelKey: 'id' | 'path' | 'link' }>()
+// pattern as TestCaseCard.vue's copyText, just packaged as its own component since
+// several pages need it (the evals catalog's test id/tests_path/deep link, the
+// Черновик MCP connect card's connector URL). Labels are plain strings (not an
+// evals-specific labelKey enum) so any caller can supply its own i18n keys.
+const props = withDefaults(defineProps<{ text: string; label: string; copiedLabel?: string }>(), { copiedLabel: undefined })
 const { t } = useI18n()
 const copied = ref(false)
 
@@ -27,8 +29,8 @@ async function copy() {
   <button
     type="button"
     class="inline-flex items-center justify-center shrink-0 text-muted-foreground hover:text-foreground transition"
-    :aria-label="t(`evalCatalog.copy.${labelKey}`)"
-    :title="copied ? t('evalCatalog.copy.copied') : t(`evalCatalog.copy.${labelKey}`)"
+    :aria-label="label"
+    :title="copied ? (copiedLabel ?? t('evalCatalog.copy.copied')) : label"
     @click="copy"
   >
     <Check v-if="copied" class="w-3.5 h-3.5 text-emerald-600" />

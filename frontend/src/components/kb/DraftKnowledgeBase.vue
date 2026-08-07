@@ -19,6 +19,7 @@ import StatTiles from './StatTiles.vue'
 import ChangeList from './ChangeList.vue'
 import ConfigChangeGroup from './ConfigChangeGroup.vue'
 import DraftEmptyState from './DraftEmptyState.vue'
+import McpConnectCard from './McpConnectCard.vue'
 import DeliveryZoneRecord from './records/DeliveryZoneRecord.vue'
 import ContactsRecord from './records/ContactsRecord.vue'
 import PoliciesRecord from './records/PoliciesRecord.vue'
@@ -97,89 +98,95 @@ function policyRowOf(entry: ChangeEntry) {
       </div>
     </header>
 
-    <div v-if="loading && !pg.changes" class="flex-1 grid place-items-center p-8">
-      <div class="text-center max-w-sm">
-        <div class="mx-auto w-12 h-12 rounded-xl bg-primary/10 text-primary grid place-items-center mb-3">
-          <WandSparkles class="w-6 h-6" />
+    <div class="flex-1 overflow-y-auto flex flex-col">
+      <div class="px-8 pt-6 shrink-0">
+        <McpConnectCard />
+      </div>
+
+      <div v-if="loading && !pg.changes" class="flex-1 grid place-items-center p-8">
+        <div class="text-center max-w-sm">
+          <div class="mx-auto w-12 h-12 rounded-xl bg-primary/10 text-primary grid place-items-center mb-3">
+            <WandSparkles class="w-6 h-6" />
+          </div>
+          <p class="text-sm text-muted-foreground">{{ t('kb.draft.loading') }}</p>
         </div>
-        <p class="text-sm text-muted-foreground">{{ t('kb.draft.loading') }}</p>
-      </div>
-    </div>
-
-    <DraftEmptyState v-else-if="isEmpty" />
-
-    <div v-else class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
-      <StatTiles :counts="counts" />
-      <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k)" />
-
-      <div v-show="active === 'config'" class="space-y-3 max-w-3xl">
-        <ConfigChangeGroup />
       </div>
 
-      <div v-show="active === 'topics'" class="space-y-3">
-        <ChangeList kind="topics" />
-      </div>
-      <div v-show="active === 'products'" class="space-y-3">
-        <ChangeList kind="products" />
-      </div>
-      <div v-show="active === 'tariffs'" class="space-y-3">
-        <ChangeList kind="tariffs" />
-      </div>
+      <DraftEmptyState v-else-if="isEmpty" />
 
-      <div v-show="active === 'delivery_zones'" class="space-y-3">
-        <DeliveryZoneRecord
-          v-for="entry in zoneEntries"
-          :key="entry.key"
-          :row="zoneRowOf(entry)"
-          :live-row="entry.type === 'removed' ? undefined : (entry.liveRow as DeliveryZoneRow | undefined)"
-          :change-type="entry.type"
-          :all-zones="allZonesForDisplay"
-          :actions="kbActions({ page: 'draft', changeType: entry.type })"
-          :busy="isBusy('delivery_zones', entry.key)"
-          :blocked-note="blockedNote('delivery_zones', entry.key)"
-          @edit="editEntry('delivery_zones', entry)"
-          @publish="pg.approveEntity('delivery_zones', entry.key)"
-          @cancel="pg.cancelChange('delivery_zones', entry.key)"
-        />
-      </div>
+      <div v-else class="px-8 py-6 space-y-6">
+        <StatTiles :counts="counts" />
+        <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k)" />
 
-      <div v-show="active === 'contacts'" class="space-y-3 max-w-2xl">
-        <ContactsRecord
-          v-if="contactEntry"
-          :row="contactRowOf(contactEntry)"
-          :live-row="contactEntry.type === 'removed' ? undefined : (contactEntry.liveRow as ContactRow | undefined)"
-          :change-type="contactEntry.type"
-          :actions="kbActions({ page: 'draft', changeType: contactEntry.type, singleton: true })"
-          :busy="isBusy('contacts', contactEntry.key)"
-          :blocked-note="blockedNote('contacts', contactEntry.key)"
-          @edit="editEntry('contacts', contactEntry)"
-          @publish="pg.approveEntity('contacts', contactEntry.key)"
-          @cancel="pg.cancelChange('contacts', contactEntry.key)"
-        />
-      </div>
+        <div v-show="active === 'config'" class="space-y-3 max-w-3xl">
+          <ConfigChangeGroup />
+        </div>
 
-      <div v-show="active === 'policies'" class="space-y-3 max-w-2xl">
-        <PoliciesRecord
-          v-if="policyEntry"
-          :row="policyRowOf(policyEntry)"
-          :live-row="policyEntry.type === 'removed' ? undefined : (policyEntry.liveRow as PolicyRow | undefined)"
-          :change-type="policyEntry.type"
-          :zones-exist="zonesExist"
-          :actions="kbActions({ page: 'draft', changeType: policyEntry.type, singleton: true })"
-          :busy="isBusy('policies', policyEntry.key)"
-          :blocked-note="blockedNote('policies', policyEntry.key)"
-          @edit="editEntry('policies', policyEntry)"
-          @publish="pg.approveEntity('policies', policyEntry.key)"
-          @cancel="pg.cancelChange('policies', policyEntry.key)"
-        />
-      </div>
+        <div v-show="active === 'topics'" class="space-y-3">
+          <ChangeList kind="topics" />
+        </div>
+        <div v-show="active === 'products'" class="space-y-3">
+          <ChangeList kind="products" />
+        </div>
+        <div v-show="active === 'tariffs'" class="space-y-3">
+          <ChangeList kind="tariffs" />
+        </div>
 
-      <p v-if="pg.gateReasons" class="flex items-start gap-2 text-sm text-destructive rounded-lg bg-destructive/10 p-3">
-        <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ t('kb.draft.gateBlocked') }} {{ pg.gateReasons }}
-      </p>
-      <p v-else-if="pg.error" class="flex items-center gap-2 text-sm text-destructive">
-        <CircleAlert class="w-4 h-4 shrink-0" /> {{ pg.error }}
-      </p>
+        <div v-show="active === 'delivery_zones'" class="space-y-3">
+          <DeliveryZoneRecord
+            v-for="entry in zoneEntries"
+            :key="entry.key"
+            :row="zoneRowOf(entry)"
+            :live-row="entry.type === 'removed' ? undefined : (entry.liveRow as DeliveryZoneRow | undefined)"
+            :change-type="entry.type"
+            :all-zones="allZonesForDisplay"
+            :actions="kbActions({ page: 'draft', changeType: entry.type })"
+            :busy="isBusy('delivery_zones', entry.key)"
+            :blocked-note="blockedNote('delivery_zones', entry.key)"
+            @edit="editEntry('delivery_zones', entry)"
+            @publish="pg.approveEntity('delivery_zones', entry.key)"
+            @cancel="pg.cancelChange('delivery_zones', entry.key)"
+          />
+        </div>
+
+        <div v-show="active === 'contacts'" class="space-y-3 max-w-2xl">
+          <ContactsRecord
+            v-if="contactEntry"
+            :row="contactRowOf(contactEntry)"
+            :live-row="contactEntry.type === 'removed' ? undefined : (contactEntry.liveRow as ContactRow | undefined)"
+            :change-type="contactEntry.type"
+            :actions="kbActions({ page: 'draft', changeType: contactEntry.type, singleton: true })"
+            :busy="isBusy('contacts', contactEntry.key)"
+            :blocked-note="blockedNote('contacts', contactEntry.key)"
+            @edit="editEntry('contacts', contactEntry)"
+            @publish="pg.approveEntity('contacts', contactEntry.key)"
+            @cancel="pg.cancelChange('contacts', contactEntry.key)"
+          />
+        </div>
+
+        <div v-show="active === 'policies'" class="space-y-3 max-w-2xl">
+          <PoliciesRecord
+            v-if="policyEntry"
+            :row="policyRowOf(policyEntry)"
+            :live-row="policyEntry.type === 'removed' ? undefined : (policyEntry.liveRow as PolicyRow | undefined)"
+            :change-type="policyEntry.type"
+            :zones-exist="zonesExist"
+            :actions="kbActions({ page: 'draft', changeType: policyEntry.type, singleton: true })"
+            :busy="isBusy('policies', policyEntry.key)"
+            :blocked-note="blockedNote('policies', policyEntry.key)"
+            @edit="editEntry('policies', policyEntry)"
+            @publish="pg.approveEntity('policies', policyEntry.key)"
+            @cancel="pg.cancelChange('policies', policyEntry.key)"
+          />
+        </div>
+
+        <p v-if="pg.gateReasons" class="flex items-start gap-2 text-sm text-destructive rounded-lg bg-destructive/10 p-3">
+          <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ t('kb.draft.gateBlocked') }} {{ pg.gateReasons }}
+        </p>
+        <p v-else-if="pg.error" class="flex items-center gap-2 text-sm text-destructive">
+          <CircleAlert class="w-4 h-4 shrink-0" /> {{ pg.error }}
+        </p>
+      </div>
     </div>
 
     <KbModalForms />
