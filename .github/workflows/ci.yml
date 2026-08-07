@@ -7,14 +7,64 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      evals: ${{ steps.filter.outputs.evals }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      docker_backend: ${{ steps.filter.outputs.docker_backend }}
+      docker_frontend: ${{ steps.filter.outputs.docker_frontend }}
+      links: ${{ steps.filter.outputs.links }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.golangci.yml'
+              - '.github/workflows/ci.yml'
+            evals:
+              - 'evals/harness/**'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              - '.nvmrc'
+              - '.github/workflows/ci.yml'
+            docker_backend:
+              - 'backend/Dockerfile'
+              - 'backend/.dockerignore'
+              - 'backend/go.mod'
+              - 'backend/go.sum'
+              - 'deploy/**'
+              - '.github/workflows/ci.yml'
+            docker_frontend:
+              - 'frontend/Dockerfile'
+              - 'frontend/.dockerignore'
+              - 'frontend/package.json'
+              - 'frontend/package-lock.json'
+              - 'frontend/nginx.conf'
+              - 'deploy/**'
+              - '.github/workflows/ci.yml'
+            links:
+              - '**/*.md'
+              - '.github/workflows/ci.yml'
+
   backend-test:
     name: backend-test
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     env:
       # Pin the toolchain to exactly what backend/go.mod declares — with the
@@ -28,14 +78,6 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-
-      - name: Build
-        working-directory: backend
-        run: go build ./...
-
-      - name: Vet
-        working-directory: backend
-        run: go vet ./...
 
       # -race -count=1: every DB test gets its own fresh SQLite file under
       # t.TempDir() (see internal/dbtest), so the suite is parallel-safe and
@@ -67,6 +109,8 @@ jobs:
   # is a separate subcommand nothing here invokes.
   evals-harness:
     name: evals-harness
+    needs: changes
+    if: needs.changes.outputs.evals == 'true'
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: local
@@ -78,10 +122,6 @@ jobs:
           go-version-file: evals/harness/go.mod
           cache-dependency-path: evals/harness/go.sum
 
-      - name: Build
-        working-directory: evals/harness
-        run: go build ./...
-
       - name: Vet
         working-directory: evals/harness
         run: go vet ./...
@@ -92,6 +132,8 @@ jobs:
 
   frontend-test:
     name: frontend-test
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -105,22 +147,21 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
-      - run: npm run typecheck
-        working-directory: frontend
-
       - run: npx eslint .
         working-directory: frontend
 
       - run: npm run test:unit
         working-directory: frontend
 
-      # Includes the vue-tsc typecheck again (cheap, already-warm) plus the
-      # blog static-site build — see package.json's build script.
+      # Includes the vue-tsc typecheck plus the blog static-site build — see
+      # package.json's build script.
       - run: npm run build
         working-directory: frontend
 
   docker-build:
     name: docker-build
+    needs: changes
+    if: needs.changes.outputs.docker_backend == 'true' || needs.changes.outputs.docker_frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -128,6 +169,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Build backend image
+        if: needs.changes.outputs.docker_backend == 'true'
         uses: docker/build-push-action@v6
         with:
           context: backend
@@ -137,6 +179,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Build frontend image
+        if: needs.changes.outputs.docker_frontend == 'true'
         uses: docker/build-push-action@v6
         with:
           context: frontend
@@ -147,6 +190,8 @@ jobs:
 
   links:
     name: links
+    needs: changes
+    if: needs.changes.outputs.links == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
