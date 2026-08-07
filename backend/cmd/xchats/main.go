@@ -1,7 +1,7 @@
 // Command xchats is the xchats backend: API edge + webhook ingress + in-process
 // workers + the multichannel response service. Subcommands: serve (default),
 // migrate, seed, seed-kb-demo, simulate-message, kb-load, backup, check,
-// restore.
+// restore, admin-credential, reset-admin-password.
 package main
 
 import (
@@ -111,6 +111,10 @@ func main() {
 		runCheck(cfg, log)
 	case "restore":
 		runRestore(log, flag.Args()[1:])
+	case "admin-credential":
+		runAdminCredential(flag.Args()[1:])
+	case "reset-admin-password":
+		runResetAdminPassword(cfg, log, flag.Args()[1:])
 	default:
 		log.Error("unknown command", "cmd", cmd)
 		os.Exit(2)
@@ -157,6 +161,13 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// step here any more.
 	st := mustStore(cfg, log)
 	defer st.Close()
+	bootstrapCredentialPath, minted, err := ensureBootstrapAdminPassword(ctx, cfg, st)
+	if err != nil {
+		fatal("bootstrap admin password", err)
+	}
+	if minted {
+		log.Info("one-time admin password created", "retrieve_with", "xchats admin-credential show")
+	}
 	seed(ctx, cfg, st, log)
 	orgID := seededOrgID(ctx, cfg, st, log)
 
@@ -329,7 +340,8 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
-		Credentials: credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
+		BootstrapAdminCredentialPath: bootstrapCredentialPath,
+		Credentials:                  credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
 		ProviderHealth: providerHealth, UpdateChecker: updateChecker,
 	})
 	router := srv.Router()

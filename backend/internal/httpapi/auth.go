@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -237,6 +238,15 @@ func (s *Server) handleChangePassword(c *gin.Context) {
 	// the half of that most implementations forget.
 	if err := s.store.DeleteOtherSessions(ctx(c), u.ID, currentSessionID(c)); err != nil {
 		s.log.Warn("password changed but failed to evict other sessions", "user_id", u.ID, "err", err)
+	}
+	// The sentinel admin's bootstrap credential is useful only until this
+	// successful forced change. Removing its plaintext copy here keeps the
+	// documented one-time guarantee; a later recovery explicitly re-mints it
+	// through `xchats reset-admin-password` plus a restart.
+	if store.IsSentinelAdmin(u.ID) && s.bootstrapAdminCredentialPath != "" {
+		if err := os.Remove(s.bootstrapAdminCredentialPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			s.log.Warn("password changed but failed to remove bootstrap credential", "user_id", u.ID, "err", err)
+		}
 	}
 	u.MustChangePassword = false
 	ok(c, s.mePayload(c, u))
