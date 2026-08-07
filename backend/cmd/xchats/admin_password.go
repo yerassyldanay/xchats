@@ -92,7 +92,7 @@ func loadOrCreateBootstrapAdminCredential(path string, minLength int) (plaintext
 		return "", false, fmt.Errorf("%s must contain at least %d characters", bootstrapAdminPasswordEnv, minLength)
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: path is bootstrapAdminCredentialPath()'s fixed app-data location, never user input
 	if errors.Is(err, os.ErrExist) {
 		// Another process won the create race. Its fully persisted credential
 		// is authoritative; read that instead of overwriting it.
@@ -123,7 +123,7 @@ func loadOrCreateBootstrapAdminCredential(path string, minLength int) (plaintext
 }
 
 func readBootstrapAdminCredential(path string) (string, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // G304: path is bootstrapAdminCredentialPath()'s fixed app-data location, never user input
 	if err != nil {
 		return "", err
 	}
@@ -151,7 +151,9 @@ func runAdminCredential(args []string) {
 	if err != nil {
 		fatal("admin credential", err)
 	}
-	fmt.Fprintln(os.Stdout, plaintext)
+	if _, err := fmt.Fprintln(os.Stdout, plaintext); err != nil {
+		fatal("admin credential", err)
+	}
 }
 
 func runResetAdminPassword(cfg *config.Config, log *slog.Logger, args []string) {
