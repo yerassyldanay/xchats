@@ -194,6 +194,26 @@ describe('detectPreset', () => {
   it('does not mistake a near-miss (one extra window) for Nights', () => {
     expect(detectPreset([...nightsWindows(), { weekday: 1, start_minute: 0, end_minute: 60 }])).toBe('custom')
   })
+
+  // BUG (see AutomationSettingsDialog.vue / schedule.ts alwaysWindows'
+  // doc comment): alwaysWindows() and weekendsWindows() are saved to the
+  // backend as UTC directly (bypassing localToUtc), but the dialog always
+  // runs utcToLocal on the STORED schedule when it reopens. At any offset
+  // that is not a whole multiple of 1440 minutes off midnight-alignment —
+  // i.e. any non-zero offset, since these are full-day windows —
+  // shiftOne's "a full 24h window landing on a non-midnight boundary must
+  // become two rows" rule (schedule.ts's dur === MINUTES_PER_DAY branch)
+  // splits each 24h window into two, so the round trip no longer matches
+  // the preset it started as. Every other test in this file pins TZ/offset
+  // 0, the one value at which this cannot happen.
+  it('detects Always after a UTC round trip at a non-zero offset', () => {
+    const roundTripped = utcToLocal(alwaysWindows(), 300) // UTC+5
+    expect(detectPreset(roundTripped)).toBe('always')
+  })
+  it('detects Weekends after a UTC round trip at a non-zero offset', () => {
+    const roundTripped = utcToLocal(weekendsWindows(), 300) // UTC+5
+    expect(detectPreset(roundTripped)).toBe('weekends')
+  })
 })
 
 describe('HH:MM <-> minutes helpers', () => {

@@ -409,3 +409,172 @@ func TestRunnerHandleRunUnknownJobIsANoop(t *testing.T) {
 		t.Fatalf("an unknown job must produce no side effects: hub=%v queue=%v", hub.calls, q.published)
 	}
 }
+
+// gatedChatClient blocks inside Complete until the test releases it, and
+// reports each entry on arrived. Used to force two concurrent HandleRun
+// calls to reach the version-gated persist / auto-send claim at exactly the
+// same moment, instead of relying on incidental goroutine scheduling.
+type gatedChatClient struct {
+	replyText string
+	arrived   chan struct{}
+	release   chan struct{}
+}
+
+func (c *gatedChatClient) Complete(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	c.arrived <- struct{}{}
+	<-c.release
+	b, _ := json.Marshal(map[string]any{
+		"reply_text": c.replyText, "reply_language": "ru", "media_files_to_send": []string{},
+		"escalate": false, "escalation_reason": "",
+	})
+	return llm.ChatResponse{Text: string(b)}, nil
+}
+
+// TestConcurrentHandleRunOnSameDispatchJobCanDoubleSend exercises the
+// scenario TestRecoverDispatchJobsCanDuplicateAnAlreadyClaimedJob proves is
+// reachable: the SAME dispatch job id handed to two workers at once. Both
+// goroutines call Runner.HandleRun(ctx, jobID) concurrently; the gated LLM
+// client holds both at the generation step until both have arrived, then
+// releases them together, maximizing the chance both reach the
+// version-gated persist (store.WriteDraftSetIfVersionCurrent) and the
+// auto-send claim (store.ClaimDraftForAutoSend) concurrently. Both checks
+// key off the SAME burst_version / trigger message — neither was designed
+// to fence against a sibling draft generated from the identical burst — so
+// this can produce two independently "sent" outbound messages to the same
+// customer for one customer message.
+//
+// This test asserts the correct outcome (exactly one send). In practice it
+// passes reliably (verified over 20 runs under -race): releasing both
+// goroutines simultaneously tends to let the SECOND persist's supersede-
+// existing-suggested-drafts step (store.WriteDraftSetIfVersionCurrent) land
+// before the FIRST has reached ClaimDraftForAutoSend, which self-heals this
+// particular interleaving. That does not mean the bug is fake — see
+// TestSequentialDuplicateDispatchJobsBothAutoSend below, which forces the
+// interleaving self-healing does NOT cover (one worker's full round trip,
+// including the send, completing before the second's generation begins —
+// the realistic shape of two dispatch jobs picked up a full recovery-tick
+// apart) and fails deterministically.
+func TestConcurrentHandleRunOnSameDispatchJobCanDoubleSend(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	accountID, chatID := seedRunnerChat(t, st)
+	if _, _, err := st.SetAutomationSettings(ctx, accountID, "scheduled_auto", nil, alwaysWindows()); err != nil {
+		t.Fatalf("SetAutomationSettings: %v", err)
+	}
+
+	if err := (&Scheduler{Store: st}).OnInboundMessage(ctx, chatID, accountID, "whatsapp", time.Now()); err != nil {
+		t.Fatalf("OnInboundMessage: %v", err)
+	}
+	version, _ := st.CurrentBurstVersion(ctx, chatID)
+	jobID, err := st.CreateDispatchJob(ctx, chatID, accountID, "whatsapp", version)
+	if err != nil {
+		t.Fatalf("CreateDispatchJob: %v", err)
+	}
+
+	hub, q := &fakeHub{}, &fakeQueue{}
+	client := &gatedChatClient{replyText: "Доставка бесплатно.", arrived: make(chan struct{}, 2), release: make(chan struct{})}
+	r := &Runner{
+		Store: st,
+		Response: &response.Service{
+			Conversations: &responsestore.ConversationRepo{Store: st},
+			KnowledgeBase: fakeKBRepo{},
+			Engine: &response.Engine{
+				LLMs: &fakeRegistry{client: client},
+				Params: func() response.LLMParams {
+					return response.LLMParams{DefaultModel: llm.ModelRef{Provider: "openrouter", Model: "test-model"}, MaxTokens: 200, Temperature: 0.3}
+				},
+			},
+		},
+		Queue: q, Hub: hub, Log: testLogger(),
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			r.HandleRun(ctx, jobID)
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-client.arrived:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for both concurrent HandleRun calls to start generating")
+		}
+	}
+	close(client.release)
+	wg.Wait()
+
+	sends := q.outboundSends()
+	if len(sends) != 1 {
+		t.Fatalf("BUG (see TestRecoverDispatchJobsCanDuplicateAnAlreadyClaimedJob / Finding #1): two "+
+			"concurrent HandleRun calls on the same dispatch job id produced %d outbound sends, want "+
+			"exactly 1: %+v", len(sends), sends)
+	}
+}
+
+// TestSequentialDuplicateDispatchJobsBothAutoSend reproduces Finding #1's
+// double-send deterministically, with no goroutines, by driving the exact
+// end state a duplicate dispatch enqueue produces in production: two
+// dispatch job rows for the SAME chat and the SAME burst_version (nothing
+// in the schema prevents this — automation_dispatch_jobs' primary key is a
+// random id, not (chat_id, burst_version); see
+// migrations/sqlite/0009_automation.up.sql), run one all the way to
+// completion (generate, persist, auto-send, delete), then run the second.
+//
+// The first HandleRun's auto-send records its outbound message via
+// InsertAutomationOutbound with sender_kind='ai' (see
+// store.InsertAutomationOutbound / automation.go's package doc). The second
+// HandleRun's own persist step (store.WriteDraftSetIfVersionCurrent) still
+// matches the unchanged burst_version and so is not discarded as stale, and
+// its own auto-send claim (store.ClaimDraftForAutoSend) checks for a human
+// reply via `sender_kind IN ('user','external_account')` — 'ai' is not in
+// that list (Finding C) — so it sees no reply, sees the same still-latest
+// inbound trigger, and sends too. Two messages reach the customer for the
+// one inbound message that started this burst.
+func TestSequentialDuplicateDispatchJobsBothAutoSend(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	accountID, chatID := seedRunnerChat(t, st)
+	if _, _, err := st.SetAutomationSettings(ctx, accountID, "scheduled_auto", nil, alwaysWindows()); err != nil {
+		t.Fatalf("SetAutomationSettings: %v", err)
+	}
+
+	if err := (&Scheduler{Store: st}).OnInboundMessage(ctx, chatID, accountID, "whatsapp", time.Now()); err != nil {
+		t.Fatalf("OnInboundMessage: %v", err)
+	}
+	version, _ := st.CurrentBurstVersion(ctx, chatID)
+
+	// Two distinct dispatch job rows for the identical (chat, burst) —
+	// exactly what TestRecoverDispatchJobsCanDuplicateAnAlreadyClaimedJob
+	// shows recoverDispatchJobs can hand to two different workers (whether
+	// as the same id delivered twice, or — equally possible, since
+	// CreateDispatchJob has no dedup — as two separate rows from two racing
+	// claim/recovery passes).
+	jobA, err := st.CreateDispatchJob(ctx, chatID, accountID, "whatsapp", version)
+	if err != nil {
+		t.Fatalf("CreateDispatchJob (A): %v", err)
+	}
+	jobB, err := st.CreateDispatchJob(ctx, chatID, accountID, "whatsapp", version)
+	if err != nil {
+		t.Fatalf("CreateDispatchJob (B): %v", err)
+	}
+
+	hub, q := &fakeHub{}, &fakeQueue{}
+	r := testRunner(st, "Доставка бесплатно.", hub, q)
+
+	r.HandleRun(ctx, jobA)
+	if got := len(q.outboundSends()); got != 1 {
+		t.Fatalf("setup: worker A's run should send once, got %d", got)
+	}
+
+	r.HandleRun(ctx, jobB)
+
+	sends := q.outboundSends()
+	if len(sends) != 1 {
+		t.Fatalf("BUG (Finding #1 + Finding C — store.ClaimDraftForAutoSend's human-reply check excludes "+
+			"sender_kind='ai'): a second dispatch job for the same already-answered burst auto-sent AGAIN "+
+			"— outbound sends = %d, want 1: %+v", len(sends), sends)
+	}
+}

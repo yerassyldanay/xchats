@@ -580,3 +580,73 @@ func TestInsertAutomationOutboundDoesNotClearUnread(t *testing.T) {
 		t.Fatalf("a manually-approved send should still clear unread_count, got %d", afterApprove.UnreadCount)
 	}
 }
+
+// TestClaimedDebounceJobIsUnrecoverableIfDispatchJobCreationFails pins a
+// real hole in the "restart-safe" story: internal/automation/scheduler.go's
+// claimDue commits ClaimDueDebounceJobs (status 'pending' -> 'claimed') in
+// one transaction, then calls CreateDispatchJob in a SEPARATE transaction.
+// If that second call fails for any reason, claimDue just logs and
+// `continue`s — it does not revert the claim. This test simulates exactly
+// that failure (by simply never calling CreateDispatchJob after the claim)
+// and shows the row is then permanently stuck: ClaimDueDebounceJobs only
+// ever selects status='pending', so it can never reclaim this row, and
+// RecoverableDispatchJobs only reads automation_dispatch_jobs, which has no
+// row for this burst. The customer gets no reply for this burst until a
+// brand-new inbound message re-arms the debounce (ArmDebounce forces
+// status='pending' unconditionally) — silently dropped, not retried.
+func TestClaimedDebounceJobIsUnrecoverableIfDispatchJobCreationFails(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	_, accountID, chatID := seedOneChat(t, st)
+
+	due := time.Now().Add(-time.Second) // already due
+	if err := st.ArmDebounce(ctx, chatID, accountID, "whatsapp", due); err != nil {
+		t.Fatalf("ArmDebounce: %v", err)
+	}
+
+	claimed, err := st.ClaimDueDebounceJobs(ctx, time.Now(), 10)
+	if err != nil {
+		t.Fatalf("ClaimDueDebounceJobs: %v", err)
+	}
+	found := false
+	for _, j := range claimed {
+		if j.ChatID == chatID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the due debounce job to be claimed: %+v", claimed)
+	}
+	// Deliberately do NOT call CreateDispatchJob here — this is
+	// scheduler.go's unhandled failure path.
+
+	again, err := st.ClaimDueDebounceJobs(ctx, time.Now().Add(time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ClaimDueDebounceJobs (retry): %v", err)
+	}
+	for _, j := range again {
+		if j.ChatID == chatID {
+			t.Fatalf("a 'claimed' debounce row must not be re-claimable — got %+v", j)
+		}
+	}
+
+	recoverable, err := st.RecoverableDispatchJobs(ctx, time.Now().Add(time.Hour), 10)
+	if err != nil {
+		t.Fatalf("RecoverableDispatchJobs: %v", err)
+	}
+	for _, j := range recoverable {
+		if j.ChatID == chatID {
+			t.Fatalf("no dispatch job was ever created for this burst, so nothing should be recoverable, got %+v", j)
+		}
+	}
+
+	// The bug: nothing in the store layer can ever surface this chat's due
+	// burst again. A correct implementation would give a 'claimed' row with
+	// no matching dispatch job some other recovery path (e.g. a stuck-claim
+	// timeout mirroring RecoverableDispatchJobs' 'processing' cutoff); today
+	// there isn't one, so this assertion fails.
+	t.Fatalf("BUG (scheduler.go claimDue, see internal/store/automation.go's ClaimDueDebounceJobs/"+
+		"RecoverableDispatchJobs): a debounce job claimed but never promoted to a dispatch job is "+
+		"permanently unrecoverable — chat_id=%s will get no automated reply for this burst until an "+
+		"unrelated new customer message re-arms it", chatID)
+}

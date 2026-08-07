@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { mountKb, testPinia } from '@/test/mount'
-import { nightsWindows } from '@/lib/schedule'
+import { nightsWindows, alwaysWindows } from '@/lib/schedule'
 import AutomationSettingsDialog from './AutomationSettingsDialog.vue'
 import type { Account } from '@/types'
 
@@ -161,5 +161,36 @@ describe('AutomationSettingsDialog', () => {
 
     expect(api.put).not.toHaveBeenCalled()
     expect(dlg.emitted('close')).toBeTruthy()
+  })
+})
+
+// This describe block runs at UTC+5 instead of the file's pinned UTC, to
+// cover the one thing a zero offset can never exercise: reopening the
+// dialog on a channel already saved as "Always" (or "Weekends"). See
+// schedule.test.ts's "detects Always/Weekends after a UTC round trip at a
+// non-zero offset" — utcToLocal splits each full-day UTC window into two at
+// any non-zero offset, so localWindows.ts's setup-time
+// utcToLocal(props.account.automation.schedule, offsetMinutes) call
+// produces 14 rows instead of 7, and detectPreset no longer recognizes it.
+describe('AutomationSettingsDialog at a non-UTC offset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubEnv('TZ', 'Asia/Almaty') // UTC+5, no DST
+  })
+  afterEach(() => {
+    wrapper?.unmount()
+    wrapper = undefined
+    vi.stubEnv('TZ', 'UTC') // restore for every other test in this file
+  })
+
+  it('BUG: reopening a channel already saved as Always no longer shows 7 rows', async () => {
+    await mountDialog({
+      account: account({
+        automation: { mode: 'scheduled_auto', wait_seconds: 5, wait_seconds_override: null, default_wait_seconds: 5, schedule: alwaysWindows() },
+      }),
+    })
+
+    const rows = body().findAll('select')
+    expect(rows).toHaveLength(7)
   })
 })
