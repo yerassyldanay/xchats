@@ -29,6 +29,24 @@ type Material struct {
 	Extraction    string    `json:"extraction"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+
+	// The fields below belong to the newer upload-material lineage
+	// (CreateUploadMaterial / mcp_upload.go's two-phase PUT flow) — populated
+	// once a file actually lands, zero-valued for materials still on the
+	// legacy text/url path above (BlobID/ExtractedText/etc.).
+	Filename           string `json:"filename"`
+	MimeType           string `json:"mime_type"`
+	SizeBytes          int64  `json:"size_bytes"`
+	ProcessingStatus   string `json:"processing_status"`
+	CustomerVisibility string `json:"customer_visibility"`
+	VisualSummary      string `json:"visual_summary"`
+	TranscriptText     string `json:"transcript_text"`
+	OperatorNote       string `json:"operator_note"`
+	// HasContent reports whether bytes are actually retrievable (storage_key
+	// set — the same test GetUploadMaterial/MaterialPreviews use). The
+	// storage_key itself is never exposed here: it is an internal blob-store
+	// locator, not a stable public identifier.
+	HasContent bool `json:"has_content"`
 }
 
 // MaterialInput creates one kbd_materials row.
@@ -179,7 +197,9 @@ func (s *Store) ListLiveMaterials(ctx context.Context, orgID uuid.UUID) ([]Mater
 }
 
 func (s *Store) listMaterials(ctx context.Context, orgID uuid.UUID) ([]Material, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction, created_at, updated_at
+	rows, err := s.db.Query(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction, created_at, updated_at,
+		filename, mime_type, size_bytes, processing_status, customer_visibility, visual_summary, transcript_text, operator_note,
+		CASE WHEN storage_key IS NOT NULL AND storage_key <> '' THEN 1 ELSE 0 END
 		FROM kbd_materials WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -188,12 +208,52 @@ func (s *Store) listMaterials(ctx context.Context, orgID uuid.UUID) ([]Material,
 	var out []Material
 	for rows.Next() {
 		var m Material
-		if err := rows.Scan(&m.ID, &m.SourceType, &m.SourceRef, &m.BlobID, &m.ExtractedText, &m.MediaKind, &m.Status, &m.Extraction, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		var filename, mimeType, customerVisibility, visualSummary, transcriptText, operatorNote *string
+		var sizeBytes *int64
+		var hasContent int
+		if err := rows.Scan(&m.ID, &m.SourceType, &m.SourceRef, &m.BlobID, &m.ExtractedText, &m.MediaKind, &m.Status, &m.Extraction, &m.CreatedAt, &m.UpdatedAt,
+			&filename, &mimeType, &sizeBytes, &m.ProcessingStatus, &customerVisibility, &visualSummary, &transcriptText, &operatorNote, &hasContent); err != nil {
 			return nil, err
 		}
+		m.Filename, m.MimeType = strOrEmpty(filename), strOrEmpty(mimeType)
+		m.CustomerVisibility = strOrEmpty(customerVisibility)
+		m.VisualSummary, m.TranscriptText, m.OperatorNote = strOrEmpty(visualSummary), strOrEmpty(transcriptText), strOrEmpty(operatorNote)
+		if sizeBytes != nil {
+			m.SizeBytes = *sizeBytes
+		}
+		m.HasContent = hasContent == 1
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// MaterialContentRef locates one org-scoped material's stored bytes for the
+// session-authenticated content endpoint (GET /kb/materials/:id/content).
+// Unlike GetUploadMaterial (used by the signed, per-material MCP media
+// token, which is itself the authorization), this filters by organization_id
+// in SQL: a logged-in user can guess any UUID, so absence and cross-org
+// mismatch must be indistinguishable — both simply return ErrUnknownKind.
+type MaterialContentRef struct {
+	StorageKey string
+	MimeType   string
+	Filename   string
+	Checksum   string
+}
+
+func (s *Store) GetMaterialContentRef(ctx context.Context, orgID, id uuid.UUID) (MaterialContentRef, error) {
+	var ref MaterialContentRef
+	var storageKey, mimeType, filename, checksum *string
+	err := s.db.QueryRow(ctx, `SELECT storage_key, mime_type, filename, sha256_checksum
+		FROM kbd_materials WHERE id = $1 AND organization_id = $2`, id, orgID).
+		Scan(&storageKey, &mimeType, &filename, &checksum)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return MaterialContentRef{}, ErrUnknownKind
+	}
+	if err != nil {
+		return MaterialContentRef{}, err
+	}
+	ref.StorageKey, ref.MimeType, ref.Filename, ref.Checksum = strOrEmpty(storageKey), strOrEmpty(mimeType), strOrEmpty(filename), strOrEmpty(checksum)
+	return ref, nil
 }
 
 // ---------------------------------------------------------------------------
