@@ -1,7 +1,7 @@
 // Command xchats is the xchats backend: API edge + webhook ingress + in-process
 // workers + the multichannel response service. Subcommands: serve (default),
 // migrate, seed, seed-kb-demo, simulate-message, kb-load, backup, check,
-// restore.
+// restore, admin-credential, reset-admin-password.
 package main
 
 import (
@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/appdirs"
+	"github.com/yerassyldanay/xchats/backend/internal/automation"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
@@ -60,6 +61,18 @@ const (
 	telegramMediaSweepBatch = 100
 )
 
+// Channel automation (internal/automation) cadence. claimEvery is short —
+// debounce waits are single-digit-to-60 seconds, so polling latency should
+// be too. recoverEvery/stuckAfter bound the crash-recovery reconcile pass
+// (also run once at startup): a dispatch job still 'processing' longer than
+// stuckAfter is assumed orphaned by a crash and re-published.
+const (
+	automationDispatchWorkers = 4
+	automationClaimEvery      = 1 * time.Second
+	automationRecoverEvery    = 1 * time.Minute
+	automationStuckAfter      = 2 * time.Minute
+)
+
 func main() {
 	cfgPath := flag.String("config", "", "path to config.yaml (default: $XCHATS_CONFIG, then ./config.yaml, then the OS config directory)")
 	flag.Parse()
@@ -98,6 +111,10 @@ func main() {
 		runCheck(cfg, log)
 	case "restore":
 		runRestore(log, flag.Args()[1:])
+	case "admin-credential":
+		runAdminCredential(flag.Args()[1:])
+	case "reset-admin-password":
+		runResetAdminPassword(cfg, log, flag.Args()[1:])
 	default:
 		log.Error("unknown command", "cmd", cmd)
 		os.Exit(2)
@@ -144,6 +161,13 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// step here any more.
 	st := mustStore(cfg, log)
 	defer st.Close()
+	bootstrapCredentialPath, minted, err := ensureBootstrapAdminPassword(ctx, cfg, st)
+	if err != nil {
+		fatal("bootstrap admin password", err)
+	}
+	if minted {
+		log.Info("one-time admin password created", "retrieve_with", "xchats admin-credential show")
+	}
 	seed(ctx, cfg, st, log)
 	orgID := seededOrgID(ctx, cfg, st, log)
 
@@ -206,6 +230,19 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	q := queue.NewInMem(2048, cfg.System.QueueWorkers, log)
 	hub := realtime.NewHub()
 
+	// automationScheduler is channel-level debounce + scheduled auto-reply
+	// (internal/automation): whatsmeow and tgingest hand every genuinely new
+	// inbound customer message to it instead of enqueueing an AI draft
+	// directly, and its Runner reuses responseService's own
+	// Conversations/KnowledgeBase/Engine (swapping in a version-gated
+	// Drafts writer per generation) so a debounced/scheduled reply is
+	// generated through the exact same grounded pipeline as every other
+	// draft.
+	automationRunner := &automation.Runner{Store: st, Response: responseService, Queue: q, Hub: hub, Log: log}
+	automationScheduler := automation.NewScheduler(st,
+		automation.Config{SystemDefaultWaitSeconds: cfg.System.CustomerMessageWaitSeconds},
+		automationRunner, log, 0)
+
 	// providerHealth is the self-healing status surface: every LLM call the
 	// engine makes reports through it (engine.StatusHook, set below), and
 	// every genuine health transition (not routine transient errors — see
@@ -239,7 +276,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// (internal/httpapi) and the long-poll manager below feed updates
 	// through the exact same Process call, so a bot's history is identical
 	// regardless of which ingress delivered it.
-	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Log: log})
+	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Automation: automationScheduler, Log: log})
 	// tgMgr is constructed unconditionally (its own Close is a cheap no-op
 	// with nothing registered) so webhook-mode deployments can still flip
 	// TG_MODE later without a restart-time wiring change; only Start is
@@ -259,6 +296,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Blob:         blobStore,
 		Queue:        q,
 		Hub:          hub,
+		Automation:   automationScheduler,
 		Log:          log,
 	})
 	if err != nil {
@@ -282,6 +320,10 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
 	// Reconnects every saved WhatsApp account without re-scanning a QR code.
 	go waMgr.Start(ctx)
+	// Claims due debounce deadlines into dispatch jobs and runs them; its
+	// own startup pass re-publishes whatever a crash left mid-flight, the
+	// same recovery philosophy as the Telegram media sweeper above.
+	automationScheduler.Start(ctx, automationDispatchWorkers, automationClaimEvery, automationRecoverEvery, automationStuckAfter)
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
@@ -298,7 +340,8 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
-		Credentials: credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
+		BootstrapAdminCredentialPath: bootstrapCredentialPath,
+		Credentials:                  credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
 		ProviderHealth: providerHealth, UpdateChecker: updateChecker,
 	})
 	router := srv.Router()
@@ -362,11 +405,13 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	if tunnelMgr != nil {
 		_ = tunnelMgr.Stop(shutdownCtx)
 	}
-	// tgMgr before q: the poller publishes to the queue via tgProc, so it
-	// must stop producing before the queue stops accepting. Explicit here
-	// (not a defer) so the ordering relative to q.Close() is guaranteed
-	// rather than left to defer's LIFO stacking.
+	// tgMgr and automationScheduler before q: the poller (via tgProc) and a
+	// scheduled_auto auto-send (via Runner.dispatchSend) both publish to the
+	// queue, so both producers must stop before the queue stops accepting.
+	// Explicit here (not a defer) so the ordering relative to q.Close() is
+	// guaranteed rather than left to defer's LIFO stacking.
 	tgMgr.Close()
+	automationScheduler.Stop()
 	q.Close()
 }
 

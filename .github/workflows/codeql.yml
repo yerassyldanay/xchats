@@ -3,7 +3,6 @@ name: CodeQL
 on:
   push:
     branches: [master]
-  pull_request:
   schedule:
     # Catches new advisories against code that hasn't changed, not just new
     # code — a Tuesday-morning cadence that doesn't collide with anyone's
@@ -12,6 +11,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Two explicit jobs, not one job with a `language: [go, javascript]`

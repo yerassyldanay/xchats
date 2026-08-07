@@ -1443,6 +1443,360 @@
         }
       ]
     },
+    "automation_settings": {
+      "columns": [
+        {
+          "name": "account_id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "mode",
+          "position": 2,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:suggestions",
+          "default_raw": "'suggestions'::text"
+        },
+        {
+          "name": "wait_seconds_override",
+          "position": 3,
+          "pg_type": "integer",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 4,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 5,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "account_id"
+      ],
+      "checks": [
+        {
+          "name": "automation_settings_mode_check",
+          "definition": "CHECK ((mode = ANY (ARRAY['off'::text, 'suggestions'::text, 'scheduled_auto'::text])))"
+        },
+        {
+          "name": "automation_settings_wait_seconds_override_check",
+          "definition": "CHECK ((wait_seconds_override IS NULL) OR (wait_seconds_override BETWEEN 0 AND 60))"
+        }
+      ]
+    },
+    "automation_schedule_windows": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "account_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "weekday",
+          "position": 3,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "start_minute",
+          "position": 4,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "end_minute",
+          "position": 5,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "automation_schedule_windows_account_idx",
+          "columns": [
+            "account_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "automation_schedule_windows_weekday_check",
+          "definition": "CHECK ((weekday BETWEEN 0 AND 6))"
+        },
+        {
+          "name": "automation_schedule_windows_start_minute_check",
+          "definition": "CHECK ((start_minute BETWEEN 0 AND 1439))"
+        },
+        {
+          "name": "automation_schedule_windows_end_minute_check",
+          "definition": "CHECK ((end_minute BETWEEN 1 AND 1440))"
+        },
+        {
+          "name": "automation_schedule_windows_end_minute_check1",
+          "definition": "CHECK ((end_minute <> start_minute))"
+        }
+      ]
+    },
+    "automation_debounce_jobs": {
+      "columns": [
+        {
+          "name": "chat_id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "account_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "channel",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "deadline_at",
+          "position": 4,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "burst_version",
+          "position": 5,
+          "pg_type": "bigint",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:1",
+          "default_raw": "1"
+        },
+        {
+          "name": "status",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:pending",
+          "default_raw": "'pending'::text"
+        },
+        {
+          "name": "created_at",
+          "position": 7,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 8,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "chat_id"
+      ],
+      "indexes": [
+        {
+          "name": "automation_debounce_jobs_due_idx",
+          "columns": [
+            "status",
+            "deadline_at"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "automation_debounce_jobs_account_idx",
+          "columns": [
+            "account_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "automation_debounce_jobs_status_check",
+          "definition": "CHECK ((status = ANY (ARRAY['pending'::text, 'claimed'::text])))"
+        }
+      ]
+    },
+    "automation_dispatch_jobs": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "chat_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "account_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "channel",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "burst_version",
+          "position": 5,
+          "pg_type": "bigint",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "status",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:pending",
+          "default_raw": "'pending'::text"
+        },
+        {
+          "name": "attempts",
+          "position": 7,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:0",
+          "default_raw": "0"
+        },
+        {
+          "name": "last_error",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:empty",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "created_at",
+          "position": 9,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 10,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "automation_dispatch_jobs_status_idx",
+          "columns": [
+            "status",
+            "updated_at"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "automation_dispatch_jobs_chat_idx",
+          "columns": [
+            "chat_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "automation_dispatch_jobs_status_check",
+          "definition": "CHECK ((status = ANY (ARRAY['pending'::text, 'processing'::text])))"
+        }
+      ]
+    },
     "kbd_draft": {
       "columns": [
         {

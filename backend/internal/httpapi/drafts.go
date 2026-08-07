@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/yerassyldanay/xchats/backend/automation"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -14,12 +15,25 @@ import (
 
 // handleSuggest is the on-demand "Подсказать ответ" trigger. Idempotent: if a
 // pending suggestion already exists it is returned rather than creating a second.
+// Manual Suggest/Regenerate bypasses debounce (this always fires immediately,
+// on every channel mode) EXCEPT "off", which rejects it outright — off means
+// no automatic OR manual drafts, full stop.
 func (s *Server) handleSuggest(c *gin.Context) {
 	chatID, okID := parseUUID(c, "id")
 	if !okID {
 		return
 	}
-	if _, ok := s.orgChat(c, chatID); !ok {
+	chat, okChat := s.orgChat(c, chatID)
+	if !okChat {
+		return
+	}
+	settings, err := s.store.AutomationSettingsForAccount(ctx(c), chat.AccountID)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	if settings.Mode == string(automation.ModeOff) {
+		fail(c, http.StatusConflict, ErrAutomationOff, "automation is off for this channel; manual suggestions are disabled")
 		return
 	}
 	// force=true (the panel's "Regenerate") skips the idempotent return and asks for

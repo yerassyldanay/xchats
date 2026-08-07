@@ -514,6 +514,12 @@ func (s *Store) DeleteOtherSessions(ctx context.Context, userID uuid.UUID, keepS
 // ResetSentinelAdminPassword ever touch.
 var sentinelAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
 
+// IsSentinelAdmin reports whether id belongs to the migration-created
+// bootstrap administrator. The HTTP password-change path uses this narrow
+// identity check to remove that account's one-time credential file without
+// coupling every ordinary user password change to bootstrap storage.
+func IsSentinelAdmin(id uuid.UUID) bool { return id == sentinelAdminID }
+
 // BootstrapSentinelAdminPassword mints the sentinel admin's first real
 // password on boot (cmd/xchats' first-boot bootstrap). It writes
 // passwordHash ONLY if the row still carries 0008_bootstrap_admin's blanked

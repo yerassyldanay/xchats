@@ -161,6 +161,44 @@ export interface WhatsAppAccount {
   created_at: string | null
 }
 
+// AutomationMode mirrors automation.Mode (backend/automation) — the closed
+// three-value channel automation mode.
+export type AutomationMode = 'off' | 'suggestions' | 'scheduled_auto'
+
+// ScheduleWindow mirrors dto.ScheduleWindow — one recurring UTC weekday/
+// time-of-day range. weekday is 0=Sunday..6=Saturday (UTC), matching
+// JavaScript's own Date.getDay()/getUTCDay() numbering, so no translation
+// table is needed anywhere this is used. end_minute <= start_minute means
+// the window wraps past UTC midnight into (weekday+1)%7 — see
+// frontend/src/lib/schedule.ts, which is the only place that interprets
+// (rather than just stores/transports) this shape.
+export interface ScheduleWindow {
+  weekday: number
+  start_minute: number
+  end_minute: number
+}
+
+// AccountAutomation mirrors dto.AccountAutomation — one channel's effective
+// (resolved) automation settings, embedded in Account. wait_seconds is
+// always the RESOLVED value (override ?? default); wait_seconds_override is
+// the raw stored value, null when the channel uses the system default.
+export interface AccountAutomation {
+  mode: AutomationMode
+  wait_seconds: number
+  wait_seconds_override: number | null
+  default_wait_seconds: number
+  schedule: ScheduleWindow[]
+}
+
+// AccountAutomationPatch is PUT /accounts/:id/automation's request body —
+// always a full replace (mode + override + the complete schedule), never a
+// partial patch: the dialog always saves the whole settings set at once.
+export interface AccountAutomationPatch {
+  mode: AutomationMode
+  wait_seconds_override: number | null
+  schedule: ScheduleWindow[]
+}
+
 // Account is the channel-neutral shape GET /accounts returns — one list for
 // every channel. external_handle is the phone number for WhatsApp and
 // "@botname" for Telegram; the webhook_* fields are Telegram health and stay
@@ -181,6 +219,7 @@ export interface Account {
   webhook_registered_at: string | null
   webhook_last_checked_at: string | null
   webhook_last_error: string | null
+  automation: AccountAutomation
 }
 
 // TelegramAccountResponse is what the /telegram-accounts lifecycle routes

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { api } from '../api/client'
 import type {
   Account,
+  AccountAutomationPatch,
   WaPairSession,
   WaPairStatus,
   TelegramAccountResponse,
@@ -86,6 +87,16 @@ export const useAccounts = defineStore('accounts', {
       const path = channel === 'telegram' ? '/telegram-accounts/' : '/whatsapp-accounts/'
       await api.del(path + id)
       await this.load()
+    },
+    // updateAutomation is channel-neutral (debounce/scheduled auto-reply
+    // applies the same way to a WhatsApp number or a Telegram bot). Patches
+    // the single returned account in place rather than reloading the whole
+    // list, matching stores/settings.ts's updateLLM/updateNgrok pattern.
+    async updateAutomation(id: string, patch: AccountAutomationPatch) {
+      const updated = await api.put<Account>(`/accounts/${id}/automation`, patch)
+      const idx = this.accounts.findIndex((a) => a.id === id)
+      if (idx !== -1) this.accounts[idx] = updated
+      return updated
     },
   },
 })

@@ -41,6 +41,14 @@ const mediaDownloadTimeout = 2 * time.Minute
 // queue becomes a logged error rather than blocking event ingestion.
 const aiDraftEnqueueTimeout = 2 * time.Second
 
+// AutomationScheduler is the narrow surface Manager needs from
+// internal/automation.Scheduler to hand off a fresh inbound customer
+// message — satisfied with zero adapter code, mirroring internal/tgingest's
+// own narrow-interface dependencies.
+type AutomationScheduler interface {
+	OnInboundMessage(ctx context.Context, chatID, accountID uuid.UUID, channel string, lastMessageAt time.Time) error
+}
+
 // ManagerConfig is Manager's construction input.
 type ManagerConfig struct {
 	// DeviceDBPath is whatsmeow's own device-session SQLite file — separate
@@ -53,7 +61,14 @@ type ManagerConfig struct {
 	// is ingested — without it neither a real inbound message nor a
 	// /debug/wa-event injection would ever reach the inbox UI live.
 	Hub *realtime.Hub
-	Log *slog.Logger
+	// Automation arms/resets a chat's debounce deadline for every genuinely
+	// new inbound customer message, replacing a direct AI-draft enqueue —
+	// see ingestMessage. Optional: nil (as in most of this package's own
+	// tests, which don't exercise automation) falls back to the pre-
+	// automation behavior of enqueueing an AI draft immediately, with no
+	// debounce and no mode gating.
+	Automation AutomationScheduler
+	Log        *slog.Logger
 }
 
 // Manager is the whatsmeow adapter's composition root: a registry of
@@ -293,7 +308,7 @@ func (m *Manager) ingestMessage(ctx context.Context, evt whatsapp.MessageReceive
 		}
 	}
 	if direction == "in" {
-		m.enqueueAIDraft(ctx, res.ChatID)
+		m.onInboundCustomerMessage(ctx, res.ChatID, accountID, evt.Timestamp)
 	}
 	return res, nil
 }
@@ -450,11 +465,29 @@ func (m *Manager) handleLoggedOut(ctx context.Context, accountID string, evt *ev
 		fmt.Sprintf("external logout (on_connect=%v reason=%v)", evt.OnConnect, evt.Reason))
 }
 
-func (m *Manager) enqueueAIDraft(ctx context.Context, chatID uuid.UUID) {
+// onInboundCustomerMessage hands a genuinely new inbound customer message to
+// the channel's automation settings: internal/automation.Scheduler decides
+// whether to arm/reset the chat's debounce deadline (mode suggestions or
+// scheduled_auto) or do nothing at all (mode off) — replacing what used to
+// be an unconditional, immediate AI-draft enqueue. m.cfg.Automation is nil
+// only in tests that don't wire one up, in which case this falls back to
+// that original immediate-enqueue behavior so those tests are unaffected.
+func (m *Manager) onInboundCustomerMessage(ctx context.Context, chatID, accountID uuid.UUID, messageTS time.Time) {
 	pctx, cancel := context.WithTimeout(ctx, aiDraftEnqueueTimeout)
 	defer cancel()
-	if err := m.cfg.Queue.Publish(pctx, queue.Message{Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: chatID}}); err != nil {
-		m.log.Error("whatsmeow: enqueue ai draft failed", "chat_id", chatID, "err", err)
+	if m.cfg.Automation == nil {
+		if err := m.cfg.Queue.Publish(pctx, queue.Message{Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: chatID}}); err != nil {
+			m.log.Error("whatsmeow: enqueue ai draft failed", "chat_id", chatID, "err", err)
+		}
+		return
+	}
+	acct, err := m.cfg.Store.AccountByID(pctx, accountID)
+	if err != nil {
+		m.log.Error("whatsmeow: resolve account channel for automation failed", "account_id", accountID, "err", err)
+		return
+	}
+	if err := m.cfg.Automation.OnInboundMessage(pctx, chatID, accountID, acct.Channel, messageTS); err != nil {
+		m.log.Error("whatsmeow: automation arm failed", "chat_id", chatID, "err", err)
 	}
 }
 

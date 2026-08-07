@@ -2,12 +2,25 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"testing"
+
+	zalandokeyring "github.com/zalando/go-keyring"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 )
+
+// Tests in this package must never probe or mutate the developer's real OS
+// keyring. Callers that opt into file credentials now deterministically use
+// their t.TempDir, while no-store tests deterministically get the intended
+// unavailable-keyring path.
+func TestMain(m *testing.M) {
+	zalandokeyring.MockInitWithError(errors.New("OS keyring disabled in tests"))
+	os.Exit(m.Run())
+}
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))

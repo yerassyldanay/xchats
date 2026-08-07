@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	zalandokeyring "github.com/zalando/go-keyring"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
@@ -101,6 +103,10 @@ type settingsHarness struct {
 // since a real one needs a live ngrok account.
 func newSettingsHarness(t *testing.T) *settingsHarness {
 	t.Helper()
+	// credentials.Open prefers a usable OS keyring over AllowFile. Disable
+	// that process-global provider before opening the test store so this
+	// harness cannot read or overwrite a developer's real xchats secrets.
+	zalandokeyring.MockInitWithError(errors.New("OS keyring disabled in tests"))
 	ctx := context.Background()
 	st, _ := dbtest.Open(t)
 

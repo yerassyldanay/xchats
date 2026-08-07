@@ -135,6 +135,11 @@ type Server struct {
 	// /settings/update-check reports no update information rather than
 	// failing.
 	updateChecker *updatecheck.Checker
+
+	// bootstrapAdminCredentialPath is the owner-only, one-time password file
+	// created by cmd/xchats on first boot. Empty in tests or deployments that
+	// do not use the sentinel admin bootstrap.
+	bootstrapAdminCredentialPath string
 }
 
 // Deps is the constructor input.
@@ -168,6 +173,8 @@ type Deps struct {
 	LLMRefresh     func()
 	ProviderHealth *providerhealth.Tracker
 	UpdateChecker  *updatecheck.Checker
+
+	BootstrapAdminCredentialPath string
 }
 
 // New builds a Server.
@@ -189,6 +196,7 @@ func New(d Deps) *Server {
 		csrfSecret:  randomCSRFFallbackSecret(),
 		credentials: d.Credentials, settings: d.Settings, tunnel: d.Tunnel, llmRefresh: d.LLMRefresh,
 		providerHealth: d.ProviderHealth, updateChecker: d.UpdateChecker,
+		bootstrapAdminCredentialPath: d.BootstrapAdminCredentialPath,
 		// Deliberately generous limits — these are abuse guards, not a
 		// throttle on legitimate usage. See ratelimit.go's doc comment.
 		oauthRegisterLimit:  newIPRateLimiter(5.0/60, 5),   // 5/min, 5 burst — registration spam is the highest-value target
@@ -323,6 +331,10 @@ func (s *Server) Router() *gin.Engine {
 	// Channel-neutral account listing — every channel in one shape. The
 	// per-channel routes below own each channel's own lifecycle.
 	auth.GET("/accounts", s.handleListAccounts)
+	// Channel-level debounce + scheduled auto-reply settings — one channel-
+	// neutral route for every channel (see orgAnyAccount's own doc comment
+	// on why it does not exclude Telegram the way orgAccount does).
+	auth.PUT("/accounts/:id/automation", s.handleUpdateAccountAutomation)
 
 	// WhatsApp accounts manager: connect via whatsmeow's own QR pairing
 	// (internal/whatsmeow), no external gateway involved.
