@@ -28,7 +28,7 @@ jobs:
           # commit in history — the default depth-1 checkout only has the tip.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
@@ -90,7 +90,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: evals/harness/go.mod
           cache-dependency-path: evals/harness/go.sum
