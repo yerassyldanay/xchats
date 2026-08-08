@@ -849,23 +849,39 @@ func (s *Store) Draft(ctx context.Context, orgID uuid.UUID) (*DraftView, error) 
 }
 
 // LiveView returns the live KB only — no blob overlay, so every row is
-// Draft:false, and no materials/requests (playground-only concepts). Used by
-// the /kb/* live editor so its reads and writes never see, or touch, pending
-// Playground work — the two flows stay fully separate (see plan "Playground
-// redesign").
+// Draft:false. Materials ARE included (org-wide kbd_materials rows have no
+// draft/live split at all — a material is either uploaded or it isn't,
+// nothing about it is "pending"), which is what lets /knowledge-base's
+// MediaStrip/MediaFieldPicker resolve an attached id to a real thumbnail and
+// its "Файлы (материалы)" tab list uploads with no separate fetch. Requests
+// stay empty: a KbRequest (confirm_fact/describe_file/comment) is a
+// Playground review-queue concept with no live-page meaning. Used by the
+// /kb/* live editor so its reads and writes never see, or touch, pending
+// Playground TEXT/FACT work — the two flows stay fully separate (see plan
+// "Playground redesign") — materials are simply outside that split.
 func (s *Store) LiveView(ctx context.Context, orgID uuid.UUID) (*DraftView, error) {
 	return s.liveView(ctx, s.db, orgID)
 }
 
 // liveView is LiveView's db-parameterized core — see identityIndex's doc
-// comment for why a caller already inside writeDraftBlobVersioned's
-// transaction must pass tx here instead of letting this reach for s.db.
+// comment (mcp_read.go) for why a caller already inside
+// writeDraftBlobVersioned's transaction must pass tx here instead of letting
+// this reach for s.db — which is exactly why this calls listMaterialsTx(ctx,
+// db, orgID) rather than the s.db-bound listMaterials: identityIndex calls
+// this from inside that locked transaction, and a second s.db acquisition
+// from in there is the pool-exhaustion deadlock identityIndex's own comment
+// describes.
 func (s *Store) liveView(ctx context.Context, db dbtx, orgID uuid.UUID) (*DraftView, error) {
 	v, err := s.mergedView(ctx, db, orgID, DraftBlob{}, 0, time.Time{})
 	if err != nil {
 		return nil, err
 	}
-	v.Materials = []Material{}
+	if v.Materials, err = listMaterialsTx(ctx, db, orgID); err != nil {
+		return nil, err
+	}
+	if v.Materials == nil {
+		v.Materials = []Material{}
+	}
 	v.Requests = []Request{}
 	return v, nil
 }
@@ -1417,15 +1433,21 @@ func (s *Store) PatchConfig(ctx context.Context, orgID uuid.UUID, actor uuid.UUI
 	})
 }
 
-// TopicInput is an upsert payload for a draft topic.
+// TopicInput is an upsert payload for a draft topic. Media is the browser
+// form lane's media edits (Stage 3 of the KB media milestone) — zero value
+// (every pointer nil) means "no media edit at all," which is exactly what
+// every existing caller that never sets it gets, so an old-shape literal
+// (TopicInput{Slug, Title, BodyMD}) still cannot blank out media an MCP tool
+// already staged (see applyTopicMedia's nil-means-absent contract).
 type TopicInput struct {
 	Slug, Title, BodyMD string
+	Media               TopicMedia
 }
 
 // UpsertTopic stages a topic create/update in the draft blob, by slug. Starts
-// from the topic's current merged shape (currentTopic) so this text-only
-// caller — the Playground editor, which has no media inputs — can never
-// blank out media an MCP tool already staged on the same topic.
+// from the topic's current merged shape (currentTopic) so a caller that
+// leaves Media zero can never blank out media an MCP tool already staged on
+// the same topic.
 func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TopicInput) error {
 	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentTopic(ctx, db, orgID, in.Slug, b)
@@ -1433,6 +1455,10 @@ func (s *Store) UpsertTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUI
 			return err
 		}
 		cur.Title, cur.BodyMD = in.Title, in.BodyMD
+		refs := applyTopicMedia(&cur, in.Media)
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
+			return err
+		}
 		b.upsertTopic(cur)
 		return nil
 	})
@@ -1450,14 +1476,16 @@ func (s *Store) DeleteTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUI
 
 // --- typed facts: tariffs / products / contacts -----------------------------
 
-// TariffInput is an upsert payload for a draft tariff.
+// TariffInput is an upsert payload for a draft tariff. Media is nil-means-
+// absent, same contract as TopicInput.Media above.
 type TariffInput struct {
 	Ref, Name, Price, LimitText, Fee, Summary, PricingType, Advantages, Disadvantages, SalesStatus string
+	Media                                                                                           TariffMedia
 }
 
 // UpsertTariff stages a tariff create/update in the draft blob, by ref.
-// Merges onto the tariff's current shape (currentTariff) so this text-only
-// caller never blanks out media an MCP tool already staged.
+// Merges onto the tariff's current shape (currentTariff) so a caller that
+// leaves Media zero never blanks out media an MCP tool already staged.
 func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TariffInput) error {
 	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentTariff(ctx, db, orgID, in.Ref, b)
@@ -1469,6 +1497,10 @@ func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 		cur.PricingType = orDefault(in.PricingType, "fixed")
 		cur.Advantages, cur.Disadvantages = in.Advantages, in.Disadvantages
 		cur.SalesStatus = orDefault(in.SalesStatus, "active")
+		refs := applyTariffMedia(&cur, in.Media)
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
+			return err
+		}
 		b.upsertTariff(cur)
 		return nil
 	})
@@ -1485,15 +1517,17 @@ func (s *Store) DeleteTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 
 // ProductInput is an upsert payload for a draft product. InStock is nil-able:
 // nil leaves the column at its current merged value, matching the same
-// nil-means-unchanged idiom PutLiveProduct uses (live.go).
+// nil-means-unchanged idiom PutLiveProduct uses (live.go). Media is
+// nil-means-absent, same contract as TopicInput.Media above.
 type ProductInput struct {
 	Ref, Name, Price, Description, Category, SalesStatus string
 	InStock                                              *bool
+	Media                                                 ProductMedia
 }
 
 // UpsertProduct stages a product create/update in the draft blob, by ref.
-// Merges onto the product's current shape (currentProduct) so this caller
-// cannot blank out media an MCP tool already staged.
+// Merges onto the product's current shape (currentProduct) so a caller that
+// leaves Media zero cannot blank out media an MCP tool already staged.
 func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ProductInput) error {
 	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentProduct(ctx, db, orgID, in.Ref, b)
@@ -1505,6 +1539,10 @@ func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, actor uuid.U
 		cur.SalesStatus = orDefault(in.SalesStatus, "active")
 		if in.InStock != nil {
 			cur.InStock = *in.InStock
+		}
+		refs := applyProductMedia(&cur, in.Media)
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
+			return err
 		}
 		b.upsertProduct(cur)
 		return nil
@@ -1555,7 +1593,8 @@ func (s *Store) DeleteZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUID
 }
 
 // ContactPatch carries optional edits to the org's singleton contact row (nil
-// = leave unchanged).
+// = leave unchanged). Media is nil-means-absent, same contract as
+// TopicInput.Media above.
 type ContactPatch struct {
 	WhatsApp         *string
 	Email            *string
@@ -1566,10 +1605,12 @@ type ContactPatch struct {
 	Phone            *string
 	Website          *string
 	Instagram        *string
+	Media            ContactsMedia
 }
 
 // PatchContacts stages an edit to the org's singleton support-contact row,
-// starting from its current merged shape so omitted fields stay unchanged.
+// starting from its current merged shape so omitted fields (and a zero
+// Media) stay unchanged.
 func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p ContactPatch) error {
 	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
 		cur, err := s.currentContact(ctx, db, orgID, b)
@@ -1603,13 +1644,18 @@ func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, actor uuid.U
 		if p.Instagram != nil {
 			cur.Instagram = *p.Instagram
 		}
+		refs := applyContactsMedia(&cur, p.Media)
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
+			return err
+		}
 		b.upsertContact(cur)
 		return nil
 	})
 }
 
 // PolicyPatch carries optional edits to the org's singleton commerce-policy
-// row (nil = leave) — a structural clone of ContactPatch.
+// row (nil = leave) — a structural clone of ContactPatch. Media is
+// nil-means-absent, same contract as TopicInput.Media above.
 type PolicyPatch struct {
 	DeliveryCost       *string
 	DeliveryInDays     *string
@@ -1620,6 +1666,7 @@ type PolicyPatch struct {
 	ReturnPeriodInDays *string
 	Warranty           *string
 	OutsideZonesNote   *string
+	Media              PoliciesMedia
 }
 
 // PatchPolicies stages an edit to the org's singleton commerce-policy row,
@@ -1657,6 +1704,10 @@ func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, actor uuid.U
 		}
 		if p.OutsideZonesNote != nil {
 			cur.OutsideZonesNote = *p.OutsideZonesNote
+		}
+		refs := applyPoliciesMedia(&cur, p.Media)
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
+			return err
 		}
 		b.upsertPolicy(cur)
 		return nil

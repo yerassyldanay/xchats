@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import KbFormDialog from './KbFormDialog.vue'
+import MediaFieldPicker from './MediaFieldPicker.vue'
 import type { TariffPayload } from './payloads'
 
 const modal = useKbModal()
@@ -16,6 +17,10 @@ const { t } = useI18n()
 const buf = reactive({
   ref: '', name: '', price: '', limit_text: '', fee: '', summary: '',
   pricing_type: 'fixed', advantages: '', disadvantages: '', sales_status: 'active',
+  featured_image: null as string | null,
+  pricing_images: [] as string[],
+  explainer_videos: [] as string[],
+  terms_documents: [] as string[],
 })
 const isEdit = () => modal.session.value?.mode === 'edit'
 
@@ -36,6 +41,10 @@ watch(
     buf.advantages = snap?.advantages ?? ''
     buf.disadvantages = snap?.disadvantages ?? ''
     buf.sales_status = snap?.sales_status || 'active'
+    buf.featured_image = snap?.featured_image ?? null
+    buf.pricing_images = [...(snap?.pricing_images ?? [])]
+    buf.explainer_videos = [...(snap?.explainer_videos ?? [])]
+    buf.terms_documents = [...(snap?.terms_documents ?? [])]
   },
   { immediate: true }
 )
@@ -109,5 +118,21 @@ function retry() {
         <Textarea v-model="buf.disadvantages" rows="2" class="min-h-0 text-[14px] mt-1" />
       </div>
     </div>
+    <MediaFieldPicker
+      :label="t('kb.media.image')" field="featured_image" :multiple="false"
+      :model-value="buf.featured_image" @update:model-value="(v) => (buf.featured_image = v as string | null)"
+    />
+    <MediaFieldPicker
+      :label="t('kb.media.pricingImages')" field="pricing_images" :multiple="true"
+      :model-value="buf.pricing_images" @update:model-value="(v) => (buf.pricing_images = v as string[])"
+    />
+    <MediaFieldPicker
+      :label="t('kb.media.videos')" field="explainer_videos" :multiple="true"
+      :model-value="buf.explainer_videos" @update:model-value="(v) => (buf.explainer_videos = v as string[])"
+    />
+    <MediaFieldPicker
+      :label="t('kb.media.terms')" field="terms_documents" :multiple="true"
+      :model-value="buf.terms_documents" @update:model-value="(v) => (buf.terms_documents = v as string[])"
+    />
   </KbFormDialog>
 </template>

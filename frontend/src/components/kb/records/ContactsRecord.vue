@@ -99,9 +99,9 @@ const diff = computed(() =>
       </div>
     </div>
     <div v-if="row" class="flex flex-col gap-2">
-      <MediaStrip :label="t('kb.media.businessCard')" :ids="row.contact_card_image" />
-      <MediaStrip :label="t('kb.media.map')" :ids="row.location_map_image" />
-      <MediaStrip :label="t('kb.media.legalDocuments')" :ids="row.company_legal_documents" />
+      <MediaStrip :label="t('kb.media.businessCard')" field="contact_card_image" :ids="row.contact_card_image" />
+      <MediaStrip :label="t('kb.media.map')" field="location_map_image" :ids="row.location_map_image" />
+      <MediaStrip :label="t('kb.media.legalDocuments')" field="company_legal_documents" :ids="row.company_legal_documents" />
     </div>
   </RecordShell>
 </template>

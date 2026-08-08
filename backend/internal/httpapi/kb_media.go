@@ -2,7 +2,10 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
 
@@ -93,4 +97,114 @@ func (s *Server) handleKBMaterialContent(c *gin.Context) {
 
 	// ServeContent (not c.Data) so a <video> tag's Range requests work.
 	http.ServeContent(c.Writer, c.Request, "", time.Time{}, bytes.NewReader(data))
+}
+
+// handleKBUploadMaterial is the browser's own upload avenue for KB media —
+// session + org authenticated (kbWrite, kb_live.go — the same preamble
+// every other /kb/* write uses; NOT admin-gated, matching the rest of this
+// non-admin group), single-shot multipart (unlike kb_media_upload's
+// two-phase MCP flow, whose signed-URL dance exists solely because the KB
+// Manager widget is cross-origin — a same-origin session request has no
+// such need). Internally still goes through CreateUploadMaterial ->
+// blob.Put -> CompleteMaterialUpload, the exact same two-phase STORE calls
+// the MCP path uses, so browser- and MCP-authored materials share one
+// lineage end to end: has_content, MaterialPreviews, GetMaterialContentRef,
+// and validateMediaRef's storage_key check all behave identically either
+// way.
+//
+// Reusing PUT /mcp/uploads/:id (mcp_upload.go) instead was rejected: it is
+// gated on s.mcpAuthEnabled()/s.mcpUploadSigner, so a deployment without the
+// MCP connector configured would lose browser KB uploads too, and its
+// uploadCORS is permissive-by-design specifically because that route never
+// sees a session cookie — reusing it here would need a second, cookie-aware
+// CORS carve-out for no real benefit.
+func (s *Server) handleKBUploadMaterial(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+
+	// Must wrap the body before anything touches it — c.FormFile below is
+	// what triggers the read. Mirrors handleUploadMedia's ordering
+	// (inbox.go) and its own doc comment on why gin's MaxMultipartMemory
+	// alone (a parser spill-to-disk threshold, not a body-size cap) isn't
+	// enough. mcpUploadMaxBytes (mcp_upload.go) is mcpserver.MaxMediaUploadBytes
+	// (50 MiB) — deliberately NOT maxUploadBytes (64 MiB, server.go's chat
+	// media cap): "what MCP can upload, the browser can too" should mean the
+	// same limit either way.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, mcpUploadMaxBytes)
+	fh, err := c.FormFile("file")
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			fail(c, http.StatusRequestEntityTooLarge, ErrValidation, "upload exceeds the maximum allowed size")
+			return
+		}
+		fail(c, http.StatusBadRequest, ErrValidation, "file part required")
+		return
+	}
+	f, err := fh.Open()
+	if err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "cannot open file")
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "cannot read file")
+		return
+	}
+
+	_, mimeType := detectMedia(fh.Filename, fh.Header.Get("Content-Type"))
+	// Same HTML-masquerade / declared-vs-sniffed check the MCP upload path
+	// runs (mcp_upload.go) and handleUploadMedia reuses for chat media —
+	// the classic stored-XSS-via-mislabeled-upload vector applies here just
+	// as much, since these bytes are later served back on this app's own
+	// origin (handleKBMaterialContent above).
+	if reason := mimeSanityCheck(mimeType, data); reason != "" {
+		fail(c, http.StatusBadRequest, ErrValidation, reason)
+		return
+	}
+	// A mime_type kbstore.KindOfMime cannot classify would be permanently
+	// un-attachable — every validateMediaRef call rejects it as "not a
+	// recognized media field" (mcp_media.go), so reject it now instead of
+	// leaving an orphaned, never-attachable kbd_materials row behind.
+	if kbstore.KindOfMime(mimeType) == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "unsupported file type "+mimeType+" — must be an image, video, audio, or document")
+		return
+	}
+
+	reqCtx := ctx(c)
+	// customer_visibility: "visible", unlike kb_media_upload's "auto" default
+	// when no target field is declared (mcp_media.go) — that branch exists
+	// for an AI agent's exploratory upload with uncertain intent; a human
+	// clicking this endpoint's dedicated upload button already has one
+	// (attach it to the field the picker is editing, a later separate
+	// draft-lane write — Stage 3), even though this endpoint itself takes no
+	// target param.
+	materialID, err := s.kb.CreateUploadMaterial(reqCtx, orgID, kbstore.UploadMaterialInput{
+		Filename: fh.Filename, MimeType: mimeType, SizeBytes: int64(len(data)), CustomerVisibility: "visible",
+	})
+	if err != nil {
+		s.kbFail(c, err)
+		return
+	}
+
+	// The object key is derived from the CONTENT hash, exactly like
+	// handleMCPUpload's storageKey — see that handler's comment on why two
+	// different payloads can never collide on the same on-disk key.
+	sum := sha256.Sum256(data)
+	sumHex := hex.EncodeToString(sum[:])
+	storageKey, err := s.blob.Put(materialID.String()+"-"+sumHex[:16], data, blob.Meta{
+		Mimetype: mimeType, FileName: fh.Filename, FileSize: int64(len(data)),
+	})
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "store failed")
+		return
+	}
+	if err := s.kb.CompleteMaterialUpload(reqCtx, materialID, "disk", storageKey, int64(len(data)), sumHex); err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "finalize failed")
+		return
+	}
+	ok(c, gin.H{"material_id": materialID, "processing_status": "parsed"})
 }

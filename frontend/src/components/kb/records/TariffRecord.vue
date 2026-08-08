@@ -99,10 +99,10 @@ const diff = computed(() =>
       </div>
     </div>
     <div class="flex flex-col gap-2">
-      <MediaStrip :label="t('kb.media.image')" :ids="row.featured_image" />
-      <MediaStrip :label="t('kb.media.pricingImages')" :ids="row.pricing_images" />
-      <MediaStrip :label="t('kb.media.videos')" :ids="row.explainer_videos" />
-      <MediaStrip :label="t('kb.media.terms')" :ids="row.terms_documents" />
+      <MediaStrip :label="t('kb.media.image')" field="featured_image" :ids="row.featured_image" />
+      <MediaStrip :label="t('kb.media.pricingImages')" field="pricing_images" :ids="row.pricing_images" />
+      <MediaStrip :label="t('kb.media.videos')" field="explainer_videos" :ids="row.explainer_videos" />
+      <MediaStrip :label="t('kb.media.terms')" field="terms_documents" :ids="row.terms_documents" />
     </div>
   </RecordShell>
 </template>

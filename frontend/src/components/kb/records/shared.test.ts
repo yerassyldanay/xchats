@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changedFields, kindOfMime, materialContentURL, mediaIds, stateForChange } from './shared'
+import { changedFields, KB_MEDIA_FIELDS, kindOfMime, materialContentURL, mediaFieldKind, mediaIds, stateForChange } from './shared'
 
 describe('stateForChange', () => {
   it('maps added -> new', () => {
@@ -56,5 +56,25 @@ describe('kindOfMime', () => {
 describe('materialContentURL', () => {
   it('points at the session-authenticated content endpoint', () => {
     expect(materialContentURL('abc-123')).toBe('/xchats/api/v1/kb/materials/abc-123/content')
+  })
+})
+
+describe('mediaFieldKind', () => {
+  it('resolves every field in the KB_MEDIA_FIELDS registry to its declared kind', () => {
+    for (const specs of Object.values(KB_MEDIA_FIELDS)) {
+      for (const spec of specs) {
+        expect(mediaFieldKind(spec.field)).toBe(spec.kind)
+      }
+    }
+  })
+  it('agrees on featured_image across every type that carries it', () => {
+    expect(mediaFieldKind('featured_image')).toBe('image')
+  })
+  it('agrees on explainer_videos, shared by topics and tariffs', () => {
+    expect(mediaFieldKind('explainer_videos')).toBe('video')
+  })
+  it('is empty for an unrecognized field', () => {
+    expect(mediaFieldKind('')).toBe('')
+    expect(mediaFieldKind('not_a_real_field')).toBe('')
   })
 })

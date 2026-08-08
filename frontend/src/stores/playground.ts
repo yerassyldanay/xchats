@@ -27,6 +27,7 @@ export const usePlayground = defineStore('playground', {
     changes: null as DraftChangeSet | null,
     loading: false,
     busy: false, // a structured draft write is in flight
+    uploading: false, // a KB material upload (POST /kb/materials) is in flight — deliberately separate from `busy`: an upload is not itself a draft write (nothing is staged until the picker's owning form is saved), so it must not gate KbFormDialog's Save button the way `busy` does
     approving: false, // an approve (whole-draft or entity) is in flight
     publishingKey: '' as string, // `${kind}:${key}` of the card whose Publish is in flight right now — always cleared once the request settles
     error: '' as string,
@@ -131,7 +132,11 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft topics ---------------------------------------------------------
-    upsertTopic(input: { slug: string; title?: string; body_md?: string }) {
+    // input's type is Omit<TopicPayload, 'kind'> (and likewise for every
+    // sibling upsert/patch below) so the wire shape stays in lockstep with
+    // payloads.ts's media fields instead of a second hand-written copy that
+    // could drift — input is forwarded to the API verbatim either way.
+    upsertTopic(input: Omit<TopicPayload, 'kind'>) {
       return this.write(async () => this.setChanges(await api.post<DraftChangeSet>('/playground/draft/topics', input, this.ifMatch())))
     },
     deleteTopic(slug: string) {
@@ -139,18 +144,7 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft tariffs (typed facts: verbatim price/limit/fee columns) --------
-    upsertTariff(input: {
-      ref: string
-      name?: string
-      price?: string
-      limit_text?: string
-      fee?: string
-      summary?: string
-      pricing_type?: string
-      advantages?: string
-      disadvantages?: string
-      sales_status?: string
-    }) {
+    upsertTariff(input: Omit<TariffPayload, 'kind'>) {
       return this.write(async () => this.setChanges(await api.post<DraftChangeSet>('/playground/draft/tariffs', input, this.ifMatch())))
     },
     deleteTariff(ref: string) {
@@ -158,15 +152,7 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft products (typed facts: verbatim price column) ------------------
-    upsertProduct(input: {
-      ref: string
-      name?: string
-      price?: string
-      description?: string
-      category?: string
-      sales_status?: string
-      in_stock?: boolean
-    }) {
+    upsertProduct(input: Omit<ProductPayload, 'kind'>) {
       return this.write(async () => this.setChanges(await api.post<DraftChangeSet>('/playground/draft/products', input, this.ifMatch())))
     },
     deleteProduct(ref: string) {
@@ -192,18 +178,12 @@ export const usePlayground = defineStore('playground', {
     },
 
     // --- draft contacts (the 'support' singleton — one org, one PATCH) -------
-    patchContacts(patch: {
-      whatsapp?: string; email?: string; address?: string; legal_information?: string; callback_time?: string
-      working_hours?: string; phone?: string; website?: string; instagram?: string
-    }) {
+    patchContacts(patch: Omit<ContactsPayload, 'kind'>) {
       return this.write(async () => this.setChanges(await api.patch<DraftChangeSet>('/playground/draft/contacts', patch, this.ifMatch())))
     },
 
     // --- draft policies (the 'main' singleton — one org, one PATCH) ----------
-    patchPolicies(patch: {
-      delivery_cost?: string; delivery_in_days?: string; free_delivery_from?: string; min_order?: string
-      prepayment?: string; installment?: string; return_period_in_days?: string; warranty?: string; outside_zones_note?: string
-    }) {
+    patchPolicies(patch: Omit<PoliciesPayload, 'kind'>) {
       return this.write(async () => this.setChanges(await api.patch<DraftChangeSet>('/playground/draft/policies', patch, this.ifMatch())))
     },
 
@@ -350,6 +330,31 @@ export const usePlayground = defineStore('playground', {
         this.liveError = e instanceof ApiError ? e.message : 'Не удалось загрузить базу знаний.'
       } finally {
         this.liveLoading = false
+      }
+    },
+
+    // --- KB material upload (MediaFieldPicker.vue's file input) -------------
+    // uploadMaterial is deliberately NOT routed through write(): it never
+    // touches `changes`/draftStale, and it must not set `busy` (KbFormDialog
+    // gates its Save button on busy, and a file upload mid-edit is not
+    // itself a draft write — nothing is staged until the form is saved).
+    // Returns the new material's id on success so the caller can attach it
+    // into the field the picker is editing; undefined on failure, with
+    // `error` set for the caller to surface. On success, reloads `live` so
+    // the new row lands in materialsById/live.materials — the picker's
+    // "attach existing" list and MediaThumb both read straight off that.
+    async uploadMaterial(file: File): Promise<string | undefined> {
+      this.uploading = true
+      this.error = ''
+      try {
+        const res = await api.uploadKbMaterial(file)
+        await this.loadLive()
+        return res.material_id
+      } catch (e) {
+        this.error = e instanceof ApiError ? e.message : 'Не удалось загрузить файл.'
+        return undefined
+      } finally {
+        this.uploading = false
       }
     },
 

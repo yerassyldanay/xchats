@@ -25,11 +25,16 @@ const { t } = useI18n()
 
 <template>
   <Dialog :open="open" @update:open="(v) => emit('update:open', v)">
-    <DialogContent>
-      <DialogHeader>
+    <!-- max-h + flex column so a tall body (ProductForm's five media
+         pickers, for instance) scrolls internally instead of overflowing
+         the viewport — DialogContent itself has no height cap and clips
+         with overflow-hidden, so without this a tall form would be
+         partially unreachable. -->
+    <DialogContent class="max-h-[85vh] flex flex-col">
+      <DialogHeader class="shrink-0">
         <DialogTitle>{{ title }}</DialogTitle>
       </DialogHeader>
-      <div class="px-5 py-5 space-y-4">
+      <div class="px-5 py-5 space-y-4 overflow-y-auto flex-1 min-h-0">
         <slot />
         <div v-if="stale" class="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-sm text-amber-950">
           <p class="font-medium">{{ t('kb.forms.staleTitle') }}</p>
@@ -37,7 +42,7 @@ const { t } = useI18n()
         </div>
         <p v-else-if="error" class="text-sm text-destructive">{{ error }}</p>
       </div>
-      <DialogFooter>
+      <DialogFooter class="shrink-0">
         <Button variant="ghost" size="sm" @click="emit('update:open', false)">{{ t('kb.forms.cancel') }}</Button>
         <Button v-if="stale" size="sm" :disabled="busy" @click="emit('reloadAndRetry')">
           <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" /> {{ t('kb.forms.reloadAndRetry') }}

@@ -179,12 +179,12 @@ func (s *Store) MarkMaterialsBuilt(ctx context.Context, ids []uuid.UUID) error {
 	return err
 }
 
-// ListLiveMaterials returns the org's kbd_materials rows for the read-only
-// "Файлы (материалы)" tab on /knowledge-base (GET /kb/materials) — the exact
-// same rows Draft() already exposes to Playground, just reachable from the
-// live-only editor surface too (which has no DraftView of its own to
-// piggyback on). Upload/attach/edit stays Playground-only until the media
-// milestone (see plan "Future Work").
+// ListLiveMaterials returns the org's kbd_materials rows for GET
+// /kb/materials — kept as its own route for a caller that wants JUST the
+// materials table without the rest of DraftView, even though GET /kb
+// (LiveView, below) now carries the exact same rows inline (see liveView's
+// own doc comment on why: materials have no draft/live split at all, so
+// there is nothing Playground-specific about them).
 func (s *Store) ListLiveMaterials(ctx context.Context, orgID uuid.UUID) ([]Material, error) {
 	materials, err := s.listMaterials(ctx, orgID)
 	if err != nil {
@@ -196,8 +196,21 @@ func (s *Store) ListLiveMaterials(ctx context.Context, orgID uuid.UUID) ([]Mater
 	return materials, nil
 }
 
+// listMaterials is the s.db-bound convenience wrapper every non-transactional
+// caller (ListLiveMaterials, Draft()) uses. liveView needs the tx-parameterized
+// listMaterialsTx instead — see that function's own doc comment.
 func (s *Store) listMaterials(ctx context.Context, orgID uuid.UUID) ([]Material, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction, created_at, updated_at,
+	return listMaterialsTx(ctx, s.db, orgID)
+}
+
+// listMaterialsTx is listMaterials' db-parameterized core (see identityIndex's
+// doc comment, mcp_read.go, for why a caller already inside
+// writeDraftBlobVersioned's locked transaction must pass that same tx here
+// instead of letting this reach for s.db — liveView is reachable from
+// exactly that context via identityIndex, so it cannot call the s.db-bound
+// listMaterials wrapper above).
+func listMaterialsTx(ctx context.Context, db dbtx, orgID uuid.UUID) ([]Material, error) {
+	rows, err := db.Query(ctx, `SELECT id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction, created_at, updated_at,
 		filename, mime_type, size_bytes, processing_status, customer_visibility, visual_summary, transcript_text, operator_note,
 		CASE WHEN storage_key IS NOT NULL AND storage_key <> '' THEN 1 ELSE 0 END
 		FROM kbd_materials WHERE organization_id = $1 ORDER BY created_at`, orgID)
