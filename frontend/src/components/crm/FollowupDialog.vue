@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { LoaderCircle } from 'lucide-vue-next'
+import { useAuth } from '../../stores/auth'
 import { useCrm } from '../../stores/crm'
 import { useInbox } from '../../stores/inbox'
 import { currentUtcOffsetMinutes, formatUtcOffset } from '../../lib/schedule'
@@ -28,6 +29,7 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'saved', f: Followup): void }
 const { t } = useI18n()
 const crm = useCrm()
 const inbox = useInbox()
+const auth = useAuth()
 
 const open = ref(true)
 function onOpenChange(v: boolean) {
@@ -55,7 +57,13 @@ const date = ref(props.followup?.due_date || defaultDate())
 const time = ref(minutesToInput(props.followup?.due_minute ?? null))
 const action = ref<FollowupAction>(props.followup?.action || 'call')
 const note = ref(props.followup?.note || '')
-const assignee = ref(props.followup?.assignee_user_id || UNASSIGNED)
+// A new follow-up defaults to the person creating it. "Задачи" opens on «Мои»,
+// so an unassigned default would put every follow-up a manager schedules
+// somewhere they do not look — the one place the feature must not lose it.
+// Rescheduling keeps whoever it is already assigned to.
+const assignee = ref(
+  props.followup ? props.followup.assignee_user_id || UNASSIGNED : auth.user?.id || UNASSIGNED,
+)
 const saving = ref(false)
 const error = ref('')
 
