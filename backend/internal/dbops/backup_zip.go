@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -102,7 +103,11 @@ func addFileToZip(zw *zip.Writer, name, srcPath string) error {
 	if err != nil {
 		return fmt.Errorf("open %q: %w", srcPath, err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Warn("failed to close backup source file", "path", srcPath, "err", err)
+		}
+	}()
 	w, err := zw.Create(name)
 	if err != nil {
 		return fmt.Errorf("create %q in zip: %w", name, err)
