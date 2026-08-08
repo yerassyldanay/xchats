@@ -92,7 +92,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.done = done
 	m.stopping = false
 	m.status = Status{Running: true, PublicURL: tun.URL(), StartedAt: &now}
+	status := m.status
 	m.mu.Unlock()
+	m.notify(status)
 
 	go m.serve(tun, done, token, cancelSession)
 
@@ -109,10 +111,10 @@ func (m *Manager) serve(tun ngrokTunnel, done chan struct{}, token string, cance
 	err := http.Serve(tun, m.deps.Handler)
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.tun != tun {
 		// Stop() already replaced/cleared this tunnel; its own call owns
 		// the resulting status, not this now-stale goroutine.
+		m.mu.Unlock()
 		return
 	}
 	if m.stopping {
@@ -120,15 +122,22 @@ func (m *Manager) serve(tun ngrokTunnel, done chan struct{}, token string, cance
 		// status. The ngrok SDK does not wrap its "Listener closed" Accept
 		// error with net.ErrClosed, so checking the error alone would report
 		// every normal stop as an unexpected session failure.
+		m.mu.Unlock()
 		return
 	}
 	m.tun = nil
 	if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
 		m.status = Status{LastError: sanitizeMessage(err.Error(), token)}
 		m.log.Warn("ngrok tunnel serve loop exited unexpectedly", "err", err)
+		status := m.status
+		m.mu.Unlock()
+		m.notify(status)
 		return
 	}
 	m.status = Status{}
+	status := m.status
+	m.mu.Unlock()
+	m.notify(status)
 }
 
 // Stop closes the tunnel and waits for its serve loop to fully exit before
@@ -158,7 +167,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 	m.stopping = false
 	m.status = Status{}
+	status := m.status
 	m.mu.Unlock()
+	m.notify(status)
 
 	return closeErr
 }

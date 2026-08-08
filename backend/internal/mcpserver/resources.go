@@ -72,7 +72,7 @@ func (s *Server) widgetResourceMeta() map[string]any {
 	// Non-nil so an unconfigured server serializes [] rather than null — a
 	// host reading null as "no policy object" would be a different bug.
 	domains := []string{}
-	if origin := originOf(s.Deps.UploadBaseURL); origin != "" {
+	if origin := originOf(s.publicBaseURL()); origin != "" {
 		domains = append(domains, origin)
 	}
 	return map[string]any{

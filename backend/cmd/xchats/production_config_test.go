@@ -118,6 +118,36 @@ func TestShouldValidateProductionConfig_TriggersOnRealURLsRegardlessOfEnvironmen
 	}
 }
 
+// TestShouldValidateProductionConfig_IgnoresATunnelDerivedAPIBaseURL guards
+// the recurring local-dev boot failure: applyNgrokPublicOrigin overwrites
+// cfg.Server.APIBaseURL with the embedded tunnel's HTTPS domain, so reading
+// the mutated value here made merely connecting ngrok from the Settings UI
+// promote a laptop to "production" — which then fatally failed on its
+// perfectly correct localhost FRONTEND_BASE_URL. Only what the operator
+// configured counts as deploy intent.
+func TestShouldValidateProductionConfig_IgnoresATunnelDerivedAPIBaseURL(t *testing.T) {
+	// Post-applyNgrokPublicOrigin state on a stock local dev box: the tunnel
+	// domain is live in cfg, but the operator configured only localhost.
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			APIBaseURL:      "https://generally-generous-eel.ngrok-free.app",
+			FrontendBaseURL: "http://localhost:8081",
+		},
+	}
+	if shouldValidateProductionConfig(cfg, "http://localhost:8090") {
+		t.Error("connecting ngrok on a local dev box must not trigger the production gate")
+	}
+	// A real deployment still trips it: there the operator set the public URL.
+	if !shouldValidateProductionConfig(cfg, "https://api.xchats.example") {
+		t.Error("an operator-configured public API_BASE_URL must still trigger the gate")
+	}
+	// ...and so does an explicitly production-labeled tunnel deployment.
+	prod := &config.Config{Environment: "production", Server: cfg.Server}
+	if !shouldValidateProductionConfig(prod, "http://localhost:8090") {
+		t.Error("ENVIRONMENT=production must trigger the gate regardless of the tunnel")
+	}
+}
+
 func TestIsLocalBaseURL(t *testing.T) {
 	cases := map[string]bool{
 		"":                           true,

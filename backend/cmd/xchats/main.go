@@ -624,10 +624,10 @@ func resolveLLMParams(settingsStore *settings.Store, cfg *config.Config) respons
 // the Settings UI (a local-dev convenience: it is how you expose a laptop to
 // an MCP host or Telegram) handed this gate a non-localhost API_BASE_URL, so
 // every such dev box silently promoted itself to "production" and then fatally
-// failed the very next check for still having a localhost frontend_base_url —
-// which is the stock config.docker.yaml default, and correct for a laptop. A
-// tunnel the app started for itself says nothing about deploy intent; only
-// what the operator configured does.
+// failed the very next check for still having a localhost FRONTEND_BASE_URL —
+// which is the stock compose default, and correct for a laptop. A tunnel the
+// app started for itself says nothing about deploy intent; only what the
+// operator configured does.
 func shouldValidateProductionConfig(cfg *config.Config, configuredAPIBaseURL string) bool {
 	return cfg.IsProduction() || !isLocalBaseURL(configuredAPIBaseURL) || !isLocalBaseURL(cfg.Server.FrontendBaseURL)
 }

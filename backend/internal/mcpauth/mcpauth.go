@@ -12,8 +12,13 @@ import (
 // config.Config so this package does not import it (avoiding an import edge
 // from a low-level auth package back up to the app's config type).
 type Config struct {
-	Issuer            string // config.Config.MCPResourceURL() — the AS also names itself as this MCP server
-	Audience          string // config.Config.MCPResourceURL() — RFC 8707 resource-indicator binding
+	Issuer   string // config.Config.MCPResourceURL() — the AS also names itself as this MCP server
+	Audience string // config.Config.MCPResourceURL() — RFC 8707 resource-indicator binding
+	// IssuerFunc/AudienceFunc make the advertised endpoint runtime-aware for
+	// embedded tunnels. Tests and fixed deployments can keep using the string
+	// fields; when present, the functions are the live source of truth.
+	IssuerFunc        func() string
+	AudienceFunc      func() string
 	AllowPrivateHosts bool   // config.Config.KBAllowPrivateFetch, reused for CIMD fetches
 	AccessTokenTTL    time.Duration
 	RefreshTokenTTL   time.Duration
@@ -35,6 +40,20 @@ func New(store *Store, key *SigningKey, cfg Config) *Authorizer {
 	return &Authorizer{Store: store, Key: key, Cfg: cfg}
 }
 
+func (a *Authorizer) Issuer() string {
+	if a.Cfg.IssuerFunc != nil {
+		return a.Cfg.IssuerFunc()
+	}
+	return a.Cfg.Issuer
+}
+
+func (a *Authorizer) Audience() string {
+	if a.Cfg.AudienceFunc != nil {
+		return a.Cfg.AudienceFunc()
+	}
+	return a.Cfg.Audience
+}
+
 // IssueTokenPair mints a fresh access JWT + refresh token for a grant that
 // has already been authenticated and authorized (a consumed authorization
 // code, or a rotated refresh token) — never called with a caller-supplied
@@ -42,15 +61,19 @@ func New(store *Store, key *SigningKey, cfg Config) *Authorizer {
 func (a *Authorizer) IssueTokenPair(ctx context.Context, clientID string, userID, orgID uuid.UUID, scope, resource string) (TokenResponse, error) {
 	now := time.Now()
 	jti := randomID(16)
+	issuer, audience := a.Issuer(), a.Audience()
+	if resource != "" && resource != audience {
+		return TokenResponse{}, ErrInvalidGrant
+	}
 	access, err := a.Key.Sign(Claims{
-		Issuer: a.Cfg.Issuer, Audience: a.Cfg.Audience, Subject: userID.String(),
+		Issuer: issuer, Audience: audience, Subject: userID.String(),
 		OrganizationID: orgID.String(), ClientID: clientID, Scopes: ParseScope(scope),
 		IssuedAt: now.Unix(), ExpiresAt: now.Add(a.Cfg.AccessTokenTTL).Unix(), JTI: jti,
 	})
 	if err != nil {
 		return TokenResponse{}, fmt.Errorf("mcpauth: sign access token: %w", err)
 	}
-	refresh, err := a.Store.IssueRefreshToken(ctx, clientID, userID, orgID, scope, resource, a.Cfg.RefreshTokenTTL)
+	refresh, err := a.Store.IssueRefreshToken(ctx, clientID, userID, orgID, scope, audience, a.Cfg.RefreshTokenTTL)
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -71,6 +94,9 @@ func (a *Authorizer) ExchangeAuthorizationCode(ctx context.Context, clientID, re
 	if err != nil {
 		return TokenResponse{}, err
 	}
+	if row.Resource != "" && row.Resource != a.Audience() {
+		return TokenResponse{}, ErrInvalidGrant
+	}
 	return a.IssueTokenPair(ctx, clientID, row.UserID, row.OrganizationID, row.Scope, row.Resource)
 }
 
@@ -83,8 +109,12 @@ func (a *Authorizer) RefreshTokenPair(ctx context.Context, clientID, refreshToke
 	}
 	now := time.Now()
 	jti := randomID(16)
+	issuer, audience := a.Issuer(), a.Audience()
+	if row.Resource != "" && row.Resource != audience {
+		return TokenResponse{}, ErrInvalidGrant
+	}
 	access, err := a.Key.Sign(Claims{
-		Issuer: a.Cfg.Issuer, Audience: a.Cfg.Audience, Subject: row.UserID.String(),
+		Issuer: issuer, Audience: audience, Subject: row.UserID.String(),
 		OrganizationID: row.OrganizationID.String(), ClientID: clientID, Scopes: ParseScope(row.Scope),
 		IssuedAt: now.Unix(), ExpiresAt: now.Add(a.Cfg.AccessTokenTTL).Unix(), JTI: jti,
 	})
@@ -106,7 +136,7 @@ func (a *Authorizer) RefreshTokenPair(ctx context.Context, clientID, refreshToke
 // KB write — this package intentionally has no dependency on internal/store
 // to make that composition explicit at the call site (internal/httpapi).
 func (a *Authorizer) VerifyAccessToken(ctx context.Context, token string) (Principal, error) {
-	claims, err := a.Key.Verify(token, a.Cfg.Issuer, a.Cfg.Audience)
+	claims, err := a.Key.Verify(token, a.Issuer(), a.Audience())
 	if err != nil {
 		return Principal{}, ErrInvalidToken
 	}
@@ -138,7 +168,7 @@ func (a *Authorizer) Revoke(ctx context.Context, token string) error {
 	if err := a.Store.RevokeRefreshToken(ctx, token); err != nil {
 		return err
 	}
-	if claims, err := a.Key.verifyIgnoringExpiry(token, a.Cfg.Issuer, a.Cfg.Audience); err == nil {
+	if claims, err := a.Key.verifyIgnoringExpiry(token, a.Issuer(), a.Audience()); err == nil {
 		return a.Store.DenylistJTI(ctx, claims.JTI, time.Unix(claims.ExpiresAt, 0))
 	}
 	return nil
