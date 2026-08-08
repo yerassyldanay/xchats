@@ -4698,6 +4698,1232 @@
           "on_update": "NO ACTION"
         }
       ]
+    },
+    "crm_statuses": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "slug",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "name",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "color",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "position",
+          "position": 6,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:0",
+          "default_raw": "0"
+        },
+        {
+          "name": "is_default",
+          "position": 7,
+          "pg_type": "boolean",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:false",
+          "default_raw": "false"
+        },
+        {
+          "name": "created_at",
+          "position": 8,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 9,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "crm_statuses_default_uq",
+          "columns": [
+            "organization_id"
+          ],
+          "unique": true,
+          "where": "(is_default = true)",
+          "backs_constraint": false
+        },
+        {
+          "name": "crm_statuses_organization_id_slug_key",
+          "columns": [
+            "organization_id",
+            "slug"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "crm_statuses_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "crm_tags": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "slug",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "name",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "color",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "created_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 7,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "crm_tags_organization_id_slug_key",
+          "columns": [
+            "organization_id",
+            "slug"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "crm_tags_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "crm_customers": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "display_name",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "phone",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "email",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "avatar_url",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "status_id",
+          "position": 7,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "assignee_user_id",
+          "position": 8,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "custom_fields",
+          "position": 9,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:{}",
+          "default_raw": "'{}'::jsonb"
+        },
+        {
+          "name": "merged_into_id",
+          "position": 10,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 11,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 12,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "crm_customers_org_assignee_idx",
+          "columns": [
+            "organization_id",
+            "assignee_user_id"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        },
+        {
+          "name": "crm_customers_org_idx",
+          "columns": [
+            "organization_id"
+          ],
+          "unique": false,
+          "where": "(merged_into_id IS NULL)",
+          "backs_constraint": false
+        },
+        {
+          "name": "crm_customers_org_status_idx",
+          "columns": [
+            "organization_id",
+            "status_id"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "crm_customers_custom_fields_check",
+          "definition": "CHECK (jsonb_typeof(custom_fields) = 'object'::text)"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "crm_customers_assignee_user_id_fkey",
+          "columns": [
+            "assignee_user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_customers_merged_into_id_fkey",
+          "columns": [
+            "merged_into_id"
+          ],
+          "ref_table": "crm_customers",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_customers_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_customers_status_id_fkey",
+          "columns": [
+            "status_id"
+          ],
+          "ref_table": "crm_statuses",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "crm_customer_identities": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "customer_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "channel",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "account_id",
+          "position": 5,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "contact_id",
+          "position": 6,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "external_id",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "username",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "phone",
+          "position": 9,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "display_name",
+          "position": 10,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "created_at",
+          "position": 11,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 12,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "crm_customer_identities_channel_contact_id_key",
+          "columns": [
+            "channel",
+            "contact_id"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        },
+        {
+          "name": "crm_customer_identities_customer_idx",
+          "columns": [
+            "customer_id"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        },
+        {
+          "name": "crm_customer_identities_organization_id_channel_account_id_external_id_key",
+          "columns": [
+            "organization_id",
+            "channel",
+            "account_id",
+            "external_id"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        }
+      ],
+      "checks": [
+        {
+          "name": "crm_customer_identities_channel_check",
+          "definition": "CHECK ((channel = ANY (ARRAY['whatsapp'::text, 'simulator'::text, 'telegram'::text])))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "crm_customer_identities_customer_id_fkey",
+          "columns": [
+            "customer_id"
+          ],
+          "ref_table": "crm_customers",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_customer_identities_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "crm_customer_tags": {
+      "columns": [
+        {
+          "name": "customer_id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "tag_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 3,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "customer_id",
+        "tag_id"
+      ],
+      "indexes": [
+        {
+          "name": "crm_customer_tags_tag_idx",
+          "columns": [
+            "tag_id"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "crm_customer_tags_customer_id_fkey",
+          "columns": [
+            "customer_id"
+          ],
+          "ref_table": "crm_customers",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_customer_tags_tag_id_fkey",
+          "columns": [
+            "tag_id"
+          ],
+          "ref_table": "crm_tags",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "crm_customer_notes": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "customer_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "author_user_id",
+          "position": 4,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "body",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 7,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "crm_customer_notes_customer_idx",
+          "columns": [
+            "customer_id",
+            "created_at"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "crm_customer_notes_author_user_id_fkey",
+          "columns": [
+            "author_user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_customer_notes_customer_id_fkey",
+          "columns": [
+            "customer_id"
+          ],
+          "ref_table": "crm_customers",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_customer_notes_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "crm_followups": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "customer_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "conversation_id",
+          "position": 4,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "channel",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "due_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "due_date",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "due_minute",
+          "position": 8,
+          "pg_type": "integer",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "action",
+          "position": 9,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:call",
+          "default_raw": "'call'::text"
+        },
+        {
+          "name": "note",
+          "position": 10,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "assignee_user_id",
+          "position": 11,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "state",
+          "position": 12,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:open",
+          "default_raw": "'open'::text"
+        },
+        {
+          "name": "completed_at",
+          "position": 13,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_by_user_id",
+          "position": 14,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 15,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 16,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "crm_followups_assignee_idx",
+          "columns": [
+            "assignee_user_id",
+            "state",
+            "due_at"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        },
+        {
+          "name": "crm_followups_customer_idx",
+          "columns": [
+            "customer_id",
+            "due_at"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        },
+        {
+          "name": "crm_followups_due_idx",
+          "columns": [
+            "organization_id",
+            "state",
+            "due_at"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "crm_followups_due_minute_check",
+          "definition": "CHECK ((due_minute IS NULL) OR (due_minute BETWEEN 0 AND 1439))"
+        },
+        {
+          "name": "crm_followups_action_check",
+          "definition": "CHECK ((action = ANY (ARRAY['call'::text, 'message'::text, 'meeting'::text, 'other'::text])))"
+        },
+        {
+          "name": "crm_followups_state_check",
+          "definition": "CHECK ((state = ANY (ARRAY['open'::text, 'completed'::text, 'cancelled'::text])))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "crm_followups_assignee_user_id_fkey",
+          "columns": [
+            "assignee_user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_followups_created_by_user_id_fkey",
+          "columns": [
+            "created_by_user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_followups_customer_id_fkey",
+          "columns": [
+            "customer_id"
+          ],
+          "ref_table": "crm_customers",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_followups_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "crm_timeline": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "customer_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "kind",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "actor_user_id",
+          "position": 5,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "summary",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "detail",
+          "position": 7,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:{}",
+          "default_raw": "'{}'::jsonb"
+        },
+        {
+          "name": "occurred_at",
+          "position": 8,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "created_at",
+          "position": 9,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "crm_timeline_customer_idx",
+          "columns": [
+            "customer_id",
+            "occurred_at"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "crm_timeline_kind_check",
+          "definition": "CHECK ((kind = ANY (ARRAY['customer_created'::text, 'identity_linked'::text, 'note_added'::text, 'status_changed'::text, 'tag_added'::text, 'tag_removed'::text, 'assignee_changed'::text, 'followup_created'::text, 'followup_completed'::text, 'followup_rescheduled'::text, 'followup_cancelled'::text, 'customers_merged'::text])))"
+        },
+        {
+          "name": "crm_timeline_detail_check",
+          "definition": "CHECK (jsonb_typeof(detail) = 'object'::text)"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "crm_timeline_actor_user_id_fkey",
+          "columns": [
+            "actor_user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_timeline_customer_id_fkey",
+          "columns": [
+            "customer_id"
+          ],
+          "ref_table": "crm_customers",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "crm_timeline_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "crm_custom_field_defs": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "key",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "label",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "field_type",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:text",
+          "default_raw": "'text'::text"
+        },
+        {
+          "name": "options",
+          "position": 6,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:[]",
+          "default_raw": "'[]'::jsonb"
+        },
+        {
+          "name": "position",
+          "position": 7,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:0",
+          "default_raw": "0"
+        },
+        {
+          "name": "created_at",
+          "position": 8,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 9,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "crm_custom_field_defs_organization_id_key_key",
+          "columns": [
+            "organization_id",
+            "key"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        }
+      ],
+      "checks": [
+        {
+          "name": "crm_custom_field_defs_field_type_check",
+          "definition": "CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'select'::text])))"
+        },
+        {
+          "name": "crm_custom_field_defs_options_check",
+          "definition": "CHECK (jsonb_typeof(options) = 'array'::text)"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "crm_custom_field_defs_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
     }
   },
   "views": {
