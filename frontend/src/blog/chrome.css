@@ -343,6 +343,9 @@
 .site-footer__contact-icon--instagram {
   color: #ec4899;
 }
+.site-footer__contact-icon--linkedin {
+  color: #0a66c2;
+}
 @media (max-width: 980px) {
   .site-footer__grid {
     grid-template-columns: minmax(240px, 1.5fr) minmax(220px, 1fr);
