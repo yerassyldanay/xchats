@@ -4,9 +4,9 @@
 #
 # `!override` REPLACES the base port list instead of appending to it.
 #
-# Apply alongside the base file, loading the root .env for interpolation:
-#   docker compose --env-file ./.env -p xchats \
-#     -f deploy/docker-compose.yaml -f deploy/docker-compose.override.yaml up --build
+# No .env anywhere (Track 2J removed the last one) — `make up`/`make up-fg`
+# apply this file automatically, so the literal values below are the whole
+# story; nothing to source or export first.
 services:
   backend:
     ports: !override
@@ -14,9 +14,24 @@ services:
     environment:
       # The base file's default assumes the base port mapping (8080:8080); this
       # override republishes the backend on 8090, so the self-advertised
-      # discovery fallback has to follow. Configured ngrok credentials
-      # discover a static domain and override this for external MCP hosts.
-      API_BASE_URL: "${API_BASE_URL:-http://localhost:8090}"
+      # discovery fallback has to follow. A configured ngrok tunnel (Settings
+      # UI) discovers its own static domain at runtime and takes over as the
+      # MCP/OAuth public origin regardless of this value — it only matters as
+      # the fallback for deployments not using the embedded tunnel.
+      API_BASE_URL: "http://localhost:8090"
+      # FRONTEND_BASE_URL / CORS_ORIGINS are deliberately NOT set here: the
+      # base compose file's localhost defaults are correct for a dev box, and
+      # pinning this machine's LAN IP in a committed file goes stale the moment
+      # DHCP moves it — or the moment anyone else checks the repo out. Export
+      # them in your shell for the one-off case of reaching the UI from another
+      # device on the network.
+      #
+      # TG_WEBHOOK_PUBLIC_BASE_URL is likewise NOT set: the embedded ngrok
+      # tunnel's static domain is discovered at boot and already serves as the
+      # Telegram webhook origin (config.TelegramResolvedWebhookBaseURL falls
+      # back to it), so pinning the hostname here would only duplicate a value
+      # the app already knows and re-break every time the domain changes. Set
+      # it only to front Telegram with a DIFFERENT hostname than the app.
   frontend:
     ports: !override
       - "8081:80"     # unchanged; 8081 is free

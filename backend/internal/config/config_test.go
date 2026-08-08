@@ -104,3 +104,59 @@ func TestTelegramResolvedWebhookSecret(t *testing.T) {
 		})
 	}
 }
+
+func TestTelegramResolvedWebhookBaseURL(t *testing.T) {
+	cases := []struct {
+		name       string
+		explicit   string
+		apiBaseURL string
+		want       string
+	}{
+		{"explicit wins over the api origin", "https://tg.example.com", "https://app.example.com", "https://tg.example.com"},
+		{"explicit trailing slash trimmed", "https://tg.example.com/", "", "https://tg.example.com"},
+		// The whole point of the fallback: an ngrok-fronted deploy never has to
+		// restate the tunnel hostname in a second env var.
+		{"falls back to the https api origin (the ngrok tunnel)", "", "https://x.ngrok-free.app", "https://x.ngrok-free.app"},
+		{"api origin trailing slash trimmed", "", "https://x.ngrok-free.app/", "https://x.ngrok-free.app"},
+		// http:// would only trade a clear "not configured" for a Bot API 400.
+		{"http api origin is not a usable fallback", "", "http://localhost:8090", ""},
+		{"nothing configured", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{TelegramWebhookPublicBaseURL: tc.explicit}
+			c.Server.APIBaseURL = tc.apiBaseURL
+			if got := c.TelegramResolvedWebhookBaseURL(); got != tc.want {
+				t.Errorf("TelegramResolvedWebhookBaseURL() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTelegramResolvedModeFollowsTheTunnelOrigin(t *testing.T) {
+	cases := []struct {
+		name       string
+		mode       string
+		explicit   string
+		apiBaseURL string
+		want       string
+	}{
+		{"explicit mode always wins", "polling", "https://tg.example.com", "https://x.ngrok-free.app", "polling"},
+		{"explicit webhook wins with nothing configured", "webhook", "", "", "webhook"},
+		// Was polling before TelegramResolvedWebhookBaseURL existed: webhook
+		// delivery is genuinely available on the tunnel origin, so use it.
+		{"https api origin alone implies webhook", "", "", "https://x.ngrok-free.app", "webhook"},
+		{"no public https origin means polling", "", "", "http://localhost:8090", "polling"},
+		{"zero config means polling", "", "", "", "polling"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{TelegramWebhookPublicBaseURL: tc.explicit}
+			c.Server.APIBaseURL = tc.apiBaseURL
+			c.Telegram.Mode = tc.mode
+			if got := c.TelegramResolvedMode(); got != tc.want {
+				t.Errorf("TelegramResolvedMode() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

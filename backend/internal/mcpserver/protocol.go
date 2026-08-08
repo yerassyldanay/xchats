@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -71,6 +72,11 @@ type Deps struct {
 	// UploadBaseURL is the public base URL kb_media_upload's signed PUT
 	// target is built against (e.g. https://xchats.kz).
 	UploadBaseURL string
+	// PublicBaseURL supersedes UploadBaseURL when present and is evaluated
+	// for every response, allowing an embedded tunnel to become usable
+	// without restarting the process. UploadBaseURL remains the fixed/test
+	// fallback.
+	PublicBaseURL func() string
 	// SignUpload mints a short-lived signed upload token for one material
 	// (internal/httpapi owns the actual secret; mcpserver only calls this
 	// seam so it never needs to import httpapi or hold the signing key
@@ -113,6 +119,13 @@ type Server struct {
 
 // New builds a Server.
 func New(deps Deps) *Server { return &Server{Deps: deps} }
+
+func (s *Server) publicBaseURL() string {
+	if s.Deps.PublicBaseURL != nil {
+		return strings.TrimRight(s.Deps.PublicBaseURL(), "/")
+	}
+	return strings.TrimRight(s.Deps.UploadBaseURL, "/")
+}
 
 // Request is one parsed JSON-RPC 2.0 request/notification.
 type Request struct {

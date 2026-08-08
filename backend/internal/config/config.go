@@ -432,12 +432,36 @@ func (c *Config) TelegramResolvedWebhookSecret() string {
 	return c.TelegramWebhookSecret
 }
 
+// TelegramResolvedWebhookBaseURL returns the public HTTPS origin to register
+// Telegram webhooks against, with no trailing slash.
+//
+// An explicit TG_WEBHOOK_PUBLIC_BASE_URL always wins (a deployment fronting
+// Telegram with a different hostname than the rest of the app). Otherwise it
+// falls back to ResolvedAPIBaseURL when that is HTTPS — which is exactly the
+// embedded ngrok tunnel's static domain, since cmd/xchats.applyNgrokPublicOrigin
+// installs it there at boot as "the single source of truth". The tunnel fronts
+// the whole app, so the Telegram ingress is already reachable on that origin;
+// making an operator restate the same ngrok hostname in a second env var was
+// pure duplication, and duplication that goes stale every time the domain
+// changes. An http:// origin is deliberately NOT used as a fallback: Telegram
+// refuses to register a non-HTTPS webhook, so returning it would only trade a
+// clear "not configured" for an opaque Bot API 400.
+func (c *Config) TelegramResolvedWebhookBaseURL() string {
+	if base := strings.TrimSpace(c.TelegramWebhookPublicBaseURL); base != "" {
+		return strings.TrimRight(base, "/")
+	}
+	if api := c.ResolvedAPIBaseURL(); strings.HasPrefix(strings.ToLower(api), "https://") {
+		return api
+	}
+	return ""
+}
+
 // TelegramResolvedMode resolves the long-polling-vs-webhook switch (Track 1):
-// an explicit Telegram.Mode always wins; otherwise a configured public
-// webhook base URL means an operator already set up webhook delivery
-// (unchanged behavior for every existing deployment), and its absence means
-// polling — the zero-config path for a local/native install with no public
-// URL at all.
+// an explicit Telegram.Mode always wins; otherwise a resolvable public webhook
+// base URL (see TelegramResolvedWebhookBaseURL — an explicit override, or the
+// ngrok tunnel's HTTPS origin) means webhook delivery is actually available,
+// and its absence means polling — the zero-config path for a local/native
+// install with no public URL at all.
 func (c *Config) TelegramResolvedMode() string {
 	switch strings.ToLower(strings.TrimSpace(c.Telegram.Mode)) {
 	case "webhook":
@@ -445,7 +469,7 @@ func (c *Config) TelegramResolvedMode() string {
 	case "polling":
 		return "polling"
 	}
-	if c.TelegramWebhookPublicBaseURL != "" {
+	if c.TelegramResolvedWebhookBaseURL() != "" {
 		return "webhook"
 	}
 	return "polling"

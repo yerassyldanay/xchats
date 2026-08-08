@@ -71,6 +71,9 @@ type Deps struct {
 	// this package's own doc comment for why that is deliberate).
 	Handler http.Handler
 	Log     *slog.Logger
+	// OnStatus receives every terminal status transition. It is called
+	// outside Manager's lock so consumers may safely update their own state.
+	OnStatus func(Status)
 
 	// connect is a test seam standing in for the real ngrok SDK connect+listen
 	// sequence (realConnect, in connect.go). Production always leaves this
@@ -117,4 +120,11 @@ func (m *Manager) setStatus(s Status) {
 	m.mu.Lock()
 	m.status = s
 	m.mu.Unlock()
+	m.notify(s)
+}
+
+func (m *Manager) notify(s Status) {
+	if m.deps.OnStatus != nil {
+		m.deps.OnStatus(s)
+	}
 }

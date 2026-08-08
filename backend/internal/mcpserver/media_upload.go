@@ -81,7 +81,7 @@ func (s *Server) handleKBMediaUpload(ctx context.Context, orgID, userID uuid.UUI
 		token = s.Deps.SignUpload(materialID.String(), expiresAt.Unix())
 	}
 	uploadURL := fmt.Sprintf("%s/mcp/uploads/%s?token=%s",
-		strings.TrimRight(s.Deps.UploadBaseURL, "/"), materialID, url.QueryEscape(token))
+		s.publicBaseURL(), materialID, url.QueryEscape(token))
 
 	structured := map[string]any{
 		"material_id":       materialID.String(),
@@ -139,7 +139,7 @@ func (s *Server) mediaIndexFor(ctx context.Context, orgID uuid.UUID, page kbstor
 			// preview.
 			token := s.Deps.SignMediaRead(id.String(), expiresAt.Unix())
 			entry["url"] = fmt.Sprintf("%s/mcp/media/%s?token=%s",
-				strings.TrimRight(s.Deps.UploadBaseURL, "/"), id, url.QueryEscape(token))
+				s.publicBaseURL(), id, url.QueryEscape(token))
 			entry["expires_at"] = expiresAt.UTC().Format(time.RFC3339)
 		}
 		out[id.String()] = entry
