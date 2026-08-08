@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Blocks, Check, FlaskConical, Inbox, Library, LogOut, BookOpen, Radio, Settings } from 'lucide-vue-next'
+import { Blocks, Check, FlaskConical, Inbox, Library, LogOut, Radio, Settings } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { useSettings } from '../stores/settings'
 import { initials, colorFor } from '../lib/format'
@@ -44,7 +44,6 @@ const baseNav = computed<{ name: string; icon: Component; label: string; match: 
 // Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
 // and rendered in its own bottom cluster (separated by a divider, above the avatar)
 // so it never reads as one more product feature.
-const blogItem = { name: 'blog', icon: BookOpen, label: 'Блог', match: ['blog', 'blog-post'] }
 const evalsItem = { name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch', 'eval-catalog'] }
 function isActive(match: string[]) {
   return match.includes(route.name as string)
@@ -96,19 +95,6 @@ async function switchOrg(orgId: string) {
       </div>
 
       <div class="mt-auto flex flex-col items-center gap-3">
-        <div class="h-px w-8 bg-white/10" aria-hidden="true" />
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <a
-              href="/blog/"
-              class="w-11 h-11 rounded-lg grid place-items-center transition text-slate-400 hover:text-white hover:bg-white/10"
-            >
-              <component :is="blogItem.icon" class="w-5 h-5" />
-            </a>
-          </TooltipTrigger>
-          <TooltipContent side="right">{{ blogItem.label }}</TooltipContent>
-        </Tooltip>
-
         <template v-if="evalsAvailable">
           <div class="h-px w-8 bg-white/10" aria-hidden="true" />
           <Tooltip>

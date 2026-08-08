@@ -1,0 +1,1734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>xchats — The AI assistant that never makes things up</title>
+  <meta name="description" content="xchats is a free, open-source AI assistant for WhatsApp and Telegram. It answers only with verified facts through value-injected templates, and you configure it right from a ChatGPT or Claude chat over MCP." />
+  <link rel="icon" type="image/png" href="./logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Design Tokens */
+    :root {
+      --blog-bg: #fafafb;
+      --blog-card: #ffffff;
+      --blog-border: #ececec;
+      --blog-text: #111827;
+      --blog-muted: #6b7280;
+      --blog-accent: #5b5ceb;
+      --blog-accent-contrast: #ffffff;
+      --blog-accent-tint: #eeedfd;
+      --blog-success: #22c55e;
+      --blog-warning: #f59e0b;
+      --blog-hero-panel: #f5f4fe;
+      --blog-shadow: 0 8px 24px rgba(17, 24, 39, 0.06);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --blog-bg: #0b0c0f;
+        --blog-card: #141518;
+        --blog-border: #26282d;
+        --blog-text: #f3f4f6;
+        --blog-muted: #9ca3af;
+        --blog-accent: #7879f1;
+        --blog-accent-contrast: #ffffff;
+        --blog-accent-tint: #23234a;
+        --blog-success: #34d399;
+        --blog-warning: #fbbf24;
+        --blog-hero-panel: #17181d;
+        --blog-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+    }
+
+    /* Base Reset & Typography */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--blog-bg);
+      color: var(--blog-text);
+      font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+      font-size: 17px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      max-width: 100%;
+      display: block;
+    }
+
+    /* Shells */
+    .blog-shell {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    @media (max-width: 640px) {
+      .blog-shell {
+        padding: 0 20px;
+      }
+    }
+
+    /* Navigation */
+    .site-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--blog-border);
+      background: rgba(250, 250, 251, 0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .site-nav {
+        background: rgba(11, 12, 15, 0.88);
+      }
+    }
+
+    .site-nav__inner {
+      display: flex;
+      align-items: center;
+      min-height: 64px;
+      padding: 0 32px;
+    }
+
+    .site-nav__brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      text-decoration: none;
+      color: var(--blog-text);
+    }
+
+    .site-nav__mark {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: var(--blog-accent);
+      color: var(--blog-accent-contrast);
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1;
+      box-shadow: 0 8px 20px rgba(91, 92, 235, 0.2);
+    }
+
+    .site-nav__primary {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      margin-left: 48px;
+      margin-right: auto;
+    }
+
+    .site-nav__right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .site-nav__link {
+      position: relative;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--blog-muted);
+      text-decoration: none;
+      transition: color 160ms ease;
+    }
+
+    .site-nav__link:hover {
+      color: var(--blog-text);
+    }
+
+    /* Language Select Dropdown */
+    .lang-select-wrapper {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .lang-select-icon {
+      position: absolute;
+      left: 10px;
+      width: 15px;
+      height: 15px;
+      color: var(--blog-muted);
+      pointer-events: none;
+    }
+
+    .lang-select-arrow {
+      position: absolute;
+      right: 9px;
+      width: 14px;
+      height: 14px;
+      color: var(--blog-muted);
+      pointer-events: none;
+    }
+
+    .lang-select {
+      appearance: none;
+      -webkit-appearance: none;
+      background: var(--blog-card);
+      color: var(--blog-text);
+      border: 1px solid var(--blog-border);
+      border-radius: 9px;
+      padding: 6px 28px 6px 32px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .lang-select:hover {
+      border-color: var(--blog-accent);
+    }
+
+    .lang-select:focus {
+      border-color: var(--blog-accent);
+      box-shadow: 0 0 0 3px var(--blog-accent-tint);
+    }
+
+    .lang-select option {
+      background: var(--blog-card);
+      color: var(--blog-text);
+    }
+
+    .site-nav__github {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 40px;
+      padding: 0 18px;
+      border-radius: 9px;
+      background: var(--blog-accent);
+      color: var(--blog-accent-contrast);
+      font-size: 14px;
+      font-weight: 650;
+      text-decoration: none;
+      box-shadow: 0 8px 18px rgba(91, 92, 235, 0.18);
+      transition: transform 160ms ease, filter 160ms ease;
+    }
+
+    .site-nav__github:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.06);
+    }
+
+    .site-nav__github svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    @media (max-width: 900px) {
+      .site-nav__primary {
+        display: none;
+      }
+      .site-nav__right {
+        margin-left: auto;
+      }
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .badge--category {
+      background: var(--blog-accent-tint);
+      color: var(--blog-accent);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .badge--success {
+      background: rgba(34, 197, 94, 0.14);
+      color: var(--blog-success);
+    }
+
+    /* Hero Section */
+    .landing-hero {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 56px;
+      align-items: center;
+      padding: 64px 32px 96px;
+    }
+
+    .landing-hero__title {
+      font-size: 48px;
+      font-weight: 700;
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+      margin: 20px 0;
+    }
+
+    .landing-hero__title em {
+      font-style: normal;
+      color: var(--blog-accent);
+    }
+
+    .landing-hero__subtitle {
+      font-size: 18px;
+      color: var(--blog-muted);
+      line-height: 1.6;
+      max-width: 52ch;
+      margin-bottom: 32px;
+    }
+
+    .landing-hero__ctas {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .landing-hero__cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 48px;
+      padding: 0 22px;
+      border-radius: 10px;
+      background: var(--blog-accent);
+      color: var(--blog-accent-contrast);
+      font-size: 15px;
+      font-weight: 650;
+      text-decoration: none;
+      box-shadow: 0 10px 24px rgba(91, 92, 235, 0.22);
+      transition: transform 160ms ease, filter 160ms ease;
+    }
+
+    .landing-hero__cta:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.06);
+    }
+
+    .landing-hero__trust {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      font-size: 14px;
+      color: var(--blog-muted);
+    }
+
+    .landing-hero__trust-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .landing-hero__trust-item svg {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+    }
+
+    .landing-hero__panel {
+      border-radius: 20px;
+      border: 1px solid var(--blog-border);
+      background: var(--blog-hero-panel);
+      padding: 14px;
+    }
+
+    .landing-hero__panel img {
+      width: 100%;
+      height: auto;
+      border-radius: 14px;
+      box-shadow: var(--blog-shadow);
+    }
+
+    @media (max-width: 900px) {
+      .landing-hero {
+        grid-template-columns: 1fr;
+        padding: 40px 20px 64px;
+        gap: 36px;
+      }
+      .landing-hero__panel {
+        order: -1;
+        max-width: 480px;
+        margin: 0 auto;
+      }
+      .landing-hero__title {
+        font-size: 36px;
+      }
+    }
+
+    /* Generic Section */
+    .landing-section {
+      padding: 80px 0;
+      border-top: 1px solid var(--blog-border);
+    }
+
+    .landing-section--muted {
+      background: var(--blog-card);
+    }
+
+    .landing-section__head {
+      max-width: 640px;
+      margin: 0 0 48px;
+    }
+
+    .landing-section__head--center {
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
+    }
+
+    .landing-section__eyebrow {
+      margin-bottom: 16px;
+    }
+
+    .landing-section__title {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 12px;
+    }
+
+    .landing-section__description {
+      font-size: 16px;
+      color: var(--blog-muted);
+      line-height: 1.65;
+    }
+
+    @media (max-width: 640px) {
+      .landing-section {
+        padding: 56px 0;
+      }
+      .landing-section__title {
+        font-size: 26px;
+      }
+    }
+
+    /* Platforms Showcase */
+    .landing-platforms {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto 1fr;
+      align-items: center;
+      gap: 14px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    .landing-channel-card {
+      border: 1px solid var(--blog-border);
+      background: var(--blog-card);
+      border-radius: 16px;
+      padding: 24px;
+    }
+
+    .landing-channel-card__icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 16px;
+    }
+
+    .landing-channel-card__icon svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .landing-channel-card__icon--wa {
+      background: rgba(34, 197, 94, 0.14);
+      color: var(--blog-success);
+    }
+
+    .landing-channel-card__icon--tg {
+      background: rgba(59, 130, 246, 0.14);
+      color: #3b82f6;
+    }
+
+    .landing-channel-card__title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .landing-channel-card__desc {
+      font-size: 14px;
+      color: var(--blog-muted);
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+
+    .landing-channel-card__meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .landing-connector__line {
+      width: 56px;
+      height: 2px;
+      background-image: repeating-linear-gradient(90deg, var(--blog-accent) 0 6px, transparent 6px 12px);
+      background-size: 200% 100%;
+      animation: landing-dash 1.6s linear infinite;
+    }
+
+    .landing-connector__hub {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      background: var(--blog-accent);
+      color: var(--blog-accent-contrast);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 8px 20px rgba(91, 92, 235, 0.25);
+    }
+
+    .landing-connector__hub svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    @keyframes landing-dash {
+      from { background-position: 0 0; }
+      to { background-position: -24px 0; }
+    }
+
+    .landing-footnote {
+      margin-top: 28px;
+      font-size: 13px;
+      color: var(--blog-muted);
+      text-align: center;
+      max-width: 640px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    @media (max-width: 720px) {
+      .landing-platforms {
+        grid-template-columns: 1fr;
+        justify-items: center;
+      }
+      .landing-connector__line {
+        width: 2px;
+        height: 28px;
+        background-image: repeating-linear-gradient(180deg, var(--blog-accent) 0 6px, transparent 6px 12px);
+        background-size: 100% 200%;
+        animation-name: landing-dash-vertical;
+      }
+    }
+
+    @keyframes landing-dash-vertical {
+      from { background-position: 0 0; }
+      to { background-position: 0 -24px; }
+    }
+
+    /* Team Showcase */
+    .landing-team-card {
+      max-width: 640px;
+      margin: 0 auto;
+      border: 1px solid var(--blog-border);
+      background: var(--blog-card);
+      border-radius: 16px;
+      padding: 20px;
+    }
+
+    .landing-team-card__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .landing-role-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--blog-border);
+      color: var(--blog-muted);
+    }
+
+    .landing-role-badge--admin {
+      background: var(--blog-accent-tint);
+      color: var(--blog-accent);
+      border-color: transparent;
+    }
+
+    .landing-filter-pills {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .landing-filter-pill {
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid var(--blog-border);
+      color: var(--blog-muted);
+    }
+
+    .landing-filter-pill--active {
+      background: var(--blog-accent-tint);
+      color: var(--blog-accent);
+      border-color: transparent;
+    }
+
+    .landing-chat-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--blog-bg);
+    }
+
+    .landing-chat-row__avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      background: var(--blog-hero-panel);
+      color: var(--blog-accent);
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex: 0 0 auto;
+    }
+
+    .landing-chat-row__body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .landing-chat-row__name {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .landing-chat-row__preview {
+      font-size: 13px;
+      color: var(--blog-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .landing-assign-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--blog-accent-tint);
+      color: var(--blog-accent);
+      font-size: 12px;
+      font-weight: 600;
+      flex: 0 0 auto;
+    }
+
+    /* Response Templates Showcase */
+    .landing-chat-demo {
+      max-width: 640px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .landing-bubble {
+      max-width: 82%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .landing-bubble--customer {
+      align-self: flex-start;
+      background: var(--blog-card);
+      border: 1px solid var(--blog-border);
+      border-bottom-left-radius: 4px;
+    }
+
+    .landing-bubble--assistant {
+      align-self: flex-end;
+      background: var(--blog-accent-tint);
+      color: var(--blog-text);
+      border-bottom-right-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+    }
+
+    .landing-bubble--wide {
+      max-width: 100%;
+    }
+
+    .landing-token {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 6px;
+      background: var(--blog-card);
+      border: 1px dashed var(--blog-accent);
+      color: var(--blog-accent);
+    }
+
+    .landing-token.is-resolved {
+      background: var(--blog-success);
+      border-style: solid;
+      border-color: var(--blog-success);
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .landing-note {
+      max-width: 640px;
+      margin: 20px auto 0;
+      padding: 14px 18px;
+      border-radius: 12px;
+      background: var(--blog-card);
+      border: 1px solid var(--blog-border);
+      font-size: 13px;
+      color: var(--blog-muted);
+      text-align: center;
+    }
+
+    /* MCP Showcase */
+    .landing-mcp-demo {
+      max-width: 640px;
+      margin: 0 auto;
+      border: 1px solid var(--blog-border);
+      background: var(--blog-card);
+      border-radius: 16px;
+      padding: 20px;
+    }
+
+    .landing-attachments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .landing-attachment-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--blog-hero-panel);
+      border: 1px solid var(--blog-border);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--blog-text);
+    }
+
+    .landing-attachment-chip svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    .landing-tool-calls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 16px 0;
+    }
+
+    .landing-tool-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: var(--blog-bg);
+      border: 1px solid var(--blog-border);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+    }
+
+    .landing-tool-chip svg {
+      width: 14px;
+      height: 14px;
+      color: var(--blog-success);
+      flex: 0 0 auto;
+    }
+
+    .landing-result-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(34, 197, 94, 0.1);
+      color: var(--blog-text);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .landing-result-card svg {
+      width: 18px;
+      height: 18px;
+      color: var(--blog-success);
+      flex: 0 0 auto;
+      margin-top: 1px;
+    }
+
+    /* How It Works Strip */
+    .landing-steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 24px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .landing-step {
+      text-align: center;
+    }
+
+    .landing-step__num {
+      width: 36px;
+      height: 36px;
+      margin: 0 auto 12px;
+      border-radius: 999px;
+      background: var(--blog-accent-tint);
+      color: var(--blog-accent);
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .landing-step__title {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .landing-step__desc {
+      font-size: 13px;
+      color: var(--blog-muted);
+      line-height: 1.5;
+    }
+
+    @media (max-width: 760px) {
+      .landing-steps {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    /* Learn More Links */
+    .landing-links {
+      display: flex;
+      justify-content: center;
+      max-width: 440px;
+      margin: 0 auto;
+    }
+
+    .landing-link-card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 24px;
+      border: 1px solid var(--blog-border);
+      background: var(--blog-card);
+      border-radius: 16px;
+      text-decoration: none;
+      color: inherit;
+      width: 100%;
+      transition: transform 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+    }
+
+    .landing-link-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--blog-accent);
+      box-shadow: var(--blog-shadow);
+    }
+
+    .landing-link-card__icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--blog-accent-tint);
+      color: var(--blog-accent);
+      display: grid;
+      place-items: center;
+    }
+
+    .landing-link-card__title {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .landing-link-card__desc {
+      font-size: 14px;
+      color: var(--blog-muted);
+      line-height: 1.55;
+    }
+
+    .landing-link-card__cta {
+      margin-top: auto;
+      font-size: 13px;
+      font-weight: 650;
+      color: var(--blog-accent);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Final CTA Panel */
+    .landing-cta-panel {
+      max-width: 1000px;
+      margin: 0 auto;
+      border-radius: 24px;
+      padding: 56px 40px;
+      text-align: center;
+      background: var(--blog-text);
+      color: var(--blog-bg);
+    }
+
+    .landing-cta-panel__title {
+      font-size: 30px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .landing-cta-panel__desc {
+      font-size: 16px;
+      opacity: 0.75;
+      max-width: 52ch;
+      margin: 0 auto 28px;
+    }
+
+    .landing-cta-panel__ctas {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    /* Footer */
+    .site-footer {
+      border-top: 1px solid var(--blog-border);
+      margin-top: 88px;
+      background: var(--blog-card);
+    }
+
+    .site-footer__grid {
+      display: grid;
+      grid-template-columns: minmax(240px, 1.8fr) minmax(130px, 0.85fr) minmax(130px, 0.85fr) minmax(250px, 1.35fr);
+      gap: 48px;
+      padding: 64px 32px;
+    }
+
+    .site-footer__brand-column {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .site-footer__brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--blog-text);
+      font-size: 18px;
+      font-weight: 750;
+      letter-spacing: -0.01em;
+      text-decoration: none;
+    }
+
+    .site-footer__mark {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      background: var(--blog-accent);
+      color: var(--blog-accent-contrast);
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .site-footer__description {
+      max-width: 38ch;
+      margin-top: 22px;
+      color: var(--blog-muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .site-footer__copyright {
+      margin-top: 28px;
+      color: var(--blog-muted);
+      font-size: 12px;
+      opacity: 0.78;
+    }
+
+    .site-footer__heading {
+      margin: 2px 0 18px;
+      color: var(--blog-text);
+      font-size: 14px;
+      font-weight: 750;
+      line-height: 1.3;
+    }
+
+    .site-footer__links {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+      list-style: none;
+    }
+
+    .site-footer__links a,
+    .site-footer__contact a {
+      color: var(--blog-muted);
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: color 160ms ease;
+    }
+
+    .site-footer__links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .site-footer__links a:hover,
+    .site-footer__contact a:hover {
+      color: var(--blog-accent);
+    }
+
+    .site-footer__links svg {
+      width: 17px;
+      height: 17px;
+    }
+
+    .site-footer__contact {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 14px;
+      font-style: normal;
+    }
+
+    .site-footer__contact a {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      max-width: 100%;
+    }
+
+    .site-footer__contact-icon {
+      width: 19px;
+      height: 19px;
+      flex: 0 0 auto;
+    }
+
+    .site-footer__contact-icon--whatsapp { color: var(--blog-success); }
+    .site-footer__contact-icon--email { color: #3b82f6; }
+    .site-footer__contact-icon--instagram { color: #ec4899; }
+    .site-footer__contact-icon--linkedin { color: #0a66c2; }
+
+    @media (max-width: 980px) {
+      .site-footer__grid {
+        grid-template-columns: minmax(240px, 1.5fr) minmax(220px, 1fr);
+        gap: 44px 56px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .site-footer {
+        margin-top: 64px;
+      }
+      .site-footer__grid {
+        grid-template-columns: 1fr;
+        gap: 36px;
+        padding: 48px 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation -->
+  <header class="site-nav">
+    <div class="blog-shell site-nav__inner">
+      <a href="./index.html" class="site-nav__brand">
+        <span class="site-nav__mark" aria-hidden="true">x</span>
+        <span>xchats</span>
+      </a>
+
+      <nav class="site-nav__primary" aria-label="landing">
+        <a href="#platforms" class="site-nav__link" data-i18n="nav.platforms">Platforms</a>
+        <a href="#team" class="site-nav__link" data-i18n="nav.team">Team</a>
+        <a href="#templates" class="site-nav__link" data-i18n="nav.templates">Templates</a>
+        <a href="#mcp" class="site-nav__link" data-i18n="nav.mcp">MCP</a>
+        <a href="#how-it-works" class="site-nav__link" data-i18n="nav.howItWorks">How it works</a>
+      </nav>
+
+      <div class="site-nav__right">
+        <!-- Language Switcher Dropdown -->
+        <div class="lang-select-wrapper">
+          <svg class="lang-select-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+          </svg>
+          <select id="lang-select" class="lang-select" onchange="setLanguage(this.value)" aria-label="Language">
+            <option value="en">English</option>
+            <option value="ru">Русский</option>
+            <option value="kk">Қазақша</option>
+          </select>
+          <svg class="lang-select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+
+        <a href="https://github.com/yerassyldanay/xchats" class="site-nav__github" target="_blank" rel="noreferrer" aria-label="GitHub">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero Section -->
+    <section class="landing-hero blog-shell">
+      <div>
+        <span class="badge badge--category" data-i18n="hero.eyebrow">OPEN SOURCE · FREE</span>
+        <h1 class="landing-hero__title">
+          <span data-i18n="hero.titlePrefix">The AI assistant that</span>
+          <em data-i18n="hero.titleHighlight">never makes things up</em>
+          <span data-i18n="hero.titleSuffix"></span>
+        </h1>
+        <p class="landing-hero__subtitle" data-i18n="hero.subtitle">
+          xchats is a free, open-source AI assistant for WhatsApp and Telegram. It answers only with verified facts through value-injected templates, and you configure it right from a ChatGPT or Claude chat over MCP.
+        </p>
+
+        <div class="landing-hero__ctas">
+          <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer" class="landing-hero__cta">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+            GitHub
+          </a>
+        </div>
+
+        <div class="landing-hero__trust">
+          <span class="landing-hero__trust-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+            <span data-i18n="hero.trust1">Open source (AGPL-3.0)</span>
+          </span>
+          <span class="landing-hero__trust-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+            <span data-i18n="hero.trust2">Runs on your own servers</span>
+          </span>
+          <span class="landing-hero__trust-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"></path></svg>
+            <span data-i18n="hero.trust3">Configurable from ChatGPT and Claude</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="landing-hero__panel">
+        <img src="./app-screenshot.png" alt="xchats interface" data-i18n-alt="hero.screenshotAlt" />
+      </div>
+    </section>
+
+    <!-- Platforms Section -->
+    <section id="platforms" class="landing-section">
+      <div class="blog-shell">
+        <div class="landing-section__head landing-section__head--center">
+          <span class="badge badge--category landing-section__eyebrow" data-i18n="platforms.eyebrow">PLATFORMS</span>
+          <h2 class="landing-section__title" data-i18n="platforms.title">Multiple social platforms — one inbox</h2>
+          <p class="landing-section__description" data-i18n="platforms.description">
+            The architecture supports any number of channels. Two are wired up today — both free, both set up in a couple of minutes.
+          </p>
+        </div>
+
+        <div class="landing-platforms">
+          <div class="landing-channel-card">
+            <div class="landing-channel-card__icon landing-channel-card__icon--wa">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.247-.694.247-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413"/></svg>
+            </div>
+            <div class="landing-channel-card__title">WhatsApp</div>
+            <p class="landing-channel-card__desc" data-i18n="platforms.waDesc">A linked device — scan a QR code, just like WhatsApp Web. No Business API, no per-conversation fees.</p>
+            <div class="landing-channel-card__meta">
+              <span class="badge badge--success" data-i18n="platforms.waBadge">Free</span>
+            </div>
+          </div>
+
+          <div class="landing-connector__line" aria-hidden="true"></div>
+          <div class="landing-connector__hub" role="img" aria-label="xchats inbox">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          </div>
+          <div class="landing-connector__line" aria-hidden="true"></div>
+
+          <div class="landing-channel-card">
+            <div class="landing-channel-card__icon landing-channel-card__icon--tg">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+            </div>
+            <div class="landing-channel-card__title">Telegram</div>
+            <p class="landing-channel-card__desc" data-i18n="platforms.tgDesc">Bot API — paste a bot token from BotFather. No public URL required: the bot can run on polling.</p>
+            <div class="landing-channel-card__meta">
+              <span class="badge badge--success" data-i18n="platforms.tgBadge">Free</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="landing-footnote" data-i18n="platforms.footnote">WhatsApp connectivity is unofficial: Meta can ban the number at their discretion. Don't connect a number you can't afford to lose — start with a test one.</p>
+      </div>
+    </section>
+
+    <!-- Team Section -->
+    <section id="team" class="landing-section landing-section--muted">
+      <div class="blog-shell">
+        <div class="landing-section__head landing-section__head--center">
+          <span class="badge badge--category landing-section__eyebrow" data-i18n="team.eyebrow">TEAM</span>
+          <h2 class="landing-section__title" data-i18n="team.title">Work together, with roles</h2>
+          <p class="landing-section__description" data-i18n="team.description">Admins and members share one inbox. A conversation can be assigned to yourself or a teammate — nothing falls through the cracks.</p>
+        </div>
+
+        <div class="landing-team-card">
+          <div class="landing-team-card__head">
+            <span class="landing-role-badge landing-role-badge--admin" data-i18n="team.roleAdmin">Admin</span>
+            <span class="landing-role-badge" data-i18n="team.roleMember">Member</span>
+          </div>
+
+          <div class="landing-filter-pills">
+            <span class="landing-filter-pill landing-filter-pill--active" data-i18n="team.filterMine">Mine</span>
+            <span class="landing-filter-pill" data-i18n="team.filterUnassigned">Unassigned</span>
+            <span class="landing-filter-pill" data-i18n="team.filterAll">All</span>
+          </div>
+
+          <div class="landing-chat-row">
+            <div class="landing-chat-row__avatar" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            </div>
+            <div class="landing-chat-row__body">
+              <div class="landing-chat-row__name" data-i18n="team.customerName">Customer · Aliya</div>
+              <div class="landing-chat-row__preview" data-i18n="team.messagePreview">Hi, how much is delivery to Almaty?</div>
+            </div>
+            <span class="landing-assign-chip" data-i18n="team.assignedTo">Assigned: Dana</span>
+          </div>
+        </div>
+
+        <p class="landing-footnote" data-i18n="team.note">Roles and conversation assignment, straight from the real product: Channels and Inbox.</p>
+      </div>
+    </section>
+
+    <!-- Response Templates Section -->
+    <section id="templates" class="landing-section">
+      <div class="blog-shell">
+        <div class="landing-section__head landing-section__head--center">
+          <span class="badge badge--category landing-section__eyebrow" data-i18n="templates.eyebrow">RESPONSE TEMPLATES</span>
+          <h2 class="landing-section__title" data-i18n="templates.title">Not one made-up number</h2>
+          <p class="landing-section__description" data-i18n="templates.description">The model is forbidden from writing numbers. It emits a placeholder — code substitutes the exact value from the knowledge base.</p>
+        </div>
+
+        <div class="landing-chat-demo">
+          <p class="landing-bubble landing-bubble--customer" data-i18n="templates.question">How much is the DeLonghi coffee machine, and when can you deliver to Astana?</p>
+          <p class="landing-bubble landing-bubble--assistant">
+            <span data-i18n="templates.sentencePrefix">The DeLonghi coffee machine costs </span><span class="landing-token is-resolved" data-i18n="templates.resolvedPrice">129,900 ₸</span><span data-i18n="templates.sentenceMiddle">. Delivery to Astana — </span><span class="landing-token is-resolved" data-i18n="templates.resolvedDays">2 days</span><span data-i18n="templates.sentenceSuffix">.</span>
+          </p>
+        </div>
+
+        <p class="landing-note" data-i18n="templates.note">The model never writes a number — code fills it in. An unknown placeholder means an error and a handoff to a human, never a guess.</p>
+      </div>
+    </section>
+
+    <!-- MCP Section -->
+    <section id="mcp" class="landing-section landing-section--muted">
+      <div class="blog-shell">
+        <div class="landing-section__head landing-section__head--center">
+          <span class="badge badge--category landing-section__eyebrow" data-i18n="mcp.eyebrow">CONFIGURE VIA MCP</span>
+          <h2 class="landing-section__title" data-i18n="mcp.title">Fill in the knowledge base right from the chat</h2>
+          <p class="landing-section__description" data-i18n="mcp.description">Connect xchats as an MCP connector in ChatGPT or Claude, and configure the knowledge base just by talking to the assistant.</p>
+        </div>
+
+        <div class="landing-mcp-demo">
+          <p class="landing-bubble landing-bubble--customer landing-bubble--wide">
+            <span data-i18n="mcp.userMessage">Understand these documents and store the tariffs, products, and delivery information.</span>
+            <span class="landing-attachments">
+              <span class="landing-attachment-chip">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
+                <span data-i18n="mcp.pdfLabel">price-list.pdf</span>
+              </span>
+              <span class="landing-attachment-chip">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+                <span>shop.example.com/delivery</span>
+              </span>
+            </span>
+          </p>
+
+          <div class="landing-tool-calls">
+            <div class="landing-tool-chip">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+              kb_product_upsert
+            </div>
+            <div class="landing-tool-chip">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+              kb_tariff_upsert
+            </div>
+            <div class="landing-tool-chip">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+              kb_delivery_zone_upsert
+            </div>
+          </div>
+
+          <div class="landing-result-card">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            <span><strong data-i18n="mcp.resultTitle">Draft updated</strong> — <span data-i18n="mcp.resultBody">The changes landed in the Draft for review — nothing publishes without human confirmation.</span></span>
+          </div>
+        </div>
+
+        <p class="landing-note" data-i18n="mcp.note">xchats never fetches files or websites itself — ChatGPT or Claude reads them and stores the facts through 13 MCP tools.</p>
+      </div>
+    </section>
+
+    <!-- How It Works Strip -->
+    <section id="how-it-works" class="landing-section">
+      <div class="blog-shell">
+        <div class="landing-section__head landing-section__head--center">
+          <h2 class="landing-section__title" data-i18n="how.title">How it works</h2>
+        </div>
+        <div class="landing-steps">
+          <div class="landing-step">
+            <div class="landing-step__num">1</div>
+            <div class="landing-step__title" data-i18n="how.step1Title">Connect the channels</div>
+            <div class="landing-step__desc" data-i18n="how.step1Desc">WhatsApp by QR code, Telegram by bot token.</div>
+          </div>
+          <div class="landing-step">
+            <div class="landing-step__num">2</div>
+            <div class="landing-step__title" data-i18n="how.step2Title">Fill in the knowledge base</div>
+            <div class="landing-step__desc" data-i18n="how.step2Desc">By hand, or through ChatGPT/Claude over MCP.</div>
+          </div>
+          <div class="landing-step">
+            <div class="landing-step__num">3</div>
+            <div class="landing-step__title" data-i18n="how.step3Title">Review the draft</div>
+            <div class="landing-step__desc" data-i18n="how.step3Desc">Every change waits for a human to confirm it.</div>
+          </div>
+          <div class="landing-step">
+            <div class="landing-step__num">4</div>
+            <div class="landing-step__title" data-i18n="how.step4Title">Get exact answers</div>
+            <div class="landing-step__desc" data-i18n="how.step4Desc">The assistant replies only with verified facts.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Learn More / Open Evals -->
+    <section id="learn-more" class="landing-section landing-section--muted">
+      <div class="blog-shell">
+        <div class="landing-section__head landing-section__head--center">
+          <span class="badge badge--category landing-section__eyebrow" data-i18n="links.eyebrow">LEARN MORE</span>
+          <h2 class="landing-section__title" data-i18n="links.title">Engineering and answer quality</h2>
+        </div>
+        <div class="landing-links">
+          <a href="https://github.com/yerassyldanay/xchats/tree/master/evals" target="_blank" rel="noreferrer" class="landing-link-card">
+            <div class="landing-link-card__icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.31L4.75 20.5a2 2 0 0 0 1.64 2.95h11.22a2 2 0 0 0 1.64-2.95L14 9.31V2z"></path><path d="M8.5 2h7"></path><path d="M14 9.3 17.5 15H6.5L10 9.3"></path></svg>
+            </div>
+            <div class="landing-link-card__title" data-i18n="links.evalsTitle">Open evals</div>
+            <p class="landing-link-card__desc" data-i18n="links.evalsDesc">Automated response-quality checks — scenarios, expectations, and rules, all in the open.</p>
+            <span class="landing-link-card__cta">
+              <span data-i18n="links.evalsCta">View on GitHub</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Final CTA Panel -->
+    <section class="landing-section">
+      <div class="blog-shell">
+        <div class="landing-cta-panel">
+          <h2 class="landing-cta-panel__title" data-i18n="cta.title">Ready to try it?</h2>
+          <p class="landing-cta-panel__desc" data-i18n="cta.description">Deploy xchats in a few minutes and connect your first channel today.</p>
+          <div class="landing-cta-panel__ctas">
+            <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer" class="landing-hero__cta">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+              GitHub
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="blog-shell site-footer__grid">
+      <div class="site-footer__brand-column">
+        <a href="./index.html" class="site-footer__brand">
+          <span class="site-footer__mark" aria-hidden="true">x</span>
+          <span>xchats</span>
+        </a>
+        <p class="site-footer__description" data-i18n="footer.description">
+          A free, open-source AI assistant for WhatsApp and Telegram with hallucination-free templated replies, configurable from ChatGPT and Claude.
+        </p>
+        <p class="site-footer__copyright">© 2026 xchats. AGPL-3.0 License.</p>
+      </div>
+
+      <nav aria-label="Product">
+        <h2 class="site-footer__heading" data-i18n="footer.productHeading">Product</h2>
+        <ul class="site-footer__links">
+          <li><a href="#platforms" data-i18n="nav.platforms">Platforms</a></li>
+          <li><a href="#team" data-i18n="nav.team">Team</a></li>
+          <li><a href="#templates" data-i18n="nav.templates">Templates</a></li>
+          <li><a href="#mcp" data-i18n="nav.mcp">MCP</a></li>
+          <li><a href="#how-it-works" data-i18n="nav.howItWorks">How it works</a></li>
+        </ul>
+      </nav>
+
+      <nav aria-label="Community">
+        <h2 class="site-footer__heading" data-i18n="footer.communityHeading">Community</h2>
+        <ul class="site-footer__links">
+          <li>
+            <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+              <span>GitHub</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+
+      <div>
+        <h2 class="site-footer__heading" data-i18n="footer.contactsHeading">Contact us</h2>
+        <address class="site-footer__contact">
+          <a href="https://wa.me/77029766509" target="_blank" rel="noreferrer">
+            <svg class="site-footer__contact-icon site-footer__contact-icon--whatsapp" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.247-.694.247-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413"/></svg>
+            <span>+7 702 976 65 09</span>
+          </a>
+          <a href="mailto:yerassyl.danay.abc@gmail.com">
+            <svg class="site-footer__contact-icon site-footer__contact-icon--email" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+            <span>yerassyl.danay.abc@gmail.com</span>
+          </a>
+          <a href="https://www.instagram.com/yerassyl.danay/" target="_blank" rel="noreferrer">
+            <svg class="site-footer__contact-icon site-footer__contact-icon--instagram" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>
+            <span>@yerassyl.danay</span>
+          </a>
+          <a href="https://www.linkedin.com/in/yerassyldanay/" target="_blank" rel="noreferrer">
+            <svg class="site-footer__contact-icon site-footer__contact-icon--linkedin" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.88 8.56a1.68 1.68 0 0 0 1.68-1.68c0-.93-.75-1.69-1.68-1.69a1.69 1.69 0 0 0-1.69 1.69c0 .93.76 1.68 1.69 1.68m1.39 9.94v-8.37H5.5v8.37h2.77z"/></svg>
+            <span>yerassyldanay</span>
+          </a>
+        </address>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const translations = {
+      en: {
+        "nav.platforms": "Platforms",
+        "nav.team": "Team",
+        "nav.templates": "Templates",
+        "nav.mcp": "MCP",
+        "nav.howItWorks": "How it works",
+        "hero.eyebrow": "OPEN SOURCE · FREE",
+        "hero.titlePrefix": "The AI assistant that",
+        "hero.titleHighlight": "never makes things up",
+        "hero.titleSuffix": "",
+        "hero.subtitle": "xchats is a free, open-source AI assistant for WhatsApp and Telegram. It answers only with verified facts through value-injected templates, and you configure it right from a ChatGPT or Claude chat over MCP.",
+        "hero.trust1": "Open source (AGPL-3.0)",
+        "hero.trust2": "Runs on your own servers",
+        "hero.trust3": "Configurable from ChatGPT and Claude",
+        "hero.screenshotAlt": "xchats interface",
+        "platforms.eyebrow": "PLATFORMS",
+        "platforms.title": "Multiple social platforms — one inbox",
+        "platforms.description": "The architecture supports any number of channels. Two are wired up today — both free, both set up in a couple of minutes.",
+        "platforms.waDesc": "A linked device — scan a QR code, just like WhatsApp Web. No Business API, no per-conversation fees.",
+        "platforms.waBadge": "Free",
+        "platforms.tgDesc": "Bot API — paste a bot token from BotFather. No public URL required: the bot can run on polling.",
+        "platforms.tgBadge": "Free",
+        "platforms.footnote": "WhatsApp connectivity is unofficial: Meta can ban the number at their discretion. Don't connect a number you can't afford to lose — start with a test one.",
+        "team.eyebrow": "TEAM",
+        "team.title": "Work together, with roles",
+        "team.description": "Admins and members share one inbox. A conversation can be assigned to yourself or a teammate — nothing falls through the cracks.",
+        "team.roleAdmin": "Admin",
+        "team.roleMember": "Member",
+        "team.filterMine": "Mine",
+        "team.filterUnassigned": "Unassigned",
+        "team.filterAll": "All",
+        "team.customerName": "Customer · Aliya",
+        "team.messagePreview": "Hi, how much is delivery to Almaty?",
+        "team.assignedTo": "Assigned: Dana",
+        "team.note": "Roles and conversation assignment, straight from the real product: Channels and Inbox.",
+        "templates.eyebrow": "RESPONSE TEMPLATES",
+        "templates.title": "Not one made-up number",
+        "templates.description": "The model is forbidden from writing numbers. It emits a placeholder — code substitutes the exact value from the knowledge base.",
+        "templates.question": "How much is the DeLonghi coffee machine, and when can you deliver to Astana?",
+        "templates.sentencePrefix": "The DeLonghi coffee machine costs ",
+        "templates.resolvedPrice": "129,900 ₸",
+        "templates.sentenceMiddle": ". Delivery to Astana — ",
+        "templates.resolvedDays": "2 days",
+        "templates.sentenceSuffix": ".",
+        "templates.note": "The model never writes a number — code fills it in. An unknown placeholder means an error and a handoff to a human, never a guess.",
+        "mcp.eyebrow": "CONFIGURE VIA MCP",
+        "mcp.title": "Fill in the knowledge base right from the chat",
+        "mcp.description": "Connect xchats as an MCP connector in ChatGPT or Claude, and configure the knowledge base just by talking to the assistant.",
+        "mcp.userMessage": "Understand these documents and store the tariffs, products, and delivery information.",
+        "mcp.pdfLabel": "price-list.pdf",
+        "mcp.resultTitle": "Draft updated",
+        "mcp.resultBody": "The changes landed in the Draft for review — nothing publishes without human confirmation.",
+        "mcp.note": "xchats never fetches files or websites itself — ChatGPT or Claude reads them and stores the facts through 13 MCP tools.",
+        "how.title": "How it works",
+        "how.step1Title": "Connect the channels",
+        "how.step1Desc": "WhatsApp by QR code, Telegram by bot token.",
+        "how.step2Title": "Fill in the knowledge base",
+        "how.step2Desc": "By hand, or through ChatGPT/Claude over MCP.",
+        "how.step3Title": "Review the draft",
+        "how.step3Desc": "Every change waits for a human to confirm it.",
+        "how.step4Title": "Get exact answers",
+        "how.step4Desc": "The assistant replies only with verified facts.",
+        "links.eyebrow": "LEARN MORE",
+        "links.title": "Engineering and answer quality",
+        "links.evalsTitle": "Open evals",
+        "links.evalsDesc": "Automated response-quality checks — scenarios, expectations, and rules, all in the open.",
+        "links.evalsCta": "View on GitHub",
+        "cta.title": "Ready to try it?",
+        "cta.description": "Deploy xchats in a few minutes and connect your first channel today.",
+        "footer.description": "A free, open-source AI assistant for WhatsApp and Telegram with hallucination-free templated replies, configurable from ChatGPT and Claude.",
+        "footer.productHeading": "Product",
+        "footer.communityHeading": "Community",
+        "footer.contactsHeading": "Contact us"
+      },
+      ru: {
+        "nav.platforms": "Платформы",
+        "nav.team": "Команда",
+        "nav.templates": "Шаблоны",
+        "nav.mcp": "MCP",
+        "nav.howItWorks": "Как это работает",
+        "hero.eyebrow": "OPEN SOURCE · БЕСПЛАТНО",
+        "hero.titlePrefix": "AI-ассистент, который",
+        "hero.titleHighlight": "никогда не выдумывает",
+        "hero.titleSuffix": "",
+        "hero.subtitle": "xchats — бесплатный open-source AI-ассистент для WhatsApp и Telegram. Отвечает только проверенными фактами благодаря шаблонам с подстановкой значений, а настраивается прямо из чата в ChatGPT или Claude через MCP.",
+        "hero.trust1": "Открытый исходный код (AGPL-3.0)",
+        "hero.trust2": "Работает на ваших серверах",
+        "hero.trust3": "Настройка через ChatGPT и Claude",
+        "hero.screenshotAlt": "Интерфейс xchats",
+        "platforms.eyebrow": "ПЛАТФОРМЫ",
+        "platforms.title": "Несколько соцсетей — один инбокс",
+        "platforms.description": "Архитектура рассчитана на любое количество каналов. Сегодня подключены два — оба бесплатные и настраиваются за пару минут.",
+        "platforms.waDesc": "Связанное устройство — сканируете QR-код, как в WhatsApp Web. Без Business API и платы за диалоги.",
+        "platforms.waBadge": "Бесплатно",
+        "platforms.tgDesc": "Bot API — вставляете токен бота, полученный в BotFather. Публичный адрес не обязателен: бот может работать через polling.",
+        "platforms.tgBadge": "Бесплатно",
+        "platforms.footnote": "WhatsApp-подключение неофициальное: Meta может заблокировать номер по своему усмотрению. Не подключайте номер, которым дорожите — начните с тестового.",
+        "team.eyebrow": "КОМАНДА",
+        "team.title": "Совместная работа с ролями",
+        "team.description": "Администраторы и участники видят один инбокс. Диалог можно назначить себе или коллеге — ничего не потеряется.",
+        "team.roleAdmin": "Администратор",
+        "team.roleMember": "Участник",
+        "team.filterMine": "Мои",
+        "team.filterUnassigned": "Неназначенные",
+        "team.filterAll": "Все",
+        "team.customerName": "Клиент · Алия",
+        "team.messagePreview": "Здравствуйте, а сколько стоит доставка в Алматы?",
+        "team.assignedTo": "Назначено: Дана",
+        "team.note": "Роли и назначение диалогов — из реального продукта: «Каналы» и «Инбокс».",
+        "templates.eyebrow": "ШАБЛОНЫ ОТВЕТОВ",
+        "templates.title": "Ни одной выдуманной цифры",
+        "templates.description": "Модели запрещено писать числа. Она вставляет плейсхолдер — код подставляет точное значение из базы знаний.",
+        "templates.question": "Сколько стоит кофемашина DeLonghi и когда доставите в Астану?",
+        "templates.sentencePrefix": "Кофемашина DeLonghi стоит ",
+        "templates.resolvedPrice": "129 900 ₸",
+        "templates.sentenceMiddle": ". Доставка в Астану — ",
+        "templates.resolvedDays": "2 дня",
+        "templates.sentenceSuffix": ".",
+        "templates.note": "Модель никогда не пишет цифры — их подставляет код. Неизвестный плейсхолдер — это ошибка и передача диалога человеку, а не выдумка.",
+        "mcp.eyebrow": "НАСТРОЙКА ЧЕРЕЗ MCP",
+        "mcp.title": "Заполните базу знаний прямо в чате",
+        "mcp.description": "Подключите xchats как MCP-коннектор в ChatGPT или Claude — и настраивайте базу знаний, просто разговаривая с ассистентом.",
+        "mcp.userMessage": "Разберись в этих документах и сохрани тарифы, товары и информацию о доставке.",
+        "mcp.pdfLabel": "прайс-лист.pdf",
+        "mcp.resultTitle": "Черновик обновлён",
+        "mcp.resultBody": "Изменения попали в Черновик на проверку — ничего не публикуется без подтверждения человека.",
+        "mcp.note": "xchats не скачивает файлы и сайты сам — их читает сама модель ChatGPT или Claude и сохраняет факты через 13 MCP-инструментов.",
+        "how.title": "Как это работает",
+        "how.step1Title": "Подключите каналы",
+        "how.step1Desc": "WhatsApp по QR-коду, Telegram по токену бота.",
+        "how.step2Title": "Заполните базу знаний",
+        "how.step2Desc": "Вручную или через ChatGPT/Claude по MCP.",
+        "how.step3Title": "Проверьте черновик",
+        "how.step3Desc": "Каждое изменение ждёт подтверждения человека.",
+        "how.step4Title": "Получайте точные ответы",
+        "how.step4Desc": "Ассистент отвечает только проверенными фактами.",
+        "links.eyebrow": "УЗНАТЬ БОЛЬШЕ",
+        "links.title": "Инженерия и качество ответов",
+        "links.evalsTitle": "Открытые эвалы",
+        "links.evalsDesc": "Автоматизированные проверки качества ответов — сценарии, ожидания и правила в открытом доступе.",
+        "links.evalsCta": "Смотреть на GitHub",
+        "cta.title": "Готовы попробовать?",
+        "cta.description": "Разверните xchats за несколько минут и подключите первый канал уже сегодня.",
+        "footer.description": "Бесплатный open-source AI-ассистент для WhatsApp и Telegram с шаблонными ответами без выдумок и настройкой через ChatGPT и Claude.",
+        "footer.productHeading": "Продукт",
+        "footer.communityHeading": "Сообщество",
+        "footer.contactsHeading": "Свяжитесь с нами"
+      },
+      kk: {
+        "nav.platforms": "Платформалар",
+        "nav.team": "Топ",
+        "nav.templates": "Үлгілер",
+        "nav.mcp": "MCP",
+        "nav.howItWorks": "Қалай жұмыс істейді",
+        "hero.eyebrow": "АШЫҚ КОД · ТЕГІН",
+        "hero.titlePrefix": "Ешқашан",
+        "hero.titleHighlight": "ойдан шығармайтын",
+        "hero.titleSuffix": "AI-көмекші",
+        "hero.subtitle": "xchats — WhatsApp пен Telegram-ға арналған тегін, ашық бастапқы кодты AI-көмекші. Ол тек тексерілген деректерге негізделген үлгілер арқылы жауап береді және ChatGPT немесе Claude чатынан MCP арқылы тікелей бапталады.",
+        "hero.trust1": "Ашық бастапқы код (AGPL-3.0)",
+        "hero.trust2": "Өз серверлеріңізде жұмыс істейді",
+        "hero.trust3": "ChatGPT пен Claude арқылы бапталады",
+        "hero.screenshotAlt": "xchats интерфейсі",
+        "platforms.eyebrow": "ПЛАТФОРМАЛАР",
+        "platforms.title": "Бірнеше әлеуметтік желі — бір инбокс",
+        "platforms.description": "Архитектура кез келген санда арнаны қолдайды. Бүгін екеуі қосылған — екеуі де тегін және бірнеше минутта бапталады.",
+        "platforms.waDesc": "Байланысқан құрылғы — WhatsApp Web-тегідей QR-кодты сканерлейсіз. Business API және диалог үшін төлем жоқ.",
+        "platforms.waBadge": "Тегін",
+        "platforms.tgDesc": "BotFather-дан алынған бот токенін енгізесіз. Жария адрес міндетті емес — бот polling арқылы жұмыс істей алады.",
+        "platforms.tgBadge": "Тегін",
+        "platforms.footnote": "WhatsApp қосылымы бейресми: Meta нөмірді өз қалауы бойынша бұғаттай алады. Жоғалтқыңыз келмейтін нөмірді қоспаңыз — тест нөмірінен бастаңыз.",
+        "team.eyebrow": "ТОП",
+        "team.title": "Рөлдермен бірге жұмыс",
+        "team.description": "Әкімшілер мен қатысушылар бір инбоксты көреді. Диалогты өзіңізге немесе әріптесіңізге тағайындауға болады — ештеңе жоғалмайды.",
+        "team.roleAdmin": "Әкімші",
+        "team.roleMember": "Қатысушы",
+        "team.filterMine": "Менікі",
+        "team.filterUnassigned": "Тағайындалмаған",
+        "team.filterAll": "Барлығы",
+        "team.customerName": "Клиент · Алия",
+        "team.messagePreview": "Сәлеметсіз бе, Алматыға жеткізу қанша тұрады?",
+        "team.assignedTo": "Тағайындалды: Дана",
+        "team.note": "Рөлдер мен диалогты тағайындау — нақты өнімнен: «Арналар» және «Инбокс».",
+        "templates.eyebrow": "ЖАУАП ҮЛГІЛЕРІ",
+        "templates.title": "Бірде-бір ойдан шығарылған сан жоқ",
+        "templates.description": "Модельге сан жазуға тыйым салынған. Ол орынбасарды қояды — кодтан білім базасындағы нақты мән алмастырылады.",
+        "templates.question": "DeLonghi кофе машинасы қанша тұрады және Астанаға қашан жеткізесіздер?",
+        "templates.sentencePrefix": "DeLonghi кофе машинасы ",
+        "templates.resolvedPrice": "129 900 ₸",
+        "templates.sentenceMiddle": " тұрады. Астанаға жеткізу — ",
+        "templates.resolvedDays": "2 күн",
+        "templates.sentenceSuffix": ".",
+        "templates.note": "Модель ешқашан сан жазбайды — оны кодтан алмастырады. Белгісіз орынбасар — қате және диалогты адамға беру, ойдан шығару емес.",
+        "mcp.eyebrow": "MCP АРҚЫЛЫ БАПТАУ",
+        "mcp.title": "Білім базасын тікелей чатта толтырыңыз",
+        "mcp.description": "xchats-ты ChatGPT немесе Claude-та MCP-коннектор ретінде қосыңыз — және көмекшімен әңгімелесу арқылы білім базасын баптаңыз.",
+        "mcp.userMessage": "Осы құжаттарды түсініп, тарифтерді, тауарларды және жеткізу ақпаратын сақта.",
+        "mcp.pdfLabel": "баға-тізімі.pdf",
+        "mcp.resultTitle": "Жоба жаңартылды",
+        "mcp.resultBody": "Өзгерістер тексеру үшін Жобаға түсті — адам растамайынша ештеңе жарияланбайды.",
+        "mcp.note": "xchats файлдар мен сайттарды өзі жүктемейді — оларды ChatGPT немесе Claude моделі оқып, 13 MCP-құралы арқылы деректерді сақтайды.",
+        "how.title": "Бұл қалай жұмыс істейді",
+        "how.step1Title": "Арналарды қосыңыз",
+        "how.step1Desc": "WhatsApp — QR-код арқылы, Telegram — бот токені арқылы.",
+        "how.step2Title": "Білім базасын толтырыңыз",
+        "how.step2Desc": "Қолмен немесе ChatGPT/Claude арқылы MCP бойынша.",
+        "how.step3Title": "Жобаны тексеріңіз",
+        "how.step3Desc": "Әр өзгеріс адамның растауын күтеді.",
+        "how.step4Title": "Дәл жауаптар алыңыз",
+        "how.step4Desc": "Көмекші тек тексерілген деректермен жауап береді.",
+        "links.eyebrow": "КӨБІРЕК БІЛУ",
+        "links.title": "Инженерия және жауап сапасы",
+        "links.evalsTitle": "Ашық эвалдар",
+        "links.evalsDesc": "Жауап сапасын автоматты тексеру — сценарийлер, күтулер және ережелер ашық түрде.",
+        "links.evalsCta": "GitHub-та қарау",
+        "cta.title": "Байқап көруге дайынсыз ба?",
+        "cta.description": "xchats-ты бірнеше минутта іске қосып, бүгін бірінші арнаны қосыңыз.",
+        "footer.description": "WhatsApp пен Telegram-ға арналған, ойдан шығармайтын үлгілі жауаптары бар және ChatGPT пен Claude арқылы бапталатын тегін, ашық бастапқы кодты AI-көмекші.",
+        "footer.productHeading": "Өнім",
+        "footer.communityHeading": "Қауымдастық",
+        "footer.contactsHeading": "Бізбен байланысыңыз"
+      }
+    };
+
+    function setLanguage(lang) {
+      if (!translations[lang]) return;
+      const dict = translations[lang];
+
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key] !== undefined) {
+          el.textContent = dict[key];
+        }
+      });
+
+      document.querySelectorAll('[data-i18n-alt]').forEach(el => {
+        const key = el.getAttribute('data-i18n-alt');
+        if (dict[key] !== undefined) {
+          el.setAttribute('alt', dict[key]);
+        }
+      });
+
+      const select = document.getElementById('lang-select');
+      if (select && select.value !== lang) {
+        select.value = lang;
+      }
+
+      document.documentElement.setAttribute('lang', lang);
+      localStorage.setItem('xchats_visit_card_lang', lang);
+      localStorage.setItem('locale', lang);
+    }
+
+    function detectLanguage() {
+      // 1. Check saved language in localStorage (supports both visit-card key and main app key)
+      const stored = localStorage.getItem('xchats_visit_card_lang') || localStorage.getItem('locale');
+      if (stored && translations[stored]) return stored;
+
+      // 2. Detect browser languages (e.g. ['ru-RU', 'ru', 'kk-KZ', 'en-US'])
+      const userLangs = navigator.languages || [navigator.language || navigator.userLanguage];
+      for (const lang of userLangs) {
+        if (!lang) continue;
+        const code = lang.toLowerCase().slice(0, 2);
+        if (translations[code]) return code;
+      }
+
+      // 3. Fallback to English
+      return 'en';
+    }
+
+    // Automatically detect and apply the corresponding language on page load
+    const initialLang = detectLanguage();
+    setLanguage(initialLang);
+  </script>
+</body>
+</html>

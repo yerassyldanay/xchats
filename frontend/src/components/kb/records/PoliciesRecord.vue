@@ -13,8 +13,8 @@ import type { ChangeType } from '@/composables/draftChanges'
 import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
-import MediaChip from './MediaChip.vue'
-import { changedFields, mediaCount, stateForChange } from './shared'
+import MediaStrip from './MediaStrip.vue'
+import { changedFields, stateForChange } from './shared'
 
 const props = defineProps<{
   row?: PolicyRow
@@ -48,6 +48,7 @@ const diff = computed(() =>
     :actions="actions"
     :busy="busy"
     :blocked-note="blockedNote"
+    :updated-at="row?.updated_at"
     @edit="$emit('edit')"
     @publish="$emit('publish')"
     @cancel="$emit('cancel')"
@@ -103,8 +104,8 @@ const diff = computed(() =>
         <FieldDiffNote :show="diff.includes('outside_zones_note')" :was="liveRow?.outside_zones_note ?? ''" />
       </div>
     </div>
-    <div v-if="row" class="flex items-center gap-1.5 flex-wrap">
-      <MediaChip :label="t('kb.media.documents')" :count="mediaCount(row.commerce_policy_documents)" />
+    <div v-if="row" class="flex flex-col gap-2">
+      <MediaStrip :label="t('kb.media.documents')" field="commerce_policy_documents" :ids="row.commerce_policy_documents" />
     </div>
   </RecordShell>
 </template>

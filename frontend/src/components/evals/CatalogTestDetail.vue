@@ -52,8 +52,8 @@ const presentKeys = computed(() => TEST_FIELD_KEYS.filter((k) => presentPredicat
       <div>
         <div class="flex items-center gap-1.5">
           <code class="font-mono text-sm font-semibold break-words">{{ test.id }}</code>
-          <CopyButton :text="test.id" label-key="id" />
-          <CopyButton :text="deepLink" label-key="link" />
+          <CopyButton :text="test.id" :label="t('evalCatalog.copy.id')" />
+          <CopyButton :text="deepLink" :label="t('evalCatalog.copy.link')" />
         </div>
         <p class="text-[11px] text-muted-foreground mt-1">
           {{ t('evalCatalog.fields.source') }} → <code class="font-mono">{{ test.source }}</code>

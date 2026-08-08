@@ -81,13 +81,23 @@ type SystemConfig struct {
 	CustomerMessageWaitSeconds int `yaml:"customer_message_wait_seconds" env:"CUSTOMER_MESSAGE_WAIT_SECONDS"`
 }
 
-// TelegramModeConfig is the long-polling-vs-webhook switch (Track 1). It is
-// its own group (rather than folded into the flat Telegram* secret fields
-// below) because it is the one Telegram setting that is boot/infra shaped —
-// safe to commit — rather than a credential or a runtime-editable setting.
+// TelegramModeConfig groups the Telegram settings that are boot/infra shaped
+// — safe to commit to config.yaml — as opposed to the flat Telegram* secret
+// fields below (bot tokens, encryption keys), which are credentials, or the
+// runtime-editable settings that live in the Settings UI.
 type TelegramModeConfig struct {
 	// Mode is "webhook" | "polling" | "" (auto — see TelegramResolvedMode).
 	Mode string `yaml:"mode" env:"TG_MODE"`
+	// WebhookPublicBaseURL must be a public HTTPS origin — Telegram refuses
+	// to register a webhook that is anything else. Leave it empty whenever
+	// the embedded ngrok tunnel fronts this deployment: the tunnel's own
+	// domain is then used automatically (see TelegramResolvedWebhookBaseURL),
+	// so there is nothing to restate here. Set it only to front Telegram with
+	// a DIFFERENT hostname than the rest of the app.
+	WebhookPublicBaseURL string `yaml:"webhook_public_base_url" env:"TG_WEBHOOK_PUBLIC_BASE_URL"`
+	// APIBaseURL overrides https://api.telegram.org (a local Bot API server,
+	// or a test double) — an advanced override, rarely set.
+	APIBaseURL string `yaml:"api_base_url" env:"TG_API_BASE_URL"`
 }
 
 // MCPConfig groups the MCP connector's TTL tunables (plan/mcp.md §3) — every
@@ -154,14 +164,10 @@ type Config struct {
 	SessionSecret string `env:"SESSION_SECRET"`
 
 	// --- Telegram (Bot API) ---
-	// TelegramWebhookPublicBaseURL must be a public HTTPS origin — Telegram
-	// refuses to register a webhook that is anything else. Validated at
-	// provisioning time. Irrelevant in polling mode.
-	TelegramWebhookPublicBaseURL string `env:"TG_WEBHOOK_PUBLIC_BASE_URL"`
-	// TelegramAPIBaseURL overrides https://api.telegram.org (a local Bot API
-	// server, or a test double) — an advanced override, env-only rather than
-	// part of the committed config.yaml.
-	TelegramAPIBaseURL string `env:"TG_API_BASE_URL"`
+	// The two non-secret Telegram URLs that used to live here moved into the
+	// committed `telegram:` config.yaml section (TelegramModeConfig above) —
+	// they are boot/infra config, not credentials, and keeping them env-only
+	// forced every deployment to carry an environment block just to set them.
 	// TelegramCredentialsEncKey is the AES-256-GCM key protecting stored bot
 	// tokens (internal/secretbox, xchats.tg_credentials). Losing it means
 	// re-pasting every bot token; it is never logged.
@@ -418,8 +424,8 @@ func Load(configPath string) (*Config, error) {
 
 // TelegramResolvedAPIBaseURL returns the Bot API root to call.
 func (c *Config) TelegramResolvedAPIBaseURL() string {
-	if c.TelegramAPIBaseURL != "" {
-		return strings.TrimRight(c.TelegramAPIBaseURL, "/")
+	if c.Telegram.APIBaseURL != "" {
+		return strings.TrimRight(c.Telegram.APIBaseURL, "/")
 	}
 	return "https://api.telegram.org"
 }
@@ -435,19 +441,20 @@ func (c *Config) TelegramResolvedWebhookSecret() string {
 // TelegramResolvedWebhookBaseURL returns the public HTTPS origin to register
 // Telegram webhooks against, with no trailing slash.
 //
-// An explicit TG_WEBHOOK_PUBLIC_BASE_URL always wins (a deployment fronting
-// Telegram with a different hostname than the rest of the app). Otherwise it
-// falls back to ResolvedAPIBaseURL when that is HTTPS — which is exactly the
-// embedded ngrok tunnel's static domain, since cmd/xchats.applyNgrokPublicOrigin
-// installs it there at boot as "the single source of truth". The tunnel fronts
-// the whole app, so the Telegram ingress is already reachable on that origin;
-// making an operator restate the same ngrok hostname in a second env var was
-// pure duplication, and duplication that goes stale every time the domain
+// An explicit telegram.webhook_public_base_url always wins (a deployment
+// fronting Telegram with a different hostname than the rest of the app).
+// Otherwise it falls back to ResolvedAPIBaseURL when that is HTTPS — which is
+// exactly the embedded ngrok tunnel's static domain, since
+// cmd/xchats.applyNgrokPublicOrigin installs it there at boot as the single
+// source of truth for the app's public origin. The tunnel fronts the whole
+// app, so the Telegram ingress is already reachable on that origin; making an
+// operator restate the same ngrok hostname in a second setting was pure
+// duplication — and duplication that goes stale every time the domain
 // changes. An http:// origin is deliberately NOT used as a fallback: Telegram
 // refuses to register a non-HTTPS webhook, so returning it would only trade a
-// clear "not configured" for an opaque Bot API 400.
+// clear "not configured" message for an opaque Bot API 400.
 func (c *Config) TelegramResolvedWebhookBaseURL() string {
-	if base := strings.TrimSpace(c.TelegramWebhookPublicBaseURL); base != "" {
+	if base := strings.TrimSpace(c.Telegram.WebhookPublicBaseURL); base != "" {
 		return strings.TrimRight(base, "/")
 	}
 	if api := c.ResolvedAPIBaseURL(); strings.HasPrefix(strings.ToLower(api), "https://") {
@@ -458,7 +465,7 @@ func (c *Config) TelegramResolvedWebhookBaseURL() string {
 
 // TelegramResolvedMode resolves the long-polling-vs-webhook switch (Track 1):
 // an explicit Telegram.Mode always wins; otherwise a resolvable public webhook
-// base URL (see TelegramResolvedWebhookBaseURL — an explicit override, or the
+// base URL (see TelegramResolvedWebhookBaseURL — an explicit setting, or the
 // ngrok tunnel's HTTPS origin) means webhook delivery is actually available,
 // and its absence means polling — the zero-config path for a local/native
 // install with no public URL at all.

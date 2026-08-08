@@ -51,6 +51,7 @@ function parentName(ref: string): string {
     :actions="actions"
     :busy="busy"
     :blocked-note="blockedNote"
+    :updated-at="row.updated_at"
     @edit="$emit('edit')"
     @publish="$emit('publish')"
     @cancel="$emit('cancel')"

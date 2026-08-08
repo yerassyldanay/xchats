@@ -9,8 +9,8 @@ import type { ChangeType } from '@/composables/draftChanges'
 import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
-import MediaChip from './MediaChip.vue'
-import { changedFields, mediaCount, stateForChange } from './shared'
+import MediaStrip from './MediaStrip.vue'
+import { changedFields, stateForChange } from './shared'
 
 const props = defineProps<{
   row: ProductRow
@@ -39,6 +39,7 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['name', 'pr
     :actions="actions"
     :busy="busy"
     :blocked-note="blockedNote"
+    :updated-at="row.updated_at"
     @edit="$emit('edit')"
     @publish="$emit('publish')"
     @cancel="$emit('cancel')"
@@ -74,12 +75,12 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['name', 'pr
       <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.description || '—' }}</p>
       <FieldDiffNote :show="diff.includes('description')" :was="liveRow?.description ?? ''" />
     </div>
-    <div class="flex items-center gap-1.5 flex-wrap">
-      <MediaChip :label="t('kb.media.image')" :count="mediaCount(row.featured_image)" />
-      <MediaChip :label="t('kb.media.gallery')" :count="mediaCount(row.gallery_images)" />
-      <MediaChip :label="t('kb.media.videos')" :count="mediaCount(row.demo_videos)" />
-      <MediaChip :label="t('kb.media.certificates')" :count="mediaCount(row.certificate_documents)" />
-      <MediaChip :label="t('kb.media.guarantee')" :count="mediaCount(row.guarantee_documents)" />
+    <div class="flex flex-col gap-2">
+      <MediaStrip :label="t('kb.media.image')" field="featured_image" :ids="row.featured_image" />
+      <MediaStrip :label="t('kb.media.gallery')" field="gallery_images" :ids="row.gallery_images" />
+      <MediaStrip :label="t('kb.media.videos')" field="demo_videos" :ids="row.demo_videos" />
+      <MediaStrip :label="t('kb.media.certificates')" field="certificate_documents" :ids="row.certificate_documents" />
+      <MediaStrip :label="t('kb.media.guarantee')" field="guarantee_documents" :ids="row.guarantee_documents" />
     </div>
   </RecordShell>
 </template>

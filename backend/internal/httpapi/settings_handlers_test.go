@@ -643,6 +643,97 @@ func TestTunnelStartFailureReturnsStatusWithLastError(t *testing.T) {
 	}
 }
 
+// mcpConnectionInfoPayload mirrors httpapi's unexported mcpConnectionInfo —
+// GET /mcp-connection lives outside the /settings/* admin group on purpose
+// (see mcp_info.go), so these tests share this harness for its fake tunnel
+// rather than living in mcp_integration_test.go's heavier MCP-auth harness.
+type mcpConnectionInfoPayload struct {
+	MCPURL          string   `json:"mcp_url"`
+	AuthEnabled     bool     `json:"auth_enabled"`
+	TunnelAvailable bool     `json:"tunnel_available"`
+	TunnelRunning   bool     `json:"tunnel_running"`
+	PublicURL       string   `json:"public_url"`
+	Scopes          []string `json:"scopes"`
+}
+
+func TestMCPConnectionInfoAvailableToMemberBeforeTunnelStarts(t *testing.T) {
+	h := newSettingsHarness(t)
+
+	resp, env := h.get("/xchats/api/v1/mcp-connection")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin GET: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var got mcpConnectionInfoPayload
+	mustDecode(t, env, &got)
+	if !got.TunnelAvailable {
+		t.Error("TunnelAvailable = false, want true (fake tunnel is wired)")
+	}
+	if got.TunnelRunning {
+		t.Error("TunnelRunning = true before Start, want false")
+	}
+	if !strings.HasSuffix(got.MCPURL, "/mcp") {
+		t.Errorf("MCPURL = %q, want a /mcp suffix even before the tunnel starts", got.MCPURL)
+	}
+	if got.PublicURL != "" {
+		t.Errorf("PublicURL = %q, want empty before Start", got.PublicURL)
+	}
+
+	// The whole point of this route living outside the admin-only /settings
+	// group: a member (not just an admin) can read it too.
+	member := h.createMemberClient("member@xchats.test", "password123")
+	resp, err := member.Get(h.srv.URL + "/xchats/api/v1/mcp-connection")
+	if err != nil {
+		t.Fatalf("member GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("member GET: status=%d, want 200", resp.StatusCode)
+	}
+}
+
+func TestMCPConnectionInfoReflectsRunningTunnel(t *testing.T) {
+	h := newSettingsHarness(t)
+
+	resp, env := h.do(http.MethodPost, "/xchats/api/v1/settings/tunnel/start", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("start tunnel: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+
+	resp, env = h.get("/xchats/api/v1/mcp-connection")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var got mcpConnectionInfoPayload
+	mustDecode(t, env, &got)
+	if !got.TunnelRunning {
+		t.Error("TunnelRunning = false after Start, want true")
+	}
+	want := "https://fake.ngrok.app/mcp"
+	if got.MCPURL != want {
+		t.Errorf("MCPURL = %q, want %q", got.MCPURL, want)
+	}
+	if got.PublicURL != "https://fake.ngrok.app" {
+		t.Errorf("PublicURL = %q, want the fake tunnel's public URL", got.PublicURL)
+	}
+}
+
+func TestMCPConnectionInfoWithoutTunnelFeature(t *testing.T) {
+	h := newNilDepsSettingsHarness(t)
+
+	resp, env := h.get("/xchats/api/v1/mcp-connection")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var got mcpConnectionInfoPayload
+	mustDecode(t, env, &got)
+	if got.TunnelAvailable {
+		t.Error("TunnelAvailable = true, want false (no tunnel wired in this harness)")
+	}
+	if got.MCPURL == "" {
+		t.Error("MCPURL is empty, want the localhost-derived fallback even with no tunnel")
+	}
+}
+
 func TestLLMRefreshCalledOnCredentialSaveDeleteAndSettingsChanges(t *testing.T) {
 	h := newSettingsHarness(t)
 	withTestProviderBaseURL(t, h, "ngrok", func(w http.ResponseWriter, _ *http.Request) {

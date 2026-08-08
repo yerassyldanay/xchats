@@ -3,7 +3,8 @@ import { DOMWrapper, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { usePlayground } from '@/stores/playground'
 import { mountKb, testPinia } from '@/test/mount'
 import KnowledgeBase from './KnowledgeBase.vue'
-import type { DraftChangeSet, DraftView, TopicRow } from '@/types'
+import ProductRecord from '@/components/kb/records/ProductRecord.vue'
+import type { DraftChangeSet, DraftView, KbMaterial, ProductRow, TopicRow } from '@/types'
 
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
 vi.mock('@/api/client', async (importOriginal) => {
@@ -22,6 +23,15 @@ function topic(over: Partial<TopicRow> = {}): TopicRow {
     ...over,
   }
 }
+function product(over: Partial<ProductRow> = {}): ProductRow {
+  return {
+    id: 'coffee-machine', ref: 'coffee-machine', name: 'Кофемашина', price: '100000', description: '', category: '',
+    in_stock: true, sales_status: 'active',
+    featured_image: null, gallery_images: [], demo_videos: [], certificate_documents: [], guarantee_documents: [],
+    draft: false, updated_at: '',
+    ...over,
+  }
+}
 function emptyLive(over: Partial<DraftView> = {}): DraftView {
   return {
     config: {
@@ -29,6 +39,16 @@ function emptyLive(over: Partial<DraftView> = {}): DraftView {
       reply_max_words: 120, draft: false, base_version: 0, updated_at: '',
     },
     topics: [], tariffs: [], products: [], contacts: [], policies: [], zones: [], materials: [], requests: [],
+    ...over,
+  }
+}
+function material(over: Partial<KbMaterial> = {}): KbMaterial {
+  return {
+    id: 'mat-1', source_type: 'file', source_ref: '', blob_id: '', extracted_text: '',
+    media_kind: '', status: 'ready', extraction: '{}', created_at: '2026-01-01', updated_at: '2026-01-02',
+    filename: 'product-photo.png', mime_type: 'image/png', size_bytes: 204800,
+    processing_status: 'parsed', customer_visibility: 'visible', visual_summary: '', transcript_text: '',
+    operator_note: '', has_content: true,
     ...over,
   }
 }
@@ -45,7 +65,6 @@ async function mountWith(changes: DraftChangeSet, live: DraftView) {
   vi.mocked(api.get).mockImplementation(async (path: string) => {
     if (path === '/playground/draft') return changes as any
     if (path === '/kb') return live as any
-    if (path === '/kb/materials') return { materials: [] } as any
     throw new Error(`unexpected GET ${path}`)
   })
   const pinia = testPinia()
@@ -88,6 +107,73 @@ describe('KnowledgeBase — published rows are read-only', () => {
     expect(wrapper.text()).toContain('Опубликованное название')
     expect(wrapper.text()).not.toContain('Черновик: новое название')
     expect(wrapper.text()).toContain('Есть неопубликованное изменение')
+  })
+})
+
+// Regression test for "empty media slots are visible" (requirement 1):
+// before MediaStrip dropped its v-if="list.length" root, a product with
+// every media column empty rendered NO media rows at all, label included.
+describe('KnowledgeBase — a product with no media still shows every media slot', () => {
+  it('renders every media label (e.g. «Галерея») and the empty indicator, not nothing', async () => {
+    const { wrapper } = await mountWith(emptyChanges(), emptyLive({ products: [product()] }))
+    await switchTab(wrapper, 'Товары')
+    expect(wrapper.text()).toContain('Галерея')
+    expect(wrapper.text()).toContain('Не добавлено')
+  })
+})
+
+// End-to-end wiring check for Stage 5: the picker's own behavior is unit
+// tested in MediaFieldPicker.dom.test.ts — this proves the field NAMES each
+// *Form.vue binds MediaFieldPicker to are actually correct end to end (a
+// typo'd field prop would silently no-op rather than fail to compile,
+// since MediaStrip/MediaFieldPicker only ever see a plain string).
+describe('KnowledgeBase — editing a product\'s media through the picker reaches the API', () => {
+  it('detaching an existing gallery image and saving sends gallery_images: []', async () => {
+    const { wrapper, api } = await mountWith(
+      emptyChanges(),
+      emptyLive({
+        products: [product({ gallery_images: ['img-1'] })],
+        materials: [material({ id: 'img-1', filename: 'existing.png', mime_type: 'image/png' })],
+      })
+    )
+    vi.mocked(api.post).mockResolvedValueOnce(emptyChanges())
+    await switchTab(wrapper, 'Товары')
+
+    // KnowledgeBase.vue keeps every tab's content mounted at once (v-show,
+    // not v-if — only the toolbar action itself is conditional), so ALL
+    // «Изменить» buttons coexist in the DOM regardless of the active tab,
+    // including Обзор's config field cards. Scope to ProductRecord
+    // specifically rather than a bare text match on the whole page.
+    const productCard = wrapper.findComponent(ProductRecord)
+    expect(productCard.exists()).toBe(true)
+    const editBtn = productCard.findAll('button').find((b) => b.text() === 'Изменить')
+    expect(editBtn).toBeTruthy()
+    await editBtn!.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    // The picker shows the seeded gallery image as a real thumbnail, not
+    // the empty state.
+    const img = body().find('img[src*="/kb/materials/img-1/content"]')
+    expect(img.exists()).toBe(true)
+
+    const detachBtn = body().findAll('button').find((b) => b.attributes('aria-label') === 'Открепить')
+    expect(detachBtn).toBeTruthy()
+    await detachBtn!.trigger('click')
+
+    const saveBtn = body().findAll('button').find((b) => b.text() === 'Сохранить')
+    await saveBtn!.trigger('click')
+    await flushPromises()
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/playground/draft/products',
+      expect.objectContaining({ ref: 'coffee-machine', gallery_images: [] }),
+      expect.anything()
+    )
+    // This file's api mocks are module-level vi.fn()s with no shared
+    // beforeEach reset — clear this call now so it can't bleed into a
+    // LATER test's `expect(api.post).not.toHaveBeenCalled()` (file order,
+    // not describe-block order, is what matters for vi.fn() call history).
+    vi.mocked(api.post).mockClear()
   })
 })
 
@@ -170,5 +256,45 @@ describe('KnowledgeBase — singleton toolbars', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('Изменить политики')
     expect(wrapper.text()).not.toContain('Добавить политики')
+  })
+})
+
+// Файлы (материалы): GET /kb already returns the whole materials table
+// (pg.live.materials) — no separate GET /kb/materials call, no lazy
+// fetch-on-tab-open. See KnowledgeBase.vue's own doc comment on `materials`.
+describe('KnowledgeBase — Файлы (материалы) reads pg.live.materials with no extra fetch', () => {
+  it('renders filename, size, and a ready image as a thumbnail with no GET /kb/materials call', async () => {
+    const { wrapper, api } = await mountWith(emptyChanges(), emptyLive({ materials: [material()] }))
+    await switchTab(wrapper, 'Файлы (материалы)')
+
+    expect(wrapper.text()).toContain('product-photo.png')
+    expect(wrapper.text()).toContain('204.8 KB')
+    const img = wrapper.find('img[src*="/kb/materials/mat-1/content"]')
+    expect(img.exists()).toBe(true)
+    expect(api.get).not.toHaveBeenCalledWith('/kb/materials')
+  })
+
+  it('shows a processing placeholder (no thumbnail, no download link) while has_content is false', async () => {
+    const { wrapper } = await mountWith(
+      emptyChanges(),
+      emptyLive({ materials: [material({ id: 'mat-2', has_content: false, processing_status: 'uploaded' })] })
+    )
+    await switchTab(wrapper, 'Файлы (материалы)')
+
+    expect(wrapper.find('img[src*="/kb/materials/mat-2/content"]').exists()).toBe(false)
+    expect(wrapper.find('a[href*="/kb/materials/mat-2/content"]').exists()).toBe(false)
+  })
+
+  it('a document material shows a download link instead of a thumbnail', async () => {
+    const { wrapper } = await mountWith(
+      emptyChanges(),
+      emptyLive({ materials: [material({ id: 'mat-3', filename: 'terms.pdf', mime_type: 'application/pdf' })] })
+    )
+    await switchTab(wrapper, 'Файлы (материалы)')
+
+    expect(wrapper.text()).toContain('terms.pdf')
+    const link = wrapper.find('a[href*="/kb/materials/mat-3/content"]')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toContain('Скачать')
   })
 })

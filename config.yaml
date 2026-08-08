@@ -40,7 +40,11 @@ system:
   customer_message_wait_seconds: 5   # default channel debounce wait; each channel may override (0-60s) via Automation settings
 
 telegram:
-  mode: ""    # "" auto (webhook if a public base URL is configured, else polling) | webhook | polling
+  mode: ""    # "" auto (webhook if a public HTTPS origin is resolvable, else polling) | webhook | polling
+  # Empty => the embedded ngrok tunnel's own domain is used for the webhook
+  # automatically. Set only to front Telegram with a DIFFERENT hostname.
+  webhook_public_base_url: ""
+  api_base_url: ""   # overrides https://api.telegram.org (self-hosted Bot API)
 
 mcp:
   access_token_ttl_seconds: 900

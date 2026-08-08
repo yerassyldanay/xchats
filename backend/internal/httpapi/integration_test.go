@@ -88,6 +88,14 @@ type harness struct {
 	tg     *telegram.Fake
 	queue  *queue.InMem
 	store  *store.Store
+	// kb is the same *kbstore.Store the Server was built with — exposed so
+	// tests can seed kbd_materials rows directly (CreateUploadMaterial /
+	// CompleteMaterialUpload) rather than going through the MCP tool surface
+	// just to get a material into the database.
+	kb *kbstore.Store
+	// blob is the same blob.Store the Server serves bytes from — exposed so
+	// a seeded kbd_materials row's storage_key resolves to real bytes.
+	blob blob.Store
 	// db is the raw handle on the same database store/kb/kbRepo share, for the
 	// assertions no exported Store method covers. It replaces the old
 	// h.store.Pool() escape hatch, which internal/store deliberately no longer
@@ -107,7 +115,7 @@ type harness struct {
 // misconfigured deployment without standing up a second harness.
 func (h *harness) setTelegramBase(t *testing.T, base string) {
 	t.Helper()
-	h.cfg.TelegramWebhookPublicBaseURL = base
+	h.cfg.Telegram.WebhookPublicBaseURL = base
 }
 
 func newHarness(t *testing.T) *harness {
@@ -132,11 +140,11 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	st, db := dbtest.Open(t)
 
 	cfg := &config.Config{
-		System:                       config.SystemConfig{SessionTTLHours: 1, MinPasswordLen: 8, SimulatorEnabled: true, CustomerMessageWaitSeconds: 5},
-		PageSize:                     50,
-		Server:                       config.ServerConfig{CORSOrigins: []string{"*"}},
-		TelegramWebhookPublicBaseURL: telegramBaseURL,
-		TelegramWebhookSecret:        tgWebhookSecret,
+		System:                config.SystemConfig{SessionTTLHours: 1, MinPasswordLen: 8, SimulatorEnabled: true, CustomerMessageWaitSeconds: 5},
+		PageSize:              50,
+		Server:                config.ServerConfig{CORSOrigins: []string{"*"}},
+		Telegram:              config.TelegramModeConfig{WebhookPublicBaseURL: telegramBaseURL},
+		TelegramWebhookSecret: tgWebhookSecret,
 	}
 	// Credential encryption is required for the Telegram lifecycle; the key is
 	// test-local and deterministic so a sealed token can be asserted on.
@@ -253,7 +261,7 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, cfg: cfg, fake: fake, tg: tgFake,
-		queue: q, store: st, db: db, worker: w, orgID: org.ID, accountID: accountID, tgPoller: tgPoller}
+		queue: q, store: st, kb: kb, blob: blobStore, db: db, worker: w, orgID: org.ID, accountID: accountID, tgPoller: tgPoller}
 	// st/db/kb/kbRepo are all closed by dbtest's own t.Cleanup registrations.
 	t.Cleanup(func() { ts.Close(); q.Close() })
 	h.login()

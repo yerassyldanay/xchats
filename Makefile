@@ -3,16 +3,18 @@ SHELL := /bin/bash
 
 BACKEND := backend
 FRONTEND := frontend
-# No .env anywhere (Track 2J removed the last one) — machine-specific infra
-# values (ports, public base URLs) that have no Settings UI equivalent live
-# as literal overrides in deploy/docker-compose.override.yaml instead, which
-# this always applies when present. A clean checkout without one falls back
-# to the base compose file's own localhost defaults (backend→8080,
-# frontend→8081) under a stable project name.
-COMPOSE := docker compose -p xchats -f deploy/docker-compose.yaml $(if $(wildcard deploy/docker-compose.override.yaml),-f deploy/docker-compose.override.yaml,)
+# One compose file, no override file, no .env: application settings live in
+# deploy/config.docker.yaml (mounted into the container), so there is nothing
+# to source or export before `make up`. The only interpolated values left are
+# the two host port mappings, which default to 8080/8081 when unset — export
+# BACKEND_PORT/FRONTEND_PORT for a run if either collides. -p pins a stable
+# project name so the volumes survive across invocations.
+COMPOSE := docker compose -p xchats -f deploy/docker-compose.yaml
 GORUN := go run ./cmd/xchats -config ../config.yaml
 
-# Ports kill-ports frees (override: make kill-ports PORTS="8080 5173")
+# Ports kill-ports frees (override: make kill-ports PORTS="8080 5173").
+# 8090 is still listed deliberately: this box used to publish the backend
+# there via a local compose override, so a stale container may still hold it.
 PORTS ?= 8080 8090 5173 8081
 
 .PHONY: help up up-fg down logs ps kill-ports migrate seed seed-kb-demo dev-backend dev-frontend \
@@ -25,7 +27,7 @@ help: ## Show this help
 up: ## Rebuild + run the whole stack detached (SQLite — backend + frontend, no separate database service)
 	$(COMPOSE) up -d --build
 	@echo "✅ up — frontend: http://localhost:$${FRONTEND_PORT:-8081} · backend: http://localhost:$${BACKEND_PORT:-8080}"
-	@echo "   (deploy/docker-compose.yaml's own defaults — a local docker-compose.override.yaml can remap either; run 'make ps' to confirm the actual bound ports)"
+	@echo "   (run 'make ps' to confirm the actual bound ports)"
 
 up-fg: ## Same as up but foreground (Ctrl-C to stop, attached logs)
 	$(COMPOSE) up --build

@@ -16,9 +16,17 @@ import (
 // don't bucket everything as 500. Unknown errors stay 500.
 func (s *Server) kbFail(c *gin.Context, err error) {
 	var ge *kbstore.GateError
+	var me *kbstore.ErrMediaReference
 	switch {
 	case errors.As(err, &ge):
 		fail(c, http.StatusUnprocessableEntity, ErrValidation, ge.Error())
+	case errors.As(err, &me):
+		// Without this case, a still-processing/cross-org/foreign-org/
+		// wrong-kind material_id falls through to the default 500 below and
+		// leaks err.Error()'s raw internal text — validateMediaRef's
+		// rejection reasons are ordinary domain messages (same class as
+		// GateError above), not something to hide behind a generic 500.
+		fail(c, http.StatusUnprocessableEntity, ErrValidation, me.Error())
 	case errors.Is(err, kbstore.ErrUnknownKind):
 		fail(c, http.StatusBadRequest, ErrValidation, "unknown row kind")
 	case errors.Is(err, kbstore.ErrStale):
@@ -88,10 +96,25 @@ func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 
 // --- topics ----------------------------------------------------------------
 
+// topicReq is shared by the draft lane (handlePlaygroundUpsertTopic below)
+// and the live lane (handleKBUpsertTopic, kb_live.go). The media fields are
+// DRAFT-LANE ONLY: PutLiveTopic's TopicInput construction never reads
+// req.FeaturedImage/etc, so these keys are silently accepted-and-ignored on
+// POST /kb/topics (see TestKBLiveTopic_IgnoresMediaKeys) — the browser never
+// calls that route anyway (only /playground/draft/* and GET /kb), but the
+// struct is shared so this is worth calling out explicitly.
 type topicReq struct {
 	Slug   string `json:"slug"`
 	Title  string `json:"title"`
 	BodyMD string `json:"body_md"`
+
+	// FeaturedImage is tri-state (absent/null/uuid — see optionalUUID).
+	// Plural fields are absent-means-unchanged, []-means-detach-all — never
+	// send null for these.
+	FeaturedImage      optionalUUID `json:"featured_image"`
+	IllustrationImages *[]uuid.UUID `json:"illustration_images"`
+	ExplainerVideos    *[]uuid.UUID `json:"explainer_videos"`
+	ReferenceDocuments *[]uuid.UUID `json:"reference_documents"`
 }
 
 func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
@@ -104,8 +127,26 @@ func (s *Server) handlePlaygroundUpsertTopic(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "slug required")
 		return
 	}
+	illustrations, ok := s.validateMediaList(c, "illustration_images", req.IllustrationImages)
+	if !ok {
+		return
+	}
+	videos, ok := s.validateMediaList(c, "explainer_videos", req.ExplainerVideos)
+	if !ok {
+		return
+	}
+	docs, ok := s.validateMediaList(c, "reference_documents", req.ReferenceDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.UpsertTopic(ctx(c), orgID, currentUser(c).ID, kbstore.TopicInput{
 		Slug: req.Slug, Title: req.Title, BodyMD: req.BodyMD,
+		Media: kbstore.TopicMedia{
+			FeaturedImage:      req.FeaturedImage.ptr(),
+			IllustrationImages: illustrations,
+			ExplainerVideos:    videos,
+			ReferenceDocuments: docs,
+		},
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -127,6 +168,9 @@ func (s *Server) handlePlaygroundDeleteTopic(c *gin.Context) {
 
 // --- typed facts: tariffs / products / contacts ----------------------------
 
+// tariffReq is shared by the draft lane (below) and the live lane
+// (handleKBUpsertTariff, kb_live.go) — see topicReq's doc comment: the media
+// fields are draft-lane only.
 type tariffReq struct {
 	Ref           string `json:"ref"`
 	Name          string `json:"name"`
@@ -138,6 +182,11 @@ type tariffReq struct {
 	Advantages    string `json:"advantages"`
 	Disadvantages string `json:"disadvantages"`
 	SalesStatus   string `json:"sales_status"`
+
+	FeaturedImage   optionalUUID `json:"featured_image"`
+	PricingImages   *[]uuid.UUID `json:"pricing_images"`
+	ExplainerVideos *[]uuid.UUID `json:"explainer_videos"`
+	TermsDocuments  *[]uuid.UUID `json:"terms_documents"`
 }
 
 func (s *Server) handlePlaygroundUpsertTariff(c *gin.Context) {
@@ -150,10 +199,28 @@ func (s *Server) handlePlaygroundUpsertTariff(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
 		return
 	}
+	pricingImages, ok := s.validateMediaList(c, "pricing_images", req.PricingImages)
+	if !ok {
+		return
+	}
+	videos, ok := s.validateMediaList(c, "explainer_videos", req.ExplainerVideos)
+	if !ok {
+		return
+	}
+	terms, ok := s.validateMediaList(c, "terms_documents", req.TermsDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.UpsertTariff(ctx(c), orgID, currentUser(c).ID, kbstore.TariffInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
 		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
 		SalesStatus: req.SalesStatus,
+		Media: kbstore.TariffMedia{
+			FeaturedImage:   req.FeaturedImage.ptr(),
+			PricingImages:   pricingImages,
+			ExplainerVideos: videos,
+			TermsDocuments:  terms,
+		},
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -173,6 +240,9 @@ func (s *Server) handlePlaygroundDeleteTariff(c *gin.Context) {
 	s.kbChanged(c, orgID)
 }
 
+// productReq is shared by the draft lane (below) and the live lane
+// (handleKBUpsertProduct, kb_live.go) — see topicReq's doc comment: the
+// media fields are draft-lane only.
 type productReq struct {
 	Ref         string `json:"ref"`
 	Name        string `json:"name"`
@@ -183,6 +253,12 @@ type productReq struct {
 	// InStock is nil-able: omitted/null leaves the draft's current merged
 	// value unchanged (kbstore.ProductInput's own nil-means-unchanged idiom).
 	InStock *bool `json:"in_stock"`
+
+	FeaturedImage        optionalUUID `json:"featured_image"`
+	GalleryImages        *[]uuid.UUID `json:"gallery_images"`
+	DemoVideos           *[]uuid.UUID `json:"demo_videos"`
+	CertificateDocuments *[]uuid.UUID `json:"certificate_documents"`
+	GuaranteeDocuments   *[]uuid.UUID `json:"guarantee_documents"`
 }
 
 func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
@@ -195,10 +271,33 @@ func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
 		return
 	}
+	gallery, ok := s.validateMediaList(c, "gallery_images", req.GalleryImages)
+	if !ok {
+		return
+	}
+	demo, ok := s.validateMediaList(c, "demo_videos", req.DemoVideos)
+	if !ok {
+		return
+	}
+	certs, ok := s.validateMediaList(c, "certificate_documents", req.CertificateDocuments)
+	if !ok {
+		return
+	}
+	guarantee, ok := s.validateMediaList(c, "guarantee_documents", req.GuaranteeDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.UpsertProduct(ctx(c), orgID, currentUser(c).ID, kbstore.ProductInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price,
 		Description: req.Description, Category: req.Category,
 		SalesStatus: req.SalesStatus, InStock: req.InStock,
+		Media: kbstore.ProductMedia{
+			FeaturedImage:        req.FeaturedImage.ptr(),
+			GalleryImages:        gallery,
+			DemoVideos:           demo,
+			CertificateDocuments: certs,
+			GuaranteeDocuments:   guarantee,
+		},
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -253,6 +352,9 @@ func (s *Server) handlePlaygroundDeleteZone(c *gin.Context) {
 	s.kbChanged(c, orgID)
 }
 
+// contactsReq is shared by the draft lane (below) and the live lane
+// (handleKBPatchContacts, kb_live.go) — see topicReq's doc comment: the
+// media fields are draft-lane only.
 type contactsReq struct {
 	WhatsApp         *string `json:"whatsapp"`
 	Email            *string `json:"email"`
@@ -263,6 +365,10 @@ type contactsReq struct {
 	Phone            *string `json:"phone"`
 	Website          *string `json:"website"`
 	Instagram        *string `json:"instagram"`
+
+	ContactCardImage      optionalUUID `json:"contact_card_image"`
+	LocationMapImage      optionalUUID `json:"location_map_image"`
+	CompanyLegalDocuments *[]uuid.UUID `json:"company_legal_documents"`
 }
 
 func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
@@ -275,10 +381,19 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "bad contacts")
 		return
 	}
+	legalDocs, ok := s.validateMediaList(c, "company_legal_documents", req.CompanyLegalDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.PatchContacts(ctx(c), orgID, currentUser(c).ID, kbstore.ContactPatch{
 		WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
 		LegalInformation: req.LegalInformation, CallbackTime: req.CallbackTime,
 		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
+		Media: kbstore.ContactsMedia{
+			ContactCardImage:      req.ContactCardImage.ptr(),
+			LocationMapImage:      req.LocationMapImage.ptr(),
+			CompanyLegalDocuments: legalDocs,
+		},
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -288,6 +403,9 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 
 // --- typed facts: commerce policies -----------------------------------------
 
+// policiesReq is shared by the draft lane (handlePlaygroundPatchPolicies
+// below) and the live lane (handleKBPatchPolicies, kb_live.go) — see
+// topicReq's doc comment: the media field is draft-lane only.
 type policiesReq struct {
 	DeliveryCost       *string `json:"delivery_cost"`
 	DeliveryInDays     *string `json:"delivery_in_days"`
@@ -298,6 +416,8 @@ type policiesReq struct {
 	ReturnPeriodInDays *string `json:"return_period_in_days"`
 	Warranty           *string `json:"warranty"`
 	OutsideZonesNote   *string `json:"outside_zones_note"`
+
+	CommercePolicyDocuments *[]uuid.UUID `json:"commerce_policy_documents"`
 }
 
 // zoneReq is the upsert payload shared by /kb/zones (live, handleKBUpsertZone)
@@ -325,11 +445,16 @@ func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "bad policies")
 		return
 	}
+	docs, ok := s.validateMediaList(c, "commerce_policy_documents", req.CommercePolicyDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.PatchPolicies(ctx(c), orgID, currentUser(c).ID, kbstore.PolicyPatch{
 		DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
 		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
 		Installment: req.Installment, ReturnPeriodInDays: req.ReturnPeriodInDays, Warranty: req.Warranty,
 		OutsideZonesNote: req.OutsideZonesNote,
+		Media:            kbstore.PoliciesMedia{CommercePolicyDocuments: docs},
 	}); err != nil {
 		s.kbFail(c, err)
 		return

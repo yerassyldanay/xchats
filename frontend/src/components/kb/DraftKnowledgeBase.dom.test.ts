@@ -47,6 +47,13 @@ async function mountWith(changes: DraftChangeSet, live: DraftView) {
   vi.mocked(api.get).mockImplementation(async (path: string) => {
     if (path === '/playground/draft') return changes as any
     if (path === '/kb') return live as any
+    // McpConnectCard (always rendered above the draft content, see
+    // DraftKnowledgeBase.vue) fetches this on mount — a realistic default
+    // response keeps every existing assertion below about the DRAFT
+    // content, not an incidental "failed to load MCP info" banner.
+    if (path === '/mcp-connection') {
+      return { mcp_url: 'http://localhost:8080/mcp', auth_enabled: true, tunnel_available: false, tunnel_running: false, scopes: ['kb:read'] } as any
+    }
     throw new Error(`unexpected GET ${path}`)
   })
   const pinia = testPinia()

@@ -1,0 +1,36 @@
+/* Design tokens shared by the prerendered blog (blog.css) and the SPA
+ * landing page (src/components/landing/landing.css). Custom properties are
+ * inert until something reads them, so importing this file costs nothing
+ * for a consumer that doesn't use every token — see blog.css's own header
+ * comment for why this stays independent of tailwind.config.js.
+ */
+:root {
+  --blog-bg: #fafafb;
+  --blog-card: #ffffff;
+  --blog-border: #ececec;
+  --blog-text: #111827;
+  --blog-muted: #6b7280;
+  --blog-accent: #5b5ceb;
+  --blog-accent-contrast: #ffffff;
+  --blog-accent-tint: #eeedfd;
+  --blog-success: #22c55e;
+  --blog-warning: #f59e0b;
+  --blog-hero-panel: #f5f4fe;
+  --blog-shadow: 0 8px 24px rgba(17, 24, 39, 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --blog-bg: #0b0c0f;
+    --blog-card: #141518;
+    --blog-border: #26282d;
+    --blog-text: #f3f4f6;
+    --blog-muted: #9ca3af;
+    --blog-accent: #7879f1;
+    --blog-accent-contrast: #ffffff;
+    --blog-accent-tint: #23234a;
+    --blog-success: #34d399;
+    --blog-warning: #fbbf24;
+    --blog-hero-panel: #17181d;
+    --blog-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+}

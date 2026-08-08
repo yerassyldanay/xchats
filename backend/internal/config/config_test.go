@@ -115,16 +115,17 @@ func TestTelegramResolvedWebhookBaseURL(t *testing.T) {
 		{"explicit wins over the api origin", "https://tg.example.com", "https://app.example.com", "https://tg.example.com"},
 		{"explicit trailing slash trimmed", "https://tg.example.com/", "", "https://tg.example.com"},
 		// The whole point of the fallback: an ngrok-fronted deploy never has to
-		// restate the tunnel hostname in a second env var.
+		// restate the tunnel hostname in a second setting.
 		{"falls back to the https api origin (the ngrok tunnel)", "", "https://x.ngrok-free.app", "https://x.ngrok-free.app"},
 		{"api origin trailing slash trimmed", "", "https://x.ngrok-free.app/", "https://x.ngrok-free.app"},
 		// http:// would only trade a clear "not configured" for a Bot API 400.
-		{"http api origin is not a usable fallback", "", "http://localhost:8090", ""},
+		{"http api origin is not a usable fallback", "", "http://localhost:8080", ""},
 		{"nothing configured", "", "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &Config{TelegramWebhookPublicBaseURL: tc.explicit}
+			c := &Config{}
+			c.Telegram.WebhookPublicBaseURL = tc.explicit
 			c.Server.APIBaseURL = tc.apiBaseURL
 			if got := c.TelegramResolvedWebhookBaseURL(); got != tc.want {
 				t.Errorf("TelegramResolvedWebhookBaseURL() = %q, want %q", got, tc.want)
@@ -146,14 +147,15 @@ func TestTelegramResolvedModeFollowsTheTunnelOrigin(t *testing.T) {
 		// Was polling before TelegramResolvedWebhookBaseURL existed: webhook
 		// delivery is genuinely available on the tunnel origin, so use it.
 		{"https api origin alone implies webhook", "", "", "https://x.ngrok-free.app", "webhook"},
-		{"no public https origin means polling", "", "", "http://localhost:8090", "polling"},
+		{"no public https origin means polling", "", "", "http://localhost:8080", "polling"},
 		{"zero config means polling", "", "", "", "polling"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &Config{TelegramWebhookPublicBaseURL: tc.explicit}
-			c.Server.APIBaseURL = tc.apiBaseURL
+			c := &Config{}
 			c.Telegram.Mode = tc.mode
+			c.Telegram.WebhookPublicBaseURL = tc.explicit
+			c.Server.APIBaseURL = tc.apiBaseURL
 			if got := c.TelegramResolvedMode(); got != tc.want {
 				t.Errorf("TelegramResolvedMode() = %q, want %q", got, tc.want)
 			}

@@ -383,10 +383,14 @@ func TestApproveGateBlocks(t *testing.T) {
 	}
 }
 
-// LiveView must NEVER see pending Playground work — it ignores the draft blob
-// entirely, so a live edit (/knowledge-base) can never mix with a draft edit
-// (/playground). Every row it returns is Draft:false; materials/requests are
-// always empty (they are playground-only concepts).
+// LiveView must NEVER see pending Playground TEXT/FACT work — it ignores the
+// draft blob entirely, so a live edit (/knowledge-base) can never mix with a
+// draft edit (/playground). Every row it returns is Draft:false. Materials
+// are the one exception to "playground work stays out of LiveView": a
+// kbd_materials row has no draft/live split at all (it's either uploaded or
+// it isn't), so LiveView DOES carry them — see liveView's own doc comment.
+// Requests remains empty; a KbRequest is a Playground review-queue concept
+// with no live-page meaning.
 func TestLiveView_IgnoresDraftBlob(t *testing.T) {
 	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
@@ -398,6 +402,15 @@ func TestLiveView_IgnoresDraftBlob(t *testing.T) {
 		Slug: "pending_only", Title: "Черновик", BodyMD: "Только в черновике.",
 	}); err != nil {
 		t.Fatalf("upsert draft topic: %v", err)
+	}
+	materialID, err := kb.CreateUploadMaterial(ctx, orgID, kbstore.UploadMaterialInput{
+		Filename: "hero.jpg", MimeType: "image/jpeg", SizeBytes: 5, CustomerVisibility: "visible",
+	})
+	if err != nil {
+		t.Fatalf("create upload material: %v", err)
+	}
+	if err := kb.CompleteMaterialUpload(ctx, materialID, "disk", "org/x/"+materialID.String(), 5, ""); err != nil {
+		t.Fatalf("complete upload: %v", err)
 	}
 
 	draft, err := kb.Draft(ctx, orgID)
@@ -426,9 +439,17 @@ func TestLiveView_IgnoresDraftBlob(t *testing.T) {
 			t.Fatalf("every LiveView row must be Draft:false, got %+v", tp)
 		}
 	}
-	if len(live.Materials) != 0 || len(live.Requests) != 0 {
-		t.Fatalf("LiveView must not carry materials/requests (playground-only), got materials=%d requests=%d",
-			len(live.Materials), len(live.Requests))
+	if len(live.Requests) != 0 {
+		t.Fatalf("LiveView must not carry requests (playground-only), got requests=%d", len(live.Requests))
+	}
+	foundMaterial := false
+	for _, m := range live.Materials {
+		if m.ID == materialID {
+			foundMaterial = true
+		}
+	}
+	if !foundMaterial {
+		t.Fatalf("LiveView must carry materials (no draft/live split) — material %s missing from %+v", materialID, live.Materials)
 	}
 }
 

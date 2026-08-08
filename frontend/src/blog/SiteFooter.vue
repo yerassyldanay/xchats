@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Github, Instagram, Mail } from 'lucide-vue-next'
+import { Github, Instagram, Linkedin, Mail } from 'lucide-vue-next'
 import { computed } from 'vue'
 import WhatsappIcon from '../components/icons/WhatsappIcon.vue'
 
@@ -92,13 +92,17 @@ const copy = computed(() => {
             <WhatsappIcon class="site-footer__contact-icon site-footer__contact-icon--whatsapp" aria-hidden="true" />
             <span>+7 702 976 65 09</span>
           </a>
-          <a href="mailto:hello@xpayment.kz">
+          <a href="mailto:yerassyl.danay.abc@gmail.com">
             <Mail class="site-footer__contact-icon site-footer__contact-icon--email" aria-hidden="true" />
-            <span>hello@xpayment.kz</span>
+            <span>yerassyl.danay.abc@gmail.com</span>
           </a>
-          <a href="https://www.instagram.com/xpayment.kz/" target="_blank" rel="noreferrer">
+          <a href="https://www.instagram.com/yerassyl.danay/" target="_blank" rel="noreferrer">
             <Instagram class="site-footer__contact-icon site-footer__contact-icon--instagram" aria-hidden="true" />
-            <span>@xpayment.kz</span>
+            <span>@yerassyl.danay</span>
+          </a>
+          <a href="https://www.linkedin.com/in/yerassyldanay/" target="_blank" rel="noreferrer">
+            <Linkedin class="site-footer__contact-icon site-footer__contact-icon--linkedin" aria-hidden="true" />
+            <span>yerassyldanay</span>
           </a>
         </address>
       </div>

@@ -226,23 +226,12 @@ func (s *Store) MCPUpsertTopic(ctx context.Context, orgID uuid.UUID, userID uuid
 		if ch.BodyMD != nil {
 			cur.BodyMD = *ch.BodyMD
 		}
-		refs := map[string][]uuid.UUID{}
-		if ch.FeaturedImage != nil {
-			cur.FeaturedImage = *ch.FeaturedImage
-			refs = mergeRefs(refs, singularRef("featured_image", *ch.FeaturedImage))
-		}
-		if ch.IllustrationImages != nil {
-			cur.IllustrationImages = nonNilUUIDs(*ch.IllustrationImages)
-			refs = mergeRefs(refs, map[string][]uuid.UUID{"illustration_images": cur.IllustrationImages})
-		}
-		if ch.ExplainerVideos != nil {
-			cur.ExplainerVideos = nonNilUUIDs(*ch.ExplainerVideos)
-			refs = mergeRefs(refs, map[string][]uuid.UUID{"explainer_videos": cur.ExplainerVideos})
-		}
-		if ch.ReferenceDocuments != nil {
-			cur.ReferenceDocuments = nonNilUUIDs(*ch.ReferenceDocuments)
-			refs = mergeRefs(refs, map[string][]uuid.UUID{"reference_documents": cur.ReferenceDocuments})
-		}
+		refs := applyTopicMedia(&cur, TopicMedia{
+			FeaturedImage:      ch.FeaturedImage,
+			IllustrationImages: ch.IllustrationImages,
+			ExplainerVideos:    ch.ExplainerVideos,
+			ReferenceDocuments: ch.ReferenceDocuments,
+		})
 		if creating && strings.TrimSpace(cur.Title) == "" {
 			return &ErrRequiredFieldMissing{Field: "title"}
 		}
@@ -330,21 +319,13 @@ func (s *Store) MCPUpsertProduct(ctx context.Context, orgID uuid.UUID, userID uu
 		if ch.InStock != nil {
 			cur.InStock = *ch.InStock
 		}
-		refs := map[string][]uuid.UUID{}
-		if ch.FeaturedImage != nil {
-			cur.FeaturedImage = *ch.FeaturedImage
-			refs = mergeRefs(refs, singularRef("featured_image", *ch.FeaturedImage))
-		}
-		applyImageSet := func(field string, patch **[]uuid.UUID, dst *[]uuid.UUID) {
-			if *patch != nil {
-				*dst = nonNilUUIDs(**patch)
-				refs = mergeRefs(refs, map[string][]uuid.UUID{field: *dst})
-			}
-		}
-		applyImageSet("gallery_images", &ch.GalleryImages, &cur.GalleryImages)
-		applyImageSet("demo_videos", &ch.DemoVideos, &cur.DemoVideos)
-		applyImageSet("certificate_documents", &ch.CertificateDocuments, &cur.CertificateDocuments)
-		applyImageSet("guarantee_documents", &ch.GuaranteeDocuments, &cur.GuaranteeDocuments)
+		refs := applyProductMedia(&cur, ProductMedia{
+			FeaturedImage:        ch.FeaturedImage,
+			GalleryImages:        ch.GalleryImages,
+			DemoVideos:           ch.DemoVideos,
+			CertificateDocuments: ch.CertificateDocuments,
+			GuaranteeDocuments:   ch.GuaranteeDocuments,
+		})
 		if creating && strings.TrimSpace(cur.Name) == "" {
 			return &ErrRequiredFieldMissing{Field: "name"}
 		}
@@ -435,23 +416,12 @@ func (s *Store) MCPUpsertTariff(ctx context.Context, orgID uuid.UUID, userID uui
 			}
 			cur.SalesStatus = *ch.SalesStatus
 		}
-		refs := map[string][]uuid.UUID{}
-		if ch.FeaturedImage != nil {
-			cur.FeaturedImage = *ch.FeaturedImage
-			refs = mergeRefs(refs, singularRef("featured_image", *ch.FeaturedImage))
-		}
-		if ch.PricingImages != nil {
-			cur.PricingImages = nonNilUUIDs(*ch.PricingImages)
-			refs = mergeRefs(refs, map[string][]uuid.UUID{"pricing_images": cur.PricingImages})
-		}
-		if ch.ExplainerVideos != nil {
-			cur.ExplainerVideos = nonNilUUIDs(*ch.ExplainerVideos)
-			refs = mergeRefs(refs, map[string][]uuid.UUID{"explainer_videos": cur.ExplainerVideos})
-		}
-		if ch.TermsDocuments != nil {
-			cur.TermsDocuments = nonNilUUIDs(*ch.TermsDocuments)
-			refs = mergeRefs(refs, map[string][]uuid.UUID{"terms_documents": cur.TermsDocuments})
-		}
+		refs := applyTariffMedia(&cur, TariffMedia{
+			FeaturedImage:   ch.FeaturedImage,
+			PricingImages:   ch.PricingImages,
+			ExplainerVideos: ch.ExplainerVideos,
+			TermsDocuments:  ch.TermsDocuments,
+		})
 		if creating && strings.TrimSpace(cur.Name) == "" {
 			return &ErrRequiredFieldMissing{Field: "name"}
 		}
@@ -518,19 +488,11 @@ func (s *Store) MCPUpsertContacts(ctx context.Context, orgID uuid.UUID, userID u
 		if ch.Instagram != nil {
 			cur.Instagram = *ch.Instagram
 		}
-		refs := map[string][]uuid.UUID{}
-		if ch.ContactCardImage != nil {
-			cur.ContactCardImage = *ch.ContactCardImage
-			refs = mergeRefs(refs, singularRef("contact_card_image", *ch.ContactCardImage))
-		}
-		if ch.LocationMapImage != nil {
-			cur.LocationMapImage = *ch.LocationMapImage
-			refs = mergeRefs(refs, singularRef("location_map_image", *ch.LocationMapImage))
-		}
-		if ch.CompanyLegalDocuments != nil {
-			cur.CompanyLegalDocuments = nonNilUUIDs(*ch.CompanyLegalDocuments)
-			refs = mergeRefs(refs, map[string][]uuid.UUID{"company_legal_documents": cur.CompanyLegalDocuments})
-		}
+		refs := applyContactsMedia(&cur, ContactsMedia{
+			ContactCardImage:      ch.ContactCardImage,
+			LocationMapImage:      ch.LocationMapImage,
+			CompanyLegalDocuments: ch.CompanyLegalDocuments,
+		})
 		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
 			return err
 		}
@@ -592,11 +554,7 @@ func (s *Store) MCPUpsertPolicies(ctx context.Context, orgID uuid.UUID, userID u
 		if ch.OutsideZonesNote != nil {
 			cur.OutsideZonesNote = *ch.OutsideZonesNote
 		}
-		refs := map[string][]uuid.UUID{}
-		if ch.CommercePolicyDocuments != nil {
-			cur.CommercePolicyDocuments = nonNilUUIDs(*ch.CommercePolicyDocuments)
-			refs = mergeRefs(refs, map[string][]uuid.UUID{"commerce_policy_documents": cur.CommercePolicyDocuments})
-		}
+		refs := applyPoliciesMedia(&cur, PoliciesMedia{CommercePolicyDocuments: ch.CommercePolicyDocuments})
 		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
 			return err
 		}

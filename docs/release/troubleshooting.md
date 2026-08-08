@@ -71,16 +71,20 @@ invocation.
 
 `internal/config.Config.TelegramResolvedMode()` decides automatically unless
 you set `telegram.mode` explicitly (`webhook` or `polling` in config.yaml,
-or the `TELEGRAM_MODE` env var):
+or the `TG_MODE` env var):
 
-- A configured `TG_WEBHOOK_PUBLIC_BASE_URL` (a public HTTPS URL Telegram can
-  reach) → **webhook** mode.
-- No public base URL configured → **polling** mode (the zero-config path;
+- A resolvable public HTTPS origin → **webhook** mode. That is either
+  `telegram.webhook_public_base_url` in config.yaml, or — when it is empty —
+  the embedded ngrok tunnel's own domain, which is used automatically once a
+  tunnel is configured (Settings → Remote Access). You only need to set the
+  explicit value to front Telegram with a *different* hostname than the rest
+  of the app.
+- No public HTTPS origin at all → **polling** mode (the zero-config path;
   no inbound connectivity required at all).
 
 If messages aren't arriving:
 
-- **Webhook mode:** confirm `TG_WEBHOOK_PUBLIC_BASE_URL` is actually
+- **Webhook mode:** confirm the resolved public origin is actually
   reachable from the internet (not just from your machine) — Telegram calls
   it directly. A tunnel (Settings → Remote Access) is one way to get a
   reachable URL without a static IP/domain. Check that the webhook secret
@@ -89,8 +93,8 @@ If messages aren't arriving:
   re-registers the webhook with the current secret.
 - **Polling mode:** confirm the bot token is valid (Settings → Integrations
   → test it) and that outbound HTTPS to `api.telegram.org` (or your
-  configured `TG_API_BASE_URL`, for a self-hosted Bot API server) isn't
-  blocked by a firewall/proxy.
+  configured `telegram.api_base_url`, for a self-hosted Bot API server)
+  isn't blocked by a firewall/proxy.
 
 ## "Could not verify the credential" vs. "credential was rejected"
 

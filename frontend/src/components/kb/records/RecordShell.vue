@@ -12,6 +12,7 @@ import { useI18n } from 'vue-i18n'
 import { LoaderCircle } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { shortTime } from '@/lib/format'
 import type { KbAction, KbActionKey } from './actions'
 import { RECORD_STATE_META, type RecordState } from './shared'
 
@@ -31,8 +32,9 @@ withDefaults(
     busy?: boolean
     busyKey?: KbActionKey // which action's spinner shows while busy — omit to just disable the row
     blockedNote?: string // §2.7: a neutral pointer to a page-level gate failure — never "this record is invalid"
+    updatedAt?: string // row.updated_at — the one DB column every *Record.vue didn't already surface somewhere in its own field body
   }>(),
-  { busy: false, recordKey: undefined, pendingMark: undefined, busyKey: undefined, blockedNote: undefined }
+  { busy: false, recordKey: undefined, pendingMark: undefined, busyKey: undefined, blockedNote: undefined, updatedAt: undefined }
 )
 
 const emit = defineEmits<{ edit: []; publish: []; cancel: []; delete: [] }>()
@@ -69,6 +71,9 @@ function fire(key: KbActionKey) {
       <Badge v-if="pendingMark" variant="outline" class="border-amber-300 text-amber-700 text-[11px] font-medium">
         {{ t('kb.pendingMark.' + pendingMark) }}
       </Badge>
+      <span v-if="updatedAt" class="ml-auto text-[11px] text-muted-foreground" :title="updatedAt">
+        {{ t('kb.fields.updatedAt') }} {{ shortTime(updatedAt) }}
+      </span>
     </div>
 
     <slot />

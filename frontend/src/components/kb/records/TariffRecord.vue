@@ -9,8 +9,8 @@ import type { ChangeType } from '@/composables/draftChanges'
 import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
-import MediaChip from './MediaChip.vue'
-import { changedFields, mediaCount, stateForChange } from './shared'
+import MediaStrip from './MediaStrip.vue'
+import { changedFields, stateForChange } from './shared'
 
 const props = defineProps<{
   row: TariffRow
@@ -43,6 +43,7 @@ const diff = computed(() =>
     :actions="actions"
     :busy="busy"
     :blocked-note="blockedNote"
+    :updated-at="row.updated_at"
     @edit="$emit('edit')"
     @publish="$emit('publish')"
     @cancel="$emit('cancel')"
@@ -97,11 +98,11 @@ const diff = computed(() =>
         <FieldDiffNote :show="diff.includes('disadvantages')" :was="liveRow?.disadvantages ?? ''" />
       </div>
     </div>
-    <div class="flex items-center gap-1.5 flex-wrap">
-      <MediaChip :label="t('kb.media.image')" :count="mediaCount(row.featured_image)" />
-      <MediaChip :label="t('kb.media.pricingImages')" :count="mediaCount(row.pricing_images)" />
-      <MediaChip :label="t('kb.media.videos')" :count="mediaCount(row.explainer_videos)" />
-      <MediaChip :label="t('kb.media.terms')" :count="mediaCount(row.terms_documents)" />
+    <div class="flex flex-col gap-2">
+      <MediaStrip :label="t('kb.media.image')" field="featured_image" :ids="row.featured_image" />
+      <MediaStrip :label="t('kb.media.pricingImages')" field="pricing_images" :ids="row.pricing_images" />
+      <MediaStrip :label="t('kb.media.videos')" field="explainer_videos" :ids="row.explainer_videos" />
+      <MediaStrip :label="t('kb.media.terms')" field="terms_documents" :ids="row.terms_documents" />
     </div>
   </RecordShell>
 </template>

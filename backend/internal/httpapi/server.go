@@ -368,6 +368,11 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/media/:id", s.handleServeMedia)
 	auth.GET("/realtime", s.handleRealtime)
 
+	// MCP connector info — deliberately session-only (no RequireAdmin): any
+	// logged-in user can see the connector URL to paste into ChatGPT/Claude,
+	// even though configuring the tunnel that backs it stays admin-only.
+	auth.GET("/mcp-connection", s.handleMCPConnectionInfo)
+
 	// Simulator API (Phase 10) — gated: the route does not exist at all unless
 	// explicitly enabled (SIMULATOR_ENABLED, default false outside dev).
 	if s.cfg.System.SimulatorEnabled {
@@ -417,6 +422,8 @@ func (s *Server) Router() *gin.Engine {
 	kb.POST("/zones", s.handleKBUpsertZone)
 	kb.DELETE("/zones/:ref", s.handleKBDeleteZone)
 	kb.GET("/materials", s.handleKBListMaterials)
+	kb.POST("/materials", s.handleKBUploadMaterial)
+	kb.GET("/materials/:id/content", s.handleKBMaterialContent)
 	kb.PATCH("/config", s.handleKBPatchConfig)
 
 	// Settings (settings.go) — every route here is admin-only. Handlers are
