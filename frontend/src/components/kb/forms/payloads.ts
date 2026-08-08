@@ -2,11 +2,21 @@
 // and stores.stageChange() dispatches on — one variant per content kind
 // (config is NOT here: it stages through stores.patchConfig({ [field]: value })
 // directly, one field at a time, never a whole-row payload).
+//
+// Media fields mirror the canonical ai_* columns (backend/internal/kbstore's
+// Draft* structs): a singular reference is `string | null` (never omitted —
+// see MediaFieldPicker.vue's doc comment on why the form always sends the
+// picker's full current state), a plural reference is `string[]` (never
+// undefined; an empty array IS "detach everything").
 export interface TopicPayload {
   kind: 'topics'
   slug: string
   title?: string
   body_md?: string
+  featured_image?: string | null
+  illustration_images?: string[]
+  explainer_videos?: string[]
+  reference_documents?: string[]
 }
 
 export interface TariffPayload {
@@ -21,6 +31,10 @@ export interface TariffPayload {
   advantages?: string
   disadvantages?: string
   sales_status?: string
+  featured_image?: string | null
+  pricing_images?: string[]
+  explainer_videos?: string[]
+  terms_documents?: string[]
 }
 
 export interface ProductPayload {
@@ -32,6 +46,11 @@ export interface ProductPayload {
   category?: string
   sales_status?: string
   in_stock?: boolean
+  featured_image?: string | null
+  gallery_images?: string[]
+  demo_videos?: string[]
+  certificate_documents?: string[]
+  guarantee_documents?: string[]
 }
 
 export interface DeliveryZonePayload {
@@ -58,6 +77,9 @@ export interface ContactsPayload {
   phone?: string
   website?: string
   instagram?: string
+  contact_card_image?: string | null
+  location_map_image?: string | null
+  company_legal_documents?: string[]
 }
 
 export interface PoliciesPayload {
@@ -71,6 +93,7 @@ export interface PoliciesPayload {
   return_period_in_days?: string
   warranty?: string
   outside_zones_note?: string
+  commerce_policy_documents?: string[]
 }
 
 export type KbFormPayload =

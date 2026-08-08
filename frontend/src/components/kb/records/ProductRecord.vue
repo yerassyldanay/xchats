@@ -76,11 +76,11 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['name', 'pr
       <FieldDiffNote :show="diff.includes('description')" :was="liveRow?.description ?? ''" />
     </div>
     <div class="flex flex-col gap-2">
-      <MediaStrip :label="t('kb.media.image')" :ids="row.featured_image" />
-      <MediaStrip :label="t('kb.media.gallery')" :ids="row.gallery_images" />
-      <MediaStrip :label="t('kb.media.videos')" :ids="row.demo_videos" />
-      <MediaStrip :label="t('kb.media.certificates')" :ids="row.certificate_documents" />
-      <MediaStrip :label="t('kb.media.guarantee')" :ids="row.guarantee_documents" />
+      <MediaStrip :label="t('kb.media.image')" field="featured_image" :ids="row.featured_image" />
+      <MediaStrip :label="t('kb.media.gallery')" field="gallery_images" :ids="row.gallery_images" />
+      <MediaStrip :label="t('kb.media.videos')" field="demo_videos" :ids="row.demo_videos" />
+      <MediaStrip :label="t('kb.media.certificates')" field="certificate_documents" :ids="row.certificate_documents" />
+      <MediaStrip :label="t('kb.media.guarantee')" field="guarantee_documents" :ids="row.guarantee_documents" />
     </div>
   </RecordShell>
 </template>

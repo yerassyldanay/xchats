@@ -422,6 +422,7 @@ func (s *Server) Router() *gin.Engine {
 	kb.POST("/zones", s.handleKBUpsertZone)
 	kb.DELETE("/zones/:ref", s.handleKBDeleteZone)
 	kb.GET("/materials", s.handleKBListMaterials)
+	kb.POST("/materials", s.handleKBUploadMaterial)
 	kb.GET("/materials/:id/content", s.handleKBMaterialContent)
 	kb.PATCH("/config", s.handleKBPatchConfig)
 

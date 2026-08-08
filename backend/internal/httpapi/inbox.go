@@ -428,7 +428,11 @@ func (s *Server) handleUploadMedia(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "cannot open file")
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			s.log.Warn("failed to close uploaded file", "err", err)
+		}
+	}()
 	data, err := io.ReadAll(f)
 	if err != nil {
 		fail(c, http.StatusBadRequest, ErrValidation, "cannot read file")

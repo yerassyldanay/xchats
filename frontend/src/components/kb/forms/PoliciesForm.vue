@@ -7,6 +7,7 @@ import type { PolicyRow } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import KbFormDialog from './KbFormDialog.vue'
+import MediaFieldPicker from './MediaFieldPicker.vue'
 import type { PoliciesPayload } from './payloads'
 
 const modal = useKbModal()
@@ -21,6 +22,7 @@ const zonesExist = computed(() => (pg.live?.zones.length ?? 0) > 0)
 const buf = reactive({
   delivery_cost: '', delivery_in_days: '', free_delivery_from: '', min_order: '',
   prepayment: '', installment: '', return_period_in_days: '', warranty: '', outside_zones_note: '',
+  commerce_policy_documents: [] as string[],
 })
 
 let seededFor = ''
@@ -39,6 +41,7 @@ watch(
     buf.return_period_in_days = snap?.return_period_in_days ?? ''
     buf.warranty = snap?.warranty ?? ''
     buf.outside_zones_note = snap?.outside_zones_note ?? ''
+    buf.commerce_policy_documents = [...(snap?.commerce_policy_documents ?? [])]
   },
   { immediate: true }
 )
@@ -106,5 +109,9 @@ function retry() {
       <Textarea v-model="buf.outside_zones_note" rows="2" class="min-h-0 text-[14px] mt-1" />
       <p class="text-xs text-muted-foreground mt-1">{{ t('kb.fields.outsideZonesHint') }}</p>
     </div>
+    <MediaFieldPicker
+      :label="t('kb.media.documents')" field="commerce_policy_documents" :multiple="true"
+      :model-value="buf.commerce_policy_documents" @update:model-value="(v) => (buf.commerce_policy_documents = v as string[])"
+    />
   </KbFormDialog>
 </template>

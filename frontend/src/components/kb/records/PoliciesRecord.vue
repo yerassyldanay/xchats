@@ -105,7 +105,7 @@ const diff = computed(() =>
       </div>
     </div>
     <div v-if="row" class="flex flex-col gap-2">
-      <MediaStrip :label="t('kb.media.documents')" :ids="row.commerce_policy_documents" />
+      <MediaStrip :label="t('kb.media.documents')" field="commerce_policy_documents" :ids="row.commerce_policy_documents" />
     </div>
   </RecordShell>
 </template>

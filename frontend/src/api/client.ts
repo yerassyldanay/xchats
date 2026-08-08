@@ -54,6 +54,21 @@ export const api = {
     })
     return unwrap(res, '/media')
   },
+  // uploadKbMaterial is upload's KB counterpart (POST /kb/materials,
+  // kb_media.go) — session-authenticated, single-shot: the returned
+  // material_id is immediately attachable from a draft-lane upsert
+  // (playground.ts's stageChange), no separate signed-URL step like the MCP
+  // kb_media_upload flow needs for its cross-origin widget caller.
+  async uploadKbMaterial(file: File): Promise<{ material_id: string; processing_status: string }> {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(API_BASE + PREFIX + '/kb/materials', {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    })
+    return unwrap(res, '/kb/materials')
+  },
   mediaURL: (urlPath: string) => API_BASE + urlPath,
   realtimeURL: () => API_BASE + PREFIX + '/realtime',
 }

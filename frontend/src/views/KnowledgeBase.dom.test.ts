@@ -3,7 +3,8 @@ import { DOMWrapper, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { usePlayground } from '@/stores/playground'
 import { mountKb, testPinia } from '@/test/mount'
 import KnowledgeBase from './KnowledgeBase.vue'
-import type { DraftChangeSet, DraftView, KbMaterial, TopicRow } from '@/types'
+import ProductRecord from '@/components/kb/records/ProductRecord.vue'
+import type { DraftChangeSet, DraftView, KbMaterial, ProductRow, TopicRow } from '@/types'
 
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
 vi.mock('@/api/client', async (importOriginal) => {
@@ -18,6 +19,15 @@ function topic(over: Partial<TopicRow> = {}): TopicRow {
   return {
     id: 'pricing', slug: 'pricing', title: 'Тарифы', body_md: 'Текст.',
     featured_image: null, illustration_images: [], explainer_videos: [], reference_documents: [],
+    draft: false, updated_at: '',
+    ...over,
+  }
+}
+function product(over: Partial<ProductRow> = {}): ProductRow {
+  return {
+    id: 'coffee-machine', ref: 'coffee-machine', name: 'Кофемашина', price: '100000', description: '', category: '',
+    in_stock: true, sales_status: 'active',
+    featured_image: null, gallery_images: [], demo_videos: [], certificate_documents: [], guarantee_documents: [],
     draft: false, updated_at: '',
     ...over,
   }
@@ -97,6 +107,73 @@ describe('KnowledgeBase — published rows are read-only', () => {
     expect(wrapper.text()).toContain('Опубликованное название')
     expect(wrapper.text()).not.toContain('Черновик: новое название')
     expect(wrapper.text()).toContain('Есть неопубликованное изменение')
+  })
+})
+
+// Regression test for "empty media slots are visible" (requirement 1):
+// before MediaStrip dropped its v-if="list.length" root, a product with
+// every media column empty rendered NO media rows at all, label included.
+describe('KnowledgeBase — a product with no media still shows every media slot', () => {
+  it('renders every media label (e.g. «Галерея») and the empty indicator, not nothing', async () => {
+    const { wrapper } = await mountWith(emptyChanges(), emptyLive({ products: [product()] }))
+    await switchTab(wrapper, 'Товары')
+    expect(wrapper.text()).toContain('Галерея')
+    expect(wrapper.text()).toContain('Не добавлено')
+  })
+})
+
+// End-to-end wiring check for Stage 5: the picker's own behavior is unit
+// tested in MediaFieldPicker.dom.test.ts — this proves the field NAMES each
+// *Form.vue binds MediaFieldPicker to are actually correct end to end (a
+// typo'd field prop would silently no-op rather than fail to compile,
+// since MediaStrip/MediaFieldPicker only ever see a plain string).
+describe('KnowledgeBase — editing a product\'s media through the picker reaches the API', () => {
+  it('detaching an existing gallery image and saving sends gallery_images: []', async () => {
+    const { wrapper, api } = await mountWith(
+      emptyChanges(),
+      emptyLive({
+        products: [product({ gallery_images: ['img-1'] })],
+        materials: [material({ id: 'img-1', filename: 'existing.png', mime_type: 'image/png' })],
+      })
+    )
+    vi.mocked(api.post).mockResolvedValueOnce(emptyChanges())
+    await switchTab(wrapper, 'Товары')
+
+    // KnowledgeBase.vue keeps every tab's content mounted at once (v-show,
+    // not v-if — only the toolbar action itself is conditional), so ALL
+    // «Изменить» buttons coexist in the DOM regardless of the active tab,
+    // including Обзор's config field cards. Scope to ProductRecord
+    // specifically rather than a bare text match on the whole page.
+    const productCard = wrapper.findComponent(ProductRecord)
+    expect(productCard.exists()).toBe(true)
+    const editBtn = productCard.findAll('button').find((b) => b.text() === 'Изменить')
+    expect(editBtn).toBeTruthy()
+    await editBtn!.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    // The picker shows the seeded gallery image as a real thumbnail, not
+    // the empty state.
+    const img = body().find('img[src*="/kb/materials/img-1/content"]')
+    expect(img.exists()).toBe(true)
+
+    const detachBtn = body().findAll('button').find((b) => b.attributes('aria-label') === 'Открепить')
+    expect(detachBtn).toBeTruthy()
+    await detachBtn!.trigger('click')
+
+    const saveBtn = body().findAll('button').find((b) => b.text() === 'Сохранить')
+    await saveBtn!.trigger('click')
+    await flushPromises()
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/playground/draft/products',
+      expect.objectContaining({ ref: 'coffee-machine', gallery_images: [] }),
+      expect.anything()
+    )
+    // This file's api mocks are module-level vi.fn()s with no shared
+    // beforeEach reset — clear this call now so it can't bleed into a
+    // LATER test's `expect(api.post).not.toHaveBeenCalled()` (file order,
+    // not describe-block order, is what matters for vi.fn() call history).
+    vi.mocked(api.post).mockClear()
   })
 })
 

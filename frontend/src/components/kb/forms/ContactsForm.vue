@@ -6,6 +6,7 @@ import type { ContactRow } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import KbFormDialog from './KbFormDialog.vue'
+import MediaFieldPicker from './MediaFieldPicker.vue'
 import type { ContactsPayload } from './payloads'
 
 const modal = useKbModal()
@@ -14,6 +15,9 @@ const { t } = useI18n()
 const buf = reactive({
   whatsapp: '', email: '', address: '', legal_information: '', callback_time: '',
   working_hours: '', phone: '', website: '', instagram: '',
+  contact_card_image: null as string | null,
+  location_map_image: null as string | null,
+  company_legal_documents: [] as string[],
 })
 
 let seededFor = ''
@@ -32,6 +36,9 @@ watch(
     buf.phone = snap?.phone ?? ''
     buf.website = snap?.website ?? ''
     buf.instagram = snap?.instagram ?? ''
+    buf.contact_card_image = snap?.contact_card_image ?? null
+    buf.location_map_image = snap?.location_map_image ?? null
+    buf.company_legal_documents = [...(snap?.company_legal_documents ?? [])]
   },
   { immediate: true }
 )
@@ -96,5 +103,17 @@ function retry() {
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.callbackTime') }}</span>
       <Input v-model="buf.callback_time" class="h-9 mt-1" />
     </div>
+    <MediaFieldPicker
+      :label="t('kb.media.businessCard')" field="contact_card_image" :multiple="false"
+      :model-value="buf.contact_card_image" @update:model-value="(v) => (buf.contact_card_image = v as string | null)"
+    />
+    <MediaFieldPicker
+      :label="t('kb.media.map')" field="location_map_image" :multiple="false"
+      :model-value="buf.location_map_image" @update:model-value="(v) => (buf.location_map_image = v as string | null)"
+    />
+    <MediaFieldPicker
+      :label="t('kb.media.legalDocuments')" field="company_legal_documents" :multiple="true"
+      :model-value="buf.company_legal_documents" @update:model-value="(v) => (buf.company_legal_documents = v as string[])"
+    />
   </KbFormDialog>
 </template>
