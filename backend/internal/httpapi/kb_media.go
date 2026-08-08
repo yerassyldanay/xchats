@@ -148,7 +148,7 @@ func (s *Server) handleKBUploadMaterial(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "cannot open file")
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(f)
 	if err != nil {
 		fail(c, http.StatusBadRequest, ErrValidation, "cannot read file")
