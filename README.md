@@ -35,15 +35,19 @@ and durably stores its own internal secrets on first boot, and everything
 an operator configures (the AI provider and its API key, ngrok, Langfuse,
 team members) lives in the Settings UI once the app is running.
 
-Open http://localhost:8081, then retrieve the one-time bootstrap admin
-password and log in:
+Open http://localhost:8081 and log in with the default admin account:
 
-```bash
-docker compose exec backend /xchats admin-credential show
-```
+- **Email:** `admin@xchat.kz`
+- **Password:** `xchat-admin-change-me`
 
-The first login forces a password change before anything else is
-reachable. After that, the setup wizard walks you through adding an LLM
+> **This password is public.** It's printed in this README and committed in
+> this repo's migration history, so anyone can look it up. Change it before
+> exposing your instance beyond your own machine — see
+> [`docs/release/installation.md`](docs/release/installation.md#first-run)
+> for how. Locked out instead? `xchats reset-admin-password` restores this
+> same default on the next boot.
+
+After logging in, the setup wizard walks you through adding an LLM
 provider API key, then **Accounts → add** to pair a WhatsApp number by
 scanning a QR code, or **Settings → Integrations** to connect a Telegram
 bot.

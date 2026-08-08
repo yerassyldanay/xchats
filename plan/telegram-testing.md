@@ -133,12 +133,12 @@ fastest) and tear it down when done. It only needs to answer what
 ## A worked example flow
 
 ```bash
-# 1. Log in (admin@xchat.kz's password is one-time and randomly generated —
-#    retrieve it with `xchats admin-credential show`, or use whatever
-#    password you've since set after the forced first-login change)
+# 1. Log in (admin@xchat.kz's password defaults to the documented public
+#    default, xchat-admin-change-me — see the root README.md — or use
+#    whatever you've since changed it to)
 curl -c jar -s -X POST localhost:8080/xchats/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@xchat.kz","password":"<your admin password>"}'
+  -d '{"email":"admin@xchat.kz","password":"xchat-admin-change-me"}'
 
 # 2. Connect a bot (real token, or a throwaway fake's — either way it must
 #    pass getMe)

@@ -524,15 +524,19 @@ func IsSentinelAdmin(id uuid.UUID) bool { return id == sentinelAdminID }
 // password on boot (cmd/xchats' first-boot bootstrap). It writes
 // passwordHash ONLY if the row still carries 0008_bootstrap_admin's blanked
 // "" sentinel — the same WHERE-guarded idempotency pattern that migration
-// uses — and deliberately leaves must_change_password set, so the operator
-// is still forced through the change-password flow on first login even
-// though the one-time password now works. minted reports whether this call
-// actually wrote it (false on every boot after the first, or if an
-// operator has since changed it some other way) — cmd/xchats uses that to
-// decide whether to print/persist the one-time credential file at all.
+// uses — which a fresh install never has, since
+// 0011_restore_default_admin_password already restores the static default
+// password. It clears must_change_password so a mint here (the "xchats
+// reset-admin-password" recovery path, or an operator-supplied
+// XCHATS_BOOTSTRAP_ADMIN_PASSWORD) lands on the same no-forced-change state
+// as a fresh install. minted reports whether this call actually wrote it
+// (false on every boot after the first, or if an operator has since changed
+// it some other way) — cmd/xchats uses that to decide whether to
+// print/persist the bootstrap credential file at all.
 func (s *Store) BootstrapSentinelAdminPassword(ctx context.Context, passwordHash string) (minted bool, err error) {
 	tag, err := s.db.Exec(ctx, `
-		UPDATE users SET password_hash = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE users SET password_hash = $2, must_change_password = 0,
+			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE id = $1 AND password_hash = ''`, sentinelAdminID, passwordHash)
 	if err != nil {
 		return false, err

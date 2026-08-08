@@ -21,10 +21,9 @@ make dev-frontend    # frontend on :5173 (Node 22+, see .nvmrc)
 No `.env` file, no secrets to set up first — see
 [`docs/release/installation.md`](docs/release/installation.md). `make up`
 runs the full Docker stack instead, if you'd rather not run two local
-processes. On first boot, retrieve the one-time bootstrap admin password
-with `xchats admin-credential show` (or
-`docker compose exec backend /xchats admin-credential show`) — see
-installation.md's first-run walkthrough.
+processes. Log in with the default admin account, `admin@xchat.kz` /
+`xchat-admin-change-me` — it's a public, documented default (see
+installation.md's first-run walkthrough for how to change it).
 
 ## Before opening a PR
 

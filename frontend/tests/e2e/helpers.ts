@@ -1,11 +1,11 @@
 import { type Page, expect } from '@playwright/test'
 
 // Credentials must match the migration-seeded admin, admin@xchat.kz — its
-// password is randomly generated per database and must be set via env (see
-// tests/e2e/README.md: retrieve the one-time bootstrap password, log in,
-// set your own). There is no fixed default password to fall back to.
+// password defaults to the documented public default, xchat-admin-change-me
+// (see the root README.md). Override via env if the target database's
+// password has since been changed (see tests/e2e/README.md).
 const EMAIL = process.env.E2E_EMAIL || 'admin@xchat.kz'
-const PASSWORD = process.env.E2E_PASSWORD || 'change-me-strong-password'
+const PASSWORD = process.env.E2E_PASSWORD || 'xchat-admin-change-me'
 
 // log in via the real Login screen → lands on the chatboard.
 export async function login(page: Page) {
