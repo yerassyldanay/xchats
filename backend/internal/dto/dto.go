@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/automation"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/messaging"
 )
 
 func decodeAttrs(b []byte) map[string]any {
@@ -41,8 +42,8 @@ type Chat struct {
 	AccountID string `json:"account_id"`
 	// WaAccountID is the deprecated alias for AccountID, emitted only for chats
 	// on the wa_* gateway (whatsapp/simulator) so an older client keeps working
-	// through the transition. A Telegram chat deliberately omits it rather than
-	// pretending its account is a WhatsApp one.
+	// through the transition. Every other channel deliberately omits it rather
+	// than pretending its account is a WhatsApp one.
 	WaAccountID        string  `json:"wa_account_id,omitempty"`
 	Contact            Contact `json:"contact"`
 	Status             string  `json:"status"`
@@ -228,7 +229,7 @@ func MapNeutralAccount(a store.Account, liveStatus string) Account {
 	}
 	// Only a channel that actually has webhook health reports it; a WhatsApp row
 	// leaves all four null rather than emitting empty strings that read as "set".
-	if a.Channel == "telegram" {
+	if hasWebhookHealth(a.Channel) {
 		url, lastErr := a.WebhookURL, a.WebhookLastError
 		out.WebhookURL = &url
 		out.WebhookLastError = &lastErr
@@ -236,6 +237,19 @@ func MapNeutralAccount(a store.Account, liveStatus string) Account {
 		out.WebhookLastCheckedAt = tsPtr(a.WebhookLastCheckedAt)
 	}
 	return out
+}
+
+// hasWebhookHealth reports whether a channel registers a provider webhook
+// and so has health fields worth reporting. WhatsApp (whatsmeow, a direct
+// WebSocket connection) and the simulator have no webhook at all; Telegram
+// and every Meta channel (Instagram, Messenger, WhatsApp Cloud API) do.
+func hasWebhookHealth(channel string) bool {
+	switch messaging.Channel(channel) {
+	case messaging.ChannelTelegram, messaging.ChannelInstagram, messaging.ChannelMessenger, messaging.ChannelWhatsAppCloud:
+		return true
+	default:
+		return false
+	}
 }
 
 func mediaURL(id uuid.UUID) string { return "/xchats/api/v1/media/" + id.String() }
@@ -293,7 +307,7 @@ func MapChat(c store.Chat) Chat {
 		LastMessageAt:      tsPtr(c.LastMessageAt),
 		LastMessagePreview: c.LastMessagePreview,
 	}
-	if channel != "telegram" {
+	if channel == string(messaging.ChannelWhatsApp) || channel == string(messaging.ChannelSimulator) {
 		out.WaAccountID = c.AccountID.String()
 	}
 	return out

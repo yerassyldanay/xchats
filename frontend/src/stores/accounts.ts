@@ -26,9 +26,14 @@ export const useAccounts = defineStore('accounts', {
     accountName: (s) => (id: string) => s.accounts.find((a) => a.id === id)?.display_name || '',
     accountChannel: (s) => (id: string) => s.accounts.find((a) => a.id === id)?.channel,
     hasMultiple: (s) => s.accounts.length > 1,
-    // whatsappAccounts is the subset the compose picker offers: a Telegram bot
-    // cannot start a conversation (the customer has to message it first).
-    whatsappAccounts: (s) => s.accounts.filter((a) => a.channel !== 'telegram'),
+    // composableAccounts is the subset the compose picker offers: only the
+    // wa_* gateway channels (whatsapp/simulator) can start a fresh
+    // conversation. Every other channel — Telegram, and every Meta channel
+    // (Instagram/Messenger/WhatsApp Cloud, v1 has no template sends) —
+    // requires the customer to message first, so it must never appear here.
+    // This is deliberately an ALLOWLIST, not "every channel but telegram":
+    // that shape silently mis-offered every new channel added since.
+    composableAccounts: (s) => s.accounts.filter((a) => a.channel === 'whatsapp' || a.channel === 'simulator'),
     telegramAccounts: (s) => s.accounts.filter((a) => a.channel === 'telegram'),
   },
   actions: {

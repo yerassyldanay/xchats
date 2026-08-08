@@ -52,20 +52,6 @@ export function connStatus(status: string): { label: string; tone: ConnTone } {
   }
 }
 
-// channelLabel is the channel's display name; channelTone drives its brand
-// colour so a chat row and an account card agree at a glance.
-export type ChannelName = 'whatsapp' | 'simulator' | 'telegram'
-export function channelLabel(channel: string): string {
-  switch (channel) {
-    case 'telegram':
-      return 'Telegram'
-    case 'simulator':
-      return 'Симулятор'
-    default:
-      return 'WhatsApp'
-  }
-}
-
 // formatBytes renders a byte count the way file managers do (1000-based
 // decimal units, IEC abbreviations left untranslated like every OS does) —
 // used by the KB materials tab and MediaStrip's document rows.

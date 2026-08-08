@@ -114,7 +114,17 @@ export interface Contact {
   push_name: string
   attributes?: Record<string, unknown>
 }
-export type ChannelName = 'whatsapp' | 'simulator' | 'telegram'
+// ChannelName is every channel the backend can report on an account/chat.
+// whatsapp is the unofficial whatsmeow (QR-paired) leg; whatsapp_cloud is
+// the official Meta WhatsApp Cloud API — the two run side by side and are
+// deliberately distinct values, never merged.
+export type ChannelName =
+  | 'whatsapp'
+  | 'simulator'
+  | 'telegram'
+  | 'instagram'
+  | 'messenger'
+  | 'whatsapp_cloud'
 
 export interface Chat {
   id: string
