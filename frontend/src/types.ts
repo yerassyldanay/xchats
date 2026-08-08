@@ -150,6 +150,9 @@ export interface Chat {
   unread_count: number
   last_message_at: string | null
   last_message_preview: string
+  /** The CRM customer this conversation belongs to; null for a chat on an
+   *  unassigned account and for chats that predate the CRM layer. */
+  customer_id: string | null
 }
 export interface Media {
   id: string
@@ -1132,4 +1135,146 @@ export interface CampaignRecipientEvent {
   campaign_id: string
   recipient_id: string
   status: CampaignRecipientStatus
+}
+
+// --- Customer management (CRM) — mirrors internal/dto/crm.go -----------------
+
+// CustomerStatus mirrors dto.CustomerStatus — one entry of the organization's
+// configurable lifecycle. These are rows, not a fixed enum: an organization
+// edits its own list, and the five seeded by migration 0013 are a starting
+// point rather than a closed vocabulary.
+export interface CustomerStatus {
+  id: string
+  slug: string
+  name: string
+  color: string
+  position: number
+  is_default: boolean
+}
+
+// CustomerTag mirrors dto.CustomerTag. Nothing is seeded — every tag an
+// organization has, it created.
+export interface CustomerTag {
+  id: string
+  slug: string
+  name: string
+  color: string
+}
+
+// CustomerIdentity mirrors dto.CustomerIdentity — one channel identity.
+// external_id is the provider's own identity for the person (the phone JID for
+// WhatsApp, the numeric user id for Telegram); the accounts themselves are
+// never merged, only linked to one xchats customer.
+export interface CustomerIdentity {
+  id: string
+  channel: ChannelName
+  account_id: string
+  contact_id: string
+  external_id: string
+  username: string
+  phone: string
+  display_name: string
+}
+
+// Customer mirrors dto.Customer. There is deliberately no notes field: the
+// profile's note is the latest CustomerNote, carried on CustomerProfile.
+export interface Customer {
+  id: string
+  display_name: string
+  phone: string
+  email: string
+  avatar_url: string
+  status_id: string | null
+  status: CustomerStatus | null
+  assignee_user_id: string | null
+  tags: CustomerTag[]
+  identities: CustomerIdentity[]
+  custom_fields: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+// CustomerNote mirrors dto.CustomerNote — an internal note. Never sent to the
+// customer; no channel adapter reads them.
+export interface CustomerNote {
+  id: string
+  customer_id: string
+  author_user_id: string | null
+  author_name: string
+  body: string
+  created_at: string
+  updated_at: string
+}
+
+export type FollowupAction = 'call' | 'message' | 'meeting' | 'other'
+export type FollowupState = 'open' | 'completed' | 'cancelled'
+
+// Followup mirrors dto.Followup. due_at is the UTC instant the backend orders
+// and buckets by; due_date/due_minute are the wall clock the manager typed, so
+// the edit form round-trips without a timezone drift. due_minute is null for
+// an all-day follow-up (the time is optional).
+export interface Followup {
+  id: string
+  customer_id: string
+  customer_name: string
+  conversation_id: string | null
+  channel: string
+  due_at: string
+  due_date: string
+  due_minute: number | null
+  action: FollowupAction
+  note: string
+  assignee_user_id: string | null
+  assignee_name: string
+  state: FollowupState
+  completed_at: string | null
+  created_at: string
+}
+
+// FollowupBuckets mirrors store.FollowupBuckets — the reminder view's header.
+// Overdue keeps counting an item until it is completed or rescheduled.
+export interface FollowupBuckets {
+  today: number
+  tomorrow: number
+  this_week: number
+  overdue: number
+}
+
+// CustomerProfile mirrors dto.CustomerProfile — the sidebar's single hydrate
+// call: the customer plus what is always rendered next to them.
+export interface CustomerProfile {
+  customer: Customer
+  latest_note: CustomerNote | null
+  next_followup: Followup | null
+  conversations: Chat[]
+}
+
+// TimelineEntry mirrors dto.TimelineEntry. `source` is "crm" for a recorded
+// CRM event and "message" for conversation activity read live from the
+// messages tables — the two populate different fields, so render by source
+// rather than by sniffing for nulls.
+export interface TimelineEntry {
+  id: string
+  source: 'crm' | 'message'
+  kind: string
+  actor_user_id: string | null
+  summary: string
+  detail?: Record<string, unknown>
+  occurred_at: string
+  channel?: string
+  chat_id?: string
+  direction?: 'in' | 'out'
+  sender_kind?: string
+  body?: string
+}
+
+// CustomFieldDef mirrors dto.CustomFieldDef — an org-defined extra profile
+// field. Values live in Customer.custom_fields, keyed by `key`.
+export interface CustomFieldDef {
+  id: string
+  key: string
+  label: string
+  field_type: 'text' | 'number' | 'date' | 'select'
+  options: string[]
+  position: number
 }

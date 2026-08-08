@@ -4,6 +4,8 @@ import Login from './views/Login.vue'
 import ChangePassword from './views/ChangePassword.vue'
 import Chatboard from './views/Chatboard.vue'
 import Accounts from './views/Accounts.vue'
+import Customers from './views/Customers.vue'
+import Followups from './views/Followups.vue'
 import Playground from './views/Playground.vue'
 import KnowledgeBase from './views/KnowledgeBase.vue'
 import Simulator from './views/Simulator.vue'
@@ -25,6 +27,8 @@ const router = createRouter({
     { path: '/', name: 'home', component: Home },
     { path: '/chatboard', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
     { path: '/accounts', name: 'accounts', component: Accounts, meta: { requiresAuth: true } },
+    { path: '/customers', name: 'customers', component: Customers, meta: { requiresAuth: true } },
+    { path: '/followups', name: 'followups', component: Followups, meta: { requiresAuth: true } },
     { path: '/playground', name: 'playground', component: Playground, meta: { requiresAuth: true } },
     { path: '/knowledge-base', name: 'knowledge-base', component: KnowledgeBase, meta: { requiresAuth: true } },
     { path: '/simulator', name: 'simulator', component: Simulator, meta: { requiresAuth: true } },
