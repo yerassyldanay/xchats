@@ -26,6 +26,10 @@ type ConversationContext struct {
 	History          []aiprompt.HistoryTurn
 	CurrentMessage   string
 	TriggerMessageID string
+	// Customer is the CRM context for whoever is on the other end, or nil when
+	// the conversation has no customer. Implementations that do not know about
+	// the CRM layer simply leave it nil, and the prompt is unchanged.
+	Customer *aiprompt.CustomerContext
 }
 
 // ConversationRepository loads the response-relevant context for a
