@@ -59,6 +59,15 @@ type GenerateRequest struct {
 	History        []aiprompt.HistoryTurn
 	IncomingText   string
 	KB             *aiprompt.KB
+	// Customer is the CRM profile of the person being answered, or nil when
+	// the conversation has no customer yet (an unassigned account, or a chat
+	// that predates the CRM layer). Nil renders no block at all, which keeps
+	// the assembled prompt byte-identical to the eval harness's — see
+	// aiprompt.RenderCustomerContext.
+	//
+	// It is read-only context: the response contract has no CRM fields, so a
+	// generated reply can never change a status, tag, assignee or follow-up.
+	Customer *aiprompt.CustomerContext
 	// ModelOverride is settable only by the authenticated simulator handler,
 	// and only to a registered provider; nil in production (the WhatsApp path
 	// never sets it).
@@ -103,7 +112,8 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	if err := aiprompt.ValidateNoStorageLocatorLeak(rendered); err != nil {
 		return nil, fmt.Errorf("response: %w", err)
 	}
-	prompt := rendered + aiprompt.ConversationTail(aiprompt.RenderHistory(req.History), req.IncomingText)
+	prompt := rendered + aiprompt.RenderCustomerContext(req.Customer) +
+		aiprompt.ConversationTail(aiprompt.RenderHistory(req.History), req.IncomingText)
 
 	params := e.Params()
 	modelRef := params.DefaultModel

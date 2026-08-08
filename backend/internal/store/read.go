@@ -27,11 +27,23 @@ type ChatFilter struct {
 
 // chatCols is the canonical inbox_chats_v projection — one shape for every
 // channel, with provider vocabulary already folded into neutral column names.
+//
+// customer_id comes from chatCustomerJoin below rather than from the view: the
+// CRM layer sits above transport and must not be baked into a read view every
+// channel adapter shares. It is NULL for a chat whose account has no
+// organization (nothing resolved it) and for chats that predate migration 0011.
 const chatCols = `c.id, c.account_id, c.contact_id, c.channel, c.external_conversation_ref,
 	c.chat_state, c.assignee_user_id,
 	c.last_message_at, c.last_message_preview, c.unread_count,
 	c.contact_id, c.contact_phone_number, c.external_contact_ref, c.contact_lid_jid,
-	c.contact_push_name, c.contact_display_name, c.contact_attributes`
+	c.contact_push_name, c.contact_display_name, c.contact_attributes,
+	ci.customer_id`
+
+// chatCustomerJoin attaches the CRM customer to an inbox_chats_v read. It is a
+// LEFT JOIN on the identity's own unique key (channel, contact_id), so it can
+// never multiply rows and never hides a chat that has no customer yet.
+const chatCustomerJoin = ` LEFT JOIN crm_customer_identities ci
+	ON ci.channel = c.channel AND ci.contact_id = c.contact_id`
 
 func scanChatDst(c *Chat) []any {
 	return []any{
@@ -40,6 +52,7 @@ func scanChatDst(c *Chat) []any {
 		&c.LastMessageAt, &c.LastMessagePreview, &c.UnreadCount,
 		&c.Contact.ID, &c.Contact.PhoneNumber, &c.Contact.ExternalContactRef, &c.Contact.LidJID,
 		&c.Contact.PushName, &c.Contact.DisplayName, &c.Contact.Attributes,
+		&c.CustomerID,
 	}
 }
 
@@ -76,12 +89,15 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 	if f.Query != "" {
 		args = append(args, "%"+strings.ToLower(f.Query)+"%")
 		i := itoa(len(args))
-		where = append(where, "(lower(c.contact_display_name) LIKE $"+i+
-			" OR lower(c.contact_phone_number) LIKE $"+i+
+		// unicode_lower rather than SQLite's lower(), which folds ASCII only —
+		// so searching "али" never matched a contact stored as «Алия». See
+		// internal/dbx's unicodelower.go.
+		where = append(where, "(unicode_lower(c.contact_display_name) LIKE $"+i+
+			" OR unicode_lower(c.contact_phone_number) LIKE $"+i+
 			" OR c.external_contact_ref LIKE $"+i+")")
 	}
 	clause := strings.Join(where, " AND ")
-	const from = `inbox_chats_v c`
+	const from = `inbox_chats_v c` + chatCustomerJoin
 
 	args = append(args, f.Limit, f.Offset)
 	q := `SELECT ` + chatCols + ` FROM ` + from + `
@@ -110,7 +126,8 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 func (s *Store) ChatByID(ctx context.Context, id uuid.UUID) (Chat, error) {
 	var c Chat
 	err := s.db.QueryRow(ctx, `SELECT `+chatCols+`
-		FROM inbox_chats_v c WHERE c.id = $1`, id).Scan(scanChatDst(&c)...)
+		FROM inbox_chats_v c`+chatCustomerJoin+`
+		WHERE c.id = $1`, id).Scan(scanChatDst(&c)...)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return c, ErrNotFound
 	}
@@ -123,7 +140,7 @@ func (s *Store) ChatByID(ctx context.Context, id uuid.UUID) (Chat, error) {
 func (s *Store) ChatByIDForOrg(ctx context.Context, id, orgID uuid.UUID) (Chat, error) {
 	var c Chat
 	err := s.db.QueryRow(ctx, `SELECT `+chatCols+`
-		FROM inbox_chats_v c
+		FROM inbox_chats_v c`+chatCustomerJoin+`
 		WHERE c.id = $1 AND c.organization_id = $2 AND c.account_deleted_at IS NULL`, id, orgID).
 		Scan(scanChatDst(&c)...)
 	if errors.Is(err, dbx.ErrNoRows) {
