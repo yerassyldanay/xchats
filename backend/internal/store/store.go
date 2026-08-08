@@ -159,6 +159,11 @@ type Chat struct {
 	LastMessagePreview string
 	UnreadCount        int
 	Contact            Contact
+	// CustomerID is the CRM customer this conversation belongs to, resolved
+	// through the contact's channel identity (see read.go's chatCustomerJoin).
+	// Invalid for a chat on an unassigned account, and for chats that predate
+	// migration 0013.
+	CustomerID uuid.NullUUID
 }
 
 type Message struct {

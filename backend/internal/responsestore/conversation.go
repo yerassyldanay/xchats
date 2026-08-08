@@ -50,6 +50,22 @@ func (r *ConversationRepo) LoadForResponse(ctx context.Context, conversationID s
 	}
 	history, current, triggerID := splitHistory(msgs)
 
+	// CRM context is best-effort: a conversation with no customer (or a
+	// failed lookup) leaves Customer nil, which renders no block at all and
+	// therefore sends exactly the prompt this path sent before the CRM layer
+	// existed. Never fail a customer reply over a missing profile.
+	var customer *aiprompt.CustomerContext
+	if summary, found, err := r.Store.CustomerContextForChat(ctx, chatID); err == nil && found {
+		customer = &aiprompt.CustomerContext{
+			Name:       summary.Name,
+			Status:     summary.Status,
+			Tags:       summary.Tags,
+			LatestNote: summary.LatestNote,
+			NextAction: summary.NextAction,
+			NextDueOn:  summary.NextDueOn,
+		}
+	}
+
 	return response.ConversationContext{
 		OrganizationID:   account.OrganizationID.UUID.String(),
 		AccountID:        account.ID.String(),
@@ -57,6 +73,7 @@ func (r *ConversationRepo) LoadForResponse(ctx context.Context, conversationID s
 		History:          history,
 		CurrentMessage:   current,
 		TriggerMessageID: triggerID,
+		Customer:         customer,
 	}, nil
 }
 
