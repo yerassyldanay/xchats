@@ -109,7 +109,9 @@ func TestShouldValidateProductionConfig_TriggersOnRealURLsRegardlessOfEnvironmen
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldValidateProductionConfig(tc.cfg); got != tc.want {
+			// The operator-configured value and the live one are the same here;
+			// the case where they diverge is covered by the test below.
+			if got := shouldValidateProductionConfig(tc.cfg, tc.cfg.Server.APIBaseURL); got != tc.want {
 				t.Errorf("shouldValidateProductionConfig() = %v, want %v", got, tc.want)
 			}
 		})

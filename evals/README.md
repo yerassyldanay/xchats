@@ -226,10 +226,12 @@ best-effort) and `harness export` (fatal-on-error — the one command a **fresh 
 needs before the viewer has anything to show, since the derived `executions.json`/
 `runs.json` are gitignored, same status as `index.html`) both write the SAME dedicated,
 schema-versioned JSON next to each run's `SUMMARY.md`. `frontend/nginx.conf` serves
-`evals/runs/` read-only at `/evals-data/` — mounted only in
-`docker-compose.override.yaml` (**local dev only**: this is raw model output, prompts,
-and KB material with no auth in front of it; the base compose file never mounts it, so
-an internet-facing deploy of the same image simply 404s there).
+`evals/runs/` read-only at `/evals-data/` — but the repo's single compose file
+deliberately never mounts it (**this is raw model output, prompts, and KB material with
+no auth in front of it**), so `/evals-data/` 404s in the Docker stack. To browse it
+locally, either run the frontend dev server (`make dev-frontend`, which serves the
+directory directly) or add a local, gitignored `deploy/docker-compose.override.yaml`
+mounting `../evals/runs:/evals-runs:ro` into the frontend service.
 
 ### Comparison metadata (`setup` / `prompt_ref` / `experiment`)
 

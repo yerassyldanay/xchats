@@ -127,6 +127,11 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	credsChain := openCredentialsAndProvisionSecrets(ctx, cfg, log)
 	settingsStore := settings.NewStore(resolveConfigDir(log))
+	// applyNgrokPublicOrigin overwrites cfg.Server.APIBaseURL with the tunnel's
+	// HTTPS domain, so the operator's own configured value — the only honest
+	// signal of deploy-for-real intent — has to be read before that call, not
+	// after. See shouldValidateProductionConfig.
+	configuredAPIBaseURL := cfg.Server.APIBaseURL
 	autoStartTunnel, err := applyNgrokPublicOrigin(ctx, cfg, ngrokCredsFrom(credsChain), settingsStore, ngrokapi.NewClient())
 	if err != nil {
 		log.Warn("ngrok static domain is not usable as the MCP public origin", "err", err)
@@ -135,7 +140,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		log.Info("using ngrok static domain as the MCP public origin", "public_origin", cfg.ResolvedAPIBaseURL())
 	}
 
-	if shouldValidateProductionConfig(cfg) {
+	if shouldValidateProductionConfig(cfg, configuredAPIBaseURL) {
 		if problems := validateProductionConfig(cfg, credsChain != nil); len(problems) > 0 {
 			fatal("production config", fmt.Errorf("%s", strings.Join(problems, "; ")))
 		}
@@ -611,8 +616,20 @@ func resolveLLMParams(settingsStore *settings.Store, cfg *config.Config) respons
 // real URLs, never touched ENVIRONMENT — silently skipped every check below.
 // Configuring a real public URL is itself a strong enough signal of intent
 // to deploy for real that it should trigger the gate on its own.
-func shouldValidateProductionConfig(cfg *config.Config) bool {
-	return cfg.IsProduction() || !isLocalBaseURL(cfg.Server.APIBaseURL) || !isLocalBaseURL(cfg.Server.FrontendBaseURL)
+//
+// configuredAPIBaseURL is cfg.Server.APIBaseURL as the OPERATOR set it,
+// captured before applyNgrokPublicOrigin overwrote it with the embedded
+// tunnel's HTTPS domain — and passing it is load-bearing, not tidiness.
+// Reading the mutated cfg value here meant that merely connecting ngrok from
+// the Settings UI (a local-dev convenience: it is how you expose a laptop to
+// an MCP host or Telegram) handed this gate a non-localhost API_BASE_URL, so
+// every such dev box silently promoted itself to "production" and then fatally
+// failed the very next check for still having a localhost frontend_base_url —
+// which is the stock config.docker.yaml default, and correct for a laptop. A
+// tunnel the app started for itself says nothing about deploy intent; only
+// what the operator configured does.
+func shouldValidateProductionConfig(cfg *config.Config, configuredAPIBaseURL string) bool {
+	return cfg.IsProduction() || !isLocalBaseURL(configuredAPIBaseURL) || !isLocalBaseURL(cfg.Server.FrontendBaseURL)
 }
 
 // validateProductionConfig returns every reason cfg is unsafe to run for

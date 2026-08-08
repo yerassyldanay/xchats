@@ -451,16 +451,18 @@ func telegramFailState(code int) string {
 	return "webhook_error"
 }
 
-// telegramWebhookBase validates the configured public base URL. Telegram will
-// only call a public HTTPS endpoint, so an http:// or empty value is caught here
-// with an actionable message instead of surfacing as an opaque Bot API 400.
+// telegramWebhookBase validates the resolved public base URL — an explicit
+// telegram.webhook_public_base_url, else the ngrok tunnel's HTTPS origin (see
+// config.TelegramResolvedWebhookBaseURL). Telegram will only call a public
+// HTTPS endpoint, so an http:// or empty value is caught here with an
+// actionable message instead of surfacing as an opaque Bot API 400.
 func (s *Server) telegramWebhookBase() (string, error) {
-	base := strings.TrimSpace(s.cfg.TelegramWebhookPublicBaseURL)
+	base := s.cfg.TelegramResolvedWebhookBaseURL()
 	if base == "" {
-		return "", errors.New("TG_WEBHOOK_PUBLIC_BASE_URL не настроен — Telegram не сможет доставлять сообщения")
+		return "", errors.New("публичный HTTPS-адрес не настроен — подключите ngrok в Настройках или задайте telegram.webhook_public_base_url, иначе Telegram не сможет доставлять сообщения")
 	}
 	if !strings.HasPrefix(strings.ToLower(base), "https://") {
-		return "", errors.New("TG_WEBHOOK_PUBLIC_BASE_URL должен начинаться с https:// — Telegram не принимает http")
+		return "", errors.New("публичный адрес для Telegram должен начинаться с https:// — Telegram не принимает http")
 	}
 	return base, nil
 }
@@ -481,7 +483,7 @@ func (s *Server) telegramSecretUsable() error {
 }
 
 func (s *Server) telegramWebhookURL(accountID uuid.UUID) string {
-	return strings.TrimRight(s.cfg.TelegramWebhookPublicBaseURL, "/") + telegramWebhookPath + accountID.String()
+	return s.cfg.TelegramResolvedWebhookBaseURL() + telegramWebhookPath + accountID.String()
 }
 
 // orgTelegramAccount resolves a Telegram account id under the caller's org.

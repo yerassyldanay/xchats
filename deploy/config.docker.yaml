@@ -3,14 +3,31 @@
 # pointed at this container's mounted volumes (see deploy/docker-compose.yaml
 # — sqlitedata:/data, blobdata:/data/blob). Mounted read-only into the
 # container as /config.yaml and selected with `-config /config.yaml`.
+#
+# THIS FILE IS THE SINGLE SOURCE OF TRUTH for boot/infra settings. The compose
+# file deliberately sets no environment: block for any value that has a field
+# here — env is parsed AFTER yaml (internal/config.Load: "env overrides
+# config.yaml for ops"), so a compose-level `VAR: "${VAR:-default}"` is always
+# set and would silently win over every line below, making this file dead
+# weight. Secrets are never here: they auto-provision into the credential
+# store on first boot, and provider keys live in the Settings UI.
 
 server:
   http_addr: ":8080"
-  api_base_url: ""          # fallback only; configured ngrok discovers its own public origin
-  frontend_base_url: ""     # empty => derived; set FRONTEND_BASE_URL to the published frontend origin
+  # The backend's own public origin, and the fallback for every MCP/OAuth
+  # discovery URL it advertises. Leave it at localhost: a configured ngrok
+  # tunnel discovers its static domain at boot and takes over as the public
+  # origin automatically (cmd/xchats.applyNgrokPublicOrigin). Set a real
+  # HTTPS origin ONLY for a genuine deployment — that alone trips the
+  # production safety gate (cmd/xchats.shouldValidateProductionConfig).
+  api_base_url: "http://localhost:8080"
+  # Where the KB Manager widget's "Review and publish in Xchats" link lands:
+  # the frontend service as reachable from the operator's own browser (a
+  # host-published port, never "frontend:80").
+  frontend_base_url: "http://localhost:8081"
   cors_origins:
-    - "http://localhost:5173"
-    - "http://localhost:8081"
+    - "http://localhost:5173"   # Vite dev server
+    - "http://localhost:8081"   # the compose frontend
   trusted_proxies: []
   secure_cookies: false
 
@@ -29,7 +46,18 @@ system:
   customer_message_wait_seconds: 5
 
 telegram:
+  # "" => auto: webhook when a public HTTPS origin is resolvable, else
+  # polling. Force either with "webhook" / "polling".
   mode: ""
+  # Leave empty whenever the embedded ngrok tunnel fronts this deployment —
+  # the tunnel's own domain is then used for the webhook automatically
+  # (config.TelegramResolvedWebhookBaseURL), so there is nothing to restate
+  # and nothing to update when the domain changes. Set it only to front
+  # Telegram with a DIFFERENT hostname than the rest of the app.
+  webhook_public_base_url: ""
+  # Overrides https://api.telegram.org (a local Bot API server, or a test
+  # double). Advanced; almost always empty.
+  api_base_url: ""
 
 mcp:
   access_token_ttl_seconds: 900

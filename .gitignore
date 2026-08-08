@@ -15,7 +15,11 @@ frontend/.env
 
 cookies.txt
 
-# local-only deploy helpers (machine-specific host ports) — keep out of git
+# The repo ships exactly ONE compose file (deploy/docker-compose.yaml). This
+# entry exists so that a machine-specific escape hatch can never be committed
+# again: docker compose still auto-loads deploy/docker-compose.override.yaml
+# if you create one locally, but it stays yours. Prefer exporting
+# BACKEND_PORT/FRONTEND_PORT for a port clash — that needs no file at all.
 deploy/docker-compose.override.yaml
 
 # blob store (local-disk media bytes)

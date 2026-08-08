@@ -28,14 +28,17 @@ use. Listens on `:80` inside the container.
 | backend  | 8080            | `${BACKEND_PORT:-8080}`     | `BACKEND_PORT`      |
 | frontend | 80              | `${FRONTEND_PORT:-8081}`    | `FRONTEND_PORT`     |
 
-Compose auto-loads a root `.env` (next to `deploy/docker-compose.yaml`'s
-invocation directory) for `${VAR:-default}` interpolation — no `--env-file`
-flag needed for the common case. For a port already taken on your machine,
-either export `BACKEND_PORT`/`FRONTEND_PORT` before `make up`, or add a
-`deploy/docker-compose.override.yaml` (gitignored — this is meant to be a
-local, machine-specific file, never committed) that republishes just the
-port you need to change. `deploy/docker-compose.override.yaml`'s own header
-comment shows a worked example.
+There is exactly one compose file and no `.env` to create — `make up` works
+on a fresh clone with nothing exported. For a port already taken on your
+machine, export `BACKEND_PORT`/`FRONTEND_PORT` for that run:
+
+```bash
+BACKEND_PORT=8090 make up
+```
+
+Those two are the only interpolated values left in the compose file. Every
+application setting lives in [`deploy/config.docker.yaml`](../../deploy/config.docker.yaml),
+which is mounted into the container as `/config.yaml`.
 
 ## Volumes
 
@@ -71,11 +74,19 @@ or lives in the Settings UI, see [`credentials.md`](credentials.md)):
   store fallback by default. See [`credentials.md`](credentials.md).
 - `XCHATS_DATA_DIR` / `XCHATS_CONFIG_DIR` — pinned under the persistent
   `/data` volume rather than the container's own ephemeral `$HOME`.
-- `CORS_ORIGINS`, `API_BASE_URL`, `FRONTEND_BASE_URL` — origin plumbing for
-  the frontend and the MCP connector's self-advertised discovery URLs.
-- `TG_WEBHOOK_PUBLIC_BASE_URL`, `TG_API_BASE_URL` — Telegram Bot API mode
-  selection (see [`troubleshooting.md`](troubleshooting.md)).
-- `SIMULATOR_ENABLED` — gates a test-only HTTP route; defaults to `false`.
+- `XCHATS_CONFIG=/config.yaml` — selects the mounted config file.
+
+That is the whole list, and deliberately so. Origin plumbing
+(`api_base_url`, `frontend_base_url`, `cors_origins`), Telegram mode and
+webhook origin, and the simulator gate all live in `config.docker.yaml`
+instead. They must NOT be re-declared as environment variables here:
+`internal/config.Load` applies env *after* yaml, so a compose-level
+`VAR: "${VAR:-default}"` is always set and would silently override the file,
+which is what previously made `config.docker.yaml` dead weight.
+
+Every one of those settings still accepts an environment override at run
+time (the `env:` struct tags are unchanged) — that escape hatch is for
+`docker run`/orchestrator deployments, not for the committed compose file.
 
 ## Common operations
 

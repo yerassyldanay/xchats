@@ -2,11 +2,17 @@
 # WhatsApp connects directly via go.mau.fi/whatsmeow (internal/whatsmeow) — no
 # external gateway to run or point at; pair a number from the UI's QR flow.
 #
-# Host port mappings are parametric — override BACKEND_PORT/FRONTEND_PORT
-# (shell env, or a root .env compose auto-loads) when the defaults collide
-# with something else already running; the internal container ports (8080 /
-# 80) and the service-to-service addressing (frontend -> backend:8080) never
-# change, only what's published to the host. See docs/release/docker.md.
+# `make up` and nothing else: this is the ONLY compose file, there is no
+# override file and no .env to create. Application settings all live in the
+# mounted config.docker.yaml; secrets auto-provision on first boot; provider
+# keys and integrations are configured from the Settings UI afterwards.
+#
+# The only knobs here are the two host port mappings, kept parametric for the
+# one case that genuinely varies per machine — a port already in use. They
+# default to 8080/8081 with nothing set; export BACKEND_PORT/FRONTEND_PORT for
+# that run to move them. The internal container ports (8080 / 80) and the
+# service-to-service addressing (frontend -> backend:8080) never change, only
+# what is published to the host. See docs/release/docker.md.
 services:
   backend:
     build:
@@ -30,25 +36,13 @@ services:
       XCHATS_ALLOW_FILE_CREDENTIALS: "1"
       XCHATS_DATA_DIR: "/data/appdata"
       XCHATS_CONFIG_DIR: "/data/appconfig"
-      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,http://localhost:${FRONTEND_PORT:-8081}}"
-      # --- MCP connector (plan/mcp.md) ---
-      # API_BASE_URL is the fallback public origin for deployments that do not
-      # use embedded ngrok. A saved ngrok authtoken plus API key discovers and
-      # persists the account's assigned domain; xchats then uses that HTTPS
-      # origin for every MCP/OAuth issuer, audience, discovery, and callback.
-      API_BASE_URL: "${API_BASE_URL:-http://localhost:${BACKEND_PORT:-8080}}"
-      # FRONTEND_BASE_URL is where the KB Manager widget's "Review and publish
-      # in Xchats" link lands — the frontend service below, as reachable from
-      # the operator's own browser (a host-published port, never "frontend:80").
-      FRONTEND_BASE_URL: "${FRONTEND_BASE_URL:-http://localhost:${FRONTEND_PORT:-8081}}"
-      # --- Telegram (Bot API) — not secrets, so still a per-deployment
-      # override here rather than a Settings UI field. Empty => polling mode
-      # (see config.yaml's telegram.mode comment). ---
-      TG_WEBHOOK_PUBLIC_BASE_URL: "${TG_WEBHOOK_PUBLIC_BASE_URL:-}"
-      TG_API_BASE_URL: "${TG_API_BASE_URL:-}"
-      # Simulator HTTP API (Phase 10) — gates whether the route is registered
-      # at all. Default false; set true to test without a WhatsApp number.
-      SIMULATOR_ENABLED: "${SIMULATOR_ENABLED:-false}"
+      # Nothing else belongs here. Every remaining boot/infra setting — the
+      # public base URLs, CORS origins, Telegram mode/webhook origin, the
+      # simulator gate — lives in the mounted config.docker.yaml above.
+      # internal/config.Load applies env AFTER yaml, so re-declaring any of
+      # them here as `VAR: "${VAR:-default}"` would always be set and would
+      # silently override the yaml, making that file unusable. That is exactly
+      # the trap this block used to be.
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:

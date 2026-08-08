@@ -20,9 +20,11 @@ This builds and starts both services detached. Default addresses:
 - Frontend: http://localhost:8081
 - Backend API: http://localhost:8080
 
-Both are overridable (`BACKEND_PORT`/`FRONTEND_PORT`, a root `.env`, or a
-local `deploy/docker-compose.override.yaml` — gitignored on purpose, for
-machine-specific remaps when a default port is already taken) — see
+There is no `.env` to create and no override file to add — `make up` on a
+fresh clone is the whole install. If one of those ports is already taken,
+export `BACKEND_PORT`/`FRONTEND_PORT` for that run (e.g.
+`BACKEND_PORT=8090 make up`); everything else is configured in
+[`deploy/config.docker.yaml`](../../deploy/config.docker.yaml). See
 [`docker.md`](docker.md).
 
 Other useful targets: `make down` (stop), `make logs` (tail), `make ps`
