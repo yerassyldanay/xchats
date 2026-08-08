@@ -2,8 +2,9 @@
 import { computed, onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Blocks, Check, FlaskConical, Inbox, Library, LogOut, Radio, Settings } from 'lucide-vue-next'
+import { Blocks, CalendarClock, Check, FlaskConical, Inbox, Library, LogOut, Radio, Settings, UsersRound } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
+import { useCrm } from '../stores/crm'
 import { useSettings } from '../stores/settings'
 import { initials, colorFor } from '../lib/format'
 import { evalsApi } from '../api/evals'
@@ -21,6 +22,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 // by App.vue so it never disappears.
 const auth = useAuth()
 const settingsStore = useSettings()
+const crm = useCrm()
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
@@ -33,14 +35,23 @@ const { t } = useI18n()
 const evalsAvailable = ref(false)
 onMounted(async () => {
   evalsAvailable.value = await evalsApi.probeAvailable()
+  void crm.loadBuckets()
 })
 
 const baseNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
   { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
+  { name: 'customers', icon: UsersRound, label: t('crm.nav.customers'), match: ['customers'] },
+  { name: 'followups', icon: CalendarClock, label: t('crm.nav.followups'), match: ['followups'] },
   { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts'] },
   { name: 'playground', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
 ])
+
+// The overdue count rides on the Задачи icon: an overdue follow-up is the one
+// piece of CRM state that has to be visible from anywhere in the app, not only
+// once you navigate to it. Loaded once on mount and refreshed by the crm
+// store's own follow-up mutations.
+const overdueCount = computed(() => crm.buckets.overdue)
 // Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
 // and rendered in its own bottom cluster (separated by a divider, above the avatar)
 // so it never reads as one more product feature.
@@ -84,10 +95,16 @@ async function switchOrg(orgId: string) {
             <RouterLink
               :to="{ name: item.name }"
               :aria-label="item.label"
-              class="w-11 h-11 rounded-lg grid place-items-center transition"
+              class="relative w-11 h-11 rounded-lg grid place-items-center transition"
               :class="isActive(item.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
             >
               <component :is="item.icon" class="w-5 h-5" />
+              <span
+                v-if="item.name === 'followups' && overdueCount > 0"
+                class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-semibold grid place-items-center"
+              >
+                {{ overdueCount > 99 ? '99+' : overdueCount }}
+              </span>
             </RouterLink>
           </TooltipTrigger>
           <TooltipContent side="right">{{ item.label }}</TooltipContent>

@@ -1,15 +1,28 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
-import { LoaderCircle, PenLine, RotateCw, Send, WandSparkles } from 'lucide-vue-next'
+import { computed, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { LoaderCircle, PenLine, RotateCw, Send, UserRound, WandSparkles } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { vAutosize } from '../lib/autosize'
 import type { AiDraft } from '../types'
+import CustomerPanel from './CustomerPanel.vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const inbox = useInbox()
+const { t } = useI18n()
+
+// The right-hand pane carries two things a manager alternates between while
+// answering: who this customer is, and the AI's suggested reply. Tabs rather
+// than a fourth column — at 340px each, four panes need ~1600px before the
+// message thread stops being the smallest thing on screen.
+//
+// «Клиент» is the default: the product is conversation-first, and the first
+// question on opening a chat is who this is, not what the model would say.
+const tab = ref<'customer' | 'assistant'>('customer')
 
 // per-option local edit state, keyed by draft id
 const edits = reactive<Record<string, { text: string }>>({})
@@ -39,24 +52,27 @@ function conf(d: AiDraft) {
   return { pct, cls: 'bg-rose-500/10 text-rose-700 dark:text-rose-400 ring-1 ring-rose-500/20' }
 }
 
-const attrs = computed(() => Object.entries(inbox.activeChat?.contact.attributes || {}).slice(0, 3))
 const hasDrafts = computed(() => inbox.drafts.length > 0)
 </script>
 
 <template>
-  <aside class="flex flex-col bg-card">
-    <header class="h-16 px-4 flex items-center justify-between border-b border-border shrink-0">
-      <span class="flex items-center gap-2.5 font-semibold">
-        <span class="w-8 h-8 rounded-lg bg-primary text-primary-foreground grid place-items-center">
-          <WandSparkles class="w-4 h-4" />
-        </span>
-        ИИ-помощник
-      </span>
+  <aside class="flex flex-col bg-card min-h-0">
+    <header class="h-16 px-3 flex items-center justify-between border-b border-border shrink-0 gap-2">
+      <Tabs :model-value="tab" class="flex-1 min-w-0" @update:model-value="(v) => (tab = v as 'customer' | 'assistant')">
+        <TabsList class="w-full">
+          <TabsTrigger value="customer" class="flex-1 gap-1.5">
+            <UserRound class="w-3.5 h-3.5" /> {{ t('crm.tab.customer') }}
+          </TabsTrigger>
+          <TabsTrigger value="assistant" class="flex-1 gap-1.5">
+            <WandSparkles class="w-3.5 h-3.5" /> {{ t('crm.tab.assistant') }}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
       <Button
-        v-if="inbox.activeChat && hasDrafts"
+        v-if="tab === 'assistant' && inbox.activeChat && hasDrafts"
         variant="ghost"
         size="icon"
-        class="w-8 h-8 text-muted-foreground"
+        class="w-8 h-8 text-muted-foreground shrink-0"
         :disabled="inbox.suggesting"
         title="Сгенерировать заново"
         @click="inbox.regenerate()"
@@ -65,7 +81,9 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
       </Button>
     </header>
 
-    <div class="flex-1 overflow-y-auto p-4 space-y-3">
+    <CustomerPanel v-if="tab === 'customer'" class="flex-1 min-h-0" />
+
+    <div v-else class="flex-1 overflow-y-auto p-4 space-y-3">
       <template v-if="inbox.activeChat">
         <!-- generating shimmer -->
         <div v-if="inbox.suggesting && !hasDrafts" class="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -166,19 +184,5 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
       </div>
     </div>
 
-    <!-- contact mini-profile -->
-    <div v-if="inbox.activeChat" class="border-t border-border p-4 shrink-0">
-      <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">Контакт</div>
-      <div class="font-semibold">{{ inbox.activeChat.contact.display_name }}</div>
-      <div class="text-sm text-muted-foreground">
-        {{ inbox.activeChat.contact.phone_number || inbox.activeChat.contact.phone_jid }}
-      </div>
-      <dl v-if="attrs.length" class="mt-2.5 space-y-1">
-        <div v-for="[k, val] in attrs" :key="k" class="flex justify-between text-xs">
-          <dt class="text-muted-foreground">{{ k }}</dt>
-          <dd class="font-medium">{{ val }}</dd>
-        </div>
-      </dl>
-    </div>
   </aside>
 </template>
