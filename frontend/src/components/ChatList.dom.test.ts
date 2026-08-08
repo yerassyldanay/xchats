@@ -22,6 +22,7 @@ function chat(id: string, channel: ChannelName): Chat {
     unread_count: 0,
     last_message_at: '2026-08-19T08:00:00Z',
     last_message_preview: `preview ${id}`,
+    customer_id: null,
   }
 }
 

@@ -66,7 +66,12 @@ describe('App — first-run setup wizard gate', () => {
     auth.user = { id: '1', email: 'a@b.c', name: 'Member', role: 'member', must_change_password: false }
     await flushPromises()
 
-    expect(api.get).not.toHaveBeenCalled()
+    // Scoped to /settings on purpose: what this test guards is that the
+    // WIZARD's setup check never runs for a non-admin. Other components
+    // mounted by App (the nav rail's overdue follow-up badge) legitimately
+    // fetch on mount for every role, and a blanket "no GET at all" would fail
+    // on those without saying anything about the wizard.
+    expect(api.get).not.toHaveBeenCalledWith('/settings')
     expect(wrapper.text()).not.toContain('Добро пожаловать в xchats')
   })
 
