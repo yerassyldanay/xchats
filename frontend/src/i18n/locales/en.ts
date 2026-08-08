@@ -343,6 +343,9 @@ export default {
       broken: 'not connected',
       manage: 'Manage channels',
       empty: 'No channels connected yet.',
+      metaTitle: 'Meta App (Instagram, Messenger, WhatsApp Cloud)',
+      metaSubtitle:
+        'Your own Meta Developer App ID and Secret — one app covers all three official Meta channels. Tokens never leave this install.',
     },
     team: {
       title: 'Team',

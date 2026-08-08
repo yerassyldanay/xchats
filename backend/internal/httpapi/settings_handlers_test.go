@@ -61,8 +61,8 @@ func TestListIntegrationsShowsAllProvidersNoneConfigured(t *testing.T) {
 	if !got.CredentialStoreAvailable {
 		t.Error("CredentialStoreAvailable = false, want true (harness forces a file-backed store)")
 	}
-	if len(got.Providers) != 5 {
-		t.Fatalf("providers = %d, want 5 (openrouter, openai, gemini, ngrok, langfuse)", len(got.Providers))
+	if len(got.Providers) != 6 {
+		t.Fatalf("providers = %d, want 6 (openrouter, openai, gemini, ngrok, langfuse, meta)", len(got.Providers))
 	}
 	seen := map[string]bool{}
 	for _, p := range got.Providers {
@@ -71,7 +71,7 @@ func TestListIntegrationsShowsAllProvidersNoneConfigured(t *testing.T) {
 			t.Errorf("provider %q reports configured=true before anything was saved", p.ID)
 		}
 	}
-	for _, id := range []string{"openrouter", "openai", "gemini", "ngrok", "langfuse"} {
+	for _, id := range []string{"openrouter", "openai", "gemini", "ngrok", "langfuse", "meta"} {
 		if !seen[id] {
 			t.Errorf("provider %q missing from the list", id)
 		}

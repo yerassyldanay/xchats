@@ -112,7 +112,7 @@ func seedFourChannels(t *testing.T, st *store.Store) (orgID, waChat, simChat, tg
 	// Generic channel core — one representative Meta channel (see the doc
 	// comment above for why only one).
 	const externalAccountID = "15550001111"
-	metaAccount := config.ChannelAccountID("whatsapp_cloud:phone:" + externalAccountID)
+	metaAccount := config.ChannelAccountID(config.WhatsAppCloudOwnerRef(externalAccountID))
 	if _, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
 		ID: metaAccount, OrganizationID: orgID, Channel: "whatsapp_cloud",
 		ExternalAccountID: externalAccountID, DisplayName: "WhatsApp Cloud", Handle: "+15550001111",
@@ -565,7 +565,7 @@ func TestClaimChannelAccountRevivesTheSameRow(t *testing.T) {
 	}
 
 	again, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
-		ID:                config.ChannelAccountID("whatsapp_cloud:phone:15550001111"),
+		ID:                config.ChannelAccountID(config.WhatsAppCloudOwnerRef("15550001111")),
 		OrganizationID:    orgID,
 		Channel:           "whatsapp_cloud",
 		ExternalAccountID: "15550001111",
@@ -611,7 +611,7 @@ func TestClaimChannelAccountRevivesTheSameRow(t *testing.T) {
 		t.Fatalf("seed other org: %v", err)
 	}
 	if _, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
-		ID:                config.ChannelAccountID("whatsapp_cloud:phone:15550001111"),
+		ID:                config.ChannelAccountID(config.WhatsAppCloudOwnerRef("15550001111")),
 		OrganizationID:    other.ID,
 		Channel:           "whatsapp_cloud",
 		ExternalAccountID: "15550001111",
@@ -633,7 +633,7 @@ func TestChannelCredentialsRequireAnEncryptionKey(t *testing.T) {
 		t.Fatalf("seed org: %v", err)
 	}
 	acct, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
-		ID:                config.ChannelAccountID("whatsapp_cloud:phone:70001"),
+		ID:                config.ChannelAccountID(config.WhatsAppCloudOwnerRef("70001")),
 		OrganizationID:    org.ID,
 		Channel:           "whatsapp_cloud",
 		ExternalAccountID: "70001",

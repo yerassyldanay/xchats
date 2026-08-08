@@ -22,7 +22,7 @@ func TestProvidersReturnsACopy(t *testing.T) {
 }
 
 func TestProviderByID(t *testing.T) {
-	for _, id := range []string{"openrouter", "openai", "gemini", "ngrok", "langfuse"} {
+	for _, id := range []string{"openrouter", "openai", "gemini", "ngrok", "langfuse", "meta"} {
 		t.Run(id, func(t *testing.T) {
 			p, ok := ProviderByID(id)
 			if !ok {
@@ -74,6 +74,9 @@ var validatorCases = []struct {
 	{"gemini", validateGemini, func(v string) map[Key]string { return map[Key]string{"gemini.api_key": v} }},
 	{"langfuse", validateLangfuse, func(v string) map[Key]string {
 		return map[Key]string{"langfuse.public_key": "pub", "langfuse.secret_key": v}
+	}},
+	{"meta", validateMeta, func(v string) map[Key]string {
+		return map[Key]string{"meta.app_id": "app123", "meta.app_secret": v}
 	}},
 }
 
@@ -264,6 +267,54 @@ func TestValidateLangfuseSendsBasicAuthAndDefaultsHost(t *testing.T) {
 	}
 	if !ok || gotUser != "pk-test" || gotPass != "sk-test" {
 		t.Errorf("basic auth = (%q, %q, %v), want (%q, %q, true)", gotUser, gotPass, ok, "pk-test", "sk-test")
+	}
+}
+
+func TestValidateMetaSendsAppTokenAsInputAndAccessToken(t *testing.T) {
+	var gotInput, gotAccess, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotInput = r.URL.Query().Get("input_token")
+		gotAccess = r.URL.Query().Get("access_token")
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	err := validateMeta(context.Background(), map[Key]string{
+		"meta.app_id": "app123", "meta.app_secret": "secret456", "meta.base_url": srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("validateMeta: %v", err)
+	}
+	if gotPath != "/debug_token" {
+		t.Errorf("path = %q, want /debug_token", gotPath)
+	}
+	const wantAppToken = "app123|secret456"
+	if gotInput != wantAppToken || gotAccess != wantAppToken {
+		t.Errorf("input_token/access_token = (%q, %q), want both %q", gotInput, gotAccess, wantAppToken)
+	}
+}
+
+func TestValidateMetaTreats400WithErrorCodeAsInvalidCredential(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Invalid OAuth access token","type":"OAuthException","code":190}}`))
+	}))
+	defer srv.Close()
+	values := map[Key]string{"meta.app_id": "bad", "meta.app_secret": "creds", "meta.base_url": srv.URL}
+	if err := validateMeta(context.Background(), values); !errors.Is(err, ErrInvalidCredential) {
+		t.Errorf("meta 400 with an error code: err = %v, want ErrInvalidCredential", err)
+	}
+}
+
+func TestValidateMetaTreatsBodyWithNoErrorCodeAsUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`not a Graph API error envelope at all`))
+	}))
+	defer srv.Close()
+	values := map[Key]string{"meta.app_id": "x", "meta.app_secret": "y", "meta.base_url": srv.URL}
+	if err := validateMeta(context.Background(), values); !errors.Is(err, ErrValidationUnavailable) {
+		t.Errorf("meta 400 non-error-shaped body: err = %v, want ErrValidationUnavailable", err)
 	}
 }
 

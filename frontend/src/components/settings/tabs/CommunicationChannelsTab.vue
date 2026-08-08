@@ -9,15 +9,26 @@ import { useI18n } from 'vue-i18n'
 import { ArrowUpRight } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useAccounts } from '@/stores/accounts'
+import { useSettings } from '@/stores/settings'
 import { connStatus, type ConnTone } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
+import ProviderCredentialCard from '../ProviderCredentialCard.vue'
 import type { Account } from '@/types'
 
 const accounts = useAccounts()
+const settings = useSettings()
 const { t } = useI18n()
+
+// The Meta App credential (App ID/Secret) is the one prerequisite every
+// official Meta channel (Instagram, Messenger, WhatsApp Cloud) shares —
+// see internal/credentials' "meta" provider. It renders here, not in
+// MonitoringTab, because it's a channel-connection prerequisite, not an
+// observability integration; the card itself is the exact same
+// ProviderCredentialCard MonitoringTab uses for langfuse.
+const meta = computed(() => settings.integrations.find((p) => p.id === 'meta'))
 
 onMounted(() => accounts.load())
 
@@ -55,6 +66,12 @@ const stats = computed(() => {
       <RouterLink :to="{ name: 'accounts' }">
         <Button size="sm" variant="outline">{{ t('settings.channels.manage') }} <ArrowUpRight class="w-4 h-4" /></Button>
       </RouterLink>
+    </div>
+
+    <div>
+      <h4 class="text-sm font-medium">{{ t('settings.channels.metaTitle') }}</h4>
+      <p class="text-xs text-muted-foreground mb-2">{{ t('settings.channels.metaSubtitle') }}</p>
+      <ProviderCredentialCard v-if="meta" :provider="meta" />
     </div>
 
     <div class="rounded-lg border border-border bg-card divide-y divide-border">

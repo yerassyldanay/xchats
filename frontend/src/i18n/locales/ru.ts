@@ -350,6 +350,9 @@ export default {
       broken: 'не подключено',
       manage: 'Управление каналами',
       empty: 'Каналы ещё не подключены.',
+      metaTitle: 'Meta App (Instagram, Messenger, WhatsApp Cloud)',
+      metaSubtitle:
+        'App ID и App Secret вашего собственного Meta Developer App — один на все три официальных канала Meta. Токены не покидают эту установку.',
     },
     team: {
       title: 'Команда',
