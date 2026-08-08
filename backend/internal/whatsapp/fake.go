@@ -174,7 +174,7 @@ func (f *Fake) injectReceipt(ctx context.Context, accountID uuid.UUID, evt Debug
 		return fmt.Errorf("whatsapp.Fake: external_id is required for a receipt event")
 	}
 	rank := map[string]int{"delivered": 2, "read": 3}[state]
-	msgID, _, err := f.Store.AdvanceDeliveryState(ctx, accountID, evt.ExternalID, state, rank)
+	msgID, _, err := f.Store.AdvanceDeliveryState(ctx, string(messaging.ChannelWhatsApp), accountID, evt.ExternalID, state, rank)
 	if err != nil {
 		if err == store.ErrNotFound {
 			return nil

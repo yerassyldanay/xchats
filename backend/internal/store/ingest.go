@@ -19,14 +19,20 @@ import (
 //
 // The wa_* gateway carries BOTH the whatsapp and simulator channels (the
 // simulator is wa_accounts rows with channel='simulator'), so both map there.
-// An empty channel means "a caller that predates the channel column" and is
-// treated as whatsapp — the same table it has always written to. Anything else
-// is a programming error and is reported, never silently routed to wa_*.
+// Instagram, Messenger and WhatsApp Cloud all carry the SAME generic
+// channel_chats/channel_messages tables (see migration 0011) — one arm, not
+// three, and the reason a future fourth channel costs no new table-dispatch
+// case at all as long as it also fits the generic core. An empty channel
+// means "a caller that predates the channel column" and is treated as
+// whatsapp — the same table it has always written to. Anything else is a
+// programming error and is reported, never silently routed to wa_*.
 
 func chatsTableFor(channel string) (string, error) {
 	switch channel {
 	case string(chanTelegram):
 		return "tg_chats", nil
+	case string(chanInstagram), string(chanMessenger), string(chanWhatsAppCloud):
+		return "channel_chats", nil
 	case string(chanWhatsApp), string(chanSimulator), "":
 		return "wa_chats", nil
 	default:
@@ -38,6 +44,8 @@ func messagesTableFor(channel string) (string, error) {
 	switch channel {
 	case string(chanTelegram):
 		return "tg_messages", nil
+	case string(chanInstagram), string(chanMessenger), string(chanWhatsAppCloud):
+		return "channel_messages", nil
 	case string(chanWhatsApp), string(chanSimulator), "":
 		return "wa_messages", nil
 	default:
@@ -51,10 +59,28 @@ func messagesTableFor(channel string) (string, error) {
 type channelName string
 
 const (
-	chanWhatsApp  channelName = "whatsapp"
-	chanSimulator channelName = "simulator"
-	chanTelegram  channelName = "telegram"
+	chanWhatsApp      channelName = "whatsapp"
+	chanSimulator     channelName = "simulator"
+	chanTelegram      channelName = "telegram"
+	chanInstagram     channelName = "instagram"
+	chanMessenger     channelName = "messenger"
+	chanWhatsAppCloud channelName = "whatsapp_cloud"
 )
+
+// isChannelCoreChannel reports whether channel is one of the generic
+// channel_* tables' channels — the dispatch UpsertOutboundMedia and
+// MediaStorageURL need beyond chatsTableFor/messagesTableFor, since those
+// two functions dispatch by TABLE NAME while media additionally needs its
+// own per-gateway table (message_media / tg_message_media /
+// channel_message_media).
+func isChannelCoreChannel(channel string) bool {
+	switch channel {
+	case string(chanInstagram), string(chanMessenger), string(chanWhatsAppCloud):
+		return true
+	default:
+		return false
+	}
+}
 
 // InboundUpsert is the worker's normalized input for one message event.
 type InboundUpsert struct {
@@ -207,12 +233,20 @@ func deliveryStateFor(direction string) string {
 	return "delivered"
 }
 
-// AdvanceDeliveryState applies a status update, monotonically (never backwards).
-// Returns the message + chat id on a real change, ErrNotFound otherwise.
-func (s *Store) AdvanceDeliveryState(ctx context.Context, accountID uuid.UUID, externalMessageID, newState string, newRank int) (uuid.UUID, uuid.UUID, error) {
+// AdvanceDeliveryState applies a status update, monotonically (never
+// backwards), on the channel's own message table. Returns the message + chat
+// id on a real change, ErrNotFound otherwise. Today's only callers are all
+// WhatsApp (whatsmeow receipts); WhatsApp Cloud API status webhooks are the
+// next caller this dispatch is for — Telegram bots get no delivery receipts
+// at all, and Instagram/Messenger DMs have no delivery-status webhook either.
+func (s *Store) AdvanceDeliveryState(ctx context.Context, channel string, accountID uuid.UUID, externalMessageID, newState string, newRank int) (uuid.UUID, uuid.UUID, error) {
+	table, err := messagesTableFor(channel)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
 	var msgID, chatID uuid.UUID
-	err := s.db.QueryRow(ctx, `
-		UPDATE wa_messages SET delivery_state = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+	err = s.db.QueryRow(ctx, `
+		UPDATE `+table+` SET delivery_state = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE account_id = $1 AND external_message_id = $2
 		  AND (CASE delivery_state
 				WHEN 'queued' THEN 0 WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2
@@ -239,6 +273,21 @@ func (s *Store) UpsertOutboundMedia(ctx context.Context, channel string, message
 			INSERT INTO tg_message_media
 				(message_id, file_id, file_unique_id, media_type, mimetype, filename, size, storage_key, download_status)
 			VALUES ($1, '', '', $2, $3, $4, $5, $6, 'ready')
+			ON CONFLICT (message_id) DO UPDATE SET
+				storage_key = EXCLUDED.storage_key,
+				download_status = 'ready',
+				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
+			messageID, m.MediaType, m.Mimetype, m.FileName, m.FileSize, storageKey)
+		return err
+	}
+	if isChannelCoreChannel(channel) {
+		// provider_ref/source_url are the INBOUND fetch-from-provider fields
+		// (see channels.go's InsertChannelMediaPending) and stay empty here:
+		// an outbound attachment is always bytes we already hold.
+		_, err := s.db.Exec(ctx, `
+			INSERT INTO channel_message_media
+				(message_id, media_type, mimetype, filename, size, storage_key, download_status)
+			VALUES ($1, $2, $3, $4, $5, $6, 'ready')
 			ON CONFLICT (message_id) DO UPDATE SET
 				storage_key = EXCLUDED.storage_key,
 				download_status = 'ready',
@@ -301,7 +350,13 @@ func (s *Store) MediaStorageURL(ctx context.Context, orgID, id uuid.UUID) (stora
 		FROM tg_message_media tm
 		JOIN tg_messages m ON m.id = tm.message_id
 		JOIN tg_accounts a ON a.id = m.account_id
-		WHERE tm.id = $1 AND a.organization_id = $2`, id, orgID).
+		WHERE tm.id = $1 AND a.organization_id = $2
+		UNION ALL
+		SELECT cmm.storage_key, cmm.mimetype, cmm.filename
+		FROM channel_message_media cmm
+		JOIN channel_messages m ON m.id = cmm.message_id
+		JOIN channel_accounts a ON a.id = m.account_id
+		WHERE cmm.id = $1 AND a.organization_id = $2`, id, orgID).
 		Scan(&storageURL, &mimetype, &fileName)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return "", "", "", ErrNotFound
