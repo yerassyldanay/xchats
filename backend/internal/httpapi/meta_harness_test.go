@@ -187,6 +187,18 @@ func (h *metaHarness) postJSON(path string, body any) (*http.Response, map[strin
 	return resp, env
 }
 
+func (h *metaHarness) getJSON(path string) (*http.Response, map[string]json.RawMessage) {
+	h.t.Helper()
+	resp, err := h.client.Get(h.srv.URL + path)
+	if err != nil {
+		h.t.Fatalf("GET %s: %v", path, err)
+	}
+	var env map[string]json.RawMessage
+	_ = json.NewDecoder(resp.Body).Decode(&env)
+	resp.Body.Close()
+	return resp, env
+}
+
 func (h *metaHarness) deleteJSON(path string) (*http.Response, map[string]json.RawMessage) {
 	h.t.Helper()
 	req, err := http.NewRequest(http.MethodDelete, h.srv.URL+path, nil)

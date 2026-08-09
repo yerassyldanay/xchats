@@ -34,8 +34,18 @@ func (w *Worker) RefreshExpiringInstagramTokens(ctx context.Context, before time
 		if refreshErr := w.refreshOneInstagramToken(ctx, m); refreshErr != nil {
 			w.Log.Warn("instagram token refresh failed", "account_id", m.AccountID, "err", refreshErr)
 			_ = w.Store.SetChannelCredentialsRefreshError(ctx, m.AccountID, refreshErr.Error())
+			// A due-and-failing refresh is the one case connection_state=
+			// token_expiring is actually meant to surface — the batch is
+			// only re-attempted every 6h, so an operator needs to see this
+			// rather than the account silently going dark once the token
+			// finally does expire.
+			_ = w.Store.SetChannelAccountState(ctx, m.AccountID, "token_expiring")
 			continue
 		}
+		// A refresh that just succeeded resolves any earlier token_expiring
+		// warning — harmless (and correctly a no-op) for an account that was
+		// never marked at all.
+		_ = w.Store.SetChannelAccountState(ctx, m.AccountID, "connected")
 		refreshed++
 	}
 	if refreshed > 0 {
@@ -65,7 +75,7 @@ func (w *Worker) refreshOneInstagramToken(ctx context.Context, m store.ChannelCr
 
 // StartInstagramTokenRefresher runs RefreshExpiringInstagramTokens once at
 // startup (catching anything that fell due while the process was down) and
-// then on a ticker until ctx is done — mirrors StartChannelMediaSweeper's
+// then on a ticker until ctx is done — mirrors StartMediaSweeper's
 // identical shape.
 func (w *Worker) StartInstagramTokenRefresher(ctx context.Context, every, before, minAge time.Duration) {
 	go func() {

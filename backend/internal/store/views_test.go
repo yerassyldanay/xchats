@@ -621,6 +621,64 @@ func TestClaimChannelAccountRevivesTheSameRow(t *testing.T) {
 	}
 }
 
+// TestChannelAccountsWithWebhookOnlyReturnsRegisteredOnes is the stale-origin
+// repair pass's own read: an account that was claimed but never got as far
+// as a webhook registration (webhook_url still ”) must not show up — there
+// is nothing to compare its origin against — and a soft-deleted account
+// (even a previously-registered one) must not either.
+func TestChannelAccountsWithWebhookOnlyReturnsRegisteredOnes(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	org, err := st.SeedOrganization(ctx, "views-webhook-list")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+
+	registered, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: config.ChannelAccountID(config.InstagramOwnerRef("ig-registered")), OrganizationID: org.ID,
+		Channel: "instagram", ExternalAccountID: "ig-registered",
+	})
+	if err != nil {
+		t.Fatalf("claim registered: %v", err)
+	}
+	if err := st.SetChannelWebhookState(ctx, registered.ID, store.ChannelWebhookState{
+		State: "connected", URL: "https://old.example.com/meta/api/v1/webhook/instagram", Registered: true,
+	}); err != nil {
+		t.Fatalf("set webhook state: %v", err)
+	}
+
+	if _, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: config.ChannelAccountID(config.InstagramOwnerRef("ig-unregistered")), OrganizationID: org.ID,
+		Channel: "instagram", ExternalAccountID: "ig-unregistered",
+	}); err != nil {
+		t.Fatalf("claim unregistered: %v", err)
+	}
+
+	deleted, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: config.ChannelAccountID(config.InstagramOwnerRef("ig-deleted")), OrganizationID: org.ID,
+		Channel: "instagram", ExternalAccountID: "ig-deleted",
+	})
+	if err != nil {
+		t.Fatalf("claim deleted: %v", err)
+	}
+	if err := st.SetChannelWebhookState(ctx, deleted.ID, store.ChannelWebhookState{
+		State: "connected", URL: "https://old.example.com/meta/api/v1/webhook/instagram", Registered: true,
+	}); err != nil {
+		t.Fatalf("set webhook state: %v", err)
+	}
+	if err := st.ConfirmChannelDisconnect(ctx, deleted.ID); err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+
+	got, err := st.ChannelAccountsWithWebhook(ctx, "instagram")
+	if err != nil {
+		t.Fatalf("ChannelAccountsWithWebhook: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != registered.ID {
+		t.Fatalf("got %+v, want exactly [%s]", got, registered.ID)
+	}
+}
+
 // Without an encryption key, credential paths must fail loudly rather than
 // storing a plaintext secret — the generic core's equivalent of
 // TestTelegramCredentialsRequireAnEncryptionKey.

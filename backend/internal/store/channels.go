@@ -147,6 +147,33 @@ func (s *Store) ChannelAccountByExternalID(ctx context.Context, channel, externa
 	return a, err
 }
 
+// ChannelAccountsWithWebhook lists every live, previously-registered account
+// on the given channel — deliberately install-wide, not org-scoped, since
+// its two callers (the stale-origin repair pass and the meta-setup
+// checklist's stale list) are both boot-time/admin maintenance concerns, not
+// a single tenant's own view. "Previously-registered" (webhook_url <> "")
+// excludes an account that was claimed but never got as far as a webhook
+// registration — comparing an empty origin against the current public base
+// URL would always spuriously read as stale.
+func (s *Store) ChannelAccountsWithWebhook(ctx context.Context, channel string) ([]ChannelAccount, error) {
+	rows, err := s.db.Query(ctx, `SELECT `+channelAccountCols+`
+		FROM channel_accounts WHERE channel = $1 AND deleted_at IS NULL AND webhook_url <> ''
+		ORDER BY created_at`, channel)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ChannelAccount
+	for rows.Next() {
+		a, err := scanChannelAccount(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // ChannelExternalAccountID resolves an account's provider-side identity
 // (phone_number_id for whatsapp_cloud, an IGSID-space user id for
 // instagram, a Page id for messenger) — the Graph API path segment a send

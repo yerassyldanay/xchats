@@ -147,6 +147,15 @@ func TestRefreshExpiringInstagramTokensRecordsFailureWithoutBlockingOthers(t *te
 	if secret, _ := st.ChannelCredentialsSecret(ctx, ok.ID); secret != "new-tok-ok" {
 		t.Fatalf("the healthy account's token = %q, want new-tok-ok", secret)
 	}
+
+	failingAcct, err := st.ChannelAccountByID(ctx, failing.ID)
+	if err != nil || failingAcct.ConnectionState != "token_expiring" {
+		t.Fatalf("failing account connection_state = %q (err %v), want token_expiring", failingAcct.ConnectionState, err)
+	}
+	okAcct, err := st.ChannelAccountByID(ctx, ok.ID)
+	if err != nil || okAcct.ConnectionState != "connected" {
+		t.Fatalf("healthy account connection_state = %q (err %v), want connected", okAcct.ConnectionState, err)
+	}
 }
 
 func TestRefreshExpiringInstagramTokensNoopsWithoutAMetaClient(t *testing.T) {

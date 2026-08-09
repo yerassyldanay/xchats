@@ -276,6 +276,39 @@ export interface MessengerOAuthStartResponse {
   authorize_url: string
 }
 
+// MetaChannelSetup is one channel's slice of GET /settings/meta-setup's
+// checklist — see backend/internal/httpapi/meta_setup.go. redirect_uri is
+// absent for whatsapp_cloud (manual WABA id + token connect, no OAuth
+// redirect).
+export interface MetaChannelSetup {
+  channel: 'instagram' | 'messenger' | 'whatsapp_cloud'
+  webhook_callback: string
+  redirect_uri?: string
+  scopes?: string[]
+  subscribe_fields: string
+  dashboard_path: string
+  development_notice: boolean
+}
+// MetaStaleAccount is one connected Instagram/Messenger account whose
+// registered webhook origin no longer matches the current public base URL —
+// WhatsApp Cloud self-heals and never appears here.
+export interface MetaStaleAccount {
+  account_id: string
+  channel: string
+  display_name: string
+  detail: string
+}
+// MetaSetupInfo is GET /settings/meta-setup's full response — the admin
+// copy-paste checklist (MetaSetupChecklist.vue).
+export interface MetaSetupInfo {
+  public_base_url: string
+  production_required: boolean
+  verify_token: string
+  graph_api_version: string
+  channels: MetaChannelSetup[]
+  stale_accounts: MetaStaleAccount[]
+}
+
 // WaPairSession is POST /wa-accounts/pair's response: a session id to poll
 // via GET /wa-accounts/pair/:session_id.
 export interface WaPairSession {

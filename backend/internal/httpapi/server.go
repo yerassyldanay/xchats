@@ -514,6 +514,7 @@ func (s *Server) Router() *gin.Engine {
 	set.GET("/tunnel", s.handleGetTunnelStatus)
 	set.POST("/tunnel/start", s.handleStartTunnel)
 	set.POST("/tunnel/stop", s.handleStopTunnel)
+	set.GET("/meta-setup", s.handleMetaSetup)
 	return r
 }
 

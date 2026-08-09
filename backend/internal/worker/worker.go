@@ -201,13 +201,25 @@ func (w *Worker) SweepTelegramMedia(ctx context.Context, olderThan time.Duration
 	return queued, nil
 }
 
-// StartTelegramMediaSweeper runs SweepTelegramMedia once at startup (picking up
-// anything a crash left behind) and then on a ticker until ctx is done.
-func (w *Worker) StartTelegramMediaSweeper(ctx context.Context, every, olderThan time.Duration, limit int) {
+// sweepAllMedia runs both media sweeps once — the tick body StartMediaSweeper
+// shares between its startup pass and its ticker.
+func (w *Worker) sweepAllMedia(ctx context.Context, olderThan time.Duration, limit int) {
+	if _, err := w.SweepTelegramMedia(ctx, olderThan, limit); err != nil {
+		w.Log.Error("telegram media sweep", "err", err)
+	}
+	if _, err := w.SweepChannelMedia(ctx, olderThan, limit); err != nil {
+		w.Log.Error("meta channel media sweep", "err", err)
+	}
+}
+
+// StartMediaSweeper runs SweepTelegramMedia and SweepChannelMedia once at
+// startup (picking up anything a crash left behind) and then together on ONE
+// ticker until ctx is done — both are the same "retry attachments whose
+// bytes never arrived" concern, so they share a single goroutine rather than
+// each running its own.
+func (w *Worker) StartMediaSweeper(ctx context.Context, every, olderThan time.Duration, limit int) {
 	go func() {
-		if _, err := w.SweepTelegramMedia(ctx, 0, limit); err != nil {
-			w.Log.Error("telegram media sweep (startup)", "err", err)
-		}
+		w.sweepAllMedia(ctx, 0, limit)
 		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
@@ -215,9 +227,7 @@ func (w *Worker) StartTelegramMediaSweeper(ctx context.Context, every, olderThan
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				if _, err := w.SweepTelegramMedia(ctx, olderThan, limit); err != nil {
-					w.Log.Error("telegram media sweep", "err", err)
-				}
+				w.sweepAllMedia(ctx, olderThan, limit)
 			}
 		}
 	}()
@@ -365,28 +375,6 @@ func (w *Worker) SweepChannelMedia(ctx context.Context, olderThan time.Duration,
 		w.Log.Info("meta channel media sweep", "queued", queued)
 	}
 	return queued, nil
-}
-
-// StartChannelMediaSweeper is SweepChannelMedia's ticker-driven twin — see
-// StartTelegramMediaSweeper's identical shape.
-func (w *Worker) StartChannelMediaSweeper(ctx context.Context, every, olderThan time.Duration, limit int) {
-	go func() {
-		if _, err := w.SweepChannelMedia(ctx, 0, limit); err != nil {
-			w.Log.Error("meta channel media sweep (startup)", "err", err)
-		}
-		t := time.NewTicker(every)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				if _, err := w.SweepChannelMedia(ctx, olderThan, limit); err != nil {
-					w.Log.Error("meta channel media sweep", "err", err)
-				}
-			}
-		}
-	}()
 }
 
 // ChannelBlobID is the deterministic blob key for a Meta-channel attachment —

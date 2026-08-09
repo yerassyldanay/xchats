@@ -109,11 +109,11 @@ onMounted(() => {
   const fbConnected = route.query.messenger_connected
   const fbError = route.query.messenger_error
   if (igConnected) {
-    oauthBanner.value = { kind: 'success', message: 'Instagram успешно подключён.' }
+    oauthBanner.value = { kind: 'success', message: t('accounts.page.instagramConnected') }
   } else if (typeof igError === 'string' && igError) {
     oauthBanner.value = { kind: 'error', message: igError }
   } else if (fbConnected) {
-    oauthBanner.value = { kind: 'success', message: 'Messenger успешно подключён.' }
+    oauthBanner.value = { kind: 'success', message: t('accounts.page.messengerConnected') }
   } else if (typeof fbError === 'string' && fbError) {
     oauthBanner.value = { kind: 'error', message: fbError }
   }
@@ -156,7 +156,7 @@ async function run(a: Account, fn: () => Promise<unknown>) {
   } catch (e) {
     actionError.value = {
       ...actionError.value,
-      [a.id]: e instanceof ApiError ? e.message : 'Не удалось выполнить действие.',
+      [a.id]: e instanceof ApiError ? e.message : t('accounts.page.errGenericAction'),
     }
   } finally {
     working.value = null
@@ -167,8 +167,8 @@ const checkConnection = (a: Account) => run(a, () => accounts.checkConnection(a.
 
 async function remove(a: Account) {
   const what = isTelegram(a)
-    ? `Отключить бота «${a.display_name}»? Чаты сохранятся и вернутся, если вставить тот же токен снова.`
-    : `Удалить «${a.display_name}»? Чаты сохранятся и вернутся при повторном добавлении номера.`
+    ? t('accounts.page.confirmDisconnectBot', { name: a.display_name })
+    : t('accounts.page.confirmDelete', { name: a.display_name })
   if (!window.confirm(what)) return
   deleting.value = a.id
   delete actionError.value[a.id]
@@ -177,7 +177,7 @@ async function remove(a: Account) {
   } catch (e) {
     actionError.value = {
       ...actionError.value,
-      [a.id]: e instanceof ApiError ? e.message : 'Не удалось отключить канал.',
+      [a.id]: e instanceof ApiError ? e.message : t('accounts.page.errDisconnect'),
     }
   } finally {
     deleting.value = null
@@ -192,12 +192,12 @@ async function remove(a: Account) {
     <div class="flex-1 flex flex-col min-w-0">
       <header class="px-8 py-5 flex items-center justify-between border-b border-border bg-card shrink-0">
         <div>
-          <h1 class="text-xl font-bold tracking-tight">Каналы</h1>
-          <p class="text-sm text-muted-foreground">Подключайте номера WhatsApp и Telegram-ботов</p>
+          <h1 class="text-xl font-bold tracking-tight">{{ t('accounts.page.title') }}</h1>
+          <p class="text-sm text-muted-foreground">{{ t('accounts.page.subtitle') }}</p>
         </div>
         <div class="flex items-center gap-3">
           <Button @click="openAdd">
-            <Plus class="w-4 h-4" /> Подключить канал
+            <Plus class="w-4 h-4" /> {{ t('accounts.page.connectChannel') }}
           </Button>
         </div>
       </header>
@@ -212,7 +212,7 @@ async function remove(a: Account) {
           <CircleCheck v-if="oauthBanner.kind === 'success'" class="w-4 h-4 shrink-0 mt-0.5" />
           <CircleAlert v-else class="w-4 h-4 shrink-0 mt-0.5" />
           <span class="min-w-0 flex-1">{{ oauthBanner.message }}</span>
-          <button class="text-xs underline shrink-0" @click="oauthBanner = null">Скрыть</button>
+          <button class="text-xs underline shrink-0" @click="oauthBanner = null">{{ t('accounts.page.dismiss') }}</button>
         </div>
 
         <!-- stat cards -->
@@ -221,31 +221,31 @@ async function remove(a: Account) {
             <div class="w-12 h-12 rounded-xl bg-wa/10 text-wa grid place-items-center">
               <CircleCheck class="w-6 h-6" />
             </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.connected }}</div><div class="text-sm text-muted-foreground mt-1">Подключено</div></div>
+            <div><div class="text-2xl font-bold leading-none">{{ stats.connected }}</div><div class="text-sm text-muted-foreground mt-1">{{ t('accounts.page.statConnected') }}</div></div>
           </div>
           <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">
             <div class="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 grid place-items-center">
               <QrCode class="w-6 h-6" />
             </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.waiting }}</div><div class="text-sm text-muted-foreground mt-1">Ждут действия</div></div>
+            <div><div class="text-2xl font-bold leading-none">{{ stats.waiting }}</div><div class="text-sm text-muted-foreground mt-1">{{ t('accounts.page.statWaiting') }}</div></div>
           </div>
           <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">
             <div class="w-12 h-12 rounded-xl bg-destructive/10 text-destructive grid place-items-center">
               <Unplug class="w-6 h-6" />
             </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.broken }}</div><div class="text-sm text-muted-foreground mt-1">Не подключено</div></div>
+            <div><div class="text-2xl font-bold leading-none">{{ stats.broken }}</div><div class="text-sm text-muted-foreground mt-1">{{ t('accounts.page.statBroken') }}</div></div>
           </div>
         </div>
 
         <!-- account cards -->
         <div>
           <div class="flex items-center justify-between mb-3">
-            <span class="font-semibold">Подключённые каналы</span>
-            <span class="text-sm text-muted-foreground">{{ accounts.accounts.length }} всего</span>
+            <span class="font-semibold">{{ t('accounts.page.connectedChannels') }}</span>
+            <span class="text-sm text-muted-foreground">{{ accounts.accounts.length }} {{ t('accounts.page.totalCount') }}</span>
           </div>
 
           <p v-if="accounts.loading && !accounts.accounts.length" class="rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
-            Загрузка…
+            {{ t('accounts.page.loading') }}
           </p>
           <div v-else-if="!accounts.accounts.length" class="rounded-lg border border-border bg-card px-5 py-16 text-center">
             <div class="mx-auto flex w-fit gap-2">
@@ -256,8 +256,8 @@ async function remove(a: Account) {
                 <TelegramIcon class="w-7 h-7" />
               </div>
             </div>
-            <p class="mt-4 text-sm text-muted-foreground">Нет подключённых каналов.<br />Подключите номер WhatsApp или Telegram-бота.</p>
-            <Button class="mt-4" @click="openAdd"><Plus class="w-4 h-4" /> Подключить канал</Button>
+            <p class="mt-4 text-sm text-muted-foreground">{{ t('accounts.page.empty') }}<br />{{ t('accounts.page.emptyHint') }}</p>
+            <Button class="mt-4" @click="openAdd"><Plus class="w-4 h-4" /> {{ t('accounts.page.connectChannel') }}</Button>
           </div>
 
           <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -320,7 +320,7 @@ async function remove(a: Account) {
                       size="icon"
                       class="w-8 h-8 text-primary"
                       :disabled="working === a.id"
-                      title="Повторить вебхук"
+                      :title="t('accounts.page.retryWebhook')"
                       @click="retryWebhook(a)"
                     >
                       <LoaderCircle v-if="working === a.id" class="w-4 h-4 animate-spin" />
@@ -331,7 +331,7 @@ async function remove(a: Account) {
                       size="icon"
                       class="w-8 h-8"
                       :disabled="working === a.id"
-                      title="Проверить подключение"
+                      :title="t('accounts.page.checkConnection')"
                       @click="checkConnection(a)"
                     >
                       <RefreshCw class="w-4 h-4" />
@@ -340,7 +340,7 @@ async function remove(a: Account) {
                       variant="ghost"
                       size="icon"
                       class="w-8 h-8"
-                      title="Заменить токен"
+                      :title="t('accounts.page.replaceToken')"
                       @click="tokenTarget = a"
                     >
                       <KeyRound class="w-4 h-4" />
@@ -352,7 +352,7 @@ async function remove(a: Account) {
                     variant="ghost"
                     size="icon"
                     class="w-8 h-8 text-primary"
-                    title="Переподключить"
+                    :title="t('accounts.page.reconnect')"
                     @click="openReconnect(a)"
                   >
                     <RotateCw class="w-4 h-4" />
@@ -362,7 +362,7 @@ async function remove(a: Account) {
                     size="icon"
                     class="w-8 h-8 text-destructive hover:bg-destructive/10"
                     :disabled="deleting === a.id"
-                    title="Удалить"
+                    :title="t('accounts.page.delete')"
                     @click="remove(a)"
                   >
                     <LoaderCircle v-if="deleting === a.id" class="w-4 h-4 animate-spin" />

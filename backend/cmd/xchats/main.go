@@ -374,8 +374,22 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// Attachments whose bytes never arrived are retried from their own media
 	// row — the durable work item that replaces an inbound-event table. The
 	// startup pass picks up whatever a crash or an outage left behind.
-	w.StartTelegramMediaSweeper(ctx, mediaSweepEvery, mediaSweepRetryAfter, mediaSweepBatch)
-	w.StartChannelMediaSweeper(ctx, mediaSweepEvery, mediaSweepRetryAfter, mediaSweepBatch)
+	w.StartMediaSweeper(ctx, mediaSweepEvery, mediaSweepRetryAfter, mediaSweepBatch)
+	// One boot-time pass: compare every connected Meta account's registered
+	// webhook origin against the public base URL just resolved above. See
+	// worker.RepairStaleMetaOrigins' own doc comment for why a single pass
+	// (not a ticker, not a live tunnel.Deps.OnStatus hook — the latter is
+	// explicitly out of scope) is the right amount of machinery here.
+	go func() {
+		repaired, stale, err := w.RepairStaleMetaOrigins(ctx, cfg.MetaResolvedPublicBaseURL(), meta.DeriveVerifyToken(cfg.SessionSecret))
+		if err != nil {
+			log.Error("meta origin repair", "err", err)
+			return
+		}
+		if repaired > 0 || stale > 0 {
+			log.Info("meta origin repair", "repaired", repaired, "stale", stale)
+		}
+	}()
 	// Reconnects every saved WhatsApp account without re-scanning a QR code.
 	go waMgr.Start(ctx)
 	// Claims due debounce deadlines into dispatch jobs and runs them; its

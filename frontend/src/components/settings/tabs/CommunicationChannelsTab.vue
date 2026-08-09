@@ -18,6 +18,7 @@ import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import InstagramIcon from '@/components/icons/InstagramIcon.vue'
 import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 import ProviderCredentialCard from '../ProviderCredentialCard.vue'
+import MetaSetupChecklist from '../MetaSetupChecklist.vue'
 import type { Account } from '@/types'
 
 const accounts = useAccounts()
@@ -78,6 +79,8 @@ const stats = computed(() => {
       <p class="text-xs text-muted-foreground mb-2">{{ t('settings.channels.metaSubtitle') }}</p>
       <ProviderCredentialCard v-if="meta" :provider="meta" />
     </div>
+
+    <MetaSetupChecklist />
 
     <div class="rounded-lg border border-border bg-card divide-y divide-border">
       <p v-if="!accounts.accounts.length" class="px-5 py-8 text-center text-sm text-muted-foreground">{{ t('settings.channels.empty') }}</p>

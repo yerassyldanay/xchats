@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { CircleAlert, CircleCheck, LoaderCircle, RotateCw, Link2, Search } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
 import { ApiError } from '../api/client'
@@ -33,6 +34,7 @@ import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 const props = defineProps<{ startChannel?: 'whatsapp' | null }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'connected'): void }>()
 const accounts = useAccounts()
+const { t } = useI18n()
 
 type Step = 'channel' | 'qr' | 'telegram' | 'whatsapp_cloud_creds' | 'whatsapp_cloud_pick' | 'connected'
 type Channel = 'whatsapp' | 'telegram' | 'whatsapp_cloud' | 'instagram' | 'messenger'
@@ -88,7 +90,7 @@ async function connectInstagram() {
     const started = await accounts.startInstagramOAuth()
     window.location.href = started.authorize_url
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось начать подключение Instagram.'
+    error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errConnectInstagram')
     busy.value = false
   }
 }
@@ -103,7 +105,7 @@ async function connectMessenger() {
     const started = await accounts.startMessengerOAuth()
     window.location.href = started.authorize_url
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось начать подключение Messenger.'
+    error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errConnectMessenger')
     busy.value = false
   }
 }
@@ -119,7 +121,7 @@ async function startPairing() {
     poll() // immediate, then on an interval
     timer = window.setInterval(poll, 2500)
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось начать подключение.'
+    error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errConnectWhatsApp')
   } finally {
     busy.value = false
   }
@@ -130,7 +132,7 @@ async function connectTelegram() {
   telegramState.value = ''
   const token = botToken.value.trim()
   if (!token) {
-    error.value = 'Вставьте токен, который выдал @BotFather.'
+    error.value = t('accounts.dialog.errBotTokenRequired')
     return
   }
   busy.value = true
@@ -141,12 +143,10 @@ async function connectTelegram() {
     // Created, but Telegram would not accept the webhook. The account is on the
     // list with a retry action — say so instead of closing on a half-success.
     telegramState.value = res.connection_state
-    error.value =
-      res.account?.webhook_last_error ||
-      'Бот добавлен, но Telegram не принял вебхук. Проверьте адрес и нажмите «Повторить вебхук» на карточке.'
+    error.value = res.account?.webhook_last_error || t('accounts.dialog.errWebhookRejected')
     emit('connected') // refresh the list so the failed card is visible
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось подключить бота.'
+    error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errConnectBot')
   } finally {
     busy.value = false
   }
@@ -162,21 +162,21 @@ async function discoverWhatsAppCloudNumbers() {
   const waba = wabaId.value.trim()
   const token = businessToken.value.trim()
   if (!waba || !token) {
-    error.value = 'Укажите ID WABA и бизнес-токен.'
+    error.value = t('accounts.dialog.errWabaTokenRequired')
     return
   }
   busy.value = true
   try {
     const res = await accounts.discoverWhatsAppCloud(waba, token)
     if (!res.phone_numbers.length) {
-      error.value = 'У этого WABA нет зарегистрированных номеров.'
+      error.value = t('accounts.dialog.errNoRegisteredNumbers')
       return
     }
     phoneNumbers.value = res.phone_numbers
     selectedPhoneNumberId.value = res.phone_numbers[0].id
     step.value = 'whatsapp_cloud_pick'
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось получить список номеров.'
+    error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errFetchNumbers')
   } finally {
     busy.value = false
   }
@@ -186,11 +186,11 @@ async function connectWhatsAppCloud() {
   error.value = ''
   const selected = phoneNumbers.value.find((p) => p.id === selectedPhoneNumberId.value)
   if (!selected) {
-    error.value = 'Выберите номер.'
+    error.value = t('accounts.dialog.errSelectNumber')
     return
   }
   if (!/^\d{6}$/.test(pin.value.trim())) {
-    error.value = 'PIN должен состоять ровно из 6 цифр.'
+    error.value = t('accounts.dialog.errPinFormat')
     return
   }
   busy.value = true
@@ -207,7 +207,7 @@ async function connectWhatsAppCloud() {
     pin.value = ''
     finish()
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось подключить номер.'
+    error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errConnectNumber')
   } finally {
     busy.value = false
   }
@@ -219,7 +219,7 @@ async function poll() {
     if (r.status === 'connected') return finish()
     if (r.status === 'timeout' || r.status === 'error') {
       stopPolling()
-      error.value = r.message || (r.status === 'timeout' ? 'Время ожидания истекло.' : 'Не удалось подключиться.')
+      error.value = r.message || (r.status === 'timeout' ? t('accounts.dialog.errTimeout') : t('accounts.dialog.errConnectGeneric'))
       qr.value = null
       return
     }
@@ -232,7 +232,7 @@ async function poll() {
     // transient network blip.
     if (e instanceof ApiError && e.status === 404) {
       stopPolling()
-      error.value = 'Сессия подключения истекла. Попробуйте снова.'
+      error.value = t('accounts.dialog.errSessionExpired')
       qr.value = null
       return
     }
@@ -283,18 +283,18 @@ onBeforeUnmount(stopPolling)
           <span v-else class="w-8 h-8 rounded-lg bg-wa/10 text-wa grid place-items-center">
             <WhatsappIcon class="w-4 h-4" />
           </span>
-          <template v-if="startChannel === 'whatsapp'">Переподключить номер</template>
-          <template v-else-if="step === 'channel'">Подключить канал</template>
-          <template v-else-if="channel === 'telegram'">Добавить Telegram-бота</template>
-          <template v-else-if="channel === 'whatsapp_cloud'">Подключить WhatsApp Cloud API</template>
-          <template v-else>Добавить номер WhatsApp</template>
+          <template v-if="startChannel === 'whatsapp'">{{ t('accounts.dialog.reconnectTitle') }}</template>
+          <template v-else-if="step === 'channel'">{{ t('accounts.dialog.pickTitle') }}</template>
+          <template v-else-if="channel === 'telegram'">{{ t('accounts.dialog.telegramTitle') }}</template>
+          <template v-else-if="channel === 'whatsapp_cloud'">{{ t('accounts.dialog.whatsappCloudTitle') }}</template>
+          <template v-else>{{ t('accounts.dialog.whatsappTitle') }}</template>
         </DialogTitle>
       </DialogHeader>
 
       <div class="px-5 py-5">
         <!-- step 0: pick the channel -->
         <div v-if="step === 'channel'" class="space-y-4">
-          <p class="text-sm text-muted-foreground">Выберите канал. Инструкция продолжится внутри выбранного способа.</p>
+          <p class="text-sm text-muted-foreground">{{ t('accounts.dialog.pickPrompt') }}</p>
           <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-wa hover:bg-wa/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wa/40 disabled:pointer-events-none disabled:opacity-60"
@@ -306,16 +306,16 @@ onBeforeUnmount(stopPolling)
                   <WhatsappIcon class="w-6 h-6" />
                 </span>
                 <span class="min-w-0">
-                  <span class="block font-semibold">WhatsApp</span>
-                  <span class="block text-xs text-muted-foreground">Подключение номера по QR-коду</span>
+                  <span class="block font-semibold">{{ t('accounts.dialog.whatsapp.name') }}</span>
+                  <span class="block text-xs text-muted-foreground">{{ t('accounts.dialog.whatsapp.tagline') }}</span>
                 </span>
               </span>
               <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
-                <li class="flex gap-2"><span class="font-semibold text-wa">01</span><span>Откройте WhatsApp → «Связанные устройства».</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-wa">02</span><span>Отсканируйте QR-код, который появится на следующем шаге.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-wa">03</span><span>Входящие чаты появятся автоматически.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-wa">01</span><span>{{ t('accounts.dialog.whatsapp.step1') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-wa">02</span><span>{{ t('accounts.dialog.whatsapp.step2') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-wa">03</span><span>{{ t('accounts.dialog.whatsapp.step3') }}</span></li>
               </ol>
-              <span class="mt-4 block text-sm font-medium text-wa">Продолжить с WhatsApp →</span>
+              <span class="mt-4 block text-sm font-medium text-wa">{{ t('accounts.dialog.whatsapp.cta') }}</span>
             </button>
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-[#229ED9] hover:bg-[#229ED9]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#229ED9]/40"
@@ -326,16 +326,16 @@ onBeforeUnmount(stopPolling)
                   <TelegramIcon class="w-6 h-6" />
                 </span>
                 <span class="min-w-0">
-                  <span class="block font-semibold">Telegram-бот</span>
-                  <span class="block text-xs text-muted-foreground">Подключение токеном @BotFather</span>
+                  <span class="block font-semibold">{{ t('accounts.dialog.telegram.name') }}</span>
+                  <span class="block text-xs text-muted-foreground">{{ t('accounts.dialog.telegram.tagline') }}</span>
                 </span>
               </span>
               <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
-                <li class="flex gap-2"><span class="font-semibold text-[#229ED9]">01</span><span>Откройте @BotFather и отправьте команду <span class="font-mono text-foreground">/newbot</span>.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-[#229ED9]">02</span><span>Задайте имя бота и скопируйте выданный секретный токен.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-[#229ED9]">03</span><span>Вставьте токен здесь — вебхук настроится автоматически.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#229ED9]">01</span><span>{{ t('accounts.dialog.telegram.step1') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#229ED9]">02</span><span>{{ t('accounts.dialog.telegram.step2') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#229ED9]">03</span><span>{{ t('accounts.dialog.telegram.step3') }}</span></li>
               </ol>
-              <span class="mt-4 block text-sm font-medium text-[#229ED9]">Продолжить с Telegram →</span>
+              <span class="mt-4 block text-sm font-medium text-[#229ED9]">{{ t('accounts.dialog.telegram.cta') }}</span>
             </button>
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-teal-600 hover:bg-teal-600/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/40"
@@ -346,16 +346,16 @@ onBeforeUnmount(stopPolling)
                   <WhatsappIcon class="w-6 h-6" />
                 </span>
                 <span class="min-w-0">
-                  <span class="block font-semibold">WhatsApp Cloud API</span>
-                  <span class="block text-xs text-muted-foreground">Официальное подключение через Meta</span>
+                  <span class="block font-semibold">{{ t('accounts.dialog.whatsappCloud.name') }}</span>
+                  <span class="block text-xs text-muted-foreground">{{ t('accounts.dialog.whatsappCloud.tagline') }}</span>
                 </span>
               </span>
               <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
-                <li class="flex gap-2"><span class="font-semibold text-teal-600">01</span><span>В Meta Business Manager создайте WABA и получите бизнес-токен.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-teal-600">02</span><span>Вставьте ID WABA и токен здесь — мы найдём подключённые номера.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-teal-600">03</span><span>Выберите номер и подтвердите его 6-значным PIN.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-teal-600">01</span><span>{{ t('accounts.dialog.whatsappCloud.step1') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-teal-600">02</span><span>{{ t('accounts.dialog.whatsappCloud.step2') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-teal-600">03</span><span>{{ t('accounts.dialog.whatsappCloud.step3') }}</span></li>
               </ol>
-              <span class="mt-4 block text-sm font-medium text-teal-600">Продолжить с WhatsApp Cloud →</span>
+              <span class="mt-4 block text-sm font-medium text-teal-600">{{ t('accounts.dialog.whatsappCloud.cta') }}</span>
             </button>
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-fuchsia-600 hover:bg-fuchsia-600/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600/40 disabled:pointer-events-none disabled:opacity-60"
@@ -367,16 +367,16 @@ onBeforeUnmount(stopPolling)
                   <InstagramIcon class="w-6 h-6" />
                 </span>
                 <span class="min-w-0">
-                  <span class="block font-semibold">Instagram Direct</span>
-                  <span class="block text-xs text-muted-foreground">Официальное подключение через Meta</span>
+                  <span class="block font-semibold">{{ t('accounts.dialog.instagram.name') }}</span>
+                  <span class="block text-xs text-muted-foreground">{{ t('accounts.dialog.instagram.tagline') }}</span>
                 </span>
               </span>
               <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
-                <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">01</span><span>Нажмите — откроется окно входа Instagram.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">02</span><span>Войдите в бизнес-аккаунт Instagram и разрешите доступ.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">03</span><span>Вы вернётесь сюда — аккаунт подключится автоматически.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">01</span><span>{{ t('accounts.dialog.instagram.step1') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">02</span><span>{{ t('accounts.dialog.instagram.step2') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">03</span><span>{{ t('accounts.dialog.instagram.step3') }}</span></li>
               </ol>
-              <span class="mt-4 block text-sm font-medium text-fuchsia-600">Продолжить с Instagram →</span>
+              <span class="mt-4 block text-sm font-medium text-fuchsia-600">{{ t('accounts.dialog.instagram.cta') }}</span>
             </button>
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-[#0084FF] hover:bg-[#0084FF]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0084FF]/40 disabled:pointer-events-none disabled:opacity-60"
@@ -388,41 +388,39 @@ onBeforeUnmount(stopPolling)
                   <MessengerIcon class="w-6 h-6" />
                 </span>
                 <span class="min-w-0">
-                  <span class="block font-semibold">Messenger</span>
-                  <span class="block text-xs text-muted-foreground">Официальное подключение через Meta</span>
+                  <span class="block font-semibold">{{ t('accounts.dialog.messenger.name') }}</span>
+                  <span class="block text-xs text-muted-foreground">{{ t('accounts.dialog.messenger.tagline') }}</span>
                 </span>
               </span>
               <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
-                <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">01</span><span>Нажмите — откроется окно входа Facebook.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">02</span><span>Войдите и разрешите доступ РОВНО к одной Facebook Page.</span></li>
-                <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">03</span><span>Вы вернётесь сюда — страница подключится автоматически.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">01</span><span>{{ t('accounts.dialog.messenger.step1') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">02</span><span>{{ t('accounts.dialog.messenger.step2') }}</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">03</span><span>{{ t('accounts.dialog.messenger.step3') }}</span></li>
               </ol>
-              <span class="mt-4 block text-sm font-medium text-[#0084FF]">Продолжить с Messenger →</span>
+              <span class="mt-4 block text-sm font-medium text-[#0084FF]">{{ t('accounts.dialog.messenger.cta') }}</span>
             </button>
           </div>
           <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
             <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ error }}
           </p>
           <p class="rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-            QR-код не сохраняется. Токены хранятся в зашифрованном виде и не показываются повторно. Для WhatsApp Cloud
-            API, Instagram и Messenger сначала настройте App ID и App Secret вашего приложения Meta в Настройках →
-            Каналы.
+            {{ t('accounts.dialog.footerNote') }}
           </p>
         </div>
 
         <!-- Telegram: paste the token -->
         <div v-else-if="step === 'telegram'" class="space-y-4">
           <ol class="space-y-1.5 text-xs text-muted-foreground">
-            <li>1. Откройте <span class="font-medium text-foreground">@BotFather</span> в Telegram.</li>
-            <li>2. Отправьте <span class="font-mono">/newbot</span> и придумайте имя.</li>
-            <li>3. Скопируйте выданный токен и вставьте его ниже.</li>
+            <li>1. {{ t('accounts.dialog.telegramSteps.step1') }}</li>
+            <li>2. {{ t('accounts.dialog.telegramSteps.step2') }}</li>
+            <li>3. {{ t('accounts.dialog.telegramSteps.step3') }}</li>
           </ol>
           <div>
-            <label class="text-xs font-medium text-muted-foreground">Название (для вас)</label>
-            <Input v-model="displayName" placeholder="Например, Магазин-бот" class="mt-1.5" />
+            <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.displayNameLabel') }}</label>
+            <Input v-model="displayName" :placeholder="t('accounts.dialog.displayNamePlaceholderBot')" class="mt-1.5" />
           </div>
           <div>
-            <label class="text-xs font-medium text-muted-foreground">Токен бота</label>
+            <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.botTokenLabel') }}</label>
             <Input
               v-model="botToken"
               type="password"
@@ -432,15 +430,15 @@ onBeforeUnmount(stopPolling)
               @keydown.enter.prevent="connectTelegram"
             />
             <p class="mt-1 text-[11px] text-muted-foreground">
-              Токен хранится в зашифрованном виде и нигде не показывается повторно.
+              {{ t('accounts.dialog.tokenStoredHint') }}
             </p>
           </div>
           <label class="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
             <input v-model="dropBacklog" type="checkbox" class="mt-0.5" />
             <span>
-              Удалить накопившиеся у Telegram сообщения
+              {{ t('accounts.dialog.dropBacklogLabel') }}
               <span class="block text-[11px]">
-                Отметьте, только если бот уже долго существовал и старые сообщения не нужны — они будут потеряны.
+                {{ t('accounts.dialog.dropBacklogHint') }}
               </span>
             </span>
           </label>
@@ -450,24 +448,21 @@ onBeforeUnmount(stopPolling)
           <Button :disabled="busy" class="w-full" @click="connectTelegram">
             <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
             <Link2 v-else class="w-4 h-4" />
-            {{ busy ? 'Подключение…' : telegramState ? 'Попробовать снова' : 'Подключить бота' }}
+            {{ busy ? t('accounts.dialog.connecting') : telegramState ? t('accounts.dialog.retry') : t('accounts.dialog.connectBot') }}
           </Button>
         </div>
 
         <!-- WhatsApp Cloud step 1: WABA id + business token -->
         <div v-else-if="step === 'whatsapp_cloud_creds'" class="space-y-4">
           <p class="text-xs text-muted-foreground leading-relaxed">
-            Найдите WABA ID и создайте бизнес-токен (System User Access Token с правами
-            <span class="font-mono">whatsapp_business_messaging</span> и
-            <span class="font-mono">whatsapp_business_management</span>) в Meta Business Manager для вашего
-            собственного приложения Meta.
+            {{ t('accounts.dialog.waCloudIntro') }}
           </p>
           <div>
-            <label class="text-xs font-medium text-muted-foreground">WABA ID</label>
-            <Input v-model="wabaId" placeholder="Например, 102938475610203" class="mt-1.5 font-mono" />
+            <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.wabaIdLabel') }}</label>
+            <Input v-model="wabaId" :placeholder="t('accounts.dialog.wabaIdPlaceholder')" class="mt-1.5 font-mono" />
           </div>
           <div>
-            <label class="text-xs font-medium text-muted-foreground">Бизнес-токен</label>
+            <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.businessTokenLabel') }}</label>
             <Input
               v-model="businessToken"
               type="password"
@@ -477,7 +472,7 @@ onBeforeUnmount(stopPolling)
               @keydown.enter.prevent="discoverWhatsAppCloudNumbers"
             />
             <p class="mt-1 text-[11px] text-muted-foreground">
-              Токен хранится в зашифрованном виде и нигде не показывается повторно.
+              {{ t('accounts.dialog.tokenStoredHint') }}
             </p>
           </div>
           <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
@@ -486,14 +481,14 @@ onBeforeUnmount(stopPolling)
           <Button :disabled="busy" class="w-full" @click="discoverWhatsAppCloudNumbers">
             <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
             <Search v-else class="w-4 h-4" />
-            {{ busy ? 'Ищем номера…' : 'Найти номера' }}
+            {{ busy ? t('accounts.dialog.findingNumbers') : t('accounts.dialog.findNumbers') }}
           </Button>
         </div>
 
         <!-- WhatsApp Cloud step 2: pick a number, enter its PIN -->
         <div v-else-if="step === 'whatsapp_cloud_pick'" class="space-y-4">
           <div>
-            <label class="text-xs font-medium text-muted-foreground">Номер</label>
+            <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.numberLabel') }}</label>
             <div class="mt-1.5 space-y-1.5">
               <label
                 v-for="p in phoneNumbers"
@@ -510,11 +505,11 @@ onBeforeUnmount(stopPolling)
             </div>
           </div>
           <div>
-            <label class="text-xs font-medium text-muted-foreground">Название (для вас)</label>
-            <Input v-model="displayName" placeholder="Например, Магазин — WhatsApp Cloud" class="mt-1.5" />
+            <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.displayNameLabel') }}</label>
+            <Input v-model="displayName" :placeholder="t('accounts.dialog.displayNamePlaceholderWaCloud')" class="mt-1.5" />
           </div>
           <div>
-            <label class="text-xs font-medium text-muted-foreground">PIN двухэтапной проверки (6 цифр)</label>
+            <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.pinLabel') }}</label>
             <Input
               v-model="pin"
               type="password"
@@ -526,7 +521,7 @@ onBeforeUnmount(stopPolling)
               @keydown.enter.prevent="connectWhatsAppCloud"
             />
             <p class="mt-1 text-[11px] text-muted-foreground">
-              Meta допускает не более 10 попыток ввода PIN за 72 часа для одного номера.
+              {{ t('accounts.dialog.pinHint') }}
             </p>
           </div>
           <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
@@ -535,7 +530,7 @@ onBeforeUnmount(stopPolling)
           <Button :disabled="busy" class="w-full" @click="connectWhatsAppCloud">
             <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
             <Link2 v-else class="w-4 h-4" />
-            {{ busy ? 'Подключение…' : 'Подключить номер' }}
+            {{ busy ? t('accounts.dialog.connecting') : t('accounts.dialog.connectNumber') }}
           </Button>
         </div>
 
@@ -547,13 +542,12 @@ onBeforeUnmount(stopPolling)
             </p>
             <Button :disabled="busy" class="w-full" @click="startPairing">
               <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
-              {{ busy ? 'Подключение…' : 'Попробовать снова' }}
+              {{ busy ? t('accounts.dialog.connecting') : t('accounts.dialog.retry') }}
             </Button>
           </template>
           <template v-else>
             <p class="text-sm text-muted-foreground leading-relaxed">
-              Откройте WhatsApp → <span class="font-medium text-foreground">«Связанные устройства»</span> →
-              «Привязать устройство» и отсканируйте код.
+              {{ t('accounts.dialog.qrIntro') }}
             </p>
             <div class="grid place-items-center">
               <div class="p-3 rounded-xl bg-card border border-border">
@@ -570,7 +564,7 @@ onBeforeUnmount(stopPolling)
             </div>
             <p class="flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <RotateCw class="w-3.5 h-3.5 animate-spin" style="animation-duration: 3s" />
-              Код обновляется автоматически. Ожидание сканирования…
+              {{ t('accounts.dialog.qrPolling') }}
             </p>
           </template>
         </div>
@@ -588,7 +582,7 @@ onBeforeUnmount(stopPolling)
             <CircleCheck class="w-9 h-9" />
           </div>
           <p class="mt-4 font-semibold text-lg">
-            {{ channel === 'telegram' ? 'Бот подключён!' : 'Номер подключён!' }}
+            {{ channel === 'telegram' ? t('accounts.dialog.botConnected') : t('accounts.dialog.numberConnected') }}
           </p>
         </div>
       </div>
