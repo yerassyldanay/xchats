@@ -536,6 +536,25 @@ export interface KbImportRun {
   synthesis?: KbImportSynthesisSummary
 }
 
+// KbImportProviderFamily mirrors extractor.Family — the source kinds
+// Capabilities() probes each provider with (backend/internal/extractor/
+// capabilities.go). A real union: useImportProviders branches on these
+// values to map a staged File.type to a family.
+export type KbImportProviderFamily = 'url' | 'text' | 'docx' | 'pdf' | 'image'
+
+// KbImportProviderCapability mirrors httpapi.kbImportProviderSummary — one
+// entry of GET /kb/import/providers' payload.providers: what a provider
+// reads (families, data-derived from its real Supports() method) and
+// whether it is currently usable (requires_credential/configured), so the
+// parser dropdown can never disagree with Submit's own precheck.
+export interface KbImportProviderCapability {
+  id: string
+  display_name: string
+  families: KbImportProviderFamily[]
+  requires_credential: boolean
+  configured: boolean
+}
+
 // McpConnectionInfo mirrors GET /mcp-connection (backend/internal/httpapi/mcp_info.go)
 // — the session-level (non-admin) view of what URL to paste into a ChatGPT or
 // Claude MCP connector. public_url/tunnel_running are only meaningful when

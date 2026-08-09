@@ -4,6 +4,38 @@
 authoring UI for pending knowledge. It may propose and accumulate changes, but
 only the explicit draft-to-live approval transaction writes `ai_*`.
 
+## Where this lives today
+
+`/playground` (page identity: Черновик) is where model-driven ingest and
+draft review both happen — not `/knowledge-base`, which stays the sole
+**manual** authoring surface (record-create forms, no model in the loop).
+Черновик's ingestion panel (`KbIngestPanel.vue`) sits above the review
+region and has three tabs, one per way information actually enters the KB
+today:
+
+| Tab | What it submits | Parsers offered |
+|---|---|---|
+| Ссылки | one or more URLs | `native`, `firecrawl` |
+| Файлы | one or more files (PDF/DOCX/text/image) | `native`, `llamaparse` |
+| ChatGPT / Claude | nothing directly — connects an external MCP client | — |
+
+Ссылки and Файлы are deliberately separate submissions (URL-only or
+file-only runs) even though the backend itself (`kbimport.SubmitInput`)
+accepts a mixed batch — the UI just never offers that combination. Both
+post to the structured import pipeline covered below (`POST /kb/imports`);
+ChatGPT/Claude instead go through the MCP connector (`plan/mcp.md`) — a
+different write path that lands in the exact same `kbd_draft`.
+
+`GET /kb/import/providers` is the parser dropdown's one source of truth:
+per provider, which source families it reads (data-derived from
+`extractor.Capabilities()`, tested against the table two sections below)
+and whether a required credential currently resolves — so the dropdown can
+never offer a provider/content pairing `POST /kb/imports`' own precheck
+would reject. The review region below the panel (StatTiles + entity tabs +
+change cards) stays visible even with an empty draft — an operator must be
+able to see the ingestion panel and start an import without first having
+something pending to review.
+
 ## End-to-end lifecycle
 
 ```text

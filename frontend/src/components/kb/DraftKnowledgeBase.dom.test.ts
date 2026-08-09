@@ -3,6 +3,7 @@ import { flushPromises } from '@vue/test-utils'
 import { usePlayground } from '@/stores/playground'
 import { mountKb, testPinia } from '@/test/mount'
 import DraftKnowledgeBase from './DraftKnowledgeBase.vue'
+import KbIngestPanel from './KbIngestPanel.vue'
 import type { DraftChangeSet, DraftView, TopicRow } from '@/types'
 
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
@@ -10,7 +11,18 @@ vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
   return {
     ...actual,
-    api: { ...actual.api, get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() },
+    api: {
+      ...actual.api,
+      get: vi.fn(),
+      post: vi.fn(),
+      patch: vi.fn(),
+      del: vi.fn(),
+      // KbIngestPanel (now always mounted here) pulls in KbImportCard,
+      // which calls these directly — none of the four above are the same
+      // underlying call, so each needs its own default here too.
+      getKbImportProviders: vi.fn().mockResolvedValue([]),
+      listKbImportRuns: vi.fn().mockResolvedValue({ runs: [] }),
+    },
   }
 })
 
@@ -62,14 +74,52 @@ async function mountWith(changes: DraftChangeSet, live: DraftView) {
   return { wrapper, pg: usePlayground() }
 }
 
+// outsideIngestPanel filters out anything inside KbIngestPanel's subtree —
+// that panel (Ссылки/Файлы staging + the ChatGPT/Claude connect card) is
+// legitimately interactive now (its own "Добавить" button, url/guidance
+// inputs), unlike the read-only review region below it these tests
+// actually guard.
+function outsideIngestPanel<T extends { element: Element }>(wrapper: ReturnType<typeof mountKb>, items: T[]): T[] {
+  const panel = wrapper.findComponent(KbIngestPanel)
+  return items.filter((el) => !(panel.exists() && panel.element.contains(el.element)))
+}
+
 describe('DraftKnowledgeBase — empty state', () => {
   it('shows the empty state linking to /knowledge-base, and no Add button anywhere', async () => {
     const { wrapper } = await mountWith(emptyChanges(), emptyLive({ topics: [topic()] }))
 
     expect(wrapper.text()).toContain('Нет неопубликованных изменений')
     expect(wrapper.find('a').exists()).toBe(true) // the stubbed RouterLink renders as <a>
-    const addButtons = wrapper.findAll('button').filter((b) => /добавить/i.test(b.text()))
+    const addButtons = outsideIngestPanel(wrapper, wrapper.findAll('button')).filter((b) => /добавить/i.test(b.text()))
     expect(addButtons).toHaveLength(0)
+  })
+
+  // AC4: the review region (heading + StatTiles) must stay visible even
+  // with nothing pending — DraftEmptyState now stands in for the entity
+  // tabs/change lists only, never for the whole region (see
+  // DraftKnowledgeBase.vue's own template comment on this v-if chain).
+  it('AC4: still shows the review heading and all-zero StatTiles alongside the empty state', async () => {
+    const { wrapper } = await mountWith(emptyChanges(), emptyLive({ topics: [topic()] }))
+
+    expect(wrapper.text()).toContain('Обзор черновика')
+    expect(wrapper.text()).toContain('Добавлено')
+    expect(wrapper.text()).toContain('Изменено')
+    expect(wrapper.text()).toContain('Удалено')
+    expect(wrapper.text()).toContain('Всего')
+    const counts = wrapper.findAll('.text-3xl').map((el) => el.text())
+    expect(counts).toEqual(['0', '0', '0', '0'])
+  })
+
+  it('AC1/AC4: the ingestion panel stays reachable while the draft is still loading', async () => {
+    const { api } = await import('@/api/client')
+    // Never resolves within this test — loading stays true throughout.
+    vi.mocked(api.get).mockImplementation(() => new Promise(() => {}))
+    const pinia = testPinia()
+    const wrapper = mountKb(DraftKnowledgeBase, { pinia })
+    await flushPromises()
+
+    expect(wrapper.findComponent(KbIngestPanel).exists()).toBe(true)
+    expect(wrapper.text()).toContain('Загрузка черновика')
   })
 })
 
@@ -155,8 +205,8 @@ describe('DraftKnowledgeBase — stat tiles', () => {
 describe('DraftKnowledgeBase — card actions wire to the store', () => {
   it('a card renders no input for its fields (read-only)', async () => {
     const { wrapper } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
-    expect(wrapper.findAll('input')).toHaveLength(0)
-    expect(wrapper.findAll('textarea')).toHaveLength(0)
+    expect(outsideIngestPanel(wrapper, wrapper.findAll('input'))).toHaveLength(0)
+    expect(outsideIngestPanel(wrapper, wrapper.findAll('textarea'))).toHaveLength(0)
   })
 
   it('Publish calls approveEntity(kind, key)', async () => {

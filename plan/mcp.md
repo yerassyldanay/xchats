@@ -27,13 +27,16 @@ chat widget links to that page. An in-chat publish tool can be added later.
 A second, non-MCP entry point shares this exact `kbd_draft`-only boundary:
 the structured knowledge base import pipeline (`internal/kbimport`,
 `POST /kb/imports` — see `plan/playground.md`) lets an operator submit a URL
-or document instead of typing it into a chat. Its pass-2 synthesis step
-emits the *same* typed upsert calls this document defines, through the
-shared `internal/mcpserver.ParseUpsertCall`/`UpsertTools` seam (§10) — one
-contract, two callers, so an imported draft entry is indistinguishable from
-one an MCP-connected model created by hand. `kb_assistant_upsert` is never
-reachable from that caller: an imported document never sets assistant
-persona/mission/guardrails.
+or document instead of typing it into a chat. Concretely, this is Черновик's
+(`/playground`) ingestion panel — its Ссылки and Файлы tabs, sitting right
+next to the ChatGPT/Claude tab this document's own `kb_media_upload`/widget
+flow powers, so both ways of getting content into the KB live in one place.
+Its pass-2 synthesis step emits the *same* typed upsert calls this document
+defines, through the shared `internal/mcpserver.ParseUpsertCall`/
+`UpsertTools` seam (§10) — one contract, two callers, so an imported draft
+entry is indistinguishable from one an MCP-connected model created by hand.
+`kb_assistant_upsert` is never reachable from that caller: an imported
+document never sets assistant persona/mission/guardrails.
 
 ## 2. Data boundaries
 

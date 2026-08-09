@@ -7,9 +7,10 @@
 // in-progress form in one tab survives switching away and back.
 import { onMounted, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bot, Database, LineChart, Radio, Users, Wifi } from 'lucide-vue-next'
+import { Bot, Database, Globe, LineChart, Radio, Users, Wifi } from 'lucide-vue-next'
 import { useSettings } from '@/stores/settings'
 import AiEngineTab from '@/components/settings/tabs/AiEngineTab.vue'
+import ExtractionTab from '@/components/settings/tabs/ExtractionTab.vue'
 import MonitoringTab from '@/components/settings/tabs/MonitoringTab.vue'
 import RemoteAccessTab from '@/components/settings/tabs/RemoteAccessTab.vue'
 import CommunicationChannelsTab from '@/components/settings/tabs/CommunicationChannelsTab.vue'
@@ -32,6 +33,7 @@ onMounted(async () => {
 
 const tabs: { key: string; labelKey: string; icon: Component }[] = [
   { key: 'ai-engine', labelKey: 'settings.tabs.aiEngine', icon: Bot },
+  { key: 'extraction', labelKey: 'settings.tabs.extraction', icon: Globe },
   { key: 'monitoring', labelKey: 'settings.tabs.monitoring', icon: LineChart },
   { key: 'remote-access', labelKey: 'settings.tabs.remoteAccess', icon: Wifi },
   { key: 'channels', labelKey: 'settings.tabs.channels', icon: Radio },
@@ -68,6 +70,7 @@ const active = ref(tabs[0].key)
       </div>
 
       <div v-show="active === 'ai-engine'"><AiEngineTab /></div>
+      <div v-show="active === 'extraction'"><ExtractionTab /></div>
       <div v-show="active === 'monitoring'"><MonitoringTab /></div>
       <div v-show="active === 'remote-access'"><RemoteAccessTab /></div>
       <div v-show="active === 'channels'"><CommunicationChannelsTab /></div>

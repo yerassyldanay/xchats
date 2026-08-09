@@ -1,29 +1,41 @@
 <script setup lang="ts">
-// KbImportCard is the Знаний база "Импорт" tab's entry point: a dropzone +
-// paste-URL input accumulate files/URLs LOCALLY (nothing is sent yet, same
-// staging idea as Composer.vue's own files ref), "Начать импорт" opens
-// KbImportDialog for the run's provider/target_type/guidance, and the
-// tracked run's live progress renders via KbImportRunStatus underneath.
+// KbImportCard is one ingest tab's body — Ссылки or Файлы, kind picks which
+// — hosted by KbIngestPanel. A dropzone/paste-URL input accumulates
+// files/URLs LOCALLY (nothing is sent yet, same staging idea as
+// Composer.vue's own files ref); provider/target-type/guidance render
+// INLINE right below it — a previous version staged here then opened a
+// separate KbImportDialog for those settings, which is gone now (no
+// popups on this page at all). The provider <Select>'s options/
+// availability come from useImportProviders, so this component never has
+// to know the capability matrix itself.
+// KbImportRunStatus renders once, shared by both tabs, in KbIngestPanel —
+// not here.
+//
 // This is the codebase's first drag-and-drop surface — MediaFieldPicker.vue
 // (single hidden <input type="file">, no drop target) is the closest prior
 // art, extended here into an actual dropzone.
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Link as LinkIcon, Upload, X } from 'lucide-vue-next'
+import { CircleAlert, Link as LinkIcon, LoaderCircle, Upload, X } from 'lucide-vue-next'
 import { useKbImport } from '@/stores/kbImport'
+import { useImportProviders } from '@/composables/useImportProviders'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import KbImportDialog from './KbImportDialog.vue'
-import KbImportRunStatus from './KbImportRunStatus.vue'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
+const props = defineProps<{ kind: 'url' | 'file' }>()
 const kbi = useKbImport()
 const { t } = useI18n()
 
-onMounted(async () => {
-  await kbi.loadLatest()
-  kbi.startRealtime()
-})
-onBeforeUnmount(() => kbi.stopRealtime())
+// Mirrors kbimport.TargetTypes (backend/internal/kbimport/enqueue.go)
+// exactly — the operator-facing vocabulary the backend itself validates
+// against (ErrValidation, 400, on anything else). assistant is absent: a
+// persona is never inferred from imported content.
+const TARGET_TYPES = ['auto', 'topics', 'products', 'tariffs', 'contacts', 'policies', 'delivery_zones'] as const
+function targetTypeLabel(tt: string): string {
+  return tt === 'auto' ? t('kb.import.targetTypeAuto') : t(`kb.entities.${tt}.plural`)
+}
 
 const pendingFiles = ref<File[]>([])
 const pendingUrls = ref<string[]>([])
@@ -31,9 +43,16 @@ const urlInput = ref('')
 const urlError = ref('')
 const dragOver = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
-const dialogOpen = ref(false)
 
-const hasPending = computed(() => pendingFiles.value.length > 0 || pendingUrls.value.length > 0)
+const provider = ref('native')
+const targetType = ref('auto')
+const guidance = ref('')
+
+const kindRef = computed(() => props.kind)
+const { options: providerOptions, hasStagedImage } = useImportProviders(kindRef, pendingFiles, provider)
+const unavailableOptions = computed(() => providerOptions.value.filter((o) => !o.available))
+
+const hasPending = computed(() => (props.kind === 'url' ? pendingUrls.value.length > 0 : pendingFiles.value.length > 0))
 
 function addFiles(list: FileList | null) {
   if (!list) return
@@ -74,16 +93,25 @@ function removeUrl(i: number) {
   pendingUrls.value.splice(i, 1)
 }
 
-function openDialog() {
-  if (!hasPending.value || kbi.isActive) return
-  dialogOpen.value = true
-}
-async function handleSubmit(form: { provider: string; targetType: string; guidance: string }) {
-  const ok = await kbi.submit({ ...form, urls: pendingUrls.value, files: pendingFiles.value })
+const canSubmit = computed(
+  () => hasPending.value && !kbi.isActive && providerOptions.value.some((o) => o.id === provider.value && o.available)
+)
+async function submit() {
+  if (!canSubmit.value) return
+  const ok = await kbi.submit({
+    provider: provider.value,
+    targetType: targetType.value,
+    guidance: guidance.value,
+    urls: pendingUrls.value,
+    files: pendingFiles.value,
+  })
   if (ok) {
     pendingFiles.value = []
     pendingUrls.value = []
-    dialogOpen.value = false
+    // provider/targetType deliberately survive a successful submit — likely
+    // reused for the next similar batch; guidance is run-specific enough
+    // that carrying it forward would read as a stale leftover instruction.
+    guidance.value = ''
   }
 }
 </script>
@@ -91,6 +119,7 @@ async function handleSubmit(form: { provider: string; targetType: string; guidan
 <template>
   <div class="space-y-4">
     <div
+      v-if="kind === 'file'"
       class="rounded-lg border border-dashed p-6 text-center transition"
       :class="dragOver ? 'border-primary bg-primary/5' : 'border-border'"
       @dragover.prevent="dragOver = true"
@@ -103,7 +132,7 @@ async function handleSubmit(form: { provider: string; targetType: string; guidan
       <input ref="fileInput" type="file" multiple class="hidden" @change="onFilePick" />
     </div>
 
-    <div class="flex items-start gap-2">
+    <div v-else class="flex items-start gap-2">
       <div class="flex-1">
         <div class="relative">
           <LinkIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -115,37 +144,86 @@ async function handleSubmit(form: { provider: string; targetType: string; guidan
     </div>
 
     <div v-if="hasPending" class="flex flex-wrap gap-2">
-      <span v-for="(f, i) in pendingFiles" :key="'f' + i" class="flex items-center gap-1.5 rounded-full bg-muted border border-border px-3 py-1 text-xs">
-        <Upload class="w-3.5 h-3.5 text-muted-foreground" /> {{ f.name }}
-        <button type="button" class="text-muted-foreground hover:text-destructive" @click="removeFile(i)">
-          <X class="w-3.5 h-3.5" />
-        </button>
-      </span>
-      <span v-for="(u, i) in pendingUrls" :key="'u' + i" class="flex items-center gap-1.5 rounded-full bg-muted border border-border px-3 py-1 text-xs max-w-xs">
-        <LinkIcon class="w-3.5 h-3.5 text-muted-foreground shrink-0" /> <span class="truncate">{{ u }}</span>
-        <button type="button" class="text-muted-foreground hover:text-destructive shrink-0" @click="removeUrl(i)">
-          <X class="w-3.5 h-3.5" />
-        </button>
-      </span>
+      <template v-if="kind === 'file'">
+        <span v-for="(f, i) in pendingFiles" :key="'f' + i" class="flex items-center gap-1.5 rounded-full bg-muted border border-border px-3 py-1 text-xs">
+          <Upload class="w-3.5 h-3.5 text-muted-foreground" /> {{ f.name }}
+          <button type="button" class="text-muted-foreground hover:text-destructive" @click="removeFile(i)">
+            <X class="w-3.5 h-3.5" />
+          </button>
+        </span>
+      </template>
+      <template v-else>
+        <span v-for="(u, i) in pendingUrls" :key="'u' + i" class="flex items-center gap-1.5 rounded-full bg-muted border border-border px-3 py-1 text-xs max-w-xs">
+          <LinkIcon class="w-3.5 h-3.5 text-muted-foreground shrink-0" /> <span class="truncate">{{ u }}</span>
+          <button type="button" class="text-muted-foreground hover:text-destructive shrink-0" @click="removeUrl(i)">
+            <X class="w-3.5 h-3.5" />
+          </button>
+        </span>
+      </template>
+    </div>
+
+    <p v-if="hasStagedImage" class="flex items-start gap-2 text-xs text-muted-foreground">
+      <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-0.5" /> {{ t('kb.import.visionGapNotice') }}
+    </p>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="text-xs font-medium text-muted-foreground">{{ t('kb.import.provider') }}</label>
+        <Select v-model="provider">
+          <SelectTrigger class="mt-1.5">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem v-for="opt in providerOptions" :key="opt.id" :value="opt.id" :disabled="!opt.available">
+                {{ opt.displayName }} <span class="text-muted-foreground">— {{ opt.capsHint }}</span>
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <ul v-if="unavailableOptions.length" class="mt-1.5 space-y-0.5">
+          <li v-for="opt in unavailableOptions" :key="opt.id" class="text-[11px] text-muted-foreground">
+            {{ opt.displayName }}: {{ opt.reason }}
+            <RouterLink v-if="opt.reasonKey === 'noCredential'" :to="{ name: 'settings' }" class="text-primary hover:underline">
+              {{ t('kb.import.unavailable.settingsLink') }}
+            </RouterLink>
+          </li>
+        </ul>
+      </div>
+
+      <div>
+        <label class="text-xs font-medium text-muted-foreground">{{ t('kb.import.targetType') }}</label>
+        <Select v-model="targetType">
+          <SelectTrigger class="mt-1.5">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem v-for="tt in TARGET_TYPES" :key="tt" :value="tt">{{ targetTypeLabel(tt) }}</SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div class="sm:col-span-2">
+        <label class="text-xs font-medium text-muted-foreground">{{ t('kb.import.guidance') }}</label>
+        <Textarea
+          v-model="guidance"
+          rows="2"
+          maxlength="2000"
+          :placeholder="t('kb.import.guidancePlaceholder')"
+          class="min-h-0 text-[14px] mt-1.5"
+        />
+      </div>
     </div>
 
     <div class="flex items-center gap-2">
-      <Button size="sm" :disabled="!hasPending || kbi.isActive" @click="openDialog">{{ t('kb.import.submitButton') }}</Button>
+      <Button size="sm" :disabled="!canSubmit || kbi.submitting" @click="submit">
+        <LoaderCircle v-if="kbi.submitting" class="w-4 h-4 animate-spin" /> {{ t('kb.import.submitButton') }}
+      </Button>
       <span v-if="kbi.isActive" class="text-xs text-muted-foreground">{{ t('kb.import.activeRunNotice') }}</span>
     </div>
 
-    <p v-if="kbi.error && !dialogOpen" class="text-sm text-destructive">{{ kbi.error }}</p>
-
-    <KbImportRunStatus v-if="kbi.current" :run="kbi.current" />
-
-    <KbImportDialog
-      :open="dialogOpen"
-      :busy="kbi.submitting"
-      :error="dialogOpen ? kbi.error : ''"
-      :pending-file-count="pendingFiles.length"
-      :pending-url-count="pendingUrls.length"
-      @update:open="(v) => (dialogOpen = v)"
-      @submit="handleSubmit"
-    />
+    <p v-if="kbi.error" class="text-sm text-destructive">{{ kbi.error }}</p>
   </div>
 </template>

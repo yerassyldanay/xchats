@@ -39,9 +39,10 @@ never needs to think about these four values at all.
 | LlamaParse   | `llamaparse.api_key`                        | Yes (`GET /api/v1/parsing/supported_file_extensions`) |
 
 Firecrawl and LlamaParse are the structured knowledge base import pipeline's
-document/URL *extraction* providers (Settings → ИИ-движок, a block separate
-from the response-drafting model providers above) — they never register an
-LLM client, so they can never accidentally become a chat/draft model choice.
+document/URL *extraction* providers, configured from their own **Settings →
+Парсеры и краулеры** tab — separate from the response-drafting model
+providers under AI Engine — they never register an LLM client, so they can
+never accidentally become a chat/draft model choice.
 
 Saving a credential that fails validation with a clear rejection (401/403,
 or Gemini's `API_KEY_INVALID` body on a 400) is refused outright. One that

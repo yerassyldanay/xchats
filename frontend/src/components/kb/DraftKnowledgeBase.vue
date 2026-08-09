@@ -1,9 +1,12 @@
 <script setup lang="ts">
-// DraftKnowledgeBase is Черновик (/playground) — a review-only surface
-// answering exactly one question: what unpublished changes will affect the
-// knowledge base? No Add buttons, no create forms (decision 1); every
-// change here originated on /knowledge-base and only gets published,
-// edited in place, or cancelled from this page.
+// DraftKnowledgeBase is Черновик (/playground) — model-driven ingest (the
+// ingestion panel: submit a URL/file to the structured import pipeline, or
+// connect ChatGPT/Claude over MCP) PLUS review of whatever ends up staged,
+// from either source. This refines, rather than reverses, the 2026-08-03
+// decision that made this page review-only: /knowledge-base remains the
+// sole MANUAL authoring surface — no Add buttons or record-create forms
+// live here, only what a model proposed gets edited in place, published,
+// or cancelled from this page.
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CircleAlert, LoaderCircle, Save, WandSparkles } from 'lucide-vue-next'
@@ -19,7 +22,7 @@ import StatTiles from './StatTiles.vue'
 import ChangeList from './ChangeList.vue'
 import ConfigChangeGroup from './ConfigChangeGroup.vue'
 import DraftEmptyState from './DraftEmptyState.vue'
-import McpConnectCard from './McpConnectCard.vue'
+import KbIngestPanel from './KbIngestPanel.vue'
 import DeliveryZoneRecord from './records/DeliveryZoneRecord.vue'
 import ContactsRecord from './records/ContactsRecord.vue'
 import PoliciesRecord from './records/PoliciesRecord.vue'
@@ -100,7 +103,7 @@ function policyRowOf(entry: ChangeEntry) {
 
     <div class="flex-1 overflow-y-auto flex flex-col">
       <div class="px-8 pt-6 shrink-0">
-        <McpConnectCard />
+        <KbIngestPanel />
       </div>
 
       <div v-if="loading && !pg.changes" class="flex-1 grid place-items-center p-8">
@@ -112,73 +115,84 @@ function policyRowOf(entry: ChangeEntry) {
         </div>
       </div>
 
-      <DraftEmptyState v-else-if="isEmpty" />
-
+      <!-- Review region: always rendered once loaded, regardless of whether
+           anything is pending — StatTiles reads all zeros rather than
+           vanishing, and DraftEmptyState now stands in for the tabs/change
+           lists only, not for this whole region (the ingestion panel above
+           must stay reachable even with an empty draft). -->
       <div v-else class="px-8 py-6 space-y-6">
+        <div>
+          <h2 class="text-sm font-semibold text-muted-foreground">{{ t('kb.draft.reviewHeading') }}</h2>
+        </div>
+
         <StatTiles :counts="counts" />
-        <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k)" />
 
-        <div v-show="active === 'config'" class="space-y-3 max-w-3xl">
-          <ConfigChangeGroup />
-        </div>
+        <DraftEmptyState v-if="isEmpty" />
+        <template v-else>
+          <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k)" />
 
-        <div v-show="active === 'topics'" class="space-y-3">
-          <ChangeList kind="topics" />
-        </div>
-        <div v-show="active === 'products'" class="space-y-3">
-          <ChangeList kind="products" />
-        </div>
-        <div v-show="active === 'tariffs'" class="space-y-3">
-          <ChangeList kind="tariffs" />
-        </div>
+          <div v-show="active === 'config'" class="space-y-3 max-w-3xl">
+            <ConfigChangeGroup />
+          </div>
 
-        <div v-show="active === 'delivery_zones'" class="space-y-3">
-          <DeliveryZoneRecord
-            v-for="entry in zoneEntries"
-            :key="entry.key"
-            :row="zoneRowOf(entry)"
-            :live-row="entry.type === 'removed' ? undefined : (entry.liveRow as DeliveryZoneRow | undefined)"
-            :change-type="entry.type"
-            :all-zones="allZonesForDisplay"
-            :actions="kbActions({ page: 'draft', changeType: entry.type })"
-            :busy="isBusy('delivery_zones', entry.key)"
-            :blocked-note="blockedNote('delivery_zones', entry.key)"
-            @edit="editEntry('delivery_zones', entry)"
-            @publish="pg.approveEntity('delivery_zones', entry.key)"
-            @cancel="pg.cancelChange('delivery_zones', entry.key)"
-          />
-        </div>
+          <div v-show="active === 'topics'" class="space-y-3">
+            <ChangeList kind="topics" />
+          </div>
+          <div v-show="active === 'products'" class="space-y-3">
+            <ChangeList kind="products" />
+          </div>
+          <div v-show="active === 'tariffs'" class="space-y-3">
+            <ChangeList kind="tariffs" />
+          </div>
 
-        <div v-show="active === 'contacts'" class="space-y-3 max-w-2xl">
-          <ContactsRecord
-            v-if="contactEntry"
-            :row="contactRowOf(contactEntry)"
-            :live-row="contactEntry.type === 'removed' ? undefined : (contactEntry.liveRow as ContactRow | undefined)"
-            :change-type="contactEntry.type"
-            :actions="kbActions({ page: 'draft', changeType: contactEntry.type, singleton: true })"
-            :busy="isBusy('contacts', contactEntry.key)"
-            :blocked-note="blockedNote('contacts', contactEntry.key)"
-            @edit="editEntry('contacts', contactEntry)"
-            @publish="pg.approveEntity('contacts', contactEntry.key)"
-            @cancel="pg.cancelChange('contacts', contactEntry.key)"
-          />
-        </div>
+          <div v-show="active === 'delivery_zones'" class="space-y-3">
+            <DeliveryZoneRecord
+              v-for="entry in zoneEntries"
+              :key="entry.key"
+              :row="zoneRowOf(entry)"
+              :live-row="entry.type === 'removed' ? undefined : (entry.liveRow as DeliveryZoneRow | undefined)"
+              :change-type="entry.type"
+              :all-zones="allZonesForDisplay"
+              :actions="kbActions({ page: 'draft', changeType: entry.type })"
+              :busy="isBusy('delivery_zones', entry.key)"
+              :blocked-note="blockedNote('delivery_zones', entry.key)"
+              @edit="editEntry('delivery_zones', entry)"
+              @publish="pg.approveEntity('delivery_zones', entry.key)"
+              @cancel="pg.cancelChange('delivery_zones', entry.key)"
+            />
+          </div>
 
-        <div v-show="active === 'policies'" class="space-y-3 max-w-2xl">
-          <PoliciesRecord
-            v-if="policyEntry"
-            :row="policyRowOf(policyEntry)"
-            :live-row="policyEntry.type === 'removed' ? undefined : (policyEntry.liveRow as PolicyRow | undefined)"
-            :change-type="policyEntry.type"
-            :zones-exist="zonesExist"
-            :actions="kbActions({ page: 'draft', changeType: policyEntry.type, singleton: true })"
-            :busy="isBusy('policies', policyEntry.key)"
-            :blocked-note="blockedNote('policies', policyEntry.key)"
-            @edit="editEntry('policies', policyEntry)"
-            @publish="pg.approveEntity('policies', policyEntry.key)"
-            @cancel="pg.cancelChange('policies', policyEntry.key)"
-          />
-        </div>
+          <div v-show="active === 'contacts'" class="space-y-3 max-w-2xl">
+            <ContactsRecord
+              v-if="contactEntry"
+              :row="contactRowOf(contactEntry)"
+              :live-row="contactEntry.type === 'removed' ? undefined : (contactEntry.liveRow as ContactRow | undefined)"
+              :change-type="contactEntry.type"
+              :actions="kbActions({ page: 'draft', changeType: contactEntry.type, singleton: true })"
+              :busy="isBusy('contacts', contactEntry.key)"
+              :blocked-note="blockedNote('contacts', contactEntry.key)"
+              @edit="editEntry('contacts', contactEntry)"
+              @publish="pg.approveEntity('contacts', contactEntry.key)"
+              @cancel="pg.cancelChange('contacts', contactEntry.key)"
+            />
+          </div>
+
+          <div v-show="active === 'policies'" class="space-y-3 max-w-2xl">
+            <PoliciesRecord
+              v-if="policyEntry"
+              :row="policyRowOf(policyEntry)"
+              :live-row="policyEntry.type === 'removed' ? undefined : (policyEntry.liveRow as PolicyRow | undefined)"
+              :change-type="policyEntry.type"
+              :zones-exist="zonesExist"
+              :actions="kbActions({ page: 'draft', changeType: policyEntry.type, singleton: true })"
+              :busy="isBusy('policies', policyEntry.key)"
+              :blocked-note="blockedNote('policies', policyEntry.key)"
+              @edit="editEntry('policies', policyEntry)"
+              @publish="pg.approveEntity('policies', policyEntry.key)"
+              @cancel="pg.cancelChange('policies', policyEntry.key)"
+            />
+          </div>
+        </template>
 
         <p v-if="pg.gateReasons" class="flex items-start gap-2 text-sm text-destructive rounded-lg bg-destructive/10 p-3">
           <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ t('kb.draft.gateBlocked') }} {{ pg.gateReasons }}

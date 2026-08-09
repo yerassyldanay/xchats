@@ -1,5 +1,5 @@
 import { log } from '../lib/logfmt'
-import type { KbImportRun } from '../types'
+import type { KbImportProviderCapability, KbImportRun } from '../types'
 
 // Env-driven addressing: VITE_API_BASE_URL points at the backend. Empty means
 // same-origin (dev uses the Vite proxy; prod fronts both behind one domain).
@@ -99,4 +99,12 @@ export const api = {
   },
   getKbImportRun: (runId: string) => send<KbImportRun>('GET', '/kb/imports/' + encodeURIComponent(runId)),
   listKbImportRuns: (limit?: number) => send<{ runs: KbImportRun[] }>('GET', '/kb/imports' + (limit ? `?limit=${limit}` : '')),
+  // getKbImportProviders is GET /kb/import/providers (internal/httpapi/
+  // kb_import.go) — the one source of truth useImportProviders fetches
+  // once and caches, so the parser dropdown can never disagree with
+  // Submit's own precheck.
+  async getKbImportProviders(): Promise<KbImportProviderCapability[]> {
+    const res = await send<{ providers: KbImportProviderCapability[] }>('GET', '/kb/import/providers')
+    return res.providers
+  },
 }

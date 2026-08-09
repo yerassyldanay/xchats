@@ -10,8 +10,9 @@ export function isTerminalRunStatus(s: KbImportRunStatus): boolean {
   return TERMINAL_STATUSES.includes(s)
 }
 
-// useKbImport backs the Знаний база "Импорт" tab (KbImportCard/Dialog/
-// RunStatus): submit URLs/files to internal/kbimport's pipeline, then track
+// useKbImport backs Черновик's ingestion panel (KbIngestPanel /
+// KbImportCard / KbImportRunStatus — see components/kb/KbIngestPanel.vue):
+// submit URLs/files to internal/kbimport's pipeline, then track
 // ONE run at a time — the backend itself enforces one active run per org
 // (ErrRunActive, 409), so there is never a second in-flight run for this
 // store to juggle. `current` is deliberately whatever the org's most recent
