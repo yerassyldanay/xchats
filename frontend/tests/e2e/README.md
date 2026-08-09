@@ -26,17 +26,14 @@ comment for the isolation rules).
    # from repo root:
    make dev-backend     # :8080
    ```
-   The tests log in as the migration-seeded admin, `admin@xchat.kz`. Its
-   password is one-time and randomly generated per database — retrieve it,
-   log in once through the browser, and set your own password (the first
-   login forces this before anything else is reachable):
-   ```bash
-   cd backend && go run ./cmd/xchats admin-credential show
-   ```
-   Then point the tests at the password you just set:
+   The tests log in as the migration-seeded admin, `admin@xchat.kz`, whose
+   password defaults to the documented public default,
+   `xchat-admin-change-me` (see the root [`README.md`](../../../README.md)).
+   `E2E_EMAIL`/`E2E_PASSWORD` only need setting if the database the tests
+   point at has since had that password changed:
    ```bash
    export E2E_EMAIL=admin@xchat.kz
-   export E2E_PASSWORD='<the password you set after the forced change>'
+   export E2E_PASSWORD='<your password, if you changed it>'
    ```
 
 ## Run

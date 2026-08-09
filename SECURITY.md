@@ -74,13 +74,16 @@ an explicit, recorded design decision, not an oversight:
   explicit opt-in (`XCHATS_ALLOW_FILE_CREDENTIALS=1`) plus an acknowledgment
   in the UI before it's used. See
   [`docs/release/credentials.md`](docs/release/credentials.md).
-- **The bootstrap admin credential is a one-time, randomly-generated
-  password**, written to a `0600`, owner-only file on first boot and
-  retrieved with `xchats admin-credential show` (never printed to a log
-  stream) — not a shared default. The account is force-flagged to change its
-  password on first login, the bootstrap file is deleted once that happens,
-  and `xchats reset-admin-password` re-mints it if it's ever needed again.
-  Documented in [`docs/release/installation.md`](docs/release/installation.md).
+- **The default admin credential (`admin@xchat.kz` /
+  `xchat-admin-change-me`) is a public, shared default** — printed in the
+  README and committed in this repo's migration history — restored on every
+  fresh install for self-host ergonomics. There is no forced first-login
+  change anymore: a deployment that never rotates this password is open to
+  anyone who reads the docs, and changing it is the operator's
+  responsibility, not something xchats enforces. `xchats
+  reset-admin-password` restores this same default if a changed password is
+  ever lost. Documented in
+  [`docs/release/installation.md`](docs/release/installation.md).
 
 ## WhatsApp connectivity
 
