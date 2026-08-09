@@ -193,3 +193,73 @@ func TestExtractFinalOutput_ValidatesThroughContractAfterExtraction(t *testing.T
 		t.Fatalf("ValidateResponse(extracted final) = (%+v, %+v), want valid with no issues", resp, issues)
 	}
 }
+
+// --- ExtractJSONObject: the contract-agnostic core other callers (e.g.
+// internal/kbimport's synthesis parser) use directly, with their own single
+// acceptance predicate instead of the customer-response contract's fields.
+
+func hasCallsField(m map[string]json.RawMessage) bool {
+	_, ok := m["calls"]
+	return ok
+}
+
+func TestExtractJSONObject_PureJSON(t *testing.T) {
+	final := `{"calls":[{"tool":"kb_product_upsert"}],"notes":"","unmapped":[]}`
+	got, ok := ExtractJSONObject(final, hasCallsField)
+	if !ok {
+		t.Fatal("expected extraction to succeed")
+	}
+	if got.Method != ExtractDirect {
+		t.Errorf("Method = %q, want %q", got.Method, ExtractDirect)
+	}
+	if got.Final != final {
+		t.Errorf("Final = %q, want %q", got.Final, final)
+	}
+}
+
+func TestExtractJSONObject_OuterFence(t *testing.T) {
+	final := `{"calls":[]}`
+	raw := "```json\n" + final + "\n```"
+	got, ok := ExtractJSONObject(raw, hasCallsField)
+	if !ok {
+		t.Fatal("expected extraction to succeed")
+	}
+	if got.Method != ExtractOuterFence {
+		t.Errorf("Method = %q, want %q", got.Method, ExtractOuterFence)
+	}
+	if got.Final != final {
+		t.Errorf("Final = %q, want %q", got.Final, final)
+	}
+}
+
+func TestExtractJSONObject_EmbeddedInReasoning(t *testing.T) {
+	final := `{"calls":[{"tool":"kb_topic_upsert"}]}`
+	raw := "Let me think about this.\n\n" + final + "\n\nThat's my answer."
+	got, ok := ExtractJSONObject(raw, hasCallsField)
+	if !ok {
+		t.Fatal("expected extraction to succeed")
+	}
+	if got.Final != final {
+		t.Errorf("Final = %q, want %q", got.Final, final)
+	}
+}
+
+func TestExtractJSONObject_RejectsNonMatchingShape(t *testing.T) {
+	raw := `{"reply_text":"hi","escalate":false}`
+	if _, ok := ExtractJSONObject(raw, hasCallsField); ok {
+		t.Fatal("expected extraction to fail: no top-level calls field")
+	}
+}
+
+func TestExtractJSONObject_LastCompleteCandidateWins(t *testing.T) {
+	partial := `{"calls":"still thinking"}` // wrong shape for calls, but the predicate here only checks presence
+	final := `{"calls":[{"tool":"kb_contacts_upsert"}]}`
+	raw := "Draft: " + partial + "\n\nFinal: " + final
+	got, ok := ExtractJSONObject(raw, hasCallsField)
+	if !ok {
+		t.Fatal("expected extraction to succeed")
+	}
+	if got.Final != final {
+		t.Errorf("Final = %q, want the LAST candidate %q", got.Final, final)
+	}
+}

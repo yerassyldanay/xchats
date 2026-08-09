@@ -26,6 +26,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
@@ -332,6 +333,17 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
+	// kbImportSvc runs the structured KB import pipeline's background
+	// workers (internal/kbimport): pass-1 extraction and pass-2 synthesis,
+	// both landing in kbd_draft only — see that package's own doc comment
+	// for the safety boundary. Started before httpapi.New so the first
+	// request the server ever handles already sees a non-nil pipeline.
+	kbImportSvc := kbimport.New(kbimport.Deps{
+		KB: kb, Blob: blobStore, Credentials: credsChain, Settings: settingsStore,
+		LLM: llmRegistry, Hub: hub, Log: log, AllowPrivateFetch: cfg.KBAllowPrivateFetch,
+	}, kbimport.DefaultConfig())
+	kbImportSvc.Start(ctx)
+
 	// The tunnel needs to serve the SAME router httpapi.New's Server owns —
 	// but httpapi.Deps also needs the tunnel (for /settings/tunnel/*)
 	// before that router exists. Broken by constructing the Server with no
@@ -348,6 +360,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		BootstrapAdminCredentialPath: bootstrapCredentialPath,
 		Credentials:                  credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
 		ProviderHealth: providerHealth, UpdateChecker: updateChecker,
+		KBImport: kbImportSvc,
 	})
 	router := srv.Router()
 
@@ -418,6 +431,10 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	tgMgr.Close()
 	automationScheduler.Stop()
 	q.Close()
+	// kbImportSvc has no producer/consumer relationship with q (its job
+	// queue is kbd_materials, claimed directly via kbstore) — it only needs
+	// to stop before the deferred kb.Close()/st.Close() run.
+	kbImportSvc.Stop()
 }
 
 // resolveConfigDir resolves the OS-appropriate per-user config directory

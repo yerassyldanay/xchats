@@ -22,7 +22,7 @@ func TestProvidersReturnsACopy(t *testing.T) {
 }
 
 func TestProviderByID(t *testing.T) {
-	for _, id := range []string{"openrouter", "openai", "gemini", "ngrok", "langfuse"} {
+	for _, id := range []string{"openrouter", "openai", "gemini", "ngrok", "langfuse", "firecrawl", "llamaparse"} {
 		t.Run(id, func(t *testing.T) {
 			p, ok := ProviderByID(id)
 			if !ok {
@@ -75,6 +75,8 @@ var validatorCases = []struct {
 	{"langfuse", validateLangfuse, func(v string) map[Key]string {
 		return map[Key]string{"langfuse.public_key": "pub", "langfuse.secret_key": v}
 	}},
+	{"firecrawl", validateFirecrawl, func(v string) map[Key]string { return map[Key]string{"firecrawl.api_key": v} }},
+	{"llamaparse", validateLlamaParse, func(v string) map[Key]string { return map[Key]string{"llamaparse.api_key": v} }},
 }
 
 func TestValidatorsClassifyResponses(t *testing.T) {
@@ -264,6 +266,72 @@ func TestValidateLangfuseSendsBasicAuthAndDefaultsHost(t *testing.T) {
 	}
 	if !ok || gotUser != "pk-test" || gotPass != "sk-test" {
 		t.Errorf("basic auth = (%q, %q, %v), want (%q, %q, true)", gotUser, gotPass, ok, "pk-test", "sk-test")
+	}
+}
+
+func TestValidateFirecrawlSendsBearerAuth(t *testing.T) {
+	var gotAuth, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	err := validateFirecrawl(context.Background(), map[Key]string{
+		"firecrawl.api_key": "fc-test", "firecrawl.base_url": srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("validateFirecrawl: %v", err)
+	}
+	if gotPath != "/v2/team/credit-usage" {
+		t.Errorf("path = %q, want %q", gotPath, "/v2/team/credit-usage")
+	}
+	if gotAuth != "Bearer fc-test" {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer fc-test")
+	}
+}
+
+func TestValidateLlamaParseSendsBearerAuth(t *testing.T) {
+	var gotAuth, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	err := validateLlamaParse(context.Background(), map[Key]string{
+		"llamaparse.api_key": "lp-test", "llamaparse.base_url": srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("validateLlamaParse: %v", err)
+	}
+	if gotPath != "/api/v1/parsing/supported_file_extensions" {
+		t.Errorf("path = %q, want %q", gotPath, "/api/v1/parsing/supported_file_extensions")
+	}
+	if gotAuth != "Bearer lp-test" {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer lp-test")
+	}
+}
+
+// TestExtractionProvidersHaveNoModel guards the Settings UI split
+// (AiEngineTab.vue): Firecrawl/LlamaParse must never appear in the
+// model-providers block, and — the actually load-bearing half of this —
+// cmd/xchats' populateLLMRegistry iterates its OWN fixed provider list
+// (llmProviderCfg), never credentials.Providers(), so this flag is
+// documentation of an invariant enforced elsewhere, not itself the safety
+// boundary; still worth pinning so a future edit can't silently flip it.
+func TestExtractionProvidersHaveNoModel(t *testing.T) {
+	for _, id := range []string{"firecrawl", "llamaparse"} {
+		p, ok := ProviderByID(id)
+		if !ok {
+			t.Fatalf("provider %q not found", id)
+		}
+		if p.HasModel {
+			t.Errorf("%s.HasModel = true, want false — extraction providers never drive the response engine's model choice", id)
+		}
+		if !p.HasBaseURL {
+			t.Errorf("%s.HasBaseURL = false, want true — self-hosting is supported", id)
+		}
 	}
 }
 
