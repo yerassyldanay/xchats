@@ -10,6 +10,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ConfigSectionMeta } from '@/components/kb/kbEntities'
+import { CONFIG_ACCENT } from '@/components/kb/kbEntities'
 import type { ChangeType } from '@/composables/draftChanges'
 import type { KbAction } from './actions'
 import { Badge } from '@/components/ui/badge'
@@ -31,6 +32,7 @@ const { t } = useI18n()
 
 const state = computed(() => (props.changeType ? stateForChange(props.changeType) : 'published'))
 const changed = computed(() => props.liveValue !== undefined && String(props.value) !== String(props.liveValue))
+const accent = computed(() => CONFIG_ACCENT[props.section.accent])
 
 function lines(v: string | number): string[] {
   return String(v || '')
@@ -43,30 +45,32 @@ function lines(v: string | number): string[] {
 <template>
   <RecordShell
     :icon="section.icon"
-    :label="t(section.i18nKey + '.title')"
+    :icon-class="accent.icon"
+    :label="t('kb.entities.config.singular')"
+    :heading="t(section.i18nKey + '.title')"
     :state="state"
     :actions="actions"
     :busy="busy"
     @edit="$emit('edit')"
     @cancel="$emit('cancel')"
   >
-    <p class="text-xs text-muted-foreground">{{ t(section.i18nKey + '.hint') }}</p>
+    <p class="-mt-2 text-xs text-muted-foreground">{{ t(section.i18nKey + '.hint') }}</p>
 
     <template v-if="section.render === 'badge'">
-      <Badge v-if="value" variant="secondary" class="bg-indigo-100 text-indigo-700 text-[13px] font-medium">
+      <Badge v-if="value" variant="secondary" class="bg-indigo-100 text-[13px] font-medium text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
         {{ value }} {{ t('kb.config.wordsUnit') }}
       </Badge>
-      <span v-else class="text-muted-foreground italic text-sm">{{ t('kb.config.empty') }}</span>
+      <span v-else class="text-sm italic text-muted-foreground">{{ t('kb.config.empty') }}</span>
     </template>
     <ul v-else-if="section.render === 'list'" class="space-y-1.5">
       <li v-for="(ln, i) in lines(value)" :key="i" class="flex gap-2 text-sm">
-        <span class="text-muted-foreground select-none">•</span><span>{{ ln }}</span>
+        <span class="select-none text-muted-foreground">•</span><span>{{ ln }}</span>
       </li>
-      <li v-if="!lines(value).length" class="text-muted-foreground italic text-sm">{{ t('kb.config.empty') }}</li>
+      <li v-if="!lines(value).length" class="text-sm italic text-muted-foreground">{{ t('kb.config.empty') }}</li>
     </ul>
     <template v-else>
       <p v-for="(p, i) in lines(value)" :key="i" class="text-sm" :class="i > 0 ? 'mt-2' : ''">{{ p }}</p>
-      <p v-if="!lines(value).length" class="text-muted-foreground italic text-sm">{{ t('kb.config.empty') }}</p>
+      <p v-if="!lines(value).length" class="text-sm italic text-muted-foreground">{{ t('kb.config.empty') }}</p>
     </template>
 
     <FieldDiffNote :show="changed" :was="String(liveValue ?? '')" />

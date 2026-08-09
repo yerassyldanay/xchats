@@ -86,10 +86,10 @@ export const CONFIG_SECTIONS: ConfigSectionMeta[] = [
   { key: 'reply_max_words', icon: Hash, accent: 'indigo', render: 'badge', i18nKey: 'kb.config.reply_max_words' },
 ]
 
-export const CONFIG_ACCENT: Record<ConfigSectionMeta['accent'], { box: string; bar: string }> = {
-  violet: { box: 'bg-violet-100 text-violet-600', bar: 'bg-violet-400' },
-  emerald: { box: 'bg-emerald-100 text-emerald-600', bar: 'bg-emerald-400' },
-  amber: { box: 'bg-amber-100 text-amber-600', bar: 'bg-amber-400' },
-  sky: { box: 'bg-sky-100 text-sky-600', bar: 'bg-sky-400' },
-  indigo: { box: 'bg-indigo-100 text-indigo-600', bar: 'bg-indigo-400' },
+export const CONFIG_ACCENT: Record<ConfigSectionMeta['accent'], { box: string; bar: string; icon: string }> = {
+  violet: { box: 'bg-violet-100 text-violet-600', bar: 'bg-violet-400', icon: 'text-violet-500 dark:text-violet-400' },
+  emerald: { box: 'bg-emerald-100 text-emerald-600', bar: 'bg-emerald-400', icon: 'text-emerald-500 dark:text-emerald-400' },
+  amber: { box: 'bg-amber-100 text-amber-600', bar: 'bg-amber-400', icon: 'text-amber-500 dark:text-amber-400' },
+  sky: { box: 'bg-sky-100 text-sky-600', bar: 'bg-sky-400', icon: 'text-sky-500 dark:text-sky-400' },
+  indigo: { box: 'bg-indigo-100 text-indigo-600', bar: 'bg-indigo-400', icon: 'text-indigo-500 dark:text-indigo-400' },
 }

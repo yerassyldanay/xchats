@@ -96,7 +96,7 @@ async function onFileChange(e: Event) {
 
 <template>
   <div class="space-y-1.5">
-    <span class="text-xs font-medium text-muted-foreground">{{ label }}</span>
+    <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ label }}</span>
     <div class="flex flex-wrap items-center gap-2">
       <div v-for="id in selectedIds" :key="id" class="relative">
         <MediaThumb :id="id" :label="label" />

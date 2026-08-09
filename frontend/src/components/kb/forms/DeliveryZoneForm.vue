@@ -85,21 +85,21 @@ function retry() {
   >
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.forms.zoneRef') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.forms.zoneRef') }}</span>
         <Input v-model="buf.ref" class="h-9 mt-1 font-mono" :disabled="isEdit()" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.name') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.name') }}</span>
         <Input v-model="buf.name" class="h-9 mt-1" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.zoneLevel') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.zoneLevel') }}</span>
         <select v-model="buf.zone_level" class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <option v-for="lvl in ZONE_LEVELS" :key="lvl" :value="lvl">{{ t('kb.zoneLevel.' + lvl) }}</option>
         </select>
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.parentZone') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.parentZone') }}</span>
         <select v-model="buf.parent_ref" class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <option value="">{{ t('kb.fields.noParentZone') }}</option>
           <option v-for="z in parentOptions" :key="z.ref" :value="z.ref">{{ z.name || z.ref }}</option>
@@ -116,16 +116,16 @@ function retry() {
     </div>
     <div v-if="buf.delivery_available" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryCost') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.deliveryCost') }}</span>
         <Input v-model="buf.delivery_cost" class="h-9 mt-1 font-mono" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryInDays') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.deliveryInDays') }}</span>
         <Input v-model="buf.delivery_in_days" class="h-9 mt-1 font-mono" />
       </div>
     </div>
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.notes') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.notes') }}</span>
       <Textarea v-model="buf.notes" rows="2" class="min-h-0 text-[14px] mt-1" />
     </div>
   </KbFormDialog>

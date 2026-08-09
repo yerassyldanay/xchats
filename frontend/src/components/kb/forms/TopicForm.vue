@@ -77,15 +77,15 @@ function retry() {
     @reload-and-retry="retry"
   >
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.forms.slug') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.forms.slug') }}</span>
       <Input v-model="buf.slug" :placeholder="t('kb.forms.slugHint')" class="h-9 mt-1" :disabled="isEdit()" />
     </div>
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.title') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.title') }}</span>
       <Input v-model="buf.title" class="h-9 mt-1" />
     </div>
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.body') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.body') }}</span>
       <Textarea v-model="buf.body_md" rows="4" class="min-h-0 text-[14px] mt-1" />
     </div>
     <MediaFieldPicker

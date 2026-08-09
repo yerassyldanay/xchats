@@ -6,9 +6,9 @@
 // them expose one without leaving this page. Every MCP write still lands in
 // the draft this page reviews — nothing an external LLM does here publishes
 // on its own.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, LoaderCircle, Play, Sparkles } from 'lucide-vue-next'
+import { ChevronDown, CircleAlert, LoaderCircle, Play, Sparkles } from 'lucide-vue-next'
 import { api, ApiError } from '@/api/client'
 import { useAuth } from '@/stores/auth'
 import { useSettings } from '@/stores/settings'
@@ -17,6 +17,22 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import CopyButton from '@/components/evals/CopyButton.vue'
 import ProviderCredentialCard from '@/components/settings/ProviderCredentialCard.vue'
+
+// open/update:open is an OPTIONAL v-model — every existing/standalone mount
+// (this component's own tests included) never binds it, so it defaults open
+// and behaves exactly as before. /playground's DraftKnowledgeBase.vue is the
+// one caller that controls it, collapsing this panel once there's a review
+// queue to prioritize instead. Kept as local state (not a bare computed off
+// the prop) so the header stays clickable even when nothing listens for
+// update:open.
+const props = withDefaults(defineProps<{ open?: boolean }>(), { open: true })
+const emit = defineEmits<{ 'update:open': [boolean] }>()
+const localOpen = ref(props.open)
+watch(() => props.open, (v) => (localOpen.value = v))
+function toggle() {
+  localOpen.value = !localOpen.value
+  emit('update:open', localOpen.value)
+}
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -67,20 +83,22 @@ async function startTunnel() {
 </script>
 
 <template>
-  <div class="rounded-lg border border-border bg-card p-5 space-y-4">
-    <div class="flex items-start gap-3">
-      <div class="w-9 h-9 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0">
-        <Sparkles class="w-5 h-5" />
+  <div class="rounded-xl border border-border bg-card">
+    <button type="button" class="flex w-full items-start gap-3 p-4 text-left sm:p-5" :aria-expanded="localOpen" @click="toggle">
+      <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+        <Sparkles class="h-5 w-5" />
       </div>
-      <div>
+      <div class="min-w-0 flex-1">
         <h3 class="font-semibold">{{ t('kb.mcp.title') }}</h3>
         <p class="text-sm text-muted-foreground">{{ t('kb.mcp.subtitle') }}</p>
       </div>
-    </div>
+      <ChevronDown class="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform" :class="localOpen ? 'rotate-180' : ''" />
+    </button>
 
+    <div v-show="localOpen" class="space-y-4 px-4 pb-4 sm:px-5 sm:pb-5">
     <div v-if="infoLoading && !info" class="text-sm text-muted-foreground py-2">{{ t('settings.common.loading') }}</div>
 
-    <p v-else-if="infoError" class="flex items-center gap-2 text-sm text-destructive">
+    <p v-else-if="infoError" class="flex flex-wrap items-center gap-2 text-sm text-destructive">
       <CircleAlert class="w-4 h-4 shrink-0" /> {{ infoError }}
       <Button size="sm" variant="outline" class="ml-auto" @click="loadInfo">{{ t('settings.common.retry') }}</Button>
     </p>
@@ -115,10 +133,11 @@ async function startTunnel() {
         </div>
       </div>
 
-      <ol class="space-y-1 text-sm text-muted-foreground list-decimal list-inside">
-        <li>{{ t('kb.mcp.step1') }}</li>
-        <li>{{ t('kb.mcp.step2') }}</li>
-        <li>{{ t('kb.mcp.step3') }}</li>
+      <ol class="space-y-2 text-sm text-muted-foreground">
+        <li v-for="(step, i) in [t('kb.mcp.step1'), t('kb.mcp.step2'), t('kb.mcp.step3')]" :key="i" class="flex gap-2.5">
+          <span class="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-medium text-foreground">{{ i + 1 }}</span>
+          <span class="pt-px">{{ step }}</span>
+        </li>
       </ol>
 
       <p v-if="!info.auth_enabled" class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-400">
@@ -130,7 +149,7 @@ async function startTunnel() {
 
         <template v-else-if="showAdminSetup">
           <ProviderCredentialCard v-if="ngrok && !ngrok.configured" :provider="ngrok" />
-          <div v-else class="flex items-center gap-2 pt-1">
+          <div v-else class="flex flex-wrap items-center gap-2 pt-1">
             <Button size="sm" :disabled="tunnelBusy" @click="startTunnel">
               <LoaderCircle v-if="tunnelBusy" class="w-4 h-4 animate-spin" />
               <Play v-else class="w-4 h-4" />
@@ -146,5 +165,6 @@ async function startTunnel() {
         <p v-else class="text-xs text-muted-foreground">{{ t('kb.mcp.memberHint') }}</p>
       </template>
     </template>
+    </div>
   </div>
 </template>

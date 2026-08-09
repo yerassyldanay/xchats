@@ -74,29 +74,29 @@ function retry() {
   >
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.forms.tariffRef') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.forms.tariffRef') }}</span>
         <Input v-model="buf.ref" class="h-9 mt-1 font-mono" :disabled="isEdit()" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.name') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.name') }}</span>
         <Input v-model="buf.name" class="h-9 mt-1" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.pricingType') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.pricingType') }}</span>
         <select v-model="buf.pricing_type" class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <option v-for="pt in PRICING_TYPES" :key="pt" :value="pt">{{ t('kb.pricingType.' + pt) }}</option>
         </select>
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.price') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.price') }}</span>
         <Input v-model="buf.price" class="h-9 mt-1 font-mono" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.limitText') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.limitText') }}</span>
         <Input v-model="buf.limit_text" class="h-9 mt-1 font-mono" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.fee') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.fee') }}</span>
         <Input v-model="buf.fee" class="h-9 mt-1 font-mono" />
       </div>
       <label class="flex items-center gap-2 px-1 h-9 mt-4">
@@ -105,16 +105,16 @@ function retry() {
       </label>
     </div>
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.summary') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.summary') }}</span>
       <Textarea v-model="buf.summary" rows="2" class="min-h-0 text-[14px] mt-1" />
     </div>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.advantages') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.advantages') }}</span>
         <Textarea v-model="buf.advantages" rows="2" class="min-h-0 text-[14px] mt-1" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.disadvantages') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.disadvantages') }}</span>
         <Textarea v-model="buf.disadvantages" rows="2" class="min-h-0 text-[14px] mt-1" />
       </div>
     </div>

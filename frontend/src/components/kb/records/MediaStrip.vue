@@ -39,7 +39,7 @@ const emptyIcon = computed(() => EMPTY_ICON[fieldKind.value])
 
 <template>
   <div class="space-y-1.5">
-    <span class="text-xs font-medium text-muted-foreground">{{ label }}</span>
+    <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ label }}</span>
     <div v-if="list.length" class="flex flex-wrap items-center gap-2">
       <MediaThumb v-for="id in list" :key="id" :id="id" :label="label" />
     </div>

@@ -67,40 +67,40 @@ function retry() {
   >
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <span class="text-xs font-medium text-muted-foreground">WhatsApp</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">WhatsApp</span>
         <Input v-model="buf.whatsapp" class="h-9 mt-1 font-mono" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.phone') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.phone') }}</span>
         <Input v-model="buf.phone" class="h-9 mt-1 font-mono" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">E-mail</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">E-mail</span>
         <Input v-model="buf.email" class="h-9 mt-1" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.website') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.website') }}</span>
         <Input v-model="buf.website" class="h-9 mt-1" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">Instagram</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">Instagram</span>
         <Input v-model="buf.instagram" class="h-9 mt-1" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.workingHours') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.workingHours') }}</span>
         <Input v-model="buf.working_hours" class="h-9 mt-1" />
       </div>
     </div>
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.address') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.address') }}</span>
       <Input v-model="buf.address" class="h-9 mt-1" />
     </div>
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.legalInformation') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.legalInformation') }}</span>
       <Textarea v-model="buf.legal_information" rows="2" class="min-h-0 text-[14px] mt-1" />
     </div>
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.callbackTime') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.callbackTime') }}</span>
       <Input v-model="buf.callback_time" class="h-9 mt-1" />
     </div>
     <MediaFieldPicker

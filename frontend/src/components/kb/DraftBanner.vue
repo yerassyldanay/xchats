@@ -14,14 +14,17 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <div v-if="show" class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 flex items-center gap-3">
-    <CheckCircle2 class="w-5 h-5 shrink-0 text-emerald-600" />
+  <div
+    v-if="show"
+    class="flex items-center gap-3 rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 dark:border-emerald-400/25 dark:bg-emerald-500/10 dark:text-emerald-200"
+  >
+    <CheckCircle2 class="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
     <span class="flex-1">{{ t('kb.banner.staged') }}</span>
-    <RouterLink :to="{ name: 'playground' }" class="font-medium underline underline-offset-2 shrink-0">
+    <RouterLink :to="{ name: 'playground' }" class="shrink-0 font-medium underline underline-offset-2">
       {{ t('kb.banner.viewDraft') }}
     </RouterLink>
-    <button type="button" class="shrink-0 text-emerald-700/70 hover:text-emerald-900 transition" @click="emit('close')">
-      <X class="w-4 h-4" />
+    <button type="button" class="shrink-0 text-emerald-700/70 transition hover:text-emerald-900 dark:text-emerald-300/70 dark:hover:text-emerald-100" @click="emit('close')">
+      <X class="h-4 w-4" />
     </button>
   </div>
 </template>

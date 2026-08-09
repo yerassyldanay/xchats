@@ -70,42 +70,42 @@ function retry() {
   >
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryCost') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.deliveryCost') }}</span>
         <Input v-model="buf.delivery_cost" class="h-9 mt-1 font-mono" :disabled="zonesExist" :title="zonesExist ? t('kb.fields.managedByZones') : undefined" />
         <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-1">{{ t('kb.fields.managedByZones') }}</p>
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryInDays') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.deliveryInDays') }}</span>
         <Input v-model="buf.delivery_in_days" class="h-9 mt-1 font-mono" :disabled="zonesExist" :title="zonesExist ? t('kb.fields.managedByZones') : undefined" />
         <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-1">{{ t('kb.fields.managedByZones') }}</p>
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.freeDeliveryFrom') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.freeDeliveryFrom') }}</span>
         <Input v-model="buf.free_delivery_from" class="h-9 mt-1 font-mono" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.minOrder') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.minOrder') }}</span>
         <Input v-model="buf.min_order" class="h-9 mt-1 font-mono" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.prepayment') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.prepayment') }}</span>
         <Input v-model="buf.prepayment" class="h-9 mt-1" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.installment') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.installment') }}</span>
         <Input v-model="buf.installment" class="h-9 mt-1" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.returnPeriod') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.returnPeriod') }}</span>
         <Input v-model="buf.return_period_in_days" class="h-9 mt-1 font-mono" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.warranty') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.warranty') }}</span>
         <Input v-model="buf.warranty" class="h-9 mt-1" />
       </div>
     </div>
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.outsideZonesNote') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.outsideZonesNote') }}</span>
       <Textarea v-model="buf.outside_zones_note" rows="2" class="min-h-0 text-[14px] mt-1" />
       <p class="text-xs text-muted-foreground mt-1">{{ t('kb.fields.outsideZonesHint') }}</p>
     </div>

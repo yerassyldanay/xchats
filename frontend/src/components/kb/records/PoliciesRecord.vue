@@ -12,7 +12,8 @@ import type { PolicyRow } from '@/types'
 import type { ChangeType } from '@/composables/draftChanges'
 import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
-import FieldDiffNote from './FieldDiffNote.vue'
+import RecordField from './RecordField.vue'
+import MediaFieldsRow from './MediaFieldsRow.vue'
 import MediaStrip from './MediaStrip.vue'
 import { changedFields, stateForChange } from './shared'
 
@@ -54,58 +55,31 @@ const diff = computed(() =>
     @cancel="$emit('cancel')"
     @delete="$emit('delete')"
   >
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryCost') }}</span>
-        <p class="text-sm mt-0.5 font-mono">{{ row?.delivery_cost || '—' }}</p>
-        <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-0.5">{{ t('kb.fields.managedByZones') }}</p>
-        <FieldDiffNote :show="diff.includes('delivery_cost')" :was="liveRow?.delivery_cost ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryInDays') }}</span>
-        <p class="text-sm mt-0.5 font-mono">{{ row?.delivery_in_days || '—' }}</p>
-        <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-0.5">{{ t('kb.fields.managedByZones') }}</p>
-        <FieldDiffNote :show="diff.includes('delivery_in_days')" :was="liveRow?.delivery_in_days ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.freeDeliveryFrom') }}</span>
-        <p class="text-sm mt-0.5 font-mono">{{ row?.free_delivery_from || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('free_delivery_from')" :was="liveRow?.free_delivery_from ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.minOrder') }}</span>
-        <p class="text-sm mt-0.5 font-mono">{{ row?.min_order || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('min_order')" :was="liveRow?.min_order ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.prepayment') }}</span>
-        <p class="text-sm mt-0.5">{{ row?.prepayment || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('prepayment')" :was="liveRow?.prepayment ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.installment') }}</span>
-        <p class="text-sm mt-0.5">{{ row?.installment || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('installment')" :was="liveRow?.installment ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.returnPeriod') }}</span>
-        <p class="text-sm mt-0.5 font-mono">{{ row?.return_period_in_days || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('return_period_in_days')" :was="liveRow?.return_period_in_days ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.warranty') }}</span>
-        <p class="text-sm mt-0.5">{{ row?.warranty || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('warranty')" :was="liveRow?.warranty ?? ''" />
-      </div>
-      <div class="sm:col-span-2">
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.outsideZonesNote') }}</span>
-        <p class="text-sm mt-0.5 whitespace-pre-line">{{ row?.outside_zones_note || '—' }}</p>
-        <p class="text-xs text-muted-foreground mt-0.5">{{ t('kb.fields.outsideZonesHint') }}</p>
-        <FieldDiffNote :show="diff.includes('outside_zones_note')" :was="liveRow?.outside_zones_note ?? ''" />
-      </div>
+    <div class="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+      <RecordField :label="t('kb.fields.deliveryCost')" mono :diff-show="diff.includes('delivery_cost')" :diff-was="liveRow?.delivery_cost">
+        <span>{{ row?.delivery_cost || '—' }}</span>
+        <span v-if="zonesExist" class="ml-1.5 font-sans text-xs font-normal text-muted-foreground/70">· {{ t('kb.fields.managedByZones') }}</span>
+      </RecordField>
+      <RecordField :label="t('kb.fields.deliveryInDays')" mono :diff-show="diff.includes('delivery_in_days')" :diff-was="liveRow?.delivery_in_days">
+        <span>{{ row?.delivery_in_days || '—' }}</span>
+        <span v-if="zonesExist" class="ml-1.5 font-sans text-xs font-normal text-muted-foreground/70">· {{ t('kb.fields.managedByZones') }}</span>
+      </RecordField>
+      <RecordField :label="t('kb.fields.freeDeliveryFrom')" :value="row?.free_delivery_from" mono :diff-show="diff.includes('free_delivery_from')" :diff-was="liveRow?.free_delivery_from" />
+      <RecordField :label="t('kb.fields.minOrder')" :value="row?.min_order" mono :diff-show="diff.includes('min_order')" :diff-was="liveRow?.min_order" />
+      <RecordField :label="t('kb.fields.prepayment')" :value="row?.prepayment" :diff-show="diff.includes('prepayment')" :diff-was="liveRow?.prepayment" />
+      <RecordField :label="t('kb.fields.installment')" :value="row?.installment" :diff-show="diff.includes('installment')" :diff-was="liveRow?.installment" />
+      <RecordField :label="t('kb.fields.returnPeriod')" :value="row?.return_period_in_days" mono :diff-show="diff.includes('return_period_in_days')" :diff-was="liveRow?.return_period_in_days" />
+      <RecordField :label="t('kb.fields.warranty')" :value="row?.warranty" :diff-show="diff.includes('warranty')" :diff-was="liveRow?.warranty" />
+      <RecordField :label="t('kb.fields.outsideZonesNote')" :diff-show="diff.includes('outside_zones_note')" :diff-was="liveRow?.outside_zones_note" span>
+        <span class="whitespace-pre-line">{{ row?.outside_zones_note || '—' }}</span>
+        <span class="mt-0.5 block text-xs font-normal normal-case text-muted-foreground">{{ t('kb.fields.outsideZonesHint') }}</span>
+      </RecordField>
     </div>
-    <div v-if="row" class="flex flex-col gap-2">
-      <MediaStrip :label="t('kb.media.documents')" field="commerce_policy_documents" :ids="row.commerce_policy_documents" />
-    </div>
+
+    <template v-if="row" #media>
+      <MediaFieldsRow>
+        <MediaStrip :label="t('kb.media.documents')" field="commerce_policy_documents" :ids="row.commerce_policy_documents" />
+      </MediaFieldsRow>
+    </template>
   </RecordShell>
 </template>

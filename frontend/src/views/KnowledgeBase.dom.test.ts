@@ -73,13 +73,18 @@ async function mountWith(changes: DraftChangeSet, live: DraftView) {
   return { wrapper, pg: usePlayground(), api }
 }
 
-// switchTab clicks a tab by its exact label — the toolbar action (and each
+// switchTab activates a tab by its label — the toolbar action (and each
 // tab's own content) only renders for the ACTIVE tab, and the page starts
-// on Обзор (config is first in KB_ENTITY_ORDER).
+// on Обзор (config is first in KB_ENTITY_ORDER). Знаний база's tabs append
+// a live row count badge after the label (e.g. "Товары 5"), so this matches
+// by PREFIX rather than exact text — safe since no tab label here is a
+// prefix of another. reka-ui's TabsTrigger (EntityTabs.vue) switches on
+// mousedown, not click — see its own source (Tabs/TabsTrigger.js) —
+// so a plain 'click' trigger never reaches it here.
 async function switchTab(wrapper: VueWrapper, label: string) {
-  const tabBtn = wrapper.findAll('button').find((b) => b.text() === label)
+  const tabBtn = wrapper.findAll('button').find((b) => b.text().startsWith(label))
   if (!tabBtn) throw new Error(`no tab button labelled ${label}`)
-  await tabBtn.trigger('click')
+  await tabBtn.trigger('mousedown', { button: 0 })
   await wrapper.vm.$nextTick()
 }
 
@@ -242,8 +247,8 @@ describe('KnowledgeBase — published data unchanged after a staged write', () =
 describe('KnowledgeBase — singleton toolbars', () => {
   it('Контакты reads «Изменить контакты», never «Добавить»', async () => {
     const { wrapper } = await mountWith(emptyChanges(), emptyLive())
-    const contactsTab = wrapper.findAll('button').find((b) => b.text() === 'Контакты')
-    await contactsTab!.trigger('click')
+    const contactsTab = wrapper.findAll('button').find((b) => b.text().startsWith('Контакты'))
+    await contactsTab!.trigger('mousedown', { button: 0 })
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('Изменить контакты')
     expect(wrapper.text()).not.toContain('Добавить контакты')
@@ -251,8 +256,8 @@ describe('KnowledgeBase — singleton toolbars', () => {
 
   it('Политики reads «Изменить политики», never «Добавить»', async () => {
     const { wrapper } = await mountWith(emptyChanges(), emptyLive())
-    const policiesTab = wrapper.findAll('button').find((b) => b.text() === 'Политики')
-    await policiesTab!.trigger('click')
+    const policiesTab = wrapper.findAll('button').find((b) => b.text().startsWith('Политики'))
+    await policiesTab!.trigger('mousedown', { button: 0 })
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('Изменить политики')
     expect(wrapper.text()).not.toContain('Добавить политики')

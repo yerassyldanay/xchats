@@ -12,7 +12,8 @@ import type { TopicRow } from '@/types'
 import type { ChangeType } from '@/composables/draftChanges'
 import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
-import FieldDiffNote from './FieldDiffNote.vue'
+import RecordField from './RecordField.vue'
+import MediaFieldsRow from './MediaFieldsRow.vue'
 import MediaStrip from './MediaStrip.vue'
 import { changedFields, stateForChange } from './shared'
 
@@ -37,6 +38,7 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['title', 'b
   <RecordShell
     :icon="ListTree"
     :label="t('kb.entities.topics.singular')"
+    :heading="row.title || row.slug"
     :record-key="row.slug"
     :state="state"
     :pending-mark="pendingMark"
@@ -49,21 +51,19 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['title', 'b
     @cancel="$emit('cancel')"
     @delete="$emit('delete')"
   >
-    <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.title') }}</span>
-      <p class="text-sm mt-0.5">{{ row.title || '—' }}</p>
-      <FieldDiffNote :show="diff.includes('title')" :was="liveRow?.title ?? ''" />
-    </div>
-    <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.body') }}</span>
-      <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.body_md || '—' }}</p>
-      <FieldDiffNote :show="diff.includes('body_md')" :was="liveRow?.body_md ?? ''" />
-    </div>
-    <div class="flex flex-col gap-2">
-      <MediaStrip :label="t('kb.media.image')" field="featured_image" :ids="row.featured_image" />
-      <MediaStrip :label="t('kb.media.illustrations')" field="illustration_images" :ids="row.illustration_images" />
-      <MediaStrip :label="t('kb.media.videos')" field="explainer_videos" :ids="row.explainer_videos" />
-      <MediaStrip :label="t('kb.media.documents')" field="reference_documents" :ids="row.reference_documents" />
-    </div>
+    <!-- the heading already shows the current title; this only appears when it just changed -->
+    <RecordField v-if="diff.includes('title')" :label="t('kb.fields.title')" :value="row.title" diff-show :diff-was="liveRow?.title" span />
+    <RecordField :label="t('kb.fields.body')" :diff-show="diff.includes('body_md')" :diff-was="liveRow?.body_md" span>
+      <span class="whitespace-pre-line">{{ row.body_md || '—' }}</span>
+    </RecordField>
+
+    <template #media>
+      <MediaFieldsRow>
+        <MediaStrip :label="t('kb.media.image')" field="featured_image" :ids="row.featured_image" />
+        <MediaStrip :label="t('kb.media.illustrations')" field="illustration_images" :ids="row.illustration_images" />
+        <MediaStrip :label="t('kb.media.videos')" field="explainer_videos" :ids="row.explainer_videos" />
+        <MediaStrip :label="t('kb.media.documents')" field="reference_documents" :ids="row.reference_documents" />
+      </MediaFieldsRow>
+    </template>
   </RecordShell>
 </template>

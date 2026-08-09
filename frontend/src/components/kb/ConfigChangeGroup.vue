@@ -48,20 +48,22 @@ function cancelSection() {
 </script>
 
 <template>
-  <div v-if="entries.length" class="space-y-3">
-    <AssistantFieldRecord
-      v-for="entry in entries"
-      :key="entry.key"
-      :section="sectionFor(entry)"
-      :value="entry.draftValue ?? ''"
-      :live-value="entry.liveValue"
-      change-type="updated"
-      :actions="CONFIG_FIELD_ACTIONS"
-      :busy="isFieldBusy(entry)"
-      @edit="edit(entry)"
-      @cancel="cancelField(entry)"
-    />
-    <div class="flex items-center gap-2 pt-1">
+  <div v-if="entries.length" class="space-y-4">
+    <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+      <AssistantFieldRecord
+        v-for="entry in entries"
+        :key="entry.key"
+        :section="sectionFor(entry)"
+        :value="entry.draftValue ?? ''"
+        :live-value="entry.liveValue"
+        change-type="updated"
+        :actions="CONFIG_FIELD_ACTIONS"
+        :busy="isFieldBusy(entry)"
+        @edit="edit(entry)"
+        @cancel="cancelField(entry)"
+      />
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
       <Button size="sm" variant="ghost" class="text-destructive" :disabled="pg.busy || pg.approving" @click="cancelSection">
         {{ t('kb.config.cancelAllSection') }}
       </Button>

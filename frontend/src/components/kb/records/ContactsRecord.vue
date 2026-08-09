@@ -11,7 +11,8 @@ import type { ContactRow } from '@/types'
 import type { ChangeType } from '@/composables/draftChanges'
 import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
-import FieldDiffNote from './FieldDiffNote.vue'
+import RecordField from './RecordField.vue'
+import MediaFieldsRow from './MediaFieldsRow.vue'
 import MediaStrip from './MediaStrip.vue'
 import { changedFields, stateForChange } from './shared'
 
@@ -51,57 +52,26 @@ const diff = computed(() =>
     @cancel="$emit('cancel')"
     @delete="$emit('delete')"
   >
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">WhatsApp</span>
-        <p class="text-sm mt-0.5 font-mono">{{ row?.whatsapp || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('whatsapp')" :was="liveRow?.whatsapp ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.phone') }}</span>
-        <p class="text-sm mt-0.5 font-mono">{{ row?.phone || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('phone')" :was="liveRow?.phone ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">E-mail</span>
-        <p class="text-sm mt-0.5">{{ row?.email || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('email')" :was="liveRow?.email ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.website') }}</span>
-        <p class="text-sm mt-0.5">{{ row?.website || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('website')" :was="liveRow?.website ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">Instagram</span>
-        <p class="text-sm mt-0.5">{{ row?.instagram || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('instagram')" :was="liveRow?.instagram ?? ''" />
-      </div>
-      <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.workingHours') }}</span>
-        <p class="text-sm mt-0.5">{{ row?.working_hours || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('working_hours')" :was="liveRow?.working_hours ?? ''" />
-      </div>
-      <div class="sm:col-span-2">
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.address') }}</span>
-        <p class="text-sm mt-0.5">{{ row?.address || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('address')" :was="liveRow?.address ?? ''" />
-      </div>
-      <div class="sm:col-span-2">
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.legalInformation') }}</span>
-        <p class="text-sm mt-0.5 whitespace-pre-line">{{ row?.legal_information || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('legal_information')" :was="liveRow?.legal_information ?? ''" />
-      </div>
-      <div class="sm:col-span-2">
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.callbackTime') }}</span>
-        <p class="text-sm mt-0.5">{{ row?.callback_time || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('callback_time')" :was="liveRow?.callback_time ?? ''" />
-      </div>
+    <div class="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+      <RecordField label="WhatsApp" :value="row?.whatsapp" mono :diff-show="diff.includes('whatsapp')" :diff-was="liveRow?.whatsapp" />
+      <RecordField :label="t('kb.fields.phone')" :value="row?.phone" mono :diff-show="diff.includes('phone')" :diff-was="liveRow?.phone" />
+      <RecordField label="E-mail" :value="row?.email" :diff-show="diff.includes('email')" :diff-was="liveRow?.email" />
+      <RecordField :label="t('kb.fields.website')" :value="row?.website" :diff-show="diff.includes('website')" :diff-was="liveRow?.website" />
+      <RecordField label="Instagram" :value="row?.instagram" :diff-show="diff.includes('instagram')" :diff-was="liveRow?.instagram" />
+      <RecordField :label="t('kb.fields.workingHours')" :value="row?.working_hours" :diff-show="diff.includes('working_hours')" :diff-was="liveRow?.working_hours" />
+      <RecordField :label="t('kb.fields.address')" :value="row?.address" :diff-show="diff.includes('address')" :diff-was="liveRow?.address" span />
+      <RecordField :label="t('kb.fields.legalInformation')" :diff-show="diff.includes('legal_information')" :diff-was="liveRow?.legal_information" span>
+        <span class="whitespace-pre-line">{{ row?.legal_information || '—' }}</span>
+      </RecordField>
+      <RecordField :label="t('kb.fields.callbackTime')" :value="row?.callback_time" :diff-show="diff.includes('callback_time')" :diff-was="liveRow?.callback_time" span />
     </div>
-    <div v-if="row" class="flex flex-col gap-2">
-      <MediaStrip :label="t('kb.media.businessCard')" field="contact_card_image" :ids="row.contact_card_image" />
-      <MediaStrip :label="t('kb.media.map')" field="location_map_image" :ids="row.location_map_image" />
-      <MediaStrip :label="t('kb.media.legalDocuments')" field="company_legal_documents" :ids="row.company_legal_documents" />
-    </div>
+
+    <template v-if="row" #media>
+      <MediaFieldsRow>
+        <MediaStrip :label="t('kb.media.businessCard')" field="contact_card_image" :ids="row.contact_card_image" />
+        <MediaStrip :label="t('kb.media.map')" field="location_map_image" :ids="row.location_map_image" />
+        <MediaStrip :label="t('kb.media.legalDocuments')" field="company_legal_documents" :ids="row.company_legal_documents" />
+      </MediaFieldsRow>
+    </template>
   </RecordShell>
 </template>

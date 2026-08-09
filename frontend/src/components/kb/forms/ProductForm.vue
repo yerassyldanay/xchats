@@ -71,19 +71,19 @@ function retry() {
   >
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.forms.ref') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.forms.ref') }}</span>
         <Input v-model="buf.ref" :placeholder="t('kb.forms.refHint')" class="h-9 mt-1 font-mono" :disabled="isEdit()" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.name') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.name') }}</span>
         <Input v-model="buf.name" class="h-9 mt-1" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.price') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.price') }}</span>
         <Input v-model="buf.price" class="h-9 mt-1 font-mono" />
       </div>
       <div>
-        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.category') }}</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.category') }}</span>
         <Input v-model="buf.category" class="h-9 mt-1" />
       </div>
       <label class="flex items-center gap-2 px-1 h-9 mt-4">
@@ -95,7 +95,7 @@ function retry() {
       </label>
     </div>
     <div>
-      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.description') }}</span>
+      <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75">{{ t('kb.fields.description') }}</span>
       <Textarea v-model="buf.description" rows="3" class="min-h-0 text-[14px] mt-1" />
     </div>
     <MediaFieldPicker

@@ -1,6 +1,7 @@
 import { computed, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ENTITY_META, KB_ENTITY_ORDER } from '@/components/kb/kbEntities'
+import { ENTITY_META, KB_ENTITY_ORDER, rowsOf } from '@/components/kb/kbEntities'
+import { usePlayground } from '@/stores/playground'
 import { useDraftChanges } from './useDraftChanges'
 
 export interface KbTab {
@@ -20,6 +21,7 @@ export interface KbTab {
 export function useEntityTabs(opts: { source: 'draft' | 'live'; extra?: KbTab[] }) {
   const { t } = useI18n()
   const { groups } = useDraftChanges()
+  const pg = usePlayground()
 
   const tabs = computed<KbTab[]>(() => {
     const base: KbTab[] =
@@ -30,10 +32,14 @@ export function useEntityTabs(opts: { source: 'draft' | 'live'; extra?: KbTab[] 
             icon: ENTITY_META[g.kind].icon,
             count: g.counts.total,
           }))
-        : KB_ENTITY_ORDER.map((kind) => ({
+        : // 'live' (Знаний база): a count straight off the published rows this
+          // page already loaded — config has no natural row count (it is one
+          // fixed identity, not a list) and is left uncounted.
+          KB_ENTITY_ORDER.map((kind) => ({
             key: kind,
             label: t(`${ENTITY_META[kind].i18nKey}.plural`),
             icon: ENTITY_META[kind].icon,
+            count: kind === 'config' ? undefined : rowsOf(kind, pg.live).length,
           }))
     return [...base, ...(opts.extra ?? [])]
   })
