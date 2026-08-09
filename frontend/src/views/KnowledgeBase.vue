@@ -8,7 +8,7 @@
 // actually publish it.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, FileText, Plus, WandSparkles } from 'lucide-vue-next'
+import { CircleAlert, FileText, Plus, Upload, WandSparkles } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
 import { useEntityTabs } from '@/composables/useEntityTabs'
 import { usePendingIndex } from '@/composables/usePendingIndex'
@@ -30,6 +30,7 @@ import PoliciesRecord from '@/components/kb/records/PoliciesRecord.vue'
 import AssistantFieldRecord from '@/components/kb/records/AssistantFieldRecord.vue'
 import KbModalForms from '@/components/kb/forms/KbModalForms.vue'
 import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
+import KbImportCard from '@/components/kb/KbImportCard.vue'
 
 const pg = usePlayground()
 const { t } = useI18n()
@@ -49,6 +50,7 @@ const { tabs, active } = useEntityTabs({
   extra: [
     { key: 'prompt', label: t('kb.page.promptTab'), icon: WandSparkles },
     { key: 'materials', label: t('kb.page.materialsTab'), icon: FileText },
+    { key: 'import', label: t('kb.page.importTab'), icon: Upload },
   ],
 })
 
@@ -256,6 +258,11 @@ watch(active, (a) => {
             {{ t('kb.page.materialsDownload') }}
           </a>
         </div>
+      </div>
+
+      <div v-show="active === 'import'" class="space-y-3 max-w-2xl">
+        <p class="text-xs text-muted-foreground">{{ t('kb.page.importHint') }}</p>
+        <KbImportCard />
       </div>
 
       <p v-if="pg.liveError" class="flex items-center gap-2 text-sm text-destructive">

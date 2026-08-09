@@ -21,6 +21,14 @@ const { t } = useI18n()
 
 const modelProviders = computed(() => store.integrations.filter((p) => p.has_model))
 
+// extractionProviders is the structured KB import pipeline's own provider
+// seam (internal/kbimport) — Firecrawl/LlamaParse, filtered by explicit id
+// rather than `!p.has_model` (ngrok/langfuse are also has_model: false, and
+// each already has its own dedicated home — RemoteAccessTab/MonitoringTab —
+// so a boolean filter here would silently pull them into this tab too).
+const EXTRACTION_PROVIDER_IDS = ['firecrawl', 'llamaparse']
+const extractionProviders = computed(() => store.integrations.filter((p) => EXTRACTION_PROVIDER_IDS.includes(p.id)))
+
 function fromSettings(): LLMSettings {
   return { ...store.settings!.llm }
 }
@@ -118,6 +126,14 @@ async function submit() {
       <h3 class="font-semibold mb-3">{{ t('settings.aiEngine.providersTitle') }}</h3>
       <div class="space-y-4">
         <ProviderCredentialCard v-for="p in modelProviders" :key="p.id" :provider="p" />
+      </div>
+    </div>
+
+    <div v-if="extractionProviders.length" class="pt-2 border-t border-border">
+      <h3 class="font-semibold mb-1 mt-6">{{ t('settings.aiEngine.extractionTitle') }}</h3>
+      <p class="text-sm text-muted-foreground mb-3">{{ t('settings.aiEngine.extractionHint') }}</p>
+      <div class="space-y-4">
+        <ProviderCredentialCard v-for="p in extractionProviders" :key="p.id" :provider="p" />
       </div>
     </div>
   </div>

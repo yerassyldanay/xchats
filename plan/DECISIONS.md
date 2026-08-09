@@ -203,7 +203,7 @@ file's metadata and storage locator; it never stores file bytes in the database.
 | `visual_summary` | `text` | null | Visual description produced during extraction |
 | `transcript_text` | `text` | null | Audio/video transcript |
 | `extraction_metadata` | `jsonb` | not null, default `{}` | Extraction method, model, provenance, and errors |
-| `processing_status` | `text` | not null, default `uploaded` | `uploaded`, `extracting`, `parsed`, `built`, `needs_human`, or `failed` |
+| `processing_status` | `text` | not null, default `uploaded` | `uploaded`, `queued`¹, `extracting`, `parsed`, `built`, `needs_human`, or `failed` |
 | `customer_visibility` | `text` | null | `auto`, `invisible`, or `visible`; file-only |
 | `created_at` | `timestamptz` | not null, default `now()` | — |
 | `updated_at` | `timestamptz` | not null, default `now()` | — |
@@ -212,6 +212,16 @@ For `source_type=file`, `storage_backend`, `storage_key`, `filename`,
 `mime_type`, and `size_bytes` are required. For non-file materials those fields
 are `NULL`. A live media column may reference only a same-organization,
 file-backed, non-empty, customer-sendable material with a compatible MIME type.
+
+¹ `queued` is the one new `processing_status` value the structured import
+pipeline (`internal/kbimport`, `POST /kb/imports`) introduces — no migration
+needed, `kbd_materials` already has every column this pipeline uses; it is a
+durable job queue on top of the existing table, not a new one. A submitted
+URL's material row starts at `queued` directly (no bytes yet, so it skips
+`uploaded`); a submitted file is re-tagged `queued` right after the ordinary
+upload/`parsed` handshake above. Either way it feeds into the same
+`extracting → parsed | needs_human | failed → built` path. See
+`plan/playground.md`'s lifecycle note for the exact state machine.
 
 #### `kbd_draft` — one pending delta per organization
 
@@ -242,16 +252,22 @@ timestamps. `contacts` and `policies` are nullable singleton objects, not arrays
 
 #### `kbd_requests` — stored human-review questions
 
+Column names below match the shipped migration
+(`migrations/sqlite/0004_knowledge_base.up.sql`) exactly — an earlier draft
+of this document used different names (`request_type`, `question_text`,
+`question_context`, `target_field`, `request_status`) that were never what
+actually shipped; this table is the corrected version.
+
 | Column | Type | Null/default | Short description |
 |---|---|---|---|
 | `id` | `uuid` | primary key | — |
 | `organization_id` | `uuid` | not null, FK `organizations(id)` | — |
 | `material_id` | `uuid` | null, FK `kbd_materials(id)` | Material that caused the question, if applicable |
-| `request_type` | `text` | not null | `confirm_value`, `describe_file`, `choose_media_column`, `resolve_duplicate`, or `resolve_conflict` |
-| `question_text` | `text` | not null | Russian question shown to the operator |
-| `question_context` | `jsonb` | not null, default `{}` | Evidence and alternatives needed to answer |
-| `target_field` | `jsonb` | not null | Exact table, natural ref, and column being resolved |
-| `request_status` | `text` | not null, default `open` | `open` or `resolved` |
+| `req_type` | `text` | not null | `confirm_value`, `describe_file`, `choose_media_column`, `resolve_duplicate`, or `resolve_conflict` |
+| `prompt` | `text` | not null, default `''` | Russian question shown to the operator |
+| `context` | `jsonb` | not null, default `{}` | Evidence and alternatives needed to answer |
+| `target` | `jsonb` | not null, default `{}` | Exact table, natural ref, and column being resolved |
+| `state` | `text` | not null, default `pending` | `pending`, `resolved`, or `dismissed` |
 | `resolution` | `jsonb` | null | Validated operator answer |
 | `created_at` | `timestamptz` | not null, default `now()` | — |
 | `resolved_at` | `timestamptz` | null | — |
@@ -599,6 +615,34 @@ Draft patch out (trimmed example):
   "requests": [] }
 ```
 
+**The structured import pipeline's pass 2 uses a different output contract**
+from the `draft_patch` shape above. Instead of one patch object,
+`internal/kbimport`'s model output is a **list of typed MCP tool calls** —
+the exact same `kb_*_upsert` tools §5 of `plan/mcp.md` defines:
+
+```json
+{
+  "calls": [
+    { "tool": "kb_product_upsert",
+      "args": { "ref": "drill-zt40h",
+        "changes": { "name": "Магнитный сверлильный станок ZT-40H", "price": "180 000 ₸",
+          "featured_image": "upload.1", "gallery_images": ["upload.2"] } } }
+  ],
+  "notes": "краткое резюме на русском",
+  "unmapped": []
+}
+```
+
+Each call is applied through `internal/mcpserver.ParseUpsertCall`/
+`UpsertCall.Apply` (`plan/mcp.md` §10) — the same decode, validation, and
+`kbd_draft` write path a live MCP connector's own tool call goes through —
+rather than a bespoke patch-merge implementation of its own. This reuses one
+validated write path instead of building and maintaining a second one; it is
+also why the import pipeline needs no `kbd_draft`-shape-specific parsing of
+its own, and why `kb_assistant_upsert` (persona/mission/guardrails) is
+structurally unreachable from imported content: it is simply never offered
+to the model as one of the allowed tools for that call.
+
 ### Draft = same schema, stored as one jsonb blob per org
 
 - The entire pending KB is **one jsonb document** (`kbd_draft`), one row per org:
@@ -862,7 +906,9 @@ still fails the parse.
 - `kbd_materials.processing_status` transitions are
   `uploaded → extracting → parsed | needs_human | failed`,
   plus **`built`** once a synthesis pass has consumed the evidence (prevents
-  re-feeding old materials every turn).
+  re-feeding old materials every turn). The structured import pipeline adds
+  one more entry state, **`queued`**, ahead of `extracting` — see the
+  `kbd_materials` table's own footnote above.
 - Per-material failures never abort the batch: transient → 2–3 retries; then (and
   for permanent failures) → `needs_human` with a `describe_file` request.
   Retrying updates the **same** row, never duplicates. Extraction failure never
@@ -884,24 +930,54 @@ still fails the parse.
 
 ### Per input type (pass-1 extractors)
 
-| Type | How it is read | Fallback (a request) |
-|---|---|---|
-| text | passthrough; still evidence, not trusted truth | — |
-| url | guarded best-effort fetch → readable text; SSRF-safe, http(s) only, **no recursive crawling in v1**, no headless browser | "paste the text or drop a screenshot" |
-| image | downscale in code, one vision call per file with KB context; OCR + visual summary kept separate; product photos → identification/attachment, infographics/nameplates/price cards → facts | "describe what this is" |
-| pdf | native text first (cheap); OCR for scanned pages; page-level provenance; page cap ~10 — **large catalogs are chunked, then merged by natural keys** | "which pages matter / paste the key points" |
-| docx | text layer read **in code** — no LLM; legacy `.doc` → fallback | "paste the key points" |
-| excel / csv | sheets read **in code** → text table — no LLM; the best-structured source for `products[]` | — |
-| audio | transcription **ON** (cap ~5 min): transcript + language + summary; **summarize before synthesis** (filler, corrections); respect temporal intent («старая цена 20, новая 25» → only the new value proposed); timestamps kept in provenance | "describe what this is" |
-| video | **phased**: v1 = audio-track **transcript-first** + store on its file-backed `kbd_materials` row; pass 2 may place its id in an allowed video-material column; sampled keyframes optional next; full visual understanding later. Never every frame. | "describe what this is" |
+The table below is this document's original v1 vision — a chat-driven
+Playground that accepts any of these eight input types directly in
+conversation. What actually shipped as `internal/kbimport`
+(`POST /kb/imports`) is narrower: only `url` and `file` submissions, read by
+one of three pluggable providers (`native`, `firecrawl`, `llamaparse`), each
+supporting a fixed subset of source kinds. The **Provider** column below
+says which one(s) — if any — a `POST /kb/imports` submission of that type can
+use; "—" means that input type is not part of the import pipeline at all
+(still reachable, if applicable, only through the older chat/upload paths
+this table otherwise describes).
+
+| Type | How it is read | Fallback (a request) | Provider (`POST /kb/imports`) |
+|---|---|---|---|
+| text (pasted) | passthrough; still evidence, not trusted truth | — | — (not an import-pipeline input; submit a `.txt`/`.md` file instead) |
+| url | guarded best-effort fetch → readable text; SSRF-safe, http(s) only, **no recursive crawling in v1**, no headless browser | "paste the text or drop a screenshot" | `native` or `firecrawl` |
+| image | downscale in code, one vision call per file with KB context; OCR + visual summary kept separate; product photos → identification/attachment, infographics/nameplates/price cards → facts | "describe what this is" | `native` — v1 attaches the file with **no vision call**, no extracted text (see "Open questions" below) |
+| pdf | native text first (cheap); OCR for scanned pages; page-level provenance; page cap ~10 — **large catalogs are chunked, then merged by natural keys** | "which pages matter / paste the key points" | `llamaparse` **only**² |
+| docx | text layer read **in code** — no LLM; legacy `.doc` → fallback | "paste the key points" | `native` or `llamaparse` |
+| excel / csv | sheets read **in code** → text table — no LLM; the best-structured source for `products[]` | — | — (not yet wired into the import pipeline) |
+| audio | transcription **ON** (cap ~5 min): transcript + language + summary; **summarize before synthesis** (filler, corrections); respect temporal intent («старая цена 20, новая 25» → only the new value proposed); timestamps kept in provenance | "describe what this is" | — (not part of the import pipeline) |
+| video | **phased**: v1 = audio-track **transcript-first** + store on its file-backed `kbd_materials` row; pass 2 may place its id in an allowed video-material column; sampled keyframes optional next; full visual understanding later. Never every frame. | "describe what this is" | — (not part of the import pipeline) |
+
+² PDF is the one type with a single-provider requirement: `native` has no
+PDF text-layer reader (stdlib-only, no vendored PDF/OOXML SDK) and
+`firecrawl` is URL-only, so `POST /kb/imports` rejects a PDF submitted
+against any provider but `llamaparse` **synchronously, at submit time**
+(`400`) — never accepted and failed later as an async job.
 
 All extractors emit the same evidence shape, so pass 2 is type-blind; upgrading
 one extractor never touches synthesis.
 
-**Provider seam:** all model calls go through **one aggregator integration
-(OpenRouter, OpenAI-compatible) from day one**; model ids are config, so models
-can be added or swapped without touching code. No direct per-vendor SDKs in v1.
-Starting defaults and prices: `evals/parsing-costs.md`.
+**Provider seam:** all model calls (pass-2 synthesis, and any pass-1
+vision/OCR step) go through **one aggregator integration (OpenRouter,
+OpenAI-compatible) from day one**; model ids are config, so models can be
+added or swapped without touching code. No direct per-vendor SDKs for LLM
+calls in v1. Starting defaults and prices: `evals/parsing-costs.md`.
+
+Pass-1 **extraction** (reading url/pdf/docx/text/image *content*, as opposed
+to any *model call* made over it) is a separate seam from the LLM aggregator
+above: `internal/kbimport`/`internal/extractor` picks one of three pluggable
+providers per run — `native` (stdlib only, no vendored SDK — plain HTTP
+fetch plus HTML/DOCX text), or one of two per-vendor hosted APIs,
+`firecrawl` (URL → markdown) and `llamaparse` (PDF/DOCX/text → markdown).
+Each is configured through the same credential-provider mechanism
+(`internal/credentials`) as an LLM provider, but registers **no**
+`llm.ChatClient` — an extraction provider can never accidentally become a
+chat/draft model choice (`docs/release/credentials.md` has the credential
+fields; the table above has the exact capability matrix).
 
 **Cost drivers (relative only; numbers live in `evals/parsing-costs.md`):**
 video ≫ audio ≈ scanned-pdf ≈ images ≫ native-pdf ≫ text / url / excel ≈ free.
@@ -962,3 +1038,10 @@ ranges and approximations small sellers actually use.
 - **KB-size threshold**: at what size does the whole-KB-in-prompt model stop
   working, and what deterministic shortlisting (by category/entity) kicks in
   then.
+- **No vision call on an imported image (v1)**: `internal/kbimport`'s
+  `native` provider attaches an uploaded or page-embedded image with no
+  extracted text and no visual summary — pass 2 synthesis sees only that the
+  material exists, not what it depicts, unlike a chat-uploaded image (which
+  does get one vision call — see the per-input-type table above). Revisit
+  once the pipeline's own cost/quality tradeoff for adding one is measured
+  (`evals/parsing-costs.md`).

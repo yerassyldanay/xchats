@@ -4,6 +4,7 @@ import { usePlayground } from '@/stores/playground'
 import { mountKb, testPinia } from '@/test/mount'
 import KnowledgeBase from './KnowledgeBase.vue'
 import ProductRecord from '@/components/kb/records/ProductRecord.vue'
+import KbImportCard from '@/components/kb/KbImportCard.vue'
 import type { DraftChangeSet, DraftView, KbMaterial, ProductRow, TopicRow } from '@/types'
 
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
@@ -95,7 +96,15 @@ describe('KnowledgeBase — published rows are read-only', () => {
   it('lists a published topic with no input fields', async () => {
     const { wrapper } = await mountWith(emptyChanges(), emptyLive({ topics: [topic()] }))
     expect(wrapper.text()).toContain('Тарифы')
-    expect(wrapper.findAll('input')).toHaveLength(0)
+    // Every tab's body is mounted at once (v-show, not v-if — see switchTab's
+    // own doc comment), so this really does scan the whole page, not just
+    // the active one. Импорт is the one legitimately interactive tab, always
+    // showing its own URL/file inputs regardless of which tab is active —
+    // everything else here (record lists, Промпт, Файлы) is read-only
+    // display, which is the actual thing this test guards.
+    const importCard = wrapper.findComponent(KbImportCard)
+    const strayInputs = wrapper.findAll('input').filter((i) => !(importCard.exists() && importCard.element.contains(i.element)))
+    expect(strayInputs).toHaveLength(0)
     expect(wrapper.findAll('textarea')).toHaveLength(0)
   })
 

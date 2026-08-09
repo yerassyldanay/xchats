@@ -35,6 +35,13 @@ never needs to think about these four values at all.
 | Google Gemini| `gemini.api_key`                            | Yes (`GET /v1/models`) |
 | Langfuse     | `langfuse.public_key`, `langfuse.secret_key`| Yes (`GET /api/public/projects`) |
 | ngrok        | `ngrok.authtoken`                           | No live check — the only real test is opening a tunnel with it |
+| Firecrawl    | `firecrawl.api_key`                         | Yes (`GET /v2/team/credit-usage`) |
+| LlamaParse   | `llamaparse.api_key`                        | Yes (`GET /api/v1/parsing/supported_file_extensions`) |
+
+Firecrawl and LlamaParse are the structured knowledge base import pipeline's
+document/URL *extraction* providers (Settings → ИИ-движок, a block separate
+from the response-drafting model providers above) — they never register an
+LLM client, so they can never accidentally become a chat/draft model choice.
 
 Saving a credential that fails validation with a clear rejection (401/403,
 or Gemini's `API_KEY_INVALID` body on a 400) is refused outright. One that

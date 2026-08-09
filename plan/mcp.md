@@ -24,6 +24,17 @@ MCP change → kbd_draft → human review → live ai_* tables
 Publishing stays in the existing authenticated Xchats review page for v1. The
 chat widget links to that page. An in-chat publish tool can be added later.
 
+A second, non-MCP entry point shares this exact `kbd_draft`-only boundary:
+the structured knowledge base import pipeline (`internal/kbimport`,
+`POST /kb/imports` — see `plan/playground.md`) lets an operator submit a URL
+or document instead of typing it into a chat. Its pass-2 synthesis step
+emits the *same* typed upsert calls this document defines, through the
+shared `internal/mcpserver.ParseUpsertCall`/`UpsertTools` seam (§10) — one
+contract, two callers, so an imported draft entry is indistinguishable from
+one an MCP-connected model created by hand. `kb_assistant_upsert` is never
+reachable from that caller: an imported document never sets assistant
+persona/mission/guardrails.
+
 ## 2. Data boundaries
 
 There are seven writable live KB tables:
@@ -416,7 +427,10 @@ Assume the first-time OAuth connection above has completed.
     audit event, clears the published delta, and refreshes the live KB.
 
 If the host cannot access the URL, it must ask the user to paste the product
-content. Server-side URL fetching is not part of this initial MCP contract.
+content. Server-side URL fetching is not part of this initial MCP contract —
+though an operator can now reach the same outcome outside a chat entirely
+via the structured import pipeline (§1's note, `plan/playground.md`), which
+does fetch URLs server-side under its own SSRF-hardened path.
 
 ## 9. Validation and implementation order
 
@@ -435,6 +449,63 @@ Implementation order:
 6. Test OAuth, tenant isolation, duplicate handling, concurrent draft writes,
    media ownership, pagination, host capability fallbacks, and publish
    validation with MCP Inspector, ChatGPT, and Claude.
+
+## 10. Shared typed-upsert seam
+
+`internal/mcpserver/apply.go` factors each `kb_*_upsert` tool's parameter
+parsing and draft-write logic out of its own handler in `handlers.go`, so a
+second caller — the structured import pipeline's pass-2 synthesis (§1's
+note, `internal/kbimport`) — can drive the exact same validation and
+`kbd_draft` write path without a live MCP connection at all:
+
+```go
+// The seven typed kb_*_upsert tools, in Tools()' own declared order.
+// kb_delete is deliberately absent: there is structurally no code path
+// from parsed web/document content to a delete marker.
+var UpsertTools = []string{ /* ... */ }
+
+// One parsed, not-yet-applied typed-upsert call.
+type UpsertCall struct {
+    Tool string // one of UpsertTools
+    Key  string // natural ref/slug as supplied, "" = create with a derived key
+}
+func (c UpsertCall) Apply(ctx context.Context, kb *kbstore.Store, orgID, userID uuid.UUID,
+    expectedVersion *int64, prov kbstore.MCPProvenance) (kbstore.UpsertResult, error)
+
+// Parses one {tool, args} pair — the same {name, arguments} shape the MCP
+// transport itself receives — through the SAME per-field parsers and
+// validation every live handler already runs.
+func ParseUpsertCall(tool string, args map[string]json.RawMessage) (UpsertCall, error)
+
+// Returns {tool name: inputSchema} for a caller-chosen subset of
+// UpsertTools — each tool's real declared JSON Schema, the same shape
+// tools/list advertises to a connected MCP host.
+func UpsertToolSchemas(names []string) map[string]map[string]any
+```
+
+- `ParseUpsertCall` decodes and validates exactly like a live `kb_*_upsert`
+  tool call — same `rejectUnknownFields`, same enum/required-field checks —
+  just invoked directly instead of through the MCP transport.
+- `UpsertCall.Apply` performs the write: one call, one `kbd_draft` merge,
+  identical to what a live connector's own upsert produces. `prov` is
+  silently not forwarded for `kb_assistant_upsert` — `MCPUpsertAssistant`
+  takes no provenance parameter; a persona/guardrails edit has never had a
+  provenance concept.
+- `UpsertToolSchemas` lets the import pipeline's synthesis prompt quote a
+  tool's real input schema verbatim, so the model sees the identical
+  contract whether it is a connected chat model or the batch synthesis
+  call — `internal/kbimport` builds its own prompt from
+  `UpsertToolSchemas(UpsertTools minus kb_assistant_upsert)`.
+- A caller resolves every media-field handle in `args` to a real
+  `material_id` **before** calling `ParseUpsertCall` — this seam carries no
+  handle-resolution logic of its own (`internal/kbimport/handles.go` does
+  it by walking `kbstore.MediaFieldKinds()`).
+
+This is "one contract, two callers," not two implementations that could
+drift apart: `internal/mcpserver/apply_test.go`'s
+`TestParseUpsertCall_EquivalentToHandler` asserts the tools-call path and
+the `ParseUpsertCall`+`Apply` path produce an identical `kbd_draft` result
+for the same input.
 
 ## References
 
