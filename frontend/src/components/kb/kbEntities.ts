@@ -52,6 +52,25 @@ export const ENTITY_META: Record<ChangeKind, EntityMeta> = {
   policies: { icon: Truck, i18nKey: 'kb.entities.policies', singleton: true, keyOf: idOf, payloadField: 'policies' },
 }
 
+// Знаний база groups its (fixed, nine-tab) rail into four labelled clusters —
+// Черновик's tab list stays flat (dynamic, usually 1-3 tabs; grouping a
+// handful of items adds chrome without helping scanability). Keys cover
+// every ChangeKind plus the two page-only extras EntityTabs.vue never sees
+// through ENTITY_META (Промпт/Файлы, appended in KnowledgeBase.vue itself).
+export type KbTabGroup = 'assistant' | 'catalog' | 'audience' | 'sources'
+export const KB_TAB_GROUP_ORDER: KbTabGroup[] = ['assistant', 'catalog', 'audience', 'sources']
+export const KB_TAB_GROUP_OF: Record<string, KbTabGroup> = {
+  config: 'assistant',
+  prompt: 'assistant',
+  topics: 'catalog',
+  products: 'catalog',
+  tariffs: 'catalog',
+  delivery_zones: 'catalog',
+  contacts: 'audience',
+  policies: 'audience',
+  materials: 'sources',
+}
+
 // rowsOf/deletesOf are the one place a caller reads a ChangeKind's array out
 // of a DraftChangeSet/DraftView without risking the zones/delivery_zones typo.
 export function rowsOf(kind: ChangeKind, view: DraftChangeSet | DraftView | null | undefined): KbRow[] {

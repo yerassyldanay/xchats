@@ -1,6 +1,6 @@
 import { computed, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ENTITY_META, KB_ENTITY_ORDER, rowsOf } from '@/components/kb/kbEntities'
+import { ENTITY_META, KB_ENTITY_ORDER, KB_TAB_GROUP_OF, rowsOf, type KbTabGroup } from '@/components/kb/kbEntities'
 import { usePlayground } from '@/stores/playground'
 import { useDraftChanges } from './useDraftChanges'
 
@@ -9,6 +9,7 @@ export interface KbTab {
   label: string
   icon: Component
   count?: number
+  group?: KbTabGroup // 'live' only — see KB_TAB_GROUP_OF's own doc comment
 }
 
 // useEntityTabs builds the pill tab row for both pages:
@@ -17,7 +18,8 @@ export interface KbTab {
 //     kind runs out of entries (its last change was published or cancelled),
 //     falls back to the first remaining tab automatically.
 //   - source 'live' (Знаний база): the fixed seven kinds in KB_ENTITY_ORDER,
-//     no counts, plus whatever `extra` tabs the page appends (Промпт/Файлы).
+//     no counts, plus whatever `extra` tabs the page appends (Промпт/Файлы),
+//     each tagged with its display group.
 export function useEntityTabs(opts: { source: 'draft' | 'live'; extra?: KbTab[] }) {
   const { t } = useI18n()
   const { groups } = useDraftChanges()
@@ -40,8 +42,10 @@ export function useEntityTabs(opts: { source: 'draft' | 'live'; extra?: KbTab[] 
             label: t(`${ENTITY_META[kind].i18nKey}.plural`),
             icon: ENTITY_META[kind].icon,
             count: kind === 'config' ? undefined : rowsOf(kind, pg.live).length,
+            group: KB_TAB_GROUP_OF[kind],
           }))
-    return [...base, ...(opts.extra ?? [])]
+    const extra = (opts.extra ?? []).map((tab) => (opts.source === 'live' ? { ...tab, group: KB_TAB_GROUP_OF[tab.key] } : tab))
+    return [...base, ...extra]
   })
 
   const active = ref('')

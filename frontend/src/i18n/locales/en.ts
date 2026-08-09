@@ -50,6 +50,12 @@ export default {
   },
   // kb.* mirrors ru.ts's kb.* key-for-key — see locales.test.ts.
   kb: {
+    tabGroups: {
+      assistant: 'Assistant',
+      catalog: 'Catalog',
+      audience: 'Contacts & policies',
+      sources: 'Materials',
+    },
     entities: {
       config: { singular: 'Overview', plural: 'Overview' },
       topics: { singular: 'Topic', plural: 'Topics' },

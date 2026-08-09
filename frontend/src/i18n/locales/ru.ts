@@ -56,6 +56,12 @@ export default {
   // the sole creation surface) redesign. New for this feature; the rest of the
   // app's chrome stays hardcoded Russian (see this file's top comment).
   kb: {
+    tabGroups: {
+      assistant: 'Ассистент',
+      catalog: 'Каталог',
+      audience: 'Клиенты и политики',
+      sources: 'Материалы',
+    },
     entities: {
       config: { singular: 'Обзор', plural: 'Обзор' },
       topics: { singular: 'Тема', plural: 'Темы' },
