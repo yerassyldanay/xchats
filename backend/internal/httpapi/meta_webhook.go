@@ -222,7 +222,10 @@ func (s *Server) handleInstagramWebhook(c *gin.Context) {
 				s.log.Info("instagram event dropped", "account_id", acct.ID, "result", reason)
 				continue
 			}
-			norm := messengerishNormalize(ctx(c), igClient, ev, token, true)
+			// Best-effort: a failed pre-lookup just means the live Profile
+			// call below still runs, same as if the contact were unknown.
+			knownName, _ := s.store.ChannelContactDisplayName(ctx(c), acct.ID, messengerishCustomerID(ev))
+			norm := messengerishNormalize(ctx(c), igClient, ev, token, knownName, true)
 			outcome, perr := s.metaProc.Process(ctx(c), acct, norm)
 			if perr != nil {
 				s.log.Error("instagram webhook processing failed; not acking", "account_id", acct.ID, "err", perr)
@@ -292,7 +295,10 @@ func (s *Server) handleMessengerWebhook(c *gin.Context) {
 				s.log.Info("messenger event dropped", "account_id", acct.ID, "result", reason)
 				continue
 			}
-			norm := messengerishNormalize(ctx(c), fbClient, ev, token, false)
+			// Best-effort: a failed pre-lookup just means the live Profile
+			// call below still runs, same as if the contact were unknown.
+			knownName, _ := s.store.ChannelContactDisplayName(ctx(c), acct.ID, messengerishCustomerID(ev))
+			norm := messengerishNormalize(ctx(c), fbClient, ev, token, knownName, false)
 			outcome, perr := s.metaProc.Process(ctx(c), acct, norm)
 			if perr != nil {
 				s.log.Error("messenger webhook processing failed; not acking", "account_id", acct.ID, "err", perr)
@@ -321,6 +327,19 @@ func messengerishMediaType(t string) string {
 	return t
 }
 
+// messengerishCustomerID resolves the id of the actual customer party in a
+// messaging event — echoes (is_echo) swap which Party is the customer:
+// Recipient on an echo (our own outbound bounced back through the webhook),
+// Sender on a genuine inbound. Shared by messengerishNormalize and its
+// callers' own pre-lookup of an already-known contact name (see
+// messengerishNormalize's doc comment), so the swap logic lives in one place.
+func messengerishCustomerID(ev messengerish.MessagingEvent) string {
+	if ev.Message.IsEcho {
+		return ev.Recipient.ID
+	}
+	return ev.Sender.ID
+}
+
 // messengerishNormalize maps one Instagram or Messenger messaging event into
 // metaingest's channel-neutral shape — shared by handleInstagramWebhook and
 // handleMessengerWebhook, since both ride the identical Messenger-Platform
@@ -328,18 +347,24 @@ func messengerishMediaType(t string) string {
 // selects which Graph host the live Profile lookup below goes through; it is
 // the caller's job to pass the same value it registered its ChannelSender
 // with. Unlike WhatsApp Cloud, neither webhook payload carries an inline
-// contact profile — ContactDisplayName is a best-effort LIVE Profile lookup
-// (never blocking: a failed lookup just leaves the name empty, dto.MapContact
-// already falls back to the id-derived handle) — and echoes (is_echo) swap
-// which Party is the actual customer: Recipient on an echo, Sender on a
-// genuine inbound.
-func messengerishNormalize(ctx context.Context, c *messengerish.Client, ev messengerish.MessagingEvent, token string, instagramHost bool) metaingest.NormalizedMessage {
-	direction, senderKind, customerID := "in", "contact", ev.Sender.ID
+// contact profile — ContactDisplayName falls back to a LIVE Profile lookup
+// only when knownDisplayName is empty (the caller's own
+// store.ChannelContactDisplayName pre-lookup came up empty too, meaning this
+// contact has never been named yet); once a contact has a name on file there
+// is nothing a repeat lookup would improve, and skipping it is what keeps a
+// long-running conversation with a known contact from placing a blocking
+// Graph API call on every single inbound message. A live lookup is itself
+// never blocking in the failure sense: an error just leaves the name empty,
+// same as before (dto.MapContact already falls back to the id-derived
+// handle).
+func messengerishNormalize(ctx context.Context, c *messengerish.Client, ev messengerish.MessagingEvent, token, knownDisplayName string, instagramHost bool) metaingest.NormalizedMessage {
+	direction, senderKind := "in", "contact"
 	if ev.Message.IsEcho {
-		direction, senderKind, customerID = "out", "external_account", ev.Recipient.ID
+		direction, senderKind = "out", "external_account"
 	}
-	contactName := ""
-	if token != "" {
+	customerID := messengerishCustomerID(ev)
+	contactName := knownDisplayName
+	if contactName == "" && token != "" {
 		if p, err := c.Profile(ctx, instagramHost, customerID, token); err == nil {
 			switch {
 			case p.Name != "":

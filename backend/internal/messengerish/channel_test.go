@@ -134,6 +134,96 @@ func TestChannelSenderUnrecognizedMediaKindFallsBackToFile(t *testing.T) {
 	}
 }
 
+func TestChannelSenderSendMediaWithCaptionSendsFollowUpText(t *testing.T) {
+	var calls []map[string]any
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		calls = append(calls, body)
+		if len(calls) == 1 {
+			_, _ = w.Write([]byte(`{"recipient_id":"1234567890123456","message_id":"m1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"recipient_id":"1234567890123456","message_id":"m2"}`))
+	}, nil)
+	sender := NewChannelSender(c, &fakeAccountSource{externalAccountID: "17841400000000001", token: "tok"},
+		&fakeMediaSource{mediaID: uuid.New(), orgID: uuid.New()}, &fakeSigner{}, true, "https://xchats.example/meta/api/v1/media")
+
+	res, err := sender.Send(context.Background(), messaging.OutboundMessage{
+		MessageID: uuid.New().String(), AccountID: uuid.New().String(), To: "1234567890123456",
+		Media: &messaging.OutboundMedia{BlobID: "b", Kind: "image", Caption: "  look at this  "},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("got %d calls, want 2 (media, then a follow-up caption text)", len(calls))
+	}
+	firstMessage, _ := calls[0]["message"].(map[string]any)
+	if _, hasAttachment := firstMessage["attachment"]; !hasAttachment {
+		t.Fatalf("first call message = %+v, want an attachment", firstMessage)
+	}
+	secondMessage, _ := calls[1]["message"].(map[string]any)
+	if secondMessage["text"] != "look at this" {
+		t.Fatalf("second call message.text = %v, want the trimmed caption", secondMessage["text"])
+	}
+	// The returned result is always the attachment's own — the caption
+	// follow-up is best-effort and never overrides it.
+	if res.ExternalID != "m1" {
+		t.Fatalf("result = %+v, want the media send's own id", res)
+	}
+}
+
+func TestChannelSenderSendMediaWithoutCaptionSendsNoFollowUp(t *testing.T) {
+	calls := 0
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"recipient_id":"1234567890123456","message_id":"m1"}`))
+	}, nil)
+	sender := NewChannelSender(c, &fakeAccountSource{externalAccountID: "17841400000000001", token: "tok"},
+		&fakeMediaSource{mediaID: uuid.New(), orgID: uuid.New()}, &fakeSigner{}, true, "https://xchats.example/meta/api/v1/media")
+
+	_, err := sender.Send(context.Background(), messaging.OutboundMessage{
+		MessageID: uuid.New().String(), AccountID: uuid.New().String(), To: "1234567890123456",
+		Media: &messaging.OutboundMedia{BlobID: "b", Kind: "image"},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("got %d calls, want 1 (no caption means no follow-up)", calls)
+	}
+}
+
+func TestChannelSenderSendMediaCaptionFollowUpFailureDoesNotFailTheSend(t *testing.T) {
+	calls := 0
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			_, _ = w.Write([]byte(`{"recipient_id":"1234567890123456","message_id":"m1"}`))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"boom"}}`))
+	}, nil)
+	sender := NewChannelSender(c, &fakeAccountSource{externalAccountID: "17841400000000001", token: "tok"},
+		&fakeMediaSource{mediaID: uuid.New(), orgID: uuid.New()}, &fakeSigner{}, true, "https://xchats.example/meta/api/v1/media")
+
+	res, err := sender.Send(context.Background(), messaging.OutboundMessage{
+		MessageID: uuid.New().String(), AccountID: uuid.New().String(), To: "1234567890123456",
+		Media: &messaging.OutboundMedia{BlobID: "b", Kind: "image", Caption: "hello"},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v, want the media send's success to stand despite the follow-up failing", err)
+	}
+	if calls != 2 {
+		t.Fatalf("got %d calls, want 2 (the follow-up must still be attempted)", calls)
+	}
+	if res.ExternalID != "m1" || !res.Delivered {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
 func TestChannelSenderInvalidAccountIDIsRejected(t *testing.T) {
 	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("no HTTP call should happen when the account id itself is invalid")

@@ -679,6 +679,56 @@ func TestChannelAccountsWithWebhookOnlyReturnsRegisteredOnes(t *testing.T) {
 	}
 }
 
+func TestChannelContactDisplayNameEmptyUntilIngestSetsIt(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	org, err := st.SeedOrganization(ctx, "views-contact-name")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	acct, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: config.ChannelAccountID(config.InstagramOwnerRef("ig-contact-name")), OrganizationID: org.ID,
+		Channel: "instagram", ExternalAccountID: "ig-contact-name",
+	})
+	if err != nil {
+		t.Fatalf("claim account: %v", err)
+	}
+
+	// No channel_contacts row at all yet.
+	name, err := st.ChannelContactDisplayName(ctx, acct.ID, "customer-1")
+	if err != nil || name != "" {
+		t.Fatalf("ChannelContactDisplayName before any message = (%q, %v), want (\"\", nil)", name, err)
+	}
+
+	if _, err := st.IngestChannelInbound(ctx, store.ChannelInbound{
+		AccountID: acct.ID, ExternalContactID: "customer-1", ContactHandle: "customer-1",
+		ContactDisplayName: "Клиент Тест", ExternalThreadID: "customer-1", Direction: "in", SenderKind: "contact",
+		ExternalMessageID: "ig-mid-name-1", MessageKind: "conversation", Body: "привет", Preview: "привет",
+		MessageTS: time.Now(),
+	}); err != nil {
+		t.Fatalf("ingest first message: %v", err)
+	}
+	name, err = st.ChannelContactDisplayName(ctx, acct.ID, "customer-1")
+	if err != nil || name != "Клиент Тест" {
+		t.Fatalf("ChannelContactDisplayName after a named ingest = (%q, %v), want (\"Клиент Тест\", nil)", name, err)
+	}
+
+	// A later message with no resolved name (e.g. a skipped live lookup)
+	// must not blank out the name already on file.
+	if _, err := st.IngestChannelInbound(ctx, store.ChannelInbound{
+		AccountID: acct.ID, ExternalContactID: "customer-1", ContactHandle: "customer-1",
+		ContactDisplayName: "", ExternalThreadID: "customer-1", Direction: "in", SenderKind: "contact",
+		ExternalMessageID: "ig-mid-name-2", MessageKind: "conversation", Body: "снова я", Preview: "снова я",
+		MessageTS: time.Now(),
+	}); err != nil {
+		t.Fatalf("ingest second message: %v", err)
+	}
+	name, err = st.ChannelContactDisplayName(ctx, acct.ID, "customer-1")
+	if err != nil || name != "Клиент Тест" {
+		t.Fatalf("ChannelContactDisplayName after a nameless ingest = (%q, %v), want the name to stick (\"Клиент Тест\", nil)", name, err)
+	}
+}
+
 // Without an encryption key, credential paths must fail loudly rather than
 // storing a plaintext secret — the generic core's equivalent of
 // TestTelegramCredentialsRequireAnEncryptionKey.

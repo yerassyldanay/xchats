@@ -150,6 +150,62 @@ func TestInstagramWebhookEchoDoesNotDuplicateTheChat(t *testing.T) {
 	}
 }
 
+func TestInstagramWebhookSkipsProfileLookupForAlreadyKnownContact(t *testing.T) {
+	h := newMetaHarness(t)
+	h.setAppCredentials("app-1", "app-secret-1")
+	acct := h.seedInstagramAccount("178414000020")
+	if err := h.store.SetChannelCredentials(context.Background(), store.ChannelCredentialsWrite{
+		AccountID: acct.ID, Secret: "ig-live-token", TokenKind: "long_lived_user_token",
+	}); err != nil {
+		t.Fatalf("SetChannelCredentials: %v", err)
+	}
+	profileCalls := 0
+	h.graphHandler = func(w http.ResponseWriter, r *http.Request) {
+		profileCalls++
+		_, _ = w.Write([]byte(`{"name":"Клиент Тест"}`))
+	}
+
+	firstBody := []byte(`{"object":"instagram","entry":[{"id":"178414000020","time":1723104000000,"messaging":[
+		{"sender":{"id":"777"},"recipient":{"id":"178414000020"},"timestamp":1723104000000,"message":{"mid":"ig-mid-known-1","text":"привет"}}
+	]}]}`)
+	resp1 := h.postRaw("/meta/api/v1/webhook/instagram", "application/json", firstBody, map[string]string{
+		"X-Hub-Signature-256": hmacSHA256Header("app-secret-1", firstBody),
+	})
+	resp1.Body.Close()
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("first status = %d", resp1.StatusCode)
+	}
+	if profileCalls != 1 {
+		t.Fatalf("profileCalls after a never-before-seen contact's message = %d, want 1 (a live lookup)", profileCalls)
+	}
+
+	// A second message from the SAME contact: the display name is now on
+	// file, so this must NOT place a second live Profile call.
+	secondBody := []byte(`{"object":"instagram","entry":[{"id":"178414000020","time":1723104060000,"messaging":[
+		{"sender":{"id":"777"},"recipient":{"id":"178414000020"},"timestamp":1723104060000,"message":{"mid":"ig-mid-known-2","text":"снова я"}}
+	]}]}`)
+	resp2 := h.postRaw("/meta/api/v1/webhook/instagram", "application/json", secondBody, map[string]string{
+		"X-Hub-Signature-256": hmacSHA256Header("app-secret-1", secondBody),
+	})
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("second status = %d", resp2.StatusCode)
+	}
+	if profileCalls != 1 {
+		t.Fatalf("profileCalls after a second message from the same contact = %d, want still 1 (no repeat lookup)", profileCalls)
+	}
+
+	chats, _, err := h.store.ListChatsForOrg(context.Background(), store.ChatFilter{OrgID: h.orgID, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListChatsForOrg: %v", err)
+	}
+	for _, c := range chats {
+		if c.AccountID == acct.ID && c.LastMessagePreview != "снова я" {
+			t.Fatalf("preview = %q, want the second message", c.LastMessagePreview)
+		}
+	}
+}
+
 func TestInstagramWebhookIgnorableEventAcks200(t *testing.T) {
 	h := newMetaHarness(t)
 	h.setAppCredentials("app-1", "app-secret-1")

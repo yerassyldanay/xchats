@@ -503,6 +503,26 @@ func (s *Store) IngestChannelInbound(ctx context.Context, in ChannelInbound) (Ch
 	return res, tx.Commit(ctx)
 }
 
+// ChannelContactDisplayName returns a contact's already-known display name,
+// or "" if none is on file yet — either because no channel_contacts row
+// exists for (accountID, externalContactID) at all, or because one exists
+// but hasn't captured a name yet (IngestChannelInbound's own upsert already
+// preserves a non-empty name once set — see its ON CONFLICT clause). Both
+// cases mean the same thing to every caller (there is nothing usable to
+// show yet), so unlike most lookups here this deliberately does not surface
+// ErrNotFound: callers use "" as their own "go look this up live" signal
+// (see messengerishNormalize's knownDisplayName parameter).
+func (s *Store) ChannelContactDisplayName(ctx context.Context, accountID uuid.UUID, externalContactID string) (string, error) {
+	var name string
+	err := s.db.QueryRow(ctx,
+		`SELECT display_name FROM channel_contacts WHERE account_id = $1 AND external_contact_id = $2`,
+		accountID, externalContactID).Scan(&name)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return "", nil
+	}
+	return name, err
+}
+
 // --- media --------------------------------------------------------------------
 
 // ChannelMediaMeta is a stored (or pending) attachment's descriptive fields.

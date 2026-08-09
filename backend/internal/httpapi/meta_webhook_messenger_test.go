@@ -149,6 +149,62 @@ func TestMessengerWebhookEchoDoesNotDuplicateTheChat(t *testing.T) {
 	}
 }
 
+func TestMessengerWebhookSkipsProfileLookupForAlreadyKnownContact(t *testing.T) {
+	h := newMetaHarness(t)
+	h.setAppCredentials("app-1", "app-secret-1")
+	acct := h.seedMessengerAccount("998877004")
+	if err := h.store.SetChannelCredentials(context.Background(), store.ChannelCredentialsWrite{
+		AccountID: acct.ID, Secret: "page-live-token", TokenKind: "page_token",
+	}); err != nil {
+		t.Fatalf("SetChannelCredentials: %v", err)
+	}
+	profileCalls := 0
+	h.graphHandler = func(w http.ResponseWriter, r *http.Request) {
+		profileCalls++
+		_, _ = w.Write([]byte(`{"name":"Клиент Тест"}`))
+	}
+
+	firstBody := []byte(`{"object":"page","entry":[{"id":"998877004","time":1723104000000,"messaging":[
+		{"sender":{"id":"777"},"recipient":{"id":"998877004"},"timestamp":1723104000000,"message":{"mid":"fb-mid-known-1","text":"привет"}}
+	]}]}`)
+	resp1 := h.postRaw("/meta/api/v1/webhook/messenger", "application/json", firstBody, map[string]string{
+		"X-Hub-Signature-256": hmacSHA256Header("app-secret-1", firstBody),
+	})
+	resp1.Body.Close()
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("first status = %d", resp1.StatusCode)
+	}
+	if profileCalls != 1 {
+		t.Fatalf("profileCalls after a never-before-seen contact's message = %d, want 1 (a live lookup)", profileCalls)
+	}
+
+	// A second message from the SAME contact: the display name is now on
+	// file, so this must NOT place a second live Profile call.
+	secondBody := []byte(`{"object":"page","entry":[{"id":"998877004","time":1723104060000,"messaging":[
+		{"sender":{"id":"777"},"recipient":{"id":"998877004"},"timestamp":1723104060000,"message":{"mid":"fb-mid-known-2","text":"снова я"}}
+	]}]}`)
+	resp2 := h.postRaw("/meta/api/v1/webhook/messenger", "application/json", secondBody, map[string]string{
+		"X-Hub-Signature-256": hmacSHA256Header("app-secret-1", secondBody),
+	})
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("second status = %d", resp2.StatusCode)
+	}
+	if profileCalls != 1 {
+		t.Fatalf("profileCalls after a second message from the same contact = %d, want still 1 (no repeat lookup)", profileCalls)
+	}
+
+	chats, _, err := h.store.ListChatsForOrg(context.Background(), store.ChatFilter{OrgID: h.orgID, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListChatsForOrg: %v", err)
+	}
+	for _, c := range chats {
+		if c.AccountID == acct.ID && c.LastMessagePreview != "снова я" {
+			t.Fatalf("preview = %q, want the second message", c.LastMessagePreview)
+		}
+	}
+}
+
 func TestMessengerWebhookIgnorableEventAcks200(t *testing.T) {
 	h := newMetaHarness(t)
 	h.setAppCredentials("app-1", "app-secret-1")

@@ -2,7 +2,9 @@ package messengerish
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -95,6 +97,13 @@ func (s *ChannelSender) Send(ctx context.Context, out messaging.OutboundMessage)
 // (Instagram/Messenger fetch our bytes themselves, never receive an
 // upload) and sends by link — mirrors whatsappcloud.ChannelSender.
 // sendMedia's identical shape.
+//
+// Unlike WhatsApp Cloud/Telegram, the Send API's attachment payload has no
+// caption field — a caption can only reach the customer as a second,
+// separate text bubble. When present, it's sent as a best-effort follow-up
+// after the attachment: its failure doesn't undo (or get reflected in) the
+// media send that already reached the customer, so the returned SendResult
+// is always the attachment's own.
 func (s *ChannelSender) sendMedia(ctx context.Context, externalAccountID string, out messaging.OutboundMessage, token string) (SendResult, error) {
 	messageID, err := uuid.Parse(out.MessageID)
 	if err != nil {
@@ -117,5 +126,14 @@ func (s *ChannelSender) sendMedia(ctx context.Context, externalAccountID string,
 		// identical fallback.
 		kind = MediaFile
 	}
-	return s.Client.SendMedia(ctx, s.InstagramHost, externalAccountID, out.To, kind, link, token)
+	res, err := s.Client.SendMedia(ctx, s.InstagramHost, externalAccountID, out.To, kind, link, token)
+	if err != nil {
+		return res, err
+	}
+	if caption := strings.TrimSpace(out.Media.Caption); caption != "" {
+		if _, err := s.Client.SendText(ctx, s.InstagramHost, externalAccountID, out.To, caption, token); err != nil {
+			slog.Warn("messengerish: caption follow-up send failed", "account_id", out.AccountID, "err", err)
+		}
+	}
+	return res, nil
 }
