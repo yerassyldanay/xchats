@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import InstagramIcon from '@/components/icons/InstagramIcon.vue'
+import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 // AddAccountDialog drives every "connect a channel" flow:
 //   channel picker → WhatsApp: start pairing, poll the QR every ~2.5s, render
@@ -20,11 +21,12 @@ import InstagramIcon from '@/components/icons/InstagramIcon.vue'
 //                    (BYO-App — see backend/internal/httpapi/
 //                    whatsapp_cloud_accounts.go), pick a discovered number,
 //                    enter its 2-step-verification PIN
-//                  → Instagram Direct: a single top-level redirect to Meta's
-//                    consent screen (Instagram Login) and back — the entire
-//                    connect happens server-side; this dialog's own job ends
-//                    the moment the browser navigates away (see
-//                    connectInstagram, below).
+//                  → Instagram Direct / Messenger: a single top-level
+//                    redirect to Meta's consent screen (Instagram Login /
+//                    plain Facebook Login) and back — the entire connect
+//                    happens server-side; this dialog's own job ends the
+//                    moment the browser navigates away (see
+//                    connectInstagram/connectMessenger, below).
 // startChannel pre-selects WhatsApp and skips the picker — used to re-pair an
 // existing broken/logged-out number (same deterministic account id, so it
 // revives that row rather than creating a new one).
@@ -33,7 +35,7 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'connected'): void }>()
 const accounts = useAccounts()
 
 type Step = 'channel' | 'qr' | 'telegram' | 'whatsapp_cloud_creds' | 'whatsapp_cloud_pick' | 'connected'
-type Channel = 'whatsapp' | 'telegram' | 'whatsapp_cloud' | 'instagram'
+type Channel = 'whatsapp' | 'telegram' | 'whatsapp_cloud' | 'instagram' | 'messenger'
 
 const step = ref<Step>('channel')
 const channel = ref<Channel>('whatsapp')
@@ -69,6 +71,7 @@ function pickChannel(c: Channel) {
   if (c === 'whatsapp') startPairing()
   else if (c === 'telegram') step.value = 'telegram'
   else if (c === 'instagram') connectInstagram()
+  else if (c === 'messenger') connectMessenger()
   else step.value = 'whatsapp_cloud_creds'
 }
 
@@ -86,6 +89,21 @@ async function connectInstagram() {
     window.location.href = started.authorize_url
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось начать подключение Instagram.'
+    busy.value = false
+  }
+}
+
+// connectMessenger is connectInstagram's exact twin for plain Facebook
+// Login — see Accounts.vue's onMounted handling of ?messenger_connected /
+// ?messenger_error.
+async function connectMessenger() {
+  error.value = ''
+  busy.value = true
+  try {
+    const started = await accounts.startMessengerOAuth()
+    window.location.href = started.authorize_url
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Не удалось начать подключение Messenger.'
     busy.value = false
   }
 }
@@ -360,13 +378,35 @@ onBeforeUnmount(stopPolling)
               </ol>
               <span class="mt-4 block text-sm font-medium text-fuchsia-600">Продолжить с Instagram →</span>
             </button>
+            <button
+              class="group rounded-xl border border-border p-4 text-left transition hover:border-[#0084FF] hover:bg-[#0084FF]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0084FF]/40 disabled:pointer-events-none disabled:opacity-60"
+              :disabled="busy"
+              @click="pickChannel('messenger')"
+            >
+              <span class="flex items-center gap-3">
+                <span class="w-11 h-11 rounded-xl bg-[#0084FF] grid place-items-center text-white shrink-0">
+                  <MessengerIcon class="w-6 h-6" />
+                </span>
+                <span class="min-w-0">
+                  <span class="block font-semibold">Messenger</span>
+                  <span class="block text-xs text-muted-foreground">Официальное подключение через Meta</span>
+                </span>
+              </span>
+              <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
+                <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">01</span><span>Нажмите — откроется окно входа Facebook.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">02</span><span>Войдите и разрешите доступ РОВНО к одной Facebook Page.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">03</span><span>Вы вернётесь сюда — страница подключится автоматически.</span></li>
+              </ol>
+              <span class="mt-4 block text-sm font-medium text-[#0084FF]">Продолжить с Messenger →</span>
+            </button>
           </div>
           <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
             <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ error }}
           </p>
           <p class="rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
             QR-код не сохраняется. Токены хранятся в зашифрованном виде и не показываются повторно. Для WhatsApp Cloud
-            API и Instagram сначала настройте App ID и App Secret вашего приложения Meta в Настройках → Каналы.
+            API, Instagram и Messenger сначала настройте App ID и App Secret вашего приложения Meta в Настройках →
+            Каналы.
           </p>
         </div>
 

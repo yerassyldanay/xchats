@@ -134,6 +134,26 @@ func (c *Client) ExchangeFacebookCode(ctx context.Context, appID, appSecret, red
 	return out, err
 }
 
+// ExchangeFacebookLongLived trades a short-lived Facebook user token for a
+// long-lived (~60 day) one. Messenger's connect flow calls this before
+// PageAccounts: a Page token minted from a long-lived User token does not
+// itself expire, whereas one minted straight from the short-lived code-
+// exchange token would inherit that short lifetime — doing this exchange
+// first is what lets Messenger get away with no background token refresher
+// at all (contrast Instagram Login's long-lived USER token, which DOES
+// expire on its own 60-day clock and needs worker/meta_tokens.go's active
+// renewal).
+func (c *Client) ExchangeFacebookLongLived(ctx context.Context, appID, appSecret, shortLivedToken string) (FacebookTokenResult, error) {
+	v := url.Values{}
+	v.Set("grant_type", "fb_exchange_token")
+	v.Set("client_id", appID)
+	v.Set("client_secret", appSecret)
+	v.Set("fb_exchange_token", shortLivedToken)
+	var out FacebookTokenResult
+	err := redactAll(c.Get(ctx, c.GraphURL("oauth/access_token")+"?"+v.Encode(), "", &out), appSecret, shortLivedToken)
+	return out, err
+}
+
 // PageAccount is one Facebook Page a user token can act as.
 type PageAccount struct {
 	ID          string `json:"id"`

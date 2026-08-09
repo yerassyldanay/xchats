@@ -9,6 +9,7 @@ import type {
   WhatsAppCloudDiscoverResponse,
   WhatsAppCloudAccountResponse,
   InstagramOAuthStartResponse,
+  MessengerOAuthStartResponse,
 } from '../types'
 
 interface ListAccounts {
@@ -127,11 +128,19 @@ export const useAccounts = defineStore('accounts', {
       return api.post<InstagramOAuthStartResponse>('/instagram-accounts/oauth/start', {})
     },
 
+    // --- Facebook Messenger (OAuth-redirect lifecycle) ---------------------
+    // Same redirect-then-server-side-connect shape as startInstagramOAuth
+    // above — the browser lands back on /accounts?messenger_connected=1 (or
+    // ?messenger_error=...).
+    startMessengerOAuth() {
+      return api.post<MessengerOAuthStartResponse>('/messenger-accounts/oauth/start', {})
+    },
+
     // --- shared ------------------------------------------------------------
     // remove routes to the channel's own delete: each tears down a different
     // provider-side registration (a whatsmeow logout + soft-delete, a
     // Telegram webhook teardown, a WhatsApp Cloud subscribed_apps clear, or
-    // an Instagram unsubscribe). Deliberately an explicit per-channel map,
+    // an Instagram/Messenger unsubscribe). Deliberately an explicit per-channel map,
     // not a "telegram vs. everything else" binary — that shape is exactly
     // what silently misrouted whatsapp_cloud's delete at the whatsmeow-only
     // endpoint before this comment was written.
@@ -144,7 +153,9 @@ export const useAccounts = defineStore('accounts', {
             ? '/whatsapp-cloud-accounts/'
             : channel === 'instagram'
               ? '/instagram-accounts/'
-              : '/whatsapp-accounts/'
+              : channel === 'messenger'
+                ? '/messenger-accounts/'
+                : '/whatsapp-accounts/'
       await api.del(path + id)
       await this.load()
     },

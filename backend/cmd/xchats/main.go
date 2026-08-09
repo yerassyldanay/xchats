@@ -358,6 +358,8 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		whatsappcloud.NewChannelSender(waCloudClient, st, st, inboxSigner, cfg.ResolvedAPIBaseURL()+"/meta/api/v1/media"))
 	senders.Register(messaging.ChannelInstagram,
 		messengerish.NewChannelSender(messengerishClient, st, st, inboxSigner, true, cfg.ResolvedAPIBaseURL()+"/meta/api/v1/media"))
+	senders.Register(messaging.ChannelMessenger,
+		messengerish.NewChannelSender(messengerishClient, st, st, inboxSigner, false, cfg.ResolvedAPIBaseURL()+"/meta/api/v1/media"))
 
 	w := &worker.Worker{
 		Store: st, Queue: q, TG: tg, WACloud: waCloudClient, MetaClient: metaClient, Blob: blobStore, Hub: hub,

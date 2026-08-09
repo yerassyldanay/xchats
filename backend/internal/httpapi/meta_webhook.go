@@ -213,7 +213,7 @@ func (s *Server) handleInstagramWebhook(c *gin.Context) {
 			continue
 		}
 		// Best-effort: an unresolvable token degrades contact-name lookups
-		// (instagramNormalize falls back to the bare provider id), it never
+		// (messengerishNormalize falls back to the bare provider id), it never
 		// blocks ingest.
 		token, _ := s.store.ChannelCredentialsSecret(ctx(c), acct.ID)
 		for _, ev := range entry.Messaging {
@@ -222,7 +222,7 @@ func (s *Server) handleInstagramWebhook(c *gin.Context) {
 				s.log.Info("instagram event dropped", "account_id", acct.ID, "result", reason)
 				continue
 			}
-			norm := instagramNormalize(ctx(c), igClient, ev, token)
+			norm := messengerishNormalize(ctx(c), igClient, ev, token, true)
 			outcome, perr := s.metaProc.Process(ctx(c), acct, norm)
 			if perr != nil {
 				s.log.Error("instagram webhook processing failed; not acking", "account_id", acct.ID, "err", perr)
@@ -240,32 +240,107 @@ func (s *Server) handleInstagramWebhook(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
-// instagramMediaType maps messengerish's attachment vocabulary onto this
+// handleMessengerWebhook is the Facebook Messenger ingress — byte-identical
+// shape to handleInstagramWebhook (same envelope, same at-least-once/
+// idempotency reasoning, same is_echo handling), differing only in which
+// channel it resolves accounts against and which Graph host
+// messengerishNormalize's live Profile lookup goes through
+// (instagramHost=false: plain graph.facebook.com, authenticated with the
+// connected Page's own token — see handleMessengerOAuthCallback for how that
+// token is obtained).
+func (s *Server) handleMessengerWebhook(c *gin.Context) {
+	raw, err := c.GetRawData()
+	if err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "unreadable body")
+		return
+	}
+
+	creds, okCreds := s.metaCreds.MetaAppCredentials(ctx(c))
+	if !okCreds {
+		s.log.Error("messenger webhook rejected: no Meta App Secret configured")
+		fail(c, http.StatusServiceUnavailable, ErrMetaAppNotConfigured, "Meta App Secret not configured")
+		return
+	}
+	if !meta.VerifySignature(creds.AppSecret, raw, c.GetHeader("X-Hub-Signature-256")) {
+		s.log.Warn("messenger webhook auth rejected", "reason", "bad signature")
+		fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook signature")
+		return
+	}
+
+	var payload messengerish.WebhookPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		s.log.Warn("messenger webhook unparsable body", "err", err)
+		c.Status(http.StatusOK)
+		return
+	}
+
+	fbClient := messengerish.NewClient(s.metaClient)
+	stored, duplicate, ignored := 0, 0, 0
+	for _, entry := range payload.Entry {
+		acct, err := s.store.ChannelAccountByExternalID(ctx(c), string(messaging.ChannelMessenger), entry.ID)
+		if err != nil {
+			s.log.Info("messenger webhook discarded", "page_id", entry.ID, "result", "unknown_account")
+			continue
+		}
+		// Best-effort: an unresolvable token degrades contact-name lookups
+		// (messengerishNormalize falls back to the bare provider id), it
+		// never blocks ingest.
+		token, _ := s.store.ChannelCredentialsSecret(ctx(c), acct.ID)
+		for _, ev := range entry.Messaging {
+			if reason, ignorable := ev.Ignorable(); ignorable {
+				ignored++
+				s.log.Info("messenger event dropped", "account_id", acct.ID, "result", reason)
+				continue
+			}
+			norm := messengerishNormalize(ctx(c), fbClient, ev, token, false)
+			outcome, perr := s.metaProc.Process(ctx(c), acct, norm)
+			if perr != nil {
+				s.log.Error("messenger webhook processing failed; not acking", "account_id", acct.ID, "err", perr)
+				fail(c, http.StatusInternalServerError, ErrInternal, "processing failed")
+				return
+			}
+			if outcome.Status == "duplicate" {
+				duplicate++
+			} else {
+				stored++
+			}
+		}
+	}
+	s.log.Info("messenger webhook processed", "stored", stored, "duplicate", duplicate, "ignored", ignored)
+	c.Status(http.StatusOK)
+}
+
+// messengerishMediaType maps messengerish's attachment vocabulary onto this
 // codebase's shared MediaType convention — every value already matches
 // (image|video|audio) except "file", which this codebase calls "document"
 // (see whatsappcloud/telegram's identical vocabulary).
-func instagramMediaType(t string) string {
+func messengerishMediaType(t string) string {
 	if t == "file" {
 		return "document"
 	}
 	return t
 }
 
-// instagramNormalize maps one Instagram messaging event into metaingest's
-// channel-neutral shape. Unlike WhatsApp Cloud, Instagram's webhook payload
-// carries no inline contact profile — ContactDisplayName is a best-effort
-// LIVE Profile lookup (never blocking: a failed lookup just leaves the name
-// empty, dto.MapContact already falls back to the id-derived handle) — and
-// echoes (is_echo) swap which Party is the actual customer: Recipient on an
-// echo, Sender on a genuine inbound.
-func instagramNormalize(ctx context.Context, c *messengerish.Client, ev messengerish.MessagingEvent, token string) metaingest.NormalizedMessage {
+// messengerishNormalize maps one Instagram or Messenger messaging event into
+// metaingest's channel-neutral shape — shared by handleInstagramWebhook and
+// handleMessengerWebhook, since both ride the identical Messenger-Platform
+// envelope (see messengerish/webhook.go's own doc comment). instagramHost
+// selects which Graph host the live Profile lookup below goes through; it is
+// the caller's job to pass the same value it registered its ChannelSender
+// with. Unlike WhatsApp Cloud, neither webhook payload carries an inline
+// contact profile — ContactDisplayName is a best-effort LIVE Profile lookup
+// (never blocking: a failed lookup just leaves the name empty, dto.MapContact
+// already falls back to the id-derived handle) — and echoes (is_echo) swap
+// which Party is the actual customer: Recipient on an echo, Sender on a
+// genuine inbound.
+func messengerishNormalize(ctx context.Context, c *messengerish.Client, ev messengerish.MessagingEvent, token string, instagramHost bool) metaingest.NormalizedMessage {
 	direction, senderKind, customerID := "in", "contact", ev.Sender.ID
 	if ev.Message.IsEcho {
 		direction, senderKind, customerID = "out", "external_account", ev.Recipient.ID
 	}
 	contactName := ""
 	if token != "" {
-		if p, err := c.Profile(ctx, true, customerID, token); err == nil {
+		if p, err := c.Profile(ctx, instagramHost, customerID, token); err == nil {
 			switch {
 			case p.Name != "":
 				contactName = p.Name
@@ -292,7 +367,7 @@ func instagramNormalize(ctx context.Context, c *messengerish.Client, ev messenge
 	}
 	if att := ev.Attachment(); att != nil {
 		norm.Attachment = &metaingest.NormalizedAttachment{
-			MediaType: instagramMediaType(att.Type), SourceURL: att.Payload.URL,
+			MediaType: messengerishMediaType(att.Type), SourceURL: att.Payload.URL,
 		}
 	}
 	return norm

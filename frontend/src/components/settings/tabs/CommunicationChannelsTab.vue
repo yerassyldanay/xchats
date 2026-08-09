@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import InstagramIcon from '@/components/icons/InstagramIcon.vue'
+import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 import ProviderCredentialCard from '../ProviderCredentialCard.vue'
 import type { Account } from '@/types'
 
@@ -46,7 +47,9 @@ function conn(status: string) {
 }
 const isTelegram = (a: Account) => a.channel === 'telegram'
 const isInstagram = (a: Account) => a.channel === 'instagram'
-const channelIcon = (a: Account) => (isTelegram(a) ? TelegramIcon : isInstagram(a) ? InstagramIcon : WhatsappIcon)
+const isMessenger = (a: Account) => a.channel === 'messenger'
+const channelIcon = (a: Account) =>
+  isTelegram(a) ? TelegramIcon : isInstagram(a) ? InstagramIcon : isMessenger(a) ? MessengerIcon : WhatsappIcon
 
 const stats = computed(() => {
   const healthy = (x: Account) => x.connection_state === 'connected'

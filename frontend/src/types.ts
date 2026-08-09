@@ -268,6 +268,14 @@ export interface InstagramOAuthStartResponse {
   authorize_url: string
 }
 
+// MessengerOAuthStartResponse is POST /messenger-accounts/oauth/start's
+// response — same shape and same redirect-then-server-side-connect flow as
+// InstagramOAuthStartResponse above (see
+// backend/internal/httpapi/meta_oauth_messenger.go).
+export interface MessengerOAuthStartResponse {
+  authorize_url: string
+}
+
 // WaPairSession is POST /wa-accounts/pair's response: a session id to poll
 // via GET /wa-accounts/pair/:session_id.
 export interface WaPairSession {

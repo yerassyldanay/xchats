@@ -296,11 +296,15 @@ func (s *Server) Router() *gin.Engine {
 	r.POST("/meta/api/v1/webhook/whatsapp", s.handleWhatsAppCloudWebhook)
 	r.GET("/meta/api/v1/webhook/instagram", s.handleMetaWebhookVerify)
 	r.POST("/meta/api/v1/webhook/instagram", s.handleInstagramWebhook)
+	r.GET("/meta/api/v1/webhook/messenger", s.handleMetaWebhookVerify)
+	r.POST("/meta/api/v1/webhook/messenger", s.handleMessengerWebhook)
 	r.GET("/meta/api/v1/media/:media_id", s.handleMetaMediaRead)
-	// Instagram's OAuth redirect lands here directly from instagram.com —
-	// see handleInstagramOAuthCallback's own doc comment for why this is
-	// public rather than behind requireSession().
+	// Instagram's and Messenger's OAuth redirects land here directly from
+	// instagram.com/facebook.com — see handleInstagramOAuthCallback's own
+	// doc comment for why these are public rather than behind
+	// requireSession().
 	r.GET(instagramCallbackPath, s.handleInstagramOAuthCallback)
+	r.GET(messengerCallbackPath, s.handleMessengerOAuthCallback)
 
 	// MCP connector (plan/mcp.md) — discovery, OAuth 2.1 + PKCE, and the
 	// JSON-RPC endpoint. Every handler here checks mcpAuthEnabled() itself,
@@ -407,6 +411,12 @@ func (s *Server) Router() *gin.Engine {
 	// callback above is the public half of the same flow.
 	auth.POST("/instagram-accounts/oauth/start", s.handleStartInstagramOAuth)
 	auth.DELETE("/instagram-accounts/:id", s.handleDeleteInstagramAccount)
+
+	// Facebook Messenger accounts manager: OAuth-redirect connect (plain
+	// Facebook Login — see meta_oauth_messenger.go's own doc comments), same
+	// start/callback shape as Instagram above.
+	auth.POST("/messenger-accounts/oauth/start", s.handleStartMessengerOAuth)
+	auth.DELETE("/messenger-accounts/:id", s.handleDeleteMessengerAccount)
 
 	auth.GET("/chats", s.handleListChats)
 	auth.POST("/chats", s.handleCreateChat)

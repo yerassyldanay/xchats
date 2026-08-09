@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/badge'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import InstagramIcon from '@/components/icons/InstagramIcon.vue'
+import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -43,10 +44,11 @@ const working = ref<string | null>(null)
 // than as a toast that disappears before anyone reads it.
 const actionError = ref<Record<string, string>>({})
 // oauthBanner surfaces the ONE-SHOT ?instagram_connected / ?instagram_error
-// query params a redirect back from Meta's OAuth consent screen lands with
-// (see AddAccountDialog.vue's connectInstagram and the backend's
-// meta_oauth.go) — cleared from the URL on mount so a page refresh never
-// re-shows a stale result.
+// (or their messenger_* twins) query params a redirect back from Meta's
+// OAuth consent screen lands with (see AddAccountDialog.vue's
+// connectInstagram/connectMessenger and the backend's meta_oauth.go /
+// meta_oauth_messenger.go) — cleared from the URL on mount so a page refresh
+// never re-shows a stale result.
 const oauthBanner = ref<{ kind: 'success' | 'error'; message: string } | null>(null)
 
 // connection tone -> badge + dot classes (connected keeps WhatsApp green)
@@ -70,32 +72,52 @@ const isTelegram = (a: Account) => a.channel === 'telegram'
 const isQrWhatsApp = (a: Account) => a.channel === 'whatsapp' || a.channel === 'simulator'
 const isWhatsAppCloud = (a: Account) => a.channel === 'whatsapp_cloud'
 const isInstagram = (a: Account) => a.channel === 'instagram'
+const isMessenger = (a: Account) => a.channel === 'messenger'
 const tileClass = (a: Account) =>
-  isTelegram(a) ? 'bg-[#229ED9]' : isWhatsAppCloud(a) ? 'bg-teal-600' : isInstagram(a) ? 'bg-fuchsia-600' : 'bg-wa'
-const channelIcon = (a: Account) => (isTelegram(a) ? TelegramIcon : isInstagram(a) ? InstagramIcon : WhatsappIcon)
+  isTelegram(a)
+    ? 'bg-[#229ED9]'
+    : isWhatsAppCloud(a)
+      ? 'bg-teal-600'
+      : isInstagram(a)
+        ? 'bg-fuchsia-600'
+        : isMessenger(a)
+          ? 'bg-[#0084FF]'
+          : 'bg-wa'
+const channelIcon = (a: Account) =>
+  isTelegram(a) ? TelegramIcon : isInstagram(a) ? InstagramIcon : isMessenger(a) ? MessengerIcon : WhatsappIcon
 // A Telegram bot's handle is @username; a QR-paired WhatsApp account's own
 // external_handle is a bare digit string (needs the + prefix); WhatsApp
-// Cloud's and Instagram's are already display-ready ("+1 555 000 1111",
-// "@my_shop" — see whatsapp_cloud_accounts.go's display_phone_number and
-// meta_oauth.go's handle) — no coercion needed for either.
+// Cloud's, Instagram's and Messenger's are already display-ready
+// ("+1 555 000 1111", "@my_shop", a Facebook Page name — see
+// whatsapp_cloud_accounts.go's display_phone_number and meta_oauth.go's /
+// meta_oauth_messenger.go's handle) — no coercion needed for any of them.
 function handle(a: Account) {
-  if (isTelegram(a) || isWhatsAppCloud(a) || isInstagram(a)) return a.external_handle || '—'
+  if (isTelegram(a) || isWhatsAppCloud(a) || isInstagram(a) || isMessenger(a)) return a.external_handle || '—'
   return a.external_handle ? '+' + a.external_handle : '—'
 }
 
 onMounted(() => {
   accounts.load()
   // A one-shot landing from Meta's OAuth redirect (see AddAccountDialog.vue's
-  // connectInstagram) — read it once, then strip the query params so a
-  // later refresh of this same URL does not re-show a stale result.
-  const connected = route.query.instagram_connected
-  const errorMsg = route.query.instagram_error
-  if (connected) {
+  // connectInstagram/connectMessenger) — read it once, then strip the query
+  // params so a later refresh of this same URL does not re-show a stale
+  // result. Instagram and Messenger never redirect back in the same trip, so
+  // checking one pair then the other (rather than merging into one lookup) is
+  // just the simplest way to express "whichever one this redirect is for".
+  const igConnected = route.query.instagram_connected
+  const igError = route.query.instagram_error
+  const fbConnected = route.query.messenger_connected
+  const fbError = route.query.messenger_error
+  if (igConnected) {
     oauthBanner.value = { kind: 'success', message: 'Instagram успешно подключён.' }
-  } else if (typeof errorMsg === 'string' && errorMsg) {
-    oauthBanner.value = { kind: 'error', message: errorMsg }
+  } else if (typeof igError === 'string' && igError) {
+    oauthBanner.value = { kind: 'error', message: igError }
+  } else if (fbConnected) {
+    oauthBanner.value = { kind: 'success', message: 'Messenger успешно подключён.' }
+  } else if (typeof fbError === 'string' && fbError) {
+    oauthBanner.value = { kind: 'error', message: fbError }
   }
-  if (connected || errorMsg) {
+  if (igConnected || igError || fbConnected || fbError) {
     router.replace({ path: route.path, query: {} })
   }
 })
