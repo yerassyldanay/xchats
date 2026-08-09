@@ -437,6 +437,7 @@ func (s *Server) Router() *gin.Engine {
 	kb.POST("/imports", s.handleKBCreateImport)
 	kb.GET("/imports", s.handleKBListImports)
 	kb.GET("/imports/:id", s.handleKBGetImport)
+	kb.GET("/import/providers", s.handleKBImportProviders)
 
 	// Settings (settings.go) — every route here is admin-only. Handlers are
 	// individually nil-tolerant for Credentials/Settings/Tunnel, but the

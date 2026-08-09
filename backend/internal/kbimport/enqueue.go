@@ -116,6 +116,9 @@ func (s *Service) Submit(ctx context.Context, orgID, userID uuid.UUID, in Submit
 		if f.MimeType == extractor.MimePDF && in.Provider != "llamaparse" {
 			return RunSummary{}, fmt.Errorf("%w: %s is a PDF — PDF extraction requires the LlamaParse provider", ErrValidation, f.Filename)
 		}
+		if extractor.IsImage(f.MimeType) && in.Provider != "native" {
+			return RunSummary{}, fmt.Errorf("%w: %s is an image — image extraction requires the native provider", ErrValidation, f.Filename)
+		}
 		return RunSummary{}, fmt.Errorf("%w: provider %q cannot read %s (%s)", ErrValidation, in.Provider, f.Filename, f.MimeType)
 	}
 

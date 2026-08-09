@@ -11,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/internal/credentials"
+	"github.com/yerassyldanay/xchats/backend/internal/extractor"
 	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
 )
@@ -165,6 +167,65 @@ func (s *Server) handleKBGetImport(c *gin.Context) {
 		return
 	}
 	ok(c, run)
+}
+
+// kbImportProviderSummary is one entry of GET /kb/import/providers.
+type kbImportProviderSummary struct {
+	ID                 string   `json:"id"`
+	DisplayName        string   `json:"display_name"`
+	Families           []string `json:"families"`
+	RequiresCredential bool     `json:"requires_credential"`
+	Configured         bool     `json:"configured"`
+}
+
+// handleKBImportProviders is GET /kb/import/providers: the one source of
+// truth for the operator-facing parser dropdown — which source families
+// each provider reads AND whether it is currently usable. Families come
+// from extractor.Capabilities(), data-derived from each provider's real
+// Supports() method rather than a second hand-maintained table.
+// Configured/RequiresCredential come from kbImport.ProviderStatus, which
+// runs through the EXACT SAME requireCredential call Submit's own
+// resolveProvider makes (kbimport.go) — so this endpoint can never disagree
+// with Submit's own precheck, and a just-saved key takes effect here with
+// no restart, same as everywhere else.
+func (s *Server) handleKBImportProviders(c *gin.Context) {
+	if !s.kbReady(c) {
+		return
+	}
+	if _, proceed := s.pgOrg(c); !proceed {
+		return
+	}
+	if s.kbImport == nil {
+		fail(c, http.StatusServiceUnavailable, ErrInternal, "the import pipeline is not available")
+		return
+	}
+	caps := extractor.Capabilities()
+	out := make([]kbImportProviderSummary, 0, len(caps))
+	for _, cp := range caps {
+		requiresCredential, configured := s.kbImport.ProviderStatus(ctx(c), cp.Name)
+		sum := kbImportProviderSummary{
+			ID: cp.Name, DisplayName: cp.Name, Families: familyStrings(cp),
+			RequiresCredential: requiresCredential, Configured: configured,
+		}
+		if p, known := credentials.ProviderByID(cp.Name); known {
+			sum.DisplayName = p.DisplayName
+		}
+		out = append(out, sum)
+	}
+	ok(c, gin.H{"providers": out})
+}
+
+// familyStrings extracts cp's supported families, in extractor.Families'
+// fixed order, as plain strings for the wire — the frontend's MIME->family
+// mapping compares against these string values directly.
+func familyStrings(cp extractor.ProviderCapabilities) []string {
+	out := make([]string, 0, len(cp.Families))
+	for _, f := range extractor.Families {
+		if cp.Families[f] {
+			out = append(out, string(f))
+		}
+	}
+	return out
 }
 
 // kbImportFail maps kbimport's typed errors to the right HTTP status +

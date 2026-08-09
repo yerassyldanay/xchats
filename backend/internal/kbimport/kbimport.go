@@ -229,6 +229,27 @@ func (s *Service) resolveProvider(ctx context.Context, name string) (extractor.P
 	}
 }
 
+// ProviderStatus reports whether name requires a credential and, if so,
+// whether one currently resolves — through the EXACT SAME requireCredential
+// call resolveProvider itself makes, so GET /kb/import/providers
+// (internal/httpapi) can never disagree with Submit's own precheck: an
+// unknown name reports (false, false), matching Submit's own rejection of
+// it.
+func (s *Service) ProviderStatus(ctx context.Context, name string) (requiresCredential, configured bool) {
+	switch name {
+	case "native":
+		return false, true
+	case "firecrawl":
+		_, err := s.requireCredential(ctx, "firecrawl.api_key")
+		return true, err == nil
+	case "llamaparse":
+		_, err := s.requireCredential(ctx, "llamaparse.api_key")
+		return true, err == nil
+	default:
+		return false, false
+	}
+}
+
 func (s *Service) requireCredential(ctx context.Context, key credentials.Key) (string, error) {
 	if s.deps.Credentials == nil {
 		return "", fmt.Errorf("%w: no credential store is configured", ErrProviderNotConfigured)

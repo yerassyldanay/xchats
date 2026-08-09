@@ -168,6 +168,12 @@ func isTextlike(mime string) bool {
 // isImage reports whether mime is any image/* subtype.
 func isImage(mime string) bool { return strings.HasPrefix(mime, "image/") }
 
+// IsImage reports whether mime is any image/* subtype — exported so a
+// caller outside this package (internal/kbimport/enqueue.go's per-provider
+// submit-time error messaging) can point an image-shaped submission at the
+// right provider without duplicating this structural check.
+func IsImage(mime string) bool { return isImage(mime) }
+
 // truncate bounds an error/log snippet to n bytes, appending an ellipsis
 // marker when it cuts — used when echoing a vendor's raw response body into
 // an error message, so a misbehaving vendor can never inflate an error

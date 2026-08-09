@@ -269,6 +269,111 @@ func TestKBImports_EndToEnd_FirecrawlURLLandsInDraftOnly(t *testing.T) {
 	}
 }
 
+// TestKBImportProviders_ShapeAndFamilies checks the endpoint against
+// plan/playground.md's own capability table without any credential
+// configured: native is always usable (no credential needed at all — see
+// handleKBImportProviders' "Configured defaults true" comment), firecrawl
+// and llamaparse both require one and, unconfigured here, report
+// configured=false.
+func TestKBImportProviders_ShapeAndFamilies(t *testing.T) {
+	h := newHarness(t)
+	var body struct {
+		Providers []struct {
+			ID                 string   `json:"id"`
+			DisplayName        string   `json:"display_name"`
+			Families           []string `json:"families"`
+			RequiresCredential bool     `json:"requires_credential"`
+			Configured         bool     `json:"configured"`
+		} `json:"providers"`
+	}
+	h.get("/xchats/api/v1/kb/import/providers", &body)
+
+	byID := map[string]struct {
+		Families           []string
+		RequiresCredential bool
+		Configured         bool
+	}{}
+	for _, p := range body.Providers {
+		byID[p.ID] = struct {
+			Families           []string
+			RequiresCredential bool
+			Configured         bool
+		}{p.Families, p.RequiresCredential, p.Configured}
+	}
+
+	native, ok := byID["native"]
+	if !ok {
+		t.Fatal("providers list is missing native")
+	}
+	if native.RequiresCredential {
+		t.Error("native.requires_credential = true, want false")
+	}
+	if !native.Configured {
+		t.Error("native.configured = false, want true — it needs no credential at all")
+	}
+	if !containsStr(native.Families, "url") || !containsStr(native.Families, "docx") || containsStr(native.Families, "pdf") {
+		t.Errorf("native.families = %v, want url+docx present, pdf absent", native.Families)
+	}
+
+	firecrawl, ok := byID["firecrawl"]
+	if !ok {
+		t.Fatal("providers list is missing firecrawl")
+	}
+	if !firecrawl.RequiresCredential {
+		t.Error("firecrawl.requires_credential = false, want true")
+	}
+	if firecrawl.Configured {
+		t.Error("firecrawl.configured = true, want false — no credential was saved")
+	}
+	if !containsStr(firecrawl.Families, "url") || len(firecrawl.Families) != 1 {
+		t.Errorf("firecrawl.families = %v, want exactly [url]", firecrawl.Families)
+	}
+
+	llamaparse, ok := byID["llamaparse"]
+	if !ok {
+		t.Fatal("providers list is missing llamaparse")
+	}
+	if !containsStr(llamaparse.Families, "pdf") {
+		t.Errorf("llamaparse.families = %v, want pdf present", llamaparse.Families)
+	}
+}
+
+// TestKBImportProviders_ConfiguredFlipsOnceCredentialSaved is the "no
+// disagreement with Submit's own precheck" guarantee: the same credential
+// save Submit's resolveProvider would pick up flips this endpoint's
+// configured flag too, with no restart.
+func TestKBImportProviders_ConfiguredFlipsOnceCredentialSaved(t *testing.T) {
+	h := newHarness(t)
+	if err := h.kbImportCreds.Set(context.Background(), "firecrawl.api_key", "fc-test-key"); err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	var body struct {
+		Providers []struct {
+			ID         string `json:"id"`
+			Configured bool   `json:"configured"`
+		} `json:"providers"`
+	}
+	h.get("/xchats/api/v1/kb/import/providers", &body)
+	for _, p := range body.Providers {
+		if p.ID == "firecrawl" {
+			if !p.Configured {
+				t.Error("firecrawl.configured = false after saving its key, want true")
+			}
+			return
+		}
+	}
+	t.Fatal("providers list is missing firecrawl")
+}
+
+func containsStr(list []string, v string) bool {
+	for _, s := range list {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
 // scriptedImportClient is a fake llm.ChatClient dedicated to this file's
 // end-to-end test — kept separate from fakeLLMClient (integration_test.go)
 // since that one's fixed response is the customer-response contract's
