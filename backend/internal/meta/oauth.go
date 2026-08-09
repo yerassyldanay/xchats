@@ -36,7 +36,7 @@ func (c *Client) ExchangeInstagramCode(ctx context.Context, appID, appSecret, re
 	form.Set("redirect_uri", redirectURI)
 	form.Set("code", code)
 	var out InstagramTokenResult
-	err := c.PostForm(ctx, "https://api.instagram.com/oauth/access_token", form, "", &out)
+	err := c.PostForm(ctx, c.instagramAPIHostBase()+"/oauth/access_token", form, "", &out)
 	return out, err
 }
 
@@ -60,7 +60,7 @@ func (c *Client) ExchangeInstagramLongLived(ctx context.Context, appSecret, shor
 	// token-redaction (which only ever scrubs what IT was told is a bearer
 	// token) cannot see them — redact both explicitly from whatever error
 	// comes back.
-	err := redactAll(c.Get(ctx, "https://graph.instagram.com/access_token?"+v.Encode(), "", &out), appSecret, shortLivedToken)
+	err := redactAll(c.Get(ctx, c.instagramGraphHostBase()+"/access_token?"+v.Encode(), "", &out), appSecret, shortLivedToken)
 	return out, err
 }
 
@@ -72,7 +72,7 @@ func (c *Client) RefreshInstagramLongLived(ctx context.Context, token string) (I
 	v.Set("grant_type", "ig_refresh_token")
 	v.Set("access_token", token)
 	var out InstagramLongLivedResult
-	err := redactAll(c.Get(ctx, "https://graph.instagram.com/refresh_access_token?"+v.Encode(), "", &out), token)
+	err := redactAll(c.Get(ctx, c.instagramGraphHostBase()+"/refresh_access_token?"+v.Encode(), "", &out), token)
 	return out, err
 }
 

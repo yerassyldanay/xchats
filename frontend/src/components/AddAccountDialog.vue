@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
+import InstagramIcon from '@/components/icons/InstagramIcon.vue'
 
 // AddAccountDialog drives every "connect a channel" flow:
 //   channel picker → WhatsApp: start pairing, poll the QR every ~2.5s, render
@@ -19,6 +20,11 @@ import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 //                    (BYO-App — see backend/internal/httpapi/
 //                    whatsapp_cloud_accounts.go), pick a discovered number,
 //                    enter its 2-step-verification PIN
+//                  → Instagram Direct: a single top-level redirect to Meta's
+//                    consent screen (Instagram Login) and back — the entire
+//                    connect happens server-side; this dialog's own job ends
+//                    the moment the browser navigates away (see
+//                    connectInstagram, below).
 // startChannel pre-selects WhatsApp and skips the picker — used to re-pair an
 // existing broken/logged-out number (same deterministic account id, so it
 // revives that row rather than creating a new one).
@@ -27,7 +33,7 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'connected'): void }>()
 const accounts = useAccounts()
 
 type Step = 'channel' | 'qr' | 'telegram' | 'whatsapp_cloud_creds' | 'whatsapp_cloud_pick' | 'connected'
-type Channel = 'whatsapp' | 'telegram' | 'whatsapp_cloud'
+type Channel = 'whatsapp' | 'telegram' | 'whatsapp_cloud' | 'instagram'
 
 const step = ref<Step>('channel')
 const channel = ref<Channel>('whatsapp')
@@ -62,7 +68,26 @@ function pickChannel(c: Channel) {
   error.value = ''
   if (c === 'whatsapp') startPairing()
   else if (c === 'telegram') step.value = 'telegram'
+  else if (c === 'instagram') connectInstagram()
   else step.value = 'whatsapp_cloud_creds'
+}
+
+// connectInstagram mints the authorize_url and immediately navigates the
+// WHOLE browser tab to it — never a fetch/XHR, Meta's consent dialog
+// refuses to render inside anything but a real top-level page. There is no
+// further dialog step: the connect finishes entirely server-side once Meta
+// redirects back to /accounts (see Accounts.vue's onMounted handling of
+// ?instagram_connected / ?instagram_error).
+async function connectInstagram() {
+  error.value = ''
+  busy.value = true
+  try {
+    const started = await accounts.startInstagramOAuth()
+    window.location.href = started.authorize_url
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Не удалось начать подключение Instagram.'
+    busy.value = false
+  }
 }
 
 async function startPairing() {
@@ -314,10 +339,34 @@ onBeforeUnmount(stopPolling)
               </ol>
               <span class="mt-4 block text-sm font-medium text-teal-600">Продолжить с WhatsApp Cloud →</span>
             </button>
+            <button
+              class="group rounded-xl border border-border p-4 text-left transition hover:border-fuchsia-600 hover:bg-fuchsia-600/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600/40 disabled:pointer-events-none disabled:opacity-60"
+              :disabled="busy"
+              @click="pickChannel('instagram')"
+            >
+              <span class="flex items-center gap-3">
+                <span class="w-11 h-11 rounded-xl bg-fuchsia-600 grid place-items-center text-white shrink-0">
+                  <InstagramIcon class="w-6 h-6" />
+                </span>
+                <span class="min-w-0">
+                  <span class="block font-semibold">Instagram Direct</span>
+                  <span class="block text-xs text-muted-foreground">Официальное подключение через Meta</span>
+                </span>
+              </span>
+              <ol class="mt-4 space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
+                <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">01</span><span>Нажмите — откроется окно входа Instagram.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">02</span><span>Войдите в бизнес-аккаунт Instagram и разрешите доступ.</span></li>
+                <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">03</span><span>Вы вернётесь сюда — аккаунт подключится автоматически.</span></li>
+              </ol>
+              <span class="mt-4 block text-sm font-medium text-fuchsia-600">Продолжить с Instagram →</span>
+            </button>
           </div>
+          <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
+            <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ error }}
+          </p>
           <p class="rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
             QR-код не сохраняется. Токены хранятся в зашифрованном виде и не показываются повторно. Для WhatsApp Cloud
-            API сначала настройте App ID и App Secret вашего приложения Meta в Настройках → Каналы.
+            API и Instagram сначала настройте App ID и App Secret вашего приложения Meta в Настройках → Каналы.
           </p>
         </div>
 

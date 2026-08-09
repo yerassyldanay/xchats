@@ -1,0 +1,21 @@
+{
+  "object": "instagram",
+  "entry": [
+    {
+      "id": "17841400000000001",
+      "time": 1723104120000,
+      "messaging": [
+        {
+          "sender": { "id": "17841400000000001" },
+          "recipient": { "id": "1234567890123456" },
+          "timestamp": 1723104120000,
+          "message": {
+            "mid": "aWdfZAG1faXRlbToxOjIy",
+            "text": "Да, есть в наличии!",
+            "is_echo": true
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -286,14 +286,21 @@ func (s *Server) Router() *gin.Engine {
 	// inbound HTTP route to receive.
 	r.POST("/telegram/api/v1/webhook/:account_id", s.handleTelegramWebhook)
 
-	// Meta channels — public, unauthenticated (Meta's own servers call
-	// these; there is no session cookie to check). The webhook path is not
-	// account-specific (see handleWhatsAppCloudWebhook's doc comment); the
-	// media route is org-scoped by its signed token instead of a URL
-	// segment (see handleMetaMediaRead).
+	// Meta channels — public, unauthenticated (Meta's own servers, or a
+	// browser mid-OAuth-redirect, call these; there is no session cookie to
+	// check in either case). The webhook paths are not account-specific
+	// (see handleWhatsAppCloudWebhook's doc comment); the media route is
+	// org-scoped by its signed token instead of a URL segment (see
+	// handleMetaMediaRead).
 	r.GET("/meta/api/v1/webhook/whatsapp", s.handleMetaWebhookVerify)
 	r.POST("/meta/api/v1/webhook/whatsapp", s.handleWhatsAppCloudWebhook)
+	r.GET("/meta/api/v1/webhook/instagram", s.handleMetaWebhookVerify)
+	r.POST("/meta/api/v1/webhook/instagram", s.handleInstagramWebhook)
 	r.GET("/meta/api/v1/media/:media_id", s.handleMetaMediaRead)
+	// Instagram's OAuth redirect lands here directly from instagram.com —
+	// see handleInstagramOAuthCallback's own doc comment for why this is
+	// public rather than behind requireSession().
+	r.GET(instagramCallbackPath, s.handleInstagramOAuthCallback)
 
 	// MCP connector (plan/mcp.md) — discovery, OAuth 2.1 + PKCE, and the
 	// JSON-RPC endpoint. Every handler here checks mcpAuthEnabled() itself,
@@ -393,6 +400,13 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/whatsapp-cloud-accounts/discover", s.handleDiscoverWhatsAppCloudNumbers)
 	auth.POST("/whatsapp-cloud-accounts", s.handleConnectWhatsAppCloudAccount)
 	auth.DELETE("/whatsapp-cloud-accounts/:id", s.handleDeleteWhatsAppCloudAccount)
+
+	// Instagram Direct accounts manager: OAuth-redirect connect (Instagram
+	// Login — see meta_oauth.go's own doc comments). start mints the
+	// authorize_url the frontend does a top-level navigation to; the
+	// callback above is the public half of the same flow.
+	auth.POST("/instagram-accounts/oauth/start", s.handleStartInstagramOAuth)
+	auth.DELETE("/instagram-accounts/:id", s.handleDeleteInstagramAccount)
 
 	auth.GET("/chats", s.handleListChats)
 	auth.POST("/chats", s.handleCreateChat)

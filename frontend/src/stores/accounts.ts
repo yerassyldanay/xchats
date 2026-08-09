@@ -8,6 +8,7 @@ import type {
   TelegramAccountResponse,
   WhatsAppCloudDiscoverResponse,
   WhatsAppCloudAccountResponse,
+  InstagramOAuthStartResponse,
 } from '../types'
 
 interface ListAccounts {
@@ -115,14 +116,25 @@ export const useAccounts = defineStore('accounts', {
       return res
     },
 
+    // --- Instagram Direct (OAuth-redirect lifecycle) ----------------------
+    // startInstagramOAuth mints the authorize_url; the CALLER does a
+    // top-level `window.location.href = ...` navigation with it (never a
+    // fetch — Meta's consent dialog refuses to render otherwise). The
+    // browser lands back on /accounts?instagram_connected=1 (or
+    // ?instagram_error=...) once Meta's own redirect completes — see
+    // AddAccountDialog.vue and Accounts.vue's onMounted handling.
+    startInstagramOAuth() {
+      return api.post<InstagramOAuthStartResponse>('/instagram-accounts/oauth/start', {})
+    },
+
     // --- shared ------------------------------------------------------------
     // remove routes to the channel's own delete: each tears down a different
     // provider-side registration (a whatsmeow logout + soft-delete, a
-    // Telegram webhook teardown, or a WhatsApp Cloud subscribed_apps clear).
-    // Deliberately an explicit per-channel map, not a "telegram vs.
-    // everything else" binary — that shape is exactly what silently
-    // misrouted whatsapp_cloud's delete at the whatsmeow-only endpoint
-    // before this comment was written.
+    // Telegram webhook teardown, a WhatsApp Cloud subscribed_apps clear, or
+    // an Instagram unsubscribe). Deliberately an explicit per-channel map,
+    // not a "telegram vs. everything else" binary — that shape is exactly
+    // what silently misrouted whatsapp_cloud's delete at the whatsmeow-only
+    // endpoint before this comment was written.
     async remove(id: string) {
       const channel = this.accounts.find((a) => a.id === id)?.channel
       const path =
@@ -130,7 +142,9 @@ export const useAccounts = defineStore('accounts', {
           ? '/telegram-accounts/'
           : channel === 'whatsapp_cloud'
             ? '/whatsapp-cloud-accounts/'
-            : '/whatsapp-accounts/'
+            : channel === 'instagram'
+              ? '/instagram-accounts/'
+              : '/whatsapp-accounts/'
       await api.del(path + id)
       await this.load()
     },

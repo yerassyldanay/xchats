@@ -33,9 +33,10 @@ type Client struct {
 	version string
 	hc      *http.Client
 	log     *slog.Logger
-	// graphHost/instagramGraphHost override the real Graph hosts — see
-	// NewHTTPWithHosts. Empty (the NewHTTP default) means the real ones.
-	graphHost, instagramGraphHost string
+	// graphHost/instagramGraphHost/instagramAPIHost override the real Graph/
+	// OAuth hosts — see NewHTTPWithHosts. Empty (the NewHTTP default) means
+	// the real ones.
+	graphHost, instagramGraphHost, instagramAPIHost string
 }
 
 // NewHTTP returns a Client. version is the "/vXX.X/" path segment GraphURL/
@@ -50,15 +51,17 @@ func NewHTTP(version string, log *slog.Logger) *Client {
 	}
 }
 
-// NewHTTPWithHosts is NewHTTP with the two Graph hosts overridden — for
-// tests only, so a channel package's own tests (internal/whatsappcloud,
-// internal/messengerish) can point GraphURL/InstagramGraphURL at an
-// httptest.Server instead of the real graph.facebook.com/
-// graph.instagram.com. Pass "" for either to keep its real host.
-func NewHTTPWithHosts(version, graphHost, instagramGraphHost string, log *slog.Logger) *Client {
+// NewHTTPWithHosts is NewHTTP with the three OAuth/Graph hosts overridden —
+// for tests only, so a channel package's own tests (internal/whatsappcloud,
+// internal/messengerish, internal/httpapi) can point GraphURL/
+// InstagramGraphURL/the Instagram OAuth calls at an httptest.Server instead
+// of the real graph.facebook.com/graph.instagram.com/api.instagram.com.
+// Pass "" for any host to keep it real.
+func NewHTTPWithHosts(version, graphHost, instagramGraphHost, instagramAPIHost string, log *slog.Logger) *Client {
 	c := NewHTTP(version, log)
 	c.graphHost = graphHost
 	c.instagramGraphHost = instagramGraphHost
+	c.instagramAPIHost = instagramAPIHost
 	return c
 }
 
@@ -89,6 +92,29 @@ func (c *Client) InstagramGraphURL(path string) string {
 	return strings.TrimRight(host, "/") + "/" + c.version + "/" + strings.TrimPrefix(path, "/")
 }
 
+// instagramGraphHostBase returns the bare graph.instagram.com host with NO
+// version segment — the short/long-lived token exchange and refresh
+// endpoints (oauth.go's ExchangeInstagramLongLived/RefreshInstagramLongLived)
+// are unversioned, unlike every other graph.instagram.com call
+// InstagramGraphURL builds.
+func (c *Client) instagramGraphHostBase() string {
+	if c.instagramGraphHost != "" {
+		return strings.TrimRight(c.instagramGraphHost, "/")
+	}
+	return "https://graph.instagram.com"
+}
+
+// instagramAPIHostBase returns the bare api.instagram.com host — Instagram
+// Login's own authorization-code exchange (oauth.go's ExchangeInstagramCode)
+// lives here, a THIRD host distinct from both graph.facebook.com and
+// graph.instagram.com.
+func (c *Client) instagramAPIHostBase() string {
+	if c.instagramAPIHost != "" {
+		return strings.TrimRight(c.instagramAPIHost, "/")
+	}
+	return "https://api.instagram.com"
+}
+
 // Get performs a GET and decodes the response into out (nil discards a
 // successful body). token, when non-empty, is sent as a Bearer Authorization
 // header — Graph API's documented preferred form over an access_token query
@@ -98,6 +124,20 @@ func (c *Client) InstagramGraphURL(path string) string {
 // build the parameter into rawURL themselves; redact() still guards those.
 func (c *Client) Get(ctx context.Context, rawURL, token string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return c.do(req, token, out)
+}
+
+// Delete performs a DELETE and decodes the response into out — Instagram/
+// Messenger's own unsubscribe-a-webhook call (DELETE /{id}/subscribed_apps),
+// the only DELETE this codebase's three Meta channels ever need.
+func (c *Client) Delete(ctx context.Context, rawURL, token string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, rawURL, nil)
 	if err != nil {
 		return err
 	}

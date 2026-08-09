@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/yerassyldanay/xchats/backend/internal/messengerish"
 	"github.com/yerassyldanay/xchats/backend/internal/meta"
 	"github.com/yerassyldanay/xchats/backend/internal/metaingest"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsappcloud"
@@ -163,6 +165,134 @@ func whatsAppCloudNormalize(m whatsappcloud.Message, contacts []whatsappcloud.Co
 			// convention one-for-one (see telegram.Message.MediaKind's
 			// identical vocabulary) — no translation needed.
 			MediaType: m.Type, Mimetype: att.MimeType, FileName: att.Filename, ProviderRef: att.ID,
+		}
+	}
+	return norm
+}
+
+// handleInstagramWebhook is the Instagram Direct ingress — same shape and
+// same at-least-once/idempotency reasoning as handleWhatsAppCloudWebhook
+// (see its doc comment), with two differences forced by Instagram's own
+// webhook envelope: entry.id names the connected account DIRECTLY (no
+// WABA-vs-phone-number indirection), and Instagram echoes our own outbound
+// sends back through this same webhook (is_echo) — metaingest.Processor.
+// Process already handles that branch (see its own doc comment); this
+// handler's only job is to set Direction/SenderKind correctly per event.
+func (s *Server) handleInstagramWebhook(c *gin.Context) {
+	raw, err := c.GetRawData()
+	if err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "unreadable body")
+		return
+	}
+
+	creds, okCreds := s.metaCreds.MetaAppCredentials(ctx(c))
+	if !okCreds {
+		s.log.Error("instagram webhook rejected: no Meta App Secret configured")
+		fail(c, http.StatusServiceUnavailable, ErrMetaAppNotConfigured, "Meta App Secret not configured")
+		return
+	}
+	if !meta.VerifySignature(creds.AppSecret, raw, c.GetHeader("X-Hub-Signature-256")) {
+		s.log.Warn("instagram webhook auth rejected", "reason", "bad signature")
+		fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook signature")
+		return
+	}
+
+	var payload messengerish.WebhookPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		s.log.Warn("instagram webhook unparsable body", "err", err)
+		c.Status(http.StatusOK)
+		return
+	}
+
+	igClient := messengerish.NewClient(s.metaClient)
+	stored, duplicate, ignored := 0, 0, 0
+	for _, entry := range payload.Entry {
+		acct, err := s.store.ChannelAccountByExternalID(ctx(c), string(messaging.ChannelInstagram), entry.ID)
+		if err != nil {
+			s.log.Info("instagram webhook discarded", "ig_id", entry.ID, "result", "unknown_account")
+			continue
+		}
+		// Best-effort: an unresolvable token degrades contact-name lookups
+		// (instagramNormalize falls back to the bare provider id), it never
+		// blocks ingest.
+		token, _ := s.store.ChannelCredentialsSecret(ctx(c), acct.ID)
+		for _, ev := range entry.Messaging {
+			if reason, ignorable := ev.Ignorable(); ignorable {
+				ignored++
+				s.log.Info("instagram event dropped", "account_id", acct.ID, "result", reason)
+				continue
+			}
+			norm := instagramNormalize(ctx(c), igClient, ev, token)
+			outcome, perr := s.metaProc.Process(ctx(c), acct, norm)
+			if perr != nil {
+				s.log.Error("instagram webhook processing failed; not acking", "account_id", acct.ID, "err", perr)
+				fail(c, http.StatusInternalServerError, ErrInternal, "processing failed")
+				return
+			}
+			if outcome.Status == "duplicate" {
+				duplicate++
+			} else {
+				stored++
+			}
+		}
+	}
+	s.log.Info("instagram webhook processed", "stored", stored, "duplicate", duplicate, "ignored", ignored)
+	c.Status(http.StatusOK)
+}
+
+// instagramMediaType maps messengerish's attachment vocabulary onto this
+// codebase's shared MediaType convention — every value already matches
+// (image|video|audio) except "file", which this codebase calls "document"
+// (see whatsappcloud/telegram's identical vocabulary).
+func instagramMediaType(t string) string {
+	if t == "file" {
+		return "document"
+	}
+	return t
+}
+
+// instagramNormalize maps one Instagram messaging event into metaingest's
+// channel-neutral shape. Unlike WhatsApp Cloud, Instagram's webhook payload
+// carries no inline contact profile — ContactDisplayName is a best-effort
+// LIVE Profile lookup (never blocking: a failed lookup just leaves the name
+// empty, dto.MapContact already falls back to the id-derived handle) — and
+// echoes (is_echo) swap which Party is the actual customer: Recipient on an
+// echo, Sender on a genuine inbound.
+func instagramNormalize(ctx context.Context, c *messengerish.Client, ev messengerish.MessagingEvent, token string) metaingest.NormalizedMessage {
+	direction, senderKind, customerID := "in", "contact", ev.Sender.ID
+	if ev.Message.IsEcho {
+		direction, senderKind, customerID = "out", "external_account", ev.Recipient.ID
+	}
+	contactName := ""
+	if token != "" {
+		if p, err := c.Profile(ctx, true, customerID, token); err == nil {
+			switch {
+			case p.Name != "":
+				contactName = p.Name
+			case p.Username != "":
+				contactName = "@" + p.Username
+			}
+		}
+	}
+	norm := metaingest.NormalizedMessage{
+		ExternalContactID:  customerID,
+		ContactHandle:      customerID,
+		ContactDisplayName: contactName,
+		ExternalThreadID:   customerID,
+		Direction:          direction,
+		SenderKind:         senderKind,
+		ExternalMessageID:  ev.Message.MID,
+		MessageKind:        ev.MessageKind(),
+		Body:               ev.Body(),
+		Preview:            ev.Preview(),
+		MessageTS:          messengerish.ParseTimestampMillis(ev.Timestamp),
+	}
+	if raw, err := json.Marshal(ev); err == nil {
+		norm.Raw = raw
+	}
+	if att := ev.Attachment(); att != nil {
+		norm.Attachment = &metaingest.NormalizedAttachment{
+			MediaType: instagramMediaType(att.Type), SourceURL: att.Payload.URL,
 		}
 	}
 	return norm

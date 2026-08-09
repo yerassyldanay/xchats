@@ -114,7 +114,10 @@ func newMetaHarness(t *testing.T) *metaHarness {
 	q := queue.NewInMem(64, 2, log)
 	hub := realtime.NewHub()
 
-	metaClient := meta.NewHTTPWithHosts("v21.0", graphSrv.URL, "", log)
+	// All three Graph/OAuth hosts point at the SAME mock server — a test's
+	// graphHandler distinguishes by URL path (e.g. "/oauth/access_token" vs
+	// "/access_token" vs "/v21.0/..."), simpler than standing up three.
+	metaClient := meta.NewHTTPWithHosts("v21.0", graphSrv.URL, graphSrv.URL, graphSrv.URL, log)
 	waCloudClient := whatsappcloud.NewClient(metaClient)
 	inboxSigner := inboxmedia.NewSigner(cfg.SessionSecret)
 	metaProc := metaingest.New(metaingest.Deps{Store: st, Queue: q, Hub: hub, Log: log})

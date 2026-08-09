@@ -102,7 +102,7 @@ func TestHandleMediaDownloadDownloadsWhatsAppCloudAttachment(t *testing.T) {
 	}))
 	defer graphSrv.Close()
 
-	waCloud := whatsappcloud.NewClient(meta.NewHTTPWithHosts("v21.0", graphSrv.URL, "", testLogger()))
+	waCloud := whatsappcloud.NewClient(meta.NewHTTPWithHosts("v21.0", graphSrv.URL, "", "", testLogger()))
 	blobStore, err := blob.NewDisk(t.TempDir())
 	if err != nil {
 		t.Fatalf("blob: %v", err)
@@ -137,11 +137,71 @@ func TestHandleMediaDownloadDownloadsWhatsAppCloudAttachment(t *testing.T) {
 	}
 }
 
+func TestHandleMediaDownloadDownloadsInstagramDirectAttachment(t *testing.T) {
+	ctx := context.Background()
+	st := dbtest.New(t)
+	org, err := st.SeedOrganization(ctx, "worker-instagram-media-test")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	acct, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: config.ChannelAccountID(config.InstagramOwnerRef("178414000001")), OrganizationID: org.ID,
+		Channel: "instagram", ExternalAccountID: "178414000001",
+	})
+	if err != nil {
+		t.Fatalf("claim channel account: %v", err)
+	}
+	inbound, err := st.IngestChannelInbound(ctx, store.ChannelInbound{
+		AccountID: acct.ID, ExternalContactID: "c1", ExternalThreadID: "c1",
+		Direction: "in", SenderKind: "contact", ExternalMessageID: "ig-mid-1", MessageKind: "imageMessage",
+	})
+	if err != nil {
+		t.Fatalf("ingest channel inbound: %v", err)
+	}
+
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Error("a direct CDN fetch must carry no Authorization header at all")
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("cdn-bytes"))
+	}))
+	defer cdn.Close()
+	if err := st.InsertChannelMediaPending(ctx, inbound.MessageID, store.ChannelMediaMeta{
+		MediaType: "image", SourceURL: cdn.URL,
+	}); err != nil {
+		t.Fatalf("insert channel media pending: %v", err)
+	}
+
+	blobStore, err := blob.NewDisk(t.TempDir())
+	if err != nil {
+		t.Fatalf("blob: %v", err)
+	}
+	w := &Worker{Store: st, Blob: blobStore, Hub: realtime.NewHub(), Log: testLogger()}
+	task := MediaDownloadTask{
+		MessageID: inbound.MessageID, Channel: messaging.ChannelInstagram, AccountID: acct.ID,
+		BlobID: ChannelBlobID(inbound.MessageID),
+	}
+	if err := w.handleMediaDownload(ctx, task); err != nil {
+		t.Fatalf("handleMediaDownload: %v", err)
+	}
+	data, bmeta, err := blobStore.Get(ChannelBlobID(inbound.MessageID))
+	if err != nil {
+		t.Fatalf("blob.Get: %v", err)
+	}
+	if string(data) != "cdn-bytes" || bmeta.Mimetype != "image/jpeg" {
+		t.Fatalf("data=%q mimetype=%q", data, bmeta.Mimetype)
+	}
+}
+
 func TestHandleMediaDownloadUnsupportedChannelIsANoop(t *testing.T) {
 	st := dbtest.New(t)
 	w := &Worker{Store: st, Hub: realtime.NewHub(), Log: testLogger()}
+	// A channel this dispatch has never heard of (every real one is routed
+	// today — Telegram, WhatsApp Cloud, Instagram, Messenger) — exercises
+	// the default branch's safety net rather than any live channel.
 	err := w.handleMediaDownload(context.Background(), MediaDownloadTask{
-		MessageID: uuid.New(), Channel: messaging.ChannelInstagram, AccountID: uuid.New(),
+		MessageID: uuid.New(), Channel: messaging.Channel("some_future_channel"), AccountID: uuid.New(),
 		FileID: "cdn-ref", BlobID: "some-blob-key",
 	})
 	if err != nil {

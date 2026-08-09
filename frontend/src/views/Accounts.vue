@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import {
   CircleAlert,
   CircleCheck,
@@ -26,8 +27,11 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
+import InstagramIcon from '@/components/icons/InstagramIcon.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const accounts = useAccounts()
 const showAdd = ref(false)
 const addStartChannel = ref<'whatsapp' | null>(null)
@@ -38,6 +42,12 @@ const working = ref<string | null>(null)
 // actionError surfaces a failed retry/check on the card that caused it, rather
 // than as a toast that disappears before anyone reads it.
 const actionError = ref<Record<string, string>>({})
+// oauthBanner surfaces the ONE-SHOT ?instagram_connected / ?instagram_error
+// query params a redirect back from Meta's OAuth consent screen lands with
+// (see AddAccountDialog.vue's connectInstagram and the backend's
+// meta_oauth.go) — cleared from the URL on mount so a page refresh never
+// re-shows a stale result.
+const oauthBanner = ref<{ kind: 'success' | 'error'; message: string } | null>(null)
 
 // connection tone -> badge + dot classes (connected keeps WhatsApp green)
 const toneMeta: Record<ConnTone, { badge: string; dot: string }> = {
@@ -55,22 +65,40 @@ function conn(status: string) {
 const isTelegram = (a: Account) => a.channel === 'telegram'
 // isQrWhatsApp is the whatsmeow-backed leg (whatsapp/simulator) — the only
 // channels the QR reconnect flow (openReconnect, below) applies to.
-// whatsapp_cloud looks similar (same brand, same 24h-window shape) but has
-// no QR session to re-scan at all.
+// whatsapp_cloud/instagram look similar (same brand, same 24h-window shape)
+// but have no QR session to re-scan at all.
 const isQrWhatsApp = (a: Account) => a.channel === 'whatsapp' || a.channel === 'simulator'
 const isWhatsAppCloud = (a: Account) => a.channel === 'whatsapp_cloud'
-const tileClass = (a: Account) => (isTelegram(a) ? 'bg-[#229ED9]' : isWhatsAppCloud(a) ? 'bg-teal-600' : 'bg-wa')
-const channelIcon = (a: Account) => (isTelegram(a) ? TelegramIcon : WhatsappIcon)
+const isInstagram = (a: Account) => a.channel === 'instagram'
+const tileClass = (a: Account) =>
+  isTelegram(a) ? 'bg-[#229ED9]' : isWhatsAppCloud(a) ? 'bg-teal-600' : isInstagram(a) ? 'bg-fuchsia-600' : 'bg-wa'
+const channelIcon = (a: Account) => (isTelegram(a) ? TelegramIcon : isInstagram(a) ? InstagramIcon : WhatsappIcon)
 // A Telegram bot's handle is @username; a QR-paired WhatsApp account's own
 // external_handle is a bare digit string (needs the + prefix); WhatsApp
-// Cloud's is already a display-ready "+1 555 000 1111" (see
-// whatsapp_cloud_accounts.go's display_phone_number) — no coercion needed.
+// Cloud's and Instagram's are already display-ready ("+1 555 000 1111",
+// "@my_shop" — see whatsapp_cloud_accounts.go's display_phone_number and
+// meta_oauth.go's handle) — no coercion needed for either.
 function handle(a: Account) {
-  if (isTelegram(a) || isWhatsAppCloud(a)) return a.external_handle || '—'
+  if (isTelegram(a) || isWhatsAppCloud(a) || isInstagram(a)) return a.external_handle || '—'
   return a.external_handle ? '+' + a.external_handle : '—'
 }
 
-onMounted(() => accounts.load())
+onMounted(() => {
+  accounts.load()
+  // A one-shot landing from Meta's OAuth redirect (see AddAccountDialog.vue's
+  // connectInstagram) — read it once, then strip the query params so a
+  // later refresh of this same URL does not re-show a stale result.
+  const connected = route.query.instagram_connected
+  const errorMsg = route.query.instagram_error
+  if (connected) {
+    oauthBanner.value = { kind: 'success', message: 'Instagram успешно подключён.' }
+  } else if (typeof errorMsg === 'string' && errorMsg) {
+    oauthBanner.value = { kind: 'error', message: errorMsg }
+  }
+  if (connected || errorMsg) {
+    router.replace({ path: route.path, query: {} })
+  }
+})
 
 const stats = computed(() => {
   const a = accounts.accounts
@@ -153,6 +181,18 @@ async function remove(a: Account) {
       </header>
 
       <div class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+        <!-- one-shot result of an Instagram OAuth redirect landing back here -->
+        <div
+          v-if="oauthBanner"
+          class="flex items-start gap-2 rounded-lg px-4 py-3 text-sm"
+          :class="oauthBanner.kind === 'success' ? 'bg-wa/10 text-wa' : 'bg-destructive/10 text-destructive'"
+        >
+          <CircleCheck v-if="oauthBanner.kind === 'success'" class="w-4 h-4 shrink-0 mt-0.5" />
+          <CircleAlert v-else class="w-4 h-4 shrink-0 mt-0.5" />
+          <span class="min-w-0 flex-1">{{ oauthBanner.message }}</span>
+          <button class="text-xs underline shrink-0" @click="oauthBanner = null">Скрыть</button>
+        </div>
+
         <!-- stat cards -->
         <div class="grid grid-cols-3 gap-5">
           <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">

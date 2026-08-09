@@ -15,7 +15,7 @@ func testClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Serv
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	h := meta.NewHTTPWithHosts("v21.0", srv.URL, "", slog.Default())
+	h := meta.NewHTTPWithHosts("v21.0", srv.URL, "", "", slog.Default())
 	return NewClient(h), srv
 }
 

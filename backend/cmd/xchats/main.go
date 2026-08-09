@@ -31,6 +31,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
+	"github.com/yerassyldanay/xchats/backend/internal/messengerish"
 	"github.com/yerassyldanay/xchats/backend/internal/meta"
 	"github.com/yerassyldanay/xchats/backend/internal/metaingest"
 	"github.com/yerassyldanay/xchats/backend/internal/ngrokapi"
@@ -64,6 +65,17 @@ const (
 	mediaSweepEvery      = 5 * time.Minute
 	mediaSweepRetryAfter = 2 * time.Minute
 	mediaSweepBatch      = 100
+)
+
+// Instagram token refresh cadence — a long-lived user token is good for
+// ~60 days; checking twice a day with a week's lead time leaves ample
+// margin, and Meta itself refuses a refresh attempt on a token less than
+// 24h old (tokenRefreshMinAge), so there is nothing to gain from checking
+// more often than that anyway.
+const (
+	tokenRefreshEvery  = 12 * time.Hour
+	tokenRefreshBefore = 7 * 24 * time.Hour
+	tokenRefreshMinAge = 24 * time.Hour
 )
 
 // Channel automation (internal/automation) cadence. claimEvery is short —
@@ -323,6 +335,10 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// every Meta route just answers META_APP_NOT_CONFIGURED until one is.
 	metaClient := meta.NewHTTP(cfg.MetaResolvedGraphAPIVersion(), log)
 	waCloudClient := whatsappcloud.NewClient(metaClient)
+	// messengerishClient is shared by Instagram Direct and Messenger (Phase
+	// 5) — both speak the same Graph send/webhook shape, see
+	// internal/messengerish's own package doc.
+	messengerishClient := messengerish.NewClient(metaClient)
 	inboxSigner := inboxmedia.NewSigner(cfg.SessionSecret)
 	// metaProc is the shared Meta ingest core (internal/metaingest) — the
 	// exact tgProc pattern, generalized: every Meta channel's webhook
@@ -340,12 +356,19 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// own NewChannelSender which still takes st for the same reason.
 	senders.Register(messaging.ChannelWhatsAppCloud,
 		whatsappcloud.NewChannelSender(waCloudClient, st, st, inboxSigner, cfg.ResolvedAPIBaseURL()+"/meta/api/v1/media"))
+	senders.Register(messaging.ChannelInstagram,
+		messengerish.NewChannelSender(messengerishClient, st, st, inboxSigner, true, cfg.ResolvedAPIBaseURL()+"/meta/api/v1/media"))
 
 	w := &worker.Worker{
-		Store: st, Queue: q, TG: tg, WACloud: waCloudClient, Blob: blobStore, Hub: hub,
+		Store: st, Queue: q, TG: tg, WACloud: waCloudClient, MetaClient: metaClient, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, Log: log,
 	}
 	q.Start(ctx, w.Handle)
+	// Instagram's long-lived user token is the one Meta-channel credential
+	// that silently expires with no renewal otherwise (WhatsApp Cloud's
+	// business token and Telegram's bot token do not) — see
+	// worker/meta_tokens.go's own doc comment.
+	w.StartInstagramTokenRefresher(ctx, tokenRefreshEvery, tokenRefreshBefore, tokenRefreshMinAge)
 	// Attachments whose bytes never arrived are retried from their own media
 	// row — the durable work item that replaces an inbound-event table. The
 	// startup pass picks up whatever a crash or an outage left behind.

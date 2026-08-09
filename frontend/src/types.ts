@@ -260,6 +260,14 @@ export interface WhatsAppCloudAccountResponse {
   connection_state: string
 }
 
+// InstagramOAuthStartResponse is POST /instagram-accounts/oauth/start's
+// response — a URL to redirect the browser's TOP-LEVEL navigation to (never
+// fetched), and the actual connect happens entirely server-side once Meta
+// redirects back (see backend/internal/httpapi/meta_oauth.go).
+export interface InstagramOAuthStartResponse {
+  authorize_url: string
+}
+
 // WaPairSession is POST /wa-accounts/pair's response: a session id to poll
 // via GET /wa-accounts/pair/:session_id.
 export interface WaPairSession {
