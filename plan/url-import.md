@@ -2,7 +2,7 @@
 
 [`DECISIONS.md`](DECISIONS.md) is authoritative. This document is an
 implementation plan for a capability that does not exist yet, and it proposes
-one amendment to that record (§10). It is design intent, not a description of
+two amendments to that record (§11). It is design intent, not a description of
 current code.
 
 ## 1. Why
@@ -266,7 +266,7 @@ properties; a `ref`/`slug` containing a dot; `sales_status` outside
 missing `in_stock` on a new product or `pricing_type` on a new tariff
 (`mcp_write.go:316/398` enforce these regardless, but failing early produces a
 better retry message); any media value that is not a known `img.N`; and a
-`body_md` that trips the topic gate (§6).
+`body_md` that trips the topic gate (§7).
 
 On failure: **one** retry with the validation errors appended, mirroring
 `aiprompt.RetryFeedback` (`retry.go:68`) and gated by the existing
@@ -283,7 +283,57 @@ The schema lives in `kbimport/schema.go`. The builders in
 bound to the MCP tool contract; extracting them into a shared package is
 worthwhile follow-up, not a prerequisite.
 
-## 6. The topic gate
+## 6. Duplicate detection
+
+Duplicate prevention runs in two layers, and only the second one is
+authoritative — [`mcp.md`](mcp.md) §4's rule that "the backend repeats the
+check because a model may skip a step" applies verbatim here.
+
+**Advisory.** The prompt carries the organization's current `IdentityIndex`
+(`kbstore/mcp_read.go:57`) — the same compact type/key/title index `kb_summary`
+serves — so the model reuses an existing `ref`/`slug` instead of inventing a
+near-duplicate. This is a hint, never a guarantee.
+
+**Authoritative.** Every `MCPUpsert*` already calls `resolveUpsertKey`
+(`mcp_write.go:48`) inside its own locked transaction, which runs `mcp.md` §4's
+four-step sequence over a consistent snapshot. The import calls no separate
+duplicate check; it reacts to the four outcomes:
+
+| Outcome | Import behaviour |
+|---|---|
+| Existing key → update | Normal path. Omitted fields stay unchanged, so a re-import of the same URL is idempotent by natural key |
+| Exact normalized title under another key → `*ErrDuplicateConflict` | The error names `ExistingKey`. Retry the entry **once** under that key — that is exactly what the error text instructs a caller to do — then record it as merged in `extraction.targets[]` |
+| Similar titles → `*ErrAmbiguousMatch` | Skip that entry, record it under `extraction.skipped[]` with the candidate keys and titles, and continue with the others. Never create a possible duplicate |
+| No match → create | `slugify`/`slugifyOrFallback`/`uniqueKey` (`mcp_write.go:101/121/132`) derive a stable key from the title, including Cyrillic transliteration |
+
+Skipping is per entry, not per import: a single ambiguous tariff must not
+discard the product that imported cleanly. Same rule as the topic gate (§7).
+
+### Why not raise a `resolve_duplicate` request
+
+`playground.md` designates `kbd_requests` with `req_type='resolve_duplicate'`
+as the mechanism for exactly this, and `kbstore.CreateRequest`
+(`materials.go:301`) already exists. It is still the wrong call **today**, for
+three reasons that must be fixed first:
+
+- There is no UI. `DraftView.requests` reaches the frontend
+  (`frontend/src/types.ts:431`) but no component renders it, so the operator
+  would never see the question.
+- There is no way to answer. `ResolveRequest` (`materials.go:326`) exists but
+  no HTTP route calls it.
+- It would wedge publishing. An open request adds an "N unresolved request(s)"
+  gate reason to **whole-draft** approve (`draft.go:2071-2080`) — per-entity
+  approve deliberately skips it. So an ambiguous import would disable
+  «Опубликовать всё» with nothing in the interface explaining why and no way
+  to clear it.
+
+So the import reports ambiguity on the job row, where the import card renders
+it and the operator can act — edit the existing record, or re-import with an
+explicit `ref`. Raising a real `resolve_duplicate` request is the correct end
+state and should follow the request UI and its resolve route, not precede
+them.
+
+## 7. The topic gate
 
 `gateTopicBody` (`kbstore/kbstore.go:479`) runs at draft-write time for topics
 and rejects a body containing `{{` or a literal currency amount:
@@ -307,7 +357,7 @@ naive topic import fails with `*GateError` most of the time. Three parts:
    its own entry, and independent valid entries still merge. Partial success,
    never silent.
 
-## 7. Image pipeline
+## 8. Image pipeline
 
 Ordering is render → LLM → download only the selected handles → upsert. A
 product page can carry forty images; downloading all of them before knowing
@@ -346,7 +396,7 @@ runs `validateMediaRefs` over them (`mcp_write.go:332`). This matters because
 (`mcp_media.go:31-34`), so `MCPAttachMedia` would reject it. One upsert call
 sets both.
 
-## 8. Provenance
+## 9. Provenance
 
 `recordProvenance` (`kbstore/mcp_media.go:509`) inserts a new url material row
 for every call carrying `SourceURL`. One URL yielding one product and three
@@ -369,7 +419,7 @@ Note that url-marker materials are written `customer_visibility='invisible'`
 field (`mcp_media.go:201`). Provenance rows and attachable images are disjoint
 populations by design, so a job row can never leak into a customer reply.
 
-## 9. Touchpoints
+## 10. Touchpoints
 
 ### New
 
@@ -397,7 +447,12 @@ populations by design, so a job row can never leak into a customer reply.
 | `frontend/src/components/kb/DraftKnowledgeBase.vue:101-104` | `<UrlImportCard />` beside `<McpConnectCard />` |
 | `frontend/src/components/kb/DraftKnowledgeBase.dom.test.ts:156-160` | The "a card renders no input" assertion counts inputs across the whole page and will now fail — scope it to the change-list container |
 | `frontend/src/types.ts`, `frontend/src/i18n/locales/ru.ts` | Request/status types and `kb.import.*` strings |
-| `mcp.md` §8, `DECISIONS.md`, `CHANGELOG.md` | See §10 |
+| `mcp.md` §8, `DECISIONS.md`, `CHANGELOG.md` | See §11 |
+
+`backend/internal/mcpauth` is **not** modified. It appears here only as the
+source of the SSRF client copied into `internal/httpsafe` (§3). This endpoint
+is session-authenticated like the rest of `/kb/*`; it issues no token, and it
+adds no OAuth scope.
 
 ### Schema impact
 
@@ -464,7 +519,7 @@ The job also surfaces for free in the Материалы tab:
 `KnowledgeBase.vue:234-237` already renders `source_type` and
 `processing_status` badges for every material row.
 
-## 10. Amendments to the design record
+## 11. Amendments to the design record
 
 Two documents contradict this plan and must be updated in the same change,
 rather than left disagreeing with the code:
@@ -476,7 +531,26 @@ rather than left disagreeing with the code:
 - `mcp.md` §8's closing line ("Server-side URL fetching is not part of this
   initial MCP contract") becomes false. It should point here instead.
 
-## 11. Implementation order
+### Not in scope: a 14th MCP tool
+
+Amending `mcp.md` §8 immediately raises "so should an MCP host be able to call
+this?" — deliberately not in this change. The endpoint stays
+session-authenticated only, for three reasons:
+
+- The value is small. A host that can already read the page runs `mcp.md`
+  §8's host-side flow today and reaches the same draft through
+  `kb_product_upsert`.
+- It is not free. A `kb_import_url` tool needs its own JSON Schema in
+  `mcpserver/tools.go`, a scope decision (`kb:draft:write` is not obviously
+  sufficient for "make the server fetch an arbitrary URL"), and an answer for
+  how an asynchronous job reports back through a synchronous tool call — MCP
+  tool results have no progress channel here.
+- It widens the SSRF surface from operators to any connected host.
+
+Worth revisiting once the endpoint has run in production; the renderer and
+pipeline are already behind interfaces, so the tool would be a thin adapter.
+
+## 12. Implementation order
 
 Each stage compiles and passes its own tests.
 
@@ -498,6 +572,11 @@ Each stage compiles and passes its own tests.
    `blob.NewDisk(t.TempDir())`, the `Fake` renderer and a stub `ChatClient`.
    Assert material rows and checksums, the resulting `kbd_draft` contents,
    provenance tagging, and partial success when the topic is gated out.
+   Cover all four duplicate outcomes from §6 by seeding live/draft rows first:
+   re-import onto an existing key is idempotent; `*ErrDuplicateConflict`
+   retries under `ExistingKey`; `*ErrAmbiguousMatch` lands in
+   `extraction.skipped[]` while its siblings still write; and assert **no**
+   `kbd_requests` row is created.
 6. **HTTP layer** — both routes, `Deps` wiring, the SSE broadcast, error
    mapping, and an `httpapi` integration test that posts a URL end to end with
    a stub renderer and stub LLM.
@@ -509,10 +588,10 @@ Each stage compiles and passes its own tests.
    Add the commented `fetch-mcp` sidecar to `deploy/docker-compose.yaml`.
 9. **Frontend** — `UrlImportCard.vue`, types, i18n, its `.dom.test.ts`, and
    the fix to `DraftKnowledgeBase.dom.test.ts`'s input assertion.
-10. **Docs** — §10's amendments and `CHANGELOG.md`; run `make notices` for the
+10. **Docs** — §11's amendments and `CHANGELOG.md`; run `make notices` for the
     `x/net` promotion.
 
-## 12. Verification
+## 13. Verification
 
 Offline and deterministic, the way the suite already runs:
 
@@ -545,11 +624,16 @@ make dev-frontend                               # :5173
    `kb_allow_private_fetch` is false.
 5. Topic gate: import a page with prices as `target_type: topic`; expect the
    topic skipped with a visible reason while products still land.
-6. MCP path: run a fetch MCP server, set `kb_import.mcp_url`, re-import a
+6. Duplicates: import the same URL twice. The second run updates in place —
+   no second product, and `base_version` advances by one per run. Then import
+   a page whose product name is merely *similar* to an existing one and
+   confirm it is reported as skipped rather than created, and that
+   «Опубликовать всё» still works.
+7. MCP path: run a fetch MCP server, set `kb_import.mcp_url`, re-import a
    JavaScript-heavy page, confirm `renderer: "mcp"` in the status payload, and
    confirm a graceful fallback to `static` when the sidecar is stopped.
 
-## 13. Risks
+## 14. Risks
 
 - **Prompt injection.** The fetched page is untrusted text driving an LLM
   whose output drives draft writes. The mitigations are structural and already
@@ -565,7 +649,7 @@ make dev-frontend                               # :5173
   nothing covers KB extraction. A scenario set under `evals/scenarios/` is the
   honest way to tune the prompt; this plan ships without one.
 - **`recordProvenance`'s `mcp_target` is last-writer-wins** for a material
-  referenced by several records. §8 sidesteps it, but the limitation remains
+  referenced by several records. §9 sidesteps it, but the limitation remains
   for MCP callers.
 - **`internal/queue` is deliberately unused here.** It has no retries and no
   durability (`queue.go:105` drops a message on handler error), so a goroutine
