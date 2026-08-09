@@ -1,0 +1,31 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "waba-1000",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550001111",
+              "phone_number_id": "15550001111"
+            },
+            "statuses": [
+              {
+                "id": "wamid.HBgLNzcwMTEyMzQ1NjcVAgARGBI5QTZBQ0YwMDEyMzQ1Njc4OTNF",
+                "status": "failed",
+                "timestamp": "1723104180",
+                "recipient_id": "77011234567",
+                "errors": [
+                  { "code": 131053, "title": "Media upload error" }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

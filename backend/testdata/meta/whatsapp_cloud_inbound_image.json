@@ -1,0 +1,40 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "waba-1000",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550001111",
+              "phone_number_id": "15550001111"
+            },
+            "contacts": [
+              {
+                "profile": { "name": "Клиент Тест" },
+                "wa_id": "77011234567"
+              }
+            ],
+            "messages": [
+              {
+                "from": "77011234567",
+                "id": "wamid.HBgLNzcwMTEyMzQ1NjcVAgARGBI5QTZBQ0YwMDEyMzQ1Njc4OTFB",
+                "timestamp": "1723104060",
+                "type": "image",
+                "image": {
+                  "id": "media-abc123",
+                  "mime_type": "image/jpeg",
+                  "sha256": "a1b2c3",
+                  "caption": "Вот скриншот ошибки"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

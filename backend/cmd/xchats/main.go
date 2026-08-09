@@ -26,10 +26,13 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/internal/inboxmedia"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
+	"github.com/yerassyldanay/xchats/backend/internal/meta"
+	"github.com/yerassyldanay/xchats/backend/internal/metaingest"
 	"github.com/yerassyldanay/xchats/backend/internal/ngrokapi"
 	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
@@ -46,6 +49,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
 	"github.com/yerassyldanay/xchats/backend/internal/updatecheck"
 	"github.com/yerassyldanay/xchats/backend/internal/version"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsappcloud"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsmeow"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -53,12 +57,13 @@ import (
 	"github.com/yerassyldanay/xchats/backend/response"
 )
 
-// Telegram media sweep cadence. The retry delay is what keeps a permanently
-// broken file_id from becoming a hot loop; the batch bounds one pass.
+// Media sweep cadence (Telegram and Meta channels alike). The retry delay is
+// what keeps a permanently broken file handle from becoming a hot loop; the
+// batch bounds one pass.
 const (
-	telegramMediaSweepEvery = 5 * time.Minute
-	telegramMediaRetryAfter = 2 * time.Minute
-	telegramMediaSweepBatch = 100
+	mediaSweepEvery      = 5 * time.Minute
+	mediaSweepRetryAfter = 2 * time.Minute
+	mediaSweepBatch      = 100
 )
 
 // Channel automation (internal/automation) cadence. claimEvery is short —
@@ -309,20 +314,43 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	}
 	defer waMgr.Close()
 
+	// Meta channels (Instagram Direct, Messenger, WhatsApp Cloud API — see
+	// internal/meta's package doc). metaClient/waCloudClient/inboxSigner are
+	// stateless HTTP wrappers built unconditionally at boot, exactly like tg
+	// above: BYO-App credentials are resolved per-call from credsChain
+	// (metaCredentialsAdapter, internal/httpapi), not baked in here, so a
+	// deployment with no Meta App ID/Secret saved yet still boots cleanly —
+	// every Meta route just answers META_APP_NOT_CONFIGURED until one is.
+	metaClient := meta.NewHTTP(cfg.MetaResolvedGraphAPIVersion(), log)
+	waCloudClient := whatsappcloud.NewClient(metaClient)
+	inboxSigner := inboxmedia.NewSigner(cfg.SessionSecret)
+	// metaProc is the shared Meta ingest core (internal/metaingest) — the
+	// exact tgProc pattern, generalized: every Meta channel's webhook
+	// handler (today: WhatsApp Cloud; Instagram/Messenger from Phase 4/5)
+	// feeds its normalized events through this one Process/ApplyStatus pair.
+	metaProc := metaingest.New(metaingest.Deps{Store: st, Queue: q, Hub: hub, Automation: automationScheduler, Log: log})
+
 	senders := messaging.NewSenderRegistry()
 	senders.Register(messaging.ChannelWhatsApp, waMgr.ChannelSender())
 	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
 	senders.Register(messaging.ChannelTelegram, telegram.NewChannelSender(tg, st, blobStore))
+	// *store.Store satisfies whatsappcloud.AccountSource and MediaSource
+	// directly (ChannelExternalAccountID/ChannelCredentialsSecret/
+	// ChannelOutboundMediaForSigning) — no adapter needed, unlike telegram's
+	// own NewChannelSender which still takes st for the same reason.
+	senders.Register(messaging.ChannelWhatsAppCloud,
+		whatsappcloud.NewChannelSender(waCloudClient, st, st, inboxSigner, cfg.ResolvedAPIBaseURL()+"/meta/api/v1/media"))
 
 	w := &worker.Worker{
-		Store: st, Queue: q, TG: tg, Blob: blobStore, Hub: hub,
+		Store: st, Queue: q, TG: tg, WACloud: waCloudClient, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, Log: log,
 	}
 	q.Start(ctx, w.Handle)
 	// Attachments whose bytes never arrived are retried from their own media
 	// row — the durable work item that replaces an inbound-event table. The
 	// startup pass picks up whatever a crash or an outage left behind.
-	w.StartTelegramMediaSweeper(ctx, telegramMediaSweepEvery, telegramMediaRetryAfter, telegramMediaSweepBatch)
+	w.StartTelegramMediaSweeper(ctx, mediaSweepEvery, mediaSweepRetryAfter, mediaSweepBatch)
+	w.StartChannelMediaSweeper(ctx, mediaSweepEvery, mediaSweepRetryAfter, mediaSweepBatch)
 	// Reconnects every saved WhatsApp account without re-scanning a QR code.
 	go waMgr.Start(ctx)
 	// Claims due debounce deadlines into dispatch jobs and runs them; its
@@ -344,6 +372,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Response: responseService, WA: waMgr, TG: tg, TGProcessor: tgProc, TGPoller: tgMgr, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
+		MetaClient: metaClient, MetaProcessor: metaProc, WACloudClient: waCloudClient, InboxMediaSigner: inboxSigner,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
 		BootstrapAdminCredentialPath: bootstrapCredentialPath,
 		Credentials:                  credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,

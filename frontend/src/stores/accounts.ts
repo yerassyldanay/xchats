@@ -6,6 +6,8 @@ import type {
   WaPairSession,
   WaPairStatus,
   TelegramAccountResponse,
+  WhatsAppCloudDiscoverResponse,
+  WhatsAppCloudAccountResponse,
 } from '../types'
 
 interface ListAccounts {
@@ -83,13 +85,52 @@ export const useAccounts = defineStore('accounts', {
       return res
     },
 
+    // --- WhatsApp Cloud API (BYO-App: WABA id + business token, manual —
+    // see backend/internal/httpapi/whatsapp_cloud_accounts.go) ------------
+    // discover is read-only (no PIN spent, nothing persisted) — the picker
+    // step before connect ever runs.
+    discoverWhatsAppCloud(wabaId: string, businessToken: string) {
+      return api.post<WhatsAppCloudDiscoverResponse>('/whatsapp-cloud-accounts/discover', {
+        waba_id: wabaId,
+        business_token: businessToken,
+      })
+    },
+    async connectWhatsAppCloud(opts: {
+      wabaId: string
+      businessToken: string
+      phoneNumberId: string
+      pin: string
+      displayName: string
+      displayPhoneNumber: string
+    }) {
+      const res = await api.post<WhatsAppCloudAccountResponse>('/whatsapp-cloud-accounts', {
+        waba_id: opts.wabaId,
+        business_token: opts.businessToken,
+        phone_number_id: opts.phoneNumberId,
+        pin: opts.pin,
+        display_name: opts.displayName,
+        display_phone_number: opts.displayPhoneNumber,
+      })
+      await this.load()
+      return res
+    },
+
     // --- shared ------------------------------------------------------------
     // remove routes to the channel's own delete: each tears down a different
-    // provider-side registration (a whatsmeow logout + soft-delete vs. a
-    // Telegram webhook teardown).
+    // provider-side registration (a whatsmeow logout + soft-delete, a
+    // Telegram webhook teardown, or a WhatsApp Cloud subscribed_apps clear).
+    // Deliberately an explicit per-channel map, not a "telegram vs.
+    // everything else" binary — that shape is exactly what silently
+    // misrouted whatsapp_cloud's delete at the whatsmeow-only endpoint
+    // before this comment was written.
     async remove(id: string) {
       const channel = this.accounts.find((a) => a.id === id)?.channel
-      const path = channel === 'telegram' ? '/telegram-accounts/' : '/whatsapp-accounts/'
+      const path =
+        channel === 'telegram'
+          ? '/telegram-accounts/'
+          : channel === 'whatsapp_cloud'
+            ? '/whatsapp-cloud-accounts/'
+            : '/whatsapp-accounts/'
       await api.del(path + id)
       await this.load()
     },

@@ -1,0 +1,35 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "waba-1000",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550001111",
+              "phone_number_id": "15550001111"
+            },
+            "contacts": [
+              {
+                "profile": { "name": "Клиент Тест" },
+                "wa_id": "77011234567"
+              }
+            ],
+            "messages": [
+              {
+                "from": "77011234567",
+                "id": "wamid.HBgLNzcwMTEyMzQ1NjcVAgARGBI5QTZBQ0YwMDEyMzQ1Njc4OTAA",
+                "timestamp": "1723104000",
+                "type": "text",
+                "text": { "body": "Здравствуйте, есть в наличии?" }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -33,6 +33,9 @@ type Client struct {
 	version string
 	hc      *http.Client
 	log     *slog.Logger
+	// graphHost/instagramGraphHost override the real Graph hosts — see
+	// NewHTTPWithHosts. Empty (the NewHTTP default) means the real ones.
+	graphHost, instagramGraphHost string
 }
 
 // NewHTTP returns a Client. version is the "/vXX.X/" path segment GraphURL/
@@ -47,21 +50,43 @@ func NewHTTP(version string, log *slog.Logger) *Client {
 	}
 }
 
+// NewHTTPWithHosts is NewHTTP with the two Graph hosts overridden — for
+// tests only, so a channel package's own tests (internal/whatsappcloud,
+// internal/messengerish) can point GraphURL/InstagramGraphURL at an
+// httptest.Server instead of the real graph.facebook.com/
+// graph.instagram.com. Pass "" for either to keep its real host.
+func NewHTTPWithHosts(version, graphHost, instagramGraphHost string, log *slog.Logger) *Client {
+	c := NewHTTP(version, log)
+	c.graphHost = graphHost
+	c.instagramGraphHost = instagramGraphHost
+	return c
+}
+
 // Version returns the configured Graph API version segment ("v21.0").
 func (c *Client) Version() string { return c.version }
 
-// GraphURL builds https://graph.facebook.com/<version>/<path> — the host
-// Messenger and WhatsApp Cloud's own Graph calls (Page/WABA/phone-number
-// discovery, subscribed_apps, message sends) use.
+// GraphURL builds <graphHost>/<version>/<path> — the host Messenger and
+// WhatsApp Cloud's own Graph calls (Page/WABA/phone-number discovery,
+// subscribed_apps, message sends) use. graphHost is
+// https://graph.facebook.com unless overridden by NewHTTPWithHosts.
 func (c *Client) GraphURL(path string) string {
-	return "https://graph.facebook.com/" + c.version + "/" + strings.TrimPrefix(path, "/")
+	host := c.graphHost
+	if host == "" {
+		host = "https://graph.facebook.com"
+	}
+	return strings.TrimRight(host, "/") + "/" + c.version + "/" + strings.TrimPrefix(path, "/")
 }
 
-// InstagramGraphURL builds https://graph.instagram.com/<version>/<path> —
+// InstagramGraphURL builds <instagramGraphHost>/<version>/<path> —
 // Instagram-with-Instagram-Login's own Graph host for message sends and
-// account discovery, distinct from graph.facebook.com.
+// account discovery, distinct from graph.facebook.com. instagramGraphHost
+// is https://graph.instagram.com unless overridden by NewHTTPWithHosts.
 func (c *Client) InstagramGraphURL(path string) string {
-	return "https://graph.instagram.com/" + c.version + "/" + strings.TrimPrefix(path, "/")
+	host := c.instagramGraphHost
+	if host == "" {
+		host = "https://graph.instagram.com"
+	}
+	return strings.TrimRight(host, "/") + "/" + c.version + "/" + strings.TrimPrefix(path, "/")
 }
 
 // Get performs a GET and decodes the response into out (nil discards a

@@ -53,11 +53,20 @@ function conn(status: string) {
 }
 
 const isTelegram = (a: Account) => a.channel === 'telegram'
-const tileClass = (a: Account) => (isTelegram(a) ? 'bg-[#229ED9]' : 'bg-wa')
+// isQrWhatsApp is the whatsmeow-backed leg (whatsapp/simulator) — the only
+// channels the QR reconnect flow (openReconnect, below) applies to.
+// whatsapp_cloud looks similar (same brand, same 24h-window shape) but has
+// no QR session to re-scan at all.
+const isQrWhatsApp = (a: Account) => a.channel === 'whatsapp' || a.channel === 'simulator'
+const isWhatsAppCloud = (a: Account) => a.channel === 'whatsapp_cloud'
+const tileClass = (a: Account) => (isTelegram(a) ? 'bg-[#229ED9]' : isWhatsAppCloud(a) ? 'bg-teal-600' : 'bg-wa')
 const channelIcon = (a: Account) => (isTelegram(a) ? TelegramIcon : WhatsappIcon)
-// A Telegram bot's handle is @username; a WhatsApp account's is its number.
+// A Telegram bot's handle is @username; a QR-paired WhatsApp account's own
+// external_handle is a bare digit string (needs the + prefix); WhatsApp
+// Cloud's is already a display-ready "+1 555 000 1111" (see
+// whatsapp_cloud_accounts.go's display_phone_number) — no coercion needed.
 function handle(a: Account) {
-  if (isTelegram(a)) return a.external_handle || '—'
+  if (isTelegram(a) || isWhatsAppCloud(a)) return a.external_handle || '—'
   return a.external_handle ? '+' + a.external_handle : '—'
 }
 
@@ -275,9 +284,9 @@ async function remove(a: Account) {
                       <KeyRound class="w-4 h-4" />
                     </Button>
                   </template>
-                  <!-- WhatsApp: re-issue a QR (a bot has no session to re-scan) -->
+                  <!-- QR-paired WhatsApp: re-issue a QR (a bot has no session to re-scan) -->
                   <Button
-                    v-else-if="a.connection_state !== 'connected'"
+                    v-else-if="isQrWhatsApp(a) && a.connection_state !== 'connected'"
                     variant="ghost"
                     size="icon"
                     class="w-8 h-8 text-primary"

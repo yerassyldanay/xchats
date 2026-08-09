@@ -240,6 +240,26 @@ export interface TelegramAccountResponse {
   pending_update_count?: number
   expected_webhook_url?: string
 }
+// WhatsAppCloudPhoneNumber is one entry in POST /whatsapp-cloud-accounts/
+// discover's response — the operator picks one before the connect step
+// (which spends one of Meta's limited PIN attempts) ever runs.
+export interface WhatsAppCloudPhoneNumber {
+  id: string
+  display_phone_number: string
+  verified_name: string
+  quality_rating: string
+}
+export interface WhatsAppCloudDiscoverResponse {
+  phone_numbers: WhatsAppCloudPhoneNumber[]
+}
+// WhatsAppCloudAccountResponse is what POST /whatsapp-cloud-accounts
+// returns — the same {account, connection_state} shape as
+// TelegramAccountResponse below.
+export interface WhatsAppCloudAccountResponse {
+  account: Account
+  connection_state: string
+}
+
 // WaPairSession is POST /wa-accounts/pair's response: a session id to poll
 // via GET /wa-accounts/pair/:session_id.
 export interface WaPairSession {

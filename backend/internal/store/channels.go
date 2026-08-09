@@ -11,6 +11,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -144,6 +145,25 @@ func (s *Store) ChannelAccountByExternalID(ctx context.Context, channel, externa
 		return a, ErrNotFound
 	}
 	return a, err
+}
+
+// ChannelExternalAccountID resolves an account's provider-side identity
+// (phone_number_id for whatsapp_cloud, an IGSID-space user id for
+// instagram, a Page id for messenger) — the Graph API path segment a send
+// needs, distinct from the account's own internal id. Exists as its own
+// narrow method (rather than making every sender import store.ChannelAccount
+// via ChannelAccountByID) so each channel adapter's own AccountSource-style
+// interface can stay decoupled from this package, exactly mirroring how
+// telegram.TokenSource never references a store type — see
+// internal/whatsappcloud/channel.go.
+func (s *Store) ChannelExternalAccountID(ctx context.Context, accountID uuid.UUID) (string, error) {
+	var id string
+	err := s.db.QueryRow(ctx, `
+		SELECT external_account_id FROM channel_accounts WHERE id = $1 AND deleted_at IS NULL`, accountID).Scan(&id)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
 }
 
 // ChannelWebhookState is one transition of a channel account's connection
@@ -478,6 +498,67 @@ func (s *Store) ChannelMediaMetaFor(ctx context.Context, messageID uuid.UUID) (C
 		return m, ErrNotFound
 	}
 	return m, err
+}
+
+// ChannelOutboundMediaForSigning resolves what an outbound attachment send
+// needs to mint a signed public media URL (see internal/inboxmedia and
+// internal/whatsappcloud.ChannelSender): the channel_message_media row's
+// own id (distinct from the blob-store key messaging.OutboundMedia.BlobID
+// carries — UpsertOutboundMedia already created this row, keyed by
+// message_id, before the send was ever enqueued) and that row's owning
+// organization, resolved in ONE query so a sender never has to trust a
+// caller-supplied org for something this security-sensitive.
+func (s *Store) ChannelOutboundMediaForSigning(ctx context.Context, messageID uuid.UUID) (mediaID, orgID uuid.UUID, err error) {
+	var org uuid.NullUUID
+	err = s.db.QueryRow(ctx, `
+		SELECT cmm.id, a.organization_id
+		FROM channel_message_media cmm
+		JOIN channel_messages m ON m.id = cmm.message_id
+		JOIN channel_accounts a ON a.id = m.account_id
+		WHERE cmm.message_id = $1`, messageID).Scan(&mediaID, &org)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return uuid.UUID{}, uuid.UUID{}, ErrNotFound
+	}
+	if err != nil {
+		return uuid.UUID{}, uuid.UUID{}, err
+	}
+	if !org.Valid {
+		// An outbound send only ever happens through an org-scoped compose
+		// path — an unassigned account reaching this point is a programming
+		// error, not a data shape to silently paper over.
+		return uuid.UUID{}, uuid.UUID{}, fmt.Errorf("store: channel account for message %s has no organization", messageID)
+	}
+	return mediaID, org.UUID, nil
+}
+
+// ChannelMediaByID resolves an outbound attachment's stored bytes location
+// (blob storage_key) plus its owning organization, from the
+// channel_message_media row's OWN id — the exact id inboxmedia.Signer signs
+// (see ChannelOutboundMediaForSigning). This is the second of the two
+// independent IDOR-defense layers GET /meta/api/v1/media/:media_id combines:
+// the signature alone proves the token was minted for THIS (org, mediaID)
+// pair, but the HTTP handler never trusts a caller-supplied org — it passes
+// THIS query's resolved value into Verify, so a token honestly signed for a
+// different organization than the one that actually owns mediaID simply
+// fails to reproduce the signature.
+func (s *Store) ChannelMediaByID(ctx context.Context, mediaID uuid.UUID) (storageKey, mimetype, fileName string, orgID uuid.UUID, err error) {
+	var org uuid.NullUUID
+	err = s.db.QueryRow(ctx, `
+		SELECT cmm.storage_key, cmm.mimetype, cmm.filename, a.organization_id
+		FROM channel_message_media cmm
+		JOIN channel_messages m ON m.id = cmm.message_id
+		JOIN channel_accounts a ON a.id = m.account_id
+		WHERE cmm.id = $1`, mediaID).Scan(&storageKey, &mimetype, &fileName, &org)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return "", "", "", uuid.UUID{}, ErrNotFound
+	}
+	if err != nil {
+		return "", "", "", uuid.UUID{}, err
+	}
+	if !org.Valid {
+		return "", "", "", uuid.UUID{}, ErrNotFound
+	}
+	return storageKey, mimetype, fileName, org.UUID, nil
 }
 
 // InsertChannelMediaPending records an inbound attachment's handle without

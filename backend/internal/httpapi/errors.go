@@ -28,4 +28,8 @@ const (
 	ErrCredentialUnverified = "CREDENTIAL_UNVERIFIED" // could not be checked; caller must resubmit with force=true to save anyway
 	ErrCredentialStore      = "CREDENTIAL_STORE"      // no credential store available, or a store read/write failed
 	ErrTunnelUnavailable    = "TUNNEL_UNAVAILABLE"    // the tunnel feature is not configured, or Start/Stop itself failed
+
+	// Meta channels surface (internal/meta, internal/whatsappcloud, internal/metaingest).
+	ErrMetaError            = "META_ERROR"              // Meta's Graph API rejected a call — see the message for its own error text
+	ErrMetaAppNotConfigured = "META_APP_NOT_CONFIGURED" // no "meta" App ID/Secret saved in Settings yet
 )

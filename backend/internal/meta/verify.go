@@ -1,7 +1,9 @@
 package meta
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"net/url"
 )
 
@@ -31,4 +33,25 @@ func Challenge(query url.Values, verifyToken string) (challenge string, ok bool)
 		return "", false
 	}
 	return query.Get("hub.challenge"), true
+}
+
+// verifyTokenLabel disambiguates DeriveVerifyToken's key from every other
+// purpose-specific value this codebase derives from the same shared seed
+// (cfg.SessionSecret) — see internal/inboxmedia's identical keyLabel
+// reasoning.
+const verifyTokenLabel = "xchats-meta-webhook-verify-token"
+
+// DeriveVerifyToken deterministically derives the hub.verify_token value this
+// install registers with every Meta webhook subscription (SetOverride /
+// subscribed_apps) and checks in Challenge. It only has to be a value WE
+// chose and can reproduce — unlike the App Secret it does not gate inbound
+// POST authenticity at all (VerifySignature does that); its only job is to
+// prove, during the one-time GET handshake, that the callback URL was
+// registered by this install and not guessed by a third party. Deriving it
+// from seed (cfg.SessionSecret) rather than storing a separate secret means
+// no new provisioned value, and it stays stable across restarts — the same
+// reasoning as internal/inboxmedia's own signer key derivation.
+func DeriveVerifyToken(seed string) string {
+	sum := sha256.Sum256([]byte(seed + verifyTokenLabel))
+	return hex.EncodeToString(sum[:])
 }
