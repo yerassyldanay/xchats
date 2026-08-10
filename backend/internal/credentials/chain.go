@@ -70,6 +70,18 @@ type OpenOptions struct {
 	// not usable — see AllowFileFromEnv for the Docker default.
 	AllowFile bool
 
+	// ForceFile skips the OS-keychain probe entirely and selects FileStore
+	// directly (AllowFile + DataDir are still required). Set it in EVERY
+	// test outside this package.
+	//
+	// Without it, Open PREFERS a real OS keychain whenever one happens to be
+	// usable, so a test that passes DataDir: t.TempDir() expecting an
+	// isolated, empty store silently gets the developer's real keychain
+	// instead: it reads their live API keys, and — because these tests seed
+	// fixtures with Set — OVERWRITES them with dummies like "fc-key". That
+	// is not hypothetical; it is why this field exists.
+	ForceFile bool
+
 	// keyring/available are test seams (see keyring_test.go/chain_test.go);
 	// production always leaves them nil, which defaults to the real OS
 	// keychain and a live availability probe.
@@ -91,7 +103,9 @@ func AllowFileFromEnv() bool {
 //
 //  1. The OS keychain (Keyring), if a real round-trip probe proves it is
 //     usable in this environment — the preferred store wherever a desktop
-//     session or a proper Secret Service provider exists.
+//     session or a proper Secret Service provider exists. Skipped entirely
+//     when opts.ForceFile is set (see that field: this preference is what
+//     makes an un-opted-out test clobber real developer credentials).
 //  2. FileStore, only when opts.AllowFile is set — the weaker, file-backed
 //     fallback, never chosen silently.
 //
@@ -112,7 +126,7 @@ func Open(opts OpenOptions) (*Chain, error) {
 	}
 	env := EnvStore{}
 
-	if probe(kr) {
+	if !opts.ForceFile && probe(kr) {
 		return &Chain{env: env, primary: &Keyring{backend: kr}, primaryName: "keyring"}, nil
 	}
 	if opts.AllowFile {

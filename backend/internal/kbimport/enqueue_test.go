@@ -55,7 +55,7 @@ func newSubmitTestService(t *testing.T, creds *credentials.Chain, allowPrivate b
 
 func newFileCredChain(t *testing.T) *credentials.Chain {
 	t.Helper()
-	c, err := credentials.Open(credentials.OpenOptions{AllowFile: true, DataDir: t.TempDir()})
+	c, err := credentials.Open(credentials.OpenOptions{AllowFile: true, ForceFile: true, DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("credentials.Open: %v", err)
 	}

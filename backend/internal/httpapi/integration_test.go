@@ -284,7 +284,7 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	// default) — a test wanting a configured Firecrawl/LlamaParse credential
 	// calls h.kbImportCreds.Set(ctx, "firecrawl.api_key", "...") directly
 	// rather than round-tripping through the Settings HTTP API.
-	kbImportCreds, err := credentials.Open(credentials.OpenOptions{AllowFile: true, DataDir: t.TempDir()})
+	kbImportCreds, err := credentials.Open(credentials.OpenOptions{AllowFile: true, ForceFile: true, DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open kb import credentials store: %v", err)
 	}
