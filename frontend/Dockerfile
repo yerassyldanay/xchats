@@ -1,6 +1,6 @@
 # Build the Vue SPA, then serve the static bundle via nginx (which also proxies
 # /xchats to the backend so the app and API are same-origin).
-FROM node:22 AS build
+FROM node:26 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
