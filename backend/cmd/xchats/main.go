@@ -231,7 +231,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Engine:        engine,
 	}
 	log.Info("response service active",
-		"provider", startupParams.DefaultModel.Provider, "model", startupParams.DefaultModel.Model, "prompt_ref", aiprompt.PromptRefShopKBV4)
+		"provider", startupParams.DefaultModel.Provider, "model", startupParams.DefaultModel.Model, "prompt_ref", aiprompt.PromptRefShopKBV5)
 
 	q := queue.NewInMem(2048, cfg.System.QueueWorkers, log)
 	hub := realtime.NewHub()

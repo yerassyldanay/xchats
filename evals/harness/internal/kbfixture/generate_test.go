@@ -146,6 +146,15 @@ func TestGenerate_RoundTripsThroughStrictDecode(t *testing.T) {
 			referenced[id] = true
 		}
 	}
+	// Tariffs carry media too (setup-basic's terms document). Omitting this
+	// loop is what made the count read 3 when tariffs were first added — the
+	// same "forgot the tariff branch" mistake that kept the whole table out of
+	// the rendered prompt until v5.
+	for _, tf := range kb.Tariffs {
+		for _, id := range allTariffMaterialIDs(tf) {
+			referenced[id] = true
+		}
+	}
 	if len(referenced) == 0 {
 		t.Fatal("expected at least one referenced material id")
 	}
@@ -169,6 +178,19 @@ func allProductMaterialIDs(p aiprompt.Product) []string {
 	ids = append(ids, p.DemoVideos...)
 	ids = append(ids, p.CertificateDocuments...)
 	ids = append(ids, p.GuaranteeDocuments...)
+	return ids
+}
+
+// allTariffMaterialIDs is allProductMaterialIDs' tariff twin — every media
+// column aiprompt's registry declares for the "tariffs" table.
+func allTariffMaterialIDs(t aiprompt.Tariff) []string {
+	var ids []string
+	if t.FeaturedImage != "" {
+		ids = append(ids, t.FeaturedImage)
+	}
+	ids = append(ids, t.PricingImages...)
+	ids = append(ids, t.ExplainerVideos...)
+	ids = append(ids, t.TermsDocuments...)
 	return ids
 }
 
