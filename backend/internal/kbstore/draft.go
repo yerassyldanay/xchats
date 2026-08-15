@@ -2158,6 +2158,23 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 		// Clear exactly the approved delta from the SAME blob this closure was
 		// handed — never a second, separately-committed pass (see the doc
 		// comment above).
+		//
+		// A whole-draft approve just materialized EVERY entry the blob held
+		// (selectApproved's own sel.Kind == "" branch takes all eight fields,
+		// and DraftBlob has exactly those eight — base_version/updated_at/
+		// updated_by are sibling COLUMNS written by persistDraftBlob, never
+		// part of the JSON). So the cleared result is by definition the empty
+		// blob, and resetting it outright is both cheaper and strictly safer
+		// than removing key by key: the per-key path below mutates b's slices
+		// in place, which is exactly what made this loop skip entries back
+		// when set's headers still aliased them. Same idiom as ClearDraft.
+		//
+		// Must stay below the config materialization and approveNote above:
+		// the former reads b.Config, the latter counts set's slices.
+		if sel.Kind == "" {
+			*b = DraftBlob{}
+			return nil
+		}
 		for _, t := range set.topics {
 			b.removeTopic(t.Slug)
 		}
@@ -2232,12 +2249,29 @@ func approveNote(sel ApproveSelector, set approveSet) string {
 
 // selectApproved picks the blob entries an ApproveSelector targets. Deletes are
 // keyed by entity kind (singular): topic|tariff|product|contact|policy|delivery_zone.
+//
+// Every slice returned here is CLONED, never a header into the caller's own
+// blob. b is taken by value, but a struct copy copies slice headers — not the
+// arrays behind them — so `products: b.Products` used to hand back a window
+// onto the live blob. ApproveVersioned then iterated that set while
+// removeProduct/removeTopic/removeTariff compacted the very same backing array
+// in place (`out := b.Products[:0]`), so the loop read shifted data and
+// skipped every other entry: 4 staged left 1 behind, 7 left 3, 12 left 5, and
+// "Опубликовать всё" never emptied Черновик. ApproveVersioned no longer walks
+// this set for the whole-draft case at all (it resets the blob outright), but
+// cloning keeps the aliasing from silently coming back through any future
+// caller — and this is the only place the alias could originate.
 func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	if sel.Kind == "" {
 		return approveSet{
-			topics: b.Topics, tariffs: b.Tariffs, products: b.Products,
-			contacts: b.Contacts, policies: b.Policies, zones: b.DeliveryZones,
-			config: b.Config.hasPending(), deletes: b.Deletes,
+			topics:   append([]DraftTopic(nil), b.Topics...),
+			tariffs:  append([]DraftTariff(nil), b.Tariffs...),
+			products: append([]DraftProduct(nil), b.Products...),
+			contacts: append([]DraftContact(nil), b.Contacts...),
+			policies: append([]DraftPolicy(nil), b.Policies...),
+			zones:    append([]DraftDeliveryZone(nil), b.DeliveryZones...),
+			config:   b.Config.hasPending(),
+			deletes:  append([]DraftDelete(nil), b.Deletes...),
 		}
 	}
 	var set approveSet
@@ -2268,12 +2302,16 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 			}
 		}
 	case "contacts":
+		// Cloned like every other branch: these two are singletons, so the
+		// aliasing is harmless today (removeContact/removePolicy nil the whole
+		// slice rather than compacting it), but leaving one live header here
+		// is the same footgun the doc comment above describes.
 		if sel.Key == domain.ContactSlug || sel.Key == NaturalKeyMain {
-			set.contacts = b.Contacts
+			set.contacts = append([]DraftContact(nil), b.Contacts...)
 		}
 	case "policies":
 		if sel.Key == domain.PolicySlug || sel.Key == NaturalKeyMain {
-			set.policies = b.Policies
+			set.policies = append([]DraftPolicy(nil), b.Policies...)
 		}
 	case "delivery_zones":
 		for _, z := range b.DeliveryZones {

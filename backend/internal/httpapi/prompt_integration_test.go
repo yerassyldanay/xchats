@@ -55,8 +55,8 @@ func TestKBPrompt_OkWithSeededKB(t *testing.T) {
 	if got.Status != "ok" {
 		t.Fatalf("status = %q, want ok (error=%q)", got.Status, got.Error)
 	}
-	if got.PromptRef != "shop-kb@v4" {
-		t.Fatalf("prompt_ref = %q, want shop-kb@v4", got.PromptRef)
+	if got.PromptRef != "shop-kb@v5" {
+		t.Fatalf("prompt_ref = %q, want shop-kb@v5", got.PromptRef)
 	}
 	if !strings.Contains(got.RenderedText, "ЗОНЫ ДОСТАВКИ") {
 		t.Fatalf("rendered_text missing the ЗОНЫ ДОСТАВКИ section marker:\n%s", got.RenderedText)

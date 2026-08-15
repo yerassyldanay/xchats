@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Blocks, Check, FlaskConical, Inbox, Library, LogOut, Radio, Settings } from 'lucide-vue-next'
+import { Blocks, Bot, Check, FlaskConical, Inbox, Library, LogOut, Radio, Settings } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { useSettings } from '../stores/settings'
 import { initials, colorFor } from '../lib/format'
@@ -40,6 +40,7 @@ const baseNav = computed<{ name: string; icon: Component; label: string; match: 
   { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts'] },
   { name: 'playground', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
+  { name: 'simulator', icon: Bot, label: t('simulator.navLabel'), match: ['simulator'] },
 ])
 // Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
 // and rendered in its own bottom cluster (separated by a divider, above the avatar)

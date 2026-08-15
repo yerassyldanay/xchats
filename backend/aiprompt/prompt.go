@@ -28,6 +28,14 @@ import (
 // the zone containment hierarchy (zone_level/parent_ref) that BUSINESS_FACTS's
 // per-zone fact lines never carried, so the frame's "most precise zone wins" rule
 // has actual hierarchy data to reason over instead of only a flat list of zone refs.
+//
+// SlotTariffs is the v5 addition (2026-08): one canonical block per active tariff,
+// exactly as renderBusinessFacts' own doc comment prescribed before it existed.
+// Until v5 the whole tariff table was silently unreachable by the model —
+// BuildCatalog built tariff facts and media (catalog.go) but no renderer emitted
+// them, so an operator who priced a tariff in its typed columns watched the
+// assistant escalate ("нет этой информации") rather than quote it. See
+// renderTariffs.
 const (
 	SlotAssistant          = "%%ASSISTANT%%"
 	SlotKnowledgeBase      = "%%KNOWLEDGE_BASE%%"
@@ -37,6 +45,7 @@ const (
 	SlotMediaAbsent        = "%%MEDIA_ABSENT%%"
 	SlotProductsInStock    = "%%PRODUCTS_IN_STOCK%%"
 	SlotProductsOutOfStock = "%%PRODUCTS_OUT_OF_STOCK%%"
+	SlotTariffs            = "%%TARIFFS%%"
 	SlotTopics             = "%%TOPICS%%"
 	SlotBusinessFacts      = "%%BUSINESS_FACTS%%"
 	SlotDeliveryZones      = "%%DELIVERY_ZONES%%"
@@ -86,6 +95,7 @@ func RenderPrompt(frame string, input *PromptInput, cat *Catalog) (string, error
 	out = strings.ReplaceAll(out, SlotMediaAbsent, renderMediaAbsent(cat.Absent))
 	out = strings.ReplaceAll(out, SlotProductsInStock, renderProductsInStock(input, cat))
 	out = strings.ReplaceAll(out, SlotProductsOutOfStock, renderProductsOutOfStock(input))
+	out = strings.ReplaceAll(out, SlotTariffs, renderTariffs(input, cat))
 	out = strings.ReplaceAll(out, SlotTopics, renderTopicBlocks(input, cat))
 	out = strings.ReplaceAll(out, SlotBusinessFacts, renderBusinessFacts(cat.Facts))
 	out = strings.ReplaceAll(out, SlotDeliveryZones, renderDeliveryZones(input.DeliveryZones))
@@ -305,6 +315,59 @@ func renderProductsOutOfStock(input *PromptInput) string {
 	return strings.Join(lines, "\n")
 }
 
+// renderTariffs renders the v5 frame's tariff list (%%TARIFFS%%): one block per
+// ACTIVE tariff with its ref, name, seller prose, fact placeholders, and every
+// populated media reference — each appearing exactly once, empty fields simply
+// omitted. Structurally the tariff twin of renderProductsInStock, which is
+// precisely what renderBusinessFacts' doc comment said a tariff-bearing frame
+// would need before tariff facts could safely be rendered anywhere.
+//
+// There is no in-stock/out-of-stock split here: ai_tariffs has no stock concept
+// (a plan is offered or it is not), so sales_status alone decides, and an
+// inactive tariff is omitted entirely rather than getting a name-only line the
+// way an out-of-stock product does.
+//
+// pricing_type is carried because it changes how the very same price/fee value
+// must be read (a "percentage" fee is a rate, not an amount) — without it a
+// model quoting {{tariff.x.fee}} has no way to tell those apart.
+func renderTariffs(input *PromptInput, cat *Catalog) string {
+	var blocks []string
+	for _, t := range input.Tariffs {
+		if !active(t.SalesStatus) {
+			continue
+		}
+		lines := []string{"tariff: " + t.Ref, "name: " + t.Name}
+		if s := strings.TrimSpace(t.PricingType); s != "" {
+			lines = append(lines, "pricing_type: "+s)
+		}
+		for _, f := range []struct{ field, text string }{
+			{"summary", t.Summary},
+			{"limit", t.LimitText},
+			{"advantages", t.Advantages},
+			{"disadvantages", t.Disadvantages},
+		} {
+			if s := strings.TrimSpace(f.text); s != "" {
+				lines = append(lines, f.field+": "+s)
+			}
+		}
+		// price and fee are the two fact columns registry.go declares for
+		// tariffs; each is emitted only when BuildCatalog actually approved a
+		// token for it, exactly as renderProductsInStock gates its price.
+		for _, col := range []string{"price", "fee"} {
+			token := "{{tariff." + t.Ref + "." + col + "}}"
+			if cat.FactByToken(token) != nil {
+				lines = append(lines, col+"_placeholder: "+token)
+			}
+		}
+		lines = append(lines, mediaRefLines(cat, "tariffs", t.Ref)...)
+		blocks = append(blocks, strings.Join(lines, "\n"))
+	}
+	if len(blocks) == 0 {
+		return "—"
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
 // renderTopicBlocks renders the v2 canonical-block frame's topic list
 // (%%TOPICS%%): one block per topic with prose (slug/title/body plus
 // every populated media reference), each field appearing exactly once. This is
@@ -334,10 +397,12 @@ func renderTopicBlocks(input *PromptInput, cat *Catalog) string {
 // renderBusinessFacts renders the v2 canonical-block frame's %%BUSINESS_FACTS%%
 // slot — the same renderFacts line format, filtered to policy/contact/delivery-
 // zone facts ONLY; product facts moved into the per-product blocks above so no
-// fact ever appears in two places. Tariff facts are deliberately NOT included:
-// shop-kb-v1 (the only schema_kb_v1 family today) has no tariffs; a future
-// tariff-bearing v2 frame would need its own canonical tariff block (mirroring
-// renderProductsInStock) before this slot could safely carry them too.
+// fact ever appears in two places.
+//
+// Tariff facts are excluded for that same one-place rule, NOT (as this comment
+// previously claimed) because tariffs are unsupported: since v5 they render in
+// their own canonical block, renderTariffs. Adding them back here would put
+// every tariff price in the prompt twice.
 func renderBusinessFacts(facts []FactEntry) string {
 	var kept []FactEntry
 	for _, f := range facts {

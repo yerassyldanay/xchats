@@ -13,6 +13,19 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    watch: {
+      // Playwright writes screenshots/traces/reports into these directories
+      // AS TESTS RUN (test-results/ per-test, more so now that
+      // playwright.config.ts's screenshot mode is 'on' rather than
+      // 'only-on-failure'). They live under this same project root, so
+      // without this exclusion Vite's file watcher treats every write as a
+      // source change and pushes an HMR full-reload to every connected
+      // page — including the very page Playwright is mid-navigation on,
+      // which is indistinguishable from a hung `page.goto()` from the
+      // outside (waiting forever for a 'load' that a second, unrelated
+      // reload keeps preempting).
+      ignored: ['**/test-results/**', '**/playwright-report/**', '**/blob-report/**', '**/test-screens/**'],
+    },
     proxy: {
       '/xchats': {
         target: process.env.API_BASE_URL || 'http://localhost:8080',

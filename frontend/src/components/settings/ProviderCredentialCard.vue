@@ -71,7 +71,7 @@ function toggleDisabled(v: boolean) {
 </script>
 
 <template>
-  <div class="rounded-lg border border-border bg-card p-5 space-y-4">
+  <div class="rounded-lg border border-border bg-card p-5 space-y-4" :data-testid="`integration-card-${provider.id}`">
     <div class="flex items-start justify-between gap-3">
       <div>
         <div class="flex items-center gap-2">

@@ -17,15 +17,18 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/brain"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/password"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
+	"github.com/yerassyldanay/xchats/backend/internal/settings"
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
@@ -108,6 +111,18 @@ type harness struct {
 	// makes in polling mode (see telegram_polling_test.go) — nil-tolerant
 	// production behavior means the 26 webhook-mode tests never touch it.
 	tgPoller *fakeTGPoller
+	// kbImport is the same *kbimport.Service the Server was built with,
+	// already Start()ed (Stop is registered via t.Cleanup, before kb.Close
+	// so background workers stop first) — exposed so a test can seed
+	// settings/credentials the pipeline reads at call time.
+	kbImport *kbimport.Service
+	// kbImportSettings/kbImportCreds are the same stores kbImport itself
+	// reads from — exposed so a test can configure a default model or a
+	// Firecrawl/LlamaParse credential directly, without a round trip
+	// through the Settings HTTP API (which this harness does not wire
+	// Deps.Settings/Deps.Credentials to by default).
+	kbImportSettings *settings.Store
+	kbImportCreds    *credentials.Chain
 }
 
 // setTelegramBase rewrites the configured public base URL mid-test. The Server
@@ -252,16 +267,48 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	tgProc := tgingest.New(tgingest.Deps{Store: st, Queue: q, Hub: hub, Log: log})
 	tgPoller := &fakeTGPoller{}
 
+	// kbImportSettings gives kbimport.Service.resolveSynthModel a default
+	// model that resolves through the SAME fakeLLMRegistry/llmClient the
+	// response engine above already uses — so a test wanting a real pass-2
+	// synthesis run just scripts llmClient's calls list, the same way
+	// TestWhatsAppInboundProducesGroundedDraftAndApprovalDelivers scripts a
+	// customer-response fixture.
+	kbImportSettings := settings.NewStore(t.TempDir())
+	if _, err := kbImportSettings.Update(func(s *settings.Settings) {
+		s.LLM.DefaultProvider, s.LLM.DefaultModel = fakeLLMProvider, "fake"
+	}); err != nil {
+		t.Fatalf("seed kb import settings: %v", err)
+	}
+	// kbImportCreds is a real, file-backed credentials.Chain (not wired into
+	// Deps.Credentials, so /settings/integrations itself stays untouched by
+	// default) — a test wanting a configured Firecrawl/LlamaParse credential
+	// calls h.kbImportCreds.Set(ctx, "firecrawl.api_key", "...") directly
+	// rather than round-tripping through the Settings HTTP API.
+	kbImportCreds, err := credentials.Open(credentials.OpenOptions{AllowFile: true, ForceFile: true, DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("open kb import credentials store: %v", err)
+	}
+	kbImportSvc := kbimport.New(kbimport.Deps{
+		KB: kb, Blob: blobStore, Settings: kbImportSettings, Credentials: kbImportCreds,
+		LLM: fakeLLMRegistry{client: llmClient},
+		Hub: hub, Log: log, AllowPrivateFetch: true,
+	}, kbimport.DefaultConfig())
+	kbImportCtx, cancelKBImport := context.WithCancel(context.Background())
+	kbImportSvc.Start(kbImportCtx)
+	t.Cleanup(func() { cancelKBImport(); kbImportSvc.Stop() })
+
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
 		Response: responseService, WA: fake, TG: tgFake, TGProcessor: tgProc, TGPoller: tgPoller, KB: kb,
-		KBRepo: cachedKB, KBInvalidator: cachedKB,
+		KBImport: kbImportSvc,
+		KBRepo:   cachedKB, KBInvalidator: cachedKB,
 		OrgID: org.ID, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, cfg: cfg, fake: fake, tg: tgFake,
-		queue: q, store: st, kb: kb, blob: blobStore, db: db, worker: w, orgID: org.ID, accountID: accountID, tgPoller: tgPoller}
+		queue: q, store: st, kb: kb, blob: blobStore, db: db, worker: w, orgID: org.ID, accountID: accountID, tgPoller: tgPoller,
+		kbImport: kbImportSvc, kbImportSettings: kbImportSettings, kbImportCreds: kbImportCreds}
 	// st/db/kb/kbRepo are all closed by dbtest's own t.Cleanup registrations.
 	t.Cleanup(func() { ts.Close(); q.Close() })
 	h.login()

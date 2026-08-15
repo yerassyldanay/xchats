@@ -49,7 +49,7 @@ func TestPopulateLLMRegistryPrefersCredsOverConfig(t *testing.T) {
 	reg := llmprovider.NewRegistry()
 	cfg := &config.Config{OpenRouterAPIKey: "sk-from-config", OpenRouterBaseURL: srv.URL}
 	settingsStore := settings.NewStore(t.TempDir())
-	creds, err := credentials.Open(credentials.OpenOptions{AllowFile: true, DataDir: t.TempDir()})
+	creds, err := credentials.Open(credentials.OpenOptions{AllowFile: true, ForceFile: true, DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("credentials.Open: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestPopulateLLMRegistryDeregistersWhenCredentialDeleted(t *testing.T) {
 	reg := llmprovider.NewRegistry()
 	cfg := &config.Config{} // no cfg fallback key at all
 	settingsStore := settings.NewStore(t.TempDir())
-	creds, err := credentials.Open(credentials.OpenOptions{AllowFile: true, DataDir: t.TempDir()})
+	creds, err := credentials.Open(credentials.OpenOptions{AllowFile: true, ForceFile: true, DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("credentials.Open: %v", err)
 	}

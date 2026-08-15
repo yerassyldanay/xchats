@@ -70,14 +70,44 @@ func operationalProperties() []string {
 // If no complete operational object exists — including when reasoning consumed
 // the completion budget and the final JSON is truncated — extraction fails.
 // A truncated or incomplete object is NEVER repaired or reconstructed.
+//
+// This is a thin instantiation of extractJSONObject over the customer-response
+// contract's own two-tier acceptance rule (loose whole-input check, strict
+// embedded-candidate check) — see ExtractJSONObject for the contract-agnostic,
+// single-predicate form other callers (e.g. internal/kbimport's synthesis
+// parser) use instead.
 func ExtractFinalOutput(raw string) (ExtractedFinal, bool) {
+	return extractJSONObject(raw, hasOperationalProperty, operationalPropertiesTyped)
+}
+
+// ExtractJSONObject is the contract-agnostic core of ExtractFinalOutput: it
+// runs the exact same direct / outer-fence / fenced-block / balanced-object
+// scan, but accept is the ONE predicate applied uniformly at every stage
+// (there is no loose-whole-input-vs-strict-embedded-candidate distinction —
+// that asymmetry is specific to the customer-response contract's own
+// diagnostic-field carve-out, preserved in ExtractFinalOutput above, not a
+// property of the scan itself). A caller with a single "is this my shape"
+// test — e.g. "does this object have a top-level calls field" — reaches for
+// this directly instead of duplicating the scan.
+func ExtractJSONObject(raw string, accept func(map[string]json.RawMessage) bool) (ExtractedFinal, bool) {
+	return extractJSONObject(raw, accept, accept)
+}
+
+// extractJSONObject is the shared scan-and-select implementation: locate a
+// JSON object in raw, preferring (in order) the whole trimmed input, the
+// whole input stripped of one outer markdown fence, then — for combined
+// reasoning+answer text — the last fenced or balanced embedded object that
+// satisfies acceptCandidate, scanned last to first so the FINAL answer wins
+// over earlier reasoning fragments. acceptWhole gates the first two stages;
+// acceptCandidate gates the third.
+func extractJSONObject(raw string, acceptWhole, acceptCandidate func(map[string]json.RawMessage) bool) (ExtractedFinal, bool) {
 	trimmed := strings.TrimSpace(raw)
-	if m, ok := decodeOneObject(trimmed); ok && hasOperationalProperty(m) {
+	if m, ok := decodeOneObject(trimmed); ok && acceptWhole(m) {
 		return ExtractedFinal{Final: trimmed, Method: ExtractDirect}, true
 	}
 	stripped := strings.TrimSpace(stripMarkdownFences(trimmed))
 	if stripped != trimmed {
-		if m, ok := decodeOneObject(stripped); ok && hasOperationalProperty(m) {
+		if m, ok := decodeOneObject(stripped); ok && acceptWhole(m) {
 			return ExtractedFinal{Final: stripped, Method: ExtractOuterFence}, true
 		}
 	}
@@ -86,7 +116,7 @@ func ExtractFinalOutput(raw string) (ExtractedFinal, bool) {
 	for i := len(candidates) - 1; i >= 0; i-- {
 		c := candidates[i]
 		m, ok := decodeOneObject(c.text)
-		if !ok || !operationalPropertiesTyped(m) {
+		if !ok || !acceptCandidate(m) {
 			continue
 		}
 		return ExtractedFinal{

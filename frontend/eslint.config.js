@@ -92,4 +92,17 @@ export default tseslint.config(
       '@typescript-eslint/no-empty-object-type': 'off',
     },
   },
+  {
+    // kb-full-journey.spec.ts shares ONE page across many test() blocks
+    // (test.beforeAll/afterAll, not the per-test `page` fixture — see its
+    // own doc comment on why) via `test('...', async ({}, testInfo) => ...)`
+    // — Playwright's own test collector requires that first argument to be
+    // an object destructuring pattern (even an empty one) to statically
+    // read which fixtures a test needs; `no-empty-pattern` doesn't know
+    // that and would otherwise flag every one of these as a mistake.
+    files: ['tests/e2e/features/kb-full-journey.spec.ts'],
+    rules: {
+      'no-empty-pattern': 'off',
+    },
+  },
 )
