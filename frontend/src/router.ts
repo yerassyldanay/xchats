@@ -6,6 +6,7 @@ import Chatboard from './views/Chatboard.vue'
 import Accounts from './views/Accounts.vue'
 import Playground from './views/Playground.vue'
 import KnowledgeBase from './views/KnowledgeBase.vue'
+import Simulator from './views/Simulator.vue'
 import EvalRuns from './views/EvalRuns.vue'
 import EvalLaunchDetail from './views/EvalLaunchDetail.vue'
 import EvalCatalog from './views/EvalCatalog.vue'
@@ -23,6 +24,7 @@ const router = createRouter({
     { path: '/accounts', name: 'accounts', component: Accounts, meta: { requiresAuth: true } },
     { path: '/playground', name: 'playground', component: Playground, meta: { requiresAuth: true } },
     { path: '/knowledge-base', name: 'knowledge-base', component: KnowledgeBase, meta: { requiresAuth: true } },
+    { path: '/simulator', name: 'simulator', component: Simulator, meta: { requiresAuth: true } },
     { path: '/evals', name: 'evals', component: EvalRuns, meta: { requiresAuth: true } },
     // MUST come before /evals/:launchId — that dynamic segment would otherwise
     // swallow this path with launchId === "catalog".

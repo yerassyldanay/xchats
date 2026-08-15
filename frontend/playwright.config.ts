@@ -23,16 +23,27 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    screenshot: 'on',
+    viewport: { width: 1440, height: 900 },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // Reuse a running dev server if present, else start one. Does NOT start the
   // backend — run `make dev-backend` first (migrations + seed happen
   // automatically on boot, no separate database service to start).
-  webServer: {
-    command: 'npm run dev',
-    url: BASE_URL,
-    reuseExistingServer: true,
-    timeout: 60_000,
-  },
+  //
+  // Conditional on E2E_BASE_URL: when it's set, the target is already
+  // running somewhere else (Docker's :8081, a staging deploy, ...) and
+  // trying to ALSO boot+poll a local `npm run dev` against that same URL is
+  // the "starts Vite and polls the wrong port" bug — Vite always listens on
+  // :5173 regardless of what BASE_URL points at, so `url: BASE_URL` would
+  // poll a port nothing is actually bound to and eventually time out. Only
+  // start the dev server when no explicit target was given.
+  webServer: process.env.E2E_BASE_URL
+    ? undefined
+    : {
+        command: 'npm run dev',
+        url: BASE_URL,
+        reuseExistingServer: true,
+        timeout: 60_000,
+      },
 })

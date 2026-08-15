@@ -463,6 +463,23 @@ export default {
       invited: 'Приглашение отправлено.',
     },
   },
+  // simulator.* — /simulator, a minimal chat UI over POST
+  // /simulator/messages (backend/internal/httpapi/simulator.go, gated by
+  // SIMULATOR_ENABLED). Not part of kb.*: it's its own page, not a Черновик/
+  // Знаний база surface.
+  simulator: {
+    navLabel: 'Симулятор',
+    pageTitle: 'Симулятор',
+    pageSubtitle: 'Проверьте ответы ассистента на вопросы клиента — без реального канала связи.',
+    inputPlaceholder: 'Введите вопрос клиента…',
+    send: 'Отправить',
+    you: 'Вы',
+    assistant: 'Ассистент',
+    empty: 'Задайте вопрос, чтобы проверить ответ ассистента.',
+    thinking: 'Ассистент печатает…',
+    escalated: 'Передано менеджеру',
+    unavailable: 'Симулятор недоступен на этом сервере. Проверьте, что SIMULATOR_ENABLED включён в конфигурации бэкенда.',
+  },
   // Channel-level debounce + scheduled auto-reply (Accounts.vue's
   // Automation button/badge/dialog).
   automation: {

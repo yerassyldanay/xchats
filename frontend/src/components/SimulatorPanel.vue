@@ -1,0 +1,130 @@
+<script setup lang="ts">
+// SimulatorPanel is a minimal chat UI over the existing simulator API
+// (POST /xchats/api/v1/simulator/messages, backend/internal/httpapi/
+// simulator.go) — it injects one synthetic inbound message per send through
+// the SAME ingestion/response path a real WhatsApp/Telegram message takes,
+// and shows the resulting suggested draft as the assistant's reply. It never
+// carries an API key, base URL, or raw prompt of its own — those stay
+// entirely server-side configuration (see the endpoint's own doc comment).
+// One conversation per page load: contact_ref/conversation_ref are
+// independent identity spaces server-side, so reusing the same generated id
+// for both is fine, and re-sending under it keeps the same thread — exactly
+// like an operator running one test conversation at a time from Playground.
+import { nextTick, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { LoaderCircle, SendHorizontal } from 'lucide-vue-next'
+import { api, ApiError } from '@/api/client'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+
+interface SimMessage {
+  role: 'user' | 'assistant'
+  text: string
+  escalate?: boolean
+}
+
+interface SimulatorMessageResponse {
+  conversation_id: string
+  message_id: string
+  draft?: { id: string; text: string; reply_language: string; escalate: boolean }
+}
+
+const { t } = useI18n()
+
+const sessionRef = `sim-ui-${crypto.randomUUID()}`
+
+const messages = ref<SimMessage[]>([])
+const input = ref('')
+const sending = ref(false)
+const error = ref('')
+const unavailable = ref(false)
+const listEl = ref<HTMLElement | null>(null)
+
+async function scrollToBottom() {
+  await nextTick()
+  listEl.value?.scrollTo({ top: listEl.value.scrollHeight, behavior: 'smooth' })
+}
+
+async function send() {
+  const text = input.value.trim()
+  if (!text || sending.value) return
+  error.value = ''
+  unavailable.value = false
+  messages.value.push({ role: 'user', text })
+  input.value = ''
+  sending.value = true
+  await scrollToBottom()
+  try {
+    const res = await api.post<SimulatorMessageResponse>('/simulator/messages', {
+      contact_ref: sessionRef,
+      conversation_ref: sessionRef,
+      text,
+      wait_for_response: true,
+    })
+    messages.value.push({ role: 'assistant', text: res.draft?.text ?? '', escalate: res.draft?.escalate })
+  } catch (e) {
+    // A 404 here almost always means SIMULATOR_ENABLED is off — the route is
+    // unregistered entirely at boot (server.go), never just gated per-request
+    // — everything else is a genuine API error worth showing verbatim.
+    if (e instanceof ApiError && e.status !== 404) {
+      error.value = e.message
+    } else {
+      unavailable.value = true
+      error.value = t('simulator.unavailable')
+    }
+  } finally {
+    sending.value = false
+    await scrollToBottom()
+  }
+}
+</script>
+
+<template>
+  <div class="h-full bg-background flex flex-col min-w-0">
+    <header class="px-8 py-4 border-b border-border bg-card shrink-0">
+      <h1 class="text-lg font-bold tracking-tight">{{ t('simulator.pageTitle') }}</h1>
+      <p class="text-sm text-muted-foreground">{{ t('simulator.pageSubtitle') }}</p>
+    </header>
+
+    <div ref="listEl" class="flex-1 overflow-y-auto px-8 py-6 space-y-4" data-testid="simulator-messages">
+      <p v-if="!messages.length" class="text-sm text-muted-foreground text-center py-10">{{ t('simulator.empty') }}</p>
+
+      <div
+        v-for="(m, i) in messages"
+        :key="i"
+        data-testid="simulator-message"
+        :data-role="m.role"
+        class="max-w-2xl rounded-lg border p-3 text-sm whitespace-pre-wrap break-words"
+        :class="m.role === 'user' ? 'ml-auto border-primary/30 bg-primary/5' : 'mr-auto border-border bg-card'"
+      >
+        <div class="text-xs font-medium text-muted-foreground mb-1">
+          {{ m.role === 'user' ? t('simulator.you') : t('simulator.assistant') }}
+        </div>
+        <span data-testid="simulator-message-text">{{ m.text }}</span>
+        <div v-if="m.escalate" class="mt-1.5 text-[11px] text-amber-600">{{ t('simulator.escalated') }}</div>
+      </div>
+
+      <div v-if="sending" class="flex items-center gap-2 text-xs text-muted-foreground" data-testid="simulator-loading">
+        <LoaderCircle class="w-3.5 h-3.5 animate-spin" /> {{ t('simulator.thinking') }}
+      </div>
+    </div>
+
+    <p v-if="error" class="px-8 pb-2 text-sm text-destructive" data-testid="simulator-error">{{ error }}</p>
+
+    <div class="p-4 border-t border-border bg-card shrink-0 flex items-end gap-2">
+      <Textarea
+        v-model="input"
+        :placeholder="t('simulator.inputPlaceholder')"
+        rows="2"
+        class="min-h-0 text-[14px]"
+        data-testid="simulator-input"
+        @keydown.enter.exact.prevent="send"
+      />
+      <Button :disabled="!input.trim() || sending" data-testid="simulator-send" @click="send">
+        <LoaderCircle v-if="sending" class="w-4 h-4 animate-spin" />
+        <SendHorizontal v-else class="w-4 h-4" />
+        {{ t('simulator.send') }}
+      </Button>
+    </div>
+  </div>
+</template>

@@ -39,20 +39,32 @@ test('База знаний: Промпт tab renders the rendered prompt with i
   await page.goto('/knowledge-base')
   await page.getByRole('button', { name: 'Промпт' }).click()
   await expect(page.getByText('Промпт ассистента')).toBeVisible()
-  await expect(page.getByText('shop-kb@v4')).toBeVisible()
+  await expect(page.getByText('shop-kb@v5')).toBeVisible()
   await expect(page.getByText('Собран успешно')).toBeVisible()
 })
 
-// Черновик is review-only (decision 1): no Add button anywhere, no
-// create-form placeholder text of any kind — the opposite of what
-// /knowledge-base offers. This deliberately does NOT assert the page is
-// globally empty (another test may have something staged — see
-// kb-draft.spec.ts's own isolation rules); it only asserts invariants that
-// must hold regardless of what else is pending.
-test('Черновик is review-only: no Add button, no create-form placeholder', async ({ page }) => {
+// Черновик is review-only (decision 1): no RECORD-CREATION button anywhere
+// (the ones /knowledge-base offers — «Добавить товар», «Добавить тему», …),
+// no create-form placeholder text of any kind. This deliberately does NOT
+// assert the page is globally empty (another test may have something
+// staged — see kb-draft.spec.ts's own isolation rules); it only asserts
+// invariants that must hold regardless of what else is pending.
+//
+// Not asserted here: a bare "Добавить" button DOES legitimately exist on
+// this page — KbIngestPanel's Ссылки tab uses it to add a URL to the
+// pending import list (kb.import.addUrl), which is staging an import
+// input, not creating a KB record the way /knowledge-base's Add buttons
+// do; scoping to the specific record-creation labels below is what keeps
+// this assertion about the right thing.
+test('Черновик is review-only: no Add-record button, no create-form placeholder', async ({ page }) => {
   await login(page)
   await page.goto('/playground')
-  await expect(page.getByRole('heading', { name: 'Черновик' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /^Добавить/ })).toHaveCount(0)
+  // exact:true — a substring match also resolves "Обзор черновика" (the
+  // review-region subheading just below, always rendered once loaded), a
+  // second real heading this assertion was never meant to match.
+  await expect(page.getByRole('heading', { name: 'Черновик', exact: true })).toBeVisible()
+  for (const label of ['Добавить тему', 'Добавить товар', 'Добавить тариф', 'Добавить зону']) {
+    await expect(page.getByRole('button', { name: label, exact: true })).toHaveCount(0)
+  }
   await expect(page.getByPlaceholder('Вставьте ссылку или опишите продукт, доставку, оплату, тарифы, цены…')).toHaveCount(0)
 })

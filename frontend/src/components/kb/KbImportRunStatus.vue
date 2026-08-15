@@ -34,10 +34,10 @@ const runMeta = computed(() => RUN_STATUS_META[props.run.status])
 </script>
 
 <template>
-  <div class="rounded-lg border border-border bg-card p-4 space-y-3">
+  <div class="rounded-lg border border-border bg-card p-4 space-y-3" data-testid="kb-import-run-status">
     <div class="flex items-center gap-2 flex-wrap">
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.import.runLabel') }}</span>
-      <Badge variant="secondary" :class="runMeta.cls + ' text-[11px] font-medium'">
+      <Badge variant="secondary" :class="runMeta.cls + ' text-[11px] font-medium'" data-testid="kb-import-run-badge">
         <LoaderCircle v-if="runMeta.spin" class="w-3 h-3 animate-spin" />
         {{ t(runMeta.labelKey) }}
       </Badge>

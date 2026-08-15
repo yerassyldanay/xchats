@@ -92,8 +92,8 @@ function policyRowOf(entry: ChangeEntry) {
         <p class="text-sm text-muted-foreground">{{ t('kb.draft.pageSubtitle') }}</p>
       </div>
       <div v-if="!isEmpty" class="flex items-center gap-2 shrink-0">
-        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" @click="discardAll">{{ t('kb.draft.discardAll') }}</Button>
-        <Button size="sm" :disabled="pg.busy || pg.approving" @click="publishAll">
+        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" data-testid="discard-all" @click="discardAll">{{ t('kb.draft.discardAll') }}</Button>
+        <Button size="sm" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="publishAll">
           <LoaderCircle v-if="pg.approving && !pg.publishingKey" class="w-4 h-4 animate-spin" />
           <Save v-else class="w-4 h-4" />
           {{ t('kb.draft.publishAll') }}<span v-if="counts.total"> · {{ counts.total }}</span>
@@ -131,17 +131,17 @@ function policyRowOf(entry: ChangeEntry) {
         <template v-else>
           <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k)" />
 
-          <div v-show="active === 'config'" class="space-y-3 max-w-3xl">
+          <div v-show="active === 'config'" class="space-y-3 max-w-3xl" data-testid="draft-tab-config">
             <ConfigChangeGroup />
           </div>
 
-          <div v-show="active === 'topics'" class="space-y-3">
+          <div v-show="active === 'topics'" class="space-y-3" data-testid="draft-tab-topics">
             <ChangeList kind="topics" />
           </div>
-          <div v-show="active === 'products'" class="space-y-3">
+          <div v-show="active === 'products'" class="space-y-3" data-testid="draft-tab-products">
             <ChangeList kind="products" />
           </div>
-          <div v-show="active === 'tariffs'" class="space-y-3">
+          <div v-show="active === 'tariffs'" class="space-y-3" data-testid="draft-tab-tariffs">
             <ChangeList kind="tariffs" />
           </div>
 

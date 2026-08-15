@@ -59,7 +59,7 @@ function fire(key: KbActionKey) {
 </script>
 
 <template>
-  <div class="rounded-lg border border-border bg-card p-4 space-y-2">
+  <div class="rounded-lg border border-border bg-card p-4 space-y-2" data-testid="kb-record">
     <div class="flex items-center gap-2 flex-wrap">
       <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
         <component :is="icon" class="w-3.5 h-3.5" /> {{ label }}

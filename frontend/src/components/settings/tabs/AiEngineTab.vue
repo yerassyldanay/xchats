@@ -67,7 +67,7 @@ async function submit() {
         <div>
           <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.defaultProvider') }}</label>
           <Select v-model="form.default_provider">
-            <SelectTrigger class="mt-1.5">
+            <SelectTrigger class="mt-1.5" data-testid="ai-engine-default-provider">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -79,7 +79,12 @@ async function submit() {
         </div>
         <div>
           <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.defaultModel') }}</label>
-          <Input v-model="form.default_model" :placeholder="t('settings.aiEngine.defaultModelHint')" class="mt-1.5 font-mono" />
+          <Input
+            v-model="form.default_model"
+            :placeholder="t('settings.aiEngine.defaultModelHint')"
+            class="mt-1.5 font-mono"
+            data-testid="ai-engine-default-model"
+          />
         </div>
         <div class="sm:col-span-2">
           <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.visionModel') }}</label>
@@ -106,7 +111,7 @@ async function submit() {
 
       <p v-if="error" class="text-sm text-destructive">{{ error }}</p>
       <div class="flex items-center gap-2">
-        <Button :disabled="busy" @click="submit">
+        <Button :disabled="busy" data-testid="ai-engine-save" @click="submit">
           <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
           {{ busy ? t('settings.common.saving') : t('settings.common.save') }}
         </Button>
