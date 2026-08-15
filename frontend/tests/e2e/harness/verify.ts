@@ -101,8 +101,38 @@ export async function loadDraftChanges(page: Page): Promise<DraftChangeSet> {
   return apiGet<DraftChangeSet>(page, '/playground/draft')
 }
 
+// Topics are keyed by `slug`, every other kind by `ref` — both are the same
+// "natural key" the import synthesizer reports back as AppliedUpsert.Key.
 function refOf(row: Record<string, unknown>): string {
-  return String(row.ref ?? row.id ?? '')
+  return String(row.ref ?? row.slug ?? row.id ?? '')
+}
+
+// --- live KB (published ai_* rows) ---------------------------------------
+
+// LiveKb is GET /kb's payload — kbstore.LiveView, the same field names
+// DraftChangeSet uses (note `zones`, not `delivery_zones`), so DRAFT_FIELD
+// maps both.
+export type LiveKb = Record<string, unknown> & {
+  config: Record<string, unknown>
+}
+
+export async function loadLiveKb(page: Page): Promise<LiveKb> {
+  return apiGet<LiveKb>(page, '/kb')
+}
+
+// liveRefs returns every natural key the PUBLISHED KB already holds for one
+// kind. This — not AppliedUpsert.Created — is what Черновик derives a staged
+// card's badge from: composables/draftChanges.ts classifies an entry as
+// 'added' (→ "Новый") when it has no live counterpart and 'updated' (→
+// "Изменён") when it does. Created answers a different question, "was this
+// key absent from live ∪ DRAFT", so it reports false for a row a previous,
+// still-unpublished run already staged — which the UI nonetheless shows as
+// "Новый" because live has never seen it.
+export async function liveRefs(page: Page, entityType: string): Promise<Set<string>> {
+  const live = await loadLiveKb(page)
+  const field = DRAFT_FIELD[entityType] ?? entityType
+  const rows = (live[field] as Array<Record<string, unknown>>) ?? []
+  return new Set(rows.map(refOf).filter(Boolean))
 }
 
 export async function verifyDraftContains(page: Page, entityType: string, ref: string): Promise<Record<string, unknown>> {

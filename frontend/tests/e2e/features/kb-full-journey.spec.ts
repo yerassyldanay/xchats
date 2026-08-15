@@ -24,6 +24,7 @@ import {
   verifyDraftContains,
   verifyDraftEmpty,
   verifyDraftExcludes,
+  liveRefs,
   verifyImportRunTerminal,
   verifyNoBackendErrors,
   verifyPromptContains,
@@ -65,6 +66,21 @@ interface EntityInfo {
   ref: string
   name: string
   hasImage: boolean
+  // existsLive: did the PUBLISHED KB already hold this natural key when the
+  // import staged it? Not cosmetic — re-running this journey against an org
+  // that still holds a previous run's published rows legitimately re-imports
+  // the same refs, and the draft stages those as edits ("Изменён", with a
+  // FieldDiffNote "Было: …") rather than additions ("Новый"); a product that
+  // was already live also SURVIVES the cancelled draft edit in Phase 4
+  // instead of disappearing. Phase 3's badge assertion and Phase 4's deletion
+  // target both depend on knowing which.
+  //
+  // Deliberately NOT AppliedUpsert.Created: that flag answers "was this key
+  // absent from live ∪ draft", so it reads false for a row an earlier,
+  // still-unpublished run already staged — which Черновик nonetheless badges
+  // "Новый", since live has never seen it. The UI classifies on live presence
+  // alone (composables/draftChanges.ts), so this mirrors that exactly.
+  existsLive: boolean
 }
 
 interface ConfigSnapshot {
@@ -289,6 +305,12 @@ async function resolveImportOrSkip(testInfo: TestInfo, label: string, runId: str
   }
 
   const applied = run.synthesis?.applied ?? []
+  // Snapshot live presence ONCE per kind, before anything is published — this
+  // is what decides each staged card's badge (see EntityInfo.existsLive).
+  const liveByKind = new Map<EntityInfo['kind'], Set<string>>()
+  for (const kind of ['products', 'tariffs', 'topics'] as const) {
+    liveByKind.set(kind, await liveRefs(page, kind))
+  }
   let added = 0
   for (const a of applied) {
     const kind = SYNTH_TYPE_TO_KIND[a.type]
@@ -296,7 +318,7 @@ async function resolveImportOrSkip(testInfo: TestInfo, label: string, runId: str
     const row = await verifyDraftContains(page, kind, a.key)
     const name = String(row.name ?? row.title ?? a.key)
     const hasImage = !!row.featured_image
-    state.entities.push({ kind, ref: a.key, name, hasImage })
+    state.entities.push({ kind, ref: a.key, name, hasImage, existsLive: liveByKind.get(kind)!.has(a.key) })
     added++
   }
   if (!added) {
@@ -460,7 +482,7 @@ test('7. Playground → Файлы: import example.pdf via LlamaParse', async ({
 // Phase 3 — review the draft
 // =====================================================================
 
-test('8. Черновик: review each entity tab — Новый badge, populated fields', async ({}, testInfo) => {
+test('8. Черновик: review each entity tab — staged-state badge, populated fields', async ({}, testInfo) => {
   test.skip(!state.entities.length, 'no imports produced any entities — nothing to review')
   await step(testInfo, page, '8. Open Черновик for review', async () => {
     await page.goto('/playground')
@@ -473,7 +495,14 @@ test('8. Черновик: review each entity tab — Новый badge, populate
       for (const e of entities) {
         const card = page.locator(`[data-testid="draft-tab-${kind}"] [data-testid="kb-record"]`).filter({ hasText: e.name })
         await expect(card).toBeVisible()
-        await expect(card.getByText('Новый', { exact: true })).toBeVisible()
+        // "Новый" only when live had never seen this ref. Re-running the
+        // journey against an org that still holds a previous run's published
+        // records legitimately re-imports the same natural refs, and the draft
+        // stages those as edits — "Изменён", with a FieldDiffNote "Было: …" —
+        // not additions. Asserting "Новый" unconditionally makes the whole spec
+        // pass only ever on a virgin database.
+        const wantBadge = e.existsLive ? 'Изменён' : 'Новый'
+        await expect(card.getByText(wantBadge, { exact: true })).toBeVisible()
       }
     })
   }
@@ -499,8 +528,15 @@ test('9. Черновик: card counts on screen match GET /playground/draft', a
 // =====================================================================
 
 test('10. Черновик: locate one imported product card (deletion UX — identification)', async ({}, testInfo) => {
-  test.skip(!entitiesOf('products').length, 'no products were successfully imported — Phase 4 has nothing to delete')
-  const target = entitiesOf('products')[0]
+  // Must be a product this run CREATED, not one it merely re-imported over an
+  // already-live record: Phase 4 removes it by cancelling the staged change,
+  // which for an edit leaves the original row live and untouched. Step 20
+  // then asserts the "deleted" product is absent from Знаний база — true only
+  // if it never existed live to begin with. Picking entities[0] blindly makes
+  // Phase 4+6 pass on a virgin database and fail on every re-run.
+  const fresh = entitiesOf('products').filter((e) => !e.existsLive)
+  test.skip(!fresh.length, 'every imported product already existed live — Phase 4 needs one whose removal is actually observable')
+  const target = fresh[0]
   state.productToDelete = target.ref
   state.productToDeleteName = target.name
   const row = await verifyDraftContains(page, 'products', target.ref)
