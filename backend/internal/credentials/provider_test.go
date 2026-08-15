@@ -186,8 +186,8 @@ func TestValidateOpenRouterSendsBearerAuth(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-		if r.URL.Path != "/key" {
-			t.Errorf("path = %q, want %q", r.URL.Path, "/key")
+		if r.URL.Path != "/auth/key" {
+			t.Errorf("path = %q, want %q", r.URL.Path, "/auth/key")
 		}
 		w.WriteHeader(http.StatusOK)
 	}))

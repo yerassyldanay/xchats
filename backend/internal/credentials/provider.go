@@ -215,7 +215,7 @@ func baseURLFor(values map[Key]string, id, def string) string {
 
 func validateOpenRouter(ctx context.Context, values map[Key]string) error {
 	base := baseURLFor(values, "openrouter", "https://openrouter.ai/api/v1")
-	resp, err := doGet(ctx, base+"/key", func(r *http.Request) {
+	resp, err := doGet(ctx, base+"/auth/key", func(r *http.Request) {
 		r.Header.Set("Authorization", "Bearer "+values["openrouter.api_key"])
 	})
 	if err != nil {
