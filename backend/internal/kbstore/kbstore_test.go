@@ -983,3 +983,81 @@ func TestDeleteLiveSingletons(t *testing.T) {
 		t.Fatalf("audit delete rows = %d, want 4 (three deletes plus the idempotent repeat)", deletes)
 	}
 }
+
+// TestApproveVersioned_WholeDraftClearsEveryEntry is the slice-aliasing
+// regression: selectApproved's whole-draft branch handed ApproveVersioned's
+// clear loop slice headers that ALIASED the blob's own backing arrays
+// (`products: b.Products` — a by-value DraftBlob copies slice headers, not the
+// arrays behind them), while removeProduct/removeTopic/removeTariff compact
+// IN PLACE via `out := b.Products[:0]`. Iterating set.products while
+// b.Products was being rewritten underneath made the loop read shifted data
+// and skip every other entry: 4 staged left 1 behind, 7 left 3, 12 left 5.
+//
+// User-visible effect: "Опубликовать всё" published every record to live but
+// never emptied Черновик, so the pending counter never reached zero and a
+// stale phantom entry could later republish over a newer live edit.
+//
+// The bug is INVISIBLE at n<=2 (nothing is left behind), which is why every
+// other approve test in this package passed against the broken code — none of
+// them stages more than one row of a single kind before a successful
+// whole-draft approve. Hence 5 of each kind here, covering all three of the
+// slice loops that iterate an aliased set.
+func TestApproveVersioned_WholeDraftClearsEveryEntry(t *testing.T) {
+	kb, orgID, _, db := newTestKB(t)
+	ctx := context.Background()
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		suffix := string(rune('a' + i))
+		if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "product-"+suffix, kbstore.ProductChanges{
+			Name: strp("Товар " + suffix), InStock: boolp(true),
+		}, nil, kbstore.MCPProvenance{}); err != nil {
+			t.Fatalf("stage product %d: %v", i, err)
+		}
+		if _, err := kb.MCPUpsertTopic(ctx, orgID, uuid.Nil, "topic-"+suffix, kbstore.TopicChanges{
+			Title: strp("Тема " + suffix), BodyMD: strp("Обычный текст без токенов и без сумм."),
+		}, nil, kbstore.MCPProvenance{}); err != nil {
+			t.Fatalf("stage topic %d: %v", i, err)
+		}
+		if _, err := kb.MCPUpsertTariff(ctx, orgID, uuid.Nil, "tariff-"+suffix, kbstore.TariffChanges{
+			Name: strp("Тариф " + suffix), PricingType: strp("fixed"),
+		}, nil, kbstore.MCPProvenance{}); err != nil {
+			t.Fatalf("stage tariff %d: %v", i, err)
+		}
+	}
+
+	if err := kb.ApproveVersioned(ctx, orgID, kbstore.ApproveSelector{}, nil, uuid.Nil); err != nil {
+		t.Fatalf("approve whole draft: %v", err)
+	}
+
+	// Half one: the draft must be EMPTY. This is what failed before the fix.
+	changes, err := kb.DraftChanges(ctx, orgID)
+	if err != nil {
+		t.Fatalf("draft changes: %v", err)
+	}
+	if got := len(changes.Products); got != 0 {
+		t.Fatalf("draft still holds %d product(s) after a whole-draft approve, want 0 (aliasing regression)", got)
+	}
+	if got := len(changes.Topics); got != 0 {
+		t.Fatalf("draft still holds %d topic(s) after a whole-draft approve, want 0 (aliasing regression)", got)
+	}
+	if got := len(changes.Tariffs); got != 0 {
+		t.Fatalf("draft still holds %d tariff(s) after a whole-draft approve, want 0 (aliasing regression)", got)
+	}
+
+	// Half two: everything actually reached live — so a fix that empties the
+	// draft without publishing cannot pass this test either.
+	for _, tc := range []struct{ table, label string }{
+		{"ai_products", "product"},
+		{"ai_topics", "topic"},
+		{"ai_tariffs", "tariff"},
+	} {
+		var live int
+		if err := db.QueryRow(ctx, `SELECT count(*) FROM `+tc.table+` WHERE organization_id = $1`, orgID).Scan(&live); err != nil {
+			t.Fatalf("count %s: %v", tc.table, err)
+		}
+		if live != n {
+			t.Fatalf("%s has %d live row(s) after approving %d staged %s(s), want %d", tc.table, live, n, tc.label, n)
+		}
+	}
+}
