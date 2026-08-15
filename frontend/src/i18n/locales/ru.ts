@@ -140,7 +140,7 @@ export default {
     pricingType: { fixed: 'Фиксированная', percentage: 'Процент', tiered: 'Пороговая' },
     zoneLevel: { city: 'Город', region: 'Регион', country: 'Страна' },
     state: { published: 'Опубликовано', new: 'Новый', changed: 'Изменён', to_delete: 'На удаление' },
-    actions: { edit: 'Изменить', publish: 'Опубликовать', cancel: 'Отменить изменение', delete: 'Удалить' },
+    actions: { edit: 'Изменить', publish: 'Опубликовать', cancel: 'Отменить изменение', removeFromDraft: 'Удалить из черновика', delete: 'Удалить' },
     config: {
       persona: { title: 'Персона', hint: 'Кто ассистент и как он общается с клиентом.' },
       mission: { title: 'Миссия', hint: 'Главная цель ассистента в каждом диалоге.' },
@@ -165,6 +165,24 @@ export default {
       emptyBody: 'Перейдите в Базу знаний, чтобы добавить или изменить информацию.',
       emptyLink: 'Перейти в Базу знаний',
       gateBlocked: 'Это изменение нельзя опубликовать: в получившейся базе знаний есть конфликты проверки.',
+      cancelConfirm: {
+        titleAdded: 'Удалить из черновика?',
+        titleUpdated: 'Отменить изменение?',
+        titleBulk: 'Отменить выбранные изменения?',
+        bodyAdded: 'Эта запись есть только в черновике — она будет удалена безвозвратно. Чтобы вернуть её, потребуется импортировать или создать её заново.',
+        bodyUpdated: 'Правка будет отменена, а запись вернётся к опубликованному значению. Опубликованные данные не изменятся.',
+        bodyRemoved: 'Отметка на удаление будет снята — запись останется в базе знаний.',
+        bodyBulk: 'Выбранные изменения ({count}) будут отменены. Новые записи удалятся безвозвратно, правки вернутся к опубликованным значениям.',
+        accept: 'Отменить изменение',
+      },
+      selection: {
+        selected: 'Выбрано: {count}',
+        selectAll: 'Выбрать все на вкладке',
+        deselectAll: 'Снять выбор на вкладке',
+        clear: 'Снять выделение',
+        cancelSelected: 'Отменить выбранные',
+        selectRecord: 'Выбрать запись',
+      },
       cardBlockedNote: 'Публикация заблокирована другим конфликтом в Черновике — см. сообщение выше.',
     },
     banner: {
@@ -462,6 +480,23 @@ export default {
       teamBody: 'Пригласите участника команды сейчас или позже — в Настройках → Команда.',
       invited: 'Приглашение отправлено.',
     },
+  },
+  // simulator.* — /simulator, a minimal chat UI over POST
+  // /simulator/messages (backend/internal/httpapi/simulator.go, gated by
+  // SIMULATOR_ENABLED). Not part of kb.*: it's its own page, not a Черновик/
+  // Знаний база surface.
+  simulator: {
+    navLabel: 'Симулятор',
+    pageTitle: 'Симулятор',
+    pageSubtitle: 'Проверьте ответы ассистента на вопросы клиента — без реального канала связи.',
+    inputPlaceholder: 'Введите вопрос клиента…',
+    send: 'Отправить',
+    you: 'Вы',
+    assistant: 'Ассистент',
+    empty: 'Задайте вопрос, чтобы проверить ответ ассистента.',
+    thinking: 'Ассистент печатает…',
+    escalated: 'Передано менеджеру',
+    unavailable: 'Симулятор недоступен на этом сервере. Проверьте, что SIMULATOR_ENABLED включён в конфигурации бэкенда.',
   },
   // Channel-level debounce + scheduled auto-reply (Accounts.vue's
   // Automation button/badge/dialog).

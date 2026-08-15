@@ -43,8 +43,8 @@ const active = ref<IngestTabKey>('urls')
   <div class="space-y-4">
     <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k as IngestTabKey)" />
 
-    <div v-show="active === 'urls'"><KbImportCard kind="url" /></div>
-    <div v-show="active === 'files'"><KbImportCard kind="file" /></div>
+    <div v-show="active === 'urls'" data-testid="kb-import-tab-urls"><KbImportCard kind="url" /></div>
+    <div v-show="active === 'files'" data-testid="kb-import-tab-files"><KbImportCard kind="file" /></div>
     <div v-show="active === 'mcp'"><McpConnectCard /></div>
 
     <KbImportRunStatus v-if="kbi.current" :run="kbi.current" />

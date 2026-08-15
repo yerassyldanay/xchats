@@ -7,14 +7,16 @@
 // sole MANUAL authoring surface — no Add buttons or record-create forms
 // live here, only what a model proposed gets edited in place, published,
 // or cancelled from this page.
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CircleAlert, LoaderCircle, Save, WandSparkles } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
 import { useDraftChanges } from '@/composables/useDraftChanges'
 import { useEntityTabs } from '@/composables/useEntityTabs'
 import { useKbModal } from '@/composables/useKbModal'
-import type { ChangeEntry } from '@/composables/draftChanges'
+import { useDraftSelection, type SelectionTarget } from '@/composables/useDraftSelection'
+import { useCancelConfirm } from '@/composables/useCancelConfirm'
+import type { ChangeEntry, ChangeKind } from '@/composables/draftChanges'
 import type { ContactRow, DeliveryZoneRow, PolicyRow } from '@/types'
 import { Button } from '@/components/ui/button'
 import EntityTabs from './EntityTabs.vue'
@@ -28,18 +30,57 @@ import ContactsRecord from './records/ContactsRecord.vue'
 import PoliciesRecord from './records/PoliciesRecord.vue'
 import { kbActions } from './records/actions'
 import KbModalForms from './forms/KbModalForms.vue'
+import ConfirmDeleteDialog from './forms/ConfirmDeleteDialog.vue'
 
 const pg = usePlayground()
 const { t } = useI18n()
 const { loading, counts, entriesFor, isEmpty } = useDraftChanges()
 const { tabs, active } = useEntityTabs({ source: 'draft' })
 const modal = useKbModal()
+const selection = useDraftSelection()
+const cancelConfirm = useCancelConfirm()
 
 onMounted(async () => {
   await Promise.all([pg.load(), pg.loadLive()])
   pg.startRealtime()
 })
-onBeforeUnmount(() => pg.stopRealtime())
+onBeforeUnmount(() => {
+  pg.stopRealtime()
+  // The selection is a module-level singleton (so a card deep in ChangeList
+  // and the bulk bar up here share it), which means it would otherwise
+  // outlive this page and reappear on the next visit.
+  selection.clear()
+})
+
+// --- multi-select -------------------------------------------------------
+
+// Every selectable entry currently in the draft, across all kinds — the
+// bulk bar deliberately spans tabs (rejecting three products and a tariff
+// is one review decision, not two). Singletons (contacts/policies) are
+// excluded: they render exactly one card on a tab of their own, so a
+// checkbox there is noise, and config has its own «Отменить все изменения
+// ассистента» already.
+const SELECTABLE_KINDS: ChangeKind[] = ['topics', 'products', 'tariffs', 'delivery_zones']
+const selectableTargets = computed<SelectionTarget[]>(() =>
+  SELECTABLE_KINDS.flatMap((kind) => entriesFor(kind).map((e) => ({ kind, key: e.key })))
+)
+// Only the entries on the tab currently being looked at — what «Выбрать
+// все» acts on, so it never silently ticks cards the operator can't see.
+const visibleTargets = computed<SelectionTarget[]>(() =>
+  SELECTABLE_KINDS.includes(active.value as ChangeKind)
+    ? entriesFor(active.value as ChangeKind).map((e) => ({ kind: active.value as ChangeKind, key: e.key }))
+    : []
+)
+const allVisibleSelected = computed(() => selection.allSelected(visibleTargets.value))
+
+function toggleSelectAll() {
+  selection.setMany(visibleTargets.value, !allVisibleSelected.value)
+}
+
+// Drop selected keys the backend no longer has. pg.changes is replaced
+// wholesale on every publish/cancel/SSE refresh, so this is the one place
+// that keeps the bulk bar's count honest.
+watch(selectableTargets, (live) => selection.prune(live))
 
 async function publishAll() {
   await pg.approve()
@@ -82,6 +123,38 @@ function contactRowOf(entry: ChangeEntry) {
 function policyRowOf(entry: ChangeEntry) {
   return (entry.type === 'removed' ? entry.liveRow : entry.draftRow) as PolicyRow | undefined
 }
+
+// --- cancel confirmation copy -------------------------------------------
+
+// The dialog says what THIS cancel actually does, because that is entirely
+// determined by the card's state: an `added` entry is destroyed (nothing to
+// revert to), an `updated` one goes back to the published value, and a
+// `removed` one is KEPT. A bulk request spans states, so it falls back to a
+// plain count.
+const confirmTitleKey = computed(() => {
+  const req = cancelConfirm.pending.value
+  if (!req) return 'kb.draft.cancelConfirm.titleUpdated'
+  if (req.targets.length > 1) return 'kb.draft.cancelConfirm.titleBulk'
+  return req.changeType === 'added' ? 'kb.draft.cancelConfirm.titleAdded' : 'kb.draft.cancelConfirm.titleUpdated'
+})
+const confirmBodyKey = computed(() => {
+  const req = cancelConfirm.pending.value
+  if (!req) return 'kb.draft.cancelConfirm.bodyUpdated'
+  if (req.targets.length > 1) return 'kb.draft.cancelConfirm.bodyBulk'
+  if (req.changeType === 'added') return 'kb.draft.cancelConfirm.bodyAdded'
+  if (req.changeType === 'removed') return 'kb.draft.cancelConfirm.bodyRemoved'
+  return 'kb.draft.cancelConfirm.bodyUpdated'
+})
+const confirmBodyParams = computed(() => {
+  const req = cancelConfirm.pending.value
+  return req && req.targets.length > 1 ? { count: req.targets.length } : undefined
+})
+const confirmAcceptKey = computed(() => {
+  const req = cancelConfirm.pending.value
+  return req && req.targets.length === 1 && req.changeType === 'added'
+    ? 'kb.actions.removeFromDraft'
+    : 'kb.draft.cancelConfirm.accept'
+})
 </script>
 
 <template>
@@ -92,8 +165,8 @@ function policyRowOf(entry: ChangeEntry) {
         <p class="text-sm text-muted-foreground">{{ t('kb.draft.pageSubtitle') }}</p>
       </div>
       <div v-if="!isEmpty" class="flex items-center gap-2 shrink-0">
-        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" @click="discardAll">{{ t('kb.draft.discardAll') }}</Button>
-        <Button size="sm" :disabled="pg.busy || pg.approving" @click="publishAll">
+        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" data-testid="discard-all" @click="discardAll">{{ t('kb.draft.discardAll') }}</Button>
+        <Button size="sm" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="publishAll">
           <LoaderCircle v-if="pg.approving && !pg.publishingKey" class="w-4 h-4 animate-spin" />
           <Save v-else class="w-4 h-4" />
           {{ t('kb.draft.publishAll') }}<span v-if="counts.total"> · {{ counts.total }}</span>
@@ -131,17 +204,45 @@ function policyRowOf(entry: ChangeEntry) {
         <template v-else>
           <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k)" />
 
-          <div v-show="active === 'config'" class="space-y-3 max-w-3xl">
+          <!-- Bulk bar: only once something is ticked, so the default review
+               view stays exactly as it was. Counts across tabs on purpose. -->
+          <div
+            v-if="!selection.isEmpty.value"
+            class="flex items-center gap-3 flex-wrap rounded-lg border border-primary/40 bg-primary/5 px-4 py-2.5"
+            data-testid="draft-bulk-bar"
+          >
+            <span class="text-sm font-medium">{{ t('kb.draft.selection.selected', { count: selection.count.value }) }}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="text-destructive"
+              :disabled="pg.busy || pg.approving"
+              data-testid="bulk-cancel"
+              @click="cancelConfirm.requestSelected()"
+            >
+              {{ t('kb.draft.selection.cancelSelected') }}
+            </Button>
+            <Button variant="ghost" size="sm" class="ml-auto" data-testid="bulk-clear" @click="selection.clear()">
+              {{ t('kb.draft.selection.clear') }}
+            </Button>
+          </div>
+          <div v-if="visibleTargets.length" class="flex">
+            <Button variant="ghost" size="sm" data-testid="bulk-select-all" @click="toggleSelectAll">
+              {{ allVisibleSelected ? t('kb.draft.selection.deselectAll') : t('kb.draft.selection.selectAll') }}
+            </Button>
+          </div>
+
+          <div v-show="active === 'config'" class="space-y-3 max-w-3xl" data-testid="draft-tab-config">
             <ConfigChangeGroup />
           </div>
 
-          <div v-show="active === 'topics'" class="space-y-3">
+          <div v-show="active === 'topics'" class="space-y-3" data-testid="draft-tab-topics">
             <ChangeList kind="topics" />
           </div>
-          <div v-show="active === 'products'" class="space-y-3">
+          <div v-show="active === 'products'" class="space-y-3" data-testid="draft-tab-products">
             <ChangeList kind="products" />
           </div>
-          <div v-show="active === 'tariffs'" class="space-y-3">
+          <div v-show="active === 'tariffs'" class="space-y-3" data-testid="draft-tab-tariffs">
             <ChangeList kind="tariffs" />
           </div>
 
@@ -156,9 +257,12 @@ function policyRowOf(entry: ChangeEntry) {
               :actions="kbActions({ page: 'draft', changeType: entry.type })"
               :busy="isBusy('delivery_zones', entry.key)"
               :blocked-note="blockedNote('delivery_zones', entry.key)"
+              selectable
+              :selected="selection.isSelected('delivery_zones', entry.key)"
               @edit="editEntry('delivery_zones', entry)"
               @publish="pg.approveEntity('delivery_zones', entry.key)"
-              @cancel="pg.cancelChange('delivery_zones', entry.key)"
+              @cancel="cancelConfirm.requestOne('delivery_zones', entry.key, entry.type)"
+              @toggle-select="selection.toggle('delivery_zones', entry.key)"
             />
           </div>
 
@@ -173,7 +277,7 @@ function policyRowOf(entry: ChangeEntry) {
               :blocked-note="blockedNote('contacts', contactEntry.key)"
               @edit="editEntry('contacts', contactEntry)"
               @publish="pg.approveEntity('contacts', contactEntry.key)"
-              @cancel="pg.cancelChange('contacts', contactEntry.key)"
+              @cancel="cancelConfirm.requestOne('contacts', contactEntry.key, contactEntry.type)"
             />
           </div>
 
@@ -189,7 +293,7 @@ function policyRowOf(entry: ChangeEntry) {
               :blocked-note="blockedNote('policies', policyEntry.key)"
               @edit="editEntry('policies', policyEntry)"
               @publish="pg.approveEntity('policies', policyEntry.key)"
-              @cancel="pg.cancelChange('policies', policyEntry.key)"
+              @cancel="cancelConfirm.requestOne('policies', policyEntry.key, policyEntry.type)"
             />
           </div>
         </template>
@@ -204,5 +308,16 @@ function policyRowOf(entry: ChangeEntry) {
     </div>
 
     <KbModalForms />
+
+    <ConfirmDeleteDialog
+      :open="cancelConfirm.isOpen.value"
+      :busy="cancelConfirm.busy.value"
+      :title-key="confirmTitleKey"
+      :body-key="confirmBodyKey"
+      :body-params="confirmBodyParams"
+      :confirm-key="confirmAcceptKey"
+      @update:open="(v) => !v && cancelConfirm.close()"
+      @confirm="cancelConfirm.confirm()"
+    />
   </div>
 </template>

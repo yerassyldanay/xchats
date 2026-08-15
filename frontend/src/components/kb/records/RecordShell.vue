@@ -33,11 +33,25 @@ withDefaults(
     busyKey?: KbActionKey // which action's spinner shows while busy — omit to just disable the row
     blockedNote?: string // §2.7: a neutral pointer to a page-level gate failure — never "this record is invalid"
     updatedAt?: string // row.updated_at — the one DB column every *Record.vue didn't already surface somewhere in its own field body
+    // selectable/selected drive Черновик's multi-select checkbox. Opt-in per
+    // caller: Знаний база's published rows render the exact same shell and
+    // have nothing to bulk-cancel, so they simply don't pass it.
+    selectable?: boolean
+    selected?: boolean
   }>(),
-  { busy: false, recordKey: undefined, pendingMark: undefined, busyKey: undefined, blockedNote: undefined, updatedAt: undefined }
+  {
+    busy: false,
+    recordKey: undefined,
+    pendingMark: undefined,
+    busyKey: undefined,
+    blockedNote: undefined,
+    updatedAt: undefined,
+    selectable: false,
+    selected: false,
+  }
 )
 
-const emit = defineEmits<{ edit: []; publish: []; cancel: []; delete: [] }>()
+const emit = defineEmits<{ edit: []; publish: []; cancel: []; delete: []; 'toggle-select': [] }>()
 const { t } = useI18n()
 
 function fire(key: KbActionKey) {
@@ -59,8 +73,22 @@ function fire(key: KbActionKey) {
 </script>
 
 <template>
-  <div class="rounded-lg border border-border bg-card p-4 space-y-2">
+  <div
+    class="rounded-lg border bg-card p-4 space-y-2 transition"
+    :class="selectable && selected ? 'border-primary ring-1 ring-primary/30' : 'border-border'"
+    data-testid="kb-record"
+  >
     <div class="flex items-center gap-2 flex-wrap">
+      <input
+        v-if="selectable"
+        type="checkbox"
+        class="w-3.5 h-3.5 shrink-0 accent-primary cursor-pointer"
+        :checked="selected"
+        :disabled="busy"
+        :aria-label="t('kb.draft.selection.selectRecord')"
+        data-testid="kb-record-select"
+        @change="emit('toggle-select')"
+      />
       <span class="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
         <component :is="icon" class="w-3.5 h-3.5" /> {{ label }}
       </span>

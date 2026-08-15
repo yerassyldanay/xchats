@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePlayground } from '@/stores/playground'
+import { useCancelConfirm } from '@/composables/useCancelConfirm'
 import { mountKb, testPinia } from '@/test/mount'
 import ConfigChangeGroup from './ConfigChangeGroup.vue'
 import AssistantFieldRecord from './records/AssistantFieldRecord.vue'
@@ -33,6 +34,11 @@ function seed(configPatch: DraftChangeSet['config']) {
 describe('ConfigChangeGroup', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // useCancelConfirm's request is a module-level singleton (one dialog per
+    // page), so a pending request from a previous test would leak into the
+    // next one's assertion.
+    testPinia()
+    useCancelConfirm().close()
   })
 
   it('renders nothing when config has no pending change', () => {
@@ -54,7 +60,11 @@ describe('ConfigChangeGroup', () => {
     expect(wrapper.findAllComponents(AssistantFieldRecord)).toHaveLength(2)
   })
 
-  it('cancelling one field calls cancelChange for just that field, leaving the others staged', async () => {
+  // Cancel is confirmed rather than immediate now (useCancelConfirm), so
+  // what this component is responsible for is REQUESTING the right target
+  // and touching nothing until the operator agrees. The dialog itself lives
+  // on the page (DraftKnowledgeBase), not here.
+  it('cancelling one field requests confirmation for just that field, without touching the store', async () => {
     const { pinia, pg } = seed({ persona: 'Новая персона', mission: 'Новая миссия' })
     const cancelSpy = vi.spyOn(pg, 'cancelChange').mockResolvedValue(true)
     const wrapper = mountKb(ConfigChangeGroup, { pinia })
@@ -62,8 +72,8 @@ describe('ConfigChangeGroup', () => {
     const cards = wrapper.findAllComponents(AssistantFieldRecord)
     await cards[0].vm.$emit('cancel')
 
-    expect(cancelSpy).toHaveBeenCalledWith('config', cards[0].props('section').key)
-    expect(cancelSpy).not.toHaveBeenCalledWith('config', cards[1].props('section').key)
+    expect(cancelSpy).not.toHaveBeenCalled()
+    expect(useCancelConfirm().pending.value?.targets).toEqual([{ kind: 'config', key: cards[0].props('section').key }])
   })
 
   it('the group publish button calls approveEntity(config, main)', async () => {
@@ -78,7 +88,7 @@ describe('ConfigChangeGroup', () => {
     expect(approveSpy).toHaveBeenCalledWith('config', 'main')
   })
 
-  it('the cancel-all button calls cancelChange(config, main)', async () => {
+  it('the cancel-all button requests confirmation for config/main, without touching the store', async () => {
     const { pinia, pg } = seed({ persona: 'Новая персона' })
     const cancelSpy = vi.spyOn(pg, 'cancelChange').mockResolvedValue(true)
     const wrapper = mountKb(ConfigChangeGroup, { pinia })
@@ -87,6 +97,7 @@ describe('ConfigChangeGroup', () => {
     expect(cancelAllBtn).toBeTruthy()
     await cancelAllBtn!.trigger('click')
 
-    expect(cancelSpy).toHaveBeenCalledWith('config', 'main')
+    expect(cancelSpy).not.toHaveBeenCalled()
+    expect(useCancelConfirm().pending.value?.targets).toEqual([{ kind: 'config', key: 'main' }])
   })
 })

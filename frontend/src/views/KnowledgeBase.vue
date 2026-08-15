@@ -142,7 +142,7 @@ watch(active, (a) => {
       </div>
 
       <!-- Обзор: 5 read cards, each with its own Edit -->
-      <div v-show="active === 'config'" class="space-y-3">
+      <div v-show="active === 'config'" class="space-y-3" data-testid="live-tab-config">
         <AssistantFieldRecord
           v-for="section in CONFIG_SECTIONS"
           :key="section.key"
@@ -154,22 +154,22 @@ watch(active, (a) => {
         />
       </div>
 
-      <div v-show="active === 'topics'" class="space-y-3">
+      <div v-show="active === 'topics'" class="space-y-3" data-testid="live-tab-topics">
         <p v-if="!pg.live?.topics.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.emptyTopics') }}</p>
         <RecordList kind="topics" @delete="(key) => askDelete('topics', key)" />
       </div>
 
-      <div v-show="active === 'products'" class="space-y-3">
+      <div v-show="active === 'products'" class="space-y-3" data-testid="live-tab-products">
         <p v-if="!pg.live?.products.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.emptyProducts') }}</p>
         <RecordList kind="products" @delete="(key) => askDelete('products', key)" />
       </div>
 
-      <div v-show="active === 'tariffs'" class="space-y-3">
+      <div v-show="active === 'tariffs'" class="space-y-3" data-testid="live-tab-tariffs">
         <p v-if="!pg.live?.tariffs.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.emptyTariffs') }}</p>
         <RecordList kind="tariffs" @delete="(key) => askDelete('tariffs', key)" />
       </div>
 
-      <div v-show="active === 'delivery_zones'" class="space-y-3">
+      <div v-show="active === 'delivery_zones'" class="space-y-3" data-testid="live-tab-delivery_zones">
         <p v-if="!pg.live?.zones.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.emptyZones') }}</p>
         <DeliveryZoneRecord
           v-for="z in pg.live?.zones"

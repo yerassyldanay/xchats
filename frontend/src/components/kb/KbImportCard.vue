@@ -128,19 +128,26 @@ async function submit() {
     >
       <Upload class="w-6 h-6 mx-auto text-muted-foreground" />
       <p class="mt-2 text-sm text-muted-foreground">{{ t('kb.import.dropHint') }}</p>
-      <Button variant="outline" size="sm" class="mt-3" @click="fileInput?.click()">{{ t('kb.import.browseButton') }}</Button>
-      <input ref="fileInput" type="file" multiple class="hidden" @change="onFilePick" />
+      <Button variant="outline" size="sm" class="mt-3" data-testid="kb-import-browse" @click="fileInput?.click()">{{ t('kb.import.browseButton') }}</Button>
+      <input ref="fileInput" type="file" multiple class="hidden" data-testid="kb-import-file-input" @change="onFilePick" />
     </div>
 
     <div v-else class="flex items-start gap-2">
       <div class="flex-1">
         <div class="relative">
           <LinkIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input v-model="urlInput" type="url" :placeholder="t('kb.import.urlPlaceholder')" class="pl-8" @keydown.enter.prevent="addUrl" />
+          <Input
+            v-model="urlInput"
+            type="url"
+            :placeholder="t('kb.import.urlPlaceholder')"
+            class="pl-8"
+            data-testid="kb-import-url-input"
+            @keydown.enter.prevent="addUrl"
+          />
         </div>
         <p v-if="urlError" class="mt-1 text-xs text-destructive">{{ urlError }}</p>
       </div>
-      <Button variant="outline" size="sm" @click="addUrl">{{ t('kb.import.addUrl') }}</Button>
+      <Button variant="outline" size="sm" data-testid="kb-import-add-url" @click="addUrl">{{ t('kb.import.addUrl') }}</Button>
     </div>
 
     <div v-if="hasPending" class="flex flex-wrap gap-2">
@@ -170,7 +177,7 @@ async function submit() {
       <div>
         <label class="text-xs font-medium text-muted-foreground">{{ t('kb.import.provider') }}</label>
         <Select v-model="provider">
-          <SelectTrigger class="mt-1.5">
+          <SelectTrigger class="mt-1.5" data-testid="kb-import-provider">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -194,7 +201,7 @@ async function submit() {
       <div>
         <label class="text-xs font-medium text-muted-foreground">{{ t('kb.import.targetType') }}</label>
         <Select v-model="targetType">
-          <SelectTrigger class="mt-1.5">
+          <SelectTrigger class="mt-1.5" data-testid="kb-import-target-type">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -213,12 +220,13 @@ async function submit() {
           maxlength="2000"
           :placeholder="t('kb.import.guidancePlaceholder')"
           class="min-h-0 text-[14px] mt-1.5"
+          data-testid="kb-import-guidance"
         />
       </div>
     </div>
 
     <div class="flex items-center gap-2">
-      <Button size="sm" :disabled="!canSubmit || kbi.submitting" @click="submit">
+      <Button size="sm" :disabled="!canSubmit || kbi.submitting" data-testid="kb-import-submit" @click="submit">
         <LoaderCircle v-if="kbi.submitting" class="w-4 h-4 animate-spin" /> {{ t('kb.import.submitButton') }}
       </Button>
       <span v-if="kbi.isActive" class="text-xs text-muted-foreground">{{ t('kb.import.activeRunNotice') }}</span>
