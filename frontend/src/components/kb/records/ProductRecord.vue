@@ -20,9 +20,11 @@ const props = defineProps<{
   actions: KbAction[]
   busy?: boolean
   blockedNote?: string
+  selectable?: boolean
+  selected?: boolean
 }>()
 
-defineEmits<{ edit: []; publish: []; cancel: []; delete: [] }>()
+defineEmits<{ edit: []; publish: []; cancel: []; delete: []; 'toggle-select': [] }>()
 const { t } = useI18n()
 
 const state = computed(() => (props.changeType ? stateForChange(props.changeType) : 'published'))
@@ -39,11 +41,14 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['name', 'pr
     :actions="actions"
     :busy="busy"
     :blocked-note="blockedNote"
+    :selectable="selectable"
+    :selected="selected"
     :updated-at="row.updated_at"
     @edit="$emit('edit')"
     @publish="$emit('publish')"
     @cancel="$emit('cancel')"
     @delete="$emit('delete')"
+    @toggle-select="$emit('toggle-select')"
   >
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
       <div>

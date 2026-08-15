@@ -134,7 +134,7 @@ export default {
     pricingType: { fixed: 'Fixed', percentage: 'Percentage', tiered: 'Tiered' },
     zoneLevel: { city: 'City', region: 'Region', country: 'Country' },
     state: { published: 'Published', new: 'New', changed: 'Changed', to_delete: 'To delete' },
-    actions: { edit: 'Edit', publish: 'Publish', cancel: 'Cancel change', delete: 'Delete' },
+    actions: { edit: 'Edit', publish: 'Publish', cancel: 'Cancel change', removeFromDraft: 'Remove from draft', delete: 'Delete' },
     config: {
       persona: { title: 'Persona', hint: 'Who the assistant is and how it talks to a customer.' },
       mission: { title: 'Mission', hint: "The assistant's main goal in every conversation." },
@@ -159,6 +159,24 @@ export default {
       emptyBody: 'Go to Knowledge Base to add or change information.',
       emptyLink: 'Go to Knowledge Base',
       gateBlocked: 'This change cannot be published: the resulting knowledge base has validation conflicts.',
+      cancelConfirm: {
+        titleAdded: 'Remove from draft?',
+        titleUpdated: 'Cancel this change?',
+        titleBulk: 'Cancel the selected changes?',
+        bodyAdded: 'This record exists only in the draft — it will be deleted for good. Getting it back means importing or creating it again.',
+        bodyUpdated: 'The edit will be discarded and the record will go back to its published value. Published data is unaffected.',
+        bodyRemoved: 'The pending removal will be lifted — the record stays in the knowledge base.',
+        bodyBulk: 'The selected changes ({count}) will be cancelled. New records are deleted for good; edits revert to their published values.',
+        accept: 'Cancel change',
+      },
+      selection: {
+        selected: 'Selected: {count}',
+        selectAll: 'Select all on this tab',
+        deselectAll: 'Deselect all on this tab',
+        clear: 'Clear selection',
+        cancelSelected: 'Cancel selected',
+        selectRecord: 'Select record',
+      },
       cardBlockedNote: 'Publishing is blocked by another conflict in the Draft — see the message above.',
     },
     banner: {

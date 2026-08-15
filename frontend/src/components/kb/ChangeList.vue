@@ -11,6 +11,8 @@ import { useI18n } from 'vue-i18n'
 import { usePlayground } from '@/stores/playground'
 import { useDraftChanges } from '@/composables/useDraftChanges'
 import { useKbModal } from '@/composables/useKbModal'
+import { useDraftSelection } from '@/composables/useDraftSelection'
+import { useCancelConfirm } from '@/composables/useCancelConfirm'
 import type { ChangeEntry } from '@/composables/draftChanges'
 import { kbActions } from './records/actions'
 import TopicRecord from './records/TopicRecord.vue'
@@ -22,6 +24,8 @@ const props = defineProps<{ kind: 'topics' | 'products' | 'tariffs' }>()
 const pg = usePlayground()
 const { entriesFor } = useDraftChanges()
 const modal = useKbModal()
+const selection = useDraftSelection()
+const cancelConfirm = useCancelConfirm()
 const { t } = useI18n()
 
 const COMPONENTS = { topics: TopicRecord, products: ProductRecord, tariffs: TariffRecord }
@@ -55,8 +59,11 @@ function liveRowOf(entry: ChangeEntry) {
 function publish(entry: ChangeEntry) {
   pg.approveEntity(props.kind, entry.key)
 }
+// Every cancel goes through the confirmation now — see useCancelConfirm's
+// own doc comment. entry.type is passed so the dialog can say what THIS
+// cancel actually does (destroy vs revert vs keep), which differs per state.
 function cancel(entry: ChangeEntry) {
-  pg.cancelChange(props.kind, entry.key)
+  cancelConfirm.requestOne(props.kind, entry.key, entry.type)
 }
 </script>
 
@@ -71,8 +78,11 @@ function cancel(entry: ChangeEntry) {
     :actions="actionsFor(entry)"
     :busy="isBusy(entry)"
     :blocked-note="blockedNote(entry)"
+    selectable
+    :selected="selection.isSelected(kind, entry.key)"
     @edit="edit(entry)"
     @publish="publish(entry)"
     @cancel="cancel(entry)"
+    @toggle-select="selection.toggle(kind, entry.key)"
   />
 </template>

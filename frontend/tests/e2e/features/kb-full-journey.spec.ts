@@ -554,41 +554,44 @@ test('10. Черновик: locate one imported product card (deletion UX — id
   })
 })
 
+// Step 10 guarantees this product is one this run CREATED (existsLive
+// false), so its card is Новый — where cancelling destroys the record
+// outright rather than reverting it, and the label says so.
 test('11. Черновик: is the destructive action clearly labeled?', async ({}, testInfo) => {
   test.skip(!state.productToDelete, 'no product selected in step 10')
   await step(testInfo, page, '11. Inspect the destructive action button', async () => {
     const card = productCard(page, state.productToDeleteName)
-    await expect(card.getByRole('button', { name: 'Отменить изменение' })).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Удалить из черновика' })).toBeVisible()
+    // «Отменить изменение» would be wrong here — there is no published value
+    // to revert to. It stays the label on Изменён/На удаление cards only.
+    await expect(card.getByRole('button', { name: 'Отменить изменение' })).toHaveCount(0)
   })
-  const deleteLabelCount = await productCard(page, state.productToDeleteName).getByRole('button', { name: 'Удалить', exact: true }).count()
   testInfo.annotations.push({
     type: 'ux-finding',
     description:
-      'Labeling: Черновик has no "Удалить" (Delete) action on a pending card at all — the only removal action is "Отменить изменение" ' +
-      '(Cancel the change; records/actions.ts only returns DELETE for page:"live", never "draft"). It IS styled destructively (red text, ' +
-      `destructive:true), but the word "delete" never appears — a first-time user may not immediately read "cancel the change" as ` +
-      `"this product will be gone." (${deleteLabelCount} "Удалить" button(s) found on this card, expect 0)`,
+      'Labeling: the action on a Новый card reads «Удалить из черновика» and is styled destructively, so it names its real effect — ' +
+      'the record is destroyed, not reverted. Изменён and На удаление cards keep «Отменить изменение», which is accurate for them.',
   })
 })
 
 test('12. Черновик: does the system confirm before destroying data?', async ({}, testInfo) => {
   test.skip(!state.productToDelete, 'no product selected in step 10')
-  let dialogSeen = false
-  page.once('dialog', async (d) => {
-    dialogSeen = true
-    await d.accept()
+  await step(testInfo, page, '12. Click Удалить из черновика and observe the confirmation', async () => {
+    await productCard(page, state.productToDeleteName).getByRole('button', { name: 'Удалить из черновика' }).click()
+    // A real Vue modal (ConfirmDeleteDialog), not window.confirm — so this
+    // is a DOM assertion, not a page.on('dialog') handler.
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.getByTestId('confirm-body')).toContainText('удалена безвозвратно')
   })
-  await step(testInfo, page, '12. Click Отменить изменение and observe confirmation (or its absence)', async () => {
-    await productCard(page, state.productToDeleteName).getByRole('button', { name: 'Отменить изменение' }).click()
-    await page.waitForTimeout(500) // give a native dialog, if any, a chance to actually surface
+  await step(testInfo, page, '12b. Confirm the removal', async () => {
+    await page.getByTestId('confirm-accept').click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
   })
   testInfo.annotations.push({
     type: 'ux-finding',
-    description: dialogSeen
-      ? 'Confirmation: a native browser confirm() appeared before the card was removed.'
-      : 'Confirmation: NONE. The click removes the card immediately — no native confirm(), no Vue modal — unlike the equivalent "Удалить" ' +
-        'action on /knowledge-base, which opens a real ConfirmDeleteDialog.vue. One click permanently drops a freshly-imported product ' +
-        'from the draft with no safety net.',
+    description:
+      'Confirmation: a modal explains that the record exists only in the draft and will be deleted for good before anything happens — ' +
+      'matching the equivalent Удалить on /knowledge-base. Nothing is dropped on a single click any more.',
   })
 })
 
@@ -609,6 +612,32 @@ test('14. Черновик: other product cards are unaffected', async ({}, test
     }
   })
   for (const e of remaining) {
+    await verifyDraftContains(page, 'products', e.ref)
+  }
+})
+
+// Non-destructive on purpose: it ticks, checks the bar counts correctly,
+// then clears. Actually cancelling here would eat the records Phase 6
+// publishes and Phase 7 asks the assistant about.
+test('14b. Черновик: multi-select shows a bulk bar counting the ticked cards', async ({}, testInfo) => {
+  const products = entitiesOf('products').filter((e) => e.ref !== state.productToDelete)
+  test.skip(products.length < 2, 'need at least two surviving products to exercise multi-select')
+  await step(testInfo, page, '14b. Select several cards and read the bulk bar', async () => {
+    await page.goto('/playground')
+    await page.getByRole('button', { name: /^Товары/ }).click()
+    await expect(page.getByTestId('draft-bulk-bar')).toHaveCount(0)
+
+    const boxes = page.locator('[data-testid="draft-tab-products"] [data-testid="kb-record-select"]')
+    await boxes.nth(0).check()
+    await boxes.nth(1).check()
+    await expect(page.getByTestId('draft-bulk-bar')).toContainText('2')
+    await expect(page.getByTestId('bulk-cancel')).toBeVisible()
+  })
+  await step(testInfo, page, '14c. Clear the selection, leaving every card staged', async () => {
+    await page.getByTestId('bulk-clear').click()
+    await expect(page.getByTestId('draft-bulk-bar')).toHaveCount(0)
+  })
+  for (const e of products) {
     await verifyDraftContains(page, 'products', e.ref)
   }
 })
