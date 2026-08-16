@@ -83,7 +83,7 @@ function retry() {
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.pricingType') }}</span>
-        <select v-model="buf.pricing_type" class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <select v-model="buf.pricing_type" class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring">
           <option v-for="pt in PRICING_TYPES" :key="pt" :value="pt">{{ t('kb.pricingType.' + pt) }}</option>
         </select>
       </div>

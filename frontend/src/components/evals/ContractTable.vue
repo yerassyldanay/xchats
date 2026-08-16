@@ -33,8 +33,8 @@ function isFirstSafetyRow(rows: VContractRow[], i: number): boolean {
           </tr>
           <tr class="border-b border-border/60 align-top last:border-0">
             <td class="py-1.5 pr-3 whitespace-nowrap">{{ row.label }}</td>
-            <td class="max-w-[240px] py-1.5 pr-3 whitespace-pre-wrap break-words text-muted-foreground">{{ row.expected || '—' }}</td>
-            <td class="max-w-[240px] py-1.5 pr-3 whitespace-pre-wrap break-words">{{ row.actual || '—' }}</td>
+            <td class="max-w-[240px] py-1.5 pr-3 whitespace-pre-wrap wrap-break-word text-muted-foreground">{{ row.expected || '—' }}</td>
+            <td class="max-w-[240px] py-1.5 pr-3 whitespace-pre-wrap wrap-break-word">{{ row.actual || '—' }}</td>
             <td class="py-1.5">
               <Badge v-if="row.pass === true" class="border-transparent bg-emerald-100 text-[11px] text-emerald-700 hover:bg-emerald-100">PASS</Badge>
               <Badge v-else-if="row.pass === false" variant="destructive" class="text-[11px]">FAIL</Badge>

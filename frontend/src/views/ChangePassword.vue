@@ -66,7 +66,7 @@ async function logout() {
 
 <template>
   <div class="flex h-full items-center justify-center bg-muted/30 px-6">
-    <form class="w-full max-w-sm rounded-lg border bg-card p-8 shadow-sm" @submit.prevent="submit">
+    <form class="w-full max-w-sm rounded-lg border bg-card p-8 shadow-xs" @submit.prevent="submit">
       <div class="mb-6 flex items-center gap-3">
         <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
           <KeyRound class="h-5 w-5" />

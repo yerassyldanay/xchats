@@ -211,21 +211,21 @@ async function submit() {
             >
               <select
                 v-model.number="w.weekday"
-                class="h-9 w-28 shrink-0 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                class="h-9 w-28 shrink-0 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option v-for="d in WEEKDAYS" :key="d" :value="d">{{ t(`automation.dialog.weekday.${WEEKDAY_KEYS[d]}`) }}</option>
               </select>
               <input
                 type="time"
                 :value="minutesToHHMM(w.start_minute)"
-                class="h-9 w-[105px] shrink-0 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                class="h-9 w-[105px] shrink-0 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                 @change="setStart(w, ($event.target as HTMLInputElement).value)"
               />
               <span class="text-xs text-muted-foreground shrink-0">{{ t('automation.dialog.rangeTo') }}</span>
               <input
                 type="time"
                 :value="endInputFromMinutes(w.end_minute)"
-                class="h-9 w-[105px] shrink-0 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                class="h-9 w-[105px] shrink-0 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                 @change="setEnd(w, ($event.target as HTMLInputElement).value)"
               />
               <Button type="button" variant="ghost" size="icon" class="w-8 h-8 ml-auto shrink-0 text-destructive hover:bg-destructive/10" :title="t('automation.dialog.removeWindow')" @click="removeWindow(i)">
