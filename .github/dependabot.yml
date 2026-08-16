@@ -1,12 +1,38 @@
 version: 2
+
+# Grouping policy, applied to every ecosystem below.
+#
+# Each ecosystem gets ONE group that covers only `minor` and `patch` updates.
+# Major updates are deliberately left ungrouped, so Dependabot opens a separate
+# PR per package for them.
+#
+# The earlier config grouped `patterns: ["*"]` with no update-types filter,
+# which swept majors into the same PR. In npm that produced a single PR
+# carrying 23 packages including ~14 breaking majors (pinia 2->4, vue-router
+# 4->5, tailwindcss 3->4, typescript 5->7, vite 6->8, vitest 3->4, eslint
+# 9->10, ...). It could not even `npm ci` — Dependabot bumped typescript to 7
+# while typescript-eslint's peer range caps at <6.1.0 — and it was far too
+# large to review, so it got closed twice (#46, #65) and every one of those
+# updates, including the safe patches, was lost with it.
+#
+# The split means the routine minor/patch roll-up stays a single green PR you
+# can merge on sight, and each breaking major arrives on its own where it can
+# be read, tested and landed independently.
+#
+# IMPORTANT: closing a Dependabot PR by hand is not "snooze" — Dependabot
+# replies "I won't notify you again about this release" and never re-proposes
+# that version. Closing the majors above muted actions/setup-node v7,
+# actions/setup-go v7, docker/login-action v4 and docker/metadata-action v6;
+# they had to be bumped by hand afterwards. Merge them, or leave them open.
 updates:
   - package-ecosystem: gomod
     directory: /backend
     schedule:
       interval: weekly
     groups:
-      go-dependencies:
+      go-minor-patch:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # A separate entry, not folded into the one above: evals/harness is a
   # distinct Go module (its own go.mod, a newer Go toolchain requirement —
@@ -18,21 +44,27 @@ updates:
     schedule:
       interval: weekly
     groups:
-      go-dependencies:
+      go-minor-patch:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
     groups:
-      npm-dependencies:
+      npm-minor-patch:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: docker
     directory: /backend
@@ -43,3 +75,13 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+    ignore:
+      # Node majors land in April and only become LTS that October. Dependabot
+      # proposes the newest tag regardless (it offered 25, then 26 — neither
+      # was LTS at the time), which would move the published frontend image
+      # onto a release line that stops getting fixes before the next one does.
+      # This repo tracks Node LTS only, so majors are chosen by hand here and
+      # in .nvmrc together — see ci.yml's "node version pins agree" step, which
+      # fails if the two ever drift. Minor/patch tag updates still flow.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

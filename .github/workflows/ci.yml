@@ -25,9 +25,9 @@ jobs:
       docker_frontend: ${{ steps.filter.outputs.docker_frontend }}
       links: ${{ steps.filter.outputs.links }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -72,13 +72,13 @@ jobs:
       # download a different compiler mid-CI instead of failing visibly.
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The Lint step's --new-from-merge-base diff needs the merge-base
           # commit in history — the default depth-1 checkout only has the tip.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
@@ -132,9 +132,9 @@ jobs:
     env:
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: evals/harness/go.mod
           cache-dependency-path: evals/harness/go.sum
@@ -162,9 +162,25 @@ jobs:
       # sets neither CI nor SITE_ORIGIN, so the guard never fires there).
       SITE_ORIGIN: https://xchats.example
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      # .nvmrc drives this job, but frontend/Dockerfile carries its own FROM
+      # node:<major> that nothing else checks — so the image that actually
+      # ships could build on a different Node than CI ever tested, silently.
+      # Dependabot updates the Dockerfile tag and cannot touch .nvmrc, so the
+      # drift is not hypothetical: it opened node 22->25 (#39) and 22->26 (#58)
+      # against a repo pinned to 22.
+      - name: node version pins agree
+        run: |
+          nvmrc="$(tr -d '[:space:]' < .nvmrc)"
+          dockerfile="$(sed -n 's/^FROM node:\([0-9]*\).*/\1/p' frontend/Dockerfile)"
+          if [ "$nvmrc" != "$dockerfile" ]; then
+            echo "::error::Node major mismatch: .nvmrc=$nvmrc but frontend/Dockerfile=$dockerfile. Update both together."
+            exit 1
+          fi
+          echo "Both pinned to Node $nvmrc."
+
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -190,13 +206,13 @@ jobs:
     if: needs.changes.outputs.docker_backend == 'true' || needs.changes.outputs.docker_frontend == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build backend image
         if: needs.changes.outputs.docker_backend == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: backend
           file: backend/Dockerfile
@@ -206,7 +222,7 @@ jobs:
 
       - name: Build frontend image
         if: needs.changes.outputs.docker_frontend == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: frontend
           file: frontend/Dockerfile
@@ -224,7 +240,7 @@ jobs:
     if: needs.changes.outputs.links == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: lycheeverse/lychee-action@v2
         with:
