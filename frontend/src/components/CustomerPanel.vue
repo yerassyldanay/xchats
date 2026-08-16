@@ -345,7 +345,7 @@ const otherConversations = computed(() =>
               {{ t('crm.followups.action.' + crm.profile.next_followup.action) }} ·
               {{ followupWhen(crm.profile.next_followup.due_date, crm.profile.next_followup.due_minute) }}
             </div>
-            <p v-if="crm.profile.next_followup.note" class="text-muted-foreground mt-0.5 break-words">
+            <p v-if="crm.profile.next_followup.note" class="text-muted-foreground mt-0.5 wrap-break-word">
               {{ crm.profile.next_followup.note }}
             </p>
             <div class="flex gap-1.5 mt-1.5">
@@ -372,7 +372,7 @@ const otherConversations = computed(() =>
       <div class="px-4 pb-3">
         <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{{ t('crm.panel.note') }}</div>
         <div v-if="crm.profile?.latest_note" class="rounded-lg bg-muted/40 p-2.5 text-[13px]">
-          <p class="whitespace-pre-wrap break-words">{{ crm.profile.latest_note.body }}</p>
+          <p class="whitespace-pre-wrap wrap-break-word">{{ crm.profile.latest_note.body }}</p>
           <p class="text-[11px] text-muted-foreground mt-1">
             {{ shortTime(crm.profile.latest_note.created_at) }}
             <template v-if="crm.profile.latest_note.author_name">
@@ -404,7 +404,7 @@ const otherConversations = computed(() =>
 
         <ul v-if="showAllNotes" class="mt-2 space-y-2">
           <li v-for="n in crm.notes" :key="n.id" class="rounded-lg border border-border p-2 text-[13px]">
-            <p class="whitespace-pre-wrap break-words">{{ n.body }}</p>
+            <p class="whitespace-pre-wrap wrap-break-word">{{ n.body }}</p>
             <div class="flex items-center justify-between mt-1">
               <span class="text-[11px] text-muted-foreground">
                 {{ shortTime(n.created_at) }}<template v-if="n.author_name"> · {{ n.author_name }}</template>
@@ -481,7 +481,7 @@ const otherConversations = computed(() =>
             <span class="absolute -left-[17px] top-1.5 w-1.5 h-1.5 rounded-full bg-border" />
             <div class="text-[11px] text-muted-foreground">{{ shortTime(e.occurred_at) }}</div>
             <div class="text-[13px]">{{ timelineLabel(e.kind, e.source, e.direction) }}</div>
-            <p v-if="e.summary || e.body" class="text-[12px] text-muted-foreground break-words line-clamp-3">
+            <p v-if="e.summary || e.body" class="text-[12px] text-muted-foreground wrap-break-word line-clamp-3">
               {{ e.source === 'message' ? e.body : e.summary }}
             </p>
           </li>

@@ -127,7 +127,7 @@ const rows = computed(() => crm.followups)
                 {{ t('crm.followups.action.' + fu.action) }} · {{ when(fu) }}
               </span>
             </div>
-            <p v-if="fu.note" class="text-[13px] text-muted-foreground mt-0.5 break-words">{{ fu.note }}</p>
+            <p v-if="fu.note" class="text-[13px] text-muted-foreground mt-0.5 wrap-break-word">{{ fu.note }}</p>
             <div v-if="fu.assignee_name" class="text-[12px] text-muted-foreground mt-0.5">
               {{ t('crm.panel.assignee') }}: {{ fu.assignee_name }}
             </div>
