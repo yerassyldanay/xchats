@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Blocks, CalendarClock, Check, FlaskConical, Inbox, Library, LogOut, Radio, Settings, UsersRound } from 'lucide-vue-next'
+import { Blocks, Bot, CalendarClock, Check, FlaskConical, Inbox, Library, LogOut, Radio, Settings, UsersRound } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { useCrm } from '../stores/crm'
 import { useSettings } from '../stores/settings'
@@ -45,6 +45,7 @@ const baseNav = computed<{ name: string; icon: Component; label: string; match: 
   { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts'] },
   { name: 'playground', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['playground'] },
   { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
+  { name: 'simulator', icon: Bot, label: t('simulator.navLabel'), match: ['simulator'] },
 ])
 
 // The overdue count rides on the Задачи icon: an overdue follow-up is the one
@@ -156,7 +157,7 @@ async function switchOrg(orgId: string) {
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <button
-              class="rounded-full ring-2 ring-white/15 transition hover:ring-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+              class="rounded-full ring-2 ring-white/15 transition hover:ring-white/30 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-white/40"
             >
               <Avatar size="base" class="text-white" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
                 <AvatarFallback class="bg-transparent text-xs font-semibold">

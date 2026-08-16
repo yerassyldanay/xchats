@@ -4,6 +4,38 @@
 authoring UI for pending knowledge. It may propose and accumulate changes, but
 only the explicit draft-to-live approval transaction writes `ai_*`.
 
+## Where this lives today
+
+`/playground` (page identity: Черновик) is where model-driven ingest and
+draft review both happen — not `/knowledge-base`, which stays the sole
+**manual** authoring surface (record-create forms, no model in the loop).
+Черновик's ingestion panel (`KbIngestPanel.vue`) sits above the review
+region and has three tabs, one per way information actually enters the KB
+today:
+
+| Tab | What it submits | Parsers offered |
+|---|---|---|
+| Ссылки | one or more URLs | `native`, `firecrawl` |
+| Файлы | one or more files (PDF/DOCX/text/image) | `native`, `llamaparse` |
+| ChatGPT / Claude | nothing directly — connects an external MCP client | — |
+
+Ссылки and Файлы are deliberately separate submissions (URL-only or
+file-only runs) even though the backend itself (`kbimport.SubmitInput`)
+accepts a mixed batch — the UI just never offers that combination. Both
+post to the structured import pipeline covered below (`POST /kb/imports`);
+ChatGPT/Claude instead go through the MCP connector (`plan/mcp.md`) — a
+different write path that lands in the exact same `kbd_draft`.
+
+`GET /kb/import/providers` is the parser dropdown's one source of truth:
+per provider, which source families it reads (data-derived from
+`extractor.Capabilities()`, tested against the table two sections below)
+and whether a required credential currently resolves — so the dropdown can
+never offer a provider/content pairing `POST /kb/imports`' own precheck
+would reject. The review region below the panel (StatTiles + entity tabs +
+change cards) stays visible even with an empty draft — an operator must be
+able to see the ingestion panel and start an import without first having
+something pending to review.
+
 ## End-to-end lifecycle
 
 ```text
@@ -45,6 +77,19 @@ uploaded → extracting → parsed | needs_human | failed
                          built
 ```
 
+The structured knowledge base import pipeline (`internal/kbimport`,
+`POST /kb/imports`) adds one new entry state, `queued`, ahead of
+`extracting`: a submitted URL's material row starts there directly (there
+are no bytes yet, so it never passes through `uploaded`), and a submitted
+file reaches it right after the ordinary upload/`parsed` handshake above,
+re-tagged as the pipeline's own job queue — `kbd_materials` IS the queue,
+claimed by a small worker pool rather than an in-memory channel, so an
+in-flight import survives a restart. Either way it converges into the same
+`extracting → parsed | needs_human | failed → built` path — see
+`internal/kbstore/import.go`'s own doc comment for the exact state machine
+(`ClaimImportJobs` / `FinishImportExtraction` / `RequeueImportJob` /
+`RecoverImportJobs`).
+
 `built` means synthesis consumed the evidence. It does not make the material or
 blob disposable: live and draft media references keep it durable. Materials
 answered through a request have `processing_status` reset to `parsed` and join
@@ -71,6 +116,20 @@ evidence and does not choose KB tables or produce live/draft entities.
 | Excel/CSV | read sheets in code into structured text | none |
 | audio | transcribe up to roughly five minutes, preserve timestamps, summarize corrections/temporal intent before synthesis | ask for a description |
 | video | transcript-first from the audio track; optional sampled keyframes later, never every frame | ask for a description |
+
+The table above is this document's original, broader v1 vision. What
+`internal/kbimport` actually ships is narrower: a pluggable `extractor.
+Provider` seam (`internal/extractor`) with exactly three providers, each
+`Supports()` a fixed subset of source kinds — an unsupported provider/source
+pairing (for example a PDF submitted against `firecrawl`) is rejected
+synchronously at submit time (`400`), never accepted and failed later as an
+async job:
+
+| Provider | URL | PDF | DOCX | Plain/structured text | Image |
+|---|---|---|---|---|---|
+| `native` (stdlib only, no vendored SDK) | readable-text extraction | — | Yes | Yes | accepted, but v1 attaches the file with no vision call — no extracted text (see `DECISIONS.md`'s "Vision gap") |
+| `firecrawl` (hosted crawl → markdown) | Yes | — | — | — | — |
+| `llamaparse` (upload → poll → markdown) | — | Yes | Yes | Yes | — |
 
 All model calls use the single configured OpenAI-compatible aggregator. Model
 selection is configuration, and relative/absolute parsing cost assumptions live

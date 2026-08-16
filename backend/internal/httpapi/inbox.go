@@ -444,7 +444,7 @@ func (s *Server) handleUploadMedia(c *gin.Context) {
 	// route serves back on the app's own origin (see handleServeMedia's
 	// header block below, its actual defense in depth). Same check the MCP
 	// upload path already applies (mcp_upload.go); reused, not reimplemented.
-	if reason := mimeSanityCheck(mimetype, data); reason != "" {
+	if reason := blob.MimeSanityCheck(mimetype, data); reason != "" {
 		fail(c, http.StatusBadRequest, ErrValidation, reason)
 		return
 	}

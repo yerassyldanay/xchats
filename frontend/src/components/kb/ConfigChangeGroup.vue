@@ -12,6 +12,7 @@ import { LoaderCircle, Save } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
 import { useDraftChanges } from '@/composables/useDraftChanges'
 import { useKbModal } from '@/composables/useKbModal'
+import { useCancelConfirm } from '@/composables/useCancelConfirm'
 import type { ChangeEntry } from '@/composables/draftChanges'
 import { CONFIG_SECTIONS, NATURAL_KEY_MAIN } from './kbEntities'
 import { CONFIG_FIELD_ACTIONS } from './records/actions'
@@ -21,6 +22,7 @@ import AssistantFieldRecord from './records/AssistantFieldRecord.vue'
 const pg = usePlayground()
 const { entriesFor } = useDraftChanges()
 const modal = useKbModal()
+const cancelConfirm = useCancelConfirm()
 const { t } = useI18n()
 
 const entries = computed(() => entriesFor('config'))
@@ -36,14 +38,20 @@ function edit(entry: ChangeEntry) {
   if (!base || !entry.field) return
   modal.openEdit('config', { ...base, [entry.field]: entry.draftValue ?? base[entry.field] }, { field: entry.field })
 }
+// Both cancels go through the shared confirmation (useCancelConfirm) — a
+// config edit is prose an operator typed by hand, so discarding it silently
+// on one click was the same misclick hazard as an entity card's.
+// entry.type is always 'updated' for a config field (a section is either
+// patched or absent), which is also the accurate description: cancelling
+// restores the published value.
 function cancelField(entry: ChangeEntry) {
-  pg.cancelChange('config', entry.key)
+  cancelConfirm.requestOne('config', entry.key, entry.type)
 }
 function publishSection() {
   pg.approveEntity('config', NATURAL_KEY_MAIN)
 }
 function cancelSection() {
-  pg.cancelChange('config', NATURAL_KEY_MAIN)
+  cancelConfirm.requestOne('config', NATURAL_KEY_MAIN, 'updated')
 }
 </script>
 

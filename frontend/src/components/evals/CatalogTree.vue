@@ -109,7 +109,7 @@ const archivedCount = computed(() => partition.archived.length)
     >
       <img :src="extractThumb(c)" class="w-6 h-6 rounded object-cover border border-border shrink-0" alt="" />
       <FileImage class="w-3.5 h-3.5 shrink-0 mt-0.5 text-muted-foreground" />
-      <span class="min-w-0 whitespace-normal break-words leading-snug font-mono text-xs">{{ c.id }}</span>
+      <span class="min-w-0 whitespace-normal wrap-break-word leading-snug font-mono text-xs">{{ c.id }}</span>
     </button>
   </div>
 </template>

@@ -17,16 +17,22 @@ import (
 // other, instead of silently shipping an unevaluated prompt.
 
 // TestAipromptSync_FrameByteIdentical pins evals/scenarios/shop-kb-v1/frame-ru.txt
-// to backend/aiprompt's embedded copy (aiprompt/frames/shop-kb-v4-ru.txt, exposed
-// via aiprompt.FrameShopKBV4RU) — the exact frame production renders.
+// to backend/aiprompt's embedded copy (aiprompt/frames/shop-kb-v5-ru.txt, exposed
+// via aiprompt.FrameShopKBV5RU) — the exact frame production renders.
+//
+// Tracks v5 since 2026-08: v4 had no way to render tariffs, so production moved
+// to v5 (v4 plus the ТАРИФЫ block) and this copy had to move with it. What this
+// test guarantees is unchanged — the graded prompt and the shipped prompt are
+// the same bytes — and it is exactly what would have caught the move silently
+// leaving the eval corpus behind.
 func TestAipromptSync_FrameByteIdentical(t *testing.T) {
 	want, err := os.ReadFile(filepath.Join("..", "scenarios", "shop-kb-v1", "frame-ru.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(want) != aiprompt.FrameShopKBV4RU() {
+	if string(want) != aiprompt.FrameShopKBV5RU() {
 		t.Fatal("evals/scenarios/shop-kb-v1/frame-ru.txt has drifted from backend/aiprompt's embedded copy " +
-			"(aiprompt/frames/shop-kb-v4-ru.txt) — production and the evaluated prompt must stay byte-identical")
+			"(aiprompt/frames/shop-kb-v5-ru.txt) — production and the evaluated prompt must stay byte-identical")
 	}
 }
 

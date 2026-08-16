@@ -36,6 +36,8 @@ services:
       XCHATS_ALLOW_FILE_CREDENTIALS: "1"
       XCHATS_DATA_DIR: "/data/appdata"
       XCHATS_CONFIG_DIR: "/data/appconfig"
+      SIMULATOR_ENABLED: "true"
+    command: ["-config", "/config.yaml", "serve"]
       # Nothing else belongs here. Every remaining boot/infra setting — the
       # public base URLs, CORS origins, Telegram mode/webhook origin, the
       # simulator gate — lives in the mounted config.docker.yaml above.

@@ -103,7 +103,7 @@ async function onFileChange(e: Event) {
         <button
           type="button"
           :aria-label="t('kb.mediaPicker.detach')"
-          class="absolute -top-1.5 -right-1.5 rounded-full bg-background border border-border shadow-sm p-0.5 text-muted-foreground hover:text-destructive hover:border-destructive transition"
+          class="absolute -top-1.5 -right-1.5 rounded-full bg-background border border-border shadow-xs p-0.5 text-muted-foreground hover:text-destructive hover:border-destructive transition"
           @click="detach(id)"
         >
           <X class="w-3 h-3" />
@@ -112,7 +112,7 @@ async function onFileChange(e: Event) {
 
       <select
         v-if="availableMaterials.length"
-        class="h-8 max-w-[220px] text-xs rounded-md border border-border bg-background px-2 text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        class="h-8 max-w-[220px] text-xs rounded-md border border-border bg-background px-2 text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         value=""
         @change="onAttachExisting"
       >

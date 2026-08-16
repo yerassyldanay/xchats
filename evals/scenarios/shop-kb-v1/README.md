@@ -13,9 +13,12 @@ caps, not a runnable scenario by itself.
   empty; `delivery_cost`/`delivery_in_days` blank and `outside_zones_note`
   set — see `ai_delivery_zones` below), four `ai_delivery_zones` rows (a
   country-level fallback, two cheaper/faster cities nested under it, and one
-  explicit deny city), and one `kbd_materials` row per referenced file.
+  explicit deny city), four `ai_tariffs` rows (three active service plans —
+  one of them a `percentage` plan carrying a fee instead of a price — plus
+  one `inactive` row that must never render), and one `kbd_materials` row
+  per referenced file.
 - `frame-ru.txt` — the only frame this family ever renders (prompt_ref
-  `shop-kb@v4`). The KNOWLEDGE BASE is Russian-only, but the frame DOES
+  `shop-kb@v5`). The KNOWLEDGE BASE is Russian-only, but the frame DOES
   route reply language by the CUSTOMER's own message (rule 7): a Kazakh
   message gets a fully Kazakh reply, recognized by words and grammar, not
   by alphabet — a customer typing Kazakh on a Russian keyboard (no

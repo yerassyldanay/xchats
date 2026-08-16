@@ -19,6 +19,13 @@ export interface KbAction {
 const EDIT: KbAction = { key: 'edit', labelKey: 'kb.actions.edit', variant: 'outline' }
 const PUBLISH: KbAction = { key: 'publish', labelKey: 'kb.actions.publish', variant: 'default' }
 const CANCEL: KbAction = { key: 'cancel', labelKey: 'kb.actions.cancel', variant: 'ghost', destructive: true }
+// REMOVE_FROM_DRAFT is CANCEL's label for an `added` entry only — same key,
+// same handler, same endpoint. «Отменить изменение» is accurate for an
+// `updated` entry (the published value comes back) and for a `removed` one
+// (the record is KEPT), but on a NEW card there is nothing to revert to:
+// the record is destroyed outright, and for an imported one that means
+// re-running a paid crawl to get it back. The button now says so.
+const REMOVE_FROM_DRAFT: KbAction = { key: 'cancel', labelKey: 'kb.actions.removeFromDraft', variant: 'ghost', destructive: true }
 const DELETE: KbAction = { key: 'delete', labelKey: 'kb.actions.delete', variant: 'ghost', destructive: true }
 
 // kbActions is the action row for the six content kinds (topics, tariffs,
@@ -36,7 +43,8 @@ export function kbActions(ctx: { page: 'draft' | 'live'; changeType?: ChangeType
   if (ctx.page === 'live') {
     return ctx.singleton ? [EDIT] : [EDIT, DELETE]
   }
-  return ctx.changeType === 'removed' ? [PUBLISH, CANCEL] : [EDIT, PUBLISH, CANCEL]
+  if (ctx.changeType === 'removed') return [PUBLISH, CANCEL]
+  return [EDIT, PUBLISH, ctx.changeType === 'added' ? REMOVE_FROM_DRAFT : CANCEL]
 }
 
 // CONFIG_FIELD_ACTIONS is the fixed action set for one staged assistant-

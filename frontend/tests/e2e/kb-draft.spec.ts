@@ -39,11 +39,15 @@ function uniqueSlug(workerIndex: number, tag: string): string {
 //      title legitimately also appears inside that dump (a `<table>`, not
 //      a card), so `page.getByText(title)` can resolve to TWO real,
 //      unrelated elements — a strict-mode violation, not a bug in the app.
-// RecordShell.vue's root div is the only element combining these four
-// classes ANYWHERE on either page, including inside PromptTab (whose own
-// cards use rounded-xl, not rounded-lg) — scoping to them sidesteps both.
+// RecordShell.vue's root div carries data-testid="kb-record" for exactly
+// this — it previously used a 4-class CSS selector
+// (div.rounded-lg.border-border.bg-card.p-4) that happened to ALSO match
+// KbImportRunStatus.vue's root (Черновик) and the Файлы/materials row
+// (Знаний база), both unrelated to this component and both sharing that
+// same incidental Tailwind class combination — a second strict-mode
+// violation waiting for a search text that happened to appear in either.
 function recordCard(page: Page, text: string) {
-  return page.locator('div.rounded-lg.border-border.bg-card.p-4').filter({ hasText: text })
+  return page.locator('[data-testid="kb-record"]').filter({ hasText: text })
 }
 
 // cleanupTopic best-effort undoes everything a test could have done to one

@@ -169,24 +169,31 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 }
 
 // frameFor picks the prompt frame for a channel. WhatsApp and the simulator
-// keep the byte-identical evaluated frame (the simulator exists to rehearse the
+// keep the byte-identical base frame (the simulator exists to rehearse the
 // WhatsApp path, so it must not diverge from it); Telegram gets the variant
 // whose only difference is a persona line that does not call the assistant a
 // WhatsApp one. An unset channel — a caller that predates GenerateRequest
-// carrying it — keeps the evaluated frame rather than guessing.
+// carrying it — keeps the base frame rather than guessing.
+//
+// v5 (not v4) since 2026-08: v4 could not render tariffs at all, so a priced
+// ai_tariffs row was invisible to the model and every tariff question escalated.
+// v5 is v4 plus the ТАРИФЫ block — see aiprompt.PromptRefShopKBV5, which also
+// records that the eval pipeline has not been re-run against it yet.
 func frameFor(channel messaging.Channel) string {
 	if channel == messaging.ChannelTelegram {
-		return aiprompt.FrameShopKBV4TGRU()
+		return aiprompt.FrameShopKBV5TGRU()
 	}
-	return aiprompt.FrameShopKBV4RU()
+	return aiprompt.FrameShopKBV5RU()
 }
 
 // PromptRefFor names the frame frameFor would pick, for logs and draft records.
+// It must move in lockstep with frameFor: a draft stamped with a ref whose
+// frame did not produce it is unreproducible.
 func PromptRefFor(channel messaging.Channel) string {
 	if channel == messaging.ChannelTelegram {
-		return aiprompt.PromptRefShopKBV4TG
+		return aiprompt.PromptRefShopKBV5TG
 	}
-	return aiprompt.PromptRefShopKBV4
+	return aiprompt.PromptRefShopKBV5
 }
 
 func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string, params LLMParams) (string, error) {

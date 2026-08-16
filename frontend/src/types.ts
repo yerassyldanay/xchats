@@ -480,6 +480,84 @@ export interface CancelChangeResponse {
   changes: DraftChangeSet
 }
 
+// --- Structured KB import pipeline (internal/kbimport) — submit a URL/file,
+// pass 1 extracts it, pass 2 synthesizes the accumulated evidence into typed
+// KB draft records (kbd_draft only — see DraftChangeSet above; an import
+// never touches DraftView/live directly, same rule as every other authoring
+// path). POST/GET /kb/imports.
+
+// KbImportRunStatus mirrors kbimport.deriveRunStatus's closed vocabulary —
+// branched on by KbImportRunStatus.vue (badge colour) and the store (when to
+// stop polling), so this is a real union rather than string+comment.
+export type KbImportRunStatus = 'extracting' | 'synthesizing' | 'built' | 'failed' | 'needs_human'
+
+// KbImportMaterialStatus mirrors kbimport.MaterialStatus — one submitted
+// URL/file's pass-1 progress within a run. processing_status mirrors
+// kbd_materials' own lifecycle (kbstore/import.go's doc comment):
+// queued -> extracting -> parsed | needs_human | failed.
+export interface KbImportMaterialStatus {
+  id: string
+  kind: 'url' | 'file'
+  label: string
+  handle: string
+  processing_status: 'queued' | 'extracting' | 'parsed' | 'needs_human' | 'failed'
+  error?: string
+}
+
+// KbImportAppliedUpsert / KbImportDroppedUpsert mirror kbstore.AppliedUpsert /
+// kbstore.DroppedUpsert — pass 2's per-call synthesis outcome (one MCP
+// typed-upsert call each; dropped ones never reached kbd_draft at all).
+export interface KbImportAppliedUpsert {
+  tool: string
+  type: string
+  key: string
+  created: boolean
+}
+export interface KbImportDroppedUpsert {
+  tool: string
+  reason: string
+}
+// KbImportTokenUsage mirrors kbstore.TokenUsage.
+export interface KbImportTokenUsage {
+  prompt_tokens: number
+  completion_tokens: number
+}
+// KbImportSynthesisSummary mirrors kbimport.SynthesisSummary — present once
+// pass 2 has started (RunSummary.synthesis is omitted until then).
+export interface KbImportSynthesisSummary {
+  status: string // running | built | failed | needs_human
+  notes?: string
+  applied?: KbImportAppliedUpsert[]
+  dropped?: KbImportDroppedUpsert[]
+  usage: KbImportTokenUsage
+}
+// KbImportRun mirrors kbimport.RunSummary — POST/GET /kb/imports' payload.
+export interface KbImportRun {
+  run_id: string
+  status: KbImportRunStatus
+  materials: KbImportMaterialStatus[]
+  synthesis?: KbImportSynthesisSummary
+}
+
+// KbImportProviderFamily mirrors extractor.Family — the source kinds
+// Capabilities() probes each provider with (backend/internal/extractor/
+// capabilities.go). A real union: useImportProviders branches on these
+// values to map a staged File.type to a family.
+export type KbImportProviderFamily = 'url' | 'text' | 'docx' | 'pdf' | 'image'
+
+// KbImportProviderCapability mirrors httpapi.kbImportProviderSummary — one
+// entry of GET /kb/import/providers' payload.providers: what a provider
+// reads (families, data-derived from its real Supports() method) and
+// whether it is currently usable (requires_credential/configured), so the
+// parser dropdown can never disagree with Submit's own precheck.
+export interface KbImportProviderCapability {
+  id: string
+  display_name: string
+  families: KbImportProviderFamily[]
+  requires_credential: boolean
+  configured: boolean
+}
+
 // McpConnectionInfo mirrors GET /mcp-connection (backend/internal/httpapi/mcp_info.go)
 // — the session-level (non-admin) view of what URL to paste into a ChatGPT or
 // Claude MCP connector. public_url/tunnel_running are only meaningful when

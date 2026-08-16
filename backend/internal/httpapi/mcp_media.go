@@ -83,7 +83,7 @@ func (s *Server) handleMCPMediaRead(c *gin.Context) {
 	}
 	c.Header("Content-Type", mimeType)
 	// nosniff is mandatory, not hygiene: this serves user-supplied bytes from
-	// the same origin that holds the app's session cookie, and mimeSanityCheck
+	// the same origin that holds the app's session cookie, and blob.MimeSanityCheck
 	// only rejects HTML-sniffing payloads when text/* was NOT declared — so a
 	// text/plain file whose contents look like a web page can legitimately be
 	// stored. The next two headers are defence in depth on the response itself.

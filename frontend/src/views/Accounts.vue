@@ -220,7 +220,7 @@ async function remove(a: Account) {
                 class="mt-3 flex items-start gap-1.5 rounded-md bg-destructive/5 px-2.5 py-2 text-[11px] leading-snug text-destructive"
               >
                 <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-px" />
-                <span class="min-w-0 break-words">{{ actionError[a.id] || a.webhook_last_error }}</span>
+                <span class="min-w-0 wrap-break-word">{{ actionError[a.id] || a.webhook_last_error }}</span>
               </p>
 
               <div class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">

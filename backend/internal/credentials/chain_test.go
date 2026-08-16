@@ -172,6 +172,42 @@ func TestOpenFallsBackToFileWhenAllowed(t *testing.T) {
 	}
 }
 
+// ForceFile is what keeps every out-of-package test isolated to its own
+// t.TempDir(). Without it those tests silently bind to the developer's real
+// OS keychain — reading their live API keys and overwriting them with the
+// fixtures they seed (see OpenOptions.ForceFile). An available keyring must
+// therefore lose to ForceFile, and the resulting store must be the file one.
+func TestOpenForceFileIgnoresAnAvailableKeyring(t *testing.T) {
+	fake := newFakeSystemKeyring()
+	if err := fake.Set("xchats", "openrouter.api_key", "the-developers-real-key"); err != nil {
+		t.Fatalf("seed keyring: %v", err)
+	}
+	c, err := Open(OpenOptions{
+		AllowFile: true,
+		ForceFile: true,
+		DataDir:   t.TempDir(),
+		keyring:   fake,
+		available: func(systemKeyring) bool { return true },
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if c.primaryName != "file" {
+		t.Fatalf("primaryName = %q, want %q", c.primaryName, "file")
+	}
+	// The isolated store starts empty — the keyring's value is not visible...
+	if _, err := c.Get(context.Background(), "openrouter.api_key"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Get: err = %v, want ErrNotFound (keyring value leaked into an isolated store)", err)
+	}
+	// ...and writing a fixture does not reach back into the keyring.
+	if err := c.Set(context.Background(), "openrouter.api_key", "sk-unknown"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if got, _ := fake.Get("xchats", "openrouter.api_key"); got != "the-developers-real-key" {
+		t.Errorf("keyring value = %q, want it untouched — a test fixture overwrote a real credential", got)
+	}
+}
+
 func TestOpenReturnsErrNoSecureStoreWhenNeitherAvailable(t *testing.T) {
 	_, err := Open(OpenOptions{
 		AllowFile: false,

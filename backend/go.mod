@@ -16,6 +16,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0
 	golang.ngrok.com/ngrok v1.13.0
 	golang.org/x/crypto v0.54.0
+	golang.org/x/net v0.57.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.56.0
@@ -77,7 +78,6 @@ require (
 	golang.ngrok.com/muxado/v2 v2.0.1 // indirect
 	golang.org/x/arch v0.22.0 // indirect
 	golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597 // indirect
-	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/term v0.45.0 // indirect

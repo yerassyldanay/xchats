@@ -23,10 +23,10 @@ make dev-frontend    # frontend :5173 портында (Node 22+, .nvmrc қар�
 `.env` файлы қажет емес, алдын ала баптайтын құпиялар жоқ — қараңыз
 [`docs/release/installation.md`](../../release/installation.md). Екі
 жергілікті процесті бөлек жүргізгіңіз келмесе, `make up` толық Docker
-стегін іске қосады. Алғашқы іске қосу кезінде bootstrap әкімші құпия сөзін
-`xchats admin-credential show` командасымен алыңыз (немесе
-`docker compose exec backend /xchats admin-credential show`) — толық
-сипаттама installation.md-дегі алғашқы іске қосу бөлімінде.
+стегін іске қосады. Әдепкі әкімші аккаунтымен кіріңіз: `admin@xchat.kz` /
+`xchat-admin-change-me` — бұл жария, құжатталған әдепкі құпия сөз (оны қалай
+ауыстыру керектігін installation.md-дегі алғашқы іске қосу бөлімінен
+қараңыз).
 
 ## PR ашпас бұрын
 

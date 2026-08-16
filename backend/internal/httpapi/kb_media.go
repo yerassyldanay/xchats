@@ -165,7 +165,7 @@ func (s *Server) handleKBUploadMaterial(c *gin.Context) {
 	// the classic stored-XSS-via-mislabeled-upload vector applies here just
 	// as much, since these bytes are later served back on this app's own
 	// origin (handleKBMaterialContent above).
-	if reason := mimeSanityCheck(mimeType, data); reason != "" {
+	if reason := blob.MimeSanityCheck(mimeType, data); reason != "" {
 		fail(c, http.StatusBadRequest, ErrValidation, reason)
 		return
 	}
