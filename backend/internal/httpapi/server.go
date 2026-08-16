@@ -367,6 +367,46 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/chats/:id/ai-drafts", s.handleSuggest)
 	auth.POST("/ai-drafts/:id/approve", s.handleApprove)
 
+	// Customer management (CRM). Deliberately session-only, not RequireAdmin:
+	// this is the working surface of the inbox — every manager who answers a
+	// conversation needs to record who the customer is and what happens next.
+	// Tenant isolation comes from crmOrg on every handler, not from a role.
+	auth.GET("/customers", s.handleListCustomers)
+	auth.POST("/customers", s.handleCreateCustomer)
+	auth.GET("/customers/:id", s.handleGetCustomer)
+	auth.PATCH("/customers/:id", s.handleUpdateCustomer)
+	auth.GET("/customers/:id/conversations", s.handleCustomerConversations)
+	auth.GET("/customers/:id/timeline", s.handleCustomerTimeline)
+	auth.POST("/customers/:id/merge", s.handleMergeCustomers)
+	auth.GET("/customers/:id/notes", s.handleListCustomerNotes)
+	auth.POST("/customers/:id/notes", s.handleAddCustomerNote)
+	auth.PATCH("/customers/:id/notes/:note_id", s.handleUpdateCustomerNote)
+	auth.DELETE("/customers/:id/notes/:note_id", s.handleDeleteCustomerNote)
+	auth.POST("/customers/:id/tags", s.handleAddCustomerTag)
+	auth.DELETE("/customers/:id/tags/:tag_id", s.handleRemoveCustomerTag)
+
+	// The org's own CRM vocabulary — tags, lifecycle statuses and custom
+	// fields are rows an organization edits, never hard-coded lists.
+	auth.GET("/crm/tags", s.handleListTags)
+	auth.POST("/crm/tags", s.handleCreateTag)
+	auth.PATCH("/crm/tags/:id", s.handleUpdateTag)
+	auth.DELETE("/crm/tags/:id", s.handleDeleteTag)
+	auth.GET("/crm/statuses", s.handleListStatuses)
+	auth.POST("/crm/statuses", s.handleCreateStatus)
+	auth.PATCH("/crm/statuses/:id", s.handleUpdateStatus)
+	auth.DELETE("/crm/statuses/:id", s.handleDeleteStatus)
+	auth.GET("/crm/custom-fields", s.handleListCustomFields)
+	auth.POST("/crm/custom-fields", s.handleCreateCustomField)
+	auth.PATCH("/crm/custom-fields/:id", s.handleUpdateCustomField)
+	auth.DELETE("/crm/custom-fields/:id", s.handleDeleteCustomField)
+
+	auth.GET("/followups", s.handleListFollowups)
+	auth.GET("/followups/buckets", s.handleFollowupBuckets)
+	auth.POST("/followups", s.handleCreateFollowup)
+	auth.PATCH("/followups/:id", s.handleRescheduleFollowup)
+	auth.POST("/followups/:id/complete", s.handleCompleteFollowup)
+	auth.POST("/followups/:id/cancel", s.handleCancelFollowup)
+
 	auth.POST("/media", s.handleUploadMedia)
 	auth.GET("/media/:id", s.handleServeMedia)
 	auth.GET("/realtime", s.handleRealtime)

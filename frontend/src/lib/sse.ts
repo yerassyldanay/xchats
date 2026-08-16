@@ -1,6 +1,6 @@
 import { api } from '../api/client'
 import { log } from './logfmt'
-import type { Chat, Message, AiDraft } from '../types'
+import type { Chat, Customer, Followup, Message, AiDraft } from '../types'
 
 export interface SSEHandlers {
   messageCreated?: (m: Message) => void
@@ -17,6 +17,13 @@ export interface SSEHandlers {
   // full resync; the client merges it into whatever GET /settings/
   // provider-health already hydrated.
   providerHealthChanged?: (d: { provider: string; healthy: boolean; at: string }) => void
+  // CRM deltas — a customer edited (status/tags/assignee/profile) or a
+  // follow-up created, rescheduled, completed or cancelled. Both carry the
+  // full entity, so an open sidebar or follow-up list merges rather than
+  // refetches. Two managers on the same conversation is the case this exists
+  // for: one sets the status, the other sees it without reloading.
+  customerUpdated?: (c: Customer) => void
+  followupChanged?: (f: Followup) => void
 }
 
 // connectRealtime opens the SSE stream and dispatches each named event. Returns
@@ -42,6 +49,8 @@ export function connectRealtime(h: SSEHandlers): () => void {
   bind('kb.row.changed', h.kbRowChanged)
   bind('kb.approved', h.kbApproved)
   bind('integration.status_changed', h.providerHealthChanged)
+  bind('customer.updated', h.customerUpdated)
+  bind('followup.changed', h.followupChanged)
   es.onopen = () => log.info('sse connected')
   es.onerror = () => log.warn('sse error; browser will retry')
   return () => es.close()

@@ -76,6 +76,7 @@ func (s *Service) generate(ctx context.Context, conversationID string, convCtx C
 		History:        convCtx.History,
 		IncomingText:   convCtx.CurrentMessage,
 		KB:             kb,
+		Customer:       convCtx.Customer,
 		ModelOverride:  opts.ModelOverride,
 	})
 	if err != nil {

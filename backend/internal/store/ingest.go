@@ -77,9 +77,12 @@ type InboundUpsert struct {
 
 // InboundResult reports what the upsert did, so the worker knows which SSE to emit.
 type InboundResult struct {
-	ContactID       uuid.UUID
-	ChatID          uuid.UUID
-	MessageID       uuid.UUID
+	ContactID uuid.UUID
+	ChatID    uuid.UUID
+	MessageID uuid.UUID
+	// CustomerID is the CRM customer this contact resolved to, or uuid.Nil
+	// when the owning account belongs to no organization (see UpsertInbound).
+	CustomerID      uuid.UUID
 	ChatCreated     bool
 	MessageInserted bool
 }
@@ -118,6 +121,27 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 	res.ChatID, res.ChatCreated, err = upsertChatTwoStep(ctx, tx, in.AccountID, res.ContactID, in.RemoteJID)
 	if err != nil {
 		return res, wrap("upsert chat", err)
+	}
+
+	// CRM identity — find-or-create the customer this contact belongs to, in
+	// this same transaction so a message and its customer link commit together
+	// and a redelivery cannot produce a second customer. An account with no
+	// organization resolves to uuid.Nil and is skipped: its chats are already
+	// invisible to every org's inbox, so there is no tenant to own the customer.
+	orgID, channel, err := accountOwner(ctx, tx, "wa_accounts", in.AccountID)
+	if err != nil {
+		return res, err
+	}
+	res.CustomerID, err = ResolveCustomerForContact(ctx, tx, orgID, IdentityInput{
+		Channel:     channel,
+		AccountID:   in.AccountID,
+		ContactID:   res.ContactID,
+		ExternalID:  in.PhoneJID,
+		Phone:       in.PhoneNumber,
+		DisplayName: in.PushName,
+	})
+	if err != nil {
+		return res, err
 	}
 
 	// message (dedup on the natural key; preserves sender_kind on conflict)

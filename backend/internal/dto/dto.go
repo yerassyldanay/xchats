@@ -50,6 +50,11 @@ type Chat struct {
 	UnreadCount        int     `json:"unread_count"`
 	LastMessageAt      *string `json:"last_message_at"`
 	LastMessagePreview string  `json:"last_message_preview"`
+	// CustomerID is the CRM customer this conversation belongs to — what the
+	// customer sidebar hydrates from without a second chat-scoped route. Null
+	// for a chat on an unassigned account and for chats that predate the CRM
+	// migration.
+	CustomerID *string `json:"customer_id"`
 }
 
 // Media is one media item on a message (a "list of URLs", each enriched).
@@ -292,6 +297,7 @@ func MapChat(c store.Chat) Chat {
 		UnreadCount:        c.UnreadCount,
 		LastMessageAt:      tsPtr(c.LastMessageAt),
 		LastMessagePreview: c.LastMessagePreview,
+		CustomerID:         nullUUIDPtr(c.CustomerID),
 	}
 	if channel != "telegram" {
 		out.WaAccountID = c.AccountID.String()

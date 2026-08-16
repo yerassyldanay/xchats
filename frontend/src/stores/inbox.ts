@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { connectRealtime } from '../lib/sse'
 import { log } from '../lib/logfmt'
+import { useCrm } from './crm'
 import type { AiDraft, Chat, Message, User } from '../types'
 
 type Assignee = 'me' | 'unassigned' | 'all'
@@ -207,6 +208,11 @@ export const useInbox = defineStore('inbox', {
         draftUpdated: (d) => {
           if (d.chat_id === this.activeId) this.drafts = []
         },
+        // CRM deltas are owned by the crm store, but the realtime connection
+        // is opened once here — routing them across keeps a single EventSource
+        // rather than a second stream per pane.
+        customerUpdated: (c) => useCrm().applyCustomerEvent(c),
+        followupChanged: (f) => useCrm().applyFollowupEvent(f),
       })
     },
     stopRealtime() {
