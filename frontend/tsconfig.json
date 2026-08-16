@@ -2,7 +2,9 @@
   "compilerOptions": {
     "target": "ES2021",
     "useDefineForClassFields": true,
-    "baseUrl": ".",
+    // No "baseUrl": deprecated in TypeScript 6, removed in 7. It was redundant
+    // anyway — these paths are already tsconfig-relative ("./src/*"), which is
+    // exactly how `paths` resolves on its own once baseUrl is absent.
     "paths": {
       "@/*": ["./src/*"]
     },

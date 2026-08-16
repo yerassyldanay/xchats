@@ -308,7 +308,7 @@ function collapseAll() {
                   v-for="opt in availableMetrics"
                   :key="opt.key"
                   class="px-3 py-1 text-xs font-medium rounded-md transition"
-                  :class="metric === opt.key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                  :class="metric === opt.key ? 'bg-background shadow-xs' : 'text-muted-foreground hover:text-foreground'"
                   @click="metric = opt.key"
                 >
                   {{ opt.label }}

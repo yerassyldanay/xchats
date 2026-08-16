@@ -94,13 +94,13 @@ function retry() {
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.zoneLevel') }}</span>
-        <select v-model="buf.zone_level" class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <select v-model="buf.zone_level" class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring">
           <option v-for="lvl in ZONE_LEVELS" :key="lvl" :value="lvl">{{ t('kb.zoneLevel.' + lvl) }}</option>
         </select>
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.parentZone') }}</span>
-        <select v-model="buf.parent_ref" class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <select v-model="buf.parent_ref" class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring">
           <option value="">{{ t('kb.fields.noParentZone') }}</option>
           <option v-for="z in parentOptions" :key="z.ref" :value="z.ref">{{ z.name || z.ref }}</option>
         </select>

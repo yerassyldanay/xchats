@@ -140,7 +140,7 @@ async function switchOrg(orgId: string) {
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <button
-              class="rounded-full ring-2 ring-white/15 transition hover:ring-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+              class="rounded-full ring-2 ring-white/15 transition hover:ring-white/30 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-white/40"
             >
               <Avatar size="base" class="text-white" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
                 <AvatarFallback class="bg-transparent text-xs font-semibold">

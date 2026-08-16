@@ -150,7 +150,7 @@ function isAudio(m: Message['media'][number]) {
             class="max-w-[68%] rounded-xl px-3.5 py-2.5"
             :class="
               m.direction === 'out'
-                ? 'bg-wa text-white rounded-br-md shadow-sm'
+                ? 'bg-wa text-white rounded-br-md shadow-xs'
                 : 'bg-card text-card-foreground rounded-bl-md border border-border shadow-card'
             "
           >
@@ -174,7 +174,7 @@ function isAudio(m: Message['media'][number]) {
                 <Download class="w-3.5 h-3.5 ml-auto opacity-70" />
               </a>
             </div>
-            <div v-if="m.content" class="whitespace-pre-wrap break-words text-[15px] leading-snug">{{ m.content }}</div>
+            <div v-if="m.content" class="whitespace-pre-wrap wrap-break-word text-[15px] leading-snug">{{ m.content }}</div>
             <div
               class="mt-1 flex items-center justify-end gap-1.5 text-[11px]"
               :class="m.direction === 'out' ? 'text-white/70' : 'text-muted-foreground'"
