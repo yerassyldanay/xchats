@@ -441,8 +441,8 @@ export default {
       },
       telegram: {
         name: 'Telegram bot',
-        tagline: 'Connect with a @BotFather token',
-        step1: 'Open @BotFather and send the /newbot command.',
+        tagline: 'Connect with a {\'@\'}BotFather token',
+        step1: 'Open {\'@\'}BotFather and send the /newbot command.',
         step2: 'Name the bot and copy the secret token it gives you.',
         step3: 'Paste the token here — the webhook is set up automatically.',
         cta: 'Continue with Telegram →',
@@ -472,7 +472,7 @@ export default {
         cta: 'Continue with Messenger →',
       },
       telegramSteps: {
-        step1: 'Open @BotFather in Telegram.',
+        step1: 'Open {\'@\'}BotFather in Telegram.',
         step2: 'Send /newbot and pick a name.',
         step3: 'Copy the token it gives you and paste it below.',
       },
@@ -505,7 +505,7 @@ export default {
       errConnectInstagram: 'Could not start the Instagram connection.',
       errConnectMessenger: 'Could not start the Messenger connection.',
       errConnectWhatsApp: 'Could not start the connection.',
-      errBotTokenRequired: 'Paste the token @BotFather gave you.',
+      errBotTokenRequired: 'Paste the token {\'@\'}BotFather gave you.',
       errWebhookRejected:
         'The bot was added, but Telegram did not accept the webhook. Check the address and click "Retry webhook" on the card.',
       errConnectBot: 'Could not connect the bot.',

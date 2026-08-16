@@ -450,8 +450,8 @@ export default {
       },
       telegram: {
         name: 'Telegram-бот',
-        tagline: 'Подключение токеном @BotFather',
-        step1: 'Откройте @BotFather и отправьте команду /newbot.',
+        tagline: 'Подключение токеном {\'@\'}BotFather',
+        step1: 'Откройте {\'@\'}BotFather и отправьте команду /newbot.',
         step2: 'Задайте имя бота и скопируйте выданный секретный токен.',
         step3: 'Вставьте токен здесь — вебхук настроится автоматически.',
         cta: 'Продолжить с Telegram →',
@@ -481,7 +481,7 @@ export default {
         cta: 'Продолжить с Messenger →',
       },
       telegramSteps: {
-        step1: 'Откройте @BotFather в Telegram.',
+        step1: 'Откройте {\'@\'}BotFather в Telegram.',
         step2: 'Отправьте /newbot и придумайте имя.',
         step3: 'Скопируйте выданный токен и вставьте его ниже.',
       },
@@ -514,7 +514,7 @@ export default {
       errConnectInstagram: 'Не удалось начать подключение Instagram.',
       errConnectMessenger: 'Не удалось начать подключение Messenger.',
       errConnectWhatsApp: 'Не удалось начать подключение.',
-      errBotTokenRequired: 'Вставьте токен, который выдал @BotFather.',
+      errBotTokenRequired: 'Вставьте токен, который выдал {\'@\'}BotFather.',
       errWebhookRejected:
         'Бот добавлен, но Telegram не принял вебхук. Проверьте адрес и нажмите «Повторить вебхук» на карточке.',
       errConnectBot: 'Не удалось подключить бота.',
