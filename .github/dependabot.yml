@@ -56,6 +56,20 @@ updates:
       npm-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # TypeScript 7 is blocked upstream, not by anything in this repo:
+      # typescript-eslint peers on `typescript >=4.8.4 <6.1.0`, and no release
+      # accepts 7 yet — not latest (8.67.0), not canary (8.67.1-alpha.4).
+      # Dependabot proposes it regardless, and the resulting PR fails `npm ci`
+      # with ERESOLVE every single time and can never go green. That is what
+      # made the grouped #65 unmergeable, and it recurred immediately as #71.
+      # We are on TypeScript 6.0.3, the highest the toolchain can resolve.
+      #
+      # REMOVE THIS ENTRY once typescript-eslint ships TypeScript 7 support,
+      # and take both bumps together in one PR. Minor/patch still flow through
+      # the group above, so 6.0.x updates are unaffected.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
