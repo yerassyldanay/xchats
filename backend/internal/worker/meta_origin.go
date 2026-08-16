@@ -26,7 +26,7 @@ import (
 // all. Instagram and Messenger cannot: their webhook is app-level, requiring
 // a Meta Dashboard edit, so a stale account is marked connection_state=
 // webhook_stale with webhook_last_error explaining exactly what changed —
-// surfaced by GET /settings/meta-setup's stale_accounts list and by the
+// surfaced by GET /channel-setup's stale_accounts list and by the
 // account's own card (MapNeutralAccount already passes connection_state and
 // webhook_last_error through verbatim; hasWebhookHealth's allowlist already
 // covers all three Meta channels, fixed in Phase 0).
@@ -110,7 +110,7 @@ func (w *Worker) repairWhatsAppCloudOrigins(ctx context.Context, currentPublicBa
 // markStaleMessengerish is the mark-and-surface half for Instagram/Messenger
 // — see RepairStaleMetaOrigins' own doc comment. It re-marks an
 // already-stale account too (not just newly-transitioned ones): the count
-// this returns feeds a log line and GET /settings/meta-setup's list, both of
+// this returns feeds a log line and GET /channel-setup's list, both of
 // which want "how many need attention right now", not "how many changed
 // this boot".
 func (w *Worker) markStaleMessengerish(ctx context.Context, channel, newCallbackURL, currentOrigin string) (int, error) {

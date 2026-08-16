@@ -9,9 +9,15 @@ import (
 // InstagramAuthorizeURL builds the "Instagram API with Instagram Login"
 // authorization dialog URL — no Facebook Page required. No Graph API
 // version segment: this host's authorize path is unversioned.
-func InstagramAuthorizeURL(appID, redirectURI, state string) string {
+// instagramAppID is the Instagram App ID from the Meta Dashboard's
+// "Instagram > API setup with Instagram login" panel — NOT the Meta
+// Developer App ID Messenger/WhatsApp Cloud use (see
+// meta.InstagramAppCredentials' own doc comment); passing the wrong one is
+// exactly what makes instagram.com answer "Sorry, this page isn't
+// available."
+func InstagramAuthorizeURL(instagramAppID, redirectURI, state string) string {
 	v := url.Values{}
-	v.Set("client_id", appID)
+	v.Set("client_id", instagramAppID)
 	v.Set("redirect_uri", redirectURI)
 	v.Set("response_type", "code")
 	v.Set("scope", "instagram_business_basic,instagram_business_manage_messages")
@@ -28,10 +34,13 @@ type InstagramTokenResult struct {
 // ExchangeInstagramCode trades an authorization code for a SHORT-LIVED
 // (1 hour) token. The code itself is single-use and short-lived — call this
 // synchronously from the OAuth callback handler, never deferred.
-func (c *Client) ExchangeInstagramCode(ctx context.Context, appID, appSecret, redirectURI, code string) (InstagramTokenResult, error) {
+// instagramAppID/instagramAppSecret are the Instagram app pair — see
+// InstagramAuthorizeURL's own doc comment on why this must never be the
+// Meta Developer App pair.
+func (c *Client) ExchangeInstagramCode(ctx context.Context, instagramAppID, instagramAppSecret, redirectURI, code string) (InstagramTokenResult, error) {
 	form := url.Values{}
-	form.Set("client_id", appID)
-	form.Set("client_secret", appSecret)
+	form.Set("client_id", instagramAppID)
+	form.Set("client_secret", instagramAppSecret)
 	form.Set("grant_type", "authorization_code")
 	form.Set("redirect_uri", redirectURI)
 	form.Set("code", code)
@@ -49,18 +58,19 @@ type InstagramLongLivedResult struct {
 }
 
 // ExchangeInstagramLongLived trades a short-lived (1h) token for a
-// long-lived (60 day) one.
-func (c *Client) ExchangeInstagramLongLived(ctx context.Context, appSecret, shortLivedToken string) (InstagramLongLivedResult, error) {
+// long-lived (60 day) one. instagramAppSecret is the Instagram app pair's
+// secret — see InstagramAuthorizeURL's own doc comment.
+func (c *Client) ExchangeInstagramLongLived(ctx context.Context, instagramAppSecret, shortLivedToken string) (InstagramLongLivedResult, error) {
 	v := url.Values{}
 	v.Set("grant_type", "ig_exchange_token")
-	v.Set("client_secret", appSecret)
+	v.Set("client_secret", instagramAppSecret)
 	v.Set("access_token", shortLivedToken)
 	var out InstagramLongLivedResult
 	// Both secrets ride the URL's query string, not a header, so Get's own
 	// token-redaction (which only ever scrubs what IT was told is a bearer
 	// token) cannot see them — redact both explicitly from whatever error
 	// comes back.
-	err := redactAll(c.Get(ctx, c.instagramGraphHostBase()+"/access_token?"+v.Encode(), "", &out), appSecret, shortLivedToken)
+	err := redactAll(c.Get(ctx, c.instagramGraphHostBase()+"/access_token?"+v.Encode(), "", &out), instagramAppSecret, shortLivedToken)
 	return out, err
 }
 

@@ -149,7 +149,7 @@ func (s *Store) ChannelAccountByExternalID(ctx context.Context, channel, externa
 
 // ChannelAccountsWithWebhook lists every live, previously-registered account
 // on the given channel — deliberately install-wide, not org-scoped, since
-// its two callers (the stale-origin repair pass and the meta-setup
+// its two callers (the stale-origin repair pass and the channel-setup
 // checklist's stale list) are both boot-time/admin maintenance concerns, not
 // a single tenant's own view. "Previously-registered" (webhook_url <> "")
 // excludes an account that was claimed but never got as far as a webhook

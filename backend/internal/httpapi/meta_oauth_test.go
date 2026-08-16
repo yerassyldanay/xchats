@@ -18,14 +18,38 @@ func TestStartInstagramOAuthRequiresAppCredentials(t *testing.T) {
 	if resp.StatusCode != http.StatusPreconditionFailed {
 		t.Fatalf("status = %d, body = %s", resp.StatusCode, env["message"])
 	}
-	if string(env["errcode"]) != `"META_APP_NOT_CONFIGURED"` {
+	if string(env["errcode"]) != `"INSTAGRAM_APP_NOT_CONFIGURED"` {
 		t.Fatalf("errcode = %s", env["errcode"])
 	}
 }
 
+// TestStartInstagramOAuthDoesNotFallBackToMetaAppCredentials is the
+// regression test for the bug this feature fixes: Instagram Login
+// (Business Login for Instagram) rejects the Meta Developer App id outright
+// — see internal/meta/oauth.go's InstagramAuthorizeURL doc comment. With
+// only the "meta" pair saved (exactly the state a fresh Messenger/WhatsApp
+// Cloud install already has), starting Instagram must still 412 rather than
+// silently reuse it.
+func TestStartInstagramOAuthDoesNotFallBackToMetaAppCredentials(t *testing.T) {
+	h := newMetaHarness(t)
+	h.setAppCredentials("meta-app-id", "meta-app-secret")
+	resp, env := h.postJSON("/xchats/api/v1/instagram-accounts/oauth/start", nil)
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, env["message"])
+	}
+	if string(env["errcode"]) != `"INSTAGRAM_APP_NOT_CONFIGURED"` {
+		t.Fatalf("errcode = %s, want INSTAGRAM_APP_NOT_CONFIGURED even with a meta pair saved", env["errcode"])
+	}
+}
+
+// TestStartInstagramOAuthReturnsAuthorizeURLAndPersistsState saves BOTH
+// pairs with DIFFERENT ids and asserts the authorize_url's client_id is the
+// INSTAGRAM one — proof the start handler reads the right credential, not
+// merely that some credential was accepted.
 func TestStartInstagramOAuthReturnsAuthorizeURLAndPersistsState(t *testing.T) {
 	h := newMetaHarness(t)
-	h.setAppCredentials("app-123", "app-secret-123")
+	h.setAppCredentials("meta-app-id", "meta-app-secret")
+	h.setInstagramAppCredentials("app-123", "app-secret-123")
 	resp, env := h.postJSON("/xchats/api/v1/instagram-accounts/oauth/start", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", resp.StatusCode, env["message"])
@@ -43,8 +67,8 @@ func TestStartInstagramOAuthReturnsAuthorizeURLAndPersistsState(t *testing.T) {
 	if u.Host != "www.instagram.com" {
 		t.Fatalf("authorize_url host = %q", u.Host)
 	}
-	if u.Query().Get("client_id") != "app-123" {
-		t.Fatalf("client_id = %q", u.Query().Get("client_id"))
+	if got := u.Query().Get("client_id"); got != "app-123" {
+		t.Fatalf("client_id = %q, want the Instagram app id (app-123), not the meta app id", got)
 	}
 	state := u.Query().Get("state")
 	if state == "" {
@@ -58,13 +82,28 @@ func TestStartInstagramOAuthReturnsAuthorizeURLAndPersistsState(t *testing.T) {
 // instagramOAuthMockHandler answers the three-hosts-in-one mock server for a
 // successful Instagram connect: code exchange (instagramAPIHost),
 // long-lived exchange (instagramGraphHostBase), Me, and Subscribe (both
-// under the versioned InstagramGraphURL).
-func instagramOAuthMockHandler(t *testing.T, igUserID, username, name string) http.HandlerFunc {
+// under the versioned InstagramGraphURL). wantAppID/wantAppSecret assert
+// EXACTLY which app pair reaches Meta on each leg — the Instagram pair,
+// never a Meta Developer App pair a test may have separately configured.
+func instagramOAuthMockHandler(t *testing.T, igUserID, username, name, wantAppID, wantAppSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/oauth/access_token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.FormValue("client_id"); got != wantAppID {
+				t.Fatalf("/oauth/access_token client_id = %q, want %q (the Instagram app id)", got, wantAppID)
+			}
+			if got := r.FormValue("client_secret"); got != wantAppSecret {
+				t.Fatalf("/oauth/access_token client_secret = %q, want %q (the Instagram app secret)", got, wantAppSecret)
+			}
 			_, _ = w.Write([]byte(`{"access_token":"short-lived-token","user_id":"` + igUserID + `"}`))
 		case r.URL.Path == "/access_token":
+			// ig_exchange_token carries no client_id — only the secret.
+			if got := r.URL.Query().Get("client_secret"); got != wantAppSecret {
+				t.Fatalf("/access_token client_secret = %q, want %q (the Instagram app secret)", got, wantAppSecret)
+			}
 			_, _ = w.Write([]byte(`{"access_token":"long-lived-token","token_type":"bearer","expires_in":5184000}`))
 		case strings.HasSuffix(r.URL.Path, "/me"):
 			_, _ = w.Write([]byte(`{"user_id":"` + igUserID + `","username":"` + username + `","name":"` + name + `"}`))
@@ -78,8 +117,13 @@ func instagramOAuthMockHandler(t *testing.T, igUserID, username, name string) ht
 
 func TestInstagramOAuthCallbackFullFlow(t *testing.T) {
 	h := newMetaHarness(t)
-	h.setAppCredentials("app-123", "app-secret-123")
-	h.graphHandler = instagramOAuthMockHandler(t, "178414000001", "my_shop", "My Shop")
+	// A different Meta pair is ALSO saved (the ordinary state once Messenger
+	// setup is done) — instagramOAuthMockHandler fails the test outright if
+	// this one ever reaches api.instagram.com/graph.instagram.com instead of
+	// the Instagram pair below.
+	h.setAppCredentials("meta-app-id", "meta-app-secret")
+	h.setInstagramAppCredentials("app-123", "app-secret-123")
+	h.graphHandler = instagramOAuthMockHandler(t, "178414000001", "my_shop", "My Shop", "app-123", "app-secret-123")
 
 	_, startEnv := h.postJSON("/xchats/api/v1/instagram-accounts/oauth/start", nil)
 	var started struct {
@@ -141,8 +185,8 @@ func TestInstagramOAuthCallbackUnknownStateRedirectsWithError(t *testing.T) {
 
 func TestInstagramOAuthCallbackStateIsSingleUse(t *testing.T) {
 	h := newMetaHarness(t)
-	h.setAppCredentials("app-123", "app-secret-123")
-	h.graphHandler = instagramOAuthMockHandler(t, "178414000002", "shop2", "Shop Two")
+	h.setInstagramAppCredentials("app-123", "app-secret-123")
+	h.graphHandler = instagramOAuthMockHandler(t, "178414000002", "shop2", "Shop Two", "app-123", "app-secret-123")
 
 	_, startEnv := h.postJSON("/xchats/api/v1/instagram-accounts/oauth/start", nil)
 	var started struct {
@@ -173,8 +217,8 @@ func TestInstagramOAuthCallbackStateIsSingleUse(t *testing.T) {
 
 func TestDeleteInstagramAccountUnsubscribesAndSoftDeletes(t *testing.T) {
 	h := newMetaHarness(t)
-	h.setAppCredentials("app-123", "app-secret-123")
-	h.graphHandler = instagramOAuthMockHandler(t, "178414000003", "shop3", "Shop Three")
+	h.setInstagramAppCredentials("app-123", "app-secret-123")
+	h.graphHandler = instagramOAuthMockHandler(t, "178414000003", "shop3", "Shop Three", "app-123", "app-secret-123")
 
 	_, startEnv := h.postJSON("/xchats/api/v1/instagram-accounts/oauth/start", nil)
 	var started struct {
