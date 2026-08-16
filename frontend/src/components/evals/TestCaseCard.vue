@@ -150,7 +150,7 @@ function onImgError(ev: Event) {
                     <Badge v-else-if="s.status === 'error'" variant="destructive" class="text-[11px]">ERROR</Badge>
                     <span v-else class="text-[11px] italic text-muted-foreground">не проверялось</span>
                   </td>
-                  <td class="py-1 max-w-[320px] whitespace-pre-wrap break-words text-muted-foreground">{{ s.detail || '—' }}</td>
+                  <td class="py-1 max-w-[320px] whitespace-pre-wrap wrap-break-word text-muted-foreground">{{ s.detail || '—' }}</td>
                 </tr>
               </tbody>
             </table>

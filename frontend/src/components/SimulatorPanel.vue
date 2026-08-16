@@ -94,7 +94,7 @@ async function send() {
         :key="i"
         data-testid="simulator-message"
         :data-role="m.role"
-        class="max-w-2xl rounded-lg border p-3 text-sm whitespace-pre-wrap break-words"
+        class="max-w-2xl rounded-lg border p-3 text-sm whitespace-pre-wrap wrap-break-word"
         :class="m.role === 'user' ? 'ml-auto border-primary/30 bg-primary/5' : 'mr-auto border-border bg-card'"
       >
         <div class="text-xs font-medium text-muted-foreground mb-1">

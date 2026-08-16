@@ -808,7 +808,11 @@ test('22-25. Симулятор: four grounding questions', async ({}, testInfo)
   ]
 
   for (const q of questions) {
-    let reply = ''
+    // No `= ''` initializer: the catch below `continue`s, so the empty string
+    // could never be observed — and seeding one would make a failed
+    // askSimulator indistinguishable from a genuinely empty reply, which is
+    // exactly what the `must not be empty` assertion downstream is checking.
+    let reply: string
     try {
       reply = await askSimulator(testInfo, `${q.n}. Ask: ${q.text}`, q.text)
     } catch (e) {
