@@ -13,22 +13,37 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
+import InstagramIcon from '@/components/icons/InstagramIcon.vue'
+import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 const inbox = useInbox()
 const accounts = useAccounts()
 const showNew = ref(false)
 
 // A chat carries its own channel, so the badge never has to guess from the
-// account list (which may not have loaded yet on a cold open).
-function channelIcon(channel: string) {
-  return channel === 'telegram' ? TelegramIcon : WhatsappIcon
+// account list (which may not have loaded yet on a cold open). Every channel
+// the inbox can surface gets its own brand icon/colour here; the simulator
+// (and any channel added later) falls back to the WhatsApp-green default
+// rather than being mislabelled as a specific provider it isn't.
+// whatsapp_cloud deliberately shares WhatsApp's icon and green: to an
+// operator it IS WhatsApp, only the transport underneath differs.
+const CHANNEL_BRAND: Record<string, { icon: typeof WhatsappIcon; dot: string; text: string }> = {
+  telegram: { icon: TelegramIcon, dot: 'bg-[#229ED9]', text: 'text-[#229ED9]' },
+  instagram: { icon: InstagramIcon, dot: 'bg-[#E4405F]', text: 'text-[#E4405F]' },
+  messenger: { icon: MessengerIcon, dot: 'bg-[#0084FF]', text: 'text-[#0084FF]' },
+  whatsapp: { icon: WhatsappIcon, dot: 'bg-wa', text: 'text-wa' },
+  whatsapp_cloud: { icon: WhatsappIcon, dot: 'bg-wa', text: 'text-wa' },
 }
-// Telegram blue vs WhatsApp green — the two brand colours the inbox mixes.
+const CHANNEL_BRAND_FALLBACK = CHANNEL_BRAND.whatsapp
+
+function channelIcon(channel: string) {
+  return (CHANNEL_BRAND[channel] ?? CHANNEL_BRAND_FALLBACK).icon
+}
 function channelDot(channel: string) {
-  return channel === 'telegram' ? 'bg-[#229ED9]' : 'bg-wa'
+  return (CHANNEL_BRAND[channel] ?? CHANNEL_BRAND_FALLBACK).dot
 }
 function channelText(channel: string) {
-  return channel === 'telegram' ? 'text-[#229ED9]' : 'text-wa'
+  return (CHANNEL_BRAND[channel] ?? CHANNEL_BRAND_FALLBACK).text
 }
 
 const ALL = '__all__'

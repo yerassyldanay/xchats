@@ -428,7 +428,7 @@ export default {
     },
     channels: {
       title: 'Каналы связи',
-      subtitle: 'Номера WhatsApp и Telegram-боты, подключённые к этому серверу.',
+      subtitle: 'Каналы, подключённые к этому серверу: WhatsApp, Telegram, Instagram, Messenger.',
       connected: 'подключено',
       waiting: 'ждут действия',
       broken: 'не подключено',
@@ -590,7 +590,7 @@ export default {
     },
     page: {
       title: 'Каналы',
-      subtitle: 'Подключайте номера WhatsApp и Telegram-ботов',
+      subtitle: 'Подключайте WhatsApp, Telegram, Instagram и Messenger',
       tabs: {
         accounts: 'Подключённые аккаунты',
         setup: 'Настройка каналов',

@@ -420,7 +420,7 @@ export default {
     },
     channels: {
       title: 'Communication channels',
-      subtitle: 'WhatsApp numbers and Telegram bots connected to this deployment.',
+      subtitle: 'Channels connected to this deployment: WhatsApp, Telegram, Instagram, Messenger.',
       connected: 'connected',
       waiting: 'waiting',
       broken: 'not connected',
@@ -582,7 +582,7 @@ export default {
     },
     page: {
       title: 'Channels',
-      subtitle: 'Connect WhatsApp numbers and Telegram bots',
+      subtitle: 'Connect WhatsApp, Telegram, Instagram and Messenger',
       tabs: {
         accounts: 'Connected accounts',
         setup: 'Channel setup',
