@@ -15,13 +15,19 @@ var sentinelAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
 
 // TestBootstrapSentinelAdminPassword_MintsOnceNotTwice pins
 // BootstrapSentinelAdminPassword's idempotency: it must write the hash
-// exactly once (on the row 0008_bootstrap_admin.up.sql left with an empty
-// password_hash) and report minted=false on every call after — the
-// property cmd/xchats' first-boot bootstrap depends on to never re-mint
-// (and re-print) a fresh password on a normal restart.
+// exactly once (on a row with a blanked "" password_hash — what
+// ResetSentinelAdminPassword produces; a freshly migrated DB no longer
+// starts there now that 0011_restore_default_admin_password seeds a real
+// default hash) and report minted=false on every call after — the property
+// cmd/xchats' bootstrap depends on to never re-mint (and re-print) a fresh
+// password on a normal restart.
 func TestBootstrapSentinelAdminPassword_MintsOnceNotTwice(t *testing.T) {
 	st, _ := dbtest.Open(t)
 	ctx := context.Background()
+
+	if err := st.ResetSentinelAdminPassword(ctx); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
 
 	hash1, err := password.Hash("first-one-time-password")
 	if err != nil {
@@ -32,7 +38,7 @@ func TestBootstrapSentinelAdminPassword_MintsOnceNotTwice(t *testing.T) {
 		t.Fatalf("first bootstrap call: %v", err)
 	}
 	if !minted {
-		t.Fatal("first call on a freshly migrated DB: minted = false, want true")
+		t.Fatal("first call on a blanked hash: minted = false, want true")
 	}
 
 	got, err := st.UserByEmail(ctx, "admin@xchat.kz")
@@ -42,8 +48,8 @@ func TestBootstrapSentinelAdminPassword_MintsOnceNotTwice(t *testing.T) {
 	if !password.Verify("first-one-time-password", got.PasswordHash) {
 		t.Error("stored hash does not verify against the minted password")
 	}
-	if !got.MustChangePassword {
-		t.Error("must_change_password = false after minting — bootstrap must leave it set")
+	if got.MustChangePassword {
+		t.Error("must_change_password = true after minting — bootstrap must clear it")
 	}
 
 	// A second call (a restart) must be a no-op, even with a different
@@ -71,11 +77,18 @@ func TestBootstrapSentinelAdminPassword_MintsOnceNotTwice(t *testing.T) {
 // TestResetSentinelAdminPassword_RemintsOnNextBoot pins the
 // "xchats reset-admin-password" recovery path end to end: reset blanks the
 // hash and re-sets must_change_password, and the NEXT
-// BootstrapSentinelAdminPassword call (the next boot) mints again.
+// BootstrapSentinelAdminPassword call (the next boot) mints again. The
+// initial reset+mint below only gets the row to "some password already
+// set" — 0011_restore_default_admin_password means a freshly migrated DB
+// starts there already, but blanking first keeps this test independent of
+// that migration's exact default.
 func TestResetSentinelAdminPassword_RemintsOnNextBoot(t *testing.T) {
 	st, _ := dbtest.Open(t)
 	ctx := context.Background()
 
+	if err := st.ResetSentinelAdminPassword(ctx); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
 	hash1, _ := password.Hash("original-one-time-password")
 	if minted, err := st.BootstrapSentinelAdminPassword(ctx, hash1); err != nil || !minted {
 		t.Fatalf("initial mint: minted=%v err=%v", minted, err)

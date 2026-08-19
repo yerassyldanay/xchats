@@ -17,6 +17,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/inboxmedia"
+	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
@@ -75,6 +76,7 @@ type Server struct {
 	tgProc   *tgingest.Processor // the Telegram webhook ingress's shared ingest core (internal/tgingest) — also used by internal/tgpoller in polling mode
 	tgPoller tgPoller            // the long-poll manager (polling mode only — see tgPoller's own doc comment)
 	kb       *kbstore.Store
+	kbImport *kbimport.Service // nil when the import pipeline is not wired (every handler checks)
 	orgID    uuid.UUID
 	log      *slog.Logger
 
@@ -171,6 +173,7 @@ type Deps struct {
 	TGProcessor   *tgingest.Processor
 	TGPoller      tgPoller
 	KB            *kbstore.Store
+	KBImport      *kbimport.Service // nil to run without the structured import pipeline
 	KBRepo        response.KnowledgeBaseRepository
 	KBInvalidator kbInvalidator
 	OrgID         uuid.UUID
@@ -210,7 +213,7 @@ func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
 		blob: d.Blob, response: d.Response, wa: d.WA, tg: d.TG,
-		tgProc: d.TGProcessor, tgPoller: d.TGPoller, kb: d.KB,
+		tgProc: d.TGProcessor, tgPoller: d.TGPoller, kb: d.KB, kbImport: d.KBImport,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
 		metaClient: d.MetaClient, metaCreds: metaCredentialsAdapter{chain: d.Credentials},
@@ -501,6 +504,16 @@ func (s *Server) Router() *gin.Engine {
 	kb.POST("/materials", s.handleKBUploadMaterial)
 	kb.GET("/materials/:id/content", s.handleKBMaterialContent)
 	kb.PATCH("/config", s.handleKBPatchConfig)
+
+	// Structured import pipeline (internal/kbimport) — submit URLs/documents,
+	// extract, and synthesize into kbd_draft. Deliberately NOT an extension
+	// of POST /kb/materials (see handleKBUploadMaterial's own doc comment):
+	// that route's {material_id, processing_status} contract is synchronous,
+	// no-AI, no-cost, and MediaFieldPicker depends on it staying that way.
+	kb.POST("/imports", s.handleKBCreateImport)
+	kb.GET("/imports", s.handleKBListImports)
+	kb.GET("/imports/:id", s.handleKBGetImport)
+	kb.GET("/import/providers", s.handleKBImportProviders)
 
 	// Settings (settings.go) — every route here is admin-only. Handlers are
 	// individually nil-tolerant for Credentials/Settings/Tunnel, but the

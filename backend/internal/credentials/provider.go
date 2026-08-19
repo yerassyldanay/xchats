@@ -121,6 +121,34 @@ var providers = []Provider{
 		HasModel:      false,
 		Validate:      validateMeta,
 	},
+	// Firecrawl and LlamaParse are the document/URL EXTRACTION provider seam
+	// (plan/DECISIONS.md's "Provider seam" amendment) — a separate axis from
+	// the model providers above: they never register an llm.ChatClient
+	// (populateLLMRegistry in cmd/xchats/main.go iterates its OWN fixed
+	// list, not credentials.Providers(), so a non-LLM provider here can
+	// never accidentally become a bogus model choice). HasModel: false
+	// keeps both out of the Settings UI's model-providers block; HasBaseURL:
+	// true because self-hosting either is real (Firecrawl ships an
+	// open-source self-host image; LlamaParse can be pointed at a private
+	// gateway).
+	{
+		ID: "firecrawl", DisplayName: "Firecrawl",
+		Fields:        []Field{{Key: "firecrawl.api_key", Label: "API Key"}},
+		CredentialURL: "https://www.firecrawl.dev/app/api-keys",
+		DocsURL:       "https://docs.firecrawl.dev",
+		HasBaseURL:    true,
+		HasModel:      false,
+		Validate:      validateFirecrawl,
+	},
+	{
+		ID: "llamaparse", DisplayName: "LlamaParse",
+		Fields:        []Field{{Key: "llamaparse.api_key", Label: "API Key"}},
+		CredentialURL: "https://cloud.llamaindex.ai/api-key",
+		DocsURL:       "https://docs.cloud.llamaindex.ai",
+		HasBaseURL:    true,
+		HasModel:      false,
+		Validate:      validateLlamaParse,
+	},
 }
 
 // Providers returns the static metadata for every credential-backed
@@ -205,7 +233,7 @@ func baseURLFor(values map[Key]string, id, def string) string {
 
 func validateOpenRouter(ctx context.Context, values map[Key]string) error {
 	base := baseURLFor(values, "openrouter", "https://openrouter.ai/api/v1")
-	resp, err := doGet(ctx, base+"/key", func(r *http.Request) {
+	resp, err := doGet(ctx, base+"/auth/key", func(r *http.Request) {
 		r.Header.Set("Authorization", "Bearer "+values["openrouter.api_key"])
 	})
 	if err != nil {
@@ -303,4 +331,26 @@ func isMetaInvalidAppBody(body []byte) bool {
 		} `json:"error"`
 	}
 	return json.Unmarshal(body, &payload) == nil && payload.Error.Code != 0
+}
+
+func validateFirecrawl(ctx context.Context, values map[Key]string) error {
+	base := baseURLFor(values, "firecrawl", "https://api.firecrawl.dev")
+	resp, err := doGet(ctx, base+"/v2/team/credit-usage", func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+values["firecrawl.api_key"])
+	})
+	if err != nil {
+		return ErrValidationUnavailable
+	}
+	return classify(resp, nil)
+}
+
+func validateLlamaParse(ctx context.Context, values map[Key]string) error {
+	base := baseURLFor(values, "llamaparse", "https://api.cloud.llamaindex.ai")
+	resp, err := doGet(ctx, base+"/api/v1/parsing/supported_file_extensions", func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+values["llamaparse.api_key"])
+	})
+	if err != nil {
+		return ErrValidationUnavailable
+	}
+	return classify(resp, nil)
 }

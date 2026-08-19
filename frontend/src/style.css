@@ -1,6 +1,90 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* source(none) + explicit @source, rather than v4's automatic detection: this
+   file sits in a monorepo whose git root is the repository root, so leaving
+   detection on would have Tailwind scan backend, evals and deploy too —
+   scanning Go and YAML for class names that cannot be there, and risking
+   false-positive utilities from any string that happens to look like one.
+   The four globs below are exactly the `content` array the v3
+   tailwind.config.js declared. Paths are relative to THIS file (src), not to
+   the project root.
+
+   NB: keep glob syntax out of this comment — a literal star-slash inside it
+   would close the comment early and the rest would be parsed as CSS.
+
+   The content and scripts globs cover the blog's markdown and its generator
+   (see scripts/build-blog.ts). Neither currently embeds Tailwind class
+   strings — the blog's classes live in src/blog Vue SFCs, already covered by
+   the second glob — but scanning them costs nothing and covers the blog
+   pipeline from every angle it could ever need one. */
+@import 'tailwindcss' source(none);
+
+@source '../index.html';
+@source './**/*.{vue,ts}';
+@source '../content/**/*.md';
+@source '../scripts/**/*.ts';
+
+@plugin 'tailwindcss-animate';
+@plugin '@tailwindcss/typography';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-wa: #22c55e;
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --shadow-card:
+    0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.05);
+  --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);
+
+  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
 
 /* shadcn-vue v3 design tokens — Linear-style minimal (HSL: H S% L%).
    Light is the default; .dark on <html> flips to a deep cool charcoal.

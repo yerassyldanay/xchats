@@ -29,6 +29,17 @@
 # requires this — a flat answer would contradict per-zone pricing) and
 # outside_zones_note carries the seller-authored refusal for every
 # unlisted direction.
+#
+# ai_tariffs holds four paid service plans, added with prompt v5 (the first
+# frame able to render a tariff at all — before it this list was empty and
+# the whole table was invisible to the model): "setup-basic" (price plus a
+# terms document, so a tariff media_ref renders), "setup-pro" (price plus
+# advantages/disadvantages prose), "installment-12" (pricing_type
+# "percentage" carrying a FEE and no price — the only fee_placeholder in the
+# fixture) and "courier-legacy" (sales_status "inactive", which must never
+# reach a prompt). None of them touch warranty: a warranty-duration question
+# is a deliberate escalation case in this family, and a priced warranty plan
+# would silently turn it into a false pass.
 organization_id: 22222222-2222-2222-2222-222222222222
 ai_assistants:
     persona: Ты — ассистент по подготовке ответов клиентам интернет-магазина «Demo Shop» в WhatsApp. Ты готовишь ОДИН черновик ответа, который проверит и отправит человек — ты никогда не отправляешь сообщения сам.
@@ -1407,7 +1418,64 @@ ai_products:
       demo_videos: []
       certificate_documents: []
       guarantee_documents: []
-ai_tariffs: []
+ai_tariffs:
+    - ref: setup-basic
+      name: Базовая установка
+      price: 7 900 ₸
+      limit_text: Один прибор за визит
+      fee: ""
+      summary: Подключение и первый запуск техники на месте, с проверкой работы.
+      pricing_type: fixed
+      advantages: ""
+      disadvantages: ""
+      sales_status: active
+      featured_image: ""
+      pricing_images: []
+      explainer_videos: []
+      terms_documents:
+        - 1147fa49-0c4b-598e-86a2-c123fa969c08
+    - ref: setup-pro
+      name: Расширенная установка
+      price: 14 900 ₸
+      limit_text: ""
+      fee: ""
+      summary: Установка со сборкой, подключением к воде или электросети и настройкой режимов.
+      pricing_type: fixed
+      advantages: Мастер настраивает технику под ваши задачи и показывает, как ей пользоваться.
+      disadvantages: Занимает больше времени и требует согласования даты заранее.
+      sales_status: active
+      featured_image: ""
+      pricing_images: []
+      explainer_videos: []
+      terms_documents: []
+    - ref: installment-12
+      name: Рассрочка на 12 месяцев
+      price: ""
+      limit_text: От 50 000 ₸
+      fee: 1,5%
+      summary: Оплата покупки равными частями в течение года.
+      pricing_type: percentage
+      advantages: ""
+      disadvantages: ""
+      sales_status: active
+      featured_image: ""
+      pricing_images: []
+      explainer_videos: []
+      terms_documents: []
+    - ref: courier-legacy
+      name: Курьер выходного дня
+      price: 4 500 ₸
+      limit_text: ""
+      fee: ""
+      summary: Старый тариф выходного дня — больше не продаётся.
+      pricing_type: fixed
+      advantages: ""
+      disadvantages: ""
+      sales_status: inactive
+      featured_image: ""
+      pricing_images: []
+      explainer_videos: []
+      terms_documents: []
 ai_contacts:
     whatsapp: ""
     email: ""
@@ -2909,6 +2977,17 @@ kbd_materials:
       size_bytes: 381536
       storage_backend: fake
       storage_key: fake://shop-kb-v1/products/sandwich-maker-samsung/gallery_images/1
+      processing_status: built
+      customer_visibility: visible
+    - id: 1147fa49-0c4b-598e-86a2-c123fa969c08
+      organization_id: ""
+      source_type: file
+      source_ref: generated://tariffs/setup-basic/terms_documents/0
+      filename: tariffs-setup-basic-terms_documents-0.pdf
+      mime_type: application/pdf
+      size_bytes: 305559
+      storage_backend: fake
+      storage_key: fake://shop-kb-v1/tariffs/setup-basic/terms_documents/0
       processing_status: built
       customer_visibility: visible
     - id: baedad4a-d974-503c-b312-b0053a4c2f6e

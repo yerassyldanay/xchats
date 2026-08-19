@@ -126,7 +126,7 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 	}
 
 	dataDir := t.TempDir()
-	creds, err := credentials.Open(credentials.OpenOptions{AllowFile: true, DataDir: dataDir})
+	creds, err := credentials.Open(credentials.OpenOptions{AllowFile: true, ForceFile: true, DataDir: dataDir})
 	if err != nil {
 		t.Fatalf("credentials.Open: %v", err)
 	}

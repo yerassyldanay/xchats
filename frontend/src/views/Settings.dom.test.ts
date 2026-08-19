@@ -57,6 +57,7 @@ function mockGet() {
 
 const TAB_LABELS = [
   'ИИ-движок',
+  'Парсеры и краулеры',
   'Мониторинг и аналитика',
   'Удалённый доступ и интеграции',
   'Каналы связи',
@@ -65,7 +66,7 @@ const TAB_LABELS = [
 ]
 
 describe('Settings view', () => {
-  it('loads and renders all 6 tabs, defaulting to AI Engine', async () => {
+  it('loads and renders all 7 tabs, defaulting to AI Engine', async () => {
     const { api } = await import('@/api/client')
     vi.mocked(api.get).mockImplementation(mockGet())
 
@@ -90,6 +91,23 @@ describe('Settings view', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Название организации')
+  })
+
+  it('switches to the extraction tab, separate from AI Engine', async () => {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockImplementation(mockGet())
+
+    const wrapper = mountKb(Settings, { pinia: testPinia() })
+    await flushPromises()
+
+    const extractionTabBtn = wrapper.findAll('button').find((b) => b.text() === 'Парсеры и краулеры')
+    await extractionTabBtn!.trigger('click')
+    await flushPromises()
+
+    // v-show, not v-if (Settings.vue's own doc comment) — every tab body
+    // stays mounted, so this only proves the extraction tab's OWN content
+    // renders, not that AI Engine's is gone.
+    expect(wrapper.text()).toContain('Используются импортом в базу знаний')
   })
 
   it('shows a load error instead of the tabs when GET /settings fails', async () => {

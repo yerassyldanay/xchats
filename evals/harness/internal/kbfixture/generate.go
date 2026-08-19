@@ -52,6 +52,17 @@ const generatedFileHeader = `# evals/scenarios/shop-kb-v1/data-ru.yaml — GENER
 # requires this — a flat answer would contradict per-zone pricing) and
 # outside_zones_note carries the seller-authored refusal for every
 # unlisted direction.
+#
+# ai_tariffs holds four paid service plans, added with prompt v5 (the first
+# frame able to render a tariff at all — before it this list was empty and
+# the whole table was invisible to the model): "setup-basic" (price plus a
+# terms document, so a tariff media_ref renders), "setup-pro" (price plus
+# advantages/disadvantages prose), "installment-12" (pricing_type
+# "percentage" carrying a FEE and no price — the only fee_placeholder in the
+# fixture) and "courier-legacy" (sales_status "inactive", which must never
+# reach a prompt). None of them touch warranty: a warranty-duration question
+# is a deliberate escalation case in this family, and a priced warranty plan
+# would silently turn it into a false pass.
 `
 
 // Generate returns the deterministic shop-kb-v1 fixture.
@@ -71,6 +82,7 @@ func Generate() *Fixture {
 		},
 		AITopics:   generateTopics(mb),
 		AIProducts: generateProducts(mb),
+		AITariffs:  generateTariffs(mb),
 		AIContacts: &AIContacts{
 			Phone:        "+7 727 300 00 00",
 			Instagram:    "@demoshop.kz",
@@ -147,20 +159,80 @@ func generateTopics(mb *materialBuilder) []AITopic {
 				"оформляется чеком или подтверждением заказа. Точный срок гарантии уточняйте у менеджера.",
 		},
 		{
-			Slug:   "returns", Title: "Возврат",
+			Slug: "returns", Title: "Возврат",
 			BodyMD: "Возврат и обмен возможны, если товар не был в использовании и сохранена упаковка. Уточняйте условия у менеджера при оформлении.",
 		},
 		{
-			Slug:   "promo", Title: "Акции",
+			Slug: "promo", Title: "Акции",
 			BodyMD: "Актуальные акции и промокоды уточняйте у менеджера — здесь фиксированного списка нет.",
 		},
 		{
-			Slug:   "support", Title: "Поддержка",
+			Slug: "support", Title: "Поддержка",
 			BodyMD: "Поддержка на связи в рабочее время — контакты для связи смотрите в разделе контактов.",
 		},
 		{
-			Slug:   "pickup", Title: "Самовывоз",
+			Slug: "pickup", Title: "Самовывоз",
 			BodyMD: "Самовывоз возможен со склада в Алматы по предварительной договорённости с менеджером.",
+		},
+	}
+}
+
+// generateTariffs returns the family's paid service plans — the fixture side of
+// the v5 ТАРИФЫ block (aiprompt.SlotTariffs). Before v5 this was `ai_tariffs:
+// []`, because no frame could render a tariff at all; the empty list is exactly
+// why the "tariffs never reach the model" bug went ungraded for so long.
+//
+// Deliberately service plans for an appliance shop rather than, say, an
+// extended-warranty product: "warranty" is a load-bearing ESCALATION case in
+// this family (the warranty topic's body is number-free and no warranty fact
+// column exists, so a duration question must escalate — see generateTopics and
+// common/kb-questions-ru.yaml's «На сколько месяцев у вас гарантия…»). A priced
+// warranty tariff would quietly answer that question and turn a deliberate
+// escalation test into a false pass.
+//
+// The four rows cover the block's whole surface in one pass:
+//   - setup-basic: price only, plus a terms document (media_ref rendering)
+//   - setup-pro:   price plus advantages/disadvantages prose
+//   - installment-12: pricing_type "percentage" with a FEE and no price — the
+//     only row exercising fee_placeholder, and the reason pricing_type is
+//     rendered at all (a percentage fee is a rate, not an amount)
+//   - courier-legacy: sales_status "inactive" — must never appear in a prompt
+func generateTariffs(mb *materialBuilder) []AITariff {
+	return []AITariff{
+		{
+			Ref: "setup-basic", Name: "Базовая установка",
+			Price:       "7 900 ₸",
+			Summary:     "Подключение и первый запуск техники на месте, с проверкой работы.",
+			LimitText:   "Один прибор за визит",
+			PricingType: "fixed",
+			SalesStatus: "active",
+			// The only tariff with media: proves a "<вид>_ref" line renders for
+			// tariffs exactly as it does for products.
+			TermsDocuments: mb.addN("tariffs/setup-basic/terms_documents", "document", 1),
+		},
+		{
+			Ref: "setup-pro", Name: "Расширенная установка",
+			Price:         "14 900 ₸",
+			Summary:       "Установка со сборкой, подключением к воде или электросети и настройкой режимов.",
+			Advantages:    "Мастер настраивает технику под ваши задачи и показывает, как ей пользоваться.",
+			Disadvantages: "Занимает больше времени и требует согласования даты заранее.",
+			PricingType:   "fixed",
+			SalesStatus:   "active",
+		},
+		{
+			Ref: "installment-12", Name: "Рассрочка на 12 месяцев",
+			Fee:         "1,5%",
+			Summary:     "Оплата покупки равными частями в течение года.",
+			LimitText:   "От 50 000 ₸",
+			PricingType: "percentage",
+			SalesStatus: "active",
+		},
+		{
+			Ref: "courier-legacy", Name: "Курьер выходного дня",
+			Price:       "4 500 ₸",
+			Summary:     "Старый тариф выходного дня — больше не продаётся.",
+			PricingType: "fixed",
+			SalesStatus: "inactive",
 		},
 	}
 }

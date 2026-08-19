@@ -1,4 +1,5 @@
 import { log } from '../lib/logfmt'
+import type { KbImportProviderCapability, KbImportRun } from '../types'
 
 // Env-driven addressing: VITE_API_BASE_URL points at the backend. Empty means
 // same-origin (dev uses the Vite proxy; prod fronts both behind one domain).
@@ -71,4 +72,39 @@ export const api = {
   },
   mediaURL: (urlPath: string) => API_BASE + urlPath,
   realtimeURL: () => API_BASE + PREFIX + '/realtime',
+
+  // submitKbImport is POST /kb/imports' multipart body: any mix of URLs and
+  // files in one request (kbimport.SubmitInput, httpapi/kb_import.go). Field
+  // names match the backend's multipart.Form keys exactly — repeated `url`,
+  // repeated `file`, single `provider`/`target_type`/`guidance`.
+  async submitKbImport(input: {
+    provider: string
+    targetType: string
+    guidance: string
+    urls: string[]
+    files: File[]
+  }): Promise<KbImportRun> {
+    const form = new FormData()
+    form.append('provider', input.provider)
+    form.append('target_type', input.targetType)
+    if (input.guidance) form.append('guidance', input.guidance)
+    for (const u of input.urls) form.append('url', u)
+    for (const f of input.files) form.append('file', f)
+    const res = await fetch(API_BASE + PREFIX + '/kb/imports', {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    })
+    return unwrap(res, '/kb/imports')
+  },
+  getKbImportRun: (runId: string) => send<KbImportRun>('GET', '/kb/imports/' + encodeURIComponent(runId)),
+  listKbImportRuns: (limit?: number) => send<{ runs: KbImportRun[] }>('GET', '/kb/imports' + (limit ? `?limit=${limit}` : '')),
+  // getKbImportProviders is GET /kb/import/providers (internal/httpapi/
+  // kb_import.go) — the one source of truth useImportProviders fetches
+  // once and caches, so the parser dropdown can never disagree with
+  // Submit's own precheck.
+  async getKbImportProviders(): Promise<KbImportProviderCapability[]> {
+    const res = await send<{ providers: KbImportProviderCapability[] }>('GET', '/kb/import/providers')
+    return res.providers
+  },
 }

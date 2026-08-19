@@ -51,28 +51,39 @@ see [`credentials.md`](credentials.md) for what "nothing to configure"
 actually means under the hood. On first boot:
 
 1. Migrations run automatically (`internal/store.New` applies every pending
-   migration on open — embedded in the binary, nothing to run by hand).
-2. A one-time admin login, `admin@xchat.kz`, is created with a randomly
-   generated password — never a shared default. The plaintext is written
-   once to `<DataDir>/bootstrap-admin-password`, mode `0600`, owner-only,
-   and never logged.
-3. Four internal secrets (session signing, Telegram token encryption, MCP
+   migration on open — embedded in the binary, nothing to run by hand),
+   including seeding the default admin account below.
+2. Four internal secrets (session signing, Telegram token encryption, MCP
    signing, the Telegram webhook secret) are generated and durably stored —
    see [`credentials.md`](credentials.md).
 
-Retrieve the bootstrap password, then log in:
+Log in with the default admin account:
 
-```bash
-xchats admin-credential show
-# Docker: docker compose exec backend /xchats admin-credential show
+```
+email:    admin@xchat.kz
+password: xchat-admin-change-me
 ```
 
-1. **Change the bootstrap password.** The first login forces a password
-   change before anything else is reachable — set your own password there.
-   The bootstrap file is deleted once you do, so it never lingers on disk
-   as a second copy of a live credential. (Lost or need to re-mint it?
-   `xchats reset-admin-password` blanks the hash so the next boot generates
-   a fresh one.)
+1. **Change the default password.** It's public — printed in this repo's
+   README and committed in its migration history — so treat it as already
+   compromised. There's no persistent in-app "change password" screen (the
+   old forced-first-login flow no longer triggers), so change it via the
+   API instead:
+   ```bash
+   curl -c jar -s -X POST http://localhost:8080/xchats/api/v1/auth/login \
+     -H 'Content-Type: application/json' \
+     -d '{"email":"admin@xchat.kz","password":"xchat-admin-change-me"}'
+   curl -b jar -s -X POST http://localhost:8080/xchats/api/v1/auth/password \
+     -H 'Content-Type: application/json' \
+     -d '{"current_password":"xchat-admin-change-me","new_password":"<a strong password>"}'
+   ```
+   Locked out later on? `xchats reset-admin-password` (Docker:
+   `docker compose exec backend /xchats reset-admin-password`), then
+   restart, restores this same default password.
+   `XCHATS_BOOTSTRAP_ADMIN_PASSWORD` overrides what gets restored through
+   that recovery path — it has no effect on a fresh install, since
+   migrations already leave a real password hash in place before that env
+   var is ever consulted.
 2. **Complete the first-run setup wizard** (shown automatically to an admin
    until dismissed): pick an LLM provider and paste its API key. Every other
    integration (ngrok, Langfuse, additional providers) is optional and

@@ -13,6 +13,7 @@ package httpapi_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"testing"
@@ -311,6 +312,58 @@ func TestPlaygroundApproveEntity_MovesRowLiveAndClearsTheChange(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("approved topic did not land in live /kb")
+	}
+}
+
+// TestPlaygroundApproveAll_PublishesAndEmptiesTheWholeDraft covers
+// POST /playground/draft/approve — the "Опубликовать всё" button — which had
+// no functional test at all (only an OPTIONS preflight in cors_test.go, which
+// never reaches the handler). That gap hid a slice-aliasing bug in
+// kbstore.ApproveVersioned that published every staged row to live but left
+// every OTHER one sitting in the draft, while still answering 200/OK — so the
+// counter never reached zero and a second click was needed. See
+// TestApproveVersioned_WholeDraftClearsEveryEntry for the mechanism.
+//
+// Five topics, not one: the bug leaves nothing behind at n<=2, which is why
+// the entity-scoped test above (a single topic) passed throughout.
+func TestPlaygroundApproveAll_PublishesAndEmptiesTheWholeDraft(t *testing.T) {
+	h := newHarness(t)
+	const n = 5
+	slugs := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		slug := fmt.Sprintf("e2e-approve-all-%d", i)
+		slugs = append(slugs, slug)
+		h.postJSON("/xchats/api/v1/playground/draft/topics", map[string]any{
+			"slug": slug, "title": "Topic " + slug, "body_md": "Plain prose, no tokens and no amounts.",
+		})
+	}
+
+	resp, env := h.postJSON("/xchats/api/v1/playground/draft/approve", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("approve all: status=%d body=%s", resp.StatusCode, mustRaw(env))
+	}
+
+	// The handler answers with the POST-approve change set, so the response
+	// body alone proves the draft was emptied.
+	var changes kbstore.DraftChangeSet
+	mustPayload(t, env, &changes)
+	if got := len(changes.Topics); got != 0 {
+		t.Fatalf("approve all returned %d topic(s) still pending, want 0 — the draft was not fully cleared", got)
+	}
+
+	var live kbstore.DraftView
+	h.get("/xchats/api/v1/kb", &live)
+	for _, want := range slugs {
+		found := false
+		for _, tp := range live.Topics {
+			if tp.Slug == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("topic %q did not land in live /kb after approving the whole draft", want)
+		}
 	}
 }
 

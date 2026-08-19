@@ -51,7 +51,7 @@ const presentKeys = computed(() => TEST_FIELD_KEYS.filter((k) => presentPredicat
     <div class="max-w-3xl min-w-0 flex-1 space-y-4">
       <div>
         <div class="flex items-center gap-1.5">
-          <code class="font-mono text-sm font-semibold break-words">{{ test.id }}</code>
+          <code class="font-mono text-sm font-semibold wrap-break-word">{{ test.id }}</code>
           <CopyButton :text="test.id" :label="t('evalCatalog.copy.id')" />
           <CopyButton :text="deepLink" :label="t('evalCatalog.copy.link')" />
         </div>
@@ -61,15 +61,15 @@ const presentKeys = computed(() => TEST_FIELD_KEYS.filter((k) => presentPredicat
       </div>
 
       <CatalogFieldRow field-key="message">
-        <p class="text-sm whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ test.message }}</p>
+        <p class="text-sm whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/40 p-2.5">{{ test.message }}</p>
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.history?.length" field-key="history">
-        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.history) }}</pre>
+        <pre class="font-mono text-xs whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.history) }}</pre>
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.requires?.length" field-key="requires">
-        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.requires) }}</pre>
+        <pre class="font-mono text-xs whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.requires) }}</pre>
         <div class="pl-3 mt-1 space-y-0.5">
           <div v-for="(g, i) in requireGroups" :key="i" class="text-[11px]">
             <template v-for="(alt, j) in g.alternatives" :key="alt.token">
@@ -91,7 +91,7 @@ const presentKeys = computed(() => TEST_FIELD_KEYS.filter((k) => presentPredicat
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.media" field-key="media">
-        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.media) }}</pre>
+        <pre class="font-mono text-xs whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.media) }}</pre>
         <div v-if="mediaAnnotations.length" class="pl-3 mt-1 space-y-0.5">
           <div v-for="a in mediaAnnotations" :key="`${a.key}:${a.name}`" class="text-[11px]">
             <code class="font-mono text-muted-foreground">{{ a.name }}</code>
@@ -101,19 +101,19 @@ const presentKeys = computed(() => TEST_FIELD_KEYS.filter((k) => presentPredicat
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.must_not_contain?.length" field-key="must_not_contain">
-        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.must_not_contain) }}</pre>
+        <pre class="font-mono text-xs whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.must_not_contain) }}</pre>
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.must_contain_any?.length" field-key="must_contain_any">
-        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.must_contain_any) }}</pre>
+        <pre class="font-mono text-xs whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.must_contain_any) }}</pre>
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.forbid_tokens?.length" field-key="forbid_tokens">
-        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.forbid_tokens) }}</pre>
+        <pre class="font-mono text-xs whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.forbid_tokens) }}</pre>
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.outcomes?.length" field-key="outcomes">
-        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.outcomes) }}</pre>
+        <pre class="font-mono text-xs whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.outcomes) }}</pre>
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.stock_check" field-key="stock_check">
@@ -121,7 +121,7 @@ const presentKeys = computed(() => TEST_FIELD_KEYS.filter((k) => presentPredicat
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.llm_checks?.length" field-key="llm_checks">
-        <pre class="font-mono text-xs whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.llm_checks) }}</pre>
+        <pre class="font-mono text-xs whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/40 p-2.5">{{ formatYamlValue(test.llm_checks) }}</pre>
       </CatalogFieldRow>
 
       <div v-if="notChecked.length" class="text-[11px] text-muted-foreground border-t border-border pt-3">

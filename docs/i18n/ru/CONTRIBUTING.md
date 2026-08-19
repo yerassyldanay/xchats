@@ -23,10 +23,10 @@ make dev-frontend    # frontend на :5173 (Node 22+, см. .nvmrc)
 Файл `.env` не нужен, секреты заранее настраивать не требуется — см.
 [`docs/release/installation.md`](../../release/installation.md). Если не
 хотите запускать два локальных процесса, `make up` поднимает весь стек в
-Docker. При первом запуске получите одноразовый bootstrap-пароль
-администратора командой `xchats admin-credential show` (или
-`docker compose exec backend /xchats admin-credential show`) — см.
-пошаговое описание первого запуска в installation.md.
+Docker. Войдите под стандартной учётной записью администратора,
+`admin@xchat.kz` / `xchat-admin-change-me` — это публичный, документированный
+пароль по умолчанию (о том, как его сменить, см. пошаговое описание первого
+запуска в installation.md).
 
 ## Перед тем как открыть PR
 

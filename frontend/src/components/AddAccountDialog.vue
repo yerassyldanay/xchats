@@ -338,7 +338,7 @@ onBeforeUnmount(stopPolling)
           <p class="text-sm text-muted-foreground">{{ t('accounts.dialog.pickPrompt') }}</p>
           <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <button
-              class="group rounded-xl border border-border p-4 text-left transition hover:border-wa hover:bg-wa/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wa/40 disabled:pointer-events-none disabled:opacity-60"
+              class="group rounded-xl border border-border p-4 text-left transition hover:border-wa hover:bg-wa/5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-wa/40 disabled:pointer-events-none disabled:opacity-60"
               :disabled="busy"
               @click="pickChannel('whatsapp')"
             >
@@ -359,7 +359,7 @@ onBeforeUnmount(stopPolling)
               <span class="mt-4 block text-sm font-medium text-wa">{{ t('accounts.dialog.whatsapp.cta') }}</span>
             </button>
             <button
-              class="group rounded-xl border border-border p-4 text-left transition hover:border-[#229ED9] hover:bg-[#229ED9]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#229ED9]/40"
+              class="group rounded-xl border border-border p-4 text-left transition hover:border-[#229ED9] hover:bg-[#229ED9]/5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#229ED9]/40"
               @click="pickChannel('telegram')"
             >
               <span class="flex items-center gap-3">

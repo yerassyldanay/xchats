@@ -1105,7 +1105,7 @@ func TestMCPMediaUpload_ConcurrentPUTsOnlyOneWins(t *testing.T) {
 
 // pngBytes is the minimal byte sequence http.DetectContentType recognizes as
 // image/png (the 8-byte PNG signature; no valid IHDR/IDAT needed since only
-// the sniff prefix is checked by mimeSanityCheck).
+// the sniff prefix is checked by blob.MimeSanityCheck).
 var pngBytes = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0}
 
 var pngSHA256Hex = func() string {

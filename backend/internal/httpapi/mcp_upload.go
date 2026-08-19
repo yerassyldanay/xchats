@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -118,7 +117,7 @@ func (s *Server) handleMCPUpload(c *gin.Context) {
 		return
 	}
 
-	if reason := mimeSanityCheck(mat.MimeType, data); reason != "" {
+	if reason := blob.MimeSanityCheck(mat.MimeType, data); reason != "" {
 		fail(c, http.StatusBadRequest, ErrValidation, reason)
 		return
 	}
@@ -151,25 +150,4 @@ func (s *Server) handleMCPUpload(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"material_id": materialID, "processing_status": "parsed"})
-}
-
-// mimeSanityCheck is a lightweight guard against a renamed/mislabeled
-// upload, not a full content-type authority: for image/video/audio the
-// sniffed top-level type must agree with what was declared (these are the
-// types a widget will render inline), and a payload that sniffs as HTML is
-// always rejected unless HTML was actually declared (the classic
-// stored-XSS-via-mislabeled-upload vector) — everything else (documents:
-// application/*, text/* other than html) is accepted as declared, since
-// office/PDF formats sniff too inconsistently to cross-check usefully.
-func mimeSanityCheck(declared string, data []byte) string {
-	sniffed := http.DetectContentType(data)
-	sniffedTop := strings.SplitN(strings.SplitN(sniffed, ";", 2)[0], "/", 2)[0]
-	declaredTop := strings.SplitN(declared, "/", 2)[0]
-	if (declaredTop == "image" || declaredTop == "video" || declaredTop == "audio") && sniffedTop != declaredTop {
-		return fmt.Sprintf("declared mime_type %q does not match the uploaded content (looks like %s)", declared, sniffed)
-	}
-	if strings.HasPrefix(sniffed, "text/html") && declaredTop != "text" {
-		return "uploaded content looks like HTML, which is not an accepted KB media type"
-	}
-	return ""
 }

@@ -134,7 +134,7 @@ export default {
     pricingType: { fixed: 'Fixed', percentage: 'Percentage', tiered: 'Tiered' },
     zoneLevel: { city: 'City', region: 'Region', country: 'Country' },
     state: { published: 'Published', new: 'New', changed: 'Changed', to_delete: 'To delete' },
-    actions: { edit: 'Edit', publish: 'Publish', cancel: 'Cancel change', delete: 'Delete' },
+    actions: { edit: 'Edit', publish: 'Publish', cancel: 'Cancel change', removeFromDraft: 'Remove from draft', delete: 'Delete' },
     config: {
       persona: { title: 'Persona', hint: 'Who the assistant is and how it talks to a customer.' },
       mission: { title: 'Mission', hint: "The assistant's main goal in every conversation." },
@@ -150,6 +150,7 @@ export default {
     draft: {
       pageTitle: 'Draft',
       pageSubtitle: 'What will change in the knowledge base after publishing',
+      reviewHeading: 'Draft overview',
       publishAll: 'Publish all',
       discardAll: 'Discard all',
       discardConfirm: 'Discard the whole draft? This cannot be undone.',
@@ -158,6 +159,24 @@ export default {
       emptyBody: 'Go to Knowledge Base to add or change information.',
       emptyLink: 'Go to Knowledge Base',
       gateBlocked: 'This change cannot be published: the resulting knowledge base has validation conflicts.',
+      cancelConfirm: {
+        titleAdded: 'Remove from draft?',
+        titleUpdated: 'Cancel this change?',
+        titleBulk: 'Cancel the selected changes?',
+        bodyAdded: 'This record exists only in the draft — it will be deleted for good. Getting it back means importing or creating it again.',
+        bodyUpdated: 'The edit will be discarded and the record will go back to its published value. Published data is unaffected.',
+        bodyRemoved: 'The pending removal will be lifted — the record stays in the knowledge base.',
+        bodyBulk: 'The selected changes ({count}) will be cancelled. New records are deleted for good; edits revert to their published values.',
+        accept: 'Cancel change',
+      },
+      selection: {
+        selected: 'Selected: {count}',
+        selectAll: 'Select all on this tab',
+        deselectAll: 'Deselect all on this tab',
+        clear: 'Clear selection',
+        cancelSelected: 'Cancel selected',
+        selectRecord: 'Select record',
+      },
       cardBlockedNote: 'Publishing is blocked by another conflict in the Draft — see the message above.',
     },
     banner: {
@@ -239,6 +258,65 @@ export default {
       settingsLink: 'Open remote access settings',
       loadError: 'Failed to load connection details.',
     },
+    import: {
+      dropHint: 'Drag files here or choose them manually',
+      browseButton: 'Choose files',
+      urlPlaceholder: 'Paste a page URL…',
+      addUrl: 'Add',
+      invalidUrl: 'Enter a valid URL (http/https)',
+      loadProvidersFailed: 'Failed to load the list of extraction providers.',
+      submitButton: 'Start import',
+      activeRunNotice: 'An import is already running — wait for it to finish before submitting another.',
+      runLabel: 'Import',
+      targetTypeAuto: 'Detect automatically',
+      provider: 'Extraction provider',
+      targetType: 'Save as',
+      guidance: 'Guidance for the model (optional)',
+      guidancePlaceholder: 'e.g. only pay attention to prices and stock',
+      visionGapNotice: 'The image will be attached as media — its text is not read.',
+      tabs: {
+        urls: 'Links',
+        files: 'Files',
+        mcp: 'ChatGPT / Claude',
+      },
+      providers: {
+        native: 'Built-in',
+        firecrawl: 'Firecrawl',
+        llamaparse: 'LlamaParse',
+      },
+      providerCaps: {
+        native: 'pages, DOCX, images',
+        firecrawl: 'links only',
+        llamaparse: 'PDF, DOCX, text',
+      },
+      unavailable: {
+        files: "can't read files",
+        pdf: "can't read PDF — needs LlamaParse",
+        urls: "can't read links",
+        noCredential: 'key not configured',
+        settingsLink: 'Configure in Settings',
+      },
+      status: {
+        extracting: 'Extracting…',
+        synthesizing: 'Synthesizing…',
+        built: 'Done',
+        failed: 'Failed',
+        needs_human: 'Needs review',
+      },
+      materialStatus: {
+        queued: 'Queued',
+        extracting: 'Extracting…',
+        parsed: 'Parsed',
+        needs_human: 'Needs review',
+        failed: 'Failed',
+      },
+      synthesis: {
+        title: 'Synthesis result',
+        created: 'new',
+        updated: 'updated',
+        running: 'The model is processing the materials…',
+      },
+    },
   },
   // settings.* mirrors ru.ts's settings.* key-for-key — see locales.test.ts.
   settings: {
@@ -246,6 +324,7 @@ export default {
     subtitle: 'Manage integrations, the AI engine, channels, and your team',
     tabs: {
       aiEngine: 'AI Engine',
+      extraction: 'Parsers & Crawlers',
       monitoring: 'Monitoring & Analytics',
       remoteAccess: 'Remote Access & Integrations',
       channels: 'Communication Channels',
@@ -311,6 +390,10 @@ export default {
       timeoutSeconds: 'Timeout (seconds)',
       retry: 'Retry on transient failure',
       providersTitle: 'Providers',
+    },
+    extraction: {
+      title: 'Parsers & crawlers',
+      subtitle: 'Used by the knowledge base import (Draft → Links/Files) to read pages, PDFs, and other documents — separate from the response provider above.',
     },
     monitoring: {
       title: 'Monitoring & analytics',
@@ -568,6 +651,23 @@ export default {
         subtitle: 'No credential of its own — uses the Meta Developer App above.',
       },
     },
+  },
+  // simulator.* — /simulator, a minimal chat UI over POST
+  // /simulator/messages (backend/internal/httpapi/simulator.go, gated by
+  // SIMULATOR_ENABLED). Not part of kb.*: it's its own page, not a Черновик/
+  // Знаний база surface.
+  simulator: {
+    navLabel: 'Simulator',
+    pageTitle: 'Simulator',
+    pageSubtitle: "Test the assistant's answers to customer questions — without a real messaging channel.",
+    inputPlaceholder: 'Type a customer question…',
+    send: 'Send',
+    you: 'You',
+    assistant: 'Assistant',
+    empty: 'Ask a question to test the assistant\'s answer.',
+    thinking: 'Assistant is typing…',
+    escalated: 'Handed off to a manager',
+    unavailable: 'The simulator is not available on this server. Check that SIMULATOR_ENABLED is set in the backend configuration.',
   },
   // Channel-level debounce + scheduled auto-reply (Accounts.vue's
   // Automation button/badge/dialog).

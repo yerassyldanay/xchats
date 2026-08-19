@@ -42,7 +42,7 @@ const emit = defineEmits<{
           @click="emit('select-test', s.name, testCase.id)"
         >
           <MessageSquare class="w-3 h-3 shrink-0 mt-0.5" />
-          <span class="min-w-0 whitespace-normal break-words leading-snug">{{ testCase.id }}</span>
+          <span class="min-w-0 whitespace-normal wrap-break-word leading-snug">{{ testCase.id }}</span>
         </button>
       </div>
     </div>

@@ -95,6 +95,11 @@ describe('KnowledgeBase — published rows are read-only', () => {
   it('lists a published topic with no input fields', async () => {
     const { wrapper } = await mountWith(emptyChanges(), emptyLive({ topics: [topic()] }))
     expect(wrapper.text()).toContain('Тарифы')
+    // Every tab's body is mounted at once (v-show, not v-if — see switchTab's
+    // own doc comment), so this really does scan the whole page, not just
+    // the active one. /knowledge-base has no interactive/ingest surface at
+    // all any more (that moved to Черновик's KbIngestPanel) — every tab
+    // here (record lists, Промпт, Файлы) is read-only display.
     expect(wrapper.findAll('input')).toHaveLength(0)
     expect(wrapper.findAll('textarea')).toHaveLength(0)
   })

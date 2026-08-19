@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,14 +17,20 @@ import (
 const (
 	bootstrapAdminCredentialFilename = "bootstrap-admin-password"
 	bootstrapAdminPasswordEnv        = "XCHATS_BOOTSTRAP_ADMIN_PASSWORD"
-	bootstrapAdminEntropyBytes       = 32
+	defaultBootstrapAdminPassword    = "xchat-admin-change-me"
 )
 
-// ensureBootstrapAdminPassword completes migration 0008's two-phase admin
-// bootstrap. The migration deliberately leaves the sentinel admin with a
-// blank, unloginnable hash; this function mints a unique one-time credential,
-// persists its plaintext in an owner-only file, and installs its hash exactly
-// once through Store.BootstrapSentinelAdminPassword.
+// ensureBootstrapAdminPassword completes the sentinel admin's bootstrap.
+// Migration 0006_init_admin ships that account with a static default
+// password (defaultBootstrapAdminPassword, restored by
+// 0011_restore_default_admin_password after 0008/0006 briefly retired it),
+// so on a fresh install Store.BootstrapSentinelAdminPassword's guard — it
+// only writes when password_hash is still the "" blanked sentinel — makes
+// this whole function a no-op: minted comes back false and nothing is
+// written. It only actually mints again on the recovery path, after "xchats
+// reset-admin-password" has re-blanked the hash, or when an operator sets
+// XCHATS_BOOTSTRAP_ADMIN_PASSWORD to override the default. Either way, it
+// persists the plaintext in an owner-only file before installing its hash.
 //
 // The file is created before the database update. That ordering is deliberate:
 // a crash can leave a reusable credential file for the next boot, but can
@@ -82,11 +86,7 @@ func loadOrCreateBootstrapAdminCredential(path string, minLength int) (plaintext
 	}
 	plaintext = os.Getenv(bootstrapAdminPasswordEnv)
 	if plaintext == "" {
-		raw := make([]byte, bootstrapAdminEntropyBytes)
-		if _, err := rand.Read(raw); err != nil {
-			return "", false, fmt.Errorf("generate bootstrap credential: %w", err)
-		}
-		plaintext = base64.RawURLEncoding.EncodeToString(raw)
+		plaintext = defaultBootstrapAdminPassword
 	}
 	if len(plaintext) < minLength {
 		return "", false, fmt.Errorf("%s must contain at least %d characters", bootstrapAdminPasswordEnv, minLength)

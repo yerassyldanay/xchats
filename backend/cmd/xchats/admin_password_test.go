@@ -28,35 +28,24 @@ func TestEnsureBootstrapAdminPasswordMintsOnceAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !minted {
-		t.Fatal("first bootstrap did not mint the sentinel admin password")
+	if minted {
+		t.Fatal("bootstrap minted on a freshly migrated DB — 0011 already restores the default password")
 	}
 	if path != filepath.Join(dataDir, bootstrapAdminCredentialFilename) {
 		t.Fatalf("credential path = %q", path)
 	}
-	plaintext, err := readBootstrapAdminCredential(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(plaintext) < cfg.System.MinPasswordLen {
-		t.Fatalf("generated credential length = %d", len(plaintext))
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("credential permissions = %o, want 600", got)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unused bootstrap credential was left on disk: %v", err)
 	}
 	u, err := st.UserByEmail(context.Background(), "admin@xchat.kz")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !password.Verify(plaintext, u.PasswordHash) {
-		t.Fatal("persisted credential does not verify against the admin hash")
+	if !password.Verify(defaultBootstrapAdminPassword, u.PasswordHash) {
+		t.Fatal("the default password does not verify against the sentinel admin's hash")
 	}
-	if !u.MustChangePassword {
-		t.Fatal("bootstrap unexpectedly cleared must_change_password")
+	if u.MustChangePassword {
+		t.Fatal("sentinel admin's must_change_password = true, want false")
 	}
 
 	_, minted, err = ensureBootstrapAdminPassword(context.Background(), cfg, st)
@@ -64,14 +53,10 @@ func TestEnsureBootstrapAdminPasswordMintsOnceAndPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	if minted {
-		t.Fatal("second bootstrap replaced an existing admin password")
+		t.Fatal("second bootstrap minted on an already-bootstrapped DB")
 	}
-	again, err := readBootstrapAdminCredential(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again != plaintext {
-		t.Fatal("second bootstrap replaced the one-time credential file")
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unused bootstrap credential was left on disk after the second call: %v", err)
 	}
 }
 
@@ -85,6 +70,9 @@ func TestEnsureBootstrapAdminPasswordUsesConfiguredFirstBootValue(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(st.Close)
+	if err := st.ResetSentinelAdminPassword(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	cfg := &config.Config{System: config.SystemConfig{MinPasswordLen: 8}}
 
 	path, minted, err := ensureBootstrapAdminPassword(context.Background(), cfg, st)
@@ -148,26 +136,31 @@ func TestResetSentinelAdminPasswordRemintsOnNextBootstrap(t *testing.T) {
 	t.Cleanup(st.Close)
 	cfg := &config.Config{System: config.SystemConfig{MinPasswordLen: 8}}
 
-	path, _, err := ensureBootstrapAdminPassword(context.Background(), cfg, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first, _ := readBootstrapAdminCredential(path)
+	// A freshly migrated DB already has the restored default password (0011),
+	// so nothing mints until the hash is blanked again — exactly what "xchats
+	// reset-admin-password" does.
 	if err := st.ResetSentinelAdminPassword(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	_, minted, err := ensureBootstrapAdminPassword(context.Background(), cfg, st)
+	path, minted, err := ensureBootstrapAdminPassword(context.Background(), cfg, st)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !minted {
 		t.Fatal("reset admin password was not re-minted")
 	}
-	second, _ := readBootstrapAdminCredential(path)
-	if second == first {
-		t.Fatal("reset reused the previous one-time credential")
+	reminted, err := readBootstrapAdminCredential(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reminted != defaultBootstrapAdminPassword {
+		t.Fatalf("re-minted credential = %q, want the static default %q", reminted, defaultBootstrapAdminPassword)
+	}
+	u, err := st.UserByEmail(context.Background(), "admin@xchat.kz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !password.Verify(reminted, u.PasswordHash) {
+		t.Fatal("re-minted credential does not verify against the stored hash")
 	}
 }
