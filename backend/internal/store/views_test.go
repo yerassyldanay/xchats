@@ -15,12 +15,21 @@ import (
 
 const viewsEncKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-// seedThreeChannels builds one organization with a WhatsApp chat, a simulator
-// chat and a Telegram chat, and returns their chat ids. It is the fixture for
-// the view-parity assertions: everything the inbox reads now comes through a
-// UNION over two very different transport schemas, and the WhatsApp leg is
-// deliberately UNFILTERED because the simulator lives inside it.
-func seedThreeChannels(t *testing.T, st *store.Store) (orgID, waChat, simChat, tgChat uuid.UUID) {
+// seedFourChannels builds one organization with a WhatsApp chat, a simulator
+// chat, a Telegram chat and a generic-channel-core chat, and returns their
+// chat ids. It is the fixture for the view-parity assertions: everything the
+// inbox reads now comes through a UNION over three very different transport
+// schemas, and the WhatsApp leg is deliberately UNFILTERED because the
+// simulator lives inside it.
+//
+// The fourth chat is seeded on channel "whatsapp_cloud" — one representative
+// of the generic channel_* core, not one seed per Meta channel. Instagram,
+// Messenger and WhatsApp Cloud all read and write through the IDENTICAL
+// channel_accounts/channel_chats/channel_messages tables and store methods
+// (see channels.go), so a second or third Meta-channel seed here would
+// exercise exactly the same SQL this one already does — the channel value
+// itself is just a string these queries never branch on.
+func seedFourChannels(t *testing.T, st *store.Store) (orgID, waChat, simChat, tgChat, metaChat uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -99,23 +108,46 @@ func seedThreeChannels(t *testing.T, st *store.Store) (orgID, waChat, simChat, t
 		t.Fatalf("telegram inbound: %v", err)
 	}
 	tgChat = tgRes.ChatID
-	return orgID, waChat, simChat, tgChat
+
+	// Generic channel core — one representative Meta channel (see the doc
+	// comment above for why only one).
+	const externalAccountID = "15550001111"
+	metaAccount := config.ChannelAccountID(config.WhatsAppCloudOwnerRef(externalAccountID))
+	if _, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: metaAccount, OrganizationID: orgID, Channel: "whatsapp_cloud",
+		ExternalAccountID: externalAccountID, DisplayName: "WhatsApp Cloud", Handle: "+15550001111",
+	}); err != nil {
+		t.Fatalf("claim channel account: %v", err)
+	}
+	metaRes, err := st.IngestChannelInbound(ctx, store.ChannelInbound{
+		AccountID: metaAccount, ExternalContactID: "wa_cloud_customer",
+		ContactHandle: "+15550002222", ContactDisplayName: "Cloud Клиент",
+		ExternalThreadID: "wa_cloud_customer", Direction: "in", SenderKind: "contact",
+		ExternalMessageID: "wamid.META1", MessageKind: "conversation", Body: "привет из whatsapp cloud",
+		Preview: "привет из whatsapp cloud", Source: "live_webhook", MessageTS: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("meta inbound: %v", err)
+	}
+	metaChat = metaRes.ChatID
+
+	return orgID, waChat, simChat, tgChat, metaChat
 }
 
 // TestInboxViewsCarryEveryChannel is the Phase-A gate in test form: one org's
-// inbox must contain all three channels' conversations, each labelled, with the
+// inbox must contain every channel's conversations, each labelled, with the
 // simulator NOT lost to a stray channel filter on the WhatsApp leg.
 func TestInboxViewsCarryEveryChannel(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
-	orgID, waChat, simChat, tgChat := seedThreeChannels(t, st)
+	orgID, waChat, simChat, tgChat, metaChat := seedFourChannels(t, st)
 
 	chats, total, err := st.ListChatsForOrg(ctx, store.ChatFilter{OrgID: orgID, Limit: 50})
 	if err != nil {
 		t.Fatalf("ListChatsForOrg: %v", err)
 	}
-	if total != 3 || len(chats) != 3 {
-		t.Fatalf("chats = %d (total %d), want 3 across whatsapp+simulator+telegram", len(chats), total)
+	if total != 4 || len(chats) != 4 {
+		t.Fatalf("chats = %d (total %d), want 4 across whatsapp+simulator+telegram+whatsapp_cloud", len(chats), total)
 	}
 	byID := map[uuid.UUID]store.Chat{}
 	for _, c := range chats {
@@ -124,7 +156,7 @@ func TestInboxViewsCarryEveryChannel(t *testing.T) {
 	for _, want := range []struct {
 		id      uuid.UUID
 		channel string
-	}{{waChat, "whatsapp"}, {simChat, "simulator"}, {tgChat, "telegram"}} {
+	}{{waChat, "whatsapp"}, {simChat, "simulator"}, {tgChat, "telegram"}, {metaChat, "whatsapp_cloud"}} {
 		got, present := byID[want.id]
 		if !present {
 			t.Fatalf("chat %s (%s) is missing from the inbox", want.id, want.channel)
@@ -146,7 +178,26 @@ func TestInboxViewsCarryEveryChannel(t *testing.T) {
 		t.Fatalf("telegram contact display name = %q", tg.Contact.DisplayName)
 	}
 
-	// The single-account filter works on either leg.
+	// The generic channel core's neutral columns carry the provider's own
+	// identities too, and (unlike wa_*/tg_*) a real last_inbound_at.
+	meta := byID[metaChat]
+	if meta.ExternalConversationRef != "wa_cloud_customer" {
+		t.Fatalf("whatsapp_cloud external_conversation_ref = %q", meta.ExternalConversationRef)
+	}
+	if meta.Contact.ExternalContactRef != "wa_cloud_customer" {
+		t.Fatalf("whatsapp_cloud external_contact_ref = %q", meta.Contact.ExternalContactRef)
+	}
+	if meta.Contact.DisplayName != "Cloud Клиент" {
+		t.Fatalf("whatsapp_cloud contact display name = %q", meta.Contact.DisplayName)
+	}
+	if meta.LastInboundAt == nil {
+		t.Fatal("whatsapp_cloud last_inbound_at is nil after an inbound message")
+	}
+	if tg.LastInboundAt != nil {
+		t.Fatalf("telegram last_inbound_at = %v, want nil (no service window on this leg)", tg.LastInboundAt)
+	}
+
+	// The single-account filter works on any leg.
 	only, _, err := st.ListChatsForOrg(ctx, store.ChatFilter{
 		OrgID: orgID, AccountID: uuid.NullUUID{UUID: tg.AccountID, Valid: true}, Limit: 50,
 	})
@@ -161,9 +212,9 @@ func TestInboxViewsCarryEveryChannel(t *testing.T) {
 func TestChatByIDAndOrgGuardSpanChannels(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
-	orgID, waChat, _, tgChat := seedThreeChannels(t, st)
+	orgID, waChat, _, tgChat, metaChat := seedFourChannels(t, st)
 
-	for _, id := range []uuid.UUID{waChat, tgChat} {
+	for _, id := range []uuid.UUID{waChat, tgChat, metaChat} {
 		if _, err := st.ChatByID(ctx, id); err != nil {
 			t.Fatalf("ChatByID(%s): %v", id, err)
 		}
@@ -172,13 +223,13 @@ func TestChatByIDAndOrgGuardSpanChannels(t *testing.T) {
 		}
 	}
 
-	// A different organization must not see either chat.
+	// A different organization must not see any of the chats.
 	other, err := st.SeedOrganization(ctx, "views-other")
 	if err != nil {
 		t.Fatalf("seed other org: %v", err)
 	}
 	otherOrg := other.ID
-	for _, id := range []uuid.UUID{waChat, tgChat} {
+	for _, id := range []uuid.UUID{waChat, tgChat, metaChat} {
 		if _, err := st.ChatByIDForOrg(ctx, id, otherOrg); err != store.ErrNotFound {
 			t.Fatalf("cross-org read of %s returned %v, want ErrNotFound", id, err)
 		}
@@ -193,7 +244,7 @@ func TestChatByIDAndOrgGuardSpanChannels(t *testing.T) {
 func TestSoftDeletedAccountsHideTheirChatsOnEveryChannel(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
-	orgID, _, _, tgChat := seedThreeChannels(t, st)
+	orgID, _, _, tgChat, metaChat := seedFourChannels(t, st)
 
 	tg, err := st.ChatByID(ctx, tgChat)
 	if err != nil {
@@ -202,6 +253,14 @@ func TestSoftDeletedAccountsHideTheirChatsOnEveryChannel(t *testing.T) {
 	if err := st.ConfirmTelegramDisconnect(ctx, tg.AccountID); err != nil {
 		t.Fatalf("disconnect: %v", err)
 	}
+	meta, err := st.ChatByID(ctx, metaChat)
+	if err != nil {
+		t.Fatalf("ChatByID: %v", err)
+	}
+	if err := st.ConfirmChannelDisconnect(ctx, meta.AccountID); err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+
 	chats, _, err := st.ListChatsForOrg(ctx, store.ChatFilter{OrgID: orgID, Limit: 50})
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -210,19 +269,25 @@ func TestSoftDeletedAccountsHideTheirChatsOnEveryChannel(t *testing.T) {
 		if c.ID == tgChat {
 			t.Fatal("a disconnected Telegram account's chat is still in the inbox")
 		}
+		if c.ID == metaChat {
+			t.Fatal("a disconnected channel-core account's chat is still in the inbox")
+		}
 	}
 	if len(chats) != 2 {
 		t.Fatalf("chats = %d, want the two wa_* ones", len(chats))
 	}
 	if _, err := st.ChatByIDForOrg(ctx, tgChat, orgID); err != store.ErrNotFound {
-		t.Fatalf("the org guard still resolves a disconnected account's chat: %v", err)
+		t.Fatalf("the org guard still resolves a disconnected Telegram account's chat: %v", err)
+	}
+	if _, err := st.ChatByIDForOrg(ctx, metaChat, orgID); err != store.ErrNotFound {
+		t.Fatalf("the org guard still resolves a disconnected channel-core account's chat: %v", err)
 	}
 }
 
 func TestAccountListingsSplitNeutralFromWhatsAppOnly(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
-	orgID, _, _, tgChat := seedThreeChannels(t, st)
+	orgID, _, _, tgChat, metaChat := seedFourChannels(t, st)
 
 	all, err := st.ListAccountsForOrg(ctx, orgID)
 	if err != nil {
@@ -232,13 +297,13 @@ func TestAccountListingsSplitNeutralFromWhatsAppOnly(t *testing.T) {
 	for _, a := range all {
 		channels[a.Channel]++
 	}
-	if channels["whatsapp"] != 1 || channels["simulator"] != 1 || channels["telegram"] != 1 {
+	if channels["whatsapp"] != 1 || channels["simulator"] != 1 || channels["telegram"] != 1 || channels["whatsapp_cloud"] != 1 {
 		t.Fatalf("neutral listing channels = %v, want one of each", channels)
 	}
 
 	// The WhatsApp-only listing covers the wa_* gateway (WhatsApp + simulator)
-	// and must never surface a bot: /whatsapp-accounts drives a QR lifecycle
-	// Telegram does not have.
+	// and must never surface a bot or a Meta channel account: /whatsapp-accounts
+	// drives a QR lifecycle neither has.
 	wa, err := st.ListWaAccountsForOrg(ctx, orgID)
 	if err != nil {
 		t.Fatalf("ListWaAccountsForOrg: %v", err)
@@ -247,8 +312,8 @@ func TestAccountListingsSplitNeutralFromWhatsAppOnly(t *testing.T) {
 		t.Fatalf("wa listing = %d accounts, want 2 (whatsapp + simulator)", len(wa))
 	}
 	for _, a := range wa {
-		if a.Channel == "telegram" {
-			t.Fatal("a Telegram bot appeared in the WhatsApp-only listing")
+		if a.Channel == "telegram" || a.Channel == "whatsapp_cloud" {
+			t.Fatalf("a %s account appeared in the WhatsApp-only listing", a.Channel)
 		}
 	}
 
@@ -270,18 +335,42 @@ func TestAccountListingsSplitNeutralFromWhatsAppOnly(t *testing.T) {
 	if acct.ExternalAccountRef != "telegram:bot:4242" {
 		t.Fatalf("external_account_ref = %q", acct.ExternalAccountRef)
 	}
+
+	// AccountByID resolves a channel-core account with ITS health fields too
+	// (the generic core registers a webhook, same as Telegram).
+	meta, err := st.ChatByID(ctx, metaChat)
+	if err != nil {
+		t.Fatalf("ChatByID: %v", err)
+	}
+	metaAcct, err := st.AccountByID(ctx, meta.AccountID)
+	if err != nil {
+		t.Fatalf("AccountByID(whatsapp_cloud): %v", err)
+	}
+	if metaAcct.Channel != "whatsapp_cloud" {
+		t.Fatalf("channel = %q", metaAcct.Channel)
+	}
+	if metaAcct.ExternalHandle != "+15550001111" {
+		t.Fatalf("external_handle = %q, want +15550001111", metaAcct.ExternalHandle)
+	}
+	if metaAcct.ExternalAccountRef != "15550001111" {
+		t.Fatalf("external_account_ref = %q, want 15550001111", metaAcct.ExternalAccountRef)
+	}
 }
 
 func TestMessagesAndDraftsAreChannelAware(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
-	_, waChat, _, tgChat := seedThreeChannels(t, st)
+	_, waChat, _, tgChat, metaChat := seedFourChannels(t, st)
 
 	for _, tc := range []struct {
 		chat    uuid.UUID
 		channel string
 		body    string
-	}{{waChat, "whatsapp", "привет из whatsapp"}, {tgChat, "telegram", "привет из telegram"}} {
+	}{
+		{waChat, "whatsapp", "привет из whatsapp"},
+		{tgChat, "telegram", "привет из telegram"},
+		{metaChat, "whatsapp_cloud", "привет из whatsapp cloud"},
+	} {
 		msgs, _, err := st.MessagesForChat(ctx, tc.chat, time.Time{}, 10)
 		if err != nil {
 			t.Fatalf("MessagesForChat(%s): %v", tc.channel, err)
@@ -321,9 +410,9 @@ func TestMessagesAndDraftsAreChannelAware(t *testing.T) {
 func TestMarkChatReadDispatchesByChannel(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
-	_, waChat, _, tgChat := seedThreeChannels(t, st)
+	_, waChat, _, tgChat, metaChat := seedFourChannels(t, st)
 
-	for _, id := range []uuid.UUID{waChat, tgChat} {
+	for _, id := range []uuid.UUID{waChat, tgChat, metaChat} {
 		before, err := st.ChatByID(ctx, id)
 		if err != nil {
 			t.Fatalf("ChatByID: %v", err)
@@ -352,13 +441,13 @@ func TestMarkChatReadDispatchesByChannel(t *testing.T) {
 func TestAssignChatDispatchesByChannelAndCanClear(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
-	orgID, waChat, _, tgChat := seedThreeChannels(t, st)
+	orgID, waChat, _, tgChat, metaChat := seedFourChannels(t, st)
 	user, err := st.SeedUser(ctx, orgID, "assignee@example.com", "hash", "Assignee")
 	if err != nil {
 		t.Fatalf("SeedUser: %v", err)
 	}
 
-	for _, id := range []uuid.UUID{waChat, tgChat} {
+	for _, id := range []uuid.UUID{waChat, tgChat, metaChat} {
 		assigned, err := st.AssignChat(ctx, id, uuid.NullUUID{UUID: user.ID, Valid: true})
 		if err != nil {
 			t.Fatalf("AssignChat(%s): %v", id, err)
@@ -381,7 +470,7 @@ func TestAssignChatDispatchesByChannelAndCanClear(t *testing.T) {
 func TestClaimTelegramAccountRevivesTheSameRow(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
-	orgID, _, _, tgChat := seedThreeChannels(t, st)
+	orgID, _, _, tgChat, _ := seedFourChannels(t, st)
 
 	tg, err := st.ChatByID(ctx, tgChat)
 	if err != nil {
@@ -453,5 +542,223 @@ func TestTelegramCredentialsRequireAnEncryptionKey(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("a keyless claim wrote %d account rows", n)
+	}
+}
+
+// A re-claim of the same external account by the same org must revive the
+// row (and its history) rather than create a second account — the generic
+// core's equivalent of TestClaimTelegramAccountRevivesTheSameRow.
+func TestClaimChannelAccountRevivesTheSameRow(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	orgID, _, _, _, metaChat := seedFourChannels(t, st)
+
+	meta, err := st.ChatByID(ctx, metaChat)
+	if err != nil {
+		t.Fatalf("ChatByID: %v", err)
+	}
+	if err := st.ConfirmChannelDisconnect(ctx, meta.AccountID); err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+	if _, err := st.ChannelCredentialsSecret(ctx, meta.AccountID); err != store.ErrNotFound {
+		t.Fatalf("the secret survived a confirmed disconnect: %v", err)
+	}
+
+	again, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID:                config.ChannelAccountID(config.WhatsAppCloudOwnerRef("15550001111")),
+		OrganizationID:    orgID,
+		Channel:           "whatsapp_cloud",
+		ExternalAccountID: "15550001111",
+		DisplayName:       "WhatsApp Cloud снова",
+		Handle:            "+15550001111",
+	})
+	if err != nil {
+		t.Fatalf("re-claim: %v", err)
+	}
+	if again.ID != meta.AccountID {
+		t.Fatalf("re-claim produced a new account %s, want %s", again.ID, meta.AccountID)
+	}
+	if again.DeletedAt != nil {
+		t.Fatal("the revived account is still soft-deleted")
+	}
+	if err := st.SetChannelCredentials(ctx, store.ChannelCredentialsWrite{
+		AccountID: again.ID, Secret: "new-token", TokenKind: "wa_business_token",
+	}); err != nil {
+		t.Fatalf("set credentials after re-claim: %v", err)
+	}
+	secret, err := st.ChannelCredentialsSecret(ctx, again.ID)
+	if err != nil || secret != "new-token" {
+		t.Fatalf("secret after re-claim = %q, %v", secret, err)
+	}
+	chats, _, err := st.ListChatsForOrg(ctx, store.ChatFilter{OrgID: orgID, Limit: 50})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	found := false
+	for _, c := range chats {
+		if c.ID == metaChat {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the revived account's history did not come back")
+	}
+
+	// Claiming the SAME external account for a DIFFERENT org must fail rather
+	// than silently steal its history.
+	other, err := st.SeedOrganization(ctx, "views-other-claim")
+	if err != nil {
+		t.Fatalf("seed other org: %v", err)
+	}
+	if _, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID:                config.ChannelAccountID(config.WhatsAppCloudOwnerRef("15550001111")),
+		OrganizationID:    other.ID,
+		Channel:           "whatsapp_cloud",
+		ExternalAccountID: "15550001111",
+		DisplayName:       "Steal attempt",
+	}); err != store.ErrChannelAccountClaimed {
+		t.Fatalf("cross-org re-claim = %v, want ErrChannelAccountClaimed", err)
+	}
+}
+
+// TestChannelAccountsWithWebhookOnlyReturnsRegisteredOnes is the stale-origin
+// repair pass's own read: an account that was claimed but never got as far
+// as a webhook registration (webhook_url still ”) must not show up — there
+// is nothing to compare its origin against — and a soft-deleted account
+// (even a previously-registered one) must not either.
+func TestChannelAccountsWithWebhookOnlyReturnsRegisteredOnes(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	org, err := st.SeedOrganization(ctx, "views-webhook-list")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+
+	registered, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: config.ChannelAccountID(config.InstagramOwnerRef("ig-registered")), OrganizationID: org.ID,
+		Channel: "instagram", ExternalAccountID: "ig-registered",
+	})
+	if err != nil {
+		t.Fatalf("claim registered: %v", err)
+	}
+	if err := st.SetChannelWebhookState(ctx, registered.ID, store.ChannelWebhookState{
+		State: "connected", URL: "https://old.example.com/meta/api/v1/webhook/instagram", Registered: true,
+	}); err != nil {
+		t.Fatalf("set webhook state: %v", err)
+	}
+
+	if _, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: config.ChannelAccountID(config.InstagramOwnerRef("ig-unregistered")), OrganizationID: org.ID,
+		Channel: "instagram", ExternalAccountID: "ig-unregistered",
+	}); err != nil {
+		t.Fatalf("claim unregistered: %v", err)
+	}
+
+	deleted, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: config.ChannelAccountID(config.InstagramOwnerRef("ig-deleted")), OrganizationID: org.ID,
+		Channel: "instagram", ExternalAccountID: "ig-deleted",
+	})
+	if err != nil {
+		t.Fatalf("claim deleted: %v", err)
+	}
+	if err := st.SetChannelWebhookState(ctx, deleted.ID, store.ChannelWebhookState{
+		State: "connected", URL: "https://old.example.com/meta/api/v1/webhook/instagram", Registered: true,
+	}); err != nil {
+		t.Fatalf("set webhook state: %v", err)
+	}
+	if err := st.ConfirmChannelDisconnect(ctx, deleted.ID); err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+
+	got, err := st.ChannelAccountsWithWebhook(ctx, "instagram")
+	if err != nil {
+		t.Fatalf("ChannelAccountsWithWebhook: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != registered.ID {
+		t.Fatalf("got %+v, want exactly [%s]", got, registered.ID)
+	}
+}
+
+func TestChannelContactDisplayNameEmptyUntilIngestSetsIt(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	org, err := st.SeedOrganization(ctx, "views-contact-name")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	acct, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID: config.ChannelAccountID(config.InstagramOwnerRef("ig-contact-name")), OrganizationID: org.ID,
+		Channel: "instagram", ExternalAccountID: "ig-contact-name",
+	})
+	if err != nil {
+		t.Fatalf("claim account: %v", err)
+	}
+
+	// No channel_contacts row at all yet.
+	name, err := st.ChannelContactDisplayName(ctx, acct.ID, "customer-1")
+	if err != nil || name != "" {
+		t.Fatalf("ChannelContactDisplayName before any message = (%q, %v), want (\"\", nil)", name, err)
+	}
+
+	if _, err := st.IngestChannelInbound(ctx, store.ChannelInbound{
+		AccountID: acct.ID, ExternalContactID: "customer-1", ContactHandle: "customer-1",
+		ContactDisplayName: "Клиент Тест", ExternalThreadID: "customer-1", Direction: "in", SenderKind: "contact",
+		ExternalMessageID: "ig-mid-name-1", MessageKind: "conversation", Body: "привет", Preview: "привет",
+		MessageTS: time.Now(),
+	}); err != nil {
+		t.Fatalf("ingest first message: %v", err)
+	}
+	name, err = st.ChannelContactDisplayName(ctx, acct.ID, "customer-1")
+	if err != nil || name != "Клиент Тест" {
+		t.Fatalf("ChannelContactDisplayName after a named ingest = (%q, %v), want (\"Клиент Тест\", nil)", name, err)
+	}
+
+	// A later message with no resolved name (e.g. a skipped live lookup)
+	// must not blank out the name already on file.
+	if _, err := st.IngestChannelInbound(ctx, store.ChannelInbound{
+		AccountID: acct.ID, ExternalContactID: "customer-1", ContactHandle: "customer-1",
+		ContactDisplayName: "", ExternalThreadID: "customer-1", Direction: "in", SenderKind: "contact",
+		ExternalMessageID: "ig-mid-name-2", MessageKind: "conversation", Body: "снова я", Preview: "снова я",
+		MessageTS: time.Now(),
+	}); err != nil {
+		t.Fatalf("ingest second message: %v", err)
+	}
+	name, err = st.ChannelContactDisplayName(ctx, acct.ID, "customer-1")
+	if err != nil || name != "Клиент Тест" {
+		t.Fatalf("ChannelContactDisplayName after a nameless ingest = (%q, %v), want the name to stick (\"Клиент Тест\", nil)", name, err)
+	}
+}
+
+// Without an encryption key, credential paths must fail loudly rather than
+// storing a plaintext secret — the generic core's equivalent of
+// TestTelegramCredentialsRequireAnEncryptionKey.
+func TestChannelCredentialsRequireAnEncryptionKey(t *testing.T) {
+	st, db := dbtest.Open(t)
+	ctx := context.Background()
+
+	org, err := st.SeedOrganization(ctx, "no-key-org-meta")
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	acct, err := st.ClaimChannelAccount(ctx, store.ChannelAccountClaim{
+		ID:                config.ChannelAccountID(config.WhatsAppCloudOwnerRef("70001")),
+		OrganizationID:    org.ID,
+		Channel:           "whatsapp_cloud",
+		ExternalAccountID: "70001",
+	})
+	if err != nil {
+		t.Fatalf("claim (account claim itself needs no key): %v", err)
+	}
+	if err := st.SetChannelCredentials(ctx, store.ChannelCredentialsWrite{
+		AccountID: acct.ID, Secret: "tok",
+	}); err != store.ErrNoCredentialsKey {
+		t.Fatalf("set credentials without a key = %v, want ErrNoCredentialsKey", err)
+	}
+	var n int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM channel_credentials`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("a keyless credentials write wrote %d rows", n)
 	}
 }

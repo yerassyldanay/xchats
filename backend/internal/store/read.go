@@ -29,7 +29,7 @@ type ChatFilter struct {
 // channel, with provider vocabulary already folded into neutral column names.
 const chatCols = `c.id, c.account_id, c.contact_id, c.channel, c.external_conversation_ref,
 	c.chat_state, c.assignee_user_id,
-	c.last_message_at, c.last_message_preview, c.unread_count,
+	c.last_message_at, c.last_inbound_at, c.last_message_preview, c.unread_count,
 	c.contact_id, c.contact_phone_number, c.external_contact_ref, c.contact_lid_jid,
 	c.contact_push_name, c.contact_display_name, c.contact_attributes`
 
@@ -37,7 +37,7 @@ func scanChatDst(c *Chat) []any {
 	return []any{
 		&c.ID, &c.AccountID, &c.ContactID, &c.Channel, &c.ExternalConversationRef,
 		&c.ChatState, &c.AssigneeUserID,
-		&c.LastMessageAt, &c.LastMessagePreview, &c.UnreadCount,
+		&c.LastMessageAt, &c.LastInboundAt, &c.LastMessagePreview, &c.UnreadCount,
 		&c.Contact.ID, &c.Contact.PhoneNumber, &c.Contact.ExternalContactRef, &c.Contact.LidJID,
 		&c.Contact.PushName, &c.Contact.DisplayName, &c.Contact.Attributes,
 	}

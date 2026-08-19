@@ -1,0 +1,399 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/yerassyldanay/xchats/backend/internal/messengerish"
+	"github.com/yerassyldanay/xchats/backend/internal/meta"
+	"github.com/yerassyldanay/xchats/backend/internal/metaingest"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsappcloud"
+	"github.com/yerassyldanay/xchats/backend/messaging"
+)
+
+// handleMetaWebhookVerify is the one-time GET subscription handshake every
+// Meta channel performs identically — see meta.Challenge's own doc comment
+// for the protocol. It is shared across all three Meta channels (a single
+// verify_token, derived once — see meta.DeriveVerifyToken) even though today
+// only the WhatsApp Cloud route is registered; Instagram/Messenger's own POST
+// routes (Phase 4/5) will point their GET half at this same handler.
+func (s *Server) handleMetaWebhookVerify(c *gin.Context) {
+	verifyToken := meta.DeriveVerifyToken(s.cfg.SessionSecret)
+	challenge, matched := meta.Challenge(c.Request.URL.Query(), verifyToken)
+	if !matched {
+		s.log.Warn("meta webhook verify rejected", "path", c.Request.URL.Path)
+		c.Status(http.StatusForbidden)
+		return
+	}
+	// Plain text, no JSON envelope — Meta treats anything else as a failed
+	// subscription attempt.
+	c.String(http.StatusOK, challenge)
+}
+
+// handleWhatsAppCloudWebhook is the WhatsApp Cloud API ingress. It does NOT
+// enqueue-and-ack: the normalized rows are committed BEFORE the 200 — see
+// handleTelegramWebhook's identical shape and doc comment for the general
+// at-least-once reasoning, and internal/metaingest.Processor for the shared
+// ingest core this delegates to.
+//
+// Order matters (§10), each step answering the way that keeps Meta's own
+// retry behavior correct: Meta redelivers a webhook until it sees a 2xx.
+//   - No App Secret configured at all: 503 — an operator setup gap, not
+//     something retrying will fix, but also not safe to treat as "ignore
+//     forever" the way an unknown account is, so this is the one non-2xx
+//     that is not "durability failure".
+//   - A bad signature: 401 — never store or process an unverified body.
+//   - A malformed body, or an entry naming a WABA this install does not own:
+//     200 — retrying either would only ever reproduce the same outcome.
+//   - An ingest/enqueue failure: 500 — Meta redelivers, and every write here
+//     is idempotent on (channel, external_message_id), so a redelivered
+//     entry that DID partially land is a safe no-op the second time.
+func (s *Server) handleWhatsAppCloudWebhook(c *gin.Context) {
+	raw, err := c.GetRawData()
+	if err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "unreadable body")
+		return
+	}
+
+	creds, okCreds := s.metaCreds.MetaAppCredentials(ctx(c))
+	if !okCreds {
+		s.log.Error("whatsapp cloud webhook rejected: no Meta App Secret configured")
+		fail(c, http.StatusServiceUnavailable, ErrMetaAppNotConfigured, "Meta App Secret not configured")
+		return
+	}
+	if !meta.VerifySignature(creds.AppSecret, raw, c.GetHeader("X-Hub-Signature-256")) {
+		s.log.Warn("whatsapp cloud webhook auth rejected", "reason", "bad signature")
+		fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook signature")
+		return
+	}
+
+	var payload whatsappcloud.WebhookPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		s.log.Warn("whatsapp cloud webhook unparsable body", "err", err)
+		c.Status(http.StatusOK)
+		return
+	}
+
+	stored, duplicate, ignored, statuses := 0, 0, 0, 0
+	for _, entry := range payload.Entry {
+		// entry.ID is the WABA id (see Entry's own doc comment) — the
+		// account this delivery is FOR is named one level deeper, by
+		// change.Value.Metadata.PhoneNumberID (channel_accounts.
+		// external_account_id), since one WABA can have several registered
+		// numbers each with its own channel_accounts row and a batched
+		// delivery can in principle cover more than one of them.
+		for _, change := range entry.Changes {
+			phoneNumberID := change.Value.Metadata.PhoneNumberID
+			if phoneNumberID == "" {
+				continue
+			}
+			acct, err := s.store.ChannelAccountByExternalID(ctx(c), string(messaging.ChannelWhatsAppCloud), phoneNumberID)
+			if err != nil {
+				s.log.Info("whatsapp cloud webhook discarded", "phone_number_id", phoneNumberID, "result", "unknown_account")
+				continue
+			}
+			for _, m := range change.Value.Messages {
+				if reason, ignorable := m.Ignorable(); ignorable {
+					ignored++
+					s.log.Info("whatsapp cloud message dropped", "account_id", acct.ID, "result", reason)
+					continue
+				}
+				outcome, perr := s.metaProc.Process(ctx(c), acct, whatsAppCloudNormalize(m, change.Value.Contacts))
+				if perr != nil {
+					s.log.Error("whatsapp cloud webhook processing failed; not acking", "account_id", acct.ID, "err", perr)
+					fail(c, http.StatusInternalServerError, ErrInternal, "processing failed")
+					return
+				}
+				if outcome.Status == "duplicate" {
+					duplicate++
+				} else {
+					stored++
+				}
+			}
+			for _, st := range change.Value.Statuses {
+				if _, aerr := s.metaProc.ApplyStatus(ctx(c), metaingest.StatusUpdate{
+					AccountID: acct.ID, Channel: string(messaging.ChannelWhatsAppCloud),
+					ExternalMessageID: st.ID, Status: st.Status, Rank: whatsappcloud.DeliveryRank(st.Status),
+				}); aerr != nil {
+					s.log.Error("whatsapp cloud status update failed; not acking", "account_id", acct.ID, "err", aerr)
+					fail(c, http.StatusInternalServerError, ErrInternal, "processing failed")
+					return
+				}
+				statuses++
+			}
+		}
+	}
+	s.log.Info("whatsapp cloud webhook processed", "stored", stored, "duplicate", duplicate, "ignored", ignored, "statuses", statuses)
+	c.Status(http.StatusOK)
+}
+
+// whatsAppCloudNormalize maps one inbound WhatsApp Cloud message (plus its
+// delivery's contact list) into metaingest's channel-neutral shape.
+// WhatsApp Cloud never echoes our own sends back through the webhook (§10),
+// so Direction/SenderKind are always the inbound-customer-message values.
+func whatsAppCloudNormalize(m whatsappcloud.Message, contacts []whatsappcloud.Contact) metaingest.NormalizedMessage {
+	contactName := ""
+	for _, ct := range contacts {
+		if ct.WAID == m.From {
+			contactName = ct.Profile.Name
+			break
+		}
+	}
+	norm := metaingest.NormalizedMessage{
+		ExternalContactID:  m.From,
+		ContactHandle:      m.From,
+		ContactDisplayName: contactName,
+		ExternalThreadID:   m.From,
+		Direction:          "in",
+		SenderKind:         "contact",
+		ExternalMessageID:  m.ID,
+		MessageKind:        m.MessageKind(),
+		Body:               m.Body(),
+		Preview:            m.Preview(),
+		MessageTS:          whatsappcloud.ParseTimestamp(m.Timestamp),
+	}
+	if raw, err := json.Marshal(m); err == nil {
+		norm.Raw = raw
+	}
+	if att := m.Attachment(); att != nil {
+		norm.Attachment = &metaingest.NormalizedAttachment{
+			// WhatsApp Cloud's own Type vocabulary (image|video|audio|
+			// document|sticker) already matches this codebase's MediaType
+			// convention one-for-one (see telegram.Message.MediaKind's
+			// identical vocabulary) — no translation needed.
+			MediaType: m.Type, Mimetype: att.MimeType, FileName: att.Filename, ProviderRef: att.ID,
+		}
+	}
+	return norm
+}
+
+// handleInstagramWebhook is the Instagram Direct ingress — same shape and
+// same at-least-once/idempotency reasoning as handleWhatsAppCloudWebhook
+// (see its doc comment), with two differences forced by Instagram's own
+// webhook envelope: entry.id names the connected account DIRECTLY (no
+// WABA-vs-phone-number indirection), and Instagram echoes our own outbound
+// sends back through this same webhook (is_echo) — metaingest.Processor.
+// Process already handles that branch (see its own doc comment); this
+// handler's only job is to set Direction/SenderKind correctly per event.
+func (s *Server) handleInstagramWebhook(c *gin.Context) {
+	raw, err := c.GetRawData()
+	if err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "unreadable body")
+		return
+	}
+
+	creds, okCreds := s.metaCreds.MetaAppCredentials(ctx(c))
+	if !okCreds {
+		s.log.Error("instagram webhook rejected: no Meta App Secret configured")
+		fail(c, http.StatusServiceUnavailable, ErrMetaAppNotConfigured, "Meta App Secret not configured")
+		return
+	}
+	if !meta.VerifySignature(creds.AppSecret, raw, c.GetHeader("X-Hub-Signature-256")) {
+		s.log.Warn("instagram webhook auth rejected", "reason", "bad signature")
+		fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook signature")
+		return
+	}
+
+	var payload messengerish.WebhookPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		s.log.Warn("instagram webhook unparsable body", "err", err)
+		c.Status(http.StatusOK)
+		return
+	}
+
+	igClient := messengerish.NewClient(s.metaClient)
+	stored, duplicate, ignored := 0, 0, 0
+	for _, entry := range payload.Entry {
+		acct, err := s.store.ChannelAccountByExternalID(ctx(c), string(messaging.ChannelInstagram), entry.ID)
+		if err != nil {
+			s.log.Info("instagram webhook discarded", "ig_id", entry.ID, "result", "unknown_account")
+			continue
+		}
+		// Best-effort: an unresolvable token degrades contact-name lookups
+		// (messengerishNormalize falls back to the bare provider id), it never
+		// blocks ingest.
+		token, _ := s.store.ChannelCredentialsSecret(ctx(c), acct.ID)
+		for _, ev := range entry.Messaging {
+			if reason, ignorable := ev.Ignorable(); ignorable {
+				ignored++
+				s.log.Info("instagram event dropped", "account_id", acct.ID, "result", reason)
+				continue
+			}
+			// Best-effort: a failed pre-lookup just means the live Profile
+			// call below still runs, same as if the contact were unknown.
+			knownName, _ := s.store.ChannelContactDisplayName(ctx(c), acct.ID, messengerishCustomerID(ev))
+			norm := messengerishNormalize(ctx(c), igClient, ev, token, knownName, true)
+			outcome, perr := s.metaProc.Process(ctx(c), acct, norm)
+			if perr != nil {
+				s.log.Error("instagram webhook processing failed; not acking", "account_id", acct.ID, "err", perr)
+				fail(c, http.StatusInternalServerError, ErrInternal, "processing failed")
+				return
+			}
+			if outcome.Status == "duplicate" {
+				duplicate++
+			} else {
+				stored++
+			}
+		}
+	}
+	s.log.Info("instagram webhook processed", "stored", stored, "duplicate", duplicate, "ignored", ignored)
+	c.Status(http.StatusOK)
+}
+
+// handleMessengerWebhook is the Facebook Messenger ingress — byte-identical
+// shape to handleInstagramWebhook (same envelope, same at-least-once/
+// idempotency reasoning, same is_echo handling), differing only in which
+// channel it resolves accounts against and which Graph host
+// messengerishNormalize's live Profile lookup goes through
+// (instagramHost=false: plain graph.facebook.com, authenticated with the
+// connected Page's own token — see handleMessengerOAuthCallback for how that
+// token is obtained).
+func (s *Server) handleMessengerWebhook(c *gin.Context) {
+	raw, err := c.GetRawData()
+	if err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "unreadable body")
+		return
+	}
+
+	creds, okCreds := s.metaCreds.MetaAppCredentials(ctx(c))
+	if !okCreds {
+		s.log.Error("messenger webhook rejected: no Meta App Secret configured")
+		fail(c, http.StatusServiceUnavailable, ErrMetaAppNotConfigured, "Meta App Secret not configured")
+		return
+	}
+	if !meta.VerifySignature(creds.AppSecret, raw, c.GetHeader("X-Hub-Signature-256")) {
+		s.log.Warn("messenger webhook auth rejected", "reason", "bad signature")
+		fail(c, http.StatusUnauthorized, ErrWebhookUnauthorized, "bad webhook signature")
+		return
+	}
+
+	var payload messengerish.WebhookPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		s.log.Warn("messenger webhook unparsable body", "err", err)
+		c.Status(http.StatusOK)
+		return
+	}
+
+	fbClient := messengerish.NewClient(s.metaClient)
+	stored, duplicate, ignored := 0, 0, 0
+	for _, entry := range payload.Entry {
+		acct, err := s.store.ChannelAccountByExternalID(ctx(c), string(messaging.ChannelMessenger), entry.ID)
+		if err != nil {
+			s.log.Info("messenger webhook discarded", "page_id", entry.ID, "result", "unknown_account")
+			continue
+		}
+		// Best-effort: an unresolvable token degrades contact-name lookups
+		// (messengerishNormalize falls back to the bare provider id), it
+		// never blocks ingest.
+		token, _ := s.store.ChannelCredentialsSecret(ctx(c), acct.ID)
+		for _, ev := range entry.Messaging {
+			if reason, ignorable := ev.Ignorable(); ignorable {
+				ignored++
+				s.log.Info("messenger event dropped", "account_id", acct.ID, "result", reason)
+				continue
+			}
+			// Best-effort: a failed pre-lookup just means the live Profile
+			// call below still runs, same as if the contact were unknown.
+			knownName, _ := s.store.ChannelContactDisplayName(ctx(c), acct.ID, messengerishCustomerID(ev))
+			norm := messengerishNormalize(ctx(c), fbClient, ev, token, knownName, false)
+			outcome, perr := s.metaProc.Process(ctx(c), acct, norm)
+			if perr != nil {
+				s.log.Error("messenger webhook processing failed; not acking", "account_id", acct.ID, "err", perr)
+				fail(c, http.StatusInternalServerError, ErrInternal, "processing failed")
+				return
+			}
+			if outcome.Status == "duplicate" {
+				duplicate++
+			} else {
+				stored++
+			}
+		}
+	}
+	s.log.Info("messenger webhook processed", "stored", stored, "duplicate", duplicate, "ignored", ignored)
+	c.Status(http.StatusOK)
+}
+
+// messengerishMediaType maps messengerish's attachment vocabulary onto this
+// codebase's shared MediaType convention — every value already matches
+// (image|video|audio) except "file", which this codebase calls "document"
+// (see whatsappcloud/telegram's identical vocabulary).
+func messengerishMediaType(t string) string {
+	if t == "file" {
+		return "document"
+	}
+	return t
+}
+
+// messengerishCustomerID resolves the id of the actual customer party in a
+// messaging event — echoes (is_echo) swap which Party is the customer:
+// Recipient on an echo (our own outbound bounced back through the webhook),
+// Sender on a genuine inbound. Shared by messengerishNormalize and its
+// callers' own pre-lookup of an already-known contact name (see
+// messengerishNormalize's doc comment), so the swap logic lives in one place.
+func messengerishCustomerID(ev messengerish.MessagingEvent) string {
+	if ev.Message.IsEcho {
+		return ev.Recipient.ID
+	}
+	return ev.Sender.ID
+}
+
+// messengerishNormalize maps one Instagram or Messenger messaging event into
+// metaingest's channel-neutral shape — shared by handleInstagramWebhook and
+// handleMessengerWebhook, since both ride the identical Messenger-Platform
+// envelope (see messengerish/webhook.go's own doc comment). instagramHost
+// selects which Graph host the live Profile lookup below goes through; it is
+// the caller's job to pass the same value it registered its ChannelSender
+// with. Unlike WhatsApp Cloud, neither webhook payload carries an inline
+// contact profile — ContactDisplayName falls back to a LIVE Profile lookup
+// only when knownDisplayName is empty (the caller's own
+// store.ChannelContactDisplayName pre-lookup came up empty too, meaning this
+// contact has never been named yet); once a contact has a name on file there
+// is nothing a repeat lookup would improve, and skipping it is what keeps a
+// long-running conversation with a known contact from placing a blocking
+// Graph API call on every single inbound message. A live lookup is itself
+// never blocking in the failure sense: an error just leaves the name empty,
+// same as before (dto.MapContact already falls back to the id-derived
+// handle).
+func messengerishNormalize(ctx context.Context, c *messengerish.Client, ev messengerish.MessagingEvent, token, knownDisplayName string, instagramHost bool) metaingest.NormalizedMessage {
+	direction, senderKind := "in", "contact"
+	if ev.Message.IsEcho {
+		direction, senderKind = "out", "external_account"
+	}
+	customerID := messengerishCustomerID(ev)
+	contactName := knownDisplayName
+	if contactName == "" && token != "" {
+		if p, err := c.Profile(ctx, instagramHost, customerID, token); err == nil {
+			switch {
+			case p.Name != "":
+				contactName = p.Name
+			case p.Username != "":
+				contactName = "@" + p.Username
+			}
+		}
+	}
+	norm := metaingest.NormalizedMessage{
+		ExternalContactID:  customerID,
+		ContactHandle:      customerID,
+		ContactDisplayName: contactName,
+		ExternalThreadID:   customerID,
+		Direction:          direction,
+		SenderKind:         senderKind,
+		ExternalMessageID:  ev.Message.MID,
+		MessageKind:        ev.MessageKind(),
+		Body:               ev.Body(),
+		Preview:            ev.Preview(),
+		MessageTS:          messengerish.ParseTimestampMillis(ev.Timestamp),
+	}
+	if raw, err := json.Marshal(ev); err == nil {
+		norm.Raw = raw
+	}
+	if att := ev.Attachment(); att != nil {
+		norm.Attachment = &metaingest.NormalizedAttachment{
+			MediaType: messengerishMediaType(att.Type), SourceURL: att.Payload.URL,
+		}
+	}
+	return norm
+}

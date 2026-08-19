@@ -100,6 +100,29 @@ type TelegramModeConfig struct {
 	APIBaseURL string `yaml:"api_base_url" env:"TG_API_BASE_URL"`
 }
 
+// MetaModeConfig groups the official Meta channels' (Instagram Direct,
+// Messenger, WhatsApp Cloud API) boot/infra settings — safe to commit. The
+// App ID/Secret themselves are NOT here: BYO-App means every install's app
+// credential is an operator-entered value in Settings (internal/credentials'
+// "meta" provider), never a config.yaml/env value, so one xchats binary
+// carries no default Meta app of its own.
+type MetaModeConfig struct {
+	// WebhookPublicBaseURL is the public HTTPS origin all three Meta webhook
+	// callbacks (and the OAuth redirect URIs) are registered against. Empty
+	// means the embedded ngrok tunnel's own domain is used automatically —
+	// see MetaResolvedPublicBaseURL, the exact TelegramResolvedWebhookBaseURL
+	// pattern. Set only to front Meta with a DIFFERENT hostname than the rest
+	// of the app.
+	WebhookPublicBaseURL string `yaml:"webhook_public_base_url" env:"META_WEBHOOK_PUBLIC_BASE_URL"`
+	// GraphAPIVersion is the "/vXX.X/" segment every graph.facebook.com /
+	// graph.instagram.com call uses. Meta deprecates versions on a schedule
+	// independent of this codebase's release cadence, so this is a plain
+	// config value an operator can bump without a code change or rebuild —
+	// never hardcoded into a URL string. Empty falls back to
+	// metaDefaultGraphAPIVersion.
+	GraphAPIVersion string `yaml:"graph_api_version" env:"META_GRAPH_API_VERSION"`
+}
+
 // MCPConfig groups the MCP connector's TTL tunables (plan/mcp.md §3) — every
 // field here is a lifetime in seconds/days, never a secret.
 type MCPConfig struct {
@@ -138,6 +161,7 @@ type Config struct {
 	Storage  StorageConfig      `yaml:"storage"`
 	System   SystemConfig       `yaml:"system"`
 	Telegram TelegramModeConfig `yaml:"telegram"`
+	Meta     MetaModeConfig     `yaml:"meta"`
 	MCP      MCPConfig          `yaml:"mcp"`
 
 	// Environment is "development" (the default) or "production" — the
@@ -482,6 +506,40 @@ func (c *Config) TelegramResolvedMode() string {
 	return "polling"
 }
 
+// metaDefaultGraphAPIVersion is MetaResolvedGraphAPIVersion's fallback when
+// meta.graph_api_version is unset. Meta typically keeps a version callable
+// for about two years after a newer one ships, but versions DO eventually
+// stop working — an operator hitting a version-deprecation error should set
+// meta.graph_api_version rather than wait for a code change here.
+const metaDefaultGraphAPIVersion = "v21.0"
+
+// MetaResolvedGraphAPIVersion returns the Graph API version segment
+// ("v21.0") every graph.facebook.com/graph.instagram.com call builds its
+// path from.
+func (c *Config) MetaResolvedGraphAPIVersion() string {
+	if v := strings.TrimSpace(c.Meta.GraphAPIVersion); v != "" {
+		return v
+	}
+	return metaDefaultGraphAPIVersion
+}
+
+// MetaResolvedPublicBaseURL returns the public HTTPS origin to register
+// every Meta webhook and OAuth redirect URI against, with no trailing
+// slash. Exactly TelegramResolvedWebhookBaseURL's pattern (see its own doc
+// comment for the full reasoning): an explicit meta.webhook_public_base_url
+// wins; otherwise ResolvedAPIBaseURL when that is HTTPS (the embedded ngrok
+// tunnel's static domain); otherwise empty, since Meta — like Telegram —
+// refuses to register a non-HTTPS callback.
+func (c *Config) MetaResolvedPublicBaseURL() string {
+	if base := strings.TrimSpace(c.Meta.WebhookPublicBaseURL); base != "" {
+		return strings.TrimRight(base, "/")
+	}
+	if api := c.ResolvedAPIBaseURL(); strings.HasPrefix(strings.ToLower(api), "https://") {
+		return api
+	}
+	return ""
+}
+
 // xchatsChannelNS is the fixed namespace for deriving a non-WhatsApp channel
 // account's id from its provider owner ref. Like xchatsWaNS it must never
 // change: it is what makes re-pasting the same bot token land on the SAME
@@ -493,6 +551,23 @@ var xchatsChannelNS = uuid.MustParse("7d6e1c2b-93a4-5f80-b1c7-2a4d6e8f0b13")
 // inbox_accounts_v exposes as external_account_ref.
 func TelegramOwnerRef(botID int64) string {
 	return "telegram:bot:" + strconv.FormatInt(botID, 10)
+}
+
+// InstagramOwnerRef, MessengerOwnerRef and WhatsAppCloudOwnerRef are the
+// Meta channels' stable provider identities — TelegramOwnerRef's siblings,
+// each feeding the same ChannelAccountID derivation below. Re-connecting the
+// same IG account / Page / phone number always lands on the same
+// channel_accounts row (history intact), exactly like a re-pasted bot token.
+func InstagramOwnerRef(igUserID string) string {
+	return "instagram:user:" + igUserID
+}
+
+func MessengerOwnerRef(pageID string) string {
+	return "messenger:page:" + pageID
+}
+
+func WhatsAppCloudOwnerRef(phoneNumberID string) string {
+	return "whatsapp_cloud:phone:" + phoneNumberID
 }
 
 // ChannelAccountID derives a deterministic account id from a channel owner ref.

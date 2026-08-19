@@ -103,6 +103,24 @@ var providers = []Provider{
 		HasModel:      false,
 		Validate:      validateLangfuse,
 	},
+	{
+		// BYO-App: this is the operator's OWN Meta Developer App (Instagram
+		// Direct, Facebook Messenger, WhatsApp Cloud API all read it — see
+		// internal/meta.AppCredentials), never a shared xchats-owned app.
+		// HasBaseURL is false: unlike an LLM provider, Meta offers no
+		// self-hosted Graph API an operator would point this at — the
+		// baseURLFor override validateMeta still honors is a test-only hook.
+		ID: "meta", DisplayName: "Meta (Instagram · Messenger · WhatsApp Cloud)",
+		Fields: []Field{
+			{Key: "meta.app_id", Label: "App ID"},
+			{Key: "meta.app_secret", Label: "App Secret"},
+		},
+		CredentialURL: "https://developers.facebook.com/apps/",
+		DocsURL:       "https://developers.facebook.com/docs/graph-api/",
+		HasBaseURL:    false,
+		HasModel:      false,
+		Validate:      validateMeta,
+	},
 	// Firecrawl and LlamaParse are the document/URL EXTRACTION provider seam
 	// (plan/DECISIONS.md's "Provider seam" amendment) — a separate axis from
 	// the model providers above: they never register an llm.ChatClient
@@ -280,6 +298,39 @@ func validateLangfuse(ctx context.Context, values map[Key]string) error {
 		return ErrValidationUnavailable
 	}
 	return classify(resp, nil)
+}
+
+// validateMeta proves an App ID/Secret pair is real with a zero-side-effect
+// debug_token call against the app's OWN token (<id>|<secret> — Meta's own
+// app-access-token shorthand), input_token and access_token both set to it.
+// A malformed/wrong pair makes that token itself invalid, and Meta rejects
+// the call outright — there is no dedicated "verify these app credentials"
+// endpoint, so this self-check is the cheapest real proof available.
+func validateMeta(ctx context.Context, values map[Key]string) error {
+	appToken := values["meta.app_id"] + "|" + values["meta.app_secret"]
+	base := baseURLFor(values, "meta", "https://graph.facebook.com/v21.0")
+	u := base + "/debug_token?input_token=" + url.QueryEscape(appToken) + "&access_token=" + url.QueryEscape(appToken)
+	resp, err := doGet(ctx, u, nil)
+	if err != nil {
+		return ErrValidationUnavailable
+	}
+	return classify(resp, isMetaInvalidAppBody)
+}
+
+// isMetaInvalidAppBody recognizes debug_token's shape for a rejected
+// request: like Gemini (isGeminiInvalidKeyBody), Graph API returns 400 —
+// not 401/403 — for most OAuthException-shaped errors, including "this
+// app_id/app_secret pair does not resolve to a real app". Any non-zero
+// error code on THIS specific self-referential call (input_token ==
+// access_token == our own claimed app token) means the pair is invalid —
+// there is no other reason this always-available endpoint would reject it.
+func isMetaInvalidAppBody(body []byte) bool {
+	var payload struct {
+		Error struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	return json.Unmarshal(body, &payload) == nil && payload.Error.Code != 0
 }
 
 func validateFirecrawl(ctx context.Context, values map[Key]string) error {

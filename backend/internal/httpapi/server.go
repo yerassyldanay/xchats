@@ -16,10 +16,13 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
+	"github.com/yerassyldanay/xchats/backend/internal/inboxmedia"
 	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
+	"github.com/yerassyldanay/xchats/backend/internal/meta"
+	"github.com/yerassyldanay/xchats/backend/internal/metaingest"
 	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
@@ -30,6 +33,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
 	"github.com/yerassyldanay/xchats/backend/internal/updatecheck"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsappcloud"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
 
@@ -75,6 +79,18 @@ type Server struct {
 	kbImport *kbimport.Service // nil when the import pipeline is not wired (every handler checks)
 	orgID    uuid.UUID
 	log      *slog.Logger
+
+	// Meta channels (Instagram Direct, Messenger, WhatsApp Cloud API — see
+	// internal/meta's package doc). All five are constructed unconditionally
+	// at boot, exactly like tg/tgProc above: a deployment with no Meta App
+	// ID/Secret saved yet still serves every route, just failing each one
+	// individually with META_APP_NOT_CONFIGURED (metaAppCredentials) rather
+	// than 404ing in a way that would look like the feature doesn't exist.
+	metaClient  *meta.Client
+	metaCreds   meta.Source
+	metaProc    *metaingest.Processor
+	waCloud     *whatsappcloud.Client
+	inboxSigner *inboxmedia.Signer
 
 	// MCP connector (plan/mcp.md). mcpAuth/mcpServer are nil when the
 	// connector is not configured (no MCP_JWT_SIGNING_KEY resolvable at
@@ -163,6 +179,12 @@ type Deps struct {
 	OrgID         uuid.UUID
 	Log           *slog.Logger
 
+	// Meta channels — see Server's own field doc comment.
+	MetaClient       *meta.Client
+	MetaProcessor    *metaingest.Processor
+	WACloudClient    *whatsappcloud.Client
+	InboxMediaSigner *inboxmedia.Signer
+
 	// MCPAuth/MCPServer are nil to run without the MCP connector (every
 	// route checks mcpAuthEnabled() first).
 	MCPAuth   *mcpauth.Authorizer
@@ -194,6 +216,8 @@ func New(d Deps) *Server {
 		tgProc: d.TGProcessor, tgPoller: d.TGPoller, kb: d.KB, kbImport: d.KBImport,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
+		metaClient: d.MetaClient, metaCreds: metaCredentialsAdapter{chain: d.Credentials},
+		metaProc: d.MetaProcessor, waCloud: d.WACloudClient, inboxSigner: d.InboxMediaSigner,
 		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer,
 		mcpUploadSigner: uploadSigner, mcpMediaSigner: mediaSigner,
 		csrfSecret:  randomCSRFFallbackSecret(),
@@ -264,6 +288,26 @@ func (s *Server) Router() *gin.Engine {
 	// connects out directly (internal/whatsmeow), so there is nothing for an
 	// inbound HTTP route to receive.
 	r.POST("/telegram/api/v1/webhook/:account_id", s.handleTelegramWebhook)
+
+	// Meta channels — public, unauthenticated (Meta's own servers, or a
+	// browser mid-OAuth-redirect, call these; there is no session cookie to
+	// check in either case). The webhook paths are not account-specific
+	// (see handleWhatsAppCloudWebhook's doc comment); the media route is
+	// org-scoped by its signed token instead of a URL segment (see
+	// handleMetaMediaRead).
+	r.GET("/meta/api/v1/webhook/whatsapp", s.handleMetaWebhookVerify)
+	r.POST("/meta/api/v1/webhook/whatsapp", s.handleWhatsAppCloudWebhook)
+	r.GET("/meta/api/v1/webhook/instagram", s.handleMetaWebhookVerify)
+	r.POST("/meta/api/v1/webhook/instagram", s.handleInstagramWebhook)
+	r.GET("/meta/api/v1/webhook/messenger", s.handleMetaWebhookVerify)
+	r.POST("/meta/api/v1/webhook/messenger", s.handleMessengerWebhook)
+	r.GET("/meta/api/v1/media/:media_id", s.handleMetaMediaRead)
+	// Instagram's and Messenger's OAuth redirects land here directly from
+	// instagram.com/facebook.com — see handleInstagramOAuthCallback's own
+	// doc comment for why these are public rather than behind
+	// requireSession().
+	r.GET(instagramCallbackPath, s.handleInstagramOAuthCallback)
+	r.GET(messengerCallbackPath, s.handleMessengerOAuthCallback)
 
 	// MCP connector (plan/mcp.md) — discovery, OAuth 2.1 + PKCE, and the
 	// JSON-RPC endpoint. Every handler here checks mcpAuthEnabled() itself,
@@ -355,6 +399,38 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/telegram-accounts/:id/check", s.handleCheckTelegramAccount)
 	auth.PUT("/telegram-accounts/:id/token", s.handleReplaceTelegramToken)
 	auth.DELETE("/telegram-accounts/:id", s.handleDeleteTelegramAccount)
+
+	// WhatsApp Cloud API accounts manager: BYO-App, manual WABA id + business
+	// token connect (see whatsapp_cloud_accounts.go's own doc comments) —
+	// discover lists a WABA's numbers without persisting anything, the POST
+	// commits (activates the chosen number and registers the webhook).
+	auth.POST("/whatsapp-cloud-accounts/discover", s.handleDiscoverWhatsAppCloudNumbers)
+	auth.POST("/whatsapp-cloud-accounts", s.handleConnectWhatsAppCloudAccount)
+	auth.DELETE("/whatsapp-cloud-accounts/:id", s.handleDeleteWhatsAppCloudAccount)
+
+	// Instagram Direct accounts manager: OAuth-redirect connect (Instagram
+	// Login — see meta_oauth.go's own doc comments). start mints the
+	// authorize_url the frontend does a top-level navigation to; the
+	// callback above is the public half of the same flow.
+	auth.POST("/instagram-accounts/oauth/start", s.handleStartInstagramOAuth)
+	auth.DELETE("/instagram-accounts/:id", s.handleDeleteInstagramAccount)
+
+	// Facebook Messenger accounts manager: OAuth-redirect connect (plain
+	// Facebook Login — see meta_oauth_messenger.go's own doc comments), same
+	// start/callback shape as Instagram above.
+	auth.POST("/messenger-accounts/oauth/start", s.handleStartMessengerOAuth)
+	auth.DELETE("/messenger-accounts/:id", s.handleDeleteMessengerAccount)
+
+	// Channel setup (channel_setup.go): installation-wide prerequisites
+	// (public HTTPS access, the Meta Developer App, each channel's own
+	// Dashboard checklist), as distinct from the per-account connect routes
+	// above. GET is open to any member — see ChannelSetupInfo's own doc
+	// comment for the member/admin payload split; only the two saves are
+	// admin-only, matching every other credential-write route's own
+	// per-route RequireAdmin() (e.g. POST /users above).
+	auth.GET("/channel-setup", s.handleChannelSetup)
+	auth.PUT("/channel-setup/meta-app", s.RequireAdmin(), s.handleSaveMetaApp)
+	auth.PUT("/channel-setup/instagram-app", s.RequireAdmin(), s.handleSaveInstagramApp)
 
 	auth.GET("/chats", s.handleListChats)
 	auth.POST("/chats", s.handleCreateChat)

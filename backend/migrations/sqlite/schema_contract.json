@@ -4698,6 +4698,1191 @@
           "on_update": "NO ACTION"
         }
       ]
+    },
+    "channel_accounts": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "channel",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "external_account_id",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "display_name",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "handle",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "connection_state",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:connecting",
+          "default_raw": "'connecting'::text"
+        },
+        {
+          "name": "webhook_url",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "webhook_registered_at",
+          "position": 9,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "webhook_last_checked_at",
+          "position": 10,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "webhook_last_error",
+          "position": 11,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "last_live_event_at",
+          "position": 12,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "provider_meta",
+          "position": 13,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_object",
+          "default_raw": "'{}'::jsonb"
+        },
+        {
+          "name": "deleted_at",
+          "position": 14,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 15,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 16,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "channel_accounts_channel_external_account_id_key",
+          "columns": [
+            "channel",
+            "external_account_id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "channel_accounts_channel_external_account_id_key",
+          "columns": [
+            "channel",
+            "external_account_id"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        },
+        {
+          "name": "channel_accounts_org_idx",
+          "columns": [
+            "organization_id"
+          ],
+          "unique": false,
+          "where": "(deleted_at IS NULL)",
+          "backs_constraint": false
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "channel_accounts_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "channel_credentials": {
+      "columns": [
+        {
+          "name": "account_id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "secret_enc",
+          "position": 2,
+          "pg_type": "bytea",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "encryption_key_version",
+          "position": 3,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "raw:1",
+          "default_raw": "1"
+        },
+        {
+          "name": "token_kind",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "expires_at",
+          "position": 5,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "refreshed_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "refresh_last_error",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "created_at",
+          "position": 8,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 9,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "account_id"
+      ],
+      "foreign_keys": [
+        {
+          "name": "channel_credentials_account_id_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "ref_table": "channel_accounts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "channel_contacts": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "account_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "external_contact_id",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "handle",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "display_name",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "attributes",
+          "position": 6,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_object",
+          "default_raw": "'{}'::jsonb"
+        },
+        {
+          "name": "created_at",
+          "position": 7,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 8,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "channel_contacts_account_id_external_contact_id_key",
+          "columns": [
+            "account_id",
+            "external_contact_id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "channel_contacts_account_id_external_contact_id_key",
+          "columns": [
+            "account_id",
+            "external_contact_id"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "channel_contacts_account_id_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "ref_table": "channel_accounts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "RESTRICT",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "channel_chats": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "account_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "contact_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "external_thread_id",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "chat_state",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:open",
+          "default_raw": "'open'::text"
+        },
+        {
+          "name": "assignee_user_id",
+          "position": 6,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "last_inbound_at",
+          "position": 7,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "last_message_at",
+          "position": 8,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "last_message_preview",
+          "position": 9,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "unread_count",
+          "position": 10,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "int:0",
+          "default_raw": "0"
+        },
+        {
+          "name": "created_at",
+          "position": 11,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 12,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "channel_chats_account_id_external_thread_id_key",
+          "columns": [
+            "account_id",
+            "external_thread_id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "channel_chats_account_id_external_thread_id_key",
+          "columns": [
+            "account_id",
+            "external_thread_id"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        },
+        {
+          "name": "channel_chats_last_message_idx",
+          "columns": [
+            "last_message_at"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "channel_chats_account_id_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "ref_table": "channel_accounts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "RESTRICT",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "channel_chats_contact_id_fkey",
+          "columns": [
+            "contact_id"
+          ],
+          "ref_table": "channel_contacts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "RESTRICT",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "channel_chats_assignee_user_id_fkey",
+          "columns": [
+            "assignee_user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "channel_messages": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "account_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "chat_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "direction",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "sender_kind",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "sender_user_id",
+          "position": 6,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "external_message_id",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "message_kind",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "body",
+          "position": 9,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "delivery_state",
+          "position": 10,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:queued",
+          "default_raw": "'queued'::text"
+        },
+        {
+          "name": "failure_reason",
+          "position": 11,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "source",
+          "position": 12,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:live_webhook",
+          "default_raw": "'live_webhook'::text"
+        },
+        {
+          "name": "raw",
+          "position": 13,
+          "pg_type": "jsonb",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "message_ts",
+          "position": 14,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 15,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 16,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "channel_messages_account_id_external_message_id_key",
+          "columns": [
+            "account_id",
+            "external_message_id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "channel_messages_account_id_external_message_id_key",
+          "columns": [
+            "account_id",
+            "external_message_id"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        },
+        {
+          "name": "channel_messages_chat_ts_idx",
+          "columns": [
+            "chat_id",
+            "message_ts"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "channel_messages_account_id_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "ref_table": "channel_accounts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "RESTRICT",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "channel_messages_chat_id_fkey",
+          "columns": [
+            "chat_id"
+          ],
+          "ref_table": "channel_chats",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "channel_messages_sender_user_id_fkey",
+          "columns": [
+            "sender_user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "channel_message_media": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "message_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "provider_ref",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "source_url",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "media_type",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "mimetype",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "filename",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "size",
+          "position": 8,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "int:0",
+          "default_raw": "0"
+        },
+        {
+          "name": "storage_key",
+          "position": 9,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "download_status",
+          "position": 10,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:pending",
+          "default_raw": "'pending'::text"
+        },
+        {
+          "name": "created_at",
+          "position": 11,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 12,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "channel_message_media_message_id_key",
+          "columns": [
+            "message_id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "channel_message_media_message_id_key",
+          "columns": [
+            "message_id"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        },
+        {
+          "name": "channel_message_media_pending_idx",
+          "columns": [
+            "updated_at"
+          ],
+          "unique": false,
+          "where": "(download_status <> 'ready'::text)",
+          "backs_constraint": false
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "channel_message_media_message_id_fkey",
+          "columns": [
+            "message_id"
+          ],
+          "ref_table": "channel_messages",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "meta_oauth_states": {
+      "columns": [
+        {
+          "name": "state",
+          "position": 1,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "channel",
+          "position": 2,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "organization_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "user_id",
+          "position": 4,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "redirect_uri",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "status",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:pending",
+          "default_raw": "'pending'::text"
+        },
+        {
+          "name": "account_id",
+          "position": 7,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "last_error",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "expires_at",
+          "position": 9,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "settled_at",
+          "position": 10,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 11,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "state"
+      ],
+      "indexes": [
+        {
+          "name": "meta_oauth_states_expires_idx",
+          "columns": [
+            "expires_at"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "meta_oauth_states_channel_check",
+          "definition": "CHECK ((channel = ANY (ARRAY['instagram'::text, 'messenger'::text, 'whatsapp_cloud'::text])))"
+        },
+        {
+          "name": "meta_oauth_states_status_check",
+          "definition": "CHECK ((status = ANY (ARRAY['pending'::text, 'needs_selection'::text, 'connected'::text, 'failed'::text, 'expired'::text])))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "meta_oauth_states_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "meta_oauth_states_user_id_fkey",
+          "columns": [
+            "user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "meta_oauth_states_account_id_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "ref_table": "channel_accounts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "meta_webhook_events": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "channel",
+          "position": 2,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "object_id",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "account_id",
+          "position": 4,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "event_key",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "outcome",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "detail",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "received_at",
+          "position": 8,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "meta_webhook_events_channel_event_key_key",
+          "columns": [
+            "channel",
+            "event_key"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "meta_webhook_events_channel_event_key_key",
+          "columns": [
+            "channel",
+            "event_key"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        },
+        {
+          "name": "meta_webhook_events_account_idx",
+          "columns": [
+            "account_id"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        },
+        {
+          "name": "meta_webhook_events_received_idx",
+          "columns": [
+            "received_at"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "meta_webhook_events_channel_check",
+          "definition": "CHECK ((channel = ANY (ARRAY['instagram'::text, 'messenger'::text, 'whatsapp_cloud'::text])))"
+        },
+        {
+          "name": "meta_webhook_events_outcome_check",
+          "definition": "CHECK ((outcome = ANY (ARRAY['stored'::text, 'duplicate'::text, 'ignored'::text, 'unknown_account'::text, 'bad_signature'::text, 'error'::text])))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "meta_webhook_events_account_id_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "ref_table": "channel_accounts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        }
+      ]
     }
   },
   "views": {
@@ -4731,6 +5916,7 @@
         "chat_state",
         "assignee_user_id",
         "last_message_at",
+        "last_inbound_at",
         "last_message_preview",
         "unread_count",
         "created_at",

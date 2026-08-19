@@ -49,6 +49,11 @@ var dbtestConsumers = map[string]bool{
 	modulePrefix + "internal/httpapi":   true,
 	modulePrefix + "internal/mcpserver": true,
 	modulePrefix + "cmd/xchats":         true,
+	// worker's own tests backdate channel_credentials.refreshed_at directly
+	// (meta_tokens_test.go) to exercise RefreshExpiringInstagramTokens'
+	// age-eligibility window — SetChannelCredentials always stamps "now", so
+	// there is no exported method that can produce that state.
+	modulePrefix + "internal/worker": true,
 }
 
 const dbxImportPath = modulePrefix + "internal/dbx"

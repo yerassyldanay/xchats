@@ -40,6 +40,15 @@ function mockGet() {
         return { items: [], page: 1, page_size: 50, total: 0 }
       case '/settings/update-check':
         return { current_version: '0.1.0', update_available: false }
+      case '/settings/meta-setup':
+        return {
+          public_base_url: '',
+          production_required: false,
+          verify_token: '',
+          graph_api_version: '',
+          channels: [],
+          stale_accounts: [],
+        }
       default:
         throw new Error(`unexpected GET ${path}`)
     }

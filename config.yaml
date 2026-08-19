@@ -46,6 +46,17 @@ telegram:
   webhook_public_base_url: ""
   api_base_url: ""   # overrides https://api.telegram.org (self-hosted Bot API)
 
+# Instagram Direct, Facebook Messenger and the WhatsApp Cloud API — the
+# official Meta channels. BYO-App: each install's own Meta Developer App ID
+# + Secret are entered once in Settings (not here — never a config.yaml or
+# env secret), so there is nothing else to configure just to boot.
+meta:
+  # Empty => the embedded ngrok tunnel's own domain is used for every Meta
+  # webhook callback and OAuth redirect URI automatically. Set only to front
+  # Meta with a DIFFERENT hostname than the rest of the app.
+  webhook_public_base_url: ""
+  graph_api_version: ""   # empty => the built-in default; bump here if Meta deprecates it
+
 mcp:
   access_token_ttl_seconds: 900
   refresh_token_ttl_days: 30

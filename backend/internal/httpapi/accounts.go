@@ -264,8 +264,12 @@ func (s *Server) handleDebugWaEvent(c *gin.Context) {
 // orgAccount resolves an account id and enforces org ownership (404 otherwise).
 // AccountByID reads the cross-channel view, so this also refuses accounts
 // that do not live on the wa_* gateway: /whatsapp-accounts/:id drives pairing,
-// logout and status, none of which a Telegram bot has. Its own lifecycle is
-// /telegram-accounts/:id.
+// logout and status, none of which any other channel has. This is
+// deliberately an ALLOWLIST (wa_* gateway channels only), not a denylist of
+// one — a denylist of "not telegram" would silently let every new channel
+// through and misroute it into whatsmeow-specific calls (Logout/Status)
+// that have never heard of that account id. Each channel's own lifecycle
+// lives at its own route (/telegram-accounts/:id, /channel-accounts/:id, ...).
 func (s *Server) orgAccount(c *gin.Context, id uuid.UUID) (store.Account, bool) {
 	org, okOrg := s.orgOf(c)
 	if !okOrg {
@@ -273,9 +277,16 @@ func (s *Server) orgAccount(c *gin.Context, id uuid.UUID) (store.Account, bool) 
 	}
 	acct, err := s.store.AccountByID(ctx(c), id)
 	if err != nil || !acct.OrganizationID.Valid || acct.OrganizationID.UUID != org.ID ||
-		acct.Channel == string(messaging.ChannelTelegram) {
+		!isWaGatewayChannel(acct.Channel) {
 		fail(c, http.StatusNotFound, ErrNotFound, "account not found")
 		return store.Account{}, false
 	}
 	return acct, true
+}
+
+// isWaGatewayChannel reports whether a channel's accounts live on the wa_*
+// gateway (whatsmeow's direct WebSocket connection) — the only channels
+// /whatsapp-accounts/:id's pairing/logout/status operations apply to.
+func isWaGatewayChannel(channel string) bool {
+	return channel == string(messaging.ChannelWhatsApp) || channel == string(messaging.ChannelSimulator)
 }

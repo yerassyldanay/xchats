@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import {
   CircleAlert,
   CircleCheck,
@@ -15,22 +16,31 @@ import {
   Unplug,
 } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
+import { useChannelSetup } from '../stores/channelSetup'
 import { ApiError } from '../api/client'
 import { connStatus, initials, colorFor, type ConnTone } from '../lib/format'
 import AddAccountDialog from '../components/AddAccountDialog.vue'
 import ReplaceTokenDialog from '../components/ReplaceTokenDialog.vue'
 import AutomationStatusBadge from '../components/AutomationStatusBadge.vue'
 import AutomationSettingsDialog from '../components/AutomationSettingsDialog.vue'
-import type { Account } from '../types'
+import ChannelSetupTab from '../components/channels/ChannelSetupTab.vue'
+import type { Account, ConnectableChannel } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
+import InstagramIcon from '@/components/icons/InstagramIcon.vue'
+import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const accounts = useAccounts()
+const channelSetup = useChannelSetup()
+const activeTab = ref<'accounts' | 'setup'>('accounts')
 const showAdd = ref(false)
-const addStartChannel = ref<'whatsapp' | null>(null)
+const addStartChannel = ref<ConnectableChannel | null>(null)
 const tokenTarget = ref<Account | null>(null)
 const automationTarget = ref<Account | null>(null)
 const deleting = ref<string | null>(null)
@@ -38,6 +48,13 @@ const working = ref<string | null>(null)
 // actionError surfaces a failed retry/check on the card that caused it, rather
 // than as a toast that disappears before anyone reads it.
 const actionError = ref<Record<string, string>>({})
+// oauthBanner surfaces the ONE-SHOT ?instagram_connected / ?instagram_error
+// (or their messenger_* twins) query params a redirect back from Meta's
+// OAuth consent screen lands with (see AddAccountDialog.vue's
+// connectInstagram/connectMessenger and the backend's meta_oauth.go /
+// meta_oauth_messenger.go) — cleared from the URL on mount so a page refresh
+// never re-shows a stale result.
+const oauthBanner = ref<{ kind: 'success' | 'error'; message: string } | null>(null)
 
 // connection tone -> badge + dot classes (connected keeps WhatsApp green)
 const toneMeta: Record<ConnTone, { badge: string; dot: string }> = {
@@ -53,15 +70,91 @@ function conn(status: string) {
 }
 
 const isTelegram = (a: Account) => a.channel === 'telegram'
-const tileClass = (a: Account) => (isTelegram(a) ? 'bg-[#229ED9]' : 'bg-wa')
-const channelIcon = (a: Account) => (isTelegram(a) ? TelegramIcon : WhatsappIcon)
-// A Telegram bot's handle is @username; a WhatsApp account's is its number.
+// isQrWhatsApp is the whatsmeow-backed leg (whatsapp/simulator) — the only
+// channels the QR reconnect flow (openReconnect, below) applies to.
+// whatsapp_cloud/instagram look similar (same brand, same 24h-window shape)
+// but have no QR session to re-scan at all.
+const isQrWhatsApp = (a: Account) => a.channel === 'whatsapp' || a.channel === 'simulator'
+const isWhatsAppCloud = (a: Account) => a.channel === 'whatsapp_cloud'
+const isInstagram = (a: Account) => a.channel === 'instagram'
+const isMessenger = (a: Account) => a.channel === 'messenger'
+const tileClass = (a: Account) =>
+  isTelegram(a)
+    ? 'bg-[#229ED9]'
+    : isWhatsAppCloud(a)
+      ? 'bg-teal-600'
+      : isInstagram(a)
+        ? 'bg-fuchsia-600'
+        : isMessenger(a)
+          ? 'bg-[#0084FF]'
+          : 'bg-wa'
+const channelIcon = (a: Account) =>
+  isTelegram(a) ? TelegramIcon : isInstagram(a) ? InstagramIcon : isMessenger(a) ? MessengerIcon : WhatsappIcon
+// A Telegram bot's handle is @username; a QR-paired WhatsApp account's own
+// external_handle is a bare digit string (needs the + prefix); WhatsApp
+// Cloud's, Instagram's and Messenger's are already display-ready
+// ("+1 555 000 1111", "@my_shop", a Facebook Page name — see
+// whatsapp_cloud_accounts.go's display_phone_number and meta_oauth.go's /
+// meta_oauth_messenger.go's handle) — no coercion needed for any of them.
 function handle(a: Account) {
-  if (isTelegram(a)) return a.external_handle || '—'
+  if (isTelegram(a) || isWhatsAppCloud(a) || isInstagram(a) || isMessenger(a)) return a.external_handle || '—'
   return a.external_handle ? '+' + a.external_handle : '—'
 }
 
-onMounted(() => accounts.load())
+// pendingChannel/focusedEntry drive the guided "Add channel" run (see
+// stores/channelSetup.ts): starting one closes this dialog and switches to
+// Channel setup, focused on the first missing prerequisite; completing one
+// switches back and reopens the dialog on the channel the admin originally
+// picked, so the whole detour reads as one continuous flow rather than two
+// unrelated screens.
+watch(
+  () => channelSetup.pendingChannel,
+  (c) => {
+    if (c) {
+      showAdd.value = false
+      activeTab.value = 'setup'
+    }
+  },
+)
+const guidedRunComplete = computed(() => channelSetup.pendingChannel !== null && channelSetup.focusedEntry === null)
+watch(guidedRunComplete, (done) => {
+  if (!done) return
+  const resume = channelSetup.pendingChannel
+  channelSetup.clearGuidedSetup()
+  activeTab.value = 'accounts'
+  addStartChannel.value = resume
+  showAdd.value = true
+})
+
+onMounted(() => {
+  accounts.load()
+  channelSetup.load()
+  // Deep link from Settings' Communication channels tab, which has no
+  // credential inputs of its own anymore and points here instead.
+  if (route.query.tab === 'setup') activeTab.value = 'setup'
+  // A one-shot landing from Meta's OAuth redirect (see AddAccountDialog.vue's
+  // connectInstagram/connectMessenger) — read it once, then strip the query
+  // params so a later refresh of this same URL does not re-show a stale
+  // result. Instagram and Messenger never redirect back in the same trip, so
+  // checking one pair then the other (rather than merging into one lookup) is
+  // just the simplest way to express "whichever one this redirect is for".
+  const igConnected = route.query.instagram_connected
+  const igError = route.query.instagram_error
+  const fbConnected = route.query.messenger_connected
+  const fbError = route.query.messenger_error
+  if (igConnected) {
+    oauthBanner.value = { kind: 'success', message: t('accounts.page.instagramConnected') }
+  } else if (typeof igError === 'string' && igError) {
+    oauthBanner.value = { kind: 'error', message: igError }
+  } else if (fbConnected) {
+    oauthBanner.value = { kind: 'success', message: t('accounts.page.messengerConnected') }
+  } else if (typeof fbError === 'string' && fbError) {
+    oauthBanner.value = { kind: 'error', message: fbError }
+  }
+  if (igConnected || igError || fbConnected || fbError) {
+    router.replace({ path: route.path, query: {} })
+  }
+})
 
 const stats = computed(() => {
   const a = accounts.accounts
@@ -97,7 +190,7 @@ async function run(a: Account, fn: () => Promise<unknown>) {
   } catch (e) {
     actionError.value = {
       ...actionError.value,
-      [a.id]: e instanceof ApiError ? e.message : 'Не удалось выполнить действие.',
+      [a.id]: e instanceof ApiError ? e.message : t('accounts.page.errGenericAction'),
     }
   } finally {
     working.value = null
@@ -108,8 +201,8 @@ const checkConnection = (a: Account) => run(a, () => accounts.checkConnection(a.
 
 async function remove(a: Account) {
   const what = isTelegram(a)
-    ? `Отключить бота «${a.display_name}»? Чаты сохранятся и вернутся, если вставить тот же токен снова.`
-    : `Удалить «${a.display_name}»? Чаты сохранятся и вернутся при повторном добавлении номера.`
+    ? t('accounts.page.confirmDisconnectBot', { name: a.display_name })
+    : t('accounts.page.confirmDelete', { name: a.display_name })
   if (!window.confirm(what)) return
   deleting.value = a.id
   delete actionError.value[a.id]
@@ -118,7 +211,7 @@ async function remove(a: Account) {
   } catch (e) {
     actionError.value = {
       ...actionError.value,
-      [a.id]: e instanceof ApiError ? e.message : 'Не удалось отключить канал.',
+      [a.id]: e instanceof ApiError ? e.message : t('accounts.page.errDisconnect'),
     }
   } finally {
     deleting.value = null
@@ -133,48 +226,68 @@ async function remove(a: Account) {
     <div class="flex-1 flex flex-col min-w-0">
       <header class="px-8 py-5 flex items-center justify-between border-b border-border bg-card shrink-0">
         <div>
-          <h1 class="text-xl font-bold tracking-tight">Каналы</h1>
-          <p class="text-sm text-muted-foreground">Подключайте номера WhatsApp и Telegram-ботов</p>
+          <h1 class="text-xl font-bold tracking-tight">{{ t('accounts.page.title') }}</h1>
+          <p class="text-sm text-muted-foreground">{{ t('accounts.page.subtitle') }}</p>
         </div>
         <div class="flex items-center gap-3">
           <Button @click="openAdd">
-            <Plus class="w-4 h-4" /> Подключить канал
+            <Plus class="w-4 h-4" /> {{ t('accounts.page.connectChannel') }}
           </Button>
         </div>
       </header>
 
-      <div class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+      <Tabs v-model="activeTab" class="flex-1 flex flex-col min-h-0">
+        <div class="px-8 pt-4 border-b border-border bg-card shrink-0">
+          <TabsList>
+            <TabsTrigger value="accounts">{{ t('accounts.page.tabs.accounts') }}</TabsTrigger>
+            <TabsTrigger value="setup">{{ t('accounts.page.tabs.setup') }}</TabsTrigger>
+          </TabsList>
+        </div>
+
+      <TabsContent value="accounts" class="flex-1 overflow-y-auto px-8 py-6 space-y-6 mt-0">
+        <!-- one-shot result of an Instagram OAuth redirect landing back here -->
+        <div
+          v-if="oauthBanner"
+          class="flex items-start gap-2 rounded-lg px-4 py-3 text-sm"
+          :class="oauthBanner.kind === 'success' ? 'bg-wa/10 text-wa' : 'bg-destructive/10 text-destructive'"
+        >
+          <CircleCheck v-if="oauthBanner.kind === 'success'" class="w-4 h-4 shrink-0 mt-0.5" />
+          <CircleAlert v-else class="w-4 h-4 shrink-0 mt-0.5" />
+          <span class="min-w-0 flex-1">{{ oauthBanner.message }}</span>
+          <button class="text-xs underline shrink-0" @click="oauthBanner = null">{{ t('accounts.page.dismiss') }}</button>
+        </div>
+
         <!-- stat cards -->
         <div class="grid grid-cols-3 gap-5">
           <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">
             <div class="w-12 h-12 rounded-xl bg-wa/10 text-wa grid place-items-center">
               <CircleCheck class="w-6 h-6" />
             </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.connected }}</div><div class="text-sm text-muted-foreground mt-1">Подключено</div></div>
+            <div><div class="text-2xl font-bold leading-none">{{ stats.connected }}</div><div class="text-sm text-muted-foreground mt-1">{{ t('accounts.page.statConnected') }}</div></div>
           </div>
           <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">
             <div class="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 grid place-items-center">
               <QrCode class="w-6 h-6" />
             </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.waiting }}</div><div class="text-sm text-muted-foreground mt-1">Ждут действия</div></div>
+            <div><div class="text-2xl font-bold leading-none">{{ stats.waiting }}</div><div class="text-sm text-muted-foreground mt-1">{{ t('accounts.page.statWaiting') }}</div></div>
           </div>
           <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">
             <div class="w-12 h-12 rounded-xl bg-destructive/10 text-destructive grid place-items-center">
               <Unplug class="w-6 h-6" />
             </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.broken }}</div><div class="text-sm text-muted-foreground mt-1">Не подключено</div></div>
+            <div><div class="text-2xl font-bold leading-none">{{ stats.broken }}</div><div class="text-sm text-muted-foreground mt-1">{{ t('accounts.page.statBroken') }}</div></div>
           </div>
         </div>
 
         <!-- account cards -->
         <div>
           <div class="flex items-center justify-between mb-3">
-            <span class="font-semibold">Подключённые каналы</span>
-            <span class="text-sm text-muted-foreground">{{ accounts.accounts.length }} всего</span>
+            <span class="font-semibold">{{ t('accounts.page.connectedChannels') }}</span>
+            <span class="text-sm text-muted-foreground">{{ accounts.accounts.length }} {{ t('accounts.page.totalCount') }}</span>
           </div>
 
           <p v-if="accounts.loading && !accounts.accounts.length" class="rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
-            Загрузка…
+            {{ t('accounts.page.loading') }}
           </p>
           <div v-else-if="!accounts.accounts.length" class="rounded-lg border border-border bg-card px-5 py-16 text-center">
             <div class="mx-auto flex w-fit gap-2">
@@ -185,8 +298,8 @@ async function remove(a: Account) {
                 <TelegramIcon class="w-7 h-7" />
               </div>
             </div>
-            <p class="mt-4 text-sm text-muted-foreground">Нет подключённых каналов.<br />Подключите номер WhatsApp или Telegram-бота.</p>
-            <Button class="mt-4" @click="openAdd"><Plus class="w-4 h-4" /> Подключить канал</Button>
+            <p class="mt-4 text-sm text-muted-foreground">{{ t('accounts.page.empty') }}<br />{{ t('accounts.page.emptyHint') }}</p>
+            <Button class="mt-4" @click="openAdd"><Plus class="w-4 h-4" /> {{ t('accounts.page.connectChannel') }}</Button>
           </div>
 
           <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -249,7 +362,7 @@ async function remove(a: Account) {
                       size="icon"
                       class="w-8 h-8 text-primary"
                       :disabled="working === a.id"
-                      title="Повторить вебхук"
+                      :title="t('accounts.page.retryWebhook')"
                       @click="retryWebhook(a)"
                     >
                       <LoaderCircle v-if="working === a.id" class="w-4 h-4 animate-spin" />
@@ -260,7 +373,7 @@ async function remove(a: Account) {
                       size="icon"
                       class="w-8 h-8"
                       :disabled="working === a.id"
-                      title="Проверить подключение"
+                      :title="t('accounts.page.checkConnection')"
                       @click="checkConnection(a)"
                     >
                       <RefreshCw class="w-4 h-4" />
@@ -269,19 +382,19 @@ async function remove(a: Account) {
                       variant="ghost"
                       size="icon"
                       class="w-8 h-8"
-                      title="Заменить токен"
+                      :title="t('accounts.page.replaceToken')"
                       @click="tokenTarget = a"
                     >
                       <KeyRound class="w-4 h-4" />
                     </Button>
                   </template>
-                  <!-- WhatsApp: re-issue a QR (a bot has no session to re-scan) -->
+                  <!-- QR-paired WhatsApp: re-issue a QR (a bot has no session to re-scan) -->
                   <Button
-                    v-else-if="a.connection_state !== 'connected'"
+                    v-else-if="isQrWhatsApp(a) && a.connection_state !== 'connected'"
                     variant="ghost"
                     size="icon"
                     class="w-8 h-8 text-primary"
-                    title="Переподключить"
+                    :title="t('accounts.page.reconnect')"
                     @click="openReconnect(a)"
                   >
                     <RotateCw class="w-4 h-4" />
@@ -291,7 +404,7 @@ async function remove(a: Account) {
                     size="icon"
                     class="w-8 h-8 text-destructive hover:bg-destructive/10"
                     :disabled="deleting === a.id"
-                    title="Удалить"
+                    :title="t('accounts.page.delete')"
                     @click="remove(a)"
                   >
                     <LoaderCircle v-if="deleting === a.id" class="w-4 h-4 animate-spin" />
@@ -302,7 +415,12 @@ async function remove(a: Account) {
             </div>
           </div>
         </div>
-      </div>
+      </TabsContent>
+
+      <TabsContent value="setup" class="flex-1 overflow-y-auto px-8 py-6 mt-0">
+        <ChannelSetupTab />
+      </TabsContent>
+      </Tabs>
     </div>
 
     <AddAccountDialog

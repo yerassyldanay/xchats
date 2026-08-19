@@ -6,6 +6,10 @@ import type {
   WaPairSession,
   WaPairStatus,
   TelegramAccountResponse,
+  WhatsAppCloudDiscoverResponse,
+  WhatsAppCloudAccountResponse,
+  InstagramOAuthStartResponse,
+  MessengerOAuthStartResponse,
 } from '../types'
 
 interface ListAccounts {
@@ -26,9 +30,14 @@ export const useAccounts = defineStore('accounts', {
     accountName: (s) => (id: string) => s.accounts.find((a) => a.id === id)?.display_name || '',
     accountChannel: (s) => (id: string) => s.accounts.find((a) => a.id === id)?.channel,
     hasMultiple: (s) => s.accounts.length > 1,
-    // whatsappAccounts is the subset the compose picker offers: a Telegram bot
-    // cannot start a conversation (the customer has to message it first).
-    whatsappAccounts: (s) => s.accounts.filter((a) => a.channel !== 'telegram'),
+    // composableAccounts is the subset the compose picker offers: only the
+    // wa_* gateway channels (whatsapp/simulator) can start a fresh
+    // conversation. Every other channel — Telegram, and every Meta channel
+    // (Instagram/Messenger/WhatsApp Cloud, v1 has no template sends) —
+    // requires the customer to message first, so it must never appear here.
+    // This is deliberately an ALLOWLIST, not "every channel but telegram":
+    // that shape silently mis-offered every new channel added since.
+    composableAccounts: (s) => s.accounts.filter((a) => a.channel === 'whatsapp' || a.channel === 'simulator'),
     telegramAccounts: (s) => s.accounts.filter((a) => a.channel === 'telegram'),
   },
   actions: {
@@ -78,13 +87,75 @@ export const useAccounts = defineStore('accounts', {
       return res
     },
 
+    // --- WhatsApp Cloud API (BYO-App: WABA id + business token, manual —
+    // see backend/internal/httpapi/whatsapp_cloud_accounts.go) ------------
+    // discover is read-only (no PIN spent, nothing persisted) — the picker
+    // step before connect ever runs.
+    discoverWhatsAppCloud(wabaId: string, businessToken: string) {
+      return api.post<WhatsAppCloudDiscoverResponse>('/whatsapp-cloud-accounts/discover', {
+        waba_id: wabaId,
+        business_token: businessToken,
+      })
+    },
+    async connectWhatsAppCloud(opts: {
+      wabaId: string
+      businessToken: string
+      phoneNumberId: string
+      pin: string
+      displayName: string
+      displayPhoneNumber: string
+    }) {
+      const res = await api.post<WhatsAppCloudAccountResponse>('/whatsapp-cloud-accounts', {
+        waba_id: opts.wabaId,
+        business_token: opts.businessToken,
+        phone_number_id: opts.phoneNumberId,
+        pin: opts.pin,
+        display_name: opts.displayName,
+        display_phone_number: opts.displayPhoneNumber,
+      })
+      await this.load()
+      return res
+    },
+
+    // --- Instagram Direct (OAuth-redirect lifecycle) ----------------------
+    // startInstagramOAuth mints the authorize_url; the CALLER does a
+    // top-level `window.location.href = ...` navigation with it (never a
+    // fetch — Meta's consent dialog refuses to render otherwise). The
+    // browser lands back on /accounts?instagram_connected=1 (or
+    // ?instagram_error=...) once Meta's own redirect completes — see
+    // AddAccountDialog.vue and Accounts.vue's onMounted handling.
+    startInstagramOAuth() {
+      return api.post<InstagramOAuthStartResponse>('/instagram-accounts/oauth/start', {})
+    },
+
+    // --- Facebook Messenger (OAuth-redirect lifecycle) ---------------------
+    // Same redirect-then-server-side-connect shape as startInstagramOAuth
+    // above — the browser lands back on /accounts?messenger_connected=1 (or
+    // ?messenger_error=...).
+    startMessengerOAuth() {
+      return api.post<MessengerOAuthStartResponse>('/messenger-accounts/oauth/start', {})
+    },
+
     // --- shared ------------------------------------------------------------
     // remove routes to the channel's own delete: each tears down a different
-    // provider-side registration (a whatsmeow logout + soft-delete vs. a
-    // Telegram webhook teardown).
+    // provider-side registration (a whatsmeow logout + soft-delete, a
+    // Telegram webhook teardown, a WhatsApp Cloud subscribed_apps clear, or
+    // an Instagram/Messenger unsubscribe). Deliberately an explicit per-channel map,
+    // not a "telegram vs. everything else" binary — that shape is exactly
+    // what silently misrouted whatsapp_cloud's delete at the whatsmeow-only
+    // endpoint before this comment was written.
     async remove(id: string) {
       const channel = this.accounts.find((a) => a.id === id)?.channel
-      const path = channel === 'telegram' ? '/telegram-accounts/' : '/whatsapp-accounts/'
+      const path =
+        channel === 'telegram'
+          ? '/telegram-accounts/'
+          : channel === 'whatsapp_cloud'
+            ? '/whatsapp-cloud-accounts/'
+            : channel === 'instagram'
+              ? '/instagram-accounts/'
+              : channel === 'messenger'
+                ? '/messenger-accounts/'
+                : '/whatsapp-accounts/'
       await api.del(path + id)
       await this.load()
     },

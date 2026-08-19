@@ -1,25 +1,29 @@
-// Package worker consumes the in-memory queue: downloads Telegram media,
-// performs outbound sends, and runs the multichannel response engine.
-// WhatsApp's own inbound ingestion and media download live entirely inside
-// internal/whatsmeow (the manager calls the store/hub directly and enqueues
-// only the AI-draft step here) — this package never sees a whatsmeow type.
-// Workers expose no HTTP — the queue is their only interface.
+// Package worker consumes the in-memory queue: downloads Telegram and Meta-
+// channel media, performs outbound sends, and runs the multichannel response
+// engine. WhatsApp's own inbound ingestion and media download live entirely
+// inside internal/whatsmeow (the manager calls the store/hub directly and
+// enqueues only the AI-draft step here) — this package never sees a
+// whatsmeow type. Workers expose no HTTP — the queue is their only interface.
 package worker
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
+	"github.com/yerassyldanay/xchats/backend/internal/meta"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsappcloud"
 	"github.com/yerassyldanay/xchats/backend/messaging"
 	"github.com/yerassyldanay/xchats/backend/response"
 )
@@ -39,17 +43,21 @@ type OutboundTask struct {
 	Caption     string
 }
 
-// MediaDownloadTask fetches a Telegram attachment's bytes when they weren't
-// inline. It carries no credential: the bot token is resolved from the store
-// by AccountID, so a token never rides the queue. WhatsApp media download has
-// no equivalent task here — internal/whatsmeow downloads inline, since only
-// it holds the whatsmeow-specific message object the download call needs.
+// MediaDownloadTask fetches a Telegram or Meta-channel attachment's bytes
+// when they weren't inline. It carries no credential: the bot/business token
+// is resolved from the store by AccountID, so a token never rides the queue.
+// WhatsApp media download has no equivalent task here — internal/whatsmeow
+// downloads inline, since only it holds the whatsmeow-specific message
+// object the download call needs.
 type MediaDownloadTask struct {
 	MessageID uuid.UUID
 	Channel   messaging.Channel
 	AccountID uuid.UUID
 	BlobID    string
-	FileID    string // the file handle to resolve through getFile
+	// FileID is the provider's own attachment handle: a Telegram file_id
+	// (resolved through getFile), or a WhatsApp Cloud media object id
+	// (resolved through Client.MediaInfo).
+	FileID string
 }
 
 // AIDraftTask runs the response engine for a chat's latest inbound message.
@@ -59,14 +67,18 @@ type AIDraftTask struct {
 
 // Worker holds the dependencies for all queue handlers.
 type Worker struct {
-	Store    *store.Store
-	Queue    queue.Queue
-	TG       telegram.Client // nil in a WhatsApp-only wiring; the media sweep no-ops
-	Blob     blob.Store
-	Hub      *realtime.Hub
-	Response *response.Service         // the multichannel response engine's entry point
-	Senders  *messaging.SenderRegistry // channel -> ChannelSender, for outbound sends
-	Log      *slog.Logger
+	Store   *store.Store
+	Queue   queue.Queue
+	TG      telegram.Client       // nil in a WhatsApp-only wiring; the media sweep no-ops
+	WACloud *whatsappcloud.Client // nil when no Meta channel is configured; the media sweep no-ops
+	// MetaClient backs RefreshExpiringInstagramTokens (meta_tokens.go) — nil
+	// in a wiring with no Meta channels configured; the refresher no-ops.
+	MetaClient *meta.Client
+	Blob       blob.Store
+	Hub        *realtime.Hub
+	Response   *response.Service         // the multichannel response engine's entry point
+	Senders    *messaging.SenderRegistry // channel -> ChannelSender, for outbound sends
+	Log        *slog.Logger
 }
 
 // publishTimeout bounds every enqueue a handler makes. A worker that fans work
@@ -99,10 +111,20 @@ func (w *Worker) Handle(ctx context.Context, m queue.Message) error {
 	return nil
 }
 
-// --- inbound events (Telegram media only — see the package doc comment) ---
+// --- inbound events (Telegram media) ---------------------------------------
 
 func (w *Worker) handleMediaDownload(ctx context.Context, t MediaDownloadTask) error {
-	return w.downloadTelegramMedia(ctx, t)
+	switch t.Channel {
+	case messaging.ChannelTelegram:
+		return w.downloadTelegramMedia(ctx, t)
+	case messaging.ChannelWhatsAppCloud:
+		return w.downloadMetaMedia(ctx, t)
+	case messaging.ChannelInstagram, messaging.ChannelMessenger:
+		return w.downloadDirectMedia(ctx, t)
+	default:
+		w.Log.Error("media download: unsupported channel", "channel", t.Channel, "message_id", t.MessageID)
+		return nil
+	}
 }
 
 // downloadTelegramMedia fetches an inbound attachment's bytes: getFile resolves
@@ -179,13 +201,25 @@ func (w *Worker) SweepTelegramMedia(ctx context.Context, olderThan time.Duration
 	return queued, nil
 }
 
-// StartTelegramMediaSweeper runs SweepTelegramMedia once at startup (picking up
-// anything a crash left behind) and then on a ticker until ctx is done.
-func (w *Worker) StartTelegramMediaSweeper(ctx context.Context, every, olderThan time.Duration, limit int) {
+// sweepAllMedia runs both media sweeps once — the tick body StartMediaSweeper
+// shares between its startup pass and its ticker.
+func (w *Worker) sweepAllMedia(ctx context.Context, olderThan time.Duration, limit int) {
+	if _, err := w.SweepTelegramMedia(ctx, olderThan, limit); err != nil {
+		w.Log.Error("telegram media sweep", "err", err)
+	}
+	if _, err := w.SweepChannelMedia(ctx, olderThan, limit); err != nil {
+		w.Log.Error("meta channel media sweep", "err", err)
+	}
+}
+
+// StartMediaSweeper runs SweepTelegramMedia and SweepChannelMedia once at
+// startup (picking up anything a crash left behind) and then together on ONE
+// ticker until ctx is done — both are the same "retry attachments whose
+// bytes never arrived" concern, so they share a single goroutine rather than
+// each running its own.
+func (w *Worker) StartMediaSweeper(ctx context.Context, every, olderThan time.Duration, limit int) {
 	go func() {
-		if _, err := w.SweepTelegramMedia(ctx, 0, limit); err != nil {
-			w.Log.Error("telegram media sweep (startup)", "err", err)
-		}
+		w.sweepAllMedia(ctx, 0, limit)
 		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
@@ -193,9 +227,7 @@ func (w *Worker) StartTelegramMediaSweeper(ctx context.Context, every, olderThan
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				if _, err := w.SweepTelegramMedia(ctx, olderThan, limit); err != nil {
-					w.Log.Error("telegram media sweep", "err", err)
-				}
+				w.sweepAllMedia(ctx, olderThan, limit)
 			}
 		}
 	}()
@@ -204,6 +236,150 @@ func (w *Worker) StartTelegramMediaSweeper(ctx context.Context, every, olderThan
 // TelegramBlobID is the deterministic blob key for a Telegram attachment: keyed
 // by the message row, so a retried download overwrites rather than accumulates.
 func TelegramBlobID(messageID uuid.UUID) string { return "tg-" + messageID.String() }
+
+// --- Meta-channel media (WhatsApp Cloud today; Instagram/Messenger from
+// Phase 4/5 share this same channel_message_media table) ------------------
+
+// downloadMetaMedia fetches a WhatsApp Cloud attachment's bytes via the
+// two-step id -> URL -> bytes resolution its Graph API requires (§10): the
+// business token is resolved fresh from the store (never carried on the
+// task), MediaInfo turns the webhook's opaque media id into a short-lived
+// URL, and DownloadMedia fetches it — the SAME bearer token is required on
+// both calls.
+func (w *Worker) downloadMetaMedia(ctx context.Context, t MediaDownloadTask) error {
+	if w.WACloud == nil {
+		return nil
+	}
+	token, err := w.Store.ChannelCredentialsSecret(ctx, t.AccountID)
+	if err != nil {
+		return fmt.Errorf("meta media: resolve token: %w", err)
+	}
+	info, err := w.WACloud.MediaInfo(ctx, t.FileID, token)
+	if err != nil {
+		w.markChannelMediaFailed(ctx, t.MessageID, err)
+		return fmt.Errorf("meta media: media info: %w", err)
+	}
+	data, mimetype, err := w.WACloud.DownloadMedia(ctx, info.URL, token)
+	if err != nil {
+		w.markChannelMediaFailed(ctx, t.MessageID, err)
+		return fmt.Errorf("meta media: download: %w", err)
+	}
+	meta, err := w.Store.ChannelMediaMetaFor(ctx, t.MessageID)
+	if err != nil {
+		return err
+	}
+	if mimetype == "" {
+		mimetype = meta.Mimetype
+	}
+	if _, err := w.Blob.Put(t.BlobID, data, blob.Meta{
+		MediaType: meta.MediaType, Mimetype: mimetype, FileName: meta.FileName, FileSize: int64(len(data)),
+	}); err != nil {
+		return err
+	}
+	if err := w.Store.SetChannelMediaReady(ctx, t.MessageID, t.BlobID, len(data)); err != nil {
+		return err
+	}
+	w.Log.Info("meta media downloaded", "message_id", t.MessageID, "bytes", len(data))
+	w.emitMessage(ctx, "message.updated", t.MessageID)
+	return nil
+}
+
+// markChannelMediaFailed records a permanent-looking failure so the sweeper's
+// backoff sees a fresh timestamp instead of hammering the same broken ref.
+func (w *Worker) markChannelMediaFailed(ctx context.Context, messageID uuid.UUID, cause error) {
+	if err := w.Store.SetChannelMediaFailed(ctx, messageID); err != nil {
+		w.Log.Error("mark meta media failed", "message_id", messageID, "err", err)
+	}
+	w.Log.Warn("meta media download failed", "message_id", messageID, "err", cause)
+}
+
+// directMediaHTTPClient fetches Instagram/Messenger CDN attachment bytes —
+// a bounded, package-private client (mirrors meta.Client's own 20s-timeout
+// http.Client) rather than the zero-value http.DefaultClient, which has no
+// timeout at all.
+var directMediaHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
+// downloadDirectMedia fetches an Instagram/Messenger attachment's bytes
+// directly from the CDN url the webhook payload already carried — unlike
+// WhatsApp Cloud's two-step media-id -> signed-url resolution, that url is
+// immediately fetchable with NO bearer token at all (Meta's CDN urls are
+// themselves short-lived and self-authorizing), so there is no token to
+// resolve from the store here.
+func (w *Worker) downloadDirectMedia(ctx context.Context, t MediaDownloadTask) error {
+	meta, err := w.Store.ChannelMediaMetaFor(ctx, t.MessageID)
+	if err != nil {
+		return err
+	}
+	if meta.SourceURL == "" {
+		return fmt.Errorf("meta media: message %s has no source_url", t.MessageID)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, meta.SourceURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := directMediaHTTPClient.Do(req)
+	if err != nil {
+		w.markChannelMediaFailed(ctx, t.MessageID, err)
+		return fmt.Errorf("meta media: direct download: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		derr := fmt.Errorf("meta media: direct download: status %d", resp.StatusCode)
+		w.markChannelMediaFailed(ctx, t.MessageID, derr)
+		return derr
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		w.markChannelMediaFailed(ctx, t.MessageID, err)
+		return fmt.Errorf("meta media: direct download: read body: %w", err)
+	}
+	mimetype := resp.Header.Get("Content-Type")
+	if mimetype == "" {
+		mimetype = meta.Mimetype
+	}
+	if _, err := w.Blob.Put(t.BlobID, data, blob.Meta{
+		MediaType: meta.MediaType, Mimetype: mimetype, FileName: meta.FileName, FileSize: int64(len(data)),
+	}); err != nil {
+		return err
+	}
+	if err := w.Store.SetChannelMediaReady(ctx, t.MessageID, t.BlobID, len(data)); err != nil {
+		return err
+	}
+	w.Log.Info("meta media downloaded (direct)", "message_id", t.MessageID, "bytes", len(data))
+	w.emitMessage(ctx, "message.updated", t.MessageID)
+	return nil
+}
+
+// SweepChannelMedia re-enqueues Meta-channel attachments whose bytes were
+// never fetched — the generic-core analogue of SweepTelegramMedia, covering
+// every channel on channel_message_media through PendingChannelMedia's one
+// query. Only whatsapp_cloud rows exist until Phase 4/5, and
+// handleMediaDownload's own dispatch safely no-ops any other channel it
+// might see.
+func (w *Worker) SweepChannelMedia(ctx context.Context, olderThan time.Duration, limit int) (int, error) {
+	pending, err := w.Store.PendingChannelMedia(ctx, olderThan, limit)
+	if err != nil {
+		return 0, err
+	}
+	queued := 0
+	for _, p := range pending {
+		if err := w.publish(ctx, queue.Message{Kind: queue.KindMediaDownload, Payload: MediaDownloadTask{
+			MessageID: p.MessageID, Channel: messaging.Channel(p.Channel), AccountID: p.AccountID,
+			FileID: p.ProviderRef, BlobID: ChannelBlobID(p.MessageID),
+		}}); err != nil {
+			return queued, err
+		}
+		queued++
+	}
+	if queued > 0 {
+		w.Log.Info("meta channel media sweep", "queued", queued)
+	}
+	return queued, nil
+}
+
+// ChannelBlobID is the deterministic blob key for a Meta-channel attachment —
+// see TelegramBlobID's identical reasoning.
+func ChannelBlobID(messageID uuid.UUID) string { return "meta-" + messageID.String() }
 
 // --- outbound sends -------------------------------------------------------
 

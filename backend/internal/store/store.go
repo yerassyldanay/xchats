@@ -143,9 +143,14 @@ type Chat struct {
 	ChatState               string
 	AssigneeUserID          uuid.NullUUID
 	LastMessageAt           *time.Time
-	LastMessagePreview      string
-	UnreadCount             int
-	Contact                 Contact
+	// LastInboundAt is when the customer last messaged in, distinct from
+	// LastMessageAt: only an inbound reopens a Meta channel's 24-hour
+	// customer-service window, so an outbound reply must not advance it. Nil
+	// on every wa_*/tg_* chat, which has no such window.
+	LastInboundAt      *time.Time
+	LastMessagePreview string
+	UnreadCount        int
+	Contact            Contact
 }
 
 type Message struct {
@@ -192,10 +197,12 @@ type Draft struct {
 
 // orgOwnsAccountExpr ranks an organization by whether it actually owns a
 // messaging account — where the chats live. It must cover every channel's
-// account table, not just wa_accounts: a Telegram-only organization is just as
-// real, and ignoring tg_accounts would let a stray duplicate org shadow it.
+// account table, not just wa_accounts: a Telegram- or Meta-channel-only
+// organization is just as real, and ignoring tg_accounts/channel_accounts
+// would let a stray duplicate org shadow it.
 const orgOwnsAccountExpr = `(EXISTS (SELECT 1 FROM wa_accounts a WHERE a.organization_id = o.id)
-	 OR EXISTS (SELECT 1 FROM tg_accounts t WHERE t.organization_id = o.id))`
+	 OR EXISTS (SELECT 1 FROM tg_accounts t WHERE t.organization_id = o.id)
+	 OR EXISTS (SELECT 1 FROM channel_accounts ca WHERE ca.organization_id = o.id))`
 
 // ---------------------------------------------------------------------------
 // Seeding (idempotent, on boot)

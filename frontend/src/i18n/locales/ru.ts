@@ -1,7 +1,8 @@
-// evalCatalog.*, kb.*, settings.*, and changePassword.* are wired through
-// vue-i18n; the rest of the app's UI chrome stays hardcoded Russian for now
-// (evalCatalog was the pilot, not a full rollout). Migrate more of the app
-// into this file/en.ts as it grows, rather than starting a second mechanism.
+// evalCatalog.*, kb.*, settings.*, changePassword.*, and accounts.* are wired
+// through vue-i18n; the rest of the app's UI chrome stays hardcoded Russian
+// for now (evalCatalog was the pilot, not a full rollout). Migrate more of
+// the app into this file/en.ts as it grows, rather than starting a second
+// mechanism.
 export default {
   evalCatalog: {
     langToggle: {
@@ -427,12 +428,17 @@ export default {
     },
     channels: {
       title: 'Каналы связи',
-      subtitle: 'Номера WhatsApp и Telegram-боты, подключённые к этому серверу.',
+      subtitle: 'Каналы, подключённые к этому серверу: WhatsApp, Telegram, Instagram, Messenger.',
       connected: 'подключено',
       waiting: 'ждут действия',
       broken: 'не подключено',
       manage: 'Управление каналами',
       empty: 'Каналы ещё не подключены.',
+      setupPointer: {
+        title: 'Настройка каналов',
+        subtitle: 'Meta Developer App, Instagram App и публичный доступ теперь настраиваются на странице «Каналы».',
+        cta: 'Открыть настройку каналов',
+      },
     },
     team: {
       title: 'Команда',
@@ -479,6 +485,179 @@ export default {
       goToChannels: 'Перейти к каналам',
       teamBody: 'Пригласите участника команды сейчас или позже — в Настройках → Команда.',
       invited: 'Приглашение отправлено.',
+    },
+  },
+  // AddAccountDialog.vue's channel-connect wizard (dialog.*) and
+  // Accounts.vue's channel list page (page.*).
+  accounts: {
+    dialog: {
+      reconnectTitle: 'Переподключить номер',
+      pickTitle: 'Подключить канал',
+      telegramTitle: 'Добавить Telegram-бота',
+      whatsappCloudTitle: 'Подключить WhatsApp Cloud API',
+      whatsappTitle: 'Добавить номер WhatsApp',
+      pickPrompt: 'Выберите канал. Инструкция продолжится внутри выбранного способа.',
+      footerNote:
+        'QR-код не сохраняется. Токены хранятся в зашифрованном виде и не показываются повторно. Для WhatsApp Cloud API, Instagram и Messenger сначала настройте App ID и App Secret вашего приложения Meta в Настройках → Каналы.',
+      whatsapp: {
+        name: 'WhatsApp',
+        tagline: 'Подключение номера по QR-коду',
+        step1: 'Откройте WhatsApp → «Связанные устройства».',
+        step2: 'Отсканируйте QR-код, который появится на следующем шаге.',
+        step3: 'Входящие чаты появятся автоматически.',
+        cta: 'Продолжить с WhatsApp →',
+      },
+      telegram: {
+        name: 'Telegram-бот',
+        tagline: 'Подключение токеном {\'@\'}BotFather',
+        step1: 'Откройте {\'@\'}BotFather и отправьте команду /newbot.',
+        step2: 'Задайте имя бота и скопируйте выданный секретный токен.',
+        step3: 'Вставьте токен здесь — вебхук настроится автоматически.',
+        cta: 'Продолжить с Telegram →',
+      },
+      whatsappCloud: {
+        name: 'WhatsApp Cloud API',
+        tagline: 'Официальное подключение через Meta',
+        step1: 'В Meta Business Manager создайте WABA и получите бизнес-токен.',
+        step2: 'Вставьте ID WABA и токен здесь — мы найдём подключённые номера.',
+        step3: 'Выберите номер и подтвердите его 6-значным PIN.',
+        cta: 'Продолжить с WhatsApp Cloud →',
+      },
+      instagram: {
+        name: 'Instagram Direct',
+        tagline: 'Официальное подключение через Meta',
+        step1: 'Нажмите — откроется окно входа Instagram.',
+        step2: 'Войдите в бизнес-аккаунт Instagram и разрешите доступ.',
+        step3: 'Вы вернётесь сюда — аккаунт подключится автоматически.',
+        cta: 'Продолжить с Instagram →',
+      },
+      messenger: {
+        name: 'Messenger',
+        tagline: 'Официальное подключение через Meta',
+        step1: 'Нажмите — откроется окно входа Facebook.',
+        step2: 'Войдите и разрешите доступ РОВНО к одной Facebook Page.',
+        step3: 'Вы вернётесь сюда — страница подключится автоматически.',
+        cta: 'Продолжить с Messenger →',
+      },
+      telegramSteps: {
+        step1: 'Откройте {\'@\'}BotFather в Telegram.',
+        step2: 'Отправьте /newbot и придумайте имя.',
+        step3: 'Скопируйте выданный токен и вставьте его ниже.',
+      },
+      displayNameLabel: 'Название (для вас)',
+      displayNamePlaceholderBot: 'Например, Магазин-бот',
+      botTokenLabel: 'Токен бота',
+      tokenStoredHint: 'Токен хранится в зашифрованном виде и нигде не показывается повторно.',
+      dropBacklogLabel: 'Удалить накопившиеся у Telegram сообщения',
+      dropBacklogHint:
+        'Отметьте, только если бот уже долго существовал и старые сообщения не нужны — они будут потеряны.',
+      connecting: 'Подключение…',
+      retry: 'Попробовать снова',
+      connectBot: 'Подключить бота',
+      waCloudIntro:
+        'Найдите WABA ID и создайте бизнес-токен (System User Access Token с правами whatsapp_business_messaging и whatsapp_business_management) в Meta Business Manager для вашего собственного приложения Meta.',
+      wabaIdLabel: 'WABA ID',
+      wabaIdPlaceholder: 'Например, 102938475610203',
+      businessTokenLabel: 'Бизнес-токен',
+      findingNumbers: 'Ищем номера…',
+      findNumbers: 'Найти номера',
+      numberLabel: 'Номер',
+      displayNamePlaceholderWaCloud: 'Например, Магазин — WhatsApp Cloud',
+      pinLabel: 'PIN двухэтапной проверки (6 цифр)',
+      pinHint: 'Meta допускает не более 10 попыток ввода PIN за 72 часа для одного номера.',
+      connectNumber: 'Подключить номер',
+      qrIntro: 'Откройте WhatsApp → «Связанные устройства» → «Привязать устройство» и отсканируйте код.',
+      qrPolling: 'Код обновляется автоматически. Ожидание сканирования…',
+      botConnected: 'Бот подключён!',
+      numberConnected: 'Номер подключён!',
+      errConnectInstagram: 'Не удалось начать подключение Instagram.',
+      errConnectMessenger: 'Не удалось начать подключение Messenger.',
+      errConnectWhatsApp: 'Не удалось начать подключение.',
+      errBotTokenRequired: 'Вставьте токен, который выдал {\'@\'}BotFather.',
+      errWebhookRejected:
+        'Бот добавлен, но Telegram не принял вебхук. Проверьте адрес и нажмите «Повторить вебхук» на карточке.',
+      errConnectBot: 'Не удалось подключить бота.',
+      errWabaTokenRequired: 'Укажите ID WABA и бизнес-токен.',
+      errNoRegisteredNumbers: 'У этого WABA нет зарегистрированных номеров.',
+      errFetchNumbers: 'Не удалось получить список номеров.',
+      errSelectNumber: 'Выберите номер.',
+      errPinFormat: 'PIN должен состоять ровно из 6 цифр.',
+      errConnectNumber: 'Не удалось подключить номер.',
+      errTimeout: 'Время ожидания истекло.',
+      errConnectGeneric: 'Не удалось подключиться.',
+      errSessionExpired: 'Сессия подключения истекла. Попробуйте снова.',
+      adminRequired: 'Настроить этот канал может только администратор.',
+    },
+    page: {
+      title: 'Каналы',
+      subtitle: 'Подключайте WhatsApp, Telegram, Instagram и Messenger',
+      tabs: {
+        accounts: 'Подключённые аккаунты',
+        setup: 'Настройка каналов',
+      },
+      connectChannel: 'Подключить канал',
+      dismiss: 'Скрыть',
+      statConnected: 'Подключено',
+      statWaiting: 'Ждут действия',
+      statBroken: 'Не подключено',
+      connectedChannels: 'Подключённые каналы',
+      totalCount: 'всего',
+      loading: 'Загрузка…',
+      empty: 'Нет подключённых каналов.',
+      emptyHint: 'Подключите номер WhatsApp или Telegram-бота.',
+      retryWebhook: 'Повторить вебхук',
+      checkConnection: 'Проверить подключение',
+      replaceToken: 'Заменить токен',
+      reconnect: 'Переподключить',
+      delete: 'Удалить',
+      instagramConnected: 'Instagram успешно подключён.',
+      messengerConnected: 'Messenger успешно подключён.',
+      confirmDisconnectBot: 'Отключить бота «{name}»? Чаты сохранятся и вернутся, если вставить тот же токен снова.',
+      confirmDelete: 'Удалить «{name}»? Чаты сохранятся и вернутся при повторном добавлении номера.',
+      errGenericAction: 'Не удалось выполнить действие.',
+      errDisconnect: 'Не удалось отключить канал.',
+    },
+    // Вкладка «Настройка каналов» (ChannelSetupTab.vue/ChannelSetupCard.vue)
+    // — общесистемные предпосылки, в отличие от page.* выше (подключения
+    // отдельных аккаунтов).
+    channelSetup: {
+      copyLabel: 'Скопировать',
+      openDashboard: 'Открыть Meta Dashboard',
+      change: 'Изменить',
+      readyHint: 'Значение уже сохранено.',
+      errRequired: 'Оба поля обязательны.',
+      iveCompletedThese: 'Я выполнил эти шаги — продолжить',
+      memberHint: 'Настроить этот канал может только администратор.',
+      status: {
+        ready: 'Готово',
+        notConfigured: 'Не настроено',
+        setupRequired: 'Требуется настройка',
+      },
+      publicAccess: {
+        title: 'Публичный доступ',
+        notReadyHint: 'Meta нужен публичный HTTPS-адрес для отправки вебхуков и OAuth-редиректов.',
+        startTunnel: 'Запустить туннель',
+        stopTunnel: 'Остановить туннель',
+      },
+      metaApp: {
+        title: 'Meta Developer App',
+        subtitle: 'App ID и App Secret вашего собственного Meta Developer App — один на Messenger и WhatsApp Cloud.',
+        appId: 'App ID',
+        appSecret: 'App Secret',
+      },
+      instagram: {
+        title: 'Instagram API',
+        appId: 'Instagram app ID',
+        appSecret: 'Instagram app secret',
+      },
+      messenger: {
+        title: 'Messenger API',
+        subtitle: 'Не имеет собственного ключа — использует Meta Developer App выше.',
+      },
+      whatsappCloud: {
+        title: 'WhatsApp Cloud API',
+        subtitle: 'Не имеет собственного ключа — использует Meta Developer App выше.',
+      },
     },
   },
   // simulator.* — /simulator, a minimal chat UI over POST

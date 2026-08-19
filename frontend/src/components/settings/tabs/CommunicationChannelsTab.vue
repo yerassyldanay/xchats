@@ -1,9 +1,11 @@
 <script setup lang="ts">
-// Channel pairing/management (QR scan, bot tokens, webhook retry, ...)
-// already has a full page at /accounts, reachable from the main nav for
-// every user — duplicating that flow inside Settings would just be a second
-// copy to keep in sync. This tab is a compact status summary with a deep
-// link into the real thing.
+// Channel pairing/management (QR scan, bot tokens, webhook retry, ...) and
+// installation-wide setup (public access, the Meta Developer App, each
+// channel's own Dashboard checklist) both live at /accounts now — the
+// "Connected accounts" and "Channel setup" tabs, respectively (see
+// components/channels/ChannelSetupTab.vue). This tab is a compact read-only
+// summary with a deep link into the real thing; it deliberately owns no
+// credential inputs of its own — one surface per credential.
 import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUpRight } from 'lucide-vue-next'
@@ -14,6 +16,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
+import InstagramIcon from '@/components/icons/InstagramIcon.vue'
+import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 import type { Account } from '@/types'
 
 const accounts = useAccounts()
@@ -33,7 +37,10 @@ function conn(status: string) {
   return { label, ...toneMeta[tone] }
 }
 const isTelegram = (a: Account) => a.channel === 'telegram'
-const channelIcon = (a: Account) => (isTelegram(a) ? TelegramIcon : WhatsappIcon)
+const isInstagram = (a: Account) => a.channel === 'instagram'
+const isMessenger = (a: Account) => a.channel === 'messenger'
+const channelIcon = (a: Account) =>
+  isTelegram(a) ? TelegramIcon : isInstagram(a) ? InstagramIcon : isMessenger(a) ? MessengerIcon : WhatsappIcon
 
 const stats = computed(() => {
   const healthy = (x: Account) => x.connection_state === 'connected'
@@ -54,6 +61,16 @@ const stats = computed(() => {
       </div>
       <RouterLink :to="{ name: 'accounts' }">
         <Button size="sm" variant="outline">{{ t('settings.channels.manage') }} <ArrowUpRight class="w-4 h-4" /></Button>
+      </RouterLink>
+    </div>
+
+    <div class="rounded-lg border border-border bg-card p-4 flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <h4 class="text-sm font-medium">{{ t('settings.channels.setupPointer.title') }}</h4>
+        <p class="text-xs text-muted-foreground">{{ t('settings.channels.setupPointer.subtitle') }}</p>
+      </div>
+      <RouterLink :to="{ name: 'accounts', query: { tab: 'setup' } }" class="shrink-0">
+        <Button size="sm" variant="outline">{{ t('settings.channels.setupPointer.cta') }} <ArrowUpRight class="w-4 h-4" /></Button>
       </RouterLink>
     </div>
 

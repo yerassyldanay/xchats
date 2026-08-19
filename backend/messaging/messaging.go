@@ -8,7 +8,10 @@
 // adapter there; this package never needs a code change.
 package messaging
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // Channel names a message's originating or destination channel.
 type Channel string
@@ -17,7 +20,22 @@ const (
 	ChannelWhatsApp  Channel = "whatsapp"
 	ChannelSimulator Channel = "simulator"
 	ChannelTelegram  Channel = "telegram"
+	// ChannelInstagram, ChannelMessenger and ChannelWhatsAppCloud are the
+	// official Meta channels: Instagram Direct, Facebook Messenger, and the
+	// WhatsApp Cloud API. They run alongside ChannelWhatsApp (whatsmeow, the
+	// unofficial QR-paired leg) rather than replacing it.
+	ChannelInstagram     Channel = "instagram"
+	ChannelMessenger     Channel = "messenger"
+	ChannelWhatsAppCloud Channel = "whatsapp_cloud"
 )
+
+// ErrOutsideServiceWindow is returned by a ChannelSender.Send when the
+// provider's free-form customer-service window (24 hours since the
+// customer's last inbound message, on every Meta channel) has closed and
+// the outbound is not a template message. It is a distinct, expected
+// failure mode — not a transport error — so callers can render it as its
+// own delivery_state/failure_reason rather than a generic send failure.
+var ErrOutsideServiceWindow = errors.New("messaging: outside the provider's free-form messaging window")
 
 // Message is one normalized inbound (or outbound) message, independent of
 // which channel produced it.

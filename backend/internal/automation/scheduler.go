@@ -8,7 +8,7 @@
 // Both durable tables (automation_debounce_jobs, automation_dispatch_jobs —
 // see internal/store/automation.go) are "the row is the queue": this package
 // owns no long-lived in-memory state a crash could lose, mirroring
-// internal/worker.StartTelegramMediaSweeper's own recovery philosophy. It
+// internal/worker.StartMediaSweeper's own recovery philosophy. It
 // deliberately does not reuse internal/queue's Kind-dispatched Queue for its
 // OWN claim→generate step (a durability model built around a *different*
 // durable table would just be redundant machinery); it DOES publish the
@@ -94,7 +94,7 @@ func (s *Scheduler) OnInboundMessage(ctx context.Context, chatID, accountID uuid
 // latency should be too). recoverEvery/stuckAfter bound the boot-time-and-
 // periodic reconcile pass that re-dispatches a job a crash left mid-flight
 // ('processing' with no update in stuckAfter) or never started ('pending') —
-// mirroring worker.StartTelegramMediaSweeper's own startup-pass-then-ticker
+// mirroring worker.StartMediaSweeper's own startup-pass-then-ticker
 // shape. Every launched goroutine stops once ctx is done; call Stop
 // afterward to block until they actually have (see Stop's own doc comment).
 func (s *Scheduler) Start(ctx context.Context, dispatchWorkers int, claimEvery, recoverEvery, stuckAfter time.Duration) {

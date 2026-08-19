@@ -408,7 +408,7 @@ func (m *Manager) applyReceiptUpdate(ctx context.Context, evt whatsapp.ReceiptUp
 	}
 	rank := deliveryRank(evt.DeliveryState)
 	for _, extID := range evt.ExternalIDs {
-		msgID, _, err := m.cfg.Store.AdvanceDeliveryState(ctx, accountID, extID, evt.DeliveryState, rank)
+		msgID, _, err := m.cfg.Store.AdvanceDeliveryState(ctx, string(messaging.ChannelWhatsApp), accountID, extID, evt.DeliveryState, rank)
 		if err != nil {
 			if err != store.ErrNotFound {
 				m.log.Error("whatsmeow: advance delivery state failed", "account_id", accountID, "external_id", extID, "err", err)
