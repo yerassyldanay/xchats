@@ -418,6 +418,17 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/messenger-accounts/oauth/start", s.handleStartMessengerOAuth)
 	auth.DELETE("/messenger-accounts/:id", s.handleDeleteMessengerAccount)
 
+	// Channel setup (channel_setup.go): installation-wide prerequisites
+	// (public HTTPS access, the Meta Developer App, each channel's own
+	// Dashboard checklist), as distinct from the per-account connect routes
+	// above. GET is open to any member — see ChannelSetupInfo's own doc
+	// comment for the member/admin payload split; only the two saves are
+	// admin-only, matching every other credential-write route's own
+	// per-route RequireAdmin() (e.g. POST /users above).
+	auth.GET("/channel-setup", s.handleChannelSetup)
+	auth.PUT("/channel-setup/meta-app", s.RequireAdmin(), s.handleSaveMetaApp)
+	auth.PUT("/channel-setup/instagram-app", s.RequireAdmin(), s.handleSaveInstagramApp)
+
 	auth.GET("/chats", s.handleListChats)
 	auth.POST("/chats", s.handleCreateChat)
 	auth.GET("/chats/:id/messages", s.handleListMessages)
@@ -514,7 +525,6 @@ func (s *Server) Router() *gin.Engine {
 	set.GET("/tunnel", s.handleGetTunnelStatus)
 	set.POST("/tunnel/start", s.handleStartTunnel)
 	set.POST("/tunnel/stop", s.handleStopTunnel)
-	set.GET("/meta-setup", s.handleMetaSetup)
 	return r
 }
 

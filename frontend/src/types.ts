@@ -126,6 +126,14 @@ export type ChannelName =
   | 'messenger'
   | 'whatsapp_cloud'
 
+// ConnectableChannel is every channel AddAccountDialog's picker can start a
+// NEW connect flow for — ChannelName minus 'simulator' (nothing user-facing
+// ever connects that leg directly). Shared by AddAccountDialog's own
+// startChannel prop and Accounts.vue's addStartChannel state so a guided
+// Channel setup run (stores/channelSetup.ts) can hand back exactly which
+// channel to resume.
+export type ConnectableChannel = 'whatsapp' | 'telegram' | 'whatsapp_cloud' | 'instagram' | 'messenger'
+
 export interface Chat {
   id: string
   channel: ChannelName
@@ -276,19 +284,37 @@ export interface MessengerOAuthStartResponse {
   authorize_url: string
 }
 
-// MetaChannelSetup is one channel's slice of GET /settings/meta-setup's
-// checklist — see backend/internal/httpapi/meta_setup.go. redirect_uri is
-// absent for whatsapp_cloud (manual WABA id + token connect, no OAuth
-// redirect).
-export interface MetaChannelSetup {
-  channel: 'instagram' | 'messenger' | 'whatsapp_cloud'
-  webhook_callback: string
+// SetupKey is one channel-setup prerequisite's id — see
+// backend/internal/httpapi/channel_setup.go's SetupKey* constants.
+// public_access/meta_app are one-time, install-wide prerequisites;
+// instagram/messenger/whatsapp_cloud are the three Meta channels that
+// depend on them.
+export type SetupKey = 'public_access' | 'meta_app' | 'instagram' | 'messenger' | 'whatsapp_cloud'
+
+// MetaDashboardField names the literal Dashboard box one copy-paste value
+// belongs in (App Settings → Basic → App Domains, and so on).
+export interface MetaDashboardField {
+  field: string
+  where: string
+  value: string
+}
+
+// ChannelSetupEntry is one prerequisite's status — GET/PUT /channel-setup's
+// per-entry shape. key/status go to every caller; every field below is
+// present ONLY in an admin's response, and even then only on the three Meta
+// CHANNEL entries (see backend/internal/httpapi/channel_setup.go's
+// ChannelSetupEntry doc comment) — absent, not just empty, for a member.
+export interface ChannelSetupEntry {
+  key: SetupKey
+  status: 'ready' | 'not_configured' | 'setup_required'
+  webhook_callback?: string
   redirect_uri?: string
   scopes?: string[]
-  subscribe_fields: string
-  dashboard_path: string
-  development_notice: boolean
+  subscribe_fields?: string
+  dashboard_path?: string
+  dashboard_fields?: MetaDashboardField[]
 }
+
 // MetaStaleAccount is one connected Instagram/Messenger account whose
 // registered webhook origin no longer matches the current public base URL —
 // WhatsApp Cloud self-heals and never appears here.
@@ -298,15 +324,19 @@ export interface MetaStaleAccount {
   display_name: string
   detail: string
 }
-// MetaSetupInfo is GET /settings/meta-setup's full response — the admin
-// copy-paste checklist (MetaSetupChecklist.vue).
-export interface MetaSetupInfo {
+
+// ChannelSetupInfo is GET (and both PUT save endpoints') /channel-setup
+// response. can_configure/public_base_url/entries go to every authenticated
+// caller; everything from verify_token down is admin-only and simply absent
+// for a member — see ChannelSetupTab.vue.
+export interface ChannelSetupInfo {
+  can_configure: boolean
   public_base_url: string
-  production_required: boolean
-  verify_token: string
-  graph_api_version: string
-  channels: MetaChannelSetup[]
-  stale_accounts: MetaStaleAccount[]
+  entries: ChannelSetupEntry[]
+  verify_token?: string
+  graph_api_version?: string
+  dashboard_url?: string
+  stale_accounts?: MetaStaleAccount[]
 }
 
 // WaPairSession is POST /wa-accounts/pair's response: a session id to poll

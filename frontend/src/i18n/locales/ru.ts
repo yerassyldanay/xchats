@@ -351,34 +351,10 @@ export default {
       broken: 'не подключено',
       manage: 'Управление каналами',
       empty: 'Каналы ещё не подключены.',
-      metaTitle: 'Meta App (Instagram, Messenger, WhatsApp Cloud)',
-      metaSubtitle:
-        'App ID и App Secret вашего собственного Meta Developer App — один на все три официальных канала Meta. Токены не покидают эту установку.',
-      metaSetup: {
-        title: 'Чек-лист настройки Meta',
-        subtitle:
-          'Всё, что нужно вставить в Dashboard вашего Meta-приложения — построено из того же публичного адреса, который использует сервер, поэтому значения не могут разойтись.',
-        noPublicUrl:
-          'Нет публичного HTTPS-адреса — настройте туннель или укажите meta.webhook_public_base_url, чтобы получить ссылки для вставки.',
-        verifyToken: 'Verify Token',
-        graphVersion: 'Версия Graph API',
-        productionRequired: 'ENVIRONMENT=production — для вебхуков Meta нужен постоянный домен, а не временный туннель.',
-        productionAdvisory: 'Для долгосрочной стабильности рекомендуется постоянный домен.',
-        webhookCallback: 'Webhook callback',
-        redirectUri: 'Redirect URI',
-        scopes: 'Разрешения (scopes)',
-        subscribeFields: 'Subscribed fields',
-        devNotice:
-          'Пока приложение в Development Mode, писать вам смогут только Testers/Admins/Developers, добавленные в Meta Dashboard — это ожидаемое поведение, а не ошибка подключения.',
-        staleTitle: 'Требуют внимания',
-        staleBody:
-          'Публичный адрес изменился, и эти аккаунты не смогли обновиться автоматически — обновите их webhook в Meta Dashboard:',
-        copyLabel: 'Скопировать',
-        channelNames: {
-          instagram: 'Instagram Direct',
-          messenger: 'Messenger',
-          whatsapp_cloud: 'WhatsApp Cloud API',
-        },
+      setupPointer: {
+        title: 'Настройка каналов',
+        subtitle: 'Meta Developer App, Instagram App и публичный доступ теперь настраиваются на странице «Каналы».',
+        cta: 'Открыть настройку каналов',
       },
     },
     team: {
@@ -527,10 +503,15 @@ export default {
       errTimeout: 'Время ожидания истекло.',
       errConnectGeneric: 'Не удалось подключиться.',
       errSessionExpired: 'Сессия подключения истекла. Попробуйте снова.',
+      adminRequired: 'Настроить этот канал может только администратор.',
     },
     page: {
       title: 'Каналы',
       subtitle: 'Подключайте номера WhatsApp и Telegram-ботов',
+      tabs: {
+        accounts: 'Подключённые аккаунты',
+        setup: 'Настройка каналов',
+      },
       connectChannel: 'Подключить канал',
       dismiss: 'Скрыть',
       statConnected: 'Подключено',
@@ -552,6 +533,48 @@ export default {
       confirmDelete: 'Удалить «{name}»? Чаты сохранятся и вернутся при повторном добавлении номера.',
       errGenericAction: 'Не удалось выполнить действие.',
       errDisconnect: 'Не удалось отключить канал.',
+    },
+    // Вкладка «Настройка каналов» (ChannelSetupTab.vue/ChannelSetupCard.vue)
+    // — общесистемные предпосылки, в отличие от page.* выше (подключения
+    // отдельных аккаунтов).
+    channelSetup: {
+      copyLabel: 'Скопировать',
+      openDashboard: 'Открыть Meta Dashboard',
+      change: 'Изменить',
+      readyHint: 'Значение уже сохранено.',
+      errRequired: 'Оба поля обязательны.',
+      iveCompletedThese: 'Я выполнил эти шаги — продолжить',
+      memberHint: 'Настроить этот канал может только администратор.',
+      status: {
+        ready: 'Готово',
+        notConfigured: 'Не настроено',
+        setupRequired: 'Требуется настройка',
+      },
+      publicAccess: {
+        title: 'Публичный доступ',
+        notReadyHint: 'Meta нужен публичный HTTPS-адрес для отправки вебхуков и OAuth-редиректов.',
+        startTunnel: 'Запустить туннель',
+        stopTunnel: 'Остановить туннель',
+      },
+      metaApp: {
+        title: 'Meta Developer App',
+        subtitle: 'App ID и App Secret вашего собственного Meta Developer App — один на Messenger и WhatsApp Cloud.',
+        appId: 'App ID',
+        appSecret: 'App Secret',
+      },
+      instagram: {
+        title: 'Instagram API',
+        appId: 'Instagram app ID',
+        appSecret: 'Instagram app secret',
+      },
+      messenger: {
+        title: 'Messenger API',
+        subtitle: 'Не имеет собственного ключа — использует Meta Developer App выше.',
+      },
+      whatsappCloud: {
+        title: 'WhatsApp Cloud API',
+        subtitle: 'Не имеет собственного ключа — использует Meta Developer App выше.',
+      },
     },
   },
   // Channel-level debounce + scheduled auto-reply (Accounts.vue's

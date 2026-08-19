@@ -41,6 +41,26 @@ func (a metaCredentialsAdapter) MetaAppCredentials(ctx context.Context) (meta.Ap
 	return meta.AppCredentials{AppID: appID, AppSecret: appSecret}, true
 }
 
+// InstagramAppCredentials reads the "instagram" App ID/Secret — a SEPARATE
+// pair from MetaAppCredentials above (see meta.InstagramAppCredentials' own
+// doc comment). Deliberately never falls back to meta.app_id/meta.app_secret
+// when unset: that value is exactly what Business Login for Instagram
+// rejects, so a fallback would silently reproduce the bug this pair fixes.
+func (a metaCredentialsAdapter) InstagramAppCredentials(ctx context.Context) (meta.InstagramAppCredentials, bool) {
+	if a.chain == nil {
+		return meta.InstagramAppCredentials{}, false
+	}
+	appID, err := a.chain.Get(ctx, credentials.KeyInstagramAppID)
+	if err != nil || appID == "" {
+		return meta.InstagramAppCredentials{}, false
+	}
+	appSecret, err := a.chain.Get(ctx, credentials.KeyInstagramAppSecret)
+	if err != nil || appSecret == "" {
+		return meta.InstagramAppCredentials{}, false
+	}
+	return meta.InstagramAppCredentials{AppID: appID, AppSecret: appSecret}, true
+}
+
 // metaAppCredentials resolves the operator's Meta App ID/Secret, failing the
 // request with META_APP_NOT_CONFIGURED when Settings has none saved yet —
 // the one guard every Meta-channel handler that talks to the Graph API (or
@@ -51,6 +71,21 @@ func (s *Server) metaAppCredentials(c *gin.Context) (meta.AppCredentials, bool) 
 		fail(c, http.StatusPreconditionFailed, ErrMetaAppNotConfigured,
 			"Meta App ID/Secret не настроены — добавьте их в Настройках")
 		return meta.AppCredentials{}, false
+	}
+	return creds, true
+}
+
+// instagramAppCredentials resolves the operator's Instagram App ID/Secret —
+// InstagramAuthorizeURL/ExchangeInstagramCode/ExchangeInstagramLongLived's
+// own guard, parallel to metaAppCredentials above but answering
+// INSTAGRAM_APP_NOT_CONFIGURED, never META_APP_NOT_CONFIGURED: the two pairs
+// are configured (and missing) independently.
+func (s *Server) instagramAppCredentials(c *gin.Context) (meta.InstagramAppCredentials, bool) {
+	creds, okCreds := s.metaCreds.InstagramAppCredentials(ctx(c))
+	if !okCreds {
+		fail(c, http.StatusPreconditionFailed, ErrInstagramAppNotConfigured,
+			"Instagram App ID/Secret не настроены — добавьте их в Настройках")
+		return meta.InstagramAppCredentials{}, false
 	}
 	return creds, true
 }

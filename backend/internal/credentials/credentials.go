@@ -25,6 +25,20 @@ import (
 // Provision). A Key never carries a value itself.
 type Key string
 
+// KeyInstagramAppID/KeyInstagramAppSecret store the Instagram App ID/Secret
+// issued by the Meta Dashboard's "Instagram > API setup with Instagram
+// login" panel — a DIFFERENT pair from meta.app_id/meta.app_secret (the
+// "meta" provider below), which is the Meta Developer App id/secret
+// Messenger and WhatsApp Cloud use. Business Login for Instagram
+// (internal/meta.InstagramAuthorizeURL) rejects the Meta app id outright —
+// see internal/meta/appcreds.go's InstagramAppCredentials doc comment —
+// so there is deliberately no fallback to meta.app_id/meta.app_secret here:
+// that value is exactly what breaks the Instagram connect dialog.
+const (
+	KeyInstagramAppID     Key = "instagram.app_id"
+	KeyInstagramAppSecret Key = "instagram.app_secret"
+)
+
 var (
 	// ErrNotFound is returned when no value is stored for a key.
 	ErrNotFound = errors.New("credentials: not found")

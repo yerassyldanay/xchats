@@ -343,33 +343,10 @@ export default {
       broken: 'not connected',
       manage: 'Manage channels',
       empty: 'No channels connected yet.',
-      metaTitle: 'Meta App (Instagram, Messenger, WhatsApp Cloud)',
-      metaSubtitle:
-        'Your own Meta Developer App ID and Secret — one app covers all three official Meta channels. Tokens never leave this install.',
-      metaSetup: {
-        title: 'Meta setup checklist',
-        subtitle:
-          'Everything to paste into your Meta App’s Dashboard — built from the same public address the server itself uses, so the two can never drift apart.',
-        noPublicUrl: 'No public HTTPS address yet — set up a tunnel or set meta.webhook_public_base_url to get values to paste.',
-        verifyToken: 'Verify Token',
-        graphVersion: 'Graph API version',
-        productionRequired: 'ENVIRONMENT=production — Meta webhooks need a stable domain, not a temporary tunnel.',
-        productionAdvisory: 'A reserved domain is recommended for long-term stability.',
-        webhookCallback: 'Webhook callback',
-        redirectUri: 'Redirect URI',
-        scopes: 'Scopes',
-        subscribeFields: 'Subscribed fields',
-        devNotice:
-          'While the app is in Development Mode, only Testers/Admins/Developers added in the Meta Dashboard can message you — that is expected, not a broken connection.',
-        staleTitle: 'Needs attention',
-        staleBody:
-          'The public address changed and these accounts could not update automatically — update their webhook in the Meta Dashboard:',
-        copyLabel: 'Copy',
-        channelNames: {
-          instagram: 'Instagram Direct',
-          messenger: 'Messenger',
-          whatsapp_cloud: 'WhatsApp Cloud API',
-        },
+      setupPointer: {
+        title: 'Channel setup',
+        subtitle: 'The Meta Developer App, the Instagram App, and public access now live on the Channels page.',
+        cta: 'Open channel setup',
       },
     },
     team: {
@@ -518,10 +495,15 @@ export default {
       errTimeout: 'The wait timed out.',
       errConnectGeneric: 'Could not connect.',
       errSessionExpired: 'The connection session expired. Please try again.',
+      adminRequired: 'Only an administrator can configure this channel.',
     },
     page: {
       title: 'Channels',
       subtitle: 'Connect WhatsApp numbers and Telegram bots',
+      tabs: {
+        accounts: 'Connected accounts',
+        setup: 'Channel setup',
+      },
       connectChannel: 'Connect a channel',
       dismiss: 'Dismiss',
       statConnected: 'Connected',
@@ -543,6 +525,48 @@ export default {
       confirmDelete: 'Delete "{name}"? Chats are kept and come back if you reconnect the same number.',
       errGenericAction: 'Could not complete the action.',
       errDisconnect: 'Could not disconnect the channel.',
+    },
+    // The Channel setup tab (ChannelSetupTab.vue/ChannelSetupCard.vue) —
+    // installation-wide prerequisites, distinct from page.* above (per-
+    // account connections).
+    channelSetup: {
+      copyLabel: 'Copy',
+      openDashboard: 'Open Meta Dashboard',
+      change: 'Change',
+      readyHint: 'A value is already saved.',
+      errRequired: 'Both fields are required.',
+      iveCompletedThese: "I've completed these steps — continue",
+      memberHint: 'Only an administrator can configure this channel.',
+      status: {
+        ready: 'Ready',
+        notConfigured: 'Not configured',
+        setupRequired: 'Setup required',
+      },
+      publicAccess: {
+        title: 'Public access',
+        notReadyHint: 'Meta needs a public HTTPS address to send webhooks and OAuth redirects to.',
+        startTunnel: 'Start tunnel',
+        stopTunnel: 'Stop tunnel',
+      },
+      metaApp: {
+        title: 'Meta Developer App',
+        subtitle: 'Your own Meta Developer App ID and Secret — one app covers Messenger and WhatsApp Cloud.',
+        appId: 'App ID',
+        appSecret: 'App Secret',
+      },
+      instagram: {
+        title: 'Instagram API',
+        appId: 'Instagram app ID',
+        appSecret: 'Instagram app secret',
+      },
+      messenger: {
+        title: 'Messenger API',
+        subtitle: 'No credential of its own — uses the Meta Developer App above.',
+      },
+      whatsappCloud: {
+        title: 'WhatsApp Cloud API',
+        subtitle: 'No credential of its own — uses the Meta Developer App above.',
+      },
     },
   },
   // Channel-level debounce + scheduled auto-reply (Accounts.vue's

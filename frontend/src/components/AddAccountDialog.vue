@@ -3,9 +3,11 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CircleAlert, CircleCheck, LoaderCircle, RotateCw, Link2, Search } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
+import { useAuth } from '../stores/auth'
+import { useChannelSetup, type GuidedChannel } from '../stores/channelSetup'
 import { ApiError } from '../api/client'
 import { log } from '../lib/logfmt'
-import type { WaPairStatus, WhatsAppCloudPhoneNumber } from '../types'
+import type { ConnectableChannel, WaPairStatus, WhatsAppCloudPhoneNumber } from '../types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,16 +30,21 @@ import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 //                    happens server-side; this dialog's own job ends the
 //                    moment the browser navigates away (see
 //                    connectInstagram/connectMessenger, below).
-// startChannel pre-selects WhatsApp and skips the picker — used to re-pair an
-// existing broken/logged-out number (same deterministic account id, so it
-// revives that row rather than creating a new one).
-const props = defineProps<{ startChannel?: 'whatsapp' | null }>()
+// startChannel pre-selects a channel and skips the picker — either WhatsApp
+// (re-pairing an existing broken/logged-out number: same deterministic
+// account id, so it revives that row rather than creating a new one), or
+// any channel a guided Channel setup run just finished walking the admin
+// through (see pickChannel's own doc comment and Accounts.vue's watcher on
+// channelSetup.pendingChannel).
+const props = defineProps<{ startChannel?: ConnectableChannel | null }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'connected'): void }>()
 const accounts = useAccounts()
+const auth = useAuth()
+const channelSetup = useChannelSetup()
 const { t } = useI18n()
 
 type Step = 'channel' | 'qr' | 'telegram' | 'whatsapp_cloud_creds' | 'whatsapp_cloud_pick' | 'connected'
-type Channel = 'whatsapp' | 'telegram' | 'whatsapp_cloud' | 'instagram' | 'messenger'
+type Channel = ConnectableChannel
 
 const step = ref<Step>('channel')
 const channel = ref<Channel>('whatsapp')
@@ -67,14 +74,44 @@ function onOpenChange(v: boolean) {
   if (!v) emit('close')
 }
 
+// pickChannel branches on an EXPLICIT channel list, never on "does a setup
+// entry exist": telegram and QR WhatsApp work regardless of Meta setup
+// state (their own accounts.pair()/createTelegram() calls are the only
+// prerequisite), so they never consult channel setup at all. The three Meta
+// channels do: if something installation-wide is still missing, an admin is
+// routed to the Channel setup tab (via channelSetup.startGuidedSetup, which
+// Accounts.vue's watcher turns into a tab switch) instead of hitting an
+// opaque Meta error, and a member sees an explanatory message instead of a
+// dead end.
 function pickChannel(c: Channel) {
   channel.value = c
   error.value = ''
-  if (c === 'whatsapp') startPairing()
-  else if (c === 'telegram') step.value = 'telegram'
-  else if (c === 'instagram') connectInstagram()
-  else if (c === 'messenger') connectMessenger()
-  else step.value = 'whatsapp_cloud_creds'
+  if (c === 'whatsapp') {
+    startPairing()
+    return
+  }
+  if (c === 'telegram') {
+    step.value = 'telegram'
+    return
+  }
+  const guided = c as GuidedChannel
+  if (channelSetup.nextRequiredSetup(guided) !== null) {
+    if (!auth.isAdmin) {
+      error.value = t('accounts.dialog.adminRequired')
+      return
+    }
+    channelSetup.startGuidedSetup(guided)
+    return
+  }
+  if (c === 'instagram') {
+    connectInstagram()
+    return
+  }
+  if (c === 'messenger') {
+    connectMessenger()
+    return
+  }
+  step.value = 'whatsapp_cloud_creds'
 }
 
 // connectInstagram mints the authorize_url and immediately navigates the
@@ -258,7 +295,11 @@ function qrSrc(b64: string) {
 }
 
 onMounted(() => {
-  if (props.startChannel === 'whatsapp') pickChannel('whatsapp')
+  // Any non-null startChannel resumes through the SAME pickChannel a manual
+  // click would use — by the time Accounts.vue reopens this dialog with one
+  // set, a guided run already confirmed every prerequisite is ready, so this
+  // goes straight to the real connect step.
+  if (props.startChannel) pickChannel(props.startChannel)
 })
 onBeforeUnmount(stopPolling)
 </script>

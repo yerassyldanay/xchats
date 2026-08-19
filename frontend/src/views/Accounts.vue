@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -16,15 +16,18 @@ import {
   Unplug,
 } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
+import { useChannelSetup } from '../stores/channelSetup'
 import { ApiError } from '../api/client'
 import { connStatus, initials, colorFor, type ConnTone } from '../lib/format'
 import AddAccountDialog from '../components/AddAccountDialog.vue'
 import ReplaceTokenDialog from '../components/ReplaceTokenDialog.vue'
 import AutomationStatusBadge from '../components/AutomationStatusBadge.vue'
 import AutomationSettingsDialog from '../components/AutomationSettingsDialog.vue'
-import type { Account } from '../types'
+import ChannelSetupTab from '../components/channels/ChannelSetupTab.vue'
+import type { Account, ConnectableChannel } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import InstagramIcon from '@/components/icons/InstagramIcon.vue'
@@ -34,8 +37,10 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const accounts = useAccounts()
+const channelSetup = useChannelSetup()
+const activeTab = ref<'accounts' | 'setup'>('accounts')
 const showAdd = ref(false)
-const addStartChannel = ref<'whatsapp' | null>(null)
+const addStartChannel = ref<ConnectableChannel | null>(null)
 const tokenTarget = ref<Account | null>(null)
 const automationTarget = ref<Account | null>(null)
 const deleting = ref<string | null>(null)
@@ -96,8 +101,37 @@ function handle(a: Account) {
   return a.external_handle ? '+' + a.external_handle : '—'
 }
 
+// pendingChannel/focusedEntry drive the guided "Add channel" run (see
+// stores/channelSetup.ts): starting one closes this dialog and switches to
+// Channel setup, focused on the first missing prerequisite; completing one
+// switches back and reopens the dialog on the channel the admin originally
+// picked, so the whole detour reads as one continuous flow rather than two
+// unrelated screens.
+watch(
+  () => channelSetup.pendingChannel,
+  (c) => {
+    if (c) {
+      showAdd.value = false
+      activeTab.value = 'setup'
+    }
+  },
+)
+const guidedRunComplete = computed(() => channelSetup.pendingChannel !== null && channelSetup.focusedEntry === null)
+watch(guidedRunComplete, (done) => {
+  if (!done) return
+  const resume = channelSetup.pendingChannel
+  channelSetup.clearGuidedSetup()
+  activeTab.value = 'accounts'
+  addStartChannel.value = resume
+  showAdd.value = true
+})
+
 onMounted(() => {
   accounts.load()
+  channelSetup.load()
+  // Deep link from Settings' Communication channels tab, which has no
+  // credential inputs of its own anymore and points here instead.
+  if (route.query.tab === 'setup') activeTab.value = 'setup'
   // A one-shot landing from Meta's OAuth redirect (see AddAccountDialog.vue's
   // connectInstagram/connectMessenger) — read it once, then strip the query
   // params so a later refresh of this same URL does not re-show a stale
@@ -202,7 +236,15 @@ async function remove(a: Account) {
         </div>
       </header>
 
-      <div class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+      <Tabs v-model="activeTab" class="flex-1 flex flex-col min-h-0">
+        <div class="px-8 pt-4 border-b border-border bg-card shrink-0">
+          <TabsList>
+            <TabsTrigger value="accounts">{{ t('accounts.page.tabs.accounts') }}</TabsTrigger>
+            <TabsTrigger value="setup">{{ t('accounts.page.tabs.setup') }}</TabsTrigger>
+          </TabsList>
+        </div>
+
+      <TabsContent value="accounts" class="flex-1 overflow-y-auto px-8 py-6 space-y-6 mt-0">
         <!-- one-shot result of an Instagram OAuth redirect landing back here -->
         <div
           v-if="oauthBanner"
@@ -373,7 +415,12 @@ async function remove(a: Account) {
             </div>
           </div>
         </div>
-      </div>
+      </TabsContent>
+
+      <TabsContent value="setup" class="flex-1 overflow-y-auto px-8 py-6 mt-0">
+        <ChannelSetupTab />
+      </TabsContent>
+      </Tabs>
     </div>
 
     <AddAccountDialog

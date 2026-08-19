@@ -1,15 +1,16 @@
 <script setup lang="ts">
-// Channel pairing/management (QR scan, bot tokens, webhook retry, ...)
-// already has a full page at /accounts, reachable from the main nav for
-// every user — duplicating that flow inside Settings would just be a second
-// copy to keep in sync. This tab is a compact status summary with a deep
-// link into the real thing.
+// Channel pairing/management (QR scan, bot tokens, webhook retry, ...) and
+// installation-wide setup (public access, the Meta Developer App, each
+// channel's own Dashboard checklist) both live at /accounts now — the
+// "Connected accounts" and "Channel setup" tabs, respectively (see
+// components/channels/ChannelSetupTab.vue). This tab is a compact read-only
+// summary with a deep link into the real thing; it deliberately owns no
+// credential inputs of its own — one surface per credential.
 import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUpRight } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useAccounts } from '@/stores/accounts'
-import { useSettings } from '@/stores/settings'
 import { connStatus, type ConnTone } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,21 +18,10 @@ import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import InstagramIcon from '@/components/icons/InstagramIcon.vue'
 import MessengerIcon from '@/components/icons/MessengerIcon.vue'
-import ProviderCredentialCard from '../ProviderCredentialCard.vue'
-import MetaSetupChecklist from '../MetaSetupChecklist.vue'
 import type { Account } from '@/types'
 
 const accounts = useAccounts()
-const settings = useSettings()
 const { t } = useI18n()
-
-// The Meta App credential (App ID/Secret) is the one prerequisite every
-// official Meta channel (Instagram, Messenger, WhatsApp Cloud) shares —
-// see internal/credentials' "meta" provider. It renders here, not in
-// MonitoringTab, because it's a channel-connection prerequisite, not an
-// observability integration; the card itself is the exact same
-// ProviderCredentialCard MonitoringTab uses for langfuse.
-const meta = computed(() => settings.integrations.find((p) => p.id === 'meta'))
 
 onMounted(() => accounts.load())
 
@@ -74,13 +64,15 @@ const stats = computed(() => {
       </RouterLink>
     </div>
 
-    <div>
-      <h4 class="text-sm font-medium">{{ t('settings.channels.metaTitle') }}</h4>
-      <p class="text-xs text-muted-foreground mb-2">{{ t('settings.channels.metaSubtitle') }}</p>
-      <ProviderCredentialCard v-if="meta" :provider="meta" />
+    <div class="rounded-lg border border-border bg-card p-4 flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <h4 class="text-sm font-medium">{{ t('settings.channels.setupPointer.title') }}</h4>
+        <p class="text-xs text-muted-foreground">{{ t('settings.channels.setupPointer.subtitle') }}</p>
+      </div>
+      <RouterLink :to="{ name: 'accounts', query: { tab: 'setup' } }" class="shrink-0">
+        <Button size="sm" variant="outline">{{ t('settings.channels.setupPointer.cta') }} <ArrowUpRight class="w-4 h-4" /></Button>
+      </RouterLink>
     </div>
-
-    <MetaSetupChecklist />
 
     <div class="rounded-lg border border-border bg-card divide-y divide-border">
       <p v-if="!accounts.accounts.length" class="px-5 py-8 text-center text-sm text-muted-foreground">{{ t('settings.channels.empty') }}</p>

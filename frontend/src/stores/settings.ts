@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api } from '../api/client'
-import type { IntegrationSummary, LLMSettings, MetaSetupInfo, NgrokSettings, Page, ProviderHealthStatus, Settings, TunnelStatus, UpdateCheckResult, User } from '../types'
+import type { IntegrationSummary, LLMSettings, NgrokSettings, Page, ProviderHealthStatus, Settings, TunnelStatus, UpdateCheckResult, User } from '../types'
 
 interface IntegrationsResponse {
   credential_store_available: boolean
@@ -38,7 +38,6 @@ export const useSettings = defineStore('settings', {
     unhealthyProviders: new Set<string>(),
     updateCheck: null as UpdateCheckResult | null,
     updateCheckLoading: false,
-    metaSetup: null as MetaSetupInfo | null,
   }),
   getters: {
     hasUnhealthyProvider: (s) => s.unhealthyProviders.size > 0,
@@ -126,9 +125,6 @@ export const useSettings = defineStore('settings', {
     },
     async loadTunnel() {
       this.tunnel = await api.get<TunnelStatus>('/settings/tunnel')
-    },
-    async loadMetaSetup() {
-      this.metaSetup = await api.get<MetaSetupInfo>('/settings/meta-setup')
     },
     async startTunnel() {
       this.tunnel = await api.post<TunnelStatus>('/settings/tunnel/start')

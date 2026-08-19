@@ -56,7 +56,7 @@ func (s *Server) handleStartInstagramOAuth(c *gin.Context) {
 		return
 	}
 	u := currentUser(c)
-	creds, okApp := s.metaAppCredentials(c)
+	creds, okApp := s.instagramAppCredentials(c)
 	if !okApp {
 		return
 	}
@@ -128,9 +128,9 @@ func (s *Server) handleInstagramOAuthCallback(c *gin.Context) {
 // fails there first), mirroring handleCreateTelegramAccount's own
 // nothing-stored-before-getMe-succeeds shape.
 func (s *Server) finishInstagramConnect(ctx context.Context, st store.MetaOAuthState, code string) (store.ChannelAccount, error) {
-	creds, okApp := s.metaCreds.MetaAppCredentials(ctx)
+	creds, okApp := s.metaCreds.InstagramAppCredentials(ctx)
 	if !okApp {
-		return store.ChannelAccount{}, errors.New("meta app id/secret не настроены")
+		return store.ChannelAccount{}, errors.New("instagram app id/secret не настроены")
 	}
 
 	tctx, cancel := context.WithTimeout(ctx, metaConnectTimeout)
