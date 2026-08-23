@@ -201,6 +201,10 @@ type SendingBudget struct {
 // transition is not one backend/campaign.CanTransition allows.
 var ErrInvalidTransition = errors.New("store: invalid campaign status transition")
 
+// ErrCampaignHasSends is returned by DeleteCampaign for a campaign that has
+// already delivered something — see that method's own doc comment.
+var ErrCampaignHasSends = errors.New("store: campaign has already sent messages and cannot be deleted")
+
 // ---------------------------------------------------------------------------
 // Campaign CRUD
 // ---------------------------------------------------------------------------
@@ -255,6 +259,47 @@ func (s *Store) CampaignByIDForOrg(ctx context.Context, id, orgID uuid.UUID) (Ca
 		return out, ErrNotFound
 	}
 	return out, err
+}
+
+// DeleteCampaign removes a campaign and, by ON DELETE CASCADE, its
+// recipients, windows and events — the way an operator discards a draft they
+// abandoned rather than leaving it in the list forever.
+//
+// It refuses a campaign with any campaign_send_log rows (ErrCampaignHasSends).
+// That ledger is what the per-account rate limiter counts against its rolling
+// windows, so deleting a campaign that already delivered would silently
+// return that headroom and let the next campaign burst past the account's
+// cap — the exact thing the tiers exist to prevent. A campaign that never
+// sent has no ledger rows and is safe to remove.
+//
+// Deleting is deliberately NOT how a running campaign is stopped: the caller
+// is expected to have rejected anything but a terminal-or-never-started
+// status first (see httpapi's handleDeleteCampaign), and the ledger check
+// here is the backstop that makes an accounting mistake impossible even if
+// that check is ever loosened.
+func (s *Store) DeleteCampaign(ctx context.Context, id uuid.UUID) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var sends int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_send_log WHERE campaign_id = $1`, id).Scan(&sends); err != nil {
+		return err
+	}
+	if sends > 0 {
+		return ErrCampaignHasSends
+	}
+
+	res, err := tx.Exec(ctx, `DELETE FROM campaigns WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit(ctx)
 }
 
 // ListCampaignsForOrg returns the org's campaigns, newest first, plus the total.

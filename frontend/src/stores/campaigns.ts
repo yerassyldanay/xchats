@@ -61,6 +61,15 @@ export const useCampaigns = defineStore('campaigns', {
       this.applyCampaign(updated)
       return updated
     },
+    // remove drops a campaign the operator abandoned. The backend refuses
+    // one that already delivered (its send-ledger rows are what the account
+    // rate limiter counts against), so callers surface that 409 rather than
+    // assuming success.
+    async remove(id: string) {
+      await api.del(`/campaigns/${id}`)
+      this.campaigns = this.campaigns.filter((c) => c.id !== id)
+      if (this.current?.id === id) this.current = null
+    },
     async duplicate(id: string) {
       const dup = await api.post<Campaign>(`/campaigns/${id}/duplicate`)
       this.campaigns.unshift(dup)

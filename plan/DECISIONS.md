@@ -95,6 +95,33 @@ Decisions worth recording:
   org-scoped `GET /campaigns/:id/recipients` REST endpoint, not the SSE
   stream. This is already enforced in code; it's recorded here so it isn't
   accidentally undone the next time someone touches these structs.
+- **Reachability checks are per-channel, not per-capability.** The live
+  preview check is chosen by the channel itself: WhatsApp gets the
+  `IsOnWhatsApp` registration check, warm-only channels get the
+  existing-conversation check, and the simulator gets none (it is
+  cold-send-capable but has no provider and no connection, so every parsed
+  identity is reachable by construction). Gating the WhatsApp branch on
+  `ColdSendCapable` — which covers whatsapp AND simulator — made a simulator
+  preview fail outright with "whatsmeow: account ... is not connected".
+  Pinned by `TestCampaignPreview_SimulatorSkipsWhatsAppRegistrationCheck`.
+- **A campaign is deletable only until it has sent.** `DELETE /campaigns/:id`
+  exists so an operator can discard a draft they abandoned — the wizard
+  creates the campaign up front (the recipient preview needs a real id to
+  resolve its channel against), so backing out would otherwise strand an
+  empty campaign in the list forever. `store.DeleteCampaign` refuses any
+  campaign with `campaign_send_log` rows, and that guard is the point:
+  that ledger is what the per-account rate limiter counts against its
+  rolling windows, so deleting a campaign that already delivered would
+  hand its headroom back and let the next campaign burst past the account's
+  cap. A running or paused campaign must be stopped first rather than
+  deleted out from under the scheduler. Everything else cascades
+  (recipients, windows, events) via the migration's own foreign keys.
+- **Collection fields never serialize as `null`.** `MapSendingBudget` and
+  `MapCampaignAccountSettings` pre-allocate `Tiers` rather than appending
+  onto a nil slice, matching `MapCampaignWindows`. An unlimited channel has
+  zero tiers, and `"tiers": null` crashed the budget widget outright
+  (`budget.tiers.length` on null). The frontend also treats the field
+  defensively.
 - **No `dto.Chat`/`dto.Message` reverse-reference fields.** Considered
   adding a `campaign_id`/`campaign_recipient_id` field to the chat and
   message DTOs so the inbox could show "this chat came from campaign X"

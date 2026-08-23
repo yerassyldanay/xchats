@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { ArrowLeft, CircleAlert, Copy, LoaderCircle, Pause, Play, RotateCcw, Square } from 'lucide-vue-next'
+import { ArrowLeft, CircleAlert, Copy, LoaderCircle, Pause, Play, RotateCcw, Square, Trash2 } from 'lucide-vue-next'
 import { useCampaigns } from '@/stores/campaigns'
 import { useAccounts } from '@/stores/accounts'
 import { ApiError } from '@/api/client'
@@ -87,6 +87,19 @@ async function duplicate() {
   await runAction(async () => {
     const dup = await campaigns.duplicate(campaignId.value)
     await router.push({ name: 'campaign-detail', params: { campaignId: dup.id } })
+  })
+}
+
+// Deleting is offered only for a campaign that has never sent — the backend
+// refuses the rest outright (a delivered campaign's send-ledger rows are
+// what the account rate limiter counts against). Gate on started_at rather
+// than status so a stopped-before-any-send campaign stays removable.
+const canDelete = computed(() => !!campaigns.current && !campaigns.current.started_at)
+const confirmingDelete = ref(false)
+async function remove() {
+  await runAction(async () => {
+    await campaigns.remove(campaignId.value)
+    await router.push({ name: 'campaigns' })
   })
 }
 
@@ -187,6 +200,28 @@ async function confirmReplace() {
           <Button type="button" size="sm" variant="ghost" :disabled="acting" @click="duplicate">
             <Copy class="w-4 h-4" /> {{ t('campaigns.actions.duplicate') }}
           </Button>
+          <template v-if="canDelete">
+            <Button
+              v-if="!confirmingDelete"
+              type="button"
+              size="sm"
+              variant="ghost"
+              class="text-destructive hover:bg-destructive/10"
+              :disabled="acting"
+              @click="confirmingDelete = true"
+            >
+              <Trash2 class="w-4 h-4" /> {{ t('campaigns.actions.delete') }}
+            </Button>
+            <template v-else>
+              <span class="text-xs text-muted-foreground">{{ t('campaigns.detail.confirmDelete') }}</span>
+              <Button type="button" size="sm" variant="outline" class="text-destructive hover:bg-destructive/10" :disabled="acting" @click="remove">
+                {{ t('campaigns.actions.deleteConfirm') }}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" :disabled="acting" @click="confirmingDelete = false">
+                {{ t('campaigns.actions.cancel') }}
+              </Button>
+            </template>
+          </template>
         </div>
       </div>
 

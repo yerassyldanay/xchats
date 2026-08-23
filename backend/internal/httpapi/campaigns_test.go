@@ -223,6 +223,47 @@ func TestCampaignPreview_TextInput(t *testing.T) {
 	}
 }
 
+// TestCampaignPreview_SimulatorSkipsWhatsAppRegistrationCheck pins the
+// channel split in parseCampaignRecipients. The simulator is cold-send-
+// capable like whatsapp but has no provider connection, so the live
+// IsOnWhatsApp registration check must not run for it — gating that branch
+// on ColdSendCapable (which covers BOTH channels) made a real simulator
+// preview fail outright with "whatsmeow: account ... is not connected".
+//
+// The assertion is that a phone the WhatsApp fake reports as NOT registered
+// still previews as valid on a simulator campaign: that can only hold if
+// the WhatsApp check was skipped entirely.
+func TestCampaignPreview_SimulatorSkipsWhatsAppRegistrationCheck(t *testing.T) {
+	h := newHarness(t)
+	h.fake.NotOnWhatsApp = map[string]bool{"77011234567": true}
+
+	simAcct, err := h.store.GetOrCreateSimulatorAccount(context.Background(), h.orgID)
+	if err != nil {
+		t.Fatalf("simulator account: %v", err)
+	}
+
+	resp, env := h.postJSON("/xchats/api/v1/campaigns", map[string]any{
+		"name": "Sim promo", "account_id": simAcct.ID.String(), "message_body": "Hi {{name}}!",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create simulator campaign status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var c campaignDTO
+	mustPayload(t, env, &c)
+
+	req := h.campaignRecipientsRequest(t, http.MethodPost, "/xchats/api/v1/campaigns/"+c.ID+"/preview",
+		"77011234567,Aigul\n77012223344,Bota", nil)
+	resp, env = h.doMultipart(t, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("simulator preview status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var result previewResultDTO
+	mustPayload(t, env, &result)
+	if result.Valid != 2 || result.Invalid != 0 {
+		t.Fatalf("simulator preview = %+v, want 2 valid / 0 invalid (the WhatsApp registration check must not run)", result)
+	}
+}
+
 func TestCampaignRecipients_ReplaceAndList(t *testing.T) {
 	h := newHarness(t)
 	c := h.createCampaign(t, "Promo", "Hi {{name}}!")
@@ -344,6 +385,55 @@ func TestCampaignLifecycle_StartWithNoRecipientsFails(t *testing.T) {
 	if string(env["errcode"]) != `"CAMPAIGN_EMPTY"` {
 		t.Errorf("errcode = %s", env["errcode"])
 	}
+}
+
+// TestDeleteCampaign covers the three outcomes that matter: an abandoned
+// draft is removable, a campaign that already delivered is not (its
+// send-ledger rows are what the account rate limiter counts against, so
+// removing them would hand back headroom), and a live campaign must be
+// stopped first rather than deleted out from under the scheduler.
+func TestDeleteCampaign(t *testing.T) {
+	h := newHarness(t)
+
+	t.Run("draft is deleted", func(t *testing.T) {
+		c := h.createCampaign(t, "Abandoned draft", "Hi {{name}}!")
+		h.replaceRecipients(t, c.ID, "77011234567,Aigul\n77012223344,Bota")
+
+		status, env := h.del("/xchats/api/v1/campaigns/" + c.ID)
+		if status != http.StatusOK {
+			t.Fatalf("delete draft status=%d body=%s", status, env["message"])
+		}
+		if r, _ := h.getRaw("/xchats/api/v1/campaigns/" + c.ID); r.StatusCode != http.StatusNotFound {
+			t.Errorf("get after delete status = %d, want 404", r.StatusCode)
+		}
+	})
+
+	t.Run("campaign with sends is refused", func(t *testing.T) {
+		c := h.createCampaign(t, "Already sent", "Hi {{name}}!")
+		h.replaceRecipients(t, c.ID, "77013334444,Dana\n77015556666,Timur")
+		h.seedSentRecipient(t, c.ID)
+
+		status, _ := h.del("/xchats/api/v1/campaigns/" + c.ID)
+		if status != http.StatusConflict {
+			t.Fatalf("delete sent campaign status = %d, want 409", status)
+		}
+		var still campaignDTO
+		h.get("/xchats/api/v1/campaigns/"+c.ID, &still)
+		if still.ID != c.ID {
+			t.Error("a refused delete must leave the campaign in place")
+		}
+	})
+
+	t.Run("running campaign must be stopped first", func(t *testing.T) {
+		c := h.createCampaign(t, "Live one", "Hi {{name}}!")
+		h.replaceRecipients(t, c.ID, "77017778888,Alia\n77019990000,Erlan")
+		h.startCampaign(t, c.ID)
+
+		status, _ := h.del("/xchats/api/v1/campaigns/" + c.ID)
+		if status != http.StatusConflict {
+			t.Fatalf("delete running campaign status = %d, want 409", status)
+		}
+	})
 }
 
 func TestCampaignDuplicate(t *testing.T) {

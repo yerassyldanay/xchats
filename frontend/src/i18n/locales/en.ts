@@ -765,6 +765,8 @@ export default {
       stop: 'Stop',
       duplicate: 'Duplicate',
       retryFailed: 'Retry failed',
+      delete: 'Delete',
+      deleteConfirm: 'Delete permanently',
       save: 'Save',
       saving: 'Saving…',
       cancel: 'Cancel',
@@ -775,6 +777,8 @@ export default {
       detailsHeading: 'Campaign details',
       nameLabel: 'Name',
       namePlaceholder: 'E.g. Summer promo',
+      noAccounts: 'No channels connected yet. A campaign can only send from a connected account.',
+      connectAccount: 'Connect a channel',
       accountLabel: 'Sending account',
       accountPlaceholder: 'Choose an account',
       messageLabel: 'Message',
@@ -813,6 +817,7 @@ export default {
       errSaveRecipientsFailed: 'The campaign was created, but the recipient list could not be saved. Open the campaign to try again.',
     },
     detail: {
+      confirmDelete: 'Delete this campaign?',
       tabOverview: 'Overview',
       tabRecipients: 'Recipients',
       tabEvents: 'History',
@@ -853,6 +858,7 @@ export default {
       paused: 'Account paused',
       nextSendAt: 'Next send: {when}',
       used: '{used}/{max}',
+      noLimits: 'No sending limits on this channel.',
       errLoadFailed: 'Could not load the sending budget.',
     },
     limits: {

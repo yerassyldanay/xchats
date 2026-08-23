@@ -89,7 +89,12 @@ function formatWindow(seconds: number): string {
         {{ t('campaigns.budget.nextSendAt', { when: formatWhen(budget.next_send_at) }) }}
       </p>
 
-      <ul v-if="budget.tiers.length" class="mt-2 space-y-1">
+      <!-- tiers?. rather than tiers.: an unlimited channel legitimately has
+           none, and a client must not fault on the empty case. -->
+      <p v-if="!budget.tiers?.length" class="mt-1 text-xs text-muted-foreground">
+        {{ t('campaigns.budget.noLimits') }}
+      </p>
+      <ul v-else class="mt-2 space-y-1">
         <li v-for="tier in budget.tiers" :key="tier.window_seconds" class="flex items-center gap-2 text-xs">
           <span class="text-muted-foreground w-16 shrink-0">{{ formatWindow(tier.window_seconds) }}</span>
           <span class="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">

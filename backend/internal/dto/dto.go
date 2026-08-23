@@ -514,6 +514,10 @@ func MapCampaignAccountSettings(s store.CampaignAccountSettings, tiers []purecam
 		MinIntervalSeconds: s.MinIntervalSeconds, JitterSeconds: s.JitterSeconds, Paused: s.Paused,
 		Windows: MapCampaignWindows(windows),
 	}
+	// Pre-allocated, never a bare append onto a nil slice: an unlimited
+	// channel (the simulator has zero tiers) would otherwise serialize
+	// "tiers": null and every client indexing it would fault.
+	out.Tiers = make([]CampaignTier, 0, len(tiers))
 	for _, t := range tiers {
 		out.Tiers = append(out.Tiers, CampaignTier{WindowSeconds: t.WindowSeconds, MaxSends: t.MaxSends})
 	}
@@ -541,6 +545,9 @@ func MapSendingBudget(b store.SendingBudget) SendingBudget {
 		Paused: b.Paused, Allowed: b.Allowed, ThrottledBy: b.ThrottledBy,
 		NextSendAt: b.NextSendAt.UTC().Format(time.RFC3339),
 	}
+	// See MapCampaignAccountSettings: "tiers": null is what an unlimited
+	// channel would otherwise serialize to.
+	out.Tiers = make([]CampaignTier, 0, len(b.Tiers))
 	for _, t := range b.Tiers {
 		used := t.Used
 		out.Tiers = append(out.Tiers, CampaignTier{WindowSeconds: t.WindowSeconds, MaxSends: t.MaxSends, Used: &used})

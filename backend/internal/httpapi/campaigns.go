@@ -333,6 +333,41 @@ func (s *Server) handleDuplicateCampaign(c *gin.Context) {
 	created(c, s.campaignDTO(c, dup))
 }
 
+// handleDeleteCampaign removes a campaign the operator no longer wants in
+// the list — in practice a draft abandoned partway through the wizard, which
+// creates the campaign up front so the recipient preview has a real id to
+// resolve its channel against.
+//
+// A running or paused campaign must be stopped first rather than deleted out
+// from under the scheduler, and a campaign that already delivered is never
+// removable at all: store.DeleteCampaign refuses one with send-ledger rows,
+// because that ledger is what the per-account rate limiter counts against.
+func (s *Server) handleDeleteCampaign(c *gin.Context) {
+	id, okID := parseUUID(c, "id")
+	if !okID {
+		return
+	}
+	camp, okC := s.orgCampaign(c, id)
+	if !okC {
+		return
+	}
+	switch purecampaign.Status(camp.Status) {
+	case purecampaign.StatusRunning, purecampaign.StatusPaused:
+		fail(c, http.StatusConflict, ErrCampaignLocked, "stop the campaign before deleting it")
+		return
+	}
+	switch err := s.store.DeleteCampaign(ctx(c), camp.ID); {
+	case err == nil:
+		ok(c, gin.H{"deleted": true})
+	case errors.Is(err, store.ErrCampaignHasSends):
+		fail(c, http.StatusConflict, ErrCampaignLocked, "this campaign has already sent messages and cannot be deleted")
+	case errors.Is(err, store.ErrNotFound):
+		fail(c, http.StatusNotFound, ErrNotFound, "campaign not found")
+	default:
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Recipients: preview (parse-only) and persist
 // ---------------------------------------------------------------------------
@@ -370,13 +405,22 @@ func (s *Server) campaignRecipientsInput(c *gin.Context) (string, bool) {
 }
 
 // parseCampaignRecipients parses raw against camp's own channel and applies
-// the live reachability check — backend/campaign.IsOnWhatsApp for a
-// cold-send-capable channel (whatsapp/simulator), store.
-// UnreachableForWarmChannel (an existing-conversation check) for every other
-// channel. ok is false only on an actual infrastructure error (already
-// reported to c); "nothing to check" (an empty valid set, or no live
-// WhatsApp manager configured) is not an error — the rows are returned as
-// parsed, unreachability simply not checked.
+// the live reachability check that channel actually supports:
+//
+//   - whatsapp (the QR-paired whatsmeow leg): Manager.IsOnWhatsApp, a live
+//     registration check against the paired phone's own connection.
+//   - simulator: nothing to check. It is cold-send-capable like whatsapp,
+//     but it has no provider and no connection — every parsed identity is
+//     reachable by construction. Gating this branch on ColdSendCapable
+//     instead of the channel itself is what made a simulator preview fail
+//     with "whatsmeow: account ... is not connected".
+//   - every warm-only channel: store.UnreachableForWarmChannel, an
+//     existing-conversation check.
+//
+// ok is false only on an actual infrastructure error (already reported to
+// c); "nothing to check" (an empty valid set, or no live WhatsApp manager
+// configured) is not an error — the rows are returned as parsed,
+// unreachability simply not checked.
 func (s *Server) parseCampaignRecipients(c *gin.Context, camp store.Campaign, raw string) (purecampaign.ParseResult, bool) {
 	result := purecampaign.ParseRecipients(raw, camp.Channel, purecampaign.DefaultCountryCode)
 
@@ -390,7 +434,11 @@ func (s *Server) parseCampaignRecipients(c *gin.Context, camp store.Campaign, ra
 		return result, true
 	}
 
-	if purecampaign.ColdSendCapable(camp.Channel) {
+	if camp.Channel == purecampaign.ChannelSimulator {
+		return result, true
+	}
+
+	if camp.Channel == purecampaign.ChannelWhatsApp {
 		if s.wa == nil {
 			return result, true
 		}

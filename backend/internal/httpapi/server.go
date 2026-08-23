@@ -456,6 +456,7 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/campaigns", s.handleCreateCampaign)
 	auth.GET("/campaigns/:id", s.handleGetCampaign)
 	auth.PATCH("/campaigns/:id", s.handleUpdateCampaign)
+	auth.DELETE("/campaigns/:id", s.handleDeleteCampaign)
 	auth.POST("/campaigns/:id/duplicate", s.handleDuplicateCampaign)
 	auth.POST("/campaigns/:id/preview", s.handleCampaignPreview)
 	auth.PUT("/campaigns/:id/recipients", s.handleReplaceCampaignRecipients)

@@ -11,7 +11,8 @@ All notable changes to this project are documented here. Format follows
   list, rate-limited per sending account with a scheduled send window,
   automatic retry on transient failures, and auto-pause when the sending
   account disconnects. Replies land in the normal inbox like any other
-  conversation.
+  conversation. A campaign can be deleted until it has sent anything, so an
+  abandoned draft doesn't linger in the list.
 - WhatsApp and Telegram team inbox with a draft-and-approve AI assistant
   grounded in a structured knowledge base.
 - MCP (Model Context Protocol) server: connect ChatGPT/Claude directly to

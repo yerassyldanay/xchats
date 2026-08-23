@@ -773,6 +773,8 @@ export default {
       stop: 'Остановить',
       duplicate: 'Дублировать',
       retryFailed: 'Повторить ошибки',
+      delete: 'Удалить',
+      deleteConfirm: 'Удалить безвозвратно',
       save: 'Сохранить',
       saving: 'Сохранение…',
       cancel: 'Отмена',
@@ -783,6 +785,8 @@ export default {
       detailsHeading: 'Параметры рассылки',
       nameLabel: 'Название',
       namePlaceholder: 'Например, Летняя акция',
+      noAccounts: 'Нет подключённых каналов. Рассылку можно отправить только с подключённого аккаунта.',
+      connectAccount: 'Подключить канал',
       accountLabel: 'Аккаунт отправки',
       accountPlaceholder: 'Выберите аккаунт',
       messageLabel: 'Сообщение',
@@ -822,6 +826,7 @@ export default {
       errSaveRecipientsFailed: 'Рассылка создана, но список получателей не удалось сохранить. Откройте рассылку, чтобы повторить попытку.',
     },
     detail: {
+      confirmDelete: 'Удалить эту рассылку?',
       tabOverview: 'Обзор',
       tabRecipients: 'Получатели',
       tabEvents: 'История',
@@ -862,6 +867,7 @@ export default {
       paused: 'Аккаунт на паузе',
       nextSendAt: 'Следующая отправка: {when}',
       used: '{used}/{max}',
+      noLimits: 'Без ограничений на этом канале.',
       errLoadFailed: 'Не удалось загрузить бюджет отправки.',
     },
     limits: {

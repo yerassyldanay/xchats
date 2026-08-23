@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { CircleAlert, LoaderCircle, Megaphone, Plus, Trash2 } from 'lucide-vue-next'
 import { useCampaigns } from '@/stores/campaigns'
 import { useAccounts } from '@/stores/accounts'
@@ -30,6 +30,11 @@ const accounts = useAccounts()
 onMounted(() => {
   if (accounts.accounts.length === 0) void accounts.load()
 })
+
+// noAccounts gates the account picker on a settled empty list — never while
+// the first load is still in flight, which would flash the "connect a
+// channel" callout at an operator who has one.
+const noAccounts = computed(() => !accounts.loading && accounts.accounts.length === 0)
 
 // --- details -----------------------------------------------------------
 // The wizard is two phases on one page, not a true multi-step flow with
@@ -74,6 +79,25 @@ async function continueToRecipients() {
     detailsError.value = e instanceof ApiError ? e.message : t('campaigns.wizard.errCreateFailed')
   } finally {
     continuing.value = false
+  }
+}
+
+// cancelPending discards the draft continueToRecipients created. Without
+// this, backing out of the wizard's second phase would strand an empty
+// campaign in the list with no recipients and no way to remove it. A
+// failed delete is deliberately swallowed: the operator asked to leave, and
+// the campaign is still reachable (and deletable) from the list.
+const cancelling = ref(false)
+async function cancelPending() {
+  const id = pendingCampaignId.value
+  cancelling.value = true
+  try {
+    if (id) await campaigns.remove(id)
+  } catch {
+    // fall through to the list either way
+  } finally {
+    cancelling.value = false
+    await router.push({ name: 'campaigns' })
   }
 }
 
@@ -182,7 +206,17 @@ async function finish() {
       </div>
       <div>
         <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.accountLabel') }}</label>
-        <Select v-model="accountId" :disabled="phase === 'recipients'">
+        <!-- With no connected channel the Select would open onto an empty
+             list and "Сохранить" would fail on a requirement the operator
+             has no way to satisfy from this page. Send them to Channels
+             instead of leaving them at a dead end. -->
+        <div v-if="noAccounts" class="mt-1.5 rounded-md border border-border bg-muted/40 p-3">
+          <p class="text-sm">{{ t('campaigns.wizard.noAccounts') }}</p>
+          <RouterLink :to="{ name: 'accounts' }" class="mt-2 inline-block">
+            <Button type="button" variant="outline" size="sm">{{ t('campaigns.wizard.connectAccount') }}</Button>
+          </RouterLink>
+        </div>
+        <Select v-else v-model="accountId" :disabled="phase === 'recipients'">
           <SelectTrigger class="mt-1.5">
             <SelectValue :placeholder="t('campaigns.wizard.accountPlaceholder')" />
           </SelectTrigger>
@@ -202,7 +236,7 @@ async function finish() {
       <p v-if="detailsError" class="flex items-center gap-1.5 text-sm text-destructive">
         <CircleAlert class="w-4 h-4 shrink-0" /> {{ detailsError }}
       </p>
-      <Button v-if="phase === 'details'" type="button" :disabled="continuing" @click="continueToRecipients">
+      <Button v-if="phase === 'details'" type="button" :disabled="continuing || noAccounts" @click="continueToRecipients">
         <LoaderCircle v-if="continuing" class="w-4 h-4 animate-spin" />
         {{ t('campaigns.actions.save') }}
       </Button>
@@ -318,9 +352,9 @@ async function finish() {
         <LoaderCircle v-if="creating" class="w-4 h-4 animate-spin" />
         {{ creating ? t('campaigns.wizard.creating') : t('campaigns.wizard.create') }}
       </Button>
-      <RouterLink :to="{ name: 'campaign-detail', params: { campaignId: pendingCampaignId } }">
-        <Button type="button" variant="ghost">{{ t('campaigns.actions.cancel') }}</Button>
-      </RouterLink>
+      <Button type="button" variant="ghost" :disabled="cancelling" @click="cancelPending">
+        {{ t('campaigns.actions.cancel') }}
+      </Button>
     </div>
     <div v-else class="mt-6 pb-10">
       <RouterLink :to="{ name: 'campaigns' }">
