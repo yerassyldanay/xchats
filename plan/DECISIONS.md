@@ -41,6 +41,71 @@ section) that starting the tunnel exposes the whole app — including the
 login page — to the public internet while it runs. An MCP-only allowlisted
 router remains a documented future hardening option, not a commitment.
 
+**2026-08 amendment — Campaigns (bulk outbound messaging).** Added a
+bulk-send feature: paste or upload a recipient list, rate-limit sends per
+sending account, route any reply into the normal inbox. Layered the same
+way as the rest of the backend — `backend/campaign` (pure domain: recipient
+parsing/normalization, status/transition rules, the retry backoff ladder)
+→ `internal/store` (persistence; deliberately never imports
+`backend/messaging`, so channel names are duplicated as string constants —
+the same boundary `backend/campaign` itself keeps, for symmetry) →
+`internal/campaign` (scheduler + runner, orchestration) → `internal/httpapi`
+(HTTP edge). `internal/outbound.Deliver` was extracted out of
+`worker.handleOutboundSend` so the queue-driven worker and the campaign
+runner share one send/classify/stamp path instead of two.
+
+Decisions worth recording:
+
+- **At-most-once delivery.** `ClaimNextRecipient` commits a pessimistic
+  'failed' ledger row and flips the recipient to 'sending' in ONE
+  transaction, before any provider call — a crash between the claim and the
+  provider call is a genuine failure (retried per the backoff ladder below),
+  never a silent duplicate send. `ReconcileStuckSending` cleans up
+  crash-orphaned 'sending' rows at boot.
+- **Retry policy.** `messaging.ErrOutsideServiceWindow` and "no existing
+  chat for a warm-only channel" are permanent failures; everything else is
+  transient and steps through a fixed 1m/5m/25m backoff
+  (`purecampaign.NextRetry`) before giving up.
+- **Cold-send vs. warm-only channels.** Only WhatsApp (and the simulator)
+  can originate a brand-new chat from a bare phone number; every other
+  channel requires a chat that already exists from a prior inbound
+  conversation. A cold send creates its chat with `chat_state='campaign'`,
+  which hides it from the default inbox listing (`ListChatsForOrg` excludes
+  it unless a caller filters by status explicitly) until the recipient
+  actually replies — `UpsertInbound` graduates it back to `'open'` on the
+  first inbound message. Graduation is inbound-only, on purpose:
+  `httpapi.sendParts` (the manual/AI reply send path) was deliberately left
+  unaware of `chat_state='campaign'` — a human proactively messaging into a
+  still-hidden chat does not graduate it. That keeps the trigger singular
+  rather than adding a second graduation path that would need its own
+  reasoning about races with the runner concurrently sending to the same
+  recipient.
+- **`realtime.Hub.Broadcast` is global, not org-scoped** ("Build 0
+  broadcasts every event to every connected client... per-user routing is a
+  later concern" — `internal/realtime/hub.go`'s own doc comment; a
+  pre-existing property of the whole app, not something Campaigns
+  introduced). Campaign recipient lists are PII (phone numbers, names) that
+  every connected client across every org would receive if an event payload
+  carried them. All three campaign SSE events — `campaign.status_changed`
+  (`dto.CampaignStatusEvent`), `campaign.recipient_updated`
+  (`dto.CampaignRecipientEvent`), and the scheduler's account-auto-pause
+  event — carry only ids, an enum status string, or a count; never
+  `raw_input`, `normalized_identity`, or a recipient name. A client that
+  wants the actual recipient rows fetches them over the authenticated,
+  org-scoped `GET /campaigns/:id/recipients` REST endpoint, not the SSE
+  stream. This is already enforced in code; it's recorded here so it isn't
+  accidentally undone the next time someone touches these structs.
+- **No `dto.Chat`/`dto.Message` reverse-reference fields.** Considered
+  adding a `campaign_id`/`campaign_recipient_id` field to the chat and
+  message DTOs so the inbox could show "this chat came from campaign X"
+  inline. Skipped: the campaign's own detail page already shows exactly
+  which chat/message resulted from each recipient (via the recipients
+  table), which covers the only place that link is actually needed today.
+  An operator can't yet jump chat→campaign from inside the inbox itself — a
+  real gap, but a small, additive one if it's ever asked for, not worth two
+  new DTO fields and the join needed to populate them on every inbox page
+  load today.
+
 ---
 
 ## Part 1 — the idea, in plain words
