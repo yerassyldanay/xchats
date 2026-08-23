@@ -1,6 +1,6 @@
 import { api } from '../api/client'
 import { log } from './logfmt'
-import type { Chat, Message, AiDraft } from '../types'
+import type { Chat, Message, AiDraft, CampaignStatusEvent, CampaignRecipientEvent } from '../types'
 
 export interface SSEHandlers {
   messageCreated?: (m: Message) => void
@@ -17,6 +17,13 @@ export interface SSEHandlers {
   // full resync; the client merges it into whatever GET /settings/
   // provider-health already hydrated.
   providerHealthChanged?: (d: { provider: string; healthy: boolean; at: string }) => void
+  // Campaigns — ids and an enum status only, deliberately never a
+  // recipient's identity (see internal/campaign.Broadcaster's own doc
+  // comment). campaignAccountAutoPaused fires when a persistently
+  // disconnected account's running campaigns are auto-paused.
+  campaignStatusChanged?: (d: CampaignStatusEvent) => void
+  campaignRecipientUpdated?: (d: CampaignRecipientEvent) => void
+  campaignAccountAutoPaused?: (d: { account_id: string; count: number }) => void
 }
 
 // connectRealtime opens the SSE stream and dispatches each named event. Returns
@@ -42,6 +49,9 @@ export function connectRealtime(h: SSEHandlers): () => void {
   bind('kb.row.changed', h.kbRowChanged)
   bind('kb.approved', h.kbApproved)
   bind('integration.status_changed', h.providerHealthChanged)
+  bind('campaign.status_changed', h.campaignStatusChanged)
+  bind('campaign.recipient_updated', h.campaignRecipientUpdated)
+  bind('campaign.account_auto_paused', h.campaignAccountAutoPaused)
   es.onopen = () => log.info('sse connected')
   es.onerror = () => log.warn('sse error; browser will retry')
   return () => es.close()
