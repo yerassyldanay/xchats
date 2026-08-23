@@ -22,6 +22,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/appdirs"
 	"github.com/yerassyldanay/xchats/backend/internal/automation"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
+	"github.com/yerassyldanay/xchats/backend/internal/campaign"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
@@ -89,6 +90,22 @@ const (
 	automationClaimEvery      = 1 * time.Second
 	automationRecoverEvery    = 1 * time.Minute
 	automationStuckAfter      = 2 * time.Minute
+)
+
+// Campaigns (internal/campaign) cadence. campaignTickEvery only bounds how
+// promptly a newly running campaign (or a newly due retry) is noticed — the
+// real send cadence is governed entirely by each account's own pacing (see
+// campaign.Scheduler.tick's own doc comment), so this can stay short without
+// risking a burst of sends. campaignMaintenanceEvery/campaignDisconnectEvery
+// are both low-frequency bookkeeping passes; campaignDisconnectAfter matches
+// the plan's ">60s disconnected" auto-pause threshold.
+const (
+	campaignTickEvery            = 2 * time.Second
+	campaignMaintenanceEvery     = 15 * time.Second
+	campaignDisconnectCheckEvery = 15 * time.Second
+	campaignDisconnectAfter      = 60 * time.Second
+	campaignPruneEvery           = 1 * time.Hour
+	campaignAccountConcurrency   = 8
 )
 
 func main() {
@@ -367,6 +384,20 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Response: responseService, Senders: senders, Log: log,
 	}
 	q.Start(ctx, w.Handle)
+
+	// campaignScheduler is Campaigns' own independent background process
+	// (internal/campaign): it discovers which accounts have a RUNNING
+	// campaign and drains their eligible recipients through the exact same
+	// internal/outbound.Deliver every manual/AI/automation send uses —
+	// called directly, never through q, since at-most-once delivery needs
+	// the ledger commit to happen before the provider call (see
+	// internal/outbound's own package doc comment).
+	campaignRunner := &campaign.Runner{Store: st, Blob: blobStore, Senders: senders, Hub: hub, Log: log}
+	campaignScheduler := campaign.NewScheduler(st, campaignRunner, campaign.Config{
+		TickEvery: campaignTickEvery, MaintenanceEvery: campaignMaintenanceEvery,
+		DisconnectCheckEvery: campaignDisconnectCheckEvery, DisconnectAfter: campaignDisconnectAfter,
+		PruneEvery: campaignPruneEvery, AccountConcurrency: campaignAccountConcurrency,
+	}, log)
 	// Instagram's long-lived user token is the one Meta-channel credential
 	// that silently expires with no renewal otherwise (WhatsApp Cloud's
 	// business token and Telegram's bot token do not) — see
@@ -397,6 +428,9 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// own startup pass re-publishes whatever a crash left mid-flight, the
 	// same recovery philosophy as the Telegram media sweeper above.
 	automationScheduler.Start(ctx, automationDispatchWorkers, automationClaimEvery, automationRecoverEvery, automationStuckAfter)
+	// Its own startup pass reconciles any send left 'sending' by a crash
+	// (ReconcileStuckSending) before the tick loop starts claiming new ones.
+	campaignScheduler.Start(ctx)
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
@@ -495,9 +529,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// scheduled_auto auto-send (via Runner.dispatchSend) both publish to the
 	// queue, so both producers must stop before the queue stops accepting.
 	// Explicit here (not a defer) so the ordering relative to q.Close() is
-	// guaranteed rather than left to defer's LIFO stacking.
+	// guaranteed rather than left to defer's LIFO stacking. campaignScheduler
+	// never publishes to q (see its own construction comment above) so has
+	// no ordering requirement against q.Close() — stopped alongside the
+	// others here anyway, before the deferred waMgr.Close()/st.Close(), so a
+	// tick already in flight finishes against still-live dependencies.
 	tgMgr.Close()
 	automationScheduler.Stop()
+	campaignScheduler.Stop()
 	q.Close()
 	// kbImportSvc has no producer/consumer relationship with q (its job
 	// queue is kbd_materials, claimed directly via kbstore) — it only needs

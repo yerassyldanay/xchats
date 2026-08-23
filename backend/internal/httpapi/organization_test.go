@@ -73,6 +73,61 @@ func TestSetActiveOrganization_SwitchesAndPersists(t *testing.T) {
 	}
 }
 
+func TestUpdateOrg_NameAndTimezone(t *testing.T) {
+	h := newHarness(t)
+
+	var before struct {
+		Timezone string `json:"timezone"`
+	}
+	h.get("/xchats/api/v1/organization", &before)
+	if before.Timezone != "Asia/Almaty" {
+		t.Fatalf("default timezone = %q, want Asia/Almaty (migration 0012's own default)", before.Timezone)
+	}
+
+	tz := "Europe/Moscow"
+	resp, env := h.putJSON("/xchats/api/v1/organization", map[string]any{"name": "Renamed Org", "timezone": tz})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var updated struct {
+		Name     string `json:"name"`
+		Timezone string `json:"timezone"`
+	}
+	mustPayload(t, env, &updated)
+	if updated.Name != "Renamed Org" || updated.Timezone != tz {
+		t.Fatalf("updated = %+v", updated)
+	}
+
+	// Persisted, not just echoed.
+	var after struct {
+		Timezone string `json:"timezone"`
+	}
+	h.get("/xchats/api/v1/organization", &after)
+	if after.Timezone != tz {
+		t.Errorf("timezone after refetch = %q, want %q", after.Timezone, tz)
+	}
+
+	// An invalid IANA zone name is rejected without touching the stored value.
+	resp, _ = h.putJSON("/xchats/api/v1/organization", map[string]any{"name": "Renamed Org", "timezone": "Not/AZone"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid timezone status = %d, want 400", resp.StatusCode)
+	}
+	h.get("/xchats/api/v1/organization", &after)
+	if after.Timezone != tz {
+		t.Errorf("timezone after rejected update = %q, want unchanged %q", after.Timezone, tz)
+	}
+
+	// Omitting timezone entirely leaves it untouched.
+	resp, env = h.putJSON("/xchats/api/v1/organization", map[string]any{"name": "Renamed Again"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	mustPayload(t, env, &updated)
+	if updated.Timezone != tz {
+		t.Errorf("timezone after name-only update = %q, want unchanged %q", updated.Timezone, tz)
+	}
+}
+
 func TestSetActiveOrganization_RejectsNonMemberOrg(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

@@ -324,16 +324,22 @@ func (s *Server) handleGetOrg(c *gin.Context) {
 		fail(c, http.StatusNotFound, ErrNotFound, "no organization")
 		return
 	}
-	ok(c, gin.H{"id": org.ID, "name": org.Name, "auto_response_mode": org.RespondMode})
+	ok(c, gin.H{"id": org.ID, "name": org.Name, "auto_response_mode": org.RespondMode, "timezone": org.Timezone})
 }
 
 type updateOrgReq struct {
 	Name string `json:"name"`
+	// Timezone is optional: nil leaves the organization's stored timezone
+	// unchanged (only Name is required on every save — see the Team
+	// settings form, which always sends the current timezone back anyway,
+	// but a nil here still means "don't touch it" for any other caller).
+	Timezone *string `json:"timezone"`
 }
 
-// handleUpdateOrg renames the current organization — the Team management
-// UI's "org rename" action, and (per RequireAdmin, which gates this route)
-// an admin-only one.
+// handleUpdateOrg renames the current organization and, when given, updates
+// its display-default timezone (Organization.Timezone's own doc comment) —
+// the Team management UI's "org rename" action, and (per RequireAdmin, which
+// gates this route) an admin-only one.
 func (s *Server) handleUpdateOrg(c *gin.Context) {
 	var req updateOrgReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -345,6 +351,14 @@ func (s *Server) handleUpdateOrg(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "name is required")
 		return
 	}
+	timezone := ""
+	if req.Timezone != nil {
+		timezone = strings.TrimSpace(*req.Timezone)
+		if _, err := time.LoadLocation(timezone); err != nil {
+			fail(c, http.StatusBadRequest, ErrValidation, "timezone must be a valid IANA zone name")
+			return
+		}
+	}
 	org, okOrg := s.orgOf(c)
 	if !okOrg {
 		return
@@ -353,7 +367,14 @@ func (s *Server) handleUpdateOrg(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	ok(c, gin.H{"id": org.ID, "name": name, "auto_response_mode": org.RespondMode})
+	if req.Timezone != nil {
+		if err := s.store.SetOrganizationTimezone(ctx(c), org.ID, timezone); err != nil {
+			fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+			return
+		}
+		org.Timezone = timezone
+	}
+	ok(c, gin.H{"id": org.ID, "name": name, "auto_response_mode": org.RespondMode, "timezone": org.Timezone})
 }
 
 func (s *Server) handleListUsers(c *gin.Context) {

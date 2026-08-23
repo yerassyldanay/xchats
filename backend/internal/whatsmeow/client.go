@@ -28,6 +28,11 @@ type waClient interface {
 	GenerateMessageID() types.MessageID
 	Upload(ctx context.Context, data []byte, appInfo wm.MediaType) (wm.UploadResponse, error)
 	Download(ctx context.Context, msg wm.DownloadableMessage) ([]byte, error)
+	// IsOnWhatsApp batch-checks phone registration — Campaigns' preview-time
+	// reachability check (an "invalid: not registered on WhatsApp" bucket)
+	// and its send-time permanent-failure classification both go through
+	// Manager.IsOnWhatsApp, which calls this.
+	IsOnWhatsApp(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error)
 }
 
 var _ waClient = (*wm.Client)(nil)

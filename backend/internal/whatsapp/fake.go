@@ -35,6 +35,12 @@ type Fake struct {
 	pairSessionID string
 	pairUpdate    PairingUpdate
 	LoggedOut     []string
+
+	// NotOnWhatsApp is the set of (digits-only, no "+") phones IsOnWhatsApp
+	// reports as NOT registered — every phone not listed here is reported
+	// registered, the harness-friendly default for tests that don't care
+	// about this check at all.
+	NotOnWhatsApp map[string]bool
 }
 
 // SentCall records one outbound send for test assertions.
@@ -122,6 +128,16 @@ func (f *Fake) InjectDebugEvent(ctx context.Context, evt DebugEvent) (DebugEvent
 	default:
 		return DebugEventResult{}, fmt.Errorf("whatsapp.Fake: unknown event_type %q", evt.EventType)
 	}
+}
+
+// IsOnWhatsApp reports every queried phone as registered, except those a
+// test has explicitly listed in NotOnWhatsApp.
+func (f *Fake) IsOnWhatsApp(ctx context.Context, accountID string, phones []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(phones))
+	for _, p := range phones {
+		out[p] = !f.NotOnWhatsApp[p]
+	}
+	return out, nil
 }
 
 func (f *Fake) injectMessage(ctx context.Context, accountID uuid.UUID, evt DebugEvent) (DebugEventResult, error) {

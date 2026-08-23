@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -555,6 +556,50 @@ func (m *Manager) Logout(ctx context.Context, accountID string) error {
 // outbound sends through this manager's live per-account clients.
 func (m *Manager) ChannelSender() messaging.ChannelSender {
 	return &Sender{manager: m}
+}
+
+// IsOnWhatsApp batch-checks phone registration through accountID's live
+// connection — Campaigns' preview-time reachability check (an "invalid: not
+// registered on WhatsApp" bucket) and its send-time permanent-failure
+// classification both call this. Each phone is queried with a leading "+"
+// (whatsmeow's own documented format); the returned map is keyed by the
+// SAME digits-only, no-"+" form backend/campaign.NormalizePhone produces,
+// so a caller looks a recipient's own normalized identity up directly. A
+// phone the provider's response never echoes back is simply absent from the
+// map — the caller treats "absent" as unknown, never as registered.
+func (m *Manager) IsOnWhatsApp(ctx context.Context, accountID string, phones []string) (map[string]bool, error) {
+	mc, ok := m.clientFor(accountID)
+	if !ok {
+		return nil, fmt.Errorf("whatsmeow: account %s is not connected", accountID)
+	}
+	queries := make([]string, len(phones))
+	for i, p := range phones {
+		queries[i] = "+" + digitsOnly(p)
+	}
+	results, err := mc.client.IsOnWhatsApp(ctx, queries)
+	if err != nil {
+		return nil, fmt.Errorf("whatsmeow: is on whatsapp: %w", err)
+	}
+	out := make(map[string]bool, len(results))
+	for _, r := range results {
+		if key := digitsOnly(r.Query); key != "" {
+			out[key] = r.IsIn
+		}
+	}
+	return out, nil
+}
+
+// digitsOnly keeps only ASCII digits — used to build/parse the "+"-prefixed
+// phone strings IsOnWhatsApp's own documented calling convention wants,
+// independent of config.CanonicalJID's JID-shaped normalization.
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteByte(byte(r))
+		}
+	}
+	return b.String()
 }
 
 // InjectDebugEvent feeds a synthetic event through the exact same

@@ -111,6 +111,75 @@ func TestEnumChecksEnforced(t *testing.T) {
 			VALUES ('h2', 'c4', 'https://example.com/cb', 'challenge', 'plain', 'u1', '11111111-1111-1111-1111-111111111111', $1)`,
 			"2030-01-01 00:00:00.000")
 	})
+
+	t.Run("campaigns.channel", func(t *testing.T) {
+		mustExec(t, db, ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u-camp-1', 'u-camp-1@example.com', 'x')`)
+		for i, ch := range []string{"whatsapp", "simulator", "telegram", "instagram", "messenger", "whatsapp_cloud"} {
+			mustExec(t, db, ctx, `INSERT INTO campaigns
+				(id, organization_id, name, account_id, channel, created_by)
+				VALUES ($1, '11111111-1111-1111-1111-111111111111', 'campaign', 'acct-1', $2, 'u-camp-1')`,
+				"camp-channel-"+strconv.Itoa(i), ch)
+		}
+		mustReject(t, db, ctx, `INSERT INTO campaigns
+			(id, organization_id, name, account_id, channel, created_by)
+			VALUES ('camp-channel-bad', '11111111-1111-1111-1111-111111111111', 'campaign', 'acct-1', 'discord', 'u-camp-1')`)
+	})
+
+	t.Run("campaigns.status", func(t *testing.T) {
+		mustExec(t, db, ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u-camp-2', 'u-camp-2@example.com', 'x')`)
+		for i, status := range []string{"draft", "scheduled", "running", "paused", "completed", "failed", "cancelled"} {
+			mustExec(t, db, ctx, `INSERT INTO campaigns
+				(id, organization_id, name, account_id, channel, status, created_by)
+				VALUES ($1, '11111111-1111-1111-1111-111111111111', 'campaign', 'acct-1', 'whatsapp', $2, 'u-camp-2')`,
+				"camp-status-"+strconv.Itoa(i), status)
+		}
+		mustReject(t, db, ctx, `INSERT INTO campaigns
+			(id, organization_id, name, account_id, channel, status, created_by)
+			VALUES ('camp-status-bad', '11111111-1111-1111-1111-111111111111', 'campaign', 'acct-1', 'whatsapp', 'active', 'u-camp-2')`)
+	})
+
+	t.Run("campaign_recipients.status", func(t *testing.T) {
+		mustExec(t, db, ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u-camp-3', 'u-camp-3@example.com', 'x')`)
+		mustExec(t, db, ctx, `INSERT INTO campaigns
+			(id, organization_id, name, account_id, channel, created_by)
+			VALUES ('camp-for-recipients', '11111111-1111-1111-1111-111111111111', 'campaign', 'acct-1', 'whatsapp', 'u-camp-3')`)
+		for i, status := range []string{"pending", "sending", "sent", "failed", "skipped"} {
+			mustExec(t, db, ctx, `INSERT INTO campaign_recipients
+				(campaign_id, normalized_identity, status) VALUES ('camp-for-recipients', $1, $2)`,
+				"7700000"+strconv.Itoa(i), status)
+		}
+		mustReject(t, db, ctx, `INSERT INTO campaign_recipients
+			(campaign_id, normalized_identity, status) VALUES ('camp-for-recipients', '77000009', 'queued')`)
+	})
+
+	t.Run("campaign_account_settings.limit_mode", func(t *testing.T) {
+		mustExec(t, db, ctx, `INSERT INTO campaign_account_settings (account_id, limit_mode) VALUES ('acct-mode-1', 'default')`)
+		mustExec(t, db, ctx, `INSERT INTO campaign_account_settings (account_id, limit_mode) VALUES ('acct-mode-2', 'custom')`)
+		mustReject(t, db, ctx, `INSERT INTO campaign_account_settings (account_id, limit_mode) VALUES ('acct-mode-3', 'unlimited')`)
+	})
+
+	t.Run("campaign_send_log.outcome and origin", func(t *testing.T) {
+		mustExec(t, db, ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u-camp-4', 'u-camp-4@example.com', 'x')`)
+		mustExec(t, db, ctx, `INSERT INTO campaigns
+			(id, organization_id, name, account_id, channel, created_by)
+			VALUES ('camp-for-log', '11111111-1111-1111-1111-111111111111', 'campaign', 'acct-1', 'whatsapp', 'u-camp-4')`)
+		mustExec(t, db, ctx, `INSERT INTO campaign_recipients
+			(id, campaign_id, normalized_identity) VALUES ('recip-for-log', 'camp-for-log', '77000001')`)
+		for _, outcome := range []string{"sent", "failed"} {
+			mustExec(t, db, ctx, `INSERT INTO campaign_send_log
+				(account_id, campaign_id, recipient_id, outcome) VALUES ('acct-1', 'camp-for-log', 'recip-for-log', $1)`,
+				outcome)
+		}
+		mustReject(t, db, ctx, `INSERT INTO campaign_send_log
+			(account_id, campaign_id, recipient_id, outcome) VALUES ('acct-1', 'camp-for-log', 'recip-for-log', 'queued')`)
+		for _, origin := range []string{"campaign", "manual", "ai"} {
+			mustExec(t, db, ctx, `INSERT INTO campaign_send_log
+				(account_id, campaign_id, recipient_id, outcome, origin) VALUES ('acct-1', 'camp-for-log', 'recip-for-log', 'sent', $1)`,
+				origin)
+		}
+		mustReject(t, db, ctx, `INSERT INTO campaign_send_log
+			(account_id, campaign_id, recipient_id, outcome, origin) VALUES ('acct-1', 'camp-for-log', 'recip-for-log', 'sent', 'automation')`)
+	})
 }
 
 func mustExec(t *testing.T, db *dbx.DB, ctx context.Context, query string, args ...any) {
