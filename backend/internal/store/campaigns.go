@@ -310,7 +310,7 @@ func (s *Store) ListCampaignsForOrg(ctx context.Context, orgID uuid.UUID, limit,
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Campaign
 	for rows.Next() {
 		c, err := scanCampaign(rows)
@@ -531,7 +531,7 @@ func (s *Store) ListCampaignEvents(ctx context.Context, campaignID uuid.UUID, li
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []CampaignEvent
 	for rows.Next() {
 		var e CampaignEvent
@@ -637,7 +637,7 @@ func (s *Store) ListCampaignRecipients(ctx context.Context, campaignID uuid.UUID
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []CampaignRecipient
 	for rows.Next() {
 		r, err := scanCampaignRecipient(rows)
@@ -663,7 +663,7 @@ func (s *Store) CampaignRecipientCounts(ctx context.Context, campaignID uuid.UUI
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]int{}
 	for rows.Next() {
 		var status string
@@ -735,7 +735,7 @@ func (s *Store) CampaignWindowsFor(ctx context.Context, campaignID uuid.UUID) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanCampaignWindowRows(rows)
 }
 
@@ -745,7 +745,7 @@ func (s *Store) CampaignAccountWindowsFor(ctx context.Context, accountID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanCampaignWindowRows(rows)
 }
 
@@ -786,7 +786,7 @@ func campaignWindows(ctx context.Context, q dbx.DBTX, campaignID uuid.UUID) ([]p
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanPureWindows(rows)
 }
 
@@ -795,7 +795,7 @@ func campaignAccountWindows(ctx context.Context, q dbx.DBTX, accountID uuid.UUID
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanPureWindows(rows)
 }
 
@@ -847,7 +847,7 @@ func campaignAccountLimits(ctx context.Context, q dbx.DBTX, accountID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []purecampaign.Tier
 	for rows.Next() {
 		var t purecampaign.Tier
@@ -949,7 +949,12 @@ func jitteredSeconds(base, jitter int) int {
 	if jitter <= 0 {
 		return base
 	}
-	delta := rand.Intn(2*jitter+1) - jitter
+	// G404: this jitter only varies send SPACING so a campaign's cadence
+	// doesn't look mechanically periodic. It guards nothing — an observer
+	// predicting the next delay learns nothing they couldn't time
+	// themselves — so a CSPRNG would buy no security and cost an error
+	// path on every claim.
+	delta := rand.Intn(2*jitter+1) - jitter //nolint:gosec // G404: see above — pacing cosmetics, not a security boundary
 	if base+delta < 0 {
 		return 0
 	}
@@ -1037,7 +1042,7 @@ func campaignSendAttempts(ctx context.Context, q dbx.DBTX, accountID uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []time.Time
 	for rows.Next() {
 		var t time.Time
@@ -1128,7 +1133,7 @@ func (s *Store) ClaimNextRecipient(ctx context.Context, accountID uuid.UUID, now
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.recipientID, &c.campaignID, &c.identity, &c.rawInput, &c.name, &c.attrsRaw, &c.channel, &c.messageBody, &c.attempts); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return Claim{}, false, err
 		}
 		candidates = append(candidates, c)
@@ -1321,7 +1326,7 @@ func (s *Store) ListRunningCampaignAccounts(ctx context.Context) ([]uuid.UUID, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out, err := scanUUIDRows(rows)
 	if err != nil {
 		return nil, err
@@ -1340,7 +1345,7 @@ func (s *Store) RunningCampaignIDs(ctx context.Context) ([]uuid.UUID, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out, err := scanUUIDRows(rows)
 	if err != nil {
 		return nil, err
@@ -1358,7 +1363,7 @@ func (s *Store) DueScheduledCampaigns(ctx context.Context, now time.Time) ([]uui
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out, err := scanUUIDRows(rows)
 	if err != nil {
 		return nil, err
@@ -1399,7 +1404,7 @@ func (s *Store) AutoPauseCampaignsForAccount(ctx context.Context, accountID uuid
 		return 0, err
 	}
 	ids, err := scanUUIDRows(rows)
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return 0, err
 	}
@@ -1465,7 +1470,7 @@ func (s *Store) UnreachableForWarmChannel(ctx context.Context, accountID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]bool{}
 	for rows.Next() {
 		var id string
