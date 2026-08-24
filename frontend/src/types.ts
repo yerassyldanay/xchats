@@ -8,6 +8,10 @@ export interface User {
 export interface Organization {
   id: string
   name: string
+  // timezone is an IANA zone name — purely a display default for the
+  // campaign quiet-hours window picker (lib/schedule.ts does the actual
+  // local<->UTC conversion); nothing server-side computes with it.
+  timezone?: string
 }
 
 // Page mirrors internal/httpapi.page — the generic list-pagination envelope
@@ -970,4 +974,162 @@ export interface CatalogFile {
   generated_at: string
   scenarios: CatalogScenario[]
   extract_cases: CatalogExtractCase[]
+}
+
+// --- Campaigns (backend/campaign, internal/campaign, internal/httpapi/campaigns.go) ---
+// Bulk outbound messaging against a pasted/uploaded recipient list,
+// rate-limited per sending account. A campaign's own windows and an
+// account's shared quiet-hours windows both use the SAME ScheduleWindow
+// shape as channel automation above (weekday 0=Sunday..6=Saturday UTC) —
+// lib/schedule.ts's utcToLocal/localToUtc apply unchanged to either.
+
+export type CampaignStatus = 'draft' | 'scheduled' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+export type CampaignRecipientStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'skipped'
+
+// Campaign mirrors dto.Campaign. min_interval_seconds/jitter_seconds are
+// null when the campaign has no pace override of its own (inherits the
+// sending account's shared pace); windows narrow the account's own
+// quiet-hours windows further, never widen them.
+export interface Campaign {
+  id: string
+  name: string
+  account_id: string
+  channel: ChannelName
+  status: CampaignStatus
+  message_body: string
+  variables: string[]
+  min_interval_seconds: number | null
+  jitter_seconds: number | null
+  windows: ScheduleWindow[]
+  schedule_at: string | null
+  started_at: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  // recipient_counts keys by CampaignRecipientStatus — never null (an empty
+  // object for a brand new draft), the list/detail views' progress bars.
+  recipient_counts: Record<string, number>
+}
+
+// CampaignPatch is PATCH /campaigns/:id's body — an OMITTED key leaves that
+// field untouched; min_interval_seconds/jitter_seconds must be given
+// together (both a number, or both explicit null to clear the override
+// back to inheriting the account's pace) or the request is rejected.
+// JSON.stringify already gives exactly this wire shape: an `undefined`
+// value is dropped from the object, an explicit `null` is kept.
+export interface CampaignPatch {
+  name?: string
+  message_body?: string
+  account_id?: string
+  min_interval_seconds?: number | null
+  jitter_seconds?: number | null
+  schedule_at?: string | null
+  windows?: ScheduleWindow[]
+}
+
+// CampaignRecipient mirrors dto.CampaignRecipient — one persisted recipient
+// row.
+export interface CampaignRecipient {
+  id: string
+  campaign_id: string
+  normalized_identity: string
+  raw_input: string
+  name: string
+  attributes?: Record<string, string>
+  status: CampaignRecipientStatus
+  failure_reason: string
+  attempts: number
+  next_attempt_at: string | null
+  chat_id: string | null
+  message_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+// CampaignEvent mirrors dto.CampaignEvent — one campaign timeline entry
+// (started, paused, auto_paused, recipients_replaced, retried_failed, ...).
+export interface CampaignEvent {
+  id: string
+  campaign_id: string
+  event: string
+  actor_user_id: string | null
+  detail?: Record<string, unknown>
+  created_at: string
+}
+
+// CampaignTier mirrors dto.CampaignTier — one simultaneous rolling-window
+// cap. used is present only in a SendingBudget response, absent in a plain
+// CampaignAccountSettings read (configuration only, no live usage).
+export interface CampaignTier {
+  window_seconds: number
+  max_sends: number
+  used?: number
+}
+
+// CampaignAccountSettings mirrors dto.CampaignAccountSettings — GET/PUT
+// /accounts/:id/sending-limits' shape: an account's pace, manual pause
+// switch, full tier set, and full quiet-hours window set, always saved as
+// one complete replace (never a partial patch).
+export interface CampaignAccountSettings {
+  account_id: string
+  limit_mode: 'default' | 'custom'
+  min_interval_seconds: number
+  jitter_seconds: number
+  paused: boolean
+  tiers: CampaignTier[]
+  windows: ScheduleWindow[]
+}
+
+// SendingBudget mirrors dto.SendingBudget — GET /accounts/:id/sending-budget's
+// LIVE read: the shared widget the Accounts page, the campaign wizard, and a
+// campaign's own detail page all render from.
+export interface SendingBudget {
+  account_id: string
+  min_interval_seconds: number
+  jitter_seconds: number
+  paused: boolean
+  allowed: boolean
+  throttled_by: number
+  next_send_at: string
+  tiers: CampaignTier[]
+}
+
+// CampaignRecipientPreviewRow mirrors dto.CampaignRecipientPreview — one
+// row of a preview (or a post-save PUT .../recipients) response.
+// normalized_identity is set only for 'valid'; reason is set for
+// 'invalid'/'duplicate'.
+export interface CampaignRecipientPreviewRow {
+  raw: string
+  name?: string
+  attributes?: Record<string, string>
+  normalized_identity?: string
+  status: 'valid' | 'invalid' | 'duplicate'
+  reason?: string
+}
+
+// CampaignRecipientPreviewResult mirrors dto.CampaignRecipientPreviewResult
+// — POST /campaigns/:id/preview and PUT /campaigns/:id/recipients' shared
+// response shape (the former never persists; the latter has just persisted
+// every 'valid' row).
+export interface CampaignRecipientPreviewResult {
+  rows: CampaignRecipientPreviewRow[]
+  total: number
+  valid: number
+  invalid: number
+  duplicate: number
+}
+
+// CampaignStatusEvent/CampaignRecipientEvent mirror dto.CampaignStatusEvent/
+// dto.CampaignRecipientEvent — the campaign.status_changed/
+// campaign.recipient_updated SSE payloads. Deliberately ids + an enum
+// status only, never a recipient's identity — see internal/campaign.
+// Broadcaster's own doc comment (backend/internal/campaign/runner.go).
+export interface CampaignStatusEvent {
+  campaign_id: string
+  status: CampaignStatus
+}
+export interface CampaignRecipientEvent {
+  campaign_id: string
+  recipient_id: string
+  status: CampaignRecipientStatus
 }

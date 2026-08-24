@@ -1,7 +1,7 @@
 import { api } from '../api/client'
 import { log } from './logfmt'
 import { desktopRuntime, type DesktopRuntime } from './desktop'
-import type { Chat, Message, AiDraft } from '../types'
+import type { Chat, Message, AiDraft, CampaignStatusEvent, CampaignRecipientEvent } from '../types'
 
 export interface SSEHandlers {
   messageCreated?: (m: Message) => void
@@ -18,6 +18,13 @@ export interface SSEHandlers {
   // full resync; the client merges it into whatever GET /settings/
   // provider-health already hydrated.
   providerHealthChanged?: (d: { provider: string; healthy: boolean; at: string }) => void
+  // Campaigns — ids and an enum status only, deliberately never a
+  // recipient's identity (see internal/campaign.Broadcaster's own doc
+  // comment). campaignAccountAutoPaused fires when a persistently
+  // disconnected account's running campaigns are auto-paused.
+  campaignStatusChanged?: (d: CampaignStatusEvent) => void
+  campaignRecipientUpdated?: (d: CampaignRecipientEvent) => void
+  campaignAccountAutoPaused?: (d: { account_id: string; count: number }) => void
 }
 
 // bindings pairs each backend event name with the handler that wants it. The
@@ -34,6 +41,9 @@ function bindings(h: SSEHandlers): Array<[string, ((d: any) => void) | undefined
     ['kb.row.changed', h.kbRowChanged],
     ['kb.approved', h.kbApproved],
     ['integration.status_changed', h.providerHealthChanged],
+    ['campaign.status_changed', h.campaignStatusChanged],
+    ['campaign.recipient_updated', h.campaignRecipientUpdated],
+    ['campaign.account_auto_paused', h.campaignAccountAutoPaused],
   ]
 }
 

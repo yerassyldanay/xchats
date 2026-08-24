@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	purecampaign "github.com/yerassyldanay/xchats/backend/campaign"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
@@ -196,6 +197,40 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 			WHERE id = $1`, res.ChatID, ts, in.Preview); err != nil {
 			return res, wrap("update aggregates", err)
+		}
+
+		// Campaign-only chats (chat_state='campaign' — see
+		// MarkChatCampaignOnly's own doc comment) graduate to a normal 'open'
+		// chat the moment ANY genuine activity lands on them, by the same
+		// MessageInserted reasoning the suppression block below uses: a
+		// customer reply or an operator's own out-of-band send both mean this
+		// is no longer just a cold campaign send sitting outside the normal
+		// inbox. A no-op UPDATE (WHERE chat_state = 'campaign' matches
+		// nothing) for every chat that was never campaign-only to begin with.
+		if _, err := tx.Exec(ctx, `
+			UPDATE wa_chats SET chat_state = 'open', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			WHERE id = $1 AND chat_state = 'campaign'`, res.ChatID); err != nil {
+			return res, wrap("graduate campaign chat", err)
+		}
+
+		// Reply suppression (plan: Campaigns): a genuinely new message on
+		// this identity — a customer's inbound reply, or an operator's own
+		// send from their phone that bypassed xchats' compose UI entirely
+		// (which is why this is keyed on MessageInserted rather than
+		// Direction: a send made THROUGH xchats' own compose already has its
+		// row from InsertOutbound, so its later fromMe echo collapses onto
+		// that existing row here rather than inserting a new one, and
+		// correctly does NOT re-trigger this) — means the identity has now
+		// been contacted outside the campaign machinery. Every still-pending
+		// row for it, in every RUNNING campaign on this same account, is
+		// marked 'skipped' in the SAME transaction as this upsert, so the
+		// two can never disagree about whether it happened.
+		if in.PhoneNumber != "" {
+			if identity, ok := purecampaign.NormalizePhone(in.PhoneNumber, purecampaign.DefaultCountryCode); ok {
+				if _, err := suppressPendingForIdentity(ctx, tx, in.AccountID, identity, "customer contact detected outside the campaign"); err != nil {
+					return res, err
+				}
+			}
 		}
 	}
 

@@ -33,4 +33,9 @@ const (
 	ErrMetaError                 = "META_ERROR"                   // Meta's Graph API rejected a call — see the message for its own error text
 	ErrMetaAppNotConfigured      = "META_APP_NOT_CONFIGURED"      // no "meta" App ID/Secret saved in Settings yet
 	ErrInstagramAppNotConfigured = "INSTAGRAM_APP_NOT_CONFIGURED" // no "instagram" App ID/Secret saved in Settings yet — see credentials.KeyInstagramAppID
+
+	// Campaigns surface (internal/httpapi/campaigns.go).
+	ErrCampaignInvalidTransition = "CAMPAIGN_INVALID_TRANSITION" // the requested status change isn't one backend/campaign.CanTransition allows from the campaign's current status
+	ErrCampaignLocked            = "CAMPAIGN_LOCKED"             // the requested edit isn't allowed right now — see the message for which field group and why
+	ErrCampaignEmpty             = "CAMPAIGN_EMPTY"              // POST .../start with no pending recipients to send to
 )

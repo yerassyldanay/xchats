@@ -68,6 +68,14 @@ type Organization struct {
 	ID          uuid.UUID
 	Name        string
 	RespondMode string
+	// Timezone is an IANA zone name (e.g. "Asia/Almaty") — purely a display
+	// default for the frontend's campaign quiet-hours window picker
+	// (frontend/src/lib/schedule.ts already does the local<->UTC conversion
+	// for automation's own windows; campaigns reuse it). Every campaign
+	// window is stored and evaluated in UTC regardless — see
+	// backend/campaign.Window's own doc comment — so nothing server-side
+	// ever reads this field for a computation.
+	Timezone string
 }
 
 type User struct {
@@ -217,16 +225,16 @@ func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization
 	// DO NOTHING` with no conflict target, so every boot inserted a fresh "xchats"
 	// — this stops that at the source without deleting the historical duplicates.
 	err := s.db.QueryRow(ctx, `
-		SELECT o.id, o.name, o.respond_mode
+		SELECT o.id, o.name, o.respond_mode, o.timezone
 		FROM organizations o
 		WHERE o.name = $1
 		ORDER BY `+orgOwnsAccountExpr+` DESC,
 		         o.created_at ASC
-		LIMIT 1`, name).Scan(&o.ID, &o.Name, &o.RespondMode)
+		LIMIT 1`, name).Scan(&o.ID, &o.Name, &o.RespondMode, &o.Timezone)
 	if errors.Is(err, dbx.ErrNoRows) {
 		err = s.db.QueryRow(ctx, `
 			INSERT INTO organizations (name) VALUES ($1)
-			RETURNING id, name, respond_mode`, name).Scan(&o.ID, &o.Name, &o.RespondMode)
+			RETURNING id, name, respond_mode, timezone`, name).Scan(&o.ID, &o.Name, &o.RespondMode, &o.Timezone)
 	}
 	return o, err
 }
@@ -680,12 +688,24 @@ func (s *Store) SetMembershipRole(ctx context.Context, orgID, userID uuid.UUID, 
 }
 
 // RenameOrganization updates an organization's display name (the Team
-// management UI's "org rename" action — the only organization field that UI
-// exposes; auto_response_mode has no editor yet).
+// management UI's "org rename" action; auto_response_mode has no editor
+// yet). See SetOrganizationTimezone for the one other user-editable field.
 func (s *Store) RenameOrganization(ctx context.Context, orgID uuid.UUID, name string) error {
 	_, err := s.db.Exec(ctx, `
 		UPDATE organizations SET name = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		WHERE id = $1`, orgID, name)
+	return err
+}
+
+// SetOrganizationTimezone updates an organization's display-default IANA
+// timezone — see Organization.Timezone's own doc comment for why this is
+// purely a frontend default, never read for a backend computation. A
+// separate call from RenameOrganization (rather than one combined update)
+// since the API accepts it as an independently optional field.
+func (s *Store) SetOrganizationTimezone(ctx context.Context, orgID uuid.UUID, timezone string) error {
+	_, err := s.db.Exec(ctx, `
+		UPDATE organizations SET timezone = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id = $1`, orgID, timezone)
 	return err
 }
 
@@ -695,13 +715,13 @@ func (s *Store) OrgForUser(ctx context.Context, userID uuid.UUID) (Organization,
 	// any channel (where the chats live), then the oldest. Guards against a stray
 	// duplicate org silently shadowing the real one (see migration 0003).
 	err := s.db.QueryRow(ctx, `
-		SELECT o.id, o.name, o.respond_mode
+		SELECT o.id, o.name, o.respond_mode, o.timezone
 		FROM organizations o
 		JOIN organization_users ou ON ou.organization_id = o.id
 		WHERE ou.user_id = $1
 		ORDER BY `+orgOwnsAccountExpr+` DESC,
 		         o.created_at ASC
-		LIMIT 1`, userID).Scan(&o.ID, &o.Name, &o.RespondMode)
+		LIMIT 1`, userID).Scan(&o.ID, &o.Name, &o.RespondMode, &o.Timezone)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return o, ErrNotFound
 	}
@@ -716,7 +736,7 @@ func (s *Store) OrgForUser(ctx context.Context, userID uuid.UUID) (Organization,
 // organization").
 func (s *Store) OrgsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT o.id, o.name, o.respond_mode
+		SELECT o.id, o.name, o.respond_mode, o.timezone
 		FROM organizations o
 		JOIN organization_users ou ON ou.organization_id = o.id
 		WHERE ou.user_id = $1
@@ -728,7 +748,7 @@ func (s *Store) OrgsForUser(ctx context.Context, userID uuid.UUID) ([]Organizati
 	var out []Organization
 	for rows.Next() {
 		var o Organization
-		if err := rows.Scan(&o.ID, &o.Name, &o.RespondMode); err != nil {
+		if err := rows.Scan(&o.ID, &o.Name, &o.RespondMode, &o.Timezone); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
@@ -742,8 +762,8 @@ func (s *Store) OrgsForUser(ctx context.Context, userID uuid.UUID) ([]Organizati
 // first.
 func (s *Store) OrgByID(ctx context.Context, orgID uuid.UUID) (Organization, error) {
 	var o Organization
-	err := s.db.QueryRow(ctx, `SELECT id, name, respond_mode FROM organizations WHERE id = $1`, orgID).
-		Scan(&o.ID, &o.Name, &o.RespondMode)
+	err := s.db.QueryRow(ctx, `SELECT id, name, respond_mode, timezone FROM organizations WHERE id = $1`, orgID).
+		Scan(&o.ID, &o.Name, &o.RespondMode, &o.Timezone)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return o, ErrNotFound
 	}

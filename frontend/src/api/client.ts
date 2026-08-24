@@ -1,5 +1,5 @@
 import { log } from '../lib/logfmt'
-import type { KbImportProviderCapability, KbImportRun } from '../types'
+import type { KbImportProviderCapability, KbImportRun, CampaignRecipientPreviewResult } from '../types'
 
 // Env-driven addressing: VITE_API_BASE_URL points at the backend. Empty means
 // same-origin (dev uses the Vite proxy; prod fronts both behind one domain).
@@ -107,4 +107,27 @@ export const api = {
     const res = await send<{ providers: KbImportProviderCapability[] }>('GET', '/kb/import/providers')
     return res.providers
   },
+
+  // campaignRecipientsBody is POST .../preview and PUT .../recipients'
+  // shared multipart body (backend/internal/httpapi/campaigns.go's
+  // campaignRecipientsInput): a pasted "text" field, an uploaded "file"
+  // field, or both (the backend prefers the file when both are present).
+  async previewCampaignRecipients(campaignId: string, input: { text?: string; file?: File }): Promise<CampaignRecipientPreviewResult> {
+    return campaignRecipientsRequest(`/campaigns/${campaignId}/preview`, input)
+  },
+  async replaceCampaignRecipients(campaignId: string, input: { text?: string; file?: File }): Promise<CampaignRecipientPreviewResult> {
+    return campaignRecipientsRequest(`/campaigns/${campaignId}/recipients`, input, 'PUT')
+  },
+}
+
+async function campaignRecipientsRequest(
+  path: string,
+  input: { text?: string; file?: File },
+  method: 'POST' | 'PUT' = 'POST',
+): Promise<CampaignRecipientPreviewResult> {
+  const form = new FormData()
+  if (input.file) form.append('file', input.file)
+  else if (input.text) form.append('text', input.text)
+  const res = await fetch(API_BASE + PREFIX + path, { method, credentials: 'include', body: form })
+  return unwrap(res, path)
 }

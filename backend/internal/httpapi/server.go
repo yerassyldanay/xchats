@@ -382,6 +382,11 @@ func (s *Server) Router() *gin.Engine {
 	// neutral route for every channel (see orgAnyAccount's own doc comment
 	// on why it does not exclude Telegram the way orgAccount does).
 	auth.PUT("/accounts/:id/automation", s.handleUpdateAccountAutomation)
+	// Campaigns' per-account pacing surface — same orgAnyAccount scoping,
+	// every channel (see campaigns.go's own file header).
+	auth.GET("/accounts/:id/sending-budget", s.handleAccountSendingBudget)
+	auth.GET("/accounts/:id/sending-limits", s.handleGetAccountSendingLimits)
+	auth.PUT("/accounts/:id/sending-limits", s.handleSetAccountSendingLimits)
 
 	// WhatsApp accounts manager: connect via whatsmeow's own QR pairing
 	// (internal/whatsmeow), no external gateway involved.
@@ -442,6 +447,26 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/chats/:id/ai-drafts", s.handleListDrafts)
 	auth.POST("/chats/:id/ai-drafts", s.handleSuggest)
 	auth.POST("/ai-drafts/:id/approve", s.handleApprove)
+
+	// Campaigns (plan/DECISIONS.md) — bulk outbound messaging against a
+	// pasted/uploaded recipient list. See campaigns.go's own file header:
+	// every route here talks to the store directly, never to internal/
+	// campaign's Scheduler/Runner, which run independently in the background.
+	auth.GET("/campaigns", s.handleListCampaigns)
+	auth.POST("/campaigns", s.handleCreateCampaign)
+	auth.GET("/campaigns/:id", s.handleGetCampaign)
+	auth.PATCH("/campaigns/:id", s.handleUpdateCampaign)
+	auth.DELETE("/campaigns/:id", s.handleDeleteCampaign)
+	auth.POST("/campaigns/:id/duplicate", s.handleDuplicateCampaign)
+	auth.POST("/campaigns/:id/preview", s.handleCampaignPreview)
+	auth.PUT("/campaigns/:id/recipients", s.handleReplaceCampaignRecipients)
+	auth.GET("/campaigns/:id/recipients", s.handleListCampaignRecipients)
+	auth.POST("/campaigns/:id/recipients/retry-failed", s.handleRetryFailedCampaignRecipients)
+	auth.GET("/campaigns/:id/events", s.handleListCampaignEvents)
+	auth.POST("/campaigns/:id/start", s.handleStartCampaign)
+	auth.POST("/campaigns/:id/pause", s.handlePauseCampaign)
+	auth.POST("/campaigns/:id/resume", s.handleResumeCampaign)
+	auth.POST("/campaigns/:id/stop", s.handleStopCampaign)
 
 	auth.POST("/media", s.handleUploadMedia)
 	auth.GET("/media/:id", s.handleServeMedia)

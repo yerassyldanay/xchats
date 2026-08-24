@@ -7,6 +7,9 @@ import Accounts from './views/Accounts.vue'
 import Playground from './views/Playground.vue'
 import KnowledgeBase from './views/KnowledgeBase.vue'
 import Simulator from './views/Simulator.vue'
+import Campaigns from './views/Campaigns.vue'
+import CampaignWizard from './views/CampaignWizard.vue'
+import CampaignDetail from './views/CampaignDetail.vue'
 import EvalRuns from './views/EvalRuns.vue'
 import EvalLaunchDetail from './views/EvalLaunchDetail.vue'
 import EvalCatalog from './views/EvalCatalog.vue'
@@ -25,6 +28,11 @@ const router = createRouter({
     { path: '/playground', name: 'playground', component: Playground, meta: { requiresAuth: true } },
     { path: '/knowledge-base', name: 'knowledge-base', component: KnowledgeBase, meta: { requiresAuth: true } },
     { path: '/simulator', name: 'simulator', component: Simulator, meta: { requiresAuth: true } },
+    { path: '/campaigns', name: 'campaigns', component: Campaigns, meta: { requiresAuth: true } },
+    // MUST come before /campaigns/:campaignId — that dynamic segment would
+    // otherwise swallow this path with campaignId === "new".
+    { path: '/campaigns/new', name: 'campaign-new', component: CampaignWizard, meta: { requiresAuth: true } },
+    { path: '/campaigns/:campaignId', name: 'campaign-detail', component: CampaignDetail, meta: { requiresAuth: true } },
     { path: '/evals', name: 'evals', component: EvalRuns, meta: { requiresAuth: true } },
     // MUST come before /evals/:launchId — that dynamic segment would otherwise
     // swallow this path with launchId === "catalog".

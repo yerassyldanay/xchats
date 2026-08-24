@@ -554,3 +554,51 @@ type simpleErr string
 func (e simpleErr) Error() string { return string(e) }
 
 const errBoom = simpleErr("boom")
+
+func TestIsOnWhatsApp(t *testing.T) {
+	mgr, st := newTestManager(t)
+	_, accountID := seedAccount(t, st, "77011111111@s.whatsapp.net")
+	fake := newFakeWAClient()
+	mgr.registerClient(accountID.String(), fake)
+	fake.isOnWhatsAppResp = []types.IsOnWhatsAppResponse{
+		{Query: "77022222222", IsIn: true},
+		{Query: "77033333333", IsIn: false},
+		// 77044444444 deliberately absent — the provider never confirmed it.
+	}
+
+	got, err := mgr.IsOnWhatsApp(context.Background(), accountID.String(),
+		[]string{"77022222222", "77033333333", "77044444444"})
+	if err != nil {
+		t.Fatalf("IsOnWhatsApp: %v", err)
+	}
+	if !got["77022222222"] {
+		t.Error(`got["77022222222"] = false, want true`)
+	}
+	if got["77033333333"] {
+		t.Error(`got["77033333333"] = true, want false`)
+	}
+	if _, ok := got["77044444444"]; ok {
+		t.Error(`got["77044444444"] present, want absent (never confirmed)`)
+	}
+
+	if len(fake.isOnWhatsAppQueries) != 1 {
+		t.Fatalf("recorded queries = %v, want exactly 1 call", fake.isOnWhatsAppQueries)
+	}
+	queried := fake.isOnWhatsAppQueries[0]
+	want := []string{"+77022222222", "+77033333333", "+77044444444"}
+	if len(queried) != len(want) {
+		t.Fatalf("queried = %v, want %v", queried, want)
+	}
+	for i := range want {
+		if queried[i] != want[i] {
+			t.Errorf("queried[%d] = %q, want %q (a leading + prefix)", i, queried[i], want[i])
+		}
+	}
+}
+
+func TestIsOnWhatsApp_AccountNotConnected(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	if _, err := mgr.IsOnWhatsApp(context.Background(), uuid.NewString(), []string{"77022222222"}); err == nil {
+		t.Fatal("IsOnWhatsApp on an unregistered account = nil error, want an error")
+	}
+}

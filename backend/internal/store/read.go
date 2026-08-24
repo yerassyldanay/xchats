@@ -47,6 +47,15 @@ func scanChatDst(c *Chat) []any {
 // recency, plus the total. inbox_chats_v carries the owning account's
 // organization_id and deleted_at, so the org scope and the "hide soft-deleted
 // accounts' chats" rule are the same two predicates they always were.
+//
+// A chat_state='campaign' row (a cold-send campaign's own recipient, before
+// any reply — see MarkChatCampaignOnly) is excluded from the default,
+// unfiltered listing: an inbox full of one-way campaign sends nobody has
+// answered yet would bury the conversations an operator actually needs to
+// see. f.Status="campaign" still reaches them explicitly (the campaign
+// detail page's own "view in inbox" links use this), and any OTHER explicit
+// f.Status is unaffected — this carve-out only changes the "no filter at
+// all" default.
 func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int, error) {
 	var where []string
 	var args []any
@@ -60,6 +69,8 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 	if f.Status != "" {
 		args = append(args, f.Status)
 		where = append(where, "c.chat_state = $"+itoa(len(args)))
+	} else {
+		where = append(where, "c.chat_state <> 'campaign'")
 	}
 	switch {
 	case f.Assignee == "me":

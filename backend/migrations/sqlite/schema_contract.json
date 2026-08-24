@@ -2897,6 +2897,15 @@
           "has_default": true,
           "default_kind": "now",
           "default_raw": "now()"
+        },
+        {
+          "name": "timezone",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:Asia/Almaty",
+          "default_raw": "'Asia/Almaty'::text"
         }
       ],
       "primary_key": [
@@ -5880,6 +5889,903 @@
             "id"
           ],
           "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "campaigns": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "name",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "account_id",
+          "position": 4,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "channel",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "status",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:draft",
+          "default_raw": "'draft'::text"
+        },
+        {
+          "name": "message_body",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "variables",
+          "position": 8,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_array",
+          "default_raw": "'[]'::jsonb"
+        },
+        {
+          "name": "min_interval_seconds",
+          "position": 9,
+          "pg_type": "integer",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "jitter_seconds",
+          "position": 10,
+          "pg_type": "integer",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "schedule_at",
+          "position": 11,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "started_at",
+          "position": 12,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_by",
+          "position": 13,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 14,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 15,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "campaigns_org_idx",
+          "columns": [
+            "organization_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "campaigns_account_status_idx",
+          "columns": [
+            "account_id",
+            "status"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "campaigns_channel_check",
+          "definition": "CHECK ((channel = ANY (ARRAY['whatsapp'::text, 'simulator'::text, 'telegram'::text, 'instagram'::text, 'messenger'::text, 'whatsapp_cloud'::text])))"
+        },
+        {
+          "name": "campaigns_status_check",
+          "definition": "CHECK ((status = ANY (ARRAY['draft'::text, 'scheduled'::text, 'running'::text, 'paused'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])))"
+        },
+        {
+          "name": "campaigns_min_interval_seconds_check",
+          "definition": "CHECK ((min_interval_seconds IS NULL) OR (min_interval_seconds > 0))"
+        },
+        {
+          "name": "campaigns_jitter_seconds_check",
+          "definition": "CHECK ((jitter_seconds IS NULL) OR (jitter_seconds >= 0))"
+        },
+        {
+          "name": "campaigns_check",
+          "definition": "CHECK (((min_interval_seconds IS NULL) = (jitter_seconds IS NULL)))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "campaigns_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "campaigns_created_by_fkey",
+          "columns": [
+            "created_by"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "RESTRICT",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "campaign_recipients": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "campaign_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "normalized_identity",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "raw_input",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "name",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "attributes",
+          "position": 6,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_object",
+          "default_raw": "'{}'::jsonb"
+        },
+        {
+          "name": "status",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:pending",
+          "default_raw": "'pending'::text"
+        },
+        {
+          "name": "failure_reason",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "attempts",
+          "position": 9,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:0",
+          "default_raw": "0"
+        },
+        {
+          "name": "next_attempt_at",
+          "position": 10,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "chat_id",
+          "position": 11,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "message_id",
+          "position": 12,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 13,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 14,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "campaign_recipients_campaign_id_normalized_identity_key",
+          "columns": [
+            "campaign_id",
+            "normalized_identity"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "campaign_recipients_campaign_id_normalized_identity_key",
+          "columns": [
+            "campaign_id",
+            "normalized_identity"
+          ],
+          "unique": true,
+          "where": "",
+          "backs_constraint": true
+        },
+        {
+          "name": "campaign_recipients_campaign_status_idx",
+          "columns": [
+            "campaign_id",
+            "status"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "campaign_recipients_identity_status_idx",
+          "columns": [
+            "normalized_identity",
+            "status"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "campaign_recipients_status_check",
+          "definition": "CHECK ((status = ANY (ARRAY['pending'::text, 'sending'::text, 'sent'::text, 'failed'::text, 'skipped'::text])))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "campaign_recipients_campaign_id_fkey",
+          "columns": [
+            "campaign_id"
+          ],
+          "ref_table": "campaigns",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "campaign_events": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "campaign_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "event",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "actor_user_id",
+          "position": 4,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "detail",
+          "position": 5,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_object",
+          "default_raw": "'{}'::jsonb"
+        },
+        {
+          "name": "created_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "campaign_events_campaign_idx",
+          "columns": [
+            "campaign_id",
+            "created_at"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "campaign_events_campaign_id_fkey",
+          "columns": [
+            "campaign_id"
+          ],
+          "ref_table": "campaigns",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "campaign_events_actor_user_id_fkey",
+          "columns": [
+            "actor_user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "campaign_account_settings": {
+      "columns": [
+        {
+          "name": "account_id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "limit_mode",
+          "position": 2,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:default",
+          "default_raw": "'default'::text"
+        },
+        {
+          "name": "min_interval_seconds",
+          "position": 3,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:90",
+          "default_raw": "90"
+        },
+        {
+          "name": "jitter_seconds",
+          "position": 4,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:30",
+          "default_raw": "30"
+        },
+        {
+          "name": "paused",
+          "position": 5,
+          "pg_type": "boolean",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "bool:false",
+          "default_raw": "false"
+        },
+        {
+          "name": "created_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 7,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "account_id"
+      ],
+      "checks": [
+        {
+          "name": "campaign_account_settings_limit_mode_check",
+          "definition": "CHECK ((limit_mode = ANY (ARRAY['default'::text, 'custom'::text])))"
+        },
+        {
+          "name": "campaign_account_settings_min_interval_seconds_check",
+          "definition": "CHECK ((min_interval_seconds > 0))"
+        },
+        {
+          "name": "campaign_account_settings_jitter_seconds_check",
+          "definition": "CHECK ((jitter_seconds >= 0))"
+        }
+      ]
+    },
+    "campaign_account_limits": {
+      "columns": [
+        {
+          "name": "account_id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "window_seconds",
+          "position": 2,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "max_sends",
+          "position": 3,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 4,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 5,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "account_id",
+        "window_seconds"
+      ],
+      "checks": [
+        {
+          "name": "campaign_account_limits_window_seconds_check",
+          "definition": "CHECK ((window_seconds > 0))"
+        },
+        {
+          "name": "campaign_account_limits_max_sends_check",
+          "definition": "CHECK ((max_sends > 0))"
+        }
+      ]
+    },
+    "campaign_account_windows": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "account_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "weekday",
+          "position": 3,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "start_minute",
+          "position": 4,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "end_minute",
+          "position": 5,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "campaign_account_windows_account_idx",
+          "columns": [
+            "account_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "campaign_account_windows_weekday_check",
+          "definition": "CHECK ((weekday BETWEEN 0 AND 6))"
+        },
+        {
+          "name": "campaign_account_windows_start_minute_check",
+          "definition": "CHECK ((start_minute BETWEEN 0 AND 1439))"
+        },
+        {
+          "name": "campaign_account_windows_end_minute_check",
+          "definition": "CHECK ((end_minute BETWEEN 1 AND 1440))"
+        },
+        {
+          "name": "campaign_account_windows_end_minute_check1",
+          "definition": "CHECK ((end_minute <> start_minute))"
+        }
+      ]
+    },
+    "campaign_windows": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "campaign_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "weekday",
+          "position": 3,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "start_minute",
+          "position": 4,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "end_minute",
+          "position": 5,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "campaign_windows_campaign_idx",
+          "columns": [
+            "campaign_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "campaign_windows_weekday_check",
+          "definition": "CHECK ((weekday BETWEEN 0 AND 6))"
+        },
+        {
+          "name": "campaign_windows_start_minute_check",
+          "definition": "CHECK ((start_minute BETWEEN 0 AND 1439))"
+        },
+        {
+          "name": "campaign_windows_end_minute_check",
+          "definition": "CHECK ((end_minute BETWEEN 1 AND 1440))"
+        },
+        {
+          "name": "campaign_windows_end_minute_check1",
+          "definition": "CHECK ((end_minute <> start_minute))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "campaign_windows_campaign_id_fkey",
+          "columns": [
+            "campaign_id"
+          ],
+          "ref_table": "campaigns",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "campaign_send_log": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "account_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "campaign_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "recipient_id",
+          "position": 4,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "attempted_at",
+          "position": 5,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "outcome",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "origin",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:campaign",
+          "default_raw": "'campaign'::text"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "campaign_send_log_account_time_idx",
+          "columns": [
+            "account_id",
+            "attempted_at"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "campaign_send_log_outcome_check",
+          "definition": "CHECK ((outcome = ANY (ARRAY['sent'::text, 'failed'::text])))"
+        },
+        {
+          "name": "campaign_send_log_origin_check",
+          "definition": "CHECK ((origin = ANY (ARRAY['campaign'::text, 'manual'::text, 'ai'::text])))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "campaign_send_log_campaign_id_fkey",
+          "columns": [
+            "campaign_id"
+          ],
+          "ref_table": "campaigns",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "campaign_send_log_recipient_id_fkey",
+          "columns": [
+            "recipient_id"
+          ],
+          "ref_table": "campaign_recipients",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
           "on_update": "NO ACTION"
         }
       ]

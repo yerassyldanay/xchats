@@ -12,13 +12,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
 	"github.com/yerassyldanay/xchats/backend/internal/meta"
+	"github.com/yerassyldanay/xchats/backend/internal/outbound"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -383,84 +383,21 @@ func ChannelBlobID(messageID uuid.UUID) string { return "meta-" + messageID.Stri
 
 // --- outbound sends -------------------------------------------------------
 
-// maskDestination keeps only the last four characters of the provider's user
-// part for logs while preserving an address suffix that is useful to diagnose
-// routing (for example, @lid versus @s.whatsapp.net).
-func maskDestination(destination string) string {
-	user, server, hasServer := strings.Cut(destination, "@")
-	if len(user) > 4 {
-		user = strings.Repeat("*", len(user)-4) + user[len(user)-4:]
-	}
-	if hasServer {
-		return user + "@" + server
-	}
-	return user
-}
-
 // handleOutboundSend routes EVERY send — text and media alike — through the
-// channel-neutral sender registry (Worker.Senders), so WhatsApp, simulator and
-// Telegram conversations share one outbound path.
-//
-// Provider vocabulary never leaves this function: JIDs and chat ids travel
-// only as the opaque To routing hint a channel-neutral OutboundMessage
-// carries; each adapter resolves the sending account itself from AccountID.
+// channel-neutral sender registry (Worker.Senders), so WhatsApp, simulator
+// and Telegram conversations share one outbound path. The actual delivery
+// logic lives in internal/outbound.Deliver — internal/campaign's Runner
+// calls that same function directly for a campaign send, so there is
+// exactly one place that resolves a sender, hydrates media, and interprets
+// a ChannelSender's result.
 func (w *Worker) handleOutboundSend(ctx context.Context, t OutboundTask) error {
-	destination := t.Destination
-	kind := "text"
-	if t.MediaID != "" {
-		kind = "media"
-	}
-	w.Log.Info("outbound send start", "message_id", t.MessageID, "account_id", t.AccountID,
-		"channel", t.Channel, "to", maskDestination(destination), "kind", kind)
-
-	sender, err := w.Senders.Sender(t.Channel)
-	if err != nil {
-		w.Log.Error("outbound send failed", "message_id", t.MessageID, "channel", t.Channel, "err", err)
-		_ = w.Store.SetDeliveryStateFor(ctx, string(t.Channel), t.MessageID, "failed")
-		w.emitMessage(ctx, "message.updated", t.MessageID)
-		return err
-	}
-
-	out := messaging.OutboundMessage{
-		MessageID: t.MessageID.String(), AccountID: t.AccountID.String(), Channel: t.Channel,
-		Text: t.Text, To: destination,
-	}
-	if t.MediaID != "" {
-		// The blob is the source of truth for kind/mimetype/filename; the adapter
-		// re-reads the bytes itself, so nothing large rides this struct.
-		media := &messaging.OutboundMedia{BlobID: t.MediaID, Caption: t.Caption}
-		if _, meta, gerr := w.Blob.Get(t.MediaID); gerr == nil {
-			media.Kind, media.Mimetype, media.FileName = meta.MediaType, meta.Mimetype, meta.FileName
-		}
-		out.Media = media
-	}
-
-	res, err := sender.Send(ctx, out)
-	if err != nil {
-		w.Log.Error("outbound send failed", "message_id", t.MessageID, "channel", t.Channel,
-			"to", maskDestination(destination), "kind", kind, "err", err)
-		_ = w.Store.SetDeliveryStateFor(ctx, string(t.Channel), t.MessageID, "failed")
-		w.emitMessage(ctx, "message.updated", t.MessageID)
-		return err
-	}
-	if res.ExternalID == "" {
-		// A success with no provider id means the gateway accepted the request but
-		// produced no message; the bubble would silently stay unconfirmed.
-		w.Log.Warn("outbound send returned no external id", "message_id", t.MessageID,
-			"channel", t.Channel, "to", maskDestination(destination))
-	} else {
-		w.Log.Info("outbound send ok", "message_id", t.MessageID, "channel", t.Channel,
-			"external_id", res.ExternalID)
-	}
-	// Stamp the provider id so a real WhatsApp fromMe=true echo collapses onto
-	// this row; the simulator's synthetic id has no echo to collapse, but
-	// stamping it keeps the column's meaning ("this send's provider id")
-	// consistent across channels.
-	if err := w.Store.StampOutboundSent(ctx, string(t.Channel), t.MessageID, res.ExternalID); err != nil {
-		return err
-	}
-	w.emitMessage(ctx, "message.updated", t.MessageID)
-	return nil
+	_, err := outbound.Deliver(ctx, outbound.Deps{
+		Store: w.Store, Blob: w.Blob, Hub: w.Hub, Senders: w.Senders, Log: w.Log,
+	}, outbound.Task{
+		MessageID: t.MessageID, AccountID: t.AccountID, Channel: t.Channel,
+		Destination: t.Destination, Text: t.Text, MediaID: t.MediaID, Caption: t.Caption,
+	})
+	return err
 }
 
 // --- AI response engine ----------------------------------------------------

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/automation"
+	purecampaign "github.com/yerassyldanay/xchats/backend/campaign"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/messaging"
 )
@@ -354,4 +355,244 @@ func MapDraft(d store.Draft) AiDraft {
 		Status:           d.DraftState,
 		CreatedAt:        d.CreatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns
+// ---------------------------------------------------------------------------
+//
+// CampaignStatusEvent/CampaignRecipientEvent are also the exact SSE payload
+// shapes internal/campaign's Scheduler/Runner broadcast (imported from
+// there, not redeclared) — ids and an enum status string only, NEVER a
+// recipient's raw_input/normalized_identity/name. internal/realtime.Hub is
+// process-global, not scoped to an organization: every connected client on
+// every org receives every event, so a recipient's phone number (or
+// Telegram chat id) must never ride one of these. See plan/DECISIONS.md.
+
+// CampaignWindow is one recurring UTC weekday/time-of-day range — the wire
+// shape of store.CampaignWindow (minus its id, exactly like automation's own
+// ScheduleWindow: a save always replaces the whole set, so there is nothing
+// to address an individual window by).
+type CampaignWindow struct {
+	// Weekday is 0=Sunday..6=Saturday in UTC.
+	Weekday     int `json:"weekday"`
+	StartMinute int `json:"start_minute"`
+	EndMinute   int `json:"end_minute"`
+}
+
+// MapCampaignWindows converts store.CampaignWindow rows to their wire shape.
+func MapCampaignWindows(ws []store.CampaignWindow) []CampaignWindow {
+	out := make([]CampaignWindow, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, CampaignWindow{Weekday: w.Weekday, StartMinute: w.StartMinute, EndMinute: w.EndMinute})
+	}
+	return out
+}
+
+// Campaign is the API campaign shape.
+type Campaign struct {
+	ID                 string           `json:"id"`
+	Name               string           `json:"name"`
+	AccountID          string           `json:"account_id"`
+	Channel            string           `json:"channel"`
+	Status             string           `json:"status"`
+	MessageBody        string           `json:"message_body"`
+	Variables          []string         `json:"variables"`
+	MinIntervalSeconds *int             `json:"min_interval_seconds"`
+	JitterSeconds      *int             `json:"jitter_seconds"`
+	Windows            []CampaignWindow `json:"windows"`
+	ScheduleAt         *string          `json:"schedule_at"`
+	StartedAt          *string          `json:"started_at"`
+	CreatedBy          string           `json:"created_by"`
+	CreatedAt          string           `json:"created_at"`
+	UpdatedAt          string           `json:"updated_at"`
+	// RecipientCounts keys by recipient status (pending/sending/sent/failed/
+	// skipped) — the list/detail views' progress bars.
+	RecipientCounts map[string]int `json:"recipient_counts"`
+}
+
+// MapCampaign maps a store.Campaign plus its own recurring windows and live
+// recipient-status counts, which the store keeps as three separate reads
+// (campaigns is the hot row a status transition rewrites every send;
+// windows and counts are read-mostly and would only add churn to that row).
+func MapCampaign(c store.Campaign, windows []store.CampaignWindow, counts map[string]int) Campaign {
+	if counts == nil {
+		counts = map[string]int{}
+	}
+	variables := c.Variables
+	if variables == nil {
+		variables = []string{}
+	}
+	return Campaign{
+		ID: c.ID.String(), Name: c.Name, AccountID: c.AccountID.String(), Channel: c.Channel, Status: c.Status,
+		MessageBody: c.MessageBody, Variables: variables,
+		MinIntervalSeconds: c.MinIntervalSeconds, JitterSeconds: c.JitterSeconds,
+		Windows:         MapCampaignWindows(windows),
+		ScheduleAt:      tsPtr(c.ScheduleAt),
+		StartedAt:       tsPtr(c.StartedAt),
+		CreatedBy:       c.CreatedBy.String(),
+		CreatedAt:       c.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:       c.UpdatedAt.UTC().Format(time.RFC3339),
+		RecipientCounts: counts,
+	}
+}
+
+// CampaignRecipient is the API shape for one persisted recipient row.
+type CampaignRecipient struct {
+	ID                 string            `json:"id"`
+	CampaignID         string            `json:"campaign_id"`
+	NormalizedIdentity string            `json:"normalized_identity"`
+	RawInput           string            `json:"raw_input"`
+	Name               string            `json:"name"`
+	Attributes         map[string]string `json:"attributes,omitempty"`
+	Status             string            `json:"status"`
+	FailureReason      string            `json:"failure_reason"`
+	Attempts           int               `json:"attempts"`
+	NextAttemptAt      *string           `json:"next_attempt_at"`
+	ChatID             *string           `json:"chat_id"`
+	MessageID          *string           `json:"message_id"`
+	CreatedAt          string            `json:"created_at"`
+	UpdatedAt          string            `json:"updated_at"`
+}
+
+// MapCampaignRecipient maps a store.CampaignRecipient.
+func MapCampaignRecipient(r store.CampaignRecipient) CampaignRecipient {
+	return CampaignRecipient{
+		ID: r.ID.String(), CampaignID: r.CampaignID.String(), NormalizedIdentity: r.NormalizedIdentity,
+		RawInput: r.RawInput, Name: r.Name, Attributes: r.Attributes,
+		Status: r.Status, FailureReason: r.FailureReason, Attempts: r.Attempts,
+		NextAttemptAt: tsPtr(r.NextAttemptAt),
+		ChatID:        nullUUIDPtr(r.ChatID), MessageID: nullUUIDPtr(r.MessageID),
+		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+// CampaignEvent is the API shape for one campaign timeline entry.
+type CampaignEvent struct {
+	ID          string         `json:"id"`
+	CampaignID  string         `json:"campaign_id"`
+	Event       string         `json:"event"`
+	ActorUserID *string        `json:"actor_user_id"`
+	Detail      map[string]any `json:"detail,omitempty"`
+	CreatedAt   string         `json:"created_at"`
+}
+
+// MapCampaignEvent maps a store.CampaignEvent.
+func MapCampaignEvent(e store.CampaignEvent) CampaignEvent {
+	return CampaignEvent{
+		ID: e.ID.String(), CampaignID: e.CampaignID.String(), Event: e.Event,
+		ActorUserID: nullUUIDPtr(e.ActorUserID), Detail: e.Detail,
+		CreatedAt: e.CreatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+// CampaignTier is one rolling-window tier's shape — either configuration only
+// (Used omitted) or, in a SendingBudget response, its live usage too.
+type CampaignTier struct {
+	WindowSeconds int  `json:"window_seconds"`
+	MaxSends      int  `json:"max_sends"`
+	Used          *int `json:"used,omitempty"`
+}
+
+// CampaignAccountSettings is the API shape for GET/PUT
+// /accounts/:id/sending-limits.
+type CampaignAccountSettings struct {
+	AccountID          string           `json:"account_id"`
+	LimitMode          string           `json:"limit_mode"`
+	MinIntervalSeconds int              `json:"min_interval_seconds"`
+	JitterSeconds      int              `json:"jitter_seconds"`
+	Paused             bool             `json:"paused"`
+	Tiers              []CampaignTier   `json:"tiers"`
+	Windows            []CampaignWindow `json:"windows"`
+}
+
+// MapCampaignAccountSettings maps store.CampaignAccountSettings plus its
+// sibling tier/window reads.
+func MapCampaignAccountSettings(s store.CampaignAccountSettings, tiers []purecampaign.Tier, windows []store.CampaignWindow) CampaignAccountSettings {
+	out := CampaignAccountSettings{
+		AccountID: s.AccountID.String(), LimitMode: s.LimitMode,
+		MinIntervalSeconds: s.MinIntervalSeconds, JitterSeconds: s.JitterSeconds, Paused: s.Paused,
+		Windows: MapCampaignWindows(windows),
+	}
+	// Pre-allocated, never a bare append onto a nil slice: an unlimited
+	// channel (the simulator has zero tiers) would otherwise serialize
+	// "tiers": null and every client indexing it would fault.
+	out.Tiers = make([]CampaignTier, 0, len(tiers))
+	for _, t := range tiers {
+		out.Tiers = append(out.Tiers, CampaignTier{WindowSeconds: t.WindowSeconds, MaxSends: t.MaxSends})
+	}
+	return out
+}
+
+// SendingBudget is the API shape for GET /accounts/:id/sending-budget — the
+// live widget the Accounts page, the campaign wizard, and a campaign's own
+// detail page all render from.
+type SendingBudget struct {
+	AccountID          string         `json:"account_id"`
+	MinIntervalSeconds int            `json:"min_interval_seconds"`
+	JitterSeconds      int            `json:"jitter_seconds"`
+	Paused             bool           `json:"paused"`
+	Allowed            bool           `json:"allowed"`
+	ThrottledBy        int            `json:"throttled_by"`
+	NextSendAt         string         `json:"next_send_at"`
+	Tiers              []CampaignTier `json:"tiers"`
+}
+
+// MapSendingBudget maps a store.SendingBudget.
+func MapSendingBudget(b store.SendingBudget) SendingBudget {
+	out := SendingBudget{
+		AccountID: b.AccountID.String(), MinIntervalSeconds: b.MinIntervalSeconds, JitterSeconds: b.JitterSeconds,
+		Paused: b.Paused, Allowed: b.Allowed, ThrottledBy: b.ThrottledBy,
+		NextSendAt: b.NextSendAt.UTC().Format(time.RFC3339),
+	}
+	// See MapCampaignAccountSettings: "tiers": null is what an unlimited
+	// channel would otherwise serialize to.
+	out.Tiers = make([]CampaignTier, 0, len(b.Tiers))
+	for _, t := range b.Tiers {
+		used := t.Used
+		out.Tiers = append(out.Tiers, CampaignTier{WindowSeconds: t.WindowSeconds, MaxSends: t.MaxSends, Used: &used})
+	}
+	return out
+}
+
+// CampaignRecipientPreview is one row of a preview (parse-only, not yet
+// persisted) response — the wire shape of backend/campaign.ParsedRecipient.
+type CampaignRecipientPreview struct {
+	Raw                string            `json:"raw"`
+	Name               string            `json:"name,omitempty"`
+	Attributes         map[string]string `json:"attributes,omitempty"`
+	NormalizedIdentity string            `json:"normalized_identity,omitempty"`
+	Status             string            `json:"status"`
+	Reason             string            `json:"reason,omitempty"`
+}
+
+// CampaignRecipientPreviewResult is POST /campaigns/:id/preview's response
+// shape — the wire shape of backend/campaign.ParseResult.
+type CampaignRecipientPreviewResult struct {
+	Rows      []CampaignRecipientPreview `json:"rows"`
+	Total     int                        `json:"total"`
+	Valid     int                        `json:"valid"`
+	Invalid   int                        `json:"invalid"`
+	Duplicate int                        `json:"duplicate"`
+}
+
+// CampaignStatusEvent is the campaign.status_changed SSE payload — ids and
+// an enum status string only. internal/httpapi broadcasts this after every
+// operator-initiated status change (start/pause/resume/stop); internal/
+// campaign's Scheduler/Runner broadcast the identical shape for their own
+// runtime transitions (auto-start, auto-complete, auto-pause) — ONE wire
+// shape regardless of which side caused the change.
+type CampaignStatusEvent struct {
+	CampaignID string `json:"campaign_id"`
+	Status     string `json:"status"`
+}
+
+// CampaignRecipientEvent is the campaign.recipient_updated SSE payload —
+// ids and an enum status string only, never a recipient's raw_input/
+// normalized_identity/name. Broadcast exclusively by internal/campaign's
+// Runner as each send resolves.
+type CampaignRecipientEvent struct {
+	CampaignID  string `json:"campaign_id"`
+	RecipientID string `json:"recipient_id"`
+	Status      string `json:"status"`
 }

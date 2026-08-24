@@ -29,6 +29,14 @@ type Manager interface {
 	// ingest path a real whatsmeow event takes — see DebugEvent's doc
 	// comment. Gated at the HTTP layer by SIMULATOR_ENABLED.
 	InjectDebugEvent(ctx context.Context, evt DebugEvent) (DebugEventResult, error)
+	// IsOnWhatsApp batch-checks phone registration through accountID's live
+	// connection — Campaigns' preview-time reachability check and its
+	// send-time permanent-failure classification. The returned map is
+	// keyed by the same digits-only, no-"+" form
+	// backend/campaign.NormalizePhone produces; a phone absent from it was
+	// not confirmed one way or the other and must be treated as unknown,
+	// never as registered.
+	IsOnWhatsApp(ctx context.Context, accountID string, phones []string) (map[string]bool, error)
 }
 
 // DebugEvent is a synthetic whatsmeow-shaped event for POST /debug/wa-event.
