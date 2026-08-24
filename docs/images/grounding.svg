@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="560" viewBox="0 0 1280 560" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif" role="img" aria-label="How xchats keeps the assistant from inventing facts: a five-stage pipeline from an inbound message on any channel, through a prompt built only from approved knowledge with exact values masked as placeholder tokens, a strict JSON reply from the model, fail-closed validation, and finally a human approval before anything is sent.">
+  <rect width="1280" height="560" rx="14" fill="#ffffff"/>
+  <rect x="0.5" y="0.5" width="1279" height="559" rx="14" fill="none" stroke="#e3e6ec"/>
+
+  <text x="40" y="52" font-size="22" font-weight="700" fill="#12141a">The anti-hallucination path</text>
+  <text x="40" y="80" font-size="15" fill="#5c6270">Every reply is built from approved knowledge, checked by code, and released by a person. Any step can refuse.</text>
+
+  <!-- ── stage 1 ─────────────────────────────────────────── -->
+  <g>
+    <rect x="40" y="118" width="222" height="196" rx="12" fill="#f6f8fb" stroke="#dfe4ec"/>
+    <circle cx="66" cy="146" r="12" fill="#4f46e5"/>
+    <text x="66" y="151" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="88" y="151" font-size="15" font-weight="700" fill="#12141a">Message arrives</text>
+    <text x="60" y="184" font-size="13.5" fill="#40464f">WhatsApp · Telegram</text>
+    <text x="60" y="206" font-size="13.5" fill="#40464f">Instagram · Messenger</text>
+    <text x="60" y="228" font-size="13.5" fill="#40464f">WhatsApp Cloud API</text>
+    <text x="60" y="264" font-size="12.5" fill="#6b7280">One inbox and one list</text>
+    <text x="60" y="283" font-size="12.5" fill="#6b7280">of threads, whichever</text>
+    <text x="60" y="302" font-size="12.5" fill="#6b7280">channel it came from.</text>
+  </g>
+
+  <!-- ── stage 2 ─────────────────────────────────────────── -->
+  <g>
+    <rect x="294" y="118" width="222" height="196" rx="12" fill="#f6f8fb" stroke="#dfe4ec"/>
+    <circle cx="320" cy="146" r="12" fill="#4f46e5"/>
+    <text x="320" y="151" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <text x="342" y="151" font-size="15" font-weight="700" fill="#12141a">Prompt is built</text>
+    <text x="314" y="184" font-size="13.5" fill="#40464f">Only <tspan font-weight="700">approved</tspan> KB rows.</text>
+    <text x="314" y="206" font-size="13.5" fill="#40464f">Drafts and raw uploads</text>
+    <text x="314" y="228" font-size="13.5" fill="#40464f">never cross over.</text>
+    <rect x="314" y="246" width="182" height="52" rx="8" fill="#eef1f7" stroke="#dbe0ea"/>
+    <text x="326" y="268" font-size="11.5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#7a3fb5">129 900 ₸</text>
+    <text x="404" y="268" font-size="11.5" fill="#6b7280">→ masked</text>
+    <text x="326" y="288" font-size="11.5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#1d6f42">{{product.coffee.price}}</text>
+  </g>
+
+  <!-- ── stage 3 ─────────────────────────────────────────── -->
+  <g>
+    <rect x="548" y="118" width="222" height="196" rx="12" fill="#f6f8fb" stroke="#dfe4ec"/>
+    <circle cx="574" cy="146" r="12" fill="#4f46e5"/>
+    <text x="574" y="151" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="596" y="151" font-size="15" font-weight="700" fill="#12141a">Model answers</text>
+    <text x="568" y="184" font-size="13.5" fill="#40464f">It never sees a price,</text>
+    <text x="568" y="206" font-size="13.5" fill="#40464f">a phone number or a</text>
+    <text x="568" y="228" font-size="13.5" fill="#40464f">file path — so it cannot</text>
+    <text x="568" y="250" font-size="13.5" fill="#40464f">get one wrong.</text>
+    <text x="568" y="284" font-size="12.5" fill="#6b7280">It copies tokens and</text>
+    <text x="568" y="303" font-size="12.5" fill="#6b7280">returns strict JSON.</text>
+  </g>
+
+  <!-- ── stage 4 ─────────────────────────────────────────── -->
+  <g>
+    <rect x="802" y="118" width="222" height="196" rx="12" fill="#fff8f4" stroke="#f2d9c9"/>
+    <circle cx="828" cy="146" r="12" fill="#c2410c"/>
+    <text x="828" y="151" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <text x="850" y="151" font-size="15" font-weight="700" fill="#12141a">Code validates</text>
+    <text x="822" y="184" font-size="13.5" fill="#40464f">Every token and every</text>
+    <text x="822" y="206" font-size="13.5" fill="#40464f">literal is checked, then</text>
+    <text x="822" y="228" font-size="13.5" fill="#40464f">the stored value is</text>
+    <text x="822" y="250" font-size="13.5" fill="#40464f">substituted verbatim.</text>
+    <text x="822" y="284" font-size="12.5" font-weight="700" fill="#9a3412">Fail-closed: one bad</text>
+    <text x="822" y="303" font-size="12.5" font-weight="700" fill="#9a3412">value rejects the reply.</text>
+  </g>
+
+  <!-- ── stage 5 ─────────────────────────────────────────── -->
+  <g>
+    <rect x="1056" y="118" width="184" height="196" rx="12" fill="#f2fbf5" stroke="#cfe9d9"/>
+    <circle cx="1082" cy="146" r="12" fill="#15803d"/>
+    <text x="1082" y="151" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <text x="1104" y="151" font-size="15" font-weight="700" fill="#12141a">A human sends</text>
+    <text x="1076" y="184" font-size="13.5" fill="#40464f">The draft waits in the</text>
+    <text x="1076" y="206" font-size="13.5" fill="#40464f">inbox. An agent edits,</text>
+    <text x="1076" y="228" font-size="13.5" fill="#40464f">approves or discards</text>
+    <text x="1076" y="250" font-size="13.5" fill="#40464f">it.</text>
+    <text x="1076" y="284" font-size="12.5" fill="#6b7280">Nothing leaves without</text>
+    <text x="1076" y="303" font-size="12.5" fill="#6b7280">that click.</text>
+  </g>
+
+  <!-- arrows between stages -->
+  <g fill="#b9c0cc">
+    <path d="M270 216 l16 0 0 -6 12 9 -12 9 0 -6 -16 0 z"/>
+    <path d="M524 216 l16 0 0 -6 12 9 -12 9 0 -6 -16 0 z"/>
+    <path d="M778 216 l16 0 0 -6 12 9 -12 9 0 -6 -16 0 z"/>
+    <path d="M1032 216 l12 0 0 -6 12 9 -12 9 0 -6 -12 0 z"/>
+  </g>
+
+  <!-- ── the refusal lane ────────────────────────────────── -->
+  <path d="M913 314 L913 372 L206 372 L206 400" fill="none" stroke="#c2410c" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <path d="M206 412 l-6 -12 12 0 z" fill="#c2410c"/>
+
+  <rect x="40" y="412" width="700" height="112" rx="12" fill="#fff8f4" stroke="#f2d9c9"/>
+  <text x="60" y="442" font-size="14.5" font-weight="700" fill="#9a3412">When the assistant can't answer honestly, it says so</text>
+  <text x="60" y="468" font-size="13" fill="#40464f">An invented number, an unknown placeholder, or a fact the approved knowledge simply</text>
+  <text x="60" y="489" font-size="13" fill="#40464f">doesn't contain — a delivery zone you don't serve, a product that's out of stock — sets</text>
+  <text x="60" y="510" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#12141a">escalate: true<tspan font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif">. No half-answer is offered; the conversation goes to a person instead.</tspan></text>
+
+  <rect x="760" y="412" width="480" height="112" rx="12" fill="#f6f8fb" stroke="#dfe4ec"/>
+  <text x="780" y="442" font-size="14.5" font-weight="700" fill="#12141a">Team-based by construction</text>
+  <text x="780" y="468" font-size="13" fill="#40464f">Every channel, contact and draft belongs to one organization.</text>
+  <text x="780" y="489" font-size="13" fill="#40464f">Agents share the inbox, assign threads, and see who replied.</text>
+  <text x="780" y="510" font-size="13" fill="#40464f">Admins hold the keys, the knowledge base and the channels.</text>
+</svg>
