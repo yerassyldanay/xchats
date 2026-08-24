@@ -16,6 +16,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/brain"
+	"github.com/yerassyldanay/xchats/backend/internal/chat"
+	"github.com/yerassyldanay/xchats/backend/internal/chatkb"
+	"github.com/yerassyldanay/xchats/backend/internal/chatstore"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
@@ -123,6 +126,11 @@ type harness struct {
 	// Deps.Settings/Deps.Credentials to by default).
 	kbImportSettings *settings.Store
 	kbImportCreds    *credentials.Chain
+	// chatLLM is the scripted model behind the /chat assistant — a separate
+	// client from llmClient above because the chat surface is the only one
+	// that streams, and its tests script answers per call (see
+	// chat_assistant_test.go).
+	chatLLM *scriptedStreamingLLM
 }
 
 // setTelegramBase rewrites the configured public base URL mid-test. The Server
@@ -297,18 +305,43 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	kbImportSvc.Start(kbImportCtx)
 	t.Cleanup(func() { cancelKBImport(); kbImportSvc.Stop() })
 
+	// The Knowledge Base chat assistant, wired exactly as main.go does it —
+	// same database, the same kbstore behind chatkb retrieval — but with a
+	// scripted, streaming model so the SSE surface can be exercised without a
+	// network call.
+	chatDB, err := chatstore.New(ctx, db.Path())
+	if err != nil {
+		t.Fatalf("chatstore: %v", err)
+	}
+	t.Cleanup(chatDB.Close)
+	chatLLM := &scriptedStreamingLLM{}
+	chatSvc := chat.New(chat.Deps{
+		Store: chatDB,
+		KB:    chatkb.NewStoreService(kb),
+		LLMs:  fakeLLMRegistry{client: chatLLM},
+		Params: func() chat.Params {
+			return chat.Params{
+				Model:     llm.ModelRef{Provider: fakeLLMProvider, Model: "fake"},
+				MaxTokens: 500, Temperature: 0.3, HistoryWindow: 4,
+			}
+		},
+		Log: log,
+	})
+
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, Queue: q, Hub: hub, Blob: blobStore,
 		Response: responseService, WA: fake, TG: tgFake, TGProcessor: tgProc, TGPoller: tgPoller, KB: kb,
 		KBImport: kbImportSvc,
 		KBRepo:   cachedKB, KBInvalidator: cachedKB,
+		Chat:  chatSvc,
 		OrgID: org.ID, Log: log,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, cfg: cfg, fake: fake, tg: tgFake,
 		queue: q, store: st, kb: kb, blob: blobStore, db: db, worker: w, orgID: org.ID, accountID: accountID, tgPoller: tgPoller,
-		kbImport: kbImportSvc, kbImportSettings: kbImportSettings, kbImportCreds: kbImportCreds}
+		kbImport: kbImportSvc, kbImportSettings: kbImportSettings, kbImportCreds: kbImportCreds,
+		chatLLM: chatLLM}
 	// st/db/kb/kbRepo are all closed by dbtest's own t.Cleanup registrations.
 	t.Cleanup(func() { ts.Close(); q.Close() })
 	h.login()

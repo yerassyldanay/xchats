@@ -853,6 +853,43 @@ export default {
   // /simulator/messages (backend/internal/httpapi/simulator.go, gated by
   // SIMULATOR_ENABLED). Not part of kb.*: it's its own page, not a Черновик/
   // Знаний база surface.
+  // chat.* — /chat, the Knowledge Base assistant (backend internal/chat +
+  // internal/chatkb). Deliberately separate from simulator.*: the simulator
+  // rehearses what a CUSTOMER would be told, this is an operator asking about
+  // their own knowledge base. Card labels reuse kb.entities.* rather than
+  // restating entity names here.
+  chat: {
+    navLabel: 'Assistant',
+    newChat: 'New chat',
+    untitled: 'Untitled',
+    noConversations: 'No chats yet',
+    delete: 'Delete chat',
+    confirmDelete: 'Click again to delete',
+    placeholder: 'Ask about your knowledge base…',
+    send: 'Send',
+    stop: 'Stop',
+    emptyTitle: 'Knowledge Base assistant',
+    emptyBody: 'Ask about the live knowledge base, about the draft — or have them compared. The assistant answers only from what the knowledge base holds, and always says which state a value came from.',
+    starters: [
+      'What changes are pending in the draft?',
+      'Compare current and draft prices',
+      'What are the delivery and return policies?',
+    ],
+    source: {
+      real: 'Live',
+      draft: 'Draft',
+    },
+    change: {
+      added: 'Added',
+      removed: 'Removed',
+      updated: 'Changed',
+    },
+    card: {
+      field: 'Field',
+      records: 'Records',
+      notSet: 'not set',
+    },
+  },
   simulator: {
     navLabel: 'Simulator',
     pageTitle: 'Simulator',

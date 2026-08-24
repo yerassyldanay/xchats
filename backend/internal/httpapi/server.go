@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
+	"github.com/yerassyldanay/xchats/backend/internal/chat"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/inboxmedia"
@@ -79,6 +80,15 @@ type Server struct {
 	kbImport *kbimport.Service // nil when the import pipeline is not wired (every handler checks)
 	orgID    uuid.UUID
 	log      *slog.Logger
+
+	// chat is the Knowledge Base chat assistant (/chat — chat_assistant.go),
+	// nil when the feature is not wired. Distinct from `response`, which is
+	// the CUSTOMER-facing reply engine: this one answers an operator's own
+	// questions about their KB and never sends anything to a customer. Every
+	// /chat/* handler checks chatReady() first, so a deployment without it
+	// returns a clear 503 rather than 404ing in a way that looks like the
+	// feature does not exist.
+	chat *chat.Service
 
 	// Meta channels (Instagram Direct, Messenger, WhatsApp Cloud API — see
 	// internal/meta's package doc). All five are constructed unconditionally
@@ -174,6 +184,7 @@ type Deps struct {
 	TGPoller      tgPoller
 	KB            *kbstore.Store
 	KBImport      *kbimport.Service // nil to run without the structured import pipeline
+	Chat          *chat.Service     // nil to run without the KB chat assistant
 	KBRepo        response.KnowledgeBaseRepository
 	KBInvalidator kbInvalidator
 	OrgID         uuid.UUID
@@ -213,7 +224,7 @@ func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Cfg, store: d.Store, queue: d.Queue, hub: d.Hub,
 		blob: d.Blob, response: d.Response, wa: d.WA, tg: d.TG,
-		tgProc: d.TGProcessor, tgPoller: d.TGPoller, kb: d.KB, kbImport: d.KBImport,
+		tgProc: d.TGProcessor, tgPoller: d.TGPoller, kb: d.KB, kbImport: d.KBImport, chat: d.Chat,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
 		metaClient: d.MetaClient, metaCreds: metaCredentialsAdapter{chain: d.Credentials},
@@ -595,6 +606,19 @@ func (s *Server) Router() *gin.Engine {
 	kb.GET("/imports/:id", s.handleKBGetImport)
 	kb.POST("/imports/:id/cancel", s.handleKBCancelImport)
 	kb.GET("/import/providers", s.handleKBImportProviders)
+
+	// KB chat assistant (chat_assistant.go) — an operator asking questions
+	// about their own knowledge base. Session-only, no RequireAdmin: every
+	// member can read the KB through the editors already, so reading it
+	// through a chat needs no stronger gate. See chat_assistant.go's own
+	// header for why this is /chat and not /chats.
+	chatGroup := auth.Group("/chat")
+	chatGroup.GET("/conversations", s.handleChatListConversations)
+	chatGroup.POST("/conversations", s.handleChatCreateConversation)
+	chatGroup.GET("/conversations/:id", s.handleChatGetConversation)
+	chatGroup.PATCH("/conversations/:id", s.handleChatRenameConversation)
+	chatGroup.DELETE("/conversations/:id", s.handleChatDeleteConversation)
+	chatGroup.POST("/conversations/:id/messages", s.handleChatSendMessage)
 
 	// Settings (settings.go) — every route here is admin-only. Handlers are
 	// individually nil-tolerant for Credentials/Settings/Tunnel, but the

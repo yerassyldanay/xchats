@@ -236,6 +236,18 @@ type Config struct {
 	LLMDraftTimeoutSeconds int     `env:"LLM_DRAFT_TIMEOUT_SECONDS"`
 	LLMDraftRetry          bool    `env:"LLM_DRAFT_RETRY"`
 
+	// --- Knowledge Base chat assistant (/chat — internal/chat) ---
+	// ChatHistoryWindow is how many past turns of a conversation one request
+	// sends to the model. The WHOLE conversation is always persisted; this
+	// bounds only what the model is shown, which is both a cost control and
+	// a relevance one (an hour-old topic dragged into an unrelated question
+	// makes answers worse, not better). ChatMaxTokens bounds the answer —
+	// deliberately its own knob rather than sharing LLM_DRAFT_MAX_TOKENS,
+	// which is sized for a short customer reply, not for an explanation of
+	// what changed across a knowledge base.
+	ChatHistoryWindow int `env:"CHAT_HISTORY_WINDOW"`
+	ChatMaxTokens     int `env:"CHAT_MAX_TOKENS"`
+
 	// --- Langfuse (LLM observability; secrets via env) ---
 	// Tracing is best-effort: when disabled or keys are missing the LLM clients
 	// emit to OTel's no-op tracer (≈ free). See internal/telemetry.NewLangfuseProvider.
@@ -305,6 +317,9 @@ func defaults() Config {
 		LLMDraftTemperature:    0.3,
 		LLMDraftTimeoutSeconds: 60,
 		LLMDraftRetry:          true,
+
+		ChatHistoryWindow: 10,
+		ChatMaxTokens:     2000,
 
 		QueueDriver: "inmem",
 	}
