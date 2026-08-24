@@ -1,0 +1,22 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "xchats",
+  "outputfilename": "xchats",
+  "frontend:dir": "../../../frontend",
+  "frontend:install": "npm ci",
+  "frontend:build": "npm run build:desktop",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "http://localhost:5173",
+  "wailsjsdir": "./wailsjs",
+  "build:tags": "desktop",
+  "author": {
+    "name": "xchats"
+  },
+  "info": {
+    "companyName": "xchats",
+    "productName": "xchats",
+    "productVersion": "0.1.0",
+    "copyright": "Licensed under the GNU AGPL-3.0-or-later",
+    "comments": "AI chat assistant for WhatsApp, Telegram, Instagram and Messenger"
+  }
+}

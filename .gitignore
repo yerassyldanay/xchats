@@ -49,6 +49,27 @@ frontend/dist-ssr/
 frontend/node_modules/
 node_modules/
 
+# Wails desktop packaging (see docs/desktop.md).
+# The built SPA is MIRRORED into the desktop binary's go:embed directory by
+# frontend/scripts/sync-desktop-assets.ts — it is build output, not source,
+# so only the .gitkeep that keeps the embed path valid is committed.
+backend/internal/desktop/dist/*
+!backend/internal/desktop/dist/.gitkeep
+# `wails build` output (build/bin/) plus the packaging templates Wails
+# regenerates on demand when they are absent — Info.plist, icon.ico,
+# info.json, the NSIS script. appicon.png is the one committed input; every
+# other file under build/ is derived from it and from wails.json.
+backend/cmd/xchats/build/*
+!backend/cmd/xchats/build/appicon.png
+# Wails' generated JS/TS binding module. Nothing is bound (the frontend talks
+# to the backend over same-origin HTTP, not Wails method calls — see
+# backend/cmd/xchats/bindings.go), so this only appears if the generator is
+# run by hand.
+backend/cmd/xchats/wailsjs/
+# `wails build`'s marker for "has package.json changed since the last
+# frontend:install?" — written next to the file it hashes.
+frontend/package.json.md5
+
 # playwright e2e artifacts
 frontend/test-results/
 frontend/playwright-report/
