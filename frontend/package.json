@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build && tsx scripts/build-blog.ts",
+    "build:desktop": "npm run build && tsx scripts/sync-desktop-assets.ts",
     "new-blog-post": "tsx scripts/new-blog-post.ts",
     "preview": "vite preview --port 5173",
     "preview:blog": "vite preview --config vite.preview-blog.config.ts",

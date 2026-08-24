@@ -16,6 +16,11 @@ All notable changes to this project are documented here. Format follows
 - CI: backend/frontend test suites, CodeQL, secret scanning (gitleaks),
   Dependabot, and a tag-triggered release workflow with build provenance
   attestation.
+- Desktop application for Windows, macOS and Linux, built with Wails: the
+  same backend binary with a WebView window attached, shipping the Vue UI
+  embedded and storing SQLite and all local data under the OS
+  application-data directory. Built for all three platforms by a GitHub
+  Actions matrix; auto-update is not implemented. See `docs/desktop.md`.
 
 ### Changed
 - Database layer ported from PostgreSQL to SQLite (no separate database

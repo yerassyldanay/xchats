@@ -100,9 +100,18 @@ func main() {
 		cmd = flag.Arg(0)
 	}
 
-	cfg, err := config.Load(config.ResolveConfigPath(*cfgPath))
+	// resolveConfigPath/applyDesktopDefaults are no-ops in the server build
+	// (desktop_off.go) and, under -tags desktop, the two adjustments a
+	// packaged app needs: read config from the OS config directory rather
+	// than the launcher's working directory, and resolve storage paths
+	// against the OS application data directory. Everything after this point
+	// is identical in both builds.
+	cfg, err := config.Load(resolveConfigPath(*cfgPath))
 	if err != nil {
 		fatal("load config", err)
+	}
+	if err := applyDesktopDefaults(cfg); err != nil {
+		fatal("desktop config", err)
 	}
 	log := newLogger(cfg)
 
@@ -480,7 +489,11 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		}()
 	}
 
-	<-ctx.Done()
+	// The server build blocks here until SIGINT/SIGTERM. The desktop build
+	// (-tags desktop) instead runs the Wails window on this goroutine and
+	// returns when the user closes it, cancelling ctx on the way out — so
+	// the teardown below is the same sequence in both cases.
+	runUntilShutdown(ctx, stop, shellDeps{Router: router, Hub: hub, Log: log, Addr: cfg.Server.HTTPAddr})
 	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
