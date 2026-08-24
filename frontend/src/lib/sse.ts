@@ -1,5 +1,6 @@
 import { api } from '../api/client'
 import { log } from './logfmt'
+import { desktopRuntime, type DesktopRuntime } from './desktop'
 import type { Chat, Message, AiDraft, CampaignStatusEvent, CampaignRecipientEvent } from '../types'
 
 export interface SSEHandlers {
@@ -26,12 +27,45 @@ export interface SSEHandlers {
   campaignAccountAutoPaused?: (d: { account_id: string; count: number }) => void
 }
 
-// connectRealtime opens the SSE stream and dispatches each named event. Returns
-// a disconnect function. SSE is the live layer only — panes hydrate via GET.
+// bindings pairs each backend event name with the handler that wants it. The
+// names are internal/realtime's own and are identical over both transports
+// below — a handler cannot tell which one delivered it.
+function bindings(h: SSEHandlers): Array<[string, ((d: any) => void) | undefined]> {
+  return [
+    ['message.created', h.messageCreated],
+    ['message.updated', h.messageUpdated],
+    ['chat.created', h.chatCreated],
+    ['chat.updated', h.chatUpdated],
+    ['ai_draft.created', h.draftCreated],
+    ['ai_draft.updated', h.draftUpdated],
+    ['kb.row.changed', h.kbRowChanged],
+    ['kb.approved', h.kbApproved],
+    ['integration.status_changed', h.providerHealthChanged],
+    ['campaign.status_changed', h.campaignStatusChanged],
+    ['campaign.recipient_updated', h.campaignRecipientUpdated],
+    ['campaign.account_auto_paused', h.campaignAccountAutoPaused],
+  ]
+}
+
+// connectRealtime opens the live event stream and dispatches each named event.
+// Returns a disconnect function. The live layer only — panes hydrate via GET.
+//
+// Two transports, picked at runtime: Server-Sent Events in a browser, and
+// Wails events in the desktop app. The desktop split is not a preference —
+// Wails' asset server cannot stream a response on Windows (its WebView2
+// response writer buffers until the handler returns), so an EventSource
+// there would connect and then never receive an event. The shell forwards
+// the same hub events over Wails' own channel instead; see
+// backend/internal/desktop/realtime.go.
 export function connectRealtime(h: SSEHandlers): () => void {
+  const runtime = desktopRuntime()
+  return runtime ? connectDesktop(runtime, h) : connectSSE(h)
+}
+
+function connectSSE(h: SSEHandlers): () => void {
   const es = new EventSource(api.realtimeURL(), { withCredentials: true })
-  const bind = (name: string, fn?: (d: any) => void) => {
-    if (!fn) return
+  for (const [name, fn] of bindings(h)) {
+    if (!fn) continue
     es.addEventListener(name, (e) => {
       try {
         fn(JSON.parse((e as MessageEvent).data))
@@ -40,19 +74,23 @@ export function connectRealtime(h: SSEHandlers): () => void {
       }
     })
   }
-  bind('message.created', h.messageCreated)
-  bind('message.updated', h.messageUpdated)
-  bind('chat.created', h.chatCreated)
-  bind('chat.updated', h.chatUpdated)
-  bind('ai_draft.created', h.draftCreated)
-  bind('ai_draft.updated', h.draftUpdated)
-  bind('kb.row.changed', h.kbRowChanged)
-  bind('kb.approved', h.kbApproved)
-  bind('integration.status_changed', h.providerHealthChanged)
-  bind('campaign.status_changed', h.campaignStatusChanged)
-  bind('campaign.recipient_updated', h.campaignRecipientUpdated)
-  bind('campaign.account_auto_paused', h.campaignAccountAutoPaused)
   es.onopen = () => log.info('sse connected')
   es.onerror = () => log.warn('sse error; browser will retry')
   return () => es.close()
+}
+
+function connectDesktop(runtime: DesktopRuntime, h: SSEHandlers): () => void {
+  // Payloads arrive already decoded: the Go side emits the same structs the
+  // SSE writer marshals, and Wails' runtime parses the envelope before
+  // invoking the callback — so there is no JSON.parse (and no parse failure)
+  // on this path.
+  const unsubscribes: Array<() => void> = []
+  for (const [name, fn] of bindings(h)) {
+    if (!fn) continue
+    unsubscribes.push(runtime.EventsOn(name, (d) => fn(d)))
+  }
+  log.info('desktop realtime connected')
+  return () => {
+    for (const off of unsubscribes) off()
+  }
 }

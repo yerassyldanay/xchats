@@ -1,0 +1,6 @@
+The desktop build's frontend bundle is copied here, not committed.
+
+`npm run build:desktop` in frontend/ (which `wails build` and `wails dev`
+run for you via wails.json's frontend:build) produces frontend/dist and
+mirrors it into this directory, which assets.go then go:embeds into the
+desktop binary. Everything here except this file is gitignored.

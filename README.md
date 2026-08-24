@@ -57,6 +57,11 @@ No Docker? `make dev-backend` (Go, `:8080`) and `make dev-frontend` (Vite,
 [`docs/release/installation.md`](docs/release/installation.md) for both
 paths in full.
 
+Prefer a desktop app? `make desktop-build` packages the same backend and UI
+as a native application for Windows, macOS or Linux — one executable that
+starts the backend and opens the UI, with SQLite and all local data under the
+OS application-data directory. See [`docs/desktop.md`](docs/desktop.md).
+
 > **WhatsApp connectivity is unofficial.** xchats talks to WhatsApp directly
 > via [whatsmeow](https://github.com/tulir/whatsmeow), a reverse-engineered
 > client — not WhatsApp's official Business API. A connected number can be
@@ -108,7 +113,9 @@ flowchart LR
 
 One Go backend (`backend/`) serves the HTTP API, runs the channel
 adapters, and hosts the MCP server; one Vue 3 + TypeScript frontend
-(`frontend/`) is the team's UI. SQLite is the only datastore. See
+(`frontend/`) is the team's UI. SQLite is the only datastore. The desktop
+app is that same backend binary with a WebView window attached — see
+[`docs/desktop.md`](docs/desktop.md). See
 [`plan/architecture.md`](plan/architecture.md) for the full design and
 [`plan/DECISIONS.md`](plan/DECISIONS.md) for the record of why it's shaped
 this way.
@@ -119,6 +126,8 @@ this way.
   and from-source setup, first-run walkthrough.
 - [`docs/release/`](docs/release/) — deploying, credentials, backups,
   upgrades, troubleshooting a real deployment.
+- [`docs/desktop.md`](docs/desktop.md) — the Wails desktop app: running and
+  building it locally, the CI matrix, and what users download.
 - [`plan/`](plan/) — the design record this project was built from; start
   at [`plan/README.md`](plan/README.md).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — development setup, conventions,
