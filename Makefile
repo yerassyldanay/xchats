@@ -12,13 +12,32 @@ FRONTEND := frontend
 COMPOSE := docker compose -p xchats -f deploy/docker-compose.yaml
 GORUN := go run ./cmd/xchats -config ../config.yaml
 
+# --- Wails desktop packaging (see docs/desktop.md) --------------------------
+# The desktop app is the SAME cmd/xchats binary with the `desktop` build tag,
+# so wails.json lives next to its main package rather than at the repo root.
+DESKTOP := $(BACKEND)/cmd/xchats
+# Pinned, like every other tool this repo shells out to: `wails build` runs
+# `go build` with tags and ldflags it chooses, so a surprise CLI upgrade is a
+# surprise change to the shipped binary.
+WAILS_VERSION := v2.15.0
+# On Linux the WebKitGTK ABI is a build tag, and the default (untagged) one is
+# a legacy path where the WebView delivers every request as a bodyless GET —
+# which would break every POST the app makes. webkit2_41 is libwebkit2gtk-4.1,
+# the current ABI. macOS/Windows need no extra tag.
+WAILS_TAGS := $(if $(filter Linux,$(shell uname -s)),-tags webkit2_41,)
+# -skipbindings: nothing is bound to the frontend, and the generator would
+# otherwise compile and RUN the server binary mid-build (see
+# backend/cmd/xchats/bindings.go).
+WAILS_FLAGS := -skipbindings $(WAILS_TAGS)
+
 # Ports kill-ports frees (override: make kill-ports PORTS="8080 5173").
 # 8090 is still listed deliberately: this box used to publish the backend
 # there via a local compose override, so a stale container may still hold it.
 PORTS ?= 8080 8090 5173 8081
 
 .PHONY: help up up-fg down logs ps kill-ports migrate seed seed-kb-demo dev-backend dev-frontend \
-        test test-backend test-frontend test-e2e build lint lint-backend lint-frontend notices ruleset-apply
+        test test-backend test-frontend test-e2e build lint lint-backend lint-frontend notices ruleset-apply \
+        desktop-tools desktop-assets desktop-dev desktop-build desktop-clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -80,6 +99,24 @@ test-e2e: ## Full demo loop + KB/response service DB-backed suites (subset of te
 build: ## Build backend binary + frontend bundle
 	cd $(BACKEND) && go build -o bin/xchats ./cmd/xchats
 	cd $(FRONTEND) && npm ci && npm run build
+
+desktop-tools: ## Install the pinned Wails CLI (one-off; see docs/desktop.md for the OS packages it needs)
+	go install github.com/wailsapp/wails/v2/cmd/wails@$(WAILS_VERSION)
+	@echo "✅ wails $(WAILS_VERSION) installed — run 'wails doctor' to check the OS-level prerequisites"
+
+desktop-assets: ## Build the SPA and mirror it into the desktop binary's go:embed directory
+	cd $(FRONTEND) && npm run build:desktop
+
+desktop-dev: ## Run the desktop app against the Vite dev server (hot reload; Ctrl-C to stop)
+	cd $(DESKTOP) && wails dev $(WAILS_FLAGS)
+
+desktop-build: ## Build the packaged desktop app for THIS platform into backend/cmd/xchats/build/bin/
+	cd $(DESKTOP) && wails build -clean $(WAILS_FLAGS)
+	@echo "✅ desktop build → $(DESKTOP)/build/bin/"
+
+desktop-clean: ## Remove desktop build output and the mirrored SPA bundle
+	rm -rf $(DESKTOP)/build/bin $(DESKTOP)/wailsjs
+	find $(BACKEND)/internal/desktop/dist -mindepth 1 ! -name .gitkeep -exec rm -rf {} +
 
 lint: lint-backend lint-frontend ## Run every linter (same checks as CI's lint jobs)
 

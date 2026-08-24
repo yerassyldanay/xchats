@@ -1,0 +1,210 @@
+name: Desktop build
+
+# Builds the Wails desktop app for Windows, macOS and Linux. See
+# docs/desktop.md for what each artifact is and how to run it.
+#
+# Every build is native: Wails links against the platform's own WebView
+# (WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux) through cgo,
+# so there is no cross-compiling to do and each platform gets its own runner.
+#
+# Triggers are deliberately narrow. This is three jobs including a macOS
+# runner, so it runs on pull requests that actually touch what goes into the
+# desktop binary — not on every backend change, which backend-test in ci.yml
+# already compiles and tests. Tag pushes build the release artifacts;
+# workflow_dispatch is the manual escape hatch.
+on:
+  pull_request:
+    paths:
+      - 'backend/cmd/xchats/**'
+      - 'backend/internal/desktop/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - 'frontend/**'
+      - '.nvmrc'
+      - '.github/workflows/desktop-build.yml'
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same pin rationale as ci.yml: with GOTOOLCHAIN=auto a future go.mod bump
+  # would silently download a different compiler mid-CI instead of failing
+  # visibly.
+  GOTOOLCHAIN: local
+  # `wails build` runs the frontend's own build, and build-blog.ts refuses to
+  # silently default to the placeholder origin when CI is set — so choose it
+  # explicitly, exactly as ci.yml's frontend-test job does. Change both
+  # together when a real domain exists.
+  SITE_ORIGIN: https://xchats.example
+  # Pinned CLI: `wails build` chooses the tags and ldflags the shipped binary
+  # is compiled with, so an unpinned CLI is an unpinned build.
+  WAILS_VERSION: v2.15.0
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform's toolchain breaking should still tell us about the
+      # other two.
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-24.04
+            platform: linux/amd64
+            # WebKitGTK's ABI is selected by a build tag. Without one, Wails
+            # compiles its legacy path, where the WebView hands the asset
+            # server every request as a bodyless GET — every POST the app
+            # makes would arrive empty. 24.04 ships libwebkit2gtk-4.1.
+            tags: webkit2_41
+            artifact: xchats-desktop-linux-amd64
+          - name: macos
+            os: macos-latest
+            # Universal: one .app that runs natively on both Apple Silicon
+            # and Intel, so there is one macOS download rather than two.
+            platform: darwin/universal
+            tags: ''
+            artifact: xchats-desktop-macos-universal
+          - name: windows
+            os: windows-latest
+            platform: windows/amd64
+            tags: ''
+            artifact: xchats-desktop-windows-amd64
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # GTK/WebKitGTK development headers — the only platform that needs any
+      # system package: WebView2 (Windows) ships as a Go library and WKWebView
+      # (macOS) comes with the SDK.
+      - name: Install Linux WebView dependencies
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install the Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      # A tag build stamps internal/version.Version so the Settings page and
+      # GET /settings/update-check report the real release, exactly as
+      # backend/Dockerfile's VERSION build-arg does for the images. Anything
+      # else is a dev build.
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -skipbindings: nothing is bound to the frontend, and Wails' binding
+      # generator would otherwise compile the module WITHOUT the desktop tag
+      # and run it — which is `xchats serve`, and would hang the build. See
+      # backend/cmd/xchats/bindings.go.
+      #
+      # wails build runs the frontend build first (wails.json's
+      # frontend:install/frontend:build), which is what mirrors the SPA into
+      # the binary's go:embed directory.
+      - name: Build desktop app
+        working-directory: backend/cmd/xchats
+        shell: bash
+        run: |
+          wails build \
+            -clean \
+            -skipbindings \
+            -platform "${{ matrix.platform }}" \
+            ${{ matrix.tags && format('-tags {0}', matrix.tags) || '' }} \
+            -ldflags "-X github.com/yerassyldanay/xchats/backend/internal/version.Version=${{ steps.version.outputs.value }}"
+          ls -l build/bin
+
+      # One archive per platform, in the shape that platform's users expect:
+      # a .app bundle has to stay a bundle (ditto preserves the symlinks and
+      # the executable bit that a plain zip would flatten), and a tarball
+      # preserves the executable bit on Linux where a zip would not.
+      - name: Package (linux)
+        if: matrix.name == 'linux'
+        working-directory: backend/cmd/xchats/build/bin
+        run: tar -czf "${{ matrix.artifact }}.tar.gz" xchats
+
+      - name: Package (macos)
+        if: matrix.name == 'macos'
+        working-directory: backend/cmd/xchats/build/bin
+        run: ditto -c -k --keepParent xchats.app "${{ matrix.artifact }}.zip"
+
+      - name: Package (windows)
+        if: matrix.name == 'windows'
+        working-directory: backend/cmd/xchats/build/bin
+        shell: pwsh
+        run: Compress-Archive -Path xchats.exe -DestinationPath "${{ matrix.artifact }}.zip"
+
+      - name: Checksum
+        working-directory: backend/cmd/xchats/build/bin
+        shell: bash
+        run: |
+          archive=$(ls ${{ matrix.artifact }}.*)
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+          cat "$archive.sha256"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            backend/cmd/xchats/build/bin/${{ matrix.artifact }}.*
+          if-no-files-found: error
+
+  # Attach the three archives to the GitHub Release for the tag. Separate
+  # from the matrix so one upload step sees all three, and idempotent in the
+  # same way release.yml's own source-bundle job is: whichever workflow
+  # reaches the tag first creates the release, the other uploads into it.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the Release + upload assets
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG='${{ github.ref_name }}'
+          ls -l artifacts
+          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes \
+            --repo "$GITHUB_REPOSITORY" \
+            || echo "release for $TAG already exists — uploading assets only"
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY" artifacts/*
