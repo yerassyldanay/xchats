@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ArrowLeft, Check, Copy, FileText } from 'lucide-vue-next'
 import { evalsApi, EvalsUnavailableError } from '@/api/evals'
 import { setupFrames, type Family, type SetupFrame } from '@/lib/evalMatrix'
@@ -11,7 +12,7 @@ import { Button } from '@/components/ui/button'
 // included, question count, experiment) and prompt text (the actual snapshotted
 // prompt.txt for one frame, fetched on demand). Extraction setups have no scenario
 // snapshot at all (prompts live in evals/prompts/, outside the served mount — see
-// evals.ts's fetchPromptText doc comment), so "Просмотр промпта" there always lands
+// evals.ts's fetchPromptText doc comment), so "view prompt" there always lands
 // on the same honest "not available" note as a legacy chat run with no snapshot.
 const props = defineProps<{
   open: boolean
@@ -23,6 +24,8 @@ const props = defineProps<{
   executions: VExecution[]
 }>()
 const emit = defineEmits<{ (e: 'update:open', value: boolean): void }>()
+
+const { t } = useI18n()
 
 const view = ref<'info' | 'prompt'>('info')
 const promptText = ref('')
@@ -92,43 +95,43 @@ async function copyPrompt() {
       <div v-if="view === 'info'" class="px-5 py-5 space-y-4">
         <div class="grid grid-cols-2 gap-3 text-sm">
           <div>
-            <div class="text-xs text-muted-foreground">Эксперимент</div>
-            <div class="mt-0.5">{{ experiment || '— не указан —' }}</div>
+            <div class="text-xs text-muted-foreground">{{ t('evals.strategy.experiment') }}</div>
+            <div class="mt-0.5">{{ experiment || t('evals.strategy.experimentNone') }}</div>
           </div>
           <div>
-            <div class="text-xs text-muted-foreground">Вопросов в проверке</div>
+            <div class="text-xs text-muted-foreground">{{ t('evals.strategy.questionCount') }}</div>
             <div class="mt-0.5">{{ questionCount }}</div>
           </div>
         </div>
 
         <div>
-          <div class="text-xs text-muted-foreground mb-2">Фреймы в составе стратегии</div>
+          <div class="text-xs text-muted-foreground mb-2">{{ t('evals.strategy.frames') }}</div>
           <div class="space-y-1.5">
             <div v-for="f in frames" :key="f.ref + f.scenario" class="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
               <div class="min-w-0">
-                <code class="text-xs font-medium">{{ f.ref || '(без версии промпта)' }}</code>
+                <code class="text-xs font-medium">{{ f.ref || t('evals.strategy.noPromptRef') }}</code>
                 <p v-if="f.scenario" class="text-xs text-muted-foreground mt-0.5 truncate">{{ f.scenario }}</p>
               </div>
               <Button size="sm" variant="outline" class="shrink-0" @click="openPrompt(f)">
-                <FileText class="w-3.5 h-3.5" /> Просмотр промпта
+                <FileText class="w-3.5 h-3.5" /> {{ t('evals.strategy.viewPrompt') }}
               </Button>
             </div>
-            <p v-if="!frames.length" class="text-xs text-muted-foreground italic">Нет данных о промптах для этой стратегии.</p>
+            <p v-if="!frames.length" class="text-xs text-muted-foreground italic">{{ t('evals.strategy.noFrames') }}</p>
           </div>
         </div>
       </div>
 
       <div v-else class="px-5 py-5 space-y-3">
-        <div v-if="promptLoading" class="text-sm text-muted-foreground py-8 text-center">Загрузка промпта…</div>
+        <div v-if="promptLoading" class="text-sm text-muted-foreground py-8 text-center">{{ t('kb.prompt.loading') }}</div>
         <div v-else-if="promptUnavailable" class="text-sm text-muted-foreground py-8 text-center max-w-sm mx-auto">
-          Текст промпта не входит в снапшот этого запуска — это либо старый запуск без сохранённого снапшота, либо промпт для разбора файлов (такие промпты пока не снимаются в снапшот).
+          {{ t('evals.strategy.promptNotInSnapshot') }}
         </div>
         <p v-else-if="promptErrorMsg" class="text-sm text-destructive py-8 text-center">{{ promptErrorMsg }}</p>
         <template v-else>
           <div class="flex justify-end">
             <Button size="sm" variant="outline" @click="copyPrompt">
               <Check v-if="copied" class="w-3.5 h-3.5" /><Copy v-else class="w-3.5 h-3.5" />
-              {{ copied ? 'Скопировано' : 'Копировать' }}
+              {{ copied ? t('common.copied') : t('common.copy') }}
             </Button>
           </div>
           <pre class="text-xs font-mono bg-muted/50 rounded-lg p-3 overflow-auto max-h-[60vh] whitespace-pre-wrap">{{ promptText }}</pre>

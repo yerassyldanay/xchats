@@ -33,8 +33,10 @@ const toneMeta: Record<ConnTone, { badge: string; dot: string }> = {
   error: { badge: 'bg-destructive/10 text-destructive', dot: 'bg-destructive' },
 }
 function conn(status: string) {
-  const { label, tone } = connStatus(status)
-  return { label, ...toneMeta[tone] }
+  const { key, tone } = connStatus(status)
+  // key === null means an unrecognised, non-empty status — show it raw rather
+  // than inventing a translation for a value the backend just started sending.
+  return { label: key ? t(`channels.connStatus.${key}`) : status, ...toneMeta[tone] }
 }
 const isTelegram = (a: Account) => a.channel === 'telegram'
 const isInstagram = (a: Account) => a.channel === 'instagram'

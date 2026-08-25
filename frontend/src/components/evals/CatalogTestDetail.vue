@@ -83,7 +83,7 @@ const presentKeys = computed(() => TEST_FIELD_KEYS.filter((k) => presentPredicat
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.escalate !== undefined" field-key="escalate">
-        <p class="text-xs">{{ test.escalate ? 'обязательна' : 'эскалации быть не должно' }}</p>
+        <p class="text-xs">{{ test.escalate ? t('evalCatalog.escalateRequired') : t('evalCatalog.escalateForbidden') }}</p>
       </CatalogFieldRow>
 
       <CatalogFieldRow v-if="test.language" field-key="language">

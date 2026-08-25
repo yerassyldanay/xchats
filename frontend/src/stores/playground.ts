@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
+import { t } from '../i18n'
 import { connectRealtime } from '../lib/sse'
 import type { CancelChangeResponse, DraftChangeSet, DraftView, KbMaterial, PromptView } from '../types'
 import type { ChangeKind } from '@/composables/draftChanges'
@@ -119,11 +120,11 @@ export const usePlayground = defineStore('playground', {
         return await fn()
       } catch (e) {
         if (e instanceof ApiError && e.errcode === 'DRAFT_STALE') {
-          this.error = 'Черновик изменился — обновляю…'
+          this.error = t('kb.draft.errStale')
           this.draftStale = true
           await this.load()
         } else {
-          this.error = e instanceof ApiError ? e.message : 'Не удалось сохранить изменение.'
+          this.error = e instanceof ApiError ? e.message : t('kb.draft.errSaveChange')
         }
         return undefined
       } finally {
@@ -258,10 +259,10 @@ export const usePlayground = defineStore('playground', {
         return res.changed
       } catch (e) {
         if (e instanceof ApiError && e.errcode === 'DRAFT_STALE') {
-          this.error = 'Черновик изменился — обновляю…'
+          this.error = t('kb.draft.errStale')
           await this.load()
         } else {
-          this.error = e instanceof ApiError ? e.message : 'Не удалось отменить изменение.'
+          this.error = e instanceof ApiError ? e.message : t('kb.draft.errRevertChange')
         }
         return false
       } finally {
@@ -306,10 +307,10 @@ export const usePlayground = defineStore('playground', {
           this.gateReasons = e.message
           this.gateBlockedKey = publishingKey
         } else if (e instanceof ApiError && e.errcode === 'DRAFT_STALE') {
-          this.error = 'Черновик изменился — обновляю…'
+          this.error = t('kb.draft.errStale')
           await this.load()
         } else {
-          this.error = e instanceof ApiError ? e.message : 'Не удалось сохранить в базу.'
+          this.error = e instanceof ApiError ? e.message : t('kb.draft.errPublish')
         }
         return false
       } finally {
@@ -327,7 +328,7 @@ export const usePlayground = defineStore('playground', {
       try {
         this.live = await api.get<DraftView>('/kb')
       } catch (e) {
-        this.liveError = e instanceof ApiError ? e.message : 'Не удалось загрузить базу знаний.'
+        this.liveError = e instanceof ApiError ? e.message : t('kb.draft.errLoadKb')
       } finally {
         this.liveLoading = false
       }
@@ -351,7 +352,7 @@ export const usePlayground = defineStore('playground', {
         await this.loadLive()
         return res.material_id
       } catch (e) {
-        this.error = e instanceof ApiError ? e.message : 'Не удалось загрузить файл.'
+        this.error = e instanceof ApiError ? e.message : t('kb.draft.errLoadFile')
         return undefined
       } finally {
         this.uploading = false
@@ -372,7 +373,7 @@ export const usePlayground = defineStore('playground', {
         // handled entirely by PromptTab from promptView.status) — without
         // this catch the request's rejection was unhandled and the tab was
         // stuck on "Загрузка промпта…" forever with no visible explanation.
-        this.promptLoadError = e instanceof ApiError ? e.message : 'Не удалось загрузить промпт.'
+        this.promptLoadError = e instanceof ApiError ? e.message : t('kb.prompt.errLoad')
       } finally {
         this.promptLoading = false
       }

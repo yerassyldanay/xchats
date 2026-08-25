@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch, type Component } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   Check,
   CheckCheck,
@@ -30,13 +31,14 @@ import {
 
 const inbox = useInbox()
 const auth = useAuth()
+const { t, locale } = useI18n()
 const scroller = ref<HTMLElement | null>(null)
 
 const chat = computed(() => inbox.activeChat)
 const assignee = computed(() => inbox.users.find((user) => user.id === chat.value?.assignee_user_id) ?? null)
 const assignmentLabel = computed(() => {
-  if (!assignee.value) return chat.value?.assignee_user_id ? 'Назначено' : 'Назначить'
-  return assignee.value.id === auth.user?.id ? 'Назначено мне' : assignee.value.name || assignee.value.email
+  if (!assignee.value) return chat.value?.assignee_user_id ? t('inbox.assign.assigned') : t('inbox.assign.assign')
+  return assignee.value.id === auth.user?.id ? t('inbox.assign.assignedToMe') : assignee.value.name || assignee.value.email
 })
 const otherUsers = computed(() => inbox.users.filter((user) => user.id !== auth.user?.id))
 
@@ -105,7 +107,7 @@ function isAudio(m: Message['media'][number]) {
               >
                 <UserRoundCheck class="w-4 h-4" />
                 <span class="min-w-0">
-                  <span class="block truncate">Назначить мне</span>
+                  <span class="block truncate">{{ t('inbox.assign.assignToMe') }}</span>
                   <span class="block truncate text-xs text-muted-foreground">{{ auth.user.email }}</span>
                 </span>
               </DropdownMenuItem>
@@ -126,12 +128,12 @@ function isAudio(m: Message['media'][number]) {
                 class="text-destructive focus:text-destructive"
                 @select="assign(null)"
               >
-                <X class="w-4 h-4" /> Снять назначение
+                <X class="w-4 h-4" /> {{ t('inbox.assign.unassign') }}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button variant="outline" size="sm" title="Решить">
-            <CircleCheck class="w-4 h-4 text-wa" /> Решить
+          <Button variant="outline" size="sm" :title="t('inbox.resolve')">
+            <CircleCheck class="w-4 h-4 text-wa" /> {{ t('inbox.resolve') }}
           </Button>
         </div>
       </header>
@@ -170,7 +172,7 @@ function isAudio(m: Message['media'][number]) {
                 :class="m.direction === 'out' ? 'bg-white/15 hover:bg-white/20 text-white' : 'bg-muted hover:bg-border text-foreground'"
               >
                 <FileText class="w-4 h-4 shrink-0" />
-                <span class="truncate">{{ md.file_name || 'Файл' }}</span>
+                <span class="truncate">{{ md.file_name || t('inbox.file') }}</span>
                 <Download class="w-3.5 h-3.5 ml-auto opacity-70" />
               </a>
             </div>
@@ -179,7 +181,7 @@ function isAudio(m: Message['media'][number]) {
               class="mt-1 flex items-center justify-end gap-1.5 text-[11px]"
               :class="m.direction === 'out' ? 'text-white/70' : 'text-muted-foreground'"
             >
-              <span>{{ shortTime(m.timestamp) }}</span>
+              <span>{{ shortTime(m.timestamp, locale) }}</span>
               <component
                 :is="tickMeta[tick(m.status)].icon"
                 v-if="m.direction === 'out'"
@@ -199,7 +201,7 @@ function isAudio(m: Message['media'][number]) {
         <div class="mx-auto w-16 h-16 rounded-2xl bg-card border border-border shadow-card grid place-items-center text-muted-foreground">
           <MessagesSquare class="w-7 h-7" />
         </div>
-        <p class="mt-4 text-sm text-muted-foreground">Выберите чат, чтобы открыть переписку</p>
+        <p class="mt-4 text-sm text-muted-foreground">{{ t('inbox.pickChat') }}</p>
       </div>
     </div>
   </section>

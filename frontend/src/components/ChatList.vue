@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { MessagesSquare, Plus, Search, SquarePen } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { useAccounts } from '../stores/accounts'
@@ -18,6 +19,7 @@ import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 const inbox = useInbox()
 const accounts = useAccounts()
+const { t, locale } = useI18n()
 const showNew = ref(false)
 
 // A chat carries its own channel, so the badge never has to guess from the
@@ -48,11 +50,13 @@ function channelText(channel: string) {
 
 const ALL = '__all__'
 
-const filters: { key: 'me' | 'unassigned' | 'all'; label: string }[] = [
-  { key: 'me', label: 'Мои' },
-  { key: 'unassigned', label: 'Неназначенные' },
-  { key: 'all', label: 'Все' },
-]
+// computed, not a module constant: the labels have to re-render when the
+// locale flips, which a plain array evaluated once at setup would not do.
+const filters = computed<{ key: 'me' | 'unassigned' | 'all'; label: string }[]>(() => [
+  { key: 'me', label: t('inbox.filters.me') },
+  { key: 'unassigned', label: t('inbox.filters.unassigned') },
+  { key: 'all', label: t('inbox.filters.all') },
+])
 
 function setFilter(k: 'me' | 'unassigned' | 'all') {
   inbox.filter = k
@@ -62,10 +66,10 @@ function setAccount(id: string | null) {
   inbox.accountFilter = id
   inbox.loadChats()
 }
-let t: number | undefined
+let searchTimer: number | undefined
 function onSearch() {
-  window.clearTimeout(t)
-  t = window.setTimeout(() => inbox.loadChats(), 250)
+  window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => inbox.loadChats(), 250)
 }
 </script>
 
@@ -74,7 +78,7 @@ function onSearch() {
     <!-- brand header -->
     <div class="flex items-center justify-between px-4 pt-4 pb-3">
       <span class="text-[19px] font-bold tracking-tight">xchats</span>
-      <Button variant="ghost" size="icon" class="text-primary" title="Новое сообщение" @click="showNew = true">
+      <Button variant="ghost" size="icon" class="text-primary" :title="t('inbox.newMessage')" @click="showNew = true">
         <SquarePen class="w-[18px] h-[18px]" />
       </Button>
     </div>
@@ -84,7 +88,7 @@ function onSearch() {
         <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <Input
           v-model="inbox.query"
-          placeholder="Поиск по чатам или контактам"
+          :placeholder="t('inbox.searchPlaceholder')"
           class="pl-9 bg-muted border-transparent focus-visible:bg-background"
           @input="onSearch"
         />
@@ -106,11 +110,11 @@ function onSearch() {
       >
         <SelectTrigger class="mt-2 h-9 text-[13px]">
           <span class="flex items-center gap-2 min-w-0">
-            <SelectValue placeholder="Все каналы" />
+            <SelectValue :placeholder="t('inbox.allChannels')" />
           </span>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem :value="ALL">Все каналы</SelectItem>
+          <SelectItem :value="ALL">{{ t('inbox.allChannels') }}</SelectItem>
           <SelectItem v-for="a in accounts.accounts" :key="a.id" :value="a.id">
             {{ a.display_name }}
           </SelectItem>
@@ -123,7 +127,7 @@ function onSearch() {
         <div class="mx-auto w-12 h-12 rounded-xl bg-muted grid place-items-center text-muted-foreground">
           <MessagesSquare class="w-6 h-6" />
         </div>
-        <p class="mt-3 text-sm text-muted-foreground">Пока нет чатов.<br />Новые сообщения появятся здесь.</p>
+        <p class="mt-3 text-sm text-muted-foreground">{{ t('inbox.emptyTitle') }}<br />{{ t('inbox.emptySubtitle') }}</p>
       </div>
 
       <button
@@ -151,7 +155,7 @@ function onSearch() {
         <div class="min-w-0 flex-1">
           <div class="flex items-baseline justify-between gap-2">
             <span class="font-semibold text-[15px] truncate">{{ c.contact.display_name }}</span>
-            <span class="text-[11px] text-muted-foreground shrink-0">{{ shortTime(c.last_message_at) }}</span>
+            <span class="text-[11px] text-muted-foreground shrink-0">{{ shortTime(c.last_message_at, locale) }}</span>
           </div>
           <div
             v-if="accounts.hasMultiple && accounts.accountName(c.account_id)"
@@ -177,7 +181,7 @@ function onSearch() {
     <Button
       size="icon"
       class="absolute bottom-5 right-5 h-14 w-14 rounded-full shadow-pop"
-      title="Новое сообщение"
+      :title="t('inbox.newMessage')"
       @click="showNew = true"
     >
       <Plus class="w-5 h-5" />
