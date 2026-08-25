@@ -80,19 +80,29 @@ export function notCheckedRequirements(test: CatalogTestCase): TestFieldKey[] {
 // no_invented_numbers is DELIBERATELY excluded here — it always runs (fail-closed
 // default) regardless of whether allowed_numbers is declared or empty, so it's never
 // "not checked"; it always renders as an active requirement (see the test-detail view).
-export function notCheckedExtractRequirements(c: CatalogExtractCase): string[] {
-  const items: string[] = []
-  if (!c.fields || Object.keys(c.fields).length === 0) items.push('Классификация')
-  if (!c.text_contains_all || c.text_contains_all.length === 0) items.push('Обязательные фразы')
-  if (!c.identify_contains_all || c.identify_contains_all.length === 0) items.push('Тема/описание (обязательно)')
-  if (!c.identify_contains_any || c.identify_contains_any.length === 0) items.push('Тема/описание (любое из)')
-  if (!c.required_numbers || c.required_numbers.length === 0) items.push('Обязательные числа')
-  if (!c.forbid_currency) items.push('Запрет валюты')
+// Returns schema key names, not labels: the component renders each through
+// evalCatalog.extract.<key> so the same wording serves this list and the
+// section heading above it, in whatever locale is active.
+export type ExtractFieldKey =
+  | 'fields'
+  | 'text_contains_all'
+  | 'identify_contains_all'
+  | 'identify_contains_any'
+  | 'required_numbers'
+  | 'forbid_currency'
+export function notCheckedExtractRequirements(c: CatalogExtractCase): ExtractFieldKey[] {
+  const items: ExtractFieldKey[] = []
+  if (!c.fields || Object.keys(c.fields).length === 0) items.push('fields')
+  if (!c.text_contains_all || c.text_contains_all.length === 0) items.push('text_contains_all')
+  if (!c.identify_contains_all || c.identify_contains_all.length === 0) items.push('identify_contains_all')
+  if (!c.identify_contains_any || c.identify_contains_any.length === 0) items.push('identify_contains_any')
+  if (!c.required_numbers || c.required_numbers.length === 0) items.push('required_numbers')
+  if (!c.forbid_currency) items.push('forbid_currency')
   return items
 }
 
 export interface ScenarioExperimentGroup {
-  experiment: string // '' = "Без эксперимента"
+  experiment: string // '' = "no experiment declared" (rendered via evals.noExperiment)
   scenarios: CatalogScenario[]
 }
 

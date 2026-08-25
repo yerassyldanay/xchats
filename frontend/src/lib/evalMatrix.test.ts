@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import ru from '../i18n/locales/ru'
 import type { RunSummary, VContractRow, VExecution } from '../types'
 import {
   buildComparisonMatrices,
@@ -20,6 +21,17 @@ import {
   shortModelName,
   type LaunchListRow,
 } from './evalMatrix'
+
+// t resolves against the REAL ru catalog rather than echoing keys back, so the
+// assertions below still pin the exact Russian shipped in the UI. Built here from
+// the plain message object instead of i18n/index.ts's vue-i18n instance: this test
+// runs in the `unit` project (environment: 'node'), where that module's
+// localStorage read at import time would throw.
+function t(key: string, named: Record<string, unknown> = {}): string {
+  const value = key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], ru)
+  if (typeof value !== 'string') throw new Error(`no ru message for ${key}`)
+  return value.replace(/\{(\w+)\}/g, (whole, name: string) => (name in named ? String(named[name]) : whole))
+}
 
 // scenarioExec is the fixture builder — every field a real VExecution carries,
 // defaulted to the "everything passed" shape so each test only overrides what it's
@@ -65,7 +77,7 @@ describe('buildComparisonMatrices — scenario family', () => {
       scenarioExec({ testID: 't1', setup: 'lang-v1', experiment: 'lang-bakeoff', model: 'm2', behaviorPass: true }),
       scenarioExec({ testID: 't2', setup: 'lang-v1', experiment: 'lang-bakeoff', model: 'm2', behaviorPass: true }),
     ]
-    const groups = buildComparisonMatrices(execs, 'scenario')
+    const groups = buildComparisonMatrices(execs, 'scenario', t)
     expect(groups).toHaveLength(1)
     const g = groups[0]
     expect(g.experiment).toBe('lang-bakeoff')
@@ -98,7 +110,7 @@ describe('buildComparisonMatrices — scenario family', () => {
     execs[0].variant.prompt = { name: 'lang-kk', version: 4 }
     execs[1].variant.prompt = { name: 'lang-ru', version: 4 }
 
-    const groups = buildComparisonMatrices(execs, 'scenario')
+    const groups = buildComparisonMatrices(execs, 'scenario', t)
     expect(groups).toHaveLength(1)
     expect(groups[0].setups).toEqual(['lang-v4-routed'])
     expect(cellFor(groups[0], 'lang-v4-routed', 'm1')!.n).toBe(2)
@@ -113,15 +125,14 @@ describe('buildComparisonMatrices — scenario family', () => {
       scenarioExec({ testID: 't2', setup: 'lang-v2', experiment: 'lang-bakeoff', model: 'm1' }),
       scenarioExec({ testID: 't1', setup: 'lang-v3', experiment: 'lang-bakeoff', model: 'm1' }),
     ]
-    const groups = buildComparisonMatrices(execs, 'scenario')
+    const groups = buildComparisonMatrices(execs, 'scenario', t)
     expect(groups).toHaveLength(2)
 
     const comparableGroup = groups.find((g) => !g.warning)!
     const warnedGroup = groups.find((g) => g.warning)!
     expect(comparableGroup.setups).toEqual(['lang-v2'])
     expect(warnedGroup.setups).toEqual(['lang-v3'])
-    expect(warnedGroup.warning).toContain('lang-v3')
-    expect(warnedGroup.warning).toContain('lang-bakeoff')
+    expect(warnedGroup.warning).toEqual({ setup: 'lang-v3', experiment: 'lang-bakeoff' })
   })
 
   it('never pools across different experiments', () => {
@@ -129,13 +140,13 @@ describe('buildComparisonMatrices — scenario family', () => {
       scenarioExec({ testID: 't1', setup: 'lang-v1', experiment: 'lang-bakeoff', model: 'm1' }),
       scenarioExec({ testID: 't1', setup: 'escalation-v1', experiment: 'escalation-bakeoff', model: 'm1' }),
     ]
-    const groups = buildComparisonMatrices(execs, 'scenario')
+    const groups = buildComparisonMatrices(execs, 'scenario', t)
     expect(groups.map((g) => g.experiment).sort()).toEqual(['escalation-bakeoff', 'lang-bakeoff'])
   })
 
   it('an unannotated scenario (no setup/experiment) falls back to the scenario name and is never dropped', () => {
     const execs: VExecution[] = [scenarioExec({ testID: 't1', model: 'm1', scenario: 'shop-current' })]
-    const groups = buildComparisonMatrices(execs, 'scenario')
+    const groups = buildComparisonMatrices(execs, 'scenario', t)
     expect(groups).toHaveLength(1)
     expect(groups[0].experiment).toBe('')
     expect(groups[0].setups).toEqual(['shop-current'])
@@ -157,7 +168,7 @@ describe('buildComparisonMatrices — scenario family', () => {
     // Both scenarios cover disjoint test-id sets ({t1} vs {t2}), so the
     // comparability guard legitimately splits them into two single-column
     // matrices — the point being that EACH column is scenario-named, not model-named.
-    const groups = buildComparisonMatrices(execs, 'scenario')
+    const groups = buildComparisonMatrices(execs, 'scenario', t)
     const allSetups = groups.flatMap((g) => g.setups)
     expect(allSetups.sort()).toEqual(['shop-current', 'shop-decisions-v1'].sort())
     expect(allSetups).not.toContain('m1')
@@ -174,7 +185,7 @@ describe('recommendedSetup', () => {
       scenarioExec({ testID: 't1', setup: 'v1', model: 'm1', behaviorPass: false }),
       scenarioExec({ testID: 't1', setup: 'v2', model: 'm1', behaviorPass: true }),
     ]
-    const [group] = buildComparisonMatrices(execs, 'scenario')
+    const [group] = buildComparisonMatrices(execs, 'scenario', t)
     expect(recommendedSetup(group)).toBe('v2')
   })
 
@@ -183,7 +194,7 @@ describe('recommendedSetup', () => {
       scenarioExec({ testID: 't1', setup: 'v1', model: 'm1', behaviorPass: true }),
       scenarioExec({ testID: 't1', setup: 'v2', model: 'm1', behaviorPass: true }),
     ]
-    const [group] = buildComparisonMatrices(execs, 'scenario')
+    const [group] = buildComparisonMatrices(execs, 'scenario', t)
     expect(recommendedSetup(group)).toBeNull()
   })
 
@@ -303,19 +314,19 @@ describe('caseLevelRequirements', () => {
 
 describe('costLabel', () => {
   it('shows a dollar figure only for measured/borrowed bases, an explicit label otherwise', () => {
-    expect(costLabel('measured_split', 0.00021)).toBe('$0.00021')
-    expect(costLabel('cached_replay_borrowed', 0.00021)).toBe('$0.00021')
-    expect(costLabel('cached_replay_unpriceable', 0)).not.toMatch(/^\$/)
-    expect(costLabel('unknown_pricing', 0)).not.toMatch(/^\$/)
-    expect(costLabel('', 0)).not.toMatch(/^\$/)
+    expect(costLabel('measured_split', 0.00021, t)).toBe('$0.00021')
+    expect(costLabel('cached_replay_borrowed', 0.00021, t)).toBe('$0.00021')
+    expect(costLabel('cached_replay_unpriceable', 0, t)).not.toMatch(/^\$/)
+    expect(costLabel('unknown_pricing', 0, t)).not.toMatch(/^\$/)
+    expect(costLabel('', 0, t)).not.toMatch(/^\$/)
   })
 })
 
 describe('pct', () => {
   it('formats a pass/total pair, and reports н/д for null or zero total', () => {
-    expect(pct(8, 10)).toBe('80% (8/10)')
-    expect(pct(null, 10)).toBe('н/д')
-    expect(pct(0, 0)).toBe('н/д')
+    expect(pct(8, 10, t)).toBe('80% (8/10)')
+    expect(pct(null, 10, t)).toBe('н/д')
+    expect(pct(0, 0, t)).toBe('н/д')
   })
 })
 
@@ -398,23 +409,23 @@ describe('shortModelName', () => {
 
 describe('formatStartedAt', () => {
   it('renders an RFC3339 UTC timestamp as the reference design\'s exact shape', () => {
-    expect(formatStartedAt('2026-07-14T15:53:00Z')).toBe('14 июля 2026, 15:53')
+    expect(formatStartedAt('2026-07-14T15:53:00Z', t)).toBe('14 июля 2026, 15:53')
   })
   it('returns empty for missing or unparseable input, never a fabricated date', () => {
-    expect(formatStartedAt(undefined)).toBe('')
-    expect(formatStartedAt('')).toBe('')
-    expect(formatStartedAt('not-a-date')).toBe('')
+    expect(formatStartedAt(undefined, t)).toBe('')
+    expect(formatStartedAt('', t)).toBe('')
+    expect(formatStartedAt('not-a-date', t)).toBe('')
   })
 })
 
 describe('formatDuration', () => {
   it('matches the reference design\'s worked examples exactly', () => {
-    expect(formatDuration(40 * 1000)).toBe('40с')
-    expect(formatDuration((18 * 60 + 42) * 1000)).toBe('18м 42с')
-    expect(formatDuration((24 * 60 + 18) * 1000)).toBe('24м 18с')
+    expect(formatDuration(40 * 1000, t)).toBe('40с')
+    expect(formatDuration((18 * 60 + 42) * 1000, t)).toBe('18м 42с')
+    expect(formatDuration((24 * 60 + 18) * 1000, t)).toBe('24м 18с')
   })
   it('drops seconds once the span reaches an hour', () => {
-    expect(formatDuration((60 * 60 + 5 * 60) * 1000)).toBe('1ч 05м')
+    expect(formatDuration((60 * 60 + 5 * 60) * 1000, t)).toBe('1ч 05м')
   })
 })
 

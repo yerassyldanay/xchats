@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Blocks, Bot, Check, FlaskConical, Inbox, Library, LogOut, Megaphone, Radio, Settings } from 'lucide-vue-next'
+import { Blocks, Bot, Check, FlaskConical, Inbox, Languages, Library, LogOut, Megaphone, Radio, Settings } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { useSettings } from '../stores/settings'
 import { initials, colorFor } from '../lib/format'
@@ -23,7 +23,18 @@ const auth = useAuth()
 const settingsStore = useSettings()
 const router = useRouter()
 const route = useRoute()
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+// The app chrome's language switcher. The landing page has its own
+// (LandingLangSwitcher) because it renders no nav rail; this is the same
+// three locales for everyone who is logged in. Native language names, never
+// re-translated per current locale — same convention as the landing switcher
+// and scripts/build-blog.ts's LOCALE_LABEL.
+const LOCALES = [
+  { code: 'ru', label: 'Русский' },
+  { code: 'en', label: 'English' },
+  { code: 'kk', label: 'Қазақша' },
+] as const
 
 // The "Эвалы" item only appears once /evals-data/ actually resolves — the local-dev
 // -only volume mount (deploy/docker-compose.override.yaml) is deliberately absent
@@ -36,17 +47,22 @@ onMounted(async () => {
 })
 
 const baseNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
-  { name: 'chatboard', icon: Inbox, label: 'Инбокс', match: ['chatboard'] },
-  { name: 'accounts', icon: Radio, label: 'Каналы', match: ['accounts'] },
+  { name: 'chatboard', icon: Inbox, label: t('nav.inbox'), match: ['chatboard'] },
+  { name: 'accounts', icon: Radio, label: t('nav.channels'), match: ['accounts'] },
   { name: 'campaigns', icon: Megaphone, label: t('campaigns.navLabel'), match: ['campaigns', 'campaign-new', 'campaign-detail'] },
   { name: 'playground', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['playground'] },
-  { name: 'knowledge-base', icon: Library, label: 'База знаний', match: ['knowledge-base'] },
+  { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base'] },
   { name: 'simulator', icon: Bot, label: t('simulator.navLabel'), match: ['simulator'] },
 ])
 // Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
 // and rendered in its own bottom cluster (separated by a divider, above the avatar)
 // so it never reads as one more product feature.
-const evalsItem = { name: 'evals', icon: FlaskConical, label: 'Эвалы', match: ['evals', 'eval-launch', 'eval-catalog'] }
+const evalsItem = computed(() => ({
+  name: 'evals',
+  icon: FlaskConical,
+  label: t('nav.evals'),
+  match: ['evals', 'eval-launch', 'eval-catalog'],
+}))
 function isActive(match: string[]) {
   return match.includes(route.name as string)
 }
@@ -119,7 +135,7 @@ async function switchOrg(orgId: string) {
             <TooltipTrigger as-child>
               <RouterLink
                 :to="{ name: 'settings' }"
-                aria-label="Настройки"
+                :aria-label="t('nav.settings')"
                 class="relative w-11 h-11 rounded-lg grid place-items-center transition"
                 :class="isActive(['settings']) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
               >
@@ -132,8 +148,8 @@ async function switchOrg(orgId: string) {
               </RouterLink>
             </TooltipTrigger>
             <TooltipContent side="right">
-              Настройки
-              <span v-if="settingsStore.hasUnhealthyProvider" class="text-destructive">— требует внимания</span>
+              {{ t('nav.settings') }}
+              <span v-if="settingsStore.hasUnhealthyProvider" class="text-destructive">{{ t('nav.needsAttention') }}</span>
             </TooltipContent>
           </Tooltip>
         </template>
@@ -163,7 +179,7 @@ async function switchOrg(orgId: string) {
               </div>
             </div>
             <template v-if="auth.orgs.length > 1">
-              <div class="text-xs text-muted-foreground mt-1 px-1">Организация</div>
+              <div class="text-xs text-muted-foreground mt-1 px-1">{{ t('nav.organization') }}</div>
               <DropdownMenuItem
                 v-for="o in auth.orgs"
                 :key="o.id"
@@ -177,11 +193,22 @@ async function switchOrg(orgId: string) {
             </template>
             <div v-else class="text-xs text-muted-foreground mt-1 mb-1 px-1 truncate">{{ auth.org?.name }}</div>
             <DropdownMenuSeparator />
+            <div class="text-xs text-muted-foreground mt-1 px-1">{{ t('nav.language') }}</div>
+            <DropdownMenuItem
+              v-for="l in LOCALES"
+              :key="l.code"
+              class="justify-between gap-2"
+              @select="locale = l.code"
+            >
+              <span class="flex items-center gap-2 truncate"><Languages class="w-4 h-4 shrink-0" /> {{ l.label }}</span>
+              <Check v-if="locale === l.code" class="w-4 h-4 shrink-0" />
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               class="text-destructive focus:bg-destructive/10 focus:text-destructive font-medium"
               @select="logout"
             >
-              <LogOut class="w-4 h-4" /> Выйти
+              <LogOut class="w-4 h-4" /> {{ t('nav.logout') }}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

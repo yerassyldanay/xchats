@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Paperclip, Send, Smile, X } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { vAutosize } from '../lib/autosize'
@@ -10,6 +11,7 @@ defineProps<{ sending: boolean }>()
 const emit = defineEmits<{ (e: 'send', text: string, files: File[]): void }>()
 
 const inbox = useInbox()
+const { t } = useI18n()
 const files = ref<File[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -44,7 +46,7 @@ function submit() {
       </span>
     </div>
     <div class="flex items-end gap-2">
-      <Button variant="ghost" size="icon" class="shrink-0" title="Прикрепить файл" @click="fileInput?.click()">
+      <Button variant="ghost" size="icon" class="shrink-0" :title="t('inbox.attachFile')" @click="fileInput?.click()">
         <Paperclip class="w-[18px] h-[18px]" />
       </Button>
       <input ref="fileInput" type="file" multiple class="hidden" @change="pick" />
@@ -53,16 +55,16 @@ function submit() {
           v-model="inbox.composerText"
           v-autosize
           rows="1"
-          placeholder="Введите сообщение…"
+          :placeholder="t('inbox.messagePlaceholder')"
           class="flex-1 resize-none border-0 bg-transparent py-2.5 min-h-0 max-h-[40vh] overflow-y-auto text-[15px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           @keydown.enter.exact.prevent="submit"
         />
-        <button class="pb-2.5 pl-2 text-muted-foreground hover:text-foreground transition" title="Эмодзи" type="button">
+        <button class="pb-2.5 pl-2 text-muted-foreground hover:text-foreground transition" :title="t('inbox.emoji')" type="button">
           <Smile class="w-5 h-5" />
         </button>
       </div>
       <Button :disabled="sending" class="shrink-0" @click="submit">
-        <Send class="w-4 h-4" /> Отправить
+        <Send class="w-4 h-4" /> {{ t('inbox.send') }}
       </Button>
     </div>
   </div>
