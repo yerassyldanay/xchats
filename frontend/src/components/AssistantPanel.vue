@@ -64,7 +64,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
             <UserRound class="w-3.5 h-3.5" /> {{ t('crm.tab.customer') }}
           </TabsTrigger>
           <TabsTrigger value="assistant" class="flex-1 gap-1.5">
-            <WandSparkles class="w-3.5 h-3.5" /> {{ t('crm.tab.assistant') }}
+            <WandSparkles class="w-3.5 h-3.5" /> {{ t('assistant.title') }}
           </TabsTrigger>
         </TabsList>
       </Tabs>

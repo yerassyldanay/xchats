@@ -757,7 +757,6 @@ export default {
     },
     tab: {
       customer: 'Клиент',
-      assistant: 'ИИ-помощник',
     },
     panel: {
       empty: 'Выберите чат',
@@ -1342,7 +1341,6 @@ export default {
     suggest: 'Подсказать ответ',
     dismiss: 'Отклонить',
     pickChat: 'Выберите чат',
-    contact: 'Контакт',
   },
   // channels.* — vocabulary shared by the Каналы page and Настройки → Каналы связи,
   // which render the SAME connection states from lib/format.ts's connStatus().

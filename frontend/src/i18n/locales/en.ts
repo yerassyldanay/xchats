@@ -752,7 +752,6 @@ export default {
     },
     tab: {
       customer: 'Customer',
-      assistant: 'AI assistant',
     },
     panel: {
       empty: 'Pick a conversation',
@@ -1337,7 +1336,6 @@ export default {
     suggest: 'Suggest a reply',
     dismiss: 'Dismiss',
     pickChat: 'Pick a chat',
-    contact: 'Contact',
   },
   // channels.* — vocabulary shared by the Channels page and Settings → Communication
   // channels, which render the SAME connection states from lib/format.ts's connStatus().
