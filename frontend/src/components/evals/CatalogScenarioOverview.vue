@@ -31,9 +31,9 @@ const { t } = useI18n()
 
     <div>
       <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">
-        База знаний · {{ scenario.facts.length }} фактов
+        {{ t('evalCatalog.scenario.knowledgeBase', { n: scenario.facts.length }) }}
       </div>
-      <p class="text-[11px] text-muted-foreground mb-1.5">источник: <code>{{ scenario.facts_source }}</code></p>
+      <p class="text-[11px] text-muted-foreground mb-1.5">{{ t('evals.source') }} <code>{{ scenario.facts_source }}</code></p>
       <div class="max-h-64 overflow-y-auto rounded-lg border border-border">
         <table class="w-full text-xs">
           <tbody>
@@ -41,14 +41,14 @@ const { t } = useI18n()
               <td class="py-1.5 px-2.5 font-mono text-muted-foreground whitespace-nowrap">{{ f.token }}</td>
               <td class="py-1.5 px-2.5">{{ f.value }}</td>
             </tr>
-            <tr v-if="!scenario.facts.length"><td class="py-2 px-2.5 text-muted-foreground italic">нет фактов</td></tr>
+            <tr v-if="!scenario.facts.length"><td class="py-2 px-2.5 text-muted-foreground italic">{{ t('evalCatalog.scenario.noFacts') }}</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
     <div v-if="scenario.media?.length">
-      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">Медиа</div>
+      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">{{ t('evalCatalog.scenario.media') }}</div>
       <div class="space-y-1">
         <div v-for="m in scenario.media" :key="m.name" class="text-xs rounded-lg border border-border px-2.5 py-1.5">
           <code class="font-mono">{{ m.name }}</code>
@@ -59,17 +59,17 @@ const { t } = useI18n()
 
     <div>
       <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">
-        Тесты · {{ scenario.tests.length }}
+        {{ t('evalCatalog.scenario.tests', { n: scenario.tests.length }) }}
       </div>
       <div class="space-y-1">
         <button
-          v-for="t in scenario.tests"
-          :key="t.id"
+          v-for="test in scenario.tests"
+          :key="test.id"
           class="w-full text-left text-xs rounded-lg border border-border px-2.5 py-1.5 hover:bg-muted/60 transition"
-          @click="emit('select-test', t.id)"
+          @click="emit('select-test', test.id)"
         >
-          <span class="font-mono">{{ t.id }}</span>
-          <span class="text-muted-foreground"> — {{ t.message }}</span>
+          <span class="font-mono">{{ test.id }}</span>
+          <span class="text-muted-foreground"> — {{ test.message }}</span>
         </button>
       </div>
     </div>

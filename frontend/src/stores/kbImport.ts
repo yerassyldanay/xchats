@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
+import { t } from '../i18n'
 import { connectRealtime } from '../lib/sse'
 import type { KbImportRun, KbImportRunStatus } from '../types'
 
@@ -62,7 +63,7 @@ export const useKbImport = defineStore('kbImport', {
         this.current = await api.submitKbImport(input)
         return true
       } catch (e) {
-        this.error = e instanceof ApiError ? e.message : 'Не удалось запустить импорт.'
+        this.error = e instanceof ApiError ? e.message : t('kb.import.errStart')
         return false
       } finally {
         this.submitting = false

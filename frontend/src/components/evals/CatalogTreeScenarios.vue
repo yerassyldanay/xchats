@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronRight, MessageSquare } from 'lucide-vue-next'
 import { scenarioNavLabel, type ScenarioExperimentGroup } from '@/lib/evalCatalog'
 
@@ -17,12 +18,13 @@ const emit = defineEmits<{
   (e: 'select-scenario', name: string): void
   (e: 'select-test', scenario: string, testId: string): void
 }>()
+const { t } = useI18n()
 </script>
 
 <template>
   <div v-for="group in groups" :key="group.experiment || '__none__'" class="mb-1">
     <div v-if="group.experiment" class="px-3 py-1 text-[11px] font-medium text-muted-foreground">{{ group.experiment }}</div>
-    <div v-else class="px-3 py-1 text-[11px] italic text-muted-foreground">Без эксперимента</div>
+    <div v-else class="px-3 py-1 text-[11px] italic text-muted-foreground">{{ t('evals.noExperiment') }}</div>
     <div v-for="s in group.scenarios" :key="s.name">
       <button
         class="w-full flex items-start gap-1.5 px-3 py-1.5 text-left text-sm hover:bg-muted/60 transition"

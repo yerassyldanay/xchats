@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { CircleAlert, LoaderCircle, Lock, Mail, ShieldCheck, WandSparkles } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { ApiError } from '../api/client'
@@ -10,10 +11,20 @@ import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 
 const auth = useAuth()
 const router = useRouter()
+const { t, locale } = useI18n()
 const email = ref('')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
+
+// Login renders outside the nav rail, so its own switcher is the only way to
+// pick a language before signing in. Native language names, same three
+// locales and same convention as NavRail/LandingLangSwitcher.
+const LOCALES = [
+  { code: 'ru', label: 'Русский' },
+  { code: 'en', label: 'English' },
+  { code: 'kk', label: 'Қазақша' },
+] as const
 
 async function submit() {
   error.value = ''
@@ -24,8 +35,8 @@ async function submit() {
   } catch (e) {
     error.value =
       e instanceof ApiError && e.errcode === 'UNAUTHORIZED'
-        ? 'Неверный email или пароль'
-        : 'Не удалось войти. Попробуйте ещё раз.'
+        ? t('login.errBadCredentials')
+        : t('login.errGeneric')
   } finally {
     busy.value = false
   }
@@ -41,19 +52,19 @@ async function submit() {
           <span class="w-11 h-11 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold">X</span>
           xchats
         </div>
-        <h1 class="mt-8 text-3xl font-semibold leading-snug tracking-tight">Командный инбокс<br />и ИИ-ассистент</h1>
+        <h1 class="mt-8 text-3xl font-semibold leading-snug tracking-tight">{{ t('login.heroLine1') }}<br />{{ t('login.heroLine2') }}</h1>
         <ul class="mt-10 space-y-4 text-slate-300">
           <li class="flex items-center gap-3">
             <span class="w-7 h-7 rounded-md bg-white/5 grid place-items-center text-wa"><WhatsappIcon class="w-4 h-4" /></span>
-            Единый инбокс WhatsApp
+            {{ t('login.benefitInbox') }}
           </li>
           <li class="flex items-center gap-3">
             <span class="w-7 h-7 rounded-md bg-white/5 grid place-items-center text-indigo-300"><WandSparkles class="w-4 h-4" /></span>
-            ИИ-ответы (предложить и отправить)
+            {{ t('login.benefitAi') }}
           </li>
           <li class="flex items-center gap-3">
             <span class="w-7 h-7 rounded-md bg-white/5 grid place-items-center text-emerald-300"><ShieldCheck class="w-4 h-4" /></span>
-            Безопасность и контроль
+            {{ t('login.benefitSecurity') }}
           </li>
         </ul>
       </div>
@@ -66,10 +77,10 @@ async function submit() {
           <span class="w-9 h-9 rounded-md bg-primary text-primary-foreground grid place-items-center">X</span>
           xchats
         </div>
-        <h2 class="text-2xl font-semibold tracking-tight mb-1">Вход в аккаунт</h2>
-        <p class="text-sm text-muted-foreground mb-7">Войдите, чтобы открыть инбокс</p>
+        <h2 class="text-2xl font-semibold tracking-tight mb-1">{{ t('login.title') }}</h2>
+        <p class="text-sm text-muted-foreground mb-7">{{ t('login.subtitle') }}</p>
 
-        <label class="block text-sm font-medium mb-1.5">Email</label>
+        <label class="block text-sm font-medium mb-1.5">{{ t('login.email') }}</label>
         <div class="relative mb-4">
           <Mail class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -82,7 +93,7 @@ async function submit() {
           />
         </div>
 
-        <label class="block text-sm font-medium mb-1.5">Пароль</label>
+        <label class="block text-sm font-medium mb-1.5">{{ t('login.password') }}</label>
         <div class="relative mb-5">
           <Lock class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -101,10 +112,25 @@ async function submit() {
 
         <Button type="submit" :disabled="busy" class="w-full h-11">
           <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
-          {{ busy ? 'Вход…' : 'Войти' }}
+          {{ busy ? t('login.busy') : t('login.submit') }}
         </Button>
 
-        <p class="mt-6 text-center text-xs text-muted-foreground">Нет аккаунта? Свяжитесь с администратором</p>
+        <p class="mt-6 text-center text-xs text-muted-foreground">{{ t('login.noAccount') }}</p>
+
+        <nav :aria-label="t('nav.language')" class="mt-5 flex items-center justify-center gap-2 text-xs">
+          <template v-for="(l, i) in LOCALES" :key="l.code">
+            <span v-if="i > 0" class="text-border" aria-hidden="true">·</span>
+            <button
+              type="button"
+              class="transition hover:text-foreground"
+              :class="locale === l.code ? 'font-medium text-foreground' : 'text-muted-foreground'"
+              :aria-current="locale === l.code ? 'true' : undefined"
+              @click="locale = l.code"
+            >
+              {{ l.label }}
+            </button>
+          </template>
+        </nav>
       </form>
     </div>
   </div>

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
+import { t } from '../i18n'
 import { connectRealtime } from '../lib/sse'
 import { log } from '../lib/logfmt'
 import { useCrm } from './crm'
@@ -73,7 +74,7 @@ export const useInbox = defineStore('inbox', {
         this.upsertChat(chat)
         if (this.filter !== 'all') await this.loadChats()
       } catch (error) {
-        this.assignmentError = error instanceof ApiError ? error.message : 'Не удалось изменить назначение.'
+        this.assignmentError = error instanceof ApiError ? error.message : t('inbox.errAssign')
       } finally {
         this.assigning = false
       }

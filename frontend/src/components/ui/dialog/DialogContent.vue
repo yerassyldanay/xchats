@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, type HTMLAttributes } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   DialogClose,
   DialogContent,
@@ -14,6 +15,11 @@ import { cn } from '@/lib/utils'
 
 const props = defineProps<DialogContentProps & { class?: HTMLAttributes['class'] }>()
 const emits = defineEmits<DialogContentEmits>()
+
+// The only translated string in the ui/ primitives: every dialog in the app
+// renders this close button, so its screen-reader label has to follow the
+// locale like the rest of the chrome.
+const { t } = useI18n()
 
 const delegatedProps = computed(() => {
   const { class: _, ...delegated } = props
@@ -43,7 +49,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
         class="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-md text-muted-foreground opacity-70 ring-offset-background transition hover:bg-accent hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
       >
         <X class="h-4 w-4" />
-        <span class="sr-only">Закрыть</span>
+        <span class="sr-only">{{ t('common.close') }}</span>
       </DialogClose>
     </DialogContent>
   </DialogPortal>

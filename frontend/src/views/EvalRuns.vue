@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ChevronLeft, ChevronRight, CircleAlert, FlaskConical, Search } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { evalsApi, EvalsUnavailableError } from '../api/evals'
@@ -22,23 +23,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 // see if it passed, and open it. No cross-launch
 // stats bar on purpose — an aggregate across unrelated launches is meaningless
 // before you've picked one.
+const { t } = useI18n()
 const loading = ref(true)
 const unavailable = ref(false)
 const error = ref('')
 const rows = ref<LaunchListRow[]>([])
 
-const familyLabel: Record<string, string> = {
-  scenario: 'WhatsApp-ответы',
-  extract: 'Разбор файлов',
-  mixed: 'Смешанный',
-  unknown: 'Неизвестно',
-}
-const bucketLabel: Record<PassBucket, string> = {
-  green: 'Пройден',
-  amber: 'Частично пройден',
-  red: 'Провален',
-  none: 'Нет проверок',
-}
+// computed, not module constants: these render into the list and the filter
+// selects, both of which must re-read when the locale changes.
+const familyLabel = computed<Record<string, string>>(() => ({
+  scenario: t('evals.family.scenario'),
+  extract: t('evals.family.extract'),
+  mixed: t('evals.family.mixed'),
+  unknown: t('evals.family.unknown'),
+}))
+const bucketLabel = computed<Record<PassBucket, string>>(() => ({
+  green: t('evals.bucket.green'),
+  amber: t('evals.bucket.amber'),
+  red: t('evals.bucket.red'),
+  none: t('evals.bucket.none'),
+}))
 const bucketBarClass: Record<PassBucket, string> = {
   green: 'bg-emerald-500',
   amber: 'bg-amber-500',
@@ -112,9 +116,9 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
 <template>
   <div class="flex flex-col h-full bg-background">
     <header class="px-8 py-5 border-b border-border bg-card shrink-0">
-      <h1 class="text-lg font-bold tracking-tight">Эвалы</h1>
+      <h1 class="text-lg font-bold tracking-tight">{{ t('nav.evals') }}</h1>
       <p class="text-sm text-muted-foreground mt-0.5 max-w-2xl">
-        Автоматические проверки качества ответов ассистента. Откройте запуск, чтобы сравнить промпты и модели и разобрать каждый ответ.
+        {{ t('evals.runs.subtitle') }}
       </p>
       <EvalsNavTabs />
     </header>
@@ -124,7 +128,7 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
         <div class="mx-auto w-12 h-12 rounded-xl bg-primary/10 text-primary grid place-items-center mb-3">
           <FlaskConical class="w-6 h-6" />
         </div>
-        <p class="text-sm text-muted-foreground">Загрузка запусков…</p>
+        <p class="text-sm text-muted-foreground">{{ t('evals.runs.loading') }}</p>
       </div>
     </div>
 
@@ -133,9 +137,9 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
         <div class="mx-auto w-12 h-12 rounded-xl bg-muted text-muted-foreground grid place-items-center">
           <FlaskConical class="w-6 h-6" />
         </div>
-        <h2 class="font-semibold">Запусков пока нет</h2>
+        <h2 class="font-semibold">{{ t('evals.runs.emptyTitle') }}</h2>
         <p class="text-sm text-muted-foreground">
-          Запустите первую оценку, чтобы проверить качество промптов, ответов модели и защитных проверок.
+          {{ t('evals.runs.emptyBody') }}
         </p>
         <pre class="text-left text-xs bg-muted rounded-lg p-3 overflow-x-auto"><code>./harness/harness run -all
 ./harness/harness export -all</code></pre>
@@ -149,30 +153,30 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
     <div v-else class="flex-1 overflow-y-auto px-8 py-6 space-y-4">
       <!-- top bar: count (left) + search & filters (right) -->
       <div class="flex items-center justify-between gap-4 flex-wrap">
-        <p class="text-sm text-muted-foreground">{{ rows.length }} {{ rows.length === 1 ? 'запуск' : 'запусков' }}</p>
+        <p class="text-sm text-muted-foreground">{{ t('evals.runs.count', rows.length) }}</p>
         <div class="flex items-center gap-2 flex-wrap">
           <div class="relative">
             <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <Input v-model="search" placeholder="Поиск по ID запуска…" class="pl-9 h-9 w-56" />
+            <Input v-model="search" :placeholder="t('evals.runs.searchPlaceholder')" class="pl-9 h-9 w-56" />
           </div>
           <Select v-model="familyChoice">
-            <SelectTrigger class="w-44 h-9"><span>{{ familyFilter ? (familyLabel[familyFilter] || familyFilter) : 'Семейство' }}</span></SelectTrigger>
+            <SelectTrigger class="w-44 h-9"><span>{{ familyFilter ? (familyLabel[familyFilter] || familyFilter) : t('evals.runs.family') }}</span></SelectTrigger>
             <SelectContent>
-              <SelectItem :value="ANY">Все семейства</SelectItem>
+              <SelectItem :value="ANY">{{ t('evals.runs.allFamilies') }}</SelectItem>
               <SelectItem v-for="f in familyOptions" :key="f" :value="f">{{ familyLabel[f] || f }}</SelectItem>
             </SelectContent>
           </Select>
           <Select v-model="modelChoice">
-            <SelectTrigger class="w-44 h-9"><span class="truncate">{{ modelFilter ? shortModelName(modelFilter) : 'Модель' }}</span></SelectTrigger>
+            <SelectTrigger class="w-44 h-9"><span class="truncate">{{ modelFilter ? shortModelName(modelFilter) : t('evals.model') }}</span></SelectTrigger>
             <SelectContent>
-              <SelectItem :value="ANY">Все модели</SelectItem>
+              <SelectItem :value="ANY">{{ t('evals.allModels') }}</SelectItem>
               <SelectItem v-for="m in modelOptions" :key="m" :value="m">{{ shortModelName(m) }}</SelectItem>
             </SelectContent>
           </Select>
           <Select v-model="statusChoice">
-            <SelectTrigger class="w-40 h-9"><span>{{ statusFilter ? bucketLabel[statusFilter as PassBucket] : 'Статус' }}</span></SelectTrigger>
+            <SelectTrigger class="w-40 h-9"><span>{{ statusFilter ? bucketLabel[statusFilter as PassBucket] : t('evals.status') }}</span></SelectTrigger>
             <SelectContent>
-              <SelectItem :value="ANY">Любой статус</SelectItem>
+              <SelectItem :value="ANY">{{ t('evals.runs.anyStatus') }}</SelectItem>
               <SelectItem v-for="b in statusOptions" :key="b" :value="b">{{ bucketLabel[b] }}</SelectItem>
             </SelectContent>
           </Select>
@@ -180,8 +184,8 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
       </div>
 
       <!-- launch list -->
-      <p v-if="!rows.length" class="text-sm text-muted-foreground py-10 text-center">Запусков пока нет.</p>
-      <p v-else-if="!filteredRows.length" class="text-sm text-muted-foreground py-10 text-center">Ничего не найдено по заданным фильтрам.</p>
+      <p v-if="!rows.length" class="text-sm text-muted-foreground py-10 text-center">{{ t('evals.runs.noneYet') }}</p>
+      <p v-else-if="!filteredRows.length" class="text-sm text-muted-foreground py-10 text-center">{{ t('evals.runs.noMatches') }}</p>
       <div v-else class="space-y-2.5">
         <RouterLink
           v-for="row in pagedRows"
@@ -192,7 +196,7 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
           <!-- launch id + started date -->
           <div class="w-56 shrink-0 min-w-0">
             <code class="text-sm font-medium block truncate">{{ row.id }}</code>
-            <p v-if="row.startedAt" class="text-xs text-muted-foreground mt-1 leading-snug">Начат {{ formatStartedAt(row.startedAt) }}</p>
+            <p v-if="row.startedAt" class="text-xs text-muted-foreground mt-1 leading-snug">{{ t('evals.runs.startedAt', { at: formatStartedAt(row.startedAt, t) }) }}</p>
             <p class="text-[11px] text-muted-foreground/70 mt-0.5">ID: {{ row.shortId }}</p>
           </div>
 
@@ -206,14 +210,14 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
           <!-- models -->
           <div class="w-48 shrink-0 flex flex-wrap gap-1.5">
             <Badge v-for="m in modelChips(row).shown" :key="m" variant="secondary" class="text-[11px] font-mono">{{ m }}</Badge>
-            <Badge v-if="modelChips(row).more > 0" variant="outline" class="text-[11px] text-muted-foreground">+{{ modelChips(row).more }} ещё</Badge>
+            <Badge v-if="modelChips(row).more > 0" variant="outline" class="text-[11px] text-muted-foreground">{{ t('evals.runs.moreModels', { n: modelChips(row).more }) }}</Badge>
           </div>
 
           <!-- result -->
           <div class="w-36 shrink-0">
             <div class="text-base font-semibold" :class="bucketTextClass[row.bucket]">{{ row.pass }} / {{ row.total }}</div>
             <p class="text-xs text-muted-foreground">
-              {{ row.total > 0 ? `${Math.round((row.pass / row.total) * 100)}% пройдено` : bucketLabel[row.bucket] }}
+              {{ row.total > 0 ? t('evals.runs.percentPassed', { pct: Math.round((row.pass / row.total) * 100) }) : bucketLabel[row.bucket] }}
             </p>
             <div class="mt-1.5 h-1.5 w-full rounded-full bg-muted overflow-hidden">
               <div
@@ -225,7 +229,7 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
           </div>
 
           <!-- duration -->
-          <div class="w-20 shrink-0 text-sm text-muted-foreground">{{ row.durationMs !== null ? formatDuration(row.durationMs) : '—' }}</div>
+          <div class="w-20 shrink-0 text-sm text-muted-foreground">{{ row.durationMs !== null ? formatDuration(row.durationMs, t) : '—' }}</div>
 
           <ChevronRight class="w-4 h-4 text-muted-foreground shrink-0 ml-auto group-hover:text-primary transition" />
         </RouterLink>
@@ -233,12 +237,12 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
 
       <!-- pagination -->
       <div v-if="filteredRows.length > PAGE_SIZE" class="flex items-center justify-between gap-4 pt-2 text-sm text-muted-foreground">
-        <p>Показано {{ rangeStart }}–{{ rangeEnd }} из {{ filteredRows.length }}</p>
+        <p>{{ t('evals.runs.pageRange', { from: rangeStart, to: rangeEnd, total: filteredRows.length }) }}</p>
         <div class="flex items-center gap-1">
           <button
             class="w-8 h-8 rounded-lg border border-border grid place-items-center disabled:opacity-40 hover:bg-muted transition"
             :disabled="page <= 1"
-            aria-label="Предыдущая страница"
+            :aria-label="t('common.prevPage')"
             @click="page--"
           >
             <ChevronLeft class="w-4 h-4" />
@@ -255,7 +259,7 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
           <button
             class="w-8 h-8 rounded-lg border border-border grid place-items-center disabled:opacity-40 hover:bg-muted transition"
             :disabled="page >= totalPages"
-            aria-label="Следующая страница"
+            :aria-label="t('common.nextPage')"
             @click="page++"
           >
             <ChevronRight class="w-4 h-4" />

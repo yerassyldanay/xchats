@@ -1,12 +1,49 @@
-// evalCatalog.*, kb.*, settings.*, changePassword.*, and accounts.* are wired
-// through vue-i18n; the rest of the app's UI chrome stays hardcoded Russian
-// for now (evalCatalog was the pilot, not a full rollout). Migrate more of
-// the app into this file/en.ts as it grows, rather than starting a second
-// mechanism.
+// The app's full message catalog. Every user-visible string in the SPA lives
+// here and in its en.ts/kk.ts siblings — there is no hardcoded UI copy left in
+// components, and locales.test.ts fails the build if the three files' key sets
+// ever drift apart. Add new strings here first, then to en.ts and kk.ts.
 export default {
   evalCatalog: {
     langToggle: {
       aria: 'Язык подсказок к полям',
+    },
+    pageTitle: 'Каталог тестов',
+    pageSubtitle:
+      'Требования из репозитория — что получит модель, что именно требуется, что не проверяется и откуда взято каждое требование. Не отчёт о результатах.',
+    loading: 'Загрузка каталога…',
+    loadFailed: 'Не удалось загрузить каталог',
+    notGeneratedTitle: 'Каталог пока не сгенерирован',
+    notGeneratedPrefix: 'Выполните',
+    notGeneratedSuffix: ', чтобы собрать требования из scenario.yaml/tests.yaml/extract/cases.yaml.',
+    exportedAt: 'Требования из репозитория, экспортированы {at} — не снапшот запуска, не результаты.',
+    schemaV2Note: 'формат v2 — выполните harness export -all для полных данных',
+    invalidLink: 'Ничего не найдено по этой ссылке — возможно, тест был переименован или удалён. Выберите тест слева.',
+    pickSomething: 'Выберите сценарий, тест или файл слева, чтобы увидеть требования.',
+    escalateRequired: 'обязательна',
+    escalateForbidden: 'эскалации быть не должно',
+    tree: {
+      whatsappChat: 'WhatsApp-чат',
+    },
+    scenario: {
+      knowledgeBase: 'База знаний · {n} фактов',
+      noFacts: 'нет фактов',
+      media: 'Медиа',
+      tests: 'Тесты · {n}',
+    },
+    // extract.* names the extract/cases.yaml knobs. The same key renders both a
+    // section heading and, when the case leaves that knob undeclared, the chip in
+    // "Не проверяется в этом случае" — one wording, never two that can drift.
+    extract: {
+      fields: 'Классификация',
+      text_contains_all: 'Обязательные фразы',
+      identify_contains_all: 'Тема/описание (обязательно всё)',
+      identify_contains_any: 'Тема/описание (любое из)',
+      allowed_numbers: 'Разрешённые числа',
+      required_numbers: 'Обязательные числа',
+      forbid_currency: 'Запрет валюты',
+      forbidCurrencyNote: 'упоминаний валюты быть не должно',
+      noNumbersExpected: 'числа не ожидаются — любое найденное число будет отмечено как выдуманное',
+      notCheckedHere: 'Не проверяется в этом случае',
     },
     legendTitle: 'Поля',
     archiveSection: 'Архив',
@@ -53,9 +90,8 @@ export default {
         'Произвольные семантические утверждения (claim/expect), которые проверяет дешёвая LLM-модель. Оцениваются только командой judge-llm (платно), независимо от детерминированных проверок.',
     },
   },
-  // kb.* — Черновик (/playground, review-only) + Знаний база (/knowledge-base,
-  // the sole creation surface) redesign. New for this feature; the rest of the
-  // app's chrome stays hardcoded Russian (see this file's top comment).
+  // kb.* — the Draft (/playground, review-only) and Knowledge base
+  // (/knowledge-base, the sole creation surface) surfaces.
   kb: {
     entities: {
       config: { singular: 'Обзор', plural: 'Обзор' },
@@ -185,6 +221,39 @@ export default {
         selectRecord: 'Выбрать запись',
       },
       cardBlockedNote: 'Публикация заблокирована другим конфликтом в Черновике — см. сообщение выше.',
+      wasBefore: 'Было:',
+      // Fallbacks the playground store puts on state when an API call fails
+      // without a server-supplied message of its own.
+      errStale: 'Черновик изменился — обновляю…',
+      errSaveChange: 'Не удалось сохранить изменение.',
+      errRevertChange: 'Не удалось отменить изменение.',
+      errPublish: 'Не удалось сохранить в базу.',
+      errLoadKb: 'Не удалось загрузить базу знаний.',
+      errLoadFile: 'Не удалось загрузить файл.',
+    },
+    prompt: {
+      title: 'Промпт ассистента',
+      subtitle:
+        'Итоговый системный промпт формируется автоматически из всех разделов базы знаний. Редактирование возможно только через соответствующие разделы базы знаний.',
+      modeRendered: 'Собранный',
+      modeFrame: 'Шаблон',
+      loading: 'Загрузка промпта…',
+      errLoad: 'Не удалось загрузить промпт.',
+      errBuild: 'Не удалось собрать промпт.',
+      aboutTitle: 'О промпте',
+      aboutBody: 'Промпт формируется автоматически из базы знаний и используется ассистентом при каждом ответе.',
+      version: 'Версия',
+      size: 'Размер',
+      chars: '{n} символов',
+      tokens: 'Токены ≈',
+      status: 'Статус',
+      statusOk: 'Собран успешно',
+      builtFrom: 'Сформирован из разделов',
+      placeholdersPrefix: 'Плейсхолдеры вида',
+      placeholdersMiddle: 'и',
+      placeholdersSuffix: 'заменяются фактическими значениями во время работы ассистента.',
+      copy: 'Копировать промпт',
+      download: 'Скачать .txt',
     },
     banner: {
       staged: 'Изменение добавлено в Черновик. Проверьте и опубликуйте его из Черновика.',
@@ -266,6 +335,7 @@ export default {
       loadError: 'Не удалось загрузить данные подключения.',
     },
     import: {
+      errStart: 'Не удалось запустить импорт.',
       dropHint: 'Перетащите файлы сюда или выберите вручную',
       browseButton: 'Выбрать файлы',
       urlPlaceholder: 'Вставьте ссылку на страницу…',
@@ -325,8 +395,7 @@ export default {
       },
     },
   },
-  // settings.* — Settings UI (Track 2H). New for this feature; the rest of
-  // the app's chrome stays hardcoded Russian (see this file's top comment).
+  // settings.* — the Settings UI (Track 2H).
   settings: {
     nav: { title: 'Настройки' },
     subtitle: 'Управление интеграциями, ИИ-движком, каналами и командой',
@@ -617,9 +686,9 @@ export default {
       errGenericAction: 'Не удалось выполнить действие.',
       errDisconnect: 'Не удалось отключить канал.',
     },
-    // Вкладка «Настройка каналов» (ChannelSetupTab.vue/ChannelSetupCard.vue)
-    // — общесистемные предпосылки, в отличие от page.* выше (подключения
-    // отдельных аккаунтов).
+    // The "Channel setup" tab (ChannelSetupTab.vue/ChannelSetupCard.vue) —
+    // system-wide prerequisites, unlike page.* above (individual account
+    // connections).
     channelSetup: {
       copyLabel: 'Скопировать',
       openDashboard: 'Открыть Meta Dashboard',
@@ -662,8 +731,8 @@ export default {
   },
   // simulator.* — /simulator, a minimal chat UI over POST
   // /simulator/messages (backend/internal/httpapi/simulator.go, gated by
-  // SIMULATOR_ENABLED). Not part of kb.*: it's its own page, not a Черновик/
-  // Знаний база surface.
+  // SIMULATOR_ENABLED). Not part of kb.*: it's its own page, not a Draft/
+  // Knowledge base surface.
   simulator: {
     navLabel: 'Симулятор',
     pageTitle: 'Симулятор',
@@ -688,7 +757,6 @@ export default {
     },
     tab: {
       customer: 'Клиент',
-      assistant: 'ИИ-помощник',
     },
     panel: {
       empty: 'Выберите чат',
@@ -1066,9 +1134,7 @@ export default {
       generic: 'Не удалось сменить пароль. Попробуйте ещё раз.',
     },
   },
-  // landing.* — the public marketing page (/) only. Ships in ru/en/kk (see
-  // locales/kk.ts, which carries ONLY this namespace — everything else in
-  // the app falls back to ru via i18n/index.ts's fallbackLocale).
+  // landing.* — the public marketing page (/) only.
   landing: {
     nav: {
       platforms: 'Платформы',
@@ -1177,6 +1243,290 @@ export default {
       communityHeading: 'Сообщество',
       contactsHeading: 'Свяжитесь с нами',
       copyrightSuffix: 'AGPL-3.0 License.',
+    },
+  },
+  // common.* — vocabulary shared by more than one surface. A word lands here only
+  // when at least two unrelated screens need the SAME word; anything screen-specific
+  // stays in its own namespace so a wording change there can't leak sideways.
+  common: {
+    close: 'Закрыть',
+    copy: 'Копировать',
+    copied: 'Скопировано',
+    refresh: 'Обновить',
+    retry: 'Повторить',
+    saving: 'Сохранение…',
+    error: 'Ошибка',
+    expandAll: 'Развернуть всё',
+    collapseAll: 'Свернуть всё',
+    prevPage: 'Предыдущая страница',
+    nextPage: 'Следующая страница',
+  },
+  // nav.* — the persistent left rail (NavRail.vue) plus the account menu it owns.
+  nav: {
+    inbox: 'Инбокс',
+    channels: 'Каналы',
+    knowledgeBase: 'База знаний',
+    evals: 'Эвалы',
+    settings: 'Настройки',
+    needsAttention: '— требует внимания',
+    organization: 'Организация',
+    language: 'Язык',
+    logout: 'Выйти',
+  },
+  login: {
+    heroLine1: 'Командный инбокс',
+    heroLine2: 'и ИИ-ассистент',
+    benefitInbox: 'Единый инбокс WhatsApp',
+    benefitAi: 'ИИ-ответы (предложить и отправить)',
+    benefitSecurity: 'Безопасность и контроль',
+    title: 'Вход в аккаунт',
+    subtitle: 'Войдите, чтобы открыть инбокс',
+    email: 'Email',
+    password: 'Пароль',
+    submit: 'Войти',
+    busy: 'Вход…',
+    noAccount: 'Нет аккаунта? Свяжитесь с администратором',
+    errBadCredentials: 'Неверный email или пароль',
+    errGeneric: 'Не удалось войти. Попробуйте ещё раз.',
+  },
+  // inbox.* — the chat board: list, thread, composer and the compose-new dialog.
+  inbox: {
+    newMessage: 'Новое сообщение',
+    searchPlaceholder: 'Поиск по чатам или контактам',
+    allChannels: 'Все каналы',
+    emptyTitle: 'Пока нет чатов.',
+    emptySubtitle: 'Новые сообщения появятся здесь.',
+    messagePlaceholder: 'Введите сообщение…',
+    attachFile: 'Прикрепить файл',
+    emoji: 'Эмодзи',
+    send: 'Отправить',
+    sending: 'Отправка…',
+    resolve: 'Решить',
+    file: 'Файл',
+    pickChat: 'Выберите чат, чтобы открыть переписку',
+    errAssign: 'Не удалось изменить назначение.',
+    filters: {
+      me: 'Мои',
+      unassigned: 'Неназначенные',
+      all: 'Все',
+    },
+    assign: {
+      assign: 'Назначить',
+      assigned: 'Назначено',
+      assignedToMe: 'Назначено мне',
+      assignToMe: 'Назначить мне',
+      unassign: 'Снять назначение',
+    },
+    compose: {
+      fromNumber: 'Отправить с номера',
+      pickNumber: 'Выберите номер',
+      phone: 'Номер телефона',
+      message: 'Сообщение',
+      errPhone: 'Введите номер с кодом страны, например 77001234567.',
+      errEmpty: 'Введите текст или прикрепите файл.',
+      errSend: 'Не удалось отправить сообщение.',
+    },
+  },
+  // assistant.* — the AI draft panel on the right of the chat board.
+  assistant: {
+    title: 'ИИ-помощник',
+    regenerate: 'Сгенерировать заново',
+    preparing: 'ИИ готовит ответ…',
+    recommended: 'Рекомендуемый ответ',
+    variant: 'Вариант {n}',
+    toComposer: 'В поле ввода',
+    replyPlaceholder: 'Текст ответа…',
+    emptyTitle: 'Ответ ещё не предложен',
+    emptySubtitle: 'Сгенерируйте черновик на основе базы знаний.',
+    suggest: 'Подсказать ответ',
+    dismiss: 'Отклонить',
+    pickChat: 'Выберите чат',
+  },
+  // channels.* — vocabulary shared by the Каналы page and Настройки → Каналы связи,
+  // which render the SAME connection states from lib/format.ts's connStatus().
+  channels: {
+    connStatus: {
+      connected: 'Подключён',
+      qr_required: 'Нужен QR',
+      connecting: 'Подключение…',
+      disconnected: 'Отключён',
+      webhook_error: 'Ошибка вебхука',
+      token_error: 'Токен отклонён',
+      disconnect_pending: 'Отключение…',
+      disconnect_error: 'Не отключился',
+      error: 'Ошибка',
+    },
+    replaceToken: {
+      title: 'Заменить токен',
+      sameBotPrefix: 'Новый токен должен принадлежать тому же боту',
+      sameBotSuffix: '. Токен другого бота подключите как отдельный канал.',
+      newToken: 'Новый токен',
+      errEmpty: 'Вставьте новый токен от {\'@\'}BotFather.',
+      errFailed: 'Не удалось заменить токен.',
+    },
+  },
+  blog: {
+    title: 'Инженерный блог',
+    comingSoon: 'В разработке. Скоро здесь появятся статьи об архитектуре и нашем опыте.',
+  },
+  // evals.* — internal eval tooling: the launches list, one launch's detail page and
+  // the per-question cards under it. evalCatalog.* (above) is the sibling REQUIREMENTS
+  // view; these two are separate routes and deliberately keep separate namespaces.
+  evals: {
+    na: 'н/д',
+    model: 'Модель',
+    status: 'Статус',
+    passed: 'пройдено',
+    failed: 'провалено',
+    allModels: 'Все модели',
+    allStrategies: 'Все стратегии',
+    allStatuses: 'Все статусы',
+    noExperiment: 'Без эксперимента',
+    noExperimentInline: 'без эксперимента',
+    source: 'источник:',
+    sourceFile: 'исходный файл',
+    sourceFileTitle: 'Исходный файл',
+    // Month names in the genitive — formatStartedAt renders "14 июля 2026, 15:53",
+    // so these must be the form that follows a day number, not the nominative.
+    months: {
+      0: 'января', 1: 'февраля', 2: 'марта', 3: 'апреля', 4: 'мая', 5: 'июня',
+      6: 'июля', 7: 'августа', 8: 'сентября', 9: 'октября', 10: 'ноября', 11: 'декабря',
+    },
+    duration: {
+      hm: '{h}ч {m}м',
+      ms: '{m}м {s}с',
+      s: '{s}с',
+    },
+    family: {
+      scenario: 'WhatsApp-ответы',
+      extract: 'Разбор файлов',
+      mixed: 'Смешанный',
+      unknown: 'Неизвестно',
+    },
+    bucket: {
+      green: 'Пройден',
+      amber: 'Частично пройден',
+      red: 'Провален',
+      none: 'Нет проверок',
+    },
+    metric: {
+      pass: 'Pass rate',
+      cost: 'Стоимость',
+      latency: 'Латентность',
+    },
+    cost: {
+      cachedUnpriceable: 'неизвестна (кеш, оценить не по чему)',
+      unknownPricing: 'цена неизвестна',
+      avg: '{avg} сред.',
+      avgPartial: '{avg} сред. ({priced}/{total})',
+    },
+    runs: {
+      navRuns: 'Запуски',
+      subtitle:
+        'Автоматические проверки качества ответов ассистента. Откройте запуск, чтобы сравнить промпты и модели и разобрать каждый ответ.',
+      loading: 'Загрузка запусков…',
+      emptyTitle: 'Запусков пока нет',
+      emptyBody: 'Запустите первую оценку, чтобы проверить качество промптов, ответов модели и защитных проверок.',
+      count: 'нет запусков | {n} запуск | {n} запуска | {n} запусков',
+      searchPlaceholder: 'Поиск по ID запуска…',
+      family: 'Семейство',
+      allFamilies: 'Все семейства',
+      anyStatus: 'Любой статус',
+      noneYet: 'Запусков пока нет.',
+      noMatches: 'Ничего не найдено по заданным фильтрам.',
+      startedAt: 'Начат {at}',
+      moreModels: '+{n} ещё',
+      percentPassed: '{pct}% пройдено',
+      pageRange: 'Показано {from}–{to} из {total}',
+    },
+    launch: {
+      backToRuns: 'Назад к запускам',
+      startedAt: 'Запуск: {at}',
+      duration: 'Длительность: {d}',
+      exportReport: 'Экспорт отчёта',
+      loading: 'Загрузка запуска…',
+      notFound: 'Запуск «{id}» не найден.',
+      noResults: 'Этот запуск не создал ни одного результата.',
+      plannedFamilies: 'Запланированные семейства: {list}',
+      expectedCalls: 'Ожидалось вызовов: {total} (WhatsApp: {scenario}, разбор файлов: {extract})',
+      statusComplete: 'Завершён',
+      statusPartial: 'Частично завершён',
+      statusFailed: 'Провален',
+      statusRunning: 'Выполняется',
+      familyInfoScenario:
+        'Результаты по ответам ассистента в WhatsApp. Сравните промпты и модели, чтобы понять, какие дают лучший результат и почему.',
+      familyInfoExtract:
+        'Результаты по разбору файлов и изображений. Сравните версии промпта и модели по точности извлечения данных.',
+      familyInfoFallback: 'Результаты этого семейства проверок.',
+      section1: '1. Матрица результатов — {axis}',
+      section2: '2. Фильтры для деталей',
+      section3: '3. Детальные результаты по вопросам — {count}',
+      questionCount: 'нет вопросов | {n} вопрос | {n} вопроса | {n} вопросов',
+      noComparable: 'Нет результатов для сравнения в этом запуске.',
+      noFilterMatches: 'Нет результатов, соответствующих фильтру.',
+      resetFilters: 'Сбросить фильтры',
+      sortDefault: 'По порядку',
+      sortFailuresFirst: 'Сначала ошибки',
+    },
+    matrix: {
+      axisScenario: 'модель × промпт',
+      axisExtract: 'модель × версия промпта',
+      axisScenarioPlural: 'модели × промпты',
+      axisExtractPlural: 'модели × версии промпта',
+      contract: 'контракт',
+      parsing: 'парсинг',
+      checks: '{n} проверок',
+      frames: '{n} фрейма',
+      incomparable:
+        '«{setup}» показан отдельно — набор тестов отличается от остальных setup\'ов эксперимента «{experiment}», совместное сравнение было бы некорректным.',
+    },
+    contract: {
+      requirement: 'Требование',
+      expected: 'Ожидается',
+      actual: 'Фактически',
+      verdict: 'Результат',
+      universalChecks: 'Универсальные проверки',
+      unavailable: 'Требования недоступны — снапшот этого запуска не содержит контракта.',
+    },
+    strategy: {
+      experiment: 'Эксперимент',
+      experimentNone: '— не указан —',
+      questionCount: 'Вопросов в проверке',
+      frames: 'Фреймы в составе стратегии',
+      noPromptRef: '(без версии промпта)',
+      viewPrompt: 'Просмотр промпта',
+      noFrames: 'Нет данных о промптах для этой стратегии.',
+      promptNotInSnapshot:
+        'Текст промпта не входит в снапшот этого запуска — это либо старый запуск без сохранённого снапшота, либо промпт для разбора файлов (такие промпты пока не снимаются в снапшот).',
+    },
+    card: {
+      modelsPassed: '{pass}/{total} моделей прошли',
+      input: 'Вход',
+      history: 'история переписки ({n})',
+      roleClient: 'Клиент',
+      roleAssistant: 'Ассистент',
+      errorBadge: 'ОШИБКА',
+      contractBroken: 'контракт нарушен',
+      truncated: 'обрезан ответ',
+      reasoningLeak: 'утечка рассуждений',
+      retries: 'повтор ×{n}',
+      callError: 'Ошибка вызова:',
+      parseError: 'Ответ не распознан:',
+      requirements: 'Требования',
+      allChecks: 'Все проверки ({n})',
+      notChecked: 'не проверялось',
+      modelResult: 'Результат модели',
+      modelReply: 'Ответ модели',
+      afterInjection: 'После инъекции (клиенту)',
+      extractedText: 'Извлечённый текст',
+      tokens: 'токены: {in} вх. / {out} исх.',
+      costBasis: 'основание цены:',
+      preprocessor: 'препроцессор:',
+      hasReasoning: 'содержит reasoning',
+      language: 'Язык:',
+      summary: 'Описание:',
+      relatesTo: 'Связано с:',
+      rawJsonTitle: 'Полный ответ проверки',
     },
   },
 }

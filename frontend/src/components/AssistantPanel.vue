@@ -64,7 +64,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
             <UserRound class="w-3.5 h-3.5" /> {{ t('crm.tab.customer') }}
           </TabsTrigger>
           <TabsTrigger value="assistant" class="flex-1 gap-1.5">
-            <WandSparkles class="w-3.5 h-3.5" /> {{ t('crm.tab.assistant') }}
+            <WandSparkles class="w-3.5 h-3.5" /> {{ t('assistant.title') }}
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -74,7 +74,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
         size="icon"
         class="w-8 h-8 text-muted-foreground shrink-0"
         :disabled="inbox.suggesting"
-        title="Сгенерировать заново"
+        :title="t('assistant.regenerate')"
         @click="inbox.regenerate()"
       >
         <RotateCw class="w-3.5 h-3.5" :class="{ 'animate-spin': inbox.suggesting }" />
@@ -97,7 +97,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
             <Skeleton class="h-3 w-2/3" />
           </div>
           <p class="text-xs text-muted-foreground flex items-center gap-2">
-            <WandSparkles class="w-3.5 h-3.5 text-primary" /> ИИ готовит ответ…
+            <WandSparkles class="w-3.5 h-3.5 text-primary" /> {{ t('assistant.preparing') }}
           </p>
         </div>
 
@@ -111,13 +111,13 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
           <div class="flex items-center justify-between gap-2 px-4 pt-3.5 pb-2.5">
             <div class="flex items-center gap-2 min-w-0">
               <span class="text-[13px] font-semibold truncate">
-                {{ i === 0 ? 'Рекомендуемый ответ' : 'Вариант ' + d.ordinal }}
+                {{ i === 0 ? t('assistant.recommended') : t('assistant.variant', { n: d.ordinal }) }}
               </span>
               <Badge v-if="conf(d)" variant="secondary" class="text-[11px] px-2 py-0.5" :class="conf(d)!.cls">
                 {{ conf(d)!.pct }}%
               </Badge>
             </div>
-            <Button variant="ghost" size="icon" class="w-7 h-7 text-muted-foreground" title="В поле ввода" @click="toComposer(d)">
+            <Button variant="ghost" size="icon" class="w-7 h-7 text-muted-foreground" :title="t('assistant.toComposer')" @click="toComposer(d)">
               <PenLine class="w-3.5 h-3.5" />
             </Button>
           </div>
@@ -128,7 +128,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
               v-model="vm(d).text"
               v-autosize
               rows="2"
-              placeholder="Текст ответа…"
+              :placeholder="t('assistant.replyPlaceholder')"
               class="min-h-0 resize-none overflow-hidden rounded-lg bg-muted/40 text-[14px] leading-snug"
             />
           </div>
@@ -138,14 +138,14 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
             <Button size="sm" class="flex-1" :disabled="busy[d.id] || !vm(d).text.trim()" @click="approve(d)">
               <LoaderCircle v-if="busy[d.id]" class="w-4 h-4 animate-spin" />
               <Send v-else class="w-4 h-4" />
-              {{ busy[d.id] ? 'Отправка…' : 'Отправить' }}
+              {{ busy[d.id] ? t('inbox.sending') : t('inbox.send') }}
             </Button>
             <Button
               variant="outline"
               size="sm"
               class="px-2.5"
               :disabled="inbox.suggesting"
-              title="Сгенерировать заново"
+              :title="t('assistant.regenerate')"
               @click="inbox.regenerate()"
             >
               <RotateCw class="w-4 h-4" :class="{ 'animate-spin': inbox.suggesting }" />
@@ -159,11 +159,11 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
             <div class="mx-auto w-11 h-11 rounded-xl bg-primary/10 text-primary grid place-items-center mb-2.5">
               <WandSparkles class="w-5 h-5" />
             </div>
-            <p class="text-[13px] font-medium">Ответ ещё не предложен</p>
-            <p class="text-xs text-muted-foreground mt-0.5">Сгенерируйте черновик на основе базы знаний.</p>
+            <p class="text-[13px] font-medium">{{ t('assistant.emptyTitle') }}</p>
+            <p class="text-xs text-muted-foreground mt-0.5">{{ t('assistant.emptySubtitle') }}</p>
           </div>
           <Button class="w-full" @click="inbox.suggest()">
-            <WandSparkles class="w-4 h-4" /> Подсказать ответ
+            <WandSparkles class="w-4 h-4" /> {{ t('assistant.suggest') }}
           </Button>
         </div>
 
@@ -172,7 +172,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
           class="w-full text-center text-[13px] text-muted-foreground hover:text-destructive py-1 transition"
           @click="inbox.drafts = []"
         >
-          Отклонить
+          {{ t('assistant.dismiss') }}
         </button>
       </template>
 
@@ -180,7 +180,7 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
         <div class="mx-auto w-12 h-12 rounded-xl bg-muted grid place-items-center text-muted-foreground mb-3">
           <WandSparkles class="w-6 h-6" />
         </div>
-        Выберите чат
+        {{ t('assistant.pickChat') }}
       </div>
     </div>
 

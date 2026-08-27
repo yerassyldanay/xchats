@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { CircleAlert, KeyRound, LoaderCircle } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
 import { ApiError } from '../api/client'
@@ -17,6 +18,7 @@ const props = defineProps<{ account: Account }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'replaced'): void }>()
 
 const accounts = useAccounts()
+const { t } = useI18n()
 const botToken = ref('')
 const error = ref('')
 const busy = ref(false)
@@ -30,7 +32,7 @@ async function submit() {
   error.value = ''
   const token = botToken.value.trim()
   if (!token) {
-    error.value = 'Вставьте новый токен от @BotFather.'
+    error.value = t('channels.replaceToken.errEmpty')
     return
   }
   busy.value = true
@@ -40,7 +42,7 @@ async function submit() {
     emit('replaced')
     emit('close')
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось заменить токен.'
+    error.value = e instanceof ApiError ? e.message : t('channels.replaceToken.errFailed')
   } finally {
     busy.value = false
   }
@@ -55,18 +57,18 @@ async function submit() {
           <span class="w-8 h-8 rounded-lg bg-[#229ED9]/10 text-[#229ED9] grid place-items-center">
             <TelegramIcon class="w-4 h-4" />
           </span>
-          Заменить токен
+          {{ t('channels.replaceToken.title') }}
         </DialogTitle>
       </DialogHeader>
 
       <div class="px-5 py-5 space-y-4">
         <p class="text-sm text-muted-foreground">
-          Новый токен должен принадлежать тому же боту
+          {{ t('channels.replaceToken.sameBotPrefix') }}
           <span class="font-medium text-foreground">{{ account.external_handle }}</span
-          >. Токен другого бота подключите как отдельный канал.
+          >{{ t('channels.replaceToken.sameBotSuffix') }}
         </p>
         <div>
-          <label class="text-xs font-medium text-muted-foreground">Новый токен</label>
+          <label class="text-xs font-medium text-muted-foreground">{{ t('channels.replaceToken.newToken') }}</label>
           <Input
             v-model="botToken"
             type="password"
@@ -82,7 +84,7 @@ async function submit() {
         <Button :disabled="busy" class="w-full" @click="submit">
           <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
           <KeyRound v-else class="w-4 h-4" />
-          {{ busy ? 'Сохранение…' : 'Заменить токен' }}
+          {{ busy ? t('common.saving') : t('channels.replaceToken.title') }}
         </Button>
       </div>
     </DialogContent>

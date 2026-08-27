@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { CircleAlert, Star } from 'lucide-vue-next'
 import { cellFor, pct, recommendedSetup, setupFrames, type MatrixGroup } from '@/lib/evalMatrix'
 import type { VExecution } from '@/types'
@@ -22,31 +23,38 @@ const emit = defineEmits<{
   (e: 'open-strategy', setup: string): void
 }>()
 
+const { t } = useI18n()
+
 const recommended = computed(() => recommendedSetup(props.group))
-const axisLabel = computed(() => (props.group.family === 'scenario' ? 'модель × промпт' : 'модель × версия промпта'))
+const axisLabel = computed(() =>
+  props.group.family === 'scenario' ? t('evals.matrix.axisScenario') : t('evals.matrix.axisExtract'),
+)
 
 function frameCount(setup: string): number {
   return setupFrames(props.executions, props.group.family, setup).length
 }
 
+function seconds(ms: number): string {
+  return t('evals.duration.s', { s: (ms / 1000).toFixed(1) })
+}
 function primaryMetric(cell: ReturnType<typeof cellFor>): string {
-  if (!cell) return 'н/д'
+  if (!cell) return t('evals.na')
   if (props.metric === 'cost') return cell.costLabel
-  if (props.metric === 'latency') return cell.avgLatencyMs !== null ? `${(cell.avgLatencyMs / 1000).toFixed(1)}с` : 'н/д'
-  return pct(props.group.family === 'scenario' ? cell.behaviorPass : cell.allChecksPass, cell.n)
+  if (props.metric === 'latency') return cell.avgLatencyMs !== null ? seconds(cell.avgLatencyMs) : t('evals.na')
+  return pct(props.group.family === 'scenario' ? cell.behaviorPass : cell.allChecksPass, cell.n, t)
 }
 function secondaryLine(cell: ReturnType<typeof cellFor>): string {
   if (!cell) return ''
   const parts: string[] = []
   if (props.metric !== 'pass') {
-    parts.push(pct(props.group.family === 'scenario' ? cell.behaviorPass : cell.allChecksPass, cell.n))
+    parts.push(pct(props.group.family === 'scenario' ? cell.behaviorPass : cell.allChecksPass, cell.n, t))
   } else if (props.group.family === 'scenario') {
-    parts.push(`контракт ${pct(cell.contractPass, cell.n)}`)
+    parts.push(`${t('evals.matrix.contract')} ${pct(cell.contractPass, cell.n, t)}`)
   } else if (cell.parsePass !== null) {
-    parts.push(`парсинг ${pct(cell.parsePass, cell.n)}`)
+    parts.push(`${t('evals.matrix.parsing')} ${pct(cell.parsePass, cell.n, t)}`)
   }
   if (props.metric !== 'cost') parts.push(cell.costLabel)
-  if (props.metric !== 'latency' && cell.avgLatencyMs !== null) parts.push(`${(cell.avgLatencyMs / 1000).toFixed(1)}с`)
+  if (props.metric !== 'latency' && cell.avgLatencyMs !== null) parts.push(seconds(cell.avgLatencyMs))
   return parts.join(' · ')
 }
 </script>
@@ -55,19 +63,20 @@ function secondaryLine(cell: ReturnType<typeof cellFor>): string {
   <section class="rounded-xl border border-border bg-card overflow-hidden">
     <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">
       <h3 class="text-sm font-semibold">
-        {{ group.experiment || 'Без эксперимента' }}
+        {{ group.experiment || t('evals.noExperiment') }}
         <span class="ml-2 text-xs font-normal text-muted-foreground">{{ axisLabel }}</span>
       </h3>
     </div>
     <p v-if="group.warning" class="px-4 py-2 text-xs text-amber-700 bg-amber-50 flex items-start gap-1.5">
-      <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-0.5" /> {{ group.warning }}
+      <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+      {{ t('evals.matrix.incomparable', { setup: group.warning.setup, experiment: group.warning.experiment || t('evals.noExperimentInline') }) }}
     </p>
 
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border bg-muted/40">
-            <th class="text-left font-medium text-muted-foreground px-4 py-2">Модель</th>
+            <th class="text-left font-medium text-muted-foreground px-4 py-2">{{ t('evals.model') }}</th>
             <th v-for="s in group.setups" :key="s" class="text-left font-medium px-4 py-2">
               <button class="group inline-flex flex-col items-start hover:text-primary transition" @click="emit('open-strategy', s)">
                 <span class="inline-flex items-center gap-1 font-mono text-foreground group-hover:text-primary">
@@ -75,8 +84,8 @@ function secondaryLine(cell: ReturnType<typeof cellFor>): string {
                   {{ s }}
                 </span>
                 <span class="text-[11px] font-normal text-muted-foreground normal-case">
-                  {{ cellFor(group, s, group.models[0])?.n ?? group.cells.find((c) => c.setup === s)?.n ?? 0 }} проверок
-                  <template v-if="frameCount(s) > 1">· {{ frameCount(s) }} фрейма</template>
+                  {{ t('evals.matrix.checks', { n: cellFor(group, s, group.models[0])?.n ?? group.cells.find((c) => c.setup === s)?.n ?? 0 }) }}
+                  <template v-if="frameCount(s) > 1">· {{ t('evals.matrix.frames', { n: frameCount(s) }) }}</template>
                 </span>
               </button>
             </th>

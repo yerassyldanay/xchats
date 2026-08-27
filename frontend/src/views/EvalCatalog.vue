@@ -22,6 +22,16 @@ const route = useRoute()
 const router = useRouter()
 const { t, locale } = useI18n()
 
+// The field-doc language toggle in the header. Short codes, not native names:
+// it sits in a 3-button segmented control next to the help dialog, where
+// "Қазақша" would not fit — and it flips the same app-wide locale the nav rail
+// does, so the long form is available there.
+const LOCALES = [
+  { code: 'ru', short: 'RU' },
+  { code: 'en', short: 'EN' },
+  { code: 'kk', short: 'KK' },
+] as const
+
 const loading = ref(true)
 const unavailable = ref(false)
 const error = ref('')
@@ -81,29 +91,23 @@ function selectCase(caseId: string) {
     <header class="px-8 py-5 border-b border-border bg-card shrink-0">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h1 class="text-lg font-bold tracking-tight">Каталог тестов</h1>
+          <h1 class="text-lg font-bold tracking-tight">{{ t('evalCatalog.pageTitle') }}</h1>
           <p class="text-sm text-muted-foreground mt-0.5 max-w-2xl">
-            Требования из репозитория — что получит модель, что именно требуется, что не проверяется и откуда взято каждое требование. Не отчёт о результатах.
+            {{ t('evalCatalog.pageSubtitle') }}
           </p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <CatalogHelpDialog />
           <div class="flex items-center rounded-lg border border-border p-0.5" role="group" :aria-label="t('evalCatalog.langToggle.aria')">
             <button
+              v-for="l in LOCALES"
+              :key="l.code"
               type="button"
               class="px-2 py-1 rounded-md text-xs font-medium transition"
-              :class="locale === 'ru' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'"
-              @click="locale = 'ru'"
+              :class="locale === l.code ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'"
+              @click="locale = l.code"
             >
-              RU
-            </button>
-            <button
-              type="button"
-              class="px-2 py-1 rounded-md text-xs font-medium transition"
-              :class="locale === 'en' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'"
-              @click="locale = 'en'"
-            >
-              EN
+              {{ l.short }}
             </button>
           </div>
         </div>
@@ -112,7 +116,7 @@ function selectCase(caseId: string) {
     </header>
 
     <div v-if="loading" class="flex-1 grid place-items-center p-8">
-      <p class="text-sm text-muted-foreground">Загрузка каталога…</p>
+      <p class="text-sm text-muted-foreground">{{ t('evalCatalog.loading') }}</p>
     </div>
 
     <div v-else-if="unavailable" class="flex-1 grid place-items-center p-8">
@@ -120,8 +124,10 @@ function selectCase(caseId: string) {
         <div class="mx-auto w-12 h-12 rounded-xl bg-muted text-muted-foreground grid place-items-center">
           <BookOpen class="w-6 h-6" />
         </div>
-        <h2 class="font-semibold">Каталог пока не сгенерирован</h2>
-        <p class="text-sm text-muted-foreground">Выполните <code class="text-xs">harness export -all</code>, чтобы собрать требования из scenario.yaml/tests.yaml/extract/cases.yaml.</p>
+        <h2 class="font-semibold">{{ t('evalCatalog.notGeneratedTitle') }}</h2>
+        <p class="text-sm text-muted-foreground">
+          {{ t('evalCatalog.notGeneratedPrefix') }} <code class="text-xs">harness export -all</code>{{ t('evalCatalog.notGeneratedSuffix') }}
+        </p>
       </div>
     </div>
 
@@ -130,15 +136,15 @@ function selectCase(caseId: string) {
         <div class="mx-auto w-12 h-12 rounded-xl bg-destructive/10 text-destructive grid place-items-center">
           <CircleAlert class="w-6 h-6" />
         </div>
-        <h2 class="font-semibold">Не удалось загрузить каталог</h2>
+        <h2 class="font-semibold">{{ t('evalCatalog.loadFailed') }}</h2>
         <p class="text-sm text-muted-foreground">{{ error }}</p>
       </div>
     </div>
 
     <TooltipProvider v-else-if="catalog" :delay-duration="200">
       <div class="px-8 py-2 border-b border-border bg-muted/30 text-[11px] text-muted-foreground shrink-0">
-        Требования из репозитория, экспортированы {{ formatStartedAt(catalog.generated_at) || catalog.generated_at }} — не снапшот запуска, не результаты.
-        <template v-if="catalog.schema_version < 3"> · формат v2 — выполните harness export -all для полных данных</template>
+        {{ t('evalCatalog.exportedAt', { at: formatStartedAt(catalog.generated_at, t) || catalog.generated_at }) }}
+        <template v-if="catalog.schema_version < 3"> · {{ t('evalCatalog.schemaV2Note') }}</template>
       </div>
       <div class="flex flex-1 min-h-0">
         <CatalogTree
@@ -152,12 +158,12 @@ function selectCase(caseId: string) {
         />
         <div class="flex-1 overflow-y-auto p-6">
           <div v-if="activePane === 'invalid'" class="text-sm text-muted-foreground">
-            Ничего не найдено по этой ссылке — возможно, тест был переименован или удалён. Выберите тест слева.
+            {{ t('evalCatalog.invalidLink') }}
           </div>
           <CatalogTestDetail v-else-if="activePane === 'test'" :test="test!" :scenario="scenario!" />
           <CatalogScenarioOverview v-else-if="activePane === 'scenario'" :scenario="scenario!" @select-test="(id) => selectTest(scenario!.name, id)" />
           <CatalogExtractCaseDetail v-else-if="activePane === 'extract'" :extract-case="extractCase!" />
-          <div v-else class="text-sm text-muted-foreground">Выберите сценарий, тест или файл слева, чтобы увидеть требования.</div>
+          <div v-else class="text-sm text-muted-foreground">{{ t('evalCatalog.pickSomething') }}</div>
         </div>
       </div>
     </TooltipProvider>

@@ -66,7 +66,7 @@ const archivedCount = computed(() => partition.archived.length)
 
 <template>
   <div class="w-80 shrink-0 border-r border-border overflow-y-auto py-3">
-    <div class="px-3 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">WhatsApp-чат</div>
+    <div class="px-3 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{{ t('evalCatalog.tree.whatsappChat') }}</div>
     <CatalogTreeScenarios
       :groups="activeGroups"
       :selected-scenario="selectedScenario"
@@ -97,7 +97,7 @@ const archivedCount = computed(() => partition.archived.length)
     />
 
     <div class="px-3 pt-3 pb-1.5">
-      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Разбор файлов</div>
+      <div class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{{ t('evals.family.extract') }}</div>
       <div class="text-[10px] font-mono text-muted-foreground/70">{{ t('evalCatalog.extractSubtitle') }}</div>
     </div>
     <button

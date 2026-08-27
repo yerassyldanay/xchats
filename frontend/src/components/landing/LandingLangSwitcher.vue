@@ -7,7 +7,7 @@
 // scripts/build-blog.ts's LOCALE_LABEL convention.
 import { useI18n } from 'vue-i18n'
 
-const { locale } = useI18n()
+const { t, locale } = useI18n()
 
 const locales = [
   { code: 'ru', label: 'Русский' },
@@ -17,7 +17,7 @@ const locales = [
 </script>
 
 <template>
-  <nav aria-label="Language" class="lang-links">
+  <nav :aria-label="t('nav.language')" class="lang-links">
     <template v-for="(l, i) in locales" :key="l.code">
       <span v-if="i > 0" class="lang-links__sep" aria-hidden="true">·</span>
       <button

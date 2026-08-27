@@ -1,20 +1,23 @@
 <script setup lang="ts">
-// Промпт tab — plan/ui/ui_knowledge_base_001.png. Shows the EXACT prompt the
+// Prompt tab — plan/ui/ui_knowledge_base_001.png. Shows the EXACT prompt the
 // response engine renders right now (GET /kb/prompt, backed by the same
 // CachedKBRepo the production reply path reads — see playground.ts's
 // loadPrompt doc comment), never a locally-reconstructed approximation.
 // Read-only by design: editing happens only through the other tabs: this
 // panel just proves what they add up to.
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   BadgeCheck, BookOpen, CircleAlert, Copy, Download, Hash, Info,
   MapPin, Package, Phone, Receipt, RefreshCw, Ruler, Sparkles, Truck,
 } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
+import { intlLocale } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
 const pg = usePlayground()
+const { t, locale } = useI18n()
 const mode = ref<'rendered' | 'frame'>('rendered')
 
 onMounted(() => {
@@ -45,7 +48,7 @@ function segments(line: string): { text: string; hl: boolean }[] {
 }
 
 function fmtNumber(n: number): string {
-  return n.toLocaleString('ru-RU')
+  return n.toLocaleString(intlLocale(locale.value))
 }
 
 // Plain script constants, not inline template literals: a Vue template
@@ -85,12 +88,12 @@ const sectionRows = computed(() => {
   const c = pg.promptView?.section_counts
   if (!c) return []
   return [
-    { icon: BookOpen, label: 'Темы', value: c.topics },
-    { icon: Package, label: 'Товары', value: c.products },
-    { icon: Receipt, label: 'Тарифы', value: c.tariffs },
-    { icon: MapPin, label: 'Зоны доставки', value: c.zones },
-    { icon: Phone, label: 'Контакты', value: c.contacts },
-    { icon: Truck, label: 'Политики', value: c.policies },
+    { icon: BookOpen, label: t('kb.entities.topics.plural'), value: c.topics },
+    { icon: Package, label: t('kb.entities.products.plural'), value: c.products },
+    { icon: Receipt, label: t('kb.entities.tariffs.plural'), value: c.tariffs },
+    { icon: MapPin, label: t('kb.entities.delivery_zones.plural'), value: c.zones },
+    { icon: Phone, label: t('kb.entities.contacts.plural'), value: c.contacts },
+    { icon: Truck, label: t('kb.entities.policies.plural'), value: c.policies },
   ]
 })
 </script>
@@ -105,15 +108,14 @@ const sectionRows = computed(() => {
             <Sparkles class="w-4 h-4" />
           </div>
           <div>
-            <h3 class="font-semibold leading-tight">Промпт ассистента</h3>
+            <h3 class="font-semibold leading-tight">{{ t('kb.prompt.title') }}</h3>
             <p class="text-xs text-muted-foreground mt-1 max-w-md">
-              Итоговый системный промпт формируется автоматически из всех разделов базы знаний.
-              Редактирование возможно только через соответствующие разделы базы знаний.
+              {{ t('kb.prompt.subtitle') }}
             </p>
           </div>
         </div>
         <Button size="sm" variant="outline" :disabled="pg.promptLoading" @click="pg.loadPrompt()">
-          <RefreshCw class="w-4 h-4" :class="pg.promptLoading ? 'animate-spin' : ''" /> Обновить
+          <RefreshCw class="w-4 h-4" :class="pg.promptLoading ? 'animate-spin' : ''" /> {{ t('common.refresh') }}
         </Button>
       </div>
 
@@ -123,27 +125,27 @@ const sectionRows = computed(() => {
           :class="mode === 'rendered' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'"
           @click="mode = 'rendered'"
         >
-          Собранный
+          {{ t('kb.prompt.modeRendered') }}
         </button>
         <button
           class="rounded-md px-3 py-1.5 text-xs font-medium transition"
           :class="mode === 'frame' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'"
           @click="mode = 'frame'"
         >
-          Шаблон
+          {{ t('kb.prompt.modeFrame') }}
         </button>
       </div>
 
-      <div v-if="pg.promptLoading && !pg.promptView" class="p-10 text-center text-sm text-muted-foreground">Загрузка промпта…</div>
+      <div v-if="pg.promptLoading && !pg.promptView" class="p-10 text-center text-sm text-muted-foreground">{{ t('kb.prompt.loading') }}</div>
       <div v-else-if="pg.promptLoadError && !pg.promptView" class="p-5">
         <p class="flex items-start gap-2 text-sm text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
           <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> <span>{{ pg.promptLoadError }}</span>
         </p>
-        <Button size="sm" variant="outline" class="mt-3" @click="pg.loadPrompt()">Повторить</Button>
+        <Button size="sm" variant="outline" class="mt-3" @click="pg.loadPrompt()">{{ t('common.retry') }}</Button>
       </div>
       <div v-else-if="mode === 'rendered' && pg.promptView?.status === 'error'" class="p-5">
         <p class="flex items-start gap-2 text-sm text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
-          <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> <span>{{ pg.promptView.error || 'Не удалось собрать промпт.' }}</span>
+          <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> <span>{{ pg.promptView.error || t('kb.prompt.errBuild') }}</span>
         </p>
       </div>
       <div v-else class="overflow-x-auto max-h-[70vh] overflow-y-auto">
@@ -161,32 +163,32 @@ const sectionRows = computed(() => {
       </div>
     </div>
 
-    <!-- right: О промпте -->
+    <!-- right: about the prompt -->
     <aside class="rounded-xl border border-border bg-card p-5 space-y-4">
-      <h3 class="font-semibold leading-tight">О промпте</h3>
-      <p class="text-xs text-muted-foreground">Промпт формируется автоматически из базы знаний и используется ассистентом при каждом ответе.</p>
+      <h3 class="font-semibold leading-tight">{{ t('kb.prompt.aboutTitle') }}</h3>
+      <p class="text-xs text-muted-foreground">{{ t('kb.prompt.aboutBody') }}</p>
 
       <dl class="space-y-3 text-sm">
         <div class="flex items-center justify-between">
-          <dt class="text-muted-foreground">Версия</dt>
+          <dt class="text-muted-foreground">{{ t('kb.prompt.version') }}</dt>
           <dd><Badge variant="secondary" class="font-mono">{{ pg.promptView?.prompt_ref || '—' }}</Badge></dd>
         </div>
         <div class="flex items-center justify-between">
-          <dt class="text-muted-foreground flex items-center gap-1.5"><Ruler class="w-3.5 h-3.5" /> Размер</dt>
-          <dd class="font-medium">{{ pg.promptView ? fmtNumber(pg.promptView.char_count) + ' символов' : '—' }}</dd>
+          <dt class="text-muted-foreground flex items-center gap-1.5"><Ruler class="w-3.5 h-3.5" /> {{ t('kb.prompt.size') }}</dt>
+          <dd class="font-medium">{{ pg.promptView ? t('kb.prompt.chars', { n: fmtNumber(pg.promptView.char_count) }) : '—' }}</dd>
         </div>
         <div class="flex items-center justify-between">
-          <dt class="text-muted-foreground flex items-center gap-1.5"><Hash class="w-3.5 h-3.5" /> Токены ≈</dt>
+          <dt class="text-muted-foreground flex items-center gap-1.5"><Hash class="w-3.5 h-3.5" /> {{ t('kb.prompt.tokens') }}</dt>
           <dd class="font-medium">{{ pg.promptView ? '~' + fmtNumber(pg.promptView.approx_tokens) : '—' }}</dd>
         </div>
         <div class="flex items-center justify-between">
-          <dt class="text-muted-foreground">Статус</dt>
+          <dt class="text-muted-foreground">{{ t('kb.prompt.status') }}</dt>
           <dd>
             <Badge v-if="pg.promptView?.status === 'ok'" class="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-              <BadgeCheck class="w-3.5 h-3.5" /> Собран успешно
+              <BadgeCheck class="w-3.5 h-3.5" /> {{ t('kb.prompt.statusOk') }}
             </Badge>
             <Badge v-else-if="pg.promptView" variant="destructive">
-              <CircleAlert class="w-3.5 h-3.5" /> Ошибка
+              <CircleAlert class="w-3.5 h-3.5" /> {{ t('common.error') }}
             </Badge>
             <span v-else class="text-muted-foreground">—</span>
           </dd>
@@ -198,7 +200,7 @@ const sectionRows = computed(() => {
       </div>
 
       <div v-if="pg.promptView?.status === 'ok'">
-        <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">Сформирован из разделов</h4>
+        <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">{{ t('kb.prompt.builtFrom') }}</h4>
         <ul class="space-y-2">
           <li v-for="row in sectionRows" :key="row.label" class="flex items-center justify-between text-sm">
             <span class="flex items-center gap-2 text-foreground/80"><component :is="row.icon" class="w-4 h-4 text-muted-foreground" /> {{ row.label }}</span>
@@ -209,15 +211,19 @@ const sectionRows = computed(() => {
 
       <p class="flex items-start gap-2 text-xs text-muted-foreground rounded-lg bg-muted px-3 py-2.5">
         <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" />
-        <span>Плейсхолдеры вида <code class="font-mono">{{ factTokenExample }}</code> и <code class="font-mono">{{ slotTokenExample }}</code> заменяются фактическими значениями во время работы ассистента.</span>
+        <span>
+          {{ t('kb.prompt.placeholdersPrefix') }} <code class="font-mono">{{ factTokenExample }}</code>
+          {{ t('kb.prompt.placeholdersMiddle') }} <code class="font-mono">{{ slotTokenExample }}</code>
+          {{ t('kb.prompt.placeholdersSuffix') }}
+        </span>
       </p>
 
       <div class="space-y-2">
         <Button variant="outline" size="sm" class="w-full" :disabled="!pg.promptView?.rendered_text" @click="copyPrompt">
-          <Copy class="w-4 h-4" /> {{ copied ? 'Скопировано' : 'Копировать промпт' }}
+          <Copy class="w-4 h-4" /> {{ copied ? t('common.copied') : t('kb.prompt.copy') }}
         </Button>
         <Button size="sm" class="w-full" :disabled="!pg.promptView?.rendered_text" @click="downloadPrompt">
-          <Download class="w-4 h-4" /> Скачать .txt
+          <Download class="w-4 h-4" /> {{ t('kb.prompt.download') }}
         </Button>
       </div>
     </aside>

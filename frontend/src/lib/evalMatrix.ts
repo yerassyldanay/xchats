@@ -23,6 +23,12 @@ export interface MatrixCell {
   avgLatencyMs: number | null
 }
 
+// Translate is the narrow slice of vue-i18n's t() the presentational helpers
+// below need. Passed in rather than imported so this module stays pure and
+// unit-testable in the node project (no localStorage, no app singleton), and
+// so a caller always renders in the locale that is active right now.
+export type Translate = (key: string, named?: Record<string, unknown>) => string
+
 export interface MatrixGroup {
   experiment: string
   family: Family
@@ -32,7 +38,9 @@ export interface MatrixGroup {
   // Set only for a group split off by the comparability guard (review amendment 3) —
   // its setup(s) disagree with the rest of the experiment on which tests/cases they
   // cover, so pooling them into one table would silently misrepresent the comparison.
-  warning?: string
+  // Carries the two operands, not a sentence: the component renders it through
+  // evals.matrix.incomparable so the warning follows the UI locale.
+  warning?: { setup: string; experiment: string }
 }
 
 function itemID(e: VExecution): string {
@@ -79,21 +87,21 @@ function firstAppearanceOrder(values: string[]): string[] {
 // costLabel mirrors evals/harness/html.go's formatVCost — a dollar figure is only
 // ever shown alongside what it's based on; every other basis reads as an explicit
 // non-number label, never a bare "$0" that could be misread as free or measured.
-export function costLabel(basis: string, estimateUSD: number): string {
+export function costLabel(basis: string, estimateUSD: number, t: Translate): string {
   switch (basis) {
     case 'measured_split':
     case 'cached_replay_borrowed':
       return `$${estimateUSD.toFixed(5)}`
     case 'cached_replay_unpriceable':
-      return 'неизвестна (кеш, оценить не по чему)'
+      return t('evals.cost.cachedUnpriceable')
     case 'unknown_pricing':
-      return 'цена неизвестна'
+      return t('evals.cost.unknownPricing')
     default:
-      return 'н/д'
+      return t('evals.na')
   }
 }
 
-function buildCell(setup: string, model: string, execs: VExecution[]): MatrixCell {
+function buildCell(setup: string, model: string, execs: VExecution[], t: Translate): MatrixCell {
   let behaviorPass = 0
   let contractPass = 0
   let allChecksPass = 0
@@ -128,13 +136,14 @@ function buildCell(setup: string, model: string, execs: VExecution[]): MatrixCel
   }
 
   const n = execs.length
-  let cost = 'н/д'
+  let cost = t('evals.na')
   if (pricedN > 0) {
+    const avg = `~$${(costSum / pricedN).toFixed(5)}`
     cost = anyUnpriced
-      ? `~$${(costSum / pricedN).toFixed(5)} сред. (${pricedN}/${n})`
-      : `~$${(costSum / pricedN).toFixed(5)} сред.`
+      ? t('evals.cost.avgPartial', { avg, priced: pricedN, total: n })
+      : t('evals.cost.avg', { avg })
   } else if (n > 0) {
-    cost = 'цена неизвестна'
+    cost = t('evals.cost.unknownPricing')
   }
 
   return {
@@ -150,7 +159,13 @@ function buildCell(setup: string, model: string, execs: VExecution[]): MatrixCel
   }
 }
 
-function buildOneMatrix(experiment: string, family: Family, setups: string[], bySetup: Map<string, VExecution[]>): MatrixGroup {
+function buildOneMatrix(
+  experiment: string,
+  family: Family,
+  setups: string[],
+  bySetup: Map<string, VExecution[]>,
+  t: Translate,
+): MatrixGroup {
   const allExecs = setups.flatMap((s) => bySetup.get(s) || [])
   const models = firstAppearanceOrder(allExecs.map((e) => e.variant.model))
   const cells: MatrixCell[] = []
@@ -158,7 +173,7 @@ function buildOneMatrix(experiment: string, family: Family, setups: string[], by
     for (const model of models) {
       const execs = (bySetup.get(setup) || []).filter((e) => e.variant.model === model)
       if (execs.length === 0) continue
-      cells.push(buildCell(setup, model, execs))
+      cells.push(buildCell(setup, model, execs, t))
     }
   }
   return { experiment, family, setups, models, cells }
@@ -170,7 +185,7 @@ function buildOneMatrix(experiment: string, family: Family, setups: string[], by
 // group's reference set into its OWN separate matrix with a warning — the
 // comparability guard (review amendment 3) that keeps a matrix from silently
 // averaging pass rates across columns that never ran the same questions.
-export function buildComparisonMatrices(executions: VExecution[], family: Family): MatrixGroup[] {
+export function buildComparisonMatrices(executions: VExecution[], family: Family, t: Translate): MatrixGroup[] {
   const inFamily = executions.filter((e) => e.family === family)
   if (inFamily.length === 0) return []
 
@@ -198,11 +213,11 @@ export function buildComparisonMatrices(executions: VExecution[], family: Family
     }
 
     if (comparable.length > 0) {
-      groups.push(buildOneMatrix(experiment, family, comparable, bySetup))
+      groups.push(buildOneMatrix(experiment, family, comparable, bySetup, t))
     }
     for (const s of mismatched) {
-      const g = buildOneMatrix(experiment, family, [s], bySetup)
-      g.warning = `«${s}» показан отдельно — набор тестов отличается от остальных setup'ов эксперимента «${experiment || '(без эксперимента)'}», совместное сравнение было бы некорректным.`
+      const g = buildOneMatrix(experiment, family, [s], bySetup, t)
+      g.warning = { setup: s, experiment }
       groups.push(g)
     }
   }
@@ -213,8 +228,8 @@ export function cellFor(group: MatrixGroup, setup: string, model: string): Matri
   return group.cells.find((c) => c.setup === setup && c.model === model)
 }
 
-export function pct(pass: number | null, total: number): string {
-  if (pass === null || total === 0) return 'н/д'
+export function pct(pass: number | null, total: number, t: Translate): string {
+  if (pass === null || total === 0) return t('evals.na')
   return `${Math.round((pass / total) * 100)}% (${pass}/${total})`
 }
 
@@ -411,21 +426,17 @@ export function shortModelName(id: string): string {
   return segments[segments.length - 1] + suffix
 }
 
-const RU_MONTHS_GENITIVE = [
-  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
-]
-
 // formatStartedAt renders an RFC3339 UTC timestamp (every timestamp this app reads
-// comes from evals/harness's time.Now().UTC() calls) as "14 июля 2026, 15:53" —
-// hand-built rather than Intl.DateTimeFormat so the exact shape is deterministic
+// comes from evals/harness's time.Now().UTC() calls) as "14 июля 2026, 15:53" /
+// "14 July 2026, 15:53" / "14 шілде 2026, 15:53" — assembled from the catalog's
+// month list rather than Intl.DateTimeFormat so the exact shape is deterministic
 // across environments/locale-data versions, not just "close enough."
-export function formatStartedAt(iso: string | undefined): string {
+export function formatStartedAt(iso: string | undefined, t: Translate): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (isNaN(d.getTime())) return ''
   const day = d.getUTCDate()
-  const month = RU_MONTHS_GENITIVE[d.getUTCMonth()]
+  const month = t(`evals.months.${d.getUTCMonth()}`)
   const year = d.getUTCFullYear()
   const hh = String(d.getUTCHours()).padStart(2, '0')
   const mm = String(d.getUTCMinutes()).padStart(2, '0')
@@ -434,14 +445,16 @@ export function formatStartedAt(iso: string | undefined): string {
 
 // formatDuration renders a millisecond span as "38с" / "18м 42с" / "1ч 05м" — seconds
 // dropped once the span reaches an hour, matching the reference design's examples.
-export function formatDuration(ms: number): string {
+// Unit letters come from the catalog (evals.duration.*), so kk/en read as "38 с" /
+// "38s" rather than a Cyrillic suffix on an English page.
+export function formatDuration(ms: number, t: Translate): string {
   const totalSeconds = Math.max(0, Math.round(ms / 1000))
   const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const seconds = totalSeconds % 60
-  if (hours > 0) return `${hours}ч ${String(minutes).padStart(2, '0')}м`
-  if (minutes > 0) return `${minutes}м ${String(seconds).padStart(2, '0')}с`
-  return `${seconds}с`
+  if (hours > 0) return t('evals.duration.hm', { h: hours, m: String(minutes).padStart(2, '0') })
+  if (minutes > 0) return t('evals.duration.ms', { m: minutes, s: String(seconds).padStart(2, '0') })
+  return t('evals.duration.s', { s: seconds })
 }
 
 export interface LaunchListRow {
