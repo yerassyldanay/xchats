@@ -1,7 +1,15 @@
 import { api } from '../api/client'
 import { log } from './logfmt'
 import { desktopRuntime, type DesktopRuntime } from './desktop'
-import type { Chat, Message, AiDraft, CampaignStatusEvent, CampaignRecipientEvent } from '../types'
+import type {
+  AiDraft,
+  CampaignRecipientEvent,
+  CampaignStatusEvent,
+  Chat,
+  Customer,
+  Followup,
+  Message,
+} from '../types'
 
 export interface SSEHandlers {
   messageCreated?: (m: Message) => void
@@ -25,6 +33,13 @@ export interface SSEHandlers {
   campaignStatusChanged?: (d: CampaignStatusEvent) => void
   campaignRecipientUpdated?: (d: CampaignRecipientEvent) => void
   campaignAccountAutoPaused?: (d: { account_id: string; count: number }) => void
+  // CRM deltas — a customer edited (status/tags/assignee/profile) or a
+  // follow-up created, rescheduled, completed or cancelled. Both carry the
+  // full entity, so an open sidebar or follow-up list merges rather than
+  // refetches. Two managers on the same conversation is the case this exists
+  // for: one sets the status, the other sees it without reloading.
+  customerUpdated?: (c: Customer) => void
+  followupChanged?: (f: Followup) => void
 }
 
 // bindings pairs each backend event name with the handler that wants it. The
@@ -44,6 +59,8 @@ function bindings(h: SSEHandlers): Array<[string, ((d: any) => void) | undefined
     ['campaign.status_changed', h.campaignStatusChanged],
     ['campaign.recipient_updated', h.campaignRecipientUpdated],
     ['campaign.account_auto_paused', h.campaignAccountAutoPaused],
+    ['customer.updated', h.customerUpdated],
+    ['followup.changed', h.followupChanged],
   ]
 }
 

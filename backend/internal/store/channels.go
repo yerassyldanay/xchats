@@ -397,9 +397,12 @@ type ChannelInbound struct {
 // ChannelInboundResult reports what the ingest did, so the caller knows
 // which SSE to emit and whether this was a redelivery.
 type ChannelInboundResult struct {
-	ContactID       uuid.UUID
-	ChatID          uuid.UUID
-	MessageID       uuid.UUID
+	ContactID uuid.UUID
+	ChatID    uuid.UUID
+	MessageID uuid.UUID
+	// CustomerID is the CRM customer this contact resolved to, or uuid.Nil
+	// when the account belongs to no organization (see IngestChannelInbound).
+	CustomerID      uuid.UUID
 	ChatCreated     bool
 	MessageInserted bool
 }
@@ -453,6 +456,28 @@ func (s *Store) IngestChannelInbound(ctx context.Context, in ChannelInbound) (Ch
 		}
 	default:
 		return res, wrap("upsert channel chat", err)
+	}
+
+	// CRM identity — the same find-or-create the wa_*/tg_* legs run (see
+	// store.UpsertInbound), in this same pre-ack transaction so a redelivery
+	// lands on the identity's unique key as a no-op rather than creating a
+	// second customer. The channel comes off the account row, so every Meta
+	// channel — and every channel added after them — is covered without a
+	// change here.
+	orgID, channel, err := accountOwner(ctx, tx, "channel_accounts", in.AccountID)
+	if err != nil {
+		return res, err
+	}
+	res.CustomerID, err = ResolveCustomerForContact(ctx, tx, orgID, IdentityInput{
+		Channel:     channel,
+		AccountID:   in.AccountID,
+		ContactID:   res.ContactID,
+		ExternalID:  in.ExternalContactID,
+		Username:    in.ContactHandle,
+		DisplayName: in.ContactDisplayName,
+	})
+	if err != nil {
+		return res, err
 	}
 
 	var extID any

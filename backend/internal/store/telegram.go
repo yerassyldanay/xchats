@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -326,11 +328,28 @@ type TgInbound struct {
 // TgInboundResult reports what the ingest did, so the webhook knows which SSE
 // to emit and whether this was a redelivery.
 type TgInboundResult struct {
-	ContactID       uuid.UUID
-	ChatID          uuid.UUID
-	MessageID       uuid.UUID
+	ContactID uuid.UUID
+	ChatID    uuid.UUID
+	MessageID uuid.UUID
+	// CustomerID is the CRM customer this contact resolved to, or uuid.Nil
+	// when the bot belongs to no organization (see IngestTelegramInbound).
+	CustomerID      uuid.UUID
 	ChatCreated     bool
 	MessageInserted bool
+}
+
+// telegramIdentityName is the human label stored on the CRM identity: the
+// display name Telegram gave us, else "First Last", else the @username. It
+// mirrors inbox_chats_v's own contact_push_name fallback so the customer and
+// the inbox never disagree about what to call the same person.
+func telegramIdentityName(in TgInbound) string {
+	if in.DisplayName != "" {
+		return in.DisplayName
+	}
+	if n := strings.TrimSpace(in.FirstName + " " + in.LastName); n != "" {
+		return n
+	}
+	return in.Username
 }
 
 // IngestTelegramInbound upserts contact → chat → message and maintains the chat
@@ -387,6 +406,26 @@ func (s *Store) IngestTelegramInbound(ctx context.Context, in TgInbound) (TgInbo
 		}
 	default:
 		return res, wrap("upsert tg chat", err)
+	}
+
+	// CRM identity — same find-or-create as the WhatsApp leg (see
+	// store.UpsertInbound), inside this same pre-ack transaction so a
+	// redelivery lands on the identity's unique key as a no-op rather than
+	// creating a second customer.
+	orgID, _, err := accountOwner(ctx, tx, "tg_accounts", in.AccountID)
+	if err != nil {
+		return res, err
+	}
+	res.CustomerID, err = ResolveCustomerForContact(ctx, tx, orgID, IdentityInput{
+		Channel:     string(chanTelegram),
+		AccountID:   in.AccountID,
+		ContactID:   res.ContactID,
+		ExternalID:  strconv.FormatInt(in.TelegramUserID, 10),
+		Username:    in.Username,
+		DisplayName: telegramIdentityName(in),
+	})
+	if err != nil {
+		return res, err
 	}
 
 	var ts any
