@@ -65,6 +65,9 @@ create. `make down` stops it, `make logs` tails it.
 Needs **Go 1.25+** and **Node 22+**. Two terminals:
 
 ```bash
+# one-off after cloning — install the locked frontend dependencies
+npm --prefix frontend ci
+
 # terminal 1 — backend on :8080
 XCHATS_ALLOW_FILE_CREDENTIALS=1 make dev-backend
 
@@ -124,11 +127,10 @@ curl -b jar -s -X POST http://localhost:8080/xchats/api/v1/auth/password \
 Locked out later? Stop the server and run `xchats reset-admin-password` — note
 that this restores the *same public default* above, so change it again.
 
-**2. Switch the language if you want English.** The app ships in **Russian by
-default**. The only language switcher is in the header of the public landing
-page at **http://localhost:8081/** (`Русский · English · Қазақша`) — pick one
-*before* signing in. Some screens (the inbox, and four of the nine sidebar
-icons) are still Russian-only whatever you choose.
+**2. Choose your language.** The app defaults to **Russian**, with complete
+Russian, English and Kazakh catalogs. Switch from the public landing page, the
+sign-in page, or the account menu after signing in; the preference is remembered
+in this browser.
 
 **3. Add an LLM key.** A setup wizard opens on first login and asks for an
 **OpenRouter** key. OpenAI and Google Gemini work too — add either under
