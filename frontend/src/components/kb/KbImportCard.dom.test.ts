@@ -89,6 +89,56 @@ describe('KbImportCard(kind=url) — staging URLs, no file controls', () => {
   })
 })
 
+// KB-11: kb_import.go enforces at most 10 files and 50 MiB each, but used to
+// surface that only after a real upload attempt — these mirror the SAME
+// limits client-side, rejecting an invalid selection before it ever reaches
+// the network.
+describe('KbImportCard(kind=file) — client-side upload limits (KB-11)', () => {
+  function stageFiles(wrapper: ReturnType<typeof mountKb>, files: File[]) {
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: files, configurable: true })
+    return input.trigger('change')
+  }
+  function fileOfSize(name: string, bytes: number): File {
+    const f = new File(['x'], name, { type: 'application/pdf' })
+    Object.defineProperty(f, 'size', { value: bytes, configurable: true })
+    return f
+  }
+
+  it('shows the file-count and per-file size limits beside the dropzone', async () => {
+    const { wrapper } = await mountCard('file')
+    expect(wrapper.find('[data-testid="kb-import-file-limits"]').text()).toContain('10')
+  })
+
+  it('rejects an oversized file with an inline notice, and never stages it', async () => {
+    const { wrapper } = await mountCard('file')
+    await stageFiles(wrapper, [fileOfSize('huge.pdf', 60 * 1024 * 1024)])
+    await flushPromises()
+
+    expect(wrapper.findAll('.rounded-full').length).toBe(0) // never staged as a chip
+    expect(wrapper.find('[data-testid="kb-import-file-error"]').text()).toContain('huge.pdf')
+  })
+
+  it('caps at 10 files and reports how many were left out', async () => {
+    const { wrapper } = await mountCard('file')
+    const dozen = Array.from({ length: 12 }, (_, i) => fileOfSize(`f${i}.txt`, 1024))
+    await stageFiles(wrapper, dozen)
+    await flushPromises()
+
+    expect(wrapper.findAll('.rounded-full').length).toBe(10)
+    expect(wrapper.find('[data-testid="kb-import-file-error"]').text()).toContain('2')
+  })
+
+  it('a valid file within limits stages normally with no error', async () => {
+    const { wrapper } = await mountCard('file')
+    await stageFiles(wrapper, [fileOfSize('normal.pdf', 1024)])
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('normal.pdf')
+    expect(wrapper.find('[data-testid="kb-import-file-error"]').exists()).toBe(false)
+  })
+})
+
 describe('KbImportCard(kind=file) — staging files, no URL input', () => {
   it('picking a file through the hidden input shows a chip, removable via its X', async () => {
     const { wrapper } = await mountCard('file')

@@ -19,6 +19,7 @@ import { useI18n } from 'vue-i18n'
 import { CircleAlert, Link as LinkIcon, LoaderCircle, Upload, X } from 'lucide-vue-next'
 import { useKbImport } from '@/stores/kbImport'
 import { useImportProviders } from '@/composables/useImportProviders'
+import { formatBytes } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -44,6 +45,14 @@ const urlError = ref('')
 const dragOver = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
+// KB-11: mirrors kb_import.go's own limits (kbImportMaxFileBytes, the
+// 10-file cap) exactly, enforced here BEFORE any network request — the
+// backend previously was the first place a user learned an oversized file
+// or an excessive count was rejected.
+const MAX_FILES = 10
+const MAX_FILE_BYTES = 50 * 1024 * 1024 // = kbImportMaxFileBytes (50 MiB) — an exact byte match, not a rounded display value
+const fileError = ref('')
+
 const provider = ref('native')
 const targetType = ref('auto')
 const guidance = ref('')
@@ -56,7 +65,23 @@ const hasPending = computed(() => (props.kind === 'url' ? pendingUrls.value.leng
 
 function addFiles(list: FileList | null) {
   if (!list) return
-  pendingFiles.value.push(...Array.from(list))
+  fileError.value = ''
+  const incoming = Array.from(list)
+  const oversized = incoming.filter((f) => f.size > MAX_FILE_BYTES)
+  const withinSize = incoming.filter((f) => f.size <= MAX_FILE_BYTES)
+
+  const room = Math.max(0, MAX_FILES - pendingFiles.value.length)
+  const overflowCount = Math.max(0, withinSize.length - room)
+  pendingFiles.value.push(...withinSize.slice(0, room))
+
+  const notices: string[] = []
+  if (oversized.length) {
+    notices.push(t('kb.import.filesTooLarge', { count: oversized.length, limit: formatBytes(MAX_FILE_BYTES), names: oversized.map((f) => f.name).join(', ') }))
+  }
+  if (overflowCount > 0) {
+    notices.push(t('kb.import.tooManyFiles', { max: MAX_FILES, count: overflowCount }))
+  }
+  fileError.value = notices.join(' ')
 }
 function onFilePick(e: Event) {
   const input = e.target as HTMLInputElement
@@ -137,6 +162,12 @@ async function submit() {
       <p class="mt-2 text-sm text-muted-foreground">{{ t('kb.import.dropHint') }}</p>
       <Button variant="outline" size="sm" class="mt-3" data-testid="kb-import-browse" @click="fileInput?.click()">{{ t('kb.import.browseButton') }}</Button>
       <input ref="fileInput" type="file" multiple class="hidden" data-testid="kb-import-file-input" @change="onFilePick" />
+      <p class="mt-2 text-[11px] text-muted-foreground" data-testid="kb-import-file-limits">
+        {{ t('kb.import.fileLimits', { max: MAX_FILES, limit: formatBytes(MAX_FILE_BYTES) }) }}
+      </p>
+      <p v-if="fileError" class="mt-2 flex items-start gap-1.5 text-left text-xs text-destructive" data-testid="kb-import-file-error">
+        <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-0.5" /> {{ fileError }}
+      </p>
     </div>
 
     <div v-else class="flex items-start gap-2">
