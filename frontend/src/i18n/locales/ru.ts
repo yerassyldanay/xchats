@@ -1376,6 +1376,7 @@ export default {
     collapseAll: 'Свернуть всё',
     prevPage: 'Предыдущая страница',
     nextPage: 'Следующая страница',
+    pageRange: 'Показано {from}–{to} из {total}',
   },
   // nav.* — the persistent left rail (NavRail.vue) plus the account menu it owns.
   nav: {

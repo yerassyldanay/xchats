@@ -7,12 +7,14 @@ import { useCampaigns } from '@/stores/campaigns'
 import { useAccounts } from '@/stores/accounts'
 import { ApiError } from '@/api/client'
 import { fingerprintOf } from '@/lib/recipientFingerprint'
+import { queryInt, queryString } from '@/lib/queryState'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import CampaignStatusBadge from '@/components/CampaignStatusBadge.vue'
 import AccountSendingBudget from '@/components/AccountSendingBudget.vue'
 import CampaignRecipientPreviewTable from '@/components/CampaignRecipientPreviewTable.vue'
 import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
+import Pagination from '@/components/Pagination.vue'
 import type { CampaignRecipientStatus, CampaignRecipientPreviewResult } from '@/types'
 
 const { t, te, locale } = useI18n()
@@ -33,7 +35,7 @@ async function load() {
   try {
     await campaigns.fetchOne(campaignId.value)
     if (accounts.accounts.length === 0) await accounts.load()
-    await Promise.all([campaigns.fetchRecipients(campaignId.value, statusFilter.value), campaigns.fetchEvents(campaignId.value)])
+    await Promise.all([loadRecipients(), loadEvents()])
   } catch (e) {
     actionError.value = e instanceof ApiError ? e.message : t('campaigns.detail.errLoadFailed')
   } finally {
@@ -46,7 +48,18 @@ onMounted(() => {
   void load()
 })
 onUnmounted(() => campaigns.stopRealtime())
-watch(campaignId, load)
+// Landing here for a first time (mount) reads the filter/page from the URL
+// query (see statusFilter/recipientsPage/eventsPage below); switching to a
+// DIFFERENT campaign in place — the only way that happens today is
+// duplicate()'s own router.push — must not carry over a page number that
+// may not even exist for the new campaign (Pagination.vue would otherwise
+// render a nonsensical range like "101–5 of 5").
+watch(campaignId, () => {
+  statusFilter.value = ''
+  recipientsPage.value = 1
+  eventsPage.value = 1
+  void load()
+})
 
 // --- derived edit gates — mirror backend/campaign.CanEditContent/
 // CanEditPacing exactly (see internal/httpapi/campaigns.go's own doc
@@ -114,9 +127,42 @@ async function remove() {
 }
 
 // --- recipients tab --------------------------------------------------------
-const statusFilter = ref<CampaignRecipientStatus | ''>('')
+// CAM-11: server-backed pagination, with the filter and page number both
+// restored from the URL on load so a refresh or a shared link doesn't
+// silently snap back to page 1 of the unfiltered list.
+const RECIPIENTS_PAGE_SIZE = 50
 const RECIPIENT_STATUSES: CampaignRecipientStatus[] = ['pending', 'sending', 'sent', 'failed', 'skipped']
-watch(statusFilter, () => campaigns.fetchRecipients(campaignId.value, statusFilter.value))
+function parseStatusFilter(raw: string): CampaignRecipientStatus | '' {
+  return (RECIPIENT_STATUSES as string[]).includes(raw) ? (raw as CampaignRecipientStatus) : ''
+}
+const statusFilter = ref<CampaignRecipientStatus | ''>(parseStatusFilter(queryString(route.query.status)))
+const recipientsPage = ref(queryInt(route.query.rpage, 1))
+
+function syncListQuery() {
+  const query: Record<string, string> = { ...(route.query as Record<string, string>) }
+  if (statusFilter.value) query.status = statusFilter.value
+  else delete query.status
+  if (recipientsPage.value > 1) query.rpage = String(recipientsPage.value)
+  else delete query.rpage
+  if (eventsPage.value > 1) query.epage = String(eventsPage.value)
+  else delete query.epage
+  void router.replace({ query })
+}
+
+async function loadRecipients() {
+  await campaigns.fetchRecipients(campaignId.value, statusFilter.value, recipientsPage.value, RECIPIENTS_PAGE_SIZE)
+}
+function setStatusFilter(s: CampaignRecipientStatus | '') {
+  statusFilter.value = s
+  recipientsPage.value = 1
+  syncListQuery()
+  void loadRecipients()
+}
+function setRecipientsPage(p: number) {
+  recipientsPage.value = p
+  syncListQuery()
+  void loadRecipients()
+}
 
 const retrying = ref(false)
 async function retryFailed() {
@@ -124,6 +170,14 @@ async function retryFailed() {
   actionError.value = ''
   try {
     await campaigns.retryFailed(campaignId.value)
+    // The store's own retryFailed always re-fetches page 1 of the failed
+    // filter (see stores/campaigns.ts) — keep the filter buttons and the
+    // pagination footer truthful to what campaigns.recipients now holds,
+    // rather than showing stale numbers for whatever filter/page was
+    // active before the retry.
+    statusFilter.value = 'failed'
+    recipientsPage.value = 1
+    syncListQuery()
   } catch (e) {
     actionError.value = e instanceof ApiError ? e.message : t('campaigns.detail.errActionFailed')
   } finally {
@@ -174,11 +228,28 @@ async function confirmReplace() {
     uploadedFile.value = null
     replacePreview.value = null
     replacedFingerprint.value = ''
+    // Same reasoning as retryFailed: the store's own replaceRecipients
+    // re-fetches page 1, unfiltered — match the footer to it.
+    statusFilter.value = ''
+    recipientsPage.value = 1
+    syncListQuery()
   } catch (e) {
     replaceError.value = e instanceof ApiError ? e.message : t('campaigns.detail.errActionFailed')
   } finally {
     replaceBusy.value = false
   }
+}
+
+// --- history (events) tab -------------------------------------------------
+const EVENTS_PAGE_SIZE = 50
+const eventsPage = ref(queryInt(route.query.epage, 1))
+async function loadEvents() {
+  await campaigns.fetchEvents(campaignId.value, eventsPage.value, EVENTS_PAGE_SIZE)
+}
+function setEventsPage(p: number) {
+  eventsPage.value = p
+  syncListQuery()
+  void loadEvents()
 }
 </script>
 
@@ -289,7 +360,7 @@ async function confirmReplace() {
         <TabsContent value="recipients" class="mt-4 space-y-3">
           <div class="flex items-center justify-between flex-wrap gap-2">
             <div class="flex flex-wrap gap-1.5">
-              <Button type="button" size="sm" :variant="statusFilter === '' ? 'default' : 'outline'" @click="statusFilter = ''">
+              <Button type="button" size="sm" :variant="statusFilter === '' ? 'default' : 'outline'" @click="setStatusFilter('')">
                 {{ t('campaigns.detail.filterAll') }}
               </Button>
               <Button
@@ -298,7 +369,7 @@ async function confirmReplace() {
                 type="button"
                 size="sm"
                 :variant="statusFilter === s ? 'default' : 'outline'"
-                @click="statusFilter = s"
+                @click="setStatusFilter(s)"
               >
                 {{ t(`campaigns.recipientStatus.${s}`) }}
               </Button>
@@ -346,10 +417,10 @@ async function confirmReplace() {
               <span v-if="r.failure_reason" class="text-[11px] text-muted-foreground truncate max-w-[30%]" :title="r.failure_reason">{{ r.failure_reason }}</span>
             </div>
           </div>
-          <p class="text-xs text-muted-foreground">{{ campaigns.recipientsTotal }}</p>
+          <Pagination :page="recipientsPage" :page-size="RECIPIENTS_PAGE_SIZE" :total="campaigns.recipientsTotal" @update:page="setRecipientsPage" />
         </TabsContent>
 
-        <TabsContent value="events" class="mt-4">
+        <TabsContent value="events" class="mt-4 space-y-3">
           <div v-if="campaigns.events.length === 0" class="text-sm text-muted-foreground">{{ t('campaigns.detail.noEvents') }}</div>
           <ul v-else class="space-y-2">
             <li v-for="e in campaigns.events" :key="e.id" class="flex items-center gap-3 text-sm">
@@ -358,6 +429,7 @@ async function confirmReplace() {
               <span class="ml-auto text-xs text-muted-foreground">{{ formatWhen(e.created_at) }}</span>
             </li>
           </ul>
+          <Pagination :page="eventsPage" :page-size="EVENTS_PAGE_SIZE" :total="campaigns.eventsTotal" @update:page="setEventsPage" />
         </TabsContent>
       </Tabs>
     </template>

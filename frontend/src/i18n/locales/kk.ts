@@ -1267,6 +1267,7 @@ export default {
     collapseAll: 'Барлығын жию',
     prevPage: 'Алдыңғы бет',
     nextPage: 'Келесі бет',
+    pageRange: '{total} ішінен {from}–{to} көрсетілді',
   },
   // nav.* — the persistent left rail (NavRail.vue) plus the account menu it owns.
   nav: {

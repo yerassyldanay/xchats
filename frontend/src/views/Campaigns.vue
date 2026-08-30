@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { Megaphone, Plus } from 'lucide-vue-next'
 import { useCampaigns } from '@/stores/campaigns'
 import { useAccounts } from '@/stores/accounts'
+import { queryInt } from '@/lib/queryState'
 import { Button } from '@/components/ui/button'
+import Pagination from '@/components/Pagination.vue'
 import CampaignStatusBadge from '@/components/CampaignStatusBadge.vue'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
@@ -16,10 +18,28 @@ import type { Campaign } from '@/types'
 const { t, locale } = useI18n()
 const campaigns = useCampaigns()
 const accounts = useAccounts()
+const route = useRoute()
+const router = useRouter()
+
+// CAM-11: the store already tracks `total` — only page/page_size were ever
+// sent — but nothing exposed a way to reach anything past the first 50.
+// The page number lives in the URL so a reload or a shared link lands back
+// on the same page instead of silently snapping to page 1.
+const PAGE_SIZE = 50
+const page = ref(queryInt(route.query.page, 1))
+
+async function loadPage(p: number) {
+  page.value = p
+  await campaigns.list(p, PAGE_SIZE)
+  const query: Record<string, string> = { ...(route.query as Record<string, string>) }
+  if (p > 1) query.page = String(p)
+  else delete query.page
+  void router.replace({ query })
+}
 
 onMounted(async () => {
   campaigns.startRealtime()
-  await Promise.all([campaigns.list(), accounts.accounts.length ? Promise.resolve() : accounts.load()])
+  await Promise.all([campaigns.list(page.value, PAGE_SIZE), accounts.accounts.length ? Promise.resolve() : accounts.load()])
 })
 onUnmounted(() => campaigns.stopRealtime())
 
@@ -92,6 +112,8 @@ const formattedDate = computed(() => (iso: string) =>
           </div>
         </div>
       </RouterLink>
+
+      <Pagination :page="page" :page-size="PAGE_SIZE" :total="campaigns.total" @update:page="loadPage" />
     </div>
   </div>
 </template>

@@ -11,8 +11,8 @@ vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
-    useRouter: () => ({ push: vi.fn() }),
-    useRoute: () => ({ params: { campaignId: 'camp-1' } }),
+    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+    useRoute: () => ({ params: { campaignId: 'camp-1' }, query: {} }),
   }
 })
 
@@ -77,6 +77,11 @@ async function mountDetail() {
 // not even in the DOM until its trigger is activated.
 async function openRecipientsTab(wrapper: Awaited<ReturnType<typeof mountDetail>>['wrapper']) {
   const trigger = wrapper.findAll('button').find((b) => b.text() === 'Получатели')
+  await trigger!.trigger('mousedown', { button: 0 })
+  await flushPromises()
+}
+async function openEventsTab(wrapper: Awaited<ReturnType<typeof mountDetail>>['wrapper']) {
+  const trigger = wrapper.findAll('button').find((b) => b.text() === 'История')
   await trigger!.trigger('mousedown', { button: 0 })
   await flushPromises()
 }
@@ -202,5 +207,91 @@ describe('CampaignDetail — Stop requires confirmation (CAM-08)', () => {
     await flushPromises()
 
     expect(api.post).not.toHaveBeenCalled()
+  })
+})
+
+// CAM-11: the Recipients and History tabs both used to cap at the first 50
+// rows the store happened to fetch, even though the API's own `total` was
+// already sitting right there in the response. Assert the wiring end to
+// end: the range text, the disabled edges, and that clicking Next actually
+// re-fetches the next page rather than just relabeling what is on screen.
+describe('CampaignDetail — recipients/history pagination (CAM-11)', () => {
+  async function mountWithTotals(recipientsTotal: number, eventsTotal: number) {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/campaigns/camp-1') return campaign() as any
+      if (path === '/accounts') return { items: [] } as any
+      if (path.startsWith('/campaigns/camp-1/recipients')) {
+        return { items: [{ id: 'r1', normalized_identity: '77011234567', name: '', status: 'pending', failure_reason: '' }], total: recipientsTotal } as any
+      }
+      if (path.startsWith('/campaigns/camp-1/events')) {
+        return { items: [{ id: 'e1', event: 'created', created_at: '2026-08-01T00:00:00Z' }], total: eventsTotal } as any
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    const pinia = testPinia()
+    const wrapper = mountKb(CampaignDetail, { pinia })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('shows the range and enables Next once recipients span more than one page', async () => {
+    const wrapper = await mountWithTotals(120, 0)
+    await openRecipientsTab(wrapper)
+
+    expect(wrapper.text()).toContain('Показано 1–50 из 120')
+    const next = wrapper.find('[aria-label="Следующая страница"]')
+    const prev = wrapper.find('[aria-label="Предыдущая страница"]')
+    expect(next.exists() && prev.exists(), 'Prev/Next controls not found').toBe(true)
+    expect((next.element as HTMLButtonElement).disabled).toBe(false)
+    expect((prev.element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('hides Prev/Next (but keeps the count) when everything fits on one page', async () => {
+    const wrapper = await mountWithTotals(3, 0)
+    await openRecipientsTab(wrapper)
+
+    expect(wrapper.text()).toContain('Показано 1–3 из 3')
+    expect(wrapper.find('[aria-label="Следующая страница"]').exists()).toBe(false)
+  })
+
+  it('clicking Next re-fetches page 2 of recipients', async () => {
+    const wrapper = await mountWithTotals(120, 0)
+    await openRecipientsTab(wrapper)
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockClear()
+
+    await wrapper.find('[aria-label="Следующая страница"]').trigger('click')
+    await flushPromises()
+
+    expect(api.get).toHaveBeenCalledWith('/campaigns/camp-1/recipients?page=2&page_size=50')
+  })
+
+  it('choosing a status filter resets the recipients page back to 1', async () => {
+    const wrapper = await mountWithTotals(120, 0)
+    await openRecipientsTab(wrapper)
+    const { api } = await import('@/api/client')
+    await wrapper.find('[aria-label="Следующая страница"]').trigger('click')
+    await flushPromises()
+    vi.mocked(api.get).mockClear()
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Ошибка')!.trigger('click')
+    await flushPromises()
+
+    expect(api.get).toHaveBeenCalledWith('/campaigns/camp-1/recipients?page=1&page_size=50&status=failed')
+  })
+
+  it('shows the range and re-fetches page 2 of the History tab on Next', async () => {
+    const wrapper = await mountWithTotals(0, 75)
+    await openEventsTab(wrapper)
+
+    expect(wrapper.text()).toContain('Показано 1–50 из 75')
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockClear()
+
+    await wrapper.find('[aria-label="Следующая страница"]').trigger('click')
+    await flushPromises()
+
+    expect(api.get).toHaveBeenCalledWith('/campaigns/camp-1/events?page=2&page_size=50')
   })
 })

@@ -1376,6 +1376,7 @@ export default {
     collapseAll: 'Collapse all',
     prevPage: 'Previous page',
     nextPage: 'Next page',
+    pageRange: 'Showing {from}–{to} of {total}',
   },
   // nav.* — the persistent left rail (NavRail.vue) plus the account menu it owns.
   nav: {
