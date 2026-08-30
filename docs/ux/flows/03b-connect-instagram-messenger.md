@@ -26,7 +26,8 @@ flowchart TD
         PageSees["User sees:
         • Header: Channels and subtitle
         • Tab bar: Connected accounts | Channel setup
-        • 3 stat cards: Connected 0 | Waiting on action 0 | Not connected 0
+        • 3 generic stat cards: Connected 0 | Waiting on action 0 | Not connected 0 🔴
+          (Redundant: Should count channels by type instead, e.g. WhatsApp / Telegram / Instagram)
         • Empty state or existing account cards grid
         • Button: + Connect a channel"]
     end
@@ -225,6 +226,14 @@ Display a progress step indicator (e.g., *"Step 1 of 3: Meta App Credentials"*) 
 - *"Instagram connected! Send a test direct message to your Instagram handle to verify incoming chats."*
 - *"Configure AI auto-replies in Automation Settings [Configure →]"*
 - *"Add business knowledge to your Knowledge Base [Go to Knowledge Base →]"*
+
+---
+
+### 🔴 9. Redundant Status Metric Cards (Replace with Channel Type Counts)
+
+**What happens today:** The top of `/accounts` renders three large stat counter boxes: `Connected (0)`, `Waiting on action (0)`, and `Not connected (0)`. When teams have only 1–3 channels, these cards waste large vertical space displaying redundant metrics that can already be counted directly on the account cards below.
+
+**Suggested change:** Replace the generic status boxes with channel counts grouped by channel type/platform (e.g. `All (3)`, `WhatsApp (1)`, `Telegram (2)`, `Instagram (0)`, `Messenger (0)`). This groups channels by platform (matching the user's mental model), doubles as quick filter pills, and keeps the page compact.
 
 ---
 
