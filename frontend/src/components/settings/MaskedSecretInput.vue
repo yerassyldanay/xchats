@@ -4,15 +4,19 @@ import { Eye, EyeOff } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { Input } from '@/components/ui/input'
 
+// inheritAttrs: false + the explicit v-bind="$attrs" below is what lets a
+// caller pass through arbitrary native input attributes (inputmode,
+// maxlength, class, @keydown.enter, ...) straight onto the real <input> —
+// this component's root used to be the wrapping <div>, so those attrs
+// landed on a div instead (autocomplete/inputmode/maxlength do nothing
+// there, and a keydown handler only worked by accident, via bubbling).
+defineOptions({ inheritAttrs: false })
+
 withDefaults(
   defineProps<{
     modelValue: string
     placeholder?: string
     disabled?: boolean
-    // Not forwarded via $attrs fallthrough: this component's template root
-    // is the wrapping <div>, not the inner <Input>, so an attribute passed
-    // by a caller would otherwise land on the div (autocomplete on a div
-    // does nothing, and native browsers never see it for autofill).
     autocomplete?: string
   }>(),
   { placeholder: '', disabled: false, autocomplete: 'off' },
@@ -26,6 +30,7 @@ const visible = ref(false)
 <template>
   <div class="relative">
     <Input
+      v-bind="$attrs"
       :model-value="modelValue"
       :type="visible ? 'text' : 'password'"
       :autocomplete="autocomplete"

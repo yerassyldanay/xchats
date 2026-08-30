@@ -1,8 +1,8 @@
 package httpapi_test
 
 // settings_test.go covers Track 2F's /settings/** surface: the
-// integrations list/save/delete/test routes, LLM/credential-storage/
-// setup-complete settings, and the tunnel status/start/stop routes. It uses
+// integrations list/save/delete/test routes, LLM/credential-storage
+// settings, and the tunnel status/start/stop routes. It uses
 // its own lightweight harness (settingsHarness) rather than the big
 // newHarness in integration_test.go — settings handlers never touch
 // WhatsApp/Telegram/KB/the response engine, so none of that machinery is

@@ -7,7 +7,7 @@ import { ApiError } from '../api/client'
 import type { Account } from '../types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import MaskedSecretInput from '@/components/settings/MaskedSecretInput.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 
 // ReplaceTokenDialog rotates a bot's token in place. The backend refuses a
@@ -69,12 +69,11 @@ async function submit() {
         </p>
         <div>
           <label class="text-xs font-medium text-muted-foreground">{{ t('channels.replaceToken.newToken') }}</label>
-          <Input
+          <MaskedSecretInput
             v-model="botToken"
-            type="password"
             autocomplete="off"
             placeholder="1234567890:AA…"
-            class="mt-1.5 font-mono"
+            class="mt-1.5"
             @keydown.enter.prevent="submit"
           />
         </div>

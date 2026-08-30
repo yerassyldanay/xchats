@@ -55,7 +55,6 @@ export interface Settings {
   providers: Record<string, ProviderSettings>
   ngrok: NgrokSettings
   credential_file_fallback_accepted: boolean
-  setup_completed: boolean
 }
 
 // IntegrationField mirrors internal/httpapi.fieldSummary.
@@ -332,10 +331,20 @@ export interface MetaStaleAccount {
   detail: string
 }
 
+// AdminContact is one workspace administrator's name/email — present only
+// for a member caller who just hit a missing prerequisite (see
+// ChannelSetupInfo.admin_contacts), so they have someone to ask instead of
+// a dead end.
+export interface AdminContact {
+  name: string
+  email: string
+}
+
 // ChannelSetupInfo is GET (and both PUT save endpoints') /channel-setup
 // response. can_configure/public_base_url/entries go to every authenticated
 // caller; everything from verify_token down is admin-only and simply absent
-// for a member — see ChannelSetupTab.vue.
+// for a member — see ChannelSetupTab.vue. admin_contacts is the mirror
+// image: present only for a member.
 export interface ChannelSetupInfo {
   can_configure: boolean
   public_base_url: string
@@ -344,6 +353,7 @@ export interface ChannelSetupInfo {
   graph_api_version?: string
   dashboard_url?: string
   stale_accounts?: MetaStaleAccount[]
+  admin_contacts?: AdminContact[]
 }
 
 // WaPairSession is POST /wa-accounts/pair's response: a session id to poll

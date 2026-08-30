@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, LoaderCircle, Plus, ShieldCheck } from 'lucide-vue-next'
+import { CircleAlert, KeyRound, LoaderCircle, Plus, ShieldCheck } from 'lucide-vue-next'
 import { useSettings } from '@/stores/settings'
 import { useAuth } from '@/stores/auth'
 import { ApiError } from '@/api/client'
@@ -9,11 +9,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { initials, colorFor } from '@/lib/format'
+import AccountSecurityDialog from '../AccountSecurityDialog.vue'
+import MaskedSecretInput from '../MaskedSecretInput.vue'
 import type { User } from '@/types'
 
 const store = useSettings()
 const auth = useAuth()
 const { t } = useI18n()
+
+const showAccountSecurity = ref(false)
 
 onMounted(() => store.loadUsers())
 
@@ -76,6 +80,16 @@ async function submitCreate() {
 
 <template>
   <div class="space-y-6">
+    <div class="rounded-lg border border-border bg-card p-5 flex items-center justify-between gap-3">
+      <div>
+        <h3 class="font-semibold">{{ t('accountSecurity.title') }}</h3>
+        <p class="text-sm text-muted-foreground">{{ t('accountSecurity.settingsHint') }}</p>
+      </div>
+      <Button size="sm" variant="outline" @click="showAccountSecurity = true">
+        <KeyRound class="w-4 h-4" /> {{ t('accountSecurity.menuItem') }}
+      </Button>
+    </div>
+
     <div class="rounded-lg border border-border bg-card p-5 space-y-3">
       <h3 class="font-semibold">{{ t('settings.team.orgName') }}</h3>
       <div class="flex items-center gap-2 max-w-md">
@@ -95,7 +109,7 @@ async function submitCreate() {
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Input v-model="createForm.name" :placeholder="t('settings.team.name')" />
           <Input v-model="createForm.email" type="email" :placeholder="t('settings.team.email')" />
-          <Input v-model="createForm.password" type="password" autocomplete="new-password" :placeholder="t('settings.team.password')" />
+          <MaskedSecretInput v-model="createForm.password" autocomplete="new-password" :placeholder="t('settings.team.password')" />
         </div>
         <p v-if="createError" class="flex items-start gap-2 text-sm text-destructive">
           <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ createError }}
@@ -130,5 +144,7 @@ async function submitCreate() {
         </div>
       </div>
     </div>
+
+    <AccountSecurityDialog v-if="showAccountSecurity" @close="showAccountSecurity = false" />
   </div>
 </template>

@@ -173,6 +173,24 @@ func (s *Server) handleLogin(c *gin.Context) {
 	ok(c, s.mePayload(c, u))
 }
 
+// handleBootstrapStatus is a public, unauthenticated probe for Login.vue's
+// "Fill default admin credentials" helper (docs/ux/flows/01-onboarding.md,
+// friction point 1) — the frontend has no session yet at the login screen,
+// so it cannot otherwise know whether the documented default credential is
+// still live. This reveals nothing beyond a boolean already implied by the
+// public README (the credential itself), and only for as long as it is
+// actually the working bootstrap path — see
+// store.DefaultAdminCredentialPending's own doc comment for exactly what it
+// checks.
+func (s *Server) handleBootstrapStatus(c *gin.Context) {
+	pending, err := s.store.DefaultAdminCredentialPending(ctx(c))
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "failed to check bootstrap status")
+		return
+	}
+	ok(c, gin.H{"default_admin_available": pending})
+}
+
 func (s *Server) handleLogout(c *gin.Context) {
 	if sid, err := c.Cookie(sessionCookie); err == nil && sid != "" {
 		_ = s.store.DeleteSession(ctx(c), sid)

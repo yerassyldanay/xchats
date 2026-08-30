@@ -6,6 +6,7 @@ import { useCrm } from '../stores/crm'
 import ChatList from '../components/ChatList.vue'
 import ChatThread from '../components/ChatThread.vue'
 import AssistantPanel from '../components/AssistantPanel.vue'
+import GettingStartedChecklist from '../components/GettingStartedChecklist.vue'
 
 const inbox = useInbox()
 const accounts = useAccounts()
@@ -22,9 +23,12 @@ onBeforeUnmount(() => inbox.stopRealtime())
 
 <template>
   <!-- The persistent nav rail is rendered by App.vue; this is just the inbox panes. -->
-  <div class="flex h-full">
-    <ChatList class="w-[340px] shrink-0 border-r border-border" />
-    <ChatThread class="flex-1 min-w-0" />
-    <AssistantPanel class="w-[340px] shrink-0 border-l border-border" />
+  <div class="flex h-full flex-col min-h-0">
+    <GettingStartedChecklist />
+    <div class="flex flex-1 min-h-0">
+      <ChatList class="w-[340px] shrink-0 border-r border-border" />
+      <ChatThread class="flex-1 min-w-0" />
+      <AssistantPanel class="w-[340px] shrink-0 border-l border-border" />
+    </div>
   </div>
 </template>

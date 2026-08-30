@@ -40,11 +40,22 @@ beyond the two specs above.
    The tests log in as the migration-seeded admin, `admin@xchat.kz`, whose
    password defaults to the documented public default,
    `xchat-admin-change-me` (see the root [`README.md`](../../../README.md)).
-   `E2E_EMAIL`/`E2E_PASSWORD` only need setting if the database the tests
-   point at has since had that password changed:
+   That default now carries a forced first-login password change
+   (`0014_force_default_admin_password_change`, per
+   `docs/ux/flows/01-onboarding.md`'s friction point 1) — `login()` in
+   `helpers.ts` completes that change automatically on a fresh database (to
+   a fixed `E2E_PASSWORD_ROTATED` value, `xchat-admin-e2e-rotated-1!` by
+   default) and self-heals on every later run against the same,
+   already-migrated database by retrying with whichever of the two
+   passwords the login form actually accepts. No manual step is needed for
+   this on a normal run.
+   `E2E_EMAIL`/`E2E_PASSWORD`/`E2E_PASSWORD_ROTATED` only need setting if the
+   database the tests point at has had either password changed some other
+   way:
    ```bash
    export E2E_EMAIL=admin@xchat.kz
    export E2E_PASSWORD='<your password, if you changed it>'
+   export E2E_PASSWORD_ROTATED='<what login() rotated it to, if not the default>'
    ```
 3. **Only for `features/kb-full-journey.spec.ts`:**
    - `make up` (the Docker stack — backend `:8080`, frontend `:8081`), not

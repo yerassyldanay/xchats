@@ -540,6 +540,47 @@ var sentinelAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
 // coupling every ordinary user password change to bootstrap storage.
 func IsSentinelAdmin(id uuid.UUID) bool { return id == sentinelAdminID }
 
+// defaultAdminPasswordHash is 0006_init_admin.up.sql's precomputed argon2id
+// hash for admin@xchat.kz / xchat-admin-change-me — the exact literal
+// 0011_restore_default_admin_password.up.sql restores, reused here (not
+// regenerated) so DefaultAdminCredentialPending can recognize the row is
+// still sitting on the documented default rather than something an
+// operator has since replaced.
+const defaultAdminPasswordHash = "$argon2id$v=19$m=65536,t=1,p=4$eZE9z7aFgeOEeYVAUCJTxg$3x3PW6uhMxX+nhuXZZZ79JQOKAoImKMB/ACkGsqq9io"
+
+// DefaultAdminCredentialPending reports whether the sentinel admin is still
+// sitting on the documented public default password AND still has
+// must_change_password set — i.e. whether logging in with the credential
+// printed in README.md would land on the forced /change-password screen
+// rather than the app. This is what Login.vue's "Fill default admin
+// credentials" helper (docs/ux/flows/01-onboarding.md, friction point 1)
+// gates on: showing it only while that credential is actually the live
+// bootstrap path, never once an operator has changed the password some
+// other way (a direct DB edit, `xchats reset-admin-password`, or a normal
+// in-app change), and never once the forced change has already succeeded.
+//
+// The password_hash check matters beyond just must_change_password alone:
+// `xchats reset-admin-password` also re-blanks the hash and re-sets
+// must_change_password (ResetSentinelAdminPassword) ahead of minting a
+// FRESH random one-time password on the next boot — a state where
+// must_change_password is set but the documented default password no
+// longer works at all. Checking both together is what keeps the helper
+// from ever offering a stale, wrong credential in that window.
+func (s *Store) DefaultAdminCredentialPending(ctx context.Context) (bool, error) {
+	var hash string
+	var mustChange bool
+	err := s.db.QueryRow(ctx, `
+		SELECT password_hash, must_change_password FROM users WHERE id = $1`, sentinelAdminID).
+		Scan(&hash, &mustChange)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return mustChange && hash == defaultAdminPasswordHash, nil
+}
+
 // BootstrapSentinelAdminPassword mints the sentinel admin's first real
 // password on boot (cmd/xchats' first-boot bootstrap). It writes
 // passwordHash ONLY if the row still carries 0008_bootstrap_admin's blanked

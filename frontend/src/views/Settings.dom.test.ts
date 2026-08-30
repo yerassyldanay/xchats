@@ -22,7 +22,6 @@ const emptySettings = {
   providers: {},
   ngrok: {},
   credential_file_fallback_accepted: false,
-  setup_completed: false,
 }
 
 function mockGet() {

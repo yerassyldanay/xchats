@@ -538,18 +538,6 @@ export default {
         "Credentials are stored in an encrypted local file rather than your OS keychain on this deployment. This is a weaker guarantee than a keychain — anyone with filesystem access and the app's key could decrypt them.",
       credentialStorageAccept: 'I understand and accept this trade-off',
     },
-    wizard: {
-      title: 'Welcome to xchats',
-      skipAll: 'Skip setup',
-      back: 'Back',
-      next: 'Next',
-      finish: 'Finish',
-      aiProviderBody: 'Add an API key so the assistant can draft replies. You can add more providers later in Settings → AI Engine.',
-      channelsBody: 'Connect a WhatsApp number or a Telegram bot to start receiving messages.',
-      goToChannels: 'Go to Channels',
-      teamBody: 'Invite a teammate now, or do it later from Settings → Team Management.',
-      invited: 'Invitation sent.',
-    },
   },
   // AddAccountDialog.vue's channel-connect wizard (dialog.*) and
   // Accounts.vue's channel list page (page.*).
@@ -561,8 +549,19 @@ export default {
       whatsappCloudTitle: 'Connect WhatsApp Cloud API',
       whatsappTitle: 'Add a WhatsApp number',
       pickPrompt: 'Pick a channel. Instructions continue inside the chosen method.',
+      tierInstant: 'Instant connect — no developer setup',
+      tierAdvanced: 'Advanced · Meta',
+      tierAdvancedHint: 'Requires a Meta Developer App and a public HTTPS address.',
+      tierAdvancedGuideCta: 'See the setup guide →',
+      readiness: {
+        ready: 'Ready to connect',
+        needsPublicAccess: 'Setup required — needs a public HTTPS address (ngrok)',
+        needsMetaApp: 'Setup required — needs a Meta Developer App',
+        needsOwnSetup: 'Setup required — one more step for this channel',
+      },
       footerNote:
-        'The QR code is never stored. Tokens are stored encrypted and never shown again. For WhatsApp Cloud API, Instagram and Messenger, first set your Meta App ID and App Secret in Settings → Channels.',
+        'The QR code is never stored. Tokens are stored encrypted and never shown again. For WhatsApp Cloud API, Instagram and Messenger, configure prerequisites in the Channel setup tab.',
+      footerNoteCta: 'Open Channel setup →',
       whatsapp: {
         name: 'WhatsApp',
         tagline: 'Connect a number via QR code',
@@ -607,17 +606,20 @@ export default {
         step1: 'Open {\'@\'}BotFather in Telegram.',
         step2: 'Send /newbot and pick a name.',
         step3: 'Copy the token it gives you and paste it below.',
+        openBotFather: 'Open {\'@\'}BotFather in Telegram',
       },
       displayNameLabel: 'Name (for you)',
       displayNamePlaceholderBot: 'E.g. Shop bot',
       botTokenLabel: 'Bot token',
       tokenStoredHint: 'The token is stored encrypted and never shown again.',
-      dropBacklogLabel: 'Drop the messages Telegram has queued up',
+      dropBacklogLabel: 'Ignore old messages sent before connecting',
       dropBacklogHint:
-        'Only check this if the bot has existed for a while and the old messages are not needed — they will be lost.',
+        "Recommended if this bot already received messages in the past that you don't want to import. Leave unchecked for brand new bots.",
       connecting: 'Connecting…',
       retry: 'Try again',
       connectBot: 'Connect bot',
+      telegramHalfSuccessHint: 'The bot was created in xchats — only the webhook delivery needs a retry.',
+      viewInChannels: 'View in Channels',
       waCloudIntro:
         'Find the WABA ID and create a business token (a System User Access Token with whatsapp_business_messaging and whatsapp_business_management permissions) in Meta Business Manager for your own Meta app.',
       wabaIdLabel: 'WABA ID',
@@ -630,10 +632,18 @@ export default {
       pinLabel: 'Two-step verification PIN (6 digits)',
       pinHint: 'Meta allows at most 10 PIN attempts per 72 hours per number.',
       connectNumber: 'Connect number',
+      preflight: {
+        title: 'Before you start',
+        internet: 'Make sure your phone has an internet connection',
+        updated: 'WhatsApp must be updated to the latest version',
+        deviceLimit: 'You can link up to 4 devices per number',
+        showQr: 'Show QR code',
+      },
       qrIntro: 'Open WhatsApp → "Linked Devices" → "Link a Device" and scan the code.',
       qrPolling: 'The code refreshes automatically. Waiting for scan…',
       botConnected: 'Bot connected!',
       numberConnected: 'Number connected!',
+      done: 'Done',
       errConnectInstagram: 'Could not start the Instagram connection.',
       errConnectMessenger: 'Could not start the Messenger connection.',
       errConnectWhatsApp: 'Could not start the connection.',
@@ -647,10 +657,32 @@ export default {
       errSelectNumber: 'Select a number.',
       errPinFormat: 'The PIN must be exactly 6 digits.',
       errConnectNumber: 'Could not connect the number.',
-      errTimeout: 'The wait timed out.',
+      errTimeout:
+        'The pairing session ended before the phone linked. Click "Try again" to start a fresh session — QR codes refresh automatically while a session is active.',
       errConnectGeneric: 'Could not connect.',
-      errSessionExpired: 'The connection session expired. Please try again.',
-      adminRequired: 'Only an administrator can configure this channel.',
+      errSessionExpired: 'The pairing session was lost (the server may have restarted). Click "Try again" to start a new session — no data was lost.',
+      blocked: {
+        title: 'Only an administrator can configure this channel.',
+        missing: {
+          public_access: 'This workspace has no public HTTPS address configured yet — Meta needs one to send webhooks and OAuth redirects to.',
+          meta_app: "This workspace's Meta Developer App credentials have not been configured yet.",
+          instagram: "This workspace's Instagram App credentials have not been configured yet.",
+          messenger: 'The Messenger setup checklist has not been confirmed yet for this workspace.',
+          whatsapp_cloud: 'The WhatsApp Cloud API setup checklist has not been confirmed yet for this workspace.',
+        },
+        contactAdmin: 'Ask a workspace administrator to finish this setup:',
+        notify: 'Notify',
+        notifySubject: 'xchats: please finish channel setup',
+        notifyBody:
+          'Hi! I tried to connect {channel} in xchats, but it needs setup that only an administrator can do. Could you configure it? The steps are under Channels → Channel setup.',
+        noAdminContacts: 'No workspace administrator was found to notify.',
+      },
+      redirecting: {
+        title: 'Redirecting to Meta…',
+        hint: 'Please make sure you are logged into the correct Instagram or Facebook account before continuing.',
+        messengerWarning:
+          'Important: when Facebook asks which Pages to allow, check the box for EXACTLY ONE Page. Selecting more than one — or none — will cause the connection to fail.',
+      },
     },
     page: {
       title: 'Channels',
@@ -661,14 +693,16 @@ export default {
       },
       connectChannel: 'Connect a channel',
       dismiss: 'Dismiss',
-      statConnected: 'Connected',
-      statWaiting: 'Waiting on action',
-      statBroken: 'Not connected',
+      filters: {
+        groupLabel: 'Filter by channel',
+        all: 'All',
+      },
       connectedChannels: 'Connected channels',
       totalCount: 'total',
       loading: 'Loading…',
       empty: 'No channels connected yet.',
       emptyHint: 'Connect a WhatsApp number or a Telegram bot.',
+      emptyFiltered: 'No channels of this type yet.',
       retryWebhook: 'Retry webhook',
       checkConnection: 'Check connection',
       replaceToken: 'Replace token',
@@ -676,6 +710,39 @@ export default {
       delete: 'Delete',
       instagramConnected: 'Instagram connected successfully.',
       messengerConnected: 'Messenger connected successfully.',
+      oauthErrors: {
+        missingParams: 'Meta did not return the expected authorization details. Please try connecting again.',
+        sessionExpired: 'The connection session expired or was already used. Please try again.',
+        connectFailed: 'Could not complete the connection.',
+        noPages: 'No Facebook Pages are available to this account. Grant access to at least one Page and try again.',
+        multiplePages: 'Access was granted to more than one Facebook Page. Grant access to exactly one Page and try again.',
+      },
+      firstChannelBanner: {
+        whatsapp: {
+          text: 'WhatsApp connected! Next step: add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
+        telegram: {
+          text: 'Your Telegram bot {handle} is live! Send it a test message, then add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
+        instagram: {
+          text: '{handle} is connected! Send yourself a test direct message to verify incoming chats, then add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
+        messenger: {
+          text: '{handle} is connected! Send the Page a test message to verify incoming chats, then add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
+        whatsapp_cloud: {
+          text: '{handle} is connected! Send a test message to verify incoming chats, then add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
+      },
+      connectionLost: {
+        text: 'Connection lost — your WhatsApp session expired.',
+        cta: 'Reconnect via QR',
+      },
       confirmDisconnectBot: 'Disconnect bot "{name}"? Chats are kept and come back if you paste the same token again.',
       confirmDelete: 'Delete "{name}"? Chats are kept and come back if you reconnect the same number.',
       errGenericAction: 'Could not complete the action.',
@@ -692,6 +759,11 @@ export default {
       errRequired: 'Both fields are required.',
       iveCompletedThese: "I've completed these steps — continue",
       memberHint: 'Only an administrator can configure this channel.',
+      guidedBanner: {
+        title: '{channel} needs a few things configured first',
+        step: 'Step {current} of {total}',
+        cancel: 'Cancel and go back',
+      },
       status: {
         ready: 'Ready',
         notConfigured: 'Not configured',
@@ -1283,6 +1355,25 @@ export default {
     noAccount: 'No account? Contact your administrator',
     errBadCredentials: 'Wrong email or password',
     errGeneric: 'Could not sign in. Please try again.',
+    fillDefaultCreds: 'Fill default admin credentials',
+  },
+  // gettingStarted.* — the persistent, minimizable checklist on the Inbox
+  // that replaced the old blocking first-run setup wizard.
+  gettingStarted: {
+    title: 'Getting started',
+    aiProvider: 'Add an AI provider key',
+    channel: 'Connect a channel',
+    kb: 'Add Knowledge Base content',
+  },
+  // accountSecurity.* — the "change your password any time" dialog, reachable
+  // from the nav rail's avatar menu and Settings → Team.
+  accountSecurity: {
+    title: 'Account security',
+    subtitle: 'Change the password for your account.',
+    menuItem: 'Change password',
+    settingsHint: 'Update your own sign-in password.',
+    done: 'Password changed.',
+    close: 'Close',
   },
   // inbox.* — the chat board: list, thread, composer and the compose-new dialog.
   inbox: {

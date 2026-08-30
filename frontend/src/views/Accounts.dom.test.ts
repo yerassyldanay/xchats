@@ -3,10 +3,11 @@ import { DOMWrapper, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { mountKb, testPinia } from '@/test/mount'
 import { useAuth } from '@/stores/auth'
+import { useAccounts } from '@/stores/accounts'
 import { useChannelSetup } from '@/stores/channelSetup'
 import AddAccountDialog from '@/components/AddAccountDialog.vue'
 import Accounts from './Accounts.vue'
-import type { ChannelSetupEntry, ChannelSetupInfo, SetupKey, User } from '@/types'
+import type { Account, ChannelSetupEntry, ChannelSetupInfo, SetupKey, User } from '@/types'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
@@ -170,6 +171,13 @@ describe('Accounts — Telegram and QR WhatsApp are never gated', () => {
       const { api } = await import('@/api/client')
       await findButton(body(), 'WhatsApp')!.trigger('click')
       await flushPromises()
+      // WhatsApp lands on the pre-flight checklist first (docs/ux/flows/
+      // 02-connect-whatsapp-qr.md #1) — not gated by Channel setup either,
+      // but not pairing yet until the operator continues past it.
+      expect(body().text()).toContain('Перед началом')
+      expect(api.post).not.toHaveBeenCalled()
+      await findButton(body(), 'Показать QR-код')!.trigger('click')
+      await flushPromises()
       expect(api.post).toHaveBeenCalledWith('/wa-accounts/pair', {})
       expect(channelSetup.pendingChannel).toBeNull()
     })
@@ -280,5 +288,147 @@ describe('Accounts — multiple accounts on an already-ready channel', () => {
     expect(api.post).toHaveBeenCalledTimes(2)
     expect(api.post).toHaveBeenNthCalledWith(2, '/instagram-accounts/oauth/start', {})
     expect(channelSetup.pendingChannel).toBeNull()
+  })
+})
+
+// docs/ux/flows/02-connect-whatsapp-qr.md, friction point 6: a dropped
+// WhatsApp session used to be recoverable only via a small, unlabeled icon
+// button — easy to miss. It should now also surface as a prominent banner
+// right on the account's own card.
+describe('Accounts — dropped WhatsApp session banner', () => {
+  it('shows a prominent reconnect banner on a broken QR-WhatsApp account, and starts a reconnect on click', async () => {
+    await installServer({ isAdmin: true })
+    const { wrapper: w } = await mountAccounts(admin())
+
+    useAccounts().accounts = [
+      {
+        id: 'acct-1',
+        channel: 'whatsapp',
+        display_name: 'Sales WA',
+        external_handle: '77011111111',
+        connection_state: 'error',
+        assigned: true,
+        last_live_event_at: null,
+        created_at: null,
+        webhook_url: null,
+        webhook_registered_at: null,
+        webhook_last_checked_at: null,
+        webhook_last_error: null,
+        automation: { mode: 'off', wait_seconds: 5, wait_seconds_override: null, default_wait_seconds: 5, schedule: [] },
+      },
+    ]
+    await flushPromises()
+
+    expect(w.text()).toContain('Соединение потеряно')
+
+    await findButton(w, 'Переподключить по QR-коду')!.trigger('click')
+    await flushPromises()
+
+    // Reconnecting reopens AddAccountDialog pre-selected on WhatsApp, landing
+    // on the same pre-flight checklist a fresh connect would.
+    expect(wrapper!.findComponent(AddAccountDialog).exists()).toBe(true)
+    expect(body().text()).toContain('Перед началом')
+  })
+
+  it('shows no banner for a healthy or still-connecting account', async () => {
+    await installServer({ isAdmin: true })
+    const { wrapper: w } = await mountAccounts(admin())
+
+    useAccounts().accounts = [
+      {
+        id: 'acct-1',
+        channel: 'whatsapp',
+        display_name: 'Sales WA',
+        external_handle: '77011111111',
+        connection_state: 'connected',
+        assigned: true,
+        last_live_event_at: null,
+        created_at: null,
+        webhook_url: null,
+        webhook_registered_at: null,
+        webhook_last_checked_at: null,
+        webhook_last_error: null,
+        automation: { mode: 'off', wait_seconds: 5, wait_seconds_override: null, default_wait_seconds: 5, schedule: [] },
+      },
+    ]
+    await flushPromises()
+
+    expect(w.text()).not.toContain('Соединение потеряно')
+  })
+})
+
+// docs/ux/flows/02-connect-whatsapp-qr.md, friction point 7: the old
+// Connected/Waiting/Broken counters are replaced by per-channel-type pills
+// that also filter the account list below.
+describe('Accounts — channel-type filter pills', () => {
+  function waAccount(): Account {
+    return {
+      id: 'acct-wa',
+      channel: 'whatsapp',
+      display_name: 'Sales WA',
+      external_handle: '77011111111',
+      connection_state: 'connected',
+      assigned: true,
+      last_live_event_at: null,
+      created_at: null,
+      webhook_url: null,
+      webhook_registered_at: null,
+      webhook_last_checked_at: null,
+      webhook_last_error: null,
+      automation: { mode: 'off', wait_seconds: 5, wait_seconds_override: null, default_wait_seconds: 5, schedule: [] },
+    }
+  }
+  function tgAccount(): Account {
+    return {
+      id: 'acct-tg',
+      channel: 'telegram',
+      display_name: 'Support Bot',
+      external_handle: '@support_bot',
+      connection_state: 'connected',
+      assigned: true,
+      last_live_event_at: null,
+      created_at: null,
+      webhook_url: null,
+      webhook_registered_at: null,
+      webhook_last_checked_at: null,
+      webhook_last_error: null,
+      automation: { mode: 'off', wait_seconds: 5, wait_seconds_override: null, default_wait_seconds: 5, schedule: [] },
+    }
+  }
+
+  it('shows a count per channel type and filters the list on click', async () => {
+    await installServer({ isAdmin: true })
+    const { wrapper: w } = await mountAccounts(admin())
+    useAccounts().accounts = [waAccount(), tgAccount()]
+    await flushPromises()
+
+    expect(w.text()).toContain('Sales WA')
+    expect(w.text()).toContain('Support Bot')
+
+    // reka-ui pills here are plain buttons — a normal click suffices.
+    await findButton(w, 'Telegram-бот')!.trigger('click')
+    await flushPromises()
+
+    expect(w.text()).toContain('Support Bot')
+    expect(w.text()).not.toContain('Sales WA')
+
+    await findButton(w, 'Все')!.trigger('click')
+    await flushPromises()
+
+    expect(w.text()).toContain('Sales WA')
+    expect(w.text()).toContain('Support Bot')
+  })
+
+  it('shows a distinct empty state when a filter matches nothing, without offering the fresh-install CTA', async () => {
+    await installServer({ isAdmin: true })
+    const { wrapper: w } = await mountAccounts(admin())
+    useAccounts().accounts = [waAccount()]
+    await flushPromises()
+
+    await findButton(w, 'Telegram-бот')!.trigger('click')
+    await flushPromises()
+
+    expect(w.text()).toContain('Каналов этого типа пока нет.')
+    expect(w.text()).not.toContain('Sales WA')
   })
 })

@@ -9,6 +9,7 @@ import {
   Check,
   FlaskConical,
   Inbox,
+  KeyRound,
   Languages,
   Library,
   LogOut,
@@ -31,6 +32,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import AccountSecurityDialog from './settings/AccountSecurityDialog.vue'
 
 // Persistent left navigation rail — always present on authed pages. Rendered once
 // by App.vue so it never disappears.
@@ -96,6 +98,8 @@ async function logout() {
   await auth.logout()
   router.push({ name: 'login' })
 }
+
+const showAccountSecurity = ref(false)
 
 // Switching re-scopes the session server-side; every org-scoped store
 // (chats, accounts, KB, playground, ...) was loaded for the PREVIOUS
@@ -235,6 +239,10 @@ async function switchOrg(orgId: string) {
               <Check v-if="locale === l.code" class="w-4 h-4 shrink-0" />
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <DropdownMenuItem @select="showAccountSecurity = true">
+              <KeyRound class="w-4 h-4" /> {{ t('accountSecurity.menuItem') }}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               class="text-destructive focus:bg-destructive/10 focus:text-destructive font-medium"
               @select="logout"
@@ -245,5 +253,6 @@ async function switchOrg(orgId: string) {
         </DropdownMenu>
       </div>
     </TooltipProvider>
+    <AccountSecurityDialog v-if="showAccountSecurity" @close="showAccountSecurity = false" />
   </nav>
 </template>
