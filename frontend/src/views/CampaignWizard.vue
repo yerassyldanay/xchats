@@ -15,6 +15,7 @@ import {
   endMinutesFromInput,
   endInputFromMinutes,
 } from '@/lib/schedule'
+import { fingerprintOf } from '@/lib/recipientFingerprint'
 import type { ScheduleWindow, CampaignRecipientPreviewResult } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -110,13 +111,23 @@ function onFileChange(e: Event) {
 const previewResult = ref<CampaignRecipientPreviewResult | null>(null)
 const previewing = ref(false)
 const previewError = ref('')
+// CAM-09: the fingerprint of whatever input the LAST successful preview
+// actually checked. previewStale compares it against the CURRENT input on
+// every render, so editing pasted text or picking a different/cleared file
+// invalidates the preview immediately — no explicit change handler needed,
+// it falls out of being a computed().
+const previewedFingerprint = ref('')
+const previewStale = computed(() => fingerprintOf(pastedText.value, uploadedFile.value) !== previewedFingerprint.value)
 async function checkRecipients() {
   previewing.value = true
   previewError.value = ''
+  const fp = fingerprintOf(pastedText.value, uploadedFile.value)
   try {
     previewResult.value = await campaigns.preview(pendingCampaignId.value, { text: pastedText.value, file: uploadedFile.value ?? undefined })
+    previewedFingerprint.value = fp
   } catch (e) {
     previewError.value = e instanceof ApiError ? e.message : t('campaigns.wizard.errNoRecipients')
+    previewResult.value = null
   } finally {
     previewing.value = false
   }
@@ -149,6 +160,10 @@ const creating = ref(false)
 const error = ref('')
 
 async function finish() {
+  if (previewStale.value) {
+    error.value = t('campaigns.wizard.errPreviewStale')
+    return
+  }
   if (!previewResult.value || previewResult.value.valid === 0) {
     error.value = t('campaigns.wizard.errNoRecipients')
     return
@@ -262,6 +277,9 @@ async function finish() {
       </p>
       <CampaignRecipientPreviewTable v-if="previewResult" :result="previewResult" />
       <p v-else class="text-xs text-muted-foreground">{{ t('campaigns.wizard.previewEmpty') }}</p>
+      <p v-if="previewResult && previewStale" class="flex items-center gap-1.5 text-xs text-amber-600" data-testid="preview-stale-notice">
+        <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ t('campaigns.wizard.previewStaleNotice') }}
+      </p>
     </section>
 
     <section v-if="phase === 'recipients'" class="mt-8 space-y-3">
@@ -348,7 +366,7 @@ async function finish() {
     </p>
 
     <div v-if="phase === 'recipients'" class="mt-6 flex items-center gap-2 pb-10">
-      <Button type="button" :disabled="creating" @click="finish">
+      <Button type="button" :disabled="creating || previewStale" @click="finish">
         <LoaderCircle v-if="creating" class="w-4 h-4 animate-spin" />
         {{ creating ? t('campaigns.wizard.creating') : t('campaigns.wizard.create') }}
       </Button>

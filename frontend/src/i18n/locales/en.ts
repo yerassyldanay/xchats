@@ -1129,6 +1129,8 @@ export default {
       errNoRecipients: 'Check the recipient list before creating the campaign.',
       errCreateFailed: 'Could not create the campaign.',
       errSaveRecipientsFailed: 'The campaign was created, but the recipient list could not be saved. Open the campaign to try again.',
+      errPreviewStale: 'The recipient list changed since the last check — check reachability again before continuing.',
+      previewStaleNotice: 'The pasted text or file changed since this check — check reachability again.',
     },
     detail: {
       confirmDelete: 'Delete this campaign?',
@@ -1147,6 +1149,7 @@ export default {
       retryFailedConfirm: 'Retry every failed recipient?',
       retriedCount: '{count} recipient(s) queued for retry.',
       noRecipients: 'No recipients yet.',
+      noEvents: 'No history yet — lifecycle events (started, paused, completed…) will appear here.',
       replaceRecipients: 'Replace recipients',
       errLoadFailed: 'Could not load the campaign.',
       errActionFailed: 'Could not complete the action.',

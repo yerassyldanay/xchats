@@ -6,6 +6,7 @@ import { ArrowLeft, CircleAlert, Copy, LoaderCircle, Pause, Play, RotateCcw, Squ
 import { useCampaigns } from '@/stores/campaigns'
 import { useAccounts } from '@/stores/accounts'
 import { ApiError } from '@/api/client'
+import { fingerprintOf } from '@/lib/recipientFingerprint'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import CampaignStatusBadge from '@/components/CampaignStatusBadge.vue'
@@ -131,18 +132,30 @@ function onFileChange(e: Event) {
 const replacePreview = ref<CampaignRecipientPreviewResult | null>(null)
 const replaceBusy = ref(false)
 const replaceError = ref('')
+// CAM-09: same staleness guard as the wizard's own preview (see its doc
+// comment on previewedFingerprint) — Save must never trust a preview that
+// no longer matches the currently pasted text / chosen file.
+const replacedFingerprint = ref('')
+const replaceStale = computed(() => fingerprintOf(pastedText.value, uploadedFile.value) !== replacedFingerprint.value)
 async function checkReplace() {
   replaceBusy.value = true
   replaceError.value = ''
+  const fp = fingerprintOf(pastedText.value, uploadedFile.value)
   try {
     replacePreview.value = await campaigns.preview(campaignId.value, { text: pastedText.value, file: uploadedFile.value ?? undefined })
+    replacedFingerprint.value = fp
   } catch (e) {
     replaceError.value = e instanceof ApiError ? e.message : t('campaigns.detail.errActionFailed')
+    replacePreview.value = null
   } finally {
     replaceBusy.value = false
   }
 }
 async function confirmReplace() {
+  if (replaceStale.value) {
+    replaceError.value = t('campaigns.wizard.errPreviewStale')
+    return
+  }
   replaceBusy.value = true
   replaceError.value = ''
   try {
@@ -151,6 +164,7 @@ async function confirmReplace() {
     pastedText.value = ''
     uploadedFile.value = null
     replacePreview.value = null
+    replacedFingerprint.value = ''
   } catch (e) {
     replaceError.value = e instanceof ApiError ? e.message : t('campaigns.detail.errActionFailed')
   } finally {
@@ -299,7 +313,7 @@ async function confirmReplace() {
             <input type="file" accept=".csv,.txt" class="text-xs" @change="onFileChange" />
             <div class="flex items-center gap-2">
               <Button type="button" size="sm" variant="outline" :disabled="replaceBusy" @click="checkReplace">{{ t('campaigns.wizard.checkReachability') }}</Button>
-              <Button type="button" size="sm" :disabled="replaceBusy || !replacePreview || replacePreview.valid === 0" @click="confirmReplace">
+              <Button type="button" size="sm" :disabled="replaceBusy || !replacePreview || replacePreview.valid === 0 || replaceStale" @click="confirmReplace">
                 <LoaderCircle v-if="replaceBusy" class="w-4 h-4 animate-spin" /> {{ t('campaigns.actions.save') }}
               </Button>
             </div>
@@ -307,6 +321,9 @@ async function confirmReplace() {
               <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ replaceError }}
             </p>
             <CampaignRecipientPreviewTable v-if="replacePreview" :result="replacePreview" />
+            <p v-if="replacePreview && replaceStale" class="flex items-center gap-1.5 text-xs text-amber-600" data-testid="replace-preview-stale-notice">
+              <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ t('campaigns.wizard.previewStaleNotice') }}
+            </p>
           </div>
 
           <p v-if="campaigns.recipients.length === 0" class="text-sm text-muted-foreground">{{ t('campaigns.detail.noRecipients') }}</p>
@@ -324,7 +341,7 @@ async function confirmReplace() {
         </TabsContent>
 
         <TabsContent value="events" class="mt-4">
-          <div v-if="campaigns.events.length === 0" class="text-sm text-muted-foreground">{{ t('campaigns.detail.noRecipients') }}</div>
+          <div v-if="campaigns.events.length === 0" class="text-sm text-muted-foreground">{{ t('campaigns.detail.noEvents') }}</div>
           <ul v-else class="space-y-2">
             <li v-for="e in campaigns.events" :key="e.id" class="flex items-center gap-3 text-sm">
               <span class="w-1.5 h-1.5 rounded-full bg-muted-foreground shrink-0" />
