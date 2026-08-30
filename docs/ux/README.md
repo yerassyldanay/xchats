@@ -25,12 +25,12 @@
 | 01 | **First-Time Onboarding** — Login, conditional password change, setup wizard, empty inbox | [01-onboarding.md](flows/01-onboarding.md) | 10 |
 | 02 | **Connect WhatsApp (QR)** — Channel picker, QR scan, timeout/retry, success | [02-connect-whatsapp-qr.md](flows/02-connect-whatsapp-qr.md) | 7 |
 | 03 | **Connect Telegram Bot** — BotFather token, polling/webhook delivery, card management | [03-connect-telegram.md](flows/03-connect-telegram.md) | 8 |
-| 03b | **Connect Instagram & Messenger (OAuth)** — Prerequisites, Meta consent, redirect handling | [03b-connect-instagram-messenger.md](flows/03b-connect-instagram-messenger.md) | 9 |
+| 03b | **Connect Instagram & Messenger (OAuth)** — Prerequisites, Meta consent, redirect handling | [03b-connect-instagram-messenger.md](flows/03b-connect-instagram-messenger.md) | 10 |
 | 04 | **Knowledge Base Lifecycle** — Upload materials, extraction, draft review, simulator testing | [04-knowledge-base.md](flows/04-knowledge-base.md) | 12 |
 | 05 | **Launching a Campaign** — Creation wizard, recipients, reachability, scheduling, dispatch | [05-campaigns.md](flows/05-campaigns.md) | 11 |
 | 06 | **Daily Inbox Triage** — Chat list, AI draft approval, composer, customer panel | [06-daily-inbox.md](flows/06-daily-inbox.md) | 12 |
 | 07 | **CRM, Follow-ups & Settings** — Customer directory, tasks, LLM keys, team management | [07-crm-settings.md](flows/07-crm-settings.md) | 15 |
-| | | **Total** | **84** |
+| | | **Total** | **85** |
 
 ---
 

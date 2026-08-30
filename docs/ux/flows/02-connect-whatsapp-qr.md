@@ -35,21 +35,16 @@ flowchart TD
 
     AccountsPage -->|"Clicks '+ Connect a channel'"| PickerModal
 
-    subgraph PickerModal["Modal: Connect a channel"]
+    subgraph PickerModal["Modal: Connect a channel (Tiered Layout)"]
         direction TB
-        PickerSees["User sees 5 channel cards in a grid:
-
-        WhatsApp — QR code pairing
-        01 Open WhatsApp on your phone
-        02 Go to Linked Devices
-        03 Scan the QR code
-
-        Telegram — Paste BotFather token
-        WhatsApp Cloud — Official Cloud API
-        Instagram — Connect via Meta
-        Messenger — Connect via Meta
-
-        Footer: QR/token storage and Meta setup note"]
+        PickerSees["User sees 2 distinct visual tiers:
+        🟢 INSTANT CONNECT (No tech setup):
+        • WhatsApp (QR scan in 10s)
+        • Telegram bot (@BotFather token in 1m)
+        ───────────────────────────────────────
+        ⚙️ ADVANCED / META (Developer setup):
+        • Instagram Direct | Messenger | WhatsApp Cloud
+        • Labeled: Requires Meta Developer App & Public HTTPS"]
     end
 
     PickerModal -->|"Clicks WhatsApp card"| QRReady
