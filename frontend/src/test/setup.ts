@@ -48,3 +48,17 @@ if (!window.IntersectionObserver) {
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = () => {}
 }
+
+// jsdom implements the PointerEvent constructor but not the Pointer Capture
+// methods on Element — reka-ui's SelectTrigger (and other Radix-style
+// primitives) call hasPointerCapture/releasePointerCapture unconditionally
+// on open, so a real pointerdown dispatch throws without these.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = () => {}
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = () => {}
+}

@@ -1133,6 +1133,11 @@ export default {
       errSaveRecipientsFailed: 'The campaign was created, but the recipient list could not be saved. Open the campaign to try again.',
       errPreviewStale: 'The recipient list changed since the last check — check reachability again before continuing.',
       previewStaleNotice: 'The pasted text or file changed since this check — check reachability again.',
+      leaveConfirm: {
+        title: 'Leave without finishing this campaign?',
+        body: 'This draft campaign has no recipients yet. Leaving now deletes it — nothing is lost, since nothing was ever sent.',
+        accept: 'Discard and leave',
+      },
     },
     detail: {
       confirmDelete: 'Delete this campaign?',

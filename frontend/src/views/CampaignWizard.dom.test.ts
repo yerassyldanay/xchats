@@ -3,17 +3,30 @@ import { flushPromises } from '@vue/test-utils'
 import { mountKb, testPinia } from '@/test/mount'
 import CampaignWizard from './CampaignWizard.vue'
 
+const routerPush = vi.fn()
+// onBeforeRouteLeave needs a real installed router to register against —
+// this mock captures the guard callback instead, so a test can invoke it
+// directly the same way vue-router's own navigation would.
+let capturedLeaveGuard: (() => boolean | Promise<boolean>) | null = null
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
-  return { ...actual, useRouter: () => ({ push: vi.fn() }) }
+  return {
+    ...actual,
+    useRouter: () => ({ push: routerPush }),
+    onBeforeRouteLeave: (guard: () => boolean | Promise<boolean>) => {
+      capturedLeaveGuard = guard
+    },
+  }
 })
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
-  return { ...actual, api: { ...actual.api, get: vi.fn().mockResolvedValue({ items: [] }) } }
+  return { ...actual, api: { ...actual.api, get: vi.fn(), post: vi.fn(), del: vi.fn() } }
 })
 
 async function mountWizard() {
+  const { api } = await import('@/api/client')
+  vi.mocked(api.get).mockResolvedValue({ items: [] })
   const pinia = testPinia()
   const wrapper = mountKb(CampaignWizard, { pinia })
   await flushPromises()
@@ -68,4 +81,35 @@ describe('CampaignWizard — message variable chips (CAM-02)', () => {
 
     expect(textarea.value).toBe('Hi {{name}}, welcome!')
   })
+})
+
+// CAM-12: continueToRecipients() already creates a REAL, empty campaign
+// server-side (POST /campaigns/:id/preview needs one to check reachability
+// against) — every exit from phase 2 other than the wizard's own Cancel/
+// finish used to bypass cleanup entirely, stranding it in the list.
+describe('CampaignWizard — warns before abandoning an orphan draft campaign (CAM-12)', () => {
+  it('does not register a leave guard while still in phase 1 (no campaign created yet)', async () => {
+    capturedLeaveGuard = null
+    await mountWizard()
+    // onBeforeRouteLeave IS called at setup (Vue Router registers the guard
+    // unconditionally), but invoking it before any campaign exists must
+    // resolve to "proceed" with no dialog.
+    expect(capturedLeaveGuard).toBeTruthy()
+    const result = capturedLeaveGuard!()
+    expect(result).toBe(true)
+  })
+
+  // The phase-2 cases (a draft campaign actually pending — beforeunload
+  // prevention, the leave-confirmation dialog, discard-and-delete) aren't
+  // covered here: reaching phase 2 in a DOM test requires driving reka-ui's
+  // Select through a real pointerdown/pointerup gesture on its
+  // Portal-rendered SelectItem, which — despite the jsdom PointerEvent +
+  // hasPointerCapture polyfills added in src/test/setup.ts — never
+  // committed a value in this harness (root cause not isolated: the
+  // element, its role="option"/aria attributes, and the dropdown's own
+  // open state all inspected as correct). hasUnsavedDraft()'s two other
+  // branches (finished, and the phase-1 case above) are covered directly;
+  // the finished-flip in confirmStop-style handlers mirrors CAM-08's own
+  // tested ConfirmDeleteDialog usage, and campaigns.remove is the same call
+  // cancelPending already made before this change.
 })

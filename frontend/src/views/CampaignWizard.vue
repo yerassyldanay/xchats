@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, onBeforeRouteLeave, useRouter } from 'vue-router'
 import { CircleAlert, LoaderCircle, Megaphone, Plus, Trash2 } from 'lucide-vue-next'
 import { useCampaigns } from '@/stores/campaigns'
 import { useAccounts } from '@/stores/accounts'
@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import CampaignRecipientPreviewTable from '@/components/CampaignRecipientPreviewTable.vue'
+import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -125,8 +126,16 @@ async function continueToRecipients() {
 // campaign in the list with no recipients and no way to remove it. A
 // failed delete is deliberately swallowed: the operator asked to leave, and
 // the campaign is still reachable (and deletable) from the list.
+//
+// finished marks that pendingCampaignId no longer needs the CAM-12 guards
+// below watching over it — either the wizard completed (finish()) or the
+// operator explicitly discarded it (cancelPending, or the leave-confirm
+// dialog's own Discard) — so navigating away from here is never again
+// silently losing track of unreviewed work.
 const cancelling = ref(false)
+const finished = ref(false)
 async function cancelPending() {
+  finished.value = true
   const id = pendingCampaignId.value
   cancelling.value = true
   try {
@@ -137,6 +146,59 @@ async function cancelPending() {
     cancelling.value = false
     await router.push({ name: 'campaigns' })
   }
+}
+
+// --- CAM-12: warn before abandoning an orphan draft campaign -------------
+// continueToRecipients() already created a real, empty campaign server-side
+// (POST /campaigns/:id/preview needs a real campaign to check reachability
+// against — there is no "preview before a campaign exists" endpoint). Every
+// exit from phase 2 other than Cancel/finish used to bypass that cleanup
+// entirely: browser back, a nav-rail click, refresh, or tab close all left
+// the empty campaign sitting in the list with nothing pointing back at it.
+function hasUnsavedDraft(): boolean {
+  return phase.value === 'recipients' && !!pendingCampaignId.value && !finished.value
+}
+
+// beforeunload cannot show custom UI — the browser's own native prompt is
+// the only option the platform allows here, unlike every other confirm in
+// this app.
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (!hasUnsavedDraft()) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+onMounted(() => window.addEventListener('beforeunload', handleBeforeUnload))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', handleBeforeUnload))
+
+// In-app navigation (nav rail, browser back/forward within the SPA) DOES
+// support a real styled dialog — onBeforeRouteLeave can await one before
+// deciding whether to let the navigation proceed.
+const leaveConfirmOpen = ref(false)
+let resolveLeave: ((proceed: boolean) => void) | null = null
+onBeforeRouteLeave(() => {
+  if (!hasUnsavedDraft()) return true
+  leaveConfirmOpen.value = true
+  return new Promise<boolean>((resolve) => {
+    resolveLeave = resolve
+  })
+})
+function stayOnWizard() {
+  leaveConfirmOpen.value = false
+  resolveLeave?.(false)
+  resolveLeave = null
+}
+async function discardAndLeave() {
+  finished.value = true // stop hasUnsavedDraft from re-triggering while the delete/navigation below settles
+  leaveConfirmOpen.value = false
+  try {
+    if (pendingCampaignId.value) await campaigns.remove(pendingCampaignId.value)
+  } catch {
+    // The campaign stays reachable and deletable from the list either way —
+    // cleanup failing here must never hide it or block the navigation the
+    // operator already confirmed.
+  }
+  resolveLeave?.(true)
+  resolveLeave = null
 }
 
 // --- recipients ----------------------------------------------------------
@@ -214,6 +276,10 @@ async function finish() {
   const id = pendingCampaignId.value
   try {
     await campaigns.replaceRecipients(id, { text: pastedText.value, file: uploadedFile.value ?? undefined })
+    // Recipients are committed server-side from here on — this is no longer
+    // an empty orphan draft even if the pace/schedule PATCH below fails, so
+    // the CAM-12 leave guards have nothing left to protect.
+    finished.value = true
   } catch (e) {
     // The campaign already exists — send the operator there to retry the
     // recipient save rather than getting stuck on this page.
@@ -452,5 +518,14 @@ async function finish() {
         <Button type="button" variant="ghost">{{ t('campaigns.actions.cancel') }}</Button>
       </RouterLink>
     </div>
+
+    <ConfirmDeleteDialog
+      :open="leaveConfirmOpen"
+      title-key="campaigns.wizard.leaveConfirm.title"
+      body-key="campaigns.wizard.leaveConfirm.body"
+      confirm-key="campaigns.wizard.leaveConfirm.accept"
+      @update:open="(v) => !v && stayOnWizard()"
+      @confirm="discardAndLeave"
+    />
   </div>
 </template>
