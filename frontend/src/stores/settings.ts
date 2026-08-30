@@ -119,10 +119,6 @@ export const useSettings = defineStore('settings', {
       await api.put('/settings/credential-storage', { credential_file_fallback_accepted: accepted })
       if (this.settings) this.settings.credential_file_fallback_accepted = accepted
     },
-    async setupComplete() {
-      await api.post('/settings/setup-complete')
-      if (this.settings) this.settings.setup_completed = true
-    },
     async loadTunnel() {
       this.tunnel = await api.get<TunnelStatus>('/settings/tunnel')
     },

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, LoaderCircle, Lock, Mail, ShieldCheck, WandSparkles } from 'lucide-vue-next'
+import { CircleAlert, LoaderCircle, Lock, Mail, ShieldCheck, WandSparkles, Wand2 } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { ApiError } from '../api/client'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,28 @@ const email = ref('')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
+
+// The documented bootstrap credential (README.md) — never a secret, since
+// it has been public since 0006_init_admin.up.sql. showDefaultCreds gates
+// whether the fill-in helper below even renders: only while the seeded
+// admin is still actually reachable with it (see auth.bootstrapStatus's own
+// doc comment) — never once an operator has rotated it.
+const DEFAULT_ADMIN_EMAIL = 'admin@xchat.kz'
+const DEFAULT_ADMIN_PASSWORD = 'xchat-admin-change-me'
+const showDefaultCreds = ref(false)
+onMounted(async () => {
+  try {
+    showDefaultCreds.value = await auth.bootstrapStatus()
+  } catch {
+    // Best-effort — the helper just stays hidden if the probe fails.
+  }
+})
+// Fills, never submits: the operator still reviews and clicks Sign in
+// themselves, same as if they had typed the credential in by hand.
+function fillDefaultCreds() {
+  email.value = DEFAULT_ADMIN_EMAIL
+  password.value = DEFAULT_ADMIN_PASSWORD
+}
 
 // Login renders outside the nav rail, so its own switcher is the only way to
 // pick a language before signing in. Native language names, same three
@@ -109,6 +131,15 @@ async function submit() {
         <p v-if="error" class="flex items-center gap-2 text-sm text-destructive mb-3">
           <CircleAlert class="w-4 h-4 shrink-0" /> {{ error }}
         </p>
+
+        <button
+          v-if="showDefaultCreds"
+          type="button"
+          class="mb-4 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border py-2 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+          @click="fillDefaultCreds"
+        >
+          <Wand2 class="w-3.5 h-3.5" /> {{ t('login.fillDefaultCreds') }}
+        </button>
 
         <Button type="submit" :disabled="busy" class="w-full h-11">
           <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />

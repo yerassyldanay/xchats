@@ -358,6 +358,7 @@ func (s *Server) Router() *gin.Engine {
 	api := r.Group("/xchats/api/v1")
 	api.POST("/auth/login", rateLimit(s.loginLimit), s.handleLogin)
 	api.POST("/auth/logout", s.handleLogout)
+	api.GET("/auth/bootstrap-status", s.handleBootstrapStatus)
 
 	auth := api.Group("")
 	auth.Use(s.requireSession())
@@ -595,7 +596,6 @@ func (s *Server) Router() *gin.Engine {
 	set.PUT("/llm", s.handleUpdateLLMSettings)
 	set.PUT("/credential-storage", s.handleUpdateCredentialStorage)
 	set.PUT("/ngrok", s.handleUpdateNgrokSettings)
-	set.POST("/setup-complete", s.handleSetupComplete)
 	set.GET("/backup/download", s.handleDownloadBackup)
 	set.GET("/provider-health", s.handleProviderHealth)
 	set.GET("/update-check", s.handleUpdateCheck)

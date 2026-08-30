@@ -35,63 +35,6 @@ function mockGet(paths: Record<string, unknown>) {
   })
 }
 
-describe('App — first-run setup wizard gate', () => {
-  beforeEach(() => vi.clearAllMocks())
-
-  it('shows the wizard once an admin is logged in and setup is not yet complete', async () => {
-    const { api } = await import('@/api/client')
-    vi.mocked(api.get).mockImplementation(
-      mockGet({
-        '/settings': { setup_completed: false, llm: {}, providers: {}, ngrok: {} },
-        '/settings/integrations': { credential_store_available: true, providers: [] },
-        '/settings/provider-health': { providers: [] },
-      }),
-    )
-
-    const { wrapper, auth } = mountApp()
-    expect(wrapper.findComponent({ name: 'SetupWizard' }).exists()).toBe(false)
-
-    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin', must_change_password: false }
-    await flushPromises()
-
-    expect(api.get).toHaveBeenCalledWith('/settings')
-    expect(wrapper.text()).toContain('Добро пожаловать в xchats')
-  })
-
-  it('never checks or shows the wizard for a non-admin', async () => {
-    const { api } = await import('@/api/client')
-    vi.mocked(api.get).mockResolvedValue({ setup_completed: false, llm: {}, providers: {}, ngrok: {} })
-
-    const { wrapper, auth } = mountApp()
-    auth.user = { id: '1', email: 'a@b.c', name: 'Member', role: 'member', must_change_password: false }
-    await flushPromises()
-
-    // Scoped to /settings on purpose: what this test guards is that the
-    // WIZARD's setup check never runs for a non-admin. Other components
-    // mounted by App (the nav rail's overdue follow-up badge) legitimately
-    // fetch on mount for every role, and a blanket "no GET at all" would fail
-    // on those without saying anything about the wizard.
-    expect(api.get).not.toHaveBeenCalledWith('/settings')
-    expect(wrapper.text()).not.toContain('Добро пожаловать в xchats')
-  })
-
-  it('does not show the wizard when setup is already complete', async () => {
-    const { api } = await import('@/api/client')
-    vi.mocked(api.get).mockImplementation(
-      mockGet({
-        '/settings': { setup_completed: true, llm: {}, providers: {}, ngrok: {} },
-        '/settings/provider-health': { providers: [] },
-      }),
-    )
-
-    const { wrapper, auth } = mountApp()
-    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin', must_change_password: false }
-    await flushPromises()
-
-    expect(wrapper.text()).not.toContain('Добро пожаловать в xchats')
-  })
-})
-
 describe('App — self-healing provider status gate', () => {
   beforeEach(() => vi.clearAllMocks())
 
@@ -100,7 +43,6 @@ describe('App — self-healing provider status gate', () => {
     const { connectRealtime } = await import('@/lib/sse')
     vi.mocked(api.get).mockImplementation(
       mockGet({
-        '/settings': { setup_completed: true, llm: {}, providers: {}, ngrok: {} },
         '/settings/provider-health': { providers: [{ provider: 'openrouter', healthy: false, at: '2026-01-01T00:00:00Z' }] },
       }),
     )
@@ -121,7 +63,6 @@ describe('App — self-healing provider status gate', () => {
     const { connectRealtime } = await import('@/lib/sse')
     vi.mocked(api.get).mockImplementation(
       mockGet({
-        '/settings': { setup_completed: true, llm: {}, providers: {}, ngrok: {} },
         '/settings/provider-health': { providers: [{ provider: 'openrouter', healthy: false, at: '2026-01-01T00:00:00Z' }] },
       }),
     )
@@ -144,6 +85,19 @@ describe('App — self-healing provider status gate', () => {
 
     const { auth } = mountApp()
     auth.user = { id: '1', email: 'a@b.c', name: 'Member', role: 'member', must_change_password: false }
+    await flushPromises()
+
+    expect(api.get).not.toHaveBeenCalledWith('/settings/provider-health')
+    expect(connectRealtime).not.toHaveBeenCalled()
+  })
+
+  it('never hydrates or connects while a forced password change is pending', async () => {
+    const { api } = await import('@/api/client')
+    const { connectRealtime } = await import('@/lib/sse')
+    vi.mocked(api.get).mockResolvedValue({ providers: [] })
+
+    const { auth } = mountApp()
+    auth.user = { id: '1', email: 'a@b.c', name: 'Admin', role: 'admin', must_change_password: true }
     await flushPromises()
 
     expect(api.get).not.toHaveBeenCalledWith('/settings/provider-health')

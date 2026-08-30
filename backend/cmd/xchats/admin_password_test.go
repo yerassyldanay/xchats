@@ -44,8 +44,12 @@ func TestEnsureBootstrapAdminPasswordMintsOnceAndPersists(t *testing.T) {
 	if !password.Verify(defaultBootstrapAdminPassword, u.PasswordHash) {
 		t.Fatal("the default password does not verify against the sentinel admin's hash")
 	}
-	if u.MustChangePassword {
-		t.Fatal("sentinel admin's must_change_password = true, want false")
+	// 0014_force_default_admin_password_change (docs/ux/flows/01-onboarding.md
+	// friction point 1) leaves this set on a fresh install — bootstrap here
+	// is a no-op (0011 already restored the hash, so BootstrapSentinelAdminPassword's
+	// password_hash='' guard never fires) and never touches the flag itself.
+	if !u.MustChangePassword {
+		t.Fatal("sentinel admin's must_change_password = false, want true")
 	}
 
 	_, minted, err = ensureBootstrapAdminPassword(context.Background(), cfg, st)

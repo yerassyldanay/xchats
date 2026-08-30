@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, LoaderCircle, Plus, ShieldCheck } from 'lucide-vue-next'
+import { CircleAlert, KeyRound, LoaderCircle, Plus, ShieldCheck } from 'lucide-vue-next'
 import { useSettings } from '@/stores/settings'
 import { useAuth } from '@/stores/auth'
 import { ApiError } from '@/api/client'
@@ -9,11 +9,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { initials, colorFor } from '@/lib/format'
+import AccountSecurityDialog from '../AccountSecurityDialog.vue'
 import type { User } from '@/types'
 
 const store = useSettings()
 const auth = useAuth()
 const { t } = useI18n()
+
+const showAccountSecurity = ref(false)
 
 onMounted(() => store.loadUsers())
 
@@ -76,6 +79,16 @@ async function submitCreate() {
 
 <template>
   <div class="space-y-6">
+    <div class="rounded-lg border border-border bg-card p-5 flex items-center justify-between gap-3">
+      <div>
+        <h3 class="font-semibold">{{ t('accountSecurity.title') }}</h3>
+        <p class="text-sm text-muted-foreground">{{ t('accountSecurity.settingsHint') }}</p>
+      </div>
+      <Button size="sm" variant="outline" @click="showAccountSecurity = true">
+        <KeyRound class="w-4 h-4" /> {{ t('accountSecurity.menuItem') }}
+      </Button>
+    </div>
+
     <div class="rounded-lg border border-border bg-card p-5 space-y-3">
       <h3 class="font-semibold">{{ t('settings.team.orgName') }}</h3>
       <div class="flex items-center gap-2 max-w-md">
@@ -130,5 +143,7 @@ async function submitCreate() {
         </div>
       </div>
     </div>
+
+    <AccountSecurityDialog v-if="showAccountSecurity" @close="showAccountSecurity = false" />
   </div>
 </template>

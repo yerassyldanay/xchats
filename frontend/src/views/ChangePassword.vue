@@ -5,12 +5,11 @@
 // future forced-reset account). The actual enforcement is the backend's
 // requirePasswordChanged gate (server.go): this page is what lets a user
 // satisfy it, not what enforces it.
-import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { CircleAlert, KeyRound, LoaderCircle } from 'lucide-vue-next'
 import { useAuth } from '@/stores/auth'
-import { ApiError } from '@/api/client'
+import { useChangePasswordForm } from '@/composables/useChangePasswordForm'
 import { Button } from '@/components/ui/button'
 import MaskedSecretInput from '@/components/settings/MaskedSecretInput.vue'
 
@@ -18,45 +17,9 @@ const auth = useAuth()
 const router = useRouter()
 const { t } = useI18n()
 
-const currentPassword = ref('')
-const newPassword = ref('')
-const confirmPassword = ref('')
-const error = ref('')
-const busy = ref(false)
-
-async function submit() {
-  error.value = ''
-  // MaskedSecretInput's root is a wrapping <div> (for the show/hide
-  // toggle), so native HTML `required` on it would be a no-op — validate
-  // presence explicitly instead of relying on form validation.
-  if (!currentPassword.value || !newPassword.value || !confirmPassword.value) {
-    error.value = t('changePassword.errors.generic')
-    return
-  }
-  if (newPassword.value !== confirmPassword.value) {
-    error.value = t('changePassword.errors.mismatch')
-    return
-  }
-  if (newPassword.value === currentPassword.value) {
-    error.value = t('changePassword.errors.sameAsCurrent')
-    return
-  }
-  busy.value = true
-  try {
-    await auth.changePassword(currentPassword.value, newPassword.value)
-    router.push({ name: 'chatboard' })
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 429) {
-      error.value = t('changePassword.errors.rateLimited')
-    } else if (e instanceof ApiError && e.errcode === 'UNAUTHORIZED') {
-      error.value = t('changePassword.errors.wrongCurrent')
-    } else {
-      error.value = t('changePassword.errors.generic')
-    }
-  } finally {
-    busy.value = false
-  }
-}
+const { currentPassword, newPassword, confirmPassword, error, busy, submit } = useChangePasswordForm(() =>
+  router.push({ name: 'chatboard' }),
+)
 
 async function logout() {
   await auth.logout()

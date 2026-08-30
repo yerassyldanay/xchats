@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
+  ArrowRight,
   CircleAlert,
   CircleCheck,
   Clock,
@@ -12,6 +13,7 @@ import {
   QrCode,
   RefreshCw,
   RotateCw,
+  TriangleAlert,
   Trash2,
   Unplug,
 } from 'lucide-vue-next'
@@ -158,14 +160,19 @@ onMounted(() => {
   }
 })
 
+// isHealthy/isWaiting/isBroken are shared by the stat cards below AND the
+// per-card "connection lost" banner (docs/ux/flows/02-connect-whatsapp-qr.md,
+// friction point 6) — one definition of "broken" so the two never drift.
+const isHealthy = (a: Account) => a.connection_state === 'connected'
+const isWaiting = (a: Account) => ['qr_required', 'connecting', 'disconnect_pending'].includes(a.connection_state)
+const isBroken = (a: Account) => !isHealthy(a) && !isWaiting(a)
+
 const stats = computed(() => {
   const a = accounts.accounts
-  const healthy = (x: Account) => x.connection_state === 'connected'
-  const waiting = (x: Account) => ['qr_required', 'connecting', 'disconnect_pending'].includes(x.connection_state)
   return {
-    connected: a.filter(healthy).length,
-    waiting: a.filter(waiting).length,
-    broken: a.filter((x) => !healthy(x) && !waiting(x)).length,
+    connected: a.filter(isHealthy).length,
+    waiting: a.filter(isWaiting).length,
+    broken: a.filter(isBroken).length,
   }
 })
 
@@ -180,8 +187,16 @@ function openReconnect(_a: Account) {
   addStartChannel.value = 'whatsapp'
   showAdd.value = true
 }
+// showFirstChannelBanner is the one-time "what's next" nudge (friction point
+// 5): true only for the run where the count crosses zero -> nonzero, never
+// again after — reloading or leaving/returning to this page starts from an
+// already-nonzero count, so it naturally never reappears without needing any
+// persisted "seen it" flag.
+const showFirstChannelBanner = ref(false)
 async function onConnected() {
+  const hadNoAccounts = accounts.accounts.length === 0
   await accounts.load()
+  if (hadNoAccounts && accounts.accounts.length > 0) showFirstChannelBanner.value = true
 }
 
 async function run(a: Account, fn: () => Promise<unknown>) {
@@ -259,6 +274,21 @@ async function remove(a: Account) {
           <button class="text-xs underline shrink-0" @click="oauthBanner = null">{{ t('accounts.page.dismiss') }}</button>
         </div>
 
+        <!-- one-time nudge toward the Knowledge Base right after the first channel ever connects -->
+        <div
+          v-if="showFirstChannelBanner"
+          class="flex items-start gap-3 rounded-lg bg-wa/10 px-4 py-3 text-sm text-wa"
+        >
+          <CircleCheck class="w-4 h-4 shrink-0 mt-0.5" />
+          <span class="min-w-0 flex-1">
+            {{ t('accounts.page.firstChannelBanner.text') }}
+            <RouterLink :to="{ name: 'knowledge-base' }" class="inline-flex items-center gap-1 font-medium underline underline-offset-2">
+              {{ t('accounts.page.firstChannelBanner.cta') }} <ArrowRight class="w-3.5 h-3.5" />
+            </RouterLink>
+          </span>
+          <button class="text-xs underline shrink-0" @click="showFirstChannelBanner = false">{{ t('accounts.page.dismiss') }}</button>
+        </div>
+
         <!-- stat cards -->
         <div class="grid grid-cols-3 gap-5">
           <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">
@@ -328,6 +358,22 @@ async function remove(a: Account) {
                   <div class="text-sm text-muted-foreground truncate">{{ handle(a) }}</div>
                 </div>
               </div>
+
+              <!-- a dropped QR-WhatsApp session gets a prominent, actionable
+                   banner rather than only the small icon button below
+                   (docs/ux/flows/02-connect-whatsapp-qr.md, friction point 6) -->
+              <button
+                v-if="isQrWhatsApp(a) && isBroken(a)"
+                type="button"
+                class="mt-3 flex w-full items-start gap-2 rounded-md bg-amber-500/10 px-2.5 py-2 text-left text-[11px] leading-snug text-amber-700 transition hover:bg-amber-500/15 dark:text-amber-400"
+                @click="openReconnect(a)"
+              >
+                <TriangleAlert class="w-3.5 h-3.5 shrink-0 mt-px" />
+                <span class="min-w-0 flex-1">
+                  {{ t('accounts.page.connectionLost.text') }}
+                  <span class="font-medium underline underline-offset-2">{{ t('accounts.page.connectionLost.cta') }}</span>
+                </span>
+              </button>
 
               <!-- a broken connection explains itself; it never silently disappears -->
               <p

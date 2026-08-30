@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, CircleCheck, LoaderCircle, RotateCw, Link2, Search } from 'lucide-vue-next'
+import { CircleAlert, CircleCheck, LoaderCircle, RotateCw, Link2, Search, Smartphone } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
 import { useAuth } from '../stores/auth'
 import { useChannelSetup, type GuidedChannel } from '../stores/channelSetup'
@@ -17,8 +17,12 @@ import InstagramIcon from '@/components/icons/InstagramIcon.vue'
 import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 // AddAccountDialog drives every "connect a channel" flow:
-//   channel picker → WhatsApp: start pairing, poll the QR every ~2.5s, render
-//                              the PNG, close on `connected`
+//   channel picker → WhatsApp: a pre-flight checklist first (phone online,
+//                              WhatsApp updated, device-limit heads up — see
+//                              docs/ux/flows/02-connect-whatsapp-qr.md),
+//                              then start pairing, poll the QR every ~2.5s,
+//                              render the PNG, and end on an explicit "Done"
+//                              click rather than an auto-close timer
 //                  → Telegram: paste the @BotFather token, one POST, done
 //                  → WhatsApp Cloud API: paste the WABA id + business token
 //                    (BYO-App — see backend/internal/httpapi/
@@ -43,7 +47,7 @@ const auth = useAuth()
 const channelSetup = useChannelSetup()
 const { t } = useI18n()
 
-type Step = 'channel' | 'qr' | 'telegram' | 'whatsapp_cloud_creds' | 'whatsapp_cloud_pick' | 'connected'
+type Step = 'channel' | 'whatsapp_preflight' | 'qr' | 'telegram' | 'whatsapp_cloud_creds' | 'whatsapp_cloud_pick' | 'connected'
 type Channel = ConnectableChannel
 
 const step = ref<Step>('channel')
@@ -87,7 +91,12 @@ function pickChannel(c: Channel) {
   channel.value = c
   error.value = ''
   if (c === 'whatsapp') {
-    startPairing()
+    // A pre-flight checklist first (docs/ux/flows/02-connect-whatsapp-qr.md,
+    // friction point 1): starting the pairing session immediately, with no
+    // warning, means a phone with no internet, an outdated WhatsApp, or an
+    // already-maxed-out device count just silently times out several
+    // seconds later with no clue why.
+    step.value = 'whatsapp_preflight'
     return
   }
   if (c === 'telegram') {
@@ -281,7 +290,10 @@ function finish() {
   stopPolling()
   step.value = 'connected'
   emit('connected')
-  window.setTimeout(() => emit('close'), 900)
+  // No auto-close timer (docs/ux/flows/02-connect-whatsapp-qr.md, friction
+  // point 4): a fixed 900ms was easy to miss on a slow render or a blink,
+  // leaving the operator unsure whether the connection actually worked.
+  // The operator confirms with a "Done" click instead.
 }
 
 function stopPolling() {
@@ -575,6 +587,35 @@ onBeforeUnmount(stopPolling)
           </Button>
         </div>
 
+        <!-- WhatsApp step 1.5: pre-flight checklist before starting the pairing session -->
+        <div v-else-if="step === 'whatsapp_preflight'" class="space-y-4">
+          <div class="mx-auto w-14 h-14 rounded-xl bg-wa/10 text-wa grid place-items-center">
+            <Smartphone class="w-7 h-7" />
+          </div>
+          <p class="text-center text-sm font-medium">{{ t('accounts.dialog.preflight.title') }}</p>
+          <ul class="space-y-2 text-sm text-muted-foreground">
+            <li class="flex items-start gap-2">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-wa" />
+              {{ t('accounts.dialog.preflight.internet') }}
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-wa" />
+              {{ t('accounts.dialog.preflight.updated') }}
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-wa" />
+              {{ t('accounts.dialog.preflight.deviceLimit') }}
+            </li>
+          </ul>
+          <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
+            <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ error }}
+          </p>
+          <Button :disabled="busy" class="w-full" @click="startPairing">
+            <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
+            {{ busy ? t('accounts.dialog.connecting') : t('accounts.dialog.preflight.showQr') }}
+          </Button>
+        </div>
+
         <!-- WhatsApp step 2: scan the QR -->
         <div v-else-if="step === 'qr'" class="text-center space-y-4">
           <template v-if="error">
@@ -625,6 +666,7 @@ onBeforeUnmount(stopPolling)
           <p class="mt-4 font-semibold text-lg">
             {{ channel === 'telegram' ? t('accounts.dialog.botConnected') : t('accounts.dialog.numberConnected') }}
           </p>
+          <Button class="mt-6" @click="emit('close')">{{ t('accounts.dialog.done') }}</Button>
         </div>
       </div>
     </DialogContent>

@@ -128,7 +128,7 @@ test.beforeAll(async ({ browser }) => {
   page.on('pageerror', (err) => pageErrors.push(err.message))
   runStartedAt = new Date().toISOString()
 
-  await login(page) // dismisses the first-run SetupWizard internally, if present
+  await login(page) // handles the forced first-login password change internally, if pending
 
   try {
     const res = await page.request.get('/xchats/api/v1/kb')

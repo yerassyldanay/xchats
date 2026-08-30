@@ -55,7 +55,6 @@ export interface Settings {
   providers: Record<string, ProviderSettings>
   ngrok: NgrokSettings
   credential_file_fallback_accepted: boolean
-  setup_completed: boolean
 }
 
 // IntegrationField mirrors internal/httpapi.fieldSummary.

@@ -77,9 +77,6 @@ type Settings struct {
 	// weaker guarantee than an OS keychain (internal/credentials.Open) —
 	// shown once, not on every save.
 	CredentialFileFallbackAccepted bool `json:"credential_file_fallback_accepted"`
-	// SetupCompleted is set by POST /settings/setup-complete — the
-	// first-run wizard's "don't show this again" flag.
-	SetupCompleted bool `json:"setup_completed"`
 }
 
 // defaults returns a fresh Settings with its LLM section seeded from

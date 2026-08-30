@@ -538,18 +538,6 @@ export default {
         "Credentials are stored in an encrypted local file rather than your OS keychain on this deployment. This is a weaker guarantee than a keychain — anyone with filesystem access and the app's key could decrypt them.",
       credentialStorageAccept: 'I understand and accept this trade-off',
     },
-    wizard: {
-      title: 'Welcome to xchats',
-      skipAll: 'Skip setup',
-      back: 'Back',
-      next: 'Next',
-      finish: 'Finish',
-      aiProviderBody: 'Add an API key so the assistant can draft replies. You can add more providers later in Settings → AI Engine.',
-      channelsBody: 'Connect a WhatsApp number or a Telegram bot to start receiving messages.',
-      goToChannels: 'Go to Channels',
-      teamBody: 'Invite a teammate now, or do it later from Settings → Team Management.',
-      invited: 'Invitation sent.',
-    },
   },
   // AddAccountDialog.vue's channel-connect wizard (dialog.*) and
   // Accounts.vue's channel list page (page.*).
@@ -630,10 +618,18 @@ export default {
       pinLabel: 'Two-step verification PIN (6 digits)',
       pinHint: 'Meta allows at most 10 PIN attempts per 72 hours per number.',
       connectNumber: 'Connect number',
+      preflight: {
+        title: 'Before you start',
+        internet: 'Make sure your phone has an internet connection',
+        updated: 'WhatsApp must be updated to the latest version',
+        deviceLimit: 'You can link up to 4 devices per number',
+        showQr: 'Show QR code',
+      },
       qrIntro: 'Open WhatsApp → "Linked Devices" → "Link a Device" and scan the code.',
       qrPolling: 'The code refreshes automatically. Waiting for scan…',
       botConnected: 'Bot connected!',
       numberConnected: 'Number connected!',
+      done: 'Done',
       errConnectInstagram: 'Could not start the Instagram connection.',
       errConnectMessenger: 'Could not start the Messenger connection.',
       errConnectWhatsApp: 'Could not start the connection.',
@@ -647,9 +643,10 @@ export default {
       errSelectNumber: 'Select a number.',
       errPinFormat: 'The PIN must be exactly 6 digits.',
       errConnectNumber: 'Could not connect the number.',
-      errTimeout: 'The wait timed out.',
+      errTimeout:
+        'The pairing session ended before the phone linked. Click "Try again" to start a fresh session — QR codes refresh automatically while a session is active.',
       errConnectGeneric: 'Could not connect.',
-      errSessionExpired: 'The connection session expired. Please try again.',
+      errSessionExpired: 'The pairing session was lost (the server may have restarted). Click "Try again" to start a new session — no data was lost.',
       adminRequired: 'Only an administrator can configure this channel.',
     },
     page: {
@@ -676,6 +673,14 @@ export default {
       delete: 'Delete',
       instagramConnected: 'Instagram connected successfully.',
       messengerConnected: 'Messenger connected successfully.',
+      firstChannelBanner: {
+        text: 'WhatsApp connected! Next step: add content to your Knowledge Base so the assistant can start drafting replies.',
+        cta: 'Go to Knowledge Base',
+      },
+      connectionLost: {
+        text: 'Connection lost — your WhatsApp session expired.',
+        cta: 'Reconnect via QR',
+      },
       confirmDisconnectBot: 'Disconnect bot "{name}"? Chats are kept and come back if you paste the same token again.',
       confirmDelete: 'Delete "{name}"? Chats are kept and come back if you reconnect the same number.',
       errGenericAction: 'Could not complete the action.',
@@ -1283,6 +1288,25 @@ export default {
     noAccount: 'No account? Contact your administrator',
     errBadCredentials: 'Wrong email or password',
     errGeneric: 'Could not sign in. Please try again.',
+    fillDefaultCreds: 'Fill default admin credentials',
+  },
+  // gettingStarted.* — the persistent, minimizable checklist on the Inbox
+  // that replaced the old blocking first-run setup wizard.
+  gettingStarted: {
+    title: 'Getting started',
+    aiProvider: 'Add an AI provider key',
+    channel: 'Connect a channel',
+    kb: 'Add Knowledge Base content',
+  },
+  // accountSecurity.* — the "change your password any time" dialog, reachable
+  // from the nav rail's avatar menu and Settings → Team.
+  accountSecurity: {
+    title: 'Account security',
+    subtitle: 'Change the password for your account.',
+    menuItem: 'Change password',
+    settingsHint: 'Update your own sign-in password.',
+    done: 'Password changed.',
+    close: 'Close',
   },
   // inbox.* — the chat board: list, thread, composer and the compose-new dialog.
   inbox: {

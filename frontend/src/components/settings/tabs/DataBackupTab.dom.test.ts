@@ -18,7 +18,6 @@ function seed() {
     providers: {},
     ngrok: {},
     credential_file_fallback_accepted: false,
-    setup_completed: true,
   }
   return pinia
 }

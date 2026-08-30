@@ -59,8 +59,8 @@ func TestSaveRoundTrip(t *testing.T) {
 		Providers: map[string]ProviderSettings{
 			"openai": {BaseURL: "https://proxy.example/v1", DefaultModel: "gpt-4o"},
 		},
-		Ngrok:          NgrokSettings{Region: "us", Domain: "example.ngrok.app"},
-		SetupCompleted: true,
+		Ngrok:                          NgrokSettings{Region: "us", Domain: "example.ngrok.app"},
+		CredentialFileFallbackAccepted: true,
 	}
 	if err := s.Save(want); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -71,7 +71,7 @@ func TestSaveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load after Save: %v", err)
 	}
-	if got.Version != want.Version || got.LLM != want.LLM || got.Ngrok != want.Ngrok || got.SetupCompleted != want.SetupCompleted {
+	if got.Version != want.Version || got.LLM != want.LLM || got.Ngrok != want.Ngrok || got.CredentialFileFallbackAccepted != want.CredentialFileFallbackAccepted {
 		t.Errorf("Load after Save = %+v, want %+v", got, want)
 	}
 	if got.Providers["openai"] != want.Providers["openai"] {
@@ -99,14 +99,14 @@ func TestUpdateMutatesAndPersists(t *testing.T) {
 	s := NewStore(dir)
 
 	got, err := s.Update(func(st *Settings) {
-		st.SetupCompleted = true
+		st.CredentialFileFallbackAccepted = true
 		st.LLM.DefaultModel = "custom-model"
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if !got.SetupCompleted || got.LLM.DefaultModel != "custom-model" {
-		t.Errorf("Update result = %+v, want SetupCompleted=true, DefaultModel=custom-model", got)
+	if !got.CredentialFileFallbackAccepted || got.LLM.DefaultModel != "custom-model" {
+		t.Errorf("Update result = %+v, want CredentialFileFallbackAccepted=true, DefaultModel=custom-model", got)
 	}
 
 	// Persisted — a fresh Store confirms it, not just the in-memory copy.
@@ -114,8 +114,8 @@ func TestUpdateMutatesAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load after Update: %v", err)
 	}
-	if !reloaded.SetupCompleted || reloaded.LLM.DefaultModel != "custom-model" {
-		t.Errorf("reloaded = %+v, want SetupCompleted=true, DefaultModel=custom-model", reloaded)
+	if !reloaded.CredentialFileFallbackAccepted || reloaded.LLM.DefaultModel != "custom-model" {
+		t.Errorf("reloaded = %+v, want CredentialFileFallbackAccepted=true, DefaultModel=custom-model", reloaded)
 	}
 }
 
@@ -209,7 +209,7 @@ func TestSettingsJSONFieldNamesAreSnakeCase(t *testing.T) {
 	if err := json.Unmarshal(b, &generic); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"version", "llm", "providers", "ngrok", "credential_file_fallback_accepted", "setup_completed"} {
+	for _, key := range []string{"version", "llm", "providers", "ngrok", "credential_file_fallback_accepted"} {
 		if _, ok := generic[key]; !ok {
 			t.Errorf("settings.json missing expected top-level key %q; got keys %v", key, keysOf(generic))
 		}

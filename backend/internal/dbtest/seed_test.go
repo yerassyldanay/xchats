@@ -13,16 +13,20 @@ import (
 
 // TestInitAdminMigration pins the "Seeding & bootstrap" decision: required
 // initial state comes 100% from migrations 0006_init_admin +
-// 0011_restore_default_admin_password, never from Go code. A fresh,
-// freshly-migrated database — nothing else — must already have the default
-// organization, the default admin user, and their membership link.
+// 0011_restore_default_admin_password + 0014_force_default_admin_password_change,
+// never from Go code. A fresh, freshly-migrated database — nothing else —
+// must already have the default organization, the default admin user, and
+// their membership link.
 //
 // The admin's password_hash must be the documented default's precomputed
-// hash and must_change_password clear — 0011 restores 0006's committed
-// default-password hash (0008 had briefly blanked it and forced a change;
-// see that migration's own comment for why this repo reversed course), so a
-// fresh install is immediately loginnable with the documented default
-// password and no forced-change screen in the way.
+// hash, and must_change_password must be SET — 0011 restores 0006's
+// committed default-password hash (0008 had briefly blanked it and forced a
+// change; see that migration's own comment for why this repo reversed
+// course on blanking it), and 0014 puts the forced-change screen back in
+// front of it: a fresh install is immediately loginnable with the
+// documented default password, but must set a real one before reaching the
+// rest of the app (docs/ux/flows/01-onboarding.md's friction point 1 — the
+// public default password must never be usable indefinitely).
 func TestInitAdminMigration(t *testing.T) {
 	db := OpenRaw(t)
 	ctx := context.Background()
@@ -57,8 +61,8 @@ func TestInitAdminMigration(t *testing.T) {
 	if hash != defaultHash {
 		t.Errorf("sentinel admin's password_hash = %q, want the restored default hash %q", hash, defaultHash)
 	}
-	if mustChangePassword {
-		t.Error("sentinel admin's must_change_password = true, want false")
+	if !mustChangePassword {
+		t.Error("sentinel admin's must_change_password = false, want true (0014 forces the change screen)")
 	}
 	if !verifyArgon2id(defaultPassword, hash) {
 		t.Error("the documented default password does not verify against the restored hash")

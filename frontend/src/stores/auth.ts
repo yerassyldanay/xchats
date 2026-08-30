@@ -30,6 +30,17 @@ export const useAuth = defineStore('auth', {
     mustChangePassword: (s) => s.user?.must_change_password === true,
   },
   actions: {
+    // bootstrapStatus is Login.vue's "Fill default admin credentials" helper
+    // (docs/ux/flows/01-onboarding.md, friction point 1) — a public,
+    // session-less probe of whether the migration-seeded admin is still
+    // sitting on the documented default password with its forced change
+    // still pending. Best-effort: a network hiccup here should just hide the
+    // helper, never break the login screen, so callers are expected to
+    // swallow a rejection rather than surface it.
+    async bootstrapStatus() {
+      const p = await api.get<{ default_admin_available: boolean }>('/auth/bootstrap-status')
+      return p.default_admin_available
+    },
     async login(email: string, password: string) {
       const p = await api.post<MePayload>('/auth/login', { email, password })
       this.user = p.user
