@@ -191,7 +191,16 @@ export default {
       reviewHeading: 'Draft overview',
       publishAll: 'Publish all',
       discardAll: 'Discard all',
-      discardConfirm: 'Discard the whole draft? This cannot be undone.',
+      publishConfirm: {
+        title: 'Publish all changes?',
+        body: 'This publishes {added} new, {updated} updated, and {removed} removed record(s) to the live knowledge base immediately.',
+        accept: 'Publish all',
+      },
+      discardConfirmDialog: {
+        title: 'Discard the whole draft?',
+        body: '{count} pending change(s) will be discarded for good. This cannot be undone.',
+        accept: 'Discard all',
+      },
       loading: 'Loading draft…',
       emptyTitle: 'No unpublished changes',
       emptyBody: 'Go to Knowledge Base to add or change information.',
@@ -803,6 +812,20 @@ export default {
     navLabel: 'Simulator',
     pageTitle: 'Simulator',
     pageSubtitle: "Test the assistant's answers to customer questions — without a real messaging channel.",
+    // KB-12: the backend sends these through the SAME ingestion path as real
+    // traffic, so a test conversation is a real row in the Inbox/CRM until
+    // cleared — this notice and the button below make that explicit instead
+    // of leaving operators to discover it in the shared inbox.
+    dataNotice: 'Test messages here appear in the Inbox and CRM like a real conversation, labelled as Simulator.',
+    clearData: 'Clear simulator data',
+    clearingData: 'Clearing…',
+    clearDataConfirm: {
+      title: 'Clear all simulator data?',
+      body: 'This permanently deletes every Simulator conversation, message, and customer this organization has ever created here — including from other sessions and other team members. Real conversations are never touched.',
+      accept: 'Clear simulator data',
+    },
+    clearDataSuccess: 'Cleared {conversations} conversation(s) and {customers} customer(s).',
+    clearDataError: 'Could not clear simulator data.',
     inputPlaceholder: 'Type a customer question…',
     send: 'Send',
     you: 'You',
@@ -873,6 +896,7 @@ export default {
         anyStatus: 'Any status',
         anyTag: 'Any tag',
         anyChannel: 'Any channel',
+        channelSimulator: 'Simulator (test data)',
       },
       newCustomer: 'New customer',
       merge: {

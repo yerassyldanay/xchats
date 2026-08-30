@@ -345,3 +345,46 @@ describe('DraftKnowledgeBase — bulk selection', () => {
     expect(wrapper.find('[data-testid="draft-bulk-bar"]').exists()).toBe(false)
   })
 })
+
+// KB-08: both whole-draft actions are irreversible (Publish all pushes
+// straight to live channels; Discard all destroys every pending change for
+// good) and previously fired with zero confirmation (Publish all) or a bare
+// window.confirm (Discard all) inconsistent with the rest of the app's
+// styled dialogs.
+describe('DraftKnowledgeBase — Publish all / Discard all require confirmation', () => {
+  it('Publish all opens a styled confirmation summarizing counts, and only approves on confirm', async () => {
+    const { wrapper, pg } = await mountWith(
+      emptyChanges({ topics: [topic({ id: 'new', slug: 'new' }), topic({ title: 'edited' })] }),
+      emptyLive({ topics: [topic()] })
+    )
+    const approveSpy = vi.spyOn(pg, 'approve').mockResolvedValue(true)
+
+    await wrapper.find('[data-testid="publish-all"]').trigger('click')
+    expect(approveSpy, 'no live write before the operator confirms').not.toHaveBeenCalled()
+
+    const accept = openDialogAccept()
+    expect(accept, 'confirmation dialog did not open').toBeTruthy()
+    accept!.click()
+    await flushPromises()
+
+    expect(approveSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('Discard all opens a styled confirmation (no window.confirm), and only discards on confirm', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    const discardSpy = vi.spyOn(pg, 'discard').mockResolvedValue(undefined)
+    const nativeConfirm = vi.spyOn(window, 'confirm')
+
+    await wrapper.find('[data-testid="discard-all"]').trigger('click')
+    expect(nativeConfirm, 'must not fall back to the native browser dialog').not.toHaveBeenCalled()
+    expect(discardSpy).not.toHaveBeenCalled()
+
+    const accept = openDialogAccept()
+    expect(accept, 'confirmation dialog did not open').toBeTruthy()
+    accept!.click()
+    await flushPromises()
+
+    expect(discardSpy).toHaveBeenCalledTimes(1)
+    nativeConfirm.mockRestore()
+  })
+})

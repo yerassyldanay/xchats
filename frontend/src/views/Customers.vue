@@ -6,9 +6,8 @@ import { Merge, Plus, Search, UsersRound } from 'lucide-vue-next'
 import { useCrm } from '../stores/crm'
 import { useInbox } from '../stores/inbox'
 import { initials, colorFor } from '../lib/format'
+import { channelIcon, channelText } from '../lib/channelBrand'
 import type { Customer } from '../types'
-import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
-import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -119,12 +118,6 @@ async function createCustomer() {
   await openCustomer(c)
 }
 
-function channelIcon(channel: string) {
-  return channel === 'telegram' ? TelegramIcon : WhatsappIcon
-}
-function channelText(channel: string) {
-  return channel === 'telegram' ? 'text-[#229ED9]' : 'text-wa'
-}
 function assigneeName(id: string | null): string {
   if (!id) return t('crm.panel.unassigned')
   const u = inbox.users.find((x) => x.id === id)
@@ -200,6 +193,10 @@ function assigneeName(id: string | null): string {
             <SelectItem :value="ANY">{{ t('crm.list.filters.anyChannel') }}</SelectItem>
             <SelectItem value="whatsapp">WhatsApp</SelectItem>
             <SelectItem value="telegram">Telegram</SelectItem>
+            <!-- KB-12: an explicit way to isolate test traffic from the Simulator
+                 page — filter it in to review/clean it up, or just recognise it
+                 was never a real customer. -->
+            <SelectItem value="simulator">{{ t('crm.list.filters.channelSimulator') }}</SelectItem>
           </SelectContent>
         </Select>
       </div>

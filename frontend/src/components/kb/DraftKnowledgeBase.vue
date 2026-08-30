@@ -7,7 +7,7 @@
 // sole MANUAL authoring surface — no Add buttons or record-create forms
 // live here, only what a model proposed gets edited in place, published,
 // or cancelled from this page.
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CircleAlert, LoaderCircle, Save, WandSparkles } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
@@ -82,11 +82,28 @@ function toggleSelectAll() {
 // that keeps the bulk bar's count honest.
 watch(selectableTargets, (live) => selection.prune(live))
 
-async function publishAll() {
+// KB-08: Publish all commits every pending change straight to live channels
+// and Discard all destroys every pending change — both irreversible, both
+// now gated behind the app's own styled confirmation dialog (ConfirmDeleteDialog,
+// reused) instead of firing immediately (Publish all) or falling back to a
+// bare window.confirm (Discard all) that looked out of place next to every
+// other styled dialog in this app.
+const publishConfirmOpen = ref(false)
+const discardConfirmOpen = ref(false)
+
+function requestPublishAll() {
+  if (counts.value.total) publishConfirmOpen.value = true
+}
+async function confirmPublishAll() {
+  publishConfirmOpen.value = false
   await pg.approve()
 }
-async function discardAll() {
-  if (pg.pendingTotal && window.confirm(t('kb.draft.discardConfirm'))) await pg.discard()
+function requestDiscardAll() {
+  if (pg.pendingTotal) discardConfirmOpen.value = true
+}
+async function confirmDiscardAll() {
+  discardConfirmOpen.value = false
+  await pg.discard()
 }
 
 function isBusy(kind: string, key: string) {
@@ -165,8 +182,8 @@ const confirmAcceptKey = computed(() => {
         <p class="text-sm text-muted-foreground">{{ t('kb.draft.pageSubtitle') }}</p>
       </div>
       <div v-if="!isEmpty" class="flex items-center gap-2 shrink-0">
-        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" data-testid="discard-all" @click="discardAll">{{ t('kb.draft.discardAll') }}</Button>
-        <Button size="sm" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="publishAll">
+        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" data-testid="discard-all" @click="requestDiscardAll">{{ t('kb.draft.discardAll') }}</Button>
+        <Button size="sm" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="requestPublishAll">
           <LoaderCircle v-if="pg.approving && !pg.publishingKey" class="w-4 h-4 animate-spin" />
           <Save v-else class="w-4 h-4" />
           {{ t('kb.draft.publishAll') }}<span v-if="counts.total"> · {{ counts.total }}</span>
@@ -318,6 +335,28 @@ const confirmAcceptKey = computed(() => {
       :confirm-key="confirmAcceptKey"
       @update:open="(v) => !v && cancelConfirm.close()"
       @confirm="cancelConfirm.confirm()"
+    />
+
+    <ConfirmDeleteDialog
+      :open="publishConfirmOpen"
+      :busy="pg.approving"
+      title-key="kb.draft.publishConfirm.title"
+      body-key="kb.draft.publishConfirm.body"
+      :body-params="{ added: counts.added, updated: counts.updated, removed: counts.removed }"
+      confirm-key="kb.draft.publishConfirm.accept"
+      @update:open="(v) => !v && (publishConfirmOpen = false)"
+      @confirm="confirmPublishAll"
+    />
+
+    <ConfirmDeleteDialog
+      :open="discardConfirmOpen"
+      :busy="pg.busy"
+      title-key="kb.draft.discardConfirmDialog.title"
+      body-key="kb.draft.discardConfirmDialog.body"
+      :body-params="{ count: counts.total }"
+      confirm-key="kb.draft.discardConfirmDialog.accept"
+      @update:open="(v) => !v && (discardConfirmOpen = false)"
+      @confirm="confirmDiscardAll"
     />
   </div>
 </template>

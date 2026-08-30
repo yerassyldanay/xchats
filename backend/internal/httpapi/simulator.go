@@ -125,6 +125,25 @@ func (s *Server) handleSimulatorMessage(c *gin.Context) {
 	})
 }
 
+// handleSimulatorPurgeData is the "Clear simulator data" action (KB-12): the
+// simulator writes every test send through the real ingestion path, so it
+// leaves real conversation/customer rows behind in the operational inbox and
+// CRM (see this file's own doc comment) — this hard-deletes all of them for
+// the caller's organization. Gated the same way as every other simulator
+// route: unregistered entirely unless SIMULATOR_ENABLED (see Router()).
+func (s *Server) handleSimulatorPurgeData(c *gin.Context) {
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
+	res, err := s.store.PurgeSimulatorData(ctx(c), org.ID)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	ok(c, gin.H{"conversations_deleted": res.ConversationsDeleted, "customers_deleted": res.CustomersDeleted})
+}
+
 // emitInbound broadcasts the same SSE events handleWaEvent emits for a real
 // inbound message, so a simulator conversation shows up live in the inbox too.
 func (s *Server) emitInbound(c *gin.Context, res store.InboundResult) {

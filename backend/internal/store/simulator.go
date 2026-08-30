@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
+
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
 // GetOrCreateSimulatorAccount returns the organization's simulator channel
@@ -23,4 +26,96 @@ func (s *Store) GetOrCreateSimulatorAccount(ctx context.Context, orgID uuid.UUID
 		ON CONFLICT (owner_jid) DO UPDATE SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
 		RETURNING `+waAccountCols, orgID).Scan(scanWaAccountDst(&a)...)
 	return a, err
+}
+
+// SimulatorPurgeResult reports what PurgeSimulatorData actually removed, so
+// the caller (the Simulator page's own "Clear simulator data" action, KB-12)
+// can confirm something real happened rather than a silent no-op.
+type SimulatorPurgeResult struct {
+	ConversationsDeleted int
+	CustomersDeleted     int
+}
+
+// PurgeSimulatorData hard-deletes every conversation, message, draft, and
+// CRM customer the organization's simulator account (GetOrCreateSimulatorAccount)
+// ever produced — the Simulator page injects synthetic traffic through the
+// SAME ingestion path a real message takes (see simulator.go's own doc
+// comment), so every test send leaves a real wa_chats/crm_customers row
+// behind; this is the "one-click cleanup action" side of KB-12.
+//
+// A CRM customer is only removed if EVERY identity it carries is simulator's
+// own — an operator who manually merged a simulator test contact into a real
+// customer (crm_merge.go) keeps that customer and its real identities
+// intact; only the simulator identity (and its now-orphaned conversation)
+// goes. Nothing outside this organization's own simulator account is ever
+// touched: no real wa_/tg_/channel_ account is scoped by this query at all.
+func (s *Store) PurgeSimulatorData(ctx context.Context, orgID uuid.UUID) (SimulatorPurgeResult, error) {
+	var res SimulatorPurgeResult
+
+	var simAccountID uuid.UUID
+	err := s.db.QueryRow(ctx,
+		`SELECT id FROM wa_accounts WHERE organization_id = $1 AND channel = 'simulator'`, orgID,
+	).Scan(&simAccountID)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return res, nil // never used the simulator — nothing to clean up
+	}
+	if err != nil {
+		return res, wrap("find simulator account", err)
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return res, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// ai_drafts.chat_id is polymorphic (no FK — see 0003_ai_engine.up.sql's
+	// file header), so this must run BEFORE wa_chats rows disappear below.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM ai_drafts WHERE channel = 'simulator'
+			AND chat_id IN (SELECT id FROM wa_chats WHERE account_id = $1)`, simAccountID); err != nil {
+		return res, wrap("purge simulator drafts", err)
+	}
+
+	// Simulator-only customers: cascades crm_customer_identities/notes/
+	// followups/timeline/tags automatically (all ON DELETE CASCADE from
+	// crm_customers — see 0013_crm.up.sql). A customer with a mix of
+	// identities (a manual merge — crm_merge.go) keeps its real identities;
+	// only its simulator identity/chat is gone as an ordinary orphaned
+	// conversation once wa_chats is cleared below.
+	custTag, err := tx.Exec(ctx, `
+		DELETE FROM crm_customers WHERE organization_id = $1
+			AND id IN (SELECT customer_id FROM crm_customer_identities WHERE channel = 'simulator' AND account_id = $2)
+			AND NOT EXISTS (
+				SELECT 1 FROM crm_customer_identities ci
+				WHERE ci.customer_id = crm_customers.id AND NOT (ci.channel = 'simulator' AND ci.account_id = $2)
+			)`, orgID, simAccountID)
+	if err != nil {
+		return res, wrap("purge simulator customers", err)
+	}
+	res.CustomersDeleted = int(custTag.RowsAffected())
+
+	// A customer that survived the delete above (a mix of real + simulator
+	// identities, from a manual merge) still keeps a dangling simulator
+	// identity row pointing at a chat this function is about to delete below
+	// — drop just that identity, not the customer it belongs to.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM crm_customer_identities WHERE channel = 'simulator' AND account_id = $1`, simAccountID); err != nil {
+		return res, wrap("purge simulator identities", err)
+	}
+
+	chatTag, err := tx.Exec(ctx, `DELETE FROM wa_chats WHERE account_id = $1`, simAccountID)
+	if err != nil {
+		return res, wrap("purge simulator chats", err)
+	}
+	res.ConversationsDeleted = int(chatTag.RowsAffected())
+
+	if _, err := tx.Exec(ctx, `DELETE FROM wa_contacts WHERE account_id = $1`, simAccountID); err != nil {
+		return res, wrap("purge simulator contacts", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return res, err
+	}
+	return res, nil
 }

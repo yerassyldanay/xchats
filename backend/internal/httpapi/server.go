@@ -521,6 +521,10 @@ func (s *Server) Router() *gin.Engine {
 	// explicitly enabled (SIMULATOR_ENABLED, default false outside dev).
 	if s.cfg.System.SimulatorEnabled {
 		auth.POST("/simulator/messages", s.handleSimulatorMessage)
+		// KB-12: hard-deletes every conversation/customer/draft the
+		// simulator ever produced for this org — see the handler's own doc
+		// comment.
+		auth.DELETE("/simulator/data", s.handleSimulatorPurgeData)
 		// Injects a synthetic whatsmeow-shaped event through the real
 		// translate -> store -> queue -> worker chain, for automated testing
 		// of the WhatsApp ingestion path without a phone — see

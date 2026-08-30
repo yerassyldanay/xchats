@@ -14,9 +14,8 @@ import {
 import { useCrm } from '../stores/crm'
 import { useInbox } from '../stores/inbox'
 import { initials, colorFor, shortTime } from '../lib/format'
+import { channelIcon, channelText } from '../lib/channelBrand'
 import FollowupDialog from './crm/FollowupDialog.vue'
-import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
-import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -138,12 +137,6 @@ async function addNote() {
   }
 }
 
-function channelIcon(channel: string) {
-  return channel === 'telegram' ? TelegramIcon : WhatsappIcon
-}
-function channelText(channel: string) {
-  return channel === 'telegram' ? 'text-[#229ED9]' : 'text-wa'
-}
 // What to show for an identity: the handle a manager would recognise.
 function identityHandle(username: string, phone: string, externalId: string) {
   if (username) return '@' + username

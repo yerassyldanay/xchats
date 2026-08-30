@@ -42,6 +42,12 @@ describe('ChatList channel badges', () => {
     ['telegram', 'bg-[#229ED9]'],
     ['whatsapp', 'bg-wa'],
     ['whatsapp_cloud', 'bg-wa'],
+    // KB-12: simulator used to fall through to the WhatsApp-green default
+    // (see the "unmapped channel" test below, which used to use 'simulator'
+    // as ITS example) — a test conversation was visually indistinguishable
+    // from a real WhatsApp one in the inbox. It now gets its own violet Bot
+    // badge (channelBrand.ts).
+    ['simulator', 'bg-violet-500'],
   ])('renders a distinct badge for %s', (channel, expectedDot) => {
     const wrapper = mountWith([chat('c1', channel as ChannelName)])
     expect(wrapper.html()).toContain(expectedDot)
@@ -59,10 +65,11 @@ describe('ChatList channel badges', () => {
     expect(html).toContain('bg-wa')
   })
 
-  // An unknown/future channel must still render rather than blowing up on a
-  // missing map entry.
-  it('falls back to the default badge for an unmapped channel', () => {
-    const wrapper = mountWith([chat('sim', 'simulator' as ChannelName)])
+  // A channel value newer than this build's closed ChannelName union (the
+  // backend added one this frontend doesn't know about yet) must still
+  // render rather than blowing up on a missing map entry.
+  it('falls back to the default badge for a genuinely unmapped channel', () => {
+    const wrapper = mountWith([chat('future', 'future_channel' as ChannelName)])
     expect(wrapper.html()).toContain('bg-wa')
   })
 })

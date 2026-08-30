@@ -5,6 +5,7 @@ import { MessagesSquare, Plus, Search, SquarePen } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { useAccounts } from '../stores/accounts'
 import { initials, colorFor, shortTime } from '../lib/format'
+import { channelDot, channelIcon, channelText } from '../lib/channelBrand'
 import NewMessageDialog from './NewMessageDialog.vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -12,41 +13,11 @@ import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
-import TelegramIcon from '@/components/icons/TelegramIcon.vue'
-import InstagramIcon from '@/components/icons/InstagramIcon.vue'
-import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 const inbox = useInbox()
 const accounts = useAccounts()
 const { t, locale } = useI18n()
 const showNew = ref(false)
-
-// A chat carries its own channel, so the badge never has to guess from the
-// account list (which may not have loaded yet on a cold open). Every channel
-// the inbox can surface gets its own brand icon/colour here; the simulator
-// (and any channel added later) falls back to the WhatsApp-green default
-// rather than being mislabelled as a specific provider it isn't.
-// whatsapp_cloud deliberately shares WhatsApp's icon and green: to an
-// operator it IS WhatsApp, only the transport underneath differs.
-const CHANNEL_BRAND: Record<string, { icon: typeof WhatsappIcon; dot: string; text: string }> = {
-  telegram: { icon: TelegramIcon, dot: 'bg-[#229ED9]', text: 'text-[#229ED9]' },
-  instagram: { icon: InstagramIcon, dot: 'bg-[#E4405F]', text: 'text-[#E4405F]' },
-  messenger: { icon: MessengerIcon, dot: 'bg-[#0084FF]', text: 'text-[#0084FF]' },
-  whatsapp: { icon: WhatsappIcon, dot: 'bg-wa', text: 'text-wa' },
-  whatsapp_cloud: { icon: WhatsappIcon, dot: 'bg-wa', text: 'text-wa' },
-}
-const CHANNEL_BRAND_FALLBACK = CHANNEL_BRAND.whatsapp
-
-function channelIcon(channel: string) {
-  return (CHANNEL_BRAND[channel] ?? CHANNEL_BRAND_FALLBACK).icon
-}
-function channelDot(channel: string) {
-  return (CHANNEL_BRAND[channel] ?? CHANNEL_BRAND_FALLBACK).dot
-}
-function channelText(channel: string) {
-  return (CHANNEL_BRAND[channel] ?? CHANNEL_BRAND_FALLBACK).text
-}
 
 const ALL = '__all__'
 
