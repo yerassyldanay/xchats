@@ -52,47 +52,57 @@ const { tabs, active } = useEntityTabs({
   ],
 })
 
-// --- banner: a persistent success notice after ANY staged write, pointing
-// at Черновик — pg.live is deliberately never refetched when it appears. --
+// --- banner: a transient "Saved" confirmation after a manual write — every
+// write on this page now commits straight to the live KB (KB-13), so unlike
+// the old "staged, go publish" notice this one just confirms and auto-hides;
+// pg.live already carries the fresh row (writeLive*/deleteLiveEntity
+// reassign it from the write's own response), so there is nothing else to
+// refresh here.
 const bannerVisible = ref(false)
-watch(() => modal.successCount.value, () => {
+let bannerTimer: number | undefined
+function flashSaved() {
   bannerVisible.value = true
-})
+  window.clearTimeout(bannerTimer)
+  bannerTimer = window.setTimeout(() => (bannerVisible.value = false), 4000)
+}
+watch(() => modal.successCount.value, flashSaved)
 
 // --- toolbar action: one contextual button per tab (decision 2). Обзор has
 // none — each of its 5 cards carries its own Edit; Промпт/Файлы have none
 // either (both read-only, no add affordance). ---------------------------
+const LIVE = { target: 'live' as const }
 const toolbar = computed(() => {
   switch (active.value) {
     case 'topics':
-      return { label: t('kb.page.addTopic'), action: () => modal.openCreate('topics') }
+      return { label: t('kb.page.addTopic'), action: () => modal.openCreate('topics', LIVE) }
     case 'products':
-      return { label: t('kb.page.addProduct'), action: () => modal.openCreate('products') }
+      return { label: t('kb.page.addProduct'), action: () => modal.openCreate('products', LIVE) }
     case 'tariffs':
-      return { label: t('kb.page.addTariff'), action: () => modal.openCreate('tariffs') }
+      return { label: t('kb.page.addTariff'), action: () => modal.openCreate('tariffs', LIVE) }
     case 'delivery_zones':
-      return { label: t('kb.page.addZone'), action: () => modal.openCreate('delivery_zones') }
+      return { label: t('kb.page.addZone'), action: () => modal.openCreate('delivery_zones', LIVE) }
     case 'contacts':
-      return { label: t('kb.page.editContacts'), action: () => modal.openEdit('contacts', (pg.live?.contacts[0] ?? {}) as ContactRow) }
+      return { label: t('kb.page.editContacts'), action: () => modal.openEdit('contacts', (pg.live?.contacts[0] ?? {}) as ContactRow, LIVE) }
     case 'policies':
-      return { label: t('kb.page.editPolicies'), action: () => modal.openEdit('policies', (pg.live?.policies[0] ?? {}) as PolicyRow) }
+      return { label: t('kb.page.editPolicies'), action: () => modal.openEdit('policies', (pg.live?.policies[0] ?? {}) as PolicyRow, LIVE) }
     default:
       return null
   }
 })
 
 // --- delete flow (topics/tariffs/products/delivery_zones only — contacts/
-// policies have no delete affordance, kbActions already drops it). -------
+// policies have no delete affordance, kbActions already drops it). Deletes
+// straight from ai_* (deleteLiveEntity, KB-13) — no draft/publish detour. --
 const deleteTarget = ref<{ kind: 'topics' | 'tariffs' | 'products' | 'delivery_zones'; key: string } | null>(null)
 function askDelete(kind: 'topics' | 'tariffs' | 'products' | 'delivery_zones', key: string) {
   deleteTarget.value = { kind, key }
 }
 async function confirmDelete() {
   if (!deleteTarget.value) return
-  const ok = await pg.stageDelete(deleteTarget.value.kind, deleteTarget.value.key)
+  const ok = await pg.deleteLiveEntity(deleteTarget.value.kind, deleteTarget.value.key)
   if (ok) {
     deleteTarget.value = null
-    bannerVisible.value = true
+    flashSaved()
   }
 }
 
@@ -150,7 +160,7 @@ watch(active, (a) => {
           :value="(pg.live?.config as any)?.[section.key] ?? ''"
           :actions="LIVE_CONFIG_ACTIONS"
           :busy="pg.busy"
-          @edit="pg.live?.config && modal.openEdit('config', pg.live.config, { field: section.key })"
+          @edit="pg.live?.config && modal.openEdit('config', pg.live.config, { field: section.key, target: 'live' })"
         />
       </div>
 
@@ -179,7 +189,7 @@ watch(active, (a) => {
           :pending-mark="markFor('delivery_zones', z.ref)"
           :actions="kbActions({ page: 'live' })"
           :busy="pg.busy"
-          @edit="modal.openEdit('delivery_zones', z)"
+          @edit="modal.openEdit('delivery_zones', z, LIVE)"
           @delete="askDelete('delivery_zones', z.ref)"
         />
       </div>
@@ -190,7 +200,7 @@ watch(active, (a) => {
           :pending-mark="markFor('contacts', 'support')"
           :actions="kbActions({ page: 'live', singleton: true })"
           :busy="pg.busy"
-          @edit="modal.openEdit('contacts', (pg.live?.contacts[0] ?? {}) as ContactRow)"
+          @edit="modal.openEdit('contacts', (pg.live?.contacts[0] ?? {}) as ContactRow, LIVE)"
         />
       </div>
 
@@ -201,7 +211,7 @@ watch(active, (a) => {
           :pending-mark="markFor('policies', 'main')"
           :actions="kbActions({ page: 'live', singleton: true })"
           :busy="pg.busy"
-          @edit="modal.openEdit('policies', (pg.live?.policies[0] ?? {}) as PolicyRow)"
+          @edit="modal.openEdit('policies', (pg.live?.policies[0] ?? {}) as PolicyRow, LIVE)"
         />
       </div>
 

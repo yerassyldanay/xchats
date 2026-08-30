@@ -251,8 +251,7 @@ export default {
       download: 'Download .txt',
     },
     banner: {
-      staged: 'Change added to the Draft. Review and publish it from the Draft.',
-      viewDraft: 'Go to Draft',
+      saved: 'Saved to the knowledge base.',
     },
     pendingMark: {
       updated: 'Has an unpublished change',

@@ -319,9 +319,124 @@ export const usePlayground = defineStore('playground', {
       }
     },
 
+    // --- live writes (Знаний база — /knowledge-base): manual create/edit/
+    // delete commit straight to ai_* via /kb/* (kb_live.go), matching
+    // plan/playground.md's rule that /knowledge-base is the sole MANUAL
+    // authoring surface — no draft/publish detour for a routine catalog
+    // edit. Unlike write() above there is no optimistic-concurrency token
+    // to stale-check: kb_live.go's kbWrite has none either, a live write is
+    // immediately final. Every /kb/* write responds with the fresh
+    // DraftView (same shape GET /kb returns), so this assigns straight into
+    // `live` — no separate reload call needed.
+    async writeLive<T>(fn: () => Promise<T>): Promise<T | undefined> {
+      this.busy = true
+      this.error = ''
+      try {
+        return await fn()
+      } catch (e) {
+        this.error = e instanceof ApiError ? e.message : t('kb.draft.errSaveChange')
+        return undefined
+      } finally {
+        this.busy = false
+      }
+    },
+    upsertLiveTopic(input: Omit<TopicPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/topics', input) })
+    },
+    deleteLiveTopic(slug: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/topics/' + encodeURIComponent(slug)) })
+    },
+    upsertLiveTariff(input: Omit<TariffPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/tariffs', input) })
+    },
+    deleteLiveTariff(ref: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/tariffs/' + encodeURIComponent(ref)) })
+    },
+    upsertLiveProduct(input: Omit<ProductPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/products', input) })
+    },
+    deleteLiveProduct(ref: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/products/' + encodeURIComponent(ref)) })
+    },
+    upsertLiveZone(input: {
+      ref: string
+      name?: string
+      zone_level: string
+      parent_ref?: string
+      delivery_available?: boolean
+      delivery_cost?: string
+      delivery_in_days?: string
+      notes?: string
+      sales_status?: string
+    }) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/zones', input) })
+    },
+    deleteLiveZone(ref: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/zones/' + encodeURIComponent(ref)) })
+    },
+    patchLiveContacts(patch: Omit<ContactsPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.patch<DraftView>('/kb/contacts', patch) })
+    },
+    patchLivePolicies(patch: Omit<PoliciesPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.patch<DraftView>('/kb/policies', patch) })
+    },
+    patchLiveConfig(patch: { persona?: string; mission?: string; guardrails?: string; language_policy?: string; reply_max_words?: number }) {
+      return this.writeLive(async () => { this.live = await api.patch<DraftView>('/kb/config', patch) })
+    },
+
+    // --- live dispatchers — mirrors stageChange/stageDelete above, one per
+    // page (see useKbModal's `target` on ModalSession) so /knowledge-base's
+    // forms never need to know which specific upsertLive*/patchLive*
+    // method their kind maps to.
+    writeLiveChange(kind: Exclude<ChangeKind, 'config'>, payload: KbFormPayload) {
+      switch (kind) {
+        case 'topics': {
+          const { kind: _k, ...rest } = payload as TopicPayload
+          return this.upsertLiveTopic(rest).then(() => !this.error)
+        }
+        case 'tariffs': {
+          const { kind: _k, ...rest } = payload as TariffPayload
+          return this.upsertLiveTariff(rest).then(() => !this.error)
+        }
+        case 'products': {
+          const { kind: _k, ...rest } = payload as ProductPayload
+          return this.upsertLiveProduct(rest).then(() => !this.error)
+        }
+        case 'delivery_zones': {
+          const { kind: _k, ...rest } = payload as DeliveryZonePayload
+          return this.upsertLiveZone(rest).then(() => !this.error)
+        }
+        case 'contacts': {
+          const { kind: _k, ...rest } = payload as ContactsPayload
+          return this.patchLiveContacts(rest).then(() => !this.error)
+        }
+        case 'policies': {
+          const { kind: _k, ...rest } = payload as PoliciesPayload
+          return this.patchLivePolicies(rest).then(() => !this.error)
+        }
+      }
+    },
+    async deleteLiveEntity(kind: 'topics' | 'tariffs' | 'products' | 'delivery_zones', key: string): Promise<boolean> {
+      switch (kind) {
+        case 'topics':
+          await this.deleteLiveTopic(key)
+          break
+        case 'tariffs':
+          await this.deleteLiveTariff(key)
+          break
+        case 'products':
+          await this.deleteLiveProduct(key)
+          break
+        case 'delivery_zones':
+          await this.deleteLiveZone(key)
+          break
+      }
+      return !this.error
+    },
+
     // --- live (Знаний база — /knowledge-base): read-only baseline, GET /kb.
-    // Never written directly — every write on this page stages into the
-    // draft (stageChange/stageDelete above).
+    // Manual writes commit directly here (writeLive* above); this loader
+    // just hydrates the initial page and re-syncs after realtime events.
     async loadLive() {
       this.liveLoading = true
       this.liveError = ''
