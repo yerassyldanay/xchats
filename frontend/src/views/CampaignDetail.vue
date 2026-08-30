@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import CampaignStatusBadge from '@/components/CampaignStatusBadge.vue'
 import AccountSendingBudget from '@/components/AccountSendingBudget.vue'
 import CampaignRecipientPreviewTable from '@/components/CampaignRecipientPreviewTable.vue'
+import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
 import type { CampaignRecipientStatus, CampaignRecipientPreviewResult } from '@/types'
 
 const { t, te, locale } = useI18n()
@@ -83,7 +84,15 @@ async function runAction(fn: () => Promise<unknown>) {
 const start = () => runAction(() => campaigns.start(campaignId.value))
 const pause = () => runAction(() => campaigns.pause(campaignId.value))
 const resume = () => runAction(() => campaigns.resume(campaignId.value))
-const stop = () => runAction(() => campaigns.stop(campaignId.value))
+
+// CAM-08: unlike Pause (resumable), Stop is permanent — remaining unsent
+// recipients are marked skipped and the campaign can never restart. It used
+// to fire on a single click with no confirmation at all.
+const stopConfirmOpen = ref(false)
+async function confirmStop() {
+  await runAction(() => campaigns.stop(campaignId.value))
+  stopConfirmOpen.value = false
+}
 async function duplicate() {
   await runAction(async () => {
     const dup = await campaigns.duplicate(campaignId.value)
@@ -207,7 +216,7 @@ async function confirmReplace() {
             variant="outline"
             class="text-destructive hover:bg-destructive/10"
             :disabled="acting"
-            @click="stop"
+            @click="stopConfirmOpen = true"
           >
             <Square class="w-4 h-4" /> {{ t('campaigns.actions.stop') }}
           </Button>
@@ -352,5 +361,15 @@ async function confirmReplace() {
         </TabsContent>
       </Tabs>
     </template>
+
+    <ConfirmDeleteDialog
+      :open="stopConfirmOpen"
+      :busy="acting"
+      title-key="campaigns.detail.stopConfirm.title"
+      body-key="campaigns.detail.stopConfirm.body"
+      confirm-key="campaigns.detail.stopConfirm.accept"
+      @update:open="(v) => !v && (stopConfirmOpen = false)"
+      @confirm="confirmStop"
+    />
   </div>
 </template>

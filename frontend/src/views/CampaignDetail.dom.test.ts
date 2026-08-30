@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import { mountKb, testPinia } from '@/test/mount'
 import { useCampaigns } from '@/stores/campaigns'
 import CampaignDetail from './CampaignDetail.vue'
@@ -23,11 +23,25 @@ vi.mock('@/api/client', async (importOriginal) => {
     api: {
       ...actual.api,
       get: vi.fn(),
+      post: vi.fn(),
       previewCampaignRecipients: vi.fn(),
       replaceCampaignRecipients: vi.fn(),
     },
   }
 })
+
+// reka-ui's Dialog renders through a Teleport into document.body, and (as
+// elsewhere in this codebase — see DraftKnowledgeBase.dom.test.ts's own
+// note) an earlier test's closed dialog can leave stale nodes behind since
+// nothing here unmounts between tests. Always take the LAST match, which
+// belongs to whichever dialog THIS test just opened.
+function body() {
+  return new DOMWrapper(document.body)
+}
+function lastButtonMatching(predicate: (b: DOMWrapper<Element>) => boolean) {
+  const all = body().findAll('button').filter(predicate)
+  return all[all.length - 1]
+}
 
 function campaign(over: Partial<Campaign> = {}): Campaign {
   return {
@@ -133,5 +147,60 @@ describe('CampaignDetail — Replace recipients staleness guard (CAM-09)', () =>
     const saveBtn = wrapper.findAll('button').find((b) => b.text() === 'Сохранить')!
     expect((saveBtn.element as HTMLButtonElement).disabled).toBe(false)
     expect(wrapper.find('[data-testid="replace-preview-stale-notice"]').exists()).toBe(false)
+  })
+})
+
+// CAM-08: Stop is permanent (unlike Pause) and previously fired on a single
+// click with zero confirmation.
+describe('CampaignDetail — Stop requires confirmation (CAM-08)', () => {
+  async function mountRunning() {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/campaigns/camp-1') return campaign({ status: 'running' }) as any
+      if (path === '/accounts') return { items: [] } as any
+      if (path.startsWith('/campaigns/camp-1/recipients')) return { items: [], total: 0 } as any
+      if (path.startsWith('/campaigns/camp-1/events')) return { items: [], total: 0 } as any
+      throw new Error(`unexpected GET ${path}`)
+    })
+    const pinia = testPinia()
+    const wrapper = mountKb(CampaignDetail, { pinia })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('does not stop on a single click; only after the confirmation dialog is accepted', async () => {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.post).mockResolvedValueOnce(campaign({ status: 'draft' }) as any)
+    const wrapper = await mountRunning()
+
+    const stopBtn = wrapper.findAll('button').find((b) => b.text().includes('Остановить'))
+    expect(stopBtn, 'Stop button not found').toBeTruthy()
+    await stopBtn!.trigger('click')
+
+    expect(api.post, 'must not call stop before confirmation').not.toHaveBeenCalled()
+    expect(body().text()).toContain('Остановить эту рассылку?')
+
+    const accept = lastButtonMatching((b) => b.text() === 'Остановить безвозвратно')
+    expect(accept, 'destructive confirm button not found').toBeTruthy()
+    await accept!.trigger('click')
+    await flushPromises()
+
+    expect(api.post).toHaveBeenCalledWith('/campaigns/camp-1/stop')
+  })
+
+  it('cancelling the dialog leaves the campaign running', async () => {
+    const { api } = await import('@/api/client')
+    // This file's api mocks are module-level vi.fn()s with no shared
+    // beforeEach reset (see KnowledgeBase.dom.test.ts's identical note) —
+    // the previous test's own call to /stop is still in the history here.
+    vi.mocked(api.post).mockClear()
+    const wrapper = await mountRunning()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Остановить'))!.trigger('click')
+    const cancelBtn = lastButtonMatching((b) => b.text() === 'Отмена')
+    await cancelBtn!.trigger('click')
+    await flushPromises()
+
+    expect(api.post).not.toHaveBeenCalled()
   })
 })

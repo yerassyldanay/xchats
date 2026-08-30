@@ -1153,6 +1153,11 @@ export default {
       noRecipients: 'No recipients yet.',
       noEvents: 'No history yet — lifecycle events (started, paused, completed…) will appear here.',
       replaceRecipients: 'Replace recipients',
+      stopConfirm: {
+        title: 'Stop this campaign?',
+        body: 'This is permanent and cannot be resumed. Any remaining unsent recipients will be marked as skipped.',
+        accept: 'Permanently stop campaign',
+      },
       errLoadFailed: 'Could not load the campaign.',
       errActionFailed: 'Could not complete the action.',
       errInvalidTransition: "The campaign can't change to that status right now.",
