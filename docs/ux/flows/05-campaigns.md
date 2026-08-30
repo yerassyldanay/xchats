@@ -25,7 +25,7 @@ flowchart TD
         Subtitle: Bulk outbound messaging to a pasted or uploaded recipient list
         Button: + New campaign"]
 
-        ListLoading["State: Loading spinner and Loading text"]
+        ListLoading["State: Plain Loading text (no spinner)"]
         ListEmpty["State: Empty List
         • Muted Megaphone icon
         • Text: No campaigns yet
@@ -84,7 +84,8 @@ flowchart TD
           - Status dot
           - Raw phone or handle
           - Recipient name
-          - Reason or normalized phone"]
+          - Reason or normalized phone
+        • 🔴 Preview is not invalidated if pasted text or the file changes afterward"]
 
         W2_Pace["Section: Pace and schedule
         • Mode toggle: Use account pace OR Custom pace
@@ -97,7 +98,8 @@ flowchart TD
 
         W2_Schedule["Start timing toggle:
         • Option: As soon as I press Start
-        • Option: At a scheduled time with Datetime picker"]
+        • Option: At a scheduled time with Datetime picker
+        • 🔴 Choosing later without a date silently leaves the campaign as a draft"]
 
         W2_Actions["Button: Create campaign
         Button: Cancel"]
@@ -147,7 +149,7 @@ flowchart TD
             R_Filters["Status filter pills: All | Pending | Sending | Sent | Failed | Skipped"]
             R_Actions["Button: Retry failed
             Button: Replace recipients"]
-            R_List["Recipient Rows:
+            R_List["Recipient Rows (first 50 only; no pagination controls):
             • Phone / Identity
             • Recipient name
             • Status label
@@ -159,7 +161,7 @@ flowchart TD
         end
 
         subgraph TabHistory["Tab: History"]
-            H_List["Timeline of events:
+            H_List["Timeline of events (first 50 only; no pagination controls):
             • Started / Paused / Resumed / Stopped
             • Auto-started / Auto-paused
             • Completed
@@ -249,19 +251,43 @@ flowchart TD
 
 ---
 
+### 🔴 9. Reachability Preview Can Become Stale Before Creation
+
+**What happens today:** After a successful reachability check, changing the pasted recipient text or selecting a different file does not clear `previewResult`. The Create button still trusts the old preview's valid count, while the final save reparses the new input. A campaign can therefore be created from recipients the operator never reviewed, using a green preview that belongs to different data.
+
+**Suggested change:** Invalidate the preview whenever either recipient source changes. Bind preview results to a fingerprint of the exact submitted text/file and require that fingerprint to match before enabling Create.
+
+---
+
+### 🔴 10. “Schedule Later” Accepts a Blank Date Without Warning
+
+**What happens today:** Selecting “At a scheduled time” reveals a `datetime-local` input, but the Finish action validates neither its presence nor its future value. If the field is blank, no `schedule_at` patch is sent; the user is redirected to a normal Draft campaign with no explanation that scheduling was ignored.
+
+**Suggested change:** Require a valid future date when “later” is selected, show an inline field error, and keep focus on the missing input until it is corrected.
+
+---
+
+### 🔴 11. Campaign, Recipient, and History Lists Stop at 50 Items
+
+**What happens today:** The stores request the first 50 campaigns, recipients, and history events and retain the API totals, but the views render no pagination or load-more controls. Campaigns after the first page are unreachable, and a large campaign's Recipients and History tabs silently show only the first 50 records.
+
+**Suggested change:** Add server-backed pagination to all three views, preserve page/filter state in the URL, and show “X–Y of Z” so truncation is explicit.
+
+---
+
 ## Source Components
 
 | UI Element / Screen | Source File |
 |---|---|
-| Persistent Navigation Rail (Campaigns nav item) | [`NavRail.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/NavRail.vue) |
-| Campaigns List Page | [`Campaigns.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Campaigns.vue) |
-| Campaign Status Badge | [`CampaignStatusBadge.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/CampaignStatusBadge.vue) |
-| Campaign Creation Wizard (2-phase setup) | [`CampaignWizard.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/CampaignWizard.vue) |
-| Recipient Reachability Preview Table | [`CampaignRecipientPreviewTable.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/CampaignRecipientPreviewTable.vue) |
-| Campaign Detail View (Overview, Recipients, History) | [`CampaignDetail.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/CampaignDetail.vue) |
-| Live Account Sending Budget Widget | [`AccountSendingBudget.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AccountSendingBudget.vue) |
-| Channels / Accounts Page (Redirect target) | [`Accounts.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue) |
-| Campaigns Pinia Store (State & Lifecycle actions) | [`stores/campaigns.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/campaigns.ts) |
-| Accounts Pinia Store | [`stores/accounts.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/accounts.ts) |
-| Router Configuration (`/campaigns`, `/campaigns/new`, `/campaigns/:id`) | [`router.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/router.ts) |
-| Localization Dictionary (English strings) | [`i18n/locales/en.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/i18n/locales/en.ts) |
+| Persistent Navigation Rail (Campaigns nav item) | [`NavRail.vue`](../../../frontend/src/components/NavRail.vue) |
+| Campaigns List Page | [`Campaigns.vue`](../../../frontend/src/views/Campaigns.vue) |
+| Campaign Status Badge | [`CampaignStatusBadge.vue`](../../../frontend/src/components/CampaignStatusBadge.vue) |
+| Campaign Creation Wizard (2-phase setup) | [`CampaignWizard.vue`](../../../frontend/src/views/CampaignWizard.vue) |
+| Recipient Reachability Preview Table | [`CampaignRecipientPreviewTable.vue`](../../../frontend/src/components/CampaignRecipientPreviewTable.vue) |
+| Campaign Detail View (Overview, Recipients, History) | [`CampaignDetail.vue`](../../../frontend/src/views/CampaignDetail.vue) |
+| Live Account Sending Budget Widget | [`AccountSendingBudget.vue`](../../../frontend/src/components/AccountSendingBudget.vue) |
+| Channels / Accounts Page (Redirect target) | [`Accounts.vue`](../../../frontend/src/views/Accounts.vue) |
+| Campaigns Pinia Store (State & Lifecycle actions) | [`stores/campaigns.ts`](../../../frontend/src/stores/campaigns.ts) |
+| Accounts Pinia Store | [`stores/accounts.ts`](../../../frontend/src/stores/accounts.ts) |
+| Router Configuration (`/campaigns`, `/campaigns/new`, `/campaigns/:id`) | [`router.ts`](../../../frontend/src/router.ts) |
+| Localization Dictionary (English strings) | [`i18n/locales/en.ts`](../../../frontend/src/i18n/locales/en.ts) |

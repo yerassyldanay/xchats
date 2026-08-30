@@ -25,8 +25,8 @@ flowchart TD
     subgraph AccountsPage["Screen: /accounts"]
         direction TB
         PageSees["User sees:
-        • Header: 'Channels and Accounts'
-        • 3 stat cards: Connected 0 | Waiting 0 | Broken 0
+        • Header: 'Channels'
+        • 3 stat cards: Connected 0 | Waiting on action 0 | Not connected 0
         • Empty state: WhatsApp + Telegram icons
         • Text: 'No channels connected yet'
         • Button: '+ Connect a channel'"]
@@ -48,54 +48,45 @@ flowchart TD
         Instagram — Connect via Meta
         Messenger — Connect via Meta
 
-        Footer: unofficial connection warning"]
+        Footer: QR/token storage and Meta setup note"]
     end
 
-    PickerModal -->|"Clicks WhatsApp card"| QRLoading
+    PickerModal -->|"Clicks WhatsApp card"| QRReady
 
-    subgraph QRLoading["Modal: Connecting..."]
-        direction TB
-        LoadingSees["User sees:
-        • Title: WhatsApp icon + 'Connect WhatsApp'
-        • Centered spinner animation
-        • Backend creates pairing session"]
-    end
-
-    QRLoading --> QRReady
-
-    subgraph QRReady["Modal: QR Code Displayed"]
+    subgraph QRReady["Modal: QR Pairing"]
         direction TB
         QRSees["User sees:
-        • Instructions: Open WhatsApp on your phone,
-          go to Settings, Linked devices, tap Link a device
-        • QR code image 208x208 in bordered card
-        • Animated spinner: Waiting for scan...
-        • Polls backend every 2.5 seconds"]
+        • Title: Add a WhatsApp number
+        • Instructions: Open WhatsApp → Linked Devices → Link a Device
+        • A spinner occupies the 208x208 QR card until the first code arrives
+        • QR code image in a bordered card once available
+        • Status: The code refreshes automatically. Waiting for scan…
+        • Frontend polls the backend every 2.5 seconds"]
     end
 
     QRReady --> ScanDecision{"User scans QR\nwith phone?"}
 
     ScanDecision -->|"Scan succeeds"| SuccessModal
-    ScanDecision -->|"No scan within ~60s"| TimeoutState
+    ScanDecision -->|"Backend QR channel reports timeout"| TimeoutState
     ScanDecision -->|"Backend restarts mid-scan"| SessionExpired
 
     subgraph TimeoutState["Modal: Timeout Error"]
         direction TB
         TimeoutSees["User sees:
-        • Red icon + 'Pairing timed out'
+        • Red icon + backend message or 'The wait timed out.'
         • QR image disappears entirely
-        • Button: Retry"]
+        • Button: Try again"]
     end
-    TimeoutState -->|"Clicks Retry"| QRLoading
+    TimeoutState -->|"Clicks Try again"| QRReady
 
     subgraph SessionExpired["Modal: Session Lost"]
         direction TB
         ExpiredSees["User sees:
-        • Red icon + 'Session expired'
+        • Red icon + 'The connection session expired. Please try again.'
         • No explanation of why
-        • Button: Retry"]
+        • Button: Try again"]
     end
-    SessionExpired -->|"Clicks Retry"| QRLoading
+    SessionExpired -->|"Clicks Try again"| QRReady
 
     subgraph SuccessModal["Modal: Success — auto-closes in 900ms"]
         direction TB
@@ -116,8 +107,7 @@ flowchart TD
           - Phone number
           - Green 'Connected' badge
           - Automation status badge
-          - Sending budget meter
-          - Buttons: Automation | Delete"]
+          - Icon-only buttons: Automation | Delete"]
     end
 ```
 
@@ -127,7 +117,7 @@ flowchart TD
 
 ### 🔴 1. No Warning About Phone Requirements Before Starting
 
-**What happens today:** User clicks the WhatsApp card and QR appears immediately.
+**What happens today:** User clicks the WhatsApp card and the dialog starts a pairing session immediately, showing a spinner in the QR card until the first code arrives.
 If their phone has no internet, WhatsApp is outdated, or they already linked the
 maximum number of devices — the scan silently fails and eventually times out.
 
@@ -138,22 +128,18 @@ maximum number of devices — the scan silently fails and eventually times out.
 
 ---
 
-### 🔴 2. QR Timeout Gives No Context
+### 🔴 2. Pairing Timeout Gives No Time Expectation or Recovery Context
 
-**What happens today:** After ~60 seconds of no scan, the QR disappears and a bare
-"Pairing timed out" message appears. User does not know if they did something
-wrong or if there is a system issue.
+**What happens today:** The frontend has no fixed 60-second timer or visible countdown. Whatsmeow rotates QR codes and eventually reports a backend-owned timeout; when that happens, the QR disappears and the user sees the backend message or the fallback "The wait timed out." They are not told how long pairing remains available or that codes refresh automatically before the terminal timeout.
 
 **Suggested change:** Show a more helpful message:
-"The QR code expired. This usually happens if the scan was not completed in
-time. Click Retry to generate a fresh code."
+"The pairing session ended before the phone linked. Click Try again to start a fresh session; QR codes refresh automatically while the session is active."
 
 ---
 
 ### 🔴 3. Session Expired Error is Cryptic
 
-**What happens today:** If the backend restarts during pairing, the poll returns 404
-and the user sees "Session expired" with no further explanation.
+**What happens today:** If the backend restarts during pairing, the poll returns 404 and the user sees "The connection session expired. Please try again." The copy gives the next action but not the likely cause.
 
 **Suggested change:** Explain: "The pairing session was lost (the server may
 have restarted). Click Retry to start a new session — no data was lost."
@@ -196,9 +182,9 @@ small unlabeled icon button (RotateCw) that is easy to miss.
 
 | Element | File |
 |---|---|
-| Channels page | [`Accounts.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue) |
-| Channel picker + QR dialog | [`AddAccountDialog.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AddAccountDialog.vue) |
-| Account cards and empty state | [`Accounts.vue` L284–418](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue#L284-L418) |
-| Sending budget meter | [`AccountSendingBudget.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AccountSendingBudget.vue) |
-| Automation dialog | [`AutomationSettingsDialog.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AutomationSettingsDialog.vue) |
-| Accounts store | [`stores/accounts.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/accounts.ts) |
+| Channels page | [`Accounts.vue`](../../../frontend/src/views/Accounts.vue) |
+| Channel picker + QR dialog | [`AddAccountDialog.vue`](../../../frontend/src/components/AddAccountDialog.vue) |
+| Account cards and empty state | [`Accounts.vue` L284–418](../../../frontend/src/views/Accounts.vue#L284-L418) |
+| Automation dialog | [`AutomationSettingsDialog.vue`](../../../frontend/src/components/AutomationSettingsDialog.vue) |
+| Accounts store | [`stores/accounts.ts`](../../../frontend/src/stores/accounts.ts) |
+| Backend QR event handling | [`pairing.go`](../../../backend/internal/whatsmeow/pairing.go) |

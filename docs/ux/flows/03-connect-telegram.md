@@ -1,7 +1,7 @@
 # Connect Telegram Bot — User Flow
 
 > **Purpose:** Trace exactly what a user sees and does when connecting a Telegram
-> bot via @BotFather token, handling webhook errors, and managing the bot card.
+> bot via @BotFather token, handling webhook or long-polling delivery, and managing the bot card.
 > Friction points are marked with 🔴.
 
 ---
@@ -45,7 +45,7 @@ flowchart TD
         Telegram bot - Connect with a BotFather token
         01 Open BotFather and send the /newbot command
         02 Name the bot and copy the secret token it gives you
-        03 Paste the token here - the webhook is set up automatically
+        03 Paste the token here - delivery is configured automatically
         CTA: Continue with Telegram
 
         WhatsApp Cloud API - Official connection via Meta
@@ -92,7 +92,8 @@ flowchart TD
 
     ConnectingState --> SubmitOutcome{"Connection outcome"}
 
-    SubmitOutcome -->|"Token valid and webhook accepted"| SuccessModal
+    SubmitOutcome -->|"Token valid and long polling starts\n(local/default without public HTTPS)"| SuccessModal
+    SubmitOutcome -->|"Token valid and webhook accepted\n(webhook mode)"| SuccessModal
     SubmitOutcome -->|"Invalid token or server network error"| ApiErrorState
     SubmitOutcome -->|"Bot created but webhook rejected by Telegram"| WebhookFailedModal
 
@@ -205,7 +206,7 @@ flowchart TD
 
 ### 🔴 3. Ambiguous "Drop Backlog" Checkbox Terminology
 
-**What happens today:** The form includes a checkbox: "Drop the messages Telegram has queued up" with subtext: "Only check this if the bot has existed for a while and the old messages are not needed — they will be lost." First-time users often do not understand what "backlog" or "queued messages" means in Telegram, causing anxiety about whether checking or unchecking it will lose their chats.
+**What happens today:** The form includes a checkbox: "Drop the messages Telegram has queued up" with subtext: "Only check this if the bot has existed for a while and the old messages are not needed — they will be lost." First-time users often do not understand what "backlog" or "queued messages" means. The setting is honored only in webhook mode; local/default polling mode ignores it, but the UI does not reveal the active delivery mode or that distinction.
 
 **Suggested change:** Rephrase the label and hint into user-centric language:
 - Label: "Ignore old messages sent before connecting"
@@ -240,12 +241,11 @@ flowchart TD
 
 ---
 
-### 🔴 7. Replace Token Rejection Lacks Actionable Guidance for New Bots
+### 🔴 7. Telegram API Errors Can Appear in Russian in Any Locale
 
-**What happens today:** In the "Replace token" dialog, if a user enters a token belonging to a different bot username, the server rejects the update (409 Conflict) because the account ID is bound to the original bot. The user receives a generic error and may not realize they cannot replace a bot with a completely different bot.
+**What happens today:** The replace-token dialog already explains that a new token must belong to the same bot and that a different bot should be connected as its own channel. However, several backend validation and Telegram API errors are hardcoded in Russian, including invalid-token, cross-organization ownership, encryption-key, and different-bot errors. Those raw messages are displayed even when the frontend locale is English or Kazakh.
 
-**Suggested change:** In the dialog explanation, add a prominent note:
-"To connect a different Telegram bot, close this dialog, delete this account card, and click '+ Connect a channel' to add the new bot."
+**Suggested change:** Return stable error codes and structured details from the backend, then translate the user-facing copy in the frontend locale dictionaries.
 
 ---
 
@@ -253,18 +253,20 @@ flowchart TD
 
 | UI Element | Source File |
 |---|---|
-| Channels page layout & header | [`Accounts.vue` L225–248](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue#L225-L248) |
-| Channel stat cards | [`Accounts.vue` L263–282](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue#L263-L282) |
-| Empty state & connect button | [`Accounts.vue` L294–306](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue#L294-L306) |
-| Account cards grid & Telegram card | [`Accounts.vue` L307–418](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue#L307-L418) |
-| Telegram card action buttons (retry, check, replace, delete) | [`Accounts.vue` L360–415](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue#L360-L415) |
-| Channel picker modal & Telegram card option | [`AddAccountDialog.vue` L336–450](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AddAccountDialog.vue#L336-L450) |
-| Telegram bot token input form | [`AddAccountDialog.vue` L452–495](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AddAccountDialog.vue#L452-L495) |
-| Success confirmation state | [`AddAccountDialog.vue` L613–628](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AddAccountDialog.vue#L613-L628) |
-| Telegram connect logic & webhook error handling | [`AddAccountDialog.vue` L167–190](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AddAccountDialog.vue#L167-L190) |
-| Replace token dialog | [`ReplaceTokenDialog.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/ReplaceTokenDialog.vue) |
-| Automation settings dialog | [`AutomationSettingsDialog.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AutomationSettingsDialog.vue) |
-| Accounts store (Telegram lifecycle actions) | [`stores/accounts.ts` L62–88](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/accounts.ts#L62-L88) |
-| Connection status badge formatting | [`lib/format.ts` L48–87](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/lib/format.ts#L48-L87) |
-| Persistent navigation rail | [`NavRail.vue` L66–76](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/NavRail.vue#L66-L76) |
-| Settings communication channels summary tab | [`CommunicationChannelsTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/tabs/CommunicationChannelsTab.vue) |
+| Channels page layout & header | [`Accounts.vue` L225–248](../../../frontend/src/views/Accounts.vue#L225-L248) |
+| Channel stat cards | [`Accounts.vue` L263–282](../../../frontend/src/views/Accounts.vue#L263-L282) |
+| Empty state & connect button | [`Accounts.vue` L294–306](../../../frontend/src/views/Accounts.vue#L294-L306) |
+| Account cards grid & Telegram card | [`Accounts.vue` L307–418](../../../frontend/src/views/Accounts.vue#L307-L418) |
+| Telegram card action buttons (retry, check, replace, delete) | [`Accounts.vue` L360–415](../../../frontend/src/views/Accounts.vue#L360-L415) |
+| Channel picker modal & Telegram card option | [`AddAccountDialog.vue` L336–450](../../../frontend/src/components/AddAccountDialog.vue#L336-L450) |
+| Telegram bot token input form | [`AddAccountDialog.vue` L452–495](../../../frontend/src/components/AddAccountDialog.vue#L452-L495) |
+| Success confirmation state | [`AddAccountDialog.vue` L613–628](../../../frontend/src/components/AddAccountDialog.vue#L613-L628) |
+| Telegram connect logic & webhook error handling | [`AddAccountDialog.vue` L167–190](../../../frontend/src/components/AddAccountDialog.vue#L167-L190) |
+| Replace token dialog | [`ReplaceTokenDialog.vue`](../../../frontend/src/components/ReplaceTokenDialog.vue) |
+| Automation settings dialog | [`AutomationSettingsDialog.vue`](../../../frontend/src/components/AutomationSettingsDialog.vue) |
+| Accounts store (Telegram lifecycle actions) | [`stores/accounts.ts` L62–88](../../../frontend/src/stores/accounts.ts#L62-L88) |
+| Connection status badge formatting | [`lib/format.ts` L48–87](../../../frontend/src/lib/format.ts#L48-L87) |
+| Persistent navigation rail | [`NavRail.vue` L66–76](../../../frontend/src/components/NavRail.vue#L66-L76) |
+| Settings communication channels summary tab | [`CommunicationChannelsTab.vue`](../../../frontend/src/components/settings/tabs/CommunicationChannelsTab.vue) |
+| Telegram create/replace handlers and raw errors | [`telegram_accounts.go`](../../../backend/internal/httpapi/telegram_accounts.go) |
+| Webhook vs polling mode resolution | [`config.go` L490–507](../../../backend/internal/config/config.go#L490-L507) |

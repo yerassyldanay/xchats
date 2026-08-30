@@ -84,7 +84,7 @@ flowchart TD
     subgraph OAuthStart["Modal: Initiating OAuth Redirect"]
         direction TB
         StartingSees["User sees:
-        • Card button shows loading spinner: Connecting...
+        • No visible spinner or redirecting state while the start request runs 🔴
         • If start fails: Inline error Could not start connection
         • If start succeeds: 🔴 Browser immediately navigates away to Meta"]
     end
@@ -93,11 +93,11 @@ flowchart TD
 
     subgraph MetaConsentPage["External Screen: Meta OAuth Consent Screen"]
         direction TB
-        MetaSees["User sees Meta authorization interface:
+        MetaSees["Representative external Meta authorization interface:
         • Instagram Login or Facebook Login prompt
         • Permission consent request for direct messages and business data
         • 🔴 Messenger only: Page picker list - must pick EXACTLY ONE page
-        • Buttons: Continue / Grant Permissions or Cancel"]
+        • Exact labels and layout are controlled by Meta, not this repository"]
     end
 
     MetaConsentPage -->|"User cancels or denies"| RedirectError
@@ -181,7 +181,7 @@ Display a progress step indicator (e.g., *"Step 1 of 3: Meta App Credentials"*) 
 
 ### 🔴 4. Sudden Full-Page Browser Navigation to External Meta Domain
 
-**What happens today:** Once prerequisites are met and the user clicks the Instagram or Messenger card, the frontend immediately executes `window.location.href = started.authorize_url`. The entire browser tab navigates away from xchats to Meta's external login domain without warning or confirmation.
+**What happens today:** Once prerequisites are met and the user clicks the Instagram or Messenger card, the frontend requests an authorization URL and then executes `window.location.href = started.authorize_url`. Although `busy` is set during the request, the picker card renders no busy indicator, so a slow request looks unresponsive before the entire tab navigates away to Meta without a transition notice.
 
 **Suggested change:** Provide a visual bridge before navigation:
 - Show a brief redirecting state: *"Redirecting to Meta to authorize your account... Please make sure you are logged into the correct Instagram or Facebook account."*
@@ -232,13 +232,15 @@ Display a progress step indicator (e.g., *"Step 1 of 3: Meta App Credentials"*) 
 
 | Element | File |
 |---|---|
-| Channels page layout & OAuth banner handling | [`Accounts.vue` L51–57, L137–159, L251–260](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue#L51-L57) |
-| Channel cards grid & status badges | [`Accounts.vue` L307–418](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue#L307-L418) |
-| Channel picker dialog & OAuth launcher | [`AddAccountDialog.vue` L86–148, L402–442](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AddAccountDialog.vue#L86-L148) |
-| Guided setup routing store | [`channelSetup.ts` L80–127](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/channelSetup.ts#L80-L127) |
-| Channel setup tab (Public access, Meta App, APIs) | [`ChannelSetupTab.vue` L132–272](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/channels/ChannelSetupTab.vue#L132-L272) |
-| Setup card shell with focus indicator | [`ChannelSetupCard.vue` L48–88](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/channels/ChannelSetupCard.vue#L48-L88) |
-| Meta Dashboard copyable fields | [`DashboardFieldList.vue` L14–25](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/channels/DashboardFieldList.vue#L14-L25) |
-| Left navigation rail (Channels entry point) | [`NavRail.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/NavRail.vue) |
-| Settings Communication channels tab | [`CommunicationChannelsTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/tabs/CommunicationChannelsTab.vue) |
-| Accounts store (OAuth start endpoints) | [`accounts.ts` L120–137](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/accounts.ts#L120-L137) |
+| Channels page layout & OAuth banner handling | [`Accounts.vue` L51–57, L137–159, L251–260](../../../frontend/src/views/Accounts.vue#L51-L57) |
+| Channel cards grid & status badges | [`Accounts.vue` L307–418](../../../frontend/src/views/Accounts.vue#L307-L418) |
+| Channel picker dialog & OAuth launcher | [`AddAccountDialog.vue` L86–148, L402–442](../../../frontend/src/components/AddAccountDialog.vue#L86-L148) |
+| Guided setup routing store | [`channelSetup.ts` L80–127](../../../frontend/src/stores/channelSetup.ts#L80-L127) |
+| Channel setup tab (Public access, Meta App, APIs) | [`ChannelSetupTab.vue` L132–272](../../../frontend/src/components/channels/ChannelSetupTab.vue#L132-L272) |
+| Setup card shell with focus indicator | [`ChannelSetupCard.vue` L48–88](../../../frontend/src/components/channels/ChannelSetupCard.vue#L48-L88) |
+| Meta Dashboard copyable fields | [`DashboardFieldList.vue` L14–25](../../../frontend/src/components/channels/DashboardFieldList.vue#L14-L25) |
+| Left navigation rail (Channels entry point) | [`NavRail.vue`](../../../frontend/src/components/NavRail.vue) |
+| Settings Communication channels tab | [`CommunicationChannelsTab.vue`](../../../frontend/src/components/settings/tabs/CommunicationChannelsTab.vue) |
+| Accounts store (OAuth start endpoints) | [`accounts.ts` L120–137](../../../frontend/src/stores/accounts.ts#L120-L137) |
+| Instagram OAuth callback and redirect errors | [`meta_oauth.go`](../../../backend/internal/httpapi/meta_oauth.go) |
+| Messenger OAuth callback and page selection | [`meta_oauth_messenger.go`](../../../backend/internal/httpapi/meta_oauth_messenger.go) |

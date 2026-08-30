@@ -1,6 +1,6 @@
 # Knowledge Base Lifecycle — User Flow
 
-> **Purpose:** Trace what a user sees and experiences throughout the 3-stage Knowledge Base lifecycle: **Ingestion** (uploading files, scraping URLs, or connecting external MCP models), **Review** (inspecting diffs, editing staged records, bulk actions, and publishing), and **Testing** (simulating customer interactions and verifying AI responses in the sandbox). Friction points are marked with 🔴.
+> **Purpose:** Trace what a user sees and experiences throughout the 3-stage Knowledge Base lifecycle: **Ingestion** (uploading files, scraping URLs, or connecting external MCP models), **Review** (inspecting diffs, editing staged records, bulk actions, and publishing), and **Testing** (simulating customer interactions and verifying AI responses through the production ingestion path). Friction points are marked with 🔴.
 
 ---
 
@@ -291,7 +291,8 @@ flowchart TD
     subgraph SimScreen["Screen: /simulator — AI Response Simulator"]
         direction TB
         SimHeader["Header: Simulator
-        Subtitle: Test the assistant answers to customer questions — without a real messaging channel"]
+        Subtitle: Test the assistant answers to customer questions — without a real messaging channel
+        🔴 The backend still writes the synthetic contact, chat, message, and draft into live CRM/inbox storage"]
 
         SimEmpty["State: Empty Chat Thread
         • Centered text: Ask a question to test the assistant answer."]
@@ -348,15 +349,15 @@ flowchart TD
 
 ### 🔴 4. Opaque Extraction and Synthesis Progress with No Time Estimates or Cancellation
 
-**What happens today:** When a user submits URLs or files for import, the status card shows "Extracting…" and then "Synthesizing…" with spinning icons for each material. Multi-page PDFs or multi-link crawls can take 30–120+ seconds. The user sees no elapsed timer, estimated time remaining, or progress percentage, and there is no way to cancel a stuck or unwanted import run.
+**What happens today:** When a user submits URLs or files for import, the status card shows "Extracting…" and then "Synthesizing…" with per-material state. The code provides no elapsed timer, estimated time remaining, progress percentage, or way to cancel a stuck or unwanted import run; actual duration depends on the material and provider.
 
 **Suggested change:** Add an elapsed time counter, a step indicator (e.g., `Step 1/2: Parsed 3/5 files`), and a "Cancel Import" button to abort long-running jobs.
 
 ---
 
-### 🔴 5. Single Active Import Run Constraint Blocks Team Members Silently
+### 🔴 5. Active Import Shows Work but Not Ownership, Timing, or Control
 
-**What happens today:** Only one import run can be active at a time across the entire organization. If another team member has started an import, a user attempting to submit sees a disabled button with a static notice: "An import is already running — wait for it to finish before submitting another." There is no indication of who started the run, what files are processing, or how long it has been running.
+**What happens today:** Only one import run can be active at a time across the organization. The shared run card does show each filename/URL, material status, extraction errors, and synthesis results, so the work is not fully hidden. However, the disabled submit notice and status card do not show who started the run, its start time or elapsed time, an ETA, or a cancel action.
 
 **Suggested change:** Replace the static warning with live run details:
 `Import in progress by Alex (started 2 minutes ago on "catalog.pdf"). [View Live Progress]`.
@@ -410,40 +411,58 @@ flowchart TD
 
 ---
 
+### 🔴 11. Upload Limits Are Enforced Only After Submission
+
+**What happens today:** The browser lets users stage any number of files without showing the server constraints. The backend accepts at most 10 files per import and at most 50 MiB per file (with a bounded multipart body). Users discover those limits only after uploading and receiving an API error; the pending chips do not flag oversized files or an excessive count.
+
+**Suggested change:** Display the limits beside the dropzone, reject invalid selections immediately, and annotate the affected file chips before any network upload begins.
+
+---
+
+### 🔴 12. “Simulator” Tests Pollute the Live Inbox and CRM
+
+**What happens today:** The simulator copy frames the experience as testing without a real messaging channel, but the backend intentionally sends synthetic messages through the same ingestion path as real traffic. It creates or reuses a simulator account, persists customer/conversation/message/draft records, and broadcasts normal realtime inbox events. Test contacts and chats therefore appear in the operational Inbox and CRM.
+
+**Suggested change:** Isolate simulator data from operational records, or clearly label and filter simulator-origin entities everywhere with a one-click cleanup action. If production-path fidelity is required, make that behavior explicit before the first simulated message.
+
+---
+
 ## Source Components
 
 | UI Element / Screen | Source File |
 |---|---|
-| Navigation Rail (Draft, KB, Simulator links) | [`NavRail.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/NavRail.vue#L66-L75) |
-| Playground / Draft Root View | [`Playground.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Playground.vue) |
-| Draft Review & Ingest Layout | [`DraftKnowledgeBase.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/DraftKnowledgeBase.vue) |
-| Ingestion Panel (Tabs & Layout) | [`KbIngestPanel.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/KbIngestPanel.vue) |
-| URL & File Import Dropzone Card | [`KbImportCard.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/KbImportCard.vue) |
-| Import Run Status & Synthesis Display | [`KbImportRunStatus.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/KbImportRunStatus.vue) |
-| MCP ChatGPT / Claude Connector Card | [`McpConnectCard.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/McpConnectCard.vue) |
-| Draft Stat Summary Tiles | [`StatTiles.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/StatTiles.vue) |
-| Draft Empty State | [`DraftEmptyState.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/DraftEmptyState.vue) |
-| Entity Tabs Strip | [`EntityTabs.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/EntityTabs.vue) |
-| Generic Change List (Topics/Products/Tariffs) | [`ChangeList.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/ChangeList.vue) |
-| Assistant Config Change Group | [`ConfigChangeGroup.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/ConfigChangeGroup.vue) |
-| Knowledge Base Live Root View | [`KnowledgeBase.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/KnowledgeBase.vue) |
-| Live Published Record List | [`RecordList.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/RecordList.vue) |
-| Staged Change Green Banner | [`DraftBanner.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/DraftBanner.vue) |
-| System Prompt Viewer Tab | [`PromptTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/PromptTab.vue) |
-| Shared Record Card Shell | [`RecordShell.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/RecordShell.vue) |
-| Field Diff Subtext Note | [`FieldDiffNote.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/FieldDiffNote.vue) |
-| Topic Record Card | [`TopicRecord.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/TopicRecord.vue) |
-| Product Record Card | [`ProductRecord.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/ProductRecord.vue) |
-| Tariff Record Card | [`TariffRecord.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/TariffRecord.vue) |
-| Delivery Zone Record Card | [`DeliveryZoneRecord.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/DeliveryZoneRecord.vue) |
-| Contacts Record Card | [`ContactsRecord.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/ContactsRecord.vue) |
-| Policies Record Card | [`PoliciesRecord.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/PoliciesRecord.vue) |
-| Assistant Field Record Card | [`AssistantFieldRecord.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/AssistantFieldRecord.vue) |
-| Media Strip & Thumbnail Components | [`MediaStrip.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/records/MediaStrip.vue) |
-| Modal Forms Host Component | [`KbModalForms.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/forms/KbModalForms.vue) |
-| Shared Modal Form Shell | [`KbFormDialog.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/forms/KbFormDialog.vue) |
-| Confirm Delete / Cancel Dialog | [`ConfirmDeleteDialog.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/kb/forms/ConfirmDeleteDialog.vue) |
-| Simulator View Root | [`Simulator.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Simulator.vue) |
-| Simulator Chat Panel Component | [`SimulatorPanel.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/SimulatorPanel.vue) |
-| Knowledge Base Store | [`stores/playground.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/playground.ts) |
-| Knowledge Base Import Store | [`stores/kbImport.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/kbImport.ts) |
+| Navigation Rail (Draft, KB, Simulator links) | [`NavRail.vue`](../../../frontend/src/components/NavRail.vue#L66-L75) |
+| Playground / Draft Root View | [`Playground.vue`](../../../frontend/src/views/Playground.vue) |
+| Draft Review & Ingest Layout | [`DraftKnowledgeBase.vue`](../../../frontend/src/components/kb/DraftKnowledgeBase.vue) |
+| Ingestion Panel (Tabs & Layout) | [`KbIngestPanel.vue`](../../../frontend/src/components/kb/KbIngestPanel.vue) |
+| URL & File Import Dropzone Card | [`KbImportCard.vue`](../../../frontend/src/components/kb/KbImportCard.vue) |
+| Import Run Status & Synthesis Display | [`KbImportRunStatus.vue`](../../../frontend/src/components/kb/KbImportRunStatus.vue) |
+| MCP ChatGPT / Claude Connector Card | [`McpConnectCard.vue`](../../../frontend/src/components/kb/McpConnectCard.vue) |
+| Draft Stat Summary Tiles | [`StatTiles.vue`](../../../frontend/src/components/kb/StatTiles.vue) |
+| Draft Empty State | [`DraftEmptyState.vue`](../../../frontend/src/components/kb/DraftEmptyState.vue) |
+| Entity Tabs Strip | [`EntityTabs.vue`](../../../frontend/src/components/kb/EntityTabs.vue) |
+| Generic Change List (Topics/Products/Tariffs) | [`ChangeList.vue`](../../../frontend/src/components/kb/ChangeList.vue) |
+| Assistant Config Change Group | [`ConfigChangeGroup.vue`](../../../frontend/src/components/kb/ConfigChangeGroup.vue) |
+| Knowledge Base Live Root View | [`KnowledgeBase.vue`](../../../frontend/src/views/KnowledgeBase.vue) |
+| Live Published Record List | [`RecordList.vue`](../../../frontend/src/components/kb/RecordList.vue) |
+| Staged Change Green Banner | [`DraftBanner.vue`](../../../frontend/src/components/kb/DraftBanner.vue) |
+| System Prompt Viewer Tab | [`PromptTab.vue`](../../../frontend/src/components/kb/PromptTab.vue) |
+| Shared Record Card Shell | [`RecordShell.vue`](../../../frontend/src/components/kb/records/RecordShell.vue) |
+| Field Diff Subtext Note | [`FieldDiffNote.vue`](../../../frontend/src/components/kb/records/FieldDiffNote.vue) |
+| Topic Record Card | [`TopicRecord.vue`](../../../frontend/src/components/kb/records/TopicRecord.vue) |
+| Product Record Card | [`ProductRecord.vue`](../../../frontend/src/components/kb/records/ProductRecord.vue) |
+| Tariff Record Card | [`TariffRecord.vue`](../../../frontend/src/components/kb/records/TariffRecord.vue) |
+| Delivery Zone Record Card | [`DeliveryZoneRecord.vue`](../../../frontend/src/components/kb/records/DeliveryZoneRecord.vue) |
+| Contacts Record Card | [`ContactsRecord.vue`](../../../frontend/src/components/kb/records/ContactsRecord.vue) |
+| Policies Record Card | [`PoliciesRecord.vue`](../../../frontend/src/components/kb/records/PoliciesRecord.vue) |
+| Assistant Field Record Card | [`AssistantFieldRecord.vue`](../../../frontend/src/components/kb/records/AssistantFieldRecord.vue) |
+| Media Strip & Thumbnail Components | [`MediaStrip.vue`](../../../frontend/src/components/kb/records/MediaStrip.vue) |
+| Modal Forms Host Component | [`KbModalForms.vue`](../../../frontend/src/components/kb/forms/KbModalForms.vue) |
+| Shared Modal Form Shell | [`KbFormDialog.vue`](../../../frontend/src/components/kb/forms/KbFormDialog.vue) |
+| Confirm Delete / Cancel Dialog | [`ConfirmDeleteDialog.vue`](../../../frontend/src/components/kb/forms/ConfirmDeleteDialog.vue) |
+| Simulator View Root | [`Simulator.vue`](../../../frontend/src/views/Simulator.vue) |
+| Simulator Chat Panel Component | [`SimulatorPanel.vue`](../../../frontend/src/components/SimulatorPanel.vue) |
+| Knowledge Base Store | [`stores/playground.ts`](../../../frontend/src/stores/playground.ts) |
+| Knowledge Base Import Store | [`stores/kbImport.ts`](../../../frontend/src/stores/kbImport.ts) |
+| Import upload limits and request parsing | [`kb_import.go`](../../../backend/internal/httpapi/kb_import.go) |
+| Simulator persistence and realtime events | [`simulator.go`](../../../backend/internal/httpapi/simulator.go) |

@@ -50,7 +50,8 @@ flowchart TD
         • Checkbox per row for merge selection
         • Avatar with initials and color
         • Display name or dash
-        • Channel icons: WhatsApp / Telegram
+        • Channel icons: Telegram or WhatsApp fallback
+          (Instagram/Messenger/other identities are mislabelled as WhatsApp) 🔴
         • Contact handle: Phone, email, or username
         • Status badge with custom color
         • Tag badges (up to 3 shown)
@@ -58,8 +59,9 @@ flowchart TD
         • Footer: Total customer count"]
     end
 
-    CustomersPage -->|"Clicks '+ New customer'"| CreateCustAction["Creates new blank customer"]
-    CreateCustAction --> CustomerSidebar
+    CustomersPage -->|"Clicks '+ New customer'"| CreateCustAction["Creates a blank customer row"]
+    CreateCustAction --> NoConversationResult["If the new customer has no conversation:
+    list remains visible and no profile editor opens 🔴"]
     CustomersPage -->|"Types query in search"| FilterResults["List filters after 250ms debounce"]
     CustomersPage -->|"Clicks quick filter pill"| FilterResults
     CustomersPage -->|"Selects 2 checkboxes and clicks 'Merge'"| MergeModal
@@ -223,17 +225,33 @@ flowchart TD
 
 ---
 
+### 🔴 7. “New Customer” Creates a Record but Opens No Editor
+
+**What happens today:** Clicking **New customer** immediately creates a blank record, then calls the same `openCustomer()` path used by existing rows. That path navigates only when the profile has a conversation. A brand-new blank customer has none, so the user remains in the directory with a new dash-named row and no form, drawer, success message, or obvious way to enter its details.
+
+**Suggested change:** Open a create/edit drawer before persisting the record, or navigate to a dedicated customer profile route that works without a conversation. Do not create an empty record until the user saves meaningful data.
+
+---
+
+### 🔴 8. Meta Channel Identities Are Mislabelled as WhatsApp in CRM
+
+**What happens today:** The directory's channel filter offers only WhatsApp and Telegram. Its icon helper returns Telegram only for the literal `telegram` channel and returns the WhatsApp icon for every other identity. Instagram, Messenger, simulator, and future channel identities therefore appear as WhatsApp and cannot be filtered by their real channel.
+
+**Suggested change:** Reuse the complete channel-brand mapping from the Inbox, expose every supported channel in the filter, and use a neutral fallback icon for unknown values.
+
+---
+
 ## Source Components
 
 | Element | File |
 |---|---|
-| Customer Directory Page | [`Customers.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Customers.vue) |
-| Customer Sidebar Panel | [`CustomerPanel.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/CustomerPanel.vue) |
-| Follow-up Schedule & Reschedule Dialog | [`FollowupDialog.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/crm/FollowupDialog.vue) |
-| Follow-up Task List & Buckets Page | [`Followups.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Followups.vue) |
-| Navigation Rail & Overdue Badge | [`NavRail.vue` L68–144](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/NavRail.vue#L68-L144) |
-| Assistant & Customer Tabs Container | [`AssistantPanel.vue` L61–85](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AssistantPanel.vue#L61-L85) |
-| CRM Pinia Store | [`stores/crm.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/crm.ts) |
+| Customer Directory Page | [`Customers.vue`](../../../frontend/src/views/Customers.vue) |
+| Customer Sidebar Panel | [`CustomerPanel.vue`](../../../frontend/src/components/CustomerPanel.vue) |
+| Follow-up Schedule & Reschedule Dialog | [`FollowupDialog.vue`](../../../frontend/src/components/crm/FollowupDialog.vue) |
+| Follow-up Task List & Buckets Page | [`Followups.vue`](../../../frontend/src/views/Followups.vue) |
+| Navigation Rail & Overdue Badge | [`NavRail.vue` L68–144](../../../frontend/src/components/NavRail.vue#L68-L144) |
+| Assistant & Customer Tabs Container | [`AssistantPanel.vue` L61–85](../../../frontend/src/components/AssistantPanel.vue#L61-L85) |
+| CRM Pinia Store | [`stores/crm.ts`](../../../frontend/src/stores/crm.ts) |
 
 ---
 
@@ -431,9 +449,9 @@ flowchart TD
 
 ---
 
-### 🔴 4. No Safeguard Against Demoting the Last Administrator
+### 🔴 4. Last-Administrator Safeguard Is Reactive Only
 
-**What happens today:** Clicking "Make member" on an admin user immediately updates their role without a confirmation dialog. If an administrator demotes themselves or the only admin in the organization, there is no UI warning or lockout protection.
+**What happens today:** The backend correctly refuses to demote an organization's last administrator in the same transaction as the role update, returning a conflict instead of allowing lockout. The UI does not know that in advance: it leaves "Make member" enabled, provides no confirmation for self-demotion, and explains the safeguard only after the rejected request appears as a row error.
 
 **Suggested change:** Disable the "Make member" button with a tooltip if there is only one administrator remaining in the organization, and require an explicit confirmation modal before self-demotion.
 
@@ -455,21 +473,31 @@ flowchart TD
 
 ---
 
+### 🔴 7. Team Management Has No Removal/Deactivation or Pagination
+
+**What happens today:** Administrators can create users and toggle roles, but cannot deactivate or remove a teammate from the organization. The users endpoint is paginated, while the store requests only its default first page and the tab has no pagination controls despite retaining `usersTotal`. In a larger team, members after the first page are invisible and former staff cannot be offboarded through the UI.
+
+**Suggested change:** Add explicit deactivate/remove actions with confirmation and session revocation, plus server-backed pagination or virtualized incremental loading for the member list.
+
+---
+
 ## Source Components
 
 | Element | File |
 |---|---|
-| Settings Main View & Tabs | [`Settings.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Settings.vue) |
-| AI Engine Tab | [`AiEngineTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/tabs/AiEngineTab.vue) |
-| Team Management Tab | [`TeamManagementTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/tabs/TeamManagementTab.vue) |
-| Provider Credential Card Component | [`ProviderCredentialCard.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/ProviderCredentialCard.vue) |
-| Masked Secret Password Input | [`MaskedSecretInput.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/MaskedSecretInput.vue) |
-| Integration Status Badge | [`IntegrationStatus.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/IntegrationStatus.vue) |
-| Parsers & Crawlers Tab | [`ExtractionTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/tabs/ExtractionTab.vue) |
-| Monitoring & Analytics Tab | [`MonitoringTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/tabs/MonitoringTab.vue) |
-| Remote Access & ngrok Tab | [`RemoteAccessTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/tabs/RemoteAccessTab.vue) |
-| Communication Channels Tab | [`CommunicationChannelsTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/tabs/CommunicationChannelsTab.vue) |
-| Data & Backup Tab | [`DataBackupTab.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/tabs/DataBackupTab.vue) |
-| Settings Pinia Store | [`stores/settings.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/settings.ts) |
-| Integration Settings Composable | [`composables/useIntegrationSettings.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/composables/useIntegrationSettings.ts) |
-| Route Definitions & Admin Guard | [`router.ts` L46–71](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/router.ts#L46-L71) |
+| Settings Main View & Tabs | [`Settings.vue`](../../../frontend/src/views/Settings.vue) |
+| AI Engine Tab | [`AiEngineTab.vue`](../../../frontend/src/components/settings/tabs/AiEngineTab.vue) |
+| Team Management Tab | [`TeamManagementTab.vue`](../../../frontend/src/components/settings/tabs/TeamManagementTab.vue) |
+| Provider Credential Card Component | [`ProviderCredentialCard.vue`](../../../frontend/src/components/settings/ProviderCredentialCard.vue) |
+| Masked Secret Password Input | [`MaskedSecretInput.vue`](../../../frontend/src/components/settings/MaskedSecretInput.vue) |
+| Integration Status Badge | [`IntegrationStatus.vue`](../../../frontend/src/components/settings/IntegrationStatus.vue) |
+| Parsers & Crawlers Tab | [`ExtractionTab.vue`](../../../frontend/src/components/settings/tabs/ExtractionTab.vue) |
+| Monitoring & Analytics Tab | [`MonitoringTab.vue`](../../../frontend/src/components/settings/tabs/MonitoringTab.vue) |
+| Remote Access & ngrok Tab | [`RemoteAccessTab.vue`](../../../frontend/src/components/settings/tabs/RemoteAccessTab.vue) |
+| Communication Channels Tab | [`CommunicationChannelsTab.vue`](../../../frontend/src/components/settings/tabs/CommunicationChannelsTab.vue) |
+| Data & Backup Tab | [`DataBackupTab.vue`](../../../frontend/src/components/settings/tabs/DataBackupTab.vue) |
+| Settings Pinia Store | [`stores/settings.ts`](../../../frontend/src/stores/settings.ts) |
+| Integration Settings Composable | [`composables/useIntegrationSettings.ts`](../../../frontend/src/composables/useIntegrationSettings.ts) |
+| Route Definitions & Admin Guard | [`router.ts` L46–71](../../../frontend/src/router.ts#L46-L71) |
+| User listing and role update handlers | [`auth.go` L380–471](../../../backend/internal/httpapi/auth.go#L380-L471) |
+| Transactional last-admin guard | [`store.go` L650–692](../../../backend/internal/store/store.go#L650-L692) |

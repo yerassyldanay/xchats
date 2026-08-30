@@ -1,6 +1,6 @@
 # First-Time Onboarding — User Flow
 
-> **Purpose:** Trace the end-to-end first-time user experience from launching a fresh installation of xchats through sign-in with default bootstrap credentials, forced password reset, initial workspace loading, and navigating through the Setup Wizard modal to the final empty inbox state. Friction points are marked with 🔴.
+> **Purpose:** Trace the end-to-end first-time user experience from launching a fresh installation of xchats through sign-in with the default bootstrap credentials, initial workspace loading, and the Setup Wizard modal to the final empty inbox state. The forced-password route is included as a conditional branch, but the current seed migration does **not** set that flag for the default admin. Friction points are marked with 🔴.
 
 ---
 
@@ -41,8 +41,9 @@ flowchart TD
     LoginPage --> LoginSubmit
 
     LoginSubmit -->|"Invalid email or password"| LoginErrorState
-    LoginSubmit -->|"Valid initial admin credentials\nmust_change_password is true"| ChangePasswordPage
-    LoginSubmit -->|"Valid operator credentials\nmust_change_password is false"| OperatorDirectInbox
+    LoginSubmit -->|"Valid current seeded admin credentials\nmust_change_password is false"| AdminDirectInbox
+    LoginSubmit -->|"Account is explicitly flagged\nmust_change_password is true"| ChangePasswordPage
+    LoginSubmit -->|"Valid non-admin credentials"| OperatorDirectInbox
 
     subgraph LoginErrorState["Screen: /login — Error"]
         direction TB
@@ -53,7 +54,7 @@ flowchart TD
     end
     LoginErrorState --> LoginPage
 
-    subgraph ChangePasswordPage["Screen: /change-password — Forced Password Reset"]
+    subgraph ChangePasswordPage["Conditional screen: /change-password — Forced Password Reset"]
         direction TB
         ChangePwSees["User sees:
         • Centered card with KeyRound icon
@@ -93,13 +94,22 @@ flowchart TD
 
     PasswordSuccessTransition --> WizardStep1
 
+    subgraph AdminDirectInbox["Transition: Seeded Admin Session Initialized"]
+        direction TB
+        AdminTransitionSees["Router redirects directly to /chatboard 🔴
+        Nav rail renders on left
+        App onboarding gate triggers Setup Wizard
+        Public default password remains unchanged"]
+    end
+    AdminDirectInbox --> WizardStep1
+
     subgraph OperatorDirectInbox["Screen: /chatboard — Non-Admin Operator Landing"]
         direction TB
         OpSees["User sees:
         • Persistent left Nav Rail
         • Empty Chat List: 'No chats yet'
-        • Empty Thread Pane: 'Pick a chat'
-        • Empty AI Panel: 'No reply suggested yet'
+        • Empty Thread Pane: 'Pick a chat to open the conversation'
+        • Right panel defaults to Customer: 'Pick a conversation'
         • Zero onboarding guide or wizard shown 🔴"]
     end
 
@@ -134,7 +144,7 @@ flowchart TD
         • If invalid: Inline error 'Invalid API key'
         • Additional settings appear: Base URL, Default Model"]
     end
-    W1SaveKey --> WizardStep2
+    W1SaveKey --> WizardStep1
 
     subgraph WizardStep2["Modal: Welcome to xchats — Step 2 of 3 (Channels)"]
         direction TB
@@ -181,9 +191,10 @@ flowchart TD
         W3Feedback["User sees:
         • If error: Red text error message
         • If success: Green checkmark + 'Invitation sent.'
-        • Form resets"]
+        • Invite form is replaced by the success message
+        • Wizard remains on Step 3 until Back, Finish, or Skip setup"]
     end
-    W3InviteSubmit --> FinishWizardAction
+    W3InviteSubmit --> WizardStep3
 
     subgraph GoToChannelsAction["Action: Go to Channels"]
         direction TB
@@ -214,15 +225,15 @@ flowchart TD
         • Left Nav Rail: Inbox, Customers, Tasks, Channels, Campaigns, KB, Simulator, Settings
         • Left Pane: Chat list empty state — 'No chats yet. New messages will show up here.'
         • Middle Pane: Chat thread empty state — 'Pick a chat to open the conversation'
-        • Right Pane: AI assistant empty state — 'No reply suggested yet.'
+        • Right Pane: Customer tab empty state — 'Pick a conversation.'
         • No getting-started checklist or onboarding banner 🔴"]
     end
 
     subgraph AccountsPageEmpty["Screen: /accounts — Channels Management"]
         direction TB
         AccountsSees["User sees:
-        • Header: Channels and Accounts
-        • Stat cards: Connected 0 | Waiting 0 | Broken 0
+        • Header: Channels
+        • Stat cards: Connected 0 | Waiting on action 0 | Not connected 0
         • Empty state banner
         • Button: + Connect a channel
         • No contextual return link to finish wizard 🔴"]
@@ -235,15 +246,15 @@ flowchart TD
 
 ### 🔴 1. Default Admin Credentials are Public in the README and Migrations
 
-**What happens today:** The initial admin credentials (`admin@xchat.kz` / `xchat-admin-change-me`) are publicly documented in the repository `README.md` and hardcoded in database seed migrations. On publicly reachable deployments, any external party who identifies an unconfigured xchats instance can log in immediately before the owner completes setup.
+**What happens today:** The initial admin credentials (`admin@xchat.kz` / `xchat-admin-change-me`) are publicly documented in the repository `README.md` and restored by the current database migration. That migration also sets `must_change_password = 0`, so the seeded admin is **not** sent through `/change-password`; the public password remains valid until an operator changes it through the API. On a publicly reachable, unconfigured deployment, this is an immediate account-takeover risk.
 
 **Suggested change:** Automatically generate a strong random one-time administrator password upon first startup and print it directly to the terminal stdout / container logs (or prompt the operator to initialize credentials in an interactive initial setup CLI command).
 
 ---
 
-### 🔴 2. No Way to Change Password in the UI After Initial Onboarding
+### 🔴 2. No Way to Change Password in the UI
 
-**What happens today:** While the app forces a password change upon the very first login via `/change-password`, once that initial reset is completed, there is no password management or security settings interface anywhere in the UI (neither in the user profile menu in the left navigation rail nor in the Settings view). The `README.md` explicitly directs users to send manual `curl` commands to the backend API to change their password later.
+**What happens today:** The `/change-password` view exists only for accounts whose server-side `must_change_password` flag is true. The current seeded admin is not flagged, and there is no password management or security interface in the profile menu or Settings. The `README.md` directs users to send a manual `curl` request to change the default password.
 
 **Suggested change:** Add an "Account Security" / "Change Password" modal or sub-tab inside the user profile avatar dropdown in the navigation rail and within the Settings page so operators and administrators can update their password directly from the interface at any time.
 
@@ -259,7 +270,7 @@ flowchart TD
 
 ### 🔴 4. Knowledge Base Setup is Completely Omitted from the Setup Wizard
 
-**What happens today:** The 3-step setup wizard covers AI Provider API keys (Step 1), Channel connection redirect (Step 2), and Teammate invitations (Step 3). The Knowledge Base is never mentioned. However, xchats' core AI assistant cannot draft replies without Knowledge Base records (products, tariffs, delivery zones, policies); without KB data, the model escalates 100% of conversations to humans.
+**What happens today:** The 3-step setup wizard covers an AI provider key (Step 1), a channel connection redirect (Step 2), and teammate creation (Step 3). The Knowledge Base is never mentioned even though its published records provide the business facts used to ground assistant replies.
 
 **Suggested change:** Add a dedicated Knowledge Base step into the onboarding wizard (e.g., between AI Provider and Channels) offering a one-click button to "Load Demo Knowledge Base" (`seed-kb-demo`) or import existing business facts, explaining that the AI relies entirely on this knowledge to answer inquiries.
 
@@ -275,10 +286,10 @@ flowchart TD
 
 ### 🔴 6. No Persistent Getting-Started Checklist After Wizard Closes
 
-**What happens today:** As soon as the Setup Wizard is completed or skipped, the modal vanishes completely. The user is left looking at an empty 3-pane chatboard with placeholder messages ("No chats yet", "Pick a chat", "No reply suggested yet"). There is no persistent onboarding checklist, banner, or progress indicator remaining on screen to guide next actions.
+**What happens today:** As soon as the Setup Wizard is completed or skipped, the modal vanishes completely. The user is left looking at an empty 3-pane chatboard with placeholder messages ("No chats yet", "Pick a chat to open the conversation", "Pick a conversation"). There is no persistent onboarding checklist, banner, or progress indicator remaining on screen to guide next actions.
 
 **Suggested change:** Render a collapsible "Getting Started Checklist" card on the empty inbox state (or in the top header) showing remaining setup milestones:
-1. [x] Set Admin Password
+1. [ ] Replace Default Admin Credentials
 2. [ ] Add AI Provider API Key (OpenRouter / OpenAI / Gemini)
 3. [ ] Connect WhatsApp or Telegram Channel
 4. [ ] Populate Knowledge Base Facts
@@ -297,20 +308,25 @@ flowchart TD
 
 ### 🔴 8. Step 3 Prompts for Teammate Invites Before the Product is Functional
 
-**What happens today:** Step 3 of the wizard asks the user to invite colleagues with email and password before channels have been connected, before the AI assistant has been verified, and before any knowledge base content is configured. If teammates accept the invitation and log in at this stage, they enter a completely non-functional workspace.
+**What happens today:** Step 3 asks the administrator to create a teammate account and choose its password before a channel or Knowledge Base content is required. The action provisions the account directly; despite the success copy saying "Invitation sent", there is no email invitation or acceptance flow. A teammate can therefore receive credentials for an empty or non-functional workspace.
 
 **Suggested change:** Reorder onboarding milestones so that teammate invitations are recommended as the final step *after* at least one communication channel is connected and verified in the Simulator.
 
 ---
 
-### 🔴 9. Non-Admin Operators See Zero Onboarding
+### 🔴 9. Setup Wizard Can Be Silently Skipped After a Load Failure
 
-**What happens today:** When an operator is invited and signs in, they are immediately placed on the `/chatboard` view without any onboarding or introduction. They receive no explanation of the 3-column layout, how assignments work, or how to review and approve AI-generated draft responses.
+**What happens today:** `App.vue` checks setup status only once per admin session. If `settingsStore.load()` fails during that check, the catch block intentionally does nothing and `checkedSetup` remains true. The wizard will not retry during the session, and the user receives no explanation that onboarding was skipped.
 
-**Suggested change:** Add a first-time operator welcome modal explaining:
-- How incoming messages appear in the chat list
-- How the AI assistant drafts recommended responses in the right-hand panel
-- How to approve or edit draft replies before sending them to customers
+**Suggested change:** Surface a retryable onboarding-status error and retry on reconnect or the next navigation. Do not mark the one-time check as complete until setup state has loaded successfully.
+
+---
+
+### 🔴 10. Setup Wizard Lacks Dialog and Form Accessibility
+
+**What happens today:** The wizard is a fixed overlay made from plain `div` elements. It has no dialog semantics, accessible name, focus trap, initial focus, Escape handling, or focus restoration. Its teammate inputs rely on placeholders instead of associated labels, and asynchronous errors/success are not announced through a live region. Keyboard and screen-reader users can move into the obscured application behind the modal or miss state changes.
+
+**Suggested change:** Use the shared accessible Dialog primitives, add explicit labels and field names, focus the first relevant control, trap and restore focus, support Escape with an intentional confirmation policy, and announce validation/success with `aria-live="polite"`.
 
 ---
 
@@ -318,18 +334,19 @@ flowchart TD
 
 | UI Element / Screen | Source File | Description |
 |---|---|---|
-| Sign In Screen | [`Login.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Login.vue) | Brand panel, credentials form, error feedback, and language selector |
-| Forced Password Reset Screen | [`ChangePassword.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/ChangePassword.vue) | Password change form required on first login before accessing workspace |
-| Masked Password Input Component | [`MaskedSecretInput.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/MaskedSecretInput.vue) | Shared secret input with eye icon toggle for showing/masking passwords |
-| Onboarding Gate & Realtime Mount | [`App.vue` L20–46](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/App.vue#L20-L46) | Evaluates `onboardingReady` for admins and displays the `SetupWizard` modal |
-| Setup Wizard Modal | [`SetupWizard.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/SetupWizard.vue) | 3-step first-run onboarding modal (AI provider, channels redirect, team invite) |
-| Provider Credential Card | [`ProviderCredentialCard.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/settings/ProviderCredentialCard.vue) | OpenRouter API key entry, validation testing, and settings configuration |
-| Persistent Navigation Rail | [`NavRail.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/NavRail.vue) | Left navigation bar, app logo, route links, status indicators, and avatar dropdown |
-| Chatboard View | [`Chatboard.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Chatboard.vue) | Main 3-pane layout containing chat list, conversation thread, and assistant panel |
-| Chat List (Empty State) | [`ChatList.vue` L125–132](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/ChatList.vue#L125-L132) | Left pane chat list with search input, filters, new message button, and empty state |
-| Chat Thread (Empty State) | [`ChatThread.vue` L199–206](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/ChatThread.vue#L199-L206) | Middle conversation pane with "Pick a chat to open the conversation" empty state |
-| AI Assistant Panel (Empty State) | [`AssistantPanel.vue` L156–185](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AssistantPanel.vue#L156-L185) | Right pane with customer info tabs, AI suggested reply cards, and empty state |
-| Channels Management View | [`Accounts.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Accounts.vue) | Channels list, connection status counters, and channel connection dialog |
-| Authentication Store | [`stores/auth.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/auth.ts) | Pinia store managing user session, roles, permissions, and `mustChangePassword` state |
-| Settings Store | [`stores/settings.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/settings.ts) | Pinia store managing integration credentials, setup completion flag, and health checks |
-| Router & Navigation Guards | [`router.ts` L50–71](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/router.ts#L50-L71) | Global route guards enforcing auth redirect, forced password reset, and role checks |
+| Sign In Screen | [`Login.vue`](../../../frontend/src/views/Login.vue) | Brand panel, credentials form, error feedback, and language selector |
+| Conditional Password Reset Screen | [`ChangePassword.vue`](../../../frontend/src/views/ChangePassword.vue) | Password form shown only when the authenticated account carries `must_change_password = true` |
+| Masked Password Input Component | [`MaskedSecretInput.vue`](../../../frontend/src/components/settings/MaskedSecretInput.vue) | Shared secret input with eye icon toggle for showing/masking passwords |
+| Onboarding Gate & Realtime Mount | [`App.vue` L20–46](../../../frontend/src/App.vue#L20-L46) | Evaluates `onboardingReady` for admins and displays the `SetupWizard` modal |
+| Setup Wizard Modal | [`SetupWizard.vue`](../../../frontend/src/components/settings/SetupWizard.vue) | 3-step first-run onboarding modal (AI provider, channels redirect, team invite) |
+| Provider Credential Card | [`ProviderCredentialCard.vue`](../../../frontend/src/components/settings/ProviderCredentialCard.vue) | OpenRouter API key entry, validation testing, and settings configuration |
+| Persistent Navigation Rail | [`NavRail.vue`](../../../frontend/src/components/NavRail.vue) | Left navigation bar, app logo, route links, status indicators, and avatar dropdown |
+| Chatboard View | [`Chatboard.vue`](../../../frontend/src/views/Chatboard.vue) | Main 3-pane layout containing chat list, conversation thread, and assistant panel |
+| Chat List (Empty State) | [`ChatList.vue` L125–132](../../../frontend/src/components/ChatList.vue#L125-L132) | Left pane chat list with search input, filters, new message button, and empty state |
+| Chat Thread (Empty State) | [`ChatThread.vue` L199–206](../../../frontend/src/components/ChatThread.vue#L199-L206) | Middle conversation pane with "Pick a chat to open the conversation" empty state |
+| Right Customer/Assistant Panel | [`AssistantPanel.vue` L58–185](../../../frontend/src/components/AssistantPanel.vue#L58-L185) | Tab container that defaults to Customer and conditionally shows AI draft states |
+| Channels Management View | [`Accounts.vue`](../../../frontend/src/views/Accounts.vue) | Channels list, connection status counters, and channel connection dialog |
+| Authentication Store | [`stores/auth.ts`](../../../frontend/src/stores/auth.ts) | Pinia store managing user session, roles, permissions, and `mustChangePassword` state |
+| Settings Store | [`stores/settings.ts`](../../../frontend/src/stores/settings.ts) | Pinia store managing integration credentials, setup completion flag, and health checks |
+| Router & Navigation Guards | [`router.ts` L50–71](../../../frontend/src/router.ts#L50-L71) | Global route guards enforcing auth redirect, forced password reset, and role checks |
+| Current Default Admin Migration | [`0011_restore_default_admin_password.up.sql`](../../../backend/migrations/sqlite/0011_restore_default_admin_password.up.sql) | Restores the public seed password and sets `must_change_password = 0` |

@@ -11,7 +11,7 @@ The operator reaches the Inbox board (`/chatboard`) via several paths:
 1. **Default Login Landing:** Signing in at `/login` redirects authenticated operators directly to `/chatboard`.
 2. **From the Nav Rail:** Clicking the **Inbox** icon (top item in the persistent left navigation bar).
 3. **From CRM Customer Details:** Clicking any linked conversation under the customer profile conversations list.
-4. **Post-Password Change:** Completing or bypassing mandatory password change lands back on `/chatboard`.
+4. **Post-Password Change:** Completing a required password change, when an account is explicitly flagged, lands back on `/chatboard`.
 
 ---
 
@@ -38,7 +38,7 @@ flowchart TD
         direction TB
         ELSees[Operator sees:
         • Search bar: Search chats or contacts
-        • Tabs: Mine | Unassigned | All
+        • Tabs: Mine · Unassigned · All
         • Message icon with text: No chats yet
         • Subtitle: New messages will show up here
         • Plus icon floating button in corner
@@ -53,7 +53,7 @@ flowchart TD
         PLSees[Operator sees:
         • Header: xchats title and New Message icon button
         • Search input with instant filter debounce
-        • Filter tabs: Mine | Unassigned | All
+        • Filter tabs: Mine · Unassigned · All
         • Channel filter dropdown if multiple numbers connected
         • Chat cards displaying:
           - Contact avatar with colored background
@@ -82,7 +82,7 @@ flowchart TD
         direction TB
         NMSees[Operator sees:
         • Title: New message
-        • Send from number selector if multiple channels available
+        • Send-from selector for eligible QR WhatsApp/simulator accounts
         • Phone number input with country code hint
         • Message text area
         • Attached files preview list
@@ -91,9 +91,9 @@ flowchart TD
     end
 
     ComposeModal --> ComposeAction{Operator fills form and clicks Send}
-    ComposeAction -->|Phone number invalid or text empty| ComposeError[Operator sees red error alert banner]
+    ComposeAction -->|Phone number invalid or both text and files empty| ComposeError[Operator sees red error alert banner]
     ComposeError --> ComposeModal
-    ComposeAction -->|Valid phone and message| ComposeSending[Button shows spinner: Sending...]
+    ComposeAction -->|Valid phone and text and/or attachment| ComposeSending[Button shows spinner: Sending...]
     ComposeSending -->|Send succeeds| OpenNewThread[Modal closes and new chat opens in main view]
     OpenNewThread --> ThreadSelectedState
 
@@ -102,7 +102,7 @@ flowchart TD
         direction TB
         TSees[Operator sees:
         • Thread Header:
-          - Contact avatar and online indicator
+          - Contact avatar and unconditional green dot — not real presence 🔴
           - Contact display name and phone number
           - Assignee dropdown button: Assign to me / Assign / Operator name
           - Resolve button outline with green checkmark
@@ -123,7 +123,7 @@ flowchart TD
     subgraph CustomerTabState[Panel: Customer Profile]
         direction TB
         CSees[Operator sees:
-        • Tab switch bar: Customer active | AI assistant
+        • Tab switch bar: Customer active · AI assistant
         • Contact avatar and editable name input
         • Connected channel identities
         • Editable phone and email fields with inline auto-save
@@ -143,7 +143,7 @@ flowchart TD
     subgraph AssistantTabState[Panel: AI Assistant Drafts]
         direction TB
         ASees[Operator sees:
-        • Tab switch bar: Customer | AI assistant active
+        • Tab switch bar: Customer · AI assistant active
         • Header: Regenerate icon button]
     end
 
@@ -217,9 +217,9 @@ flowchart TD
 
 ## Friction Points and Suggested Changes
 
-### 🔴 1. AI Assistant Tab is Hidden by Default
+### 🔴 1. AI Draft Availability Is Hidden Behind an Unbadged Tab
 
-**What happens today:** When opening a conversation, the right panel defaults to the **Customer** tab. The operator has to manually click the **AI assistant** tab on every conversation to see whether a suggested draft exists or to generate one.
+**What happens today:** The right panel defaults to **Customer** when `AssistantPanel` first mounts. The selected tab then persists while the operator switches conversations, so it does not reset for every chat. However, when Customer remains selected there is no badge or status indicator showing that an AI draft exists or is being generated behind the **AI assistant** tab.
 
 **Suggested change:** Automatically default to the **AI assistant** tab when unread inbound messages are pending triage, or add an unread badge indicator / glowing dot to the **AI assistant** tab header when drafts are ready so the operator does not miss them.
 
@@ -273,16 +273,56 @@ flowchart TD
 
 ---
 
+### 🔴 8. Rapid Chat Switching Can Render the Previous Chat’s Data
+
+**What happens today:** `selectChat()` sets the active ID, clears state, and launches message/draft requests without cancellation or a response-ID guard. If an operator clicks Chat A and quickly clicks Chat B, the slower response for A can arrive last and overwrite B's messages or drafts. The customer profile watcher has the same stale-response risk, so the right panel can also show the wrong customer after rapid selection.
+
+**Suggested change:** Cancel superseded requests with `AbortController`, or capture the requested chat/customer ID and apply each response only if it still matches the active selection.
+
+---
+
+### 🔴 9. Manual Send Failures Are Invisible and Attachments Are Lost
+
+**What happens today:** `ChatThread` calls `inbox.send()` without awaiting or catching it, and the store has no `sendError` state. A failed upload or message request produces no inline error or retry action. `Composer` also clears its selected files immediately after emitting the send event, before the async upload succeeds, so the operator must find and attach them again after a failure.
+
+**Suggested change:** Keep text and attachments until the send succeeds, surface an inline retryable error, and distinguish upload failure from message-delivery failure.
+
+---
+
+### 🔴 10. Green “Online” Dot Is Always Shown
+
+**What happens today:** Every active thread renders a green presence dot on the customer avatar unconditionally. It is not backed by presence or last-seen data, so it communicates a false “online now” state for WhatsApp, Telegram, Instagram, Messenger, and simulator contacts.
+
+**Suggested change:** Remove the dot until presence data exists, or replace it with a channel badge. If presence is later implemented, label it accessibly and show unknown/offline states honestly.
+
+---
+
+### 🔴 11. Inbox and Message History Are Silently Truncated
+
+**What happens today:** The chat list requests only the backend's first page (50 by default), and a selected thread requests the latest 80 messages. Neither pane offers pagination, infinite scroll, or a count indicating that older chats/messages exist. Operators cannot reach older records without search, and cannot load messages older than the 80-item window.
+
+**Suggested change:** Add cursor/page-based loading with visible loading states and preserve scroll position when prepending older messages.
+
+---
+
+### 🔴 12. “New Message” Supports Only QR WhatsApp/Simulator Accounts
+
+**What happens today:** The send-from selector is built from `composableAccounts`, which includes only `whatsapp` and `simulator`. Telegram, WhatsApp Cloud API, Instagram, and Messenger accounts are excluded because those transports cannot use the same phone-number compose endpoint. The dialog does not explain this limitation, and if there is zero or one eligible account the selector is hidden entirely.
+
+**Suggested change:** Hide or disable the entry point when no eligible account exists and explain which channels can initiate conversations. For supported non-phone channels, provide channel-specific compose flows instead of a universal phone-number form.
+
+---
+
 ## Source Components
 
 | UI Element / View | Source File |
 |---|---|
-| Main 3-Column Board Layout | [`Chatboard.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/views/Chatboard.vue) |
-| Left Chat List & Filters | [`ChatList.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/ChatList.vue) |
-| Message Thread & Assignee Bar | [`ChatThread.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/ChatThread.vue) |
-| Message Composer Bar | [`Composer.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/Composer.vue) |
-| Right Assistant Draft Panel | [`AssistantPanel.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/AssistantPanel.vue) |
-| Customer Profile & CRM Details | [`CustomerPanel.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/CustomerPanel.vue) |
-| Outbound Compose Modal | [`NewMessageDialog.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/NewMessageDialog.vue) |
-| Persistent Navigation Rail | [`NavRail.vue`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/components/NavRail.vue) |
-| Inbox State & Realtime Store | [`stores/inbox.ts`](file:///home/yerassyl/codespace/github.com/yerassyldanay/xchats/frontend/src/stores/inbox.ts) |
+| Main 3-Column Board Layout | [`Chatboard.vue`](../../../frontend/src/views/Chatboard.vue) |
+| Left Chat List & Filters | [`ChatList.vue`](../../../frontend/src/components/ChatList.vue) |
+| Message Thread & Assignee Bar | [`ChatThread.vue`](../../../frontend/src/components/ChatThread.vue) |
+| Message Composer Bar | [`Composer.vue`](../../../frontend/src/components/Composer.vue) |
+| Right Assistant Draft Panel | [`AssistantPanel.vue`](../../../frontend/src/components/AssistantPanel.vue) |
+| Customer Profile & CRM Details | [`CustomerPanel.vue`](../../../frontend/src/components/CustomerPanel.vue) |
+| Outbound Compose Modal | [`NewMessageDialog.vue`](../../../frontend/src/components/NewMessageDialog.vue) |
+| Persistent Navigation Rail | [`NavRail.vue`](../../../frontend/src/components/NavRail.vue) |
+| Inbox State & Realtime Store | [`stores/inbox.ts`](../../../frontend/src/stores/inbox.ts) |
