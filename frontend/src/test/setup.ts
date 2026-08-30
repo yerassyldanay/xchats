@@ -62,3 +62,14 @@ if (!Element.prototype.setPointerCapture) {
 if (!Element.prototype.releasePointerCapture) {
   Element.prototype.releasePointerCapture = () => {}
 }
+
+// jsdom implements the Blob/File constructors but not URL.createObjectURL/
+// revokeObjectURL — any "download this as a file" affordance (PromptTab's
+// downloadPrompt, CampaignWizard's downloadSampleCsv) throws the moment a
+// dom test actually clicks the button, not just when it constructs the Blob.
+if (!URL.createObjectURL) {
+  URL.createObjectURL = () => 'blob:mock'
+}
+if (!URL.revokeObjectURL) {
+  URL.revokeObjectURL = () => {}
+}

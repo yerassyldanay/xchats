@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, onBeforeRouteLeave, useRouter } from 'vue-router'
 import { CircleAlert, LoaderCircle, Megaphone, Plus, Trash2 } from 'lucide-vue-next'
@@ -23,6 +23,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import CampaignRecipientPreviewTable from '@/components/CampaignRecipientPreviewTable.vue'
 import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
+import AccountSendingBudget from '@/components/AccountSendingBudget.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -92,6 +93,19 @@ function confirmCustomVariable() {
   customVariableName.value = ''
   showCustomVariable.value = false
 }
+
+// CAM-03: "Variables used: name, promo_code" is a fact about the template,
+// not a preview of the actual message — the operator cannot tell how line
+// breaks, spacing, or a variable's real value will look until a message
+// has already gone out. Substituted with representative sample values
+// (never a real recipient's data — nothing is loaded yet at this phase),
+// so an unmapped custom variable falls back to a bracketed placeholder
+// naming itself rather than rendering blank.
+const SAMPLE_VARIABLE_VALUES: Record<string, string> = { name: 'Aigul', phone: '77011234567', code: 'SUMMER2026', promo_code: 'SUMMER2026' }
+const showMessagePreview = ref(false)
+const renderedMessagePreview = computed(() =>
+  messageBody.value.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_, v: string) => SAMPLE_VARIABLE_VALUES[v] ?? `[${v}]`),
+)
 
 const detailsError = ref('')
 const continuing = ref(false)
@@ -204,9 +218,6 @@ async function discardAndLeave() {
 // --- recipients ----------------------------------------------------------
 const pastedText = ref('')
 const uploadedFile = ref<File | null>(null)
-function onFileChange(e: Event) {
-  uploadedFile.value = (e.target as HTMLInputElement).files?.[0] ?? null
-}
 const previewResult = ref<CampaignRecipientPreviewResult | null>(null)
 const previewing = ref(false)
 const previewError = ref('')
@@ -233,6 +244,44 @@ async function checkRecipients() {
 }
 const canCheckRecipients = computed(() => pastedText.value.trim() !== '' || !!uploadedFile.value)
 
+// CAM-04: the reachability check used to be a manual prerequisite — paste
+// or upload a list, then separately notice and click Check, or Create would
+// just reject with a red error. A file selection is a single discrete
+// action (check it immediately); typed/pasted text checks itself 400ms
+// after the operator stops typing, so it never fires on every keystroke.
+const PREVIEW_DEBOUNCE_MS = 400
+let previewDebounceTimer: ReturnType<typeof setTimeout> | null = null
+watch(pastedText, () => {
+  if (previewDebounceTimer) clearTimeout(previewDebounceTimer)
+  if (!pastedText.value.trim()) return
+  previewDebounceTimer = setTimeout(() => void checkRecipients(), PREVIEW_DEBOUNCE_MS)
+})
+onBeforeUnmount(() => {
+  if (previewDebounceTimer) clearTimeout(previewDebounceTimer)
+})
+function onFileChange(e: Event) {
+  uploadedFile.value = (e.target as HTMLInputElement).files?.[0] ?? null
+  if (uploadedFile.value) void checkRecipients()
+}
+
+// CAM-06: the placeholder's two example lines don't say whether a header
+// row is required, which separators work, or how a country code should be
+// written — all of it is auto-detected server-side (see ParseRecipients'
+// own doc comment, backend/campaign/recipients.go), but the operator has
+// no way to know that without reading the Go source.
+const SAMPLE_CSV = 'phone,name,promo_code\n77011234567,Aigul,SUMMER2026\n77022222222,Bota,SUMMER2026\n'
+function downloadSampleCsv() {
+  const blob = new Blob([SAMPLE_CSV], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'recipients-sample.csv'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 // --- pace + schedule -----------------------------------------------------
 const paceMode = ref<'inherit' | 'custom'>('inherit')
 const minInterval = ref(90)
@@ -253,26 +302,60 @@ const invalidWindow = computed(() => localWindows.value.some((w) => w.start_minu
 
 const scheduleMode = ref<'now' | 'later'>('now')
 const scheduleAtLocal = ref('')
+const scheduleAtInputEl = ref<HTMLInputElement | null>(null)
+// CAM-10: a blank or already-past "later" date used to fall through
+// silently — no schedule_at patch was ever sent, and the campaign landed
+// on the detail page as an ordinary Draft with no explanation that
+// scheduling was ignored.
+const scheduleError = ref('')
+watch([scheduleMode, scheduleAtLocal], () => {
+  scheduleError.value = ''
+})
 
 // --- finish: save recipients + pace/schedule, then go to the campaign ----
 const creating = ref(false)
 const error = ref('')
 
 async function finish() {
-  if (previewStale.value) {
-    error.value = t('campaigns.wizard.errPreviewStale')
-    return
-  }
-  if (!previewResult.value || previewResult.value.valid === 0) {
-    error.value = t('campaigns.wizard.errNoRecipients')
-    return
+  error.value = ''
+  scheduleError.value = ''
+
+  if (scheduleMode.value === 'later') {
+    const when = scheduleAtLocal.value ? new Date(scheduleAtLocal.value) : null
+    if (!when || Number.isNaN(when.getTime())) {
+      scheduleError.value = t('campaigns.wizard.errScheduleRequired')
+      scheduleAtInputEl.value?.focus()
+      return
+    }
+    if (when.getTime() <= Date.now()) {
+      scheduleError.value = t('campaigns.wizard.errScheduleInPast')
+      scheduleAtInputEl.value?.focus()
+      return
+    }
   }
   if (invalidWindow.value) {
     error.value = t('campaigns.limits.errInvalidWindow')
     return
   }
-  error.value = ''
+
   creating.value = true
+  // CAM-04: Create is no longer blocked on a manual Check first — an
+  // unchecked or now-stale list is checked here, in the background, and
+  // creation proceeds automatically once it comes back valid.
+  if (!previewResult.value || previewStale.value) {
+    if (!canCheckRecipients.value) {
+      error.value = t('campaigns.wizard.errNoRecipients')
+      creating.value = false
+      return
+    }
+    await checkRecipients()
+  }
+  if (!previewResult.value || previewResult.value.valid === 0) {
+    error.value = previewError.value || t('campaigns.wizard.errNoRecipients')
+    creating.value = false
+    return
+  }
+
   const id = pendingCampaignId.value
   try {
     await campaigns.replaceRecipients(id, { text: pastedText.value, file: uploadedFile.value ?? undefined })
@@ -297,13 +380,24 @@ async function finish() {
     if (localWindows.value.length > 0) {
       patch.windows = localToUtc(localWindows.value, offsetMinutes)
     }
-    if (scheduleMode.value === 'later' && scheduleAtLocal.value) {
+    // scheduleAtLocal is guaranteed present and in the future here — the
+    // earlier guard above already returned otherwise.
+    if (scheduleMode.value === 'later') {
       patch.schedule_at = new Date(scheduleAtLocal.value).toISOString()
     }
     if (Object.keys(patch).length > 0) {
       await campaigns.update(id, patch)
     }
-    await router.push({ name: 'campaign-detail', params: { campaignId: id } })
+    // CAM-07: landing on the detail page in plain Draft status with no
+    // explanation left operators assuming "Create" had already started
+    // sending. Tell the detail page to greet a just-created, launch-now
+    // campaign with an explicit "click Start" prompt — never for one that
+    // was deliberately scheduled, which starts itself.
+    if (scheduleMode.value === 'now') {
+      await router.push({ name: 'campaign-detail', params: { campaignId: id }, query: { created: '1' } })
+    } else {
+      await router.push({ name: 'campaign-detail', params: { campaignId: id } })
+    }
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : t('campaigns.wizard.errCreateFailed')
   } finally {
@@ -316,6 +410,30 @@ async function finish() {
   <div class="flex-1 overflow-y-auto px-8 py-6 max-w-2xl">
     <h1 class="text-xl font-semibold flex items-center gap-2"><Megaphone class="w-5 h-5" /> {{ t('campaigns.wizard.title') }}</h1>
 
+    <!-- CAM-01: the wizard is two phases on one page with no back/forward
+         navigation (see phase's own doc comment above) — this indicator
+         orients the operator without implying either step is a separate
+         screen they could navigate to directly. -->
+    <div class="mt-3 flex items-center gap-2 text-xs font-medium" data-testid="wizard-step-indicator">
+      <span
+        class="flex items-center gap-1.5 rounded-full px-2.5 py-1"
+        data-testid="wizard-step-details"
+        :class="phase === 'details' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'"
+      >
+        <span class="grid place-items-center w-4 h-4 rounded-full text-[10px]" :class="phase === 'details' ? 'bg-primary-foreground text-primary' : 'bg-muted'">1</span>
+        {{ t('campaigns.wizard.stepDetails') }}
+      </span>
+      <span class="text-muted-foreground">→</span>
+      <span
+        class="flex items-center gap-1.5 rounded-full px-2.5 py-1"
+        data-testid="wizard-step-recipients"
+        :class="phase === 'recipients' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'"
+      >
+        <span class="grid place-items-center w-4 h-4 rounded-full text-[10px]" :class="phase === 'recipients' ? 'bg-primary-foreground text-primary' : 'bg-muted'">2</span>
+        {{ t('campaigns.wizard.stepRecipients') }}
+      </span>
+    </div>
+
     <section class="mt-6 space-y-4">
       <h2 class="text-sm font-semibold">{{ t('campaigns.wizard.detailsHeading') }}</h2>
       <div>
@@ -325,9 +443,9 @@ async function finish() {
       <div>
         <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.accountLabel') }}</label>
         <!-- With no connected channel the Select would open onto an empty
-             list and "Сохранить" would fail on a requirement the operator
-             has no way to satisfy from this page. Send them to Channels
-             instead of leaving them at a dead end. -->
+             list and Continue would fail on a requirement the operator has
+             no way to satisfy from this page. Send them to Channels instead
+             of leaving them at a dead end. -->
         <div v-if="noAccounts" class="mt-1.5 rounded-md border border-border bg-muted/40 p-3">
           <p class="text-sm">{{ t('campaigns.wizard.noAccounts') }}</p>
           <RouterLink :to="{ name: 'accounts' }" class="mt-2 inline-block">
@@ -342,6 +460,12 @@ async function finish() {
             <SelectItem v-for="a in accounts.accounts" :key="a.id" :value="a.id">{{ a.display_name || a.external_handle }}</SelectItem>
           </SelectContent>
         </Select>
+        <!-- CAM-05: the account's own live budget/rate-limit headroom was
+             only ever visible AFTER creation, on the detail page — an
+             operator could configure hundreds of recipients against an
+             account that's already throttled or paused and only find out
+             once it was too late to pick a different one. -->
+        <AccountSendingBudget v-if="accountId && !noAccounts" :account-id="accountId" class="mt-2" />
       </div>
       <div>
         <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.messageLabel') }}</label>
@@ -386,13 +510,28 @@ async function finish() {
         <p v-if="uniqueVariables.length" class="mt-1 text-xs text-muted-foreground">
           {{ t('campaigns.wizard.variablesDetected', { variables: uniqueVariables.join(', ') }) }}
         </p>
+        <!-- CAM-03: "Variables used: name, promo_code" is the template's own
+             shape, not a preview of the actual message — line breaks,
+             spacing, and a variable's real value were all invisible until
+             a message had already gone out. -->
+        <div v-if="messageBody.trim()" class="mt-1.5">
+          <button type="button" class="text-xs font-medium text-primary hover:underline" data-testid="toggle-message-preview" @click="showMessagePreview = !showMessagePreview">
+            {{ showMessagePreview ? t('campaigns.wizard.previewHide') : t('campaigns.wizard.previewShow') }}
+          </button>
+          <div v-if="showMessagePreview" class="mt-2 max-w-xs">
+            <div class="rounded-2xl rounded-bl-sm border border-wa/20 bg-wa/10 px-3 py-2 text-sm whitespace-pre-wrap" data-testid="message-preview-bubble">
+              {{ renderedMessagePreview }}
+            </div>
+            <p class="mt-1 text-[11px] text-muted-foreground">{{ t('campaigns.wizard.previewSampleHint') }}</p>
+          </div>
+        </div>
       </div>
       <p v-if="detailsError" class="flex items-center gap-1.5 text-sm text-destructive">
         <CircleAlert class="w-4 h-4 shrink-0" /> {{ detailsError }}
       </p>
       <Button v-if="phase === 'details'" type="button" :disabled="continuing || noAccounts" @click="continueToRecipients">
         <LoaderCircle v-if="continuing" class="w-4 h-4 animate-spin" />
-        {{ t('campaigns.actions.save') }}
+        {{ t('campaigns.wizard.continueButton') }}
       </Button>
     </section>
 
@@ -401,12 +540,28 @@ async function finish() {
       <p class="text-xs text-muted-foreground">{{ t('campaigns.wizard.recipientsHint') }}</p>
       <div>
         <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.pasteLabel') }}</label>
-        <Textarea v-model="pastedText" :placeholder="t('campaigns.wizard.pastePlaceholder')" class="mt-1.5 min-h-[120px] font-mono text-xs" />
+        <Textarea v-model="pastedText" :placeholder="t('campaigns.wizard.pastePlaceholder')" class="mt-1.5 min-h-[120px] font-mono text-xs" data-testid="paste-recipients" />
       </div>
       <div class="flex items-center gap-2">
         <label class="text-xs font-medium text-muted-foreground shrink-0">{{ t('campaigns.wizard.uploadLabel') }}</label>
         <input type="file" accept=".csv,.txt" class="text-xs" @change="onFileChange" />
       </div>
+      <!-- CAM-06: the placeholder's two example lines don't say whether a
+           header row is required, which separators work, or how a country
+           code should be written — all of it auto-detected server-side,
+           invisible from here without reading the Go source. -->
+      <details class="rounded-md border border-border p-2.5 text-xs text-muted-foreground">
+        <summary class="cursor-pointer font-medium text-foreground">{{ t('campaigns.wizard.formatHelpTitle') }}</summary>
+        <ul class="mt-2 list-disc space-y-1 pl-4">
+          <li>{{ t('campaigns.wizard.formatHelpHeader') }}</li>
+          <li>{{ t('campaigns.wizard.formatHelpSeparator') }}</li>
+          <li>{{ t('campaigns.wizard.formatHelpPhone') }}</li>
+          <li>{{ t('campaigns.wizard.formatHelpColumns') }}</li>
+        </ul>
+        <button type="button" class="mt-2 font-medium text-primary hover:underline" data-testid="download-sample-csv" @click="downloadSampleCsv">
+          {{ t('campaigns.wizard.downloadSample') }}
+        </button>
+      </details>
       <Button type="button" variant="outline" size="sm" :disabled="!canCheckRecipients || previewing" @click="checkRecipients">
         <LoaderCircle v-if="previewing" class="w-4 h-4 animate-spin" />
         {{ previewing ? t('campaigns.wizard.checking') : t('campaigns.wizard.checkReachability') }}
@@ -414,7 +569,7 @@ async function finish() {
       <p v-if="previewError" class="flex items-center gap-1.5 text-sm text-destructive">
         <CircleAlert class="w-4 h-4 shrink-0" /> {{ previewError }}
       </p>
-      <CampaignRecipientPreviewTable v-if="previewResult" :result="previewResult" />
+      <CampaignRecipientPreviewTable v-if="previewResult" :result="previewResult" :message-variables="uniqueVariables" />
       <p v-else class="text-xs text-muted-foreground">{{ t('campaigns.wizard.previewEmpty') }}</p>
       <p v-if="previewResult && previewStale" class="flex items-center gap-1.5 text-xs text-amber-600" data-testid="preview-stale-notice">
         <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ t('campaigns.wizard.previewStaleNotice') }}
@@ -492,11 +647,19 @@ async function finish() {
           </Button>
           <input
             v-if="scheduleMode === 'later'"
+            ref="scheduleAtInputEl"
             v-model="scheduleAtLocal"
             type="datetime-local"
             class="h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            :class="scheduleError ? 'border-destructive' : 'border-border'"
           />
         </div>
+        <!-- CAM-10: required only once "later" is actually selected, and
+             cleared the moment either mode or the date value changes so a
+             fixed error doesn't survive a correction. -->
+        <p v-if="scheduleMode === 'later' && scheduleError" class="mt-1.5 flex items-center gap-1.5 text-xs text-destructive" data-testid="schedule-error">
+          <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ scheduleError }}
+        </p>
       </div>
     </section>
 
@@ -505,7 +668,7 @@ async function finish() {
     </p>
 
     <div v-if="phase === 'recipients'" class="mt-6 flex items-center gap-2 pb-10">
-      <Button type="button" :disabled="creating || previewStale" @click="finish">
+      <Button type="button" :disabled="creating" @click="finish">
         <LoaderCircle v-if="creating" class="w-4 h-4 animate-spin" />
         {{ creating ? t('campaigns.wizard.creating') : t('campaigns.wizard.create') }}
       </Button>

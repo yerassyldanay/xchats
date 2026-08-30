@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { ArrowLeft, CircleAlert, Copy, LoaderCircle, Pause, Play, RotateCcw, Square, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, CircleAlert, CircleCheck, Copy, LoaderCircle, Pause, Play, RotateCcw, Square, Trash2, X } from 'lucide-vue-next'
 import { useCampaigns } from '@/stores/campaigns'
 import { useAccounts } from '@/stores/accounts'
 import { ApiError } from '@/api/client'
@@ -29,6 +29,16 @@ const campaign = computed(() => campaigns.current)
 const loading = ref(true)
 const actionError = ref('')
 
+// CAM-07: the wizard used to redirect here with zero explanation — a
+// newly created, launch-now campaign sits in plain Draft until someone
+// notices the small Start button, and operators routinely assumed
+// "Create campaign" had already begun sending. The wizard marks that
+// arrival with ?created=1 (never set for a campaign deliberately
+// scheduled — that one starts itself); the flag is stripped from the URL
+// immediately so a reload or a shared link doesn't resurface it.
+const arrivedFromCreation = ref(route.query.created === '1')
+const showCreatedBanner = computed(() => arrivedFromCreation.value && campaign.value?.status === 'draft' && !campaign.value?.schedule_at)
+
 async function load() {
   loading.value = true
   actionError.value = ''
@@ -45,6 +55,11 @@ async function load() {
 
 onMounted(() => {
   campaigns.startRealtime()
+  if (arrivedFromCreation.value) {
+    const q = { ...(route.query as Record<string, string>) }
+    delete q.created
+    void router.replace({ query: q })
+  }
   void load()
 })
 onUnmounted(() => campaigns.stopRealtime())
@@ -262,6 +277,15 @@ function setEventsPage(p: number) {
     <p v-if="loading" class="mt-8 text-sm text-muted-foreground">{{ t('campaigns.list.loading') }}</p>
 
     <template v-else-if="campaign">
+      <div v-if="showCreatedBanner" class="mt-3 flex items-center gap-2 rounded-lg border border-wa/30 bg-wa/10 px-3 py-2 text-sm" data-testid="created-banner">
+        <CircleCheck class="w-4 h-4 shrink-0 text-wa" />
+        <span class="flex-1">{{ t('campaigns.detail.createdBanner') }}</span>
+        <Button type="button" size="sm" :disabled="acting" @click="start">{{ t('campaigns.actions.start') }}</Button>
+        <button type="button" class="text-muted-foreground hover:text-foreground" :aria-label="t('common.close')" @click="arrivedFromCreation = false">
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
       <div class="mt-2 flex items-start justify-between gap-4">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -400,7 +424,7 @@ function setEventsPage(p: number) {
             <p v-if="replaceError" class="flex items-center gap-1.5 text-xs text-destructive">
               <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ replaceError }}
             </p>
-            <CampaignRecipientPreviewTable v-if="replacePreview" :result="replacePreview" />
+            <CampaignRecipientPreviewTable v-if="replacePreview" :result="replacePreview" :message-variables="campaign?.variables" />
             <p v-if="replacePreview && replaceStale" class="flex items-center gap-1.5 text-xs text-amber-600" data-testid="replace-preview-stale-notice">
               <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ t('campaigns.wizard.previewStaleNotice') }}
             </p>

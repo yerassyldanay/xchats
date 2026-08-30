@@ -7,12 +7,18 @@ import type { Campaign, CampaignRecipientPreviewResult } from '@/types'
 
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
 
+const routerPush = vi.fn()
+const routerReplace = vi.fn()
+// route.query is read once at component setup (CAM-07's arrivedFromCreation,
+// CAM-11's statusFilter/recipientsPage/eventsPage) — mutate this object from
+// a test BEFORE mounting to control what a fresh mount sees.
+let routeQuery: Record<string, string> = {}
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
-    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-    useRoute: () => ({ params: { campaignId: 'camp-1' }, query: {} }),
+    useRouter: () => ({ push: routerPush, replace: routerReplace }),
+    useRoute: () => ({ params: { campaignId: 'camp-1' }, query: routeQuery }),
   }
 })
 
@@ -57,10 +63,10 @@ function previewResult(valid: number): CampaignRecipientPreviewResult {
   return { rows: [], total: valid, valid, invalid: 0, duplicate: 0 }
 }
 
-async function mountDetail() {
+async function mountDetail(campaignOver: Partial<Campaign> = {}) {
   const { api } = await import('@/api/client')
   vi.mocked(api.get).mockImplementation(async (path: string) => {
-    if (path === '/campaigns/camp-1') return campaign() as any
+    if (path === '/campaigns/camp-1') return campaign(campaignOver) as any
     if (path === '/accounts') return { items: [] } as any
     if (path.startsWith('/campaigns/camp-1/recipients')) return { items: [], total: 0 } as any
     if (path.startsWith('/campaigns/camp-1/events')) return { items: [], total: 0 } as any
@@ -293,5 +299,61 @@ describe('CampaignDetail — recipients/history pagination (CAM-11)', () => {
     await flushPromises()
 
     expect(api.get).toHaveBeenCalledWith('/campaigns/camp-1/events?page=2&page_size=50')
+  })
+})
+
+// CAM-07: the wizard used to redirect here with zero explanation — a
+// newly created, launch-now campaign sat in plain Draft until someone
+// noticed the small Start button.
+describe('CampaignDetail — post-creation launch banner (CAM-07)', () => {
+  it('shows the banner for a just-created, launch-now draft, and strips ?created=1 from the URL', async () => {
+    routeQuery = { created: '1' }
+    routerReplace.mockClear()
+    const { wrapper } = await mountDetail()
+    routeQuery = {}
+
+    expect(wrapper.find('[data-testid="created-banner"]').exists()).toBe(true)
+    expect(routerReplace).toHaveBeenCalledWith({ query: {} })
+  })
+
+  it('never shows the banner without the ?created=1 arrival flag', async () => {
+    routeQuery = {}
+    const { wrapper } = await mountDetail()
+    expect(wrapper.find('[data-testid="created-banner"]').exists()).toBe(false)
+  })
+
+  it('never shows the banner for a campaign that was deliberately scheduled — it starts itself', async () => {
+    routeQuery = { created: '1' }
+    const { wrapper } = await mountDetail({ schedule_at: '2026-09-01T10:00:00Z' })
+    routeQuery = {}
+    expect(wrapper.find('[data-testid="created-banner"]').exists()).toBe(false)
+  })
+
+  it('clicking Start from the banner starts the campaign', async () => {
+    routeQuery = { created: '1' }
+    const { wrapper } = await mountDetail()
+    routeQuery = {}
+    const { api } = await import('@/api/client')
+    vi.mocked(api.post).mockClear()
+    vi.mocked(api.post).mockResolvedValueOnce(campaign({ status: 'running' }) as any)
+
+    const banner = wrapper.find('[data-testid="created-banner"]')
+    await banner.find('button').trigger('click')
+    await flushPromises()
+
+    expect(api.post).toHaveBeenCalledWith('/campaigns/camp-1/start')
+  })
+
+  it('dismissing the banner hides it without starting the campaign', async () => {
+    routeQuery = { created: '1' }
+    const { wrapper } = await mountDetail()
+    routeQuery = {}
+    const { api } = await import('@/api/client')
+    vi.mocked(api.post).mockClear()
+
+    await wrapper.find('[data-testid="created-banner"] [aria-label="Закрыть"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="created-banner"]').exists()).toBe(false)
+    expect(api.post).not.toHaveBeenCalled()
   })
 })
