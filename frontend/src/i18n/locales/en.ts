@@ -339,6 +339,9 @@ export default {
     },
     import: {
       errStart: 'Could not start the import.',
+      errLoadStatus: 'Could not load import status.',
+      retryLoadStatus: 'Retry',
+      statusUnknownNotice: "Import status couldn't be loaded — start is disabled until this is resolved, to avoid conflicting with a run that might already be active.",
       dropHint: 'Drag files here or choose them manually',
       browseButton: 'Choose files',
       urlPlaceholder: 'Paste a page URL…',

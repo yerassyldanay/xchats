@@ -23,6 +23,13 @@ export const useKbImport = defineStore('kbImport', {
   state: () => ({
     current: null as KbImportRun | null,
     loading: false,
+    // KB-15: a FAILED status hydration must look nothing like "no import" —
+    // loadLatest used to swallow the request error entirely, so a refresh
+    // during an outage silently dropped an active run from the UI and the
+    // operator only discovered it via a 409 on their next Submit. loadError
+    // is that failure surfaced; statusUnknown below is what gates submission
+    // on it.
+    loadError: '' as string,
     submitting: false,
     error: '' as string,
 
@@ -36,21 +43,32 @@ export const useKbImport = defineStore('kbImport', {
     isActive(s): boolean {
       return !!s.current && !isTerminalRunStatus(s.current.status)
     },
+    // statusUnknown is true only while the LAST loadLatest/retry attempt
+    // failed — a genuinely different condition from isActive being false
+    // (which means "asked, and there is none"). Submission stays disabled
+    // while this is true: enabling it would risk a 409 against a run this
+    // client just can't see right now, or silently racing a run that IS
+    // active.
+    statusUnknown(s): boolean {
+      return !!s.loadError
+    },
   },
   actions: {
     // loadLatest hydrates `current` from the org's most recent run on
     // mount, so a page reload mid-import still shows live progress instead
-    // of a blank card. Best-effort, like App.vue's own provider-health
-    // hydration: a failure just leaves the card in its empty state for this
-    // session rather than raising a banner over what is, either way, not a
-    // user-initiated action.
+    // of a blank card. A failure sets loadError (see its own doc comment)
+    // instead of throwing — like App.vue's own provider-health hydration,
+    // this runs unprompted on mount, so there is no caller positioned to
+    // show a page-level error; the ingestion panel renders loadError itself
+    // with a retry action (KbIngestPanel.vue).
     async loadLatest() {
       this.loading = true
+      this.loadError = ''
       try {
         const res = await api.listKbImportRuns(1)
         this.current = res.runs[0] ?? null
-      } catch {
-        // best-effort — see doc comment above
+      } catch (e) {
+        this.loadError = e instanceof ApiError ? e.message : t('kb.import.errLoadStatus')
       } finally {
         this.loading = false
       }
@@ -72,16 +90,17 @@ export const useKbImport = defineStore('kbImport', {
 
     // refresh re-reads the tracked run — called on every kb.row.changed SSE
     // event (startRealtime below) while it is still non-terminal. A failed
-    // refresh is silently swallowed rather than surfaced in `error`: the
-    // next successful SSE-triggered refresh (or the next mount) recovers on
-    // its own, and a transient poll failure is not worth interrupting the
-    // user over the way a failed submit is.
+    // refresh sets loadError the same as loadLatest (so the retry banner
+    // covers this path too — an outage doesn't have to start exactly at
+    // mount to leave the operator looking at silently stale progress); it
+    // does not touch `error`, which stays Submit's own failure signal.
     async refresh() {
       if (!this.current) return
       try {
         this.current = await api.getKbImportRun(this.current.run_id)
-      } catch {
-        // best-effort — see doc comment above
+        this.loadError = ''
+      } catch (e) {
+        this.loadError = e instanceof ApiError ? e.message : t('kb.import.errLoadStatus')
       }
     },
 

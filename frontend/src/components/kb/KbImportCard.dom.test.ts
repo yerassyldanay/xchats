@@ -197,4 +197,34 @@ describe('KbImportCard — submitting', () => {
     expect((buttonLabelled(wrapper, 'Начать импорт').element as HTMLButtonElement).disabled).toBe(true)
     expect(wrapper.text()).toContain('Импорт уже выполняется')
   })
+
+  // KB-15: a FAILED status load must disable submission just as firmly as a
+  // known-active run — enabling it would risk a 409 against a run this
+  // client just can't currently see.
+  it('disables submission and shows a retry notice when the last status load failed', async () => {
+    const { wrapper, kbi } = await mountCard('url')
+    kbi.loadError = 'network error'
+    await stageOneUrl(wrapper)
+
+    expect((buttonLabelled(wrapper, 'Начать импорт').element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.find('[data-testid="kb-import-status-unknown"]').exists()).toBe(true)
+    // The active-run notice must not ALSO show — statusUnknown is a distinct
+    // condition (unknown, not known-active) with its own message.
+    expect(wrapper.text()).not.toContain('Импорт уже выполняется')
+  })
+
+  it('retry re-calls loadLatest and, on success, re-enables submission', async () => {
+    const { wrapper, kbi } = await mountCard('url')
+    const loadSpy = vi.spyOn(kbi, 'loadLatest').mockImplementation(async () => {
+      kbi.loadError = ''
+    })
+    kbi.loadError = 'network error'
+    await stageOneUrl(wrapper)
+
+    await wrapper.find('[data-testid="kb-import-retry-status"]').trigger('click')
+    await flushPromises()
+
+    expect(loadSpy).toHaveBeenCalledOnce()
+    expect((buttonLabelled(wrapper, 'Начать импорт').element as HTMLButtonElement).disabled).toBe(false)
+  })
 })

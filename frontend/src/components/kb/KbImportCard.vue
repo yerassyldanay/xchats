@@ -93,8 +93,15 @@ function removeUrl(i: number) {
   pendingUrls.value.splice(i, 1)
 }
 
+// KB-15: statusUnknown (the last status load/refresh failed) must not
+// silently enable a submit that might 409 against a run this client just
+// can't currently see — see kbImport.ts's own doc comment on the getter.
 const canSubmit = computed(
-  () => hasPending.value && !kbi.isActive && providerOptions.value.some((o) => o.id === provider.value && o.available)
+  () =>
+    hasPending.value &&
+    !kbi.isActive &&
+    !kbi.statusUnknown &&
+    providerOptions.value.some((o) => o.id === provider.value && o.available)
 )
 async function submit() {
   if (!canSubmit.value) return
@@ -229,7 +236,13 @@ async function submit() {
       <Button size="sm" :disabled="!canSubmit || kbi.submitting" data-testid="kb-import-submit" @click="submit">
         <LoaderCircle v-if="kbi.submitting" class="w-4 h-4 animate-spin" /> {{ t('kb.import.submitButton') }}
       </Button>
-      <span v-if="kbi.isActive" class="text-xs text-muted-foreground">{{ t('kb.import.activeRunNotice') }}</span>
+      <span v-if="kbi.statusUnknown" class="flex items-center gap-1.5 text-xs text-destructive" data-testid="kb-import-status-unknown">
+        {{ t('kb.import.statusUnknownNotice') }}
+        <button type="button" class="font-medium underline underline-offset-2 shrink-0" data-testid="kb-import-retry-status" @click="kbi.loadLatest()">
+          {{ t('kb.import.retryLoadStatus') }}
+        </button>
+      </span>
+      <span v-else-if="kbi.isActive" class="text-xs text-muted-foreground">{{ t('kb.import.activeRunNotice') }}</span>
     </div>
 
     <p v-if="kbi.error" class="text-sm text-destructive">{{ kbi.error }}</p>
