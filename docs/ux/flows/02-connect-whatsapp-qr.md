@@ -26,7 +26,8 @@ flowchart TD
         direction TB
         PageSees["User sees:
         • Header: 'Channels'
-        • 3 stat cards: Connected 0 | Waiting on action 0 | Not connected 0
+        • 3 generic stat cards: Connected 0 | Waiting on action 0 | Broken 0 🔴
+          (Redundant: Should count channels by type instead, e.g. WhatsApp / Telegram)
         • Empty state: WhatsApp + Telegram icons
         • Text: 'No channels connected yet'
         • Button: '+ Connect a channel'"]
@@ -34,21 +35,16 @@ flowchart TD
 
     AccountsPage -->|"Clicks '+ Connect a channel'"| PickerModal
 
-    subgraph PickerModal["Modal: Connect a channel"]
+    subgraph PickerModal["Modal: Connect a channel (Tiered Layout)"]
         direction TB
-        PickerSees["User sees 5 channel cards in a grid:
-
-        WhatsApp — QR code pairing
-        01 Open WhatsApp on your phone
-        02 Go to Linked Devices
-        03 Scan the QR code
-
-        Telegram — Paste BotFather token
-        WhatsApp Cloud — Official Cloud API
-        Instagram — Connect via Meta
-        Messenger — Connect via Meta
-
-        Footer: QR/token storage and Meta setup note"]
+        PickerSees["User sees 2 distinct visual tiers:
+        🟢 INSTANT CONNECT (No tech setup):
+        • WhatsApp (QR scan in 10s)
+        • Telegram bot (@BotFather token in 1m)
+        ───────────────────────────────────────
+        ⚙️ ADVANCED / META (Developer setup):
+        • Instagram Direct | Messenger | WhatsApp Cloud
+        • Labeled: Requires Meta Developer App & Public HTTPS"]
     end
 
     PickerModal -->|"Clicks WhatsApp card"| QRReady
@@ -175,6 +171,14 @@ small unlabeled icon button (RotateCw) that is easy to miss.
 
 **Suggested change:** Show a prominent yellow banner on the card:
 "Connection lost — your WhatsApp session expired. [Reconnect via QR →]"
+
+---
+
+### 🔴 7. Redundant Status Metric Cards (Replace with Channel Type Counts)
+
+**What happens today:** The top of `/accounts` renders three large stat counter boxes: `Connected (0)`, `Waiting on action (0)`, and `Broken (0)`. When teams have only 1–3 channels, these cards waste large vertical space displaying redundant metrics that can already be counted directly on the account cards below.
+
+**Suggested change:** Replace the generic status boxes with channel counts grouped by channel type/platform (e.g. `All (3)`, `WhatsApp (1)`, `Telegram (2)`, `Instagram (0)`). This groups channels by platform (which matches the user's mental model), doubles as quick filter pills, and keeps the page compact.
 
 ---
 

@@ -26,30 +26,26 @@ flowchart TD
         PageSees["User sees:
         • Header: Channels and subtitle
         • Tab bar: Connected accounts | Channel setup
-        • 3 stat cards: Connected 0 | Waiting on action 0 | Not connected 0
+        • 3 generic stat cards: Connected 0 | Waiting on action 0 | Not connected 0 🔴
+          (Redundant: Should count channels by type instead, e.g. WhatsApp / Telegram / Instagram)
         • Empty state or existing account cards grid
         • Button: + Connect a channel"]
     end
 
     AccountsPage -->|"Clicks + Connect a channel"| PickerModal
 
-    subgraph PickerModal["Modal: Connect a channel"]
+    subgraph PickerModal["Modal: Connect a channel (Tiered Layout)"]
         direction TB
-        PickerSees["User sees 5 channel cards in a grid:
-        • WhatsApp: Connect a number via QR code
-        • Telegram bot: Connect with BotFather token
-        • WhatsApp Cloud API: Official connection via Meta
-        • Instagram Direct: Official connection via Meta
-          - 01 Click Instagram login window opens
-          - 02 Sign in to Instagram business account and grant access
-          - 03 Land back here account connects automatically
-          - CTA: Continue with Instagram
-        • Messenger: Official connection via Meta
-          - 01 Click Facebook login window opens
-          - 02 Sign in and grant access to EXACTLY one Facebook Page
-          - 03 Land back here Page connects automatically
-          - CTA: Continue with Messenger
-        • 🔴 Footer note: Mentions outdated Settings Channels path"]
+        PickerSees["User sees 2 distinct visual tiers:
+        🟢 INSTANT CONNECT (No tech setup):
+        • WhatsApp (QR scan in 10s)
+        • Telegram bot (@BotFather token in 1m)
+        ───────────────────────────────────────
+        ⚙️ ADVANCED / META (Developer setup):
+        • Instagram Direct (Requires Meta App & Public HTTPS)
+        • Messenger (Requires Meta App & Page)
+        • WhatsApp Cloud API (Requires WABA & Token)
+        • Button: Read 3-Step Meta Setup Guide"]
     end
 
     PickerModal -->|"Clicks Instagram Direct or Messenger card"| PrereqCheck{"Prerequisites ready?\n1. Public access\n2. Meta Developer App\n3. Channel App/Checklist"}
@@ -225,6 +221,79 @@ Display a progress step indicator (e.g., *"Step 1 of 3: Meta App Credentials"*) 
 - *"Instagram connected! Send a test direct message to your Instagram handle to verify incoming chats."*
 - *"Configure AI auto-replies in Automation Settings [Configure →]"*
 - *"Add business knowledge to your Knowledge Base [Go to Knowledge Base →]"*
+
+---
+
+### 🔴 9. Redundant Status Metric Cards (Replace with Channel Type Counts)
+
+**What happens today:** The top of `/accounts` renders three large stat counter boxes: `Connected (0)`, `Waiting on action (0)`, and `Not connected (0)`. When teams have only 1–3 channels, these cards waste large vertical space displaying redundant metrics that can already be counted directly on the account cards below.
+
+**Suggested change:** Replace the generic status boxes with channel counts grouped by channel type/platform (e.g. `All (3)`, `WhatsApp (1)`, `Telegram (2)`, `Instagram (0)`, `Messenger (0)`). This groups channels by platform (matching the user's mental model), doubles as quick filter pills, and keeps the page compact.
+
+---
+
+### 🔴 10. Channel Picker Deceives Users on Setup Complexity (Tier Channels & Add Visual Guides)
+
+**What happens today:** The channel picker displays all 5 channels in a flat grid. The Instagram card promises: *"1. Click — window opens, 2. Sign in, 3. Done!"*, giving no hint that public HTTPS, an ngrok tunnel, and a Meta Developer App are required. When clicked, the dialog vanishes and drops the user into an intimidating technical form.
+
+**Suggested change:** Implement a 3-part UX overhaul:
+
+#### 1. Tier the Channel Picker into Two Visual Sections
+```text
++--------------------------------------------------------------------------------------------------+
+| Connect a Channel                                                                            [X] |
++--------------------------------------------------------------------------------------------------+
+|  🟢 INSTANT CONNECT (Recommended — No tech setup required)                                       |
+|  Connect in under 1 minute. Works locally on your computer with zero domain or network setup.    |
+|  +--------------------------------------------+  +--------------------------------------------+  |
+|  | [WA] WhatsApp               [ 10 SECONDS ] |  | [TG] Telegram               [ 1 MINUTE ]   |  |
+|  | Scan a QR code with your phone.            |  | Connect with a free @BotFather token.      |  |
+|  | [ Connect with QR → ]                      |  | [ Connect Telegram Bot → ]                 |  |
+|  +--------------------------------------------+  +--------------------------------------------+  |
+| ──────────────────────────────────────────────────────────────────────────────────────────────── |
+|  ⚙️ ADVANCED / META PLATFORM (Requires Developer Setup)                                          |
+|  Requires a Meta Developer Account, a verified Facebook Page, and a public domain.               |
+|  ℹ️ First time? [ Read the 3-Step Meta Setup Guide → ]                                           |
+|  +-----------------------------+  +-----------------------------+  +---------------------------+  |
+|  | [IG] Instagram Direct       |  | [FB] Messenger              |  | [WA] WhatsApp Cloud API   |  |
+|  | [ Configure & Connect → ]   |  | [ Configure & Connect → ]   |  | [ Setup Cloud API → ]     |  |
+|  +-----------------------------+  +-----------------------------+  +---------------------------+  |
++--------------------------------------------------------------------------------------------------+
+```
+
+#### 2. Interactive "Before You Start" Pre-Flight Screen
+Before navigating to setup, show an explicit pre-flight checklist:
+- `[✓] 1. Public HTTPS address` (Ready via tunnel or custom domain)
+- `[ ] 2. Meta Developer Account` (Direct link: `developers.facebook.com`)
+- `[ ] 3. Professional Instagram / Facebook Page` (Must be Business type)
+
+#### 3. Step-by-Step Visual Dashboard Guides
+In `ChannelSetupTab.vue`, replace raw text inputs with visual walkthrough cards:
+
+**Visual A: Finding App ID & App Secret in Meta**
+```text
+Inside developers.facebook.com > Your App > App settings > Basic:
++--------------------------------------------------------------------------------------------+
+|  Meta for Developers   My Apps > "xchats-bot"                                              |
+|--------------------------------------------------------------------------------------------|
+|  [Dashboard]          Basic Settings                                                       |
+|  ▼ App settings                                                                            |
+|    • Basic <--------  App ID:      [ 1234567890123456 ] [ Copy ] <------- 1. Copy App ID   |
+|    • Advanced                                                                              |
+|  ► Products           App Secret:  [ •••••••••••••••• ] [ Show ] <------- 2. Click 'Show'  |
++--------------------------------------------------------------------------------------------+
+```
+
+**Visual B: Configuring Webhook in Meta**
+```text
+Inside developers.facebook.com > Webhooks > Instagram / Messenger:
++--------------------------------------------------------------------------------------------+
+|  Edit Webhook Callback URL                                                                 |
+|  Callback URL:   [ https://xyz.ngrok-free.app/xchats/api/v1/meta/webhook ] <--- [ Copy ]   |
+|  Verify Token:   [ xchats-verify-abc123xyz                               ] <--- [ Copy ]   |
+|  [✓] Webhook field: Check the box for 'messages'                                          |
++--------------------------------------------------------------------------------------------+
+```
 
 ---
 

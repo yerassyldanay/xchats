@@ -30,29 +30,24 @@ flowchart TD
         PageSees["User sees:
         • Header: Channels - Connect WhatsApp, Telegram, Instagram and Messenger
         • Tab bar: Connected accounts | Channel setup
-        • 3 stat cards: Connected 0 | Waiting on action 0 | Not connected 0
+        • 3 generic stat cards: Connected 0 | Waiting on action 0 | Not connected 0 🔴
+          (Redundant: Should count channels by type instead, e.g. WhatsApp / Telegram)
         • Empty state: WhatsApp and Telegram icons with No channels connected yet
         • Button: + Connect a channel"]
     end
 
     AccountsPage -->|"Clicks + Connect a channel"| PickerModal
 
-    subgraph PickerModal["Modal: Connect a channel"]
+    subgraph PickerModal["Modal: Connect a channel (Tiered Layout)"]
         direction TB
-        PickerSees["User sees 5 channel cards in a grid:
-
-        WhatsApp - Connect a number via QR code
-        Telegram bot - Connect with a BotFather token
-        01 Open BotFather and send the /newbot command
-        02 Name the bot and copy the secret token it gives you
-        03 Paste the token here - delivery is configured automatically
-        CTA: Continue with Telegram
-
-        WhatsApp Cloud API - Official connection via Meta
-        Instagram Direct - Official connection via Meta
-        Messenger - Official connection via Meta
-
-        Footer: Token encryption and storage security note"]
+        PickerSees["User sees 2 distinct visual tiers:
+        🟢 INSTANT CONNECT (No tech setup):
+        • WhatsApp (QR scan in 10s)
+        • Telegram bot (@BotFather token in 1m)
+        ───────────────────────────────────────
+        ⚙️ ADVANCED / META (Developer setup):
+        • Instagram Direct | Messenger | WhatsApp Cloud
+        • Labeled: Requires Meta Developer App & Public HTTPS"]
     end
 
     PickerModal -->|"Clicks Telegram bot card"| TelegramForm
@@ -246,6 +241,14 @@ flowchart TD
 **What happens today:** The replace-token dialog already explains that a new token must belong to the same bot and that a different bot should be connected as its own channel. However, several backend validation and Telegram API errors are hardcoded in Russian, including invalid-token, cross-organization ownership, encryption-key, and different-bot errors. Those raw messages are displayed even when the frontend locale is English or Kazakh.
 
 **Suggested change:** Return stable error codes and structured details from the backend, then translate the user-facing copy in the frontend locale dictionaries.
+
+---
+
+### 🔴 8. Redundant Status Metric Cards (Replace with Channel Type Counts)
+
+**What happens today:** The top of `/accounts` renders three large stat counter boxes: `Connected (0)`, `Waiting on action (0)`, and `Not connected (0)`. When teams have only 1–3 channels, these cards waste large vertical space displaying redundant metrics that can already be counted directly on the account cards below.
+
+**Suggested change:** Replace the generic status boxes with channel counts grouped by channel type/platform (e.g. `All (3)`, `WhatsApp (1)`, `Telegram (2)`, `Instagram (0)`). This groups channels by platform (matching the user's mental model), doubles as quick filter pills, and keeps the page compact.
 
 ---
 
