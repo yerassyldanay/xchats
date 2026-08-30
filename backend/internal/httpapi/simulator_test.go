@@ -1,14 +1,18 @@
 package httpapi_test
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/llm"
 )
 
 func TestSimulatorMessage_SyncPathPersistsOneDraft(t *testing.T) {
@@ -118,6 +122,91 @@ func TestSimulatorMessage_UnregisteredProviderRejected(t *testing.T) {
 	})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for an unregistered provider", resp.StatusCode)
+	}
+}
+
+// capturingLLMClient wraps fakeLLMClient's own scripted reply but records
+// every request's messages, so a test can inspect the actual rendered prompt
+// instead of only the (content-agnostic) reply text.
+type capturingLLMClient struct {
+	fakeLLMClient
+	mu    sync.Mutex
+	calls []llm.ChatRequest
+}
+
+func (c *capturingLLMClient) Complete(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	c.mu.Lock()
+	c.calls = append(c.calls, req)
+	c.mu.Unlock()
+	return c.fakeLLMClient.Complete(ctx, req)
+}
+
+func (c *capturingLLMClient) lastPromptContains(marker string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.calls) == 0 {
+		return false
+	}
+	last := c.calls[len(c.calls)-1]
+	for _, m := range last.Messages {
+		if strings.Contains(m.Content, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestSimulatorMessage_UseDraft is KB-02's end-to-end guarantee: an operator
+// can verify a PENDING draft edit — not yet published — before committing to
+// the live KB. draftMarker exists only in the draft (staged, never
+// published/approved), so it must reach the model's prompt with use_draft:
+// true and never without it.
+func TestSimulatorMessage_UseDraft(t *testing.T) {
+	client := &capturingLLMClient{}
+	h := newHarnessWithLLM(t, client)
+
+	const draftMarker = "ЧЕРНОВИК_ТОЛЬКО_ДЛЯ_ТЕСТА"
+	resp, _ := h.postJSON("/xchats/api/v1/playground/draft/topics", map[string]any{
+		"slug": "draft-only-topic", "title": draftMarker, "body_md": "Текст черновика.",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stage draft topic: status = %d, want 200", resp.StatusCode)
+	}
+
+	// Without use_draft, the live KB (which never had this topic published)
+	// must not mention it.
+	resp2, _ := h.postJSON("/xchats/api/v1/simulator/messages", map[string]any{
+		"contact_ref": "sim-live", "conversation_ref": "sim-live",
+		"text": "Расскажи всё, что знаешь.", "wait_for_response": true,
+	})
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("live status = %d, want 200", resp2.StatusCode)
+	}
+	if client.lastPromptContains(draftMarker) {
+		t.Fatal("the LIVE prompt must not contain a topic that was only ever staged in the draft")
+	}
+
+	// With use_draft, the SAME still-unpublished topic must be visible.
+	resp3, _ := h.postJSON("/xchats/api/v1/simulator/messages", map[string]any{
+		"contact_ref": "sim-draft", "conversation_ref": "sim-draft",
+		"text": "Расскажи всё, что знаешь.", "wait_for_response": true, "use_draft": true,
+	})
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("draft status = %d, want 200", resp3.StatusCode)
+	}
+	if !client.lastPromptContains(draftMarker) {
+		t.Fatal("use_draft:true must answer against the staged draft, including its still-unpublished topic")
+	}
+}
+
+func TestSimulatorMessage_UseDraftRequiresWaitForResponse(t *testing.T) {
+	h := newHarness(t)
+	resp, _ := h.postJSON("/xchats/api/v1/simulator/messages", map[string]any{
+		"contact_ref": "a", "conversation_ref": "c", "text": "x",
+		"wait_for_response": false, "use_draft": true,
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (use_draft without wait_for_response)", resp.StatusCode)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/yerassyldanay/xchats/backend/internal/dto"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
+	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -18,8 +19,11 @@ import (
 )
 
 // simulatorMessageReq is the simulator API's only input shape. It deliberately
-// carries no API key, base URL, raw prompt, or KB override — those stay
-// entirely server-side configuration.
+// carries no API key, base URL, or raw prompt — those stay entirely
+// server-side configuration. UseDraft (KB-02) only ever PICKS between two
+// KBs the server itself computes for the caller's own organization — the
+// live one, or this org's own current Черновик with its pending changes
+// applied — never arbitrary KB content from the client.
 type simulatorMessageReq struct {
 	ContactRef      string `json:"contact_ref"`
 	ConversationRef string `json:"conversation_ref"`
@@ -27,6 +31,12 @@ type simulatorMessageReq struct {
 	WaitForResponse bool   `json:"wait_for_response"`
 	Provider        string `json:"provider,omitempty"`
 	Model           string `json:"model,omitempty"`
+	// UseDraft answers against the org's staged Черновик (live rows with
+	// pending changes overlaid) instead of the live KB — letting an operator
+	// verify draft edits before publishing (KB-02). Meaningful only combined
+	// with WaitForResponse: true (validated below) — the async path's own
+	// worker has no notion of a per-request KB choice.
+	UseDraft bool `json:"use_draft,omitempty"`
 }
 
 // handleSimulatorMessage injects one synthetic inbound message into the same
@@ -48,6 +58,13 @@ func (s *Server) handleSimulatorMessage(c *gin.Context) {
 	}
 	if (req.Provider == "") != (req.Model == "") {
 		fail(c, http.StatusBadRequest, ErrValidation, "provider and model must both be set, or both omitted")
+		return
+	}
+	if req.UseDraft && !req.WaitForResponse {
+		fail(c, http.StatusBadRequest, ErrValidation, "use_draft requires wait_for_response")
+		return
+	}
+	if req.UseDraft && !s.kbReady(c) {
 		return
 	}
 
@@ -105,7 +122,17 @@ func (s *Server) handleSimulatorMessage(c *gin.Context) {
 		return
 	}
 
-	persisted, err := s.response.Respond(ctx(c), messaging.ChannelSimulator, res.ChatID.String(), response.RespondOptions{ModelOverride: override})
+	opts := response.RespondOptions{ModelOverride: override}
+	if req.UseDraft {
+		dv, err := s.kb.Draft(ctx(c), org.ID)
+		if err != nil {
+			s.kbFail(c, err)
+			return
+		}
+		opts.KBOverride = responsestore.BuildKBFromDraftView(org.ID.String(), dv)
+	}
+
+	persisted, err := s.response.Respond(ctx(c), messaging.ChannelSimulator, res.ChatID.String(), opts)
 	if err != nil {
 		fail(c, http.StatusBadGateway, ErrAIUnavailable, err.Error())
 		return

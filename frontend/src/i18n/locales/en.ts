@@ -826,6 +826,11 @@ export default {
     },
     clearDataSuccess: 'Cleared {conversations} conversation(s) and {customers} customer(s).',
     clearDataError: 'Could not clear simulator data.',
+    // KB-02: which KB a send answers against — see environment ref's own
+    // doc comment in SimulatorPanel.vue.
+    environmentLabel: 'Test against',
+    environmentLive: 'Live Knowledge Base',
+    environmentDraft: 'Staged Draft',
     inputPlaceholder: 'Type a customer question…',
     send: 'Send',
     you: 'You',

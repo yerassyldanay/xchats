@@ -5,7 +5,7 @@ import SimulatorPanel from './SimulatorPanel.vue'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
-  return { ...actual, api: { ...actual.api, del: vi.fn() } }
+  return { ...actual, api: { ...actual.api, del: vi.fn(), post: vi.fn() } }
 })
 
 // reka-ui's Dialog renders through a Teleport into document.body.
@@ -51,5 +51,35 @@ describe('SimulatorPanel — Clear simulator data requires confirmation', () => 
     await flushPromises()
 
     expect(wrapper.find('[data-testid="simulator-clear-error"]').text()).toContain('boom')
+  })
+})
+
+// KB-02: the environment toggle picks which KB a send answers against.
+describe('SimulatorPanel — test environment toggle (KB-02)', () => {
+  it('defaults to live (use_draft: false) and switches to the draft on toggle', async () => {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.post).mockResolvedValue({
+      conversation_id: 'c1', message_id: 'm1',
+      draft: { id: 'd1', text: 'ok', reply_language: 'ru', escalate: false },
+    } as any)
+
+    const wrapper = mountKb(SimulatorPanel)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="simulator-input"]').setValue('Привет')
+    await wrapper.find('[data-testid="simulator-send"]').trigger('click')
+    await flushPromises()
+    expect(api.post).toHaveBeenLastCalledWith('/simulator/messages', expect.objectContaining({ use_draft: false }))
+    expect(wrapper.find('[data-testid="simulator-message-draft-badge"]').exists()).toBe(false)
+
+    // reka-ui's TabsTrigger selects on mousedown, not click.
+    await wrapper.find('[data-testid="simulator-env-draft"]').trigger('mousedown', { button: 0 })
+    await flushPromises()
+    await wrapper.find('[data-testid="simulator-input"]').setValue('Ещё вопрос')
+    await wrapper.find('[data-testid="simulator-send"]').trigger('click')
+    await flushPromises()
+    expect(api.post).toHaveBeenLastCalledWith('/simulator/messages', expect.objectContaining({ use_draft: true }))
+    // The reply generated while the draft toggle was active is labelled as such.
+    expect(wrapper.findAll('[data-testid="simulator-message-draft-badge"]')).toHaveLength(1)
   })
 })

@@ -40,3 +40,11 @@ if (!window.IntersectionObserver) {
     }
   } as unknown as typeof IntersectionObserver
 }
+
+// jsdom implements no scrolling — Element.scrollTo/scrollIntoView are simply
+// absent, so any component that scrolls a list into view on update (e.g.
+// SimulatorPanel's own scrollToBottom) throws "is not a function" the moment
+// a dom test actually exercises that code path.
+if (!Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = () => {}
+}

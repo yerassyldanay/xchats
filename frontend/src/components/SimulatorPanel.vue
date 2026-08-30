@@ -16,12 +16,14 @@ import { CircleAlert, LoaderCircle, SendHorizontal, Trash2 } from 'lucide-vue-ne
 import { api, ApiError } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
 
 interface SimMessage {
   role: 'user' | 'assistant'
   text: string
   escalate?: boolean
+  usedDraft?: boolean
 }
 
 interface SimulatorMessageResponse {
@@ -40,6 +42,12 @@ const sending = ref(false)
 const error = ref('')
 const unavailable = ref(false)
 const listEl = ref<HTMLElement | null>(null)
+
+// KB-02: which KB a send answers against. 'live' matches every real channel;
+// 'draft' answers against this org's own Черновик (pending, unpublished
+// changes overlaid on live — kbstore.Store.Draft) so an operator can verify
+// an edit before publishing it, without a round trip through the live KB.
+const environment = ref<'live' | 'draft'>('live')
 
 // KB-12: every send here lands a real row in the operational Inbox/CRM (see
 // this component's own doc comment) — clearData is the "one-click cleanup"
@@ -80,14 +88,16 @@ async function send() {
   input.value = ''
   sending.value = true
   await scrollToBottom()
+  const usedDraft = environment.value === 'draft'
   try {
     const res = await api.post<SimulatorMessageResponse>('/simulator/messages', {
       contact_ref: sessionRef,
       conversation_ref: sessionRef,
       text,
       wait_for_response: true,
+      use_draft: usedDraft,
     })
-    messages.value.push({ role: 'assistant', text: res.draft?.text ?? '', escalate: res.draft?.escalate })
+    messages.value.push({ role: 'assistant', text: res.draft?.text ?? '', escalate: res.draft?.escalate, usedDraft })
   } catch (e) {
     // A 404 here almost always means SIMULATOR_ENABLED is off — the route is
     // unregistered entirely at boot (server.go), never just gated per-request
@@ -115,9 +125,20 @@ async function send() {
           <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-0.5" /> {{ t('simulator.dataNotice') }}
         </p>
       </div>
-      <Button variant="outline" size="sm" class="shrink-0 text-muted-foreground" data-testid="simulator-clear-data" @click="clearConfirmOpen = true">
-        <Trash2 class="w-3.5 h-3.5" /> {{ t('simulator.clearData') }}
-      </Button>
+      <div class="flex flex-col items-end gap-2 shrink-0">
+        <Button variant="outline" size="sm" class="text-muted-foreground" data-testid="simulator-clear-data" @click="clearConfirmOpen = true">
+          <Trash2 class="w-3.5 h-3.5" /> {{ t('simulator.clearData') }}
+        </Button>
+        <div class="text-right">
+          <label class="block text-[11px] font-medium text-muted-foreground mb-1">{{ t('simulator.environmentLabel') }}</label>
+          <Tabs :model-value="environment" @update:model-value="(v) => (environment = v as 'live' | 'draft')">
+            <TabsList>
+              <TabsTrigger value="live" data-testid="simulator-env-live">{{ t('simulator.environmentLive') }}</TabsTrigger>
+              <TabsTrigger value="draft" data-testid="simulator-env-draft">{{ t('simulator.environmentDraft') }}</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+      </div>
     </header>
 
     <p v-if="clearResult" class="px-8 pt-3 text-xs text-emerald-600" data-testid="simulator-clear-success">{{ clearResult }}</p>
@@ -134,8 +155,15 @@ async function send() {
         class="max-w-2xl rounded-lg border p-3 text-sm whitespace-pre-wrap wrap-break-word"
         :class="m.role === 'user' ? 'ml-auto border-primary/30 bg-primary/5' : 'mr-auto border-border bg-card'"
       >
-        <div class="text-xs font-medium text-muted-foreground mb-1">
-          {{ m.role === 'user' ? t('simulator.you') : t('simulator.assistant') }}
+        <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1">
+          <span>{{ m.role === 'user' ? t('simulator.you') : t('simulator.assistant') }}</span>
+          <span
+            v-if="m.role === 'assistant' && m.usedDraft"
+            class="rounded-full bg-violet-100 text-violet-700 px-1.5 py-0.5 text-[10px] font-semibold"
+            data-testid="simulator-message-draft-badge"
+          >
+            {{ t('simulator.environmentDraft') }}
+          </span>
         </div>
         <span data-testid="simulator-message-text">{{ m.text }}</span>
         <div v-if="m.escalate" class="mt-1.5 text-[11px] text-amber-600">{{ t('simulator.escalated') }}</div>
