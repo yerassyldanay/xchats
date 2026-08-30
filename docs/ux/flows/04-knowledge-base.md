@@ -103,13 +103,14 @@ flowchart TD
     ModalForm -->|"Concurrent conflict"| FormStaleNotice
     FormStaleNotice -->|"Clicks Reload and retry"| ModalForm
 
-    subgraph KB_BannerState["Screen: /knowledge-base — Change Staged Banner"]
+    subgraph KB_BannerState["Screen: /knowledge-base — Change Staged Banner (🔴 Friction)"]
         direction TB
         BannerBox["Green Banner at top:
         • Checkmark icon
         • Text: Change added to the Draft. Review and publish it from the Draft.
         • Link: Go to Draft
-        • Close X button"]
+        • Close X button
+        🔴 Friction: Manual human edits should save directly to live DB (PUT /kb/*)"]
     end
 
     KB_BannerState -->|"Clicks Go to Draft"| DraftScreen
@@ -424,6 +425,14 @@ flowchart TD
 **What happens today:** The simulator copy frames the experience as testing without a real messaging channel, but the backend intentionally sends synthetic messages through the same ingestion path as real traffic. It creates or reuses a simulator account, persists customer/conversation/message/draft records, and broadcasts normal realtime inbox events. Test contacts and chats therefore appear in the operational Inbox and CRM.
 
 **Suggested change:** Isolate simulator data from operational records, or clearly label and filter simulator-origin entities everywhere with a one-click cleanup action. If production-path fidelity is required, make that behavior explicit before the first simulated message.
+
+---
+
+### 🔴 13. Manual Edits Staged Into Draft Instead of Saving Directly to Live
+
+**What happens today:** When an operator manually adds, edits, or deletes an item directly on `/knowledge-base` (e.g. updating a product price, editing working hours, or tweaking a tariff), the frontend does not save the change directly to the live database. Instead, it calls `stageChange()` / `stageDelete()`, pushing the edit into the `kbd_draft` staging area, displays a green notification banner (*"Change added to the Draft. Review and publish it from the Draft"*), and forces the operator to switch pages to `/playground` (Draft) to find the change and click "Publish all". This artificial 2-step ceremony introduces severe friction for routine catalog updates.
+
+**Suggested change:** Connect the manual edit modals and delete actions directly to the existing backend live-write endpoints (`PUT /xchats/api/v1/kb/products`, `PUT /xchats/api/v1/kb/tariffs`, `PUT /xchats/api/v1/kb/topics`, `PATCH /xchats/api/v1/kb/contacts`, `PATCH /xchats/api/v1/kb/policies`, `DELETE /xchats/api/v1/kb/*`). When an operator clicks "Save" or "Delete" on `/knowledge-base`, the change should commit immediately to the live database. Reserve the staging draft workflow (`/draft`) exclusively for asynchronous AI extractions from files/URLs and MCP prompt runs where review of synthetic data is actually needed.
 
 ---
 
