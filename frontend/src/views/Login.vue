@@ -7,6 +7,7 @@ import { useAuth } from '../stores/auth'
 import { ApiError } from '../api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import MaskedSecretInput from '@/components/settings/MaskedSecretInput.vue'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 
 const auth = useAuth()
@@ -117,10 +118,9 @@ async function submit() {
 
         <label class="block text-sm font-medium mb-1.5">{{ t('login.password') }}</label>
         <div class="relative mb-5">
-          <Lock class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
+          <Lock class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground z-10" />
+          <MaskedSecretInput
             v-model="password"
-            type="password"
             autocomplete="current-password"
             required
             placeholder="••••••••"

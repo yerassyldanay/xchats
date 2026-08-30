@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { initials, colorFor } from '@/lib/format'
 import AccountSecurityDialog from '../AccountSecurityDialog.vue'
+import MaskedSecretInput from '../MaskedSecretInput.vue'
 import type { User } from '@/types'
 
 const store = useSettings()
@@ -108,7 +109,7 @@ async function submitCreate() {
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Input v-model="createForm.name" :placeholder="t('settings.team.name')" />
           <Input v-model="createForm.email" type="email" :placeholder="t('settings.team.email')" />
-          <Input v-model="createForm.password" type="password" autocomplete="new-password" :placeholder="t('settings.team.password')" />
+          <MaskedSecretInput v-model="createForm.password" autocomplete="new-password" :placeholder="t('settings.team.password')" />
         </div>
         <p v-if="createError" class="flex items-start gap-2 text-sm text-destructive">
           <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ createError }}

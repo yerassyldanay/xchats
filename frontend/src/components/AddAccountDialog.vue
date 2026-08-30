@@ -11,6 +11,7 @@ import type { ConnectableChannel, WaPairStatus, WhatsAppCloudPhoneNumber } from 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import MaskedSecretInput from '@/components/settings/MaskedSecretInput.vue'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import InstagramIcon from '@/components/icons/InstagramIcon.vue'
@@ -487,12 +488,11 @@ onBeforeUnmount(stopPolling)
           </div>
           <div>
             <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.botTokenLabel') }}</label>
-            <Input
+            <MaskedSecretInput
               v-model="botToken"
-              type="password"
               autocomplete="off"
               placeholder="1234567890:AA…"
-              class="mt-1.5 font-mono"
+              class="mt-1.5"
               @keydown.enter.prevent="connectTelegram"
             />
             <p class="mt-1 text-[11px] text-muted-foreground">
@@ -529,12 +529,11 @@ onBeforeUnmount(stopPolling)
           </div>
           <div>
             <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.businessTokenLabel') }}</label>
-            <Input
+            <MaskedSecretInput
               v-model="businessToken"
-              type="password"
               autocomplete="off"
               placeholder="EAAG…"
-              class="mt-1.5 font-mono"
+              class="mt-1.5"
               @keydown.enter.prevent="discoverWhatsAppCloudNumbers"
             />
             <p class="mt-1 text-[11px] text-muted-foreground">
@@ -576,14 +575,13 @@ onBeforeUnmount(stopPolling)
           </div>
           <div>
             <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.pinLabel') }}</label>
-            <Input
+            <MaskedSecretInput
               v-model="pin"
-              type="password"
               inputmode="numeric"
               autocomplete="off"
               maxlength="6"
               placeholder="••••••"
-              class="mt-1.5 font-mono"
+              class="mt-1.5"
               @keydown.enter.prevent="connectWhatsAppCloud"
             />
             <p class="mt-1 text-[11px] text-muted-foreground">
