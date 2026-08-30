@@ -244,11 +244,30 @@ flowchart TD
 
 ## Friction Points and Suggested Changes
 
+## Recommended Simplified Target Flow
+
+The intended onboarding should keep first launch easy and make only account security mandatory:
+
+1. Seed the documented default administrator credentials as today, but set `must_change_password = 1`.
+2. On `/login`, show a first-run helper: **Fill Default Admin Credentials**. Clicking it fills `admin@xchat.kz` and `xchat-admin-change-me` without submitting the form.
+3. After Sign in, require the existing `/change-password` flow before any protected route is available.
+4. After the password is changed, redirect directly to `/chatboard`; do not block the user with another setup wizard.
+5. Show a small, persistent, minimizable Getting Started checklist for the remaining optional configuration:
+   - Add an AI provider key
+   - Connect a channel
+   - Add Knowledge Base content
+6. Derive checklist completion from actual provider, account, and Knowledge Base state. Remove the separate `setup_completed` flag and permanent **Skip setup** behavior.
+7. Keep teammate creation in Settings rather than first-run onboarding.
+
+The default-credential helper should be available only while the bootstrap administrator still has `must_change_password = true`. It must never submit automatically, and it should disappear after the mandatory password change succeeds.
+
+---
+
 ### 🔴 1. Default Admin Credentials are Public in the README and Migrations
 
 **What happens today:** The initial admin credentials (`admin@xchat.kz` / `xchat-admin-change-me`) are publicly documented in the repository `README.md` and restored by the current database migration. That migration also sets `must_change_password = 0`, so the seeded admin is **not** sent through `/change-password`; the public password remains valid until an operator changes it through the API. On a publicly reachable, unconfigured deployment, this is an immediate account-takeover risk.
 
-**Suggested change:** Automatically generate a strong random one-time administrator password upon first startup and print it directly to the terminal stdout / container logs (or prompt the operator to initialize credentials in an interactive initial setup CLI command).
+**Suggested change:** Keep the known bootstrap credentials for an easy first launch, set `must_change_password = 1` in the seed/restore migration, and force the existing password-change route immediately after the first successful login. Add a **Fill Default Admin Credentials** button to `/login` that fills the documented email and password without auto-submitting. Show that helper only while the bootstrap account still requires its password change.
 
 ---
 
@@ -264,7 +283,7 @@ flowchart TD
 
 **What happens today:** The setup wizard check in `App.vue` only evaluates `onboardingReady` for users where `isAdmin` is true. When a teammate or operator account logs in for the first time, they bypass all introductory guidance and are dropped directly onto an empty `/chatboard` with three blank columns and zero context.
 
-**Suggested change:** Implement an Operator Onboarding Tour for non-admin team members that introduces the shared inbox, explains the three-pane layout (Chat List, Active Conversation Thread, CRM / AI Suggested Reply panel), and explains how to review, edit, and approve AI draft suggestions.
+**Suggested change:** Use concise contextual guidance in the Inbox empty states and tooltips instead of another blocking tour. Operators should be able to start working immediately and discover assignment, Customer, and AI draft actions in place.
 
 ---
 
@@ -272,7 +291,7 @@ flowchart TD
 
 **What happens today:** The 3-step setup wizard covers an AI provider key (Step 1), a channel connection redirect (Step 2), and teammate creation (Step 3). The Knowledge Base is never mentioned even though its published records provide the business facts used to ground assistant replies.
 
-**Suggested change:** Add a dedicated Knowledge Base step into the onboarding wizard (e.g., between AI Provider and Channels) offering a one-click button to "Load Demo Knowledge Base" (`seed-kb-demo`) or import existing business facts, explaining that the AI relies entirely on this knowledge to answer inquiries.
+**Suggested change:** Add **Knowledge Base content** as one of the three persistent checklist items. Link directly to the existing import surface and explain in one sentence that published knowledge grounds assistant replies; do not add another mandatory wizard step.
 
 ---
 
@@ -280,7 +299,7 @@ flowchart TD
 
 **What happens today:** The top-right header of every wizard step has a "Skip setup" button. Clicking it immediately triggers `store.setupComplete()`, which permanently marks the deployment as setup-complete on the server and closes the modal. Users who accidentally click this are left with an unconfigured system and no obvious way to relaunch the guided flow.
 
-**Suggested change:** Replace the destructive "Skip setup" action with "Save for later" or "Minimize checklist". If a user attempts to dismiss setup before adding an AI key or connecting a channel, display a gentle confirmation explaining what capabilities remain inactive.
+**Suggested change:** Retire the blocking setup modal after the mandatory password change. Replace it with a minimizable checklist that remains available until its real configuration milestones are complete. No permanent skip flag is needed.
 
 ---
 
@@ -288,13 +307,13 @@ flowchart TD
 
 **What happens today:** As soon as the Setup Wizard is completed or skipped, the modal vanishes completely. The user is left looking at an empty 3-pane chatboard with placeholder messages ("No chats yet", "Pick a chat to open the conversation", "Pick a conversation"). There is no persistent onboarding checklist, banner, or progress indicator remaining on screen to guide next actions.
 
-**Suggested change:** Render a collapsible "Getting Started Checklist" card on the empty inbox state (or in the top header) showing remaining setup milestones:
-1. [ ] Replace Default Admin Credentials
-2. [ ] Add AI Provider API Key (OpenRouter / OpenAI / Gemini)
-3. [ ] Connect WhatsApp or Telegram Channel
-4. [ ] Populate Knowledge Base Facts
-5. [ ] Test Assistant in Simulator
-6. [ ] Invite Teammates
+**Suggested change:** Render a collapsible Getting Started card on the empty Inbox with three milestones derived from live state:
+
+1. [ ] Add AI Provider Key
+2. [ ] Connect a Channel
+3. [ ] Add Knowledge Base Content
+
+The mandatory password change is already complete before the user reaches this checklist. Simulator testing and teammate creation remain normal product actions rather than onboarding gates.
 
 ---
 
@@ -302,7 +321,7 @@ flowchart TD
 
 **What happens today:** On Step 2 of the wizard ("Connect Channels"), the central action button is "Go to Channels". Clicking this button immediately invokes `finish()`, which marks setup complete, destroys the wizard modal, and redirects the user to `/accounts`. The user never sees Step 3 (Invite Teammate), and no guided overlay or contextual tutorial appears on the `/accounts` page.
 
-**Suggested change:** Embed the channel connection dialog directly inside the wizard modal (or launch the channel connector as a child modal that returns the user back to Step 3 of the wizard upon completion).
+**Suggested change:** Remove this wizard step. The persistent checklist's **Connect a Channel** action should navigate to `/accounts`; returning to the Inbox should show the milestone completed automatically once an account is connected.
 
 ---
 
@@ -310,7 +329,7 @@ flowchart TD
 
 **What happens today:** Step 3 asks the administrator to create a teammate account and choose its password before a channel or Knowledge Base content is required. The action provisions the account directly; despite the success copy saying "Invitation sent", there is no email invitation or acceptance flow. A teammate can therefore receive credentials for an empty or non-functional workspace.
 
-**Suggested change:** Reorder onboarding milestones so that teammate invitations are recommended as the final step *after* at least one communication channel is connected and verified in the Simulator.
+**Suggested change:** Remove teammate creation from first-run onboarding. Keep it in Settings → Team Management for administrators who need it later.
 
 ---
 
@@ -318,7 +337,7 @@ flowchart TD
 
 **What happens today:** `App.vue` checks setup status only once per admin session. If `settingsStore.load()` fails during that check, the catch block intentionally does nothing and `checkedSetup` remains true. The wizard will not retry during the session, and the user receives no explanation that onboarding was skipped.
 
-**Suggested change:** Surface a retryable onboarding-status error and retry on reconnect or the next navigation. Do not mark the one-time check as complete until setup state has loaded successfully.
+**Suggested change:** Remove the one-time `setup_completed` check. Load the three checklist milestones from their real sources, show a retry action if any status request fails, and retry normally on navigation or reconnect.
 
 ---
 
@@ -326,7 +345,7 @@ flowchart TD
 
 **What happens today:** The wizard is a fixed overlay made from plain `div` elements. It has no dialog semantics, accessible name, focus trap, initial focus, Escape handling, or focus restoration. Its teammate inputs rely on placeholders instead of associated labels, and asynchronous errors/success are not announced through a live region. Keyboard and screen-reader users can move into the obscured application behind the modal or miss state changes.
 
-**Suggested change:** Use the shared accessible Dialog primitives, add explicit labels and field names, focus the first relevant control, trap and restore focus, support Escape with an intentional confirmation policy, and announce validation/success with `aria-live="polite"`.
+**Suggested change:** Retiring the modal removes most of this complexity. Build the replacement checklist with semantic buttons and links, visible focus states, clear labels, and `aria-live="polite"` for asynchronous status updates. Keep the mandatory password screen as a normal focused page rather than another modal.
 
 ---
 
