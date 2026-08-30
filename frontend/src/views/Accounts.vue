@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
@@ -10,12 +10,10 @@ import {
   KeyRound,
   LoaderCircle,
   Plus,
-  QrCode,
   RefreshCw,
   RotateCw,
   TriangleAlert,
   Trash2,
-  Unplug,
 } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
 import { useChannelSetup } from '../stores/channelSetup'
@@ -160,21 +158,41 @@ onMounted(() => {
   }
 })
 
-// isHealthy/isWaiting/isBroken are shared by the stat cards below AND the
-// per-card "connection lost" banner (docs/ux/flows/02-connect-whatsapp-qr.md,
-// friction point 6) — one definition of "broken" so the two never drift.
+// isHealthy/isWaiting/isBroken back the per-card "connection lost" banner
+// (docs/ux/flows/02-connect-whatsapp-qr.md, friction point 6).
 const isHealthy = (a: Account) => a.connection_state === 'connected'
 const isWaiting = (a: Account) => ['qr_required', 'connecting', 'disconnect_pending'].includes(a.connection_state)
 const isBroken = (a: Account) => !isHealthy(a) && !isWaiting(a)
 
-const stats = computed(() => {
-  const a = accounts.accounts
-  return {
-    connected: a.filter(isHealthy).length,
-    waiting: a.filter(isWaiting).length,
-    broken: a.filter(isBroken).length,
-  }
-})
+// channelOf buckets an account under the same 5 types the connect picker
+// offers (ConnectableChannel) — a QR-paired WhatsApp number and a simulator
+// account share one lifecycle (isQrWhatsApp elsewhere in this file), so a
+// simulator row counts under 'whatsapp' here too rather than falling out of
+// every filter pill.
+function channelOf(a: Account): ConnectableChannel {
+  return isQrWhatsApp(a) ? 'whatsapp' : (a.channel as ConnectableChannel)
+}
+
+// Replaces the old Connected/Waiting/Broken status counters
+// (docs/ux/flows/02-connect-whatsapp-qr.md, friction point 7): those three
+// numbers duplicate what's already visible on each account's own badge, and
+// waste vertical space once a team has more than a couple of channels.
+// Counting BY PLATFORM instead matches how an operator actually thinks about
+// their channels, and doubles as a quick filter — see activeFilter below.
+const CHANNEL_TILES: { key: ConnectableChannel; labelKey: string; icon: Component; dotClass: string }[] = [
+  { key: 'whatsapp', labelKey: 'accounts.dialog.whatsapp.name', icon: WhatsappIcon, dotClass: 'bg-wa' },
+  { key: 'telegram', labelKey: 'accounts.dialog.telegram.name', icon: TelegramIcon, dotClass: 'bg-[#229ED9]' },
+  { key: 'whatsapp_cloud', labelKey: 'accounts.dialog.whatsappCloud.name', icon: WhatsappIcon, dotClass: 'bg-teal-600' },
+  { key: 'instagram', labelKey: 'accounts.dialog.instagram.name', icon: InstagramIcon, dotClass: 'bg-fuchsia-600' },
+  { key: 'messenger', labelKey: 'accounts.dialog.messenger.name', icon: MessengerIcon, dotClass: 'bg-[#0084FF]' },
+]
+const channelFilters = computed(() =>
+  CHANNEL_TILES.map((tile) => ({ ...tile, count: accounts.accounts.filter((a) => channelOf(a) === tile.key).length })),
+)
+const activeFilter = ref<'all' | ConnectableChannel>('all')
+const filteredAccounts = computed(() =>
+  activeFilter.value === 'all' ? accounts.accounts : accounts.accounts.filter((a) => channelOf(a) === activeFilter.value),
+)
 
 function openAdd() {
   addStartChannel.value = null
@@ -289,33 +307,40 @@ async function remove(a: Account) {
           <button class="text-xs underline shrink-0" @click="showFirstChannelBanner = false">{{ t('accounts.page.dismiss') }}</button>
         </div>
 
-        <!-- stat cards -->
-        <div class="grid grid-cols-3 gap-5">
-          <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">
-            <div class="w-12 h-12 rounded-xl bg-wa/10 text-wa grid place-items-center">
-              <CircleCheck class="w-6 h-6" />
-            </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.connected }}</div><div class="text-sm text-muted-foreground mt-1">{{ t('accounts.page.statConnected') }}</div></div>
-          </div>
-          <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">
-            <div class="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 grid place-items-center">
-              <QrCode class="w-6 h-6" />
-            </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.waiting }}</div><div class="text-sm text-muted-foreground mt-1">{{ t('accounts.page.statWaiting') }}</div></div>
-          </div>
-          <div class="rounded-lg border border-border bg-card p-5 flex items-center gap-4">
-            <div class="w-12 h-12 rounded-xl bg-destructive/10 text-destructive grid place-items-center">
-              <Unplug class="w-6 h-6" />
-            </div>
-            <div><div class="text-2xl font-bold leading-none">{{ stats.broken }}</div><div class="text-sm text-muted-foreground mt-1">{{ t('accounts.page.statBroken') }}</div></div>
-          </div>
+        <!-- channel-type filter pills (docs/ux/flows/02-connect-whatsapp-qr.md,
+             friction point 7) — replaces the old generic Connected/Waiting/Broken
+             counters with per-platform counts that double as quick filters. -->
+        <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="t('accounts.page.filters.groupLabel')">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+            :class="activeFilter === 'all' ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted'"
+            :aria-pressed="activeFilter === 'all'"
+            @click="activeFilter = 'all'"
+          >
+            {{ t('accounts.page.filters.all') }} <span class="text-xs opacity-70">{{ accounts.accounts.length }}</span>
+          </button>
+          <button
+            v-for="tile in channelFilters"
+            :key="tile.key"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+            :class="activeFilter === tile.key ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted'"
+            :aria-pressed="activeFilter === tile.key"
+            @click="activeFilter = tile.key"
+          >
+            <span class="w-4 h-4 rounded grid place-items-center text-white shrink-0" :class="tile.dotClass">
+              <component :is="tile.icon" class="w-2.5 h-2.5" />
+            </span>
+            {{ t(tile.labelKey) }} <span class="text-xs opacity-70">{{ tile.count }}</span>
+          </button>
         </div>
 
         <!-- account cards -->
         <div>
           <div class="flex items-center justify-between mb-3">
             <span class="font-semibold">{{ t('accounts.page.connectedChannels') }}</span>
-            <span class="text-sm text-muted-foreground">{{ accounts.accounts.length }} {{ t('accounts.page.totalCount') }}</span>
+            <span class="text-sm text-muted-foreground">{{ filteredAccounts.length }} {{ t('accounts.page.totalCount') }}</span>
           </div>
 
           <p v-if="accounts.loading && !accounts.accounts.length" class="rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
@@ -334,9 +359,14 @@ async function remove(a: Account) {
             <Button class="mt-4" @click="openAdd"><Plus class="w-4 h-4" /> {{ t('accounts.page.connectChannel') }}</Button>
           </div>
 
+          <!-- accounts exist, but none match the active filter pill -->
+          <p v-else-if="!filteredAccounts.length" class="rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
+            {{ t('accounts.page.emptyFiltered') }}
+          </p>
+
           <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             <div
-              v-for="a in accounts.accounts"
+              v-for="a in filteredAccounts"
               :key="a.id"
               class="rounded-lg border border-border bg-card p-4 transition hover:shadow-pop"
             >

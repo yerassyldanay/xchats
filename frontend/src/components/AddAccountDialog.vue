@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, CircleCheck, LoaderCircle, RotateCw, Link2, Search, Smartphone } from 'lucide-vue-next'
+import { CircleAlert, CircleCheck, LoaderCircle, RotateCw, Link2, Search, Settings2, Smartphone, Zap } from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
 import { useAuth } from '../stores/auth'
 import { useChannelSetup, type GuidedChannel } from '../stores/channelSetup'
@@ -348,7 +348,13 @@ onBeforeUnmount(stopPolling)
         <!-- step 0: pick the channel -->
         <div v-if="step === 'channel'" class="space-y-4">
           <p class="text-sm text-muted-foreground">{{ t('accounts.dialog.pickPrompt') }}</p>
-          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+
+          <!-- Tiered layout: instant (no developer setup) vs. Meta-backed channels
+               that need a Developer App + public HTTPS first. -->
+          <p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-wa">
+            <Zap class="w-3.5 h-3.5" /> {{ t('accounts.dialog.tierInstant') }}
+          </p>
+          <div class="grid gap-3 sm:grid-cols-2">
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-wa hover:bg-wa/5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-wa/40 disabled:pointer-events-none disabled:opacity-60"
               :disabled="busy"
@@ -390,6 +396,13 @@ onBeforeUnmount(stopPolling)
               </ol>
               <span class="mt-4 block text-sm font-medium text-[#229ED9]">{{ t('accounts.dialog.telegram.cta') }}</span>
             </button>
+          </div>
+
+          <p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <Settings2 class="w-3.5 h-3.5" /> {{ t('accounts.dialog.tierAdvanced') }}
+          </p>
+          <p class="-mt-2 text-xs text-muted-foreground">{{ t('accounts.dialog.tierAdvancedHint') }}</p>
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-teal-600 hover:bg-teal-600/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/40"
               @click="pickChannel('whatsapp_cloud')"
