@@ -552,8 +552,16 @@ export default {
       tierInstant: 'Instant connect — no developer setup',
       tierAdvanced: 'Advanced · Meta',
       tierAdvancedHint: 'Requires a Meta Developer App and a public HTTPS address.',
+      tierAdvancedGuideCta: 'See the setup guide →',
+      readiness: {
+        ready: 'Ready to connect',
+        needsPublicAccess: 'Setup required — needs a public HTTPS address (ngrok)',
+        needsMetaApp: 'Setup required — needs a Meta Developer App',
+        needsOwnSetup: 'Setup required — one more step for this channel',
+      },
       footerNote:
-        'The QR code is never stored. Tokens are stored encrypted and never shown again. For WhatsApp Cloud API, Instagram and Messenger, first set your Meta App ID and App Secret in Settings → Channels.',
+        'The QR code is never stored. Tokens are stored encrypted and never shown again. For WhatsApp Cloud API, Instagram and Messenger, configure prerequisites in the Channel setup tab.',
+      footerNoteCta: 'Open Channel setup →',
       whatsapp: {
         name: 'WhatsApp',
         tagline: 'Connect a number via QR code',
@@ -598,17 +606,20 @@ export default {
         step1: 'Open {\'@\'}BotFather in Telegram.',
         step2: 'Send /newbot and pick a name.',
         step3: 'Copy the token it gives you and paste it below.',
+        openBotFather: 'Open {\'@\'}BotFather in Telegram',
       },
       displayNameLabel: 'Name (for you)',
       displayNamePlaceholderBot: 'E.g. Shop bot',
       botTokenLabel: 'Bot token',
       tokenStoredHint: 'The token is stored encrypted and never shown again.',
-      dropBacklogLabel: 'Drop the messages Telegram has queued up',
+      dropBacklogLabel: 'Ignore old messages sent before connecting',
       dropBacklogHint:
-        'Only check this if the bot has existed for a while and the old messages are not needed — they will be lost.',
+        "Recommended if this bot already received messages in the past that you don't want to import. Leave unchecked for brand new bots.",
       connecting: 'Connecting…',
       retry: 'Try again',
       connectBot: 'Connect bot',
+      telegramHalfSuccessHint: 'The bot was created in xchats — only the webhook delivery needs a retry.',
+      viewInChannels: 'View in Channels',
       waCloudIntro:
         'Find the WABA ID and create a business token (a System User Access Token with whatsapp_business_messaging and whatsapp_business_management permissions) in Meta Business Manager for your own Meta app.',
       wabaIdLabel: 'WABA ID',
@@ -650,7 +661,28 @@ export default {
         'The pairing session ended before the phone linked. Click "Try again" to start a fresh session — QR codes refresh automatically while a session is active.',
       errConnectGeneric: 'Could not connect.',
       errSessionExpired: 'The pairing session was lost (the server may have restarted). Click "Try again" to start a new session — no data was lost.',
-      adminRequired: 'Only an administrator can configure this channel.',
+      blocked: {
+        title: 'Only an administrator can configure this channel.',
+        missing: {
+          public_access: 'This workspace has no public HTTPS address configured yet — Meta needs one to send webhooks and OAuth redirects to.',
+          meta_app: "This workspace's Meta Developer App credentials have not been configured yet.",
+          instagram: "This workspace's Instagram App credentials have not been configured yet.",
+          messenger: 'The Messenger setup checklist has not been confirmed yet for this workspace.',
+          whatsapp_cloud: 'The WhatsApp Cloud API setup checklist has not been confirmed yet for this workspace.',
+        },
+        contactAdmin: 'Ask a workspace administrator to finish this setup:',
+        notify: 'Notify',
+        notifySubject: 'xchats: please finish channel setup',
+        notifyBody:
+          'Hi! I tried to connect {channel} in xchats, but it needs setup that only an administrator can do. Could you configure it? The steps are under Channels → Channel setup.',
+        noAdminContacts: 'No workspace administrator was found to notify.',
+      },
+      redirecting: {
+        title: 'Redirecting to Meta…',
+        hint: 'Please make sure you are logged into the correct Instagram or Facebook account before continuing.',
+        messengerWarning:
+          'Important: when Facebook asks which Pages to allow, check the box for EXACTLY ONE Page. Selecting more than one — or none — will cause the connection to fail.',
+      },
     },
     page: {
       title: 'Channels',
@@ -678,9 +710,34 @@ export default {
       delete: 'Delete',
       instagramConnected: 'Instagram connected successfully.',
       messengerConnected: 'Messenger connected successfully.',
+      oauthErrors: {
+        missingParams: 'Meta did not return the expected authorization details. Please try connecting again.',
+        sessionExpired: 'The connection session expired or was already used. Please try again.',
+        connectFailed: 'Could not complete the connection.',
+        noPages: 'No Facebook Pages are available to this account. Grant access to at least one Page and try again.',
+        multiplePages: 'Access was granted to more than one Facebook Page. Grant access to exactly one Page and try again.',
+      },
       firstChannelBanner: {
-        text: 'WhatsApp connected! Next step: add content to your Knowledge Base so the assistant can start drafting replies.',
-        cta: 'Go to Knowledge Base',
+        whatsapp: {
+          text: 'WhatsApp connected! Next step: add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
+        telegram: {
+          text: 'Your Telegram bot {handle} is live! Send it a test message, then add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
+        instagram: {
+          text: '{handle} is connected! Send yourself a test direct message to verify incoming chats, then add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
+        messenger: {
+          text: '{handle} is connected! Send the Page a test message to verify incoming chats, then add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
+        whatsapp_cloud: {
+          text: '{handle} is connected! Send a test message to verify incoming chats, then add content to your Knowledge Base so the assistant can start drafting replies.',
+          cta: 'Go to Knowledge Base',
+        },
       },
       connectionLost: {
         text: 'Connection lost — your WhatsApp session expired.',
@@ -702,6 +759,11 @@ export default {
       errRequired: 'Both fields are required.',
       iveCompletedThese: "I've completed these steps — continue",
       memberHint: 'Only an administrator can configure this channel.',
+      guidedBanner: {
+        title: '{channel} needs a few things configured first',
+        step: 'Step {current} of {total}',
+        cancel: 'Cancel and go back',
+      },
       status: {
         ready: 'Ready',
         notConfigured: 'Not configured',

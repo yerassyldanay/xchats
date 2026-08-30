@@ -196,6 +196,42 @@ func TestChannelSetupMemberPayloadCarriesOnlyStatusesAndPublicURL(t *testing.T) 
 	})
 }
 
+// TestChannelSetupMemberPayloadListsAdminContacts pins
+// docs/ux/flows/03b-connect-instagram-messenger.md's friction point 2: a
+// member blocked on a missing prerequisite gets someone to ask, and an
+// admin — who has no use for this — never gets the field at all.
+func TestChannelSetupMemberPayloadListsAdminContacts(t *testing.T) {
+	h := newMetaHarness(t)
+	h.createMember(t, memberEmail, memberPass, "Member")
+	member := h.loginAs(t, memberEmail, memberPass)
+
+	resp, err := member.Get(h.srv.URL + "/xchats/api/v1/channel-setup")
+	if err != nil {
+		t.Fatalf("GET as member: %v", err)
+	}
+	defer resp.Body.Close()
+	var env map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	var info httpapi.ChannelSetupInfo
+	if err := json.Unmarshal(env["payload"], &info); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if len(info.AdminContacts) != 1 {
+		t.Fatalf("admin_contacts = %+v, want exactly the one seeded admin", info.AdminContacts)
+	}
+	if info.AdminContacts[0].Email != metaAdminEmail {
+		t.Errorf("admin_contacts[0].email = %q, want %q", info.AdminContacts[0].Email, metaAdminEmail)
+	}
+
+	// The admin payload must never carry this — it is a member-only field.
+	adminInfo := h.channelSetup(t)
+	if adminInfo.AdminContacts != nil {
+		t.Errorf("admin payload must not carry admin_contacts, got %+v", adminInfo.AdminContacts)
+	}
+}
+
 func TestChannelSetupAdminPayloadIncludesFullDashboardChecklist(t *testing.T) {
 	h := newMetaHarness(t)
 	h.setAppCredentials("meta-id", "meta-secret")

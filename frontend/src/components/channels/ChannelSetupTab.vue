@@ -6,7 +6,7 @@
 // channel_setup.go's own doc comment for the split this mirrors.
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, Globe, KeyRound, LoaderCircle, Play, Square } from 'lucide-vue-next'
+import { CircleAlert, Compass, Globe, KeyRound, LoaderCircle, Play, Square } from 'lucide-vue-next'
 import { useChannelSetup } from '@/stores/channelSetup'
 import { useSettings } from '@/stores/settings'
 import { ApiError } from '@/api/client'
@@ -127,10 +127,48 @@ async function submitInstagramApp() {
 function showContinue(channel: 'messenger' | 'whatsapp_cloud') {
   return channelSetup.pendingChannel === channel && channelSetup.focusedEntry === channel
 }
+
+// guidedSteps/guidedStepIndex back the "why am I here" banner below — the
+// automatic tab switch that lands an admin here otherwise gives no context
+// at all (docs/ux/flows/03b-connect-instagram-messenger.md, friction point
+// 3). Mirrors nextRequiredSetup's own fixed dependency order (public_access
+// -> meta_app -> the channel itself) rather than exposing it from the store.
+const guidedStepTotal = 3
+const guidedStepIndex = computed(() => {
+  if (!channelSetup.pendingChannel) return 0
+  const order: string[] = ['public_access', 'meta_app', channelSetup.pendingChannel]
+  const idx = order.indexOf(channelSetup.focusedEntry ?? '')
+  return idx === -1 ? guidedStepTotal : idx + 1
+})
 </script>
 
 <template>
   <div class="space-y-4">
+    <!-- Why the admin landed here: the picker dialog closes and switches to
+         this tab with no explanation on its own (docs/ux/flows/
+         03b-connect-instagram-messenger.md, friction point 3). -->
+    <div
+      v-if="channelSetup.pendingChannel"
+      class="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm"
+    >
+      <Compass class="w-4 h-4 shrink-0 mt-0.5 text-primary" />
+      <div class="min-w-0 flex-1">
+        <p class="font-medium text-primary">
+          {{ t('accounts.channelSetup.guidedBanner.title', { channel: t(`accounts.dialog.${channelSetup.pendingChannel}.name`) }) }}
+        </p>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          {{ t('accounts.channelSetup.guidedBanner.step', { current: guidedStepIndex, total: guidedStepTotal }) }}
+        </p>
+      </div>
+      <button
+        type="button"
+        class="shrink-0 text-xs font-medium text-muted-foreground underline underline-offset-2"
+        @click="channelSetup.clearGuidedSetup()"
+      >
+        {{ t('accounts.channelSetup.guidedBanner.cancel') }}
+      </button>
+    </div>
+
     <!-- Public access -->
     <ChannelSetupCard entry-key="public_access" :title="t('accounts.channelSetup.publicAccess.title')" :icon="Globe" icon-class="bg-sky-500/10 text-sky-600">
       <div v-if="channelSetup.statusOf('public_access') === 'ready'" class="space-y-2">

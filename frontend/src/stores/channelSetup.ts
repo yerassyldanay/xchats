@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api } from '../api/client'
-import type { ChannelSetupEntry, ChannelSetupInfo, MetaStaleAccount, SetupKey } from '../types'
+import type { AdminContact, ChannelSetupEntry, ChannelSetupInfo, MetaStaleAccount, SetupKey } from '../types'
 
 // GuidedChannel is the subset of ChannelName a guided setup run can target —
 // telegram/whatsapp never consult channel setup at all (AddAccountDialog's
@@ -24,6 +24,10 @@ export const useChannelSetup = defineStore('channelSetup', {
     graphAPIVersion: '',
     dashboardURL: '',
     staleAccounts: [] as MetaStaleAccount[],
+    // Member-only payload — see ChannelSetupInfo.admin_contacts' own doc
+    // comment. Empty for an admin response, exactly as the backend leaves
+    // it absent.
+    adminContacts: [] as AdminContact[],
 
     // --- guided "Add channel" run state (in-memory only) ------------------
     // pendingChannel is consumed the moment a guided run completes (see
@@ -52,6 +56,7 @@ export const useChannelSetup = defineStore('channelSetup', {
       this.graphAPIVersion = info.graph_api_version ?? ''
       this.dashboardURL = info.dashboard_url ?? ''
       this.staleAccounts = info.stale_accounts ?? []
+      this.adminContacts = info.admin_contacts ?? []
     },
     async load() {
       this.loading = true

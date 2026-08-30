@@ -52,9 +52,66 @@ const actionError = ref<Record<string, string>>({})
 // (or their messenger_* twins) query params a redirect back from Meta's
 // OAuth consent screen lands with (see AddAccountDialog.vue's
 // connectInstagram/connectMessenger and the backend's meta_oauth.go /
-// meta_oauth_messenger.go) — cleared from the URL on mount so a page refresh
-// never re-shows a stale result.
-const oauthBanner = ref<{ kind: 'success' | 'error'; message: string } | null>(null)
+// meta_oauth_messenger.go) — cleared from the URL on mount. The banner
+// itself now outlives that: see saveOauthBanner/restoreOauthBanner below.
+const oauthBanner = ref<{ kind: 'success' | 'error'; message: string; detail?: string } | null>(null)
+
+// oauthErrorBanner translates a stable ..._error_code (see backend/internal/
+// httpapi/meta_oauth.go's metaOAuthErr* constants) into a localized message
+// instead of showing the backend's raw (Russian) fallback text verbatim in
+// every locale (docs/ux/flows/03b-connect-instagram-messenger.md, friction
+// point 7). An unrecognized/absent code just keeps the old raw-message
+// behavior. CONNECT_FAILED wraps an arbitrary upstream error that cannot be
+// localized, so its raw message survives as `detail` under the translated
+// headline rather than being discarded.
+const OAUTH_ERROR_KEYS: Record<string, string> = {
+  MISSING_PARAMS: 'accounts.page.oauthErrors.missingParams',
+  SESSION_EXPIRED: 'accounts.page.oauthErrors.sessionExpired',
+  CONNECT_FAILED: 'accounts.page.oauthErrors.connectFailed',
+  NO_PAGES: 'accounts.page.oauthErrors.noPages',
+  MULTIPLE_PAGES: 'accounts.page.oauthErrors.multiplePages',
+}
+function oauthErrorBanner(message: string, code: unknown): { kind: 'error'; message: string; detail?: string } {
+  const key = typeof code === 'string' ? OAUTH_ERROR_KEYS[code] : undefined
+  if (!key) return { kind: 'error', message }
+  return code === 'CONNECT_FAILED' ? { kind: 'error', message: t(key), detail: message } : { kind: 'error', message: t(key) }
+}
+
+// The OAuth banner is otherwise a true one-shot: query params are stripped
+// on mount, so a reload or an accidental dismiss used to lose the
+// connection result for good (docs/ux/flows/
+// 03b-connect-instagram-messenger.md, friction point 6). sessionStorage
+// survives a reload without needing a new backend activity feed; a TTL
+// keeps a stale result from lingering into unrelated later visits.
+const OAUTH_BANNER_KEY = 'xchats.accounts.oauthBanner'
+const OAUTH_BANNER_TTL_MS = 5 * 60 * 1000
+function saveOauthBanner(banner: typeof oauthBanner.value) {
+  try {
+    if (banner) sessionStorage.setItem(OAUTH_BANNER_KEY, JSON.stringify({ ...banner, ts: Date.now() }))
+    else sessionStorage.removeItem(OAUTH_BANNER_KEY)
+  } catch {
+    // Unavailable storage (locked-down/private browsing) — the banner just
+    // won't survive a refresh there; nothing else depends on it.
+  }
+}
+function restoreOauthBanner() {
+  try {
+    const raw = sessionStorage.getItem(OAUTH_BANNER_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (Date.now() - parsed.ts > OAUTH_BANNER_TTL_MS) {
+      sessionStorage.removeItem(OAUTH_BANNER_KEY)
+      return
+    }
+    oauthBanner.value = { kind: parsed.kind, message: parsed.message, detail: parsed.detail }
+  } catch {
+    // Malformed/unavailable storage — same as "nothing to restore".
+  }
+}
+function dismissOauthBanner() {
+  oauthBanner.value = null
+  saveOauthBanner(null)
+}
 
 // connection tone -> badge + dot classes (connected keeps WhatsApp green)
 const toneMeta: Record<ConnTone, { badge: string; dot: string }> = {
@@ -147,14 +204,17 @@ onMounted(() => {
   if (igConnected) {
     oauthBanner.value = { kind: 'success', message: t('accounts.page.instagramConnected') }
   } else if (typeof igError === 'string' && igError) {
-    oauthBanner.value = { kind: 'error', message: igError }
+    oauthBanner.value = oauthErrorBanner(igError, route.query.instagram_error_code)
   } else if (fbConnected) {
     oauthBanner.value = { kind: 'success', message: t('accounts.page.messengerConnected') }
   } else if (typeof fbError === 'string' && fbError) {
-    oauthBanner.value = { kind: 'error', message: fbError }
+    oauthBanner.value = oauthErrorBanner(fbError, route.query.messenger_error_code)
   }
   if (igConnected || igError || fbConnected || fbError) {
     router.replace({ path: route.path, query: {} })
+    saveOauthBanner(oauthBanner.value)
+  } else {
+    restoreOauthBanner()
   }
 })
 
@@ -205,16 +265,22 @@ function openReconnect(_a: Account) {
   addStartChannel.value = 'whatsapp'
   showAdd.value = true
 }
-// showFirstChannelBanner is the one-time "what's next" nudge (friction point
-// 5): true only for the run where the count crosses zero -> nonzero, never
-// again after — reloading or leaving/returning to this page starts from an
-// already-nonzero count, so it naturally never reappears without needing any
-// persisted "seen it" flag.
-const showFirstChannelBanner = ref(false)
+// firstChannelBanner is the one-time "what's next" nudge (friction point 5),
+// now channel-aware instead of always showing WhatsApp-specific copy
+// (docs/ux/flows/03-connect-telegram.md, friction point 6; docs/ux/flows/
+// 03b-connect-instagram-messenger.md, friction point 8) — true only for the
+// run where the count crosses zero -> nonzero, never again after: reloading
+// or leaving/returning to this page starts from an already-nonzero count, so
+// it naturally never reappears without needing any persisted "seen it" flag.
+const firstChannelBanner = ref<{ channel: ConnectableChannel; handle: string } | null>(null)
 async function onConnected() {
   const hadNoAccounts = accounts.accounts.length === 0
+  const knownIds = new Set(accounts.accounts.map((a) => a.id))
   await accounts.load()
-  if (hadNoAccounts && accounts.accounts.length > 0) showFirstChannelBanner.value = true
+  if (hadNoAccounts && accounts.accounts.length > 0) {
+    const newest = accounts.accounts.find((a) => !knownIds.has(a.id)) ?? accounts.accounts[0]
+    firstChannelBanner.value = { channel: channelOf(newest), handle: handle(newest) }
+  }
 }
 
 async function run(a: Account, fn: () => Promise<unknown>) {
@@ -288,23 +354,26 @@ async function remove(a: Account) {
         >
           <CircleCheck v-if="oauthBanner.kind === 'success'" class="w-4 h-4 shrink-0 mt-0.5" />
           <CircleAlert v-else class="w-4 h-4 shrink-0 mt-0.5" />
-          <span class="min-w-0 flex-1">{{ oauthBanner.message }}</span>
-          <button class="text-xs underline shrink-0" @click="oauthBanner = null">{{ t('accounts.page.dismiss') }}</button>
+          <span class="min-w-0 flex-1">
+            {{ oauthBanner.message }}
+            <span v-if="oauthBanner.detail" class="block text-xs opacity-80">{{ oauthBanner.detail }}</span>
+          </span>
+          <button class="text-xs underline shrink-0" @click="dismissOauthBanner">{{ t('accounts.page.dismiss') }}</button>
         </div>
 
         <!-- one-time nudge toward the Knowledge Base right after the first channel ever connects -->
         <div
-          v-if="showFirstChannelBanner"
+          v-if="firstChannelBanner"
           class="flex items-start gap-3 rounded-lg bg-wa/10 px-4 py-3 text-sm text-wa"
         >
           <CircleCheck class="w-4 h-4 shrink-0 mt-0.5" />
           <span class="min-w-0 flex-1">
-            {{ t('accounts.page.firstChannelBanner.text') }}
+            {{ t(`accounts.page.firstChannelBanner.${firstChannelBanner.channel}.text`, { handle: firstChannelBanner.handle }) }}
             <RouterLink :to="{ name: 'knowledge-base' }" class="inline-flex items-center gap-1 font-medium underline underline-offset-2">
-              {{ t('accounts.page.firstChannelBanner.cta') }} <ArrowRight class="w-3.5 h-3.5" />
+              {{ t(`accounts.page.firstChannelBanner.${firstChannelBanner.channel}.cta`) }} <ArrowRight class="w-3.5 h-3.5" />
             </RouterLink>
           </span>
-          <button class="text-xs underline shrink-0" @click="showFirstChannelBanner = false">{{ t('accounts.page.dismiss') }}</button>
+          <button class="text-xs underline shrink-0" @click="firstChannelBanner = null">{{ t('accounts.page.dismiss') }}</button>
         </div>
 
         <!-- channel-type filter pills (docs/ux/flows/02-connect-whatsapp-qr.md,
@@ -405,14 +474,37 @@ async function remove(a: Account) {
                 </span>
               </button>
 
-              <!-- a broken connection explains itself; it never silently disappears -->
-              <p
+              <!-- a broken connection explains itself; it never silently disappears.
+                   For Telegram, the fix is a text button right here, not a tiny
+                   icon in the footer below (docs/ux/flows/03-connect-telegram.md,
+                   friction point 5). -->
+              <div
                 v-if="actionError[a.id] || a.webhook_last_error"
-                class="mt-3 flex items-start gap-1.5 rounded-md bg-destructive/5 px-2.5 py-2 text-[11px] leading-snug text-destructive"
+                class="mt-3 rounded-md bg-destructive/5 px-2.5 py-2 text-[11px] leading-snug text-destructive"
               >
-                <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-px" />
-                <span class="min-w-0 wrap-break-word">{{ actionError[a.id] || a.webhook_last_error }}</span>
-              </p>
+                <p class="flex items-start gap-1.5">
+                  <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-px" />
+                  <span class="min-w-0 wrap-break-word">{{ actionError[a.id] || a.webhook_last_error }}</span>
+                </p>
+                <div v-if="isTelegram(a)" class="mt-2 flex flex-wrap gap-1.5 pl-5">
+                  <button
+                    type="button"
+                    class="rounded-md border border-destructive/30 px-2 py-1 font-medium text-destructive transition hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-60"
+                    :disabled="working === a.id"
+                    @click="retryWebhook(a)"
+                  >
+                    {{ t('accounts.page.retryWebhook') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-md border border-destructive/30 px-2 py-1 font-medium text-destructive transition hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-60"
+                    :disabled="working === a.id"
+                    @click="checkConnection(a)"
+                  >
+                    {{ t('accounts.page.checkConnection') }}
+                  </button>
+                </div>
+              </div>
 
               <div class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -506,6 +598,7 @@ async function remove(a: Account) {
       :start-channel="addStartChannel"
       @close="showAdd = false"
       @connected="onConnected"
+      @open-setup="showAdd = false; activeTab = 'setup'"
     />
     <ReplaceTokenDialog
       v-if="tokenTarget"
