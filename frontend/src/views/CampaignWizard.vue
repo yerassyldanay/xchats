@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRouter } from 'vue-router'
 import { CircleAlert, LoaderCircle, Megaphone, Plus, Trash2 } from 'lucide-vue-next'
@@ -54,6 +54,43 @@ const accountId = ref('')
 const messageBody = ref('')
 const variablesDetected = computed(() => [...messageBody.value.matchAll(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g)].map((m) => m[1]))
 const uniqueVariables = computed(() => [...new Set(variablesDetected.value)])
+
+// CAM-02: the parser only ever recognizes double-brace {{var}} — a single-
+// brace placeholder or hint would teach the wrong syntax outright. Quick-
+// insert chips below the textarea (native <textarea>, not the <Textarea>
+// wrapper, so a plain HTMLTextAreaElement ref reports selectionStart/End)
+// insert the correct token at the cursor instead of requiring exact typing.
+const messageTextareaEl = ref<HTMLTextAreaElement | null>(null)
+const QUICK_VARIABLES = ['name', 'phone'] as const
+const showCustomVariable = ref(false)
+const customVariableName = ref('')
+
+function insertVariable(varName: string) {
+  const token = `{{${varName}}}`
+  const el = messageTextareaEl.value
+  if (!el) {
+    messageBody.value += token
+    return
+  }
+  const start = el.selectionStart ?? messageBody.value.length
+  const end = el.selectionEnd ?? messageBody.value.length
+  messageBody.value = messageBody.value.slice(0, start) + token + messageBody.value.slice(end)
+  const caret = start + token.length
+  void nextTick(() => {
+    el.focus()
+    el.setSelectionRange(caret, caret)
+  })
+}
+function chipLabel(varName: string): string {
+  return '+ {{' + varName + '}}'
+}
+function confirmCustomVariable() {
+  const varName = customVariableName.value.trim().replace(/\s+/g, '_')
+  if (!varName) return
+  insertVariable(varName)
+  customVariableName.value = ''
+  showCustomVariable.value = false
+}
 
 const detailsError = ref('')
 const continuing = ref(false)
@@ -243,7 +280,43 @@ async function finish() {
       <div>
         <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.messageLabel') }}</label>
         <p class="mt-0.5 text-xs text-muted-foreground">{{ t('campaigns.wizard.messageHint') }}</p>
-        <Textarea v-model="messageBody" :disabled="phase === 'recipients'" :placeholder="t('campaigns.wizard.messagePlaceholder')" class="mt-1.5 min-h-[100px]" />
+        <textarea
+          ref="messageTextareaEl"
+          v-model="messageBody"
+          :disabled="phase === 'recipients'"
+          :placeholder="t('campaigns.wizard.messagePlaceholder')"
+          class="mt-1.5 min-h-[100px] flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        />
+        <div v-if="phase === 'details'" class="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <button
+            v-for="v in QUICK_VARIABLES"
+            :key="v"
+            type="button"
+            class="rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-mono hover:bg-accent"
+            :data-testid="`insert-var-${v}`"
+            @click="insertVariable(v)"
+          >
+            {{ chipLabel(v) }}
+          </button>
+          <Input
+            v-if="showCustomVariable"
+            v-model="customVariableName"
+            :placeholder="t('campaigns.wizard.customVariablePlaceholder')"
+            class="h-7 w-36 text-xs"
+            data-testid="custom-var-input"
+            @keydown.enter.prevent="confirmCustomVariable"
+            @blur="!customVariableName.trim() && (showCustomVariable = false)"
+          />
+          <button
+            v-else
+            type="button"
+            class="rounded-full border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+            data-testid="add-custom-var"
+            @click="showCustomVariable = true"
+          >
+            + {{ t('campaigns.wizard.customVariable') }}
+          </button>
+        </div>
         <p v-if="uniqueVariables.length" class="mt-1 text-xs text-muted-foreground">
           {{ t('campaigns.wizard.variablesDetected', { variables: uniqueVariables.join(', ') }) }}
         </p>

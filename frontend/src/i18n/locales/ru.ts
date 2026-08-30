@@ -1098,7 +1098,9 @@ export default {
       messageLabel: 'Сообщение',
       messageHint:
         "Используйте {'{{'}переменную{'}}'} для персонального значения, например {'{{'}name{'}}'} — определяется по колонкам списка получателей.",
-      messagePlaceholder: 'Здравствуйте, {name}, ...',
+      messagePlaceholder: "Здравствуйте, {'{{'}name{'}}'}, вот ваше предложение: {'{{'}code{'}}'}",
+      customVariable: 'Своя переменная',
+      customVariablePlaceholder: 'имя_переменной',
       variablesDetected: 'Используемые переменные: {variables}',
       recipientsHeading: 'Получатели',
       recipientsHint: 'Вставьте список или загрузите файл .csv/.txt — один получатель на строку.',

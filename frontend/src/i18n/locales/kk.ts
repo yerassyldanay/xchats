@@ -1100,7 +1100,9 @@ export default {
       messageLabel: 'Хабарлама',
       messageHint:
         "Жеке мән үшін {'{{'}айнымалы{'}}'} қолданыңыз, мысалы {'{{'}name{'}}'} — ол алушылар тізімінің бағандары бойынша анықталады.",
-      messagePlaceholder: 'Сәлеметсіз бе, {name}, ...',
+      messagePlaceholder: "Сәлеметсіз бе, {'{{'}name{'}}'}, ұсынысыңыз: {'{{'}code{'}}'}",
+      customVariable: 'Өз айнымалысы',
+      customVariablePlaceholder: 'айнымалы_аты',
       variablesDetected: 'Қолданылатын айнымалылар: {variables}',
       recipientsHeading: 'Алушылар',
       recipientsHint: 'Тізімді қойыңыз немесе .csv/.txt файлын жүктеңіз — әр жолда бір алушы.',
