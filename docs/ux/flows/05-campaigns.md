@@ -325,27 +325,32 @@ flowchart LR
 ```
 
 ### 1. Step 1: Audience & Channel Selection (WHO)
-* **Select Account:** Operator picks the sending account (WhatsApp, Telegram, or Simulator).
+* **Select Account:** Operator picks the sending account (WhatsApp, Telegram, or safe **Simulator**).
+  * The Simulator account is automatically provisioned/included for every organization so it is immediately available for zero-cost sandbox tests.
   * The **live sending budget & quota widget** immediately shows available sending headroom.
 * **Upload or Paste Contacts:**
   * Drop `.csv`/`.txt` or paste raw numbers.
   * System instantly normalizes phone numbers and extracts all CSV column headers.
   * Preview table highlights: **X valid**, **Y invalid**, **Z duplicates**.
-* **Transition:** Clicking **"Continue to Message →"** passes the detected audience columns forward.
+* **Transition:** Clicking **"Continue to Message →"**:
+  * Calls `POST /campaigns` with name, account, and temporary placeholder `"Draft message"` to obtain the server-side `campaign_id` required for reachability binding.
+  * Replaces recipients via `PUT /campaigns/:id/recipients`.
+  * Passes detected CSV columns and reachability counts into Step 2.
 
 ### 2. Step 2: Message Selection & Personalization (WHAT)
 * **Template Integration:**
-  * **Saved Templates Dropdown:** Operator can pick a pre-existing template from the Library.
+  * **Saved Templates Dropdown:** Operator can pick a pre-existing template from the Organization-wide Library.
   * **Auto-Validation:** The system checks template variables against the uploaded CSV columns:
     * Matching columns show green checkmarks (e.g. `{{name}}`, `{{promo_code}}`).
     * Any missing column triggers an inline amber alert (e.g. `⚠️ Message uses {{discount}}, but your file does not contain a 'discount' column`).
 * **Dynamic Column Chips & Inline Autocomplete:**
   * One-click chips are generated for every column present in the uploaded file (`[+ {{name}}]`, `[+ {{promo_code}}]`, `[+ {{city}}]`).
-  * **Inline `{` Triggered Autocomplete:** Typing `{` or `{{` directly in the message textarea opens an inline floating suggestion popup matching uploaded columns. Operators can filter by typing (e.g. `{{pr`), navigate via `↑`/`↓`, and press `Enter` or `Tab` to insert the full `{{promo_code}}` token automatically.
+  * **Inline Floating Autocomplete Menu:** Typing `{` or `{{` directly in the message textarea opens a floating suggestion menu positioned right under the cursor. Operators can filter by typing (e.g. `{{pr`), navigate via `↑`/`↓`, and press `Enter` or `Tab` to insert the full `{{promo_code}}` token automatically (or `Esc` to dismiss).
 * **Chat Bubble Preview:**
   * Fast, toggleable chat bubble preview rendering the message with clean sample substitutions (`Aigul`, `SUMMER2026`, etc.) and fallback brackets for custom variables, allowing operators to audit layout, line breaks, and emojis instantly.
 * **Save as Template (Optional):**
-  * Checkbox or button: *"Save this message to template library"* with a template name prompt.
+  * Checkbox or button: *"Save this message to template library"* with a template name prompt (saves organization-wide).
+* **Transition:** Clicking **"Continue to Schedule →"** updates the draft's message text via `PATCH /campaigns/:id`.
 
 ### 3. Step 3: Pacing, Schedule & Launch (WHEN & LAUNCH)
 * **Anti-Ban Safeguards:**
@@ -357,7 +362,8 @@ flowchart LR
 * **Pre-Flight Summary Card:**
   * Shows total reachable audience, estimated broadcast duration, and sending account health.
 * **Explicit Submission Actions:**
-  * `[Save as Draft]` vs `[Launch Campaign 🚀]`.
+  * **Save as Draft:** Leaves campaign in `'draft'` status and redirects to `CampaignDetail.vue` with an informative banner (`?draft=1`).
+  * **Launch Campaign 🚀:** Transitions campaign to `'running'` (or `'scheduled'`) and begins broadcast dispatch.
 
 ---
 
@@ -366,10 +372,11 @@ flowchart LR
 To support high-velocity broadcasting without retyping or duplicating old campaigns, a dedicated template catalog is introduced:
 
 ### Capabilities
-1. **Browse & Filter:** Dedicated **Templates** tab on `/campaigns` with search and status filter (`Active` vs `Archived`).
-2. **Author & Edit:** Create and modify named templates with explicit variable placeholders.
-3. **Archive & Restore:** Deprecate seasonal or expired campaigns without deleting audit history.
-4. **Instant In-Wizard Application:** Select any active template directly inside the campaign composer.
+1. **Organization-Wide Scope:** Any user in the organization can create, view, edit, and use shared templates.
+2. **Browse & Filter:** Dedicated **Templates** tab on `/campaigns` with search and status filter (`Active` vs `Archived`).
+3. **Author & Edit:** Create and modify named templates with explicit variable placeholders.
+4. **Archive & Restore:** Soft-archive deprecated or seasonal campaigns (`is_archived = 1`) so they don't clutter the composer while preserving audit history.
+5. **Instant In-Wizard Application:** Select any active template directly inside the campaign composer, or save newly drafted text as a new template on the fly.
 
 ```mermaid
 flowchart LR
@@ -399,7 +406,7 @@ The backend provides a native synthetic channel (`ChannelSimulator`) that routes
 ### How Simulator Campaign Testing Works
 
 1. **Select "Simulator" Channel:**
-   * In Step 1, the sending account picker includes **"Simulator (Safe Test Channel)"**.
+   * In Step 1, the sending account picker automatically includes **"Simulator"** for every organization.
    * Quota and rate limits reflect sandbox parameters.
 2. **Broadcast Execution:**
    * When launched, the campaign runner processes the recipient list, verifies pacing intervals, and evaluates variables.
@@ -413,9 +420,9 @@ The backend provides a native synthetic channel (`ChannelSimulator`) that routes
 ## Implementation Roadmap (Phase 2)
 
 1. **CAM-14 — Dedicated Template Library:** Add `campaign_templates` schema, CRUD endpoints, and `/campaigns?tab=templates` UI with search, active/archived tabs, and in-wizard template selection/saving.
-2. **CAM-15 — Audience-First Wizard Refactor & Autocomplete:** Invert wizard flow to Audience Upload (Step 1) $\rightarrow$ Message & Template (Step 2) $\rightarrow$ Schedule & Launch (Step 3), with dynamic column chips, unblocked text editing, and inline `{` triggered variable autocomplete.
-3. **CAM-16 — Simulator Channel Integration:** Expose the Simulator account in campaign creation for end-to-end sandbox broadcast testing with zero network overhead.
-4. **CAM-17 — Dual Wizard Submission Actions:** Add explicit "Save as Draft" and "Launch Campaign 🚀" buttons in Step 3.
+2. **CAM-15 — Audience-First Wizard Refactor & Autocomplete:** Invert wizard flow to Audience Upload (Step 1) $\rightarrow$ Message & Template (Step 2) $\rightarrow$ Schedule & Launch (Step 3), with dynamic column chips, unblocked text editing, and inline floating `{` triggered variable autocomplete.
+3. **CAM-16 — Simulator Channel Integration:** Automatically include the Simulator account in the campaign account picker for zero-cost, end-to-end sandbox broadcast testing.
+4. **CAM-17 — Dual Wizard Submission Actions:** Add explicit "Save as Draft" (redirects with draft banner) and "Launch Campaign 🚀" buttons in Step 3.
 5. **CAM-18 — Playwright E2E Coverage:** Add complete browser-level test suite covering creation, navigation guards, and simulated execution.
 
 ---
