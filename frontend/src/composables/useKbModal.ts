@@ -40,9 +40,9 @@ const successCountRef = ref(0)
 
 // useKbModal owns the whole "open a form, survive a background refresh,
 // handle a stale submit" flow (§2.6) for BOTH pages: /knowledge-base opens
-// it to create/edit a published row, /playground opens it to tweak a
-// pending row's value before publishing — either way, submit() always
-// stages into the draft (stores.stageChange), never writes live directly.
+// it for direct live edits (KB-13), /draft opens it to tweak a pending
+// row's value before publishing — submit() dispatches to whichever store
+// method the session's target says (see its own doc comment below).
 export function useKbModal() {
   const pg = usePlayground()
 

@@ -90,7 +90,7 @@ export default {
         'Произвольные семантические утверждения (claim/expect), которые проверяет дешёвая LLM-модель. Оцениваются только командой judge-llm (платно), независимо от детерминированных проверок.',
     },
   },
-  // kb.* — the Draft (/playground, review-only) and Knowledge base
+  // kb.* — the Draft (/draft, review-only) and Knowledge base
   // (/knowledge-base, the sole creation surface) surfaces.
   kb: {
     entities: {
@@ -210,6 +210,11 @@ export default {
       emptyTitle: 'Нет неопубликованных изменений',
       emptyBody: 'Перейдите в Базу знаний, чтобы добавить или изменить информацию.',
       emptyLink: 'Перейти в Базу знаний',
+      publishedBanner: {
+        message: 'База знаний обновлена!',
+        testInSimulator: 'Проверить новые ответы в Симуляторе →',
+        viewLive: 'Открыть Базу знаний →',
+      },
       gateBlocked: 'Это изменение нельзя опубликовать: в получившейся базе знаний есть конфликты проверки.',
       cancelConfirm: {
         titleAdded: 'Удалить из черновика?',
@@ -232,6 +237,7 @@ export default {
       cardBlockedNote: 'Публикация заблокирована другим конфликтом в Черновике — см. сообщение выше.',
       fixInTab: 'Исправить на вкладке «{tab}» →',
       wasBefore: 'Было:',
+      viewDiff: 'Посмотреть изменения →',
       // Fallbacks the playground store puts on state when an API call fails
       // without a server-supplied message of its own.
       errStale: 'Черновик изменился — обновляю…',
@@ -275,6 +281,15 @@ export default {
     page: {
       title: 'База знаний',
       subtitle: 'Финальные данные, которые использует ассистент',
+      entityGuideTitle: 'В чём разница между этими вкладками?',
+      entityGuide: {
+        topics: 'Общие вопросы, правила и информация о компании.',
+        products: 'Физические или цифровые товары с артикулом, ценой, остатком и фото.',
+        tariffs: 'Тарифные планы, ценовые уровни и лимиты обслуживания.',
+        delivery_zones: 'Региональные тарифы доставки, сроки и зоны покрытия.',
+        contacts: 'Как клиенту связаться с человеком — телефон, email, часы работы.',
+        policies: 'Возврат, гарантия и условия доставки, которые видит клиент.',
+      },
       addTopic: 'Добавить тему',
       addProduct: 'Добавить товар',
       addTariff: 'Добавить тариф',
@@ -289,6 +304,7 @@ export default {
       promptTab: 'Промпт',
       materialsTab: 'Файлы (материалы)',
       materialsHint: 'Материалы, добавленные через интеграции базы знаний, доступны здесь только для просмотра.',
+      materialsImportNew: 'Импортировать новые файлы / ссылки',
       materialsEmpty: 'Материалов пока нет.',
       materialsCreated: 'Создано:',
       materialsDownload: 'Скачать',
@@ -372,6 +388,10 @@ export default {
       targetType: 'Куда сохранить',
       guidance: 'Подсказка модели (необязательно)',
       guidancePlaceholder: 'Например: обрати внимание только на цены и наличие',
+      guidanceHelpTitle: 'Советы по написанию подсказки',
+      guidanceHelpFocus: 'Укажите, что важно — цены, остатки на складе или какие разделы пропустить.',
+      guidanceHelpBrief: 'Одного-двух предложений достаточно — модель сама читает весь документ, пересказывать его содержание не нужно.',
+      guidanceHelpTargetType: 'Выберите правильную категорию «Сохранить как» выше — она определяет, какие поля модель попытается заполнить.',
       visionGapNotice: 'Изображение будет прикреплено как медиа — текст с него не считывается.',
       tabs: {
         urls: 'Ссылки',

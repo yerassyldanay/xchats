@@ -334,4 +334,44 @@ describe('KnowledgeBase — Файлы (материалы) reads pg.live.materi
     expect(link.exists()).toBe(true)
     expect(link.text()).toContain('Скачать')
   })
+
+  // KB-10: this tab used to be a dead end — read-only, with no path back to
+  // actually importing something. The ingestion panel lives on /draft.
+  it('shows an Import New Files / URLs button linking to /draft', async () => {
+    const { wrapper } = await mountWith(emptyChanges(), emptyLive({ materials: [material()] }))
+    await switchTab(wrapper, 'Файлы (материалы)')
+
+    const link = wrapper.find('[data-testid="materials-import-new"]')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toContain('Импортировать новые файлы')
+  })
+})
+
+// KB-06: six entity tabs with no explanation of when a fact belongs under
+// Topics vs Products vs Policies — this is visible regardless of which tab
+// is active, since it sits right below the tab strip itself.
+describe('KnowledgeBase — entity guide (KB-06)', () => {
+  it('shows a collapsed accordion explaining each of the six entity kinds', async () => {
+    const { wrapper } = await mountWith(emptyChanges(), emptyLive())
+
+    const guide = wrapper.find('[data-testid="entity-guide"]')
+    expect(guide.exists()).toBe(true)
+    expect(guide.text()).toContain('В чём разница между этими вкладками?')
+    for (const phrase of [
+      'Общие вопросы, правила',
+      'Физические или цифровые товары',
+      'Тарифные планы',
+      'Региональные тарифы доставки',
+      'Как клиенту связаться с человеком',
+      'Возврат, гарантия',
+    ]) {
+      expect(guide.text()).toContain(phrase)
+    }
+  })
+
+  it('stays visible after switching tabs', async () => {
+    const { wrapper } = await mountWith(emptyChanges({ topics: [topic()] }), emptyLive())
+    await switchTab(wrapper, 'Темы')
+    expect(wrapper.find('[data-testid="entity-guide"]').exists()).toBe(true)
+  })
 })

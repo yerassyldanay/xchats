@@ -260,6 +260,18 @@ async function submit() {
           class="min-h-0 text-[14px] mt-1.5"
           data-testid="kb-import-guidance"
         />
+        <!-- KB-06: the placeholder alone only ever shows ONE example — this
+             covers what actually makes an instruction useful, since the
+             model reads the whole document itself and does not need a
+             restatement of its contents. -->
+        <details class="mt-1.5 rounded-md border border-border p-2.5 text-xs text-muted-foreground" data-testid="kb-import-guidance-help">
+          <summary class="cursor-pointer font-medium text-foreground">{{ t('kb.import.guidanceHelpTitle') }}</summary>
+          <ul class="mt-2 list-disc space-y-1 pl-4">
+            <li>{{ t('kb.import.guidanceHelpFocus') }}</li>
+            <li>{{ t('kb.import.guidanceHelpBrief') }}</li>
+            <li>{{ t('kb.import.guidanceHelpTargetType') }}</li>
+          </ul>
+        </details>
       </div>
     </div>
 

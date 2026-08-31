@@ -205,6 +205,11 @@ export default {
       emptyTitle: 'No unpublished changes',
       emptyBody: 'Go to Knowledge Base to add or change information.',
       emptyLink: 'Go to Knowledge Base',
+      publishedBanner: {
+        message: 'Knowledge base updated!',
+        testInSimulator: 'Test new answers in Simulator →',
+        viewLive: 'View live Knowledge Base →',
+      },
       gateBlocked: 'This change cannot be published: the resulting knowledge base has validation conflicts.',
       cancelConfirm: {
         titleAdded: 'Remove from draft?',
@@ -227,6 +232,7 @@ export default {
       cardBlockedNote: 'Publishing is blocked by another conflict in the Draft — see the message above.',
       fixInTab: 'Fix in {tab} tab →',
       wasBefore: 'Was:',
+      viewDiff: 'View diff →',
       // Fallbacks the playground store puts on state when an API call fails
       // without a server-supplied message of its own.
       errStale: 'The draft changed — refreshing…',
@@ -270,6 +276,15 @@ export default {
     page: {
       title: 'Knowledge Base',
       subtitle: 'The final data the assistant uses',
+      entityGuideTitle: "What's the difference between these tabs?",
+      entityGuide: {
+        topics: 'General FAQs, policies, and company background.',
+        products: 'Physical or digital items with a SKU, price, stock level, and photos.',
+        tariffs: 'Subscription plans, pricing tiers, and service limits.',
+        delivery_zones: 'Regional shipping rates, delivery days, and coverage.',
+        contacts: 'How customers reach a human — phone, email, working hours.',
+        policies: 'Returns, warranties, and delivery terms shown to customers.',
+      },
       addTopic: 'Add topic',
       addProduct: 'Add product',
       addTariff: 'Add tariff',
@@ -284,6 +299,7 @@ export default {
       promptTab: 'Prompt',
       materialsTab: 'Files (materials)',
       materialsHint: 'Materials added through knowledge base integrations are shown here for viewing only.',
+      materialsImportNew: 'Import new files / URLs',
       materialsEmpty: 'No materials yet.',
       materialsCreated: 'Created:',
       materialsDownload: 'Download',
@@ -367,6 +383,10 @@ export default {
       targetType: 'Save as',
       guidance: 'Guidance for the model (optional)',
       guidancePlaceholder: 'e.g. only pay attention to prices and stock',
+      guidanceHelpTitle: 'Tips for writing guidance',
+      guidanceHelpFocus: 'Say what matters — prices, stock levels, or which sections to skip.',
+      guidanceHelpBrief: 'A sentence or two is enough — the model reads the whole document itself, there is no need to restate its contents.',
+      guidanceHelpTargetType: 'Pick the right "Save as" category above — it steers which fields the model tries to fill in.',
       visionGapNotice: 'The image will be attached as media — its text is not read.',
       tabs: {
         urls: 'Links',

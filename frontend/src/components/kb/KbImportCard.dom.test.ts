@@ -278,3 +278,12 @@ describe('KbImportCard — submitting', () => {
     expect((buttonLabelled(wrapper, 'Начать импорт').element as HTMLButtonElement).disabled).toBe(false)
   })
 })
+
+describe('KbImportCard — guidance formatting tips (KB-06)', () => {
+  it('shows a collapsed tips disclosure under the guidance textarea', async () => {
+    const { wrapper } = await mountCard('url')
+    expect(wrapper.find('[data-testid="kb-import-guidance-help"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Советы по написанию подсказки')
+    expect(wrapper.text()).toContain('Одного-двух предложений достаточно')
+  })
+})

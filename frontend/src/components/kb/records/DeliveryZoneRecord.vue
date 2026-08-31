@@ -66,17 +66,17 @@ function parentName(ref: string): string {
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.name') }}</span>
         <p class="text-sm mt-0.5">{{ row.name || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('name')" :was="liveRow?.name ?? ''" />
+        <FieldDiffNote :show="diff.includes('name')" :was="liveRow?.name ?? ''" :now="row.name" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.zoneLevel') }}</span>
         <p class="text-sm mt-0.5">{{ t('kb.zoneLevel.' + row.zone_level) }}</p>
-        <FieldDiffNote :show="diff.includes('zone_level')" :was="liveRow ? t('kb.zoneLevel.' + liveRow.zone_level) : ''" />
+        <FieldDiffNote :show="diff.includes('zone_level')" :was="liveRow ? t('kb.zoneLevel.' + liveRow.zone_level) : ''" :now="t('kb.zoneLevel.' + row.zone_level)" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.parentZone') }}</span>
         <p class="text-sm mt-0.5">{{ parentName(row.parent_ref) }}</p>
-        <FieldDiffNote :show="diff.includes('parent_ref')" :was="liveRow ? parentName(liveRow.parent_ref) : ''" />
+        <FieldDiffNote :show="diff.includes('parent_ref')" :was="liveRow ? parentName(liveRow.parent_ref) : ''" :now="parentName(row.parent_ref)" />
       </div>
       <div class="flex flex-col justify-center gap-1 text-sm">
         <span :class="row.delivery_available ? 'text-emerald-700' : 'text-muted-foreground'">
@@ -91,18 +91,18 @@ function parentName(ref: string): string {
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryCost') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row.delivery_cost || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('delivery_cost')" :was="liveRow?.delivery_cost ?? ''" />
+        <FieldDiffNote :show="diff.includes('delivery_cost')" :was="liveRow?.delivery_cost ?? ''" :now="row.delivery_cost" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryInDays') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row.delivery_in_days || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('delivery_in_days')" :was="liveRow?.delivery_in_days ?? ''" />
+        <FieldDiffNote :show="diff.includes('delivery_in_days')" :was="liveRow?.delivery_in_days ?? ''" :now="row.delivery_in_days" />
       </div>
     </div>
     <div>
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.notes') }}</span>
       <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.notes || '—' }}</p>
-      <FieldDiffNote :show="diff.includes('notes')" :was="liveRow?.notes ?? ''" />
+      <FieldDiffNote :show="diff.includes('notes')" :was="liveRow?.notes ?? ''" :now="row.notes" />
     </div>
   </RecordShell>
 </template>

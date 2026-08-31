@@ -92,7 +92,7 @@ export default {
         'Арзан LLM моделі тексеретін еркін семантикалық тұжырымдар (claim/expect). Тек judge-llm командасымен бағаланады (ақылы), детерминистік тексерулерден тәуелсіз.',
     },
   },
-  // kb.* — the Draft (/playground, review-only) and Knowledge base
+  // kb.* — the Draft (/draft, review-only) and Knowledge base
   // (/knowledge-base, the sole creation surface) surfaces.
   kb: {
     entities: {
@@ -212,6 +212,11 @@ export default {
       emptyTitle: 'Жарияланбаған өзгеріс жоқ',
       emptyBody: 'Ақпарат қосу немесе өзгерту үшін Білім базасына өтіңіз.',
       emptyLink: 'Білім базасына өту',
+      publishedBanner: {
+        message: 'Білім базасы жаңартылды!',
+        testInSimulator: 'Жаңа жауаптарды Симуляторда тексеру →',
+        viewLive: 'Білім базасын ашу →',
+      },
       gateBlocked: 'Бұл өзгерісті жариялау мүмкін емес: нәтижелі білім базасында тексеру қайшылықтары бар.',
       cancelConfirm: {
         titleAdded: 'Жобадан жою керек пе?',
@@ -234,6 +239,7 @@ export default {
       cardBlockedNote: 'Жариялау Жобадағы басқа қайшылықпен бұғатталған — жоғарыдағы хабарламаны қараңыз.',
       fixInTab: '«{tab}» қойындысында түзету →',
       wasBefore: 'Бұрын:',
+      viewDiff: 'Өзгерістерді қарау →',
       // Fallbacks the playground store puts on state when an API call fails
       // without a server-supplied message of its own.
       errStale: 'Жоба өзгерді — жаңартылуда…',
@@ -277,6 +283,15 @@ export default {
     page: {
       title: 'Білім базасы',
       subtitle: 'Көмекші пайдаланатын түпкілікті деректер',
+      entityGuideTitle: 'Бұл қойындылардың айырмашылығы неде?',
+      entityGuide: {
+        topics: 'Жалпы сұрақтар, ережелер және компания туралы ақпарат.',
+        products: 'Артикулы, бағасы, қалдығы және фотосы бар физикалық немесе цифрлық тауарлар.',
+        tariffs: 'Жазылым жоспарлары, баға деңгейлері және қызмет шектеулері.',
+        delivery_zones: 'Аймақтық жеткізу тарифтері, мерзімдері және қамту аймақтары.',
+        contacts: 'Клиент адаммен қалай байланысады — телефон, email, жұмыс уақыты.',
+        policies: 'Клиентке көрсетілетін қайтару, кепілдік және жеткізу шарттары.',
+      },
       addTopic: 'Тақырып қосу',
       addProduct: 'Тауар қосу',
       addTariff: 'Тариф қосу',
@@ -291,6 +306,7 @@ export default {
       promptTab: 'Промпт',
       materialsTab: 'Файлдар (материалдар)',
       materialsHint: 'Білім базасының интеграциялары арқылы қосылған материалдар мұнда тек көру үшін қолжетімді.',
+      materialsImportNew: 'Жаңа файлдар / сілтемелер импорттау',
       materialsEmpty: 'Әзірге материал жоқ.',
       materialsCreated: 'Жасалды:',
       materialsDownload: 'Жүктеп алу',
@@ -374,6 +390,10 @@ export default {
       targetType: 'Қайда сақтау',
       guidance: 'Модельге нұсқау (міндетті емес)',
       guidancePlaceholder: 'Мысалы: тек бағалар мен қолжетімділікке назар аудар',
+      guidanceHelpTitle: 'Нұсқау жазу бойынша кеңестер',
+      guidanceHelpFocus: 'Не маңызды екенін көрсетіңіз — бағалар, қоймадағы қалдық немесе қай бөлімдерді өткізіп жіберу керек.',
+      guidanceHelpBrief: 'Бір-екі сөйлем жеткілікті — модель құжаттың бәрін өзі оқиды, мазмұнын қайталап жазудың қажеті жоқ.',
+      guidanceHelpTargetType: 'Жоғарыдағы дұрыс «Сақтау түрі» санатын таңдаңыз — ол модель қай өрістерді толтыруға тырысатынын анықтайды.',
       visionGapNotice: 'Сурет медиа ретінде тіркеледі — одан мәтін оқылмайды.',
       tabs: {
         urls: 'Сілтемелер',

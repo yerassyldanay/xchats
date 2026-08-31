@@ -54,17 +54,17 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['name', 'pr
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.name') }}</span>
         <p class="text-sm mt-0.5">{{ row.name || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('name')" :was="liveRow?.name ?? ''" />
+        <FieldDiffNote :show="diff.includes('name')" :was="liveRow?.name ?? ''" :now="row.name" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.price') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row.price || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('price')" :was="liveRow?.price ?? ''" />
+        <FieldDiffNote :show="diff.includes('price')" :was="liveRow?.price ?? ''" :now="row.price" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.category') }}</span>
         <p class="text-sm mt-0.5">{{ row.category || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('category')" :was="liveRow?.category ?? ''" />
+        <FieldDiffNote :show="diff.includes('category')" :was="liveRow?.category ?? ''" :now="row.category" />
       </div>
       <div class="flex flex-col justify-center gap-1 text-sm">
         <span :class="row.in_stock ? 'text-emerald-700' : 'text-muted-foreground'">
@@ -78,7 +78,7 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['name', 'pr
     <div>
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.description') }}</span>
       <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.description || '—' }}</p>
-      <FieldDiffNote :show="diff.includes('description')" :was="liveRow?.description ?? ''" />
+      <FieldDiffNote :show="diff.includes('description')" :was="liveRow?.description ?? ''" :now="row.description" />
     </div>
     <div class="flex flex-col gap-2">
       <MediaStrip :label="t('kb.media.image')" field="featured_image" :ids="row.featured_image" />

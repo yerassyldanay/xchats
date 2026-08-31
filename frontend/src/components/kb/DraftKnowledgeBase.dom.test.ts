@@ -463,3 +463,60 @@ describe('DraftKnowledgeBase — Publish all / Discard all require confirmation'
     nativeConfirm.mockRestore()
   })
 })
+
+// KB-03: approveWith (both approve() and every approveEntity() call funnel
+// through it) is the one choke point every publish path shares — these
+// tests drive its own `approving` flag directly, the same signal
+// DraftKnowledgeBase.vue's own watcher reacts to, rather than mocking a
+// specific publish button's click handler.
+describe('DraftKnowledgeBase — KB-03: post-publish bridge to Simulator', () => {
+  it('shows a dismissible success banner linking to Simulator/Knowledge Base once a publish empties the draft', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.approving = true
+    await wrapper.vm.$nextTick()
+    pg.changes = emptyChanges() // the publish landed and emptied the draft
+    pg.approving = false
+    await wrapper.vm.$nextTick()
+
+    const banner = wrapper.find('[data-testid="publish-success-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('База знаний обновлена')
+    expect(banner.text()).toContain('Симулятор')
+    expect(banner.text()).toContain('Базу знаний')
+  })
+
+  it('does not show the banner just because the draft happened to load already empty', async () => {
+    const { wrapper } = await mountWith(emptyChanges(), emptyLive())
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(false)
+  })
+
+  it('does not show the banner when the draft empties WITHOUT a publish (e.g. discard)', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.changes = emptyChanges() // discard's own effect — pg.approving is never touched
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(false)
+  })
+
+  it('does not show the banner after a FAILED publish attempt', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.approving = true
+    await wrapper.vm.$nextTick()
+    pg.error = 'publish failed' // the draft stays non-empty on a real failure, but guard on the error too
+    pg.approving = false
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(false)
+  })
+
+  it('the dismiss button hides the banner', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.approving = true
+    await wrapper.vm.$nextTick()
+    pg.changes = emptyChanges()
+    pg.approving = false
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="publish-success-dismiss"]').trigger('click')
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(false)
+  })
+})

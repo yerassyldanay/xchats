@@ -8,7 +8,7 @@ import type {
   ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, TariffPayload, TopicPayload,
 } from '@/components/kb/forms/payloads'
 
-// usePlayground backs the two KB pages — Черновик (/playground) and Знаний
+// usePlayground backs the two KB pages — Черновик (/draft) and Знаний
 // база (/knowledge-base) — over the same underlying structured KB:
 //   - `changes`: the Черновик review payload (kbstore.DraftChangeSet) — ONLY
 //     what is staged in kbd_draft, plus explicit deletion entries. Never a
@@ -77,7 +77,7 @@ export const usePlayground = defineStore('playground', {
     // draft.go's mergedView) — materials themselves have no draft/live
     // split at all, so a draft row's media field (e.g. a staged product's
     // gallery_images) resolves against this the same as a published one's.
-    // Both /knowledge-base and /playground already call loadLive() on
+    // Both /knowledge-base and /draft already call loadLive() on
     // mount and re-call it on every kb.row.changed SSE event, so this
     // getter needs no fetch or refresh logic of its own.
     materialsById(s): Record<string, KbMaterial> {

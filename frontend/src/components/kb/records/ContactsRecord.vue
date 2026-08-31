@@ -55,47 +55,47 @@ const diff = computed(() =>
       <div>
         <span class="text-xs font-medium text-muted-foreground">WhatsApp</span>
         <p class="text-sm mt-0.5 font-mono">{{ row?.whatsapp || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('whatsapp')" :was="liveRow?.whatsapp ?? ''" />
+        <FieldDiffNote :show="diff.includes('whatsapp')" :was="liveRow?.whatsapp ?? ''" :now="row?.whatsapp ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.phone') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row?.phone || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('phone')" :was="liveRow?.phone ?? ''" />
+        <FieldDiffNote :show="diff.includes('phone')" :was="liveRow?.phone ?? ''" :now="row?.phone ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">E-mail</span>
         <p class="text-sm mt-0.5">{{ row?.email || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('email')" :was="liveRow?.email ?? ''" />
+        <FieldDiffNote :show="diff.includes('email')" :was="liveRow?.email ?? ''" :now="row?.email ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.website') }}</span>
         <p class="text-sm mt-0.5">{{ row?.website || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('website')" :was="liveRow?.website ?? ''" />
+        <FieldDiffNote :show="diff.includes('website')" :was="liveRow?.website ?? ''" :now="row?.website ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">Instagram</span>
         <p class="text-sm mt-0.5">{{ row?.instagram || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('instagram')" :was="liveRow?.instagram ?? ''" />
+        <FieldDiffNote :show="diff.includes('instagram')" :was="liveRow?.instagram ?? ''" :now="row?.instagram ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.workingHours') }}</span>
         <p class="text-sm mt-0.5">{{ row?.working_hours || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('working_hours')" :was="liveRow?.working_hours ?? ''" />
+        <FieldDiffNote :show="diff.includes('working_hours')" :was="liveRow?.working_hours ?? ''" :now="row?.working_hours ?? ''" />
       </div>
       <div class="sm:col-span-2">
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.address') }}</span>
         <p class="text-sm mt-0.5">{{ row?.address || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('address')" :was="liveRow?.address ?? ''" />
+        <FieldDiffNote :show="diff.includes('address')" :was="liveRow?.address ?? ''" :now="row?.address ?? ''" />
       </div>
       <div class="sm:col-span-2">
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.legalInformation') }}</span>
         <p class="text-sm mt-0.5 whitespace-pre-line">{{ row?.legal_information || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('legal_information')" :was="liveRow?.legal_information ?? ''" />
+        <FieldDiffNote :show="diff.includes('legal_information')" :was="liveRow?.legal_information ?? ''" :now="row?.legal_information ?? ''" />
       </div>
       <div class="sm:col-span-2">
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.callbackTime') }}</span>
         <p class="text-sm mt-0.5">{{ row?.callback_time || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('callback_time')" :was="liveRow?.callback_time ?? ''" />
+        <FieldDiffNote :show="diff.includes('callback_time')" :was="liveRow?.callback_time ?? ''" :now="row?.callback_time ?? ''" />
       </div>
     </div>
     <div v-if="row" class="flex flex-col gap-2">

@@ -2,7 +2,7 @@
 // KbIngestPanel is Черновик's ingestion region — every way information
 // enters the KB, one tab each: Ссылки/Файлы (the structured import
 // pipeline, internal/kbimport) and ChatGPT / Claude (the MCP connector,
-// McpConnectCard unchanged). This is where /playground's own "model-driven
+// McpConnectCard unchanged). This is where /draft's own "model-driven
 // ingest" half of the 2026-08 product-boundary refinement actually lives;
 // /knowledge-base stays the only MANUAL authoring surface (no Add buttons
 // or record forms here).
