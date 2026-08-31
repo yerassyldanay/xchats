@@ -6,7 +6,7 @@ import type { KbImportRun, KbImportRunStatus } from '../types'
 
 // A run is done reacting to anything — the next submit is only blocked by
 // isActive below, never by this on its own.
-const TERMINAL_STATUSES: KbImportRunStatus[] = ['built', 'failed', 'needs_human']
+const TERMINAL_STATUSES: KbImportRunStatus[] = ['built', 'failed', 'needs_human', 'cancelled']
 export function isTerminalRunStatus(s: KbImportRunStatus): boolean {
   return TERMINAL_STATUSES.includes(s)
 }
@@ -32,6 +32,8 @@ export const useKbImport = defineStore('kbImport', {
     loadError: '' as string,
     submitting: false,
     error: '' as string,
+    cancelling: false,
+    cancelError: '' as string,
 
     disconnect: null as null | (() => void),
     reloadTimer: undefined as number | undefined,
@@ -101,6 +103,24 @@ export const useKbImport = defineStore('kbImport', {
         this.loadError = ''
       } catch (e) {
         this.loadError = e instanceof ApiError ? e.message : t('kb.import.errLoadStatus')
+      }
+    },
+
+    // KB-04: cancel is only ever offered for `current` (the one run this
+    // store tracks) — cancelable gates the button in the UI, but the store
+    // still surfaces a failed attempt (e.g. a race where synthesis claimed
+    // the run a moment before this request landed) rather than assuming
+    // success.
+    async cancel() {
+      if (!this.current) return
+      this.cancelling = true
+      this.cancelError = ''
+      try {
+        this.current = await api.cancelKbImportRun(this.current.run_id)
+      } catch (e) {
+        this.cancelError = e instanceof ApiError ? e.message : t('kb.import.errCancel')
+      } finally {
+        this.cancelling = false
       }
     },
 

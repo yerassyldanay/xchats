@@ -582,6 +582,7 @@ func (s *Server) Router() *gin.Engine {
 	kb.POST("/imports", s.handleKBCreateImport)
 	kb.GET("/imports", s.handleKBListImports)
 	kb.GET("/imports/:id", s.handleKBGetImport)
+	kb.POST("/imports/:id/cancel", s.handleKBCancelImport)
 	kb.GET("/import/providers", s.handleKBImportProviders)
 
 	// Settings (settings.go) — every route here is admin-only. Handlers are

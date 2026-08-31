@@ -97,6 +97,21 @@ export function formatBytes(bytes: number): string {
   return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`
 }
 
+// formatElapsed renders a duration the way a live progress counter should
+// (KB-04's own "elapsed time counter") — coarsest-unit-first, no
+// zero-padding (this is a running total, not a clock face). ms is always a
+// wall-clock delta the caller computes fresh (Date.now() - startedAt), so
+// this function itself stays a pure formatter with no timer of its own.
+export function formatElapsed(ms: number, t: (key: string, named?: Record<string, unknown>) => string): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) return t('common.elapsed.hm', { h: hours, m: minutes })
+  if (minutes > 0) return t('common.elapsed.ms', { m: minutes, s: seconds })
+  return t('common.elapsed.s', { s: seconds })
+}
+
 // tick maps a message delivery status to a UI-agnostic discriminant. The
 // component maps the discriminant to an icon + class, keeping this module pure.
 export type TickStatus = 'queued' | 'sent' | 'delivered' | 'read' | 'failed'

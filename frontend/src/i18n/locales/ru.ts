@@ -344,6 +344,7 @@ export default {
     },
     import: {
       errStart: 'Не удалось запустить импорт.',
+      errCancel: 'Не удалось отменить импорт.',
       errLoadStatus: 'Не удалось загрузить статус импорта.',
       retryLoadStatus: 'Повторить',
       statusUnknownNotice: 'Не удалось загрузить статус импорта — запуск отключён, пока это не будет устранено, чтобы не конфликтовать с уже активным запуском.',
@@ -359,6 +360,12 @@ export default {
       submitButton: 'Начать импорт',
       activeRunNotice: 'Импорт уже выполняется — дождитесь завершения перед новой отправкой.',
       runLabel: 'Импорт',
+      cancelButton: 'Отменить импорт',
+      startedBy: 'Начал(а): {name}',
+      startedByYou: 'вы',
+      elapsedFor: 'Прошло: {elapsed}',
+      stepExtracting: 'Шаг 1/2: обработано {done}/{total} файлов',
+      stepSynthesizing: 'Шаг 2/2: синтез базы знаний',
       targetTypeAuto: 'Определить автоматически',
       provider: 'Источник извлечения',
       targetType: 'Куда сохранить',
@@ -393,6 +400,7 @@ export default {
         built: 'Готово',
         failed: 'Ошибка',
         needs_human: 'Нужна проверка',
+        cancelled: 'Отменено',
       },
       materialStatus: {
         queued: 'В очереди',
@@ -400,6 +408,7 @@ export default {
         parsed: 'Обработан',
         needs_human: 'Нужна проверка',
         failed: 'Ошибка',
+        cancelled: 'Отменено',
       },
       synthesis: {
         title: 'Результат синтеза',
@@ -1394,6 +1403,11 @@ export default {
     prevPage: 'Предыдущая страница',
     nextPage: 'Следующая страница',
     pageRange: 'Показано {from}–{to} из {total}',
+    elapsed: {
+      hm: '{h} ч {m} мин',
+      ms: '{m} мин {s} сек',
+      s: '{s} сек',
+    },
   },
   // nav.* — the persistent left rail (NavRail.vue) plus the account menu it owns.
   nav: {

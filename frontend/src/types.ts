@@ -612,18 +612,18 @@ export interface CancelChangeResponse {
 // KbImportRunStatus mirrors kbimport.deriveRunStatus's closed vocabulary —
 // branched on by KbImportRunStatus.vue (badge colour) and the store (when to
 // stop polling), so this is a real union rather than string+comment.
-export type KbImportRunStatus = 'extracting' | 'synthesizing' | 'built' | 'failed' | 'needs_human'
+export type KbImportRunStatus = 'extracting' | 'synthesizing' | 'built' | 'failed' | 'needs_human' | 'cancelled'
 
 // KbImportMaterialStatus mirrors kbimport.MaterialStatus — one submitted
 // URL/file's pass-1 progress within a run. processing_status mirrors
 // kbd_materials' own lifecycle (kbstore/import.go's doc comment):
-// queued -> extracting -> parsed | needs_human | failed.
+// queued -> extracting -> parsed | needs_human | failed | cancelled.
 export interface KbImportMaterialStatus {
   id: string
   kind: 'url' | 'file'
   label: string
   handle: string
-  processing_status: 'queued' | 'extracting' | 'parsed' | 'needs_human' | 'failed'
+  processing_status: 'queued' | 'extracting' | 'parsed' | 'needs_human' | 'failed' | 'cancelled'
   error?: string
 }
 
@@ -658,6 +658,15 @@ export interface KbImportSynthesisSummary {
 export interface KbImportRun {
   run_id: string
   status: KbImportRunStatus
+  // started_by is a raw user id — the org's own already-loaded user list
+  // (useInbox().users, id -> name) resolves it to a display name; the API
+  // does not (see RunSummary.StartedBy's own doc comment).
+  started_by: string
+  started_at: string
+  // cancelable is true only while pass 1 is still running — see
+  // kbstore.CancelImportRun's own doc comment for why cancelling is
+  // refused once synthesis has been claimed.
+  cancelable: boolean
   materials: KbImportMaterialStatus[]
   synthesis?: KbImportSynthesisSummary
 }

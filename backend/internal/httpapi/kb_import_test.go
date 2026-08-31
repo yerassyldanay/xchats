@@ -161,6 +161,73 @@ func TestKBImports_GetRun_UnknownIdIs404(t *testing.T) {
 	}
 }
 
+// TestKBImports_Cancel_QueuedRun cancels immediately after Submit — before
+// this harness's own running worker pool's ClaimEvery tick (3s by default)
+// has any real chance to claim the material — the same "check right after
+// POST, no sleep" timing TestKBImports_202Shape above already relies on.
+func TestKBImports_Cancel_QueuedRun(t *testing.T) {
+	h := newHarness(t)
+	resp, env := h.postImport(t, "native", "auto", "", []string{"https://example.com/a"}, nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d (body=%s)", resp.StatusCode, env["message"])
+	}
+	var created struct {
+		RunID string `json:"run_id"`
+	}
+	mustPayload(t, env, &created)
+
+	cancelResp, cancelEnv := h.postJSON("/xchats/api/v1/kb/imports/"+created.RunID+"/cancel", nil)
+	if cancelResp.StatusCode != http.StatusOK {
+		t.Fatalf("cancel status=%d, want 200 (body=%s)", cancelResp.StatusCode, cancelEnv["message"])
+	}
+	var run struct {
+		Status     string `json:"status"`
+		Cancelable bool   `json:"cancelable"`
+	}
+	mustPayload(t, cancelEnv, &run)
+	if run.Status != "cancelled" || run.Cancelable {
+		t.Fatalf("cancel response = %+v, want status=cancelled, cancelable=false", run)
+	}
+
+	getResp, getEnv := h.getRaw("/xchats/api/v1/kb/imports/" + created.RunID)
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET after cancel status=%d (body=%s)", getResp.StatusCode, getEnv["message"])
+	}
+	var got struct {
+		Status string `json:"status"`
+	}
+	mustPayload(t, getEnv, &got)
+	if got.Status != "cancelled" {
+		t.Fatalf("GET run status = %q, want cancelled", got.Status)
+	}
+}
+
+func TestKBImports_Cancel_CrossOrgIs404(t *testing.T) {
+	h := newHarness(t)
+	resp, env := h.postImport(t, "native", "auto", "", []string{"https://example.com/a"}, nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d (body=%s)", resp.StatusCode, env["message"])
+	}
+	var created struct {
+		RunID string `json:"run_id"`
+	}
+	mustPayload(t, env, &created)
+
+	h2 := newHarness(t)
+	cancelResp, cancelEnv := h2.postJSON("/xchats/api/v1/kb/imports/"+created.RunID+"/cancel", nil)
+	if cancelResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-org cancel status=%d, want 404 (body=%s)", cancelResp.StatusCode, cancelEnv["message"])
+	}
+}
+
+func TestKBImports_Cancel_UnknownIdIs404(t *testing.T) {
+	h := newHarness(t)
+	resp, env := h.postJSON("/xchats/api/v1/kb/imports/00000000-0000-0000-0000-000000000099/cancel", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404 (body=%s)", resp.StatusCode, env["message"])
+	}
+}
+
 // TestKBImports_EndToEnd_FirecrawlURLLandsInDraftOnly drives the WHOLE
 // pipeline through real HTTP: submit a URL against an httptest Firecrawl
 // double, wait for the background pipeline (already running on this

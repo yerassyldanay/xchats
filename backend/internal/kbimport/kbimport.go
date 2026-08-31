@@ -49,6 +49,11 @@ var (
 	ErrRunActive = errors.New("kbimport: an import run is already active for this organization")
 	// ErrNotFound means the run id does not resolve for this organization.
 	ErrNotFound = errors.New("kbimport: import run not found")
+	// ErrCancelNotAllowed means Cancel was called after pass 2 (synthesis)
+	// had already been claimed for the run → 409 (see
+	// kbstore.CancelImportRun's own doc comment for why that boundary is a
+	// hard one, not just a UI nicety).
+	ErrCancelNotAllowed = errors.New("kbimport: this run can no longer be cancelled — synthesis has already started")
 )
 
 // Deps are the Service's external collaborators. Every write path this
@@ -292,10 +297,23 @@ func (s *Service) resolveSynthModel() (llm.ModelRef, error) {
 
 // RunSummary is GET /kb/imports/:id's payload.
 type RunSummary struct {
-	RunID     uuid.UUID         `json:"run_id"`
-	Status    string            `json:"status"` // extracting | synthesizing | built | failed | needs_human
-	Materials []MaterialStatus  `json:"materials"`
-	Synthesis *SynthesisSummary `json:"synthesis,omitempty"`
+	RunID uuid.UUID `json:"run_id"`
+	Status string   `json:"status"` // extracting | synthesizing | built | failed | needs_human | cancelled
+	// StartedBy/StartedAt come from the run's primary material — the
+	// user id Submit recorded (ImportParams.UserID, already stored on
+	// every run before this) and that row's own created_at. StartedBy is
+	// a raw uuid, matching how CreatedBy is exposed elsewhere in this app
+	// (dto.Campaign.CreatedBy) — resolving it to a display name is a
+	// client-side lookup against the org's already-loaded user list, not
+	// this API's job.
+	StartedBy string           `json:"started_by"`
+	StartedAt time.Time        `json:"started_at"`
+	Materials []MaterialStatus `json:"materials"`
+	// Cancelable is true only while pass 1 is still in progress — see
+	// kbstore.CancelImportRun's own doc comment for why cancelling is
+	// refused once synthesis has been claimed.
+	Cancelable bool              `json:"cancelable"`
+	Synthesis  *SynthesisSummary `json:"synthesis,omitempty"`
 }
 
 // MaterialStatus is one material's status within RunSummary.
@@ -346,11 +364,37 @@ func (s *Service) RunStatus(ctx context.Context, orgID, runID uuid.UUID) (RunSum
 		})
 	}
 	out.Status = deriveRunStatus(materials, primary)
-	if primary != nil && primary.Params.Synthesis != nil {
-		st := primary.Params.Synthesis
-		out.Synthesis = &SynthesisSummary{Status: st.Status, Notes: st.Notes, Applied: st.Applied, Dropped: st.Dropped, Usage: st.Usage}
+	if primary != nil {
+		out.StartedBy = primary.Params.UserID.String()
+		out.StartedAt = primary.CreatedAt
+		out.Cancelable = primary.Params.Synthesis == nil
+		if primary.Params.Synthesis != nil {
+			st := primary.Params.Synthesis
+			out.Synthesis = &SynthesisSummary{Status: st.Status, Notes: st.Notes, Applied: st.Applied, Dropped: st.Dropped, Usage: st.Usage}
+		}
 	}
 	return out, nil
+}
+
+// Cancel stops runID from progressing further — see
+// kbstore.CancelImportRun's own doc comment for exactly what "stops" means
+// and its safety boundary.
+func (s *Service) Cancel(ctx context.Context, orgID, runID uuid.UUID) error {
+	cancelled, err := s.deps.KB.CancelImportRun(ctx, orgID, runID)
+	if err != nil {
+		switch {
+		case errors.Is(err, kbstore.ErrUnknownKind):
+			return ErrNotFound
+		case errors.Is(err, kbstore.ErrImportRunNotCancelable):
+			return ErrCancelNotAllowed
+		default:
+			return err
+		}
+	}
+	if cancelled {
+		s.notify()
+	}
+	return nil
 }
 
 // ListRuns returns the org's most recent import runs' summaries, newest
@@ -389,6 +433,8 @@ func deriveRunStatus(materials []kbstore.ImportMaterial, primary *kbstore.Import
 			return "failed"
 		case kbstore.SynthesisNeedsHuman:
 			return "needs_human"
+		case kbstore.SynthesisCancelled:
+			return "cancelled"
 		}
 	}
 	for _, m := range materials {

@@ -55,6 +55,12 @@ import (
 // having first been CASed through 'queued'.
 const ImportStatusQueued = "queued"
 
+// ImportStatusCancelled is CancelImportRun's own terminal processing_status
+// — set on every material that was still 'queued' or 'extracting' when the
+// run was cancelled, so a material chip stops reading as perpetually
+// in-progress once the run itself has stopped.
+const ImportStatusCancelled = "cancelled"
+
 // Synthesis states — SynthesisState.Status. "" means pass 2 has not begun
 // for this run yet.
 const (
@@ -62,11 +68,25 @@ const (
 	SynthesisBuilt      = "built"
 	SynthesisFailed     = "failed"
 	SynthesisNeedsHuman = "needs_human"
+	// SynthesisCancelled is CancelImportRun's own terminal marker — set on
+	// the primary material's synthesis sub-state even when pass 2 was
+	// never claimed (Synthesis was nil), since ActiveImportRun's
+	// one-run-per-org gate keys off synthesis reaching a terminal status,
+	// never off processing_status (see its own doc comment): leaving
+	// Synthesis nil after a cancel would leave the org permanently unable
+	// to submit a new run.
+	SynthesisCancelled = "cancelled"
 )
 
 // ErrImportRunActive means the organization already has a non-terminal
 // import run — the one-active-run-per-org 409 gate.
 var ErrImportRunActive = errors.New("kbstore: an import run is already active for this organization")
+
+// ErrImportRunNotCancelable means CancelImportRun was called after pass 2
+// (synthesis) had already been claimed for the run — see CancelImportRun's
+// own doc comment for why that boundary is a hard one, not just a UI
+// nicety.
+var ErrImportRunNotCancelable = errors.New("kbstore: this run can no longer be cancelled — synthesis has already started")
 
 // AppliedUpsert records one pass-2 call that landed in the draft —
 // SynthesisState.Applied's element shape, surfaced verbatim in the run
@@ -115,7 +135,7 @@ func (st *SynthesisState) isTerminal() bool {
 		return false
 	}
 	switch st.Status {
-	case SynthesisBuilt, SynthesisFailed, SynthesisNeedsHuman:
+	case SynthesisBuilt, SynthesisFailed, SynthesisNeedsHuman, SynthesisCancelled:
 		return true
 	}
 	return false
@@ -176,6 +196,7 @@ type ImportMaterial struct {
 	ExtractedText      string
 	CustomerVisibility string
 	ProcessingStatus   string
+	CreatedAt          time.Time
 	Params             ImportParams
 }
 
@@ -578,7 +599,7 @@ func (s *Store) mergeImportParams(ctx context.Context, id uuid.UUID, mutate func
 // oldest first.
 func (s *Store) ImportRunMaterials(ctx context.Context, orgID, runID uuid.UUID) ([]ImportMaterial, error) {
 	rows, err := s.db.Query(ctx, `SELECT id, source_type, source_ref, filename, mime_type, storage_key,
-		extracted_text, customer_visibility, processing_status, extraction_metadata
+		extracted_text, customer_visibility, processing_status, created_at, extraction_metadata
 		FROM kbd_materials
 		WHERE organization_id = $1 AND json_extract(extraction_metadata, '$.import.run_id') = $2
 		ORDER BY created_at`,
@@ -592,14 +613,18 @@ func (s *Store) ImportRunMaterials(ctx context.Context, orgID, runID uuid.UUID) 
 	for rows.Next() {
 		var m ImportMaterial
 		var filename, mimeType, storageKey, visibility *string
+		var createdAt string
 		var meta string
 		if err := rows.Scan(&m.ID, &m.SourceType, &m.SourceRef, &filename, &mimeType, &storageKey,
-			&m.ExtractedText, &visibility, &m.ProcessingStatus, &meta); err != nil {
+			&m.ExtractedText, &visibility, &m.ProcessingStatus, &createdAt, &meta); err != nil {
 			return nil, err
 		}
 		m.OrganizationID = orgID
 		m.Filename, m.MimeType, m.StorageKey = strOrEmpty(filename), strOrEmpty(mimeType), strOrEmpty(storageKey)
 		m.CustomerVisibility = strOrEmpty(visibility)
+		if t, err := dbx.ParseTime(createdAt); err == nil {
+			m.CreatedAt = t
+		}
 		params, err := parseImportParams(meta)
 		if err != nil {
 			return nil, err
@@ -608,6 +633,94 @@ func (s *Store) ImportRunMaterials(ctx context.Context, orgID, runID uuid.UUID) 
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// CancelImportRun stops runID from progressing further, provided pass 2
+// has not started yet. Every 'queued' (not yet claimed) or 'extracting'
+// (mid pass-1) material moves to ImportStatusCancelled; the primary's
+// synthesis is marked SynthesisCancelled too — even though pass 2 was
+// never claimed — for the reason SynthesisCancelled's own doc comment
+// gives.
+//
+// A material a worker already has claimed and is mid pass-1 (an in-flight
+// extractor.Extract call) is NOT interrupted — it keeps running up to
+// ExtractTimeout, exactly like every other 'extracting' row this package's
+// own CAS convention already tolerates a race on: its eventual
+// FinishImportExtraction/RequeueImportJob call finds the row no longer
+// 'extracting' and simply discards the result (see those methods' own
+// WHERE-clause CAS) — RequeueImportJob is the one exception (no CAS guard
+// of its own), so a cancel landing in the split second between a reported
+// extraction failure and RequeueImportJob's write can rarely be undone by
+// it; narrow enough, and the same class of race RecoverImportJobs' own doc
+// comment already accepts elsewhere in this package, to leave as is rather
+// than widening this change to add one.
+//
+// Refuses (ErrImportRunNotCancelable) once the primary's synthesis has
+// already been claimed (Params.Synthesis != nil): FinishImportSynthesis
+// writes with NO CAS guard of its own (its own doc comment: claiming
+// BeginImportSynthesis makes that call the run's only remaining writer),
+// so a synthesis result landing after this would silently overwrite
+// 'cancelled' back to built/failed/needs_human — unlike pass 1, there is
+// no race-tolerant path here to rely on.
+//
+// found reports whether runID resolved to a run that was not ALREADY
+// terminal — false is a benign no-op (the run finished naturally in the
+// same instant), not an error.
+func (s *Store) CancelImportRun(ctx context.Context, orgID, runID uuid.UUID) (found bool, err error) {
+	materials, err := s.ImportRunMaterials(ctx, orgID, runID)
+	if err != nil {
+		return false, err
+	}
+	if len(materials) == 0 {
+		return false, ErrUnknownKind
+	}
+	var primary *ImportMaterial
+	for i := range materials {
+		if materials[i].Params.Primary {
+			primary = &materials[i]
+		}
+	}
+	if primary == nil {
+		return false, ErrUnknownKind
+	}
+	if primary.Params.Synthesis.isTerminal() {
+		return false, nil
+	}
+	if primary.Params.Synthesis != nil {
+		return false, ErrImportRunNotCancelable
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `UPDATE kbd_materials
+		SET processing_status = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE organization_id = $1
+		  AND json_extract(extraction_metadata, '$.import.run_id') = $2
+		  AND processing_status IN ('queued', 'extracting')`,
+		orgID, runID.String(), ImportStatusCancelled); err != nil {
+		return false, fmt.Errorf("kbstore: cancel import run materials: %w", err)
+	}
+
+	patch, err := marshalSynthesisPatch(SynthesisState{Status: SynthesisCancelled})
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE kbd_materials
+		SET extraction_metadata = json_patch(extraction_metadata, $3),
+		    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id = $1 AND organization_id = $2`,
+		primary.ID, orgID, patch); err != nil {
+		return false, fmt.Errorf("kbstore: cancel import run synthesis: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // RecentImportRuns returns the org's most recent import run ids (ordered by

@@ -346,6 +346,7 @@ export default {
     },
     import: {
       errStart: 'Импортты іске қосу мүмкін болмады.',
+      errCancel: 'Импортты болдырмау мүмкін болмады.',
       errLoadStatus: 'Импорт күйін жүктеу мүмкін болмады.',
       retryLoadStatus: 'Қайталау',
       statusUnknownNotice: 'Импорт күйін жүктеу мүмкін болмады — бұл шешілгенше іске қосу өшірулі, әлдеқашан белсенді жұмыспен қайшылықты болдырмау үшін.',
@@ -361,6 +362,12 @@ export default {
       submitButton: 'Импортты бастау',
       activeRunNotice: 'Импорт әлдеқашан орындалуда — жаңасын жіберер алдында аяқталуын күтіңіз.',
       runLabel: 'Импорт',
+      cancelButton: 'Импортты болдырмау',
+      startedBy: 'Бастаған: {name}',
+      startedByYou: 'сіз',
+      elapsedFor: 'Өткен уақыт: {elapsed}',
+      stepExtracting: '1/2 қадам: {done}/{total} файл өңделді',
+      stepSynthesizing: '2/2 қадам: білім базасы синтезделуде',
       targetTypeAuto: 'Автоматты анықтау',
       provider: 'Айыру көзі',
       targetType: 'Қайда сақтау',
@@ -395,6 +402,7 @@ export default {
         built: 'Дайын',
         failed: 'Қате',
         needs_human: 'Тексеру қажет',
+        cancelled: 'Болдырылмады',
       },
       materialStatus: {
         queued: 'Кезекте',
@@ -402,6 +410,7 @@ export default {
         parsed: 'Өңделді',
         needs_human: 'Тексеру қажет',
         failed: 'Қате',
+        cancelled: 'Болдырылмады',
       },
       synthesis: {
         title: 'Синтез нәтижесі',
@@ -1285,6 +1294,11 @@ export default {
     prevPage: 'Алдыңғы бет',
     nextPage: 'Келесі бет',
     pageRange: '{total} ішінен {from}–{to} көрсетілді',
+    elapsed: {
+      hm: '{h} сағ {m} мин',
+      ms: '{m} мин {s} сек',
+      s: '{s} сек',
+    },
   },
   // nav.* — the persistent left rail (NavRail.vue) plus the account menu it owns.
   nav: {

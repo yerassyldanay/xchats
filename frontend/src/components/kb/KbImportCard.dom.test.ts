@@ -241,7 +241,7 @@ describe('KbImportCard — submitting', () => {
 
   it('disables submission and shows a notice while a run is non-terminal', async () => {
     const { wrapper, kbi } = await mountCard('url')
-    kbi.current = { run_id: 'run-1', status: 'synthesizing', materials: [] } as KbImportRun
+    kbi.current = { run_id: 'run-1', status: 'synthesizing', started_by: 'user-1', started_at: '2026-08-31T10:00:00Z', cancelable: false, materials: [] } as KbImportRun
     await stageOneUrl(wrapper)
 
     expect((buttonLabelled(wrapper, 'Начать импорт').element as HTMLButtonElement).disabled).toBe(true)

@@ -2,6 +2,7 @@ package kbstore_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -698,6 +699,160 @@ func TestActiveImportRun_GateLifecycle(t *testing.T) {
 	// A new run may now start.
 	if _, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: uuid.New(), Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/y"}); err != nil {
 		t.Fatalf("expected a second run to be enqueueable once the first is terminal: %v", err)
+	}
+}
+
+// --- CancelImportRun ---------------------------------------------------------
+
+func TestCancelImportRun_QueuedMaterialsAndFreesTheOrgGate(t *testing.T) {
+	kb, orgID, _, _ := newTestKB(t)
+	ctx := context.Background()
+	runID := uuid.New()
+
+	primaryID, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: runID, Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondaryID, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: runID, Provider: "native", TargetType: "auto", URL: "https://example.com/b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := kb.CancelImportRun(ctx, orgID, runID)
+	if err != nil || !found {
+		t.Fatalf("CancelImportRun: found=%v err=%v, want true/nil", found, err)
+	}
+
+	mats, err := kb.ImportRunMaterials(ctx, orgID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range mats {
+		if m.ProcessingStatus != kbstore.ImportStatusCancelled {
+			t.Errorf("material %s status = %q, want cancelled", m.ID, m.ProcessingStatus)
+		}
+		if m.ID == primaryID && (m.Params.Synthesis == nil || m.Params.Synthesis.Status != kbstore.SynthesisCancelled) {
+			t.Errorf("primary synthesis = %+v, want a cancelled SynthesisState", m.Params.Synthesis)
+		}
+	}
+	_ = secondaryID
+
+	// ActiveImportRun's one-run-per-org gate must release: a cancelled run
+	// with pass 2 never claimed would otherwise leave Synthesis nil forever
+	// (isTerminal() false), permanently blocking a fresh Submit.
+	if _, active, err := kb.ActiveImportRun(ctx, orgID); err != nil || active {
+		t.Fatalf("after cancel: active=%v err=%v, want false/nil", active, err)
+	}
+	if _, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: uuid.New(), Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/c"}); err != nil {
+		t.Fatalf("expected a new run to be enqueueable after cancel: %v", err)
+	}
+}
+
+func TestCancelImportRun_ExtractingMaterial_LateFinishIsDiscardedNotResurrected(t *testing.T) {
+	kb, orgID, _, _ := newTestKB(t)
+	ctx := context.Background()
+	runID := uuid.New()
+
+	primaryID, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: runID, Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kb.ClaimImportJobs(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	if found, err := kb.CancelImportRun(ctx, orgID, runID); err != nil || !found {
+		t.Fatalf("CancelImportRun: found=%v err=%v, want true/nil", found, err)
+	}
+
+	// The worker that claimed primaryID before the cancel is still running
+	// pass 1 (in this test, synchronously) and now reports its outcome —
+	// FinishImportExtraction's own CAS (WHERE processing_status =
+	// 'extracting') must find the row already 'cancelled' and refuse the
+	// late write rather than resurrecting it as 'parsed'.
+	if err := kb.FinishImportExtraction(ctx, primaryID, kbstore.ExtractionOutcome{Status: "parsed", ExtractedText: "late result"}); !errors.Is(err, kbstore.ErrUnknownKind) {
+		t.Fatalf("late FinishImportExtraction err = %v, want ErrUnknownKind", err)
+	}
+
+	mats, err := kb.ImportRunMaterials(ctx, orgID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mats) != 1 || mats[0].ProcessingStatus != kbstore.ImportStatusCancelled || mats[0].ExtractedText != "" {
+		t.Fatalf("material after late finish = %+v, want cancelled with no extracted text", mats[0])
+	}
+}
+
+func TestCancelImportRun_RefusedOnceSynthesisClaimed(t *testing.T) {
+	kb, orgID, _, _ := newTestKB(t)
+	ctx := context.Background()
+	runID := uuid.New()
+
+	primaryID, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: runID, Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kb.ClaimImportJobs(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := kb.FinishImportExtraction(ctx, primaryID, kbstore.ExtractionOutcome{Status: "parsed", ExtractedText: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := kb.BeginImportSynthesis(ctx, primaryID); err != nil || !claimed {
+		t.Fatalf("BeginImportSynthesis: claimed=%v err=%v", claimed, err)
+	}
+
+	if found, err := kb.CancelImportRun(ctx, orgID, runID); !errors.Is(err, kbstore.ErrImportRunNotCancelable) || found {
+		t.Fatalf("CancelImportRun once synthesis is running: found=%v err=%v, want false/ErrImportRunNotCancelable", found, err)
+	}
+
+	// Refusing must leave the run entirely untouched — still able to finish
+	// synthesis normally afterward.
+	if err := kb.FinishImportSynthesis(ctx, primaryID, kbstore.SynthesisState{Status: kbstore.SynthesisBuilt}); err != nil {
+		t.Fatalf("FinishImportSynthesis after a refused cancel: %v", err)
+	}
+}
+
+func TestCancelImportRun_AlreadyTerminalIsANoOp(t *testing.T) {
+	kb, orgID, _, _ := newTestKB(t)
+	ctx := context.Background()
+	runID := uuid.New()
+
+	primaryID, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: runID, Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kb.ClaimImportJobs(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := kb.FinishImportExtraction(ctx, primaryID, kbstore.ExtractionOutcome{Status: "parsed", ExtractedText: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := kb.BeginImportSynthesis(ctx, primaryID); err != nil {
+		t.Fatal(err)
+	}
+	if err := kb.FinishImportSynthesis(ctx, primaryID, kbstore.SynthesisState{Status: kbstore.SynthesisBuilt}); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := kb.CancelImportRun(ctx, orgID, runID)
+	if err != nil || found {
+		t.Fatalf("CancelImportRun on an already-built run: found=%v err=%v, want false/nil", found, err)
+	}
+
+	mats, err := kb.ImportRunMaterials(ctx, orgID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mats[0].Params.Synthesis.Status != kbstore.SynthesisBuilt {
+		t.Fatalf("a no-op cancel must never touch the run's own terminal status, got %+v", mats[0].Params.Synthesis)
+	}
+}
+
+func TestCancelImportRun_UnknownRunID(t *testing.T) {
+	kb, orgID, _, _ := newTestKB(t)
+	if _, err := kb.CancelImportRun(context.Background(), orgID, uuid.New()); !errors.Is(err, kbstore.ErrUnknownKind) {
+		t.Fatalf("CancelImportRun for an unknown run: err = %v, want ErrUnknownKind", err)
 	}
 }
 

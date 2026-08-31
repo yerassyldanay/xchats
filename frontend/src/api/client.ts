@@ -99,6 +99,10 @@ export const api = {
   },
   getKbImportRun: (runId: string) => send<KbImportRun>('GET', '/kb/imports/' + encodeURIComponent(runId)),
   listKbImportRuns: (limit?: number) => send<{ runs: KbImportRun[] }>('GET', '/kb/imports' + (limit ? `?limit=${limit}` : '')),
+  // cancelKbImportRun is POST /kb/imports/:id/cancel (KB-04) — only valid
+  // while pass 1 is still running (KbImportRun.cancelable); refused with a
+  // 409 once synthesis has been claimed.
+  cancelKbImportRun: (runId: string) => send<KbImportRun>('POST', '/kb/imports/' + encodeURIComponent(runId) + '/cancel'),
   // getKbImportProviders is GET /kb/import/providers (internal/httpapi/
   // kb_import.go) — the one source of truth useImportProviders fetches
   // once and caches, so the parser dropdown can never disagree with

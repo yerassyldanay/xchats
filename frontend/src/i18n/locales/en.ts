@@ -339,6 +339,7 @@ export default {
     },
     import: {
       errStart: 'Could not start the import.',
+      errCancel: 'Could not cancel the import.',
       errLoadStatus: 'Could not load import status.',
       retryLoadStatus: 'Retry',
       statusUnknownNotice: "Import status couldn't be loaded — start is disabled until this is resolved, to avoid conflicting with a run that might already be active.",
@@ -354,6 +355,12 @@ export default {
       submitButton: 'Start import',
       activeRunNotice: 'An import is already running — wait for it to finish before submitting another.',
       runLabel: 'Import',
+      cancelButton: 'Cancel import',
+      startedBy: 'Started by {name}',
+      startedByYou: 'you',
+      elapsedFor: '{elapsed} elapsed',
+      stepExtracting: 'Step 1/2: Parsed {done}/{total} files',
+      stepSynthesizing: 'Step 2/2: Synthesizing your knowledge base',
       targetTypeAuto: 'Detect automatically',
       provider: 'Extraction provider',
       targetType: 'Save as',
@@ -388,6 +395,7 @@ export default {
         built: 'Done',
         failed: 'Failed',
         needs_human: 'Needs review',
+        cancelled: 'Cancelled',
       },
       materialStatus: {
         queued: 'Queued',
@@ -395,6 +403,7 @@ export default {
         parsed: 'Parsed',
         needs_human: 'Needs review',
         failed: 'Failed',
+        cancelled: 'Cancelled',
       },
       synthesis: {
         title: 'Synthesis result',
@@ -1394,6 +1403,11 @@ export default {
     prevPage: 'Previous page',
     nextPage: 'Next page',
     pageRange: 'Showing {from}–{to} of {total}',
+    elapsed: {
+      hm: '{h}h {m}m',
+      ms: '{m}m {s}s',
+      s: '{s}s',
+    },
   },
   // nav.* — the persistent left rail (NavRail.vue) plus the account menu it owns.
   nav: {

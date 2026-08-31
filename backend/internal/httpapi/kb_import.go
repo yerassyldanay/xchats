@@ -169,6 +169,36 @@ func (s *Server) handleKBGetImport(c *gin.Context) {
 	ok(c, run)
 }
 
+// handleKBCancelImport is POST /kb/imports/:id/cancel: stop a run in
+// progress. A write like Submit itself (kbWrite, not kbReady — cancelling
+// mutates kbd_materials), so it is refused the same way Submit is while
+// the KB gate is closed.
+func (s *Server) handleKBCancelImport(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	if s.kbImport == nil {
+		fail(c, http.StatusServiceUnavailable, ErrInternal, "the import pipeline is not available")
+		return
+	}
+	runID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "invalid run id")
+		return
+	}
+	if err := s.kbImport.Cancel(ctx(c), orgID, runID); err != nil {
+		s.kbImportFail(c, err)
+		return
+	}
+	run, err := s.kbImport.RunStatus(ctx(c), orgID, runID)
+	if err != nil {
+		s.kbImportFail(c, err)
+		return
+	}
+	ok(c, run)
+}
+
 // kbImportProviderSummary is one entry of GET /kb/import/providers.
 type kbImportProviderSummary struct {
 	ID                 string   `json:"id"`
@@ -239,6 +269,8 @@ func (s *Server) kbImportFail(c *gin.Context, err error) {
 	case errors.Is(err, kbimport.ErrValidation):
 		fail(c, http.StatusBadRequest, ErrValidation, err.Error())
 	case errors.Is(err, kbimport.ErrRunActive):
+		fail(c, http.StatusConflict, ErrConflict, err.Error())
+	case errors.Is(err, kbimport.ErrCancelNotAllowed):
 		fail(c, http.StatusConflict, ErrConflict, err.Error())
 	case errors.Is(err, kbimport.ErrNotFound):
 		fail(c, http.StatusNotFound, ErrNotFound, err.Error())
