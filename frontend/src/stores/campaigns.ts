@@ -11,6 +11,7 @@ import type {
   CampaignRecipientPreviewResult,
   CampaignStatusEvent,
   CampaignRecipientEvent,
+  Message,
   Page,
 } from '../types'
 
@@ -32,6 +33,12 @@ export const useCampaigns = defineStore('campaigns', {
     current: null as Campaign | null,
     recipients: [] as CampaignRecipient[],
     recipientsTotal: 0,
+    // lastRecipientsQuery remembers fetchRecipients' own last (status,
+    // page, pageSize) — applyRecipientEvent re-issues the SAME query on a
+    // relevant live event, so the detail page's current filter/page keeps
+    // working without the store needing the view to hand its own state
+    // back in on every event.
+    lastRecipientsQuery: null as { status?: string; page: number; pageSize: number } | null,
     events: [] as CampaignEvent[],
     eventsTotal: 0,
     disconnect: null as null | (() => void),
@@ -96,6 +103,7 @@ export const useCampaigns = defineStore('campaigns', {
       const res = await api.get<Page<CampaignRecipient>>(`/campaigns/${id}/recipients?${q}`)
       this.recipients = res.items
       this.recipientsTotal = res.total
+      this.lastRecipientsQuery = { status, page, pageSize }
       return res
     },
     async retryFailed(id: string, recipientIds?: string[]) {
@@ -158,7 +166,32 @@ export const useCampaigns = defineStore('campaigns', {
       // recipient's status changes; only re-fetched when the detail page
       // is actually open on this campaign (avoids a request per event for
       // every OTHER campaign's traffic while the list page is open).
-      if (this.current?.id === evt.campaign_id) void this.fetchOne(evt.campaign_id)
+      if (this.current?.id === evt.campaign_id) {
+        void this.fetchOne(evt.campaign_id)
+        // A recipient's own message_id/chat_id are populated only once it
+        // is actually claimed and sent — this event deliberately carries
+        // no more than ids+status (see CampaignRecipientEvent's own doc
+        // comment), so picking up a freshly-linked message_id (and from
+        // there, applyMessageUpdate's own later delivery_state updates)
+        // needs a real re-fetch, not an in-place patch of the row already
+        // loaded from before this recipient was ever sent to.
+        if (this.lastRecipientsQuery) {
+          const { status, page, pageSize } = this.lastRecipientsQuery
+          void this.fetchRecipients(evt.campaign_id, status, page, pageSize)
+        }
+      }
+    },
+    // applyMessageUpdate keeps a loaded recipient's own message_delivery_state
+    // live as delivery/read receipts arrive (real channels' own webhooks, or
+    // Simulator's ReceiptSimulator) — campaign.recipient_updated only fires
+    // on the recipient's own coarse status (pending/sending/sent/...), never
+    // on this finer message-level progression, so message.updated is the
+    // one event that actually carries it. Every OTHER field on message.updated
+    // is irrelevant here (it is not a chat view) — matched purely by
+    // message_id to whichever loaded recipient, if any, it belongs to.
+    applyMessageUpdate(m: Message) {
+      const r = this.recipients.find((x) => x.message_id === m.id)
+      if (r) r.message_delivery_state = m.status
     },
 
     // --- realtime ------------------------------------------------------
@@ -171,6 +204,7 @@ export const useCampaigns = defineStore('campaigns', {
       this.disconnect = connectRealtime({
         campaignStatusChanged: (e) => this.applyStatusEvent(e),
         campaignRecipientUpdated: (e) => this.applyRecipientEvent(e),
+        messageUpdated: (m) => this.applyMessageUpdate(m),
       })
     },
     stopRealtime() {
