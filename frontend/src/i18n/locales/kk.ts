@@ -232,6 +232,7 @@ export default {
         selectRecord: 'Жазбаны таңдау',
       },
       cardBlockedNote: 'Жариялау Жобадағы басқа қайшылықпен бұғатталған — жоғарыдағы хабарламаны қараңыз.',
+      fixInTab: '«{tab}» қойындысында түзету →',
       wasBefore: 'Бұрын:',
       // Fallbacks the playground store puts on state when an API call fails
       // without a server-supplied message of its own.

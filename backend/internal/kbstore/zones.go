@@ -242,8 +242,14 @@ func validateZoneWorld(ctx context.Context, tx dbtx, orgID uuid.UUID) error {
 //     delivery_cost and delivery_time (the flat KB-wide delivery answer) and
 //     a non-blank outside_zones_note (the closed-world refusal for a
 //     direction matching no zone).
-func zoneGateReasons(zones []ZoneRow, policies []PolicyRow) []string {
-	var reasons []string
+func zoneGateReasons(zones []ZoneRow, policies []PolicyRow) []GateReason {
+	var reasons []GateReason
+	zoneReason := func(z ZoneRow, format string, args ...any) GateReason {
+		return GateReason{Kind: "delivery_zones", Key: z.Ref, Message: fmt.Sprintf(format, args...)}
+	}
+	policyReason := func(p PolicyRow, format string, args ...any) GateReason {
+		return GateReason{Kind: "policies", Key: p.Slug, Message: fmt.Sprintf(format, args...)}
+	}
 	byRef := make(map[string]ZoneRow, len(zones))
 	for _, z := range zones {
 		byRef[z.Ref] = z
@@ -251,40 +257,42 @@ func zoneGateReasons(zones []ZoneRow, policies []PolicyRow) []string {
 	for _, z := range zones {
 		if z.DeliveryAvailable {
 			if strings.TrimSpace(z.DeliveryCost) == "" || strings.TrimSpace(z.DeliveryInDays) == "" {
-				reasons = append(reasons, fmt.Sprintf(
+				reasons = append(reasons, zoneReason(z,
 					"zone %q: delivery_available is on, so delivery_cost and delivery_in_days are both required", z.Ref))
 			}
 		} else if strings.TrimSpace(z.DeliveryCost) != "" || strings.TrimSpace(z.DeliveryInDays) != "" {
-			reasons = append(reasons, fmt.Sprintf(
+			reasons = append(reasons, zoneReason(z,
 				"zone %q: delivery_available is off, so delivery_cost and delivery_in_days must both be blank", z.Ref))
 		}
 		if z.ParentRef == "" {
 			continue
 		}
 		if z.ParentRef == z.Ref {
-			reasons = append(reasons, fmt.Sprintf("zone %q: parent_ref cannot reference itself", z.Ref))
+			reasons = append(reasons, zoneReason(z, "zone %q: parent_ref cannot reference itself", z.Ref))
 			continue
 		}
 		if _, ok := byRef[z.ParentRef]; !ok {
-			reasons = append(reasons, fmt.Sprintf("zone %q: parent_ref %q does not resolve to an existing zone", z.Ref, z.ParentRef))
+			reasons = append(reasons, zoneReason(z, "zone %q: parent_ref %q does not resolve to an existing zone", z.Ref, z.ParentRef))
 			continue
 		}
 		if zoneParentCycle(z.Ref, byRef) {
-			reasons = append(reasons, fmt.Sprintf("zone %q: parent_ref chain forms a cycle", z.Ref))
+			reasons = append(reasons, zoneReason(z, "zone %q: parent_ref chain forms a cycle", z.Ref))
 		}
 	}
 	if len(zones) == 0 {
 		return reasons
 	}
 	if len(policies) == 0 {
-		reasons = append(reasons, "at least one policy row with outside_zones_note is required while delivery zones exist")
+		// No policy row exists at all — there is no key to point at, only
+		// the Policies tab itself.
+		reasons = append(reasons, GateReason{Kind: "policies", Message: "at least one policy row with outside_zones_note is required while delivery zones exist"})
 	}
 	for _, p := range policies {
 		if strings.TrimSpace(p.DeliveryCost) != "" || strings.TrimSpace(p.DeliveryInDays) != "" {
-			reasons = append(reasons, "policy: delivery_cost and delivery_in_days must be blank while delivery zones exist — set cost/days per zone instead")
+			reasons = append(reasons, policyReason(p, "policy: delivery_cost and delivery_in_days must be blank while delivery zones exist — set cost/days per zone instead"))
 		}
 		if strings.TrimSpace(p.OutsideZonesNote) == "" {
-			reasons = append(reasons, "policy: outside_zones_note is required while delivery zones exist")
+			reasons = append(reasons, policyReason(p, "policy: outside_zones_note is required while delivery zones exist"))
 		}
 	}
 	return reasons

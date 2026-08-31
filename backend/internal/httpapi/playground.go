@@ -19,7 +19,17 @@ func (s *Server) kbFail(c *gin.Context, err error) {
 	var me *kbstore.ErrMediaReference
 	switch {
 	case errors.As(err, &ge):
-		fail(c, http.StatusUnprocessableEntity, ErrValidation, ge.Error())
+		// KB-09: the gate validates the WHOLE resulting KB even for a
+		// single-row approve (an unrelated staged policy can 422 a valid
+		// tariff's own publish) — Reasons names which entity actually
+		// caused each violation, so the client can point the operator at
+		// it instead of just reciting the flat message ge.Error() already
+		// carries (kept too, for anything that only reads .message).
+		reasons := make([]gin.H, len(ge.Reasons))
+		for i, r := range ge.Reasons {
+			reasons[i] = gin.H{"kind": r.Kind, "key": r.Key, "message": r.Message}
+		}
+		failWithPayload(c, http.StatusUnprocessableEntity, ErrValidation, ge.Error(), gin.H{"reasons": reasons})
 	case errors.As(err, &me):
 		// Without this case, a still-processing/cross-org/foreign-org/
 		// wrong-kind material_id falls through to the default 500 below and

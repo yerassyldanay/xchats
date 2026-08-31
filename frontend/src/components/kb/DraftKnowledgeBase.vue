@@ -112,6 +112,17 @@ function isBusy(kind: string, key: string) {
 function blockedNote(kind: string, key: string) {
   return pg.gateBlockedKey === `${kind}:${key}` ? t('kb.draft.cardBlockedNote') : undefined
 }
+
+// KB-09: a gate reason's own kind is already the tab's key (ChangeKind) —
+// tabs is dynamic (useEntityTabs' own doc comment: only kinds with
+// pending entries), which the offending entity's tab always is, since
+// that pending entry is exactly what tripped the gate.
+function entityTabLabel(kind: string): string {
+  return tabs.value.find((tb) => tb.key === kind)?.label || kind
+}
+function goToTab(kind: string) {
+  active.value = kind
+}
 function editEntry(kind: 'delivery_zones' | 'contacts' | 'policies', entry: ChangeEntry) {
   const row = entry.type === 'removed' ? entry.liveRow : entry.draftRow
   if (row) modal.openEdit(kind, row)
@@ -315,9 +326,29 @@ const confirmAcceptKey = computed(() => {
           </div>
         </template>
 
-        <p v-if="pg.gateReasons" class="flex items-start gap-2 text-sm text-destructive rounded-lg bg-destructive/10 p-3">
-          <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ t('kb.draft.gateBlocked') }} {{ pg.gateReasons }}
-        </p>
+        <div v-if="pg.gateReasons" class="rounded-lg bg-destructive/10 p-3 space-y-1.5" data-testid="gate-error-banner">
+          <p class="flex items-start gap-2 text-sm text-destructive">
+            <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ t('kb.draft.gateBlocked') }}
+          </p>
+          <ul v-if="pg.gateReasonDetails.length" class="ml-6 space-y-1 text-sm text-destructive">
+            <li v-for="(r, i) in pg.gateReasonDetails" :key="i">
+              {{ r.message }}
+              <button
+                v-if="r.kind"
+                type="button"
+                class="font-medium underline underline-offset-2 hover:no-underline"
+                data-testid="gate-reason-fix-link"
+                @click="goToTab(r.kind)"
+              >
+                {{ t('kb.draft.fixInTab', { tab: entityTabLabel(r.kind) }) }}
+              </button>
+            </li>
+          </ul>
+          <!-- Fallback for the rare case the structured payload didn't come
+               through (an older cached response, a malformed reasons[]) —
+               the flat message alone, exactly as this banner always showed. -->
+          <p v-else class="ml-6 text-sm text-destructive">{{ pg.gateReasons }}</p>
+        </div>
         <p v-else-if="pg.error" class="flex items-center gap-2 text-sm text-destructive">
           <CircleAlert class="w-4 h-4 shrink-0" /> {{ pg.error }}
         </p>

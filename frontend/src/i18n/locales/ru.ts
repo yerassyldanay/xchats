@@ -230,6 +230,7 @@ export default {
         selectRecord: 'Выбрать запись',
       },
       cardBlockedNote: 'Публикация заблокирована другим конфликтом в Черновике — см. сообщение выше.',
+      fixInTab: 'Исправить на вкладке «{tab}» →',
       wasBefore: 'Было:',
       // Fallbacks the playground store puts on state when an API call fails
       // without a server-supplied message of its own.

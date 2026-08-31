@@ -225,6 +225,7 @@ export default {
         selectRecord: 'Select record',
       },
       cardBlockedNote: 'Publishing is blocked by another conflict in the Draft — see the message above.',
+      fixInTab: 'Fix in {tab} tab →',
       wasBefore: 'Was:',
       // Fallbacks the playground store puts on state when an API call fails
       // without a server-supplied message of its own.

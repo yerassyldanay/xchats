@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { t } from '../i18n'
 import { connectRealtime } from '../lib/sse'
-import type { CancelChangeResponse, DraftChangeSet, DraftView, KbMaterial, PromptView } from '../types'
+import type { CancelChangeResponse, DraftChangeSet, DraftView, KbGateReason, KbMaterial, PromptView } from '../types'
 import type { ChangeKind } from '@/composables/draftChanges'
 import type {
   ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, TariffPayload, TopicPayload,
@@ -34,6 +34,11 @@ export const usePlayground = defineStore('playground', {
     error: '' as string,
     draftStale: false, // true when the LAST write() failed on DRAFT_STALE — see write()'s doc comment
     gateReasons: '' as string, // last approve-gate (422) message — rendered at PAGE level only (the gate validates the whole resulting KB, never just the selected entity — see approveWith's doc comment)
+    // KB-09: the SAME 422's structured reasons — kind/key naming the
+    // offending entity per violation, so the page-level banner can link
+    // straight to it ("Fix in Delivery Zones Tab →") instead of just
+    // reciting gateReasons' flat text. Reset alongside it.
+    gateReasonDetails: [] as KbGateReason[],
     gateBlockedKey: '' as string, // `${kind}:${key}` of the card whose attempt produced gateReasons — cleared by the NEXT publish attempt (success or not), so only the card that triggered it shows a neutral "blocked" pointer, never "this record is invalid"
 
     // --- live slice (Знаний база — the comparison baseline, read-only here) -
@@ -298,6 +303,7 @@ export const usePlayground = defineStore('playground', {
       this.publishingKey = publishingKey
       this.error = ''
       this.gateReasons = ''
+      this.gateReasonDetails = []
       this.gateBlockedKey = ''
       try {
         this.setChanges(await api.post<DraftChangeSet>(path, {}, this.ifMatch()))
@@ -306,6 +312,12 @@ export const usePlayground = defineStore('playground', {
         if (e instanceof ApiError && e.status === 422) {
           this.gateReasons = e.message
           this.gateBlockedKey = publishingKey
+          // KB-09: the structured payload rides alongside .message (see
+          // ApiError's own doc comment) — an older/unexpected 422 shape
+          // (payload missing or malformed) just leaves this empty, and the
+          // UI falls back to the flat gateReasons string.
+          const reasons = (e.payload as { reasons?: KbGateReason[] } | undefined)?.reasons
+          this.gateReasonDetails = Array.isArray(reasons) ? reasons : []
         } else if (e instanceof ApiError && e.errcode === 'DRAFT_STALE') {
           this.error = t('kb.draft.errStale')
           await this.load()

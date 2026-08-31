@@ -7,7 +7,11 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const PREFIX = '/xchats/api/v1'
 
 export class ApiError extends Error {
-  constructor(public errcode: string, public status: number, message: string) {
+  // payload is failWithPayload's own optional "something useful alongside
+  // the failure" body (server.go) — undefined for the ordinary fail() case
+  // (nearly every error). KB-09's gate 422 is the one caller that reads
+  // it (payload.reasons); everything else keeps using .message as before.
+  constructor(public errcode: string, public status: number, message: string, public payload?: unknown) {
     super(message || errcode)
   }
 }
@@ -22,7 +26,7 @@ async function unwrap<T>(res: Response, path: string): Promise<T> {
   const env = (await res.json()) as Envelope<T>
   log.info('api call', { path, status: res.status, errcode: env.errcode })
   if (env.errcode !== 'OK') {
-    throw new ApiError(env.errcode, res.status, env.message)
+    throw new ApiError(env.errcode, res.status, env.message, env.payload)
   }
   return env.payload
 }

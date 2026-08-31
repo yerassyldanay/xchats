@@ -6,7 +6,7 @@ import { useDraftSelection } from '@/composables/useDraftSelection'
 import { mountKb, testPinia } from '@/test/mount'
 import DraftKnowledgeBase from './DraftKnowledgeBase.vue'
 import KbIngestPanel from './KbIngestPanel.vue'
-import type { DraftChangeSet, DraftView, TopicRow } from '@/types'
+import type { DraftChangeSet, DraftView, ProductRow, TopicRow } from '@/types'
 
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
 vi.mock('@/api/client', async (importOriginal) => {
@@ -33,6 +33,15 @@ function topic(over: Partial<TopicRow> = {}): TopicRow {
     id: 'pricing', slug: 'pricing', title: 'Тарифы', body_md: 'Текст.',
     featured_image: null, illustration_images: [], explainer_videos: [], reference_documents: [],
     draft: false, updated_at: '',
+    ...over,
+  }
+}
+
+function product(over: Partial<ProductRow> = {}): ProductRow {
+  return {
+    id: 'p1', ref: 'p1', name: 'Товар', price: '', description: '', category: '',
+    in_stock: true, sales_status: 'active', featured_image: null, gallery_images: [],
+    demo_videos: [], certificate_documents: [], guarantee_documents: [], draft: false, updated_at: '',
     ...over,
   }
 }
@@ -290,6 +299,64 @@ describe('DraftKnowledgeBase — 422 gate failure renders page-level only', () =
     expect(wrapper.text()).toContain('publish gate failed: policy main is incomplete')
     expect(wrapper.text()).toContain('Публикация заблокирована другим конфликтом в Черновике')
     expect(wrapper.text().toLowerCase()).not.toContain('невалид')
+  })
+})
+
+// KB-09: the flat page-level gate message tells you SOMETHING is blocked but
+// not WHERE — these structured reasons (kind/key/message from the backend's
+// GateError.Reasons) let the banner point straight at the offending tab.
+describe('DraftKnowledgeBase — KB-09: structured gate reasons link to their tab', () => {
+  it('renders each reason\'s message, with a Fix-in-Tab link only for reasons that carry a kind', async () => {
+    const { wrapper, pg } = await mountWith(
+      emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })], products: [product()] }),
+      emptyLive()
+    )
+    pg.gateReasons = 'publish gate failed: policy main is incomplete'
+    pg.gateReasonDetails = [
+      { kind: 'products', key: 'p1', message: 'available requires cost and days to be set' },
+      { kind: '', key: '', message: '3 unresolved request(s) remain' },
+    ]
+    await wrapper.vm.$nextTick()
+
+    const banner = wrapper.find('[data-testid="gate-error-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('available requires cost and days to be set')
+    expect(banner.text()).toContain('3 unresolved request(s) remain')
+    // The flat message is the v-else fallback — once structured reasons are
+    // present, it must not also render (no duplicate/contradictory text).
+    expect(banner.text()).not.toContain('publish gate failed: policy main is incomplete')
+
+    const fixLinks = wrapper.findAll('[data-testid="gate-reason-fix-link"]')
+    expect(fixLinks).toHaveLength(1)
+    expect(fixLinks[0].text()).toContain('Товары') // products' plural label
+  })
+
+  it('clicking a Fix-in-Tab link switches the active tab to that reason\'s kind', async () => {
+    const { wrapper, pg } = await mountWith(
+      emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })], products: [product()] }),
+      emptyLive()
+    )
+    pg.gateReasons = 'publish gate failed'
+    pg.gateReasonDetails = [{ kind: 'products', key: 'p1', message: 'available requires cost and days to be set' }]
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-testid="gate-reason-fix-link"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="draft-tab-products"]').isVisible()).toBe(true)
+    expect(wrapper.find('[data-testid="draft-tab-topics"]').isVisible()).toBe(false)
+  })
+
+  it('falls back to the flat message with no list or links when gateReasonDetails is empty', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.gateReasons = 'publish gate failed: policy main is incomplete'
+    pg.gateReasonDetails = []
+    await wrapper.vm.$nextTick()
+
+    const banner = wrapper.find('[data-testid="gate-error-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('publish gate failed: policy main is incomplete')
+    expect(wrapper.find('[data-testid="gate-reason-fix-link"]').exists()).toBe(false)
+    expect(banner.find('ul').exists()).toBe(false)
   })
 })
 

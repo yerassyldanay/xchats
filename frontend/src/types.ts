@@ -603,6 +603,17 @@ export interface CancelChangeResponse {
   changes: DraftChangeSet
 }
 
+// KbGateReason mirrors kbstore.GateReason — one deterministic approve-gate
+// violation, carried in a 422's payload.reasons alongside the existing
+// flat message (KB-09). kind matches ChangeKind (draftChanges.ts) when the
+// violation names a single entity; both kind and key are "" for one that
+// doesn't (an unresolved-request count spans the whole org, not one row).
+export interface KbGateReason {
+  kind: string
+  key: string
+  message: string
+}
+
 // --- Structured KB import pipeline (internal/kbimport) — submit a URL/file,
 // pass 1 extracts it, pass 2 synthesizes the accumulated evidence into typed
 // KB draft records (kbd_draft only — see DraftChangeSet above; an import
