@@ -443,6 +443,31 @@ func MapCampaign(c store.Campaign, windows []store.CampaignWindow, counts map[st
 	}
 }
 
+// CampaignTemplate is the API shape for one reusable message template (CAM-14).
+type CampaignTemplate struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	MessageBody string   `json:"message_body"`
+	Variables   []string `json:"variables"`
+	IsArchived  bool     `json:"is_archived"`
+	CreatedBy   string   `json:"created_by"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
+}
+
+// MapCampaignTemplate maps a store.CampaignTemplate.
+func MapCampaignTemplate(t store.CampaignTemplate) CampaignTemplate {
+	variables := t.Variables
+	if variables == nil {
+		variables = []string{}
+	}
+	return CampaignTemplate{
+		ID: t.ID.String(), Name: t.Name, MessageBody: t.MessageBody, Variables: variables,
+		IsArchived: t.IsArchived, CreatedBy: t.CreatedBy.String(),
+		CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: t.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
 // CampaignRecipient is the API shape for one persisted recipient row.
 type CampaignRecipient struct {
 	ID                 string            `json:"id"`

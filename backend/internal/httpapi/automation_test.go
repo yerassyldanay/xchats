@@ -37,14 +37,29 @@ func (h *harness) listNeutralAccounts() []accountDTO {
 	return out.Items
 }
 
+// findAccountDTO locates one account by id in a listNeutralAccounts result
+// — CAM-16 means GET /accounts always also carries the org's own simulator
+// account (see accounts.go's own doc comment on handleListAccounts), so a
+// test asserting on ONE specific pre-seeded account can no longer assume
+// it is accts[0] or that len(accts) == 1.
+func findAccountDTO(accts []accountDTO, id string) accountDTO {
+	for _, a := range accts {
+		if a.ID == id {
+			return a
+		}
+	}
+	return accountDTO{}
+}
+
 func TestGetAccountsIncludesEffectiveAutomationDefaults(t *testing.T) {
 	h := newHarness(t)
 
 	accts := h.listNeutralAccounts()
-	if len(accts) != 1 {
-		t.Fatalf("want 1 account, got %d", len(accts))
+	acct := findAccountDTO(accts, h.accountID.String())
+	if acct.ID == "" {
+		t.Fatalf("seeded account %s not found in %+v", h.accountID, accts)
 	}
-	a := accts[0].Automation
+	a := acct.Automation
 	if a.Mode != "suggestions" {
 		t.Errorf("default mode = %q, want suggestions", a.Mode)
 	}
@@ -91,8 +106,9 @@ func TestUpdateAccountAutomationPersistsModeOverrideAndSchedule(t *testing.T) {
 	// Reload via GET /accounts confirms it's durably persisted, not just
 	// echoed back from the PUT response.
 	accts := h.listNeutralAccounts()
-	if len(accts) != 1 || accts[0].Automation.Mode != "scheduled_auto" || len(accts[0].Automation.Schedule) != 2 {
-		t.Fatalf("reread accounts = %+v", accts)
+	reread := findAccountDTO(accts, h.accountID.String())
+	if reread.ID == "" || reread.Automation.Mode != "scheduled_auto" || len(reread.Automation.Schedule) != 2 {
+		t.Fatalf("reread account = %+v (from accounts = %+v)", reread, accts)
 	}
 
 	// A second save fully replaces the schedule and clears the override.
@@ -143,9 +159,9 @@ func TestUpdateAccountAutomationValidatesModeWaitAndWindows(t *testing.T) {
 	}
 
 	// Nothing from the rejected requests should have been persisted.
-	accts := h.listNeutralAccounts()
-	if accts[0].Automation.Mode != "suggestions" {
-		t.Fatalf("a rejected update mutated settings: %+v", accts[0].Automation)
+	acct := findAccountDTO(h.listNeutralAccounts(), h.accountID.String())
+	if acct.Automation.Mode != "suggestions" {
+		t.Fatalf("a rejected update mutated settings: %+v", acct.Automation)
 	}
 }
 
@@ -173,9 +189,9 @@ func TestUpdateAccountAutomationRejectsCrossOrgAccount(t *testing.T) {
 	}
 
 	// The owning org's settings must be untouched.
-	accts := h.listNeutralAccounts()
-	if accts[0].Automation.Mode != "suggestions" {
-		t.Fatalf("cross-org attempt mutated the real owner's settings: %+v", accts[0].Automation)
+	acct := findAccountDTO(h.listNeutralAccounts(), h.accountID.String())
+	if acct.Automation.Mode != "suggestions" {
+		t.Fatalf("cross-org attempt mutated the real owner's settings: %+v", acct.Automation)
 	}
 }
 

@@ -468,6 +468,14 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/campaigns/:id/pause", s.handlePauseCampaign)
 	auth.POST("/campaigns/:id/resume", s.handleResumeCampaign)
 	auth.POST("/campaigns/:id/stop", s.handleStopCampaign)
+	// CAM-14: the reusable message template library — see
+	// campaign_templates.go's own file header.
+	auth.GET("/campaign-templates", s.handleListCampaignTemplates)
+	auth.POST("/campaign-templates", s.handleCreateCampaignTemplate)
+	auth.GET("/campaign-templates/:id", s.handleGetCampaignTemplate)
+	auth.PATCH("/campaign-templates/:id", s.handleUpdateCampaignTemplate)
+	auth.POST("/campaign-templates/:id/archive", s.handleArchiveCampaignTemplate)
+	auth.POST("/campaign-templates/:id/restore", s.handleRestoreCampaignTemplate)
 	// Customer management (CRM). Deliberately session-only, not RequireAdmin:
 	// this is the working surface of the inbox — every manager who answers a
 	// conversation needs to record who the customer is and what happens next.
