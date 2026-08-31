@@ -111,8 +111,11 @@ func (s *Server) handleKBCreateImport(c *gin.Context) {
 	accepted(c, run)
 }
 
-// handleKBListImports is GET /kb/imports: the org's most recent import
-// runs, newest first.
+// handleKBListImports is GET /kb/imports: a page of the org's import runs,
+// newest first — ?limit= (default 20) and ?offset= (default 0), plus the
+// response's "total" field, so KB-14's history list can paginate without a
+// separate count endpoint. The pre-existing "just the latest run" caller
+// (?limit=1) keeps working unchanged with offset defaulting to 0.
 func (s *Server) handleKBListImports(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -131,12 +134,18 @@ func (s *Server) handleKBListImports(c *gin.Context) {
 			limit = n
 		}
 	}
-	runs, err := s.kbImport.ListRuns(ctx(c), orgID, limit)
+	offset := 0
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			offset = n
+		}
+	}
+	runs, total, err := s.kbImport.ListRuns(ctx(c), orgID, limit, offset)
 	if err != nil {
 		s.kbImportFail(c, err)
 		return
 	}
-	ok(c, gin.H{"runs": runs})
+	ok(c, gin.H{"runs": runs, "total": total})
 }
 
 // handleKBGetImport is GET /kb/imports/:id: one run's current status —

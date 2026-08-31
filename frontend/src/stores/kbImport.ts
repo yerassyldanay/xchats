@@ -2,13 +2,25 @@ import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { t } from '../i18n'
 import { connectRealtime } from '../lib/sse'
-import type { KbImportRun, KbImportRunStatus } from '../types'
+import type { KbImportRun, KbImportRunStatus, User } from '../types'
 
 // A run is done reacting to anything — the next submit is only blocked by
 // isActive below, never by this on its own.
 const TERMINAL_STATUSES: KbImportRunStatus[] = ['built', 'failed', 'needs_human', 'cancelled']
 export function isTerminalRunStatus(s: KbImportRunStatus): boolean {
   return TERMINAL_STATUSES.includes(s)
+}
+
+// resolveStartedByLabel turns a run's raw started_by user id (RunSummary's
+// own doc comment: the API never resolves it to a name) into a display
+// label — "you" for the viewer's own id, the org's already-loaded user
+// list's name for anyone else, "" if neither resolves. Shared by
+// KbIngestPanel's live current-run card and KbImportHistoryDialog's row
+// list (KB-14) so ownership reads identically in both places a run appears.
+export function resolveStartedByLabel(userId: string, currentUserId: string | undefined, users: User[]): string {
+  if (!userId) return ''
+  if (userId === currentUserId) return t('kb.import.startedByYou')
+  return users.find((u) => u.id === userId)?.name || ''
 }
 
 // useKbImport backs Черновик's ingestion panel (KbIngestPanel /
@@ -34,6 +46,16 @@ export const useKbImport = defineStore('kbImport', {
     error: '' as string,
     cancelling: false,
     cancelError: '' as string,
+
+    // KB-14: the history list is deliberately separate state from `current`
+    // — opening the history dialog must never disturb the prominent
+    // current-run card (AC1/AC2), and a history page's runs are frequently
+    // terminal ones `current` itself will never be re-hydrated to once a
+    // fresher run starts.
+    history: [] as KbImportRun[],
+    historyTotal: 0,
+    historyLoading: false,
+    historyError: '' as string,
 
     disconnect: null as null | (() => void),
     reloadTimer: undefined as number | undefined,
@@ -121,6 +143,23 @@ export const useKbImport = defineStore('kbImport', {
         this.cancelError = e instanceof ApiError ? e.message : t('kb.import.errCancel')
       } finally {
         this.cancelling = false
+      }
+    },
+
+    // KB-14: loadHistory fetches one page of the org's import runs (newest
+    // first), 1-based like Pagination.vue's own `page` prop — the offset
+    // math lives here so the dialog only ever deals in page numbers.
+    async loadHistory(page: number, pageSize: number) {
+      this.historyLoading = true
+      this.historyError = ''
+      try {
+        const res = await api.listKbImportRuns(pageSize, (page - 1) * pageSize)
+        this.history = res.runs
+        this.historyTotal = res.total
+      } catch (e) {
+        this.historyError = e instanceof ApiError ? e.message : t('kb.import.errLoadStatus')
+      } finally {
+        this.historyLoading = false
       }
     },
 

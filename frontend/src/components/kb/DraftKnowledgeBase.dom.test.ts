@@ -23,9 +23,17 @@ vi.mock('@/api/client', async (importOriginal) => {
       // which calls these directly — none of the four above are the same
       // underlying call, so each needs its own default here too.
       getKbImportProviders: vi.fn().mockResolvedValue([]),
-      listKbImportRuns: vi.fn().mockResolvedValue({ runs: [] }),
+      listKbImportRuns: vi.fn().mockResolvedValue({ runs: [], total: 0 }),
     },
   }
+})
+// KbIngestPanel (KB-14) reads useRoute/useRouter for its history dialog's
+// URL state — no test in this file exercises that dialog, so a static,
+// always-empty mock is enough (contrast KbIngestPanel.dom.test.ts's own
+// mutable routeQuery, which actually drives history-dialog behavior).
+vi.mock('vue-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-router')>()
+  return { ...actual, useRouter: () => ({ replace: vi.fn() }), useRoute: () => ({ query: {} }) }
 })
 
 function topic(over: Partial<TopicRow> = {}): TopicRow {

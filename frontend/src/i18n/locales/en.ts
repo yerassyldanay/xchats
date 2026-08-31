@@ -412,6 +412,15 @@ export default {
         updated: 'updated',
         running: 'The model is processing the materials…',
       },
+      history: {
+        open: 'History',
+        title: 'Import history',
+        runTitle: 'Import run',
+        back: 'Back to history',
+        loading: 'Loading…',
+        empty: 'No import runs yet.',
+        errLoadRun: 'Could not load this import run.',
+      },
     },
   },
   // settings.* mirrors ru.ts's settings.* key-for-key — see locales.test.ts.

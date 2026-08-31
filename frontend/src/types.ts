@@ -678,8 +678,21 @@ export interface KbImportRun {
   // kbstore.CancelImportRun's own doc comment for why cancelling is
   // refused once synthesis has been claimed.
   cancelable: boolean
+  // finished_at is set once the run reaches a terminal status (built,
+  // failed, needs_human, cancelled) — absent while still active, mirroring
+  // synthesis' own omitted-until-started shape rather than a zero instant.
+  finished_at?: string
   materials: KbImportMaterialStatus[]
   synthesis?: KbImportSynthesisSummary
+}
+
+// KbImportRunPage mirrors GET /kb/imports' response shape — KB-14's history
+// list, ?limit=&offset= paginated. total is the org's full run count (not
+// just runs.length), so a page beyond the last still reports how many
+// pages exist.
+export interface KbImportRunPage {
+  runs: KbImportRun[]
+  total: number
 }
 
 // KbImportProviderFamily mirrors extractor.Family — the source kinds

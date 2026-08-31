@@ -126,11 +126,15 @@ type SynthesisState struct {
 	Usage     TokenUsage      `json:"usage"`
 }
 
-// isTerminal reports whether st represents a finished run — built (pass 2
+// IsTerminal reports whether st represents a finished run — built (pass 2
 // landed something), failed (pass 2 gave up after a re-ask), or
 // needs_human (recovery gave up on a stuck run). A nil state, or an empty
-// Status, is NOT terminal — pass 2 has not even begun.
-func (st *SynthesisState) isTerminal() bool {
+// Status, is NOT terminal — pass 2 has not even begun. Exported so
+// kbimport.RunStatus (a different package) can derive RunSummary.FinishedAt
+// from the same single source of truth this file's own callers use, rather
+// than re-deriving "terminal" from a second, string-literal copy of the
+// same status set.
+func (st *SynthesisState) IsTerminal() bool {
 	if st == nil {
 		return false
 	}
@@ -197,7 +201,13 @@ type ImportMaterial struct {
 	CustomerVisibility string
 	ProcessingStatus   string
 	CreatedAt          time.Time
-	Params             ImportParams
+	// UpdatedAt is the row's last write — for the primary material of a
+	// terminal run, that write IS the transition into that terminal state
+	// (FinishImportSynthesis/CancelImportRun both set updated_at in the
+	// same statement as the state change), so kbimport.RunStatus reads this
+	// as the run's finish time.
+	UpdatedAt time.Time
+	Params    ImportParams
 }
 
 // ExtractionOutcome is what pass 1 reports after running a Provider against
@@ -599,7 +609,7 @@ func (s *Store) mergeImportParams(ctx context.Context, id uuid.UUID, mutate func
 // oldest first.
 func (s *Store) ImportRunMaterials(ctx context.Context, orgID, runID uuid.UUID) ([]ImportMaterial, error) {
 	rows, err := s.db.Query(ctx, `SELECT id, source_type, source_ref, filename, mime_type, storage_key,
-		extracted_text, customer_visibility, processing_status, created_at, extraction_metadata
+		extracted_text, customer_visibility, processing_status, created_at, updated_at, extraction_metadata
 		FROM kbd_materials
 		WHERE organization_id = $1 AND json_extract(extraction_metadata, '$.import.run_id') = $2
 		ORDER BY created_at`,
@@ -613,10 +623,10 @@ func (s *Store) ImportRunMaterials(ctx context.Context, orgID, runID uuid.UUID) 
 	for rows.Next() {
 		var m ImportMaterial
 		var filename, mimeType, storageKey, visibility *string
-		var createdAt string
+		var createdAt, updatedAt string
 		var meta string
 		if err := rows.Scan(&m.ID, &m.SourceType, &m.SourceRef, &filename, &mimeType, &storageKey,
-			&m.ExtractedText, &visibility, &m.ProcessingStatus, &createdAt, &meta); err != nil {
+			&m.ExtractedText, &visibility, &m.ProcessingStatus, &createdAt, &updatedAt, &meta); err != nil {
 			return nil, err
 		}
 		m.OrganizationID = orgID
@@ -624,6 +634,9 @@ func (s *Store) ImportRunMaterials(ctx context.Context, orgID, runID uuid.UUID) 
 		m.CustomerVisibility = strOrEmpty(visibility)
 		if t, err := dbx.ParseTime(createdAt); err == nil {
 			m.CreatedAt = t
+		}
+		if t, err := dbx.ParseTime(updatedAt); err == nil {
+			m.UpdatedAt = t
 		}
 		params, err := parseImportParams(meta)
 		if err != nil {
@@ -683,7 +696,7 @@ func (s *Store) CancelImportRun(ctx context.Context, orgID, runID uuid.UUID) (fo
 	if primary == nil {
 		return false, ErrUnknownKind
 	}
-	if primary.Params.Synthesis.isTerminal() {
+	if primary.Params.Synthesis.IsTerminal() {
 		return false, nil
 	}
 	if primary.Params.Synthesis != nil {
@@ -723,39 +736,53 @@ func (s *Store) CancelImportRun(ctx context.Context, orgID, runID uuid.UUID) (fo
 	return true, nil
 }
 
-// RecentImportRuns returns the org's most recent import run ids (ordered by
-// their primary material's created_at, newest first), capped at limit —
-// GET /kb/imports' listing source.
-func (s *Store) RecentImportRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]uuid.UUID, error) {
+// RecentImportRuns returns a page of the org's import run ids (ordered by
+// their primary material's created_at, newest first) — GET /kb/imports'
+// listing source, for both the "just the latest run" caller (limit=1,
+// offset=0) and KB-14's paginated history (limit=pageSize,
+// offset=(page-1)*pageSize). total is the org's full run count, letting the
+// caller compute page count without a second query.
+func (s *Store) RecentImportRuns(ctx context.Context, orgID uuid.UUID, limit, offset int) (ids []uuid.UUID, total int, err error) {
 	if limit <= 0 {
 		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	rows, err := s.db.Query(ctx, `SELECT extraction_metadata FROM kbd_materials
 		WHERE organization_id = $1 AND json_extract(extraction_metadata, '$.import.run_id') IS NOT NULL
 		ORDER BY created_at DESC`, orgID)
 	if err != nil {
-		return nil, fmt.Errorf("kbstore: list recent import runs: %w", err)
+		return nil, 0, fmt.Errorf("kbstore: list recent import runs: %w", err)
 	}
 	defer rows.Close()
-	var out []uuid.UUID
+	var all []uuid.UUID
 	for rows.Next() {
 		var meta string
 		if err := rows.Scan(&meta); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		params, err := parseImportParams(meta)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if !params.Primary {
 			continue
 		}
-		out = append(out, params.RunID)
-		if len(out) >= limit {
-			break
-		}
+		all = append(all, params.RunID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	total = len(all)
+	if offset >= total {
+		return []uuid.UUID{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
 }
 
 // ActiveImportRun returns the org's current non-terminal run's id, if any —
@@ -784,7 +811,7 @@ func (s *Store) ActiveImportRun(ctx context.Context, orgID uuid.UUID) (uuid.UUID
 		if !params.Primary {
 			continue
 		}
-		if !params.Synthesis.isTerminal() {
+		if !params.Synthesis.IsTerminal() {
 			return params.RunID, true, nil
 		}
 	}

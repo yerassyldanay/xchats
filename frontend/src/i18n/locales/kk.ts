@@ -419,6 +419,15 @@ export default {
         updated: 'жаңартылды',
         running: 'Модель материалдарды өңдеуде…',
       },
+      history: {
+        open: 'Тарих',
+        title: 'Импорт тарихы',
+        runTitle: 'Импорт',
+        back: 'Тарихқа оралу',
+        loading: 'Жүктелуде…',
+        empty: 'Әзірге импорт болған жоқ.',
+        errLoadRun: 'Бұл импортты жүктеу мүмкін болмады.',
+      },
     },
   },
   // settings.* — the Settings UI (Track 2H).

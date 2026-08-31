@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
+	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
 	"github.com/yerassyldanay/xchats/backend/llm"
 )
@@ -239,5 +241,125 @@ func TestCancel_UnknownRun_ReturnsErrNotFound(t *testing.T) {
 
 	if err := svc.Cancel(context.Background(), org.ID, uuid.New()); !errors.Is(err, kbimport.ErrNotFound) {
 		t.Fatalf("Cancel for an unknown run: err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestRunStatus_FinishedAt covers KB-14's FinishedAt: nil while the run
+// hasn't reached a terminal synthesis state, set once it has. Drives the
+// state machine directly through the store (EnqueueImport/
+// FinishImportExtraction/BeginImportSynthesis/FinishImportSynthesis) rather
+// than the full Submit/worker-pool pipeline — RunStatus's derivation is what
+// is under test here, not pass 1/pass 2 themselves (already covered by
+// TestEndToEnd_StartClaimsExtractsAndSynthesizes above).
+func TestRunStatus_FinishedAt(t *testing.T) {
+	kb, st, _ := dbtest.NewKB(t)
+	org, err := st.SeedOrganization(context.Background(), "xchats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := kbimport.New(kbimport.Deps{KB: kb, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}, kbimport.DefaultConfig())
+	ctx := context.Background()
+
+	runID := uuid.New()
+	primaryID, err := kb.EnqueueImport(ctx, org.ID, kbstore.ImportInput{
+		RunID: runID, Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := svc.RunStatus(ctx, org.ID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.FinishedAt != nil {
+		t.Fatalf("FinishedAt = %v before synthesis has even started, want nil", before.FinishedAt)
+	}
+
+	if _, err := kb.ClaimImportJobs(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := kb.FinishImportExtraction(ctx, primaryID, kbstore.ExtractionOutcome{Status: "parsed", ExtractedText: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := kb.BeginImportSynthesis(ctx, primaryID); err != nil || !claimed {
+		t.Fatalf("BeginImportSynthesis: claimed=%v err=%v", claimed, err)
+	}
+	mid, err := svc.RunStatus(ctx, org.ID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mid.FinishedAt != nil {
+		t.Fatalf("FinishedAt = %v while synthesis is still running, want nil", mid.FinishedAt)
+	}
+
+	if err := kb.FinishImportSynthesis(ctx, primaryID, kbstore.SynthesisState{Status: kbstore.SynthesisBuilt}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := svc.RunStatus(ctx, org.ID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.FinishedAt == nil || after.FinishedAt.IsZero() {
+		t.Fatalf("FinishedAt = %v after the run built, want a non-zero timestamp", after.FinishedAt)
+	}
+}
+
+// TestListRuns_PaginatesAndReportsTotal is ListRuns' own test — the
+// underlying store-level pagination mechanics are already covered by
+// kbstore.TestRecentImportRuns_PaginatesAndReportsTotal; this proves the
+// Service wraps it correctly (ids turn into full RunSummary entries, total
+// passes through unchanged).
+func TestListRuns_PaginatesAndReportsTotal(t *testing.T) {
+	kb, st, _ := dbtest.NewKB(t)
+	org, err := st.SeedOrganization(context.Background(), "xchats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := kbimport.New(kbimport.Deps{KB: kb, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}, kbimport.DefaultConfig())
+	ctx := context.Background()
+
+	want := make(map[uuid.UUID]bool, 3)
+	for i := 0; i < 3; i++ {
+		runID := uuid.New()
+		want[runID] = true
+		if _, err := kb.EnqueueImport(ctx, org.ID, kbstore.ImportInput{
+			RunID: runID, Provider: "native", TargetType: "auto", Primary: true,
+			URL: fmt.Sprintf("https://example.com/%d", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page1, total, err := svc.ListRuns(ctx, org.ID, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || len(page1) != 2 {
+		t.Fatalf("page1 = %+v (total %d), want 2 summaries (total 3)", page1, total)
+	}
+	page2, total2, err := svc.ListRuns(ctx, org.ID, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total2 != 3 || len(page2) != 1 {
+		t.Fatalf("page2 = %+v (total %d), want 1 summary (total 3)", page2, total2)
+	}
+
+	seen := make(map[uuid.UUID]bool, 3)
+	for _, r := range append(append([]kbimport.RunSummary{}, page1...), page2...) {
+		if seen[r.RunID] {
+			t.Fatalf("run %s appeared on more than one page", r.RunID)
+		}
+		seen[r.RunID] = true
+		if !want[r.RunID] {
+			t.Fatalf("unexpected run %s", r.RunID)
+		}
+		if len(r.Materials) != 1 {
+			t.Fatalf("run %s materials = %+v, want exactly the one enqueued url", r.RunID, r.Materials)
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("pages together covered %d runs, want all 3", len(seen))
 	}
 }

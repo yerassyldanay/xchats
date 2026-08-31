@@ -34,6 +34,21 @@ export function colorFor(id: string): string {
   return palette[h % palette.length]
 }
 
+// formatDateTime renders an absolute instant (day, month, year, hour:minute)
+// — unlike shortTime's today-vs-not split, entries spanning many days (e.g.
+// KB-14's import history list) need the date spelled out every time, not
+// just when it isn't today.
+export function formatDateTime(iso: string, locale = 'ru'): string {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString(intlLocale(locale), {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 export function shortTime(iso: string | null, locale = 'ru'): string {
   if (!iso) return ''
   const d = new Date(iso)

@@ -417,6 +417,15 @@ export default {
         updated: 'обновлено',
         running: 'Модель обрабатывает материалы…',
       },
+      history: {
+        open: 'История',
+        title: 'История импорта',
+        runTitle: 'Импорт',
+        back: 'Назад к истории',
+        loading: 'Загрузка…',
+        empty: 'Пока нет ни одного импорта.',
+        errLoadRun: 'Не удалось загрузить этот импорт.',
+      },
     },
   },
   // settings.* — the Settings UI (Track 2H).

@@ -19,6 +19,7 @@ import { CircleAlert, CircleCheck, Clock, FileText, Link as LinkIcon, LoaderCirc
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatElapsed } from '@/lib/format'
+import { RUN_STATUS_META } from '@/lib/kbImportStatus'
 import type { KbImportMaterialStatus, KbImportRun, KbImportRunStatus as RunStatus } from '@/types'
 
 const props = withDefaults(defineProps<{ run: KbImportRun; cancellable?: boolean; cancelling?: boolean; startedByLabel?: string }>(), {
@@ -29,14 +30,6 @@ const props = withDefaults(defineProps<{ run: KbImportRun; cancellable?: boolean
 const emit = defineEmits<{ cancel: [] }>()
 const { t } = useI18n()
 
-const RUN_STATUS_META: Record<RunStatus, { labelKey: string; cls: string; spin: boolean }> = {
-  extracting: { labelKey: 'kb.import.status.extracting', cls: 'bg-sky-100 text-sky-700', spin: true },
-  synthesizing: { labelKey: 'kb.import.status.synthesizing', cls: 'bg-sky-100 text-sky-700', spin: true },
-  built: { labelKey: 'kb.import.status.built', cls: 'bg-emerald-100 text-emerald-700', spin: false },
-  failed: { labelKey: 'kb.import.status.failed', cls: 'bg-red-100 text-red-700', spin: false },
-  needs_human: { labelKey: 'kb.import.status.needs_human', cls: 'bg-amber-100 text-amber-700', spin: false },
-  cancelled: { labelKey: 'kb.import.status.cancelled', cls: 'bg-secondary text-secondary-foreground', spin: false },
-}
 const MATERIAL_STATUS_META: Record<KbImportMaterialStatus['processing_status'], { labelKey: string; cls: string; spin: boolean }> = {
   queued: { labelKey: 'kb.import.materialStatus.queued', cls: 'bg-secondary text-secondary-foreground', spin: false },
   extracting: { labelKey: 'kb.import.materialStatus.extracting', cls: 'bg-sky-100 text-sky-700', spin: true },

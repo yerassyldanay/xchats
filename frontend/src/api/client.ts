@@ -1,5 +1,5 @@
 import { log } from '../lib/logfmt'
-import type { KbImportProviderCapability, KbImportRun, CampaignRecipientPreviewResult } from '../types'
+import type { KbImportProviderCapability, KbImportRun, KbImportRunPage, CampaignRecipientPreviewResult } from '../types'
 
 // Env-driven addressing: VITE_API_BASE_URL points at the backend. Empty means
 // same-origin (dev uses the Vite proxy; prod fronts both behind one domain).
@@ -102,7 +102,18 @@ export const api = {
     return unwrap(res, '/kb/imports')
   },
   getKbImportRun: (runId: string) => send<KbImportRun>('GET', '/kb/imports/' + encodeURIComponent(runId)),
-  listKbImportRuns: (limit?: number) => send<{ runs: KbImportRun[] }>('GET', '/kb/imports' + (limit ? `?limit=${limit}` : '')),
+  // listKbImportRuns covers both callers of GET /kb/imports: the ingestion
+  // panel's "just the latest run" hydration (limit=1, offset omitted) and
+  // KB-14's paginated history list (limit=pageSize, offset=(page-1)*
+  // pageSize) — the response's total is the org's full run count, not just
+  // runs.length.
+  listKbImportRuns: (limit?: number, offset?: number) => {
+    const params = new URLSearchParams()
+    if (limit) params.set('limit', String(limit))
+    if (offset) params.set('offset', String(offset))
+    const qs = params.toString()
+    return send<KbImportRunPage>('GET', '/kb/imports' + (qs ? `?${qs}` : ''))
+  },
   // cancelKbImportRun is POST /kb/imports/:id/cancel (KB-04) — only valid
   // while pass 1 is still running (KbImportRun.cancelable); refused with a
   // 409 once synthesis has been claimed.

@@ -894,3 +894,86 @@ func TestImportRunMaterials_OrgScoped(t *testing.T) {
 		t.Fatalf("org B materials = %+v, want only idB", matsB)
 	}
 }
+
+// TestImportRunMaterials_PopulatesUpdatedAt covers KB-14's FinishedAt: a
+// freshly enqueued material's updated_at must round-trip non-zero (it has
+// the same DEFAULT as created_at — see the migration), the same as
+// CreatedAt already did before this field existed.
+func TestImportRunMaterials_PopulatesUpdatedAt(t *testing.T) {
+	kb, orgID, _, _ := newTestKB(t)
+	ctx := context.Background()
+	runID := uuid.New()
+	if _, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: runID, Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/x"}); err != nil {
+		t.Fatal(err)
+	}
+
+	mats, err := kb.ImportRunMaterials(ctx, orgID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mats) != 1 || mats[0].UpdatedAt.IsZero() {
+		t.Fatalf("materials = %+v, want exactly one row with a non-zero UpdatedAt", mats)
+	}
+}
+
+// --- RecentImportRuns is paginated (KB-14) ----------------------------------
+
+func TestRecentImportRuns_PaginatesAndReportsTotal(t *testing.T) {
+	kb, orgID, _, _ := newTestKB(t)
+	ctx := context.Background()
+
+	want := make(map[uuid.UUID]bool, 3)
+	for i := 0; i < 3; i++ {
+		runID := uuid.New()
+		want[runID] = true
+		if _, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{
+			RunID: runID, Provider: "native", TargetType: "auto", Primary: true,
+			URL: fmt.Sprintf("https://example.com/%d", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// created_at is millisecond-precision and these three inserts can land
+	// in the same millisecond, so DESC order across them is not something a
+	// test may assume — only totality (every run appears exactly once
+	// across the pages) and the page sizes themselves are guaranteed.
+	page1, total1, err := kb.RecentImportRuns(ctx, orgID, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total1 != 3 || len(page1) != 2 {
+		t.Fatalf("page1 = %v (total %d), want 2 ids (total 3)", page1, total1)
+	}
+
+	page2, total2, err := kb.RecentImportRuns(ctx, orgID, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total2 != 3 || len(page2) != 1 {
+		t.Fatalf("page2 = %v (total %d), want 1 id (total 3)", page2, total2)
+	}
+
+	seen := make(map[uuid.UUID]bool, 3)
+	for _, id := range append(append([]uuid.UUID{}, page1...), page2...) {
+		if seen[id] {
+			t.Fatalf("run %s appeared on more than one page", id)
+		}
+		seen[id] = true
+		if !want[id] {
+			t.Fatalf("run %s was never enqueued", id)
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("pages together covered %d runs, want all 3", len(seen))
+	}
+
+	// Past the end: empty page, total still reported.
+	page3, total3, err := kb.RecentImportRuns(ctx, orgID, 2, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total3 != 3 || len(page3) != 0 {
+		t.Fatalf("page3 = %v (total %d), want 0 ids (total 3)", page3, total3)
+	}
+}

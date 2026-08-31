@@ -306,9 +306,17 @@ type RunSummary struct {
 	// (dto.Campaign.CreatedBy) — resolving it to a display name is a
 	// client-side lookup against the org's already-loaded user list, not
 	// this API's job.
-	StartedBy string           `json:"started_by"`
-	StartedAt time.Time        `json:"started_at"`
-	Materials []MaterialStatus `json:"materials"`
+	StartedBy string    `json:"started_by"`
+	StartedAt time.Time `json:"started_at"`
+	// FinishedAt is set once the run reaches a terminal synthesis state
+	// (built/failed/needs_human/cancelled) — the primary material's own
+	// UpdatedAt at that point, since every terminal transition
+	// (FinishImportSynthesis, CancelImportRun) writes it in the same
+	// statement as the state change. A pointer, omitted while the run is
+	// still active, matching Synthesis' own omitempty below rather than a
+	// zero time.Time the client would have to special-case.
+	FinishedAt *time.Time       `json:"finished_at,omitempty"`
+	Materials  []MaterialStatus `json:"materials"`
 	// Cancelable is true only while pass 1 is still in progress — see
 	// kbstore.CancelImportRun's own doc comment for why cancelling is
 	// refused once synthesis has been claimed.
@@ -371,6 +379,10 @@ func (s *Service) RunStatus(ctx context.Context, orgID, runID uuid.UUID) (RunSum
 		if primary.Params.Synthesis != nil {
 			st := primary.Params.Synthesis
 			out.Synthesis = &SynthesisSummary{Status: st.Status, Notes: st.Notes, Applied: st.Applied, Dropped: st.Dropped, Usage: st.Usage}
+			if st.IsTerminal() {
+				finishedAt := primary.UpdatedAt
+				out.FinishedAt = &finishedAt
+			}
 		}
 	}
 	return out, nil
@@ -397,13 +409,15 @@ func (s *Service) Cancel(ctx context.Context, orgID, runID uuid.UUID) error {
 	return nil
 }
 
-// ListRuns returns the org's most recent import runs' summaries, newest
-// first — GET /kb/imports' listing source. Bounded at limit (<=0 defaults
-// to 20).
-func (s *Service) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]RunSummary, error) {
-	runIDs, err := s.deps.KB.RecentImportRuns(ctx, orgID, limit)
+// ListRuns returns one page of the org's import runs' summaries, newest
+// first — GET /kb/imports' listing source: limit=1/offset=0 for "just the
+// active run" (the pre-KB-14 caller), or limit=pageSize/offset=(page-1)*
+// pageSize for KB-14's history list. limit<=0 defaults to 20. total is the
+// org's full run count, for the caller to compute page count.
+func (s *Service) ListRuns(ctx context.Context, orgID uuid.UUID, limit, offset int) (runs []RunSummary, total int, err error) {
+	runIDs, total, err := s.deps.KB.RecentImportRuns(ctx, orgID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]RunSummary, 0, len(runIDs))
 	for _, runID := range runIDs {
@@ -412,11 +426,11 @@ func (s *Service) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]R
 			if errors.Is(err, ErrNotFound) {
 				continue // vanished between the listing scan and this read — skip, not fatal
 			}
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, summary)
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // deriveRunStatus computes RunSummary.Status from the primary's synthesis
