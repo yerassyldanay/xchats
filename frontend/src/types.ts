@@ -1103,6 +1103,27 @@ export interface CampaignEvent {
   created_at: string
 }
 
+// CampaignTemplate mirrors dto.CampaignTemplate — one reusable,
+// organization-wide message template (CAM-14). Pure content: no account,
+// channel, status, pace, or schedule of its own.
+export interface CampaignTemplate {
+  id: string
+  name: string
+  message_body: string
+  variables: string[]
+  is_archived: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+// CampaignTemplatePatch is PATCH /campaign-templates/:id's body — an
+// omitted key leaves that field untouched.
+export interface CampaignTemplatePatch {
+  name?: string
+  message_body?: string
+}
+
 // CampaignTier mirrors dto.CampaignTier — one simultaneous rolling-window
 // cap. used is present only in a SendingBudget response, absent in a plain
 // CampaignAccountSettings read (configuration only, no live usage).

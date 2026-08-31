@@ -9,6 +9,7 @@ import { queryInt } from '@/lib/queryState'
 import { Button } from '@/components/ui/button'
 import Pagination from '@/components/Pagination.vue'
 import CampaignStatusBadge from '@/components/CampaignStatusBadge.vue'
+import CampaignTemplatesPanel from '@/components/CampaignTemplatesPanel.vue'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import InstagramIcon from '@/components/icons/InstagramIcon.vue'
@@ -34,6 +35,19 @@ async function loadPage(p: number) {
   const query: Record<string, string> = { ...(route.query as Record<string, string>) }
   if (p > 1) query.page = String(p)
   else delete query.page
+  void router.replace({ query })
+}
+
+// CAM-14: Campaigns vs Templates — a tab switcher living entirely in the
+// URL (?tab=templates), same queryString idiom `page` above already uses,
+// so a reload or a shared link lands back on the same tab instead of
+// silently snapping to Campaigns.
+const activeTab = ref<'campaigns' | 'templates'>(route.query.tab === 'templates' ? 'templates' : 'campaigns')
+function setTab(tab: 'campaigns' | 'templates') {
+  activeTab.value = tab
+  const query: Record<string, string> = { ...(route.query as Record<string, string>) }
+  if (tab === 'templates') query.tab = 'templates'
+  else delete query.tab
   void router.replace({ query })
 }
 
@@ -70,50 +84,76 @@ const formattedDate = computed(() => (iso: string) =>
         <h1 class="text-xl font-semibold flex items-center gap-2"><Megaphone class="w-5 h-5" /> {{ t('campaigns.list.title') }}</h1>
         <p class="text-sm text-muted-foreground mt-0.5">{{ t('campaigns.list.subtitle') }}</p>
       </div>
-      <RouterLink :to="{ name: 'campaign-new' }">
+      <RouterLink v-if="activeTab === 'campaigns'" :to="{ name: 'campaign-new' }">
         <Button type="button"><Plus class="w-4 h-4" /> {{ t('campaigns.list.newCampaign') }}</Button>
       </RouterLink>
     </div>
 
-    <p v-if="campaigns.loading" class="mt-8 text-sm text-muted-foreground">{{ t('campaigns.list.loading') }}</p>
-
-    <div v-else-if="campaigns.campaigns.length === 0" class="mt-12 text-center">
-      <Megaphone class="w-10 h-10 mx-auto text-muted-foreground/50" />
-      <p class="mt-3 text-sm font-medium">{{ t('campaigns.list.empty') }}</p>
-      <p class="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">{{ t('campaigns.list.emptyHint') }}</p>
-    </div>
-
-    <div v-else class="mt-6 space-y-2">
-      <RouterLink
-        v-for="c in campaigns.campaigns"
-        :key="c.id"
-        :to="{ name: 'campaign-detail', params: { campaignId: c.id } }"
-        class="block rounded-lg border border-border p-4 hover:bg-muted/40 transition"
+    <!-- CAM-14: Campaigns vs Templates. -->
+    <div class="mt-4 flex items-center gap-1 rounded-lg border border-border p-0.5 w-fit">
+      <button
+        type="button"
+        class="rounded-md px-4 py-1.5 text-sm font-medium transition"
+        :class="activeTab === 'campaigns' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
+        data-testid="campaigns-tab"
+        @click="setTab('campaigns')"
       >
-        <div class="flex items-center gap-3">
-          <span class="w-9 h-9 rounded-lg bg-muted grid place-items-center shrink-0">
-            <component :is="channelIcon(c)" class="w-5 h-5" />
-          </span>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <span class="font-medium truncate">{{ c.name }}</span>
-              <CampaignStatusBadge :status="c.status" />
-            </div>
-            <div class="mt-0.5 text-xs text-muted-foreground truncate">
-              {{ t('campaigns.list.columnAccount') }}: {{ accounts.accountName(c.account_id) || c.account_id }}
-              · {{ t('campaigns.list.columnCreated') }}: {{ formattedDate(c.created_at) }}
-            </div>
-          </div>
-          <div class="w-40 shrink-0 text-right">
-            <div class="text-xs text-muted-foreground">{{ t('campaigns.list.sentOf', { sent: sentCount(c), total: totalCount(c) }) }}</div>
-            <div class="mt-1 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div class="h-full rounded-full bg-primary" :style="{ width: progressPct(c) + '%' }" />
-            </div>
-          </div>
-        </div>
-      </RouterLink>
-
-      <Pagination :page="page" :page-size="PAGE_SIZE" :total="campaigns.total" @update:page="loadPage" />
+        {{ t('campaigns.list.title') }}
+      </button>
+      <button
+        type="button"
+        class="rounded-md px-4 py-1.5 text-sm font-medium transition"
+        :class="activeTab === 'templates' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
+        data-testid="templates-tab"
+        @click="setTab('templates')"
+      >
+        {{ t('campaigns.templates.tabLabel') }}
+      </button>
     </div>
+
+    <template v-if="activeTab === 'campaigns'">
+      <p v-if="campaigns.loading" class="mt-8 text-sm text-muted-foreground">{{ t('campaigns.list.loading') }}</p>
+
+      <div v-else-if="campaigns.campaigns.length === 0" class="mt-12 text-center">
+        <Megaphone class="w-10 h-10 mx-auto text-muted-foreground/50" />
+        <p class="mt-3 text-sm font-medium">{{ t('campaigns.list.empty') }}</p>
+        <p class="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">{{ t('campaigns.list.emptyHint') }}</p>
+      </div>
+
+      <div v-else class="mt-6 space-y-2">
+        <RouterLink
+          v-for="c in campaigns.campaigns"
+          :key="c.id"
+          :to="{ name: 'campaign-detail', params: { campaignId: c.id } }"
+          class="block rounded-lg border border-border p-4 hover:bg-muted/40 transition"
+        >
+          <div class="flex items-center gap-3">
+            <span class="w-9 h-9 rounded-lg bg-muted grid place-items-center shrink-0">
+              <component :is="channelIcon(c)" class="w-5 h-5" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="font-medium truncate">{{ c.name }}</span>
+                <CampaignStatusBadge :status="c.status" />
+              </div>
+              <div class="mt-0.5 text-xs text-muted-foreground truncate">
+                {{ t('campaigns.list.columnAccount') }}: {{ accounts.accountName(c.account_id) || c.account_id }}
+                · {{ t('campaigns.list.columnCreated') }}: {{ formattedDate(c.created_at) }}
+              </div>
+            </div>
+            <div class="w-40 shrink-0 text-right">
+              <div class="text-xs text-muted-foreground">{{ t('campaigns.list.sentOf', { sent: sentCount(c), total: totalCount(c) }) }}</div>
+              <div class="mt-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                <div class="h-full rounded-full bg-primary" :style="{ width: progressPct(c) + '%' }" />
+              </div>
+            </div>
+          </div>
+        </RouterLink>
+
+        <Pagination :page="page" :page-size="PAGE_SIZE" :total="campaigns.total" @update:page="loadPage" />
+      </div>
+    </template>
+
+    <CampaignTemplatesPanel v-else />
   </div>
 </template>

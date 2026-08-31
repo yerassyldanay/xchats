@@ -7,18 +7,23 @@ import type { Campaign } from '@/types'
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
 
 const routerReplace = vi.fn()
+// route.query is read once at component setup (CAM-14's activeTab) —
+// mutate this object from a test BEFORE mounting, same pattern
+// CampaignDetail.dom.test.ts established for CAM-11's own query-restored
+// list state.
+let routeQuery: Record<string, string> = {}
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
     useRouter: () => ({ replace: routerReplace }),
-    useRoute: () => ({ query: {} }),
+    useRoute: () => ({ query: routeQuery }),
   }
 })
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
-  return { ...actual, api: { ...actual.api, get: vi.fn() } }
+  return { ...actual, api: { ...actual.api, get: vi.fn(), post: vi.fn(), patch: vi.fn() } }
 })
 
 function campaign(id: string): Campaign {
@@ -77,5 +82,63 @@ describe('Campaigns — list pagination (CAM-11)', () => {
 
     expect(api.get).toHaveBeenCalledWith('/campaigns?page=2&page_size=50')
     expect(routerReplace).toHaveBeenCalledWith({ query: { page: '2' } })
+  })
+})
+
+// CAM-14: Campaigns vs Templates tab switcher, state mirrored into the URL
+// the same way CAM-11's own page number is (see routeQuery's own doc
+// comment above).
+describe('Campaigns — Templates tab (CAM-14)', () => {
+  async function mountPage() {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.startsWith('/campaigns?')) return { items: [campaign('c1')], total: 1 } as any
+      if (path === '/accounts') return { items: [] } as any
+      if (path.startsWith('/campaign-templates?')) return { items: [], total: 0 } as any
+      throw new Error(`unexpected GET ${path}`)
+    })
+    routerReplace.mockClear()
+    const pinia = testPinia()
+    const wrapper = mountKb(Campaigns, { pinia })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('defaults to the Campaigns tab and shows the campaign list', async () => {
+    const wrapper = await mountPage()
+    expect(wrapper.find('[data-testid="campaigns-tab"]').classes()).toContain('bg-primary')
+    expect(wrapper.text()).toContain('Campaign c1')
+    expect(wrapper.find('[data-testid="template-search"]').exists()).toBe(false)
+  })
+
+  it('clicking the Templates tab shows the templates panel and mirrors it into the URL', async () => {
+    const wrapper = await mountPage()
+    const { api } = await import('@/api/client')
+
+    await wrapper.find('[data-testid="templates-tab"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="templates-tab"]').classes()).toContain('bg-primary')
+    expect(wrapper.find('[data-testid="template-search"]').exists()).toBe(true)
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/campaign-templates?'))
+    expect(routerReplace).toHaveBeenCalledWith({ query: { tab: 'templates' } })
+  })
+
+  it('?tab=templates in the URL opens directly on the Templates tab', async () => {
+    routeQuery = { tab: 'templates' }
+    const wrapper = await mountPage()
+    routeQuery = {}
+
+    expect(wrapper.find('[data-testid="templates-tab"]').classes()).toContain('bg-primary')
+    expect(wrapper.find('[data-testid="template-search"]').exists()).toBe(true)
+  })
+
+  it('the New campaign button is hidden on the Templates tab', async () => {
+    const wrapper = await mountPage()
+    expect(wrapper.text()).toContain('Новая рассылка')
+
+    await wrapper.find('[data-testid="templates-tab"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Новая рассылка')
   })
 })
