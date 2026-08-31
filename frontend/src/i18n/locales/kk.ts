@@ -1234,6 +1234,8 @@ export default {
     },
     detail: {
       createdBanner: 'Таратылым жасалды! Қарқыныңызға сай хабарлама жіберуді бастау үшін «Іске қосу» басыңыз.',
+      messageDelivered: 'Жеткізілді',
+      messageRead: 'Оқылды',
       confirmDelete: 'Бұл таратылым жойылсын ба?',
       tabOverview: 'Шолу',
       tabRecipients: 'Алушылар',

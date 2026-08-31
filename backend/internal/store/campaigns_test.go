@@ -242,7 +242,7 @@ func TestReplaceCampaignRecipientsAndClaimLifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ReplaceCampaignRecipients (2nd): %v", err)
 	}
-	recipients, total, err := st.ListCampaignRecipients(ctx, c.ID, "", 50, 0)
+	recipients, total, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestReplaceCampaignRecipientsAndClaimLifecycle(t *testing.T) {
 		t.Errorf("claim.MessageBody = %q", claim.MessageBody)
 	}
 
-	claimedRecipient, _, err := st.ListCampaignRecipients(ctx, c.ID, "sending", 50, 0)
+	claimedRecipient, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "sending", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients(sending): %v", err)
 	}
@@ -311,7 +311,7 @@ func TestReplaceCampaignRecipientsAndClaimLifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("FinalizeAttempt: %v", err)
 	}
-	sentRecipient, _, err := st.ListCampaignRecipients(ctx, c.ID, "sent", 50, 0)
+	sentRecipient, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "sent", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients(sent): %v", err)
 	}
@@ -518,7 +518,7 @@ func TestReconcileStuckSending(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("ReconcileStuckSending reconciled %d, want 1", n)
 	}
-	failed, _, err := st.ListCampaignRecipients(ctx, c.ID, "failed", 50, 0)
+	failed, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "failed", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients(failed): %v", err)
 	}
@@ -608,7 +608,7 @@ func TestRetryFailedRecipients(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("retried %d, want 1", n)
 	}
-	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "", 50, 0)
+	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}
@@ -1217,5 +1217,195 @@ func TestInsertCampaignOutbound(t *testing.T) {
 	}
 	if chat.UnreadCount != 0 {
 		t.Errorf("UnreadCount = %d, want 0 (a fresh chat starts at 0; campaign sends must not bump it)", chat.UnreadCount)
+	}
+}
+
+// TestListCampaignRecipients_MessageDeliveryStateTracksTheLinkedMessage
+// proves ListCampaignRecipients' own LEFT JOIN: a recipient with no message
+// yet reports an empty MessageDeliveryState; once InsertCampaignOutbound +
+// StampOutboundSent link a real message, it reports that message's own
+// delivery_state — and tracks it live as AdvanceDeliveryState (the exact
+// mechanism a real channel's delivery-receipt webhook, or Simulator's own
+// ReceiptSimulator, calls) moves it forward. Uses channel='simulator'
+// throughout (both the campaign and ListCampaignRecipients' own channel
+// argument) since that is the join's new caller.
+func TestListCampaignRecipients_MessageDeliveryStateTracksTheLinkedMessage(t *testing.T) {
+	ctx := context.Background()
+	st := dbtest.New(t)
+	org, err := st.SeedOrganization(ctx, "campaigns-test-org-"+uuid.NewString())
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	user, err := st.SeedUser(ctx, org.ID, uuid.NewString()+"@example.com", "hash", "Tester")
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	acct, err := st.GetOrCreateSimulatorAccount(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("GetOrCreateSimulatorAccount: %v", err)
+	}
+
+	c, err := st.CreateCampaign(ctx, store.Campaign{
+		OrganizationID: org.ID, Name: "Sim promo", AccountID: acct.ID, Channel: "simulator",
+		MessageBody: "Hi!", CreatedBy: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	if err := st.ReplaceCampaignRecipients(ctx, c.ID, []store.CampaignRecipientInput{
+		{NormalizedIdentity: "77011234563", RawInput: "77011234563"},
+	}); err != nil {
+		t.Fatalf("ReplaceCampaignRecipients: %v", err)
+	}
+
+	before, _, err := st.ListCampaignRecipients(ctx, c.ID, "simulator", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListCampaignRecipients (before send): %v", err)
+	}
+	if len(before) != 1 || before[0].MessageDeliveryState != "" {
+		t.Fatalf("before send = %+v, want one recipient with an empty MessageDeliveryState", before)
+	}
+
+	if _, err := st.SetCampaignStatus(ctx, c.ID, purecampaign.StatusRunning, uuid.NullUUID{UUID: user.ID, Valid: true}, "started", nil); err != nil {
+		t.Fatalf("start campaign: %v", err)
+	}
+	claim, ok, err := st.ClaimNextRecipient(ctx, acct.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ClaimNextRecipient: %v", err)
+	}
+	if !ok {
+		t.Fatal("ClaimNextRecipient: ok = false, want true")
+	}
+
+	chatID, _, err := st.FindOrCreateChat(ctx, acct.ID, "77011234563@s.whatsapp.net", "77011234563")
+	if err != nil {
+		t.Fatalf("FindOrCreateChat: %v", err)
+	}
+	msgID, err := st.InsertCampaignOutbound(ctx, "simulator", chatID, acct.ID, "Hi!", "Hi!")
+	if err != nil {
+		t.Fatalf("InsertCampaignOutbound: %v", err)
+	}
+	externalID := "sim-" + msgID.String()
+	if err := st.StampOutboundSent(ctx, "simulator", msgID, externalID); err != nil {
+		t.Fatalf("StampOutboundSent: %v", err)
+	}
+	if err := st.FinalizeAttempt(ctx, store.FinalizeAttemptParams{
+		LogID: claim.LogID, RecipientID: claim.RecipientID, NewStatus: purecampaign.RecipientSent,
+		ChatID: uuid.NullUUID{UUID: chatID, Valid: true}, MessageID: uuid.NullUUID{UUID: msgID, Valid: true},
+	}); err != nil {
+		t.Fatalf("FinalizeAttempt: %v", err)
+	}
+
+	afterSend, _, err := st.ListCampaignRecipients(ctx, c.ID, "simulator", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListCampaignRecipients (after send): %v", err)
+	}
+	if len(afterSend) != 1 || afterSend[0].MessageDeliveryState != "sent" {
+		t.Fatalf("after send = %+v, want MessageDeliveryState=sent", afterSend)
+	}
+
+	if _, _, err := st.AdvanceDeliveryState(ctx, "simulator", acct.ID, externalID, "delivered", 2); err != nil {
+		t.Fatalf("AdvanceDeliveryState(delivered): %v", err)
+	}
+	afterDelivered, _, err := st.ListCampaignRecipients(ctx, c.ID, "simulator", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListCampaignRecipients (after delivered): %v", err)
+	}
+	if len(afterDelivered) != 1 || afterDelivered[0].MessageDeliveryState != "delivered" {
+		t.Fatalf("after delivered = %+v, want MessageDeliveryState=delivered", afterDelivered)
+	}
+
+	if _, _, err := st.AdvanceDeliveryState(ctx, "simulator", acct.ID, externalID, "read", 3); err != nil {
+		t.Fatalf("AdvanceDeliveryState(read): %v", err)
+	}
+	afterRead, _, err := st.ListCampaignRecipients(ctx, c.ID, "simulator", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListCampaignRecipients (after read): %v", err)
+	}
+	if len(afterRead) != 1 || afterRead[0].MessageDeliveryState != "read" {
+		t.Fatalf("after read = %+v, want MessageDeliveryState=read", afterRead)
+	}
+	// The recipient's own coarse Status never grows a fourth value — it
+	// stays 'sent' regardless of how far delivery_state advances.
+	if afterRead[0].Status != string(purecampaign.RecipientSent) {
+		t.Errorf("Status = %q, want unaffected sent", afterRead[0].Status)
+	}
+}
+
+// TestSimulatorMessagesAwaitingReceipt proves the ReceiptSimulator sweep
+// query itself: only simulator-channel, outbound, sent-or-delivered
+// messages older than the cutoff come back, and a whatsapp-channel message
+// (same shape, different account channel) is excluded even though it lives
+// in the very same wa_messages table.
+func TestSimulatorMessagesAwaitingReceipt(t *testing.T) {
+	ctx := context.Background()
+	st := dbtest.New(t)
+	org, err := st.SeedOrganization(ctx, "sim-receipts-org-"+uuid.NewString())
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	simAcct, err := st.GetOrCreateSimulatorAccount(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("GetOrCreateSimulatorAccount: %v", err)
+	}
+	waAcct, err := st.SeedAccount(ctx, store.Account{
+		ID: uuid.New(), OrganizationID: uuid.NullUUID{UUID: org.ID, Valid: true},
+		DisplayName: "Real WA", ExternalAccountRef: "7770000001@s.whatsapp.net", ExternalHandle: "77700000001",
+		ConnectionState: "connected",
+	})
+	if err != nil {
+		t.Fatalf("seed wa account: %v", err)
+	}
+
+	simChat, _, err := st.FindOrCreateChat(ctx, simAcct.ID, "77011234563@s.whatsapp.net", "77011234563")
+	if err != nil {
+		t.Fatalf("FindOrCreateChat (sim): %v", err)
+	}
+	simMsgID, err := st.InsertCampaignOutbound(ctx, "simulator", simChat, simAcct.ID, "hi", "hi")
+	if err != nil {
+		t.Fatalf("InsertCampaignOutbound (sim): %v", err)
+	}
+	if err := st.StampOutboundSent(ctx, "simulator", simMsgID, "sim-"+simMsgID.String()); err != nil {
+		t.Fatalf("StampOutboundSent (sim): %v", err)
+	}
+
+	waChat, _, err := st.FindOrCreateChat(ctx, waAcct.ID, "77011234564@s.whatsapp.net", "77011234564")
+	if err != nil {
+		t.Fatalf("FindOrCreateChat (wa): %v", err)
+	}
+	waMsgID, err := st.InsertCampaignOutbound(ctx, "whatsapp", waChat, waAcct.ID, "hi", "hi")
+	if err != nil {
+		t.Fatalf("InsertCampaignOutbound (wa): %v", err)
+	}
+	if err := st.StampOutboundSent(ctx, "whatsapp", waMsgID, "wamid-"+waMsgID.String()); err != nil {
+		t.Fatalf("StampOutboundSent (wa): %v", err)
+	}
+
+	// A cutoff in the future includes every not-yet-advanced message —
+	// exactly the simulator one, never the whatsapp one.
+	future := time.Now().Add(time.Hour)
+	candidates, err := st.SimulatorMessagesAwaitingReceipt(ctx, future)
+	if err != nil {
+		t.Fatalf("SimulatorMessagesAwaitingReceipt: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %+v, want exactly the one simulator message", candidates)
+	}
+	got := candidates[0]
+	if got.MessageID != simMsgID || got.AccountID != simAcct.ID || got.DeliveryState != "sent" {
+		t.Errorf("candidate = %+v", got)
+	}
+	if got.Destination != "77011234563@s.whatsapp.net" {
+		t.Errorf("Destination = %q", got.Destination)
+	}
+
+	// A cutoff strictly in the past excludes it again (too recent).
+	past := time.Now().Add(-time.Hour)
+	candidates, err = st.SimulatorMessagesAwaitingReceipt(ctx, past)
+	if err != nil {
+		t.Fatalf("SimulatorMessagesAwaitingReceipt (past cutoff): %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %+v, want none before their own update time", candidates)
 	}
 }

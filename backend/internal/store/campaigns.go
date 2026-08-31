@@ -86,6 +86,13 @@ type CampaignRecipient struct {
 	MessageID          uuid.NullUUID
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	// MessageDeliveryState is the linked message's own delivery_state
+	// (queued/sent/delivered/read/failed) — finer-grained than Status
+	// above, which only ever reaches 'sent' once ANY successful delivery
+	// happens. Empty when MessageID is unset (nothing sent yet). Populated
+	// by a LEFT JOIN in ListCampaignRecipients only — never set by any
+	// single-row read/write in this file, so it stays zero-valued there.
+	MessageDeliveryState string
 }
 
 // CampaignRecipientInput is one row of ReplaceCampaignRecipients' input —
@@ -554,14 +561,21 @@ func (s *Store) ListCampaignEvents(ctx context.Context, campaignID uuid.UUID, li
 // Recipients
 // ---------------------------------------------------------------------------
 
-const campaignRecipientCols = `id, campaign_id, normalized_identity, raw_input, name, attributes,
-	status, failure_reason, attempts, next_attempt_at, chat_id, message_id, created_at, updated_at`
+// campaignRecipientCols is ListCampaignRecipients' own column list (r.-
+// qualified: that query is the only caller, and the only one joining a
+// message table) — every OTHER campaign_recipients read in this file scans
+// its own unqualified column list directly, since none of them join
+// anything.
+const campaignRecipientCols = `r.id, r.campaign_id, r.normalized_identity, r.raw_input, r.name, r.attributes,
+	r.status, r.failure_reason, r.attempts, r.next_attempt_at, r.chat_id, r.message_id, r.created_at, r.updated_at,
+	COALESCE(m.delivery_state, '')`
 
 func scanCampaignRecipient(row dbx.Scanner) (CampaignRecipient, error) {
 	var r CampaignRecipient
 	var attrsRaw string
 	err := row.Scan(&r.ID, &r.CampaignID, &r.NormalizedIdentity, &r.RawInput, &r.Name, &attrsRaw,
-		&r.Status, &r.FailureReason, &r.Attempts, &r.NextAttemptAt, &r.ChatID, &r.MessageID, &r.CreatedAt, &r.UpdatedAt)
+		&r.Status, &r.FailureReason, &r.Attempts, &r.NextAttemptAt, &r.ChatID, &r.MessageID, &r.CreatedAt, &r.UpdatedAt,
+		&r.MessageDeliveryState)
 	if err != nil {
 		return r, err
 	}
@@ -622,17 +636,28 @@ func (s *Store) ReplaceCampaignRecipients(ctx context.Context, campaignID uuid.U
 
 // ListCampaignRecipients returns a campaign's recipients, oldest first
 // (recipient list order), optionally filtered to one status, plus the total.
-func (s *Store) ListCampaignRecipients(ctx context.Context, campaignID uuid.UUID, status string, limit, offset int) ([]CampaignRecipient, int, error) {
-	where := "campaign_id = $1"
+// channel picks which channel's own message table to LEFT JOIN for each
+// recipient's linked message (see MessageDeliveryState's own doc comment) —
+// every recipient on one campaign shares that campaign's single channel, so
+// this is resolved once by the caller (which already has the loaded
+// Campaign) rather than stored per-recipient.
+func (s *Store) ListCampaignRecipients(ctx context.Context, campaignID uuid.UUID, channel, status string, limit, offset int) ([]CampaignRecipient, int, error) {
+	msgTable, err := messagesTableFor(channel)
+	if err != nil {
+		return nil, 0, err
+	}
+	where := "r.campaign_id = $1"
 	args := []any{campaignID}
 	if status != "" {
 		args = append(args, status)
-		where += " AND status = $" + itoa(len(args))
+		where += " AND r.status = $" + itoa(len(args))
 	}
 	countArgs := append([]any(nil), args...)
 	args = append(args, limit, offset)
-	q := `SELECT ` + campaignRecipientCols + ` FROM campaign_recipients WHERE ` + where +
-		` ORDER BY created_at LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
+	q := `SELECT ` + campaignRecipientCols + `
+		FROM campaign_recipients r LEFT JOIN ` + msgTable + ` m ON m.id = r.message_id
+		WHERE ` + where +
+		` ORDER BY r.created_at LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, 0, err
@@ -650,7 +675,7 @@ func (s *Store) ListCampaignRecipients(ctx context.Context, campaignID uuid.UUID
 		return nil, 0, err
 	}
 	var total int
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM campaign_recipients WHERE `+where, countArgs...).Scan(&total)
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM campaign_recipients r WHERE `+where, countArgs...).Scan(&total)
 	return out, total, nil
 }
 
@@ -1534,6 +1559,49 @@ func (s *Store) InsertCampaignOutbound(ctx context.Context, channel string, chat
 		return uuid.Nil, wrap("update aggregates", err)
 	}
 	return id, tx.Commit(ctx)
+}
+
+// SimulatorReceiptCandidate is one simulator-channel outbound message
+// ReceiptSimulator's sweep (backend/internal/simulator) may need to advance
+// further — just enough to call AdvanceDeliveryState and re-derive the
+// message's own fixed simulator.Outcome from Destination.
+type SimulatorReceiptCandidate struct {
+	MessageID         uuid.UUID
+	AccountID         uuid.UUID
+	ExternalMessageID string
+	Destination       string // the wa_chats.remote_jid this message was sent to
+	DeliveryState     string // current state: 'sent' or 'delivered'
+}
+
+// SimulatorMessagesAwaitingReceipt finds simulator-channel outbound messages
+// still sitting at 'sent' or 'delivered' as of their last update, older than
+// olderThan — ReceiptSimulator's own sweep candidates. Reuses the exact same
+// wa_messages/wa_chats/wa_accounts tables the simulator channel already
+// shares with whatsapp (see messagesTableFor/chatsTableFor's own dispatch);
+// there is no simulator-specific storage.
+func (s *Store) SimulatorMessagesAwaitingReceipt(ctx context.Context, olderThan time.Time) ([]SimulatorReceiptCandidate, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT m.id, m.account_id, COALESCE(m.external_message_id, ''), COALESCE(c.remote_jid, ''), m.delivery_state
+		FROM wa_messages m
+		JOIN wa_accounts a ON a.id = m.account_id
+		JOIN wa_chats c ON c.id = m.chat_id
+		WHERE a.channel = 'simulator' AND m.direction = 'out'
+		  AND m.delivery_state IN ('sent', 'delivered')
+		  AND m.external_message_id IS NOT NULL AND m.external_message_id != ''
+		  AND m.updated_at <= $1`, olderThan)
+	if err != nil {
+		return nil, wrap("list simulator messages awaiting receipt", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []SimulatorReceiptCandidate
+	for rows.Next() {
+		var c SimulatorReceiptCandidate
+		if err := rows.Scan(&c.MessageID, &c.AccountID, &c.ExternalMessageID, &c.Destination, &c.DeliveryState); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // ---------------------------------------------------------------------------

@@ -1090,6 +1090,11 @@ export interface CampaignRecipient {
   message_id: string | null
   created_at: string
   updated_at: string
+  // message_delivery_state is the linked message's own delivery_state
+  // (queued/sent/delivered/read/failed) — finer-grained than status above,
+  // which never moves past 'sent' once ANY successful delivery happens.
+  // Empty when message_id is null.
+  message_delivery_state: string
 }
 
 // CampaignEvent mirrors dto.CampaignEvent — one campaign timeline entry

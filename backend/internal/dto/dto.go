@@ -484,6 +484,10 @@ type CampaignRecipient struct {
 	MessageID          *string           `json:"message_id"`
 	CreatedAt          string            `json:"created_at"`
 	UpdatedAt          string            `json:"updated_at"`
+	// MessageDeliveryState mirrors store.CampaignRecipient.MessageDeliveryState
+	// — the linked message's own sent/delivered/read/failed, finer-grained
+	// than Status above. Empty when MessageID is null.
+	MessageDeliveryState string `json:"message_delivery_state"`
 }
 
 // MapCampaignRecipient maps a store.CampaignRecipient.
@@ -495,6 +499,7 @@ func MapCampaignRecipient(r store.CampaignRecipient) CampaignRecipient {
 		NextAttemptAt: tsPtr(r.NextAttemptAt),
 		ChatID:        nullUUIDPtr(r.ChatID), MessageID: nullUUIDPtr(r.MessageID),
 		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
+		MessageDeliveryState: r.MessageDeliveryState,
 	}
 }
 

@@ -43,6 +43,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
+	"github.com/yerassyldanay/xchats/backend/internal/simreceipts"
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
@@ -407,6 +408,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		DisconnectCheckEvery: campaignDisconnectCheckEvery, DisconnectAfter: campaignDisconnectAfter,
 		PruneEvery: campaignPruneEvery, AccountConcurrency: campaignAccountConcurrency,
 	}, log)
+	// simulatorReceipts is the Simulator channel's own delivery-receipt
+	// source: a real channel's sent->delivered->read progression is driven
+	// by an inbound webhook (see store.Store.AdvanceDeliveryState's own doc
+	// comment); Simulator has no such webhook, so this sweep plays that
+	// same role for it, on the exact same store method, so a campaign sent
+	// through Simulator completes and updates its message statuses through
+	// the identical pipeline a live channel would.
+	simulatorReceipts := simreceipts.NewReceiptSimulator(st, hub, simreceipts.Config{}, log)
 	// Instagram's long-lived user token is the one Meta-channel credential
 	// that silently expires with no renewal otherwise (WhatsApp Cloud's
 	// business token and Telegram's bot token do not) — see
@@ -440,6 +449,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// Its own startup pass reconciles any send left 'sending' by a crash
 	// (ReconcileStuckSending) before the tick loop starts claiming new ones.
 	campaignScheduler.Start(ctx)
+	simulatorReceipts.Start(ctx)
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
@@ -550,6 +560,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	tgMgr.Close()
 	automationScheduler.Stop()
 	campaignScheduler.Stop()
+	simulatorReceipts.Stop()
 	q.Close()
 	// kbImportSvc has no producer/consumer relationship with q (its job
 	// queue is kbd_materials, claimed directly via kbstore) — it only needs

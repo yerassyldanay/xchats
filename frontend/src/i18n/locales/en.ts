@@ -1231,6 +1231,8 @@ export default {
     },
     detail: {
       createdBanner: 'Campaign created! Click Start to begin sending messages according to your pacing rules.',
+      messageDelivered: 'Delivered',
+      messageRead: 'Read',
       confirmDelete: 'Delete this campaign?',
       tabOverview: 'Overview',
       tabRecipients: 'Recipients',

@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -98,5 +99,56 @@ func TestChannelSender_DeterministicAcrossCalls(t *testing.T) {
 	r2, _ := s.Send(context.Background(), out)
 	if r1.ExternalID != r2.ExternalID {
 		t.Fatalf("external id not deterministic: %q vs %q", r1.ExternalID, r2.ExternalID)
+	}
+}
+
+// TestSimulatedOutcome_DigitBuckets pins the documented convention on
+// Outcome's own doc comment: the destination's last digit (before any "@")
+// fixes its outcome, always the same way, so an e2e test can deliberately
+// choose a number to exercise the failure or delivered-only paths.
+func TestSimulatedOutcome_DigitBuckets(t *testing.T) {
+	cases := []struct {
+		destination string
+		want        Outcome
+	}{
+		{"77011234560@s.whatsapp.net", OutcomeFailed},
+		{"77011234561@s.whatsapp.net", OutcomeDeliveredOnly},
+		{"77011234562@s.whatsapp.net", OutcomeDeliveredOnly},
+		{"77011234563@s.whatsapp.net", OutcomeRead},
+		{"77011234567@s.whatsapp.net", OutcomeRead},
+		{"77011234569@s.whatsapp.net", OutcomeRead},
+		{"", OutcomeRead},                // no digit at all -> never masquerades as a failure
+		{"no-digits-here", OutcomeRead},
+	}
+	for _, tc := range cases {
+		if got := SimulatedOutcome(tc.destination); got != tc.want {
+			t.Errorf("SimulatedOutcome(%q) = %v, want %v", tc.destination, got, tc.want)
+		}
+	}
+}
+
+func TestChannelSender_Send_RejectsOutcomeFailedDestination(t *testing.T) {
+	s := NewChannelSender()
+	res, err := s.Send(context.Background(), messaging.OutboundMessage{
+		MessageID: "11111111-1111-1111-1111-111111111111", To: "77011234560@s.whatsapp.net", Text: "hi",
+	})
+	if !errors.Is(err, messaging.ErrRecipientUnreachable) {
+		t.Fatalf("err = %v, want messaging.ErrRecipientUnreachable", err)
+	}
+	if res != (messaging.SendResult{}) {
+		t.Errorf("SendResult = %+v, want the zero value on a rejected send", res)
+	}
+}
+
+func TestChannelSender_Send_SucceedsForOutcomeReadDestination(t *testing.T) {
+	s := NewChannelSender()
+	res, err := s.Send(context.Background(), messaging.OutboundMessage{
+		MessageID: "11111111-1111-1111-1111-111111111111", To: "77011234567@s.whatsapp.net", Text: "hi",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if !res.Delivered || res.ExternalID == "" {
+		t.Errorf("SendResult = %+v, want a successful, deterministic result", res)
 	}
 }

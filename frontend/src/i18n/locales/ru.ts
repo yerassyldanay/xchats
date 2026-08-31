@@ -1232,6 +1232,8 @@ export default {
     },
     detail: {
       createdBanner: 'Рассылка создана! Нажмите «Запустить», чтобы начать отправку согласно вашему темпу.',
+      messageDelivered: 'Доставлено',
+      messageRead: 'Прочитано',
       confirmDelete: 'Удалить эту рассылку?',
       tabOverview: 'Обзор',
       tabRecipients: 'Получатели',

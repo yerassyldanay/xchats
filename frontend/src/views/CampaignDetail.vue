@@ -438,6 +438,20 @@ function setEventsPage(p: number) {
               <span class="ml-auto text-xs" :class="r.status === 'failed' ? 'text-destructive' : r.status === 'sent' ? 'text-wa' : 'text-muted-foreground'">
                 {{ t(`campaigns.recipientStatus.${r.status}`) }}
               </span>
+              <!-- message_delivery_state is finer-grained than status: a
+                   coarse 'sent' recipient may have since been marked
+                   delivered or read by the channel's own receipts (see
+                   store.Store.AdvanceDeliveryState) — worth surfacing here
+                   since it's otherwise only visible by opening the chat in
+                   Inbox. Redundant with 'sent' itself, so shown only once
+                   it says something status doesn't already. -->
+              <span
+                v-if="r.status === 'sent' && (r.message_delivery_state === 'delivered' || r.message_delivery_state === 'read')"
+                class="text-[11px] text-muted-foreground"
+                data-testid="recipient-delivery-state"
+              >
+                {{ r.message_delivery_state === 'read' ? t('campaigns.detail.messageRead') : t('campaigns.detail.messageDelivered') }}
+              </span>
               <span v-if="r.failure_reason" class="text-[11px] text-muted-foreground truncate max-w-[30%]" :title="r.failure_reason">{{ r.failure_reason }}</span>
             </div>
           </div>

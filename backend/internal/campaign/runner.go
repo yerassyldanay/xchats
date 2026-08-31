@@ -162,19 +162,21 @@ func (r *Runner) resolveChat(ctx context.Context, claim store.Claim) (chatID uui
 }
 
 // finalize records the outcome of one send attempt: nil sendErr -> sent;
-// messaging.ErrOutsideServiceWindow or errNoExistingChat -> permanently
-// failed (neither is a transport hiccup a retry could fix — the provider's
-// own service-window rule needs the customer to message in again, and a
-// still-missing chat needs preview-time reachability re-checked, not a
-// resend); anything else -> transient, stepped through
-// backend/campaign.NextRetry's fixed backoff ladder until it is exhausted,
-// at which point it too becomes permanently failed.
+// messaging.ErrOutsideServiceWindow, errNoExistingChat, or
+// messaging.ErrRecipientUnreachable -> permanently failed (none of the three
+// is a transport hiccup a retry could fix — the provider's own
+// service-window rule needs the customer to message in again, a
+// still-missing chat needs preview-time reachability re-checked rather than
+// a resend, and an unreachable destination stays unreachable); anything
+// else -> transient, stepped through backend/campaign.NextRetry's fixed
+// backoff ladder until it is exhausted, at which point it too becomes
+// permanently failed.
 func (r *Runner) finalize(ctx context.Context, claim store.Claim, sendErr error, chatID, messageID uuid.NullUUID) {
 	p := store.FinalizeAttemptParams{LogID: claim.LogID, RecipientID: claim.RecipientID, ChatID: chatID, MessageID: messageID}
 	switch {
 	case sendErr == nil:
 		p.NewStatus = purecampaign.RecipientSent
-	case errors.Is(sendErr, messaging.ErrOutsideServiceWindow), errors.Is(sendErr, errNoExistingChat):
+	case errors.Is(sendErr, messaging.ErrOutsideServiceWindow), errors.Is(sendErr, errNoExistingChat), errors.Is(sendErr, messaging.ErrRecipientUnreachable):
 		p.NewStatus = purecampaign.RecipientFailed
 		p.FailureReason = sendErr.Error()
 	default:

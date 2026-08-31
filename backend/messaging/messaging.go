@@ -37,6 +37,14 @@ const (
 // own delivery_state/failure_reason rather than a generic send failure.
 var ErrOutsideServiceWindow = errors.New("messaging: outside the provider's free-form messaging window")
 
+// ErrRecipientUnreachable is returned by a ChannelSender.Send when the
+// provider has permanently rejected this specific destination (an invalid
+// or deactivated number, a hard bounce) — never a transient network/rate
+// hiccup. Like ErrOutsideServiceWindow, this is an expected failure mode a
+// retry cannot fix: callers finalize it immediately as a permanent failure
+// rather than stepping it through the transient-retry ladder.
+var ErrRecipientUnreachable = errors.New("messaging: recipient is permanently unreachable")
+
 // Message is one normalized inbound (or outbound) message, independent of
 // which channel produced it.
 type Message struct {
