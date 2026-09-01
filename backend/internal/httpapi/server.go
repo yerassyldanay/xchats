@@ -468,6 +468,14 @@ func (s *Server) Router() *gin.Engine {
 	auth.POST("/campaigns/:id/pause", s.handlePauseCampaign)
 	auth.POST("/campaigns/:id/resume", s.handleResumeCampaign)
 	auth.POST("/campaigns/:id/stop", s.handleStopCampaign)
+	// CAM-14: the reusable message template library — see
+	// campaign_templates.go's own file header.
+	auth.GET("/campaign-templates", s.handleListCampaignTemplates)
+	auth.POST("/campaign-templates", s.handleCreateCampaignTemplate)
+	auth.GET("/campaign-templates/:id", s.handleGetCampaignTemplate)
+	auth.PATCH("/campaign-templates/:id", s.handleUpdateCampaignTemplate)
+	auth.POST("/campaign-templates/:id/archive", s.handleArchiveCampaignTemplate)
+	auth.POST("/campaign-templates/:id/restore", s.handleRestoreCampaignTemplate)
 	// Customer management (CRM). Deliberately session-only, not RequireAdmin:
 	// this is the working surface of the inbox — every manager who answers a
 	// conversation needs to record who the customer is and what happens next.
@@ -521,6 +529,10 @@ func (s *Server) Router() *gin.Engine {
 	// explicitly enabled (SIMULATOR_ENABLED, default false outside dev).
 	if s.cfg.System.SimulatorEnabled {
 		auth.POST("/simulator/messages", s.handleSimulatorMessage)
+		// KB-12: hard-deletes every conversation/customer/draft the
+		// simulator ever produced for this org — see the handler's own doc
+		// comment.
+		auth.DELETE("/simulator/data", s.handleSimulatorPurgeData)
 		// Injects a synthetic whatsmeow-shaped event through the real
 		// translate -> store -> queue -> worker chain, for automated testing
 		// of the WhatsApp ingestion path without a phone — see
@@ -578,6 +590,7 @@ func (s *Server) Router() *gin.Engine {
 	kb.POST("/imports", s.handleKBCreateImport)
 	kb.GET("/imports", s.handleKBListImports)
 	kb.GET("/imports/:id", s.handleKBGetImport)
+	kb.POST("/imports/:id/cancel", s.handleKBCancelImport)
 	kb.GET("/import/providers", s.handleKBImportProviders)
 
 	// Settings (settings.go) — every route here is admin-only. Handlers are

@@ -7,6 +7,8 @@ import type { ChangeKind, ConfigField, KbRow } from './draftChanges'
 
 export type ModalMode = 'create' | 'edit'
 
+export type ModalTarget = 'draft' | 'live'
+
 export interface ModalSession {
   id: string // stable for the life of the dialog — never the store row's own reference
   kind: ChangeKind
@@ -14,6 +16,13 @@ export interface ModalSession {
   key?: string
   field?: ConfigField // config only — which of the 5 sections this edit targets
   snapshot: KbRow | DraftConfig | null // a DEEP copy taken at open; create mode has none
+  // target picks which store method submit() calls: 'draft' (default) stages
+  // into kbd_draft for Черновик's own review — every openCreate/openEdit call
+  // from DraftKnowledgeBase.vue/ChangeList.vue leaves this at its default.
+  // 'live' commits straight to ai_* (writeLiveChange) — every call from
+  // /knowledge-base (the sole MANUAL authoring surface, see KB-13/
+  // plan/playground.md) passes it explicitly.
+  target: ModalTarget
 }
 
 // Module-level (not inside the function body) so every component calling
@@ -31,9 +40,9 @@ const successCountRef = ref(0)
 
 // useKbModal owns the whole "open a form, survive a background refresh,
 // handle a stale submit" flow (§2.6) for BOTH pages: /knowledge-base opens
-// it to create/edit a published row, /playground opens it to tweak a
-// pending row's value before publishing — either way, submit() always
-// stages into the draft (stores.stageChange), never writes live directly.
+// it for direct live edits (KB-13), /draft opens it to tweak a pending
+// row's value before publishing — submit() dispatches to whichever store
+// method the session's target says (see its own doc comment below).
 export function useKbModal() {
   const pg = usePlayground()
 
@@ -48,8 +57,8 @@ export function useKbModal() {
     staleRef.value = false
   }
 
-  function openCreate(kind: ChangeKind) {
-    session.value = { id: nanoid(), kind, mode: 'create', snapshot: null }
+  function openCreate(kind: ChangeKind, opts?: { target?: ModalTarget }) {
+    session.value = { id: nanoid(), kind, mode: 'create', snapshot: null, target: opts?.target ?? 'draft' }
     reset()
   }
 
@@ -68,7 +77,7 @@ export function useKbModal() {
   // unwraps to the underlying plain object structuredClone can actually
   // handle; it is a no-op on an already-plain object (e.g. in tests), so
   // this is safe regardless of what called openEdit.
-  function openEdit(kind: ChangeKind, row: KbRow | DraftConfig, opts?: { field?: ConfigField }) {
+  function openEdit(kind: ChangeKind, row: KbRow | DraftConfig, opts?: { field?: ConfigField; target?: ModalTarget }) {
     const raw = toRaw(row)
     session.value = {
       id: nanoid(),
@@ -77,6 +86,7 @@ export function useKbModal() {
       key: 'id' in raw ? raw.id : undefined,
       field: opts?.field,
       snapshot: structuredClone(raw),
+      target: opts?.target ?? 'draft',
     }
     reset()
   }
@@ -94,17 +104,25 @@ export function useKbModal() {
     successCountRef.value++
   }
 
-  // submit stages payload and closes ONLY on success. A DRAFT_STALE
-  // conflict — detected via pg.draftStale, not by parsing pg.error's text —
-  // leaves the dialog open with everything the operator typed intact and
-  // sets `stale`, so the caller can offer «Обновить и повторить» instead of
-  // silently overwriting their input with whatever just arrived.
+  // submit writes payload and closes ONLY on success — where it writes
+  // depends on session.target (see ModalSession's doc comment): 'live'
+  // commits straight to ai_* (writeLiveChange, no staleness concept — a
+  // live write is immediately final), 'draft' stages into kbd_draft the
+  // same as always. A DRAFT_STALE conflict — detected via pg.draftStale,
+  // not by parsing pg.error's text — leaves the dialog open with
+  // everything the operator typed intact and sets `stale`, so the caller
+  // can offer «Обновить и повторить» instead of silently overwriting their
+  // input with whatever just arrived; that path is only reachable on the
+  // draft target.
   async function submit(payload: KbFormPayload): Promise<boolean> {
     if (!session.value) return false
     busyRef.value = true
     reset()
     try {
-      const ok = await pg.stageChange(session.value.kind as Exclude<ChangeKind, 'config'>, payload)
+      const kind = session.value.kind as Exclude<ChangeKind, 'config'>
+      const ok = session.value.target === 'live'
+        ? await pg.writeLiveChange(kind, payload)
+        : await pg.stageChange(kind, payload)
       if (ok) {
         close()
         successCountRef.value++

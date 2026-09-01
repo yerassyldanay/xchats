@@ -32,7 +32,7 @@ func TestSchedulerTickClaimsAndSends(t *testing.T) {
 
 	s.tick(ctx)
 
-	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "sent", 50, 0)
+	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "sent", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestSchedulerStartStopLifecycle(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	for {
-		recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "sent", 50, 0)
+		recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "sent", 50, 0)
 		if err != nil {
 			t.Fatalf("ListCampaignRecipients: %v", err)
 		}

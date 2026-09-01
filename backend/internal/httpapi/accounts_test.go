@@ -216,6 +216,58 @@ func (h *harness) del(path string) (int, map[string]json.RawMessage) {
 	return resp.StatusCode, env
 }
 
+// TestListAccounts_AlwaysIncludesSimulator covers CAM-16: the simulator
+// account must be available to the campaign wizard's account picker (which
+// reads this same GET /accounts the Channels page does) from the very
+// first list call, not only once some simulator traffic happens to have
+// created its row already (the old behavior — GetOrCreateSimulatorAccount
+// was previously only ever called lazily, from POST /simulator/messages).
+func TestListAccounts_AlwaysIncludesSimulator(t *testing.T) {
+	h := newHarness(t)
+
+	var page struct {
+		Items []struct {
+			Channel         string `json:"channel"`
+			ConnectionState string `json:"connection_state"`
+		} `json:"items"`
+	}
+	h.get("/xchats/api/v1/accounts", &page)
+
+	var sim *struct {
+		Channel         string `json:"channel"`
+		ConnectionState string `json:"connection_state"`
+	}
+	for i := range page.Items {
+		if page.Items[i].Channel == "simulator" {
+			sim = &page.Items[i]
+			break
+		}
+	}
+	if sim == nil {
+		t.Fatalf("items = %+v, want a simulator account present on the very first list", page.Items)
+	}
+	if sim.ConnectionState != "connected" {
+		t.Errorf("simulator connection_state = %q, want connected", sim.ConnectionState)
+	}
+
+	// Idempotent: listing twice must not create a second simulator row.
+	var page2 struct {
+		Items []struct {
+			Channel string `json:"channel"`
+		} `json:"items"`
+	}
+	h.get("/xchats/api/v1/accounts", &page2)
+	simCount := 0
+	for _, it := range page2.Items {
+		if it.Channel == "simulator" {
+			simCount++
+		}
+	}
+	if simCount != 1 {
+		t.Errorf("simulator accounts after a second list = %d, want exactly 1", simCount)
+	}
+}
+
 // getRaw is like h.get but returns the raw response + envelope instead of
 // decoding into a caller-supplied shape, for asserting on non-2xx status.
 func (h *harness) getRaw(path string) (*http.Response, map[string]json.RawMessage) {

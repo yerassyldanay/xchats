@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
 )
@@ -26,11 +27,18 @@ type Service struct {
 	Engine        *Engine
 }
 
-// RespondOptions customizes one Respond call. ModelOverride is settable only
-// by the authenticated simulator handler, and only to a provider registered in
-// Engine.LLMs — production WhatsApp traffic never sets it.
+// RespondOptions customizes one Respond call. ModelOverride and KBOverride are
+// settable only by the authenticated simulator handler — production traffic
+// on every real channel never sets either.
 type RespondOptions struct {
 	ModelOverride *llm.ModelRef
+	// KBOverride, when set, is used verbatim instead of loading the live KB
+	// through KnowledgeBase.Load — the Simulator's "test against staged
+	// draft" mode (KB-02), fed a kbstore Draft() view translated by
+	// responsestore.BuildKBFromDraftView. nil (the default, and every
+	// non-simulator caller) means the ordinary live load below runs exactly
+	// as before.
+	KBOverride *aiprompt.KB
 }
 
 // Respond loads the conversation's context, verifies the requested channel
@@ -64,9 +72,13 @@ func (s *Service) generate(ctx context.Context, conversationID string, convCtx C
 		TriggerMessageID: convCtx.TriggerMessageID,
 	}
 
-	kb, err := s.KnowledgeBase.Load(ctx, convCtx.OrganizationID)
-	if err != nil {
-		return holdingDraft(draft, err)
+	kb := opts.KBOverride
+	if kb == nil {
+		var err error
+		kb, err = s.KnowledgeBase.Load(ctx, convCtx.OrganizationID)
+		if err != nil {
+			return holdingDraft(draft, err)
+		}
 	}
 
 	result, err := s.Engine.Generate(ctx, GenerateRequest{

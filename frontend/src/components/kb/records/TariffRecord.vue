@@ -58,27 +58,27 @@ const diff = computed(() =>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.name') }}</span>
         <p class="text-sm mt-0.5">{{ row.name || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('name')" :was="liveRow?.name ?? ''" />
+        <FieldDiffNote :show="diff.includes('name')" :was="liveRow?.name ?? ''" :now="row.name" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.pricingType') }}</span>
         <p class="text-sm mt-0.5">{{ t('kb.pricingType.' + row.pricing_type) }}</p>
-        <FieldDiffNote :show="diff.includes('pricing_type')" :was="liveRow ? t('kb.pricingType.' + liveRow.pricing_type) : ''" />
+        <FieldDiffNote :show="diff.includes('pricing_type')" :was="liveRow ? t('kb.pricingType.' + liveRow.pricing_type) : ''" :now="t('kb.pricingType.' + row.pricing_type)" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.price') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row.price || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('price')" :was="liveRow?.price ?? ''" />
+        <FieldDiffNote :show="diff.includes('price')" :was="liveRow?.price ?? ''" :now="row.price" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.limitText') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row.limit_text || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('limit_text')" :was="liveRow?.limit_text ?? ''" />
+        <FieldDiffNote :show="diff.includes('limit_text')" :was="liveRow?.limit_text ?? ''" :now="row.limit_text" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.fee') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row.fee || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('fee')" :was="liveRow?.fee ?? ''" />
+        <FieldDiffNote :show="diff.includes('fee')" :was="liveRow?.fee ?? ''" :now="row.fee" />
       </div>
       <div class="flex items-center text-sm">
         <span :class="row.sales_status === 'active' ? 'text-emerald-700' : 'text-muted-foreground'">
@@ -89,18 +89,18 @@ const diff = computed(() =>
     <div>
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.summary') }}</span>
       <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.summary || '—' }}</p>
-      <FieldDiffNote :show="diff.includes('summary')" :was="liveRow?.summary ?? ''" />
+      <FieldDiffNote :show="diff.includes('summary')" :was="liveRow?.summary ?? ''" :now="row.summary" />
     </div>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.advantages') }}</span>
         <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.advantages || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('advantages')" :was="liveRow?.advantages ?? ''" />
+        <FieldDiffNote :show="diff.includes('advantages')" :was="liveRow?.advantages ?? ''" :now="row.advantages" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.disadvantages') }}</span>
         <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.disadvantages || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('disadvantages')" :was="liveRow?.disadvantages ?? ''" />
+        <FieldDiffNote :show="diff.includes('disadvantages')" :was="liveRow?.disadvantages ?? ''" :now="row.disadvantages" />
       </div>
     </div>
     <div class="flex flex-col gap-2">

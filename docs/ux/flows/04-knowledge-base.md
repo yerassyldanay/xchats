@@ -1,6 +1,10 @@
 # Knowledge Base Lifecycle — User Flow
 
-> **Purpose:** Trace what a user sees and experiences throughout the 3-stage Knowledge Base lifecycle: **Ingestion** (uploading files, scraping URLs, or connecting external MCP models), **Review** (inspecting diffs, editing staged records, bulk actions, and publishing), and **Testing** (simulating customer interactions and verifying AI responses through the production ingestion path). Friction points are marked with 🔴.
+> **Verified:** 2026-08-30 against the Knowledge Base and Draft views, playground/import stores, simulator path, and relevant backend handlers.
+>
+> **Status:** Living implementation roadmap. Open work uses stable `KB-*` IDs. `P1` protects live-data integrity or removes a major workflow block; `P2` improves a frequent workflow; `P3` is refinement.
+>
+> **Purpose:** Trace what a user sees and experiences throughout the 3-stage Knowledge Base lifecycle: **Ingestion** (uploading files, scraping URLs, or connecting external MCP models), **Review** (inspecting diffs, editing staged records, bulk actions, and publishing), and **Testing** (simulating customer interactions and verifying AI responses through the production ingestion path).
 
 ---
 
@@ -110,7 +114,7 @@ flowchart TD
         • Text: Change added to the Draft. Review and publish it from the Draft.
         • Link: Go to Draft
         • Close X button
-        🔴 Friction: Manual human edits should save directly to live DB (PUT /kb/*)"]
+        🔴 KB-13: Manual human edits should save directly through live KB APIs"]
     end
 
     KB_BannerState -->|"Clicks Go to Draft"| DraftScreen
@@ -323,7 +327,7 @@ flowchart TD
 
 ## Friction Points and Suggested Changes
 
-### 🔴 1. Ambiguous "Playground" Route Name vs "Draft" Purpose
+### KB-01 — [P2] Ambiguous "Playground" Route Name vs "Draft" Purpose
 
 **What happens today:** In the navigation rail, the icon (`Blocks`) is labeled **Draft** (or **Черновик**), but the browser URL is `/playground`. Meanwhile, developers and users typically associate the word "Playground" with testing/sandboxing AI prompts (which is actually housed under `/simulator`). This causes confusion on where to go to test vs where to review staging data.
 
@@ -331,7 +335,7 @@ flowchart TD
 
 ---
 
-### 🔴 2. Cannot Test Draft Changes in Simulator Before Publishing to Live
+### KB-02 — [P1] Cannot Test Draft Changes in Simulator Before Publishing to Live
 
 **What happens today:** The Simulator (`/simulator`) only executes against the live, published knowledge base. An operator who imports files or edits topics/tariffs in the Draft cannot test how the AI assistant will answer customer questions before clicking **Publish all**. If a draft change contains flawed instructions or conflicting facts, the user must push it live to production channels first before testing it.
 
@@ -339,7 +343,7 @@ flowchart TD
 
 ---
 
-### 🔴 3. No Guidance or Bridge to Simulator After Publishing
+### KB-03 — [P2] No Guidance or Bridge to Simulator After Publishing
 
 **What happens today:** When the user publishes changes on `/playground`, the pending items vanish and the empty state appears ("No unpublished changes. Go to Knowledge Base to add or change information"). There is no prompt, toast, or action button guiding the user to test their newly published knowledge in the Simulator.
 
@@ -348,24 +352,23 @@ flowchart TD
 
 ---
 
-### 🔴 4. Opaque Extraction and Synthesis Progress with No Time Estimates or Cancellation
+### KB-04 — [P2] Import Progress Lacks Timing, Ownership, and Cancellation
 
 **What happens today:** When a user submits URLs or files for import, the status card shows "Extracting…" and then "Synthesizing…" with per-material state. The code provides no elapsed timer, estimated time remaining, progress percentage, or way to cancel a stuck or unwanted import run; actual duration depends on the material and provider.
 
-**Suggested change:** Add an elapsed time counter, a step indicator (e.g., `Step 1/2: Parsed 3/5 files`), and a "Cancel Import" button to abort long-running jobs.
+**Suggested change:** Add an elapsed time counter, a step indicator (e.g., `Step 1/2: Parsed 3/5 files`), ownership/start-time context, and a **Cancel Import** button. Keep one import-run state owner in the Pinia store and derive all progress UI from it.
 
 ---
 
-### 🔴 5. Active Import Shows Work but Not Ownership, Timing, or Control
+### KB-05 — [Merged into KB-04] Active Import Ownership and Control
 
 **What happens today:** Only one import run can be active at a time across the organization. The shared run card does show each filename/URL, material status, extraction errors, and synthesis results, so the work is not fully hidden. However, the disabled submit notice and status card do not show who started the run, its start time or elapsed time, an ETA, or a cancel action.
 
-**Suggested change:** Replace the static warning with live run details:
-`Import in progress by Alex (started 2 minutes ago on "catalog.pdf"). [View Live Progress]`.
+**Roadmap note:** This is the same implementation boundary as `KB-04`, not a separate project. The combined target is: `Import in progress by Alex (started 2 minutes ago on “catalog.pdf”). [View Live Progress] [Cancel]`.
 
 ---
 
-### 🔴 6. Lack of Guidance on Content Formatting and Entity Categories
+### KB-06 — [P2] Lack of Guidance on Content Formatting and Entity Categories
 
 **What happens today:** On the ingestion card, the "Guidance for the model" textarea has a simple placeholder ("e.g. only pay attention to prices and stock"), but there are no formatting tips, file size recommendations, or supported document type lists. On Knowledge Base, new users are presented with 6 entity tabs (Topics, Products, Tariffs, Delivery Zones, Contacts, Policies) with no explanation of when to use a "Topic" vs a "Product" vs a "Policy".
 
@@ -377,7 +380,7 @@ flowchart TD
 
 ---
 
-### 🔴 7. Difficult-to-Read Diff Notes for Long Multiline Fields and Policies
+### KB-07 — [P3] Difficult-to-Read Diff Notes for Long Multiline Fields and Policies
 
 **What happens today:** When reviewing updated draft items, modified fields show the new text in the card with a small subtext: `Was: [entire previous value line-through]`. For long text fields (e.g., multi-paragraph Topic bodies, assistant guardrails, or return policies), the strikethrough becomes a massive unreadable block with no side-by-side or word-level diff.
 
@@ -385,7 +388,7 @@ flowchart TD
 
 ---
 
-### 🔴 8. No Confirmation Guard on "Publish All" and Inconsistent "Discard All" Dialog
+### KB-08 — [P1] No Confirmation Guard on "Publish All" and Inconsistent "Discard All" Dialog
 
 **What happens today:** Clicking **Publish all** immediately pushes all staged items across all entity tabs directly to live production channels with zero confirmation dialog. Conversely, clicking **Discard all** triggers a generic native browser `window.confirm` popup, which looks out of place and inconsistent with the rest of the application's styled dialogs.
 
@@ -395,7 +398,7 @@ flowchart TD
 
 ---
 
-### 🔴 9. Cryptic Validation Conflict Banner on Single-Item Publish Attempts
+### KB-09 — [P2] Cryptic Validation Conflict Banner on Single-Item Publish Attempts
 
 **What happens today:** If an operator tries to publish a single valid card (e.g. a simple Topic) while an unrelated card in another tab has a validation conflict (e.g. a broken Delivery Zone hierarchy), the publish fails with a page-level red banner: `This change cannot be published: the resulting knowledge base has validation conflicts: [technical error message]`. The clicked card receives a generic note: `Publishing is blocked by another conflict in the Draft — see the message above`, leaving the operator confused as to why their valid card was blocked and which specific entity caused the issue.
 
@@ -404,7 +407,7 @@ flowchart TD
 
 ---
 
-### 🔴 10. "Files (materials)" Tab on Knowledge Base Lacks Ingestion Affordance
+### KB-10 — [P2] "Files (materials)" Tab on Knowledge Base Lacks Ingestion Affordance
 
 **What happens today:** On `/knowledge-base`, the "Files (materials)" tab displays a read-only list of previously processed materials with a subtext "Materials added through knowledge base integrations are shown here for viewing only." There is no button to upload new materials from this tab; the user must realize they have to switch to the "Draft" page (`/playground`) to import files.
 
@@ -412,7 +415,7 @@ flowchart TD
 
 ---
 
-### 🔴 11. Upload Limits Are Enforced Only After Submission
+### KB-11 — [P2] Upload Limits Are Enforced Only After Submission
 
 **What happens today:** The browser lets users stage any number of files without showing the server constraints. The backend accepts at most 10 files per import and at most 50 MiB per file (with a bounded multipart body). Users discover those limits only after uploading and receiving an API error; the pending chips do not flag oversized files or an excessive count.
 
@@ -420,7 +423,7 @@ flowchart TD
 
 ---
 
-### 🔴 12. “Simulator” Tests Pollute the Live Inbox and CRM
+### KB-12 — [P1] “Simulator” Tests Pollute the Live Inbox and CRM
 
 **What happens today:** The simulator copy frames the experience as testing without a real messaging channel, but the backend intentionally sends synthetic messages through the same ingestion path as real traffic. It creates or reuses a simulator account, persists customer/conversation/message/draft records, and broadcasts normal realtime inbox events. Test contacts and chats therefore appear in the operational Inbox and CRM.
 
@@ -428,11 +431,59 @@ flowchart TD
 
 ---
 
-### 🔴 13. Manual Edits Staged Into Draft Instead of Saving Directly to Live
+### KB-13 — [P1] Manual Edits Are Staged Instead of Saving Directly to Live
 
 **What happens today:** When an operator manually adds, edits, or deletes an item directly on `/knowledge-base` (e.g. updating a product price, editing working hours, or tweaking a tariff), the frontend does not save the change directly to the live database. Instead, it calls `stageChange()` / `stageDelete()`, pushing the edit into the `kbd_draft` staging area, displays a green notification banner (*"Change added to the Draft. Review and publish it from the Draft"*), and forces the operator to switch pages to `/playground` (Draft) to find the change and click "Publish all". This artificial 2-step ceremony introduces severe friction for routine catalog updates.
 
-**Suggested change:** Connect the manual edit modals and delete actions directly to the existing backend live-write endpoints (`PUT /xchats/api/v1/kb/products`, `PUT /xchats/api/v1/kb/tariffs`, `PUT /xchats/api/v1/kb/topics`, `PATCH /xchats/api/v1/kb/contacts`, `PATCH /xchats/api/v1/kb/policies`, `DELETE /xchats/api/v1/kb/*`). When an operator clicks "Save" or "Delete" on `/knowledge-base`, the change should commit immediately to the live database. Reserve the staging draft workflow (`/draft`) exclusively for asynchronous AI extractions from files/URLs and MCP prompt runs where review of synthetic data is actually needed.
+**Suggested change:** Connect manual edit modals and delete actions to the existing live-write endpoints: `POST /xchats/api/v1/kb/topics`, `POST /xchats/api/v1/kb/tariffs`, `POST /xchats/api/v1/kb/products`, `POST /xchats/api/v1/kb/zones`, `PATCH /xchats/api/v1/kb/contacts`, `PATCH /xchats/api/v1/kb/policies`, `PATCH /xchats/api/v1/kb/config`, and the corresponding `DELETE` routes. When an operator clicks **Save**, commit immediately and show success or a recoverable inline error. Keep styled confirmation for destructive deletes. Reserve `/playground` staging for asynchronous extraction/MCP work where review is valuable.
+
+**Acceptance criteria:**
+
+- Manual Save performs exactly 1 live write and updates the visible record without a second publish step.
+- Manual Delete requires confirmation and removes the live record only after success.
+- Extraction and MCP writes continue to land in Draft.
+- Live and draft stores remain explicit sources of truth; UI components do not merge them implicitly.
+
+---
+
+### KB-14 — [P2] Import History Exists in the API but Not in the UI
+
+**What happens today:** The backend can list import runs, but the store requests only `listKbImportRuns(1)` and the page renders only `current`. Operators cannot inspect an older failed import, compare past runs, or audit who imported a source.
+
+**Suggested change:** Add an import-history list with status, owner, start/completion time, sources, and a link to run details. Use server-backed pagination or incremental loading.
+
+**Acceptance criteria:**
+
+- The latest active run remains prominent.
+- Completed and failed runs are accessible without replacing the current-run card.
+- The URL identifies the selected run or history page.
+- Lists larger than 50 records use pagination or virtualization.
+
+---
+
+### KB-15 — [P2] Failed Import-Status Hydration Looks Like “No Import”
+
+**What happens today:** `loadLatest()` silently swallows request failures. After a refresh, an active import can disappear from the UI and the operator discovers it only by receiving a conflict when submitting another run.
+
+**Suggested change:** Model loading, loaded, and failed states separately. Show a compact retry state and do not present submission as definitely available while status is unknown.
+
+**Acceptance criteria:**
+
+- A failed status request is visibly different from an organization with no import runs.
+- Retry reloads status without refreshing the whole page.
+- Unknown status cannot misleadingly enable a submission that the backend will reject as already active.
+
+---
+
+## Implementation Order
+
+1. `KB-08` — confirm bulk publication to live knowledge.
+2. `KB-12` — isolate or unmistakably label simulator data.
+3. `KB-13` — make routine manual edits direct while retaining safe delete confirmation.
+4. `KB-02` — test Draft before publishing.
+5. `KB-04`/`KB-05` and `KB-15` — make imports observable and recoverable.
+6. `KB-09`, `KB-11`, and `KB-14` — improve validation, client limits, and history.
+7. `KB-01`, `KB-03`, `KB-06`, `KB-07`, and `KB-10` — improve navigation, guidance, and review clarity.
 
 ---
 

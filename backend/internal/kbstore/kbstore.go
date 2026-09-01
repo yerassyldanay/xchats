@@ -455,40 +455,62 @@ func auditRow(ctx context.Context, tx execer, orgID uuid.UUID, actor uuid.UUID, 
 // Deterministic gate (the Approve safety boundary — see draft.go · Approve)
 // ---------------------------------------------------------------------------
 
-// GateError reports the deterministic approve-gate violations (plan/12 · gate).
-type GateError struct{ Reasons []string }
+// GateReason is one deterministic approve-gate violation. Kind/Key name the
+// offending entity — Kind is one of the same kind strings the frontend's
+// own ChangeKind union already uses ("topics", "delivery_zones",
+// "policies", ...; draftChanges.ts), Key is that entity's own natural key
+// — so a caller can point the operator straight at it rather than reciting
+// the message alone (KB-09: "Publishing blocked: Delivery Zone 'Almaty
+// Region' is missing a parent zone. [Fix in Delivery Zones Tab →]"). Both
+// are "" for a violation with no single offending entity (an
+// unresolved-request count spans the whole org, not one row) — a caller
+// shows Message alone then.
+type GateReason struct {
+	Kind    string
+	Key     string
+	Message string
+}
 
-func (e *GateError) Error() string { return "publish gate failed: " + strings.Join(e.Reasons, "; ") }
+// GateError reports the deterministic approve-gate violations (plan/12 · gate).
+type GateError struct{ Reasons []GateReason }
+
+func (e *GateError) Error() string {
+	msgs := make([]string, len(e.Reasons))
+	for i, r := range e.Reasons {
+		msgs[i] = r.Message
+	}
+	return "publish gate failed: " + strings.Join(msgs, "; ")
+}
 
 // gate is the deterministic approve gate (pure, testable): over the resulting
 // LIVE set (live ∪ approved, minus deletes), every topic body is pure prose (no
 // fact tokens, no literal currency), no request pends. Facts are typed columns
 // (validated at reply-render time, fail closed), so the gate does not touch them.
-func gate(snap *domain.Snapshot, pendingRequests int) []string {
-	var reasons []string
+func gate(snap *domain.Snapshot, pendingRequests int) []GateReason {
+	var reasons []GateReason
 	for _, t := range snap.Topics {
 		reasons = append(reasons, gateTopicBody(t.Slug, t.BodyMD)...)
 	}
 	if pendingRequests > 0 {
-		reasons = append(reasons, fmt.Sprintf("%d unresolved request(s)", pendingRequests))
+		reasons = append(reasons, GateReason{Message: fmt.Sprintf("%d unresolved request(s)", pendingRequests)})
 	}
 	return reasons
 }
 
 // gateTopicBody is the per-topic half of the gate — also reused stand-alone by
 // the /kb/* live-write path (live.go).
-func gateTopicBody(slug, bodyMD string) []string {
-	var reasons []string
+func gateTopicBody(slug, bodyMD string) []GateReason {
+	var reasons []GateReason
 	// Topic bodies are pure prose (14 Decision 3): a fact token in a body means
 	// stored knowledge is carrying a value — it belongs in a typed column, quoted
 	// only in replies.
 	if strings.Contains(bodyMD, "{{") {
-		reasons = append(reasons, fmt.Sprintf("topic %q body must be pure prose — no {{...}} tokens", slug))
+		reasons = append(reasons, GateReason{Kind: "topics", Key: slug, Message: fmt.Sprintf("topic %q body must be pure prose — no {{...}} tokens", slug)})
 	}
 	// A literal price/currency amount in a body is an unconfirmed number shipping
 	// to customers — the fact belongs in a typed tariff/product column.
 	if lit := rawCurrencyRE.FindString(bodyMD); lit != "" {
-		reasons = append(reasons, fmt.Sprintf("topic %q has a literal amount %q — put the fact in a typed column", slug, strings.TrimSpace(lit)))
+		reasons = append(reasons, GateReason{Kind: "topics", Key: slug, Message: fmt.Sprintf("topic %q has a literal amount %q — put the fact in a typed column", slug, strings.TrimSpace(lit))})
 	}
 	return reasons
 }

@@ -69,6 +69,6 @@ function lines(v: string | number): string[] {
       <p v-if="!lines(value).length" class="text-muted-foreground italic text-sm">{{ t('kb.config.empty') }}</p>
     </template>
 
-    <FieldDiffNote :show="changed" :was="String(liveValue ?? '')" />
+    <FieldDiffNote :show="changed" :was="String(liveValue ?? '')" :now="String(value ?? '')" />
   </RecordShell>
 </template>

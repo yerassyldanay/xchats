@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { usePlayground } from '@/stores/playground'
 import { mountKb, testPinia } from '@/test/mount'
@@ -13,6 +13,19 @@ vi.mock('@/api/client', async (importOriginal) => {
     ...actual,
     api: { ...actual.api, get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() },
   }
+})
+
+// useKbModal's session/successCount are MODULE-level singletons shared by
+// every mounted instance (see its own doc comment) — an unmounted-but-not-
+// disposed wrapper from an earlier test stays reactive to them, so it would
+// re-open its own Teleported dialog the instant a LATER test targets the
+// same entity kind, and body()'s queries below would match the stale one.
+// Track and unmount after every test so only the current test's dialog can
+// ever be live in document.body.
+let mounted: VueWrapper | undefined
+afterEach(() => {
+  mounted?.unmount()
+  mounted = undefined
 })
 
 function topic(over: Partial<TopicRow> = {}): TopicRow {
@@ -69,6 +82,7 @@ async function mountWith(changes: DraftChangeSet, live: DraftView) {
   })
   const pinia = testPinia()
   const wrapper = mountKb(KnowledgeBase, { pinia })
+  mounted = wrapper
   await flushPromises()
   return { wrapper, pg: usePlayground(), api }
 }
@@ -169,11 +183,10 @@ describe('KnowledgeBase — editing a product\'s media through the picker reache
     await saveBtn!.trigger('click')
     await flushPromises()
 
-    expect(api.post).toHaveBeenCalledWith(
-      '/playground/draft/products',
-      expect.objectContaining({ ref: 'coffee-machine', gallery_images: [] }),
-      expect.anything()
-    )
+    // /knowledge-base writes commit straight to the live KB (KB-13) — no
+    // /playground/draft detour, no If-Match (a live write has no staleness
+    // concept to guard against).
+    expect(api.post).toHaveBeenCalledWith('/kb/products', expect.objectContaining({ ref: 'coffee-machine', gallery_images: [] }))
     // This file's api mocks are module-level vi.fn()s with no shared
     // beforeEach reset — clear this call now so it can't bleed into a
     // LATER test's `expect(api.post).not.toHaveBeenCalled()` (file order,
@@ -182,8 +195,8 @@ describe('KnowledgeBase — editing a product\'s media through the picker reache
   })
 })
 
-describe('KnowledgeBase — «Добавить …» stages into the draft, not /kb', () => {
-  it('«Добавить тему» opens the create modal (no direct /kb write on click)', async () => {
+describe('KnowledgeBase — «Добавить …» opens the modal, writes only on Save', () => {
+  it('«Добавить тему» opens the create modal (no write on click alone)', async () => {
     const { wrapper, api } = await mountWith(emptyChanges(), emptyLive())
     await switchTab(wrapper, 'Темы')
     const addBtn = wrapper.findAll('button').find((b) => b.text().includes('Добавить тему'))
@@ -197,13 +210,22 @@ describe('KnowledgeBase — «Добавить …» stages into the draft, not 
     // The dialog is now open (teleported to document.body) with the topic
     // form's slug field visible.
     expect(body().find('input').exists()).toBe(true)
+
+    // useKbModal's session is a module-level singleton shared by every
+    // mounted page (see its own doc comment), and this file never unmounts
+    // a wrapper between tests — leaving this dialog open would leak a
+    // draft-target 'topics' session into whichever test runs next. Close it
+    // the same way a user would (Cancel), matching how every other test in
+    // this file that opens a dialog also resolves it before finishing.
+    const cancelBtn = body().findAll('button').find((b) => b.text() === 'Отмена')
+    await cancelBtn!.trigger('click')
   })
 })
 
-describe('KnowledgeBase — delete asks for confirmation and stages a removal', () => {
-  it('clicking Удалить opens a confirmation, and only stages on confirm', async () => {
+describe('KnowledgeBase — delete asks for confirmation and writes live only on confirm', () => {
+  it('clicking Удалить opens a confirmation, and only deletes on confirm', async () => {
     const { wrapper, pg } = await mountWith(emptyChanges(), emptyLive({ topics: [topic()] }))
-    const stageDeleteSpy = vi.spyOn(pg, 'stageDelete').mockResolvedValue(true)
+    const deleteLiveSpy = vi.spyOn(pg, 'deleteLiveEntity').mockResolvedValue(true)
     await switchTab(wrapper, 'Темы')
 
     const deleteBtn = wrapper.findAll('button').find((b) => b.text() === 'Удалить')
@@ -211,7 +233,7 @@ describe('KnowledgeBase — delete asks for confirmation and stages a removal', 
     await deleteBtn!.trigger('click')
     await wrapper.vm.$nextTick()
 
-    expect(stageDeleteSpy).not.toHaveBeenCalled() // confirmation first, no write yet
+    expect(deleteLiveSpy).not.toHaveBeenCalled() // confirmation first, no write yet
     expect(body().text()).toContain('Удалить запись?')
 
     const confirmBtn = body().findAll('button').find((b) => b.text() === 'Удалить' && b.classes().some((c) => c.includes('destructive')))
@@ -219,15 +241,21 @@ describe('KnowledgeBase — delete asks for confirmation and stages a removal', 
     await confirmBtn!.trigger('click')
     await flushPromises()
 
-    expect(stageDeleteSpy).toHaveBeenCalledWith('topics', 'pricing')
+    expect(deleteLiveSpy).toHaveBeenCalledWith('topics', 'pricing')
   })
 })
 
-describe('KnowledgeBase — published data unchanged after a staged write', () => {
-  it('pg.live is untouched by a successful stage (no live refetch is triggered by the modal)', async () => {
+// KB-13: /knowledge-base is the sole MANUAL authoring surface — a Save here
+// commits straight to ai_* (no draft/publish detour), so pg.live is
+// reassigned from the write's own response and the record is visible
+// immediately, with a transient "Saved" confirmation instead of the old
+// "staged, go publish" banner.
+describe('KnowledgeBase — a manual Save writes straight to the live KB', () => {
+  it('pg.live is reassigned from POST /kb/topics\' response and a Saved confirmation shows', async () => {
     const { wrapper, pg, api } = await mountWith(emptyChanges(), emptyLive({ topics: [topic()] }))
     const liveBefore = pg.live
-    vi.mocked(api.post).mockResolvedValueOnce(emptyChanges({ topics: [topic({ id: 'new-topic', slug: 'new-topic', title: 'Новая' })] }))
+    const newLive = emptyLive({ topics: [topic(), topic({ id: 'new-topic', slug: 'new-topic', title: 'Новая' })] })
+    vi.mocked(api.post).mockResolvedValueOnce(newLive as any)
     await switchTab(wrapper, 'Темы')
 
     const addBtn = wrapper.findAll('button').find((b) => b.text().includes('Добавить тему'))
@@ -239,8 +267,12 @@ describe('KnowledgeBase — published data unchanged after a staged write', () =
     await saveBtn!.trigger('click')
     await flushPromises()
 
-    expect(pg.live).toBe(liveBefore) // same object reference — never reassigned
-    expect(wrapper.text()).toContain('Изменение добавлено в Черновик')
+    expect(api.post).toHaveBeenCalledWith('/kb/topics', expect.objectContaining({ slug: 'new-topic' }))
+    expect(pg.live).not.toBe(liveBefore) // reassigned from the write's response
+    // Pinia wraps a newly assigned object in its own reactive proxy, so this
+    // is never the SAME reference as newLive — deep-equal is the right check.
+    expect(pg.live).toEqual(newLive)
+    expect(wrapper.text()).toContain('Сохранено в базе знаний')
   })
 })
 
@@ -301,5 +333,45 @@ describe('KnowledgeBase — Файлы (материалы) reads pg.live.materi
     const link = wrapper.find('a[href*="/kb/materials/mat-3/content"]')
     expect(link.exists()).toBe(true)
     expect(link.text()).toContain('Скачать')
+  })
+
+  // KB-10: this tab used to be a dead end — read-only, with no path back to
+  // actually importing something. The ingestion panel lives on /draft.
+  it('shows an Import New Files / URLs button linking to /draft', async () => {
+    const { wrapper } = await mountWith(emptyChanges(), emptyLive({ materials: [material()] }))
+    await switchTab(wrapper, 'Файлы (материалы)')
+
+    const link = wrapper.find('[data-testid="materials-import-new"]')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toContain('Импортировать новые файлы')
+  })
+})
+
+// KB-06: six entity tabs with no explanation of when a fact belongs under
+// Topics vs Products vs Policies — this is visible regardless of which tab
+// is active, since it sits right below the tab strip itself.
+describe('KnowledgeBase — entity guide (KB-06)', () => {
+  it('shows a collapsed accordion explaining each of the six entity kinds', async () => {
+    const { wrapper } = await mountWith(emptyChanges(), emptyLive())
+
+    const guide = wrapper.find('[data-testid="entity-guide"]')
+    expect(guide.exists()).toBe(true)
+    expect(guide.text()).toContain('В чём разница между этими вкладками?')
+    for (const phrase of [
+      'Общие вопросы, правила',
+      'Физические или цифровые товары',
+      'Тарифные планы',
+      'Региональные тарифы доставки',
+      'Как клиенту связаться с человеком',
+      'Возврат, гарантия',
+    ]) {
+      expect(guide.text()).toContain(phrase)
+    }
+  })
+
+  it('stays visible after switching tabs', async () => {
+    const { wrapper } = await mountWith(emptyChanges({ topics: [topic()] }), emptyLive())
+    await switchTab(wrapper, 'Темы')
+    expect(wrapper.find('[data-testid="entity-guide"]').exists()).toBe(true)
   })
 })

@@ -21,6 +21,14 @@ comments atop `harness/env.ts`/`harness/verify.ts`/`harness/shot.ts`, for the
 full design; **Prerequisites** below covers what it additionally needs
 beyond the two specs above.
 
+`campaign-simulator.spec.ts` covers Campaigns end to end on the Simulator
+channel — the wizard's Audience/Message/Schedule steps, launch, the real
+runner processing both a normal and a deliberately-unreachable recipient,
+async delivered/read progression, and the sent message being retrievable
+through the same chats API the Inbox reads from. No LLM key or egress
+needed — Simulator never calls a network provider, by construction (see
+backend/internal/simulator's own package-level test).
+
 ## Prerequisites
 
 1. **A browser.** Playwright downloads Chromium from its CDN:

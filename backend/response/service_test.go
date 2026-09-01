@@ -130,6 +130,32 @@ func TestService_Respond_ConversationLoadFailurePropagates(t *testing.T) {
 	}
 }
 
+// TestService_Respond_KBOverrideBypassesLoad is KB-02's core service-level
+// guarantee: when the caller (the simulator's "test against staged draft"
+// mode) supplies KBOverride, generate() must use it verbatim instead of
+// calling KnowledgeBase.Load — proven here by an override KB whose product
+// price differs from fakeKBRepo's, showing up in the generated reply.
+func TestService_Respond_KBOverrideBypassesLoad(t *testing.T) {
+	convRepo := &fakeConversationRepo{ctx: ConversationContext{Channel: messaging.ChannelSimulator}}
+	draftRepo := &fakeDraftRepo{}
+	client := &fakeClient{responses: []llm.ChatResponse{{Text: responseJSON("Цена: {{product.widget.price}}.", nil, false, "")}}}
+	// fakeKBRepo.err is set: if generate() ever fell through to Load(), the
+	// call would produce a holding draft instead of the scripted reply below
+	// — this doubles as proof Load was never reached.
+	svc := testService(convRepo, &fakeKBRepo{err: errors.New("Load must not be called when KBOverride is set")}, draftRepo, client)
+
+	override := testKB()
+	override.Products[0].Price = "2 000 ₸ (черновик)"
+
+	out, err := svc.Respond(context.Background(), messaging.ChannelSimulator, "conv-1", RespondOptions{KBOverride: override})
+	if err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	if len(out) != 1 || out[0].Text != "Цена: 2 000 ₸ (черновик)." {
+		t.Fatalf("unexpected result (KBOverride was not used): %+v", out)
+	}
+}
+
 func TestService_Respond_ModelOverridePassedToEngine(t *testing.T) {
 	convRepo := &fakeConversationRepo{ctx: ConversationContext{Channel: messaging.ChannelSimulator}}
 	draftRepo := &fakeDraftRepo{}

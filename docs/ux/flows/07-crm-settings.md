@@ -1,6 +1,10 @@
 # CRM, Follow-ups, and Settings Management — User Flows
 
-> **Purpose:** Trace the end-to-end user journeys for **CRM and Follow-ups** (customer directory, profile sidebar, task scheduling, reminders) and **Settings and Team Management** (AI model engine, provider credentials, team members, organization branding). Friction points are marked with 🔴.
+> **Verified:** 2026-08-30 against CRM/customer/follow-up views and stores, the Settings tabs/store, router guards, Account Security, and user-management handlers.
+>
+> **Status:** Living implementation roadmap. CRM work uses stable `CRM-*` IDs and Settings work uses `SET-*`. `P1` blocks access, offboarding, or reliable operations; `P2` is frequent workflow friction; `P3` is refinement.
+>
+> **Purpose:** Trace the end-to-end user journeys for **CRM and Follow-ups** (customer directory, profile sidebar, task scheduling, reminders) and **Settings and Team Management** (AI model engine, provider credentials, team members, organization branding).
 
 ---
 
@@ -17,7 +21,7 @@
 
 1. **From the Nav Rail (Customers):** User clicks the `UsersRound` icon labeled "Customers" to navigate to `/customers`.
 2. **From the Nav Rail (Follow-ups):** User clicks the `CalendarClock` icon labeled "Follow-ups" to navigate to `/followups` (displays a red badge with the overdue count if overdue items exist).
-3. **From the Inbox (Chatboard):** When working inside `/chatboard`, selecting any conversation automatically opens the right sidebar tab "Customer" (`CustomerPanel`), allowing in-context profile management.
+3. **From the Inbox (Chatboard):** The right sidebar initially defaults to **Customer**, but the selected Customer/AI Assistant tab persists while the operator switches conversations.
 4. **From Customer Directory to Chat:** Clicking any customer row in `/customers` jumps directly to their latest conversation in `/chatboard`.
 5. **From Follow-ups to Chat:** Clicking the conversation icon on a follow-up item in `/followups` jumps directly to that conversation in `/chatboard`.
 
@@ -30,7 +34,7 @@ flowchart TD
     NavStart["User in App Nav Rail"]
     NavStart -->|"Clicks 'Customers' icon"| CustomersPage
     NavStart -->|"Clicks 'Follow-ups' icon"| FollowupsPage
-    NavStart -->|"Selects chat in Inbox"| CustomerSidebar
+    NavStart -->|"Selects chat while Customer tab is active"| CustomerSidebar
 
     subgraph CustomersPage["Screen: /customers (Customer Directory)"]
         direction TB
@@ -177,7 +181,7 @@ flowchart TD
 
 ## Friction Points and Suggested Changes
 
-### 🔴 1. Clicking a Customer Row Forces Unwanted Navigation to Chatboard
+### CRM-01 — [P2] Clicking a Customer Row Forces Unwanted Navigation to Chatboard
 
 **What happens today:** When an operator clicks a customer row in `/customers` to view details or notes, the app immediately navigates to `/chatboard` and selects their latest conversation. If the customer has no active conversations or the manager just wants to update contact records, tags, or status, they are abruptly navigated away from the directory.
 
@@ -185,7 +189,7 @@ flowchart TD
 
 ---
 
-### 🔴 2. No In-App Configuration for Statuses and Custom Fields
+### CRM-02 — [P1] No In-App Configuration for Statuses and Custom Fields
 
 **What happens today:** Tags can be created dynamically inside the Customer Sidebar (`+ Add tag` -> type new tag name), but Statuses and Custom Fields cannot be created, edited, or reordered anywhere in the user interface. If no statuses are seeded, the Status dropdown only contains "No status".
 
@@ -193,7 +197,7 @@ flowchart TD
 
 ---
 
-### 🔴 3. Follow-up Due Dates Lack Relative Time Cues
+### CRM-03 — [P2] Follow-up Due Dates Lack Relative Time Cues
 
 **What happens today:** Follow-ups display rigid date-time strings (e.g., `2026-08-30 · 14:00` or `2026-08-30 · all day`). In the overdue and today lists, there are no relative cues like "Due in 30 minutes", "2 hours overdue", or "Due yesterday".
 
@@ -201,7 +205,7 @@ flowchart TD
 
 ---
 
-### 🔴 4. Customer Directory Lacks Pagination and Column Sorting
+### CRM-04 — [P1] Customer Directory Lacks Pagination and Column Sorting
 
 **What happens today:** The customer directory fetches a hardcoded `page_size=100` and displays a total count in the footer, but provides no pagination controls (Previous/Next page) or column header sorting (e.g. sort by Name, Created Date, or Last Active). Customers beyond the first 100 cannot be viewed without typing a matching search query.
 
@@ -209,7 +213,7 @@ flowchart TD
 
 ---
 
-### 🔴 5. Merge Dialog Provides No Field-Level Conflict Preview
+### CRM-05 — [P1] Merge Dialog Provides No Field-Level Conflict Preview
 
 **What happens today:** The merge dialog warns that all channels, conversations, notes, tags, and timeline entries will move to the target customer. However, it does not show what happens if both profiles have conflicting phone numbers, email addresses, or different statuses.
 
@@ -217,7 +221,7 @@ flowchart TD
 
 ---
 
-### 🔴 6. Nav Rail Overdue Badge Does Not Recalculate Periodically
+### CRM-06 — [P2] Nav Rail Overdue Badge Does Not Recalculate Periodically
 
 **What happens today:** The overdue count badge on the nav rail is loaded on initial app mount and updated only when the user executes a follow-up action. If the app is kept open across day boundaries or as a task becomes overdue in real time, the badge does not update until a manual page reload occurs.
 
@@ -225,7 +229,7 @@ flowchart TD
 
 ---
 
-### 🔴 7. “New Customer” Creates a Record but Opens No Editor
+### CRM-07 — [P1] “New Customer” Creates a Record but Opens No Editor
 
 **What happens today:** Clicking **New customer** immediately creates a blank record, then calls the same `openCustomer()` path used by existing rows. That path navigates only when the profile has a conversation. A brand-new blank customer has none, so the user remains in the directory with a new dash-named row and no form, drawer, success message, or obvious way to enter its details.
 
@@ -233,11 +237,50 @@ flowchart TD
 
 ---
 
-### 🔴 8. Meta Channel Identities Are Mislabelled as WhatsApp in CRM
+### CRM-08 — [P2] Meta Channel Identities Are Mislabelled as WhatsApp in CRM
 
 **What happens today:** The directory's channel filter offers only WhatsApp and Telegram. Its icon helper returns Telegram only for the literal `telegram` channel and returns the WhatsApp icon for every other identity. Instagram, Messenger, simulator, and future channel identities therefore appear as WhatsApp and cannot be filtered by their real channel.
 
 **Suggested change:** Reuse the complete channel-brand mapping from the Inbox, expose every supported channel in the filter, and use a neutral fallback icon for unknown values.
+
+---
+
+### CRM-09 — [P1] Follow-ups Stop at 200 Without Pagination
+
+**What happens today:** The follow-up store requests `page_size=200`, discards the API total, and exposes no pagination or load-more control. Additional tasks are silently unreachable.
+
+**Suggested change:** Add server-backed pagination or incremental loading, retain the total, and preserve bucket/scope/page state in the URL.
+
+**Acceptance criteria:**
+
+- Operators can reach every follow-up.
+- The UI shows the visible range and total.
+- Bucket and assignee filters remain stable while paging.
+
+---
+
+### CRM-10 — [P1] CRM List and Profile Requests Can Finish Out of Order
+
+**What happens today:** Rapid search/filter changes can apply an older customer list after a newer request. Rapid customer selection can likewise apply the previous profile or timeline to the current customer.
+
+**Suggested change:** Use latest-request-wins guards and cancellation in the CRM store. Components should select/filter through store actions and render explicit loading state.
+
+**Acceptance criteria:**
+
+- Out-of-order responses cannot overwrite current list/profile/timeline state.
+- Loading and error state belong to the request they describe.
+- Tests deliberately complete requests in reverse order.
+
+---
+
+## CRM Implementation Order
+
+1. `CRM-10` — prevent cross-customer state.
+2. `CRM-07` — make customer creation usable.
+3. `CRM-04` and `CRM-09` — expose complete datasets.
+4. `CRM-05` — make destructive merge outcomes explicit.
+5. `CRM-02`, `CRM-03`, `CRM-06`, and `CRM-08` — improve configuration and triage.
+6. `CRM-01` — add in-directory profile editing.
 
 ---
 
@@ -268,7 +311,7 @@ flowchart TD
 
 1. **From the Nav Rail (Settings Icon):** An administrator clicks the `Settings` gear icon at the bottom of the nav rail to navigate to `/settings`.
 2. **From Unhealthy Provider Alert:** When a configured provider fails health verification, a red dot appears on the Settings icon with the tooltip "Needs attention", prompting the admin to open `/settings`.
-3. **From Setup Wizard:** During first-time onboarding (`SetupWizard`), links direct the user to AI provider and team settings.
+3. **From Getting Started:** The persistent administrator checklist links to Settings for AI provider configuration. Account Security is also reachable from the user menu and Team Management tab.
 4. **Access Control Gate:** Non-admin users do not see the Settings gear in the nav rail. If a non-admin navigates to `/settings` directly via URL, the router guard redirects them immediately to `/chatboard`.
 
 ---
@@ -364,6 +407,9 @@ flowchart TD
 
     subgraph TeamTab["Tab: Team Management"]
         direction TB
+        SecurityCard["Account Security Card:
+        • Opens password-change dialog for the current user"]
+
         OrgCard["Organization Name Card:
         • Org Name text input
         • Button: Rename (shows spinner when saving)
@@ -375,7 +421,7 @@ flowchart TD
         • Expanded Invite Form:
           - Name text input
           - Email input (type=email)
-          - Password input (type=password)
+          - Masked password input with Show/Hide toggle
           - Error alert (if email taken or invalid)
           - Button: Add member (shows spinner)
         • Members List:
@@ -425,7 +471,7 @@ flowchart TD
 
 ## Friction Points and Suggested Changes
 
-### 🔴 1. No Guidance on LLM Provider Selection and Model Compatibility
+### SET-01 — [P2] No Guidance on LLM Provider Selection and Model Compatibility
 
 **What happens today:** In the AI Engine settings tab, admins see OpenRouter, OpenAI, and Gemini listed with freeform text inputs for "Default model" and "Vision model". There is no explanation of model pricing, latency, capabilities, or which model identifiers are valid.
 
@@ -433,7 +479,7 @@ flowchart TD
 
 ---
 
-### 🔴 2. Default Provider Setting is Disconnected from Provider Key Status
+### SET-02 — [P1] Default Provider Setting Is Disconnected from Provider Key Status
 
 **What happens today:** An administrator can select "OpenAI" as the Default Provider in the top card and click "Save", even if no OpenAI API key has been added in the cards below. The top form saves successfully with a green checkmark, while auto-replies across the app will fail at runtime.
 
@@ -441,15 +487,15 @@ flowchart TD
 
 ---
 
-### 🔴 3. Manual Password Creation Required Instead of Email Invitations
+### SET-03 — [P1] Manual Password Creation Required Instead of Email Invitations
 
-**What happens today:** When adding a team member, the admin must type a temporary password manually into a plaintext/password field. The admin is then responsible for insecurely transmitting this password out-of-band to the teammate.
+**What happens today:** When adding a team member, the admin must type a temporary password into a masked field with a Show/Hide toggle. Masking protects shoulder-surfing, but the admin remains responsible for transmitting the credential out-of-band.
 
 **Suggested change:** Provide an "Invite via Email" or "Generate One-Time Login Link" option where new teammates receive a secure link to set their own initial password.
 
 ---
 
-### 🔴 4. Last-Administrator Safeguard Is Reactive Only
+### SET-04 — [P1] Last-Administrator Safeguard Is Reactive Only
 
 **What happens today:** The backend correctly refuses to demote an organization's last administrator in the same transaction as the role update, returning a conflict instead of allowing lockout. The UI does not know that in advance: it leaves "Make member" enabled, provides no confirmation for self-demotion, and explains the safeguard only after the rejected request appears as a row error.
 
@@ -457,7 +503,7 @@ flowchart TD
 
 ---
 
-### 🔴 5. Silent Route Redirection for Non-Admin Users
+### SET-05 — [P2] Silent Route Redirection for Non-Admin Users
 
 **What happens today:** If a non-admin user navigates to `/settings` (e.g., via a shared link or bookmark), the router guard silently redirects them to `/chatboard` with no notification. The user is left confused as to why the page did not open.
 
@@ -465,7 +511,7 @@ flowchart TD
 
 ---
 
-### 🔴 6. Deleting a Provider Credential Does Not Warn if It is Currently in Active Use
+### SET-06 — [P1] Deleting a Provider Credential Does Not Warn if It Is Currently in Active Use
 
 **What happens today:** If an admin deletes the API key for OpenRouter while OpenRouter is selected as the default response engine, the deletion occurs immediately upon confirmation. The AI Engine card continues to point to OpenRouter, leading to broken assistant replies.
 
@@ -473,11 +519,50 @@ flowchart TD
 
 ---
 
-### 🔴 7. Team Management Has No Removal/Deactivation or Pagination
+### SET-07 — [P1] Team Management Has No Removal/Deactivation or Pagination
 
 **What happens today:** Administrators can create users and toggle roles, but cannot deactivate or remove a teammate from the organization. The users endpoint is paginated, while the store requests only its default first page and the tab has no pagination controls despite retaining `usersTotal`. In a larger team, members after the first page are invisible and former staff cannot be offboarded through the UI.
 
 **Suggested change:** Add explicit deactivate/remove actions with confirmation and session revocation, plus server-backed pagination or virtualized incremental loading for the member list.
+
+---
+
+### SET-08 — [P2] Settings Tabs Are Not Addressable in the URL
+
+**What happens today:** `Settings.vue` keeps the active tab in a local ref. Refresh always returns to AI Engine; administrators cannot bookmark Team Management, use Back/Forward between tabs, or share a direct link to a setting.
+
+**Suggested change:** Store the active tab in a validated route query such as `/settings?tab=team`. Use links for tab navigation so standard browser behavior works.
+
+**Acceptance criteria:**
+
+- Every tab has a stable URL.
+- Refresh and Back/Forward preserve the active tab.
+- Invalid tab values fall back safely to AI Engine.
+
+---
+
+### SET-09 — [P2] Initial Settings Load Failure Has No Retry
+
+**What happens today:** If the initial settings/integrations request fails, the entire page shows only a generic error string. There is no Retry action and no partial rendering of data that did load.
+
+**Suggested change:** Track settings and integration loading independently, show actionable inline failures, and provide Retry without requiring a full-page refresh.
+
+**Acceptance criteria:**
+
+- Every initial-load failure includes a visible Retry action.
+- Successfully loaded sections remain usable when another source fails where safe.
+- Async updates use an accessible live-status pattern.
+
+---
+
+## Settings Implementation Order
+
+1. `SET-07` — enable secure offboarding and complete member access.
+2. `SET-02` and `SET-06` — prevent configuration that breaks AI replies.
+3. `SET-04` — make role safety proactive.
+4. `SET-03` — replace shared temporary passwords with invitation setup.
+5. `SET-08` and `SET-09` — make Settings navigable and recoverable.
+6. `SET-01` and `SET-05` — improve guidance and access feedback.
 
 ---
 
@@ -488,6 +573,7 @@ flowchart TD
 | Settings Main View & Tabs | [`Settings.vue`](../../../frontend/src/views/Settings.vue) |
 | AI Engine Tab | [`AiEngineTab.vue`](../../../frontend/src/components/settings/tabs/AiEngineTab.vue) |
 | Team Management Tab | [`TeamManagementTab.vue`](../../../frontend/src/components/settings/tabs/TeamManagementTab.vue) |
+| Account Security Dialog | [`AccountSecurityDialog.vue`](../../../frontend/src/components/settings/AccountSecurityDialog.vue) |
 | Provider Credential Card Component | [`ProviderCredentialCard.vue`](../../../frontend/src/components/settings/ProviderCredentialCard.vue) |
 | Masked Secret Password Input | [`MaskedSecretInput.vue`](../../../frontend/src/components/settings/MaskedSecretInput.vue) |
 | Integration Status Badge | [`IntegrationStatus.vue`](../../../frontend/src/components/settings/IntegrationStatus.vue) |

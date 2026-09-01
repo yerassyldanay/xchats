@@ -59,49 +59,49 @@ const diff = computed(() =>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryCost') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row?.delivery_cost || '—' }}</p>
         <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-0.5">{{ t('kb.fields.managedByZones') }}</p>
-        <FieldDiffNote :show="diff.includes('delivery_cost')" :was="liveRow?.delivery_cost ?? ''" />
+        <FieldDiffNote :show="diff.includes('delivery_cost')" :was="liveRow?.delivery_cost ?? ''" :now="row?.delivery_cost ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.deliveryInDays') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row?.delivery_in_days || '—' }}</p>
         <p v-if="zonesExist" class="text-xs text-muted-foreground/70 mt-0.5">{{ t('kb.fields.managedByZones') }}</p>
-        <FieldDiffNote :show="diff.includes('delivery_in_days')" :was="liveRow?.delivery_in_days ?? ''" />
+        <FieldDiffNote :show="diff.includes('delivery_in_days')" :was="liveRow?.delivery_in_days ?? ''" :now="row?.delivery_in_days ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.freeDeliveryFrom') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row?.free_delivery_from || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('free_delivery_from')" :was="liveRow?.free_delivery_from ?? ''" />
+        <FieldDiffNote :show="diff.includes('free_delivery_from')" :was="liveRow?.free_delivery_from ?? ''" :now="row?.free_delivery_from ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.minOrder') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row?.min_order || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('min_order')" :was="liveRow?.min_order ?? ''" />
+        <FieldDiffNote :show="diff.includes('min_order')" :was="liveRow?.min_order ?? ''" :now="row?.min_order ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.prepayment') }}</span>
         <p class="text-sm mt-0.5">{{ row?.prepayment || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('prepayment')" :was="liveRow?.prepayment ?? ''" />
+        <FieldDiffNote :show="diff.includes('prepayment')" :was="liveRow?.prepayment ?? ''" :now="row?.prepayment ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.installment') }}</span>
         <p class="text-sm mt-0.5">{{ row?.installment || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('installment')" :was="liveRow?.installment ?? ''" />
+        <FieldDiffNote :show="diff.includes('installment')" :was="liveRow?.installment ?? ''" :now="row?.installment ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.returnPeriod') }}</span>
         <p class="text-sm mt-0.5 font-mono">{{ row?.return_period_in_days || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('return_period_in_days')" :was="liveRow?.return_period_in_days ?? ''" />
+        <FieldDiffNote :show="diff.includes('return_period_in_days')" :was="liveRow?.return_period_in_days ?? ''" :now="row?.return_period_in_days ?? ''" />
       </div>
       <div>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.warranty') }}</span>
         <p class="text-sm mt-0.5">{{ row?.warranty || '—' }}</p>
-        <FieldDiffNote :show="diff.includes('warranty')" :was="liveRow?.warranty ?? ''" />
+        <FieldDiffNote :show="diff.includes('warranty')" :was="liveRow?.warranty ?? ''" :now="row?.warranty ?? ''" />
       </div>
       <div class="sm:col-span-2">
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.outsideZonesNote') }}</span>
         <p class="text-sm mt-0.5 whitespace-pre-line">{{ row?.outside_zones_note || '—' }}</p>
         <p class="text-xs text-muted-foreground mt-0.5">{{ t('kb.fields.outsideZonesHint') }}</p>
-        <FieldDiffNote :show="diff.includes('outside_zones_note')" :was="liveRow?.outside_zones_note ?? ''" />
+        <FieldDiffNote :show="diff.includes('outside_zones_note')" :was="liveRow?.outside_zones_note ?? ''" :now="row?.outside_zones_note ?? ''" />
       </div>
     </div>
     <div v-if="row" class="flex flex-col gap-2">

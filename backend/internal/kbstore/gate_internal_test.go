@@ -7,11 +7,19 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 )
 
-func gateReasons(topicBody string) []string {
+func gateReasons(topicBody string) []GateReason {
 	snap := &domain.Snapshot{
 		Topics: []domain.Topic{{Slug: "t", Language: "ru", BodyMD: topicBody}},
 	}
 	return gate(snap, 0)
+}
+
+func joinReasons(r []GateReason) string {
+	msgs := make([]string, len(r))
+	for i, x := range r {
+		msgs[i] = x.Message
+	}
+	return strings.Join(msgs, "; ")
 }
 
 // A pure-prose body passes: facts live in typed columns, quoted only in replies.
@@ -26,8 +34,11 @@ func TestGate_PureProseOK(t *testing.T) {
 // token in stored knowledge means a value is living where only prose belongs.
 func TestGate_TokenInBodyBlocked(t *testing.T) {
 	r := gateReasons("Цена — {{tariff.x.price}} в месяц.")
-	if len(r) == 0 || !strings.Contains(strings.Join(r, "; "), "pure prose") {
+	if len(r) == 0 || !strings.Contains(joinReasons(r), "pure prose") {
 		t.Fatalf("token-in-body should be blocked, got %v", r)
+	}
+	if r[0].Kind != "topics" || r[0].Key != "t" {
+		t.Fatalf("reason should name the offending topic, got kind=%q key=%q", r[0].Kind, r[0].Key)
 	}
 }
 
@@ -35,7 +46,7 @@ func TestGate_TokenInBodyBlocked(t *testing.T) {
 func TestGate_LiteralCurrencyBlocked(t *testing.T) {
 	for _, body := range []string{"Цена 25 000 ₸ в месяц.", "Стоит 9900тг.", "Now $50 only."} {
 		r := gateReasons(body)
-		if len(r) == 0 || !strings.Contains(strings.Join(r, "; "), "literal amount") {
+		if len(r) == 0 || !strings.Contains(joinReasons(r), "literal amount") {
 			t.Fatalf("body %q should be blocked for a literal amount, got %v", body, r)
 		}
 	}

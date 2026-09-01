@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// McpConnectCard is /playground's answer to "how do I let ChatGPT or Claude
+// McpConnectCard is /draft's answer to "how do I let ChatGPT or Claude
 // configure the knowledge base?" — the MCP connector itself (13 kb_* tools,
 // OAuth 2.1) already exists server-side (backend/internal/mcpserver); this
 // only surfaces the URL to paste into a connector and, for an admin, lets

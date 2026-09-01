@@ -158,7 +158,7 @@ func TestRunner_ColdSendCreatesChatAndCompletesCampaign(t *testing.T) {
 		t.Errorf("destination = %q, want the cold-send JID", call.To)
 	}
 
-	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "sent", 50, 0)
+	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "sent", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestRunner_TransientFailureSchedulesRetry(t *testing.T) {
 		t.Fatal("HandleAccount: claimed = false, want true")
 	}
 
-	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "pending", 50, 0)
+	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "pending", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestRunner_PermanentFailureNeverRetries(t *testing.T) {
 		t.Fatal("HandleAccount: claimed = false, want true")
 	}
 
-	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "failed", 50, 0)
+	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "failed", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}
@@ -272,6 +272,49 @@ func TestRunner_PermanentFailureNeverRetries(t *testing.T) {
 
 	// A single recipient, now terminal -> the campaign still auto-completes
 	// even though its one send failed.
+	got, err := st.CampaignByID(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("CampaignByID: %v", err)
+	}
+	if got.Status != string(purecampaign.StatusCompleted) {
+		t.Errorf("campaign status = %q, want completed", got.Status)
+	}
+}
+
+// TestRunner_ErrRecipientUnreachableNeverRetries mirrors
+// TestRunner_PermanentFailureNeverRetries exactly, for the OTHER permanent
+// sentinel (messaging.ErrRecipientUnreachable, added for the Simulator
+// channel's own deterministic "this destination is unreachable" outcome —
+// see backend/internal/simulator.Outcome) — proving finalize() treats it
+// identically to ErrOutsideServiceWindow: no retry, immediate terminal
+// failure, campaign still auto-completes.
+func TestRunner_ErrRecipientUnreachableNeverRetries(t *testing.T) {
+	ctx := context.Background()
+	st := dbtest.New(t)
+	orgID, userID, acctID := seedWAFixture(t, st)
+	c := startCampaignWithFastPacing(t, st, orgID, acctID, userID, "whatsapp", "Promo", "Hi!", "77011234567")
+
+	hub := &fakeHub{}
+	senders := messaging.NewSenderRegistry()
+	sender := &fakeSender{err: messaging.ErrRecipientUnreachable}
+	senders.Register(messaging.ChannelWhatsApp, sender)
+	r := testRunner(st, hub, senders, t)
+
+	if claimed := r.HandleAccount(ctx, acctID); !claimed {
+		t.Fatal("HandleAccount: claimed = false, want true")
+	}
+
+	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "failed", 50, 0)
+	if err != nil {
+		t.Fatalf("ListCampaignRecipients: %v", err)
+	}
+	if len(recipients) != 1 {
+		t.Fatalf("failed recipients = %d, want 1 (permanent failure, no retry)", len(recipients))
+	}
+	if recipients[0].NextAttemptAt != nil {
+		t.Errorf("NextAttemptAt = %v, want nil (terminal)", recipients[0].NextAttemptAt)
+	}
+
 	got, err := st.CampaignByID(ctx, c.ID)
 	if err != nil {
 		t.Fatalf("CampaignByID: %v", err)
@@ -316,7 +359,7 @@ func TestRunner_WarmOnlyChannelWithNoExistingChatFailsPermanently(t *testing.T) 
 		t.Errorf("sender.calls = %d, want 0 (must never attempt delivery with no chat)", n)
 	}
 
-	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "failed", 50, 0)
+	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "failed", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}
@@ -382,7 +425,7 @@ func TestRunner_WarmOnlyChannelReusesExistingChat(t *testing.T) {
 		t.Fatalf("sender.calls = %d, want 1", n)
 	}
 
-	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "sent", 50, 0)
+	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "sent", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}

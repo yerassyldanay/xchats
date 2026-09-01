@@ -10,14 +10,21 @@ func zone(ref, parent string, available bool, cost, days string) ZoneRow {
 		DeliveryAvailable: available, DeliveryCost: cost, DeliveryInDays: days}
 }
 
-func hasReason(reasons []string, substr string) bool {
-	return strings.Contains(strings.Join(reasons, "; "), substr)
+func hasReason(reasons []GateReason, substr string) bool {
+	msgs := make([]string, len(reasons))
+	for i, r := range reasons {
+		msgs[i] = r.Message
+	}
+	return strings.Contains(strings.Join(msgs, "; "), substr)
 }
 
 func TestZoneGateReasons_AvailableRequiresCostAndDays(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{zone("almaty", "", true, "", "")}, nil)
 	if !hasReason(r, "delivery_cost and delivery_in_days are both required") {
 		t.Fatalf("want a missing-cost/days reason, got %v", r)
+	}
+	if r[0].Kind != "delivery_zones" || r[0].Key != "almaty" {
+		t.Fatalf("reason should name the offending zone, got kind=%q key=%q", r[0].Kind, r[0].Key)
 	}
 }
 
@@ -100,10 +107,13 @@ func TestZoneGateReasons_ZonesRequireBlankFlatPolicyFields(t *testing.T) {
 
 func TestZoneGateReasons_ZonesRequireOutsideZonesNote(t *testing.T) {
 	r := zoneGateReasons([]ZoneRow{zone("almaty", "", true, "5 000 ₸", "1")}, []PolicyRow{
-		{OutsideZonesNote: ""},
+		{Slug: "ru", OutsideZonesNote: ""},
 	})
 	if !hasReason(r, "outside_zones_note is required") {
 		t.Fatalf("want an outside_zones_note-required reason, got %v", r)
+	}
+	if r[0].Kind != "policies" || r[0].Key != "ru" {
+		t.Fatalf("reason should name the offending policy row, got kind=%q key=%q", r[0].Kind, r[0].Key)
 	}
 }
 

@@ -31,8 +31,24 @@ const ROTATED_PASSWORD = process.env.E2E_PASSWORD_ROTATED || 'xchat-admin-e2e-ro
 //     login()) — the login form's own error state is the signal to retry
 //     with ROTATED_PASSWORD instead.
 export async function login(page: Page) {
+  // waitForURL resolves as soon as the CURRENT url already matches its
+  // pattern — since submitLogin's own page.goto('/login') already leaves us
+  // sitting on a url that matches "…|login" one instant before the click's
+  // async POST+redirect ever runs, a pattern that lists 'login' as one of
+  // its own alternatives resolves immediately, before the real outcome is
+  // known. Waiting for the URL to actually leave /login (a predicate, not
+  // a static pattern) is what actually blocks until the click's own
+  // navigation — successful or not — has resolved.
   await submitLogin(page, DEFAULT_PASSWORD)
-  await page.waitForURL(/\/(chatboard|change-password|login)/, { timeout: 10_000 })
+  await page
+    .waitForURL((url) => !url.pathname.includes('/login'), { timeout: 10_000 })
+    .catch(() => {
+      // Still on /login once this genuinely times out (not the immediate-
+      // resolve race above) — the one legitimate reason is a LATER run
+      // against an already-migrated database, whose password was rotated
+      // by an earlier login() in this same run (see ROTATED_PASSWORD's own
+      // doc comment); the login form's own rejection is that signal.
+    })
 
   if (page.url().includes('/login')) {
     await submitLogin(page, ROTATED_PASSWORD)
@@ -47,7 +63,12 @@ export async function login(page: Page) {
 }
 
 async function submitLogin(page: Page, password: string) {
-  await page.goto('/login')
+  // waitUntil: 'domcontentloaded', not the default 'load' — the page is
+  // fully interactive well before 'load' fires (which also waits on
+  // whatever unrelated background requests Chromium's own profile makes;
+  // see playwright.config.ts's own launchOptions.args comment for why
+  // those are disabled outright rather than relied on to finish quickly).
+  await page.goto('/login', { waitUntil: 'domcontentloaded' })
   await page.locator('input[type=email]').fill(EMAIL)
   await page.locator('input[type=password]').fill(password)
   await page.getByRole('button', { name: 'Войти' }).click()

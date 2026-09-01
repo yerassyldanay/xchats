@@ -71,7 +71,7 @@ const baseNav = computed<{ name: string; icon: Component; label: string; match: 
   { name: 'followups', icon: CalendarClock, label: t('crm.nav.followups'), match: ['followups'] },
   { name: 'accounts', icon: Radio, label: t('nav.channels'), match: ['accounts'] },
   { name: 'campaigns', icon: Megaphone, label: t('campaigns.navLabel'), match: ['campaigns', 'campaign-new', 'campaign-detail'] },
-  { name: 'playground', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['playground'] },
+  { name: 'draft', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['draft'] },
   { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base'] },
   { name: 'simulator', icon: Bot, label: t('simulator.navLabel'), match: ['simulator'] },
 ])

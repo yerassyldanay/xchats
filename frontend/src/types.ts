@@ -603,6 +603,17 @@ export interface CancelChangeResponse {
   changes: DraftChangeSet
 }
 
+// KbGateReason mirrors kbstore.GateReason — one deterministic approve-gate
+// violation, carried in a 422's payload.reasons alongside the existing
+// flat message (KB-09). kind matches ChangeKind (draftChanges.ts) when the
+// violation names a single entity; both kind and key are "" for one that
+// doesn't (an unresolved-request count spans the whole org, not one row).
+export interface KbGateReason {
+  kind: string
+  key: string
+  message: string
+}
+
 // --- Structured KB import pipeline (internal/kbimport) — submit a URL/file,
 // pass 1 extracts it, pass 2 synthesizes the accumulated evidence into typed
 // KB draft records (kbd_draft only — see DraftChangeSet above; an import
@@ -612,18 +623,18 @@ export interface CancelChangeResponse {
 // KbImportRunStatus mirrors kbimport.deriveRunStatus's closed vocabulary —
 // branched on by KbImportRunStatus.vue (badge colour) and the store (when to
 // stop polling), so this is a real union rather than string+comment.
-export type KbImportRunStatus = 'extracting' | 'synthesizing' | 'built' | 'failed' | 'needs_human'
+export type KbImportRunStatus = 'extracting' | 'synthesizing' | 'built' | 'failed' | 'needs_human' | 'cancelled'
 
 // KbImportMaterialStatus mirrors kbimport.MaterialStatus — one submitted
 // URL/file's pass-1 progress within a run. processing_status mirrors
 // kbd_materials' own lifecycle (kbstore/import.go's doc comment):
-// queued -> extracting -> parsed | needs_human | failed.
+// queued -> extracting -> parsed | needs_human | failed | cancelled.
 export interface KbImportMaterialStatus {
   id: string
   kind: 'url' | 'file'
   label: string
   handle: string
-  processing_status: 'queued' | 'extracting' | 'parsed' | 'needs_human' | 'failed'
+  processing_status: 'queued' | 'extracting' | 'parsed' | 'needs_human' | 'failed' | 'cancelled'
   error?: string
 }
 
@@ -658,8 +669,30 @@ export interface KbImportSynthesisSummary {
 export interface KbImportRun {
   run_id: string
   status: KbImportRunStatus
+  // started_by is a raw user id — the org's own already-loaded user list
+  // (useInbox().users, id -> name) resolves it to a display name; the API
+  // does not (see RunSummary.StartedBy's own doc comment).
+  started_by: string
+  started_at: string
+  // cancelable is true only while pass 1 is still running — see
+  // kbstore.CancelImportRun's own doc comment for why cancelling is
+  // refused once synthesis has been claimed.
+  cancelable: boolean
+  // finished_at is set once the run reaches a terminal status (built,
+  // failed, needs_human, cancelled) — absent while still active, mirroring
+  // synthesis' own omitted-until-started shape rather than a zero instant.
+  finished_at?: string
   materials: KbImportMaterialStatus[]
   synthesis?: KbImportSynthesisSummary
+}
+
+// KbImportRunPage mirrors GET /kb/imports' response shape — KB-14's history
+// list, ?limit=&offset= paginated. total is the org's full run count (not
+// just runs.length), so a page beyond the last still reports how many
+// pages exist.
+export interface KbImportRunPage {
+  runs: KbImportRun[]
+  total: number
 }
 
 // KbImportProviderFamily mirrors extractor.Family — the source kinds
@@ -1057,6 +1090,11 @@ export interface CampaignRecipient {
   message_id: string | null
   created_at: string
   updated_at: string
+  // message_delivery_state is the linked message's own delivery_state
+  // (queued/sent/delivered/read/failed) — finer-grained than status above,
+  // which never moves past 'sent' once ANY successful delivery happens.
+  // Empty when message_id is null.
+  message_delivery_state: string
 }
 
 // CampaignEvent mirrors dto.CampaignEvent — one campaign timeline entry
@@ -1068,6 +1106,27 @@ export interface CampaignEvent {
   actor_user_id: string | null
   detail?: Record<string, unknown>
   created_at: string
+}
+
+// CampaignTemplate mirrors dto.CampaignTemplate — one reusable,
+// organization-wide message template (CAM-14). Pure content: no account,
+// channel, status, pace, or schedule of its own.
+export interface CampaignTemplate {
+  id: string
+  name: string
+  message_body: string
+  variables: string[]
+  is_archived: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+// CampaignTemplatePatch is PATCH /campaign-templates/:id's body — an
+// omitted key leaves that field untouched.
+export interface CampaignTemplatePatch {
+  name?: string
+  message_body?: string
 }
 
 // CampaignTier mirrors dto.CampaignTier — one simultaneous rolling-window

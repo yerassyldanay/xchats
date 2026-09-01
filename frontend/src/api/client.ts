@@ -1,5 +1,5 @@
 import { log } from '../lib/logfmt'
-import type { KbImportProviderCapability, KbImportRun, CampaignRecipientPreviewResult } from '../types'
+import type { KbImportProviderCapability, KbImportRun, KbImportRunPage, CampaignRecipientPreviewResult } from '../types'
 
 // Env-driven addressing: VITE_API_BASE_URL points at the backend. Empty means
 // same-origin (dev uses the Vite proxy; prod fronts both behind one domain).
@@ -7,7 +7,11 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const PREFIX = '/xchats/api/v1'
 
 export class ApiError extends Error {
-  constructor(public errcode: string, public status: number, message: string) {
+  // payload is failWithPayload's own optional "something useful alongside
+  // the failure" body (server.go) — undefined for the ordinary fail() case
+  // (nearly every error). KB-09's gate 422 is the one caller that reads
+  // it (payload.reasons); everything else keeps using .message as before.
+  constructor(public errcode: string, public status: number, message: string, public payload?: unknown) {
     super(message || errcode)
   }
 }
@@ -22,7 +26,7 @@ async function unwrap<T>(res: Response, path: string): Promise<T> {
   const env = (await res.json()) as Envelope<T>
   log.info('api call', { path, status: res.status, errcode: env.errcode })
   if (env.errcode !== 'OK') {
-    throw new ApiError(env.errcode, res.status, env.message)
+    throw new ApiError(env.errcode, res.status, env.message, env.payload)
   }
   return env.payload
 }
@@ -98,7 +102,22 @@ export const api = {
     return unwrap(res, '/kb/imports')
   },
   getKbImportRun: (runId: string) => send<KbImportRun>('GET', '/kb/imports/' + encodeURIComponent(runId)),
-  listKbImportRuns: (limit?: number) => send<{ runs: KbImportRun[] }>('GET', '/kb/imports' + (limit ? `?limit=${limit}` : '')),
+  // listKbImportRuns covers both callers of GET /kb/imports: the ingestion
+  // panel's "just the latest run" hydration (limit=1, offset omitted) and
+  // KB-14's paginated history list (limit=pageSize, offset=(page-1)*
+  // pageSize) — the response's total is the org's full run count, not just
+  // runs.length.
+  listKbImportRuns: (limit?: number, offset?: number) => {
+    const params = new URLSearchParams()
+    if (limit) params.set('limit', String(limit))
+    if (offset) params.set('offset', String(offset))
+    const qs = params.toString()
+    return send<KbImportRunPage>('GET', '/kb/imports' + (qs ? `?${qs}` : ''))
+  },
+  // cancelKbImportRun is POST /kb/imports/:id/cancel (KB-04) — only valid
+  // while pass 1 is still running (KbImportRun.cancelable); refused with a
+  // 409 once synthesis has been claimed.
+  cancelKbImportRun: (runId: string) => send<KbImportRun>('POST', '/kb/imports/' + encodeURIComponent(runId) + '/cancel'),
   // getKbImportProviders is GET /kb/import/providers (internal/httpapi/
   // kb_import.go) — the one source of truth useImportProviders fetches
   // once and caches, so the parser dropdown can never disagree with

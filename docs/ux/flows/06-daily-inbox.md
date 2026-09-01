@@ -1,6 +1,10 @@
 # Daily Inbox Triage — User Flow
 
-> **Purpose:** Trace the operator journey for daily message triage on `/chatboard`: scanning conversation lists, selecting active threads, inspecting customer context, reviewing and editing AI draft suggestions, replying via manual input or AI approval, and composing new outbound conversations. Friction points are marked with 🔴.
+> **Verified:** 2026-08-30 against the chatboard composition, inbox and CRM stores, chat list/thread/composer, customer panel, assistant panel, and new-message dialog.
+>
+> **Status:** Living implementation roadmap. Stable `INB-*` IDs identify remaining work. `P0` can show or send one customer’s data in another customer’s context; `P1` can lose or falsely report customer communication; `P2` is frequent workflow friction; `P3` is refinement.
+>
+> **Purpose:** Trace the operator journey for daily message triage on `/chatboard`: scanning conversation lists, selecting active threads, inspecting customer context, reviewing and editing AI draft suggestions, replying via manual input or AI approval, and composing new outbound conversations.
 
 ---
 
@@ -119,7 +123,7 @@ flowchart TD
     ThreadSelectedState --> RightPanelCheck{Right panel tab selection}
 
     %% Right Column - Customer Tab
-    RightPanelCheck -->|Default: Customer tab selected| CustomerTabState
+    RightPanelCheck -->|Initial default: Customer; selection persists across chats| CustomerTabState
     subgraph CustomerTabState[Panel: Customer Profile]
         direction TB
         CSees[Operator sees:
@@ -203,8 +207,8 @@ flowchart TD
     TriageDecision -->|Clicks Regenerate icon| ShimmerState
 
     %% Branch 5: Dismiss Draft & Type Manual Reply
-    TriageDecision -->|Clicks Dismiss| DismissState[Draft cards cleared]
-    DismissState --> ComposerEditState
+    TriageDecision -->|Clicks Dismiss| DismissState[Draft cards cleared locally; they can return after reload or reselect]
+    DismissState --> EmptyDraftState
 
     %% After Reply Sent
     ReplySentState --> PostReplyAction{Next triage action}
@@ -217,7 +221,7 @@ flowchart TD
 
 ## Friction Points and Suggested Changes
 
-### 🔴 1. AI Draft Availability Is Hidden Behind an Unbadged Tab
+### INB-01 — [P2] AI Draft Availability Is Hidden Behind an Unbadged Tab
 
 **What happens today:** The right panel defaults to **Customer** when `AssistantPanel` first mounts. The selected tab then persists while the operator switches conversations, so it does not reset for every chat. However, when Customer remains selected there is no badge or status indicator showing that an AI draft exists or is being generated behind the **AI assistant** tab.
 
@@ -225,7 +229,7 @@ flowchart TD
 
 ---
 
-### 🔴 2. Rigid 3-Column Layout Compresses Message Thread on Laptops
+### INB-02 — [P2] Rigid 3-Column Layout Compresses Message Thread on Laptops
 
 **What happens today:** The interface enforces a fixed 3-column desktop layout (`68px` navigation rail + `340px` chat list + `340px` assistant/customer panel = `748px` of fixed sidebars). On standard 13-inch and 14-inch laptops (1280px–1366px screen width), the central message thread is squeezed into less than 550px, and on screens below 1100px, elements collide or become horizontally cramped. Neither the chat list nor the assistant panel can be collapsed or resized.
 
@@ -233,7 +237,7 @@ flowchart TD
 
 ---
 
-### 🔴 3. No Keyboard Shortcut to Approve and Send AI Drafts
+### INB-03 — [P2] No Keyboard Shortcut to Approve and Send AI Drafts
 
 **What happens today:** Operators must move their hand from the keyboard to the mouse to click the **Send** button inside the draft card. While the bottom composer supports `Enter` to send, the AI draft card text area does not support keyboard send shortcuts (`Cmd+Enter` / `Ctrl+Enter`).
 
@@ -241,7 +245,7 @@ flowchart TD
 
 ---
 
-### 🔴 4. "Resolve" Button in Thread Header is Non-Functional
+### INB-04 — [P1] "Resolve" Button in Thread Header Is Non-Functional
 
 **What happens today:** The thread header prominently displays an outline button with a green checkmark labeled **Resolve**. However, in the code, this button has no click handler or action attached—clicking it produces no response.
 
@@ -249,7 +253,7 @@ flowchart TD
 
 ---
 
-### 🔴 5. Stale AI Drafts Disappear Silently Without Feedback
+### INB-05 — [P2] Stale AI Drafts Disappear Silently Without Feedback
 
 **What happens today:** If an incoming message arrives while a draft is being approved or if a draft becomes stale (`CONFLICT` or `DRAFT_STALE`), the drafts list is immediately cleared to an empty state with no explanatory toast or notification. The operator is left wondering why their draft vanished without sending.
 
@@ -257,7 +261,7 @@ flowchart TD
 
 ---
 
-### 🔴 6. Redundant "New Message" Triggers with No Keyboard Shortcut
+### INB-06 — [P3] Redundant "New Message" Triggers with No Keyboard Shortcut
 
 **What happens today:** The chat list contains two duplicate UI triggers to open the New Message dialog: a ghost icon button in the header and a large floating circular Plus button at the bottom right that partially obscures the lowest chat card. There is no global keyboard shortcut (e.g. `C` or `Cmd+N`) to trigger the composer.
 
@@ -265,7 +269,7 @@ flowchart TD
 
 ---
 
-### 🔴 7. Smile (Emoji) Button in Composer is an Unwired Placeholder
+### INB-07 — [P2] Smile (Emoji) Button in Composer Is an Unwired Placeholder
 
 **What happens today:** In the message composer, there is an emoji Smile icon button next to the textarea. Clicking it does nothing because no emoji picker popover or dropdown is implemented.
 
@@ -273,15 +277,22 @@ flowchart TD
 
 ---
 
-### 🔴 8. Rapid Chat Switching Can Render the Previous Chat’s Data
+### INB-08 — [P0] Rapid Chat Switching Can Render the Previous Chat’s Data
 
 **What happens today:** `selectChat()` sets the active ID, clears state, and launches message/draft requests without cancellation or a response-ID guard. If an operator clicks Chat A and quickly clicks Chat B, the slower response for A can arrive last and overwrite B's messages or drafts. The customer profile watcher has the same stale-response risk, so the right panel can also show the wrong customer after rapid selection.
 
-**Suggested change:** Cancel superseded requests with `AbortController`, or capture the requested chat/customer ID and apply each response only if it still matches the active selection.
+**Suggested change:** Capture the requested chat/customer ID, cancel obsolete work with `AbortController` where supported, and apply a response only if it still matches the active selection. Keep request identity and mutation guards in the Pinia stores rather than duplicating them in each component.
+
+**Acceptance criteria:**
+
+- Selecting A and then B can never render A’s messages, drafts, profile, or timeline under B.
+- Obsolete requests cannot clear B’s loading/error state.
+- Search/filter list requests follow the same latest-request-wins rule.
+- Tests force responses to finish out of order.
 
 ---
 
-### 🔴 9. Manual Send Failures Are Invisible and Attachments Are Lost
+### INB-09 — [P1] Manual Send Failures Are Invisible and Attachments Are Lost
 
 **What happens today:** `ChatThread` calls `inbox.send()` without awaiting or catching it, and the store has no `sendError` state. A failed upload or message request produces no inline error or retry action. `Composer` also clears its selected files immediately after emitting the send event, before the async upload succeeds, so the operator must find and attach them again after a failure.
 
@@ -289,7 +300,7 @@ flowchart TD
 
 ---
 
-### 🔴 10. Green “Online” Dot Is Always Shown
+### INB-10 — [P2] Green “Online” Dot Is Always Shown
 
 **What happens today:** Every active thread renders a green presence dot on the customer avatar unconditionally. It is not backed by presence or last-seen data, so it communicates a false “online now” state for WhatsApp, Telegram, Instagram, Messenger, and simulator contacts.
 
@@ -297,7 +308,7 @@ flowchart TD
 
 ---
 
-### 🔴 11. Inbox and Message History Are Silently Truncated
+### INB-11 — [P1] Inbox and Message History Are Silently Truncated
 
 **What happens today:** The chat list requests only the backend's first page (50 by default), and a selected thread requests the latest 80 messages. Neither pane offers pagination, infinite scroll, or a count indicating that older chats/messages exist. Operators cannot reach older records without search, and cannot load messages older than the 80-item window.
 
@@ -305,11 +316,82 @@ flowchart TD
 
 ---
 
-### 🔴 12. “New Message” Supports Only QR WhatsApp/Simulator Accounts
+### INB-12 — [P2] “New Message” Supports Only QR WhatsApp/Simulator Accounts
 
 **What happens today:** The send-from selector is built from `composableAccounts`, which includes only `whatsapp` and `simulator`. Telegram, WhatsApp Cloud API, Instagram, and Messenger accounts are excluded because those transports cannot use the same phone-number compose endpoint. The dialog does not explain this limitation, and if there is zero or one eligible account the selector is hidden entirely.
 
 **Suggested change:** Hide or disable the entry point when no eligible account exists and explain which channels can initiate conversations. For supported non-phone channels, provide channel-specific compose flows instead of a universal phone-number form.
+
+---
+
+### INB-13 — [P0] Attachment Upload Can Send to the Wrong Customer
+
+**What happens today:** `send()` checks that `activeId` exists, uploads files, and only then builds `/chats/${this.activeId}/messages`. The chat list remains interactive during upload. If the operator switches from chat A to chat B while files upload, the eventual request uses B’s id with A’s text and attachments.
+
+**Suggested change:** Capture an immutable `chatId` at send start and use it for the complete operation. Associate sending/error state with that chat instead of one global boolean. Switching chats may remain possible, but it must never retarget an in-flight operation.
+
+**Acceptance criteria:**
+
+- Every send is bound to the chat active when Send was pressed.
+- Switching chats during upload cannot change the destination.
+- The original chat receives success/error state even when it is no longer selected.
+- Double-send is prevented per chat without freezing unrelated conversations.
+- A test pauses upload, switches chats, resumes, and verifies the original chat id.
+
+**Primary ownership:** `stores/inbox.ts`; `Composer.vue` and `ChatThread.vue` only render store state and emit intent.
+
+---
+
+### INB-14 — [P2] Dismissed AI Drafts Return
+
+**What happens today:** **Dismiss** assigns `inbox.drafts = []` locally. It does not call a backend dismiss/reject endpoint, so the same options return when drafts are refetched or the chat is reselected.
+
+**Suggested change:** Add an explicit store action and backend state transition for dismissing the current draft set. If dismissal is intentionally local, rename it to **Hide for now** and communicate that behavior.
+
+**Acceptance criteria:**
+
+- The label matches persistence semantics.
+- Permanent dismissal survives reselect and refresh.
+- The component never mutates Pinia state directly; it calls an explicit action.
+
+---
+
+### INB-15 — [P2] Loading the Inbox Briefly Shows a False Empty State
+
+**What happens today:** `ChatList.vue` renders “No chats yet” whenever the array is empty, including while `loadingChats` is true during initial load or filter changes.
+
+**Suggested change:** Render loading, failed, filtered-empty, and truly-empty states separately.
+
+**Acceptance criteria:**
+
+- Initial load shows a stable skeleton or loading state.
+- Request failure shows Retry rather than an empty inbox.
+- Empty copy reflects active search/filter state.
+
+---
+
+### INB-16 — [P2] Active Conversation Is Not Represented in the URL
+
+**What happens today:** Every selected conversation remains at `/chatboard`. Refresh loses the selection, and customer/follow-up navigation relies on in-memory store mutations after routing.
+
+**Suggested change:** Represent the active chat as a route parameter or query value. Restore it on load, preserve filters where practical, and show a clear not-found state for inaccessible chats.
+
+**Acceptance criteria:**
+
+- A selected chat can be refreshed, bookmarked, and shared with another authorized user.
+- Browser Back/Forward restores conversation selection.
+- Authorization remains enforced by the API.
+
+---
+
+## Implementation Order
+
+1. `INB-13` and `INB-08` — eliminate cross-customer data and send races.
+2. `INB-09` — make send success/failure trustworthy and preserve attachments.
+3. `INB-11` — expose complete chat and message history.
+4. `INB-04` — remove or implement the false Resolve action.
+5. `INB-14`–`INB-16` — make dismissal, loading, and navigation state honest.
+6. `INB-01`–`INB-03`, `INB-05`–`INB-07`, `INB-10`, and `INB-12` — improve daily speed and clarity.
 
 ---
 

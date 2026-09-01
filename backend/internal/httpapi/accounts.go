@@ -39,11 +39,21 @@ func (s *Server) handleListWhatsAppAccounts(c *gin.Context) {
 // handleListAccounts is the channel-neutral account listing: every connected
 // account the org owns, on every channel, in one shape — including each
 // channel's effective (resolved) automation settings. It is what the UI's
-// «Каналы» page renders. /whatsapp-accounts stays alongside it, WhatsApp-only,
-// because the pairing lifecycle it drives has no meaning for any other channel.
+// «Каналы» page renders, AND (CAM-16) the campaign wizard's account picker —
+// GetOrCreateSimulatorAccount ensures the org's zero-cost sandbox channel is
+// always among them, not just once some simulator traffic happens to have
+// created its row already. Idempotent (ON CONFLICT DO UPDATE on the
+// simulator's own stable owner_jid), so calling it on every list is cheap
+// and safe under concurrent requests. /whatsapp-accounts stays alongside
+// this, WhatsApp-only, because the pairing lifecycle it drives has no
+// meaning for any other channel.
 func (s *Server) handleListAccounts(c *gin.Context) {
 	org, okOrg := s.orgOf(c)
 	if !okOrg {
+		return
+	}
+	if _, err := s.store.GetOrCreateSimulatorAccount(ctx(c), org.ID); err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
 	accts, err := s.store.ListAccountsForOrg(ctx(c), org.ID)

@@ -29,7 +29,12 @@ const router = createRouter({
     { path: '/accounts', name: 'accounts', component: Accounts, meta: { requiresAuth: true } },
     { path: '/customers', name: 'customers', component: Customers, meta: { requiresAuth: true } },
     { path: '/followups', name: 'followups', component: Followups, meta: { requiresAuth: true } },
-    { path: '/playground', name: 'playground', component: Playground, meta: { requiresAuth: true } },
+    { path: '/draft', name: 'draft', component: Playground, meta: { requiresAuth: true } },
+    // KB-01: /playground read "test AI prompts" (that's actually /simulator)
+    // when the page is really the staged-changes review/ingest surface —
+    // renamed to /draft to match the nav label and page header. Old links/
+    // bookmarks still land somewhere real instead of a bare 404.
+    { path: '/playground', redirect: '/draft' },
     { path: '/knowledge-base', name: 'knowledge-base', component: KnowledgeBase, meta: { requiresAuth: true } },
     { path: '/simulator', name: 'simulator', component: Simulator, meta: { requiresAuth: true } },
     { path: '/campaigns', name: 'campaigns', component: Campaigns, meta: { requiresAuth: true } },

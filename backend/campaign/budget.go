@@ -34,22 +34,21 @@ const (
 )
 
 // DefaultTiersFor returns the built-in tier set for a channel with no
-// campaign_account_limits rows of its own — every real send channel gets
-// DefaultTiers; the simulator (testing only) is unlimited (zero tiers, so
-// Budget's tier loop never throttles it).
+// campaign_account_limits rows of its own. Simulator gets the exact same
+// DefaultTiers as any real channel — it stands in for a whatsmeow-backed
+// WhatsApp account, so a campaign exercises the real rolling-window
+// throttling/backoff behavior end to end without ever touching a live
+// provider. An operator who wants a faster demo/test run can still override
+// it per-account via the normal campaign_account_limits mechanism (see
+// SetCampaignAccountLimits) — this only governs the unconfigured default.
 func DefaultTiersFor(channel string) []Tier {
-	if channel == ChannelSimulator {
-		return nil
-	}
 	return append([]Tier(nil), DefaultTiers...)
 }
 
 // DefaultPacingFor returns the built-in min-interval/jitter for a channel
-// with no campaign_account_settings row of its own.
+// with no campaign_account_settings row of its own. Simulator uses the same
+// pacing as a real channel for the same reason as DefaultTiersFor above.
 func DefaultPacingFor(channel string) (minIntervalSeconds, jitterSeconds int) {
-	if channel == ChannelSimulator {
-		return 0, 0
-	}
 	return DefaultMinIntervalSeconds, DefaultJitterSeconds
 }
 

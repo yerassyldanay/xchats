@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -158,6 +159,142 @@ func TestKBImports_GetRun_UnknownIdIs404(t *testing.T) {
 	resp, env := h.getRaw("/xchats/api/v1/kb/imports/00000000-0000-0000-0000-000000000099")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404 (body=%s)", resp.StatusCode, env["message"])
+	}
+}
+
+// TestKBImports_Cancel_QueuedRun cancels immediately after Submit — before
+// this harness's own running worker pool's ClaimEvery tick (3s by default)
+// has any real chance to claim the material — the same "check right after
+// POST, no sleep" timing TestKBImports_202Shape above already relies on.
+func TestKBImports_Cancel_QueuedRun(t *testing.T) {
+	h := newHarness(t)
+	resp, env := h.postImport(t, "native", "auto", "", []string{"https://example.com/a"}, nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d (body=%s)", resp.StatusCode, env["message"])
+	}
+	var created struct {
+		RunID string `json:"run_id"`
+	}
+	mustPayload(t, env, &created)
+
+	cancelResp, cancelEnv := h.postJSON("/xchats/api/v1/kb/imports/"+created.RunID+"/cancel", nil)
+	if cancelResp.StatusCode != http.StatusOK {
+		t.Fatalf("cancel status=%d, want 200 (body=%s)", cancelResp.StatusCode, cancelEnv["message"])
+	}
+	var run struct {
+		Status     string `json:"status"`
+		Cancelable bool   `json:"cancelable"`
+	}
+	mustPayload(t, cancelEnv, &run)
+	if run.Status != "cancelled" || run.Cancelable {
+		t.Fatalf("cancel response = %+v, want status=cancelled, cancelable=false", run)
+	}
+
+	getResp, getEnv := h.getRaw("/xchats/api/v1/kb/imports/" + created.RunID)
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET after cancel status=%d (body=%s)", getResp.StatusCode, getEnv["message"])
+	}
+	var got struct {
+		Status string `json:"status"`
+	}
+	mustPayload(t, getEnv, &got)
+	if got.Status != "cancelled" {
+		t.Fatalf("GET run status = %q, want cancelled", got.Status)
+	}
+}
+
+func TestKBImports_Cancel_CrossOrgIs404(t *testing.T) {
+	h := newHarness(t)
+	resp, env := h.postImport(t, "native", "auto", "", []string{"https://example.com/a"}, nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d (body=%s)", resp.StatusCode, env["message"])
+	}
+	var created struct {
+		RunID string `json:"run_id"`
+	}
+	mustPayload(t, env, &created)
+
+	h2 := newHarness(t)
+	cancelResp, cancelEnv := h2.postJSON("/xchats/api/v1/kb/imports/"+created.RunID+"/cancel", nil)
+	if cancelResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-org cancel status=%d, want 404 (body=%s)", cancelResp.StatusCode, cancelEnv["message"])
+	}
+}
+
+func TestKBImports_Cancel_UnknownIdIs404(t *testing.T) {
+	h := newHarness(t)
+	resp, env := h.postJSON("/xchats/api/v1/kb/imports/00000000-0000-0000-0000-000000000099/cancel", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404 (body=%s)", resp.StatusCode, env["message"])
+	}
+}
+
+// TestKBImports_ListImports_PaginatesAndReportsTotal covers KB-14's history
+// list: ?limit=&offset= slices the org's runs and the response's "total"
+// reflects the full count, not just what came back on this page. Each run
+// is cancelled right after submit (same "before ClaimEvery's first tick"
+// timing TestKBImports_Cancel_QueuedRun above relies on) purely to free the
+// one-active-run-per-org gate for the next submission — the runs' terminal
+// status is incidental to what this test checks.
+func TestKBImports_ListImports_PaginatesAndReportsTotal(t *testing.T) {
+	h := newHarness(t)
+	runIDs := make(map[string]bool, 3)
+	for i := 0; i < 3; i++ {
+		resp, env := h.postImport(t, "native", "auto", "", []string{fmt.Sprintf("https://example.com/%d", i)}, nil)
+		if resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("submit #%d status=%d (body=%s)", i, resp.StatusCode, env["message"])
+		}
+		var created struct {
+			RunID string `json:"run_id"`
+		}
+		mustPayload(t, env, &created)
+		runIDs[created.RunID] = true
+
+		cancelResp, cancelEnv := h.postJSON("/xchats/api/v1/kb/imports/"+created.RunID+"/cancel", nil)
+		if cancelResp.StatusCode != http.StatusOK {
+			t.Fatalf("cancel #%d status=%d (body=%s)", i, cancelResp.StatusCode, cancelEnv["message"])
+		}
+	}
+
+	type listPayload struct {
+		Runs []struct {
+			RunID string `json:"run_id"`
+		} `json:"runs"`
+		Total int `json:"total"`
+	}
+
+	resp1, env1 := h.getRaw("/xchats/api/v1/kb/imports?limit=2&offset=0")
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("page1 status=%d (body=%s)", resp1.StatusCode, env1["message"])
+	}
+	var page1 listPayload
+	mustPayload(t, env1, &page1)
+	if page1.Total != 3 || len(page1.Runs) != 2 {
+		t.Fatalf("page1 = %+v, want 2 runs (total 3)", page1)
+	}
+
+	resp2, env2 := h.getRaw("/xchats/api/v1/kb/imports?limit=2&offset=2")
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("page2 status=%d (body=%s)", resp2.StatusCode, env2["message"])
+	}
+	var page2 listPayload
+	mustPayload(t, env2, &page2)
+	if page2.Total != 3 || len(page2.Runs) != 1 {
+		t.Fatalf("page2 = %+v, want 1 run (total 3)", page2)
+	}
+
+	seen := map[string]bool{}
+	for _, r := range append(page1.Runs, page2.Runs...) {
+		if seen[r.RunID] {
+			t.Fatalf("run %s appeared on more than one page", r.RunID)
+		}
+		seen[r.RunID] = true
+		if !runIDs[r.RunID] {
+			t.Fatalf("unexpected run id %s", r.RunID)
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("pages together covered %d runs, want all 3", len(seen))
 	}
 }
 

@@ -4,7 +4,7 @@
 // the honest mechanism is that the LLM CLIENT reads the attached
 // documents itself and stores structured facts through the 13 kb_* MCP
 // tools (backend/internal/mcpserver/tools.go). Every one of those writes
-// lands in kbd_draft, never live — this is the same Черновик /playground
+// lands in kbd_draft, never live — this is the same Черновик /draft
 // reviews, which is why the closing card says "review", not "published".
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'

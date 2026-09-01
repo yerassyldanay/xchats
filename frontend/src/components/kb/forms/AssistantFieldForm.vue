@@ -44,12 +44,15 @@ async function submit() {
   const patch: Record<string, string | number> = {
     [field]: field === 'reply_max_words' ? Number(buf.value) || 0 : String(buf.value),
   }
-  // patchConfig() (like every write() action) resolves to undefined on
-  // BOTH success and failure — setChanges() has no return value, so its
-  // result can't distinguish the two. pg.error is write()'s own success
-  // signal (reset at the start of every call, set only in its catch),
-  // the same one stageChange() checks for the other six KbFormPayload kinds.
-  await pg.patchConfig(patch)
+  // patchConfig()/patchLiveConfig() (like every write()/writeLive() action)
+  // resolve to undefined on BOTH success and failure — assignment has no
+  // return value, so the result can't distinguish the two. pg.error is
+  // write()'s own success signal (reset at the start of every call, set
+  // only in its catch), the same one stageChange() checks for the other
+  // six KbFormPayload kinds. target picks which one runs — see
+  // useKbModal's ModalSession doc comment.
+  if (modal.session.value?.target === 'live') await pg.patchLiveConfig(patch)
+  else await pg.patchConfig(patch)
   if (!pg.error) {
     modal.close()
     modal.markSuccess()
