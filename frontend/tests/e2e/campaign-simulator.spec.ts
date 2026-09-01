@@ -33,10 +33,42 @@ async function pickSimulatorAccount(page: Page) {
   await page.getByRole('option', { name: /Simulator/ }).click()
 }
 
+// giveSimulatorAFastPace overrides the Simulator account's sending pace via
+// PUT /accounts/:id/sending-limits — the same endpoint stores/campaigns.ts's
+// saveSendingLimits calls (wired into the store for a future Sending-limits
+// settings view, not yet mounted anywhere) — not a test-only backdoor.
+// Simulator now defaults to the exact same whatsmeow-style pacing as a real
+// WhatsApp account (90s +/-30s jitter between sends, 5/8/20/35/50
+// rolling-window tiers — see backend/campaign.DefaultTiersFor/
+// DefaultPacingFor), so that a campaign sent through it is throttled the
+// way a live one would be. That realism is exactly what this spec's own
+// two-recipient run doesn't need: without an override it would need
+// minutes just to clear the second recipient's min-interval. An operator
+// who wants a fast rehearsal run will have this same per-account override
+// available once that settings view exists; this drives the API directly.
+async function giveSimulatorAFastPace(page: Page) {
+  const accountsRes = await page.request.get('/xchats/api/v1/accounts')
+  const accountsBody = await accountsRes.json()
+  const sim = accountsBody.payload.items.find((a: { channel: string }) => a.channel === 'simulator')
+  if (!sim) throw new Error('expected a simulator account to always exist (GetOrCreateSimulatorAccount)')
+  const res = await page.request.put(`/xchats/api/v1/accounts/${sim.id}/sending-limits`, {
+    data: {
+      limit_mode: 'custom',
+      min_interval_seconds: 1,
+      jitter_seconds: 0,
+      paused: false,
+      tiers: [{ window_seconds: 60, max_sends: 50 }],
+      windows: [],
+    },
+  })
+  if (!res.ok()) throw new Error(`sending-limits override failed: ${res.status()} ${await res.text()}`)
+}
+
 test('a campaign sent through Simulator runs the real pipeline: audience, message, launch, delivery, and Inbox', async ({ page }, testInfo) => {
   const name = uniqueCampaignName(testInfo.workerIndex)
 
   await login(page)
+  await giveSimulatorAFastPace(page)
   await page.goto('/campaigns')
   await page.getByRole('button', { name: 'Новая рассылка' }).click()
   await expect(page).toHaveURL('/campaigns/new')

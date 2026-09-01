@@ -136,8 +136,10 @@ CREATE INDEX campaign_events_campaign_idx ON campaign_events(campaign_id, create
 -- campaign_account_settings: one row per account, exactly like
 -- automation_settings — a MISSING row means the account is on the implicit
 -- built-in default (backend/campaign.DefaultTiersFor/DefaultPacingFor: the
--- whatsmeow/WhatsApp Cloud pacing for every real channel, unlimited for the
--- simulator). limit_mode is a UI-facing preference ("default" vs
+-- same whatsmeow/WhatsApp Cloud pacing for every channel, simulator
+-- included — it stands in for a real WhatsApp account, so a campaign sent
+-- through it is throttled exactly the way a live one would be unless an
+-- operator overrides it below). limit_mode is a UI-facing preference ("default" vs
 -- "custom") that does not itself gate anything server-side — the stored
 -- min_interval_seconds/jitter_seconds are always what the claim path reads
 -- once this row exists, regardless of which mode produced them. paused is
