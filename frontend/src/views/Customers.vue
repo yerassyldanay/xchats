@@ -103,12 +103,14 @@ async function doMerge() {
 
 async function openCustomer(c: Customer) {
   // Straight to the newest conversation, with the customer tab already on
-  // screen beside it.
+  // screen beside it. The chatId route param drives the actual selection
+  // (Chatboard.vue) — INB-16 moved this out of "push then mutate the store
+  // separately" so a refresh/bookmark/share of the resulting URL lands on
+  // the same chat.
   const profile = await crm.loadProfile(c.id).then(() => crm.profile)
   const chat = profile?.conversations?.[0]
   if (chat) {
-    await router.push({ name: 'chatboard' })
-    await inbox.selectChat(chat.id)
+    await router.push({ name: 'chatboard', params: { chatId: chat.id } })
   }
 }
 

@@ -25,7 +25,10 @@ const router = createRouter({
     { path: '/login', name: 'login', component: Login },
     { path: '/change-password', name: 'change-password', component: ChangePassword, meta: { requiresAuth: true } },
     { path: '/', name: 'home', component: Home },
-    { path: '/chatboard', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
+    // :chatId is optional (INB-16) — the open conversation lives in the URL so
+    // it survives a refresh and can be bookmarked/shared/restored via Back-
+    // Forward, instead of only ever existing in the Pinia store.
+    { path: '/chatboard/:chatId?', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
     { path: '/accounts', name: 'accounts', component: Accounts, meta: { requiresAuth: true } },
     { path: '/customers', name: 'customers', component: Customers, meta: { requiresAuth: true } },
     { path: '/followups', name: 'followups', component: Followups, meta: { requiresAuth: true } },

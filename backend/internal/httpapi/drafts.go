@@ -142,6 +142,32 @@ func (s *Server) handleApprove(c *gin.Context) {
 	ok(c, gin.H{"items": items})
 }
 
+// handleDismissDrafts persists INB-14's Dismiss action. Previously Dismiss
+// only cleared Pinia state locally (inbox.drafts = []), so the same options
+// reappeared the moment they were refetched — on reload or reselecting the
+// chat. This is an explicit backend state transition instead.
+func (s *Server) handleDismissDrafts(c *gin.Context) {
+	chatID, okID := parseUUID(c, "id")
+	if !okID {
+		return
+	}
+	if _, ok := s.orgChat(c, chatID); !ok {
+		return
+	}
+	dismissed, err := s.store.DismissDrafts(ctx(c), chatID)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	// Same event/shape handleApprove already broadcasts on send — the
+	// frontend's existing ai_draft.updated handler clears the panel for
+	// every operator viewing this chat, not just the one who clicked Dismiss.
+	for _, d := range dismissed {
+		s.hub.Broadcast("ai_draft.updated", dto.MapDraft(d))
+	}
+	ok(c, gin.H{"items": mapDrafts(dismissed)})
+}
+
 func (s *Server) classifyLostClaim(c *gin.Context, draftID uuid.UUID) {
 	d, err := s.store.DraftByID(ctx(c), draftID)
 	if errors.Is(err, store.ErrNotFound) {

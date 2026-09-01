@@ -8,6 +8,7 @@ import {
   Clock,
   Download,
   FileText,
+  LoaderCircle,
   MessagesSquare,
   TriangleAlert,
   UserPlus,
@@ -18,6 +19,7 @@ import { useInbox } from '../stores/inbox'
 import { useAuth } from '../stores/auth'
 import { api } from '../api/client'
 import { shortTime, tick, initials, colorFor, type TickStatus } from '../lib/format'
+import { channelDot, channelIcon } from '../lib/channelBrand'
 import Composer from './Composer.vue'
 import type { Message } from '../types'
 import { Button } from '@/components/ui/button'
@@ -46,6 +48,11 @@ function assign(userId: string | null) {
   if (chat.value) inbox.assignChat(chat.value.id, userId)
 }
 
+const isResolved = computed(() => chat.value?.status === 'resolved')
+function toggleResolved() {
+  if (chat.value) inbox.setChatStatus(chat.value.id, isResolved.value ? 'open' : 'resolved')
+}
+
 // delivery-tick discriminant -> icon + class (colored for the green out-bubble)
 const tickMeta: Record<TickStatus, { icon: Component; cls: string }> = {
   queued: { icon: Clock, cls: 'text-white/50' },
@@ -55,13 +62,35 @@ const tickMeta: Record<TickStatus, { icon: Component; cls: string }> = {
   failed: { icon: TriangleAlert, cls: 'text-rose-200' },
 }
 
+// olderLoadAnchor is set right before loadOlder() prepends a page, and
+// consumed by the length watcher below: prepending must preserve the
+// operator's scroll position (INB-11) instead of the default jump-to-bottom
+// that a genuinely new/initial message list gets.
+let olderLoadAnchor: { prevHeight: number; prevTop: number } | null = null
+
 watch(
   () => inbox.messages.length,
   async () => {
     await nextTick()
-    if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight
+    if (!scroller.value) return
+    if (olderLoadAnchor) {
+      const { prevHeight, prevTop } = olderLoadAnchor
+      scroller.value.scrollTop = scroller.value.scrollHeight - prevHeight + prevTop
+      olderLoadAnchor = null
+      return
+    }
+    scroller.value.scrollTop = scroller.value.scrollHeight
   }
 )
+
+function loadOlder() {
+  // Mirrors loadOlderMessages' own guard: skip staging an anchor for a call
+  // that will be a no-op, or the next genuinely new message would wrongly
+  // consume this stale anchor instead of scrolling to the bottom.
+  if (!inbox.messagesNextBefore || inbox.loadingOlderMessages) return
+  if (scroller.value) olderLoadAnchor = { prevHeight: scroller.value.scrollHeight, prevTop: scroller.value.scrollTop }
+  inbox.loadOlderMessages()
+}
 
 function onSend(text: string, files: File[]) {
   inbox.send(text, files)
@@ -83,7 +112,15 @@ function isAudio(m: Message['media'][number]) {
             <Avatar size="base" class="text-white" :style="{ backgroundColor: colorFor(chat.id) }">
               <AvatarFallback class="bg-transparent text-sm font-semibold">{{ initials(chat.contact.display_name) }}</AvatarFallback>
             </Avatar>
-            <span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-wa ring-2 ring-card" />
+            <!-- INB-10: this used to be an unconditional green "online" dot,
+                 which is not backed by presence data on any channel. A
+                 channel badge (matching the chat list's cards) instead. -->
+            <span
+              class="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full ring-2 ring-card grid place-items-center text-white"
+              :class="channelDot(chat.channel)"
+            >
+              <component :is="channelIcon(chat.channel)" class="w-2.5 h-2.5" />
+            </span>
           </div>
           <div class="min-w-0">
             <div class="font-semibold leading-tight truncate">{{ chat.contact.display_name }}</div>
@@ -132,16 +169,33 @@ function isAudio(m: Message['media'][number]) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button variant="outline" size="sm" :title="t('inbox.resolve')">
-            <CircleCheck class="w-4 h-4 text-wa" /> {{ t('inbox.resolve') }}
+          <Button
+            variant="outline"
+            size="sm"
+            :class="isResolved ? 'border-wa/40 bg-wa/10 text-wa hover:text-wa' : ''"
+            :disabled="inbox.settingChatStatus"
+            :title="isResolved ? t('inbox.reopen') : t('inbox.resolve')"
+            @click="toggleResolved"
+          >
+            <CircleCheck class="w-4 h-4" :class="isResolved ? 'text-wa' : ''" />
+            {{ isResolved ? t('inbox.reopen') : t('inbox.resolve') }}
           </Button>
         </div>
       </header>
       <p v-if="inbox.assignmentError" class="border-b border-destructive/20 bg-destructive/5 px-5 py-2 text-xs text-destructive">
         {{ inbox.assignmentError }}
       </p>
+      <p v-if="inbox.chatStatusError" class="border-b border-destructive/20 bg-destructive/5 px-5 py-2 text-xs text-destructive">
+        {{ inbox.chatStatusError }}
+      </p>
 
       <div ref="scroller" class="flex-1 overflow-y-auto px-6 py-5 space-y-2.5">
+        <div v-if="inbox.messagesNextBefore" class="flex justify-center pb-1.5">
+          <Button variant="outline" size="sm" :disabled="inbox.loadingOlderMessages" @click="loadOlder">
+            <LoaderCircle v-if="inbox.loadingOlderMessages" class="w-3.5 h-3.5 animate-spin" />
+            {{ inbox.loadingOlderMessages ? t('inbox.loadingOlder') : t('inbox.loadOlder') }}
+          </Button>
+        </div>
         <div
           v-for="m in inbox.messages"
           :key="m.id"
@@ -193,7 +247,7 @@ function isAudio(m: Message['media'][number]) {
         </div>
       </div>
 
-      <Composer :sending="inbox.sending" @send="onSend" />
+      <Composer :sending="inbox.activeSending" @send="onSend" />
     </template>
 
     <div v-else class="flex-1 grid place-items-center">
@@ -201,7 +255,13 @@ function isAudio(m: Message['media'][number]) {
         <div class="mx-auto w-16 h-16 rounded-2xl bg-card border border-border shadow-card grid place-items-center text-muted-foreground">
           <MessagesSquare class="w-7 h-7" />
         </div>
-        <p class="mt-4 text-sm text-muted-foreground">{{ t('inbox.pickChat') }}</p>
+        <!-- activeChatUnavailable (INB-16): a chat opened by id — typically
+             restored from the URL — that turned out not to exist or not to
+             belong to this org. Distinct copy so it never reads as the
+             ordinary "nothing selected yet" placeholder. -->
+        <p class="mt-4 text-sm text-muted-foreground">
+          {{ inbox.activeChatUnavailable ? t('inbox.chatNotFound') : t('inbox.pickChat') }}
+        </p>
       </div>
     </div>
   </section>

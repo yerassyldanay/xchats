@@ -55,8 +55,10 @@ function when(fu: Followup): string {
 
 async function openChat(fu: Followup) {
   if (!fu.conversation_id) return
-  await router.push({ name: 'chatboard' })
-  await inbox.selectChat(fu.conversation_id)
+  // The chatId route param drives the actual selection (Chatboard.vue) —
+  // INB-16 moved this out of "push then mutate the store separately" so a
+  // refresh/bookmark/share of the resulting URL lands on the same chat.
+  await router.push({ name: 'chatboard', params: { chatId: fu.conversation_id } })
 }
 
 const rows = computed(() => crm.followups)

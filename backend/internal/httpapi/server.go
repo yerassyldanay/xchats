@@ -440,13 +440,16 @@ func (s *Server) Router() *gin.Engine {
 
 	auth.GET("/chats", s.handleListChats)
 	auth.POST("/chats", s.handleCreateChat)
+	auth.GET("/chats/:id", s.handleGetChat)
 	auth.GET("/chats/:id/messages", s.handleListMessages)
 	auth.POST("/chats/:id/messages", s.handleSendMessage)
 	auth.POST("/chats/:id/read", s.handleReadChat)
 	auth.PATCH("/chats/:id/assignee", s.handleAssignChat)
+	auth.PATCH("/chats/:id/status", s.handleSetChatStatus)
 
 	auth.GET("/chats/:id/ai-drafts", s.handleListDrafts)
 	auth.POST("/chats/:id/ai-drafts", s.handleSuggest)
+	auth.POST("/chats/:id/ai-drafts/dismiss", s.handleDismissDrafts)
 	auth.POST("/ai-drafts/:id/approve", s.handleApprove)
 
 	// Campaigns (plan/DECISIONS.md) — bulk outbound messaging against a
