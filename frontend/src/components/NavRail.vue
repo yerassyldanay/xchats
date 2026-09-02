@@ -264,10 +264,10 @@ async function switchOrg(orgId: string) {
             <DropdownMenuSeparator />
             <!-- Language switching now lives on the dedicated Globe button next
                  to Settings — see the rail's bottom cluster. -->
-            <DropdownMenuItem v-if="evalsAvailable" @select="router.push({ name: 'evals' })">
+            <DropdownMenuItem @select="router.push({ name: 'evals' })">
               <FlaskConical class="w-4 h-4" /> {{ t('nav.testsAndBenchmarks') }}
             </DropdownMenuItem>
-            <DropdownMenuSeparator v-if="evalsAvailable" />
+            <DropdownMenuSeparator />
             <DropdownMenuItem @select="showAccountSecurity = true">
               <KeyRound class="w-4 h-4" /> {{ t('accountSecurity.menuItem') }}
             </DropdownMenuItem>

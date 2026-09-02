@@ -130,7 +130,11 @@ async function openChannelChat(c: Customer, ident: CustomerIdentity) {
   const chat =
     profile?.conversations?.find((conv) => conv.channel === ident.channel && conv.account_id === ident.account_id) ??
     profile?.conversations?.find((conv) => conv.channel === ident.channel)
-  if (chat) await router.push({ name: 'chatboard', params: { chatId: chat.id } })
+  if (chat) {
+    await router.push({ name: 'chatboard', params: { chatId: chat.id } })
+  } else {
+    await openCustomer(c)
+  }
 }
 
 async function createCustomer() {

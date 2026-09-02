@@ -38,6 +38,19 @@ describe('Combobox', () => {
     expect(wrapper.findAll('button')).toHaveLength(0)
   })
 
+  it('allows keyboard navigation with ArrowDown/ArrowUp and selection with Enter', async () => {
+    const wrapper = mount(Combobox, {
+      props: { modelValue: '', options: ['gpt-4o', 'gpt-4o-mini', 'o1'] },
+    })
+    const input = wrapper.find('input')
+    await input.trigger('focus')
+    await input.trigger('keydown', { key: 'ArrowDown' })
+    await input.trigger('keydown', { key: 'ArrowDown' })
+    await input.trigger('keydown', { key: 'Enter' })
+
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['gpt-4o-mini'])
+  })
+
   it('forwards passthrough attributes (e.g. data-testid) to the actual input, not the wrapper', () => {
     const wrapper = mount(Combobox, {
       props: { modelValue: '', options: [] },
