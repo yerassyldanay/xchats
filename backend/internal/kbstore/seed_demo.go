@@ -2,27 +2,23 @@ package kbstore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 
 	"github.com/google/uuid"
+	"github.com/yerassyldanay/xchats/backend/internal/blob"
 )
 
 // SeedDemoKB inserts a small, complete "Demo Shop" knowledge base — assistant
 // config, contacts, policies, 3 topics, 5 products (3 in stock, 2 not), 2
-// tariffs, and 3 delivery zones — into an org that has none yet. Content is
-// the same fixed dataset migration 0008_kb_response_demo_data used to insert
-// automatically (0009_remove_kb_response_demo_data deletes it again in the
-// same migration run in every real environment, so that pair nets to zero
-// today) — moved here so it only ever runs when explicitly asked for.
-//
-// Explicit and opt-in only: nothing calls this from serve's boot path or from
-// RunMigrations. It is wired to its own CLI subcommand
-// ("xchats seed-kb-demo" / "make seed-kb-demo") for test/demo use.
-//
-// Guarded on the org having zero live topics — the same invariant
-// SeedLiveIfEmpty uses — so calling this against an org that already has KB
-// content (including a second call against the org it just seeded) is always
-// a safe no-op, never a silent overwrite of real data.
+// tariffs, 3 delivery zones, and staged draft changes into an org that has none yet.
 func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool, err error) {
+	return s.SeedDemoKBWithBlob(ctx, orgID, nil)
+}
+
+// SeedDemoKBWithBlob is SeedDemoKB with optional image asset uploads into blob.Store.
+func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobStore blob.Store) (inserted bool, err error) {
 	var exists bool
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ai_topics WHERE organization_id = $1)`,
 		orgID).Scan(&exists); err != nil {
@@ -37,6 +33,62 @@ func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool,
 		return false, err
 	}
 	defer tx.Rollback(ctx)
+
+	// 1. Media Assets
+	var coffeeMatID, blenderMatID, parcelMatID *uuid.UUID
+	if len(demoCoffeeMachineJpg) > 0 {
+		id := uuid.New()
+		coffeeMatID = &id
+		sha := sha256.Sum256(demoCoffeeMachineJpg)
+		key := "demo-coffee-machine-" + id.String() + ".jpg"
+		if blobStore != nil {
+			_, _ = blobStore.Put(key, demoCoffeeMachineJpg, blob.Meta{
+				MediaType: "image", Mimetype: "image/jpeg", FileName: "coffee-machine.jpg",
+				FileSize: int64(len(demoCoffeeMachineJpg)), OrgID: orgID.String(),
+			})
+		}
+		_, _ = tx.Exec(ctx, `
+			INSERT INTO kbd_materials (id, organization_id, source_type, filename, mime_type, size_bytes,
+				sha256_checksum, processing_status, customer_visibility, storage_backend, storage_key)
+			VALUES ($1, $2, 'file', 'delonghi-coffee-machine.jpg', 'image/jpeg', $3, $4, 'parsed', 'visible', 'disk', $5)`,
+			id, orgID, int64(len(demoCoffeeMachineJpg)), hex.EncodeToString(sha[:]), key)
+	}
+
+	if len(demoBlenderJpg) > 0 {
+		id := uuid.New()
+		blenderMatID = &id
+		sha := sha256.Sum256(demoBlenderJpg)
+		key := "demo-blender-" + id.String() + ".jpg"
+		if blobStore != nil {
+			_, _ = blobStore.Put(key, demoBlenderJpg, blob.Meta{
+				MediaType: "image", Mimetype: "image/jpeg", FileName: "blender.jpg",
+				FileSize: int64(len(demoBlenderJpg)), OrgID: orgID.String(),
+			})
+		}
+		_, _ = tx.Exec(ctx, `
+			INSERT INTO kbd_materials (id, organization_id, source_type, filename, mime_type, size_bytes,
+				sha256_checksum, processing_status, customer_visibility, storage_backend, storage_key)
+			VALUES ($1, $2, 'file', 'bosch-blender.jpg', 'image/jpeg', $3, $4, 'parsed', 'visible', 'disk', $5)`,
+			id, orgID, int64(len(demoBlenderJpg)), hex.EncodeToString(sha[:]), key)
+	}
+
+	if len(demoDeliveryParcelJpg) > 0 {
+		id := uuid.New()
+		parcelMatID = &id
+		sha := sha256.Sum256(demoDeliveryParcelJpg)
+		key := "demo-delivery-parcel-" + id.String() + ".jpg"
+		if blobStore != nil {
+			_, _ = blobStore.Put(key, demoDeliveryParcelJpg, blob.Meta{
+				MediaType: "image", Mimetype: "image/jpeg", FileName: "delivery-parcel.jpg",
+				FileSize: int64(len(demoDeliveryParcelJpg)), OrgID: orgID.String(),
+			})
+		}
+		_, _ = tx.Exec(ctx, `
+			INSERT INTO kbd_materials (id, organization_id, source_type, filename, mime_type, size_bytes,
+				sha256_checksum, processing_status, customer_visibility, storage_backend, storage_key)
+			VALUES ($1, $2, 'file', 'express-delivery.jpg', 'image/jpeg', $3, $4, 'parsed', 'visible', 'disk', $5)`,
+			id, orgID, int64(len(demoDeliveryParcelJpg)), hex.EncodeToString(sha[:]), key)
+	}
 
 	persona := "Ты — ассистент по подготовке ответов клиентам интернет-магазина «Demo Shop» в WhatsApp. Ты готовишь ОДИН черновик ответа, который проверит и отправит человек — ты никогда не отправляешь сообщения сам."
 	mission := "Помогай клиентам выбрать товар, узнать актуальную цену и наличие, и оформить заказ."
@@ -56,9 +108,6 @@ func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool,
 		return false, err
 	}
 
-	// Zone-compatible from the start (blank flat delivery fields, a real
-	// outside_zones_note) — see aiprompt.BuildCatalog's fail-closed invariant,
-	// same reasoning as 0008's own zone-insert guard below.
 	if err := upsertPolicyRow(ctx, tx, orgID, DraftPolicy{
 		FreeDeliveryFrom: "20 000 ₸", MinOrder: "5 000 ₸",
 		OutsideZonesNote: "В города и страны за пределами списка зон доставки мы не доставляем.",
@@ -68,7 +117,8 @@ func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool,
 
 	topics := []DraftTopic{
 		{Slug: "demo_catalog", Title: "Каталог",
-			BodyMD: "В каталоге бытовая техника для дома и кухни. Актуальные позиции, цены и наличие — только из блоков товаров, не перечисляй товары по памяти."},
+			BodyMD: "В каталоге бытовая техника для дома и кухни. Актуальные позиции, цены и наличие — только из блоков товаров, не перечисляй товары по памяти.",
+			FeaturedImage: parcelMatID},
 		{Slug: "demo_payment", Title: "Оплата",
 			BodyMD: "Принимаем оплату картой, через Kaspi и наличными при получении. Оформление — прямо в WhatsApp."},
 		{Slug: "demo_warranty", Title: "Гарантия",
@@ -82,9 +132,11 @@ func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool,
 
 	products := []DraftProduct{
 		{Ref: "demo_coffee-machine", Name: "Кофемашина DeLonghi", Price: "129 900 ₸",
-			Description: "Автоматическая кофемашина для дома с капучинатором и жерновковой кофемолкой.", InStock: true},
+			Description: "Автоматическая кофемашина для дома с капучинатором и жерновковой кофемолкой.", InStock: true,
+			FeaturedImage: coffeeMatID},
 		{Ref: "demo_blender", Name: "Блендер Bosch", Price: "11 200 ₸",
-			Description: "Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.", InStock: true},
+			Description: "Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.", InStock: true,
+			FeaturedImage: blenderMatID},
 		{Ref: "demo_kettle", Name: "Чайник Bosch", Price: "40 200 ₸",
 			Description: "Электрический чайник с быстрым закипанием и автоматическим отключением.", InStock: false},
 		{Ref: "demo_toaster", Name: "Тостер Tefal", Price: "81 600 ₸",
@@ -124,6 +176,52 @@ func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool,
 			return false, err
 		}
 	}
+
+	// 2. Initial Staged Draft Changes for /playground (Playground Review Demo)
+	draft := DraftBlob{
+		Topics: []DraftTopic{
+			{
+				Slug:   "autumn_deals",
+				Title:  "Осенние спецпредложения",
+				BodyMD: "До конца месяца действуют скидки до 25% на всю мелкую бытовую технику и аксессуары. При покупке от 50 000 ₸ дарим фирменный набор посуды!",
+			},
+		},
+		Products: []DraftProduct{
+			{
+				Ref:         "demo_toaster",
+				Name:        "Тостер Tefal OptiGrill",
+				Price:       "74 900 ₸",
+				Description: "Компактный тостер с 7 режимами обжаривания и съемным поддоном для крошек. Специальная осенняя цена!",
+				InStock:     true,
+			},
+		},
+		DeliveryZones: []DraftDeliveryZone{
+			{
+				Ref:               "demo_taraz",
+				Name:              "г. Тараз",
+				ZoneLevel:         "city",
+				ParentRef:         "demo_kazakhstan",
+				DeliveryAvailable: true,
+				DeliveryCost:      "1 800 ₸",
+				DeliveryInDays:    "2–3 дня",
+				Notes:             "Доставка курьерской службой до двери",
+				SalesStatus:       "active",
+			},
+		},
+		Policies: []DraftPolicy{
+			{
+				FreeDeliveryFrom: "15 000 ₸",
+				MinOrder:         "5 000 ₸",
+				OutsideZonesNote: "В города и страны за пределами списка зон доставки мы не доставляем.",
+			},
+		},
+	}
+	draftRaw, _ := json.Marshal(draft)
+	_, _ = tx.Exec(ctx, `
+		INSERT INTO kbd_draft (organization_id, draft, base_version)
+		VALUES ($1, $2, 1)
+		ON CONFLICT (organization_id) DO UPDATE SET draft = $2, base_version = base_version + 1`,
+		orgID, draftRaw)
 
 	if err := auditRow(ctx, tx, orgID, uuid.Nil, "seed", "demo KB content seeded (seed-kb-demo)"); err != nil {
 		return false, err

@@ -35,7 +35,7 @@ WAILS_FLAGS := -skipbindings $(WAILS_TAGS)
 # there via a local compose override, so a stale container may still hold it.
 PORTS ?= 8080 8090 5173 8081
 
-.PHONY: help up up-fg down logs ps kill-ports migrate seed seed-kb-demo dev-backend dev-frontend \
+.PHONY: help up up-fg down logs ps kill-ports migrate seed seed-demo seed-kb-demo dev-backend dev-frontend \
         test test-backend test-frontend test-e2e build lint lint-backend lint-frontend notices ruleset-apply \
         desktop-tools desktop-assets desktop-dev desktop-build desktop-clean
 
@@ -74,8 +74,11 @@ migrate: ## Apply DB migrations
 seed: ## Seed the default organization + admin login
 	cd $(BACKEND) && $(GORUN) seed
 
-seed-kb-demo: ## Seed demo KB content (topics/products/tariffs/zones/contacts/policies) — opt-in, for test cases only; no-ops if the org already has KB content
-	cd $(BACKEND) && $(GORUN) seed-kb-demo
+seed-demo: ## Seed full demo dataset (KB + products/images + draft + customers + followups + campaigns)
+	cd $(BACKEND) && $(GORUN) seed-demo
+
+seed-kb-demo: ## Alias for seed-demo (legacy)
+	cd $(BACKEND) && $(GORUN) seed-demo
 
 dev-backend: ## Run the backend (go) on :8080
 	cd $(BACKEND) && $(GORUN) serve
