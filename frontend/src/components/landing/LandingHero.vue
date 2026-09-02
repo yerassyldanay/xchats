@@ -1,8 +1,25 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Github, Server, Sparkles } from 'lucide-vue-next'
+import { Check, Copy, Github, Server, Sparkles } from 'lucide-vue-next'
 
 const { t } = useI18n()
+
+const QUICKSTART = 'make up && make seed-demo'
+const copied = ref(false)
+let copiedTimer: ReturnType<typeof setTimeout> | undefined
+async function copyQuickstart() {
+  try {
+    await navigator.clipboard.writeText(QUICKSTART)
+    copied.value = true
+    clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => (copied.value = false), 1800)
+  } catch {
+    // Clipboard API unavailable (insecure context, permission denied) — the
+    // command is still selectable/readable in the box, so this is a
+    // best-effort convenience, not the only way to get the text.
+  }
+}
 </script>
 
 <template>
@@ -13,6 +30,16 @@ const { t } = useI18n()
         {{ t('landing.hero.titlePrefix') }} <em>{{ t('landing.hero.titleHighlight') }}</em> {{ t('landing.hero.titleSuffix') }}
       </h1>
       <p class="landing-hero__subtitle">{{ t('landing.hero.subtitle') }}</p>
+
+      <button type="button" class="landing-quickstart" @click="copyQuickstart">
+        <code class="landing-quickstart__cmd">$ {{ QUICKSTART }}</code>
+        <span class="landing-quickstart__copy">
+          <Check v-if="copied" class="w-4 h-4" aria-hidden="true" />
+          <Copy v-else class="w-4 h-4" aria-hidden="true" />
+          {{ copied ? t('common.copied') : t('common.copy') }}
+        </span>
+      </button>
+      <p class="landing-quickstart__hint">{{ t('landing.hero.quickstartHint') }}</p>
 
       <div class="landing-hero__ctas">
         <RouterLink :to="{ name: 'login' }" class="landing-hero__cta">{{ t('landing.hero.ctaPrimary') }}</RouterLink>
@@ -29,7 +56,7 @@ const { t } = useI18n()
     </div>
 
     <div class="landing-hero__panel">
-      <img src="/app-screenshot.png" :alt="t('landing.hero.screenshotAlt')" />
+      <img src="/screenshots/inbox.png" :alt="t('landing.hero.screenshotAlt')" />
     </div>
   </section>
 </template>

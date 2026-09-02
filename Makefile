@@ -36,7 +36,7 @@ WAILS_FLAGS := -skipbindings $(WAILS_TAGS)
 PORTS ?= 8080 8090 5173 8081
 
 .PHONY: help up up-fg down logs ps kill-ports migrate seed seed-demo seed-kb-demo dev-backend dev-frontend \
-        test test-backend test-frontend test-e2e build lint lint-backend lint-frontend notices ruleset-apply \
+        test test-backend test-frontend test-e2e build screenshots lint lint-backend lint-frontend notices ruleset-apply \
         desktop-tools desktop-assets desktop-dev desktop-build desktop-clean
 
 help: ## Show this help
@@ -102,6 +102,9 @@ test-e2e: ## Full demo loop + KB/response service DB-backed suites (subset of te
 build: ## Build backend binary + frontend bundle
 	cd $(BACKEND) && go build -o bin/xchats ./cmd/xchats
 	cd $(FRONTEND) && npm ci && npm run build
+
+screenshots: ## Regenerate docs/images/*.png from a running, seeded instance (needs `make up`/`dev-backend`+`dev-frontend` on :8081 AND `make seed-demo` first — see frontend/scripts/capture-screenshots.mjs)
+	cd $(FRONTEND) && node scripts/capture-screenshots.mjs
 
 desktop-tools: ## Install the pinned Wails CLI (one-off; see docs/desktop.md for the OS packages it needs)
 	go install github.com/wailsapp/wails/v2/cmd/wails@$(WAILS_VERSION)

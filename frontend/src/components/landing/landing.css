@@ -38,15 +38,43 @@
   display: block;
 }
 
-/* The lang switcher renders <button>s (it sets i18n locale, it doesn't
-   navigate) using chrome.css's .lang-links__link visuals — reset the
-   button-specific defaults chrome.css never had to account for. */
-.landing .lang-links__link {
-  background: none;
-  border: none;
+/* Language dropdown (LandingLangSwitcher.vue) — a real <select>, styled to
+   sit flush in the nav next to the Features/Tour/Architecture/Docs links. */
+.landing-lang-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.landing-lang-select__icon {
+  position: absolute;
+  left: 9px;
+  width: 15px;
+  height: 15px;
+  color: var(--blog-muted);
+  pointer-events: none;
+}
+.landing-lang-select__chevron {
+  position: absolute;
+  right: 8px;
+  width: 13px;
+  height: 13px;
+  color: var(--blog-muted);
+  pointer-events: none;
+}
+.landing-lang-select select {
+  appearance: none;
   font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blog-text);
+  background: var(--blog-card);
+  border: 1px solid var(--blog-border);
+  border-radius: 8px;
+  padding: 7px 26px 7px 30px;
   cursor: pointer;
-  padding: 0;
+}
+.landing-lang-select select:hover {
+  border-color: var(--blog-accent);
 }
 
 /* ---------- hero ---------- */
@@ -147,6 +175,53 @@
   .landing-hero__panel img {
     filter: brightness(0.94) saturate(0.96);
   }
+}
+
+/* Copy-paste quickstart box — deliberately a fixed dark terminal regardless
+   of the page's own light/dark mode (same convention as most "copy this
+   command" boxes), so it reads as a command prompt rather than a themed UI
+   element. */
+.landing-quickstart {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  max-width: 480px;
+  margin-bottom: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #262b35;
+  background: #0b0d12;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 160ms ease;
+}
+.landing-quickstart:hover {
+  border-color: var(--blog-accent);
+}
+.landing-quickstart__cmd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  color: #e6e8ec;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.landing-quickstart__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #9aa3b2;
+}
+.landing-quickstart__hint {
+  font-size: 13px;
+  color: var(--blog-muted);
+  margin: 0 0 20px;
 }
 @media (max-width: 900px) {
   .landing-hero {
@@ -763,5 +838,92 @@
   .landing-cta-panel {
     padding: 40px 24px;
     border-radius: 18px;
+  }
+}
+
+/* ---------- interactive product showcase (ProductShowcase.vue) ---------- */
+.landing-showcase {
+  max-width: 980px;
+  margin: 0 auto;
+}
+.landing-showcase__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+.landing-showcase__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--blog-border);
+  background: var(--blog-card);
+  color: var(--blog-muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+.landing-showcase__tab:hover {
+  color: var(--blog-text);
+}
+.landing-showcase__tab.is-active {
+  color: var(--blog-accent);
+  border-color: var(--blog-accent);
+  background: var(--blog-accent-tint);
+}
+.landing-showcase__frame {
+  border-radius: 16px;
+  border: 1px solid var(--blog-border);
+  background: var(--blog-hero-panel);
+  padding: 12px;
+}
+.landing-showcase__frame img {
+  width: 100%;
+  height: auto;
+  border-radius: 11px;
+  box-shadow: var(--blog-shadow);
+}
+@media (prefers-color-scheme: dark) {
+  .landing-showcase__frame img {
+    filter: brightness(0.94) saturate(0.96);
+  }
+}
+.landing-showcase__desc {
+  max-width: 68ch;
+  margin: 20px auto 0;
+  text-align: center;
+  font-size: 15px;
+  color: var(--blog-muted);
+  line-height: 1.6;
+}
+@media (max-width: 640px) {
+  .landing-showcase__tab {
+    padding: 8px 12px;
+    font-size: 12.5px;
+  }
+}
+
+/* ---------- architecture highlights (ArchitectureSection.vue) ---------- */
+.landing-arch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  max-width: 980px;
+  margin: 0 auto;
+}
+.landing-channel-card__icon--arch {
+  background: var(--blog-accent-tint);
+  color: var(--blog-accent);
+}
+@media (max-width: 780px) {
+  .landing-arch-grid {
+    grid-template-columns: 1fr;
   }
 }

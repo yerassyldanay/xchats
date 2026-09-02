@@ -13,34 +13,32 @@ afterEach(() => {
 describe('Home (landing page)', () => {
   it('renders the positioning headline and CTAs in Russian by default', () => {
     const wrapper = mountKb(Home, { pinia: testPinia() })
-    expect(wrapper.text()).toContain('AI-ассистент, который')
-    expect(wrapper.text()).toContain('никогда не выдумывает')
+    expect(wrapper.text()).toContain('омниканальный инбокс с')
+    expect(wrapper.text()).toContain('AI без галлюцинаций')
     expect(wrapper.text()).toContain('Начать бесплатно')
   })
 
-  it('switching the language switcher to English re-renders the hero in English', async () => {
+  it('switching the language dropdown to English re-renders the hero in English', async () => {
     const wrapper = mountKb(Home, { pinia: testPinia() })
-    const enBtn = wrapper.findAll('.lang-links__link').find((b) => b.text() === 'English')
-    expect(enBtn).toBeTruthy()
-    await enBtn!.trigger('click')
-    await wrapper.vm.$nextTick()
+    const select = wrapper.find('.landing-lang-select select')
+    expect(select.exists()).toBe(true)
+    await select.setValue('en')
 
-    expect(wrapper.text()).toContain('The AI assistant that')
-    expect(wrapper.text()).toContain('never makes things up')
+    expect(wrapper.text()).toContain('The self-hosted omnichannel inbox with')
+    expect(wrapper.text()).toContain('zero-hallucination AI')
     expect(wrapper.text()).toContain('Get started free')
   })
 
   it('switching to Қазақша renders the hero title with no missing space around the highlighted phrase', async () => {
     const wrapper = mountKb(Home, { pinia: testPinia() })
-    const kkBtn = wrapper.findAll('.lang-links__link').find((b) => b.text() === 'Қазақша')
-    await kkBtn!.trigger('click')
-    await wrapper.vm.$nextTick()
+    const select = wrapper.find('.landing-lang-select select')
+    await select.setValue('kk')
 
     const heading = wrapper.find('.landing-hero__title')
-    // Regression guard for the <template v-if> whitespace bug: the
-    // highlighted phrase and the trailing suffix must not run together.
-    expect(heading.text()).toContain('шығармайтын AI-көмекші')
-    expect(heading.text()).not.toContain('шығармайтынAI')
+    // Regression guard for the <template v-if> whitespace bug: the plain
+    // prefix and the highlighted phrase must not run together.
+    expect(heading.text()).toContain('AI-мен self-hosted')
+    expect(heading.text()).not.toContain('AI-менself-hosted')
   })
 
   it('footer states the real license (AGPL-3.0), not the old MIT text', () => {

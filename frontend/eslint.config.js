@@ -19,10 +19,18 @@ export default tseslint.config(
   {
     // Build/test tooling that runs under Node, not the browser: Vite/
     // Vitest/Playwright/Tailwind configs, the blog build/scaffold scripts,
-    // and the Playwright e2e specs themselves.
-    files: ['*.config.{js,ts}', 'scripts/**/*.ts', '*.mjs', 'tests/**/*.ts'],
+    // and the Playwright e2e specs themselves. Both global sets, not just
+    // node's: a Playwright script's own top level is Node (fs, process,
+    // console), but callbacks handed to page.evaluate()/addInitScript()
+    // run IN the browser page (window, document, localStorage) — .ts files
+    // here get a free pass on the latter from typescript-eslint's
+    // recommended config (it turns off base no-undef for TS entirely,
+    // deferring to tsc), but a plain .mjs script like
+    // scripts/capture-screenshots.mjs has no such pass, so it needs
+    // globals.browser merged in explicitly.
+    files: ['*.config.{js,ts}', 'scripts/**/*.{js,ts,mjs}', '*.mjs', 'tests/**/*.ts'],
     languageOptions: {
-      globals: globals.node,
+      globals: { ...globals.node, ...globals.browser },
     },
   },
   {
