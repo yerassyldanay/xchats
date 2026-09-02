@@ -72,7 +72,7 @@ function toggleCollapsed() {
 }
 
 const goToProvider = () => router.push({ name: 'settings' })
-const goToChannel = () => router.push({ name: 'accounts' })
+const goToChannel = () => router.push({ name: 'channels' })
 const goToKb = () => router.push({ name: 'knowledge-base' })
 </script>
 

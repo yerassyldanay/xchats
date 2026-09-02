@@ -194,7 +194,10 @@ func TestCustomerSidebarRoundTrip(t *testing.T) {
 		t.Errorf("next followup = %+v", profile.NextFollowup)
 	}
 
-	// The timeline shows the CRM actions AND the conversation message.
+	// The timeline shows the CRM milestones and nothing else — TODO.md
+	// "Filter out routine message logs from Timeline": it is an executive
+	// audit log of account changes, not a transcript (see crm_timeline.go's
+	// own doc comment).
 	var timeline struct {
 		Items []struct {
 			Source string `json:"source"`
@@ -213,8 +216,8 @@ func TestCustomerSidebarRoundTrip(t *testing.T) {
 			t.Errorf("timeline is missing %q: %+v", want, kinds)
 		}
 	}
-	if !sources["message"] {
-		t.Errorf("timeline has no conversation activity: %+v", sources)
+	if sources["message"] {
+		t.Errorf("timeline includes routine conversation activity, want CRM milestones only: %+v", sources)
 	}
 }
 

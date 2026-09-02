@@ -515,6 +515,7 @@ export default {
       timeoutSeconds: 'Timeout (seconds)',
       retry: 'Retry on transient failure',
       providersTitle: 'Providers',
+      providersHint: 'Credentials for the provider selected above under "Default provider".',
     },
     extraction: {
       title: 'Parsers & crawlers',
@@ -745,6 +746,7 @@ export default {
         setup: 'Channel setup',
       },
       connectChannel: 'Connect a channel',
+      addToChannel: 'Add a {channel} account',
       dismiss: 'Dismiss',
       filters: {
         groupLabel: 'Filter by channel',
@@ -899,6 +901,7 @@ export default {
     // cleared — this notice and the button below make that explicit instead
     // of leaving operators to discover it in the shared inbox.
     dataNotice: 'Test messages here appear in the Inbox and CRM like a real conversation, labelled as Simulator.',
+    newConversation: '+ New conversation',
     clearData: 'Clear simulator data',
     clearingData: 'Clearing…',
     clearDataConfirm: {
@@ -917,10 +920,21 @@ export default {
     send: 'Send',
     you: 'You',
     assistant: 'Assistant',
-    empty: 'Ask a question to test the assistant\'s answer.',
+    loadingHistory: 'Loading conversation history…',
     thinking: 'Assistant is typing…',
     escalated: 'Handed off to a manager',
     unavailable: 'The simulator is not available on this server. Check that SIMULATOR_ENABLED is set in the backend configuration.',
+    hero: {
+      title: 'Test how the assistant replies',
+      body: 'Ask anything a customer might — the assistant answers using the live knowledge base, exactly like it would in a real conversation.',
+      suggestionsLabel: 'Try one of these:',
+      suggestions: [
+        'What are your delivery options?',
+        'Do you have any discounts right now?',
+        'How can I pay for my order?',
+      ],
+    },
+    inboxBanner: 'This is a Simulator test conversation — messages here are not from a real customer.',
   },
   // Channel-level debounce + scheduled auto-reply (Accounts.vue's
   // Automation button/badge/dialog).
@@ -986,6 +1000,12 @@ export default {
         channelSimulator: 'Simulator (test data)',
       },
       newCustomer: 'New customer',
+      viewToggle: {
+        groupLabel: 'Switch layout',
+        grid: 'Grid view',
+        list: 'List view',
+      },
+      openChannelChat: 'Open this conversation',
       merge: {
         action: 'Merge',
         title: 'Merge customers',
@@ -1005,12 +1025,20 @@ export default {
         tomorrow: 'Tomorrow',
         week: 'This week',
         overdue: 'Overdue',
+        later: 'Later',
       },
       scope: {
         me: 'Mine',
         all: 'All',
         unassigned: 'Unassigned',
       },
+      tabs: {
+        active: 'Active',
+        completed: 'Completed',
+      },
+      newTask: '+ New task',
+      searchPlaceholder: 'Search by customer or note…',
+      actionFilterAll: 'All',
       empty: 'Nothing here',
       complete: 'Complete',
       reschedule: 'Reschedule',
@@ -1023,10 +1051,18 @@ export default {
         meeting: 'Meeting',
         other: 'Other',
       },
+      completedEmpty: 'No completed tasks yet',
+      completedAt: 'Completed {when}',
+      reopen: 'Reopen',
     },
     dialog: {
       title: 'Next step',
       editTitle: 'Reschedule',
+      newTaskTitle: 'New task',
+      customer: 'Customer',
+      customerSearchPlaceholder: "Name, phone, {'@'}username…",
+      searchingCustomers: 'Searching…',
+      changeCustomer: 'Change customer',
       date: 'Date',
       time: 'Time',
       timeHint: 'The time is optional — without it the follow-up is all-day.',
@@ -1040,7 +1076,21 @@ export default {
       cancel: 'Cancel',
       errors: {
         dateRequired: 'Pick a date.',
+        customerRequired: 'Pick a customer.',
         saveFailed: 'Could not save the follow-up.',
+      },
+    },
+    reschedule: {
+      title: 'Reschedule task',
+      currentlyDue: 'Currently due: {when}',
+      presets: {
+        plusHour: '+1 hour',
+        tomorrow: 'Tomorrow at 10:00',
+        nextWeek: 'Next week',
+        custom: 'Custom date & time',
+      },
+      errors: {
+        saveFailed: 'Could not reschedule the task.',
       },
     },
     timeline: {
@@ -1518,7 +1568,7 @@ export default {
     inbox: 'Inbox',
     channels: 'Channels',
     knowledgeBase: 'Knowledge base',
-    evals: 'Evals',
+    testsAndBenchmarks: 'Tests & Benchmarks',
     settings: 'Settings',
     needsAttention: '— needs attention',
     organization: 'Organization',

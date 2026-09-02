@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  Bot,
   CalendarClock,
   Check,
   ChevronDown,
@@ -169,6 +170,11 @@ function openConversation(chatId: string) {
 const otherConversations = computed(() =>
   (crm.profile?.conversations ?? []).filter((c) => c.id !== inbox.activeId),
 )
+
+// TODO.md: a customer whose only channel is the Simulator must never read as
+// a real one in the CRM profile — same violet Bot pill as the chat list card
+// and thread header (ChatList.vue/ChatThread.vue).
+const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).some((i) => i.channel === 'simulator'))
 </script>
 
 <template>
@@ -206,7 +212,13 @@ const otherConversations = computed(() =>
             @blur="flush('display_name', nameDraft)"
             @keyup.enter="flush('display_name', nameDraft)"
           />
-          <div class="mt-1 flex flex-wrap gap-1.5">
+          <div class="mt-1 flex flex-wrap items-center gap-1.5">
+            <span
+              v-if="isSimulatorCustomer"
+              class="inline-flex items-center gap-0.5 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400"
+            >
+              <Bot class="w-2.5 h-2.5" /> {{ t('simulator.navLabel') }}
+            </span>
             <span
               v-for="ident in customer.identities"
               :key="ident.id"

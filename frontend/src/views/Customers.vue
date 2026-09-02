@@ -2,12 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Merge, Plus, Search, UsersRound } from 'lucide-vue-next'
+import { LayoutGrid, List, Merge, Plus, Search, UsersRound } from 'lucide-vue-next'
 import { useCrm } from '../stores/crm'
 import { useInbox } from '../stores/inbox'
 import { initials, colorFor } from '../lib/format'
 import { channelIcon, channelText } from '../lib/channelBrand'
-import type { Customer } from '../types'
+import type { Customer, CustomerIdentity } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -36,6 +36,10 @@ const selected = ref<string[]>([])
 const showMerge = ref(false)
 const merging = ref(false)
 const mergeError = ref('')
+// TODO.md Customers phase: grid is the richer default (avatar, status, tags,
+// channels all at a glance); list stays available for anyone who wants the
+// denser view back. Not persisted — a per-session preference, not a setting.
+const viewMode = ref<'grid' | 'list'>('grid')
 
 onMounted(async () => {
   await Promise.allSettled([crm.loadCatalogs(), inbox.loadUsers()])
@@ -114,10 +118,34 @@ async function openCustomer(c: Customer) {
   }
 }
 
+// openChannelChat is the card's per-identity badge (TODO.md "Multi-channel
+// conversation links on customer cards") — unlike openCustomer's "jump to the
+// newest conversation regardless of channel", this jumps to the ONE the
+// operator actually clicked. The identities list itself carries no chat id
+// (it's a channel account, not a conversation), so the profile — already the
+// one place that resolves "which chats does this customer have" — is loaded
+// on demand rather than fetched up front for every row on the page.
+async function openChannelChat(c: Customer, ident: CustomerIdentity) {
+  const profile = await crm.loadProfile(c.id).then(() => crm.profile)
+  const chat =
+    profile?.conversations?.find((conv) => conv.channel === ident.channel && conv.account_id === ident.account_id) ??
+    profile?.conversations?.find((conv) => conv.channel === ident.channel)
+  if (chat) await router.push({ name: 'chatboard', params: { chatId: chat.id } })
+}
+
 async function createCustomer() {
   const c = await crm.createCustomer({ display_name: '' })
   selected.value = []
   await openCustomer(c)
+}
+
+// identityHandle mirrors CustomerPanel.vue's own — the handle an operator
+// would actually recognise, not the raw external id (a WhatsApp JID's own
+// digits are the useful part of it).
+function identityHandle(ident: CustomerIdentity): string {
+  if (ident.username) return '@' + ident.username
+  if (ident.phone) return ident.phone
+  return ident.external_id.split('@')[0] || '—'
 }
 
 function assigneeName(id: string | null): string {
@@ -133,6 +161,28 @@ function assigneeName(id: string | null): string {
       <div class="flex items-center justify-between gap-3">
         <h1 class="text-[19px] font-bold tracking-tight">{{ t('crm.list.title') }}</h1>
         <div class="flex items-center gap-2">
+          <div class="flex items-center rounded-lg border border-border p-0.5" role="group" :aria-label="t('crm.list.viewToggle.groupLabel')">
+            <button
+              type="button"
+              class="rounded-md p-1.5 transition"
+              :class="viewMode === 'grid' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
+              :aria-pressed="viewMode === 'grid'"
+              :title="t('crm.list.viewToggle.grid')"
+              @click="viewMode = 'grid'"
+            >
+              <LayoutGrid class="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              class="rounded-md p-1.5 transition"
+              :class="viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
+              :aria-pressed="viewMode === 'list'"
+              :title="t('crm.list.viewToggle.list')"
+              @click="viewMode = 'list'"
+            >
+              <List class="w-4 h-4" />
+            </button>
+          </div>
           <Button
             v-if="selected.length === 2"
             variant="outline"
@@ -230,7 +280,7 @@ function assigneeName(id: string | null): string {
         </p>
       </div>
 
-      <ul v-else class="divide-y divide-border">
+      <ul v-else-if="viewMode === 'list'" class="divide-y divide-border">
         <li
           v-for="c in crm.customers"
           :key="c.id"
@@ -282,6 +332,70 @@ function assigneeName(id: string | null): string {
           </button>
         </li>
       </ul>
+
+      <!-- TODO.md Customers phase: rich profile cards — status, channel
+           handles, tags and assignee at a glance, with each connected
+           channel directly clickable to jump to THAT conversation rather
+           than always the customer's newest one regardless of channel. -->
+      <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-6">
+        <div
+          v-for="c in crm.customers"
+          :key="c.id"
+          class="relative rounded-lg border border-border bg-card p-4 transition hover:shadow-pop"
+          :class="{ 'border-primary/50 bg-primary/5': selected.includes(c.id) }"
+        >
+          <input
+            type="checkbox"
+            class="absolute top-3.5 right-3.5 w-4 h-4 accent-primary"
+            :checked="selected.includes(c.id)"
+            :aria-label="c.display_name"
+            @change="toggleSelect(c.id)"
+          />
+          <button class="flex items-start gap-3 w-full text-left pr-6" @click="openCustomer(c)">
+            <Avatar class="w-10 h-10 shrink-0">
+              <AvatarFallback :class="colorFor(c.id)">{{ initials(c.display_name) }}</AvatarFallback>
+            </Avatar>
+            <div class="min-w-0 flex-1 pt-0.5">
+              <div class="font-medium truncate">{{ c.display_name || '—' }}</div>
+              <div class="text-[12px] text-muted-foreground truncate">
+                {{ c.phone || c.email || c.identities[0]?.phone || c.identities[0]?.username || '—' }}
+              </div>
+            </div>
+          </button>
+
+          <div v-if="c.status || c.tags.length" class="mt-3 flex flex-wrap gap-1.5">
+            <Badge
+              v-if="c.status"
+              variant="secondary"
+              class="text-[11px]"
+              :style="c.status.color ? { borderColor: c.status.color, color: c.status.color } : undefined"
+            >
+              {{ c.status.name }}
+            </Badge>
+            <Badge v-for="tg in c.tags.slice(0, 3)" :key="tg.id" variant="secondary" class="text-[11px]">
+              {{ tg.name }}
+            </Badge>
+          </div>
+
+          <div class="mt-3 flex flex-wrap gap-1.5">
+            <button
+              v-for="ident in c.identities"
+              :key="ident.id"
+              type="button"
+              class="inline-flex max-w-full items-center gap-1 rounded-full border border-border px-2 py-1 text-[11px] transition hover:bg-muted"
+              :title="t('crm.list.openChannelChat')"
+              @click="openChannelChat(c, ident)"
+            >
+              <component :is="channelIcon(ident.channel)" class="w-3 h-3 shrink-0" :class="channelText(ident.channel)" />
+              <span class="truncate">{{ identityHandle(ident) }}</span>
+            </button>
+          </div>
+
+          <div class="mt-3 flex items-center justify-between border-t border-border pt-2.5 text-[11px] text-muted-foreground">
+            <span class="truncate">{{ assigneeName(c.assignee_user_id) }}</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <footer class="px-6 py-2 border-t border-border text-[12px] text-muted-foreground shrink-0">

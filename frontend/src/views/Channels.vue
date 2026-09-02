@@ -258,6 +258,15 @@ function openAdd() {
   addStartChannel.value = null
   showAdd.value = true
 }
+// openAddForChannel is TODO.md's "dedicated + Add Account button per
+// channel" — the small trigger next to each filter pill, and the CTA on that
+// channel's own empty state, both land straight on the matching connect flow
+// instead of the generic picker openAdd() shows.
+function openAddForChannel(channel: ConnectableChannel) {
+  addStartChannel.value = channel
+  showAdd.value = true
+}
+const activeFilterTile = computed(() => channelFilters.value.find((tile) => tile.key === activeFilter.value) ?? null)
 // openReconnect re-pairs the same number from scratch (whatsmeow has no
 // partial-reconnect concept): a fresh QR scan lands on this SAME account row
 // (id = uuidv5(owner_jid) is deterministic), reviving it with history intact.
@@ -389,20 +398,32 @@ async function remove(a: Account) {
           >
             {{ t('accounts.page.filters.all') }} <span class="text-xs opacity-70">{{ accounts.accounts.length }}</span>
           </button>
-          <button
-            v-for="tile in channelFilters"
-            :key="tile.key"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-            :class="activeFilter === tile.key ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted'"
-            :aria-pressed="activeFilter === tile.key"
-            @click="activeFilter = tile.key"
-          >
-            <span class="w-4 h-4 rounded grid place-items-center text-white shrink-0" :class="tile.dotClass">
-              <component :is="tile.icon" class="w-2.5 h-2.5" />
-            </span>
-            {{ t(tile.labelKey) }} <span class="text-xs opacity-70">{{ tile.count }}</span>
-          </button>
+          <template v-for="tile in channelFilters" :key="tile.key">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+              :class="activeFilter === tile.key ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted'"
+              :aria-pressed="activeFilter === tile.key"
+              @click="activeFilter = tile.key"
+            >
+              <span class="w-4 h-4 rounded grid place-items-center text-white shrink-0" :class="tile.dotClass">
+                <component :is="tile.icon" class="w-2.5 h-2.5" />
+              </span>
+              {{ t(tile.labelKey) }} <span class="text-xs opacity-70">{{ tile.count }}</span>
+            </button>
+            <!-- TODO.md Channels phase: a dedicated "+ Add" per channel,
+                 right next to that channel's own filter pill, landing
+                 directly on its connect flow rather than the generic picker. -->
+            <button
+              type="button"
+              class="inline-flex w-7 h-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+              :title="t('accounts.page.addToChannel', { channel: t(tile.labelKey) })"
+              :aria-label="t('accounts.page.addToChannel', { channel: t(tile.labelKey) })"
+              @click="openAddForChannel(tile.key)"
+            >
+              <Plus class="w-3.5 h-3.5" />
+            </button>
+          </template>
         </div>
 
         <!-- account cards -->
@@ -428,10 +449,23 @@ async function remove(a: Account) {
             <Button class="mt-4" @click="openAdd"><Plus class="w-4 h-4" /> {{ t('accounts.page.connectChannel') }}</Button>
           </div>
 
-          <!-- accounts exist, but none match the active filter pill -->
-          <p v-else-if="!filteredAccounts.length" class="rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
-            {{ t('accounts.page.emptyFiltered') }}
-          </p>
+          <!-- accounts exist, but none match the active filter pill: a
+               channel-specific onboarding card (TODO.md "Empty channels
+               display a clean onboarding card with setup instructions and a
+               connect button"), not just a line of muted text. -->
+          <div v-else-if="!filteredAccounts.length" class="rounded-lg border border-border bg-card px-5 py-16 text-center">
+            <div
+              v-if="activeFilterTile"
+              class="mx-auto w-14 h-14 rounded-xl grid place-items-center text-white"
+              :class="activeFilterTile.dotClass"
+            >
+              <component :is="activeFilterTile.icon" class="w-7 h-7" />
+            </div>
+            <p class="mt-4 text-sm text-muted-foreground">{{ t('accounts.page.emptyFiltered') }}</p>
+            <Button class="mt-4" data-testid="channel-empty-connect" @click="openAddForChannel(activeFilter as ConnectableChannel)">
+              <Plus class="w-4 h-4" /> {{ t('accounts.page.connectChannel') }}
+            </Button>
+          </div>
 
           <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             <div

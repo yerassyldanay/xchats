@@ -9,10 +9,12 @@ import { useI18n } from 'vue-i18n'
 import { CircleCheck, LoaderCircle } from 'lucide-vue-next'
 import { useSettings } from '@/stores/settings'
 import { ApiError } from '@/api/client'
+import { CURATED_MODELS } from '@/lib/curatedModels'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Combobox } from '@/components/ui/combobox'
 import ProviderCredentialCard from '../ProviderCredentialCard.vue'
 import type { LLMSettings } from '@/types'
 
@@ -20,6 +22,11 @@ const store = useSettings()
 const { t } = useI18n()
 
 const modelProviders = computed(() => store.integrations.filter((p) => p.has_model))
+// TODO.md: "Default provider" doubles as the provider selector — picking one
+// here is also what reveals ITS credential card below, instead of every
+// provider's form rendering at once regardless of which one is actually in
+// use.
+const selectedProvider = computed(() => modelProviders.value.find((p) => p.id === form.default_provider) ?? null)
 
 function fromSettings(): LLMSettings {
   return { ...store.settings!.llm }
@@ -79,10 +86,11 @@ async function submit() {
         </div>
         <div>
           <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.defaultModel') }}</label>
-          <Input
+          <Combobox
             v-model="form.default_model"
+            :options="CURATED_MODELS[form.default_provider] ?? []"
             :placeholder="t('settings.aiEngine.defaultModelHint')"
-            class="mt-1.5 font-mono"
+            class="mt-1.5"
             data-testid="ai-engine-default-model"
           />
         </div>
@@ -121,9 +129,11 @@ async function submit() {
 
     <div>
       <h3 class="font-semibold mb-3">{{ t('settings.aiEngine.providersTitle') }}</h3>
-      <div class="space-y-4">
-        <ProviderCredentialCard v-for="p in modelProviders" :key="p.id" :provider="p" />
-      </div>
+      <p class="mb-3 text-sm text-muted-foreground">{{ t('settings.aiEngine.providersHint') }}</p>
+      <!-- TODO.md: only the selected provider's credential form renders —
+           "Default provider" above IS the provider selector, so switching
+           it is what reveals a different card here. -->
+      <ProviderCredentialCard v-if="selectedProvider" :key="selectedProvider.id" :provider="selectedProvider" />
     </div>
   </div>
 </template>

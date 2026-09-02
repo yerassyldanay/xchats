@@ -10,14 +10,16 @@
 // independent identity spaces server-side, so reusing the same generated id
 // for both is fine, and re-sending under it keeps the same thread — exactly
 // like an operator running one test conversation at a time from Playground.
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, LoaderCircle, SendHorizontal, Trash2 } from 'lucide-vue-next'
+import { Bot, CircleAlert, LoaderCircle, Plus, SendHorizontal, Trash2 } from 'lucide-vue-next'
 import { api, ApiError } from '@/api/client'
+import { useAuth } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
+import type { AiDraft, Message } from '@/types'
 
 interface SimMessage {
   role: 'user' | 'assistant'
@@ -32,9 +34,45 @@ interface SimulatorMessageResponse {
   draft?: { id: string; text: string; reply_language: string; escalate: boolean }
 }
 
-const { t } = useI18n()
+// A session is the (contact_ref/conversation_ref) pair every send under it
+// reuses, plus the chat id learned back from the first send — needed to
+// fetch history, since simulator.go upserts through the SAME ingestion path
+// a real WhatsApp message takes (see the file's own doc comment below), and
+// that chat id is otherwise opaque to the caller.
+interface SimSession {
+  ref: string
+  conversationId: string | null
+}
 
-const sessionRef = `sim-ui-${crypto.randomUUID()}`
+const { t, tm } = useI18n()
+const auth = useAuth()
+
+// Stable per-operator localStorage key — was crypto.randomUUID() on every
+// mount before, which minted a brand-new (and thus empty-looking) session on
+// every reload and left the old one behind as an orphaned duplicate test
+// chat in the Inbox. 'sim-default' is the static fallback for the sliver of
+// time auth.user can be unset while this route's guard still resolves.
+const storageKey = computed(() => `sim-user-${auth.user?.id || 'default'}`)
+
+function loadSession(): SimSession {
+  try {
+    const raw = localStorage.getItem(storageKey.value)
+    if (raw) return JSON.parse(raw) as SimSession
+  } catch {
+    // Malformed/unavailable storage — start fresh, same as a first-ever visit.
+  }
+  return { ref: storageKey.value, conversationId: null }
+}
+function saveSession() {
+  try {
+    localStorage.setItem(storageKey.value, JSON.stringify(session.value))
+  } catch {
+    // Unavailable storage (locked-down/private browsing) — the session just
+    // won't survive a refresh; nothing else depends on the write succeeding.
+  }
+}
+
+const session = ref<SimSession>(loadSession())
 
 const messages = ref<SimMessage[]>([])
 const input = ref('')
@@ -42,6 +80,8 @@ const sending = ref(false)
 const error = ref('')
 const unavailable = ref(false)
 const listEl = ref<HTMLElement | null>(null)
+const loadingHistory = ref(false)
+const suggestions = computed(() => tm('simulator.hero.suggestions') as unknown as string[])
 
 // KB-02: which KB a send answers against. 'live' matches every real channel;
 // 'draft' answers against this org's own Черновик (pending, unpublished
@@ -66,6 +106,14 @@ async function clearData() {
     const res = await api.del<{ conversations_deleted: number; customers_deleted: number }>('/simulator/data')
     clearResult.value = t('simulator.clearDataSuccess', { conversations: res.conversations_deleted, customers: res.customers_deleted })
     messages.value = []
+    // clearData wipes every simulator conversation org-wide, so the chat this
+    // session's conversationId points at is gone too — same fresh-session
+    // shape as "+ New conversation", but keeping the same ref/thread identity
+    // since the operator did not ask to start a new one.
+    if (session.value.conversationId) {
+      session.value = { ...session.value, conversationId: null }
+      saveSession()
+    }
   } catch (e) {
     clearError.value = e instanceof ApiError ? e.message : t('simulator.clearDataError')
   } finally {
@@ -79,24 +127,82 @@ async function scrollToBottom() {
   listEl.value?.scrollTo({ top: listEl.value.scrollHeight, behavior: 'smooth' })
 }
 
-async function send() {
-  const text = input.value.trim()
-  if (!text || sending.value) return
+// loadHistory restores an existing thread on mount/reload (TODO.md: "fetch
+// its previous message history on load") by reading the same chat the real
+// Inbox would — the simulator writes through the SAME ingestion path a real
+// WhatsApp message takes (see this file's own doc comment), so its chat row
+// is an entirely ordinary one once a first send has created it. Only the
+// customer's own turns ever persist as real messages, though: an AI reply
+// here is a pending SUGGESTED draft, never auto-approved into a real
+// outbound message (see send() below) — so it is not itself in that list,
+// which is why the latest draft is layered on separately as the trailing
+// bubble, matching what was on screen when the tab was last open.
+async function loadHistory() {
+  const id = session.value.conversationId
+  if (!id) return
+  loadingHistory.value = true
+  try {
+    const [msgPage, draftPage] = await Promise.all([
+      api.get<{ items: Message[] }>(`/chats/${id}/messages?limit=80`),
+      api.get<{ items: AiDraft[] }>(`/chats/${id}/ai-drafts`),
+    ])
+    const restored: SimMessage[] = msgPage.items.map((m) => ({
+      role: m.direction === 'out' ? 'assistant' : 'user',
+      text: m.content,
+    }))
+    const latestDraft = draftPage.items[0]
+    if (latestDraft) restored.push({ role: 'assistant', text: latestDraft.draft_text, escalate: latestDraft.escalate })
+    messages.value = restored
+  } catch {
+    // A gone/inaccessible chat (e.g. cleared from another session) just
+    // falls back to an empty thread — same as a brand new one.
+  } finally {
+    loadingHistory.value = false
+  }
+  await scrollToBottom()
+}
+onMounted(loadHistory)
+
+// "+ New conversation" (TODO.md) mints a fresh timestamped ref under the
+// SAME per-operator storage key, so it becomes the one future reloads
+// restore — without touching the previous thread, which stays exactly where
+// it is in the Inbox/CRM (still reachable there, just no longer this tab's
+// active session).
+function newConversation() {
+  session.value = { ref: `${storageKey.value}-${Date.now()}`, conversationId: null }
+  saveSession()
+  messages.value = []
+  input.value = ''
   error.value = ''
   unavailable.value = false
-  messages.value.push({ role: 'user', text })
+}
+
+// text is an explicit override (the hero suggestion chips); anything else —
+// including the native Event Vue's "@click=\"send\"" method-handler shorthand
+// passes bare identifier handlers, on the input's own Enter-to-send binding
+// too — falls back to the composer's own text.
+async function send(text?: unknown) {
+  const value = (typeof text === 'string' ? text : input.value).trim()
+  if (!value || sending.value) return
+  error.value = ''
+  unavailable.value = false
+  messages.value.push({ role: 'user', text: value })
   input.value = ''
   sending.value = true
   await scrollToBottom()
   const usedDraft = environment.value === 'draft'
   try {
     const res = await api.post<SimulatorMessageResponse>('/simulator/messages', {
-      contact_ref: sessionRef,
-      conversation_ref: sessionRef,
-      text,
+      contact_ref: session.value.ref,
+      conversation_ref: session.value.ref,
+      text: value,
       wait_for_response: true,
       use_draft: usedDraft,
     })
+    if (session.value.conversationId !== res.conversation_id) {
+      session.value = { ...session.value, conversationId: res.conversation_id }
+      saveSession()
+    }
     messages.value.push({ role: 'assistant', text: res.draft?.text ?? '', escalate: res.draft?.escalate, usedDraft })
   } catch (e) {
     // A 404 here almost always means SIMULATOR_ENABLED is off — the route is
@@ -126,9 +232,14 @@ async function send() {
         </p>
       </div>
       <div class="flex flex-col items-end gap-2 shrink-0">
-        <Button variant="outline" size="sm" class="text-muted-foreground" data-testid="simulator-clear-data" @click="clearConfirmOpen = true">
-          <Trash2 class="w-3.5 h-3.5" /> {{ t('simulator.clearData') }}
-        </Button>
+        <div class="flex items-center gap-2">
+          <Button variant="outline" size="sm" data-testid="simulator-new-conversation" @click="newConversation">
+            <Plus class="w-3.5 h-3.5" /> {{ t('simulator.newConversation') }}
+          </Button>
+          <Button variant="outline" size="sm" class="text-muted-foreground" data-testid="simulator-clear-data" @click="clearConfirmOpen = true">
+            <Trash2 class="w-3.5 h-3.5" /> {{ t('simulator.clearData') }}
+          </Button>
+        </div>
         <div class="text-right">
           <label class="block text-[11px] font-medium text-muted-foreground mb-1">{{ t('simulator.environmentLabel') }}</label>
           <Tabs :model-value="environment" @update:model-value="(v) => (environment = v as 'live' | 'draft')">
@@ -145,7 +256,38 @@ async function send() {
     <p v-else-if="clearError" class="px-8 pt-3 text-xs text-destructive" data-testid="simulator-clear-error">{{ clearError }}</p>
 
     <div ref="listEl" class="flex-1 overflow-y-auto px-8 py-6 space-y-4" data-testid="simulator-messages">
-      <p v-if="!messages.length" class="text-sm text-muted-foreground text-center py-10">{{ t('simulator.empty') }}</p>
+      <div v-if="loadingHistory" class="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+        <LoaderCircle class="w-4 h-4 animate-spin" /> {{ t('simulator.loadingHistory') }}
+      </div>
+
+      <!-- Rich onboarding hero (TODO.md: "replace the plain empty text with a
+           rich visual card") — only for a genuinely fresh thread; a restored
+           one with real history never shows this even briefly. -->
+      <div v-else-if="!messages.length" class="max-w-lg mx-auto text-center py-8" data-testid="simulator-hero">
+        <div class="mx-auto w-14 h-14 rounded-2xl bg-violet-500/10 text-violet-600 grid place-items-center">
+          <Bot class="w-7 h-7" />
+        </div>
+        <h2 class="mt-4 text-base font-semibold">{{ t('simulator.hero.title') }}</h2>
+        <p class="mt-1.5 text-sm text-muted-foreground">{{ t('simulator.hero.body') }}</p>
+        <p class="mt-4 flex items-start gap-1.5 rounded-lg bg-muted/50 px-3 py-2 text-left text-xs text-muted-foreground">
+          <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-0.5" /> {{ t('simulator.dataNotice') }}
+        </p>
+        <div class="mt-5">
+          <p class="mb-2 text-xs font-medium text-muted-foreground">{{ t('simulator.hero.suggestionsLabel') }}</p>
+          <div class="flex flex-wrap justify-center gap-2">
+            <button
+              v-for="s in suggestions"
+              :key="s"
+              type="button"
+              data-testid="simulator-hero-suggestion"
+              class="rounded-full border border-border bg-card px-3.5 py-1.5 text-sm text-left transition hover:bg-muted"
+              @click="send(s)"
+            >
+              {{ s }}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div
         v-for="(m, i) in messages"
