@@ -33,8 +33,15 @@ async function unwrap<T>(res: Response, path: string): Promise<T> {
 
 type Headers = Record<string, string>
 
-async function send<T>(method: string, path: string, body?: unknown, headers?: Headers): Promise<T> {
-  const opts: RequestInit = { method, credentials: 'include', headers: { ...(headers || {}) } }
+// isAbortError recognizes a fetch aborted via AbortController.abort() — every
+// caller that races a request against a newer one (INB-08) must swallow this
+// silently instead of surfacing it as a load/save failure.
+export function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'AbortError'
+}
+
+async function send<T>(method: string, path: string, body?: unknown, headers?: Headers, signal?: AbortSignal): Promise<T> {
+  const opts: RequestInit = { method, credentials: 'include', headers: { ...(headers || {}) }, signal }
   if (body !== undefined) {
     opts.headers = { 'Content-Type': 'application/json', ...(headers || {}) }
     opts.body = JSON.stringify(body)
@@ -44,18 +51,19 @@ async function send<T>(method: string, path: string, body?: unknown, headers?: H
 }
 
 export const api = {
-  get: <T>(path: string, headers?: Headers) => send<T>('GET', path, undefined, headers),
-  post: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('POST', path, body, headers),
-  put: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('PUT', path, body, headers),
-  patch: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('PATCH', path, body, headers),
-  del: <T>(path: string, headers?: Headers) => send<T>('DELETE', path, undefined, headers),
-  async upload(file: File): Promise<{ media_id: string; url: string; media_type: string }> {
+  get: <T>(path: string, headers?: Headers, signal?: AbortSignal) => send<T>('GET', path, undefined, headers, signal),
+  post: <T>(path: string, body?: unknown, headers?: Headers, signal?: AbortSignal) => send<T>('POST', path, body, headers, signal),
+  put: <T>(path: string, body?: unknown, headers?: Headers, signal?: AbortSignal) => send<T>('PUT', path, body, headers, signal),
+  patch: <T>(path: string, body?: unknown, headers?: Headers, signal?: AbortSignal) => send<T>('PATCH', path, body, headers, signal),
+  del: <T>(path: string, headers?: Headers, signal?: AbortSignal) => send<T>('DELETE', path, undefined, headers, signal),
+  async upload(file: File, signal?: AbortSignal): Promise<{ media_id: string; url: string; media_type: string }> {
     const form = new FormData()
     form.append('file', file)
     const res = await fetch(API_BASE + PREFIX + '/media', {
       method: 'POST',
       credentials: 'include',
       body: form,
+      signal,
     })
     return unwrap(res, '/media')
   },

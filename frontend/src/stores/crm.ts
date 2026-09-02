@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { api, ApiError } from '../api/client'
+import { api, ApiError, isAbortError } from '../api/client'
 import { log } from '../lib/logfmt'
 import { currentUtcOffsetMinutes } from '../lib/schedule'
 import type {
@@ -56,6 +56,12 @@ export const useCrm = defineStore('crm', {
     loadingProfile: false,
     savingProfile: false,
     profileError: '',
+    // profileAbort/timelineAbort are INB-08's race guard for the sidebar's
+    // customerId watcher: rapid chat switching fires loadProfile/loadTimeline
+    // for each intermediate customer, and without this the slowest response
+    // — not the latest request — can win and show the wrong customer.
+    profileAbort: null as AbortController | null,
+    timelineAbort: null as AbortController | null,
 
     // customers list (the Клиенты page)
     customers: [] as Customer[],
@@ -113,21 +119,29 @@ export const useCrm = defineStore('crm', {
     // --- active customer profile -------------------------------------------
 
     async loadProfile(customerId: string | null) {
+      this.profileAbort?.abort()
       if (!customerId) {
+        this.profileAbort = null
         this.profile = null
         this.notes = []
         this.timeline = []
         return
       }
+      const ctrl = new AbortController()
+      this.profileAbort = ctrl
       this.loadingProfile = true
       this.profileError = ''
       try {
-        this.profile = await api.get<CustomerProfile>(`/customers/${customerId}`)
+        const p = await api.get<CustomerProfile>(`/customers/${customerId}`, undefined, ctrl.signal)
+        if (this.profileAbort !== ctrl) return // superseded by a newer selection
+        this.profile = p
       } catch (e) {
+        if (isAbortError(e)) return
+        if (this.profileAbort !== ctrl) return
         this.profile = null
         this.profileError = errorMessage(e, 'Не удалось загрузить карточку клиента.')
       } finally {
-        this.loadingProfile = false
+        if (this.profileAbort === ctrl) this.loadingProfile = false
       }
     },
 
@@ -137,8 +151,17 @@ export const useCrm = defineStore('crm', {
     },
 
     async loadTimeline(customerId: string) {
-      const p = await api.get<ListResponse<TimelineEntry>>(`/customers/${customerId}/timeline`)
-      this.timeline = p.items
+      this.timelineAbort?.abort()
+      const ctrl = new AbortController()
+      this.timelineAbort = ctrl
+      try {
+        const p = await api.get<ListResponse<TimelineEntry>>(`/customers/${customerId}/timeline`, undefined, ctrl.signal)
+        if (this.timelineAbort !== ctrl) return
+        this.timeline = p.items
+      } catch (e) {
+        if (isAbortError(e)) return
+        log.warn('load timeline failed', { customerId, error: String(e) })
+      }
     },
 
     // patchCustomer applies one inline edit. Only the touched keys are sent —
