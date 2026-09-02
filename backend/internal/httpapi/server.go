@@ -540,7 +540,8 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/mcp-connection", s.handleMCPConnectionInfo)
 
 	// Simulator API (Phase 10) — gated: the route does not exist at all unless
-	// explicitly enabled (SIMULATOR_ENABLED, default false outside dev).
+	// enabled (SIMULATOR_ENABLED, defaults true — see config.defaults()). A
+	// deployment that wants it gone entirely sets SIMULATOR_ENABLED=false.
 	if s.cfg.System.SimulatorEnabled {
 		auth.POST("/simulator/messages", s.handleSimulatorMessage)
 		// KB-12: hard-deletes every conversation/customer/draft the

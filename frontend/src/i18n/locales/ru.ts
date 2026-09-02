@@ -520,6 +520,7 @@ export default {
       timeoutSeconds: 'Таймаут (секунды)',
       retry: 'Повторять при временном сбое',
       providersTitle: 'Провайдеры',
+      providersHint: 'Учётные данные для провайдера, выбранного выше в поле «Провайдер по умолчанию».',
     },
     extraction: {
       title: 'Парсеры и краулеры',
@@ -751,6 +752,7 @@ export default {
         setup: 'Настройка каналов',
       },
       connectChannel: 'Подключить канал',
+      addToChannel: 'Добавить аккаунт «{channel}»',
       dismiss: 'Скрыть',
       filters: {
         groupLabel: 'Фильтр по каналу',
@@ -901,6 +903,7 @@ export default {
     pageTitle: 'Симулятор',
     pageSubtitle: 'Проверьте ответы ассистента на вопросы клиента — без реального канала связи.',
     dataNotice: 'Тестовые сообщения здесь попадают в Инбокс и CRM как настоящий диалог, с пометкой «Симулятор».',
+    newConversation: '+ Новая беседа',
     clearData: 'Очистить данные симулятора',
     clearingData: 'Очистка…',
     clearDataConfirm: {
@@ -917,10 +920,21 @@ export default {
     send: 'Отправить',
     you: 'Вы',
     assistant: 'Ассистент',
-    empty: 'Задайте вопрос, чтобы проверить ответ ассистента.',
+    loadingHistory: 'Загрузка истории беседы…',
     thinking: 'Ассистент печатает…',
     escalated: 'Передано менеджеру',
     unavailable: 'Симулятор недоступен на этом сервере. Проверьте, что SIMULATOR_ENABLED включён в конфигурации бэкенда.',
+    hero: {
+      title: 'Проверьте, как отвечает ассистент',
+      body: 'Задайте любой вопрос, который мог бы задать клиент — ассистент ответит по действующей базе знаний, точно как в реальном диалоге.',
+      suggestionsLabel: 'Попробуйте один из примеров:',
+      suggestions: [
+        'Какие у вас есть способы доставки?',
+        'Есть ли сейчас скидки?',
+        'Как оплатить заказ?',
+      ],
+    },
+    inboxBanner: 'Это тестовая беседа с Симулятором — сообщения здесь не от настоящего клиента.',
   },
   // Channel-level debounce + scheduled auto-reply (Accounts.vue's
   // Automation button/badge/dialog).
@@ -986,6 +1000,12 @@ export default {
         channelSimulator: 'Симулятор (тестовые данные)',
       },
       newCustomer: 'Новый клиент',
+      viewToggle: {
+        groupLabel: 'Переключить вид',
+        grid: 'Плитка',
+        list: 'Список',
+      },
+      openChannelChat: 'Открыть этот диалог',
       merge: {
         action: 'Объединить',
         title: 'Объединить клиентов',
@@ -1005,12 +1025,20 @@ export default {
         tomorrow: 'Завтра',
         week: 'На неделе',
         overdue: 'Просрочено',
+        later: 'Позже',
       },
       scope: {
         me: 'Мои',
         all: 'Все',
         unassigned: 'Без ответственного',
       },
+      tabs: {
+        active: 'Активные',
+        completed: 'Выполненные',
+      },
+      newTask: '+ Новая задача',
+      searchPlaceholder: 'Поиск по клиенту или заметке…',
+      actionFilterAll: 'Все',
       empty: 'Задач в этом разделе нет',
       complete: 'Выполнено',
       reschedule: 'Перенести',
@@ -1023,10 +1051,18 @@ export default {
         meeting: 'Встреча',
         other: 'Другое',
       },
+      completedEmpty: 'Пока нет выполненных задач',
+      completedAt: 'Выполнено {when}',
+      reopen: 'Вернуть в работу',
     },
     dialog: {
       title: 'Следующий шаг',
       editTitle: 'Перенести задачу',
+      newTaskTitle: 'Новая задача',
+      customer: 'Клиент',
+      customerSearchPlaceholder: "Имя, телефон, {'@'}username…",
+      searchingCustomers: 'Поиск…',
+      changeCustomer: 'Изменить клиента',
       date: 'Дата',
       time: 'Время',
       timeHint: 'Время необязательно — без него задача считается на весь день.',
@@ -1040,7 +1076,21 @@ export default {
       cancel: 'Отмена',
       errors: {
         dateRequired: 'Укажите дату.',
+        customerRequired: 'Выберите клиента.',
         saveFailed: 'Не удалось сохранить задачу.',
+      },
+    },
+    reschedule: {
+      title: 'Перенести задачу',
+      currentlyDue: 'Сейчас назначено: {when}',
+      presets: {
+        plusHour: '+1 час',
+        tomorrow: 'Завтра в 10:00',
+        nextWeek: 'Следующая неделя',
+        custom: 'Своя дата и время',
+      },
+      errors: {
+        saveFailed: 'Не удалось перенести задачу.',
       },
     },
     timeline: {
@@ -1518,7 +1568,7 @@ export default {
     inbox: 'Инбокс',
     channels: 'Каналы',
     knowledgeBase: 'База знаний',
-    evals: 'Эвалы',
+    testsAndBenchmarks: 'Тесты и бенчмарки',
     settings: 'Настройки',
     needsAttention: '— требует внимания',
     organization: 'Организация',

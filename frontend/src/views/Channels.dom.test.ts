@@ -6,7 +6,7 @@ import { useAuth } from '@/stores/auth'
 import { useAccounts } from '@/stores/accounts'
 import { useChannelSetup } from '@/stores/channelSetup'
 import AddAccountDialog from '@/components/AddAccountDialog.vue'
-import Accounts from './Accounts.vue'
+import Channels from './Channels.vue'
 import type { Account, ChannelSetupEntry, ChannelSetupInfo, SetupKey, User } from '@/types'
 
 vi.mock('@/api/client', async (importOriginal) => {
@@ -24,9 +24,9 @@ function member(): User {
 function testRouter() {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/accounts', name: 'accounts', component: { template: '<div/>' } }],
+    routes: [{ path: '/channels', name: 'channels', component: { template: '<div/>' } }],
   })
-  router.push('/accounts')
+  router.push('/channels')
   return router
 }
 
@@ -121,10 +121,10 @@ afterEach(() => {
   wrapper = undefined
 })
 
-async function mountAccounts(user: User) {
+async function mountChannels(user: User) {
   const pinia = testPinia()
   useAuth().user = user
-  wrapper = mountKb(Accounts, { pinia, global: { plugins: [testRouter()] } })
+  wrapper = mountKb(Channels, { pinia, global: { plugins: [testRouter()] } })
   await flushPromises()
   return { wrapper: wrapper!, channelSetup: useChannelSetup() }
 }
@@ -134,10 +134,10 @@ async function openAddDialog() {
   await flushPromises()
 }
 
-describe('Accounts — tabs', () => {
+describe('Channels — tabs', () => {
   it('renders both tabs, defaults to Connected accounts, and switches to Channel setup on click', async () => {
     await installServer({ isAdmin: true })
-    const { wrapper: w } = await mountAccounts(admin())
+    const { wrapper: w } = await mountChannels(admin())
 
     expect(w.text()).toContain('Подключённые аккаунты')
     expect(w.text()).toContain('Настройка каналов')
@@ -152,11 +152,11 @@ describe('Accounts — tabs', () => {
   })
 })
 
-describe('Accounts — Telegram and QR WhatsApp are never gated', () => {
+describe('Channels — Telegram and QR WhatsApp are never gated', () => {
   for (const [label, user] of [['admin', admin()] as const, ['member', member()] as const]) {
     it(`${label}: both work immediately even with every setup entry not_configured`, async () => {
       await installServer({ isAdmin: label === 'admin' })
-      const { channelSetup } = await mountAccounts(user)
+      const { channelSetup } = await mountChannels(user)
       await openAddDialog()
 
       await findButton(body(), 'Telegram-бот')!.trigger('click')
@@ -184,10 +184,10 @@ describe('Accounts — Telegram and QR WhatsApp are never gated', () => {
   }
 })
 
-describe('Accounts — Meta channel routing', () => {
+describe('Channels — Meta channel routing', () => {
   it('ready: picking Instagram starts the connect immediately, no setup detour', async () => {
     const { api } = await installServer({ isAdmin: true, state: { publicReady: true, metaReady: true, igReady: true } })
-    const { channelSetup } = await mountAccounts(admin())
+    const { channelSetup } = await mountChannels(admin())
     await openAddDialog()
 
     await findButton(body(), 'Instagram Direct')!.trigger('click')
@@ -199,7 +199,7 @@ describe('Accounts — Meta channel routing', () => {
 
   it('missing + admin: routes to Channel setup, focused on the first missing prerequisite', async () => {
     await installServer({ isAdmin: true }) // nothing configured
-    const { wrapper: w, channelSetup } = await mountAccounts(admin())
+    const { wrapper: w, channelSetup } = await mountChannels(admin())
     await openAddDialog()
 
     await findButton(body(), 'Instagram Direct')!.trigger('click')
@@ -214,7 +214,7 @@ describe('Accounts — Meta channel routing', () => {
 
   it('missing + member: shows the administrator message in-dialog and starts nothing', async () => {
     await installServer({ isAdmin: false }) // nothing configured
-    const { channelSetup } = await mountAccounts(member())
+    const { channelSetup } = await mountChannels(member())
     await openAddDialog()
 
     const { api } = await import('@/api/client')
@@ -228,10 +228,10 @@ describe('Accounts — Meta channel routing', () => {
   })
 })
 
-describe('Accounts — guided stepping on a fresh install', () => {
+describe('Channels — guided stepping on a fresh install', () => {
   it('walks Public access → Meta Developer App → Instagram API, then resumes the Instagram connect', async () => {
     const { api } = await installServer({ isAdmin: true })
-    const { wrapper: w, channelSetup } = await mountAccounts(admin())
+    const { wrapper: w, channelSetup } = await mountChannels(admin())
     await openAddDialog()
 
     // 1. Picking Instagram on a fresh install focuses Public access — NOT the Instagram card.
@@ -268,10 +268,10 @@ describe('Accounts — guided stepping on a fresh install', () => {
   })
 })
 
-describe('Accounts — multiple accounts on an already-ready channel', () => {
+describe('Channels — multiple accounts on an already-ready channel', () => {
   it('connecting a second account never re-triggers the setup prompt', async () => {
     const { api } = await installServer({ isAdmin: true, state: { publicReady: true, metaReady: true, igReady: true } })
-    const { channelSetup } = await mountAccounts(admin())
+    const { channelSetup } = await mountChannels(admin())
 
     await openAddDialog()
     await findButton(body(), 'Instagram Direct')!.trigger('click')
@@ -295,10 +295,10 @@ describe('Accounts — multiple accounts on an already-ready channel', () => {
 // WhatsApp session used to be recoverable only via a small, unlabeled icon
 // button — easy to miss. It should now also surface as a prominent banner
 // right on the account's own card.
-describe('Accounts — dropped WhatsApp session banner', () => {
+describe('Channels — dropped WhatsApp session banner', () => {
   it('shows a prominent reconnect banner on a broken QR-WhatsApp account, and starts a reconnect on click', async () => {
     await installServer({ isAdmin: true })
-    const { wrapper: w } = await mountAccounts(admin())
+    const { wrapper: w } = await mountChannels(admin())
 
     useAccounts().accounts = [
       {
@@ -332,7 +332,7 @@ describe('Accounts — dropped WhatsApp session banner', () => {
 
   it('shows no banner for a healthy or still-connecting account', async () => {
     await installServer({ isAdmin: true })
-    const { wrapper: w } = await mountAccounts(admin())
+    const { wrapper: w } = await mountChannels(admin())
 
     useAccounts().accounts = [
       {
@@ -360,7 +360,7 @@ describe('Accounts — dropped WhatsApp session banner', () => {
 // docs/ux/flows/02-connect-whatsapp-qr.md, friction point 7: the old
 // Connected/Waiting/Broken counters are replaced by per-channel-type pills
 // that also filter the account list below.
-describe('Accounts — channel-type filter pills', () => {
+describe('Channels — channel-type filter pills', () => {
   function waAccount(): Account {
     return {
       id: 'acct-wa',
@@ -398,7 +398,7 @@ describe('Accounts — channel-type filter pills', () => {
 
   it('shows a count per channel type and filters the list on click', async () => {
     await installServer({ isAdmin: true })
-    const { wrapper: w } = await mountAccounts(admin())
+    const { wrapper: w } = await mountChannels(admin())
     useAccounts().accounts = [waAccount(), tgAccount()]
     await flushPromises()
 
@@ -419,9 +419,9 @@ describe('Accounts — channel-type filter pills', () => {
     expect(w.text()).toContain('Support Bot')
   })
 
-  it('shows a distinct empty state when a filter matches nothing, without offering the fresh-install CTA', async () => {
+  it('shows a distinct empty state when a filter matches nothing, with its own onboarding CTA for that channel', async () => {
     await installServer({ isAdmin: true })
-    const { wrapper: w } = await mountAccounts(admin())
+    const { wrapper: w } = await mountChannels(admin())
     useAccounts().accounts = [waAccount()]
     await flushPromises()
 
@@ -430,5 +430,27 @@ describe('Accounts — channel-type filter pills', () => {
 
     expect(w.text()).toContain('Каналов этого типа пока нет.')
     expect(w.text()).not.toContain('Sales WA')
+
+    // TODO.md Channels phase: the empty-filtered state gets its own connect
+    // CTA (channel-specific onboarding), landing on the SAME dialog the
+    // per-pill "+ Add" button next to the filter pills does. A dedicated
+    // testid disambiguates it from the header's own generic "Подключить
+    // канал" button, which shares the exact same label.
+    await w.get('[data-testid="channel-empty-connect"]').trigger('click')
+    await flushPromises()
+    expect(w.findComponent(AddAccountDialog).props('startChannel')).toBe('telegram')
+  })
+
+  it('the per-channel "+ Add" button next to each filter pill starts that channel\'s connect flow directly', async () => {
+    await installServer({ isAdmin: true })
+    const { wrapper: w } = await mountChannels(admin())
+    useAccounts().accounts = [waAccount(), tgAccount()]
+    await flushPromises()
+
+    await w.get('[aria-label="Добавить аккаунт «Telegram-бот»"]').trigger('click')
+    await flushPromises()
+
+    expect(w.findComponent(AddAccountDialog).exists()).toBe(true)
+    expect(w.findComponent(AddAccountDialog).props('startChannel')).toBe('telegram')
   })
 })

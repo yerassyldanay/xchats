@@ -522,6 +522,7 @@ export default {
       timeoutSeconds: 'Таймаут (секунд)',
       retry: 'Уақытша ақау кезінде қайталау',
       providersTitle: 'Провайдерлер',
+      providersHint: 'Жоғарыда «Әдепкі провайдер» өрісінде таңдалған провайдердің тіркелгі деректері.',
     },
     extraction: {
       title: 'Парсерлер мен краулерлер',
@@ -753,6 +754,7 @@ export default {
         setup: 'Арналарды баптау',
       },
       connectChannel: 'Арна қосу',
+      addToChannel: '«{channel}» аккаунтын қосу',
       dismiss: 'Жасыру',
       filters: {
         groupLabel: 'Арна бойынша сүзу',
@@ -899,6 +901,7 @@ export default {
     pageTitle: 'Симулятор',
     pageSubtitle: 'Көмекшінің клиент сұрақтарына жауабын тексеріңіз — нақты байланыс арнасынсыз.',
     dataNotice: 'Мұндағы тест хабарламалары нағыз әңгіме сияқты Инбокс пен CRM-ге түседі, «Симулятор» деп белгіленеді.',
+    newConversation: '+ Жаңа әңгіме',
     clearData: 'Симулятор деректерін тазалау',
     clearingData: 'Тазалануда…',
     clearDataConfirm: {
@@ -915,10 +918,21 @@ export default {
     send: 'Жіберу',
     you: 'Сіз',
     assistant: 'Көмекші',
-    empty: 'Көмекшінің жауабын тексеру үшін сұрақ қойыңыз.',
+    loadingHistory: 'Әңгіме тарихы жүктелуде…',
     thinking: 'Көмекші жазып жатыр…',
     escalated: 'Менеджерге берілді',
     unavailable: 'Бұл серверде симулятор қолжетімсіз. Бэкенд конфигурациясында SIMULATOR_ENABLED қосулы екенін тексеріңіз.',
+    hero: {
+      title: 'Көмекшінің қалай жауап беретінін тексеріңіз',
+      body: 'Клиент қоятын кез келген сұрақты қойыңыз — көмекші қолданыстағы білім қоры бойынша, нақты диалогтегідей жауап береді.',
+      suggestionsLabel: 'Мына мысалдардың бірін көріңіз:',
+      suggestions: [
+        'Жеткізудің қандай тәсілдері бар?',
+        'Қазір жеңілдіктер бар ма?',
+        'Тапсырысты қалай төлеуге болады?',
+      ],
+    },
+    inboxBanner: 'Бұл Симулятормен тестілік әңгіме — мұндағы хабарламалар нақты клиенттен емес.',
   },
   // Channel-level debounce + scheduled auto-reply (Accounts.vue's
   // Automation button/badge/dialog).
@@ -984,6 +998,12 @@ export default {
         channelSimulator: 'Симулятор (тест деректері)',
       },
       newCustomer: 'Жаңа клиент',
+      viewToggle: {
+        groupLabel: 'Көріністі ауыстыру',
+        grid: 'Тор',
+        list: 'Тізім',
+      },
+      openChannelChat: 'Осы әңгімені ашу',
       merge: {
         action: 'Біріктіру',
         title: 'Клиенттерді біріктіру',
@@ -1003,12 +1023,20 @@ export default {
         tomorrow: 'Ертең',
         week: 'Осы аптада',
         overdue: 'Мерзімі өткен',
+        later: 'Кейінірек',
       },
       scope: {
         me: 'Меніңкі',
         all: 'Барлығы',
         unassigned: 'Жауаптысыз',
       },
+      tabs: {
+        active: 'Белсенді',
+        completed: 'Орындалған',
+      },
+      newTask: '+ Жаңа тапсырма',
+      searchPlaceholder: 'Клиент немесе ескертпе бойынша іздеу…',
+      actionFilterAll: 'Барлығы',
       empty: 'Бұл бөлімде тапсырмалар жоқ',
       complete: 'Орындалды',
       reschedule: 'Ауыстыру',
@@ -1021,10 +1049,18 @@ export default {
         meeting: 'Кездесу',
         other: 'Басқа',
       },
+      completedEmpty: 'Орындалған тапсырмалар әлі жоқ',
+      completedAt: 'Орындалды: {when}',
+      reopen: 'Қайта ашу',
     },
     dialog: {
       title: 'Келесі қадам',
       editTitle: 'Тапсырманы ауыстыру',
+      newTaskTitle: 'Жаңа тапсырма',
+      customer: 'Клиент',
+      customerSearchPlaceholder: "Аты, телефоны, {'@'}username…",
+      searchingCustomers: 'Іздеу…',
+      changeCustomer: 'Клиентті өзгерту',
       date: 'Күні',
       time: 'Уақыты',
       timeHint: 'Уақыт міндетті емес — онсыз тапсырма күні бойы деп саналады.',
@@ -1038,7 +1074,21 @@ export default {
       cancel: 'Болдырмау',
       errors: {
         dateRequired: 'Күнін көрсетіңіз.',
+        customerRequired: 'Клиентті таңдаңыз.',
         saveFailed: 'Тапсырманы сақтау мүмкін болмады.',
+      },
+    },
+    reschedule: {
+      title: 'Тапсырманы ауыстыру',
+      currentlyDue: 'Қазір белгіленген: {when}',
+      presets: {
+        plusHour: '+1 сағат',
+        tomorrow: 'Ертең сағат 10:00',
+        nextWeek: 'Келесі апта',
+        custom: 'Өз күні мен уақыты',
+      },
+      errors: {
+        saveFailed: 'Тапсырманы ауыстыру мүмкін болмады.',
       },
     },
     timeline: {
@@ -1405,7 +1455,7 @@ export default {
     inbox: 'Инбокс',
     channels: 'Арналар',
     knowledgeBase: 'Білім базасы',
-    evals: 'Эвалдар',
+    testsAndBenchmarks: 'Тесттер мен бенчмарктер',
     settings: 'Баптаулар',
     needsAttention: '— назар аудару қажет',
     organization: 'Ұйым',

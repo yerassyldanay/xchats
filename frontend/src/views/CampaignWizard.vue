@@ -676,7 +676,7 @@ async function launchCampaign() {
         <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.accountLabel') }}</label>
         <div v-if="noAccounts" class="mt-1.5 rounded-md border border-border bg-muted/40 p-3">
           <p class="text-sm">{{ t('campaigns.wizard.noAccounts') }}</p>
-          <RouterLink :to="{ name: 'accounts' }" class="mt-2 inline-block">
+          <RouterLink :to="{ name: 'channels' }" class="mt-2 inline-block">
             <Button type="button" variant="outline" size="sm">{{ t('campaigns.wizard.connectAccount') }}</Button>
           </RouterLink>
         </div>

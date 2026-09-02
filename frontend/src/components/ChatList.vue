@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, LoaderCircle, MessagesSquare, PanelLeftClose, PanelLeftOpen, Search, SearchX, SquarePen } from 'lucide-vue-next'
+import { Bot, CircleAlert, LoaderCircle, MessagesSquare, PanelLeftClose, PanelLeftOpen, Search, SearchX, SquarePen } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { useAccounts } from '../stores/accounts'
 import { initials, colorFor, shortTime } from '../lib/format'
@@ -209,9 +209,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
           </span>
         </div>
         <div class="min-w-0 flex-1">
-          <div class="flex items-baseline justify-between gap-2">
+          <div class="flex items-baseline gap-1.5">
             <span class="font-semibold text-[15px] truncate">{{ c.contact.display_name }}</span>
-            <span class="text-[11px] text-muted-foreground shrink-0">{{ shortTime(c.last_message_at, locale) }}</span>
+            <!-- KB-12 / TODO.md: a synthetic test chat must never be mistaken
+                 for a real customer — the small channel dot below already
+                 sets it apart, but this prominent pill is the one that
+                 actually reads at a glance. -->
+            <span
+              v-if="c.channel === 'simulator'"
+              class="inline-flex items-center gap-0.5 shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400"
+            >
+              <Bot class="w-2.5 h-2.5" /> {{ t('simulator.navLabel') }}
+            </span>
+            <span class="ml-auto text-[11px] text-muted-foreground shrink-0">{{ shortTime(c.last_message_at, locale) }}</span>
           </div>
           <div
             v-if="accounts.hasMultiple && accounts.accountName(c.account_id)"

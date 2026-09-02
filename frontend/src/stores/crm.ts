@@ -74,12 +74,20 @@ export const useCrm = defineStore('crm', {
     assigneeFilter: 'all' as 'all' | 'me' | 'unassigned' | string,
     followupFilter: 'all' as FollowupFilter,
 
-    // follow-ups (the Задачи page + the sidebar's next action)
+    // follow-ups (the Задачи board + the sidebar's next action). `followups`
+    // is every OPEN one in scope, unbounded by due date — TODO.md's board
+    // groups them into Overdue/Today/Tomorrow/Later sections client-side
+    // (Followups.vue), rather than the server filtering to one bucket at a
+    // time the way the old single-bucket list view did.
     followups: [] as Followup[],
     buckets: { today: 0, tomorrow: 0, this_week: 0, overdue: 0 } as FollowupBuckets,
-    bucketFilter: 'today' as 'today' | 'tomorrow' | 'week' | 'overdue',
     followupAssignee: 'me' as 'all' | 'me' | 'unassigned',
     loadingFollowups: false,
+    // Completed/cancelled history (TODO.md "Completed" tab) — a separate
+    // list from the open board above, sorted newest-completed-first.
+    completedFollowups: [] as Followup[],
+    completedTotal: 0,
+    loadingCompletedFollowups: false,
   }),
   getters: {
     activeCustomer(state): Customer | null {
@@ -291,17 +299,41 @@ export const useCrm = defineStore('crm', {
       }
     },
 
+    // loadFollowups fetches every OPEN follow-up in scope, unbounded by due
+    // date — the board (Followups.vue) groups the result into time sections
+    // itself. bucket= is deliberately never sent: the backend's own bucket
+    // filter both windows by date AND implicitly restricts to state=open, so
+    // asking for state=open with no bucket returns the complete open set in
+    // one request instead of one per section.
     async loadFollowups() {
       this.loadingFollowups = true
       try {
         const params = new URLSearchParams(tzParam())
-        params.set('bucket', this.bucketFilter)
+        params.set('state', 'open')
         params.set('page_size', '200')
         if (this.followupAssignee !== 'all') params.set('assignee', this.followupAssignee)
         const p = await api.get<Page<Followup>>('/followups?' + params.toString())
         this.followups = p.items
       } finally {
         this.loadingFollowups = false
+      }
+    },
+
+    // loadCompletedFollowups is the "Completed" tab's own history view — a
+    // separate list from the open board above, newest-completed-first (the
+    // backend itself orders by due_at, which reads oddly for a history log).
+    async loadCompletedFollowups() {
+      this.loadingCompletedFollowups = true
+      try {
+        const params = new URLSearchParams()
+        params.set('state', 'completed')
+        params.set('page_size', '100')
+        if (this.followupAssignee !== 'all') params.set('assignee', this.followupAssignee)
+        const p = await api.get<Page<Followup>>('/followups?' + params.toString())
+        this.completedFollowups = [...p.items].sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
+        this.completedTotal = p.total
+      } finally {
+        this.loadingCompletedFollowups = false
       }
     },
 
@@ -325,38 +357,44 @@ export const useCrm = defineStore('crm', {
       this.afterFollowupChange(await api.post<Followup>(`/followups/${id}/cancel`))
     },
 
+    // reopenFollowup is the Completed tab's "put this back on the board"
+    // (TODO.md "Allow reopening accidentally completed tasks"). There is no
+    // dedicated reopen endpoint: RescheduleFollowup already resets a
+    // completed/cancelled item back to state=open as a side effect (see its
+    // own doc comment in crm_followups.go), so echoing the item's own
+    // due/action/note/assignee back through PATCH does exactly that without
+    // actually changing when it's due.
+    async reopenFollowup(fu: Followup): Promise<Followup> {
+      const reopened = await api.patch<Followup>(`/followups/${fu.id}`, {
+        customer_id: fu.customer_id,
+        conversation_id: fu.conversation_id,
+        channel: fu.channel,
+        due_at: fu.due_at,
+        due_date: fu.due_date,
+        due_minute: fu.due_minute,
+        action: fu.action,
+        note: fu.note,
+        assignee_user_id: fu.assignee_user_id,
+      })
+      this.completedFollowups = this.completedFollowups.filter((f) => f.id !== fu.id)
+      this.completedTotal = Math.max(0, this.completedTotal - 1)
+      this.afterFollowupChange(reopened)
+      return reopened
+    },
+
     // afterFollowupChange keeps every view that can show this follow-up in
-    // sync: the list it may have left, the bucket counts, and the sidebar's
-    // "next action" line.
+    // sync: the board it may have left (any state other than open), the
+    // bucket counts, the Completed history if it just landed there, and the
+    // sidebar's "next action" line.
     afterFollowupChange(fu: Followup) {
       this.followups = this.followups.filter((f) => f.id !== fu.id)
-      if (fu.state === 'open' && this.matchesBucket(fu)) this.followups.push(fu)
+      if (fu.state === 'open') this.followups.push(fu)
       this.followups.sort((a, b) => a.due_at.localeCompare(b.due_at))
+      this.completedFollowups = this.completedFollowups.filter((f) => f.id !== fu.id)
+      if (fu.state === 'completed') this.completedFollowups.unshift(fu)
       void this.loadBuckets()
       if (this.profile?.customer.id === fu.customer_id) {
         void this.loadProfile(fu.customer_id)
-      }
-    },
-
-    // matchesBucket decides locally whether a just-changed follow-up still
-    // belongs in the visible bucket, so completing one row does not need a
-    // full refetch. Boundaries mirror the backend's bucketWindow.
-    matchesBucket(fu: Followup): boolean {
-      const due = new Date(fu.due_at)
-      const start = new Date()
-      start.setHours(0, 0, 0, 0)
-      const day = 24 * 60 * 60 * 1000
-      switch (this.bucketFilter) {
-        case 'today':
-          return due >= start && due < new Date(start.getTime() + day)
-        case 'tomorrow':
-          return due >= new Date(start.getTime() + day) && due < new Date(start.getTime() + 2 * day)
-        case 'week':
-          return due >= start && due < new Date(start.getTime() + 7 * day)
-        case 'overdue':
-          return due < start
-        default:
-          return true
       }
     },
 
@@ -369,10 +407,11 @@ export const useCrm = defineStore('crm', {
       this.applyCustomer(c)
     },
 
+    // The board shows every open follow-up in scope regardless of due date
+    // now, so — unlike the old single-bucket list — there is no "does this
+    // even belong in the visible window" branch left to short-circuit on.
     applyFollowupEvent(fu: Followup) {
-      const known = this.followups.some((f) => f.id === fu.id)
-      if (known || this.matchesBucket(fu)) this.afterFollowupChange(fu)
-      else void this.loadBuckets()
+      this.afterFollowupChange(fu)
     },
   },
 })

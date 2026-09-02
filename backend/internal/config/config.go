@@ -68,8 +68,10 @@ type SystemConfig struct {
 	SessionTTLHours int    `yaml:"session_ttl_hours" env:"SESSION_TTL_HOURS"`
 	MinPasswordLen  int    `yaml:"min_password_len"`
 	// SimulatorEnabled gates the /simulator/messages API (Phase 10): the route is
-	// not registered at all when false. Defaults false — only a dev/staging
-	// deployment should set SIMULATOR_ENABLED=true.
+	// not registered at all when false. Defaults true so every install gets a
+	// working AI-draft/inbox-triage demo out of the box, without pairing a
+	// live WhatsApp/Telegram account first — set SIMULATOR_ENABLED=false to
+	// turn it off for a deployment that wants it gone entirely.
 	SimulatorEnabled bool `yaml:"simulator_enabled" env:"SIMULATOR_ENABLED"`
 	// CustomerMessageWaitSeconds is the system-wide default debounce wait for
 	// channel-level automation (internal/automation): how long a chat must go
@@ -291,6 +293,7 @@ func defaults() Config {
 			QueueWorkers:               4,
 			SessionTTLHours:            720,
 			MinPasswordLen:             8,
+			SimulatorEnabled:           true,
 			CustomerMessageWaitSeconds: 5,
 		},
 		MCP: MCPConfig{

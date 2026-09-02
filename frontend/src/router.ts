@@ -4,7 +4,7 @@ import Login from './views/Login.vue'
 import ChangePassword from './views/ChangePassword.vue'
 import Chatboard from './views/Chatboard.vue'
 import Chat from './views/Chat.vue'
-import Accounts from './views/Accounts.vue'
+import Channels from './views/Channels.vue'
 import Customers from './views/Customers.vue'
 import Followups from './views/Followups.vue'
 import Playground from './views/Playground.vue'
@@ -34,7 +34,13 @@ const router = createRouter({
     // inbox. Different surfaces, one unfortunate letter apart — see
     // internal/httpapi/chat_assistant.go's header.
     { path: '/chat', name: 'chat', component: Chat, meta: { requiresAuth: true } },
-    { path: '/accounts', name: 'accounts', component: Accounts, meta: { requiresAuth: true } },
+    { path: '/channels', name: 'channels', component: Channels, meta: { requiresAuth: true } },
+    // /accounts was the legacy path — Channels.vue's own name always matched
+    // the product's "Channels" label, only the route itself lagged. Old
+    // links/bookmarks still land somewhere real; a function redirect (not a
+    // bare string) keeps ?tab=setup deep links (CommunicationChannelsTab.vue)
+    // working through the redirect instead of dropping the query.
+    { path: '/accounts', redirect: (to) => ({ path: '/channels', query: to.query }) },
     { path: '/customers', name: 'customers', component: Customers, meta: { requiresAuth: true } },
     { path: '/followups', name: 'followups', component: Followups, meta: { requiresAuth: true } },
     { path: '/draft', name: 'draft', component: Playground, meta: { requiresAuth: true } },

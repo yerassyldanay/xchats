@@ -37,7 +37,7 @@ function testRouter() {
     routes: [
       { path: '/', name: 'chatboard', component: { template: '<div/>' } },
       { path: '/settings', name: 'settings', component: { template: '<div/>' } },
-      { path: '/accounts', name: 'accounts', component: { template: '<div/>' } },
+      { path: '/channels', name: 'channels', component: { template: '<div/>' } },
       { path: '/kb', name: 'knowledge-base', component: { template: '<div/>' } },
     ],
   })

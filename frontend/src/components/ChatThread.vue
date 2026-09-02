@@ -2,8 +2,10 @@
 import { computed, nextTick, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  Bot,
   Check,
   CheckCheck,
+  CircleAlert,
   CircleCheck,
   Clock,
   Download,
@@ -123,7 +125,15 @@ function isAudio(m: Message['media'][number]) {
             </span>
           </div>
           <div class="min-w-0">
-            <div class="font-semibold leading-tight truncate">{{ chat.contact.display_name }}</div>
+            <div class="flex items-center gap-1.5">
+              <div class="font-semibold leading-tight truncate">{{ chat.contact.display_name }}</div>
+              <span
+                v-if="chat.channel === 'simulator'"
+                class="inline-flex items-center gap-0.5 shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400"
+              >
+                <Bot class="w-2.5 h-2.5" /> {{ t('simulator.navLabel') }}
+              </span>
+            </div>
             <div class="text-xs text-muted-foreground truncate">{{ chat.contact.phone_number || chat.contact.phone_jid }}</div>
           </div>
         </div>
@@ -182,6 +192,12 @@ function isAudio(m: Message['media'][number]) {
           </Button>
         </div>
       </header>
+      <p
+        v-if="chat.channel === 'simulator'"
+        class="flex items-center gap-1.5 border-b border-violet-500/20 bg-violet-500/5 px-5 py-2 text-xs text-violet-700 dark:text-violet-400"
+      >
+        <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ t('simulator.inboxBanner') }}
+      </p>
       <p v-if="inbox.assignmentError" class="border-b border-destructive/20 bg-destructive/5 px-5 py-2 text-xs text-destructive">
         {{ inbox.assignmentError }}
       </p>
