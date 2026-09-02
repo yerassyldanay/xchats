@@ -855,6 +855,43 @@ export default {
       },
     },
   },
+  // chat.* — /chat, the Knowledge Base assistant (backend internal/chat +
+  // internal/chatkb). Deliberately separate from simulator.*: the simulator
+  // rehearses what a CUSTOMER would be told, this is an operator asking about
+  // their own knowledge base. Card labels reuse kb.entities.* rather than
+  // restating entity names here.
+  chat: {
+    navLabel: 'Ассистент',
+    newChat: 'Новый чат',
+    untitled: 'Без названия',
+    noConversations: 'Пока нет ни одного чата',
+    delete: 'Удалить чат',
+    confirmDelete: 'Нажмите ещё раз, чтобы удалить',
+    placeholder: 'Спросите о базе знаний…',
+    send: 'Отправить',
+    stop: 'Остановить',
+    emptyTitle: 'Ассистент по базе знаний',
+    emptyBody: 'Задайте вопрос о текущей базе знаний, о черновике — или попросите сравнить их. Ассистент отвечает только тем, что есть в базе, и всегда указывает источник.',
+    starters: [
+      'Что сейчас ожидает публикации в черновике?',
+      'Сравни текущие и черновиковые цены',
+      'Какие условия доставки и возврата?',
+    ],
+    source: {
+      real: 'Текущая',
+      draft: 'Черновик',
+    },
+    change: {
+      added: 'Добавлено',
+      removed: 'Удалено',
+      updated: 'Изменено',
+    },
+    card: {
+      field: 'Поле',
+      records: 'Записи',
+      notSet: 'не задано',
+    },
+  },
   // simulator.* — /simulator, a minimal chat UI over POST
   // /simulator/messages (backend/internal/httpapi/simulator.go, gated by
   // SIMULATOR_ENABLED). Not part of kb.*: it's its own page, not a Draft/

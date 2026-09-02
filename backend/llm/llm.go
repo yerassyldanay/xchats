@@ -53,6 +53,26 @@ type ChatClient interface {
 	Complete(ctx context.Context, req ChatRequest) (ChatResponse, error)
 }
 
+// StreamClient is a ChatClient that can also deliver a completion
+// incrementally, token by token, as the provider produces it. Deliberately a
+// SEPARATE interface rather than a method on ChatClient: every existing
+// caller (the response engine, the KB import pipeline) wants the whole
+// answer or nothing, and a provider adapter that cannot stream must stay a
+// valid ChatClient. A caller that wants streaming type-asserts for this and
+// falls back to Complete when the assertion fails.
+type StreamClient interface {
+	ChatClient
+	// Stream performs one chat-completion call, invoking onDelta with each
+	// incremental piece of text as it arrives. It returns the SAME
+	// ChatResponse Complete would have returned for the request — Text is
+	// the full concatenation of every delta, so a caller never has to
+	// accumulate the pieces itself to persist the result.
+	//
+	// onDelta runs on the goroutine that called Stream and must not block;
+	// cancelling ctx is the way to stop a stream early.
+	Stream(ctx context.Context, req ChatRequest, onDelta func(string)) (ChatResponse, error)
+}
+
 // ModelRef names a specific model on a specific provider — the unit the
 // Registry resolves a ChatClient by, and what a request or draft is recorded
 // against for provenance ("prompt_ref=... provider=... model=...").

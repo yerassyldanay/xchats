@@ -23,6 +23,9 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/automation"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/campaign"
+	"github.com/yerassyldanay/xchats/backend/internal/chat"
+	"github.com/yerassyldanay/xchats/backend/internal/chatkb"
+	"github.com/yerassyldanay/xchats/backend/internal/chatstore"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
@@ -464,6 +467,25 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	}, kbimport.DefaultConfig())
 	kbImportSvc.Start(ctx)
 
+	// The Knowledge Base chat assistant (/chat). It shares this process's one
+	// database connection (internal/dbx.Open refcounts by path, exactly like
+	// kb above) and the SAME llmRegistry every other AI path already uses, so
+	// a key saved in Settings takes effect here too with no extra wiring.
+	// Retrieval goes through chatkb over the existing kbstore — the chat
+	// never reads a KB table itself.
+	chatDB, err := chatstore.New(ctx, cfg.Storage.DBPath)
+	if err != nil {
+		fatal("chatstore", err)
+	}
+	defer chatDB.Close()
+	chatSvc := chat.New(chat.Deps{
+		Store:  chatDB,
+		KB:     chatkb.NewStoreService(kb),
+		LLMs:   llmRegistry,
+		Params: func() chat.Params { return resolveChatParams(settingsStore, cfg) },
+		Log:    log,
+	})
+
 	// The tunnel needs to serve the SAME router httpapi.New's Server owns —
 	// but httpapi.Deps also needs the tunnel (for /settings/tunnel/*)
 	// before that router exists. Broken by constructing the Server with no
@@ -481,7 +503,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		BootstrapAdminCredentialPath: bootstrapCredentialPath,
 		Credentials:                  credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
 		ProviderHealth: providerHealth, UpdateChecker: updateChecker,
-		KBImport: kbImportSvc,
+		KBImport: kbImportSvc, Chat: chatSvc,
 	})
 	router := srv.Router()
 
@@ -748,6 +770,30 @@ func resolveLLMParams(settingsStore *settings.Store, cfg *config.Config) respons
 		Temperature:  st.LLM.Temperature,
 		RetryEnabled: st.LLM.Retry,
 	}
+}
+
+// resolveChatParams is resolveLLMParams' Knowledge-Base-chat counterpart:
+// the chat assistant runs on the SAME provider and model the rest of xchats
+// is configured with (one place to change the model, not two), but with its
+// own answer-length and history-window knobs — a chat answer explaining what
+// changed across a knowledge base is a different shape of output from a
+// short customer reply, and LLM_DRAFT_MAX_TOKENS is sized for the latter.
+// Read fresh per request, so a Settings change applies to the next message.
+func resolveChatParams(settingsStore *settings.Store, cfg *config.Config) chat.Params {
+	p := chat.Params{
+		Model: llm.ModelRef{
+			Provider: orDefault(cfg.LLMDefaultProvider, "openrouter"),
+			Model:    orDefault(cfg.LLMDefaultModel, "google/gemini-2.5-flash"),
+		},
+		Temperature:   cfg.LLMDraftTemperature,
+		MaxTokens:     cfg.ChatMaxTokens,
+		HistoryWindow: cfg.ChatHistoryWindow,
+	}
+	if st, err := settingsStore.Load(); err == nil {
+		p.Model = llm.ModelRef{Provider: st.LLM.DefaultProvider, Model: st.LLM.DefaultModel}
+		p.Temperature = st.LLM.Temperature
+	}
+	return p
 }
 
 // shouldValidateProductionConfig (A10) reports whether runServe should run

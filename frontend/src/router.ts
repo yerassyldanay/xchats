@@ -3,6 +3,7 @@ import Home from './views/Home.vue'
 import Login from './views/Login.vue'
 import ChangePassword from './views/ChangePassword.vue'
 import Chatboard from './views/Chatboard.vue'
+import Chat from './views/Chat.vue'
 import Accounts from './views/Accounts.vue'
 import Customers from './views/Customers.vue'
 import Followups from './views/Followups.vue'
@@ -29,6 +30,10 @@ const router = createRouter({
     // it survives a refresh and can be bookmarked/shared/restored via Back-
     // Forward, instead of only ever existing in the Pinia store.
     { path: '/chatboard/:chatId?', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
+    // /chat is the Knowledge Base assistant; /chatboard above is the customer
+    // inbox. Different surfaces, one unfortunate letter apart — see
+    // internal/httpapi/chat_assistant.go's header.
+    { path: '/chat', name: 'chat', component: Chat, meta: { requiresAuth: true } },
     { path: '/accounts', name: 'accounts', component: Accounts, meta: { requiresAuth: true } },
     { path: '/customers', name: 'customers', component: Customers, meta: { requiresAuth: true } },
     { path: '/followups', name: 'followups', component: Followups, meta: { requiresAuth: true } },

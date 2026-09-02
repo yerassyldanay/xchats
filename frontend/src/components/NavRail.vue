@@ -16,6 +16,7 @@ import {
   Megaphone,
   Radio,
   Settings,
+  Sparkles,
   UsersRound,
 } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
@@ -74,6 +75,7 @@ const baseNav = computed<{ name: string; icon: Component; label: string; match: 
   { name: 'draft', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['draft'] },
   { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base'] },
   { name: 'simulator', icon: Bot, label: t('simulator.navLabel'), match: ['simulator'] },
+  { name: 'chat', icon: Sparkles, label: t('chat.navLabel'), match: ['chat'] },
 ])
 
 // The overdue count rides on the Задачи icon: an overdue follow-up is the one

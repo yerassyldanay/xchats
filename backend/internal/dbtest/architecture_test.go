@@ -22,6 +22,7 @@ var persistenceBoundary = map[string]bool{
 	modulePrefix + "internal/kbstore":       true,
 	modulePrefix + "internal/responsestore": true,
 	modulePrefix + "internal/mcpauth":       true,
+	modulePrefix + "internal/chatstore":     true,
 	modulePrefix + "internal/dbtest":        true,
 	// dbops is durability tooling (backup/restore/integrity-check), not a
 	// repository package — but it is the one other place in this module
@@ -32,6 +33,12 @@ var persistenceBoundary = map[string]bool{
 	// internal/store (a normal store consumer, like httpapi) but never
 	// internal/dbx directly — see the sqlite-cutover plan's Layering
 	// section, which this test enforces at build-graph level.
+	//
+	// internal/chatstore (the KB chat assistant's chat_conversations/
+	// chat_messages tables) IS a repository package, and is listed above.
+	// Its two consumers are not: internal/chat orchestrates the chat feature
+	// through chatstore's exported methods, and internal/chatkb reads the KB
+	// through kbstore's — neither touches dbx.
 }
 
 // dbtestConsumers may import internal/dbx from their TEST files only — never

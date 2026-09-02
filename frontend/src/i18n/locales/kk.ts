@@ -861,6 +861,39 @@ export default {
   // /simulator/messages (backend/internal/httpapi/simulator.go, gated by
   // SIMULATOR_ENABLED). Not part of kb.*: it's its own page, not a Draft/
   // Knowledge base surface.
+  // chat.* mirrors ru.ts/en.ts's chat.* key-for-key — see locales.test.ts.
+  chat: {
+    navLabel: 'Көмекші',
+    newChat: 'Жаңа чат',
+    untitled: 'Атаусыз',
+    noConversations: 'Әзірге чат жоқ',
+    delete: 'Чатты өшіру',
+    confirmDelete: 'Өшіру үшін тағы басыңыз',
+    placeholder: 'Білім базасы туралы сұраңыз…',
+    send: 'Жіберу',
+    stop: 'Тоқтату',
+    emptyTitle: 'Білім базасы бойынша көмекші',
+    emptyBody: 'Қолданыстағы білім базасы, жоба туралы сұраңыз — немесе екеуін салыстыруды сұраңыз. Көмекші тек білім базасында барды айтады және әр мәннің қай күйден алынғанын әрқашан көрсетеді.',
+    starters: [
+      'Жобада қазір не жариялануды күтіп тұр?',
+      'Қолданыстағы және жобадағы бағаларды салыстыр',
+      'Жеткізу мен қайтару шарттары қандай?',
+    ],
+    source: {
+      real: 'Қолданыстағы',
+      draft: 'Жоба',
+    },
+    change: {
+      added: 'Қосылды',
+      removed: 'Өшірілді',
+      updated: 'Өзгертілді',
+    },
+    card: {
+      field: 'Өріс',
+      records: 'Жазбалар',
+      notSet: 'көрсетілмеген',
+    },
+  },
   simulator: {
     navLabel: 'Симулятор',
     pageTitle: 'Симулятор',

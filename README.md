@@ -237,6 +237,7 @@ then the OS config directory). With no command it runs `serve`.
 | **Campaigns** | Bulk outbound to a pasted or uploaded recipient list, rate-limited and confined to a send window. Replies come back to the Inbox. |
 | **Draft** | Staging area for knowledge-base edits — shows exactly what publishing would add, update and remove. Also where you import from a URL or a document. |
 | **Knowledge Base** | The live, approved facts the assistant answers from. |
+| **Assistant** | Chat with your own knowledge base: ask what's live, what's staged in Draft, or how they differ. Answers stream in, sourced and labelled real vs. draft. |
 | **Simulator** | Try the assistant against a question with no live account attached. |
 | **Settings** *(admin)* | LLM provider and model, parsers, monitoring, ngrok, channels, team and roles, backups. |
 

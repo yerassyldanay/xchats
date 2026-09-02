@@ -1347,3 +1347,93 @@ export interface CustomFieldDef {
   options: string[]
   position: number
 }
+
+// --- Knowledge Base chat assistant (/chat) ---
+// Mirrors internal/chatkb and internal/chat. The backend computes every
+// structured element below from the knowledge base itself and hands it over
+// ready to render — nothing here is parsed out of the model's prose (see
+// internal/chatkb/components.go).
+
+// KbSource is the state a record was read from. The two are never merged.
+export type KbSource = 'REAL_KB' | 'DRAFT_KB'
+
+// KbRecordKind is the same plural entity vocabulary the KB editor pages use
+// (see components/kb/kbEntities.ts's ENTITY_META), so a chat card can borrow
+// their icon and localized entity name instead of inventing its own.
+export type KbRecordKind = 'topics' | 'products' | 'tariffs' | 'delivery_zones' | 'contacts' | 'policies' | 'config'
+
+export interface KbRecordField {
+  key: string
+  label: string
+  value: string
+}
+
+export interface KbRecord {
+  kind: KbRecordKind
+  key: string
+  title: string
+  source: KbSource
+  fields: KbRecordField[]
+}
+
+// KbChangeType mirrors chatkb.ChangeType.
+export type KbChangeType = 'added' | 'removed' | 'updated'
+
+export interface KbFieldDiff {
+  key: string
+  label: string
+  real: string
+  draft: string
+}
+
+export interface KbItemData {
+  record: KbRecord
+}
+export interface KbListData {
+  kind: KbRecordKind | ''
+  source: KbSource
+  records: KbRecord[]
+}
+export interface KbComparisonData {
+  kind: KbRecordKind
+  key: string
+  title: string
+  change: KbChangeType
+  real: KbRecord | null
+  draft: KbRecord | null
+  fields: KbFieldDiff[]
+}
+
+// ChatComponent is one structured element attached to an assistant turn. The
+// union is discriminated by `type` — see components/chat/KbComponent.vue.
+export type ChatComponent =
+  | { type: 'kb_item'; data: KbItemData }
+  | { type: 'kb_list'; data: KbListData }
+  | { type: 'kb_comparison'; data: KbComparisonData }
+
+export type ChatRole = 'user' | 'assistant' | 'system'
+
+// ChatMessage mirrors internal/chat.Message.
+export interface ChatMessage {
+  id: string
+  role: ChatRole
+  content: string
+  components: ChatComponent[]
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+// ChatConversation mirrors chatstore.Conversation — one sidebar row.
+export interface ChatConversation {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+// ChatConversationDetail is GET /chat/conversations/:id — a thread plus its
+// whole transcript.
+export interface ChatConversationDetail {
+  conversation: ChatConversation
+  messages: ChatMessage[]
+}
