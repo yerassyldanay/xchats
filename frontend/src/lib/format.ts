@@ -34,6 +34,21 @@ export function colorFor(id: string): string {
   return palette[h % palette.length]
 }
 
+// formatDateTime renders an absolute instant (day, month, year, hour:minute)
+// — unlike shortTime's today-vs-not split, entries spanning many days (e.g.
+// KB-14's import history list) need the date spelled out every time, not
+// just when it isn't today.
+export function formatDateTime(iso: string, locale = 'ru'): string {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString(intlLocale(locale), {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 export function shortTime(iso: string | null, locale = 'ru'): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -95,6 +110,21 @@ export function formatBytes(bytes: number): string {
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1000)), units.length - 1)
   const value = bytes / 1000 ** i
   return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`
+}
+
+// formatElapsed renders a duration the way a live progress counter should
+// (KB-04's own "elapsed time counter") — coarsest-unit-first, no
+// zero-padding (this is a running total, not a clock face). ms is always a
+// wall-clock delta the caller computes fresh (Date.now() - startedAt), so
+// this function itself stays a pure formatter with no timer of its own.
+export function formatElapsed(ms: number, t: (key: string, named?: Record<string, unknown>) => string): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) return t('common.elapsed.hm', { h: hours, m: minutes })
+  if (minutes > 0) return t('common.elapsed.ms', { m: minutes, s: seconds })
+  return t('common.elapsed.s', { s: seconds })
 }
 
 // tick maps a message delivery status to a UI-agnostic discriminant. The

@@ -68,8 +68,10 @@ type SystemConfig struct {
 	SessionTTLHours int    `yaml:"session_ttl_hours" env:"SESSION_TTL_HOURS"`
 	MinPasswordLen  int    `yaml:"min_password_len"`
 	// SimulatorEnabled gates the /simulator/messages API (Phase 10): the route is
-	// not registered at all when false. Defaults false — only a dev/staging
-	// deployment should set SIMULATOR_ENABLED=true.
+	// not registered at all when false. Defaults true so every install gets a
+	// working AI-draft/inbox-triage demo out of the box, without pairing a
+	// live WhatsApp/Telegram account first — set SIMULATOR_ENABLED=false to
+	// turn it off for a deployment that wants it gone entirely.
 	SimulatorEnabled bool `yaml:"simulator_enabled" env:"SIMULATOR_ENABLED"`
 	// CustomerMessageWaitSeconds is the system-wide default debounce wait for
 	// channel-level automation (internal/automation): how long a chat must go
@@ -236,6 +238,18 @@ type Config struct {
 	LLMDraftTimeoutSeconds int     `env:"LLM_DRAFT_TIMEOUT_SECONDS"`
 	LLMDraftRetry          bool    `env:"LLM_DRAFT_RETRY"`
 
+	// --- Knowledge Base chat assistant (/chat — internal/chat) ---
+	// ChatHistoryWindow is how many past turns of a conversation one request
+	// sends to the model. The WHOLE conversation is always persisted; this
+	// bounds only what the model is shown, which is both a cost control and
+	// a relevance one (an hour-old topic dragged into an unrelated question
+	// makes answers worse, not better). ChatMaxTokens bounds the answer —
+	// deliberately its own knob rather than sharing LLM_DRAFT_MAX_TOKENS,
+	// which is sized for a short customer reply, not for an explanation of
+	// what changed across a knowledge base.
+	ChatHistoryWindow int `env:"CHAT_HISTORY_WINDOW"`
+	ChatMaxTokens     int `env:"CHAT_MAX_TOKENS"`
+
 	// --- Langfuse (LLM observability; secrets via env) ---
 	// Tracing is best-effort: when disabled or keys are missing the LLM clients
 	// emit to OTel's no-op tracer (≈ free). See internal/telemetry.NewLangfuseProvider.
@@ -279,6 +293,7 @@ func defaults() Config {
 			QueueWorkers:               4,
 			SessionTTLHours:            720,
 			MinPasswordLen:             8,
+			SimulatorEnabled:           true,
 			CustomerMessageWaitSeconds: 5,
 		},
 		MCP: MCPConfig{
@@ -305,6 +320,9 @@ func defaults() Config {
 		LLMDraftTemperature:    0.3,
 		LLMDraftTimeoutSeconds: 60,
 		LLMDraftRetry:          true,
+
+		ChatHistoryWindow: 10,
+		ChatMaxTokens:     2000,
 
 		QueueDriver: "inmem",
 	}

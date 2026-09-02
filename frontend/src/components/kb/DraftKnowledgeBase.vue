@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// DraftKnowledgeBase is Черновик (/playground) — model-driven ingest (the
+// DraftKnowledgeBase is Черновик (/draft) — model-driven ingest (the
 // ingestion panel: submit a URL/file to the structured import pipeline, or
 // connect ChatGPT/Claude over MCP) PLUS review of whatever ends up staged,
 // from either source. This refines, rather than reverses, the 2026-08-03
@@ -7,9 +7,9 @@
 // sole MANUAL authoring surface — no Add buttons or record-create forms
 // live here, only what a model proposed gets edited in place, published,
 // or cancelled from this page.
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, LoaderCircle, Save, WandSparkles } from 'lucide-vue-next'
+import { CircleAlert, CircleCheck, LoaderCircle, Save, WandSparkles, X } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
 import { useDraftChanges } from '@/composables/useDraftChanges'
 import { useEntityTabs } from '@/composables/useEntityTabs'
@@ -52,6 +52,25 @@ onBeforeUnmount(() => {
   selection.clear()
 })
 
+// KB-03: once a publish empties the draft, bridge the operator straight to
+// testing the result instead of leaving them at a bare empty state with no
+// next step. approveWith (both approve() and every approveEntity() call —
+// ChangeList.vue's own publish() among them — funnel through it) is the one
+// choke point every publish path shares, so watching ITS OWN approving flag
+// catches all of them uniformly without wrapping each card's @publish
+// handler individually. Discard never touches `approving`, so a
+// discard-emptied draft correctly never triggers this — there is nothing
+// new published to go test.
+const justPublished = ref(false)
+watch(
+  () => pg.approving,
+  (approving, wasApproving) => {
+    if (wasApproving && !approving && !pg.error && !pg.gateReasons && isEmpty.value) {
+      justPublished.value = true
+    }
+  }
+)
+
 // --- multi-select -------------------------------------------------------
 
 // Every selectable entry currently in the draft, across all kinds — the
@@ -82,11 +101,28 @@ function toggleSelectAll() {
 // that keeps the bulk bar's count honest.
 watch(selectableTargets, (live) => selection.prune(live))
 
-async function publishAll() {
+// KB-08: Publish all commits every pending change straight to live channels
+// and Discard all destroys every pending change — both irreversible, both
+// now gated behind the app's own styled confirmation dialog (ConfirmDeleteDialog,
+// reused) instead of firing immediately (Publish all) or falling back to a
+// bare window.confirm (Discard all) that looked out of place next to every
+// other styled dialog in this app.
+const publishConfirmOpen = ref(false)
+const discardConfirmOpen = ref(false)
+
+function requestPublishAll() {
+  if (counts.value.total) publishConfirmOpen.value = true
+}
+async function confirmPublishAll() {
+  publishConfirmOpen.value = false
   await pg.approve()
 }
-async function discardAll() {
-  if (pg.pendingTotal && window.confirm(t('kb.draft.discardConfirm'))) await pg.discard()
+function requestDiscardAll() {
+  if (pg.pendingTotal) discardConfirmOpen.value = true
+}
+async function confirmDiscardAll() {
+  discardConfirmOpen.value = false
+  await pg.discard()
 }
 
 function isBusy(kind: string, key: string) {
@@ -94,6 +130,17 @@ function isBusy(kind: string, key: string) {
 }
 function blockedNote(kind: string, key: string) {
   return pg.gateBlockedKey === `${kind}:${key}` ? t('kb.draft.cardBlockedNote') : undefined
+}
+
+// KB-09: a gate reason's own kind is already the tab's key (ChangeKind) —
+// tabs is dynamic (useEntityTabs' own doc comment: only kinds with
+// pending entries), which the offending entity's tab always is, since
+// that pending entry is exactly what tripped the gate.
+function entityTabLabel(kind: string): string {
+  return tabs.value.find((tb) => tb.key === kind)?.label || kind
+}
+function goToTab(kind: string) {
+  active.value = kind
 }
 function editEntry(kind: 'delivery_zones' | 'contacts' | 'policies', entry: ChangeEntry) {
   const row = entry.type === 'removed' ? entry.liveRow : entry.draftRow
@@ -165,8 +212,8 @@ const confirmAcceptKey = computed(() => {
         <p class="text-sm text-muted-foreground">{{ t('kb.draft.pageSubtitle') }}</p>
       </div>
       <div v-if="!isEmpty" class="flex items-center gap-2 shrink-0">
-        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" data-testid="discard-all" @click="discardAll">{{ t('kb.draft.discardAll') }}</Button>
-        <Button size="sm" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="publishAll">
+        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" data-testid="discard-all" @click="requestDiscardAll">{{ t('kb.draft.discardAll') }}</Button>
+        <Button size="sm" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="requestPublishAll">
           <LoaderCircle v-if="pg.approving && !pg.publishingKey" class="w-4 h-4 animate-spin" />
           <Save v-else class="w-4 h-4" />
           {{ t('kb.draft.publishAll') }}<span v-if="counts.total"> · {{ counts.total }}</span>
@@ -199,6 +246,30 @@ const confirmAcceptKey = computed(() => {
         </div>
 
         <StatTiles :counts="counts" />
+
+        <div
+          v-if="justPublished && isEmpty"
+          class="rounded-lg border border-wa/30 bg-wa/10 px-4 py-3 flex items-center gap-3 text-sm"
+          data-testid="publish-success-banner"
+        >
+          <CircleCheck class="w-4 h-4 shrink-0 text-wa" />
+          <span class="flex-1">{{ t('kb.draft.publishedBanner.message') }}</span>
+          <RouterLink :to="{ name: 'simulator' }" class="font-medium text-primary hover:underline shrink-0">
+            {{ t('kb.draft.publishedBanner.testInSimulator') }}
+          </RouterLink>
+          <RouterLink :to="{ name: 'knowledge-base' }" class="font-medium text-primary hover:underline shrink-0">
+            {{ t('kb.draft.publishedBanner.viewLive') }}
+          </RouterLink>
+          <button
+            type="button"
+            class="text-muted-foreground hover:text-foreground shrink-0"
+            :aria-label="t('common.close')"
+            data-testid="publish-success-dismiss"
+            @click="justPublished = false"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        </div>
 
         <DraftEmptyState v-if="isEmpty" />
         <template v-else>
@@ -298,9 +369,29 @@ const confirmAcceptKey = computed(() => {
           </div>
         </template>
 
-        <p v-if="pg.gateReasons" class="flex items-start gap-2 text-sm text-destructive rounded-lg bg-destructive/10 p-3">
-          <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ t('kb.draft.gateBlocked') }} {{ pg.gateReasons }}
-        </p>
+        <div v-if="pg.gateReasons" class="rounded-lg bg-destructive/10 p-3 space-y-1.5" data-testid="gate-error-banner">
+          <p class="flex items-start gap-2 text-sm text-destructive">
+            <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ t('kb.draft.gateBlocked') }}
+          </p>
+          <ul v-if="pg.gateReasonDetails.length" class="ml-6 space-y-1 text-sm text-destructive">
+            <li v-for="(r, i) in pg.gateReasonDetails" :key="i">
+              {{ r.message }}
+              <button
+                v-if="r.kind"
+                type="button"
+                class="font-medium underline underline-offset-2 hover:no-underline"
+                data-testid="gate-reason-fix-link"
+                @click="goToTab(r.kind)"
+              >
+                {{ t('kb.draft.fixInTab', { tab: entityTabLabel(r.kind) }) }}
+              </button>
+            </li>
+          </ul>
+          <!-- Fallback for the rare case the structured payload didn't come
+               through (an older cached response, a malformed reasons[]) —
+               the flat message alone, exactly as this banner always showed. -->
+          <p v-else class="ml-6 text-sm text-destructive">{{ pg.gateReasons }}</p>
+        </div>
         <p v-else-if="pg.error" class="flex items-center gap-2 text-sm text-destructive">
           <CircleAlert class="w-4 h-4 shrink-0" /> {{ pg.error }}
         </p>
@@ -318,6 +409,28 @@ const confirmAcceptKey = computed(() => {
       :confirm-key="confirmAcceptKey"
       @update:open="(v) => !v && cancelConfirm.close()"
       @confirm="cancelConfirm.confirm()"
+    />
+
+    <ConfirmDeleteDialog
+      :open="publishConfirmOpen"
+      :busy="pg.approving"
+      title-key="kb.draft.publishConfirm.title"
+      body-key="kb.draft.publishConfirm.body"
+      :body-params="{ added: counts.added, updated: counts.updated, removed: counts.removed }"
+      confirm-key="kb.draft.publishConfirm.accept"
+      @update:open="(v) => !v && (publishConfirmOpen = false)"
+      @confirm="confirmPublishAll"
+    />
+
+    <ConfirmDeleteDialog
+      :open="discardConfirmOpen"
+      :busy="pg.busy"
+      title-key="kb.draft.discardConfirmDialog.title"
+      body-key="kb.draft.discardConfirmDialog.body"
+      :body-params="{ count: counts.total }"
+      confirm-key="kb.draft.discardConfirmDialog.accept"
+      @update:open="(v) => !v && (discardConfirmOpen = false)"
+      @confirm="confirmDiscardAll"
     />
   </div>
 </template>

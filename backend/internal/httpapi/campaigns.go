@@ -551,7 +551,7 @@ func (s *Server) handleListCampaignRecipients(c *gin.Context) {
 		return
 	}
 	limit, offset, pageNum, pageSize := s.pageParams(c)
-	items, total, err := s.store.ListCampaignRecipients(ctx(c), camp.ID, c.Query("status"), limit, offset)
+	items, total, err := s.store.ListCampaignRecipients(ctx(c), camp.ID, camp.Channel, c.Query("status"), limit, offset)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return

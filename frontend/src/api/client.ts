@@ -1,5 +1,5 @@
 import { log } from '../lib/logfmt'
-import type { KbImportProviderCapability, KbImportRun, CampaignRecipientPreviewResult } from '../types'
+import type { KbImportProviderCapability, KbImportRun, KbImportRunPage, CampaignRecipientPreviewResult } from '../types'
 
 // Env-driven addressing: VITE_API_BASE_URL points at the backend. Empty means
 // same-origin (dev uses the Vite proxy; prod fronts both behind one domain).
@@ -7,7 +7,11 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const PREFIX = '/xchats/api/v1'
 
 export class ApiError extends Error {
-  constructor(public errcode: string, public status: number, message: string) {
+  // payload is failWithPayload's own optional "something useful alongside
+  // the failure" body (server.go) — undefined for the ordinary fail() case
+  // (nearly every error). KB-09's gate 422 is the one caller that reads
+  // it (payload.reasons); everything else keeps using .message as before.
+  constructor(public errcode: string, public status: number, message: string, public payload?: unknown) {
     super(message || errcode)
   }
 }
@@ -22,15 +26,22 @@ async function unwrap<T>(res: Response, path: string): Promise<T> {
   const env = (await res.json()) as Envelope<T>
   log.info('api call', { path, status: res.status, errcode: env.errcode })
   if (env.errcode !== 'OK') {
-    throw new ApiError(env.errcode, res.status, env.message)
+    throw new ApiError(env.errcode, res.status, env.message, env.payload)
   }
   return env.payload
 }
 
 type Headers = Record<string, string>
 
-async function send<T>(method: string, path: string, body?: unknown, headers?: Headers): Promise<T> {
-  const opts: RequestInit = { method, credentials: 'include', headers: { ...(headers || {}) } }
+// isAbortError recognizes a fetch aborted via AbortController.abort() — every
+// caller that races a request against a newer one (INB-08) must swallow this
+// silently instead of surfacing it as a load/save failure.
+export function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'AbortError'
+}
+
+async function send<T>(method: string, path: string, body?: unknown, headers?: Headers, signal?: AbortSignal): Promise<T> {
+  const opts: RequestInit = { method, credentials: 'include', headers: { ...(headers || {}) }, signal }
   if (body !== undefined) {
     opts.headers = { 'Content-Type': 'application/json', ...(headers || {}) }
     opts.body = JSON.stringify(body)
@@ -40,18 +51,19 @@ async function send<T>(method: string, path: string, body?: unknown, headers?: H
 }
 
 export const api = {
-  get: <T>(path: string, headers?: Headers) => send<T>('GET', path, undefined, headers),
-  post: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('POST', path, body, headers),
-  put: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('PUT', path, body, headers),
-  patch: <T>(path: string, body?: unknown, headers?: Headers) => send<T>('PATCH', path, body, headers),
-  del: <T>(path: string, headers?: Headers) => send<T>('DELETE', path, undefined, headers),
-  async upload(file: File): Promise<{ media_id: string; url: string; media_type: string }> {
+  get: <T>(path: string, headers?: Headers, signal?: AbortSignal) => send<T>('GET', path, undefined, headers, signal),
+  post: <T>(path: string, body?: unknown, headers?: Headers, signal?: AbortSignal) => send<T>('POST', path, body, headers, signal),
+  put: <T>(path: string, body?: unknown, headers?: Headers, signal?: AbortSignal) => send<T>('PUT', path, body, headers, signal),
+  patch: <T>(path: string, body?: unknown, headers?: Headers, signal?: AbortSignal) => send<T>('PATCH', path, body, headers, signal),
+  del: <T>(path: string, headers?: Headers, signal?: AbortSignal) => send<T>('DELETE', path, undefined, headers, signal),
+  async upload(file: File, signal?: AbortSignal): Promise<{ media_id: string; url: string; media_type: string }> {
     const form = new FormData()
     form.append('file', file)
     const res = await fetch(API_BASE + PREFIX + '/media', {
       method: 'POST',
       credentials: 'include',
       body: form,
+      signal,
     })
     return unwrap(res, '/media')
   },
@@ -98,7 +110,22 @@ export const api = {
     return unwrap(res, '/kb/imports')
   },
   getKbImportRun: (runId: string) => send<KbImportRun>('GET', '/kb/imports/' + encodeURIComponent(runId)),
-  listKbImportRuns: (limit?: number) => send<{ runs: KbImportRun[] }>('GET', '/kb/imports' + (limit ? `?limit=${limit}` : '')),
+  // listKbImportRuns covers both callers of GET /kb/imports: the ingestion
+  // panel's "just the latest run" hydration (limit=1, offset omitted) and
+  // KB-14's paginated history list (limit=pageSize, offset=(page-1)*
+  // pageSize) — the response's total is the org's full run count, not just
+  // runs.length.
+  listKbImportRuns: (limit?: number, offset?: number) => {
+    const params = new URLSearchParams()
+    if (limit) params.set('limit', String(limit))
+    if (offset) params.set('offset', String(offset))
+    const qs = params.toString()
+    return send<KbImportRunPage>('GET', '/kb/imports' + (qs ? `?${qs}` : ''))
+  },
+  // cancelKbImportRun is POST /kb/imports/:id/cancel (KB-04) — only valid
+  // while pass 1 is still running (KbImportRun.cancelable); refused with a
+  // 409 once synthesis has been claimed.
+  cancelKbImportRun: (runId: string) => send<KbImportRun>('POST', '/kb/imports/' + encodeURIComponent(runId) + '/cancel'),
   // getKbImportProviders is GET /kb/import/providers (internal/httpapi/
   // kb_import.go) — the one source of truth useImportProviders fetches
   // once and caches, so the parser dropdown can never disagree with

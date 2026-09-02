@@ -2,13 +2,13 @@ import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { t } from '../i18n'
 import { connectRealtime } from '../lib/sse'
-import type { CancelChangeResponse, DraftChangeSet, DraftView, KbMaterial, PromptView } from '../types'
+import type { CancelChangeResponse, DraftChangeSet, DraftView, KbGateReason, KbMaterial, PromptView } from '../types'
 import type { ChangeKind } from '@/composables/draftChanges'
 import type {
   ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, TariffPayload, TopicPayload,
 } from '@/components/kb/forms/payloads'
 
-// usePlayground backs the two KB pages — Черновик (/playground) and Знаний
+// usePlayground backs the two KB pages — Черновик (/draft) and Знаний
 // база (/knowledge-base) — over the same underlying structured KB:
 //   - `changes`: the Черновик review payload (kbstore.DraftChangeSet) — ONLY
 //     what is staged in kbd_draft, plus explicit deletion entries. Never a
@@ -34,6 +34,11 @@ export const usePlayground = defineStore('playground', {
     error: '' as string,
     draftStale: false, // true when the LAST write() failed on DRAFT_STALE — see write()'s doc comment
     gateReasons: '' as string, // last approve-gate (422) message — rendered at PAGE level only (the gate validates the whole resulting KB, never just the selected entity — see approveWith's doc comment)
+    // KB-09: the SAME 422's structured reasons — kind/key naming the
+    // offending entity per violation, so the page-level banner can link
+    // straight to it ("Fix in Delivery Zones Tab →") instead of just
+    // reciting gateReasons' flat text. Reset alongside it.
+    gateReasonDetails: [] as KbGateReason[],
     gateBlockedKey: '' as string, // `${kind}:${key}` of the card whose attempt produced gateReasons — cleared by the NEXT publish attempt (success or not), so only the card that triggered it shows a neutral "blocked" pointer, never "this record is invalid"
 
     // --- live slice (Знаний база — the comparison baseline, read-only here) -
@@ -72,7 +77,7 @@ export const usePlayground = defineStore('playground', {
     // draft.go's mergedView) — materials themselves have no draft/live
     // split at all, so a draft row's media field (e.g. a staged product's
     // gallery_images) resolves against this the same as a published one's.
-    // Both /knowledge-base and /playground already call loadLive() on
+    // Both /knowledge-base and /draft already call loadLive() on
     // mount and re-call it on every kb.row.changed SSE event, so this
     // getter needs no fetch or refresh logic of its own.
     materialsById(s): Record<string, KbMaterial> {
@@ -298,6 +303,7 @@ export const usePlayground = defineStore('playground', {
       this.publishingKey = publishingKey
       this.error = ''
       this.gateReasons = ''
+      this.gateReasonDetails = []
       this.gateBlockedKey = ''
       try {
         this.setChanges(await api.post<DraftChangeSet>(path, {}, this.ifMatch()))
@@ -306,6 +312,12 @@ export const usePlayground = defineStore('playground', {
         if (e instanceof ApiError && e.status === 422) {
           this.gateReasons = e.message
           this.gateBlockedKey = publishingKey
+          // KB-09: the structured payload rides alongside .message (see
+          // ApiError's own doc comment) — an older/unexpected 422 shape
+          // (payload missing or malformed) just leaves this empty, and the
+          // UI falls back to the flat gateReasons string.
+          const reasons = (e.payload as { reasons?: KbGateReason[] } | undefined)?.reasons
+          this.gateReasonDetails = Array.isArray(reasons) ? reasons : []
         } else if (e instanceof ApiError && e.errcode === 'DRAFT_STALE') {
           this.error = t('kb.draft.errStale')
           await this.load()
@@ -319,9 +331,124 @@ export const usePlayground = defineStore('playground', {
       }
     },
 
+    // --- live writes (Знаний база — /knowledge-base): manual create/edit/
+    // delete commit straight to ai_* via /kb/* (kb_live.go), matching
+    // plan/playground.md's rule that /knowledge-base is the sole MANUAL
+    // authoring surface — no draft/publish detour for a routine catalog
+    // edit. Unlike write() above there is no optimistic-concurrency token
+    // to stale-check: kb_live.go's kbWrite has none either, a live write is
+    // immediately final. Every /kb/* write responds with the fresh
+    // DraftView (same shape GET /kb returns), so this assigns straight into
+    // `live` — no separate reload call needed.
+    async writeLive<T>(fn: () => Promise<T>): Promise<T | undefined> {
+      this.busy = true
+      this.error = ''
+      try {
+        return await fn()
+      } catch (e) {
+        this.error = e instanceof ApiError ? e.message : t('kb.draft.errSaveChange')
+        return undefined
+      } finally {
+        this.busy = false
+      }
+    },
+    upsertLiveTopic(input: Omit<TopicPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/topics', input) })
+    },
+    deleteLiveTopic(slug: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/topics/' + encodeURIComponent(slug)) })
+    },
+    upsertLiveTariff(input: Omit<TariffPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/tariffs', input) })
+    },
+    deleteLiveTariff(ref: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/tariffs/' + encodeURIComponent(ref)) })
+    },
+    upsertLiveProduct(input: Omit<ProductPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/products', input) })
+    },
+    deleteLiveProduct(ref: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/products/' + encodeURIComponent(ref)) })
+    },
+    upsertLiveZone(input: {
+      ref: string
+      name?: string
+      zone_level: string
+      parent_ref?: string
+      delivery_available?: boolean
+      delivery_cost?: string
+      delivery_in_days?: string
+      notes?: string
+      sales_status?: string
+    }) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/zones', input) })
+    },
+    deleteLiveZone(ref: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/zones/' + encodeURIComponent(ref)) })
+    },
+    patchLiveContacts(patch: Omit<ContactsPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.patch<DraftView>('/kb/contacts', patch) })
+    },
+    patchLivePolicies(patch: Omit<PoliciesPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.patch<DraftView>('/kb/policies', patch) })
+    },
+    patchLiveConfig(patch: { persona?: string; mission?: string; guardrails?: string; language_policy?: string; reply_max_words?: number }) {
+      return this.writeLive(async () => { this.live = await api.patch<DraftView>('/kb/config', patch) })
+    },
+
+    // --- live dispatchers — mirrors stageChange/stageDelete above, one per
+    // page (see useKbModal's `target` on ModalSession) so /knowledge-base's
+    // forms never need to know which specific upsertLive*/patchLive*
+    // method their kind maps to.
+    writeLiveChange(kind: Exclude<ChangeKind, 'config'>, payload: KbFormPayload) {
+      switch (kind) {
+        case 'topics': {
+          const { kind: _k, ...rest } = payload as TopicPayload
+          return this.upsertLiveTopic(rest).then(() => !this.error)
+        }
+        case 'tariffs': {
+          const { kind: _k, ...rest } = payload as TariffPayload
+          return this.upsertLiveTariff(rest).then(() => !this.error)
+        }
+        case 'products': {
+          const { kind: _k, ...rest } = payload as ProductPayload
+          return this.upsertLiveProduct(rest).then(() => !this.error)
+        }
+        case 'delivery_zones': {
+          const { kind: _k, ...rest } = payload as DeliveryZonePayload
+          return this.upsertLiveZone(rest).then(() => !this.error)
+        }
+        case 'contacts': {
+          const { kind: _k, ...rest } = payload as ContactsPayload
+          return this.patchLiveContacts(rest).then(() => !this.error)
+        }
+        case 'policies': {
+          const { kind: _k, ...rest } = payload as PoliciesPayload
+          return this.patchLivePolicies(rest).then(() => !this.error)
+        }
+      }
+    },
+    async deleteLiveEntity(kind: 'topics' | 'tariffs' | 'products' | 'delivery_zones', key: string): Promise<boolean> {
+      switch (kind) {
+        case 'topics':
+          await this.deleteLiveTopic(key)
+          break
+        case 'tariffs':
+          await this.deleteLiveTariff(key)
+          break
+        case 'products':
+          await this.deleteLiveProduct(key)
+          break
+        case 'delivery_zones':
+          await this.deleteLiveZone(key)
+          break
+      }
+      return !this.error
+    },
+
     // --- live (Знаний база — /knowledge-base): read-only baseline, GET /kb.
-    // Never written directly — every write on this page stages into the
-    // draft (stageChange/stageDelete above).
+    // Manual writes commit directly here (writeLive* above); this loader
+    // just hydrates the initial page and re-syncs after realtime events.
     async loadLive() {
       this.liveLoading = true
       this.liveError = ''

@@ -109,7 +109,7 @@ func TestBudget_EmptyTiersNeverThrottle(t *testing.T) {
 	}
 	d := Budget(nil, attempts, 0, time.Time{}, now)
 	if !d.Allowed {
-		t.Fatalf("Decision = %+v, want allowed (simulator/no-tier channel is unlimited)", d)
+		t.Fatalf("Decision = %+v, want allowed (an explicit empty tier set — e.g. a custom account override — never throttles on tiers)", d)
 	}
 }
 

@@ -1,24 +1,41 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, CircleCheck, LoaderCircle, RotateCw, Link2, Search } from 'lucide-vue-next'
+import {
+  CircleAlert,
+  CircleCheck,
+  ExternalLink,
+  LoaderCircle,
+  RotateCw,
+  Link2,
+  Search,
+  Settings2,
+  Smartphone,
+  TriangleAlert,
+  Zap,
+} from 'lucide-vue-next'
 import { useAccounts } from '../stores/accounts'
 import { useAuth } from '../stores/auth'
 import { useChannelSetup, type GuidedChannel } from '../stores/channelSetup'
 import { ApiError } from '../api/client'
 import { log } from '../lib/logfmt'
-import type { ConnectableChannel, WaPairStatus, WhatsAppCloudPhoneNumber } from '../types'
+import type { AdminContact, ConnectableChannel, SetupKey, WaPairStatus, WhatsAppCloudPhoneNumber } from '../types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import MaskedSecretInput from '@/components/settings/MaskedSecretInput.vue'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
 import InstagramIcon from '@/components/icons/InstagramIcon.vue'
 import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 // AddAccountDialog drives every "connect a channel" flow:
-//   channel picker → WhatsApp: start pairing, poll the QR every ~2.5s, render
-//                              the PNG, close on `connected`
+//   channel picker → WhatsApp: a pre-flight checklist first (phone online,
+//                              WhatsApp updated, device-limit heads up — see
+//                              docs/ux/flows/02-connect-whatsapp-qr.md),
+//                              then start pairing, poll the QR every ~2.5s,
+//                              render the PNG, and end on an explicit "Done"
+//                              click rather than an auto-close timer
 //                  → Telegram: paste the @BotFather token, one POST, done
 //                  → WhatsApp Cloud API: paste the WABA id + business token
 //                    (BYO-App — see backend/internal/httpapi/
@@ -37,13 +54,21 @@ import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 // through (see pickChannel's own doc comment and Accounts.vue's watcher on
 // channelSetup.pendingChannel).
 const props = defineProps<{ startChannel?: ConnectableChannel | null }>()
-const emit = defineEmits<{ (e: 'close'): void; (e: 'connected'): void }>()
+const emit = defineEmits<{ (e: 'close'): void; (e: 'connected'): void; (e: 'open-setup'): void }>()
 const accounts = useAccounts()
 const auth = useAuth()
 const channelSetup = useChannelSetup()
 const { t } = useI18n()
 
-type Step = 'channel' | 'qr' | 'telegram' | 'whatsapp_cloud_creds' | 'whatsapp_cloud_pick' | 'connected'
+type Step =
+  | 'channel'
+  | 'whatsapp_preflight'
+  | 'qr'
+  | 'telegram'
+  | 'whatsapp_cloud_creds'
+  | 'whatsapp_cloud_pick'
+  | 'redirecting'
+  | 'connected'
 type Channel = ConnectableChannel
 
 const step = ref<Step>('channel')
@@ -55,8 +80,16 @@ const qr = ref<WaPairStatus | null>(null)
 const error = ref('')
 // telegramState carries a connection that was CREATED but whose webhook failed:
 // the account exists and is listed, so the dialog explains it rather than
-// pretending nothing happened.
+// pretending nothing happened. telegramAccountId is that account's id, so
+// "Retry webhook" (below) can retry it directly instead of re-submitting the
+// token (docs/ux/flows/03-connect-telegram.md, friction point 2).
 const telegramState = ref('')
+const telegramAccountId = ref('')
+// blockedMissingKey replaces a generic "admin only" string with WHICH
+// prerequisite a non-admin member is blocked on, once a Meta channel needs
+// setup (docs/ux/flows/03b-connect-instagram-messenger.md, friction point 2)
+// — see the blocked-panel template block below.
+const blockedMissingKey = ref<SetupKey | null>(null)
 const busy = ref(false)
 const open = ref(true)
 let timer: number | undefined
@@ -86,8 +119,14 @@ function onOpenChange(v: boolean) {
 function pickChannel(c: Channel) {
   channel.value = c
   error.value = ''
+  blockedMissingKey.value = null
   if (c === 'whatsapp') {
-    startPairing()
+    // A pre-flight checklist first (docs/ux/flows/02-connect-whatsapp-qr.md,
+    // friction point 1): starting the pairing session immediately, with no
+    // warning, means a phone with no internet, an outdated WhatsApp, or an
+    // already-maxed-out device count just silently times out several
+    // seconds later with no clue why.
+    step.value = 'whatsapp_preflight'
     return
   }
   if (c === 'telegram') {
@@ -95,9 +134,10 @@ function pickChannel(c: Channel) {
     return
   }
   const guided = c as GuidedChannel
-  if (channelSetup.nextRequiredSetup(guided) !== null) {
+  const missing = channelSetup.nextRequiredSetup(guided)
+  if (missing !== null) {
     if (!auth.isAdmin) {
-      error.value = t('accounts.dialog.adminRequired')
+      blockedMissingKey.value = missing
       return
     }
     channelSetup.startGuidedSetup(guided)
@@ -116,34 +156,43 @@ function pickChannel(c: Channel) {
 
 // connectInstagram mints the authorize_url and immediately navigates the
 // WHOLE browser tab to it — never a fetch/XHR, Meta's consent dialog
-// refuses to render inside anything but a real top-level page. There is no
-// further dialog step: the connect finishes entirely server-side once Meta
-// redirects back to /accounts (see Accounts.vue's onMounted handling of
-// ?instagram_connected / ?instagram_error).
+// refuses to render inside anything but a real top-level page. The dialog
+// shows a 'redirecting' step for the round trip to the start request (there
+// is no other busy indicator on the picker card itself — docs/ux/flows/
+// 03b-connect-instagram-messenger.md, friction point 4) and stays there
+// until the browser actually navigates away; the connect itself finishes
+// entirely server-side once Meta redirects back to /accounts (see
+// Accounts.vue's onMounted handling of ?instagram_connected /
+// ?instagram_error).
 async function connectInstagram() {
   error.value = ''
   busy.value = true
+  step.value = 'redirecting'
   try {
     const started = await accounts.startInstagramOAuth()
     window.location.href = started.authorize_url
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errConnectInstagram')
     busy.value = false
+    step.value = 'channel'
   }
 }
 
 // connectMessenger is connectInstagram's exact twin for plain Facebook
 // Login — see Accounts.vue's onMounted handling of ?messenger_connected /
-// ?messenger_error.
+// ?messenger_error. Its 'redirecting' step additionally carries the
+// exactly-one-Page warning (see the template block below).
 async function connectMessenger() {
   error.value = ''
   busy.value = true
+  step.value = 'redirecting'
   try {
     const started = await accounts.startMessengerOAuth()
     window.location.href = started.authorize_url
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errConnectMessenger')
     busy.value = false
+    step.value = 'channel'
   }
 }
 
@@ -175,13 +224,40 @@ async function connectTelegram() {
   busy.value = true
   try {
     const res = await accounts.createTelegram(token, displayName.value.trim(), dropBacklog.value)
-    botToken.value = ''
-    if (res.connection_state === 'connected') return finish()
-    // Created, but Telegram would not accept the webhook. The account is on the
-    // list with a retry action — say so instead of closing on a half-success.
+    if (res.connection_state === 'connected') {
+      botToken.value = ''
+      return finish()
+    }
+    // Created, but Telegram would not accept the webhook. The account is
+    // already on the list — "Retry webhook" (below) retries THAT account
+    // directly, so the token stays filled in rather than forcing a
+    // re-submit of a value that was never the problem (docs/ux/flows/
+    // 03-connect-telegram.md, friction point 2).
     telegramState.value = res.connection_state
+    telegramAccountId.value = res.account.id
     error.value = res.account?.webhook_last_error || t('accounts.dialog.errWebhookRejected')
     emit('connected') // refresh the list so the failed card is visible
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errConnectBot')
+  } finally {
+    busy.value = false
+  }
+}
+
+// retryTelegramWebhook is the half-success state's primary action: it hits
+// the SAME retry-webhook endpoint the account card's own retry button uses,
+// keyed by the account id already minted above — no token re-entry needed.
+async function retryTelegramWebhook() {
+  error.value = ''
+  busy.value = true
+  try {
+    const res = await accounts.retryWebhook(telegramAccountId.value)
+    if (res.connection_state === 'connected') {
+      botToken.value = ''
+      return finish()
+    }
+    telegramState.value = res.connection_state
+    error.value = res.account?.webhook_last_error || t('accounts.dialog.errWebhookRejected')
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : t('accounts.dialog.errConnectBot')
   } finally {
@@ -281,7 +357,10 @@ function finish() {
   stopPolling()
   step.value = 'connected'
   emit('connected')
-  window.setTimeout(() => emit('close'), 900)
+  // No auto-close timer (docs/ux/flows/02-connect-whatsapp-qr.md, friction
+  // point 4): a fixed 900ms was easy to miss on a slow render or a blink,
+  // leaving the operator unsure whether the connection actually worked.
+  // The operator confirms with a "Done" click instead.
 }
 
 function stopPolling() {
@@ -292,6 +371,34 @@ function stopPolling() {
 // A data-URI passes through; a bare base64 payload gets the PNG prefix.
 function qrSrc(b64: string) {
   return b64.startsWith('data:') ? b64 : 'data:image/png;base64,' + b64
+}
+
+// readinessFor distinguishes the three Meta-backed picker cards by their
+// LIVE setup state instead of the same static hint on every card — in
+// particular, calling out the public-HTTPS/ngrok prerequisite by name, since
+// that is the one requirement none of them can skip (docs/ux/flows/
+// 03b-connect-instagram-messenger.md, friction point 10).
+type Readiness = { ready: boolean; label: string }
+function readinessFor(c: GuidedChannel): Readiness {
+  const missing = channelSetup.nextRequiredSetup(c)
+  if (missing === null) return { ready: true, label: t('accounts.dialog.readiness.ready') }
+  if (missing === 'public_access') return { ready: false, label: t('accounts.dialog.readiness.needsPublicAccess') }
+  if (missing === 'meta_app') return { ready: false, label: t('accounts.dialog.readiness.needsMetaApp') }
+  return { ready: false, label: t('accounts.dialog.readiness.needsOwnSetup') }
+}
+const waCloudReadiness = computed(() => readinessFor('whatsapp_cloud'))
+const instagramReadiness = computed(() => readinessFor('instagram'))
+const messengerReadiness = computed(() => readinessFor('messenger'))
+
+// notifyAdminHref builds a mailto: link pre-filled for the blocked-panel
+// "Notify" action — no in-app notification channel exists, and a mailto
+// link needs no new backend surface while still getting the admin an
+// actionable message (docs/ux/flows/03b-connect-instagram-messenger.md,
+// friction point 2).
+function notifyAdminHref(admin: AdminContact): string {
+  const subject = encodeURIComponent(t('accounts.dialog.blocked.notifySubject'))
+  const body = encodeURIComponent(t('accounts.dialog.blocked.notifyBody', { channel: t(`accounts.dialog.${channel.value}.name`) }))
+  return `mailto:${admin.email}?subject=${subject}&body=${body}`
 }
 
 onMounted(() => {
@@ -321,6 +428,18 @@ onBeforeUnmount(stopPolling)
           >
             <WhatsappIcon class="w-4 h-4" />
           </span>
+          <span
+            v-else-if="channel === 'instagram'"
+            class="w-8 h-8 rounded-lg bg-fuchsia-600/10 text-fuchsia-600 grid place-items-center"
+          >
+            <InstagramIcon class="w-4 h-4" />
+          </span>
+          <span
+            v-else-if="channel === 'messenger'"
+            class="w-8 h-8 rounded-lg bg-[#0084FF]/10 text-[#0084FF] grid place-items-center"
+          >
+            <MessengerIcon class="w-4 h-4" />
+          </span>
           <span v-else class="w-8 h-8 rounded-lg bg-wa/10 text-wa grid place-items-center">
             <WhatsappIcon class="w-4 h-4" />
           </span>
@@ -328,6 +447,8 @@ onBeforeUnmount(stopPolling)
           <template v-else-if="step === 'channel'">{{ t('accounts.dialog.pickTitle') }}</template>
           <template v-else-if="channel === 'telegram'">{{ t('accounts.dialog.telegramTitle') }}</template>
           <template v-else-if="channel === 'whatsapp_cloud'">{{ t('accounts.dialog.whatsappCloudTitle') }}</template>
+          <template v-else-if="channel === 'instagram'">{{ t('accounts.dialog.instagram.name') }}</template>
+          <template v-else-if="channel === 'messenger'">{{ t('accounts.dialog.messenger.name') }}</template>
           <template v-else>{{ t('accounts.dialog.whatsappTitle') }}</template>
         </DialogTitle>
       </DialogHeader>
@@ -336,7 +457,13 @@ onBeforeUnmount(stopPolling)
         <!-- step 0: pick the channel -->
         <div v-if="step === 'channel'" class="space-y-4">
           <p class="text-sm text-muted-foreground">{{ t('accounts.dialog.pickPrompt') }}</p>
-          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+
+          <!-- Tiered layout: instant (no developer setup) vs. Meta-backed channels
+               that need a Developer App + public HTTPS first. -->
+          <p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-wa">
+            <Zap class="w-3.5 h-3.5" /> {{ t('accounts.dialog.tierInstant') }}
+          </p>
+          <div class="grid gap-3 sm:grid-cols-2">
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-wa hover:bg-wa/5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-wa/40 disabled:pointer-events-none disabled:opacity-60"
               :disabled="busy"
@@ -378,6 +505,18 @@ onBeforeUnmount(stopPolling)
               </ol>
               <span class="mt-4 block text-sm font-medium text-[#229ED9]">{{ t('accounts.dialog.telegram.cta') }}</span>
             </button>
+          </div>
+
+          <p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <Settings2 class="w-3.5 h-3.5" /> {{ t('accounts.dialog.tierAdvanced') }}
+          </p>
+          <p class="-mt-2 text-xs text-muted-foreground">
+            {{ t('accounts.dialog.tierAdvancedHint') }}
+            <button type="button" class="font-medium text-primary underline underline-offset-2" @click="emit('open-setup')">
+              {{ t('accounts.dialog.tierAdvancedGuideCta') }}
+            </button>
+          </p>
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-teal-600 hover:bg-teal-600/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/40"
               @click="pickChannel('whatsapp_cloud')"
@@ -396,7 +535,11 @@ onBeforeUnmount(stopPolling)
                 <li class="flex gap-2"><span class="font-semibold text-teal-600">02</span><span>{{ t('accounts.dialog.whatsappCloud.step2') }}</span></li>
                 <li class="flex gap-2"><span class="font-semibold text-teal-600">03</span><span>{{ t('accounts.dialog.whatsappCloud.step3') }}</span></li>
               </ol>
-              <span class="mt-4 block text-sm font-medium text-teal-600">{{ t('accounts.dialog.whatsappCloud.cta') }}</span>
+              <span class="mt-4 flex items-center gap-1.5 text-sm font-medium" :class="waCloudReadiness.ready ? 'text-teal-600' : 'text-amber-600'">
+                <CircleCheck v-if="waCloudReadiness.ready" class="w-3.5 h-3.5 shrink-0" />
+                <CircleAlert v-else class="w-3.5 h-3.5 shrink-0" />
+                {{ waCloudReadiness.ready ? t('accounts.dialog.whatsappCloud.cta') : waCloudReadiness.label }}
+              </span>
             </button>
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-fuchsia-600 hover:bg-fuchsia-600/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600/40 disabled:pointer-events-none disabled:opacity-60"
@@ -417,7 +560,11 @@ onBeforeUnmount(stopPolling)
                 <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">02</span><span>{{ t('accounts.dialog.instagram.step2') }}</span></li>
                 <li class="flex gap-2"><span class="font-semibold text-fuchsia-600">03</span><span>{{ t('accounts.dialog.instagram.step3') }}</span></li>
               </ol>
-              <span class="mt-4 block text-sm font-medium text-fuchsia-600">{{ t('accounts.dialog.instagram.cta') }}</span>
+              <span class="mt-4 flex items-center gap-1.5 text-sm font-medium" :class="instagramReadiness.ready ? 'text-fuchsia-600' : 'text-amber-600'">
+                <CircleCheck v-if="instagramReadiness.ready" class="w-3.5 h-3.5 shrink-0" />
+                <CircleAlert v-else class="w-3.5 h-3.5 shrink-0" />
+                {{ instagramReadiness.ready ? t('accounts.dialog.instagram.cta') : instagramReadiness.label }}
+              </span>
             </button>
             <button
               class="group rounded-xl border border-border p-4 text-left transition hover:border-[#0084FF] hover:bg-[#0084FF]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0084FF]/40 disabled:pointer-events-none disabled:opacity-60"
@@ -438,36 +585,89 @@ onBeforeUnmount(stopPolling)
                 <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">02</span><span>{{ t('accounts.dialog.messenger.step2') }}</span></li>
                 <li class="flex gap-2"><span class="font-semibold text-[#0084FF]">03</span><span>{{ t('accounts.dialog.messenger.step3') }}</span></li>
               </ol>
-              <span class="mt-4 block text-sm font-medium text-[#0084FF]">{{ t('accounts.dialog.messenger.cta') }}</span>
+              <span class="mt-4 flex items-center gap-1.5 text-sm font-medium" :class="messengerReadiness.ready ? 'text-[#0084FF]' : 'text-amber-600'">
+                <CircleCheck v-if="messengerReadiness.ready" class="w-3.5 h-3.5 shrink-0" />
+                <CircleAlert v-else class="w-3.5 h-3.5 shrink-0" />
+                {{ messengerReadiness.ready ? t('accounts.dialog.messenger.cta') : messengerReadiness.label }}
+              </span>
             </button>
           </div>
           <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
             <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ error }}
           </p>
+
+          <!-- Non-admin member picked a Meta channel that still needs setup:
+               explain what's missing and who can fix it, instead of a dead-end
+               "admin only" line (docs/ux/flows/03b-connect-instagram-messenger.md,
+               friction point 2). -->
+          <div v-if="blockedMissingKey" class="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm">
+            <p class="flex items-start gap-2 font-medium text-amber-700 dark:text-amber-400">
+              <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" />
+              {{ t('accounts.dialog.blocked.title') }}
+            </p>
+            <p class="text-xs text-muted-foreground">{{ t(`accounts.dialog.blocked.missing.${blockedMissingKey}`) }}</p>
+            <div v-if="channelSetup.adminContacts.length" class="space-y-1.5">
+              <p class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.blocked.contactAdmin') }}</p>
+              <ul class="space-y-1.5">
+                <li
+                  v-for="admin in channelSetup.adminContacts"
+                  :key="admin.email"
+                  class="flex items-center justify-between gap-2 rounded-md bg-card px-2.5 py-1.5 text-xs"
+                >
+                  <span class="min-w-0 truncate">{{ admin.name }} <span class="text-muted-foreground">({{ admin.email }})</span></span>
+                  <a
+                    :href="notifyAdminHref(admin)"
+                    class="shrink-0 rounded-md border border-amber-500/40 px-2 py-1 font-medium text-amber-700 transition hover:bg-amber-500/10 dark:text-amber-400"
+                  >
+                    {{ t('accounts.dialog.blocked.notify') }}
+                  </a>
+                </li>
+              </ul>
+            </div>
+            <p v-else class="text-xs text-muted-foreground">{{ t('accounts.dialog.blocked.noAdminContacts') }}</p>
+          </div>
+
           <p class="rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
             {{ t('accounts.dialog.footerNote') }}
+            <button type="button" class="font-medium text-primary underline underline-offset-2" @click="emit('open-setup')">
+              {{ t('accounts.dialog.footerNoteCta') }}
+            </button>
           </p>
         </div>
 
         <!-- Telegram: paste the token -->
         <div v-else-if="step === 'telegram'" class="space-y-4">
-          <ol class="space-y-1.5 text-xs text-muted-foreground">
-            <li>1. {{ t('accounts.dialog.telegramSteps.step1') }}</li>
-            <li>2. {{ t('accounts.dialog.telegramSteps.step2') }}</li>
-            <li>3. {{ t('accounts.dialog.telegramSteps.step3') }}</li>
-          </ol>
+          <div class="rounded-lg border border-[#229ED9]/30 bg-[#229ED9]/5 px-3 py-2.5">
+            <ol class="space-y-1.5 text-xs text-muted-foreground">
+              <li>1. {{ t('accounts.dialog.telegramSteps.step1') }}</li>
+              <li>2. {{ t('accounts.dialog.telegramSteps.step2') }}</li>
+              <li>3. {{ t('accounts.dialog.telegramSteps.step3') }}</li>
+            </ol>
+            <!-- A verified deep link, not just instructions to search Telegram
+                 manually — searching by name risks landing on an impersonator
+                 bot (docs/ux/flows/03-connect-telegram.md, friction point 1). -->
+            <a
+              href="https://t.me/BotFather"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#229ED9] hover:underline"
+            >
+              <TelegramIcon class="w-3.5 h-3.5" />
+              {{ t('accounts.dialog.telegramSteps.openBotFather') }}
+              <ExternalLink class="w-3 h-3" />
+            </a>
+          </div>
           <div>
             <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.displayNameLabel') }}</label>
             <Input v-model="displayName" :placeholder="t('accounts.dialog.displayNamePlaceholderBot')" class="mt-1.5" />
           </div>
           <div>
             <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.botTokenLabel') }}</label>
-            <Input
+            <MaskedSecretInput
               v-model="botToken"
-              type="password"
               autocomplete="off"
               placeholder="1234567890:AA…"
-              class="mt-1.5 font-mono"
+              class="mt-1.5"
               @keydown.enter.prevent="connectTelegram"
             />
             <p class="mt-1 text-[11px] text-muted-foreground">
@@ -486,10 +686,27 @@ onBeforeUnmount(stopPolling)
           <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
             <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ error }}
           </p>
-          <Button :disabled="busy" class="w-full" @click="connectTelegram">
+          <!-- Half-success: the bot was created but Telegram rejected the
+               webhook — retry THAT account directly, or leave it for later
+               and go look at the card (docs/ux/flows/03-connect-telegram.md,
+               friction point 2). -->
+          <template v-if="telegramState">
+            <p class="text-xs text-muted-foreground">{{ t('accounts.dialog.telegramHalfSuccessHint') }}</p>
+            <div class="flex gap-2">
+              <Button :disabled="busy" class="flex-1" @click="retryTelegramWebhook">
+                <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
+                <RotateCw v-else class="w-4 h-4" />
+                {{ busy ? t('accounts.dialog.connecting') : t('accounts.page.retryWebhook') }}
+              </Button>
+              <Button variant="outline" class="flex-1" @click="emit('close')">
+                {{ t('accounts.dialog.viewInChannels') }}
+              </Button>
+            </div>
+          </template>
+          <Button v-else :disabled="busy" class="w-full" @click="connectTelegram">
             <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
             <Link2 v-else class="w-4 h-4" />
-            {{ busy ? t('accounts.dialog.connecting') : telegramState ? t('accounts.dialog.retry') : t('accounts.dialog.connectBot') }}
+            {{ busy ? t('accounts.dialog.connecting') : t('accounts.dialog.connectBot') }}
           </Button>
         </div>
 
@@ -504,12 +721,11 @@ onBeforeUnmount(stopPolling)
           </div>
           <div>
             <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.businessTokenLabel') }}</label>
-            <Input
+            <MaskedSecretInput
               v-model="businessToken"
-              type="password"
               autocomplete="off"
               placeholder="EAAG…"
-              class="mt-1.5 font-mono"
+              class="mt-1.5"
               @keydown.enter.prevent="discoverWhatsAppCloudNumbers"
             />
             <p class="mt-1 text-[11px] text-muted-foreground">
@@ -551,14 +767,13 @@ onBeforeUnmount(stopPolling)
           </div>
           <div>
             <label class="text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.pinLabel') }}</label>
-            <Input
+            <MaskedSecretInput
               v-model="pin"
-              type="password"
               inputmode="numeric"
               autocomplete="off"
               maxlength="6"
               placeholder="••••••"
-              class="mt-1.5 font-mono"
+              class="mt-1.5"
               @keydown.enter.prevent="connectWhatsAppCloud"
             />
             <p class="mt-1 text-[11px] text-muted-foreground">
@@ -572,6 +787,35 @@ onBeforeUnmount(stopPolling)
             <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
             <Link2 v-else class="w-4 h-4" />
             {{ busy ? t('accounts.dialog.connecting') : t('accounts.dialog.connectNumber') }}
+          </Button>
+        </div>
+
+        <!-- WhatsApp step 1.5: pre-flight checklist before starting the pairing session -->
+        <div v-else-if="step === 'whatsapp_preflight'" class="space-y-4">
+          <div class="mx-auto w-14 h-14 rounded-xl bg-wa/10 text-wa grid place-items-center">
+            <Smartphone class="w-7 h-7" />
+          </div>
+          <p class="text-center text-sm font-medium">{{ t('accounts.dialog.preflight.title') }}</p>
+          <ul class="space-y-2 text-sm text-muted-foreground">
+            <li class="flex items-start gap-2">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-wa" />
+              {{ t('accounts.dialog.preflight.internet') }}
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-wa" />
+              {{ t('accounts.dialog.preflight.updated') }}
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-wa" />
+              {{ t('accounts.dialog.preflight.deviceLimit') }}
+            </li>
+          </ul>
+          <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
+            <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ error }}
+          </p>
+          <Button :disabled="busy" class="w-full" @click="startPairing">
+            <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
+            {{ busy ? t('accounts.dialog.connecting') : t('accounts.dialog.preflight.showQr') }}
           </Button>
         </div>
 
@@ -610,6 +854,22 @@ onBeforeUnmount(stopPolling)
           </template>
         </div>
 
+        <!-- Instagram/Messenger: the visual bridge before the whole tab
+             navigates away to Meta (docs/ux/flows/
+             03b-connect-instagram-messenger.md, friction point 4) -->
+        <div v-else-if="step === 'redirecting'" class="text-center py-8 space-y-4">
+          <LoaderCircle class="w-8 h-8 mx-auto animate-spin text-muted-foreground" />
+          <p class="text-sm font-medium">{{ t('accounts.dialog.redirecting.title') }}</p>
+          <p class="px-4 text-xs leading-relaxed text-muted-foreground">{{ t('accounts.dialog.redirecting.hint') }}</p>
+          <p
+            v-if="channel === 'messenger'"
+            class="mx-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-left text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+          >
+            <TriangleAlert class="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{{ t('accounts.dialog.redirecting.messengerWarning') }}</span>
+          </p>
+        </div>
+
         <!-- step 3: connected -->
         <div v-else class="text-center py-8">
           <div
@@ -625,6 +885,7 @@ onBeforeUnmount(stopPolling)
           <p class="mt-4 font-semibold text-lg">
             {{ channel === 'telegram' ? t('accounts.dialog.botConnected') : t('accounts.dialog.numberConnected') }}
           </p>
+          <Button class="mt-6" @click="emit('close')">{{ t('accounts.dialog.done') }}</Button>
         </div>
       </div>
     </DialogContent>

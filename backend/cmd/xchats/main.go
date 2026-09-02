@@ -23,6 +23,9 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/automation"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/campaign"
+	"github.com/yerassyldanay/xchats/backend/internal/chat"
+	"github.com/yerassyldanay/xchats/backend/internal/chatkb"
+	"github.com/yerassyldanay/xchats/backend/internal/chatstore"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
@@ -43,6 +46,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
+	"github.com/yerassyldanay/xchats/backend/internal/simreceipts"
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
@@ -407,6 +411,14 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		DisconnectCheckEvery: campaignDisconnectCheckEvery, DisconnectAfter: campaignDisconnectAfter,
 		PruneEvery: campaignPruneEvery, AccountConcurrency: campaignAccountConcurrency,
 	}, log)
+	// simulatorReceipts is the Simulator channel's own delivery-receipt
+	// source: a real channel's sent->delivered->read progression is driven
+	// by an inbound webhook (see store.Store.AdvanceDeliveryState's own doc
+	// comment); Simulator has no such webhook, so this sweep plays that
+	// same role for it, on the exact same store method, so a campaign sent
+	// through Simulator completes and updates its message statuses through
+	// the identical pipeline a live channel would.
+	simulatorReceipts := simreceipts.NewReceiptSimulator(st, hub, simreceipts.Config{}, log)
 	// Instagram's long-lived user token is the one Meta-channel credential
 	// that silently expires with no renewal otherwise (WhatsApp Cloud's
 	// business token and Telegram's bot token do not) — see
@@ -440,6 +452,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// Its own startup pass reconciles any send left 'sending' by a crash
 	// (ReconcileStuckSending) before the tick loop starts claiming new ones.
 	campaignScheduler.Start(ctx)
+	simulatorReceipts.Start(ctx)
 
 	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
 
@@ -453,6 +466,25 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		LLM: llmRegistry, Hub: hub, Log: log, AllowPrivateFetch: cfg.KBAllowPrivateFetch,
 	}, kbimport.DefaultConfig())
 	kbImportSvc.Start(ctx)
+
+	// The Knowledge Base chat assistant (/chat). It shares this process's one
+	// database connection (internal/dbx.Open refcounts by path, exactly like
+	// kb above) and the SAME llmRegistry every other AI path already uses, so
+	// a key saved in Settings takes effect here too with no extra wiring.
+	// Retrieval goes through chatkb over the existing kbstore — the chat
+	// never reads a KB table itself.
+	chatDB, err := chatstore.New(ctx, cfg.Storage.DBPath)
+	if err != nil {
+		fatal("chatstore", err)
+	}
+	defer chatDB.Close()
+	chatSvc := chat.New(chat.Deps{
+		Store:  chatDB,
+		KB:     chatkb.NewStoreService(kb),
+		LLMs:   llmRegistry,
+		Params: func() chat.Params { return resolveChatParams(settingsStore, cfg) },
+		Log:    log,
+	})
 
 	// The tunnel needs to serve the SAME router httpapi.New's Server owns —
 	// but httpapi.Deps also needs the tunnel (for /settings/tunnel/*)
@@ -471,7 +503,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		BootstrapAdminCredentialPath: bootstrapCredentialPath,
 		Credentials:                  credsChain, Settings: settingsStore, LLMRefresh: llmRefresh,
 		ProviderHealth: providerHealth, UpdateChecker: updateChecker,
-		KBImport: kbImportSvc,
+		KBImport: kbImportSvc, Chat: chatSvc,
 	})
 	router := srv.Router()
 
@@ -550,6 +582,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	tgMgr.Close()
 	automationScheduler.Stop()
 	campaignScheduler.Stop()
+	simulatorReceipts.Stop()
 	q.Close()
 	// kbImportSvc has no producer/consumer relationship with q (its job
 	// queue is kbd_materials, claimed directly via kbstore) — it only needs
@@ -737,6 +770,30 @@ func resolveLLMParams(settingsStore *settings.Store, cfg *config.Config) respons
 		Temperature:  st.LLM.Temperature,
 		RetryEnabled: st.LLM.Retry,
 	}
+}
+
+// resolveChatParams is resolveLLMParams' Knowledge-Base-chat counterpart:
+// the chat assistant runs on the SAME provider and model the rest of xchats
+// is configured with (one place to change the model, not two), but with its
+// own answer-length and history-window knobs — a chat answer explaining what
+// changed across a knowledge base is a different shape of output from a
+// short customer reply, and LLM_DRAFT_MAX_TOKENS is sized for the latter.
+// Read fresh per request, so a Settings change applies to the next message.
+func resolveChatParams(settingsStore *settings.Store, cfg *config.Config) chat.Params {
+	p := chat.Params{
+		Model: llm.ModelRef{
+			Provider: orDefault(cfg.LLMDefaultProvider, "openrouter"),
+			Model:    orDefault(cfg.LLMDefaultModel, "google/gemini-2.5-flash"),
+		},
+		Temperature:   cfg.LLMDraftTemperature,
+		MaxTokens:     cfg.ChatMaxTokens,
+		HistoryWindow: cfg.ChatHistoryWindow,
+	}
+	if st, err := settingsStore.Load(); err == nil {
+		p.Model = llm.ModelRef{Provider: st.LLM.DefaultProvider, Model: st.LLM.DefaultModel}
+		p.Temperature = st.LLM.Temperature
+	}
+	return p
 }
 
 // shouldValidateProductionConfig (A10) reports whether runServe should run

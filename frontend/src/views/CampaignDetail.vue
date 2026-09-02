@@ -2,15 +2,19 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { ArrowLeft, CircleAlert, Copy, LoaderCircle, Pause, Play, RotateCcw, Square, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, CircleAlert, CircleCheck, Copy, LoaderCircle, Pause, Play, RotateCcw, Square, Trash2, X } from 'lucide-vue-next'
 import { useCampaigns } from '@/stores/campaigns'
 import { useAccounts } from '@/stores/accounts'
 import { ApiError } from '@/api/client'
+import { fingerprintOf } from '@/lib/recipientFingerprint'
+import { queryInt, queryString } from '@/lib/queryState'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import CampaignStatusBadge from '@/components/CampaignStatusBadge.vue'
 import AccountSendingBudget from '@/components/AccountSendingBudget.vue'
 import CampaignRecipientPreviewTable from '@/components/CampaignRecipientPreviewTable.vue'
+import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
+import Pagination from '@/components/Pagination.vue'
 import type { CampaignRecipientStatus, CampaignRecipientPreviewResult } from '@/types'
 
 const { t, te, locale } = useI18n()
@@ -25,13 +29,23 @@ const campaign = computed(() => campaigns.current)
 const loading = ref(true)
 const actionError = ref('')
 
+// CAM-07: the wizard used to redirect here with zero explanation — a
+// newly created, launch-now campaign sits in plain Draft until someone
+// notices the small Start button, and operators routinely assumed
+// "Create campaign" had already begun sending. The wizard marks that
+// arrival with ?created=1 (never set for a campaign deliberately
+// scheduled — that one starts itself); the flag is stripped from the URL
+// immediately so a reload or a shared link doesn't resurface it.
+const arrivedFromCreation = ref(route.query.created === '1')
+const showCreatedBanner = computed(() => arrivedFromCreation.value && campaign.value?.status === 'draft' && !campaign.value?.schedule_at)
+
 async function load() {
   loading.value = true
   actionError.value = ''
   try {
     await campaigns.fetchOne(campaignId.value)
     if (accounts.accounts.length === 0) await accounts.load()
-    await Promise.all([campaigns.fetchRecipients(campaignId.value, statusFilter.value), campaigns.fetchEvents(campaignId.value)])
+    await Promise.all([loadRecipients(), loadEvents()])
   } catch (e) {
     actionError.value = e instanceof ApiError ? e.message : t('campaigns.detail.errLoadFailed')
   } finally {
@@ -41,10 +55,26 @@ async function load() {
 
 onMounted(() => {
   campaigns.startRealtime()
+  if (arrivedFromCreation.value) {
+    const q = { ...(route.query as Record<string, string>) }
+    delete q.created
+    void router.replace({ query: q })
+  }
   void load()
 })
 onUnmounted(() => campaigns.stopRealtime())
-watch(campaignId, load)
+// Landing here for a first time (mount) reads the filter/page from the URL
+// query (see statusFilter/recipientsPage/eventsPage below); switching to a
+// DIFFERENT campaign in place — the only way that happens today is
+// duplicate()'s own router.push — must not carry over a page number that
+// may not even exist for the new campaign (Pagination.vue would otherwise
+// render a nonsensical range like "101–5 of 5").
+watch(campaignId, () => {
+  statusFilter.value = ''
+  recipientsPage.value = 1
+  eventsPage.value = 1
+  void load()
+})
 
 // --- derived edit gates — mirror backend/campaign.CanEditContent/
 // CanEditPacing exactly (see internal/httpapi/campaigns.go's own doc
@@ -82,7 +112,15 @@ async function runAction(fn: () => Promise<unknown>) {
 const start = () => runAction(() => campaigns.start(campaignId.value))
 const pause = () => runAction(() => campaigns.pause(campaignId.value))
 const resume = () => runAction(() => campaigns.resume(campaignId.value))
-const stop = () => runAction(() => campaigns.stop(campaignId.value))
+
+// CAM-08: unlike Pause (resumable), Stop is permanent — remaining unsent
+// recipients are marked skipped and the campaign can never restart. It used
+// to fire on a single click with no confirmation at all.
+const stopConfirmOpen = ref(false)
+async function confirmStop() {
+  await runAction(() => campaigns.stop(campaignId.value))
+  stopConfirmOpen.value = false
+}
 async function duplicate() {
   await runAction(async () => {
     const dup = await campaigns.duplicate(campaignId.value)
@@ -104,9 +142,42 @@ async function remove() {
 }
 
 // --- recipients tab --------------------------------------------------------
-const statusFilter = ref<CampaignRecipientStatus | ''>('')
+// CAM-11: server-backed pagination, with the filter and page number both
+// restored from the URL on load so a refresh or a shared link doesn't
+// silently snap back to page 1 of the unfiltered list.
+const RECIPIENTS_PAGE_SIZE = 50
 const RECIPIENT_STATUSES: CampaignRecipientStatus[] = ['pending', 'sending', 'sent', 'failed', 'skipped']
-watch(statusFilter, () => campaigns.fetchRecipients(campaignId.value, statusFilter.value))
+function parseStatusFilter(raw: string): CampaignRecipientStatus | '' {
+  return (RECIPIENT_STATUSES as string[]).includes(raw) ? (raw as CampaignRecipientStatus) : ''
+}
+const statusFilter = ref<CampaignRecipientStatus | ''>(parseStatusFilter(queryString(route.query.status)))
+const recipientsPage = ref(queryInt(route.query.rpage, 1))
+
+function syncListQuery() {
+  const query: Record<string, string> = { ...(route.query as Record<string, string>) }
+  if (statusFilter.value) query.status = statusFilter.value
+  else delete query.status
+  if (recipientsPage.value > 1) query.rpage = String(recipientsPage.value)
+  else delete query.rpage
+  if (eventsPage.value > 1) query.epage = String(eventsPage.value)
+  else delete query.epage
+  void router.replace({ query })
+}
+
+async function loadRecipients() {
+  await campaigns.fetchRecipients(campaignId.value, statusFilter.value, recipientsPage.value, RECIPIENTS_PAGE_SIZE)
+}
+function setStatusFilter(s: CampaignRecipientStatus | '') {
+  statusFilter.value = s
+  recipientsPage.value = 1
+  syncListQuery()
+  void loadRecipients()
+}
+function setRecipientsPage(p: number) {
+  recipientsPage.value = p
+  syncListQuery()
+  void loadRecipients()
+}
 
 const retrying = ref(false)
 async function retryFailed() {
@@ -114,6 +185,14 @@ async function retryFailed() {
   actionError.value = ''
   try {
     await campaigns.retryFailed(campaignId.value)
+    // The store's own retryFailed always re-fetches page 1 of the failed
+    // filter (see stores/campaigns.ts) — keep the filter buttons and the
+    // pagination footer truthful to what campaigns.recipients now holds,
+    // rather than showing stale numbers for whatever filter/page was
+    // active before the retry.
+    statusFilter.value = 'failed'
+    recipientsPage.value = 1
+    syncListQuery()
   } catch (e) {
     actionError.value = e instanceof ApiError ? e.message : t('campaigns.detail.errActionFailed')
   } finally {
@@ -131,18 +210,30 @@ function onFileChange(e: Event) {
 const replacePreview = ref<CampaignRecipientPreviewResult | null>(null)
 const replaceBusy = ref(false)
 const replaceError = ref('')
+// CAM-09: same staleness guard as the wizard's own preview (see its doc
+// comment on previewedFingerprint) — Save must never trust a preview that
+// no longer matches the currently pasted text / chosen file.
+const replacedFingerprint = ref('')
+const replaceStale = computed(() => fingerprintOf(pastedText.value, uploadedFile.value) !== replacedFingerprint.value)
 async function checkReplace() {
   replaceBusy.value = true
   replaceError.value = ''
+  const fp = fingerprintOf(pastedText.value, uploadedFile.value)
   try {
     replacePreview.value = await campaigns.preview(campaignId.value, { text: pastedText.value, file: uploadedFile.value ?? undefined })
+    replacedFingerprint.value = fp
   } catch (e) {
     replaceError.value = e instanceof ApiError ? e.message : t('campaigns.detail.errActionFailed')
+    replacePreview.value = null
   } finally {
     replaceBusy.value = false
   }
 }
 async function confirmReplace() {
+  if (replaceStale.value) {
+    replaceError.value = t('campaigns.wizard.errPreviewStale')
+    return
+  }
   replaceBusy.value = true
   replaceError.value = ''
   try {
@@ -151,11 +242,29 @@ async function confirmReplace() {
     pastedText.value = ''
     uploadedFile.value = null
     replacePreview.value = null
+    replacedFingerprint.value = ''
+    // Same reasoning as retryFailed: the store's own replaceRecipients
+    // re-fetches page 1, unfiltered — match the footer to it.
+    statusFilter.value = ''
+    recipientsPage.value = 1
+    syncListQuery()
   } catch (e) {
     replaceError.value = e instanceof ApiError ? e.message : t('campaigns.detail.errActionFailed')
   } finally {
     replaceBusy.value = false
   }
+}
+
+// --- history (events) tab -------------------------------------------------
+const EVENTS_PAGE_SIZE = 50
+const eventsPage = ref(queryInt(route.query.epage, 1))
+async function loadEvents() {
+  await campaigns.fetchEvents(campaignId.value, eventsPage.value, EVENTS_PAGE_SIZE)
+}
+function setEventsPage(p: number) {
+  eventsPage.value = p
+  syncListQuery()
+  void loadEvents()
 }
 </script>
 
@@ -168,6 +277,15 @@ async function confirmReplace() {
     <p v-if="loading" class="mt-8 text-sm text-muted-foreground">{{ t('campaigns.list.loading') }}</p>
 
     <template v-else-if="campaign">
+      <div v-if="showCreatedBanner" class="mt-3 flex items-center gap-2 rounded-lg border border-wa/30 bg-wa/10 px-3 py-2 text-sm" data-testid="created-banner">
+        <CircleCheck class="w-4 h-4 shrink-0 text-wa" />
+        <span class="flex-1">{{ t('campaigns.detail.createdBanner') }}</span>
+        <Button type="button" size="sm" :disabled="acting" @click="start">{{ t('campaigns.actions.start') }}</Button>
+        <button type="button" class="text-muted-foreground hover:text-foreground" :aria-label="t('common.close')" @click="arrivedFromCreation = false">
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
       <div class="mt-2 flex items-start justify-between gap-4">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -193,7 +311,7 @@ async function confirmReplace() {
             variant="outline"
             class="text-destructive hover:bg-destructive/10"
             :disabled="acting"
-            @click="stop"
+            @click="stopConfirmOpen = true"
           >
             <Square class="w-4 h-4" /> {{ t('campaigns.actions.stop') }}
           </Button>
@@ -266,7 +384,7 @@ async function confirmReplace() {
         <TabsContent value="recipients" class="mt-4 space-y-3">
           <div class="flex items-center justify-between flex-wrap gap-2">
             <div class="flex flex-wrap gap-1.5">
-              <Button type="button" size="sm" :variant="statusFilter === '' ? 'default' : 'outline'" @click="statusFilter = ''">
+              <Button type="button" size="sm" :variant="statusFilter === '' ? 'default' : 'outline'" @click="setStatusFilter('')">
                 {{ t('campaigns.detail.filterAll') }}
               </Button>
               <Button
@@ -275,7 +393,7 @@ async function confirmReplace() {
                 type="button"
                 size="sm"
                 :variant="statusFilter === s ? 'default' : 'outline'"
-                @click="statusFilter = s"
+                @click="setStatusFilter(s)"
               >
                 {{ t(`campaigns.recipientStatus.${s}`) }}
               </Button>
@@ -299,14 +417,17 @@ async function confirmReplace() {
             <input type="file" accept=".csv,.txt" class="text-xs" @change="onFileChange" />
             <div class="flex items-center gap-2">
               <Button type="button" size="sm" variant="outline" :disabled="replaceBusy" @click="checkReplace">{{ t('campaigns.wizard.checkReachability') }}</Button>
-              <Button type="button" size="sm" :disabled="replaceBusy || !replacePreview || replacePreview.valid === 0" @click="confirmReplace">
+              <Button type="button" size="sm" :disabled="replaceBusy || !replacePreview || replacePreview.valid === 0 || replaceStale" @click="confirmReplace">
                 <LoaderCircle v-if="replaceBusy" class="w-4 h-4 animate-spin" /> {{ t('campaigns.actions.save') }}
               </Button>
             </div>
             <p v-if="replaceError" class="flex items-center gap-1.5 text-xs text-destructive">
               <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ replaceError }}
             </p>
-            <CampaignRecipientPreviewTable v-if="replacePreview" :result="replacePreview" />
+            <CampaignRecipientPreviewTable v-if="replacePreview" :result="replacePreview" :message-variables="campaign?.variables" />
+            <p v-if="replacePreview && replaceStale" class="flex items-center gap-1.5 text-xs text-amber-600" data-testid="replace-preview-stale-notice">
+              <CircleAlert class="w-3.5 h-3.5 shrink-0" /> {{ t('campaigns.wizard.previewStaleNotice') }}
+            </p>
           </div>
 
           <p v-if="campaigns.recipients.length === 0" class="text-sm text-muted-foreground">{{ t('campaigns.detail.noRecipients') }}</p>
@@ -317,14 +438,28 @@ async function confirmReplace() {
               <span class="ml-auto text-xs" :class="r.status === 'failed' ? 'text-destructive' : r.status === 'sent' ? 'text-wa' : 'text-muted-foreground'">
                 {{ t(`campaigns.recipientStatus.${r.status}`) }}
               </span>
+              <!-- message_delivery_state is finer-grained than status: a
+                   coarse 'sent' recipient may have since been marked
+                   delivered or read by the channel's own receipts (see
+                   store.Store.AdvanceDeliveryState) — worth surfacing here
+                   since it's otherwise only visible by opening the chat in
+                   Inbox. Redundant with 'sent' itself, so shown only once
+                   it says something status doesn't already. -->
+              <span
+                v-if="r.status === 'sent' && (r.message_delivery_state === 'delivered' || r.message_delivery_state === 'read')"
+                class="text-[11px] text-muted-foreground"
+                data-testid="recipient-delivery-state"
+              >
+                {{ r.message_delivery_state === 'read' ? t('campaigns.detail.messageRead') : t('campaigns.detail.messageDelivered') }}
+              </span>
               <span v-if="r.failure_reason" class="text-[11px] text-muted-foreground truncate max-w-[30%]" :title="r.failure_reason">{{ r.failure_reason }}</span>
             </div>
           </div>
-          <p class="text-xs text-muted-foreground">{{ campaigns.recipientsTotal }}</p>
+          <Pagination :page="recipientsPage" :page-size="RECIPIENTS_PAGE_SIZE" :total="campaigns.recipientsTotal" @update:page="setRecipientsPage" />
         </TabsContent>
 
-        <TabsContent value="events" class="mt-4">
-          <div v-if="campaigns.events.length === 0" class="text-sm text-muted-foreground">{{ t('campaigns.detail.noRecipients') }}</div>
+        <TabsContent value="events" class="mt-4 space-y-3">
+          <div v-if="campaigns.events.length === 0" class="text-sm text-muted-foreground">{{ t('campaigns.detail.noEvents') }}</div>
           <ul v-else class="space-y-2">
             <li v-for="e in campaigns.events" :key="e.id" class="flex items-center gap-3 text-sm">
               <span class="w-1.5 h-1.5 rounded-full bg-muted-foreground shrink-0" />
@@ -332,8 +467,19 @@ async function confirmReplace() {
               <span class="ml-auto text-xs text-muted-foreground">{{ formatWhen(e.created_at) }}</span>
             </li>
           </ul>
+          <Pagination :page="eventsPage" :page-size="EVENTS_PAGE_SIZE" :total="campaigns.eventsTotal" @update:page="setEventsPage" />
         </TabsContent>
       </Tabs>
     </template>
+
+    <ConfirmDeleteDialog
+      :open="stopConfirmOpen"
+      :busy="acting"
+      title-key="campaigns.detail.stopConfirm.title"
+      body-key="campaigns.detail.stopConfirm.body"
+      confirm-key="campaigns.detail.stopConfirm.accept"
+      @update:open="(v) => !v && (stopConfirmOpen = false)"
+      @confirm="confirmStop"
+    />
   </div>
 </template>

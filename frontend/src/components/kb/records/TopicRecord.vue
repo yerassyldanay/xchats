@@ -57,12 +57,12 @@ const diff = computed(() => changedFields(props.row, props.liveRow, ['title', 'b
     <div>
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.title') }}</span>
       <p class="text-sm mt-0.5">{{ row.title || '—' }}</p>
-      <FieldDiffNote :show="diff.includes('title')" :was="liveRow?.title ?? ''" />
+      <FieldDiffNote :show="diff.includes('title')" :was="liveRow?.title ?? ''" :now="row.title" />
     </div>
     <div>
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.body') }}</span>
       <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.body_md || '—' }}</p>
-      <FieldDiffNote :show="diff.includes('body_md')" :was="liveRow?.body_md ?? ''" />
+      <FieldDiffNote :show="diff.includes('body_md')" :was="liveRow?.body_md ?? ''" :now="row.body_md" />
     </div>
     <div class="flex flex-col gap-2">
       <MediaStrip :label="t('kb.media.image')" field="featured_image" :ids="row.featured_image" />

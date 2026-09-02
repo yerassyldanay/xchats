@@ -242,7 +242,7 @@ func TestReplaceCampaignRecipientsAndClaimLifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ReplaceCampaignRecipients (2nd): %v", err)
 	}
-	recipients, total, err := st.ListCampaignRecipients(ctx, c.ID, "", 50, 0)
+	recipients, total, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestReplaceCampaignRecipientsAndClaimLifecycle(t *testing.T) {
 		t.Errorf("claim.MessageBody = %q", claim.MessageBody)
 	}
 
-	claimedRecipient, _, err := st.ListCampaignRecipients(ctx, c.ID, "sending", 50, 0)
+	claimedRecipient, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "sending", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients(sending): %v", err)
 	}
@@ -311,7 +311,7 @@ func TestReplaceCampaignRecipientsAndClaimLifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("FinalizeAttempt: %v", err)
 	}
-	sentRecipient, _, err := st.ListCampaignRecipients(ctx, c.ID, "sent", 50, 0)
+	sentRecipient, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "sent", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients(sent): %v", err)
 	}
@@ -390,6 +390,161 @@ func TestClaimNextRecipient_PausedAccount(t *testing.T) {
 	}
 	if ok {
 		t.Error("ClaimNextRecipient on a manually paused account = claimed, want refused")
+	}
+}
+
+// TestClaimNextRecipient_PoolsBudgetAcrossConcurrentCampaigns proves the
+// account-wide tier cap is a single SHARED pool across every 'running'
+// campaign on one account — never a separate allowance per campaign. This is
+// what makes several campaigns launched on the same account "just work"
+// without double-spending a real channel's rate limit: campaignSendAttempts
+// (backend/internal/store/campaigns.go) reads campaign_send_log filtered
+// only by account_id, not campaign_id, so Budget always sees every
+// campaign's attempts on that account together.
+//
+// The account is given a tier of 2 sends/hour. Campaign A (started first,
+// so FIFO drains it first) has 3 pending recipients — enough to exceed the
+// shared cap on its own — and Campaign B (started second) has 1. After
+// Campaign A's first two claims exhaust the shared 2/hour tier, a third
+// claim must be refused even though Campaign B has made ZERO attempts of
+// its own and still has an untouched pending recipient: if the budget were
+// (incorrectly) scoped per campaign instead of per account, this claim
+// would succeed by drawing from Campaign B's "unused" allowance. Finally,
+// once the tier's window rolls over, claims resume and both campaigns'
+// remaining recipients eventually get served — proving this is throttling,
+// not starvation.
+func TestClaimNextRecipient_PoolsBudgetAcrossConcurrentCampaigns(t *testing.T) {
+	ctx := context.Background()
+	st := dbtest.New(t)
+	orgID, userID, acctID := seedCampaignFixture(t, st, ctx)
+
+	campA := mustCreateCampaign(t, st, ctx, orgID, acctID, userID, "Campaign A", "Hi A {{name}}!")
+	campB := mustCreateCampaign(t, st, ctx, orgID, acctID, userID, "Campaign B", "Hi B {{name}}!")
+	if err := st.ReplaceCampaignRecipients(ctx, campA.ID, []store.CampaignRecipientInput{
+		{NormalizedIdentity: "77011110001", Name: "A1"},
+		{NormalizedIdentity: "77011110002", Name: "A2"},
+		{NormalizedIdentity: "77011110003", Name: "A3"},
+	}); err != nil {
+		t.Fatalf("ReplaceCampaignRecipients(A): %v", err)
+	}
+	if err := st.ReplaceCampaignRecipients(ctx, campB.ID, []store.CampaignRecipientInput{
+		{NormalizedIdentity: "77011110004", Name: "B1"},
+	}); err != nil {
+		t.Fatalf("ReplaceCampaignRecipients(B): %v", err)
+	}
+
+	// One account-wide tier — 2 sends/hour, shared by whichever campaign's
+	// recipients happen to be claimed. MinIntervalSeconds is kept small (and
+	// jitter-free) so advancing `now` by a couple of seconds between claims
+	// is enough to clear it without ever leaving the 1h tier window.
+	if _, _, _, err := st.SetCampaignAccountLimits(ctx, acctID,
+		store.CampaignAccountSettingsInput{LimitMode: "custom", MinIntervalSeconds: 1, JitterSeconds: 0},
+		[]purecampaign.Tier{{WindowSeconds: 3600, MaxSends: 2}}, nil); err != nil {
+		t.Fatalf("SetCampaignAccountLimits: %v", err)
+	}
+
+	if _, err := st.SetCampaignStatus(ctx, campA.ID, purecampaign.StatusRunning, uuid.NullUUID{}, "started", nil); err != nil {
+		t.Fatalf("start A: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond) // distinct started_at ordering
+	if _, err := st.SetCampaignStatus(ctx, campB.ID, purecampaign.StatusRunning, uuid.NullUUID{}, "started", nil); err != nil {
+		t.Fatalf("start B: %v", err)
+	}
+
+	base := time.Now().UTC()
+
+	// Claim 1: FIFO by started_at picks Campaign A (started first).
+	c1, ok, err := st.ClaimNextRecipient(ctx, acctID, base)
+	if err != nil || !ok {
+		t.Fatalf("claim 1: ok=%v err=%v", ok, err)
+	}
+	if c1.CampaignID != campA.ID {
+		t.Fatalf("claim 1 campaign = %s, want A (%s)", c1.CampaignID, campA.ID)
+	}
+	if err := st.FinalizeAttempt(ctx, store.FinalizeAttemptParams{LogID: c1.LogID, RecipientID: c1.RecipientID, NewStatus: purecampaign.RecipientSent}); err != nil {
+		t.Fatalf("finalize 1: %v", err)
+	}
+
+	// Claim 2, a few seconds later (past min-interval, still deep inside the
+	// 1h tier window): still Campaign A's turn under strict FIFO drain — and
+	// this is the shared tier's SECOND (and last) slot.
+	t2 := base.Add(5 * time.Second)
+	c2, ok, err := st.ClaimNextRecipient(ctx, acctID, t2)
+	if err != nil || !ok {
+		t.Fatalf("claim 2: ok=%v err=%v", ok, err)
+	}
+	if c2.CampaignID != campA.ID {
+		t.Fatalf("claim 2 campaign = %s, want A (%s)", c2.CampaignID, campA.ID)
+	}
+	if err := st.FinalizeAttempt(ctx, store.FinalizeAttemptParams{LogID: c2.LogID, RecipientID: c2.RecipientID, NewStatus: purecampaign.RecipientSent}); err != nil {
+		t.Fatalf("finalize 2: %v", err)
+	}
+
+	// Claim 3: the shared tier is now at capacity (2/2 in the last hour).
+	// Campaign B has never sent anything and still has its one recipient
+	// untouched — a per-campaign budget bug would let this claim succeed by
+	// drawing from Campaign B's "fresh" allowance. It must not.
+	t3 := base.Add(10 * time.Second)
+	_, ok, err = st.ClaimNextRecipient(ctx, acctID, t3)
+	if err != nil {
+		t.Fatalf("claim 3: %v", err)
+	}
+	if ok {
+		t.Error("claim 3 = claimed, want refused (shared account tier at capacity, regardless of which campaign has headroom of its own)")
+	}
+
+	// Both campaigns' still-pending recipients are untouched by the refusal.
+	countsA, err := st.CampaignRecipientCounts(ctx, campA.ID)
+	if err != nil {
+		t.Fatalf("CampaignRecipientCounts(A): %v", err)
+	}
+	if countsA["pending"] != 1 || countsA["sent"] != 2 {
+		t.Errorf("Campaign A counts = %+v, want 1 pending / 2 sent", countsA)
+	}
+	countsB, err := st.CampaignRecipientCounts(ctx, campB.ID)
+	if err != nil {
+		t.Fatalf("CampaignRecipientCounts(B): %v", err)
+	}
+	if countsB["pending"] != 1 || countsB["sent"] != 0 {
+		t.Errorf("Campaign B counts = %+v, want its 1 recipient still untouched (never got a shot at the shared budget)", countsB)
+	}
+
+	// Once the 1h tier window has fully rolled over, the shared budget opens
+	// back up — proving this was throttling, not starvation. FIFO still
+	// drains Campaign A's last recipient first...
+	t4 := base.Add(3601 * time.Second)
+	c4, ok, err := st.ClaimNextRecipient(ctx, acctID, t4)
+	if err != nil || !ok {
+		t.Fatalf("claim 4 (after window rollover): ok=%v err=%v", ok, err)
+	}
+	if c4.CampaignID != campA.ID {
+		t.Fatalf("claim 4 campaign = %s, want A's last recipient (%s)", c4.CampaignID, campA.ID)
+	}
+	if err := st.FinalizeAttempt(ctx, store.FinalizeAttemptParams{LogID: c4.LogID, RecipientID: c4.RecipientID, NewStatus: purecampaign.RecipientSent}); err != nil {
+		t.Fatalf("finalize 4: %v", err)
+	}
+
+	// ...and then Campaign B, which was never starved, finally gets served.
+	t5 := t4.Add(5 * time.Second)
+	c5, ok, err := st.ClaimNextRecipient(ctx, acctID, t5)
+	if err != nil || !ok {
+		t.Fatalf("claim 5: ok=%v err=%v", ok, err)
+	}
+	if c5.CampaignID != campB.ID {
+		t.Fatalf("claim 5 campaign = %s, want B (%s) — it must eventually be served, not starved", c5.CampaignID, campB.ID)
+	}
+	if err := st.FinalizeAttempt(ctx, store.FinalizeAttemptParams{LogID: c5.LogID, RecipientID: c5.RecipientID, NewStatus: purecampaign.RecipientSent}); err != nil {
+		t.Fatalf("finalize 5: %v", err)
+	}
+
+	for _, c := range []store.Campaign{campA, campB} {
+		counts, err := st.CampaignRecipientCounts(ctx, c.ID)
+		if err != nil {
+			t.Fatalf("CampaignRecipientCounts(%s): %v", c.ID, err)
+		}
+		if counts["pending"] != 0 || counts["sending"] != 0 {
+			t.Errorf("campaign %s final counts = %+v, want everything resolved", c.ID, counts)
+		}
 	}
 }
 
@@ -518,7 +673,7 @@ func TestReconcileStuckSending(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("ReconcileStuckSending reconciled %d, want 1", n)
 	}
-	failed, _, err := st.ListCampaignRecipients(ctx, c.ID, "failed", 50, 0)
+	failed, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "failed", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients(failed): %v", err)
 	}
@@ -608,7 +763,7 @@ func TestRetryFailedRecipients(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("retried %d, want 1", n)
 	}
-	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "", 50, 0)
+	recipients, _, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "", 50, 0)
 	if err != nil {
 		t.Fatalf("ListCampaignRecipients: %v", err)
 	}
@@ -688,12 +843,24 @@ func TestCampaignAccountSettingsDefaults(t *testing.T) {
 		t.Errorf("tiers = %+v, want the %d built-in defaults", tiers, len(purecampaign.DefaultTiers))
 	}
 
+	// Simulator stands in for a real whatsmeow-backed WhatsApp account, so it
+	// gets the exact same built-in defaults as any real channel — a campaign
+	// sent through it is throttled/paced exactly the way a live one would be
+	// unless an operator overrides it (see budget.go's own doc comments).
+	simSettings, err := st.CampaignAccountSettingsFor(ctx, acctID, "simulator")
+	if err != nil {
+		t.Fatalf("CampaignAccountSettingsFor(simulator): %v", err)
+	}
+	if simSettings.MinIntervalSeconds != purecampaign.DefaultMinIntervalSeconds || simSettings.JitterSeconds != purecampaign.DefaultJitterSeconds {
+		t.Errorf("simulator settings = %+v, want the same built-in defaults as a real channel", simSettings)
+	}
+
 	simTiers, err := st.CampaignAccountLimitsFor(ctx, acctID, "simulator")
 	if err != nil {
 		t.Fatalf("CampaignAccountLimitsFor(simulator): %v", err)
 	}
-	if len(simTiers) != 0 {
-		t.Errorf("simulator default tiers = %+v, want none (unlimited)", simTiers)
+	if len(simTiers) != len(purecampaign.DefaultTiers) {
+		t.Errorf("simulator default tiers = %+v, want the %d built-in defaults (same as a real channel)", simTiers, len(purecampaign.DefaultTiers))
 	}
 }
 
@@ -1217,5 +1384,195 @@ func TestInsertCampaignOutbound(t *testing.T) {
 	}
 	if chat.UnreadCount != 0 {
 		t.Errorf("UnreadCount = %d, want 0 (a fresh chat starts at 0; campaign sends must not bump it)", chat.UnreadCount)
+	}
+}
+
+// TestListCampaignRecipients_MessageDeliveryStateTracksTheLinkedMessage
+// proves ListCampaignRecipients' own LEFT JOIN: a recipient with no message
+// yet reports an empty MessageDeliveryState; once InsertCampaignOutbound +
+// StampOutboundSent link a real message, it reports that message's own
+// delivery_state — and tracks it live as AdvanceDeliveryState (the exact
+// mechanism a real channel's delivery-receipt webhook, or Simulator's own
+// ReceiptSimulator, calls) moves it forward. Uses channel='simulator'
+// throughout (both the campaign and ListCampaignRecipients' own channel
+// argument) since that is the join's new caller.
+func TestListCampaignRecipients_MessageDeliveryStateTracksTheLinkedMessage(t *testing.T) {
+	ctx := context.Background()
+	st := dbtest.New(t)
+	org, err := st.SeedOrganization(ctx, "campaigns-test-org-"+uuid.NewString())
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	user, err := st.SeedUser(ctx, org.ID, uuid.NewString()+"@example.com", "hash", "Tester")
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	acct, err := st.GetOrCreateSimulatorAccount(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("GetOrCreateSimulatorAccount: %v", err)
+	}
+
+	c, err := st.CreateCampaign(ctx, store.Campaign{
+		OrganizationID: org.ID, Name: "Sim promo", AccountID: acct.ID, Channel: "simulator",
+		MessageBody: "Hi!", CreatedBy: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	if err := st.ReplaceCampaignRecipients(ctx, c.ID, []store.CampaignRecipientInput{
+		{NormalizedIdentity: "77011234563", RawInput: "77011234563"},
+	}); err != nil {
+		t.Fatalf("ReplaceCampaignRecipients: %v", err)
+	}
+
+	before, _, err := st.ListCampaignRecipients(ctx, c.ID, "simulator", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListCampaignRecipients (before send): %v", err)
+	}
+	if len(before) != 1 || before[0].MessageDeliveryState != "" {
+		t.Fatalf("before send = %+v, want one recipient with an empty MessageDeliveryState", before)
+	}
+
+	if _, err := st.SetCampaignStatus(ctx, c.ID, purecampaign.StatusRunning, uuid.NullUUID{UUID: user.ID, Valid: true}, "started", nil); err != nil {
+		t.Fatalf("start campaign: %v", err)
+	}
+	claim, ok, err := st.ClaimNextRecipient(ctx, acct.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ClaimNextRecipient: %v", err)
+	}
+	if !ok {
+		t.Fatal("ClaimNextRecipient: ok = false, want true")
+	}
+
+	chatID, _, err := st.FindOrCreateChat(ctx, acct.ID, "77011234563@s.whatsapp.net", "77011234563")
+	if err != nil {
+		t.Fatalf("FindOrCreateChat: %v", err)
+	}
+	msgID, err := st.InsertCampaignOutbound(ctx, "simulator", chatID, acct.ID, "Hi!", "Hi!")
+	if err != nil {
+		t.Fatalf("InsertCampaignOutbound: %v", err)
+	}
+	externalID := "sim-" + msgID.String()
+	if err := st.StampOutboundSent(ctx, "simulator", msgID, externalID); err != nil {
+		t.Fatalf("StampOutboundSent: %v", err)
+	}
+	if err := st.FinalizeAttempt(ctx, store.FinalizeAttemptParams{
+		LogID: claim.LogID, RecipientID: claim.RecipientID, NewStatus: purecampaign.RecipientSent,
+		ChatID: uuid.NullUUID{UUID: chatID, Valid: true}, MessageID: uuid.NullUUID{UUID: msgID, Valid: true},
+	}); err != nil {
+		t.Fatalf("FinalizeAttempt: %v", err)
+	}
+
+	afterSend, _, err := st.ListCampaignRecipients(ctx, c.ID, "simulator", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListCampaignRecipients (after send): %v", err)
+	}
+	if len(afterSend) != 1 || afterSend[0].MessageDeliveryState != "sent" {
+		t.Fatalf("after send = %+v, want MessageDeliveryState=sent", afterSend)
+	}
+
+	if _, _, err := st.AdvanceDeliveryState(ctx, "simulator", acct.ID, externalID, "delivered", 2); err != nil {
+		t.Fatalf("AdvanceDeliveryState(delivered): %v", err)
+	}
+	afterDelivered, _, err := st.ListCampaignRecipients(ctx, c.ID, "simulator", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListCampaignRecipients (after delivered): %v", err)
+	}
+	if len(afterDelivered) != 1 || afterDelivered[0].MessageDeliveryState != "delivered" {
+		t.Fatalf("after delivered = %+v, want MessageDeliveryState=delivered", afterDelivered)
+	}
+
+	if _, _, err := st.AdvanceDeliveryState(ctx, "simulator", acct.ID, externalID, "read", 3); err != nil {
+		t.Fatalf("AdvanceDeliveryState(read): %v", err)
+	}
+	afterRead, _, err := st.ListCampaignRecipients(ctx, c.ID, "simulator", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListCampaignRecipients (after read): %v", err)
+	}
+	if len(afterRead) != 1 || afterRead[0].MessageDeliveryState != "read" {
+		t.Fatalf("after read = %+v, want MessageDeliveryState=read", afterRead)
+	}
+	// The recipient's own coarse Status never grows a fourth value — it
+	// stays 'sent' regardless of how far delivery_state advances.
+	if afterRead[0].Status != string(purecampaign.RecipientSent) {
+		t.Errorf("Status = %q, want unaffected sent", afterRead[0].Status)
+	}
+}
+
+// TestSimulatorMessagesAwaitingReceipt proves the ReceiptSimulator sweep
+// query itself: only simulator-channel, outbound, sent-or-delivered
+// messages older than the cutoff come back, and a whatsapp-channel message
+// (same shape, different account channel) is excluded even though it lives
+// in the very same wa_messages table.
+func TestSimulatorMessagesAwaitingReceipt(t *testing.T) {
+	ctx := context.Background()
+	st := dbtest.New(t)
+	org, err := st.SeedOrganization(ctx, "sim-receipts-org-"+uuid.NewString())
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	simAcct, err := st.GetOrCreateSimulatorAccount(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("GetOrCreateSimulatorAccount: %v", err)
+	}
+	waAcct, err := st.SeedAccount(ctx, store.Account{
+		ID: uuid.New(), OrganizationID: uuid.NullUUID{UUID: org.ID, Valid: true},
+		DisplayName: "Real WA", ExternalAccountRef: "7770000001@s.whatsapp.net", ExternalHandle: "77700000001",
+		ConnectionState: "connected",
+	})
+	if err != nil {
+		t.Fatalf("seed wa account: %v", err)
+	}
+
+	simChat, _, err := st.FindOrCreateChat(ctx, simAcct.ID, "77011234563@s.whatsapp.net", "77011234563")
+	if err != nil {
+		t.Fatalf("FindOrCreateChat (sim): %v", err)
+	}
+	simMsgID, err := st.InsertCampaignOutbound(ctx, "simulator", simChat, simAcct.ID, "hi", "hi")
+	if err != nil {
+		t.Fatalf("InsertCampaignOutbound (sim): %v", err)
+	}
+	if err := st.StampOutboundSent(ctx, "simulator", simMsgID, "sim-"+simMsgID.String()); err != nil {
+		t.Fatalf("StampOutboundSent (sim): %v", err)
+	}
+
+	waChat, _, err := st.FindOrCreateChat(ctx, waAcct.ID, "77011234564@s.whatsapp.net", "77011234564")
+	if err != nil {
+		t.Fatalf("FindOrCreateChat (wa): %v", err)
+	}
+	waMsgID, err := st.InsertCampaignOutbound(ctx, "whatsapp", waChat, waAcct.ID, "hi", "hi")
+	if err != nil {
+		t.Fatalf("InsertCampaignOutbound (wa): %v", err)
+	}
+	if err := st.StampOutboundSent(ctx, "whatsapp", waMsgID, "wamid-"+waMsgID.String()); err != nil {
+		t.Fatalf("StampOutboundSent (wa): %v", err)
+	}
+
+	// A cutoff in the future includes every not-yet-advanced message —
+	// exactly the simulator one, never the whatsapp one.
+	future := time.Now().Add(time.Hour)
+	candidates, err := st.SimulatorMessagesAwaitingReceipt(ctx, future)
+	if err != nil {
+		t.Fatalf("SimulatorMessagesAwaitingReceipt: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %+v, want exactly the one simulator message", candidates)
+	}
+	got := candidates[0]
+	if got.MessageID != simMsgID || got.AccountID != simAcct.ID || got.DeliveryState != "sent" {
+		t.Errorf("candidate = %+v", got)
+	}
+	if got.Destination != "77011234563@s.whatsapp.net" {
+		t.Errorf("Destination = %q", got.Destination)
+	}
+
+	// A cutoff strictly in the past excludes it again (too recent).
+	past := time.Now().Add(-time.Hour)
+	candidates, err = st.SimulatorMessagesAwaitingReceipt(ctx, past)
+	if err != nil {
+		t.Fatalf("SimulatorMessagesAwaitingReceipt (past cutoff): %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %+v, want none before their own update time", candidates)
 	}
 }

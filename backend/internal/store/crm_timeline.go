@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -93,18 +92,24 @@ func appendTimeline(ctx context.Context, tx *dbx.Tx, orgID, customerID uuid.UUID
 	return wrap("append timeline", err)
 }
 
-// CustomerTimeline returns the customer's CRM events merged with the messages
-// of every conversation their identities own, newest first, capped at limit.
+// CustomerTimeline returns the customer's CRM events, newest first, capped at
+// limit — an executive audit log of account milestones (status/tag changes,
+// notes, follow-ups, merges, channel connections), not a transcript.
 //
-// Both legs are fetched at `limit` and merged in Go rather than UNIONed in SQL:
-// crm_timeline and inbox_messages_v have no shared shape, and a UNION would
-// force every message column onto the CRM leg (and vice versa) purely to
-// satisfy the compiler.
+// It used to also merge in every message of every conversation the
+// customer's identities own, read live from inbox_messages_v. TODO.md's
+// "Filter out routine message logs from Timeline" retired that leg entirely:
+// a "клиент написал" / "Наш ответ" row for every single bubble buried the
+// handful of CRM events that actually matter under hundreds of routine chat
+// logs, and the full transcript already lives one click away in the
+// conversation itself (see CustomerProfile.conversations). TimelineEntry
+// keeps its Source/message fields for the DTO's sake — see MapTimelineEntry —
+// but this store method now only ever produces TimelineSourceCRM rows.
 func (s *Store) CustomerTimeline(ctx context.Context, orgID, customerID uuid.UUID, limit int) ([]TimelineEntry, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	out := make([]TimelineEntry, 0, limit*2)
+	out := make([]TimelineEntry, 0, limit)
 
 	rows, err := s.db.Query(ctx, `
 		SELECT id, kind, actor_user_id, summary, detail, occurred_at
@@ -124,35 +129,6 @@ func (s *Store) CustomerTimeline(ctx context.Context, orgID, customerID uuid.UUI
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-
-	msgRows, err := s.db.Query(ctx, `
-		SELECT m.id, m.chat_id, m.channel, m.direction, m.sender_kind, m.body,
-			COALESCE(m.message_ts, m.created_at)
-		FROM inbox_messages_v m
-		JOIN inbox_chats_v c ON c.id = m.chat_id
-		JOIN crm_customer_identities ci ON ci.channel = c.channel AND ci.contact_id = c.contact_id
-		WHERE c.organization_id = $1 AND ci.customer_id = $2
-		ORDER BY COALESCE(m.message_ts, m.created_at) DESC LIMIT $3`, orgID, customerID, limit)
-	if err != nil {
-		return nil, wrap("timeline messages", err)
-	}
-	defer func() { _ = msgRows.Close() }()
-	for msgRows.Next() {
-		e := TimelineEntry{Source: TimelineSourceMessage, Kind: "message"}
-		if err := msgRows.Scan(&e.ID, &e.ChatID, &e.Channel, &e.Direction, &e.SenderKind,
-			&e.Body, &e.OccurredAt); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	if err := msgRows.Err(); err != nil {
-		return nil, err
-	}
-
-	sort.SliceStable(out, func(i, j int) bool { return out[i].OccurredAt.After(out[j].OccurredAt) })
-	if len(out) > limit {
-		out = out[:limit]
 	}
 	return out, nil
 }

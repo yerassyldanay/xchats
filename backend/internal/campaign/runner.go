@@ -90,11 +90,22 @@ func (r *Runner) send(ctx context.Context, claim store.Claim) {
 		return
 	}
 
-	vars := make(map[string]string, len(claim.Attributes)+1)
+	// name and phone are always the recipient's own real values, never a
+	// CSV-supplied attribute of the same key — phone in particular is
+	// never itself a named Attribute (it is the identity column every
+	// recipient is parsed and deduplicated by, see backend/campaign's own
+	// ParseRecipients doc comment), so it would otherwise render as
+	// literally missing: Render silently drops an unmapped {{token}}
+	// rather than leaving it as-is. The frontend wizard already offers
+	// {{phone}} as a quick-insert chip and excludes it from its own
+	// unmatched-variable warning on that same assumption — this is what
+	// makes that assumption actually true at send time.
+	vars := make(map[string]string, len(claim.Attributes)+2)
 	for k, v := range claim.Attributes {
 		vars[k] = v
 	}
 	vars["name"] = claim.Name
+	vars["phone"] = claim.NormalizedIdentity
 	text := purecampaign.Render(claim.MessageBody, vars)
 
 	msgID, err := r.Store.InsertCampaignOutbound(ctx, claim.Channel, chatID, claim.AccountID, text, previewText(text))
@@ -162,19 +173,21 @@ func (r *Runner) resolveChat(ctx context.Context, claim store.Claim) (chatID uui
 }
 
 // finalize records the outcome of one send attempt: nil sendErr -> sent;
-// messaging.ErrOutsideServiceWindow or errNoExistingChat -> permanently
-// failed (neither is a transport hiccup a retry could fix — the provider's
-// own service-window rule needs the customer to message in again, and a
-// still-missing chat needs preview-time reachability re-checked, not a
-// resend); anything else -> transient, stepped through
-// backend/campaign.NextRetry's fixed backoff ladder until it is exhausted,
-// at which point it too becomes permanently failed.
+// messaging.ErrOutsideServiceWindow, errNoExistingChat, or
+// messaging.ErrRecipientUnreachable -> permanently failed (none of the three
+// is a transport hiccup a retry could fix — the provider's own
+// service-window rule needs the customer to message in again, a
+// still-missing chat needs preview-time reachability re-checked rather than
+// a resend, and an unreachable destination stays unreachable); anything
+// else -> transient, stepped through backend/campaign.NextRetry's fixed
+// backoff ladder until it is exhausted, at which point it too becomes
+// permanently failed.
 func (r *Runner) finalize(ctx context.Context, claim store.Claim, sendErr error, chatID, messageID uuid.NullUUID) {
 	p := store.FinalizeAttemptParams{LogID: claim.LogID, RecipientID: claim.RecipientID, ChatID: chatID, MessageID: messageID}
 	switch {
 	case sendErr == nil:
 		p.NewStatus = purecampaign.RecipientSent
-	case errors.Is(sendErr, messaging.ErrOutsideServiceWindow), errors.Is(sendErr, errNoExistingChat):
+	case errors.Is(sendErr, messaging.ErrOutsideServiceWindow), errors.Is(sendErr, errNoExistingChat), errors.Is(sendErr, messaging.ErrRecipientUnreachable):
 		p.NewStatus = purecampaign.RecipientFailed
 		p.FailureReason = sendErr.Error()
 	default:

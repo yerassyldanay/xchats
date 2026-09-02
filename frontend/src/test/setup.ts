@@ -40,3 +40,36 @@ if (!window.IntersectionObserver) {
     }
   } as unknown as typeof IntersectionObserver
 }
+
+// jsdom implements no scrolling — Element.scrollTo/scrollIntoView are simply
+// absent, so any component that scrolls a list into view on update (e.g.
+// SimulatorPanel's own scrollToBottom) throws "is not a function" the moment
+// a dom test actually exercises that code path.
+if (!Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = () => {}
+}
+
+// jsdom implements the PointerEvent constructor but not the Pointer Capture
+// methods on Element — reka-ui's SelectTrigger (and other Radix-style
+// primitives) call hasPointerCapture/releasePointerCapture unconditionally
+// on open, so a real pointerdown dispatch throws without these.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = () => {}
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = () => {}
+}
+
+// jsdom implements the Blob/File constructors but not URL.createObjectURL/
+// revokeObjectURL — any "download this as a file" affordance (PromptTab's
+// downloadPrompt, CampaignWizard's downloadSampleCsv) throws the moment a
+// dom test actually clicks the button, not just when it constructs the Blob.
+if (!URL.createObjectURL) {
+  URL.createObjectURL = () => 'blob:mock'
+}
+if (!URL.revokeObjectURL) {
+  URL.revokeObjectURL = () => {}
+}

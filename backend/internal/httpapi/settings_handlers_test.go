@@ -29,7 +29,6 @@ func TestGetSettingsReturnsDefaults(t *testing.T) {
 		LLM     struct {
 			DefaultProvider string `json:"default_provider"`
 		} `json:"llm"`
-		SetupCompleted bool `json:"setup_completed"`
 	}
 	mustDecode(t, env, &got)
 	if got.Version != 1 {
@@ -37,9 +36,6 @@ func TestGetSettingsReturnsDefaults(t *testing.T) {
 	}
 	if got.LLM.DefaultProvider != "openrouter" {
 		t.Errorf("LLM.DefaultProvider = %q, want %q", got.LLM.DefaultProvider, "openrouter")
-	}
-	if got.SetupCompleted {
-		t.Error("SetupCompleted = true on a fresh install, want false")
 	}
 }
 
@@ -469,22 +465,6 @@ func TestUpdateNgrokSettingsRoundTrips(t *testing.T) {
 	}
 }
 
-func TestSetupComplete(t *testing.T) {
-	h := newSettingsHarness(t)
-	resp, env := h.do(http.MethodPost, "/xchats/api/v1/settings/setup-complete", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d body=%s", resp.StatusCode, env["message"])
-	}
-	_, settingsEnv := h.get("/xchats/api/v1/settings")
-	var full struct {
-		SetupCompleted bool `json:"setup_completed"`
-	}
-	mustDecode(t, settingsEnv, &full)
-	if !full.SetupCompleted {
-		t.Error("SetupCompleted = false after POST /settings/setup-complete")
-	}
-}
-
 func TestDownloadBackup(t *testing.T) {
 	h := newSettingsHarness(t)
 
@@ -846,7 +826,6 @@ func TestSettingsRoutesDegradeGracefullyWithNoOptionalDepsWired(t *testing.T) {
 		{"test credential", http.MethodPost, "/xchats/api/v1/settings/integrations/openrouter/test", nil, http.StatusServiceUnavailable},
 		{"update llm settings", http.MethodPut, "/xchats/api/v1/settings/llm", map[string]any{"default_provider": "openrouter", "default_model": "m", "max_tokens": 500, "temperature": 0.3, "timeout_seconds": 60}, http.StatusServiceUnavailable},
 		{"update credential storage", http.MethodPut, "/xchats/api/v1/settings/credential-storage", map[string]any{"credential_file_fallback_accepted": true}, http.StatusServiceUnavailable},
-		{"setup complete", http.MethodPost, "/xchats/api/v1/settings/setup-complete", nil, http.StatusServiceUnavailable},
 		{"update ngrok settings", http.MethodPut, "/xchats/api/v1/settings/ngrok", map[string]any{"region": "eu"}, http.StatusServiceUnavailable},
 		{"provider health", http.MethodGet, "/xchats/api/v1/settings/provider-health", nil, http.StatusOK},
 		{"update check", http.MethodGet, "/xchats/api/v1/settings/update-check", nil, http.StatusOK},

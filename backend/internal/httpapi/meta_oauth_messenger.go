@@ -21,6 +21,17 @@ import (
 // reasoning for why it is PUBLIC.
 const messengerCallbackPath = "/meta/api/v1/oauth/messenger/callback"
 
+// errNoFacebookPages/errMultipleFacebookPages are finishMessengerConnect's
+// two distinguishable page-count failures — sentinels rather than plain
+// errors.New calls so handleMessengerOAuthCallback can map each to its own
+// stable metaOAuthErr* code (errors.Is, via the %w-wrapped count below) for
+// the frontend, instead of both falling into the generic CONNECT_FAILED
+// bucket (docs/ux/flows/03b-connect-instagram-messenger.md, friction point 5).
+var (
+	errNoFacebookPages       = errors.New("нет доступных Facebook Pages — предоставьте доступ хотя бы к одной Page и попробуйте снова")
+	errMultipleFacebookPages = errors.New("предоставлен доступ более чем к одной Facebook Page — предоставьте доступ ровно к одной Page и попробуйте снова")
+)
+
 // messengerScopes is the permission set Messenger's connect flow requests:
 // pages_show_list so PageAccounts can enumerate the operator's Pages,
 // pages_messaging to send/receive DMs, pages_manage_metadata to subscribe
@@ -73,12 +84,12 @@ func (s *Server) handleMessengerOAuthCallback(c *gin.Context) {
 	code := c.Query("code")
 	stateParam := c.Query("state")
 	if code == "" || stateParam == "" {
-		s.redirectAccounts(c, "messenger_error", "Meta не передала code/state — попробуйте подключить заново.")
+		s.redirectAccountsErr(c, "messenger_error", metaOAuthErrMissingParams, "Meta не передала code/state — попробуйте подключить заново.")
 		return
 	}
 	st, err := s.store.MetaOAuthStateByID(ctx(c), stateParam)
 	if err != nil {
-		s.redirectAccounts(c, "messenger_error", "Сессия подключения истекла или уже использована. Попробуйте снова.")
+		s.redirectAccountsErr(c, "messenger_error", metaOAuthErrSessionExpired, "Сессия подключения истекла или уже использована. Попробуйте снова.")
 		return
 	}
 
@@ -86,7 +97,14 @@ func (s *Server) handleMessengerOAuthCallback(c *gin.Context) {
 	if connectErr != nil {
 		s.log.Warn("messenger oauth callback failed", "org_id", st.OrganizationID, "err", connectErr)
 		_ = s.store.SettleMetaOAuthState(ctx(c), st.State, "failed", uuid.NullUUID{}, connectErr.Error())
-		s.redirectAccounts(c, "messenger_error", "Не удалось подключить Messenger: "+connectErr.Error())
+		errCode := metaOAuthErrConnectFailed
+		switch {
+		case errors.Is(connectErr, errNoFacebookPages):
+			errCode = metaOAuthErrNoPages
+		case errors.Is(connectErr, errMultipleFacebookPages):
+			errCode = metaOAuthErrMultiplePages
+		}
+		s.redirectAccountsErr(c, "messenger_error", errCode, "Не удалось подключить Messenger: "+connectErr.Error())
 		return
 	}
 	_ = s.store.SettleMetaOAuthState(ctx(c), st.State, "connected", uuid.NullUUID{UUID: acct.ID, Valid: true}, "")
@@ -131,12 +149,11 @@ func (s *Server) finishMessengerConnect(ctx context.Context, st store.MetaOAuthS
 	}
 	switch len(pages) {
 	case 0:
-		return store.ChannelAccount{}, errors.New("нет доступных Facebook Pages — предоставьте доступ хотя бы к одной Page и попробуйте снова")
+		return store.ChannelAccount{}, errNoFacebookPages
 	case 1:
 		// exactly one — the unambiguous, supported case.
 	default:
-		return store.ChannelAccount{}, fmt.Errorf(
-			"предоставлен доступ к %d Facebook Pages — предоставьте доступ ровно к одной Page и попробуйте снова", len(pages))
+		return store.ChannelAccount{}, fmt.Errorf("%w (%d Pages)", errMultipleFacebookPages, len(pages))
 	}
 	page := pages[0]
 

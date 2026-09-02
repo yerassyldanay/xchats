@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CircleAlert, LoaderCircle, Paperclip, Send, SquarePen, X } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { useAccounts } from '../stores/accounts'
 import { ApiError } from '../api/client'
+import { channelIcon, channelText } from '../lib/channelBrand'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -15,6 +16,20 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const inbox = useInbox()
 const accounts = useAccounts()
 const { t } = useI18n()
+
+// INB-12: composeNew only ever reaches the wa_* gateway (see
+// composableAccounts' own doc comment) — a Telegram bot can't message first,
+// and the Meta channels have no template-send path yet. Brand names, not
+// translated — same convention as the app's own "xchats".
+const CHANNEL_DISPLAY_NAME: Record<string, string> = {
+  telegram: 'Telegram',
+  instagram: 'Instagram',
+  messenger: 'Messenger',
+  whatsapp_cloud: 'WhatsApp Cloud API',
+}
+// The OTHER channels connected — shown so "why can't I start here" has an
+// answer instead of the entry point just quietly doing nothing useful.
+const nonComposableAccounts = computed(() => accounts.accounts.filter((a) => !accounts.composableAccounts.includes(a)))
 
 const phone = ref('')
 const text = ref('')
@@ -74,60 +89,86 @@ async function submit() {
         </DialogTitle>
       </DialogHeader>
 
-      <div class="px-5 py-5 space-y-4">
-        <div v-if="accounts.composableAccounts.length > 1">
-          <label class="text-xs font-medium text-muted-foreground">{{ t('inbox.compose.fromNumber') }}</label>
-          <Select v-model="fromAccount">
-            <SelectTrigger class="mt-1.5">
-              <SelectValue :placeholder="t('inbox.compose.pickNumber')" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="a in accounts.composableAccounts" :key="a.id" :value="a.id">
-                {{ a.display_name }}{{ a.external_handle ? ' (+' + a.external_handle + ')' : '' }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+      <!-- INB-12: composing is wa_* gateway-only — explain that instead of
+           offering a phone form that can only fail with "no account". -->
+      <template v-if="!accounts.loading && accounts.composableAccounts.length === 0">
+        <div class="px-5 py-5">
+          <div class="text-center mb-4">
+            <div class="mx-auto w-11 h-11 rounded-xl bg-muted grid place-items-center text-muted-foreground mb-2.5">
+              <CircleAlert class="w-5 h-5" />
+            </div>
+            <p class="text-[13px] font-medium">{{ t('inbox.compose.noEligible.title') }}</p>
+            <p class="text-xs text-muted-foreground mt-1">{{ t('inbox.compose.noEligible.body') }}</p>
+          </div>
+          <ul v-if="nonComposableAccounts.length" class="space-y-2 rounded-lg bg-muted/50 p-3">
+            <li v-for="a in nonComposableAccounts" :key="a.id" class="flex items-center gap-2 text-xs">
+              <component :is="channelIcon(a.channel)" class="w-3.5 h-3.5 shrink-0" :class="channelText(a.channel)" />
+              <span class="font-medium">{{ CHANNEL_DISPLAY_NAME[a.channel] || a.channel }}</span>
+              <span class="text-muted-foreground">— {{ t('inbox.compose.noEligible.waitsForCustomer') }}</span>
+            </li>
+          </ul>
         </div>
-        <div>
-          <label class="text-xs font-medium text-muted-foreground">{{ t('inbox.compose.phone') }}</label>
-          <Input
-            v-model="phone"
-            inputmode="tel"
-            placeholder="77001234567"
-            class="mt-1.5"
-            @keydown.enter.prevent="submit"
-          />
-        </div>
-        <div>
-          <label class="text-xs font-medium text-muted-foreground">{{ t('inbox.compose.message') }}</label>
-          <Textarea v-model="text" :placeholder="t('inbox.messagePlaceholder')" class="mt-1.5 min-h-[84px] resize-none" />
-        </div>
-        <div v-if="files.length" class="flex flex-wrap gap-2">
-          <span
-            v-for="(f, i) in files"
-            :key="i"
-            class="flex items-center gap-1.5 rounded-full bg-muted border border-border px-3 py-1 text-xs"
-          >
-            <Paperclip class="w-3.5 h-3.5 text-muted-foreground" /> {{ f.name }}
-            <button class="text-muted-foreground hover:text-destructive" @click="removeFile(i)"><X class="w-3.5 h-3.5" /></button>
-          </span>
-        </div>
-        <p v-if="error" class="flex items-center gap-2 text-sm text-destructive">
-          <CircleAlert class="w-4 h-4 shrink-0" /> {{ error }}
-        </p>
-      </div>
+        <DialogFooter>
+          <Button variant="outline" @click="emit('close')">{{ t('common.close') }}</Button>
+        </DialogFooter>
+      </template>
 
-      <DialogFooter class="justify-between">
-        <Button variant="ghost" size="icon" :title="t('inbox.attachFile')" @click="fileInput?.click()">
-          <Paperclip class="w-4 h-4" />
-        </Button>
-        <input ref="fileInput" type="file" multiple class="hidden" @change="pick" />
-        <Button :disabled="sending" @click="submit">
-          <LoaderCircle v-if="sending" class="w-4 h-4 animate-spin" />
-          <Send v-else class="w-4 h-4" />
-          {{ sending ? t('inbox.sending') : t('inbox.send') }}
-        </Button>
-      </DialogFooter>
+      <template v-else>
+        <div class="px-5 py-5 space-y-4">
+          <div v-if="accounts.composableAccounts.length > 1">
+            <label class="text-xs font-medium text-muted-foreground">{{ t('inbox.compose.fromNumber') }}</label>
+            <Select v-model="fromAccount">
+              <SelectTrigger class="mt-1.5">
+                <SelectValue :placeholder="t('inbox.compose.pickNumber')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="a in accounts.composableAccounts" :key="a.id" :value="a.id">
+                  {{ a.display_name }}{{ a.external_handle ? ' (+' + a.external_handle + ')' : '' }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label class="text-xs font-medium text-muted-foreground">{{ t('inbox.compose.phone') }}</label>
+            <Input
+              v-model="phone"
+              inputmode="tel"
+              placeholder="77001234567"
+              class="mt-1.5"
+              @keydown.enter.prevent="submit"
+            />
+          </div>
+          <div>
+            <label class="text-xs font-medium text-muted-foreground">{{ t('inbox.compose.message') }}</label>
+            <Textarea v-model="text" :placeholder="t('inbox.messagePlaceholder')" class="mt-1.5 min-h-[84px] resize-none" />
+          </div>
+          <div v-if="files.length" class="flex flex-wrap gap-2">
+            <span
+              v-for="(f, i) in files"
+              :key="i"
+              class="flex items-center gap-1.5 rounded-full bg-muted border border-border px-3 py-1 text-xs"
+            >
+              <Paperclip class="w-3.5 h-3.5 text-muted-foreground" /> {{ f.name }}
+              <button class="text-muted-foreground hover:text-destructive" @click="removeFile(i)"><X class="w-3.5 h-3.5" /></button>
+            </span>
+          </div>
+          <p v-if="error" class="flex items-center gap-2 text-sm text-destructive">
+            <CircleAlert class="w-4 h-4 shrink-0" /> {{ error }}
+          </p>
+        </div>
+
+        <DialogFooter class="justify-between">
+          <Button variant="ghost" size="icon" :title="t('inbox.attachFile')" @click="fileInput?.click()">
+            <Paperclip class="w-4 h-4" />
+          </Button>
+          <input ref="fileInput" type="file" multiple class="hidden" @change="pick" />
+          <Button :disabled="sending" @click="submit">
+            <LoaderCircle v-if="sending" class="w-4 h-4 animate-spin" />
+            <Send v-else class="w-4 h-4" />
+            {{ sending ? t('inbox.sending') : t('inbox.send') }}
+          </Button>
+        </DialogFooter>
+      </template>
     </DialogContent>
   </Dialog>
 </template>

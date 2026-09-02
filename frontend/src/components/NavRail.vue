@@ -8,13 +8,15 @@ import {
   CalendarClock,
   Check,
   FlaskConical,
+  Globe,
   Inbox,
-  Languages,
+  KeyRound,
   Library,
   LogOut,
   Megaphone,
   Radio,
   Settings,
+  Sparkles,
   UsersRound,
 } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
@@ -31,6 +33,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import AccountSecurityDialog from './settings/AccountSecurityDialog.vue'
 
 // Persistent left navigation rail — always present on authed pages. Rendered once
 // by App.vue so it never disappears.
@@ -63,31 +66,33 @@ onMounted(async () => {
   void crm.loadBuckets()
 })
 
-const baseNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
+// Four functional clusters, each rendered as its own group with a divider
+// between them (TODO.md "Reorganize sidebar into logical functional
+// groups"): daily triage tools stay in the first, always-visible screenful;
+// setup/config tools (Channels, Settings, language, avatar) sink to the
+// bottom cluster below, out of the way of the workflow above it.
+const dailyOpsNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
   { name: 'chatboard', icon: Inbox, label: t('nav.inbox'), match: ['chatboard'] },
   { name: 'customers', icon: UsersRound, label: t('crm.nav.customers'), match: ['customers'] },
   { name: 'followups', icon: CalendarClock, label: t('crm.nav.followups'), match: ['followups'] },
-  { name: 'accounts', icon: Radio, label: t('nav.channels'), match: ['accounts'] },
-  { name: 'campaigns', icon: Megaphone, label: t('campaigns.navLabel'), match: ['campaigns', 'campaign-new', 'campaign-detail'] },
-  { name: 'playground', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['playground'] },
-  { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base'] },
-  { name: 'simulator', icon: Bot, label: t('simulator.navLabel'), match: ['simulator'] },
 ])
+const growthNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
+  { name: 'campaigns', icon: Megaphone, label: t('campaigns.navLabel'), match: ['campaigns', 'campaign-new', 'campaign-detail'] },
+])
+const aiBrainNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
+  { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base'] },
+  { name: 'draft', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['draft'] },
+  { name: 'simulator', icon: Bot, label: t('simulator.navLabel'), match: ['simulator'] },
+  { name: 'chat', icon: Sparkles, label: t('chat.navLabel'), match: ['chat'] },
+])
+// Rendered as one group with dividers between clusters — see the template.
+const navClusters = computed(() => [dailyOpsNav.value, growthNav.value, aiBrainNav.value])
 
 // The overdue count rides on the Задачи icon: an overdue follow-up is the one
 // piece of CRM state that has to be visible from anywhere in the app, not only
 // once you navigate to it. Loaded once on mount and refreshed by the crm
 // store's own follow-up mutations.
 const overdueCount = computed(() => crm.buckets.overdue)
-// Эвалы is internal tooling, unrelated to the product nav above — kept out of baseNav
-// and rendered in its own bottom cluster (separated by a divider, above the avatar)
-// so it never reads as one more product feature.
-const evalsItem = computed(() => ({
-  name: 'evals',
-  icon: FlaskConical,
-  label: t('nav.evals'),
-  match: ['evals', 'eval-launch', 'eval-catalog'],
-}))
 function isActive(match: string[]) {
   return match.includes(route.name as string)
 }
@@ -96,6 +101,8 @@ async function logout() {
   await auth.logout()
   router.push({ name: 'login' })
 }
+
+const showAccountSecurity = ref(false)
 
 // Switching re-scopes the session server-side; every org-scoped store
 // (chats, accounts, KB, playground, ...) was loaded for the PREVIOUS
@@ -122,46 +129,50 @@ async function switchOrg(orgId: string) {
       </RouterLink>
 
       <div class="mt-6 flex flex-col gap-2">
-        <Tooltip v-for="item in baseNav" :key="item.name">
-          <TooltipTrigger as-child>
-            <RouterLink
-              :to="{ name: item.name }"
-              :aria-label="item.label"
-              class="relative w-11 h-11 rounded-lg grid place-items-center transition"
-              :class="isActive(item.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
-            >
-              <component :is="item.icon" class="w-5 h-5" />
-              <span
-                v-if="item.name === 'followups' && overdueCount > 0"
-                class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-semibold grid place-items-center"
-              >
-                {{ overdueCount > 99 ? '99+' : overdueCount }}
-              </span>
-            </RouterLink>
-          </TooltipTrigger>
-          <TooltipContent side="right">{{ item.label }}</TooltipContent>
-        </Tooltip>
-      </div>
-
-      <div class="mt-auto flex flex-col items-center gap-3">
-        <template v-if="evalsAvailable">
-          <div class="h-px w-8 bg-white/10" aria-hidden="true" />
-          <Tooltip>
+        <template v-for="(cluster, ci) in navClusters" :key="ci">
+          <div v-if="ci > 0" class="h-px w-8 bg-white/10 my-1 self-center" aria-hidden="true" />
+          <Tooltip v-for="item in cluster" :key="item.name">
             <TooltipTrigger as-child>
               <RouterLink
-                :to="{ name: evalsItem.name }"
-                class="w-11 h-11 rounded-lg grid place-items-center transition"
-                :class="isActive(evalsItem.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
+                :to="{ name: item.name }"
+                :aria-label="item.label"
+                class="relative w-11 h-11 rounded-lg grid place-items-center transition"
+                :class="isActive(item.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
               >
-                <component :is="evalsItem.icon" class="w-5 h-5" />
+                <component :is="item.icon" class="w-5 h-5" />
+                <span
+                  v-if="item.name === 'followups' && overdueCount > 0"
+                  class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-semibold grid place-items-center"
+                >
+                  {{ overdueCount > 99 ? '99+' : overdueCount }}
+                </span>
               </RouterLink>
             </TooltipTrigger>
-            <TooltipContent side="right">{{ evalsItem.label }}</TooltipContent>
+            <TooltipContent side="right">{{ item.label }}</TooltipContent>
           </Tooltip>
         </template>
+      </div>
+
+      <!-- Management cluster: Channels, Settings (admin only), Globe, Avatar —
+           TODO.md's 4th cluster. One divider separates it from the workflow
+           clusters above; these four read as one "setup & you" group. -->
+      <div class="mt-auto flex flex-col items-center gap-3">
+        <div class="h-px w-8 bg-white/10" aria-hidden="true" />
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <RouterLink
+              :to="{ name: 'channels' }"
+              :aria-label="t('nav.channels')"
+              class="w-11 h-11 rounded-lg grid place-items-center transition"
+              :class="isActive(['channels']) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
+            >
+              <Radio class="w-5 h-5" />
+            </RouterLink>
+          </TooltipTrigger>
+          <TooltipContent side="right">{{ t('nav.channels') }}</TooltipContent>
+        </Tooltip>
 
         <template v-if="auth.isAdmin">
-          <div class="h-px w-8 bg-white/10" aria-hidden="true" />
           <Tooltip>
             <TooltipTrigger as-child>
               <RouterLink
@@ -184,6 +195,33 @@ async function switchOrg(orgId: string) {
             </TooltipContent>
           </Tooltip>
         </template>
+
+        <!-- Dedicated Globe language switcher (TODO.md "Add Globe icon language
+             switcher button") — was buried a click deeper inside the avatar
+             menu; now one click from any page, right next to Settings. -->
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <button
+              type="button"
+              :aria-label="t('nav.language')"
+              :title="t('nav.language')"
+              class="w-11 h-11 rounded-lg grid place-items-center transition text-slate-400 hover:text-white hover:bg-white/10 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-white/40"
+            >
+              <Globe class="w-5 h-5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="right" align="end" class="w-44">
+            <DropdownMenuItem
+              v-for="l in LOCALES"
+              :key="l.code"
+              class="justify-between gap-2"
+              @select="locale = l.code"
+            >
+              <span class="truncate">{{ l.label }}</span>
+              <Check v-if="locale === l.code" class="w-4 h-4 shrink-0" />
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
@@ -224,15 +262,14 @@ async function switchOrg(orgId: string) {
             </template>
             <div v-else class="text-xs text-muted-foreground mt-1 mb-1 px-1 truncate">{{ auth.org?.name }}</div>
             <DropdownMenuSeparator />
-            <div class="text-xs text-muted-foreground mt-1 px-1">{{ t('nav.language') }}</div>
-            <DropdownMenuItem
-              v-for="l in LOCALES"
-              :key="l.code"
-              class="justify-between gap-2"
-              @select="locale = l.code"
-            >
-              <span class="flex items-center gap-2 truncate"><Languages class="w-4 h-4 shrink-0" /> {{ l.label }}</span>
-              <Check v-if="locale === l.code" class="w-4 h-4 shrink-0" />
+            <!-- Language switching now lives on the dedicated Globe button next
+                 to Settings — see the rail's bottom cluster. -->
+            <DropdownMenuItem @select="router.push({ name: 'evals' })">
+              <FlaskConical class="w-4 h-4" /> {{ t('nav.testsAndBenchmarks') }}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem @select="showAccountSecurity = true">
+              <KeyRound class="w-4 h-4" /> {{ t('accountSecurity.menuItem') }}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -245,5 +282,6 @@ async function switchOrg(orgId: string) {
         </DropdownMenu>
       </div>
     </TooltipProvider>
+    <AccountSecurityDialog v-if="showAccountSecurity" @close="showAccountSecurity = false" />
   </nav>
 </template>

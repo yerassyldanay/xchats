@@ -25,6 +25,21 @@ import (
 // enough that an abandoned attempt does not linger.
 const metaOAuthStateTTL = 10 * time.Minute
 
+// Stable, locale-independent codes for every OAuth-redirect failure the
+// frontend can distinguish (docs/ux/flows/03b-connect-instagram-messenger.md,
+// friction point 7) — the redirect's own `..._error` value stays a
+// human-readable (Russian) fallback message for anything the frontend does
+// not have a translation for, but every KNOWN failure also carries one of
+// these in `..._error_code` so the UI can show a localized string instead of
+// the raw backend text regardless of the active locale.
+const (
+	metaOAuthErrMissingParams  = "MISSING_PARAMS"
+	metaOAuthErrSessionExpired = "SESSION_EXPIRED"
+	metaOAuthErrConnectFailed  = "CONNECT_FAILED"
+	metaOAuthErrNoPages        = "NO_PAGES"
+	metaOAuthErrMultiplePages  = "MULTIPLE_PAGES"
+)
+
 // instagramCallbackPath is registered with Meta as Instagram Login's
 // redirect_uri — see server.go's route table. It is PUBLIC and does not
 // require the browser's session cookie to have survived the round trip to
@@ -101,12 +116,12 @@ func (s *Server) handleInstagramOAuthCallback(c *gin.Context) {
 	code := c.Query("code")
 	stateParam := c.Query("state")
 	if code == "" || stateParam == "" {
-		s.redirectAccounts(c, "instagram_error", "Meta не передала code/state — попробуйте подключить заново.")
+		s.redirectAccountsErr(c, "instagram_error", metaOAuthErrMissingParams, "Meta не передала code/state — попробуйте подключить заново.")
 		return
 	}
 	st, err := s.store.MetaOAuthStateByID(ctx(c), stateParam)
 	if err != nil {
-		s.redirectAccounts(c, "instagram_error", "Сессия подключения истекла или уже использована. Попробуйте снова.")
+		s.redirectAccountsErr(c, "instagram_error", metaOAuthErrSessionExpired, "Сессия подключения истекла или уже использована. Попробуйте снова.")
 		return
 	}
 
@@ -114,7 +129,7 @@ func (s *Server) handleInstagramOAuthCallback(c *gin.Context) {
 	if connectErr != nil {
 		s.log.Warn("instagram oauth callback failed", "org_id", st.OrganizationID, "err", connectErr)
 		_ = s.store.SettleMetaOAuthState(ctx(c), st.State, "failed", uuid.NullUUID{}, connectErr.Error())
-		s.redirectAccounts(c, "instagram_error", "Не удалось подключить Instagram: "+connectErr.Error())
+		s.redirectAccountsErr(c, "instagram_error", metaOAuthErrConnectFailed, "Не удалось подключить Instagram: "+connectErr.Error())
 		return
 	}
 	_ = s.store.SettleMetaOAuthState(ctx(c), st.State, "connected", uuid.NullUUID{UUID: acct.ID, Valid: true}, "")
@@ -230,5 +245,16 @@ func (s *Server) handleDeleteInstagramAccount(c *gin.Context) {
 // as skipping the param entirely — see Accounts.vue's onMounted handler.
 func (s *Server) redirectAccounts(c *gin.Context, key, value string) {
 	u := s.cfg.ResolvedFrontendBaseURL() + "/accounts?" + key + "=" + url.QueryEscape(value)
+	c.Redirect(http.StatusFound, u)
+}
+
+// redirectAccountsErr is redirectAccounts' error-path sibling: it carries
+// BOTH the human-readable (Russian) message under key, for anything the
+// frontend has no translation for, AND a stable `<key>_code` alongside it —
+// see the metaOAuthErr* constants' own doc comment for why both travel
+// together rather than the code replacing the message.
+func (s *Server) redirectAccountsErr(c *gin.Context, key, code, message string) {
+	u := s.cfg.ResolvedFrontendBaseURL() + "/accounts?" + key + "=" + url.QueryEscape(message) +
+		"&" + key + "_code=" + url.QueryEscape(code)
 	c.Redirect(http.StatusFound, u)
 }

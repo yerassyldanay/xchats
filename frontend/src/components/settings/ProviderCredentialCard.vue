@@ -5,7 +5,9 @@ import { CircleAlert, ExternalLink, LoaderCircle, Trash2 } from 'lucide-vue-next
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Combobox } from '@/components/ui/combobox'
 import { useIntegrationSettings } from '@/composables/useIntegrationSettings'
+import { CURATED_MODELS } from '@/lib/curatedModels'
 import IntegrationStatus from './IntegrationStatus.vue'
 import MaskedSecretInput from './MaskedSecretInput.vue'
 import type { IntegrationSummary } from '@/types'
@@ -134,7 +136,7 @@ function toggleDisabled(v: boolean) {
         </div>
         <div v-if="provider.has_model">
           <label class="text-xs font-medium text-muted-foreground">{{ t('settings.integration.defaultModel') }}</label>
-          <Input v-model="defaultModel" class="mt-1.5" />
+          <Combobox v-model="defaultModel" :options="CURATED_MODELS[provider.id] ?? []" class="mt-1.5" />
         </div>
         <Button v-if="settingsDirty" size="sm" variant="outline" class="sm:col-span-2 w-fit" :disabled="busy" @click="saveProviderSettings">
           {{ t('settings.common.save') }}

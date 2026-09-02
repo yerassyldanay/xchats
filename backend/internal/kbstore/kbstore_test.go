@@ -377,7 +377,14 @@ func TestApproveGateBlocks(t *testing.T) {
 	if !errors.As(err, &ge) {
 		t.Fatalf("want GateError, got %T: %v", err, err)
 	}
-	joined := strings.Join(ge.Reasons, "; ")
+	msgs := make([]string, len(ge.Reasons))
+	for i, r := range ge.Reasons {
+		msgs[i] = r.Message
+		if r.Kind != "topics" {
+			t.Errorf("reason %q should name kind=topics, got %q", r.Message, r.Kind)
+		}
+	}
+	joined := strings.Join(msgs, "; ")
 	if !strings.Contains(joined, "pure prose") || !strings.Contains(joined, "literal amount") {
 		t.Fatalf("want both a token reason and a literal-amount reason, got %v", ge.Reasons)
 	}

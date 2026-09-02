@@ -317,9 +317,13 @@ func TestFollowupBuckets(t *testing.T) {
 	}
 }
 
-// TestTimelineMergesCrmAndMessages checks the timeline is the union the
-// product brief describes — CRM events AND conversation activity, newest first.
-func TestTimelineMergesCrmAndMessages(t *testing.T) {
+// TestTimelineIsCrmEventsOnly checks the timeline is CRM milestones ONLY —
+// TODO.md's "Filter out routine message logs from Timeline": conversation
+// activity used to be merged in too, but a note/status-change now has to
+// stay findable among real message volume, not buried under one row per
+// chat bubble. A real inbound message exists in this fixture on purpose, to
+// prove it is excluded rather than merely absent.
+func TestTimelineIsCrmEventsOnly(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()
 	orgID, accountID := crmFixture(t, st, "org-timeline")
@@ -357,8 +361,11 @@ func TestTimelineMergesCrmAndMessages(t *testing.T) {
 			t.Errorf("timeline is missing a %q event: %+v", want, kinds)
 		}
 	}
-	if sources[store.TimelineSourceMessage] == 0 {
-		t.Errorf("timeline has no conversation activity: %+v", sources)
+	if sources[store.TimelineSourceMessage] != 0 {
+		t.Errorf("timeline includes routine conversation activity, want CRM events only: %+v", sources)
+	}
+	if got, want := sources[store.TimelineSourceCRM], len(entries); got != want {
+		t.Errorf("every entry should be CRM-sourced: %d of %d are", got, want)
 	}
 	for i := 1; i < len(entries); i++ {
 		if entries[i].OccurredAt.After(entries[i-1].OccurredAt) {

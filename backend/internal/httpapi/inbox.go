@@ -77,6 +77,23 @@ func (s *Server) orgChat(c *gin.Context, chatID uuid.UUID) (store.Chat, bool) {
 	return chat, true
 }
 
+// handleGetChat resolves a single chat by id (INB-16) — a deep link (a URL
+// restored on load/refresh, or a link from the Customers/Followups pages)
+// needs this even when the chat sits past the list's first page, since
+// handleListChats' pagination should not decide whether a specific,
+// already-known chat id can be opened.
+func (s *Server) handleGetChat(c *gin.Context) {
+	chatID, okID := parseUUID(c, "id")
+	if !okID {
+		return
+	}
+	chat, okChat := s.orgChat(c, chatID)
+	if !okChat {
+		return
+	}
+	ok(c, dto.MapChat(chat))
+}
+
 func (s *Server) handleListMessages(c *gin.Context) {
 	chatID, okID := parseUUID(c, "id")
 	if !okID {
@@ -394,6 +411,38 @@ func (s *Server) handleAssignChat(c *gin.Context) {
 	chat, err := s.store.AssignChat(ctx(c), chatID, assignee)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, "failed to update assignee")
+		return
+	}
+	mapped := dto.MapChat(chat)
+	s.hub.Broadcast("chat.updated", mapped)
+	ok(c, mapped)
+}
+
+// chatStatusValues is the set INB-04's Resolve/Reopen toggle may set — the
+// only writer of chat_state outside the campaign-recipient path (campaigns.go
+// stamps 'campaign' itself, and never through this endpoint).
+var chatStatusValues = map[string]bool{"open": true, "resolved": true}
+
+type setChatStatusReq struct {
+	Status string `json:"status"`
+}
+
+func (s *Server) handleSetChatStatus(c *gin.Context) {
+	chatID, okID := parseUUID(c, "id")
+	if !okID {
+		return
+	}
+	if _, ok := s.orgChat(c, chatID); !ok {
+		return
+	}
+	var req setChatStatusReq
+	if err := c.ShouldBindJSON(&req); err != nil || !chatStatusValues[req.Status] {
+		fail(c, http.StatusBadRequest, ErrValidation, "status must be one of: open, resolved")
+		return
+	}
+	chat, err := s.store.SetChatState(ctx(c), chatID, req.Status)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, "failed to update chat status")
 		return
 	}
 	mapped := dto.MapChat(chat)

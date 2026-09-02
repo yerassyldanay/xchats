@@ -6790,6 +6790,136 @@
         }
       ]
     },
+    "campaign_templates": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "name",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "message_body",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "variables",
+          "position": 5,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_array",
+          "default_raw": "'[]'::jsonb"
+        },
+        {
+          "name": "is_archived",
+          "position": 6,
+          "pg_type": "boolean",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "false",
+          "default_raw": "false"
+        },
+        {
+          "name": "created_by",
+          "position": 7,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 8,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 9,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "campaign_templates_org_idx",
+          "columns": [
+            "organization_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "campaign_templates_org_archived_idx",
+          "columns": [
+            "organization_id",
+            "is_archived"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [],
+      "foreign_keys": [
+        {
+          "name": "campaign_templates_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "campaign_templates_created_by_fkey",
+          "columns": [
+            "created_by"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "RESTRICT",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
     "crm_statuses": {
       "columns": [
         {
@@ -8002,6 +8132,197 @@
             "organization_id"
           ],
           "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "chat_conversations": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "user_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "title",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "created_at",
+          "position": 5,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "chat_conversations_owner_idx",
+          "columns": [
+            "organization_id",
+            "user_id",
+            "updated_at"
+          ],
+          "unique": false,
+          "backs_constraint": false
+        }
+      ],
+      "checks": [],
+      "foreign_keys": [
+        {
+          "name": "chat_conversations_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "chat_conversations_user_id_fkey",
+          "columns": [
+            "user_id"
+          ],
+          "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "chat_messages": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "conversation_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "seq",
+          "position": 3,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "role",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "content",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "metadata",
+          "position": 6,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:{}",
+          "default_raw": "'{}'::jsonb"
+        },
+        {
+          "name": "created_at",
+          "position": 7,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "chat_messages_conversation_seq_idx",
+          "columns": [
+            "conversation_id",
+            "seq"
+          ],
+          "unique": true,
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "chat_messages_role_check",
+          "definition": "CHECK ((role = ANY (ARRAY['user'::text, 'assistant'::text, 'system'::text])))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "chat_messages_conversation_id_fkey",
+          "columns": [
+            "conversation_id"
+          ],
+          "ref_table": "chat_conversations",
           "ref_columns": [
             "id"
           ],

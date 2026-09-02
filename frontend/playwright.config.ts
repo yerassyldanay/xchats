@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { defineConfig, devices } from '@playwright/test'
 
 // Browser e2e for the Vue SPA. The frontend is started automatically (Vite);
@@ -5,6 +6,16 @@ import { defineConfig, devices } from '@playwright/test'
 // running separately — see tests/e2e/README.md. Override the target with
 // E2E_BASE_URL.
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:5173'
+
+// Some sandboxes pre-install a Chromium build under a fixed path whose own
+// revision doesn't match whatever this checked-in @playwright/test version
+// expects (browserType.launch then fails "Executable doesn't exist" and
+// suggests `playwright install`, which such a sandbox has no egress for).
+// Prefer that pre-installed binary when it's actually there; every normal
+// contributor/CI run (no such path) is unaffected and keeps resolving the
+// browser the standard way.
+const PINNED_CHROMIUM = '/opt/pw-browsers/chromium'
+const executablePath = existsSync(PINNED_CHROMIUM) ? PINNED_CHROMIUM : undefined
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -25,6 +36,31 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'on',
     viewport: { width: 1440, height: 900 },
+    launchOptions: {
+      ...(executablePath ? { executablePath } : {}),
+      // Chromium's default profile makes its own background requests
+      // (autofill, Google account/sync checks, component updates) totally
+      // unrelated to whatever the test navigates to. A locked-down sandbox
+      // proxy rejecting those (never this suite's own traffic) can still
+      // stall the surrounding page load/navigation while Chromium retries
+      // them — disabling the services outright removes that noise instead
+      // of trying to allowlist their hosts.
+      args: [
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-domain-reliability',
+        '--disable-client-side-phishing-detection',
+        '--disable-sync',
+        '--disable-features=AutofillServerCommunication,OptimizationHints,MediaRouter',
+        // Chromium otherwise inherits this shell's HTTPS_PROXY (the agent
+        // proxy — see /root/.ccr/README.md) and routes EVERY request,
+        // including plain localhost:5173/8080 traffic this dev stack
+        // itself serves, through it. That proxy exists for outbound
+        // internet egress control, not for a same-host dev server; routing
+        // through it anyway adds a hop that can stall a request outright.
+        '--no-proxy-server',
+      ],
+    },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // Reuse a running dev server if present, else start one. Does NOT start the

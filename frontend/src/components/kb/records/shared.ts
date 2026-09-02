@@ -1,5 +1,5 @@
 // Shared types/helpers for kb/records/*Record.vue — one component per
-// writable table, reused by BOTH Черновик (/playground, review-only) and
+// writable table, reused by BOTH Черновик (/draft, review-only) and
 // Знаний база (/knowledge-base, RecordList's published rows). See
 // RecordShell.vue for the chrome every *Record.vue wraps its own field body
 // in.

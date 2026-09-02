@@ -474,24 +474,6 @@ func (s *Server) handleUpdateCredentialStorage(c *gin.Context) {
 	ok(c, gin.H{"credential_file_fallback_accepted": updated.CredentialFileFallbackAccepted})
 }
 
-// --- POST /settings/setup-complete ---------------------------------------
-
-// handleSetupComplete is the first-run wizard's "don't show this again."
-func (s *Server) handleSetupComplete(c *gin.Context) {
-	if s.settings == nil {
-		fail(c, http.StatusServiceUnavailable, ErrInternal, "settings store is unavailable")
-		return
-	}
-	updated, err := s.settings.Update(func(st *settings.Settings) {
-		st.SetupCompleted = true
-	})
-	if err != nil {
-		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
-		return
-	}
-	ok(c, gin.H{"setup_completed": updated.SetupCompleted})
-}
-
 // --- PUT /settings/ngrok ---------------------------------------------------
 
 type updateNgrokSettingsReq struct {

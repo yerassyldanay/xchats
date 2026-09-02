@@ -116,7 +116,7 @@ function modelChips(row: LaunchListRow): { shown: string[]; more: number } {
 <template>
   <div class="flex flex-col h-full bg-background">
     <header class="px-8 py-5 border-b border-border bg-card shrink-0">
-      <h1 class="text-lg font-bold tracking-tight">{{ t('nav.evals') }}</h1>
+      <h1 class="text-lg font-bold tracking-tight">{{ t('nav.testsAndBenchmarks') }}</h1>
       <p class="text-sm text-muted-foreground mt-0.5 max-w-2xl">
         {{ t('evals.runs.subtitle') }}
       </p>

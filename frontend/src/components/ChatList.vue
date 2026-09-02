@@ -1,52 +1,36 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessagesSquare, Plus, Search, SquarePen } from 'lucide-vue-next'
+import { Bot, CircleAlert, LoaderCircle, MessagesSquare, PanelLeftClose, PanelLeftOpen, Search, SearchX, SquarePen } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { useAccounts } from '../stores/accounts'
 import { initials, colorFor, shortTime } from '../lib/format'
+import { channelDot, channelIcon, channelText } from '../lib/channelBrand'
+import { usePanelCollapsed } from '../lib/panelCollapse'
 import NewMessageDialog from './NewMessageDialog.vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
-import TelegramIcon from '@/components/icons/TelegramIcon.vue'
-import InstagramIcon from '@/components/icons/InstagramIcon.vue'
-import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 const inbox = useInbox()
 const accounts = useAccounts()
 const { t, locale } = useI18n()
 const showNew = ref(false)
 
-// A chat carries its own channel, so the badge never has to guess from the
-// account list (which may not have loaded yet on a cold open). Every channel
-// the inbox can surface gets its own brand icon/colour here; the simulator
-// (and any channel added later) falls back to the WhatsApp-green default
-// rather than being mislabelled as a specific provider it isn't.
-// whatsapp_cloud deliberately shares WhatsApp's icon and green: to an
-// operator it IS WhatsApp, only the transport underneath differs.
-const CHANNEL_BRAND: Record<string, { icon: typeof WhatsappIcon; dot: string; text: string }> = {
-  telegram: { icon: TelegramIcon, dot: 'bg-[#229ED9]', text: 'text-[#229ED9]' },
-  instagram: { icon: InstagramIcon, dot: 'bg-[#E4405F]', text: 'text-[#E4405F]' },
-  messenger: { icon: MessengerIcon, dot: 'bg-[#0084FF]', text: 'text-[#0084FF]' },
-  whatsapp: { icon: WhatsappIcon, dot: 'bg-wa', text: 'text-wa' },
-  whatsapp_cloud: { icon: WhatsappIcon, dot: 'bg-wa', text: 'text-wa' },
-}
-const CHANNEL_BRAND_FALLBACK = CHANNEL_BRAND.whatsapp
+// INB-02: the 340px chat list is fixed width — on a 13"/14" laptop that
+// plus the 340px assistant panel leaves the thread under 550px. Collapsing
+// to a slim rail reclaims that space; the choice persists across reloads.
+const collapsed = usePanelCollapsed('chatList')
+const totalUnread = computed(() => inbox.chats.reduce((sum, c) => sum + c.unread_count, 0))
 
-function channelIcon(channel: string) {
-  return (CHANNEL_BRAND[channel] ?? CHANNEL_BRAND_FALLBACK).icon
-}
-function channelDot(channel: string) {
-  return (CHANNEL_BRAND[channel] ?? CHANNEL_BRAND_FALLBACK).dot
-}
-function channelText(channel: string) {
-  return (CHANNEL_BRAND[channel] ?? CHANNEL_BRAND_FALLBACK).text
-}
+// isFiltered distinguishes "nothing matches this search/filter" (INB-15)
+// from a genuinely empty inbox — the copy and the fix (clear the filter vs.
+// wait for messages) are different.
+const isFiltered = computed(() => !!inbox.query || inbox.filter !== 'all' || !!inbox.accountFilter)
 
 const ALL = '__all__'
 
@@ -71,16 +55,58 @@ function onSearch() {
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => inbox.loadChats(), 250)
 }
+
+// INB-06: C opens New Message from anywhere on the board, as long as the
+// operator isn't typing — the FAB it used to duplicate is gone, so this
+// (plus the header button) is the only other entry point.
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+}
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key.toLowerCase() !== 'c' || e.ctrlKey || e.metaKey || e.altKey) return
+  if (isTypingTarget(e.target)) return
+  e.preventDefault()
+  showNew.value = true
+}
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <template>
-  <aside class="relative flex flex-col bg-card">
+  <aside
+    class="relative flex flex-col bg-card shrink-0 border-r border-border transition-[width] duration-200"
+    :class="collapsed ? 'w-14' : 'w-[340px]'"
+  >
+    <!-- Collapsed: a slim rail — expand, compose, and the total unread
+         count, with the full list (search/filters/cards) hidden. -->
+    <template v-if="collapsed">
+      <div class="flex flex-col items-center gap-2 pt-4">
+        <Button variant="ghost" size="icon" :title="t('inbox.expandList')" @click="collapsed = false">
+          <PanelLeftOpen class="w-[18px] h-[18px]" />
+        </Button>
+        <Button variant="ghost" size="icon" class="text-primary" :title="`${t('inbox.newMessage')} (C)`" @click="showNew = true">
+          <SquarePen class="w-[18px] h-[18px]" />
+        </Button>
+        <Badge v-if="totalUnread > 0" class="h-5 min-w-[20px] justify-center px-1.5 text-[11px] font-semibold">
+          {{ totalUnread }}
+        </Badge>
+      </div>
+      <!-- global C shortcut keeps working while collapsed; see script setup -->
+    </template>
+
+    <template v-else>
     <!-- brand header -->
     <div class="flex items-center justify-between px-4 pt-4 pb-3">
       <span class="text-[19px] font-bold tracking-tight">xchats</span>
-      <Button variant="ghost" size="icon" class="text-primary" :title="t('inbox.newMessage')" @click="showNew = true">
-        <SquarePen class="w-[18px] h-[18px]" />
-      </Button>
+      <div class="flex items-center gap-0.5">
+        <Button variant="ghost" size="icon" class="text-primary" :title="`${t('inbox.newMessage')} (C)`" @click="showNew = true">
+          <SquarePen class="w-[18px] h-[18px]" />
+        </Button>
+        <Button variant="ghost" size="icon" class="text-muted-foreground" :title="t('inbox.collapseList')" @click="collapsed = true">
+          <PanelLeftClose class="w-[18px] h-[18px]" />
+        </Button>
+      </div>
     </div>
 
     <div class="px-3 pb-3 border-b border-border">
@@ -123,7 +149,37 @@ function onSearch() {
     </div>
 
     <div class="flex-1 overflow-y-auto">
-      <div v-if="!inbox.chats.length" class="px-6 py-12 text-center">
+      <!-- Loading: initial load, or a filter/search change from an already-
+           empty list — never reads as "no chats" while still in flight. -->
+      <div v-if="!inbox.chats.length && inbox.loadingChats" class="px-3 py-2 space-y-1">
+        <div v-for="i in 6" :key="i" class="flex items-center gap-3 px-3 py-3">
+          <Skeleton class="w-11 h-11 rounded-full shrink-0" />
+          <div class="flex-1 space-y-2">
+            <Skeleton class="h-3.5 w-2/3" />
+            <Skeleton class="h-3 w-4/5" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Failed: distinct from "no chats" — offers a way back in. -->
+      <div v-else-if="!inbox.chats.length && inbox.chatsError" class="px-6 py-12 text-center">
+        <div class="mx-auto w-12 h-12 rounded-xl bg-destructive/10 grid place-items-center text-destructive">
+          <CircleAlert class="w-6 h-6" />
+        </div>
+        <p class="mt-3 text-sm text-muted-foreground">{{ inbox.chatsError }}</p>
+        <Button variant="outline" size="sm" class="mt-3" @click="inbox.loadChats()">{{ t('common.retry') }}</Button>
+      </div>
+
+      <!-- Filtered empty: the search/filter matched nothing. -->
+      <div v-else-if="!inbox.chats.length && isFiltered" class="px-6 py-12 text-center">
+        <div class="mx-auto w-12 h-12 rounded-xl bg-muted grid place-items-center text-muted-foreground">
+          <SearchX class="w-6 h-6" />
+        </div>
+        <p class="mt-3 text-sm text-muted-foreground">{{ t('inbox.noResultsTitle') }}<br />{{ t('inbox.noResultsSubtitle') }}</p>
+      </div>
+
+      <!-- Truly empty: no chats exist yet. -->
+      <div v-else-if="!inbox.chats.length" class="px-6 py-12 text-center">
         <div class="mx-auto w-12 h-12 rounded-xl bg-muted grid place-items-center text-muted-foreground">
           <MessagesSquare class="w-6 h-6" />
         </div>
@@ -153,9 +209,19 @@ function onSearch() {
           </span>
         </div>
         <div class="min-w-0 flex-1">
-          <div class="flex items-baseline justify-between gap-2">
+          <div class="flex items-baseline gap-1.5">
             <span class="font-semibold text-[15px] truncate">{{ c.contact.display_name }}</span>
-            <span class="text-[11px] text-muted-foreground shrink-0">{{ shortTime(c.last_message_at, locale) }}</span>
+            <!-- KB-12 / TODO.md: a synthetic test chat must never be mistaken
+                 for a real customer — the small channel dot below already
+                 sets it apart, but this prominent pill is the one that
+                 actually reads at a glance. -->
+            <span
+              v-if="c.channel === 'simulator'"
+              class="inline-flex items-center gap-0.5 shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400"
+            >
+              <Bot class="w-2.5 h-2.5" /> {{ t('simulator.navLabel') }}
+            </span>
+            <span class="ml-auto text-[11px] text-muted-foreground shrink-0">{{ shortTime(c.last_message_at, locale) }}</span>
           </div>
           <div
             v-if="accounts.hasMultiple && accounts.accountName(c.account_id)"
@@ -175,17 +241,20 @@ function onSearch() {
           </div>
         </div>
       </button>
-    </div>
 
-    <!-- New message (compose by phone number) -->
-    <Button
-      size="icon"
-      class="absolute bottom-5 right-5 h-14 w-14 rounded-full shadow-pop"
-      :title="t('inbox.newMessage')"
-      @click="showNew = true"
-    >
-      <Plus class="w-5 h-5" />
-    </Button>
+      <div v-if="inbox.hasMoreChats" class="px-3 py-3">
+        <Button variant="outline" size="sm" class="w-full" :disabled="inbox.loadingMoreChats" @click="inbox.loadMoreChats()">
+          <LoaderCircle v-if="inbox.loadingMoreChats" class="w-3.5 h-3.5 animate-spin" />
+          {{ inbox.loadingMoreChats ? t('inbox.loadingOlder') : t('inbox.loadMoreChats') }}
+        </Button>
+      </div>
+    </div>
+    </template>
+
+    <!-- INB-06: the floating action button used to duplicate the header's
+         compose button while obscuring the lowest chat card; removed in
+         favor of that one entry point plus the C shortcut below. Shared by
+         both collapsed/expanded states, so it stays outside the branch above. -->
     <NewMessageDialog v-if="showNew" @close="showNew = false" />
   </aside>
 </template>

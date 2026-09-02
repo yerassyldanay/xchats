@@ -111,8 +111,11 @@ func (s *Server) handleKBCreateImport(c *gin.Context) {
 	accepted(c, run)
 }
 
-// handleKBListImports is GET /kb/imports: the org's most recent import
-// runs, newest first.
+// handleKBListImports is GET /kb/imports: a page of the org's import runs,
+// newest first — ?limit= (default 20) and ?offset= (default 0), plus the
+// response's "total" field, so KB-14's history list can paginate without a
+// separate count endpoint. The pre-existing "just the latest run" caller
+// (?limit=1) keeps working unchanged with offset defaulting to 0.
 func (s *Server) handleKBListImports(c *gin.Context) {
 	if !s.kbReady(c) {
 		return
@@ -131,12 +134,18 @@ func (s *Server) handleKBListImports(c *gin.Context) {
 			limit = n
 		}
 	}
-	runs, err := s.kbImport.ListRuns(ctx(c), orgID, limit)
+	offset := 0
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			offset = n
+		}
+	}
+	runs, total, err := s.kbImport.ListRuns(ctx(c), orgID, limit, offset)
 	if err != nil {
 		s.kbImportFail(c, err)
 		return
 	}
-	ok(c, gin.H{"runs": runs})
+	ok(c, gin.H{"runs": runs, "total": total})
 }
 
 // handleKBGetImport is GET /kb/imports/:id: one run's current status —
@@ -159,6 +168,36 @@ func (s *Server) handleKBGetImport(c *gin.Context) {
 	runID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		fail(c, http.StatusBadRequest, ErrValidation, "invalid run id")
+		return
+	}
+	run, err := s.kbImport.RunStatus(ctx(c), orgID, runID)
+	if err != nil {
+		s.kbImportFail(c, err)
+		return
+	}
+	ok(c, run)
+}
+
+// handleKBCancelImport is POST /kb/imports/:id/cancel: stop a run in
+// progress. A write like Submit itself (kbWrite, not kbReady — cancelling
+// mutates kbd_materials), so it is refused the same way Submit is while
+// the KB gate is closed.
+func (s *Server) handleKBCancelImport(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	if s.kbImport == nil {
+		fail(c, http.StatusServiceUnavailable, ErrInternal, "the import pipeline is not available")
+		return
+	}
+	runID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "invalid run id")
+		return
+	}
+	if err := s.kbImport.Cancel(ctx(c), orgID, runID); err != nil {
+		s.kbImportFail(c, err)
 		return
 	}
 	run, err := s.kbImport.RunStatus(ctx(c), orgID, runID)
@@ -239,6 +278,8 @@ func (s *Server) kbImportFail(c *gin.Context, err error) {
 	case errors.Is(err, kbimport.ErrValidation):
 		fail(c, http.StatusBadRequest, ErrValidation, err.Error())
 	case errors.Is(err, kbimport.ErrRunActive):
+		fail(c, http.StatusConflict, ErrConflict, err.Error())
+	case errors.Is(err, kbimport.ErrCancelNotAllowed):
 		fail(c, http.StatusConflict, ErrConflict, err.Error())
 	case errors.Is(err, kbimport.ErrNotFound):
 		fail(c, http.StatusNotFound, ErrNotFound, err.Error())

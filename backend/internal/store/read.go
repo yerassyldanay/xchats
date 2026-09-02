@@ -202,6 +202,26 @@ func (s *Store) AssignChat(ctx context.Context, id uuid.UUID, assignee uuid.Null
 	return s.ChatByID(ctx, id)
 }
 
+// SetChatState sets a chat's chat_state on the transport-specific chat table
+// (INB-04's Resolve/Reopen) and returns the refreshed channel-neutral view
+// row. state is caller-validated (handleResolveChat); the column itself
+// carries no CHECK constraint.
+func (s *Store) SetChatState(ctx context.Context, id uuid.UUID, state string) (Chat, error) {
+	chat, err := s.ChatByID(ctx, id)
+	if err != nil {
+		return Chat{}, err
+	}
+	table, err := chatsTableFor(chat.Channel)
+	if err != nil {
+		return Chat{}, err
+	}
+	if _, err := s.db.Exec(ctx,
+		`UPDATE `+table+` SET chat_state = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, id, state); err != nil {
+		return Chat{}, err
+	}
+	return s.ChatByID(ctx, id)
+}
+
 // MessagesForChat returns up to limit messages older than `before` (chronological asc),
 // with their media refs attached, plus the next cursor.
 func (s *Store) MessagesForChat(ctx context.Context, chatID uuid.UUID, before time.Time, limit int) ([]Message, *time.Time, error) {
@@ -471,6 +491,30 @@ func (s *Store) SetDraftSent(ctx context.Context, draftID, sentMessageID uuid.UU
 func (s *Store) ReopenDraft(ctx context.Context, draftID uuid.UUID) error {
 	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET draft_state='suggested', updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE id=$1`, draftID)
 	return err
+}
+
+// DismissDrafts marks every currently-suggested option for a chat as
+// 'dismissed' (INB-14) — an explicit, persisted state transition for the
+// operator's Dismiss action, so the set does not silently reappear on
+// refetch or reselecting the chat the way clearing local UI state alone did.
+func (s *Store) DismissDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, error) {
+	rows, err := s.db.Query(ctx, `
+		UPDATE ai_drafts SET draft_state='dismissed', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE chat_id = $1 AND draft_state='suggested'
+		RETURNING `+draftCols+``, chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Draft
+	for rows.Next() {
+		var d Draft
+		if err := rows.Scan(scanDraftDst(&d)...); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // LatestInboundMessageID returns the most recent inbound message for a chat (the

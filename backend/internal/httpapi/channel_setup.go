@@ -65,6 +65,16 @@ type ChannelSetupEntry struct {
 	DashboardFields []MetaDashboardField `json:"dashboard_fields,omitempty"`
 }
 
+// AdminContact is one workspace administrator's name/email — handed to a
+// MEMBER caller who just hit a missing prerequisite they cannot fix
+// themselves (docs/ux/flows/03b-connect-instagram-messenger.md, friction
+// point 2), so the blocked state names someone to ask instead of being a
+// dead end.
+type AdminContact struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
 // MetaStaleAccount is one connected Meta account whose registered webhook
 // origin no longer matches the current public base URL — Instagram/Messenger
 // only (WhatsApp Cloud self-heals via SetOverride and never sits in this
@@ -97,6 +107,11 @@ type ChannelSetupInfo struct {
 	GraphAPIVersion string              `json:"graph_api_version,omitempty"`
 	DashboardURL    string              `json:"dashboard_url,omitempty"`
 	StaleAccounts   *[]MetaStaleAccount `json:"stale_accounts,omitempty"`
+
+	// AdminContacts is the inverse of the admin-only fields above: present
+	// ONLY for a member caller (see AdminContact's own doc comment), never
+	// for an admin, who has no use for it.
+	AdminContacts []AdminContact `json:"admin_contacts,omitempty"`
 }
 
 // callerIsAdmin reports whether the current request's caller holds the
@@ -145,6 +160,7 @@ func (s *Server) buildChannelSetupInfo(c *gin.Context, admin bool) ChannelSetupI
 		},
 	}
 	if !admin {
+		info.AdminContacts = s.orgAdminContacts(c)
 		return info
 	}
 	info.VerifyToken = meta.DeriveVerifyToken(s.cfg.SessionSecret)
@@ -248,6 +264,32 @@ func (s *Server) metaStaleAccounts(c *gin.Context) []MetaStaleAccount {
 			out = append(out, MetaStaleAccount{
 				AccountID: a.ID.String(), Channel: a.Channel, DisplayName: a.DisplayName, Detail: a.WebhookLastError,
 			})
+		}
+	}
+	return out
+}
+
+// orgAdminContacts lists the current organization's admins, for a member
+// caller who cannot configure a missing prerequisite themselves. Uses
+// resolveOrg directly (not orgOf) because it must never fail the request —
+// this only ever backs the member half of buildChannelSetupInfo, called
+// from a handler (handleChannelSetup) that has already committed to a 200
+// response; orgOf's own fail() would double-write on top of that. A
+// resolution failure (or a store error) just yields no contacts, same as
+// zero admins would.
+func (s *Server) orgAdminContacts(c *gin.Context) []AdminContact {
+	org, err := s.resolveOrg(c, currentUser(c).ID, currentSessionID(c))
+	if err != nil {
+		return nil
+	}
+	users, _, err := s.store.ListUsersForOrg(ctx(c), org.ID, 100, 0)
+	if err != nil {
+		return nil
+	}
+	out := []AdminContact{}
+	for _, u := range users {
+		if u.Role == "admin" {
+			out = append(out, AdminContact{Name: u.DisplayName, Email: u.Email})
 		}
 	}
 	return out

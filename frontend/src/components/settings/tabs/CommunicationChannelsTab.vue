@@ -61,7 +61,7 @@ const stats = computed(() => {
         <h3 class="font-semibold">{{ t('settings.channels.title') }}</h3>
         <p class="text-sm text-muted-foreground">{{ t('settings.channels.subtitle') }}</p>
       </div>
-      <RouterLink :to="{ name: 'accounts' }">
+      <RouterLink :to="{ name: 'channels' }">
         <Button size="sm" variant="outline">{{ t('settings.channels.manage') }} <ArrowUpRight class="w-4 h-4" /></Button>
       </RouterLink>
     </div>
@@ -71,7 +71,7 @@ const stats = computed(() => {
         <h4 class="text-sm font-medium">{{ t('settings.channels.setupPointer.title') }}</h4>
         <p class="text-xs text-muted-foreground">{{ t('settings.channels.setupPointer.subtitle') }}</p>
       </div>
-      <RouterLink :to="{ name: 'accounts', query: { tab: 'setup' } }" class="shrink-0">
+      <RouterLink :to="{ name: 'channels', query: { tab: 'setup' } }" class="shrink-0">
         <Button size="sm" variant="outline">{{ t('settings.channels.setupPointer.cta') }} <ArrowUpRight class="w-4 h-4" /></Button>
       </RouterLink>
     </div>

@@ -3,7 +3,8 @@ import Home from './views/Home.vue'
 import Login from './views/Login.vue'
 import ChangePassword from './views/ChangePassword.vue'
 import Chatboard from './views/Chatboard.vue'
-import Accounts from './views/Accounts.vue'
+import Chat from './views/Chat.vue'
+import Channels from './views/Channels.vue'
 import Customers from './views/Customers.vue'
 import Followups from './views/Followups.vue'
 import Playground from './views/Playground.vue'
@@ -25,11 +26,29 @@ const router = createRouter({
     { path: '/login', name: 'login', component: Login },
     { path: '/change-password', name: 'change-password', component: ChangePassword, meta: { requiresAuth: true } },
     { path: '/', name: 'home', component: Home },
-    { path: '/chatboard', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
-    { path: '/accounts', name: 'accounts', component: Accounts, meta: { requiresAuth: true } },
+    // :chatId is optional (INB-16) — the open conversation lives in the URL so
+    // it survives a refresh and can be bookmarked/shared/restored via Back-
+    // Forward, instead of only ever existing in the Pinia store.
+    { path: '/chatboard/:chatId?', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
+    // /chat is the Knowledge Base assistant; /chatboard above is the customer
+    // inbox. Different surfaces, one unfortunate letter apart — see
+    // internal/httpapi/chat_assistant.go's header.
+    { path: '/chat', name: 'chat', component: Chat, meta: { requiresAuth: true } },
+    { path: '/channels', name: 'channels', component: Channels, meta: { requiresAuth: true } },
+    // /accounts was the legacy path — Channels.vue's own name always matched
+    // the product's "Channels" label, only the route itself lagged. Old
+    // links/bookmarks still land somewhere real; a function redirect (not a
+    // bare string) keeps ?tab=setup deep links (CommunicationChannelsTab.vue)
+    // working through the redirect instead of dropping the query.
+    { path: '/accounts', redirect: (to) => ({ path: '/channels', query: to.query }) },
     { path: '/customers', name: 'customers', component: Customers, meta: { requiresAuth: true } },
     { path: '/followups', name: 'followups', component: Followups, meta: { requiresAuth: true } },
-    { path: '/playground', name: 'playground', component: Playground, meta: { requiresAuth: true } },
+    { path: '/draft', name: 'draft', component: Playground, meta: { requiresAuth: true } },
+    // KB-01: /playground read "test AI prompts" (that's actually /simulator)
+    // when the page is really the staged-changes review/ingest surface —
+    // renamed to /draft to match the nav label and page header. Old links/
+    // bookmarks still land somewhere real instead of a bare 404.
+    { path: '/playground', redirect: '/draft' },
     { path: '/knowledge-base', name: 'knowledge-base', component: KnowledgeBase, meta: { requiresAuth: true } },
     { path: '/simulator', name: 'simulator', component: Simulator, meta: { requiresAuth: true } },
     { path: '/campaigns', name: 'campaigns', component: Campaigns, meta: { requiresAuth: true } },

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
@@ -281,6 +282,46 @@ func TestPlaygroundCancelChange_AbsentTargetIgnoresStaleIfMatch(t *testing.T) {
 	mustPayload(t, env, &out)
 	if out.Changed {
 		t.Fatalf("changed = true, want false")
+	}
+}
+
+// TestPlaygroundApprove_GateViolationReturnsStructuredReasons is KB-09: the
+// page-level 422 used to carry only a flat joined message, leaving the
+// operator unable to tell WHICH staged entity actually caused a gate
+// failure that a different, valid card's own publish attempt tripped
+// over. The payload's reasons[] now names it directly.
+func TestPlaygroundApprove_GateViolationReturnsStructuredReasons(t *testing.T) {
+	h := newHarness(t)
+	h.postJSON("/xchats/api/v1/playground/draft/topics", map[string]any{
+		"slug": "broken-token-topic", "title": "Broken", "body_md": "Цена {{tariff.x.price}}.",
+	})
+
+	resp, env := h.postJSON("/xchats/api/v1/playground/draft/approve", map[string]any{})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("approve with a gate violation: status=%d, want 422 (body=%s)", resp.StatusCode, mustRaw(env))
+	}
+	var payload struct {
+		Reasons []struct {
+			Kind    string `json:"kind"`
+			Key     string `json:"key"`
+			Message string `json:"message"`
+		} `json:"reasons"`
+	}
+	mustPayload(t, env, &payload)
+	if len(payload.Reasons) == 0 {
+		t.Fatalf("expected at least one structured reason, got none (message=%s)", env["message"])
+	}
+	found := false
+	for _, r := range payload.Reasons {
+		if r.Kind == "topics" && r.Key == "broken-token-topic" {
+			found = true
+			if !strings.Contains(r.Message, "pure prose") {
+				t.Errorf("reason message = %q, want it to explain the pure-prose rule", r.Message)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no reason named kind=topics key=broken-token-topic, got %+v", payload.Reasons)
 	}
 }
 

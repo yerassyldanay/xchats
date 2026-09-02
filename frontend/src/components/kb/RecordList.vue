@@ -29,7 +29,7 @@ const rows = computed(() => pg.live?.[props.kind] ?? [])
 const actions = kbActions({ page: 'live' })
 
 function edit(row: TopicRow | ProductRow | TariffRow) {
-  modal.openEdit(props.kind, row)
+  modal.openEdit(props.kind, row, { target: 'live' })
 }
 
 // asRow exists for ONE reason: <component :is> can't let TypeScript narrow

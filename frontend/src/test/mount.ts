@@ -16,7 +16,7 @@ export function testPinia(): Pinia {
 // (a fresh one by default, or pass one you already seeded via testPinia()),
 // the app's real i18n instance — so kb.* strings render exactly as
 // production does, not a fake translator — and a RouterLink/RouterView stub,
-// since KB components link to /playground or /knowledge-base but a full
+// since KB components link to /draft or /knowledge-base but a full
 // vue-router instance is unnecessary machinery for a component-level mount.
 export function mountKb<T extends Component>(
   component: T,

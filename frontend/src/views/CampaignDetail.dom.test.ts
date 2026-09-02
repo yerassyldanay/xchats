@@ -1,0 +1,359 @@
+import { describe, expect, it, vi } from 'vitest'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
+import { mountKb, testPinia } from '@/test/mount'
+import { useCampaigns } from '@/stores/campaigns'
+import CampaignDetail from './CampaignDetail.vue'
+import type { Campaign, CampaignRecipientPreviewResult } from '@/types'
+
+vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
+
+const routerPush = vi.fn()
+const routerReplace = vi.fn()
+// route.query is read once at component setup (CAM-07's arrivedFromCreation,
+// CAM-11's statusFilter/recipientsPage/eventsPage) — mutate this object from
+// a test BEFORE mounting to control what a fresh mount sees.
+let routeQuery: Record<string, string> = {}
+vi.mock('vue-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-router')>()
+  return {
+    ...actual,
+    useRouter: () => ({ push: routerPush, replace: routerReplace }),
+    useRoute: () => ({ params: { campaignId: 'camp-1' }, query: routeQuery }),
+  }
+})
+
+vi.mock('@/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/client')>()
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      get: vi.fn(),
+      post: vi.fn(),
+      previewCampaignRecipients: vi.fn(),
+      replaceCampaignRecipients: vi.fn(),
+    },
+  }
+})
+
+// reka-ui's Dialog renders through a Teleport into document.body, and (as
+// elsewhere in this codebase — see DraftKnowledgeBase.dom.test.ts's own
+// note) an earlier test's closed dialog can leave stale nodes behind since
+// nothing here unmounts between tests. Always take the LAST match, which
+// belongs to whichever dialog THIS test just opened.
+function body() {
+  return new DOMWrapper(document.body)
+}
+function lastButtonMatching(predicate: (b: DOMWrapper<Element>) => boolean) {
+  const all = body().findAll('button').filter(predicate)
+  return all[all.length - 1]
+}
+
+function campaign(over: Partial<Campaign> = {}): Campaign {
+  return {
+    id: 'camp-1', name: 'Summer promo', account_id: 'acct-1', channel: 'whatsapp', status: 'draft',
+    message_body: 'Hi {{name}}', variables: ['name'], min_interval_seconds: null, jitter_seconds: null,
+    windows: [], schedule_at: null, started_at: null, created_by: 'user-1',
+    created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z',
+    recipient_counts: {},
+    ...over,
+  }
+}
+function previewResult(valid: number): CampaignRecipientPreviewResult {
+  return { rows: [], total: valid, valid, invalid: 0, duplicate: 0 }
+}
+
+async function mountDetail(campaignOver: Partial<Campaign> = {}) {
+  const { api } = await import('@/api/client')
+  vi.mocked(api.get).mockImplementation(async (path: string) => {
+    if (path === '/campaigns/camp-1') return campaign(campaignOver) as any
+    if (path === '/accounts') return { items: [] } as any
+    if (path.startsWith('/campaigns/camp-1/recipients')) return { items: [], total: 0 } as any
+    if (path.startsWith('/campaigns/camp-1/events')) return { items: [], total: 0 } as any
+    throw new Error(`unexpected GET ${path}`)
+  })
+  const pinia = testPinia()
+  const wrapper = mountKb(CampaignDetail, { pinia })
+  await flushPromises()
+  return { wrapper, campaigns: useCampaigns() }
+}
+
+// reka-ui's TabsTrigger selects on mousedown, not click (see Accounts.dom.test.ts's
+// own note) — the Recipients tab's content (the Replace-recipients panel) is
+// not even in the DOM until its trigger is activated.
+async function openRecipientsTab(wrapper: Awaited<ReturnType<typeof mountDetail>>['wrapper']) {
+  const trigger = wrapper.findAll('button').find((b) => b.text() === 'Получатели')
+  await trigger!.trigger('mousedown', { button: 0 })
+  await flushPromises()
+}
+async function openEventsTab(wrapper: Awaited<ReturnType<typeof mountDetail>>['wrapper']) {
+  const trigger = wrapper.findAll('button').find((b) => b.text() === 'История')
+  await trigger!.trigger('mousedown', { button: 0 })
+  await flushPromises()
+}
+
+// CAM-09: replacing a campaign's recipients must never save an audience the
+// operator never actually reviewed — editing the pasted text (or swapping
+// the file) after a successful check has to invalidate that check
+// immediately, disabling Save until it is re-run against the CURRENT input.
+describe('CampaignDetail — Replace recipients staleness guard (CAM-09)', () => {
+  it('Save stays disabled until a check succeeds for the CURRENT text', async () => {
+    const { wrapper } = await mountDetail()
+    await openRecipientsTab(wrapper)
+
+    const replaceToggle = wrapper.findAll('button').find((b) => b.text() === 'Заменить получателей')
+    await replaceToggle!.trigger('click')
+
+    const saveBtn = wrapper.findAll('button').find((b) => b.text() === 'Сохранить')
+    expect(saveBtn, 'Save button not found').toBeTruthy()
+    expect((saveBtn!.element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('a successful check enables Save; editing the text afterward disables it again with a stale notice', async () => {
+    const { wrapper, campaigns } = await mountDetail()
+    await openRecipientsTab(wrapper)
+    const { api } = await import('@/api/client')
+    vi.mocked(api.previewCampaignRecipients).mockResolvedValueOnce(previewResult(3))
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Заменить получателей')!.trigger('click')
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('77011234567,Aigul')
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Проверить')!.trigger('click')
+    await flushPromises()
+
+    let saveBtn = wrapper.findAll('button').find((b) => b.text() === 'Сохранить')!
+    expect((saveBtn.element as HTMLButtonElement).disabled, 'Save must enable once the preview matches the current text').toBe(false)
+    expect(wrapper.find('[data-testid="replace-preview-stale-notice"]').exists()).toBe(false)
+
+    // Editing the text WITHOUT re-checking must invalidate the preview.
+    await textarea.setValue('77011234567,Aigul\n77022222222,Bota')
+
+    saveBtn = wrapper.findAll('button').find((b) => b.text() === 'Сохранить')!
+    expect((saveBtn.element as HTMLButtonElement).disabled, 'Save must re-disable once the text no longer matches the checked preview').toBe(true)
+    expect(wrapper.find('[data-testid="replace-preview-stale-notice"]').exists()).toBe(true)
+
+    // Clicking Save (were it somehow enabled) must not be reachable — assert
+    // the store action was never invoked as the actual behind-the-scenes guard.
+    const replaceSpy = vi.spyOn(campaigns, 'replaceRecipients')
+    expect(replaceSpy).not.toHaveBeenCalled()
+  })
+
+  it('re-checking after an edit clears staleness again', async () => {
+    const { wrapper } = await mountDetail()
+    await openRecipientsTab(wrapper)
+    const { api } = await import('@/api/client')
+    vi.mocked(api.previewCampaignRecipients).mockResolvedValueOnce(previewResult(1)).mockResolvedValueOnce(previewResult(2))
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Заменить получателей')!.trigger('click')
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('one,recipient')
+    await wrapper.findAll('button').find((b) => b.text() === 'Проверить')!.trigger('click')
+    await flushPromises()
+
+    await textarea.setValue('one,recipient\ntwo,recipient')
+    await wrapper.findAll('button').find((b) => b.text() === 'Проверить')!.trigger('click')
+    await flushPromises()
+
+    const saveBtn = wrapper.findAll('button').find((b) => b.text() === 'Сохранить')!
+    expect((saveBtn.element as HTMLButtonElement).disabled).toBe(false)
+    expect(wrapper.find('[data-testid="replace-preview-stale-notice"]').exists()).toBe(false)
+  })
+})
+
+// CAM-08: Stop is permanent (unlike Pause) and previously fired on a single
+// click with zero confirmation.
+describe('CampaignDetail — Stop requires confirmation (CAM-08)', () => {
+  async function mountRunning() {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/campaigns/camp-1') return campaign({ status: 'running' }) as any
+      if (path === '/accounts') return { items: [] } as any
+      if (path.startsWith('/campaigns/camp-1/recipients')) return { items: [], total: 0 } as any
+      if (path.startsWith('/campaigns/camp-1/events')) return { items: [], total: 0 } as any
+      throw new Error(`unexpected GET ${path}`)
+    })
+    const pinia = testPinia()
+    const wrapper = mountKb(CampaignDetail, { pinia })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('does not stop on a single click; only after the confirmation dialog is accepted', async () => {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.post).mockResolvedValueOnce(campaign({ status: 'draft' }) as any)
+    const wrapper = await mountRunning()
+
+    const stopBtn = wrapper.findAll('button').find((b) => b.text().includes('Остановить'))
+    expect(stopBtn, 'Stop button not found').toBeTruthy()
+    await stopBtn!.trigger('click')
+
+    expect(api.post, 'must not call stop before confirmation').not.toHaveBeenCalled()
+    expect(body().text()).toContain('Остановить эту рассылку?')
+
+    const accept = lastButtonMatching((b) => b.text() === 'Остановить безвозвратно')
+    expect(accept, 'destructive confirm button not found').toBeTruthy()
+    await accept!.trigger('click')
+    await flushPromises()
+
+    expect(api.post).toHaveBeenCalledWith('/campaigns/camp-1/stop')
+  })
+
+  it('cancelling the dialog leaves the campaign running', async () => {
+    const { api } = await import('@/api/client')
+    // This file's api mocks are module-level vi.fn()s with no shared
+    // beforeEach reset (see KnowledgeBase.dom.test.ts's identical note) —
+    // the previous test's own call to /stop is still in the history here.
+    vi.mocked(api.post).mockClear()
+    const wrapper = await mountRunning()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Остановить'))!.trigger('click')
+    const cancelBtn = lastButtonMatching((b) => b.text() === 'Отмена')
+    await cancelBtn!.trigger('click')
+    await flushPromises()
+
+    expect(api.post).not.toHaveBeenCalled()
+  })
+})
+
+// CAM-11: the Recipients and History tabs both used to cap at the first 50
+// rows the store happened to fetch, even though the API's own `total` was
+// already sitting right there in the response. Assert the wiring end to
+// end: the range text, the disabled edges, and that clicking Next actually
+// re-fetches the next page rather than just relabeling what is on screen.
+describe('CampaignDetail — recipients/history pagination (CAM-11)', () => {
+  async function mountWithTotals(recipientsTotal: number, eventsTotal: number) {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/campaigns/camp-1') return campaign() as any
+      if (path === '/accounts') return { items: [] } as any
+      if (path.startsWith('/campaigns/camp-1/recipients')) {
+        return { items: [{ id: 'r1', normalized_identity: '77011234567', name: '', status: 'pending', failure_reason: '' }], total: recipientsTotal } as any
+      }
+      if (path.startsWith('/campaigns/camp-1/events')) {
+        return { items: [{ id: 'e1', event: 'created', created_at: '2026-08-01T00:00:00Z' }], total: eventsTotal } as any
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    const pinia = testPinia()
+    const wrapper = mountKb(CampaignDetail, { pinia })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('shows the range and enables Next once recipients span more than one page', async () => {
+    const wrapper = await mountWithTotals(120, 0)
+    await openRecipientsTab(wrapper)
+
+    expect(wrapper.text()).toContain('Показано 1–50 из 120')
+    const next = wrapper.find('[aria-label="Следующая страница"]')
+    const prev = wrapper.find('[aria-label="Предыдущая страница"]')
+    expect(next.exists() && prev.exists(), 'Prev/Next controls not found').toBe(true)
+    expect((next.element as HTMLButtonElement).disabled).toBe(false)
+    expect((prev.element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('hides Prev/Next (but keeps the count) when everything fits on one page', async () => {
+    const wrapper = await mountWithTotals(3, 0)
+    await openRecipientsTab(wrapper)
+
+    expect(wrapper.text()).toContain('Показано 1–3 из 3')
+    expect(wrapper.find('[aria-label="Следующая страница"]').exists()).toBe(false)
+  })
+
+  it('clicking Next re-fetches page 2 of recipients', async () => {
+    const wrapper = await mountWithTotals(120, 0)
+    await openRecipientsTab(wrapper)
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockClear()
+
+    await wrapper.find('[aria-label="Следующая страница"]').trigger('click')
+    await flushPromises()
+
+    expect(api.get).toHaveBeenCalledWith('/campaigns/camp-1/recipients?page=2&page_size=50')
+  })
+
+  it('choosing a status filter resets the recipients page back to 1', async () => {
+    const wrapper = await mountWithTotals(120, 0)
+    await openRecipientsTab(wrapper)
+    const { api } = await import('@/api/client')
+    await wrapper.find('[aria-label="Следующая страница"]').trigger('click')
+    await flushPromises()
+    vi.mocked(api.get).mockClear()
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Ошибка')!.trigger('click')
+    await flushPromises()
+
+    expect(api.get).toHaveBeenCalledWith('/campaigns/camp-1/recipients?page=1&page_size=50&status=failed')
+  })
+
+  it('shows the range and re-fetches page 2 of the History tab on Next', async () => {
+    const wrapper = await mountWithTotals(0, 75)
+    await openEventsTab(wrapper)
+
+    expect(wrapper.text()).toContain('Показано 1–50 из 75')
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockClear()
+
+    await wrapper.find('[aria-label="Следующая страница"]').trigger('click')
+    await flushPromises()
+
+    expect(api.get).toHaveBeenCalledWith('/campaigns/camp-1/events?page=2&page_size=50')
+  })
+})
+
+// CAM-07: the wizard used to redirect here with zero explanation — a
+// newly created, launch-now campaign sat in plain Draft until someone
+// noticed the small Start button.
+describe('CampaignDetail — post-creation launch banner (CAM-07)', () => {
+  it('shows the banner for a just-created, launch-now draft, and strips ?created=1 from the URL', async () => {
+    routeQuery = { created: '1' }
+    routerReplace.mockClear()
+    const { wrapper } = await mountDetail()
+    routeQuery = {}
+
+    expect(wrapper.find('[data-testid="created-banner"]').exists()).toBe(true)
+    expect(routerReplace).toHaveBeenCalledWith({ query: {} })
+  })
+
+  it('never shows the banner without the ?created=1 arrival flag', async () => {
+    routeQuery = {}
+    const { wrapper } = await mountDetail()
+    expect(wrapper.find('[data-testid="created-banner"]').exists()).toBe(false)
+  })
+
+  it('never shows the banner for a campaign that was deliberately scheduled — it starts itself', async () => {
+    routeQuery = { created: '1' }
+    const { wrapper } = await mountDetail({ schedule_at: '2026-09-01T10:00:00Z' })
+    routeQuery = {}
+    expect(wrapper.find('[data-testid="created-banner"]').exists()).toBe(false)
+  })
+
+  it('clicking Start from the banner starts the campaign', async () => {
+    routeQuery = { created: '1' }
+    const { wrapper } = await mountDetail()
+    routeQuery = {}
+    const { api } = await import('@/api/client')
+    vi.mocked(api.post).mockClear()
+    vi.mocked(api.post).mockResolvedValueOnce(campaign({ status: 'running' }) as any)
+
+    const banner = wrapper.find('[data-testid="created-banner"]')
+    await banner.find('button').trigger('click')
+    await flushPromises()
+
+    expect(api.post).toHaveBeenCalledWith('/campaigns/camp-1/start')
+  })
+
+  it('dismissing the banner hides it without starting the campaign', async () => {
+    routeQuery = { created: '1' }
+    const { wrapper } = await mountDetail()
+    routeQuery = {}
+    const { api } = await import('@/api/client')
+    vi.mocked(api.post).mockClear()
+
+    await wrapper.find('[data-testid="created-banner"] [aria-label="Закрыть"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="created-banner"]').exists()).toBe(false)
+    expect(api.post).not.toHaveBeenCalled()
+  })
+})

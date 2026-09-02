@@ -55,7 +55,6 @@ export interface Settings {
   providers: Record<string, ProviderSettings>
   ngrok: NgrokSettings
   credential_file_fallback_accepted: boolean
-  setup_completed: boolean
 }
 
 // IntegrationField mirrors internal/httpapi.fieldSummary.
@@ -332,10 +331,20 @@ export interface MetaStaleAccount {
   detail: string
 }
 
+// AdminContact is one workspace administrator's name/email — present only
+// for a member caller who just hit a missing prerequisite (see
+// ChannelSetupInfo.admin_contacts), so they have someone to ask instead of
+// a dead end.
+export interface AdminContact {
+  name: string
+  email: string
+}
+
 // ChannelSetupInfo is GET (and both PUT save endpoints') /channel-setup
 // response. can_configure/public_base_url/entries go to every authenticated
 // caller; everything from verify_token down is admin-only and simply absent
-// for a member — see ChannelSetupTab.vue.
+// for a member — see ChannelSetupTab.vue. admin_contacts is the mirror
+// image: present only for a member.
 export interface ChannelSetupInfo {
   can_configure: boolean
   public_base_url: string
@@ -344,6 +353,7 @@ export interface ChannelSetupInfo {
   graph_api_version?: string
   dashboard_url?: string
   stale_accounts?: MetaStaleAccount[]
+  admin_contacts?: AdminContact[]
 }
 
 // WaPairSession is POST /wa-accounts/pair's response: a session id to poll
@@ -593,6 +603,17 @@ export interface CancelChangeResponse {
   changes: DraftChangeSet
 }
 
+// KbGateReason mirrors kbstore.GateReason — one deterministic approve-gate
+// violation, carried in a 422's payload.reasons alongside the existing
+// flat message (KB-09). kind matches ChangeKind (draftChanges.ts) when the
+// violation names a single entity; both kind and key are "" for one that
+// doesn't (an unresolved-request count spans the whole org, not one row).
+export interface KbGateReason {
+  kind: string
+  key: string
+  message: string
+}
+
 // --- Structured KB import pipeline (internal/kbimport) — submit a URL/file,
 // pass 1 extracts it, pass 2 synthesizes the accumulated evidence into typed
 // KB draft records (kbd_draft only — see DraftChangeSet above; an import
@@ -602,18 +623,18 @@ export interface CancelChangeResponse {
 // KbImportRunStatus mirrors kbimport.deriveRunStatus's closed vocabulary —
 // branched on by KbImportRunStatus.vue (badge colour) and the store (when to
 // stop polling), so this is a real union rather than string+comment.
-export type KbImportRunStatus = 'extracting' | 'synthesizing' | 'built' | 'failed' | 'needs_human'
+export type KbImportRunStatus = 'extracting' | 'synthesizing' | 'built' | 'failed' | 'needs_human' | 'cancelled'
 
 // KbImportMaterialStatus mirrors kbimport.MaterialStatus — one submitted
 // URL/file's pass-1 progress within a run. processing_status mirrors
 // kbd_materials' own lifecycle (kbstore/import.go's doc comment):
-// queued -> extracting -> parsed | needs_human | failed.
+// queued -> extracting -> parsed | needs_human | failed | cancelled.
 export interface KbImportMaterialStatus {
   id: string
   kind: 'url' | 'file'
   label: string
   handle: string
-  processing_status: 'queued' | 'extracting' | 'parsed' | 'needs_human' | 'failed'
+  processing_status: 'queued' | 'extracting' | 'parsed' | 'needs_human' | 'failed' | 'cancelled'
   error?: string
 }
 
@@ -648,8 +669,30 @@ export interface KbImportSynthesisSummary {
 export interface KbImportRun {
   run_id: string
   status: KbImportRunStatus
+  // started_by is a raw user id — the org's own already-loaded user list
+  // (useInbox().users, id -> name) resolves it to a display name; the API
+  // does not (see RunSummary.StartedBy's own doc comment).
+  started_by: string
+  started_at: string
+  // cancelable is true only while pass 1 is still running — see
+  // kbstore.CancelImportRun's own doc comment for why cancelling is
+  // refused once synthesis has been claimed.
+  cancelable: boolean
+  // finished_at is set once the run reaches a terminal status (built,
+  // failed, needs_human, cancelled) — absent while still active, mirroring
+  // synthesis' own omitted-until-started shape rather than a zero instant.
+  finished_at?: string
   materials: KbImportMaterialStatus[]
   synthesis?: KbImportSynthesisSummary
+}
+
+// KbImportRunPage mirrors GET /kb/imports' response shape — KB-14's history
+// list, ?limit=&offset= paginated. total is the org's full run count (not
+// just runs.length), so a page beyond the last still reports how many
+// pages exist.
+export interface KbImportRunPage {
+  runs: KbImportRun[]
+  total: number
 }
 
 // KbImportProviderFamily mirrors extractor.Family — the source kinds
@@ -1047,6 +1090,11 @@ export interface CampaignRecipient {
   message_id: string | null
   created_at: string
   updated_at: string
+  // message_delivery_state is the linked message's own delivery_state
+  // (queued/sent/delivered/read/failed) — finer-grained than status above,
+  // which never moves past 'sent' once ANY successful delivery happens.
+  // Empty when message_id is null.
+  message_delivery_state: string
 }
 
 // CampaignEvent mirrors dto.CampaignEvent — one campaign timeline entry
@@ -1058,6 +1106,27 @@ export interface CampaignEvent {
   actor_user_id: string | null
   detail?: Record<string, unknown>
   created_at: string
+}
+
+// CampaignTemplate mirrors dto.CampaignTemplate — one reusable,
+// organization-wide message template (CAM-14). Pure content: no account,
+// channel, status, pace, or schedule of its own.
+export interface CampaignTemplate {
+  id: string
+  name: string
+  message_body: string
+  variables: string[]
+  is_archived: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+// CampaignTemplatePatch is PATCH /campaign-templates/:id's body — an
+// omitted key leaves that field untouched.
+export interface CampaignTemplatePatch {
+  name?: string
+  message_body?: string
 }
 
 // CampaignTier mirrors dto.CampaignTier — one simultaneous rolling-window
@@ -1277,4 +1346,94 @@ export interface CustomFieldDef {
   field_type: 'text' | 'number' | 'date' | 'select'
   options: string[]
   position: number
+}
+
+// --- Knowledge Base chat assistant (/chat) ---
+// Mirrors internal/chatkb and internal/chat. The backend computes every
+// structured element below from the knowledge base itself and hands it over
+// ready to render — nothing here is parsed out of the model's prose (see
+// internal/chatkb/components.go).
+
+// KbSource is the state a record was read from. The two are never merged.
+export type KbSource = 'REAL_KB' | 'DRAFT_KB'
+
+// KbRecordKind is the same plural entity vocabulary the KB editor pages use
+// (see components/kb/kbEntities.ts's ENTITY_META), so a chat card can borrow
+// their icon and localized entity name instead of inventing its own.
+export type KbRecordKind = 'topics' | 'products' | 'tariffs' | 'delivery_zones' | 'contacts' | 'policies' | 'config'
+
+export interface KbRecordField {
+  key: string
+  label: string
+  value: string
+}
+
+export interface KbRecord {
+  kind: KbRecordKind
+  key: string
+  title: string
+  source: KbSource
+  fields: KbRecordField[]
+}
+
+// KbChangeType mirrors chatkb.ChangeType.
+export type KbChangeType = 'added' | 'removed' | 'updated'
+
+export interface KbFieldDiff {
+  key: string
+  label: string
+  real: string
+  draft: string
+}
+
+export interface KbItemData {
+  record: KbRecord
+}
+export interface KbListData {
+  kind: KbRecordKind | ''
+  source: KbSource
+  records: KbRecord[]
+}
+export interface KbComparisonData {
+  kind: KbRecordKind
+  key: string
+  title: string
+  change: KbChangeType
+  real: KbRecord | null
+  draft: KbRecord | null
+  fields: KbFieldDiff[]
+}
+
+// ChatComponent is one structured element attached to an assistant turn. The
+// union is discriminated by `type` — see components/chat/KbComponent.vue.
+export type ChatComponent =
+  | { type: 'kb_item'; data: KbItemData }
+  | { type: 'kb_list'; data: KbListData }
+  | { type: 'kb_comparison'; data: KbComparisonData }
+
+export type ChatRole = 'user' | 'assistant' | 'system'
+
+// ChatMessage mirrors internal/chat.Message.
+export interface ChatMessage {
+  id: string
+  role: ChatRole
+  content: string
+  components: ChatComponent[]
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+// ChatConversation mirrors chatstore.Conversation — one sidebar row.
+export interface ChatConversation {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+// ChatConversationDetail is GET /chat/conversations/:id — a thread plus its
+// whole transcript.
+export interface ChatConversationDetail {
+  conversation: ChatConversation
+  messages: ChatMessage[]
 }

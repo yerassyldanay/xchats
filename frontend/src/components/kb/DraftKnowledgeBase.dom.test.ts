@@ -6,7 +6,7 @@ import { useDraftSelection } from '@/composables/useDraftSelection'
 import { mountKb, testPinia } from '@/test/mount'
 import DraftKnowledgeBase from './DraftKnowledgeBase.vue'
 import KbIngestPanel from './KbIngestPanel.vue'
-import type { DraftChangeSet, DraftView, TopicRow } from '@/types'
+import type { DraftChangeSet, DraftView, ProductRow, TopicRow } from '@/types'
 
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
 vi.mock('@/api/client', async (importOriginal) => {
@@ -23,9 +23,17 @@ vi.mock('@/api/client', async (importOriginal) => {
       // which calls these directly — none of the four above are the same
       // underlying call, so each needs its own default here too.
       getKbImportProviders: vi.fn().mockResolvedValue([]),
-      listKbImportRuns: vi.fn().mockResolvedValue({ runs: [] }),
+      listKbImportRuns: vi.fn().mockResolvedValue({ runs: [], total: 0 }),
     },
   }
+})
+// KbIngestPanel (KB-14) reads useRoute/useRouter for its history dialog's
+// URL state — no test in this file exercises that dialog, so a static,
+// always-empty mock is enough (contrast KbIngestPanel.dom.test.ts's own
+// mutable routeQuery, which actually drives history-dialog behavior).
+vi.mock('vue-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-router')>()
+  return { ...actual, useRouter: () => ({ replace: vi.fn() }), useRoute: () => ({ query: {} }) }
 })
 
 function topic(over: Partial<TopicRow> = {}): TopicRow {
@@ -33,6 +41,15 @@ function topic(over: Partial<TopicRow> = {}): TopicRow {
     id: 'pricing', slug: 'pricing', title: 'Тарифы', body_md: 'Текст.',
     featured_image: null, illustration_images: [], explainer_videos: [], reference_documents: [],
     draft: false, updated_at: '',
+    ...over,
+  }
+}
+
+function product(over: Partial<ProductRow> = {}): ProductRow {
+  return {
+    id: 'p1', ref: 'p1', name: 'Товар', price: '', description: '', category: '',
+    in_stock: true, sales_status: 'active', featured_image: null, gallery_images: [],
+    demo_videos: [], certificate_documents: [], guarantee_documents: [], draft: false, updated_at: '',
     ...over,
   }
 }
@@ -293,6 +310,64 @@ describe('DraftKnowledgeBase — 422 gate failure renders page-level only', () =
   })
 })
 
+// KB-09: the flat page-level gate message tells you SOMETHING is blocked but
+// not WHERE — these structured reasons (kind/key/message from the backend's
+// GateError.Reasons) let the banner point straight at the offending tab.
+describe('DraftKnowledgeBase — KB-09: structured gate reasons link to their tab', () => {
+  it('renders each reason\'s message, with a Fix-in-Tab link only for reasons that carry a kind', async () => {
+    const { wrapper, pg } = await mountWith(
+      emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })], products: [product()] }),
+      emptyLive()
+    )
+    pg.gateReasons = 'publish gate failed: policy main is incomplete'
+    pg.gateReasonDetails = [
+      { kind: 'products', key: 'p1', message: 'available requires cost and days to be set' },
+      { kind: '', key: '', message: '3 unresolved request(s) remain' },
+    ]
+    await wrapper.vm.$nextTick()
+
+    const banner = wrapper.find('[data-testid="gate-error-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('available requires cost and days to be set')
+    expect(banner.text()).toContain('3 unresolved request(s) remain')
+    // The flat message is the v-else fallback — once structured reasons are
+    // present, it must not also render (no duplicate/contradictory text).
+    expect(banner.text()).not.toContain('publish gate failed: policy main is incomplete')
+
+    const fixLinks = wrapper.findAll('[data-testid="gate-reason-fix-link"]')
+    expect(fixLinks).toHaveLength(1)
+    expect(fixLinks[0].text()).toContain('Товары') // products' plural label
+  })
+
+  it('clicking a Fix-in-Tab link switches the active tab to that reason\'s kind', async () => {
+    const { wrapper, pg } = await mountWith(
+      emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })], products: [product()] }),
+      emptyLive()
+    )
+    pg.gateReasons = 'publish gate failed'
+    pg.gateReasonDetails = [{ kind: 'products', key: 'p1', message: 'available requires cost and days to be set' }]
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-testid="gate-reason-fix-link"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="draft-tab-products"]').isVisible()).toBe(true)
+    expect(wrapper.find('[data-testid="draft-tab-topics"]').isVisible()).toBe(false)
+  })
+
+  it('falls back to the flat message with no list or links when gateReasonDetails is empty', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.gateReasons = 'publish gate failed: policy main is incomplete'
+    pg.gateReasonDetails = []
+    await wrapper.vm.$nextTick()
+
+    const banner = wrapper.find('[data-testid="gate-error-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('publish gate failed: policy main is incomplete')
+    expect(wrapper.find('[data-testid="gate-reason-fix-link"]').exists()).toBe(false)
+    expect(banner.find('ul').exists()).toBe(false)
+  })
+})
+
 // Multi-select: tick several pending cards and cancel them in one confirmed
 // action, instead of one click (and one dialog) per card.
 describe('DraftKnowledgeBase — bulk selection', () => {
@@ -343,5 +418,105 @@ describe('DraftKnowledgeBase — bulk selection', () => {
 
     await wrapper.find('[data-testid="bulk-select-all"]').trigger('click')
     expect(wrapper.find('[data-testid="draft-bulk-bar"]').exists()).toBe(false)
+  })
+})
+
+// KB-08: both whole-draft actions are irreversible (Publish all pushes
+// straight to live channels; Discard all destroys every pending change for
+// good) and previously fired with zero confirmation (Publish all) or a bare
+// window.confirm (Discard all) inconsistent with the rest of the app's
+// styled dialogs.
+describe('DraftKnowledgeBase — Publish all / Discard all require confirmation', () => {
+  it('Publish all opens a styled confirmation summarizing counts, and only approves on confirm', async () => {
+    const { wrapper, pg } = await mountWith(
+      emptyChanges({ topics: [topic({ id: 'new', slug: 'new' }), topic({ title: 'edited' })] }),
+      emptyLive({ topics: [topic()] })
+    )
+    const approveSpy = vi.spyOn(pg, 'approve').mockResolvedValue(true)
+
+    await wrapper.find('[data-testid="publish-all"]').trigger('click')
+    expect(approveSpy, 'no live write before the operator confirms').not.toHaveBeenCalled()
+
+    const accept = openDialogAccept()
+    expect(accept, 'confirmation dialog did not open').toBeTruthy()
+    accept!.click()
+    await flushPromises()
+
+    expect(approveSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('Discard all opens a styled confirmation (no window.confirm), and only discards on confirm', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    const discardSpy = vi.spyOn(pg, 'discard').mockResolvedValue(undefined)
+    const nativeConfirm = vi.spyOn(window, 'confirm')
+
+    await wrapper.find('[data-testid="discard-all"]').trigger('click')
+    expect(nativeConfirm, 'must not fall back to the native browser dialog').not.toHaveBeenCalled()
+    expect(discardSpy).not.toHaveBeenCalled()
+
+    const accept = openDialogAccept()
+    expect(accept, 'confirmation dialog did not open').toBeTruthy()
+    accept!.click()
+    await flushPromises()
+
+    expect(discardSpy).toHaveBeenCalledTimes(1)
+    nativeConfirm.mockRestore()
+  })
+})
+
+// KB-03: approveWith (both approve() and every approveEntity() call funnel
+// through it) is the one choke point every publish path shares — these
+// tests drive its own `approving` flag directly, the same signal
+// DraftKnowledgeBase.vue's own watcher reacts to, rather than mocking a
+// specific publish button's click handler.
+describe('DraftKnowledgeBase — KB-03: post-publish bridge to Simulator', () => {
+  it('shows a dismissible success banner linking to Simulator/Knowledge Base once a publish empties the draft', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.approving = true
+    await wrapper.vm.$nextTick()
+    pg.changes = emptyChanges() // the publish landed and emptied the draft
+    pg.approving = false
+    await wrapper.vm.$nextTick()
+
+    const banner = wrapper.find('[data-testid="publish-success-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('База знаний обновлена')
+    expect(banner.text()).toContain('Симулятор')
+    expect(banner.text()).toContain('Базу знаний')
+  })
+
+  it('does not show the banner just because the draft happened to load already empty', async () => {
+    const { wrapper } = await mountWith(emptyChanges(), emptyLive())
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(false)
+  })
+
+  it('does not show the banner when the draft empties WITHOUT a publish (e.g. discard)', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.changes = emptyChanges() // discard's own effect — pg.approving is never touched
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(false)
+  })
+
+  it('does not show the banner after a FAILED publish attempt', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.approving = true
+    await wrapper.vm.$nextTick()
+    pg.error = 'publish failed' // the draft stays non-empty on a real failure, but guard on the error too
+    pg.approving = false
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(false)
+  })
+
+  it('the dismiss button hides the banner', async () => {
+    const { wrapper, pg } = await mountWith(emptyChanges({ topics: [topic({ id: 'new', slug: 'new' })] }), emptyLive())
+    pg.approving = true
+    await wrapper.vm.$nextTick()
+    pg.changes = emptyChanges()
+    pg.approving = false
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="publish-success-dismiss"]').trigger('click')
+    expect(wrapper.find('[data-testid="publish-success-banner"]').exists()).toBe(false)
   })
 })

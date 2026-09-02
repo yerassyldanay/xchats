@@ -120,4 +120,37 @@ describe('useKbModal — openCreate', () => {
     expect(modal.session.value?.mode).toBe('create')
     expect(modal.session.value?.snapshot).toBeNull()
   })
+
+  it('defaults target to draft when unspecified (Черновик callers never pass one)', () => {
+    const modal = useKbModal()
+    modal.openCreate('products')
+    expect(modal.session.value?.target).toBe('draft')
+  })
+})
+
+// KB-13: /knowledge-base passes target:'live' explicitly, which routes
+// submit() through the store's writeLiveChange (POST /kb/*) instead of
+// stageChange (POST /playground/draft/*) — no If-Match, no draft staging.
+describe('useKbModal — target: live (KB-13, /knowledge-base manual writes)', () => {
+  it('openEdit/openCreate record target live on the session', () => {
+    const modal = useKbModal()
+    modal.openEdit('topics', topic, { target: 'live' })
+    expect(modal.session.value?.target).toBe('live')
+
+    modal.openCreate('products', { target: 'live' })
+    expect(modal.session.value?.target).toBe('live')
+  })
+
+  it('submit() on a live session posts to /kb/* directly, with no If-Match header', async () => {
+    const modal = useKbModal()
+    modal.openEdit('topics', topic, { target: 'live' })
+
+    vi.mocked(api.post).mockResolvedValueOnce({ topics: [topic] } as any)
+    const ok = await modal.submit({ kind: 'topics', slug: 'pricing', title: 'Новое название', body_md: 'Текст.' })
+
+    expect(ok).toBe(true)
+    expect(api.post).toHaveBeenCalledWith('/kb/topics', expect.objectContaining({ slug: 'pricing' }))
+    expect(api.post).not.toHaveBeenCalledWith('/playground/draft/topics', expect.anything(), expect.anything())
+    expect(modal.isOpen.value).toBe(false)
+  })
 })
