@@ -1,11 +1,11 @@
 <script setup lang="ts">
-// Visually chrome.css's .lang-links (the blog's LangLinks.vue), but these
-// are <button>s that flip the SPA's own vue-i18n locale instead of <a>s to
-// a differently-prefixed URL — the landing page is one route, not a
-// separate prerendered document per locale like the blog. Native language
-// names throughout (never re-translated per current locale), matching
-// scripts/build-blog.ts's LOCALE_LABEL convention.
+// A real <select> dropdown (not chrome.css's inline .lang-links button row) —
+// the landing nav is tight on horizontal space next to the new Features/
+// Tour/Architecture/Docs links, and a native select is free accessibility
+// (keyboard, screen reader) with zero extra JS for outside-click handling.
+// Native language names throughout, matching LandingNav/NavRail convention.
 import { useI18n } from 'vue-i18n'
+import { ChevronDown, Globe } from 'lucide-vue-next'
 
 const { t, locale } = useI18n()
 
@@ -17,17 +17,11 @@ const locales = [
 </script>
 
 <template>
-  <nav :aria-label="t('nav.language')" class="lang-links">
-    <template v-for="(l, i) in locales" :key="l.code">
-      <span v-if="i > 0" class="lang-links__sep" aria-hidden="true">·</span>
-      <button
-        type="button"
-        class="lang-links__link"
-        :aria-current="locale === l.code ? 'page' : undefined"
-        @click="locale = l.code"
-      >
-        {{ l.label }}
-      </button>
-    </template>
-  </nav>
+  <label class="landing-lang-select">
+    <Globe class="landing-lang-select__icon" aria-hidden="true" />
+    <select v-model="locale" :aria-label="t('nav.language')">
+      <option v-for="l in locales" :key="l.code" :value="l.code">{{ l.label }}</option>
+    </select>
+    <ChevronDown class="landing-lang-select__chevron" aria-hidden="true" />
+  </label>
 </template>

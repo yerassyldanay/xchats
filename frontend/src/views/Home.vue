@@ -11,9 +11,11 @@ import '@/components/landing/landing.css'
 import LandingNav from '@/components/landing/LandingNav.vue'
 import LandingHero from '@/components/landing/LandingHero.vue'
 import PlatformsSection from '@/components/landing/PlatformsSection.vue'
+import ProductShowcase from '@/components/landing/ProductShowcase.vue'
 import TeamSection from '@/components/landing/TeamSection.vue'
 import TemplatesSection from '@/components/landing/TemplatesSection.vue'
 import McpSection from '@/components/landing/McpSection.vue'
+import ArchitectureSection from '@/components/landing/ArchitectureSection.vue'
 import HowItWorksStrip from '@/components/landing/HowItWorksStrip.vue'
 import LandingLinks from '@/components/landing/LandingLinks.vue'
 import LandingCta from '@/components/landing/LandingCta.vue'
@@ -26,9 +28,11 @@ import LandingFooter from '@/components/landing/LandingFooter.vue'
     <main>
       <LandingHero />
       <PlatformsSection />
+      <ProductShowcase />
       <TeamSection />
       <TemplatesSection />
       <McpSection />
+      <ArchitectureSection />
       <HowItWorksStrip />
       <LandingLinks />
       <LandingCta />

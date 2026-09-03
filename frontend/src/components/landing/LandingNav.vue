@@ -7,8 +7,14 @@
 import { useI18n } from 'vue-i18n'
 import { Github } from 'lucide-vue-next'
 import LandingLangSwitcher from './LandingLangSwitcher.vue'
+import { useAuth } from '@/stores/auth'
 
 const { t } = useI18n()
+// router.ts already resolves auth.ready via fetchMe() on every navigation
+// (including this public route) before this component ever mounts, so
+// auth.isAuthed is reliable here without this component fetching anything
+// itself — see router.ts's beforeEach guard.
+const auth = useAuth()
 </script>
 
 <template>
@@ -20,11 +26,12 @@ const { t } = useI18n()
       </RouterLink>
 
       <nav class="site-nav__primary" aria-label="landing">
-        <a href="#platforms" class="site-nav__link">{{ t('landing.nav.platforms') }}</a>
-        <a href="#team" class="site-nav__link">{{ t('landing.nav.team') }}</a>
-        <a href="#templates" class="site-nav__link">{{ t('landing.nav.templates') }}</a>
-        <a href="#mcp" class="site-nav__link">{{ t('landing.nav.mcp') }}</a>
-        <a href="/blog/" class="site-nav__link">{{ t('landing.nav.blog') }}</a>
+        <a href="#platforms" class="site-nav__link">{{ t('landing.nav.features') }}</a>
+        <a href="#showcase" class="site-nav__link">{{ t('landing.nav.tour') }}</a>
+        <a href="#architecture" class="site-nav__link">{{ t('landing.nav.architecture') }}</a>
+        <a href="https://github.com/yerassyldanay/xchats/tree/master/docs" target="_blank" rel="noreferrer" class="site-nav__link">{{
+          t('landing.nav.docs')
+        }}</a>
       </nav>
 
       <div class="site-nav__right">
@@ -39,7 +46,8 @@ const { t } = useI18n()
           <span>{{ t('landing.nav.github') }}</span>
         </a>
         <LandingLangSwitcher />
-        <RouterLink :to="{ name: 'login' }" class="site-nav__cta">{{ t('landing.nav.login') }}</RouterLink>
+        <RouterLink v-if="auth.isAuthed" :to="{ name: 'chatboard' }" class="site-nav__cta">{{ t('landing.nav.goToInbox') }}</RouterLink>
+        <RouterLink v-else :to="{ name: 'login' }" class="site-nav__cta">{{ t('landing.nav.login') }}</RouterLink>
       </div>
     </div>
   </header>
