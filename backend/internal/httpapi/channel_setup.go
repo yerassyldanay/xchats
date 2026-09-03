@@ -67,8 +67,7 @@ type ChannelSetupEntry struct {
 
 // AdminContact is one workspace administrator's name/email — handed to a
 // MEMBER caller who just hit a missing prerequisite they cannot fix
-// themselves (docs/ux/flows/03b-connect-instagram-messenger.md, friction
-// point 2), so the blocked state names someone to ask instead of being a
+// themselves, so the blocked state names someone to ask instead of being a
 // dead end.
 type AdminContact struct {
 	Name  string `json:"name"`

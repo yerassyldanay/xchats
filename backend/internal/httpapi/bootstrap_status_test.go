@@ -8,9 +8,8 @@ import (
 
 // TestBootstrapStatus pins GET /auth/bootstrap-status — the public, session-
 // less probe Login.vue's "Fill default admin credentials" helper
-// (docs/ux/flows/01-onboarding.md, friction point 1) polls before a user has
-// signed in at all. newHarness's database still carries migration 0006's
-// sentinel admin (admin@xchat.kz) alongside the harness's own separately
+// polls before a user has signed in at all. newHarness's database still carries
+// migration 0006's sentinel admin (admin@xchat.kz) alongside the harness's own separately
 // seeded admin — see rbac_test.go's TestSetMembershipRoleRefusesToDemoteLastAdmin
 // for that same fact — and 0014_force_default_admin_password_change leaves
 // that sentinel on the documented default password with must_change_password

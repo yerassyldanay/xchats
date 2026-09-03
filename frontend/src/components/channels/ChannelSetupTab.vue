@@ -130,8 +130,7 @@ function showContinue(channel: 'messenger' | 'whatsapp_cloud') {
 
 // guidedSteps/guidedStepIndex back the "why am I here" banner below — the
 // automatic tab switch that lands an admin here otherwise gives no context
-// at all (docs/ux/flows/03b-connect-instagram-messenger.md, friction point
-// 3). Mirrors nextRequiredSetup's own fixed dependency order (public_access
+// at all. Mirrors nextRequiredSetup's own fixed dependency order (public_access
 // -> meta_app -> the channel itself) rather than exposing it from the store.
 const guidedStepTotal = 3
 const guidedStepIndex = computed(() => {
@@ -145,8 +144,7 @@ const guidedStepIndex = computed(() => {
 <template>
   <div class="space-y-4">
     <!-- Why the admin landed here: the picker dialog closes and switches to
-         this tab with no explanation on its own (docs/ux/flows/
-         03b-connect-instagram-messenger.md, friction point 3). -->
+         this tab with no explanation on its own. -->
     <div
       v-if="channelSetup.pendingChannel"
       class="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm"

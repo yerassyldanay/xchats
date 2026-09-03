@@ -26,7 +26,7 @@ const messengerCallbackPath = "/meta/api/v1/oauth/messenger/callback"
 // errors.New calls so handleMessengerOAuthCallback can map each to its own
 // stable metaOAuthErr* code (errors.Is, via the %w-wrapped count below) for
 // the frontend, instead of both falling into the generic CONNECT_FAILED
-// bucket (docs/ux/flows/03b-connect-instagram-messenger.md, friction point 5).
+// bucket.
 var (
 	errNoFacebookPages       = errors.New("нет доступных Facebook Pages — предоставьте доступ хотя бы к одной Page и попробуйте снова")
 	errMultipleFacebookPages = errors.New("предоставлен доступ более чем к одной Facebook Page — предоставьте доступ ровно к одной Page и попробуйте снова")

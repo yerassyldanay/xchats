@@ -25,8 +25,7 @@ import (
 // course on blanking it), and 0014 puts the forced-change screen back in
 // front of it: a fresh install is immediately loginnable with the
 // documented default password, but must set a real one before reaching the
-// rest of the app (docs/ux/flows/01-onboarding.md's friction point 1 — the
-// public default password must never be usable indefinitely).
+// rest of the app (the public default password must never be usable indefinitely).
 func TestInitAdminMigration(t *testing.T) {
 	db := OpenRaw(t)
 	ctx := context.Background()

@@ -1,6 +1,5 @@
 -- Force the mandatory password-change screen back on for the shipped
--- default admin credential (docs/ux/flows/01-onboarding.md, friction point
--- 1). 0011_restore_default_admin_password restored the known default
+-- default admin credential. 0011_restore_default_admin_password restored the known default
 -- password for self-host ergonomics but left must_change_password = 0, so
 -- the publicly-documented password (it is printed in README.md and sits in
 -- this repo's git history) worked indefinitely on any deployment an
