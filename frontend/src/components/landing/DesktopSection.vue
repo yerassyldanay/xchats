@@ -1,23 +1,26 @@
 <script setup lang="ts">
 // The native desktop app — three platform cards, each linking straight to
-// the GitHub Release that carries all three archives (built and attached by
-// .github/workflows/desktop-build.yml on every `v*.*.*` tag; see
-// docs/desktop.md for what each artifact is). id="desktop" is the landing
-// nav's "Desktop" anchor. Reuses .landing-link-card (LandingLinks.vue's own
-// clickable-card style) rather than the non-interactive .landing-channel-card
-// Platforms/Architecture use, since every card here is a download link.
+// its own artifact via GitHub's stable "latest release" asset URL
+// (github.com/<repo>/releases/latest/download/<exact-filename>, a permanent
+// redirect GitHub maintains — never goes stale across version bumps, unlike
+// linking a specific tag). Filenames must match the `artifact` names
+// .github/workflows/desktop-build.yml packages and attaches to the Release
+// on every `v*.*.*` tag; see docs/desktop.md for what each one is. Until a
+// tag has actually been pushed through that workflow these 404 — that's a
+// release-process gap to fix by cutting a release, not by changing the URL
+// shape here.
 import { useI18n } from 'vue-i18n'
 import { ArrowRight, AppWindow, Laptop, Terminal } from 'lucide-vue-next'
 import SectionShell from './SectionShell.vue'
 
 const { t } = useI18n()
 
-const RELEASES_URL = 'https://github.com/yerassyldanay/xchats/releases/latest'
+const DOWNLOAD_BASE = 'https://github.com/yerassyldanay/xchats/releases/latest/download/'
 
 const CARDS = [
-  { key: 'win', icon: AppWindow },
-  { key: 'mac', icon: Laptop },
-  { key: 'linux', icon: Terminal },
+  { key: 'win', icon: AppWindow, asset: 'xchats-desktop-windows-amd64.zip' },
+  { key: 'mac', icon: Laptop, asset: 'xchats-desktop-macos-universal.zip' },
+  { key: 'linux', icon: Terminal, asset: 'xchats-desktop-linux-amd64.tar.gz' },
 ] as const
 </script>
 
@@ -29,7 +32,14 @@ const CARDS = [
     :description="t('landing.desktop.description')"
   >
     <div class="landing-arch-grid">
-      <a v-for="card in CARDS" :key="card.key" :href="RELEASES_URL" target="_blank" rel="noreferrer" class="landing-link-card">
+      <a
+        v-for="card in CARDS"
+        :key="card.key"
+        :href="DOWNLOAD_BASE + card.asset"
+        target="_blank"
+        rel="noreferrer"
+        class="landing-link-card"
+      >
         <div class="landing-link-card__icon"><component :is="card.icon" aria-hidden="true" /></div>
         <div class="landing-link-card__title">
           {{ t(`landing.desktop.${card.key}Title`) }}
@@ -40,8 +50,9 @@ const CARDS = [
       </a>
     </div>
 
+    <p class="landing-footnote">{{ t('landing.desktop.signingNote') }}</p>
     <p class="landing-footnote">
-      {{ t('landing.desktop.footnotePrefix') }} <code>docker compose up</code> {{ t('landing.desktop.footnoteSuffix') }}
+      {{ t('landing.desktop.footnotePrefix') }} <code>make up</code> {{ t('landing.desktop.footnoteSuffix') }}
     </p>
   </SectionShell>
 </template>
