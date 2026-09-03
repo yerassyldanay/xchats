@@ -1,5 +1,5 @@
 # Build the Go backend (migrations + sample media are go:embed'd into the binary).
-FROM golang:1.25 AS build
+FROM golang:1.27 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
