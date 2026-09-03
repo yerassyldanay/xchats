@@ -5,12 +5,11 @@ import { ApiError } from '@/api/client'
 
 // useChangePasswordForm is the change-password form's shared state/validation/
 // submit logic — used by both the forced first-login screen
-// (views/ChangePassword.vue, A1) and the "any time" Account Security dialog
-// reachable from the nav rail's avatar menu and Settings → Team
-// (docs/ux/flows/01-onboarding.md, friction point 2). Both wrap the exact
-// same three-field form and POST /auth/password call; only the surrounding
-// chrome (a full page vs. a dialog) and what happens on success (navigate
-// vs. close) differ, so those stay with each caller via onSuccess.
+// (views/ChangePassword.vue) and the "any time" Account Security dialog
+// reachable from the nav rail's avatar menu and Settings → Team.
+// Both wrap the exact same three-field form and POST /auth/password call;
+// only the surrounding chrome (a full page vs. a dialog) and what happens
+// on success (navigate vs. close) differ, so those stay with each caller via onSuccess.
 export function useChangePasswordForm(onSuccess: () => void) {
   const auth = useAuth()
   const { t } = useI18n()

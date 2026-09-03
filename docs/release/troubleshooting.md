@@ -48,7 +48,7 @@ invocation.
   set (ngrok assigns a random one) to isolate the problem.
 - Remember the tunnel serves the **entire application**, login page
   included — not just an API surface. This is a deliberate, documented
-  design choice (see `plan/DECISIONS.md`'s 2026-08 tunnel amendment), not a
+  design choice (see [`docs/overview.md`](../overview.md)), not a
   bug: expect the whole app to be reachable at the public URL for as long as
   the tunnel is running, and stop it when you don't need remote access.
 

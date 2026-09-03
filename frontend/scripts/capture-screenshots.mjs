@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Captures the high-resolution product screenshots used in the README, the
-// visual tour (docs/tour.md) and the landing page's tabbed showcase — the
+// Captures the high-resolution product screenshots used in the README's
+// visual tour and the landing page's tabbed showcase — the
 // single source of truth for every screenshot under docs/images/, so the
 // docs never drift from what the app actually looks like.
 //

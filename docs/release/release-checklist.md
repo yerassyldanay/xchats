@@ -15,7 +15,7 @@ automation should do once it's built.
 - [ ] No secrets in the diff — double-check anything touching `config.yaml`,
       `deploy/`, or test fixtures for anything that looks like a real key
       pasted in by mistake.
-- [ ] `plan/DECISIONS.md`, this `docs/release/` tree, and the README reflect
+- [ ] `docs/overview.md`, this `docs/release/` tree, and the README reflect
       reality — a stale doc claiming something the code no longer does is
       worse than no doc.
 - [ ] Changelog entry written for the release (see

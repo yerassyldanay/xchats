@@ -171,9 +171,8 @@ describe('Channels — Telegram and QR WhatsApp are never gated', () => {
       const { api } = await import('@/api/client')
       await findButton(body(), 'WhatsApp')!.trigger('click')
       await flushPromises()
-      // WhatsApp lands on the pre-flight checklist first (docs/ux/flows/
-      // 02-connect-whatsapp-qr.md #1) — not gated by Channel setup either,
-      // but not pairing yet until the operator continues past it.
+      // WhatsApp lands on the pre-flight checklist first — not gated by Channel
+      // setup either, but not pairing yet until the operator continues past it.
       expect(body().text()).toContain('Перед началом')
       expect(api.post).not.toHaveBeenCalled()
       await findButton(body(), 'Показать QR-код')!.trigger('click')
@@ -291,10 +290,8 @@ describe('Channels — multiple accounts on an already-ready channel', () => {
   })
 })
 
-// docs/ux/flows/02-connect-whatsapp-qr.md, friction point 6: a dropped
-// WhatsApp session used to be recoverable only via a small, unlabeled icon
-// button — easy to miss. It should now also surface as a prominent banner
-// right on the account's own card.
+// Dropped WhatsApp session recovery: a dropped session should surface
+// as a prominent banner right on the account's own card.
 describe('Channels — dropped WhatsApp session banner', () => {
   it('shows a prominent reconnect banner on a broken QR-WhatsApp account, and starts a reconnect on click', async () => {
     await installServer({ isAdmin: true })
@@ -357,9 +354,7 @@ describe('Channels — dropped WhatsApp session banner', () => {
   })
 })
 
-// docs/ux/flows/02-connect-whatsapp-qr.md, friction point 7: the old
-// Connected/Waiting/Broken counters are replaced by per-channel-type pills
-// that also filter the account list below.
+// Per-channel-type pills that also filter the account list below.
 describe('Channels — channel-type filter pills', () => {
   function waAccount(): Account {
     return {

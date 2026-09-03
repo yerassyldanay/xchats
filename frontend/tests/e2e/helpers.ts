@@ -8,8 +8,7 @@ const EMAIL = process.env.E2E_EMAIL || 'admin@xchat.kz'
 const DEFAULT_PASSWORD = process.env.E2E_PASSWORD || 'xchat-admin-change-me'
 // ROTATED_PASSWORD is what login() sets the sentinel admin's password to the
 // FIRST time it satisfies the forced first-login change
-// (0014_force_default_admin_password_change.up.sql /
-// docs/ux/flows/01-onboarding.md's friction point 1: the documented default
+// (0014_force_default_admin_password_change.up.sql: the documented default
 // now carries must_change_password = 1, so a fresh database's very first
 // login lands on /change-password, not /chatboard). The backend/database is
 // shared across the whole suite run (workers: 1, one persisted DB — see

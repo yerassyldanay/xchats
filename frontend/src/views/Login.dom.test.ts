@@ -45,8 +45,7 @@ describe('Login — password visibility toggle', () => {
   })
 })
 
-// docs/ux/flows/01-onboarding.md, friction point 1 / "Recommended Simplified
-// Target Flow" item 2: the helper is hardcoded client-side (never fetched
+// Default admin credentials helper: the helper is hardcoded client-side (never fetched
 // from the server) and only ever fills the form — auth.bootstrapStatus is
 // the ONLY thing that decides whether it renders at all.
 describe('Login — default admin credentials helper', () => {

@@ -49,8 +49,7 @@ backend/internal/simulator's own package-level test).
    password defaults to the documented public default,
    `xchat-admin-change-me` (see the root [`README.md`](../../../README.md)).
    That default now carries a forced first-login password change
-   (`0014_force_default_admin_password_change`, per
-   `docs/ux/flows/01-onboarding.md`'s friction point 1) — `login()` in
+   (`0014_force_default_admin_password_change`) — `login()` in
    `helpers.ts` completes that change automatically on a fresh database (to
    a fixed `E2E_PASSWORD_ROTATED` value, `xchat-admin-e2e-rotated-1!` by
    default) and self-heals on every later run against the same,

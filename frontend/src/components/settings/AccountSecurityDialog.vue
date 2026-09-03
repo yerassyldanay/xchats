@@ -1,8 +1,7 @@
 <script setup lang="ts">
-// AccountSecurityDialog is the "change your password any time" surface
-// (docs/ux/flows/01-onboarding.md, friction point 2) — reachable from the
-// nav rail's avatar dropdown for every signed-in user, and from Settings →
-// Team for admins. Unlike the forced first-login screen
+// AccountSecurityDialog is the "change your password any time" surface —
+// reachable from the nav rail's avatar dropdown for every signed-in user, and
+// from Settings → Team for admins. Unlike the forced first-login screen
 // (views/ChangePassword.vue), nothing routes here automatically and
 // closing it is always allowed; both share the same validation/submit logic
 // via useChangePasswordForm.

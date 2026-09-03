@@ -59,8 +59,7 @@ const oauthBanner = ref<{ kind: 'success' | 'error'; message: string; detail?: s
 // oauthErrorBanner translates a stable ..._error_code (see backend/internal/
 // httpapi/meta_oauth.go's metaOAuthErr* constants) into a localized message
 // instead of showing the backend's raw (Russian) fallback text verbatim in
-// every locale (docs/ux/flows/03b-connect-instagram-messenger.md, friction
-// point 7). An unrecognized/absent code just keeps the old raw-message
+// every locale. An unrecognized/absent code just keeps the old raw-message
 // behavior. CONNECT_FAILED wraps an arbitrary upstream error that cannot be
 // localized, so its raw message survives as `detail` under the translated
 // headline rather than being discarded.
@@ -79,10 +78,9 @@ function oauthErrorBanner(message: string, code: unknown): { kind: 'error'; mess
 
 // The OAuth banner is otherwise a true one-shot: query params are stripped
 // on mount, so a reload or an accidental dismiss used to lose the
-// connection result for good (docs/ux/flows/
-// 03b-connect-instagram-messenger.md, friction point 6). sessionStorage
-// survives a reload without needing a new backend activity feed; a TTL
-// keeps a stale result from lingering into unrelated later visits.
+// connection result for good. sessionStorage survives a reload without
+// needing a new backend activity feed; a TTL keeps a stale result from
+// lingering into unrelated later visits.
 const OAUTH_BANNER_KEY = 'xchats.accounts.oauthBanner'
 const OAUTH_BANNER_TTL_MS = 5 * 60 * 1000
 function saveOauthBanner(banner: typeof oauthBanner.value) {
@@ -218,8 +216,7 @@ onMounted(() => {
   }
 })
 
-// isHealthy/isWaiting/isBroken back the per-card "connection lost" banner
-// (docs/ux/flows/02-connect-whatsapp-qr.md, friction point 6).
+// isHealthy/isWaiting/isBroken back the per-card "connection lost" banner.
 const isHealthy = (a: Account) => a.connection_state === 'connected'
 const isWaiting = (a: Account) => ['qr_required', 'connecting', 'disconnect_pending'].includes(a.connection_state)
 const isBroken = (a: Account) => !isHealthy(a) && !isWaiting(a)
@@ -233,8 +230,7 @@ function channelOf(a: Account): ConnectableChannel {
   return isQrWhatsApp(a) ? 'whatsapp' : (a.channel as ConnectableChannel)
 }
 
-// Replaces the old Connected/Waiting/Broken status counters
-// (docs/ux/flows/02-connect-whatsapp-qr.md, friction point 7): those three
+// Replaces the old Connected/Waiting/Broken status counters: those three
 // numbers duplicate what's already visible on each account's own badge, and
 // waste vertical space once a team has more than a couple of channels.
 // Counting BY PLATFORM instead matches how an operator actually thinks about
@@ -274,12 +270,10 @@ function openReconnect(_a: Account) {
   addStartChannel.value = 'whatsapp'
   showAdd.value = true
 }
-// firstChannelBanner is the one-time "what's next" nudge (friction point 5),
-// now channel-aware instead of always showing WhatsApp-specific copy
-// (docs/ux/flows/03-connect-telegram.md, friction point 6; docs/ux/flows/
-// 03b-connect-instagram-messenger.md, friction point 8) — true only for the
-// run where the count crosses zero -> nonzero, never again after: reloading
-// or leaving/returning to this page starts from an already-nonzero count, so
+// firstChannelBanner is the one-time "what's next" nudge, now channel-aware
+// instead of always showing WhatsApp-specific copy — true only for the run
+// where the count crosses zero -> nonzero, never again after: reloading or
+// leaving/returning to this page starts from an already-nonzero count, so
 // it naturally never reappears without needing any persisted "seen it" flag.
 const firstChannelBanner = ref<{ channel: ConnectableChannel; handle: string } | null>(null)
 async function onConnected() {
@@ -385,8 +379,7 @@ async function remove(a: Account) {
           <button class="text-xs underline shrink-0" @click="firstChannelBanner = null">{{ t('accounts.page.dismiss') }}</button>
         </div>
 
-        <!-- channel-type filter pills (docs/ux/flows/02-connect-whatsapp-qr.md,
-             friction point 7) — replaces the old generic Connected/Waiting/Broken
+        <!-- channel-type filter pills — replaces the old generic Connected/Waiting/Broken
              counters with per-platform counts that double as quick filters. -->
         <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="t('accounts.page.filters.groupLabel')">
           <button
@@ -493,8 +486,7 @@ async function remove(a: Account) {
               </div>
 
               <!-- a dropped QR-WhatsApp session gets a prominent, actionable
-                   banner rather than only the small icon button below
-                   (docs/ux/flows/02-connect-whatsapp-qr.md, friction point 6) -->
+                   banner rather than only the small icon button below -->
               <button
                 v-if="isQrWhatsApp(a) && isBroken(a)"
                 type="button"
@@ -510,8 +502,7 @@ async function remove(a: Account) {
 
               <!-- a broken connection explains itself; it never silently disappears.
                    For Telegram, the fix is a text button right here, not a tiny
-                   icon in the footer below (docs/ux/flows/03-connect-telegram.md,
-                   friction point 5). -->
+                   icon in the footer below. -->
               <div
                 v-if="actionError[a.id] || a.webhook_last_error"
                 class="mt-3 rounded-md bg-destructive/5 px-2.5 py-2 text-[11px] leading-snug text-destructive"

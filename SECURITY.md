@@ -64,8 +64,8 @@ Documenting these up front so they aren't re-reported as findings — each is
 an explicit, recorded design decision, not an oversight:
 
 - **The ngrok tunnel serves the full application, not just an API
-  allowlist** — including the login page — while running. Recorded in
-  [`plan/DECISIONS.md`](plan/DECISIONS.md)'s 2026-08 tunnel amendment;
+  allowlist** — including the login page — while running. Recorded as a
+  design decision;
   mitigated by cookies gaining `Secure` over the tunnel's HTTPS origin and
   an explicit UI warning before starting it. See
   [`docs/release/troubleshooting.md`](docs/release/troubleshooting.md).

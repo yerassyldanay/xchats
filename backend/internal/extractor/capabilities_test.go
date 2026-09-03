@@ -6,12 +6,12 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/extractor"
 )
 
-// TestCapabilities_MatchesPlaygroundDoc pins Capabilities()'s output against
-// the exact matrix plan/playground.md's "Per input type" table documents
-// (the table's own Provider column) — if a provider's Supports() ever
-// changes, this test forces the doc (or this test, if the doc was wrong) to
-// be updated in the same change, rather than the two silently drifting.
-func TestCapabilities_MatchesPlaygroundDoc(t *testing.T) {
+// TestCapabilities_MatchesDoc pins Capabilities()'s output against
+// the expected provider capability matrix (the provider per-input-type matrix)
+// — if a provider's Supports() ever changes, this test forces the capability
+// definition (or this test) to be updated in the same change, rather than
+// silently drifting.
+func TestCapabilities_MatchesDoc(t *testing.T) {
 	want := map[string]map[extractor.Family]bool{
 		"native": {
 			extractor.FamilyURL: true, extractor.FamilyText: true, extractor.FamilyDOCX: true,
@@ -38,7 +38,7 @@ func TestCapabilities_MatchesPlaygroundDoc(t *testing.T) {
 		}
 		for _, f := range extractor.Families {
 			if cp.Families[f] != wantFam[f] {
-				t.Errorf("%s.Families[%s] = %v, want %v (plan/playground.md's table disagrees)", cp.Name, f, cp.Families[f], wantFam[f])
+				t.Errorf("%s.Families[%s] = %v, want %v (capability matrix disagrees)", cp.Name, f, cp.Families[f], wantFam[f])
 			}
 		}
 	}
