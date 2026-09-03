@@ -160,8 +160,7 @@ func TestMessengerOAuthCallbackZeroPagesFails(t *testing.T) {
 	if !strings.Contains(loc, "messenger_error") {
 		t.Fatalf("Location = %q, want messenger_error (no Pages granted)", loc)
 	}
-	// docs/ux/flows/03b-connect-instagram-messenger.md, friction point 7: a
-	// stable code travels alongside the message so the frontend can show a
+	// A stable code travels alongside the message so the frontend can show a
 	// localized string regardless of the active locale.
 	if !strings.Contains(loc, "messenger_error_code=NO_PAGES") {
 		t.Fatalf("Location = %q, want messenger_error_code=NO_PAGES", loc)

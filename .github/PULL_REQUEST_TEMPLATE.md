@@ -11,6 +11,6 @@ checked it in an actual browser — see CONTRIBUTING.md. -->
 
 - [ ] `go build ./... && go vet ./... && go test -race -count=1 ./...` (backend, if touched)
 - [ ] `npm run typecheck && npm run test:unit && npm run build` (frontend, if touched)
-- [ ] Updated [`plan/DECISIONS.md`](../plan/DECISIONS.md) if this changes a recorded decision
+- [ ] Updated [`docs/overview.md`](../docs/overview.md) if this changes a recorded architecture decision
 - [ ] Added a `CHANGELOG.md` entry if this is operator-visible
 - [ ] Commits are signed off (`git commit -s`) — see CONTRIBUTING.md

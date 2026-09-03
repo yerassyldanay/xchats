@@ -10,7 +10,7 @@ import (
 // It is a deliberately narrow projection, not a customer row. No ids, no
 // storage locators, no custom fields, no raw profile columns — the same
 // "internal ids never enter a prompt" rule the knowledge base is held to (see
-// plan/overview.md's invariants). store.CustomerSummary is its only producer.
+// docs/overview.md's invariants). store.CustomerSummary is its only producer.
 //
 // This block is READ-ONLY context. Nothing the model emits can change a
 // status, a tag, an assignee or a follow-up: the response contract

@@ -8,7 +8,7 @@ body:
         For anything beyond a small change, this issue is meant to start the
         discussion [CONTRIBUTING.md](../../CONTRIBUTING.md) asks for before
         code gets written — especially if it touches something recorded in
-        [`plan/DECISIONS.md`](../../plan/DECISIONS.md).
+        [`docs/overview.md`](../../docs/overview.md).
   - type: textarea
     id: problem
     attributes:

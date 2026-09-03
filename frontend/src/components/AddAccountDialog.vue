@@ -31,8 +31,7 @@ import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 
 // AddAccountDialog drives every "connect a channel" flow:
 //   channel picker → WhatsApp: a pre-flight checklist first (phone online,
-//                              WhatsApp updated, device-limit heads up — see
-//                              docs/ux/flows/02-connect-whatsapp-qr.md),
+//                              WhatsApp updated, device-limit heads up),
 //                              then start pairing, poll the QR every ~2.5s,
 //                              render the PNG, and end on an explicit "Done"
 //                              click rather than an auto-close timer
@@ -82,13 +81,12 @@ const error = ref('')
 // the account exists and is listed, so the dialog explains it rather than
 // pretending nothing happened. telegramAccountId is that account's id, so
 // "Retry webhook" (below) can retry it directly instead of re-submitting the
-// token (docs/ux/flows/03-connect-telegram.md, friction point 2).
+// token.
 const telegramState = ref('')
 const telegramAccountId = ref('')
 // blockedMissingKey replaces a generic "admin only" string with WHICH
 // prerequisite a non-admin member is blocked on, once a Meta channel needs
-// setup (docs/ux/flows/03b-connect-instagram-messenger.md, friction point 2)
-// — see the blocked-panel template block below.
+// setup — see the blocked-panel template block below.
 const blockedMissingKey = ref<SetupKey | null>(null)
 const busy = ref(false)
 const open = ref(true)
@@ -121,10 +119,9 @@ function pickChannel(c: Channel) {
   error.value = ''
   blockedMissingKey.value = null
   if (c === 'whatsapp') {
-    // A pre-flight checklist first (docs/ux/flows/02-connect-whatsapp-qr.md,
-    // friction point 1): starting the pairing session immediately, with no
-    // warning, means a phone with no internet, an outdated WhatsApp, or an
-    // already-maxed-out device count just silently times out several
+    // A pre-flight checklist first: starting the pairing session immediately,
+    // with no warning, means a phone with no internet, an outdated WhatsApp,
+    // or an already-maxed-out device count just silently times out several
     // seconds later with no clue why.
     step.value = 'whatsapp_preflight'
     return
@@ -158,8 +155,7 @@ function pickChannel(c: Channel) {
 // WHOLE browser tab to it — never a fetch/XHR, Meta's consent dialog
 // refuses to render inside anything but a real top-level page. The dialog
 // shows a 'redirecting' step for the round trip to the start request (there
-// is no other busy indicator on the picker card itself — docs/ux/flows/
-// 03b-connect-instagram-messenger.md, friction point 4) and stays there
+// is no other busy indicator on the picker card itself) and stays there
 // until the browser actually navigates away; the connect itself finishes
 // entirely server-side once Meta redirects back to /accounts (see
 // Accounts.vue's onMounted handling of ?instagram_connected /
@@ -231,8 +227,7 @@ async function connectTelegram() {
     // Created, but Telegram would not accept the webhook. The account is
     // already on the list — "Retry webhook" (below) retries THAT account
     // directly, so the token stays filled in rather than forcing a
-    // re-submit of a value that was never the problem (docs/ux/flows/
-    // 03-connect-telegram.md, friction point 2).
+    // re-submit of a value that was never the problem.
     telegramState.value = res.connection_state
     telegramAccountId.value = res.account.id
     error.value = res.account?.webhook_last_error || t('accounts.dialog.errWebhookRejected')
@@ -357,8 +352,7 @@ function finish() {
   stopPolling()
   step.value = 'connected'
   emit('connected')
-  // No auto-close timer (docs/ux/flows/02-connect-whatsapp-qr.md, friction
-  // point 4): a fixed 900ms was easy to miss on a slow render or a blink,
+  // No auto-close timer: a fixed 900ms was easy to miss on a slow render or a blink,
   // leaving the operator unsure whether the connection actually worked.
   // The operator confirms with a "Done" click instead.
 }
@@ -376,8 +370,7 @@ function qrSrc(b64: string) {
 // readinessFor distinguishes the three Meta-backed picker cards by their
 // LIVE setup state instead of the same static hint on every card — in
 // particular, calling out the public-HTTPS/ngrok prerequisite by name, since
-// that is the one requirement none of them can skip (docs/ux/flows/
-// 03b-connect-instagram-messenger.md, friction point 10).
+// that is the one requirement none of them can skip.
 type Readiness = { ready: boolean; label: string }
 function readinessFor(c: GuidedChannel): Readiness {
   const missing = channelSetup.nextRequiredSetup(c)
@@ -393,8 +386,7 @@ const messengerReadiness = computed(() => readinessFor('messenger'))
 // notifyAdminHref builds a mailto: link pre-filled for the blocked-panel
 // "Notify" action — no in-app notification channel exists, and a mailto
 // link needs no new backend surface while still getting the admin an
-// actionable message (docs/ux/flows/03b-connect-instagram-messenger.md,
-// friction point 2).
+// actionable message.
 function notifyAdminHref(admin: AdminContact): string {
   const subject = encodeURIComponent(t('accounts.dialog.blocked.notifySubject'))
   const body = encodeURIComponent(t('accounts.dialog.blocked.notifyBody', { channel: t(`accounts.dialog.${channel.value}.name`) }))
@@ -598,8 +590,7 @@ onBeforeUnmount(stopPolling)
 
           <!-- Non-admin member picked a Meta channel that still needs setup:
                explain what's missing and who can fix it, instead of a dead-end
-               "admin only" line (docs/ux/flows/03b-connect-instagram-messenger.md,
-               friction point 2). -->
+               "admin only" line. -->
           <div v-if="blockedMissingKey" class="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm">
             <p class="flex items-start gap-2 font-medium text-amber-700 dark:text-amber-400">
               <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" />
@@ -645,7 +636,7 @@ onBeforeUnmount(stopPolling)
             </ol>
             <!-- A verified deep link, not just instructions to search Telegram
                  manually — searching by name risks landing on an impersonator
-                 bot (docs/ux/flows/03-connect-telegram.md, friction point 1). -->
+                 bot. -->
             <a
               href="https://t.me/BotFather"
               target="_blank"
@@ -688,8 +679,7 @@ onBeforeUnmount(stopPolling)
           </p>
           <!-- Half-success: the bot was created but Telegram rejected the
                webhook — retry THAT account directly, or leave it for later
-               and go look at the card (docs/ux/flows/03-connect-telegram.md,
-               friction point 2). -->
+               and go look at the card. -->
           <template v-if="telegramState">
             <p class="text-xs text-muted-foreground">{{ t('accounts.dialog.telegramHalfSuccessHint') }}</p>
             <div class="flex gap-2">
@@ -855,8 +845,7 @@ onBeforeUnmount(stopPolling)
         </div>
 
         <!-- Instagram/Messenger: the visual bridge before the whole tab
-             navigates away to Meta (docs/ux/flows/
-             03b-connect-instagram-messenger.md, friction point 4) -->
+             navigates away to Meta -->
         <div v-else-if="step === 'redirecting'" class="text-center py-8 space-y-4">
           <LoaderCircle class="w-8 h-8 mx-auto animate-spin text-muted-foreground" />
           <p class="text-sm font-medium">{{ t('accounts.dialog.redirecting.title') }}</p>

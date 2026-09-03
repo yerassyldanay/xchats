@@ -553,11 +553,11 @@ const defaultAdminPasswordHash = "$argon2id$v=19$m=65536,t=1,p=4$eZE9z7aFgeOEeYV
 // must_change_password set — i.e. whether logging in with the credential
 // printed in README.md would land on the forced /change-password screen
 // rather than the app. This is what Login.vue's "Fill default admin
-// credentials" helper (docs/ux/flows/01-onboarding.md, friction point 1)
-// gates on: showing it only while that credential is actually the live
-// bootstrap path, never once an operator has changed the password some
-// other way (a direct DB edit, `xchats reset-admin-password`, or a normal
-// in-app change), and never once the forced change has already succeeded.
+// credentials" helper gates on: showing it only while that credential is
+// actually the live bootstrap path, never once an operator has changed the
+// password some other way (a direct DB edit, `xchats reset-admin-password`,
+// or a normal in-app change), and never once the forced change has already
+// succeeded.
 //
 // The password_hash check matters beyond just must_change_password alone:
 // `xchats reset-admin-password` also re-blanks the hash and re-sets

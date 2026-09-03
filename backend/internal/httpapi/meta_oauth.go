@@ -26,8 +26,7 @@ import (
 const metaOAuthStateTTL = 10 * time.Minute
 
 // Stable, locale-independent codes for every OAuth-redirect failure the
-// frontend can distinguish (docs/ux/flows/03b-connect-instagram-messenger.md,
-// friction point 7) — the redirect's own `..._error` value stays a
+// frontend can distinguish — the redirect's own `..._error` value stays a
 // human-readable (Russian) fallback message for anything the frontend does
 // not have a translation for, but every KNOWN failure also carries one of
 // these in `..._error_code` so the UI can show a localized string instead of

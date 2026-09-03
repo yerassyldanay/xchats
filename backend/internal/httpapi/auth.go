@@ -174,11 +174,10 @@ func (s *Server) handleLogin(c *gin.Context) {
 }
 
 // handleBootstrapStatus is a public, unauthenticated probe for Login.vue's
-// "Fill default admin credentials" helper (docs/ux/flows/01-onboarding.md,
-// friction point 1) — the frontend has no session yet at the login screen,
-// so it cannot otherwise know whether the documented default credential is
-// still live. This reveals nothing beyond a boolean already implied by the
-// public README (the credential itself), and only for as long as it is
+// "Fill default admin credentials" helper — the frontend has no session yet at
+// the login screen, so it cannot otherwise know whether the documented default
+// credential is still live. This reveals nothing beyond a boolean already implied by
+// the public README (the credential itself), and only for as long as it is
 // actually the working bootstrap path — see
 // store.DefaultAdminCredentialPending's own doc comment for exactly what it
 // checks.

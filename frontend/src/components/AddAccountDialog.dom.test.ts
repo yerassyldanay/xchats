@@ -41,7 +41,7 @@ describe('AddAccountDialog — WhatsApp QR pairing', () => {
     wrapper = undefined
   })
 
-  it('shows a pre-flight checklist before starting a pairing session (docs/ux/flows/02-connect-whatsapp-qr.md #1)', async () => {
+  it('shows a pre-flight checklist before starting a pairing session', async () => {
     const { api } = await import('@/api/client')
     await mountDialog()
 

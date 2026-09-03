@@ -196,10 +196,9 @@ func TestChannelSetupMemberPayloadCarriesOnlyStatusesAndPublicURL(t *testing.T) 
 	})
 }
 
-// TestChannelSetupMemberPayloadListsAdminContacts pins
-// docs/ux/flows/03b-connect-instagram-messenger.md's friction point 2: a
-// member blocked on a missing prerequisite gets someone to ask, and an
-// admin — who has no use for this — never gets the field at all.
+// TestChannelSetupMemberPayloadListsAdminContacts pins the prerequisite
+// behavior: a member blocked on a missing prerequisite gets someone to ask,
+// and an admin — who has no use for this — never gets the field at all.
 func TestChannelSetupMemberPayloadListsAdminContacts(t *testing.T) {
 	h := newMetaHarness(t)
 	h.createMember(t, memberEmail, memberPass, "Member")

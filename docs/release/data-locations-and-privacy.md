@@ -62,7 +62,7 @@ Message content and any KB material you build necessarily leaves your
 deployment when you configure an LLM provider — that's the provider making
 the inference call your feature needs. Which fields of a conversation
 actually get sent in that prompt is a product-logic question outside this
-document's scope; see `plan/knowledge-base.md` and `plan/DECISIONS.md`.
+document's scope; see [`docs/overview.md`](../overview.md).
 
 ## Backups carry the same data (minus credentials)
 

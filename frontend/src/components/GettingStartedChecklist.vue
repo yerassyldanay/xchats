@@ -1,7 +1,6 @@
 <script setup lang="ts">
-// GettingStartedChecklist replaces the old blocking SetupWizard modal
-// (docs/ux/flows/01-onboarding.md, friction points 5 & 6): a small,
-// persistent, minimizable card on the Inbox rather than a full-screen
+// GettingStartedChecklist replaces the old blocking SetupWizard modal:
+// a small, persistent, minimizable card on the Inbox rather than a full-screen
 // overlay with a permanent "Skip setup" escape hatch. Its three milestones
 // are derived from real, live state (a configured AI provider, a connected
 // channel, published Knowledge Base content) — never a separate
@@ -25,8 +24,7 @@ const { t } = useI18n()
 const router = useRouter()
 
 // Only an admin can act on any of these three milestones (provider keys and
-// channel connections live behind Settings/RequireAdmin; see
-// docs/ux/flows/01-onboarding.md friction point 3 for why operators get
+// channel connections live behind Settings/RequireAdmin; operators get
 // contextual empty-state guidance instead of this card). accounts.accounts
 // is already loaded by Chatboard's own onMounted; the other two are this
 // card's own concern.

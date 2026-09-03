@@ -4,9 +4,9 @@
 
 - Check open issues/PRs for overlap first.
 - For anything beyond a small fix, open an issue describing the change
-  before writing code — this project has a detailed `plan/` directory
-  ([`plan/DECISIONS.md`](plan/DECISIONS.md) is the authoritative design
-  record) and a change that cuts against a recorded decision needs that
+  before writing code — this project has a detailed overview document
+  ([`docs/overview.md`](docs/overview.md) is the authoritative architectural
+  record) and a change that cuts against a recorded design needs that
   discussed first, not discovered at review time.
 
 ## Development setup
@@ -100,7 +100,7 @@ contributed with the right to do so under [AGPL-3.0](LICENSE).
 - Keep PRs scoped to one change — easier to review, easier to revert if
   something's wrong.
 - Explain the *why* in the PR description; the diff already shows the *what*.
-- A PR that touches [`plan/DECISIONS.md`](plan/DECISIONS.md)-covered
+- A PR that touches [`docs/overview.md`](docs/overview.md)-covered
   territory should update that file in the same PR, not leave it to drift
   stale.
 - Every PR needs one approving review from a code owner before it can merge
