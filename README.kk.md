@@ -19,7 +19,7 @@ WhatsApp, Telegram, Instagram және Messenger — бір ортақ inbox-т�
 
 </div>
 
-![xchats шолуы](docs/images/overview-bento.png)
+![xchats шолуы](docs/images/hero-banner.png)
 
 ---
 

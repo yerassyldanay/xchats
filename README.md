@@ -18,7 +18,7 @@ always approves before it sends.
 
 </div>
 
-![xchats overview](docs/images/overview-bento.png)
+![xchats overview](docs/images/hero-banner.png)
 
 ---
 

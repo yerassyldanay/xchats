@@ -19,7 +19,7 @@ WhatsApp, Telegram, Instagram и Messenger — в одном общем инбо
 
 </div>
 
-![Обзор xchats](docs/images/overview-bento.png)
+![Обзор xchats](docs/images/hero-banner.png)
 
 ---
 
