@@ -1,11 +1,11 @@
 <script setup lang="ts">
-// The interactive tabbed product showcase — five REAL screenshots
+// The interactive tabbed product showcase — seven REAL screenshots
 // (frontend/public/screenshots/*.png, mirrored from docs/images/ by
 // scripts/capture-screenshots.mjs) rather than another hand-built mock demo
 // like the sections above. id="showcase" is the landing nav's "Tour" anchor.
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { GitCompare, Inbox, Library, Users, Wand2 } from 'lucide-vue-next'
+import { CalendarCheck, GitCompare, Inbox, Library, Megaphone, Users, Wand2 } from 'lucide-vue-next'
 import SectionShell from './SectionShell.vue'
 
 const { t } = useI18n()
@@ -14,8 +14,10 @@ const TABS = [
   { key: 'inbox', icon: Inbox, img: '/screenshots/inbox.png' },
   { key: 'kb', icon: Library, img: '/screenshots/knowledge-base.png' },
   { key: 'draft', icon: GitCompare, img: '/screenshots/draft-staging.png' },
-  { key: 'crm', icon: Users, img: '/screenshots/followups.png' },
-  { key: 'mcp', icon: Wand2, img: '/screenshots/simulator.png' },
+  { key: 'customers', icon: Users, img: '/screenshots/customers.png' },
+  { key: 'followups', icon: CalendarCheck, img: '/screenshots/followups.png' },
+  { key: 'campaigns', icon: Megaphone, img: '/screenshots/campaigns.png' },
+  { key: 'simulator', icon: Wand2, img: '/screenshots/simulator.png' },
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']

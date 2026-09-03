@@ -28,6 +28,7 @@ const auth = useAuth()
       <nav class="site-nav__primary" aria-label="landing">
         <a href="#platforms" class="site-nav__link">{{ t('landing.nav.features') }}</a>
         <a href="#showcase" class="site-nav__link">{{ t('landing.nav.tour') }}</a>
+        <a href="#desktop" class="site-nav__link">{{ t('landing.nav.desktop') }}</a>
         <a href="#architecture" class="site-nav__link">{{ t('landing.nav.architecture') }}</a>
         <a href="https://github.com/yerassyldanay/xchats/tree/master/docs" target="_blank" rel="noreferrer" class="site-nav__link">{{
           t('landing.nav.docs')

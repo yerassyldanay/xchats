@@ -26,10 +26,13 @@ const year = new Date().getUTCFullYear()
       <nav :aria-label="t('landing.footer.productHeading')">
         <h2 class="site-footer__heading">{{ t('landing.footer.productHeading') }}</h2>
         <ul class="site-footer__links">
-          <li><a href="#platforms">{{ t('landing.nav.platforms') }}</a></li>
-          <li><a href="#team">{{ t('landing.nav.team') }}</a></li>
-          <li><a href="#templates">{{ t('landing.nav.templates') }}</a></li>
-          <li><a href="#mcp">{{ t('landing.nav.mcp') }}</a></li>
+          <li><a href="#platforms">{{ t('landing.nav.features') }}</a></li>
+          <li><a href="#showcase">{{ t('landing.nav.tour') }}</a></li>
+          <li><a href="#desktop">{{ t('landing.nav.desktop') }}</a></li>
+          <li><a href="#architecture">{{ t('landing.nav.architecture') }}</a></li>
+          <li>
+            <a href="https://github.com/yerassyldanay/xchats/tree/master/docs" target="_blank" rel="noreferrer">{{ t('landing.nav.docs') }}</a>
+          </li>
           <li><a href="/blog/">{{ t('landing.nav.blog') }}</a></li>
         </ul>
       </nav>

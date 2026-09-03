@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>xchats — The AI assistant that never makes things up</title>
-  <meta name="description" content="xchats is a free, open-source AI assistant for WhatsApp and Telegram. It answers only with verified facts through value-injected templates, and you configure it right from a ChatGPT or Claude chat over MCP." />
+  <meta name="description" content="xchats is a free, open-source AI assistant for WhatsApp, Telegram, Instagram and Messenger. Runs as a native desktop app for Windows, macOS and Linux — no Docker required — and answers only with verified facts through value-injected templates, configured right from a ChatGPT or Claude chat over MCP." />
   <link rel="icon" type="image/png" href="./logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -333,6 +333,18 @@
       filter: brightness(1.06);
     }
 
+    .landing-hero__cta--ghost {
+      background: var(--blog-card);
+      color: var(--blog-text);
+      border: 1px solid var(--blog-border);
+      box-shadow: none;
+    }
+
+    .landing-hero__cta--ghost:hover {
+      border-color: var(--blog-accent);
+      filter: none;
+    }
+
     .landing-hero__trust {
       display: flex;
       flex-wrap: wrap;
@@ -351,6 +363,62 @@
       width: 16px;
       height: 16px;
       flex: 0 0 auto;
+    }
+
+    /* Desktop-downloads mini box: three OS chips plus a one-line caption. */
+    .landing-hero__downloads {
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 20px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--blog-border);
+      background: var(--blog-card);
+    }
+
+    .landing-hero__downloads-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .landing-hero__downloads-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--blog-accent-tint);
+      color: var(--blog-accent);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .landing-hero__downloads-chip svg {
+      width: 15px;
+      height: 15px;
+      flex: 0 0 auto;
+    }
+
+    .landing-hero__downloads-caption {
+      margin: 10px 0 0;
+      font-size: 12.5px;
+      color: var(--blog-muted);
+    }
+
+    .landing-hero__server-hint {
+      font-size: 13px;
+      color: var(--blog-muted);
+      margin: 0 0 20px;
+    }
+
+    .landing-hero__server-hint code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12.5px;
+      padding: 1px 6px;
+      border-radius: 5px;
+      background: var(--blog-hero-panel);
+      border: 1px solid var(--blog-border);
     }
 
     .landing-hero__panel {
@@ -430,14 +498,19 @@
       }
     }
 
-    /* Platforms Showcase */
+    /* Platforms Showcase — a responsive 2x2 grid of the four channels the
+       app actually implements (WhatsApp, Telegram, Instagram, Messenger). */
     .landing-platforms {
       display: grid;
-      grid-template-columns: 1fr auto auto auto 1fr;
-      align-items: center;
-      gap: 14px;
-      max-width: 920px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+      max-width: 720px;
       margin: 0 auto;
+    }
+    @media (max-width: 640px) {
+      .landing-platforms {
+        grid-template-columns: 1fr;
+      }
     }
 
     .landing-channel-card {
@@ -467,8 +540,18 @@
     }
 
     .landing-channel-card__icon--tg {
-      background: rgba(59, 130, 246, 0.14);
-      color: #3b82f6;
+      background: rgba(34, 158, 217, 0.14);
+      color: #229ed9;
+    }
+
+    .landing-channel-card__icon--ig {
+      background: rgba(228, 64, 95, 0.14);
+      color: #e4405f;
+    }
+
+    .landing-channel-card__icon--mg {
+      background: rgba(0, 132, 255, 0.14);
+      color: #0084ff;
     }
 
     .landing-channel-card__title {
@@ -493,35 +576,6 @@
       gap: 6px;
     }
 
-    .landing-connector__line {
-      width: 56px;
-      height: 2px;
-      background-image: repeating-linear-gradient(90deg, var(--blog-accent) 0 6px, transparent 6px 12px);
-      background-size: 200% 100%;
-      animation: landing-dash 1.6s linear infinite;
-    }
-
-    .landing-connector__hub {
-      width: 40px;
-      height: 40px;
-      border-radius: 999px;
-      background: var(--blog-accent);
-      color: var(--blog-accent-contrast);
-      display: grid;
-      place-items: center;
-      box-shadow: 0 8px 20px rgba(91, 92, 235, 0.25);
-    }
-
-    .landing-connector__hub svg {
-      width: 18px;
-      height: 18px;
-    }
-
-    @keyframes landing-dash {
-      from { background-position: 0 0; }
-      to { background-position: -24px 0; }
-    }
-
     .landing-footnote {
       margin-top: 28px;
       font-size: 13px;
@@ -532,23 +586,13 @@
       margin-right: auto;
     }
 
-    @media (max-width: 720px) {
-      .landing-platforms {
-        grid-template-columns: 1fr;
-        justify-items: center;
-      }
-      .landing-connector__line {
-        width: 2px;
-        height: 28px;
-        background-image: repeating-linear-gradient(180deg, var(--blog-accent) 0 6px, transparent 6px 12px);
-        background-size: 100% 200%;
-        animation-name: landing-dash-vertical;
-      }
-    }
-
-    @keyframes landing-dash-vertical {
-      from { background-position: 0 0; }
-      to { background-position: 0 -24px; }
+    .landing-footnote code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      padding: 1px 6px;
+      border-radius: 5px;
+      background: var(--blog-hero-panel);
+      border: 1px solid var(--blog-border);
     }
 
     /* Team Showcase */
@@ -807,6 +851,123 @@
       margin-top: 1px;
     }
 
+    /* Interactive Product Showcase (7-tab carousel) */
+    .landing-showcase {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    .landing-showcase__tabs {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 28px;
+    }
+
+    .landing-showcase__tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-radius: 10px;
+      border: 1px solid var(--blog-border);
+      background: var(--blog-card);
+      color: var(--blog-muted);
+      font: inherit;
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .landing-showcase__tab:hover {
+      color: var(--blog-text);
+    }
+
+    .landing-showcase__tab.is-active {
+      color: var(--blog-accent);
+      border-color: var(--blog-accent);
+      background: var(--blog-accent-tint);
+    }
+
+    .landing-showcase__tab svg {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+    }
+
+    .landing-showcase__frame {
+      border-radius: 16px;
+      border: 1px solid var(--blog-border);
+      background: var(--blog-hero-panel);
+      padding: 12px;
+    }
+
+    .landing-showcase__frame img {
+      width: 100%;
+      height: auto;
+      border-radius: 11px;
+      box-shadow: var(--blog-shadow);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .landing-showcase__frame img {
+        filter: brightness(0.94) saturate(0.96);
+      }
+    }
+
+    .landing-showcase__desc {
+      max-width: 68ch;
+      margin: 20px auto 0;
+      text-align: center;
+      font-size: 15px;
+      color: var(--blog-muted);
+      line-height: 1.6;
+    }
+
+    @media (max-width: 640px) {
+      .landing-showcase__tab {
+        padding: 8px 12px;
+        font-size: 12.5px;
+      }
+    }
+
+    /* Architecture pillars */
+    .landing-arch-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 720px) {
+      .landing-arch-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .landing-channel-card__icon--arch {
+      background: var(--blog-accent-tint);
+      color: var(--blog-accent);
+    }
+
+    /* The filename badge next to a Desktop-section card title (xchats.exe,
+       xchats.app, xchats). */
+    .landing-desktop__exe {
+      margin-left: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--blog-muted);
+      background: var(--blog-bg);
+      border: 1px solid var(--blog-border);
+      border-radius: 6px;
+      padding: 1px 6px;
+      vertical-align: middle;
+    }
+
     /* How It Works Strip */
     .landing-steps {
       display: grid;
@@ -939,6 +1100,12 @@
       flex-wrap: wrap;
       justify-content: center;
       gap: 12px;
+    }
+
+    .landing-cta-panel .landing-hero__cta--ghost {
+      background: transparent;
+      color: var(--blog-bg);
+      border-color: rgba(255, 255, 255, 0.2);
     }
 
     /* Footer */
@@ -1097,11 +1264,11 @@
       </a>
 
       <nav class="site-nav__primary" aria-label="landing">
-        <a href="#platforms" class="site-nav__link" data-i18n="nav.platforms">Platforms</a>
-        <a href="#team" class="site-nav__link" data-i18n="nav.team">Team</a>
-        <a href="#templates" class="site-nav__link" data-i18n="nav.templates">Templates</a>
-        <a href="#mcp" class="site-nav__link" data-i18n="nav.mcp">MCP</a>
-        <a href="#how-it-works" class="site-nav__link" data-i18n="nav.howItWorks">How it works</a>
+        <a href="#platforms" class="site-nav__link" data-i18n="nav.features">Features</a>
+        <a href="#showcase" class="site-nav__link" data-i18n="nav.tour">Tour</a>
+        <a href="#desktop" class="site-nav__link" data-i18n="nav.desktop">Desktop</a>
+        <a href="#architecture" class="site-nav__link" data-i18n="nav.architecture">Architecture</a>
+        <a href="https://github.com/yerassyldanay/xchats/tree/master/docs" class="site-nav__link" target="_blank" rel="noreferrer" data-i18n="nav.docs">Docs</a>
       </nav>
 
       <div class="site-nav__right">
@@ -1141,34 +1308,60 @@
           <span data-i18n="hero.titleSuffix"></span>
         </h1>
         <p class="landing-hero__subtitle" data-i18n="hero.subtitle">
-          xchats is a free, open-source AI assistant for WhatsApp and Telegram. It answers only with verified facts through value-injected templates, and you configure it right from a ChatGPT or Claude chat over MCP.
+          WhatsApp, Telegram, Instagram and Messenger in one shared inbox. The assistant drafts every reply from your own knowledge base — a human always approves before it sends.
         </p>
 
+        <div class="landing-hero__downloads">
+          <div class="landing-hero__downloads-row">
+            <span class="landing-hero__downloads-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></svg>
+              <span data-i18n="hero.downloadsWindows">Windows (.exe)</span>
+            </span>
+            <span class="landing-hero__downloads-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"/><path d="M20.054 15.987H3.946"/></svg>
+              <span data-i18n="hero.downloadsMac">macOS (.app)</span>
+            </span>
+            <span class="landing-hero__downloads-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19h8"/><path d="m4 17 6-6-6-6"/></svg>
+              <span data-i18n="hero.downloadsLinux">Linux (Ubuntu)</span>
+            </span>
+          </div>
+          <p class="landing-hero__downloads-caption" data-i18n="hero.downloadsLabel">Single executable · No Docker or database setup required</p>
+        </div>
+
         <div class="landing-hero__ctas">
-          <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer" class="landing-hero__cta">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
-            GitHub
+          <a href="https://github.com/yerassyldanay/xchats/releases/latest" target="_blank" rel="noreferrer" class="landing-hero__cta">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>
+            <span data-i18n="hero.ctaPrimary">Download Executable</span>
+          </a>
+          <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer" class="landing-hero__cta landing-hero__cta--ghost">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>
+            <span data-i18n="hero.ctaSecondary">Star on GitHub</span>
           </a>
         </div>
 
+        <p class="landing-hero__server-hint">
+          <span data-i18n="hero.serverHintPrefix">Optional server quickstart:</span> <code>make up</code> <span data-i18n="hero.serverHintSuffix">(Docker Compose)</span>
+        </p>
+
         <div class="landing-hero__trust">
           <span class="landing-hero__trust-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
-            <span data-i18n="hero.trust1">Open source (AGPL-3.0)</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <span data-i18n="hero.trust1">Zero setup — double-click and run</span>
           </span>
           <span class="landing-hero__trust-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
-            <span data-i18n="hero.trust2">Runs on your own servers</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <span data-i18n="hero.trust2">No Docker or external database required</span>
           </span>
           <span class="landing-hero__trust-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"></path></svg>
-            <span data-i18n="hero.trust3">Configurable from ChatGPT and Claude</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <span data-i18n="hero.trust3">100% local-first privacy on your machine</span>
           </span>
         </div>
       </div>
 
       <div class="landing-hero__panel">
-        <img src="./app-screenshot.png" alt="xchats interface" data-i18n-alt="hero.screenshotAlt" />
+        <img src="./screenshots/overview-bento.png" alt="A four-panel overview of xchats: the shared team inbox, MCP-configured knowledge base, CRM follow-ups, and the anti-hallucination grounding pipeline" data-i18n-alt="hero.screenshotAlt" />
       </div>
     </section>
 
@@ -1176,10 +1369,10 @@
     <section id="platforms" class="landing-section">
       <div class="blog-shell">
         <div class="landing-section__head landing-section__head--center">
-          <span class="badge badge--category landing-section__eyebrow" data-i18n="platforms.eyebrow">PLATFORMS</span>
-          <h2 class="landing-section__title" data-i18n="platforms.title">Multiple social platforms — one inbox</h2>
+          <span class="badge badge--category landing-section__eyebrow" data-i18n="platforms.eyebrow">CHANNELS</span>
+          <h2 class="landing-section__title" data-i18n="platforms.title">Four platforms — one inbox</h2>
           <p class="landing-section__description" data-i18n="platforms.description">
-            The architecture supports any number of channels. Two are wired up today — both free, both set up in a couple of minutes.
+            Connect all your customer messaging channels into one unified workspace. All free, all set up in minutes.
           </p>
         </div>
 
@@ -1189,31 +1382,98 @@
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.247-.694.247-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413"/></svg>
             </div>
             <div class="landing-channel-card__title">WhatsApp</div>
-            <p class="landing-channel-card__desc" data-i18n="platforms.waDesc">A linked device — scan a QR code, just like WhatsApp Web. No Business API, no per-conversation fees.</p>
+            <p class="landing-channel-card__desc" data-i18n="platforms.waDesc">Linked device via QR code (no per-conversation Meta fees) or the official WhatsApp Cloud API.</p>
             <div class="landing-channel-card__meta">
               <span class="badge badge--success" data-i18n="platforms.waBadge">Free</span>
             </div>
           </div>
-
-          <div class="landing-connector__line" aria-hidden="true"></div>
-          <div class="landing-connector__hub" role="img" aria-label="xchats inbox">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-          </div>
-          <div class="landing-connector__line" aria-hidden="true"></div>
 
           <div class="landing-channel-card">
             <div class="landing-channel-card__icon landing-channel-card__icon--tg">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
             </div>
             <div class="landing-channel-card__title">Telegram</div>
-            <p class="landing-channel-card__desc" data-i18n="platforms.tgDesc">Bot API — paste a bot token from BotFather. No public URL required: the bot can run on polling.</p>
+            <p class="landing-channel-card__desc" data-i18n="platforms.tgDesc">Connect with your BotFather token. Supports webhook or polling — no public URL required.</p>
             <div class="landing-channel-card__meta">
               <span class="badge badge--success" data-i18n="platforms.tgBadge">Free</span>
             </div>
           </div>
+
+          <div class="landing-channel-card">
+            <div class="landing-channel-card__icon landing-channel-card__icon--ig">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227a3.81 3.81 0 0 1-.9 1.382c-.42.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421a3.83 3.83 0 0 1-1.379-.9c-.421-.42-.687-.824-.9-1.38-.165-.42-.36-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.86.06-1.17.255-1.814.42-2.235.21-.57.479-.96.9-1.381.42-.419.819-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06zM12 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.88 1.44 1.44 0 0 0 0-2.88z"/></svg>
+            </div>
+            <div class="landing-channel-card__title">Instagram</div>
+            <p class="landing-channel-card__desc" data-i18n="platforms.igDesc">Connect your Instagram Business or Creator account. DMs arrive right in the team inbox.</p>
+            <div class="landing-channel-card__meta">
+              <span class="badge badge--success" data-i18n="platforms.igBadge">Free</span>
+            </div>
+          </div>
+
+          <div class="landing-channel-card">
+            <div class="landing-channel-card__icon landing-channel-card__icon--mg">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.301 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111C24 4.974 18.627 0 12 0zm1.191 14.963-3.055-3.26-5.963 3.26L10.732 8l3.131 3.259L19.752 8l-6.561 6.963z"/></svg>
+            </div>
+            <div class="landing-channel-card__title">Messenger</div>
+            <p class="landing-channel-card__desc" data-i18n="platforms.mgDesc">Link a Facebook Page — customer messages flow directly into the shared inbox.</p>
+            <div class="landing-channel-card__meta">
+              <span class="badge badge--success" data-i18n="platforms.mgBadge">Free</span>
+            </div>
+          </div>
         </div>
 
-        <p class="landing-footnote" data-i18n="platforms.footnote">WhatsApp connectivity is unofficial: Meta can ban the number at their discretion. Don't connect a number you can't afford to lose — start with a test one.</p>
+        <p class="landing-footnote" data-i18n="platforms.footnote">WhatsApp Web connectivity is unofficial: Meta can ban the number at their discretion. Don't connect a number you can't afford to lose — start with a test one.</p>
+      </div>
+    </section>
+
+    <!-- Product Showcase -->
+    <section id="showcase" class="landing-section">
+      <div class="blog-shell">
+        <div class="landing-section__head landing-section__head--center">
+          <span class="badge badge--category landing-section__eyebrow" data-i18n="showcase.eyebrow">SEE IT IN ACTION</span>
+          <h2 class="landing-section__title" data-i18n="showcase.title">One product, seven real screens</h2>
+          <p class="landing-section__description" data-i18n="showcase.description">Every panel below is a real screenshot from a live, running instance — not a mockup.</p>
+        </div>
+
+        <div class="landing-showcase">
+          <div class="landing-showcase__tabs" role="tablist" aria-label="Product showcase">
+            <button type="button" role="tab" aria-selected="true" class="landing-showcase__tab is-active" data-tab="inbox" onclick="setShowcaseTab('inbox')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+              <span data-i18n="showcase.inboxTab">Shared Team Inbox</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" class="landing-showcase__tab" data-tab="kb" onclick="setShowcaseTab('kb')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg>
+              <span data-i18n="showcase.kbTab">Grounded Knowledge Base</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" class="landing-showcase__tab" data-tab="draft" onclick="setShowcaseTab('draft')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>
+              <span data-i18n="showcase.draftTab">Staged Draft Review</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" class="landing-showcase__tab" data-tab="customers" onclick="setShowcaseTab('customers')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg>
+              <span data-i18n="showcase.customersTab">Customer CRM</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" class="landing-showcase__tab" data-tab="followups" onclick="setShowcaseTab('followups')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg>
+              <span data-i18n="showcase.followupsTab">Follow-up Board</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" class="landing-showcase__tab" data-tab="campaigns" onclick="setShowcaseTab('campaigns')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 6a13 13 0 0 0 8.4-2.8A1 1 0 0 1 21 4v12a1 1 0 0 1-1.6.8A13 13 0 0 0 11 14H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/><path d="M6 14a12 12 0 0 0 2.4 7.2 2 2 0 0 0 3.2-2.4A8 8 0 0 1 10 14"/><path d="M8 6v8"/></svg>
+              <span data-i18n="showcase.campaignsTab">Campaigns</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" class="landing-showcase__tab" data-tab="simulator" onclick="setShowcaseTab('simulator')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>
+              <span data-i18n="showcase.simulatorTab">Built-in Simulator</span>
+            </button>
+          </div>
+
+          <div class="landing-showcase__stage">
+            <div class="landing-showcase__frame">
+              <img id="showcase-img" src="./screenshots/inbox.png" alt="The xchats team inbox with an AI-drafted reply awaiting approval" data-i18n-alt="showcase.inboxAlt" />
+            </div>
+            <p id="showcase-desc" class="landing-showcase__desc" data-i18n="showcase.inboxDesc">Every channel in one inbox, with a grounded AI draft waiting beside each thread for a human to approve.</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1323,6 +1583,105 @@
       </div>
     </section>
 
+    <!-- Desktop App Section -->
+    <section id="desktop" class="landing-section">
+      <div class="blog-shell">
+        <div class="landing-section__head landing-section__head--center">
+          <span class="badge badge--category landing-section__eyebrow" data-i18n="desktop.eyebrow">DESKTOP APP</span>
+          <h2 class="landing-section__title" data-i18n="desktop.title">No Docker. No servers. Just download and run.</h2>
+          <p class="landing-section__description" data-i18n="desktop.description">
+            xchats ships as a standalone native desktop application for Windows, macOS, and Linux. The embedded SQLite database, Go backend, and Vue web interface are all packaged into a single executable.
+          </p>
+        </div>
+
+        <div class="landing-arch-grid">
+          <a href="https://github.com/yerassyldanay/xchats/releases/latest" target="_blank" rel="noreferrer" class="landing-link-card">
+            <div class="landing-link-card__icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></svg>
+            </div>
+            <div class="landing-link-card__title">
+              <span data-i18n="desktop.winTitle">Windows</span>
+              <code class="landing-desktop__exe">xchats.exe</code>
+            </div>
+            <p class="landing-link-card__desc" data-i18n="desktop.winDesc">Portable executable. Unzip and run. No installer, no Docker, no registry changes — data stored cleanly in AppData.</p>
+            <span class="landing-link-card__cta">
+              <span data-i18n="desktop.downloadCta">Download</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </span>
+          </a>
+
+          <a href="https://github.com/yerassyldanay/xchats/releases/latest" target="_blank" rel="noreferrer" class="landing-link-card">
+            <div class="landing-link-card__icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"/><path d="M20.054 15.987H3.946"/></svg>
+            </div>
+            <div class="landing-link-card__title">
+              <span data-i18n="desktop.macTitle">macOS</span>
+              <code class="landing-desktop__exe">xchats.app</code>
+            </div>
+            <p class="landing-link-card__desc" data-i18n="desktop.macDesc">Universal bundle, native on Apple Silicon (M1/M2/M3/M4) and Intel Macs. Drag to /Applications.</p>
+            <span class="landing-link-card__cta">
+              <span data-i18n="desktop.downloadCta">Download</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </span>
+          </a>
+
+          <a href="https://github.com/yerassyldanay/xchats/releases/latest" target="_blank" rel="noreferrer" class="landing-link-card">
+            <div class="landing-link-card__icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19h8"/><path d="m4 17 6-6-6-6"/></svg>
+            </div>
+            <div class="landing-link-card__title">
+              <span data-i18n="desktop.linuxTitle">Linux</span>
+              <code class="landing-desktop__exe">xchats</code>
+            </div>
+            <p class="landing-link-card__desc" data-i18n="desktop.linuxDesc">Single self-contained ELF binary. Runs natively on Ubuntu 24.04+, Debian 13+, and Fedora 39+.</p>
+            <span class="landing-link-card__cta">
+              <span data-i18n="desktop.downloadCta">Download</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </span>
+          </a>
+        </div>
+
+        <p class="landing-footnote">
+          <span data-i18n="desktop.footnotePrefix">Looking for server deployment? You can also run xchats on a remote VPS or home lab via</span> <code>docker compose up</code> <span data-i18n="desktop.footnoteSuffix">or pre-built container images.</span>
+        </p>
+      </div>
+    </section>
+
+    <!-- Architecture Section -->
+    <section id="architecture" class="landing-section landing-section--muted">
+      <div class="blog-shell">
+        <div class="landing-section__head landing-section__head--center">
+          <span class="badge badge--category landing-section__eyebrow" data-i18n="architecture.eyebrow">UNDER THE HOOD</span>
+          <h2 class="landing-section__title" data-i18n="architecture.title">Built to stay simple, fast and yours</h2>
+          <p class="landing-section__description" data-i18n="architecture.description">No hosted dependencies, no subscription walls, no proprietary lock-in — built from day one for operators who run their own tools.</p>
+        </div>
+
+        <div class="landing-arch-grid">
+          <div class="landing-channel-card">
+            <div class="landing-channel-card__icon landing-channel-card__icon--arch">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20v2"/><path d="M12 2v2"/><path d="M17 20v2"/><path d="M17 2v2"/><path d="M2 12h2"/><path d="M2 17h2"/><path d="M2 7h2"/><path d="M20 12h2"/><path d="M20 17h2"/><path d="M20 7h2"/><path d="M7 20v2"/><path d="M7 2v2"/><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>
+            </div>
+            <div class="landing-channel-card__title" data-i18n="architecture.binaryTitle">One binary, embedded SQLite</div>
+            <p class="landing-channel-card__desc" data-i18n="architecture.binaryDesc">Written in Go with an embedded database (modernc.org/sqlite). No Postgres, Redis, or broker required — back it up by copying one file.</p>
+          </div>
+          <div class="landing-channel-card">
+            <div class="landing-channel-card__icon landing-channel-card__icon--arch">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div class="landing-channel-card__title" data-i18n="architecture.privacyTitle">Local-first privacy</div>
+            <p class="landing-channel-card__desc" data-i18n="architecture.privacyDesc">Your conversations, message history, contacts and knowledge base live exclusively on your machine or server. Zero external telemetry.</p>
+          </div>
+          <div class="landing-channel-card">
+            <div class="landing-channel-card__icon landing-channel-card__icon--arch">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10.586 5.414-5.172 5.172"/><path d="m18.586 13.414-5.172 5.172"/><path d="M6 12h12"/><circle cx="12" cy="20" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="20" cy="12" r="2"/><circle cx="4" cy="12" r="2"/></svg>
+            </div>
+            <div class="landing-channel-card__title" data-i18n="architecture.modelTitle">Model &amp; platform agnostic</div>
+            <p class="landing-channel-card__desc" data-i18n="architecture.modelDesc">Swap between OpenAI, Claude, Gemini, OpenRouter, or a local self-hosted Ollama model directly from Settings.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- How It Works Strip -->
     <section id="how-it-works" class="landing-section">
       <div class="blog-shell">
@@ -1332,23 +1691,23 @@
         <div class="landing-steps">
           <div class="landing-step">
             <div class="landing-step__num">1</div>
-            <div class="landing-step__title" data-i18n="how.step1Title">Connect the channels</div>
-            <div class="landing-step__desc" data-i18n="how.step1Desc">WhatsApp by QR code, Telegram by bot token.</div>
+            <div class="landing-step__title" data-i18n="how.step1Title">Get the app</div>
+            <div class="landing-step__desc" data-i18n="how.step1Desc">Download the desktop executable for Windows, macOS or Linux — or launch with Docker on a server.</div>
           </div>
           <div class="landing-step">
             <div class="landing-step__num">2</div>
-            <div class="landing-step__title" data-i18n="how.step2Title">Fill in the knowledge base</div>
-            <div class="landing-step__desc" data-i18n="how.step2Desc">By hand, or through ChatGPT/Claude over MCP.</div>
+            <div class="landing-step__title" data-i18n="how.step2Title">Connect channels</div>
+            <div class="landing-step__desc" data-i18n="how.step2Desc">Scan a QR code for WhatsApp, add a Telegram bot token, or link Instagram and Messenger.</div>
           </div>
           <div class="landing-step">
             <div class="landing-step__num">3</div>
-            <div class="landing-step__title" data-i18n="how.step3Title">Review the draft</div>
-            <div class="landing-step__desc" data-i18n="how.step3Desc">Every change waits for a human to confirm it.</div>
+            <div class="landing-step__title" data-i18n="how.step3Title">Fill the knowledge base</div>
+            <div class="landing-step__desc" data-i18n="how.step3Desc">Add products and policies by hand, or let ChatGPT/Claude stage them over MCP.</div>
           </div>
           <div class="landing-step">
             <div class="landing-step__num">4</div>
             <div class="landing-step__title" data-i18n="how.step4Title">Get exact answers</div>
-            <div class="landing-step__desc" data-i18n="how.step4Desc">The assistant replies only with verified facts.</div>
+            <div class="landing-step__desc" data-i18n="how.step4Desc">The assistant drafts accurate, grounded replies for a human to approve.</div>
           </div>
         </div>
       </div>
@@ -1382,11 +1741,15 @@
       <div class="blog-shell">
         <div class="landing-cta-panel">
           <h2 class="landing-cta-panel__title" data-i18n="cta.title">Ready to try it?</h2>
-          <p class="landing-cta-panel__desc" data-i18n="cta.description">Deploy xchats in a few minutes and connect your first channel today.</p>
+          <p class="landing-cta-panel__desc" data-i18n="cta.description">Download the standalone executable for your OS, or launch the Docker container today.</p>
           <div class="landing-cta-panel__ctas">
-            <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer" class="landing-hero__cta">
+            <a href="https://github.com/yerassyldanay/xchats/releases/latest" target="_blank" rel="noreferrer" class="landing-hero__cta">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>
+              <span data-i18n="cta.ctaPrimary">Download for Desktop</span>
+            </a>
+            <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer" class="landing-hero__cta landing-hero__cta--ghost">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
-              GitHub
+              <span data-i18n="cta.ctaSecondary">View on GitHub</span>
             </a>
           </div>
         </div>
@@ -1403,7 +1766,7 @@
           <span>xchats</span>
         </a>
         <p class="site-footer__description" data-i18n="footer.description">
-          A free, open-source AI assistant for WhatsApp and Telegram with hallucination-free templated replies, configurable from ChatGPT and Claude.
+          A free, open-source AI assistant for WhatsApp, Telegram, Instagram and Messenger, with hallucination-free templated replies — as a native desktop app or self-hosted with Docker.
         </p>
         <p class="site-footer__copyright">© 2026 xchats. AGPL-3.0 License.</p>
       </div>
@@ -1411,11 +1774,11 @@
       <nav aria-label="Product">
         <h2 class="site-footer__heading" data-i18n="footer.productHeading">Product</h2>
         <ul class="site-footer__links">
-          <li><a href="#platforms" data-i18n="nav.platforms">Platforms</a></li>
-          <li><a href="#team" data-i18n="nav.team">Team</a></li>
-          <li><a href="#templates" data-i18n="nav.templates">Templates</a></li>
-          <li><a href="#mcp" data-i18n="nav.mcp">MCP</a></li>
-          <li><a href="#how-it-works" data-i18n="nav.howItWorks">How it works</a></li>
+          <li><a href="#platforms" data-i18n="nav.features">Features</a></li>
+          <li><a href="#showcase" data-i18n="nav.tour">Tour</a></li>
+          <li><a href="#desktop" data-i18n="nav.desktop">Desktop</a></li>
+          <li><a href="#architecture" data-i18n="nav.architecture">Architecture</a></li>
+          <li><a href="https://github.com/yerassyldanay/xchats/tree/master/docs" target="_blank" rel="noreferrer" data-i18n="nav.docs">Docs</a></li>
         </ul>
       </nav>
 
@@ -1458,28 +1821,64 @@
   <script>
     const translations = {
       en: {
-        "nav.platforms": "Platforms",
-        "nav.team": "Team",
-        "nav.templates": "Templates",
-        "nav.mcp": "MCP",
-        "nav.howItWorks": "How it works",
+        "nav.features": "Features",
+        "nav.tour": "Tour",
+        "nav.desktop": "Desktop",
+        "nav.architecture": "Architecture",
+        "nav.docs": "Docs",
         "hero.eyebrow": "OPEN SOURCE · FREE",
         "hero.titlePrefix": "The AI assistant that",
         "hero.titleHighlight": "never makes things up",
         "hero.titleSuffix": "",
-        "hero.subtitle": "xchats is a free, open-source AI assistant for WhatsApp and Telegram. It answers only with verified facts through value-injected templates, and you configure it right from a ChatGPT or Claude chat over MCP.",
-        "hero.trust1": "Open source (AGPL-3.0)",
-        "hero.trust2": "Runs on your own servers",
-        "hero.trust3": "Configurable from ChatGPT and Claude",
-        "hero.screenshotAlt": "xchats interface",
-        "platforms.eyebrow": "PLATFORMS",
-        "platforms.title": "Multiple social platforms — one inbox",
-        "platforms.description": "The architecture supports any number of channels. Two are wired up today — both free, both set up in a couple of minutes.",
-        "platforms.waDesc": "A linked device — scan a QR code, just like WhatsApp Web. No Business API, no per-conversation fees.",
+        "hero.subtitle": "WhatsApp, Telegram, Instagram and Messenger in one shared inbox. The assistant drafts every reply from your own knowledge base — a human always approves before it sends.",
+        "hero.downloadsWindows": "Windows (.exe)",
+        "hero.downloadsMac": "macOS (.app)",
+        "hero.downloadsLinux": "Linux (Ubuntu)",
+        "hero.downloadsLabel": "Single executable · No Docker or database setup required",
+        "hero.ctaPrimary": "Download Executable",
+        "hero.ctaSecondary": "Star on GitHub",
+        "hero.serverHintPrefix": "Optional server quickstart:",
+        "hero.serverHintSuffix": "(Docker Compose)",
+        "hero.trust1": "Zero setup — double-click and run",
+        "hero.trust2": "No Docker or external database required",
+        "hero.trust3": "100% local-first privacy on your machine",
+        "hero.screenshotAlt": "A four-panel overview of xchats: the shared team inbox, MCP-configured knowledge base, CRM follow-ups, and the anti-hallucination grounding pipeline",
+        "platforms.eyebrow": "CHANNELS",
+        "platforms.title": "Four platforms — one inbox",
+        "platforms.description": "Connect all your customer messaging channels into one unified workspace. All free, all set up in minutes.",
+        "platforms.waDesc": "Linked device via QR code (no per-conversation Meta fees) or the official WhatsApp Cloud API.",
         "platforms.waBadge": "Free",
-        "platforms.tgDesc": "Bot API — paste a bot token from BotFather. No public URL required: the bot can run on polling.",
+        "platforms.tgDesc": "Connect with your BotFather token. Supports webhook or polling — no public URL required.",
         "platforms.tgBadge": "Free",
-        "platforms.footnote": "WhatsApp connectivity is unofficial: Meta can ban the number at their discretion. Don't connect a number you can't afford to lose — start with a test one.",
+        "platforms.igDesc": "Connect your Instagram Business or Creator account. DMs arrive right in the team inbox.",
+        "platforms.igBadge": "Free",
+        "platforms.mgDesc": "Link a Facebook Page — customer messages flow directly into the shared inbox.",
+        "platforms.mgBadge": "Free",
+        "platforms.footnote": "WhatsApp Web connectivity is unofficial: Meta can ban the number at their discretion. Don't connect a number you can't afford to lose — start with a test one.",
+        "showcase.eyebrow": "SEE IT IN ACTION",
+        "showcase.title": "One product, seven real screens",
+        "showcase.description": "Every panel below is a real screenshot from a live, running instance — not a mockup.",
+        "showcase.inboxTab": "Shared Team Inbox",
+        "showcase.inboxDesc": "Every channel in one inbox, with a grounded AI draft waiting beside each thread for a human to approve.",
+        "showcase.inboxAlt": "The xchats team inbox with an AI-drafted reply awaiting approval",
+        "showcase.kbTab": "Grounded Knowledge Base",
+        "showcase.kbDesc": "Products, prices, delivery zones and policies — the exact facts the assistant is allowed to answer from, nothing more.",
+        "showcase.kbAlt": "The Knowledge Base catalog with real product photos and prices",
+        "showcase.draftTab": "Staged Draft Review",
+        "showcase.draftDesc": "Every knowledge-base edit lands here first, as a full before/after diff, before it can reach a live conversation.",
+        "showcase.draftAlt": "The Draft page showing a pending product price change as a diff",
+        "showcase.customersTab": "Customer CRM",
+        "showcase.customersDesc": "A lightweight profile for every contact — status, tags, notes and every channel identity in one place.",
+        "showcase.customersAlt": "A customer profile card showing contact status, tags, notes and channel identities",
+        "showcase.followupsTab": "Follow-up Board",
+        "showcase.followupsDesc": "Every promised next step becomes a task, automatically grouped into Overdue, Today, Tomorrow and Later.",
+        "showcase.followupsAlt": "The Follow-ups board grouped by Overdue, Today, Tomorrow and Later",
+        "showcase.campaignsTab": "Campaigns",
+        "showcase.campaignsDesc": "Bulk outbound broadcasts with rate limiting, send windows, live delivery tracking and automatic inbox sync for replies.",
+        "showcase.campaignsAlt": "A campaign's live delivery progress with rate limits and reply sync back into the inbox",
+        "showcase.simulatorTab": "Built-in Simulator",
+        "showcase.simulatorDesc": "Test real customer questions against the live knowledge base or a staged draft — without a test phone number.",
+        "showcase.simulatorAlt": "The Simulator testing the assistant against the knowledge base with no live channel attached",
         "team.eyebrow": "TEAM",
         "team.title": "Work together, with roles",
         "team.description": "Admins and members share one inbox. A conversation can be assigned to yourself or a teammate — nothing falls through the cracks.",
@@ -1510,50 +1909,109 @@
         "mcp.resultTitle": "Draft updated",
         "mcp.resultBody": "The changes landed in the Draft for review — nothing publishes without human confirmation.",
         "mcp.note": "xchats never fetches files or websites itself — ChatGPT or Claude reads them and stores the facts through 13 MCP tools.",
+        "desktop.eyebrow": "DESKTOP APP",
+        "desktop.title": "No Docker. No servers. Just download and run.",
+        "desktop.description": "xchats ships as a standalone native desktop application for Windows, macOS, and Linux. The embedded SQLite database, Go backend, and Vue web interface are all packaged into a single executable.",
+        "desktop.winTitle": "Windows",
+        "desktop.winDesc": "Portable executable. Unzip and run. No installer, no Docker, no registry changes — data stored cleanly in AppData.",
+        "desktop.macTitle": "macOS",
+        "desktop.macDesc": "Universal bundle, native on Apple Silicon (M1/M2/M3/M4) and Intel Macs. Drag to /Applications.",
+        "desktop.linuxTitle": "Linux",
+        "desktop.linuxDesc": "Single self-contained ELF binary. Runs natively on Ubuntu 24.04+, Debian 13+, and Fedora 39+.",
+        "desktop.downloadCta": "Download",
+        "desktop.footnotePrefix": "Looking for server deployment? You can also run xchats on a remote VPS or home lab via",
+        "desktop.footnoteSuffix": "or pre-built container images.",
+        "architecture.eyebrow": "UNDER THE HOOD",
+        "architecture.title": "Built to stay simple, fast and yours",
+        "architecture.description": "No hosted dependencies, no subscription walls, no proprietary lock-in — built from day one for operators who run their own tools.",
+        "architecture.binaryTitle": "One binary, embedded SQLite",
+        "architecture.binaryDesc": "Written in Go with an embedded database (modernc.org/sqlite). No Postgres, Redis, or broker required — back it up by copying one file.",
+        "architecture.privacyTitle": "Local-first privacy",
+        "architecture.privacyDesc": "Your conversations, message history, contacts and knowledge base live exclusively on your machine or server. Zero external telemetry.",
+        "architecture.modelTitle": "Model & platform agnostic",
+        "architecture.modelDesc": "Swap between OpenAI, Claude, Gemini, OpenRouter, or a local self-hosted Ollama model directly from Settings.",
         "how.title": "How it works",
-        "how.step1Title": "Connect the channels",
-        "how.step1Desc": "WhatsApp by QR code, Telegram by bot token.",
-        "how.step2Title": "Fill in the knowledge base",
-        "how.step2Desc": "By hand, or through ChatGPT/Claude over MCP.",
-        "how.step3Title": "Review the draft",
-        "how.step3Desc": "Every change waits for a human to confirm it.",
+        "how.step1Title": "Get the app",
+        "how.step1Desc": "Download the desktop executable for Windows, macOS or Linux — or launch with Docker on a server.",
+        "how.step2Title": "Connect channels",
+        "how.step2Desc": "Scan a QR code for WhatsApp, add a Telegram bot token, or link Instagram and Messenger.",
+        "how.step3Title": "Fill the knowledge base",
+        "how.step3Desc": "Add products and policies by hand, or let ChatGPT/Claude stage them over MCP.",
         "how.step4Title": "Get exact answers",
-        "how.step4Desc": "The assistant replies only with verified facts.",
+        "how.step4Desc": "The assistant drafts accurate, grounded replies for a human to approve.",
         "links.eyebrow": "LEARN MORE",
         "links.title": "Engineering and answer quality",
         "links.evalsTitle": "Open evals",
         "links.evalsDesc": "Automated response-quality checks — scenarios, expectations, and rules, all in the open.",
         "links.evalsCta": "View on GitHub",
         "cta.title": "Ready to try it?",
-        "cta.description": "Deploy xchats in a few minutes and connect your first channel today.",
-        "footer.description": "A free, open-source AI assistant for WhatsApp and Telegram with hallucination-free templated replies, configurable from ChatGPT and Claude.",
+        "cta.description": "Download the standalone executable for your OS, or launch the Docker container today.",
+        "cta.ctaPrimary": "Download for Desktop",
+        "cta.ctaSecondary": "View on GitHub",
+        "footer.description": "A free, open-source AI assistant for WhatsApp, Telegram, Instagram and Messenger, with hallucination-free templated replies — as a native desktop app or self-hosted with Docker.",
         "footer.productHeading": "Product",
         "footer.communityHeading": "Community",
         "footer.contactsHeading": "Contact us"
       },
       ru: {
-        "nav.platforms": "Платформы",
-        "nav.team": "Команда",
-        "nav.templates": "Шаблоны",
-        "nav.mcp": "MCP",
-        "nav.howItWorks": "Как это работает",
+        "nav.features": "Возможности",
+        "nav.tour": "Тур",
+        "nav.desktop": "Десктоп",
+        "nav.architecture": "Архитектура",
+        "nav.docs": "Документация",
         "hero.eyebrow": "OPEN SOURCE · БЕСПЛАТНО",
         "hero.titlePrefix": "AI-ассистент, который",
         "hero.titleHighlight": "никогда не выдумывает",
         "hero.titleSuffix": "",
-        "hero.subtitle": "xchats — бесплатный open-source AI-ассистент для WhatsApp и Telegram. Отвечает только проверенными фактами благодаря шаблонам с подстановкой значений, а настраивается прямо из чата в ChatGPT или Claude через MCP.",
-        "hero.trust1": "Открытый исходный код (AGPL-3.0)",
-        "hero.trust2": "Работает на ваших серверах",
-        "hero.trust3": "Настройка через ChatGPT и Claude",
-        "hero.screenshotAlt": "Интерфейс xchats",
-        "platforms.eyebrow": "ПЛАТФОРМЫ",
-        "platforms.title": "Несколько соцсетей — один инбокс",
-        "platforms.description": "Архитектура рассчитана на любое количество каналов. Сегодня подключены два — оба бесплатные и настраиваются за пару минут.",
-        "platforms.waDesc": "Связанное устройство — сканируете QR-код, как в WhatsApp Web. Без Business API и платы за диалоги.",
+        "hero.subtitle": "WhatsApp, Telegram, Instagram и Messenger — в одном общем инбоксе. Ассистент готовит каждый ответ по вашей базе знаний, а отправляет его всегда человек.",
+        "hero.downloadsWindows": "Windows (.exe)",
+        "hero.downloadsMac": "macOS (.app)",
+        "hero.downloadsLinux": "Linux (Ubuntu)",
+        "hero.downloadsLabel": "Один исполняемый файл · Docker и база данных не нужны",
+        "hero.ctaPrimary": "Скачать приложение",
+        "hero.ctaSecondary": "Звезда на GitHub",
+        "hero.serverHintPrefix": "Опциональный быстрый старт для сервера:",
+        "hero.serverHintSuffix": "(Docker Compose)",
+        "hero.trust1": "Без настройки — запускается по двойному клику",
+        "hero.trust2": "Docker и внешняя база данных не нужны",
+        "hero.trust3": "100% приватность: всё локально, на вашем устройстве",
+        "hero.screenshotAlt": "Обзор xchats из четырёх панелей: общий инбокс команды, база знаний через MCP, задачи CRM и конвейер защиты от галлюцинаций",
+        "platforms.eyebrow": "КАНАЛЫ",
+        "platforms.title": "Четыре платформы — один инбокс",
+        "platforms.description": "Объедините все каналы обращений клиентов в одном рабочем пространстве. Все бесплатные, все настраиваются за минуты.",
+        "platforms.waDesc": "Связанное устройство по QR-коду (без платы Meta за диалог) или официальный WhatsApp Cloud API.",
         "platforms.waBadge": "Бесплатно",
-        "platforms.tgDesc": "Bot API — вставляете токен бота, полученный в BotFather. Публичный адрес не обязателен: бот может работать через polling.",
+        "platforms.tgDesc": "Подключается по токену бота из BotFather. Поддерживает webhook и polling — публичный адрес не обязателен.",
         "platforms.tgBadge": "Бесплатно",
-        "platforms.footnote": "WhatsApp-подключение неофициальное: Meta может заблокировать номер по своему усмотрению. Не подключайте номер, которым дорожите — начните с тестового.",
+        "platforms.igDesc": "Подключите аккаунт Instagram Business или Creator — сообщения в Direct попадают прямо в общий инбокс.",
+        "platforms.igBadge": "Бесплатно",
+        "platforms.mgDesc": "Привяжите страницу Facebook — сообщения клиентов сразу попадают в общий инбокс.",
+        "platforms.mgBadge": "Бесплатно",
+        "platforms.footnote": "WhatsApp Web-подключение неофициальное: Meta может заблокировать номер по своему усмотрению. Не подключайте номер, которым дорожите — начните с тестового.",
+        "showcase.eyebrow": "ПОСМОТРИТЕ В ДЕЙСТВИИ",
+        "showcase.title": "Один продукт — семь настоящих экранов",
+        "showcase.description": "Каждая панель ниже — реальный скриншот с работающего инстанса, а не макет.",
+        "showcase.inboxTab": "Общий инбокс команды",
+        "showcase.inboxDesc": "Все каналы в одном инбоксе, а рядом с каждым диалогом — черновик ответа ассистента, готовый к одобрению.",
+        "showcase.inboxAlt": "Инбокс xchats с черновиком ответа от ИИ, ожидающим одобрения",
+        "showcase.kbTab": "База знаний с проверкой фактов",
+        "showcase.kbDesc": "Товары, цены, зоны доставки и политики — те самые факты, которыми ассистенту разрешено отвечать, и ничего больше.",
+        "showcase.kbAlt": "Каталог базы знаний с настоящими фото товаров и ценами",
+        "showcase.draftTab": "Черновик изменений на проверке",
+        "showcase.draftDesc": "Любое изменение базы знаний сначала попадает сюда как полный diff «было/стало», прежде чем попасть в реальный диалог.",
+        "showcase.draftAlt": "Страница «Черновик» с изменением цены товара в виде диффа",
+        "showcase.customersTab": "CRM клиентов",
+        "showcase.customersDesc": "Лёгкий профиль для каждого контакта — статус, теги, заметки и все привязанные каналы в одном месте.",
+        "showcase.customersAlt": "Карточка клиента со статусом, тегами, заметками и привязанными каналами",
+        "showcase.followupsTab": "Доска задач",
+        "showcase.followupsDesc": "Каждый обещанный следующий шаг становится задачей и автоматически группируется: просрочено, сегодня, завтра, позже.",
+        "showcase.followupsAlt": "Доска задач, сгруппированных на просроченные, сегодняшние, завтрашние и более поздние",
+        "showcase.campaignsTab": "Кампании",
+        "showcase.campaignsDesc": "Массовые рассылки с ограничением скорости, окнами отправки, отслеживанием доставки в реальном времени и автоматической синхронизацией ответов с инбоксом.",
+        "showcase.campaignsAlt": "Отслеживание доставки кампании в реальном времени с ограничением скорости и синхронизацией ответов",
+        "showcase.simulatorTab": "Встроенный симулятор",
+        "showcase.simulatorDesc": "Проверяйте реальные вопросы клиентов на живой базе знаний или черновике — без тестового номера телефона.",
+        "showcase.simulatorAlt": "Симулятор, тестирующий ассистента по базе знаний без подключения реального канала",
         "team.eyebrow": "КОМАНДА",
         "team.title": "Совместная работа с ролями",
         "team.description": "Администраторы и участники видят один инбокс. Диалог можно назначить себе или коллеге — ничего не потеряется.",
@@ -1584,50 +2042,109 @@
         "mcp.resultTitle": "Черновик обновлён",
         "mcp.resultBody": "Изменения попали в Черновик на проверку — ничего не публикуется без подтверждения человека.",
         "mcp.note": "xchats не скачивает файлы и сайты сам — их читает сама модель ChatGPT или Claude и сохраняет факты через 13 MCP-инструментов.",
+        "desktop.eyebrow": "ДЕСКТОП-ПРИЛОЖЕНИЕ",
+        "desktop.title": "Без Docker. Без серверов. Просто скачайте и запустите.",
+        "desktop.description": "xchats поставляется как отдельное нативное десктоп-приложение для Windows, macOS и Linux. Встроенная база SQLite, backend на Go и веб-интерфейс на Vue — всё упаковано в один исполняемый файл.",
+        "desktop.winTitle": "Windows",
+        "desktop.winDesc": "Портативный исполняемый файл. Распакуйте и запустите. Без установщика, без Docker, без изменений в реестре — данные аккуратно хранятся в AppData.",
+        "desktop.macTitle": "macOS",
+        "desktop.macDesc": "Универсальная сборка, нативно работает и на Apple Silicon (M1/M2/M3/M4), и на Intel Mac. Перетащите в /Applications.",
+        "desktop.linuxTitle": "Linux",
+        "desktop.linuxDesc": "Один самодостаточный ELF-бинарник. Нативно работает на Ubuntu 24.04+, Debian 13+ и Fedora 39+.",
+        "desktop.downloadCta": "Скачать",
+        "desktop.footnotePrefix": "Разворачиваете на сервере? xchats можно запустить и на VPS или домашнем сервере через",
+        "desktop.footnoteSuffix": "или готовые образы контейнеров.",
+        "architecture.eyebrow": "ПОД КАПОТОМ",
+        "architecture.title": "Просто, быстро и полностью ваше",
+        "architecture.description": "Никаких облачных зависимостей, подписок и проприетарной привязки — с первого дня сделано для тех, кто сам управляет своими инструментами.",
+        "architecture.binaryTitle": "Один бинарник, встроенный SQLite",
+        "architecture.binaryDesc": "Написан на Go со встроенной базой данных (modernc.org/sqlite). Не нужен ни Postgres, ни Redis, ни брокер очередей — бэкап — это копия одного файла.",
+        "architecture.privacyTitle": "Приватность прежде всего",
+        "architecture.privacyDesc": "Диалоги, история сообщений, контакты и база знаний хранятся исключительно на вашем компьютере или сервере. Никакой внешней телеметрии.",
+        "architecture.modelTitle": "Любая модель и платформа",
+        "architecture.modelDesc": "Переключайтесь между OpenAI, Claude, Gemini, OpenRouter или локальной моделью через Ollama прямо в Настройках.",
         "how.title": "Как это работает",
-        "how.step1Title": "Подключите каналы",
-        "how.step1Desc": "WhatsApp по QR-коду, Telegram по токену бота.",
-        "how.step2Title": "Заполните базу знаний",
-        "how.step2Desc": "Вручную или через ChatGPT/Claude по MCP.",
-        "how.step3Title": "Проверьте черновик",
-        "how.step3Desc": "Каждое изменение ждёт подтверждения человека.",
+        "how.step1Title": "Получите приложение",
+        "how.step1Desc": "Скачайте десктоп-версию для Windows, macOS или Linux — либо разверните на сервере через Docker.",
+        "how.step2Title": "Подключите каналы",
+        "how.step2Desc": "Отсканируйте QR-код для WhatsApp, добавьте токен бота Telegram или привяжите Instagram и Messenger.",
+        "how.step3Title": "Заполните базу знаний",
+        "how.step3Desc": "Добавьте товары и политики вручную — или доверьте это ChatGPT/Claude через MCP.",
         "how.step4Title": "Получайте точные ответы",
-        "how.step4Desc": "Ассистент отвечает только проверенными фактами.",
+        "how.step4Desc": "Ассистент готовит точные, проверенные ответы, а подтверждает их человек.",
         "links.eyebrow": "УЗНАТЬ БОЛЬШЕ",
         "links.title": "Инженерия и качество ответов",
         "links.evalsTitle": "Открытые эвалы",
         "links.evalsDesc": "Автоматизированные проверки качества ответов — сценарии, ожидания и правила в открытом доступе.",
         "links.evalsCta": "Смотреть на GitHub",
         "cta.title": "Готовы попробовать?",
-        "cta.description": "Разверните xchats за несколько минут и подключите первый канал уже сегодня.",
-        "footer.description": "Бесплатный open-source AI-ассистент для WhatsApp и Telegram с шаблонными ответами без выдумок и настройкой через ChatGPT и Claude.",
+        "cta.description": "Скачайте отдельный исполняемый файл для вашей ОС — или разверните Docker-контейнер уже сегодня.",
+        "cta.ctaPrimary": "Скачать для десктопа",
+        "cta.ctaSecondary": "Смотреть на GitHub",
+        "footer.description": "Бесплатный open-source AI-ассистент для WhatsApp, Telegram, Instagram и Messenger с шаблонными ответами без выдумок — как нативное десктоп-приложение или self-hosted через Docker.",
         "footer.productHeading": "Продукт",
         "footer.communityHeading": "Сообщество",
         "footer.contactsHeading": "Свяжитесь с нами"
       },
       kk: {
-        "nav.platforms": "Платформалар",
-        "nav.team": "Топ",
-        "nav.templates": "Үлгілер",
-        "nav.mcp": "MCP",
-        "nav.howItWorks": "Қалай жұмыс істейді",
+        "nav.features": "Мүмкіндіктер",
+        "nav.tour": "Тур",
+        "nav.desktop": "Десктоп",
+        "nav.architecture": "Архитектура",
+        "nav.docs": "Құжаттама",
         "hero.eyebrow": "АШЫҚ КОД · ТЕГІН",
         "hero.titlePrefix": "Ешқашан",
         "hero.titleHighlight": "ойдан шығармайтын",
         "hero.titleSuffix": "AI-көмекші",
-        "hero.subtitle": "xchats — WhatsApp пен Telegram-ға арналған тегін, ашық бастапқы кодты AI-көмекші. Ол тек тексерілген деректерге негізделген үлгілер арқылы жауап береді және ChatGPT немесе Claude чатынан MCP арқылы тікелей бапталады.",
-        "hero.trust1": "Ашық бастапқы код (AGPL-3.0)",
-        "hero.trust2": "Өз серверлеріңізде жұмыс істейді",
-        "hero.trust3": "ChatGPT пен Claude арқылы бапталады",
-        "hero.screenshotAlt": "xchats интерфейсі",
-        "platforms.eyebrow": "ПЛАТФОРМАЛАР",
-        "platforms.title": "Бірнеше әлеуметтік желі — бір инбокс",
-        "platforms.description": "Архитектура кез келген санда арнаны қолдайды. Бүгін екеуі қосылған — екеуі де тегін және бірнеше минутта бапталады.",
-        "platforms.waDesc": "Байланысқан құрылғы — WhatsApp Web-тегідей QR-кодты сканерлейсіз. Business API және диалог үшін төлем жоқ.",
+        "hero.subtitle": "WhatsApp, Telegram, Instagram және Messenger — бір ортақ inbox-та. Көмекші әр жауапты сіздің білім қорыңыз бойынша дайындайды, ал жібереді әрдайым адам.",
+        "hero.downloadsWindows": "Windows (.exe)",
+        "hero.downloadsMac": "macOS (.app)",
+        "hero.downloadsLinux": "Linux (Ubuntu)",
+        "hero.downloadsLabel": "Бір орындалатын файл · Docker пен дерекқор қажет емес",
+        "hero.ctaPrimary": "Қолданбаны жүктеу",
+        "hero.ctaSecondary": "GitHub-та жұлдызша",
+        "hero.serverHintPrefix": "Сервер үшін міндетті емес жылдам бастау:",
+        "hero.serverHintSuffix": "(Docker Compose)",
+        "hero.trust1": "Баптаусыз — қос басу арқылы іске қосылады",
+        "hero.trust2": "Docker пен сыртқы дерекқор қажет емес",
+        "hero.trust3": "100% жекелік — бәрі құрылғыңызда сақталады",
+        "hero.screenshotAlt": "xchats-тың төрт панельді шолуы: ортақ команда инбоксы, MCP арқылы бапталған білім қоры, CRM тапсырмалары және галлюцинацияға қарсы негіздеу конвейері",
+        "platforms.eyebrow": "АРНАЛАР",
+        "platforms.title": "Төрт платформа — бір инбокс",
+        "platforms.description": "Клиенттермен байланыстың барлық арнасын бір жұмыс кеңістігіне біріктіріңіз. Барлығы тегін, барлығы бірнеше минутта бапталады.",
+        "platforms.waDesc": "QR-код арқылы байланысқан құрылғы (Meta диалог үшін ақы алмайды) немесе ресми WhatsApp Cloud API.",
         "platforms.waBadge": "Тегін",
-        "platforms.tgDesc": "BotFather-дан алынған бот токенін енгізесіз. Жария адрес міндетті емес — бот polling арқылы жұмыс істей алады.",
+        "platforms.tgDesc": "BotFather-дан алынған бот токені арқылы қосылады. Webhook пен polling режимін қолдайды — жария адрес міндетті емес.",
         "platforms.tgBadge": "Тегін",
-        "platforms.footnote": "WhatsApp қосылымы бейресми: Meta нөмірді өз қалауы бойынша бұғаттай алады. Жоғалтқыңыз келмейтін нөмірді қоспаңыз — тест нөмірінен бастаңыз.",
+        "platforms.igDesc": "Instagram Business немесе Creator аккаунтыңызды қосыңыз — Direct хабарлары тікелей ортақ инбоксқа түседі.",
+        "platforms.igBadge": "Тегін",
+        "platforms.mgDesc": "Facebook парақшасын байланыстырыңыз — клиент хабарлары бірден ортақ инбоксқа түседі.",
+        "platforms.mgBadge": "Тегін",
+        "platforms.footnote": "WhatsApp Web қосылымы бейресми: Meta нөмірді өз қалауы бойынша бұғаттай алады. Жоғалтқыңыз келмейтін нөмірді қоспаңыз — тест нөмірінен бастаңыз.",
+        "showcase.eyebrow": "ІС ЖҮЗІНДЕ КӨРІҢІЗ",
+        "showcase.title": "Бір өнім — жеті нақты экран",
+        "showcase.description": "Төмендегі әр панель — жұмыс істеп тұрған инстанстың нақты скриншоты, макет емес.",
+        "showcase.inboxTab": "Ортақ команда инбоксы",
+        "showcase.inboxDesc": "Барлық арна бір инбокста, ал әр диалогтың қасында — адамның бекітуін күтіп тұрған көмекшінің жауап жобасы.",
+        "showcase.inboxAlt": "Бекітуді күтіп тұрған AI жауап жобасы бар xchats инбоксы",
+        "showcase.kbTab": "Тексерілген фактілі білім қоры",
+        "showcase.kbDesc": "Тауарлар, бағалар, жеткізу аймақтары және саясаттар — көмекшіге жауап беруге рұқсат етілген нақ сол фактілер, одан артық ешнәрсе жоқ.",
+        "showcase.kbAlt": "Нақты тауар суреттері мен бағалары бар білім қоры каталогы",
+        "showcase.draftTab": "Тексерудегі өзгерістер жобасы",
+        "showcase.draftDesc": "Білім қорына енгізілетін кез келген өзгеріс алдымен осында, толық «болды/болады» айырмашылығы түрінде түседі — нақты диалогқа жеткенге дейін.",
+        "showcase.draftAlt": "Тауар бағасының өзгеруін дифф түрінде көрсететін «Жоба» беті",
+        "showcase.customersTab": "Клиенттер CRM",
+        "showcase.customersDesc": "Әр контакт үшін жеңіл профиль — мәртебе, тегтер, ескертпелер және барлық арна сәйкестігі бір жерде.",
+        "showcase.customersAlt": "Мәртебесі, тегтері, ескертпелері және байланысқан арналары бар клиент профилі",
+        "showcase.followupsTab": "Тапсырмалар тақтасы",
+        "showcase.followupsDesc": "Уәде етілген әр келесі қадам тапсырмаға айналады және автоматты түрде топтастырылады: мерзімі өткен, бүгін, ертең, кейінірек.",
+        "showcase.followupsAlt": "Мерзімі өткен, бүгінгі, ертеңгі және кейінгі деп топтастырылған тапсырмалар тақтасы",
+        "showcase.campaignsTab": "Науқандар",
+        "showcase.campaignsDesc": "Жіберу жылдамдығы шектелген, жіберу терезелері бар, нақты уақытта жеткізуді бақылайтын және жауаптарды инбоксқа автоматты синхрондайтын жаппай таратылымдар.",
+        "showcase.campaignsAlt": "Жылдамдық шегі мен жауап синхрондауы бар науқанның нақты уақыттағы жеткізу барысы",
+        "showcase.simulatorTab": "Кіріктірілген симулятор",
+        "showcase.simulatorDesc": "Клиенттердің нақты сұрақтарын тірі білім қорына немесе жоба нұсқасына қарсы тексеріңіз — тест телефон нөмірінсіз.",
+        "showcase.simulatorAlt": "Нақты арна қосылмаған күйде көмекшіні білім қоры бойынша тексеретін симулятор",
         "team.eyebrow": "ТОП",
         "team.title": "Рөлдермен бірге жұмыс",
         "team.description": "Әкімшілер мен қатысушылар бір инбоксты көреді. Диалогты өзіңізге немесе әріптесіңізге тағайындауға болады — ештеңе жоғалмайды.",
@@ -1658,31 +2175,57 @@
         "mcp.resultTitle": "Жоба жаңартылды",
         "mcp.resultBody": "Өзгерістер тексеру үшін Жобаға түсті — адам растамайынша ештеңе жарияланбайды.",
         "mcp.note": "xchats файлдар мен сайттарды өзі жүктемейді — оларды ChatGPT немесе Claude моделі оқып, 13 MCP-құралы арқылы деректерді сақтайды.",
+        "desktop.eyebrow": "ДЕСКТОП ҚОЛДАНБА",
+        "desktop.title": "Docker жоқ. Сервер жоқ. Жүктеп алып, іске қосасыз.",
+        "desktop.description": "xchats Windows, macOS және Linux үшін дербес десктоп қолданба ретінде жеткізіледі. Ендірілген SQLite дерекқоры, Go backend және Vue веб-интерфейсі бір орындалатын файлға жиналған.",
+        "desktop.winTitle": "Windows",
+        "desktop.winDesc": "Портативті орындалатын файл. Мұрағаттан шығарып, іске қосыңыз. Орнатушысыз, Docker-сіз, тізілім өзгерместен — деректер AppData-да ретті сақталады.",
+        "desktop.macTitle": "macOS",
+        "desktop.macDesc": "Әмбебап құрастырылым — Apple Silicon (M1/M2/M3/M4) пен Intel Mac-те де нативті жұмыс істейді. /Applications қалтасына сүйреп апарыңыз.",
+        "desktop.linuxTitle": "Linux",
+        "desktop.linuxDesc": "Дербес бір ELF бинарнигі. Ubuntu 24.04+, Debian 13+ және Fedora 39+ жүйелерінде нативті жұмыс істейді.",
+        "desktop.downloadCta": "Жүктеп алу",
+        "desktop.footnotePrefix": "Серверге орнатқыңыз келе ме? xchats-ты VPS немесе үй серверінде де",
+        "desktop.footnoteSuffix": "немесе дайын контейнер бейнелері арқылы іске қосуға болады.",
+        "architecture.eyebrow": "ІШКІ ҚҰРЫЛЫМ",
+        "architecture.title": "Қарапайым, жылдам және толықтай сіздікі",
+        "architecture.description": "Бұлтты тәуелділік те, жазылым да, меншікті байлау да жоқ — өз құралдарын өзі басқаратындарға арнап жасалған.",
+        "architecture.binaryTitle": "Бір бинарник, ендірілген SQLite",
+        "architecture.binaryDesc": "Go тілінде, ендірілген дерекқормен (modernc.org/sqlite) жазылған. Postgres те, Redis те, брокер де қажет емес — сақтық көшірме — бір файлды көшіру ғана.",
+        "architecture.privacyTitle": "Жекелік бірінші орында",
+        "architecture.privacyDesc": "Диалогтар, хабарлар тарихы, контактілер және білім базасы тек сіздің құрылғыңызда немесе серверіңізде сақталады. Сыртқы телеметрия жоқ.",
+        "architecture.modelTitle": "Кез келген модель мен платформа",
+        "architecture.modelDesc": "OpenAI, Claude, Gemini, OpenRouter немесе Ollama арқылы жергілікті модель арасында тікелей Баптауларда ауысыңыз.",
         "how.title": "Бұл қалай жұмыс істейді",
-        "how.step1Title": "Арналарды қосыңыз",
-        "how.step1Desc": "WhatsApp — QR-код арқылы, Telegram — бот токені арқылы.",
-        "how.step2Title": "Білім базасын толтырыңыз",
-        "how.step2Desc": "Қолмен немесе ChatGPT/Claude арқылы MCP бойынша.",
-        "how.step3Title": "Жобаны тексеріңіз",
-        "how.step3Desc": "Әр өзгеріс адамның растауын күтеді.",
+        "how.step1Title": "Қолданбаны алыңыз",
+        "how.step1Desc": "Windows, macOS немесе Linux үшін десктоп нұсқасын жүктеп алыңыз — немесе серверде Docker арқылы іске қосыңыз.",
+        "how.step2Title": "Арналарды қосыңыз",
+        "how.step2Desc": "WhatsApp үшін QR-кодты сканерлеңіз, Telegram бот токенін қосыңыз немесе Instagram мен Messenger-ді байланыстырыңыз.",
+        "how.step3Title": "Білім базасын толтырыңыз",
+        "how.step3Desc": "Тауарлар мен саясаттарды қолмен қосыңыз — немесе ChatGPT/Claude-ға MCP арқылы тапсырыңыз.",
         "how.step4Title": "Дәл жауаптар алыңыз",
-        "how.step4Desc": "Көмекші тек тексерілген деректермен жауап береді.",
+        "how.step4Desc": "Көмекші дәл, негізделген жауап дайындайды, ал оны адам растайды.",
         "links.eyebrow": "КӨБІРЕК БІЛУ",
         "links.title": "Инженерия және жауап сапасы",
         "links.evalsTitle": "Ашық эвалдар",
         "links.evalsDesc": "Жауап сапасын автоматты тексеру — сценарийлер, күтулер және ережелер ашық түрде.",
         "links.evalsCta": "GitHub-та қарау",
         "cta.title": "Байқап көруге дайынсыз ба?",
-        "cta.description": "xchats-ты бірнеше минутта іске қосып, бүгін бірінші арнаны қосыңыз.",
-        "footer.description": "WhatsApp пен Telegram-ға арналған, ойдан шығармайтын үлгілі жауаптары бар және ChatGPT пен Claude арқылы бапталатын тегін, ашық бастапқы кодты AI-көмекші.",
+        "cta.description": "Өз ОЖ-ыңызға арналған орындалатын файлды жүктеп алыңыз — немесе бүгін Docker контейнерін іске қосыңыз.",
+        "cta.ctaPrimary": "Десктопқа жүктеп алу",
+        "cta.ctaSecondary": "GitHub-та қарау",
+        "footer.description": "WhatsApp, Telegram, Instagram және Messenger үшін тегін, ашық бастапқы кодты AI-көмекші — ойдан шығармайтын үлгілі жауаптармен, нативті десктоп қолданба немесе Docker арқылы self-hosted түрінде.",
         "footer.productHeading": "Өнім",
         "footer.communityHeading": "Қауымдастық",
         "footer.contactsHeading": "Бізбен байланысыңыз"
       }
     };
 
+    let currentLang = 'en';
+
     function setLanguage(lang) {
       if (!translations[lang]) return;
+      currentLang = lang;
       const dict = translations[lang];
 
       document.querySelectorAll('[data-i18n]').forEach(el => {
@@ -1707,6 +2250,47 @@
       document.documentElement.setAttribute('lang', lang);
       localStorage.setItem('xchats_visit_card_lang', lang);
       localStorage.setItem('locale', lang);
+
+      // The showcase's currently-open tab holds translated text that
+      // data-i18n never touches directly (see setShowcaseTab) — refresh it
+      // so a language switch doesn't leave it stuck in the old language.
+      setShowcaseTab(activeShowcaseTab);
+    }
+
+    // Product Showcase — seven real screenshots swapped in on tab click.
+    // Kept out of the plain data-i18n sweep above because the image path
+    // and the alt/description text all change together per tab.
+    const SHOWCASE_IMG = {
+      inbox: './screenshots/inbox.png',
+      kb: './screenshots/knowledge-base.png',
+      draft: './screenshots/draft-staging.png',
+      customers: './screenshots/customers.png',
+      followups: './screenshots/followups.png',
+      campaigns: './screenshots/campaigns.png',
+      simulator: './screenshots/simulator.png',
+    };
+    let activeShowcaseTab = 'inbox';
+
+    function setShowcaseTab(key) {
+      if (!SHOWCASE_IMG[key]) return;
+      activeShowcaseTab = key;
+
+      document.querySelectorAll('.landing-showcase__tab').forEach(btn => {
+        const isActive = btn.getAttribute('data-tab') === key;
+        btn.classList.toggle('is-active', isActive);
+        btn.setAttribute('aria-selected', String(isActive));
+      });
+
+      const dict = translations[currentLang] || translations.en;
+      const img = document.getElementById('showcase-img');
+      if (img) {
+        img.src = SHOWCASE_IMG[key];
+        img.alt = dict[`showcase.${key}Alt`] || '';
+      }
+      const desc = document.getElementById('showcase-desc');
+      if (desc) {
+        desc.textContent = dict[`showcase.${key}Desc`] || '';
+      }
     }
 
     function detectLanguage() {

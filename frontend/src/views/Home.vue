@@ -15,6 +15,7 @@ import ProductShowcase from '@/components/landing/ProductShowcase.vue'
 import TeamSection from '@/components/landing/TeamSection.vue'
 import TemplatesSection from '@/components/landing/TemplatesSection.vue'
 import McpSection from '@/components/landing/McpSection.vue'
+import DesktopSection from '@/components/landing/DesktopSection.vue'
 import ArchitectureSection from '@/components/landing/ArchitectureSection.vue'
 import HowItWorksStrip from '@/components/landing/HowItWorksStrip.vue'
 import LandingLinks from '@/components/landing/LandingLinks.vue'
@@ -32,6 +33,7 @@ import LandingFooter from '@/components/landing/LandingFooter.vue'
       <TeamSection />
       <TemplatesSection />
       <McpSection />
+      <DesktopSection />
       <ArchitectureSection />
       <HowItWorksStrip />
       <LandingLinks />

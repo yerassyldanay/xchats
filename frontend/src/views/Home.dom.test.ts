@@ -13,9 +13,9 @@ afterEach(() => {
 describe('Home (landing page)', () => {
   it('renders the positioning headline and CTAs in Russian by default', () => {
     const wrapper = mountKb(Home, { pinia: testPinia() })
-    expect(wrapper.text()).toContain('омниканальный инбокс с')
-    expect(wrapper.text()).toContain('AI без галлюцинаций')
-    expect(wrapper.text()).toContain('Начать бесплатно')
+    expect(wrapper.text()).toContain('AI-ассистент, который')
+    expect(wrapper.text()).toContain('никогда не выдумывает')
+    expect(wrapper.text()).toContain('Скачать приложение')
   })
 
   it('switching the language dropdown to English re-renders the hero in English', async () => {
@@ -24,9 +24,9 @@ describe('Home (landing page)', () => {
     expect(select.exists()).toBe(true)
     await select.setValue('en')
 
-    expect(wrapper.text()).toContain('The self-hosted omnichannel inbox with')
-    expect(wrapper.text()).toContain('zero-hallucination AI')
-    expect(wrapper.text()).toContain('Get started free')
+    expect(wrapper.text()).toContain('The AI assistant that')
+    expect(wrapper.text()).toContain('never makes things up')
+    expect(wrapper.text()).toContain('Download Executable')
   })
 
   it('switching to Қазақша renders the hero title with no missing space around the highlighted phrase', async () => {
@@ -35,10 +35,18 @@ describe('Home (landing page)', () => {
     await select.setValue('kk')
 
     const heading = wrapper.find('.landing-hero__title')
-    // Regression guard for the <template v-if> whitespace bug: the plain
-    // prefix and the highlighted phrase must not run together.
-    expect(heading.text()).toContain('AI-мен self-hosted')
-    expect(heading.text()).not.toContain('AI-менself-hosted')
+    // Regression guard for the <template v-if> whitespace bug: the
+    // highlighted phrase and the plain suffix must not run together.
+    expect(heading.text()).toContain('ойдан шығармайтын AI-көмекші')
+    expect(heading.text()).not.toContain('ойдан шығармайтынAI-көмекші')
+  })
+
+  it('lists all three native desktop executables', () => {
+    const wrapper = mountKb(Home, { pinia: testPinia() })
+    const section = wrapper.find('#desktop')
+    expect(section.exists()).toBe(true)
+    expect(wrapper.text()).toContain('xchats.exe')
+    expect(wrapper.text()).toContain('xchats.app')
   })
 
   it('footer states the real license (AGPL-3.0), not the old MIT text', () => {
@@ -62,6 +70,6 @@ describe('Home (landing page)', () => {
 
   it('the WhatsApp footnote carries the unofficial-connectivity warning', () => {
     const wrapper = mountKb(Home, { pinia: testPinia() })
-    expect(wrapper.text()).toContain('WhatsApp-подключение неофициальное')
+    expect(wrapper.text()).toContain('WhatsApp Web-подключение неофициальное')
   })
 })

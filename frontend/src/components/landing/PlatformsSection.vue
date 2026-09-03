@@ -1,16 +1,27 @@
 <script setup lang="ts">
-// Showcase 1: multiple social platforms, one inbox. Only WhatsApp and
-// Telegram are wired up today — both genuinely free (WhatsApp: linked
-// device via whatsmeow, no Business API; Telegram: Bot API, no public URL
-// required for polling mode) — see the footnote for the one honest caveat:
-// WhatsApp connectivity is unofficial (README.md's own warning).
+// Showcase 1: multiple social platforms, one inbox. All four channels the
+// app actually implements (see channelBrand.ts, the one source of truth for
+// icon/color per channel, shared with the authenticated app's ChatList and
+// CustomerPanel) — WhatsApp (whatsmeow linked-device + the official Cloud
+// API), Telegram Bot API, Instagram Direct and Facebook Messenger (both via
+// the Meta Graph API, see backend/internal/meta) — see the footnote for the
+// one honest caveat: WhatsApp Web connectivity is unofficial (README.md's
+// own warning).
 import { useI18n } from 'vue-i18n'
-import { MessageSquare } from 'lucide-vue-next'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 import TelegramIcon from '@/components/icons/TelegramIcon.vue'
+import InstagramIcon from '@/components/icons/InstagramIcon.vue'
+import MessengerIcon from '@/components/icons/MessengerIcon.vue'
 import SectionShell from './SectionShell.vue'
 
 const { t } = useI18n()
+
+const CHANNELS = [
+  { key: 'wa', icon: WhatsappIcon, iconClass: 'landing-channel-card__icon--wa' },
+  { key: 'tg', icon: TelegramIcon, iconClass: 'landing-channel-card__icon--tg' },
+  { key: 'ig', icon: InstagramIcon, iconClass: 'landing-channel-card__icon--ig' },
+  { key: 'mg', icon: MessengerIcon, iconClass: 'landing-channel-card__icon--mg' },
+] as const
 </script>
 
 <template>
@@ -21,27 +32,14 @@ const { t } = useI18n()
     :description="t('landing.platforms.description')"
   >
     <div class="landing-platforms">
-      <div class="landing-channel-card">
-        <div class="landing-channel-card__icon landing-channel-card__icon--wa"><WhatsappIcon /></div>
-        <div class="landing-channel-card__title">{{ t('landing.platforms.waTitle') }}</div>
-        <p class="landing-channel-card__desc">{{ t('landing.platforms.waDesc') }}</p>
-        <div class="landing-channel-card__meta">
-          <span class="badge badge--success">{{ t('landing.platforms.waBadge') }}</span>
+      <div v-for="channel in CHANNELS" :key="channel.key" class="landing-channel-card">
+        <div class="landing-channel-card__icon" :class="channel.iconClass">
+          <component :is="channel.icon" />
         </div>
-      </div>
-
-      <div class="landing-connector__line" aria-hidden="true" />
-      <div class="landing-connector__hub" role="img" :aria-label="t('landing.platforms.hubLabel')">
-        <MessageSquare aria-hidden="true" />
-      </div>
-      <div class="landing-connector__line" aria-hidden="true" />
-
-      <div class="landing-channel-card">
-        <div class="landing-channel-card__icon landing-channel-card__icon--tg"><TelegramIcon /></div>
-        <div class="landing-channel-card__title">{{ t('landing.platforms.tgTitle') }}</div>
-        <p class="landing-channel-card__desc">{{ t('landing.platforms.tgDesc') }}</p>
+        <div class="landing-channel-card__title">{{ t(`landing.platforms.${channel.key}Title`) }}</div>
+        <p class="landing-channel-card__desc">{{ t(`landing.platforms.${channel.key}Desc`) }}</p>
         <div class="landing-channel-card__meta">
-          <span class="badge badge--success">{{ t('landing.platforms.tgBadge') }}</span>
+          <span class="badge badge--success">{{ t(`landing.platforms.${channel.key}Badge`) }}</span>
         </div>
       </div>
     </div>

@@ -1,25 +1,17 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+// The public landing page's hero: leads with the native desktop executables
+// (Windows/macOS/Linux — see docs/release/installation.md's sibling
+// .github/workflows/desktop-build.yml, which builds and attaches exactly
+// these three archives to every GitHub Release) rather than the Docker
+// quickstart, since most visitors want to double-click and run, not stand
+// up a server first. The Docker path still exists — see the de-emphasized
+// server hint below the CTAs — for the operators who do want it.
 import { useI18n } from 'vue-i18n'
-import { Check, Copy, Github, Server, Sparkles } from 'lucide-vue-next'
+import { AppWindow, Check, Download, Laptop, Star, Terminal } from 'lucide-vue-next'
 
 const { t } = useI18n()
 
-const QUICKSTART = 'make up && make seed-demo'
-const copied = ref(false)
-let copiedTimer: ReturnType<typeof setTimeout> | undefined
-async function copyQuickstart() {
-  try {
-    await navigator.clipboard.writeText(QUICKSTART)
-    copied.value = true
-    clearTimeout(copiedTimer)
-    copiedTimer = setTimeout(() => (copied.value = false), 1800)
-  } catch {
-    // Clipboard API unavailable (insecure context, permission denied) — the
-    // command is still selectable/readable in the box, so this is a
-    // best-effort convenience, not the only way to get the text.
-  }
-}
+const RELEASES_URL = 'https://github.com/yerassyldanay/xchats/releases/latest'
 </script>
 
 <template>
@@ -31,32 +23,37 @@ async function copyQuickstart() {
       </h1>
       <p class="landing-hero__subtitle">{{ t('landing.hero.subtitle') }}</p>
 
-      <button type="button" class="landing-quickstart" @click="copyQuickstart">
-        <code class="landing-quickstart__cmd">$ {{ QUICKSTART }}</code>
-        <span class="landing-quickstart__copy">
-          <Check v-if="copied" class="w-4 h-4" aria-hidden="true" />
-          <Copy v-else class="w-4 h-4" aria-hidden="true" />
-          {{ copied ? t('common.copied') : t('common.copy') }}
-        </span>
-      </button>
-      <p class="landing-quickstart__hint">{{ t('landing.hero.quickstartHint') }}</p>
+      <div class="landing-hero__downloads">
+        <div class="landing-hero__downloads-row">
+          <span class="landing-hero__downloads-chip"><AppWindow class="w-4 h-4" aria-hidden="true" /> {{ t('landing.hero.downloadsWindows') }}</span>
+          <span class="landing-hero__downloads-chip"><Laptop class="w-4 h-4" aria-hidden="true" /> {{ t('landing.hero.downloadsMac') }}</span>
+          <span class="landing-hero__downloads-chip"><Terminal class="w-4 h-4" aria-hidden="true" /> {{ t('landing.hero.downloadsLinux') }}</span>
+        </div>
+        <p class="landing-hero__downloads-caption">{{ t('landing.hero.downloadsLabel') }}</p>
+      </div>
 
       <div class="landing-hero__ctas">
-        <RouterLink :to="{ name: 'login' }" class="landing-hero__cta">{{ t('landing.hero.ctaPrimary') }}</RouterLink>
+        <a :href="RELEASES_URL" target="_blank" rel="noreferrer" class="landing-hero__cta">
+          <Download class="w-4 h-4" aria-hidden="true" /> {{ t('landing.hero.ctaPrimary') }}
+        </a>
         <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer" class="landing-hero__cta landing-hero__cta--ghost">
-          <Github class="w-4 h-4" aria-hidden="true" /> {{ t('landing.hero.ctaSecondary') }}
+          <Star class="w-4 h-4" aria-hidden="true" /> {{ t('landing.hero.ctaSecondary') }}
         </a>
       </div>
 
+      <p class="landing-hero__server-hint">
+        {{ t('landing.hero.serverHintPrefix') }} <code>make up</code> {{ t('landing.hero.serverHintSuffix') }}
+      </p>
+
       <div class="landing-hero__trust">
-        <span class="landing-hero__trust-item"><Github aria-hidden="true" /> {{ t('landing.hero.trust1') }}</span>
-        <span class="landing-hero__trust-item"><Server aria-hidden="true" /> {{ t('landing.hero.trust2') }}</span>
-        <span class="landing-hero__trust-item"><Sparkles aria-hidden="true" /> {{ t('landing.hero.trust3') }}</span>
+        <span class="landing-hero__trust-item"><Check aria-hidden="true" /> {{ t('landing.hero.trust1') }}</span>
+        <span class="landing-hero__trust-item"><Check aria-hidden="true" /> {{ t('landing.hero.trust2') }}</span>
+        <span class="landing-hero__trust-item"><Check aria-hidden="true" /> {{ t('landing.hero.trust3') }}</span>
       </div>
     </div>
 
     <div class="landing-hero__panel">
-      <img src="/screenshots/inbox.png" :alt="t('landing.hero.screenshotAlt')" />
+      <img src="/screenshots/overview-bento.png" :alt="t('landing.hero.screenshotAlt')" />
     </div>
   </section>
 </template>

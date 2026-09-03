@@ -177,51 +177,57 @@
   }
 }
 
-/* Copy-paste quickstart box — deliberately a fixed dark terminal regardless
-   of the page's own light/dark mode (same convention as most "copy this
-   command" boxes), so it reads as a command prompt rather than a themed UI
-   element. */
-.landing-quickstart {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
+/* Desktop-downloads mini box: three OS chips plus a one-line caption, sitting
+   above the CTAs so "this ships as a native app" registers before anything
+   else — see LandingHero.vue's own comment for why desktop leads over the
+   Docker path here. */
+.landing-hero__downloads {
   width: 100%;
   max-width: 480px;
-  margin-bottom: 8px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid #262b35;
-  background: #0b0d12;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-  transition: border-color 160ms ease;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--blog-border);
+  background: var(--blog-card);
 }
-.landing-quickstart:hover {
-  border-color: var(--blog-accent);
+.landing-hero__downloads-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
-.landing-quickstart__cmd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 14px;
-  color: #e6e8ec;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.landing-quickstart__copy {
+.landing-hero__downloads-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
-  font-size: 12.5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--blog-accent-tint);
+  color: var(--blog-accent);
+  font-size: 13px;
   font-weight: 600;
-  color: #9aa3b2;
 }
-.landing-quickstart__hint {
+.landing-hero__downloads-chip svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+.landing-hero__downloads-caption {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--blog-muted);
+}
+.landing-hero__server-hint {
   font-size: 13px;
   color: var(--blog-muted);
   margin: 0 0 20px;
+}
+.landing-hero__server-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--blog-hero-panel);
+  border: 1px solid var(--blog-border);
 }
 @media (max-width: 900px) {
   .landing-hero {
@@ -327,12 +333,13 @@
 }
 
 /* ---------- showcase 1: platforms ---------- */
+/* A responsive 2x2 grid of the four channels the app actually implements
+   (see channelBrand.ts) — collapsing to one column on narrow screens. */
 .landing-platforms {
   display: grid;
-  grid-template-columns: 1fr auto auto auto 1fr;
-  align-items: center;
-  gap: 14px;
-  max-width: 920px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  max-width: 720px;
   margin: 0 auto;
 }
 .landing-channel-card {
@@ -353,13 +360,23 @@
   width: 24px;
   height: 24px;
 }
+/* Colors match channelBrand.ts exactly, so a channel reads the same way
+   here as it does in the authenticated app's ChatList/CustomerPanel. */
 .landing-channel-card__icon--wa {
   background: rgba(34, 197, 94, 0.14);
   color: var(--blog-success);
 }
 .landing-channel-card__icon--tg {
-  background: rgba(59, 130, 246, 0.14);
-  color: #3b82f6;
+  background: rgba(34, 158, 217, 0.14);
+  color: #229ed9;
+}
+.landing-channel-card__icon--ig {
+  background: rgba(228, 64, 95, 0.14);
+  color: #e4405f;
+}
+.landing-channel-card__icon--mg {
+  background: rgba(0, 132, 255, 0.14);
+  color: #0084ff;
 }
 .landing-channel-card__title {
   display: flex;
@@ -380,35 +397,6 @@
   flex-wrap: wrap;
   gap: 6px;
 }
-.landing-connector__line {
-  width: 56px;
-  height: 2px;
-  background-image: repeating-linear-gradient(90deg, var(--blog-accent) 0 6px, transparent 6px 12px);
-  background-size: 200% 100%;
-  animation: landing-dash 1.6s linear infinite;
-}
-.landing-connector__hub {
-  width: 40px;
-  height: 40px;
-  border-radius: 999px;
-  background: var(--blog-accent);
-  color: var(--blog-accent-contrast);
-  display: grid;
-  place-items: center;
-  box-shadow: 0 8px 20px rgba(91, 92, 235, 0.25);
-}
-.landing-connector__hub svg {
-  width: 18px;
-  height: 18px;
-}
-@keyframes landing-dash {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: -24px 0;
-  }
-}
 .landing-footnote {
   margin-top: 28px;
   font-size: 13px;
@@ -418,25 +406,17 @@
   margin-left: auto;
   margin-right: auto;
 }
-@media (max-width: 720px) {
+.landing-footnote code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--blog-hero-panel);
+  border: 1px solid var(--blog-border);
+}
+@media (max-width: 640px) {
   .landing-platforms {
     grid-template-columns: 1fr;
-    justify-items: center;
-  }
-  .landing-connector__line {
-    width: 2px;
-    height: 28px;
-    background-image: repeating-linear-gradient(180deg, var(--blog-accent) 0 6px, transparent 6px 12px);
-    background-size: 100% 200%;
-    animation-name: landing-dash-vertical;
-  }
-}
-@keyframes landing-dash-vertical {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 0 -24px;
   }
 }
 
@@ -784,6 +764,21 @@
 .landing-link-card__title {
   font-size: 17px;
   font-weight: 700;
+}
+/* The filename badge next to a DesktopSection.vue card title (xchats.exe,
+   xchats.app, xchats) — a small monospace pill, distinct enough from the
+   title's own weight that it reads as a fact, not part of the heading. */
+.landing-desktop__exe {
+  margin-left: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--blog-muted);
+  background: var(--blog-bg);
+  border: 1px solid var(--blog-border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  vertical-align: middle;
 }
 .landing-link-card__desc {
   font-size: 14px;
