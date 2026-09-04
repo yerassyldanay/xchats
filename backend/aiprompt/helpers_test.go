@@ -59,13 +59,13 @@ func baseKB() *KB {
 			{
 				Ref: "coffee-machine", Name: "Кофемашина DeLonghi", Price: "129 900 ₸",
 				Description: "Автоматическая кофемашина для дома.", Category: "Кофемашины",
-				InStock: true, SalesStatus: "active",
+				AvailabilityStatus: "in_stock", SalesStatus: "active",
 				FeaturedImage: "m-cm-featured",
 				GalleryImages: []string{"m-cm-gallery-1", "m-cm-gallery-2"},
 			},
 			{
 				Ref: "cookware-set", Name: "Набор посуды", Price: "24 900 ₸",
-				InStock: false, SalesStatus: "active",
+				AvailabilityStatus: "unavailable", SalesStatus: "active",
 			},
 		},
 		Tariffs: []Tariff{

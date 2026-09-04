@@ -96,6 +96,7 @@ export default {
       delivery_zones: { singular: 'Delivery zone', plural: 'Delivery zones' },
       contacts: { singular: 'Contacts', plural: 'Contacts' },
       policies: { singular: 'Policies', plural: 'Policies' },
+      tariff_info: { singular: 'Tariff information', plural: 'Tariff information' },
     },
     fields: {
       title: 'Title',
@@ -104,8 +105,15 @@ export default {
       price: 'Price',
       category: 'Category',
       description: 'Description',
-      inStockYes: 'In stock',
-      inStockNo: 'Out of stock',
+      brand: 'Brand',
+      bestFor: 'Best for',
+      notFor: 'Not for',
+      availabilityStatus: 'Availability',
+      availabilityNote: 'Availability note',
+      availabilityNoteHint: 'A qualitative description of timing (e.g. "shipped in weekly batches"). An exact lead time in days belongs in an additional fact instead.',
+      installationTerms: 'Installation terms',
+      warrantyTerms: 'Warranty terms',
+      warrantyTermsHint: 'Overrides the general warranty prose for this product. The exact warranty duration belongs in an additional fact (e.g. warranty_in_months).',
       salesStatusActive: 'Active for sale',
       salesStatusInactive: 'Not active for sale',
       pricingType: 'Pricing type',
@@ -138,7 +146,6 @@ export default {
       outsideZonesHint: 'What the assistant tells a customer whose location falls outside every delivery zone.',
       managedByZones: 'Managed under "Delivery zones"',
       salesStatus: 'Active for sale',
-      inStock: 'In stock',
       deliveryAvailable: 'Delivery available',
       updatedAt: 'Updated:',
     },
@@ -171,8 +178,28 @@ export default {
     },
     pricingType: { fixed: 'Fixed', percentage: 'Percentage', tiered: 'Tiered' },
     zoneLevel: { city: 'City', region: 'Region', country: 'Country' },
+    availabilityStatus: { in_stock: 'In stock', preorder: 'Preorder', on_demand: 'Made to order', unavailable: 'Unavailable' },
     state: { published: 'Published', new: 'New', changed: 'Changed', to_delete: 'To delete' },
     actions: { edit: 'Edit', publish: 'Publish', cancel: 'Cancel change', removeFromDraft: 'Remove from draft', delete: 'Delete' },
+    // facts.* — the repeatable ref/value/instruction editor (AdditionalFactsEditor.vue)
+    // for aiprompt.AdditionalFact: seller-defined "virtual fact columns" on a
+    // product, tariff, or the tariff_info singleton. instruction is the ONLY part
+    // the customer-facing prompt ever quotes verbatim — value stays hidden behind
+    // a token there (backend/aiprompt/facts.go) — but this staff-facing editor
+    // shows both, since an operator must be able to confirm what they entered.
+    facts: {
+      title: 'Additional facts',
+      hint: 'Hidden values for the assistant prompt',
+      empty: 'No additional facts.',
+      addFact: 'Add fact',
+      removeFact: 'Remove fact',
+      refPlaceholder: 'e.g. limit_on_devices',
+      refInvalid: 'Lowercase letters, digits, and _, starting with a letter',
+      refDuplicate: 'This ref is already used on this record',
+      valuePlaceholder: 'Value',
+      valueType: { string: 'Text', number: 'Number', boolean: 'Yes/no' },
+      instructionPlaceholder: 'How the assistant may safely mention this fact (without stating the exact value)',
+    },
     config: {
       persona: { title: 'Persona', hint: 'Who the assistant is and how it talks to a customer.' },
       mission: { title: 'Mission', hint: "The assistant's main goal in every conversation." },
@@ -284,6 +311,7 @@ export default {
         delivery_zones: 'Regional shipping rates, delivery days, and coverage.',
         contacts: 'How customers reach a human — phone, email, working hours.',
         policies: 'Returns, warranties, and delivery terms shown to customers.',
+        tariff_info: 'Facts shared across every tariff (e.g. a trial period), not tied to any one plan.',
       },
       addTopic: 'Add topic',
       addProduct: 'Add product',
@@ -291,6 +319,7 @@ export default {
       addZone: 'Add zone',
       editContacts: 'Edit contacts',
       editPolicies: 'Edit policies',
+      editTariffInfo: 'Edit tariff information',
       emptyTopics: 'No topics yet.',
       emptyProducts: 'No products yet.',
       emptyTariffs: 'No tariffs yet.',
@@ -317,6 +346,8 @@ export default {
       editZone: 'Edit delivery zone',
       editContacts: 'Edit contacts',
       editPolicies: 'Edit policies',
+      editTariffInfo: 'Edit tariff information',
+      tariffInfoHint: 'Facts shared across every tariff (e.g. a trial period). A fact specific to one tariff belongs on its own card instead.',
       slug: 'Slug',
       slugHint: 'e.g. tariffs',
       ref: 'Ref',
@@ -1615,6 +1646,8 @@ export default {
   // when at least two unrelated screens need the SAME word; anything screen-specific
   // stays in its own namespace so a wording change there can't leak sideways.
   common: {
+    yes: 'Yes',
+    no: 'No',
     close: 'Close',
     copy: 'Copy',
     copied: 'Copied',

@@ -506,8 +506,8 @@ func TestMCPOAuthFullFlow_ThroughToolsCall(t *testing.T) {
 		t.Fatalf("tools/list result not an object: %#v", list.Result)
 	}
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 13 {
-		t.Fatalf("expected 13 tools, got %d: %#v", len(tools), tools)
+	if len(tools) != 14 {
+		t.Fatalf("expected 14 tools, got %d: %#v", len(tools), tools)
 	}
 }
 
@@ -828,7 +828,7 @@ func TestMCPMediaUploadEndToEnd(t *testing.T) {
 		"name": "kb_product_upsert",
 		"arguments": map[string]any{
 			"ref":     "widget-1",
-			"changes": map[string]any{"name": "Widget", "price": "1000", "in_stock": true},
+			"changes": map[string]any{"name": "Widget", "price": "1000", "availability_status": "in_stock"},
 		},
 	})
 	if create.Error != nil {
@@ -1125,7 +1125,7 @@ func TestMCPMediaReadEndToEnd(t *testing.T) {
 		"name": "kb_product_upsert",
 		"arguments": map[string]any{
 			"ref":     "preview-1",
-			"changes": map[string]any{"name": "Widget", "in_stock": true},
+			"changes": map[string]any{"name": "Widget", "availability_status": "in_stock"},
 		},
 	})
 	if create.Error != nil {

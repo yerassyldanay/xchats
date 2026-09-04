@@ -124,7 +124,10 @@ func TestBuildCatalog_MaterialVisibilityAccepted(t *testing.T) {
 func TestBuildCatalog_MediaAbsenceRule(t *testing.T) {
 	kb := baseKB()
 	// coffee-machine: featured_image + gallery_images populated (fully populated).
-	// cookware-set: no media columns set at all (fully media-less, from baseKB).
+	// kettle: available, no media columns set at all (media-less).
+	kb.Products = append(kb.Products, Product{
+		Ref: "kettle", Name: "Чайник", Price: "5 900 ₸", AvailabilityStatus: "in_stock", SalesStatus: "active",
+	})
 	cat, err := BuildCatalog(kb)
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)
@@ -144,36 +147,52 @@ func TestBuildCatalog_MediaAbsenceRule(t *testing.T) {
 		}
 	}
 
-	foundCookwareAbsent := false
+	foundKettleAbsent := false
 	for _, a := range cat.Absent {
-		if a.Table == "products" && a.Ref == "cookware-set" {
-			foundCookwareAbsent = true
+		if a.Table == "products" && a.Ref == "kettle" {
+			foundKettleAbsent = true
 		}
 	}
-	if !foundCookwareAbsent {
-		t.Error("cookware-set has no media columns populated and must appear in Absent")
+	if !foundKettleAbsent {
+		t.Error("kettle has no media columns populated and must appear in Absent")
+	}
+	if got := cat.MediaByToken("products.kettle.featured_image"); got != nil {
+		t.Error("kettle has no featured_image; must not appear in media catalog")
+	}
+
+	// cookware-set is unavailable (baseKB): complete suppression means it gets
+	// no media token AND no Absent entry either — it never gets a rendered
+	// block at all (renderProductsUnavailable is name-only), so there is
+	// nothing for Absent to say about it.
+	for _, a := range cat.Absent {
+		if a.Table == "products" && a.Ref == "cookware-set" {
+			t.Error("unavailable product cookware-set must not appear in Absent — it is fully suppressed, not media-less")
+		}
 	}
 	if got := cat.MediaByToken("products.cookware-set.featured_image"); got != nil {
-		t.Error("cookware-set has no featured_image; must not appear in media catalog")
+		t.Error("unavailable product cookware-set must not appear in the media catalog even when a column is populated")
 	}
 
 	// Partial population: only featured_image set, gallery empty -> catalogued
 	// for featured_image only, and NOT listed as media-less.
 	kb2 := baseKB()
-	kb2.Products[1].FeaturedImage = "m-cm-featured" // reuse a valid material id
+	kb2.Products = append(kb2.Products, Product{
+		Ref: "kettle", Name: "Чайник", Price: "5 900 ₸", AvailabilityStatus: "in_stock", SalesStatus: "active",
+		FeaturedImage: "m-cm-featured", // reuse a valid material id
+	})
 	cat2, err := BuildCatalog(kb2)
 	if err != nil {
 		t.Fatalf("BuildCatalog (partial): %v", err)
 	}
-	if got := cat2.MediaByToken("products.cookware-set.featured_image"); got == nil {
-		t.Error("expected products.cookware-set.featured_image after partial population")
+	if got := cat2.MediaByToken("products.kettle.featured_image"); got == nil {
+		t.Error("expected products.kettle.featured_image after partial population")
 	}
-	if got := cat2.MediaByToken("products.cookware-set.gallery_images"); got != nil {
-		t.Error("cookware-set.gallery_images still empty; must not be catalogued")
+	if got := cat2.MediaByToken("products.kettle.gallery_images"); got != nil {
+		t.Error("kettle.gallery_images still empty; must not be catalogued")
 	}
 	for _, a := range cat2.Absent {
-		if a.Table == "products" && a.Ref == "cookware-set" {
-			t.Error("cookware-set now has one populated media column; must not be in Absent")
+		if a.Table == "products" && a.Ref == "kettle" {
+			t.Error("kettle now has one populated media column; must not be in Absent")
 		}
 	}
 }
@@ -286,9 +305,11 @@ func TestBuildCatalog_BlankExactFactsProduceNoPlaceholder(t *testing.T) {
 // product, in-stock or out-of-stock — availability is now expressed only via
 // which of PRODUCTS IN STOCK / PRODUCTS OUT OF STOCK a product appears in
 // (prompt.go's renderProductsInStock/renderProductsOutOfStock), never a
-// citable placeholder.
+// citable placeholder. The same now holds for availability_status
+// (0017_kb_virtual_facts): it is rendered as plain visible text in a v6
+// product block (availabilityStatusRU, prompt.go), never a hidden token.
 func TestBuildCatalog_NoInStockFactToken(t *testing.T) {
-	kb := baseKB() // coffee-machine InStock=true, cookware-set InStock=false
+	kb := baseKB() // coffee-machine AvailabilityStatus="in_stock", cookware-set "unavailable"
 	cat, err := BuildCatalog(kb)
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)

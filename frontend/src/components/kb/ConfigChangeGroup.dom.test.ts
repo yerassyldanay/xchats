@@ -19,14 +19,14 @@ function seed(configPatch: DraftChangeSet['config']) {
   const pg = usePlayground()
   pg.changes = {
     base_version: 1, updated_at: '', config: configPatch,
-    topics: [], tariffs: [], products: [], contacts: [], policies: [], zones: [], deletes: [],
+    topics: [], tariffs: [], products: [], contacts: [], policies: [], tariff_info: [], zones: [], deletes: [],
   }
   pg.live = {
     config: {
       organization_id: 'org-1', persona: 'Старая персона', mission: 'Старая миссия', guardrails: '',
       language_policy: '', reply_max_words: 120, draft: false, base_version: 0, updated_at: '',
     },
-    topics: [], tariffs: [], products: [], contacts: [], policies: [], zones: [], materials: [], requests: [],
+    topics: [], tariffs: [], products: [], contacts: [], policies: [], tariff_info: [], zones: [], materials: [], requests: [],
   } as DraftView
   return { pinia, pg }
 }

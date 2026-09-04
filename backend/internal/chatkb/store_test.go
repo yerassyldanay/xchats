@@ -24,13 +24,13 @@ func TestStoreServiceSeparatesLiveFromEffectiveDraft(t *testing.T) {
 		t.Fatalf("seed organization: %v", err)
 	}
 	actor := uuid.Nil
-	inStock := true
+	availabilityStatus := "in_stock"
 
-	live := kbstore.ProductInput{Ref: "vitamin-d", Name: "Vitamin D", Price: "12 000 KZT", InStock: &inStock, SalesStatus: "active"}
+	live := kbstore.ProductInput{Ref: "vitamin-d", Name: "Vitamin D", Price: "12 000 KZT", AvailabilityStatus: &availabilityStatus, SalesStatus: "active"}
 	if err := kb.PutLiveProduct(ctx, org.ID, actor, live); err != nil {
 		t.Fatalf("seed live product: %v", err)
 	}
-	untouched := kbstore.ProductInput{Ref: "omega-3", Name: "Omega 3", Price: "8 000 KZT", InStock: &inStock, SalesStatus: "active"}
+	untouched := kbstore.ProductInput{Ref: "omega-3", Name: "Omega 3", Price: "8 000 KZT", AvailabilityStatus: &availabilityStatus, SalesStatus: "active"}
 	if err := kb.PutLiveProduct(ctx, org.ID, actor, untouched); err != nil {
 		t.Fatalf("seed untouched product: %v", err)
 	}

@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 )
 
 // UpsertResult is what every MCP upsert tool returns to the model: which key
@@ -265,13 +267,20 @@ func (s *Store) MCPUpsertTopic(ctx context.Context, orgID uuid.UUID, userID uuid
 // Product
 // ---------------------------------------------------------------------------
 
-// ProductChanges is kb_product_upsert's `changes`.
+// ProductChanges is kb_product_upsert's `changes`. AvailabilityStatus
+// replaces the legacy InStock *bool (migration 0017_kb_virtual_facts) —
+// required on create, same as InStock was. AdditionalFacts is nil-means-
+// unchanged, non-nil (even empty) means replace (media_apply.go's
+// pointer-to-slice convention, applied here to a fact list instead of a
+// uuid list).
 type ProductChanges struct {
-	Name, Price, Description, Category                                  *string
-	InStock                                                             *bool // required on create
-	SalesStatus                                                         *string
-	FeaturedImage                                                       **uuid.UUID
-	GalleryImages, DemoVideos, CertificateDocuments, GuaranteeDocuments *[]uuid.UUID
+	Name, Price, Description, Category, Brand, Advantages, Disadvantages, BestFor, NotFor *string
+	AvailabilityStatus                                                                    *string // required on create
+	AvailabilityNote, InstallationTerms, WarrantyTerms                                    *string
+	AdditionalFacts                                                                       *[]aiprompt.AdditionalFact
+	SalesStatus                                                                           *string
+	FeaturedImage                                                                         **uuid.UUID
+	GalleryImages, DemoVideos, CertificateDocuments, GuaranteeDocuments                   *[]uuid.UUID
 }
 
 // MCPUpsertProduct creates or patches a product (kb_product_upsert).
@@ -307,17 +316,50 @@ func (s *Store) MCPUpsertProduct(ctx context.Context, orgID uuid.UUID, userID uu
 		if ch.Category != nil {
 			cur.Category = *ch.Category
 		}
+		if ch.Brand != nil {
+			cur.Brand = *ch.Brand
+		}
+		if ch.Advantages != nil {
+			cur.Advantages = *ch.Advantages
+		}
+		if ch.Disadvantages != nil {
+			cur.Disadvantages = *ch.Disadvantages
+		}
+		if ch.BestFor != nil {
+			cur.BestFor = *ch.BestFor
+		}
+		if ch.NotFor != nil {
+			cur.NotFor = *ch.NotFor
+		}
+		if ch.AvailabilityNote != nil {
+			cur.AvailabilityNote = *ch.AvailabilityNote
+		}
+		if ch.InstallationTerms != nil {
+			cur.InstallationTerms = *ch.InstallationTerms
+		}
+		if ch.WarrantyTerms != nil {
+			cur.WarrantyTerms = *ch.WarrantyTerms
+		}
 		if ch.SalesStatus != nil {
 			if err := validateEnum("sales_status", *ch.SalesStatus, "active", "inactive"); err != nil {
 				return err
 			}
 			cur.SalesStatus = *ch.SalesStatus
 		}
-		if creating && ch.InStock == nil {
-			return &ErrRequiredFieldMissing{Field: "in_stock"}
+		if creating && ch.AvailabilityStatus == nil {
+			return &ErrRequiredFieldMissing{Field: "availability_status"}
 		}
-		if ch.InStock != nil {
-			cur.InStock = *ch.InStock
+		if ch.AvailabilityStatus != nil {
+			if err := validateEnum("availability_status", *ch.AvailabilityStatus, "in_stock", "preorder", "on_demand", "unavailable"); err != nil {
+				return err
+			}
+			cur.AvailabilityStatus = *ch.AvailabilityStatus
+		}
+		if ch.AdditionalFacts != nil {
+			cur.AdditionalFacts = *ch.AdditionalFacts
+		}
+		if err := validateProductFacts(cur); err != nil {
+			return err
 		}
 		refs := applyProductMedia(&cur, ProductMedia{
 			FeaturedImage:        ch.FeaturedImage,
@@ -351,12 +393,15 @@ func (s *Store) MCPUpsertProduct(ctx context.Context, orgID uuid.UUID, userID uu
 // Tariff
 // ---------------------------------------------------------------------------
 
-// TariffChanges is kb_tariff_upsert's `changes`.
+// TariffChanges is kb_tariff_upsert's `changes`. AdditionalFacts is
+// nil-means-unchanged, non-nil (even empty) means replace (ProductChanges'
+// doc comment).
 type TariffChanges struct {
-	Name, Price, LimitText, Fee, Summary, PricingType, Advantages, Disadvantages *string
-	SalesStatus                                                                  *string
-	FeaturedImage                                                                **uuid.UUID
-	PricingImages, ExplainerVideos, TermsDocuments                               *[]uuid.UUID
+	Name, Price, LimitText, Fee, Summary, PricingType, Advantages, Disadvantages, BestFor, NotFor *string
+	AdditionalFacts                                                                               *[]aiprompt.AdditionalFact
+	SalesStatus                                                                                   *string
+	FeaturedImage                                                                                 **uuid.UUID
+	PricingImages, ExplainerVideos, TermsDocuments                                                *[]uuid.UUID
 }
 
 // MCPUpsertTariff creates or patches a tariff (kb_tariff_upsert).
@@ -410,11 +455,23 @@ func (s *Store) MCPUpsertTariff(ctx context.Context, orgID uuid.UUID, userID uui
 		if ch.Disadvantages != nil {
 			cur.Disadvantages = *ch.Disadvantages
 		}
+		if ch.BestFor != nil {
+			cur.BestFor = *ch.BestFor
+		}
+		if ch.NotFor != nil {
+			cur.NotFor = *ch.NotFor
+		}
+		if ch.AdditionalFacts != nil {
+			cur.AdditionalFacts = *ch.AdditionalFacts
+		}
 		if ch.SalesStatus != nil {
 			if err := validateEnum("sales_status", *ch.SalesStatus, "active", "inactive"); err != nil {
 				return err
 			}
 			cur.SalesStatus = *ch.SalesStatus
+		}
+		if err := validateTariffFacts(cur); err != nil {
+			return err
 		}
 		refs := applyTariffMedia(&cur, TariffMedia{
 			FeaturedImage:   ch.FeaturedImage,
@@ -572,6 +629,44 @@ func (s *Store) MCPUpsertPolicies(ctx context.Context, orgID uuid.UUID, userID u
 }
 
 // ---------------------------------------------------------------------------
+// TariffInfo (singleton, patch-only) — organization-wide tariff facts that
+// belong to no single plan (aiprompt.TariffInfo's doc comment).
+// ---------------------------------------------------------------------------
+
+// TariffInfoChanges is kb_tariff_info_upsert's `changes`. AdditionalFacts is
+// nil-means-unchanged, non-nil (even empty) means replace, the only field
+// this singleton carries.
+type TariffInfoChanges struct {
+	AdditionalFacts *[]aiprompt.AdditionalFact
+}
+
+// MCPUpsertTariffInfo patches the tariff_info singleton.
+func (s *Store) MCPUpsertTariffInfo(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ch TariffInfoChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentTariffInfo(ctx, db, orgID, b)
+		if err != nil {
+			return err
+		}
+		if ch.AdditionalFacts != nil {
+			cur.AdditionalFacts = *ch.AdditionalFacts
+		}
+		if err := validateTariffInfoFacts(cur); err != nil {
+			return err
+		}
+		if err := s.recordProvenance(ctx, db, orgID, KBTypeTariffInfo, NaturalKeyMain, provenance); err != nil {
+			return err
+		}
+		b.upsertTariffInfo(cur)
+		b.removeDelete(deleteKindFor(KBTypeTariffInfo), NaturalKeyMain) // upserting cancels a pending delete — see MCPUpsertTopic's comment
+		return nil
+	})
+	if err != nil {
+		return UpsertResult{}, err
+	}
+	return UpsertResult{Type: KBTypeTariffInfo, Key: NaturalKeyMain, DraftVersion: newVersion}, nil
+}
+
+// ---------------------------------------------------------------------------
 // Delivery zone
 // ---------------------------------------------------------------------------
 
@@ -704,7 +799,7 @@ func (s *Store) MCPDelete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID
 	switch kbType {
 	case KBTypeAssistant:
 		return DeleteResult{}, &ErrCannotDelete{Reason: "the assistant configuration cannot be deleted"}
-	case KBTypeContacts, KBTypePolicies:
+	case KBTypeContacts, KBTypePolicies, KBTypeTariffInfo:
 		if key != NaturalKeyMain {
 			return DeleteResult{}, &ErrCannotDelete{Reason: fmt.Sprintf("key must be %q for %s", NaturalKeyMain, kbType)}
 		}
@@ -745,6 +840,8 @@ func (s *Store) MCPDelete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID
 			b.removeContact()
 		case KBTypePolicies:
 			b.removePolicy()
+		case KBTypeTariffInfo:
+			b.removeTariffInfo()
 		}
 		if found.ExistsInLive {
 			b.addDelete(deleteKindFor(kbType), key)

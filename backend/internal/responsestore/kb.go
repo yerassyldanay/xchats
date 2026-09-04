@@ -92,6 +92,9 @@ func (r *KnowledgeBaseRepo) Load(ctx context.Context, organizationID string) (*a
 	if kb.Policies, err = loadPolicies(ctx, tx, orgID); err != nil {
 		return nil, err
 	}
+	if kb.TariffInfo, err = loadTariffInfo(ctx, tx, orgID); err != nil {
+		return nil, err
+	}
 	if kb.DeliveryZones, err = loadDeliveryZones(ctx, tx, orgID); err != nil {
 		return nil, err
 	}
@@ -163,8 +166,9 @@ func loadTopics(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) ([]aiprompt.To
 
 func loadProducts(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) ([]aiprompt.Product, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT ref, name, price, description, category, sales_status, in_stock,
-		       featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
+		SELECT ref, name, price, description, category, brand, advantages, disadvantages, best_for, not_for,
+		       availability_status, availability_note, installation_terms, warranty_terms, additional_facts,
+		       sales_status, featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
 		FROM ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("responsestore: load products: %w", err)
@@ -175,7 +179,9 @@ func loadProducts(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) ([]aiprompt.
 		var p aiprompt.Product
 		var featuredImage uuid.NullUUID
 		var gallery, demo, cert, guarantee []uuid.UUID
-		if err := rows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.SalesStatus, &p.InStock,
+		if err := rows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.Brand, &p.Advantages, &p.Disadvantages,
+			&p.BestFor, &p.NotFor, &p.AvailabilityStatus, &p.AvailabilityNote, &p.InstallationTerms, &p.WarrantyTerms,
+			(*aiprompt.FactsColumn)(&p.AdditionalFacts), &p.SalesStatus,
 			&featuredImage, (*dbx.UUIDArray)(&gallery), (*dbx.UUIDArray)(&demo), (*dbx.UUIDArray)(&cert), (*dbx.UUIDArray)(&guarantee)); err != nil {
 			return nil, fmt.Errorf("responsestore: scan product: %w", err)
 		}
@@ -193,7 +199,8 @@ func loadProducts(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) ([]aiprompt.
 
 func loadTariffs(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) ([]aiprompt.Tariff, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages, sales_status,
+		SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages,
+		       best_for, not_for, additional_facts, sales_status,
 		       featured_image, pricing_images, explainer_videos, terms_documents
 		FROM ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
@@ -206,7 +213,8 @@ func loadTariffs(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) ([]aiprompt.T
 		var featuredImage uuid.NullUUID
 		var pricing, explainer, terms []uuid.UUID
 		if err := rows.Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary,
-			&t.PricingType, &t.Advantages, &t.Disadvantages, &t.SalesStatus,
+			&t.PricingType, &t.Advantages, &t.Disadvantages, &t.BestFor, &t.NotFor,
+			(*aiprompt.FactsColumn)(&t.AdditionalFacts), &t.SalesStatus,
 			&featuredImage, (*dbx.UUIDArray)(&pricing), (*dbx.UUIDArray)(&explainer), (*dbx.UUIDArray)(&terms)); err != nil {
 			return nil, fmt.Errorf("responsestore: scan tariff: %w", err)
 		}
@@ -219,6 +227,23 @@ func loadTariffs(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) ([]aiprompt.T
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// loadTariffInfo reads the org's ai_tariff_info singleton, or nil if it has
+// none yet (an org that never staged an organization-wide tariff fact) —
+// the same "no row -> nil pointer, never a zero-value struct" convention
+// loadContacts/loadPolicies below already use for their own singletons.
+func loadTariffInfo(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) (*aiprompt.TariffInfo, error) {
+	var ti aiprompt.TariffInfo
+	err := tx.QueryRow(ctx, `SELECT additional_facts FROM ai_tariff_info WHERE organization_id = $1`, orgID).
+		Scan((*aiprompt.FactsColumn)(&ti.AdditionalFacts))
+	if errors.Is(err, dbx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("responsestore: load tariff_info: %w", err)
+	}
+	return &ti, nil
 }
 
 func loadContacts(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) (*aiprompt.Contacts, error) {

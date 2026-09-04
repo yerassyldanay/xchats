@@ -42,29 +42,45 @@ type Assistant struct {
 
 // Topic mirrors ai_topics.
 type Topic struct {
-	Slug                string
-	Title               string
-	BodyMD              string
-	FeaturedImage       string
-	IllustrationImages  []string
-	ExplainerVideos     []string
-	ReferenceDocuments  []string
+	Slug               string
+	Title              string
+	BodyMD             string
+	FeaturedImage      string
+	IllustrationImages []string
+	ExplainerVideos    []string
+	ReferenceDocuments []string
 }
 
-// Product mirrors ai_products.
+// Product mirrors ai_products. AvailabilityStatus REPLACES the old in_stock
+// boolean as the availability source of truth (migration
+// 0017_kb_virtual_facts): in_stock | preorder | on_demand are all fully
+// visible (prose, fact tokens, media — see productVisible in catalog.go),
+// unavailable is name-only and emits no fact or media tokens.
+// AvailabilityNote is qualitative prompt-visible prose ("ships from our
+// Almaty warehouse"); an exact lead time belongs in AdditionalFacts (e.g. a
+// lead_time_in_days virtual fact), never in this free-text note.
 type Product struct {
-	Ref                    string
-	Name                   string
-	Price                  string
-	Description            string
-	Category               string
-	InStock                bool
-	SalesStatus            string // active | inactive
-	FeaturedImage          string
-	GalleryImages          []string
-	DemoVideos             []string
-	CertificateDocuments   []string
-	GuaranteeDocuments     []string
+	Ref                  string
+	Name                 string
+	Price                string
+	Description          string
+	Category             string
+	Brand                string
+	Advantages           string
+	Disadvantages        string
+	BestFor              string
+	NotFor               string
+	AvailabilityStatus   string // in_stock | preorder | on_demand | unavailable
+	AvailabilityNote     string
+	InstallationTerms    string
+	WarrantyTerms        string // overrides Policies.Warranty for this product when non-blank
+	AdditionalFacts      []AdditionalFact
+	SalesStatus          string // active | inactive
+	FeaturedImage        string
+	GalleryImages        []string
+	DemoVideos           []string
+	CertificateDocuments []string
+	GuaranteeDocuments   []string
 }
 
 // Tariff mirrors ai_tariffs.
@@ -78,11 +94,23 @@ type Tariff struct {
 	PricingType     string // fixed | percentage | tiered | hybrid
 	Advantages      string
 	Disadvantages   string
+	BestFor         string
+	NotFor          string
+	AdditionalFacts []AdditionalFact
 	SalesStatus     string // active | inactive
 	FeaturedImage   string
 	PricingImages   []string
 	ExplainerVideos []string
 	TermsDocuments  []string
+}
+
+// TariffInfo mirrors the ai_tariff_info singleton (natural ref "main",
+// SingletonRef): organization-wide tariff facts that belong to no single
+// plan (e.g. a trial period shared by every tariff — a tariff-specific
+// trial instead belongs in that Tariff's own AdditionalFacts). It carries
+// no prose or media columns, only virtual facts.
+type TariffInfo struct {
+	AdditionalFacts []AdditionalFact
 }
 
 // Contacts mirrors the ai_contacts singleton (natural ref "main").
@@ -162,6 +190,7 @@ type KB struct {
 	Tariffs        []Tariff
 	Contacts       *Contacts
 	Policies       *Policies
+	TariffInfo     *TariffInfo
 	DeliveryZones  []DeliveryZone
 	Materials      []Material
 }
@@ -190,6 +219,7 @@ type PromptInput struct {
 	Tariffs       []Tariff
 	Contacts      *Contacts
 	Policies      *Policies
+	TariffInfo    *TariffInfo
 	DeliveryZones []DeliveryZone
 }
 
@@ -203,6 +233,7 @@ func (kb *KB) PromptInput() *PromptInput {
 		Tariffs:       kb.Tariffs,
 		Contacts:      kb.Contacts,
 		Policies:      kb.Policies,
+		TariffInfo:    kb.TariffInfo,
 		DeliveryZones: kb.DeliveryZones,
 	}
 }

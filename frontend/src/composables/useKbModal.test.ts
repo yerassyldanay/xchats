@@ -18,7 +18,7 @@ vi.mock('@/api/client', async (importOriginal) => {
 function emptyChanges(over: Partial<DraftChangeSet> = {}): DraftChangeSet {
   return {
     base_version: 1, updated_at: '', config: null,
-    topics: [], tariffs: [], products: [], contacts: [], policies: [], zones: [], deletes: [],
+    topics: [], tariffs: [], products: [], contacts: [], policies: [], tariff_info: [], zones: [], deletes: [],
     ...over,
   }
 }

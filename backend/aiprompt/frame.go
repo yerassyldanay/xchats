@@ -89,3 +89,46 @@ var frameShopKBV5TGRU string
 func FrameShopKBV5TGRU() string {
 	return frameShopKBV5TGRU
 }
+
+// PromptRefShopKBV6 identifies the v6 frame — virtual fact columns
+// (0017_kb_virtual_facts): v5's whole rule body plus availability_status
+// (in_stock/preorder/on_demand fully visible, unavailable name-only,
+// replacing the old in_stock boolean split), product/tariff prose
+// (brand/advantages/disadvantages/best_for/not_for/availability_note/
+// installation_terms/warranty_terms), the organization-wide tariff_info
+// singleton, and every entity's seller-authored virtual facts rendered
+// beside their instruction (new rule 8) — see prompt.go's
+// SlotProductsAvailable/SlotProductsUnavailable/SlotTariffCatalog/
+// SlotTariffInfo doc comment for the renderer side of this.
+//
+// Cut as a NEW version, never an edit to v5, for the same reason v5 was
+// cut instead of editing v4: frame_test.go's hash pin says so in as many
+// words, and v5 is the frame every draft record stamped "shop-kb@v5"
+// actually used — reproducing one means rendering the frame it actually
+// used, not today's. v5 (and v4) stay embedded and pinned exactly as
+// before this file.
+//
+// GRADING STATUS: like v5 was at the time it shipped, v6 is covered by
+// unit tests and the frame's own rules, not yet by a graded eval run.
+const PromptRefShopKBV6 = "shop-kb@v6"
+
+//go:embed frames/shop-kb-v6-ru.txt
+var frameShopKBV6RU string
+
+// FrameShopKBV6RU returns the v6 frame text, ready for RenderPrompt.
+func FrameShopKBV6RU() string {
+	return frameShopKBV6RU
+}
+
+// PromptRefShopKBV6TG identifies the Telegram variant of the v6 frame,
+// related to it exactly as V5TG is to V5: byte-identical but for the
+// persona line.
+const PromptRefShopKBV6TG = "shop-kb@v6-tg"
+
+//go:embed frames/shop-kb-v6-tg-ru.txt
+var frameShopKBV6TGRU string
+
+// FrameShopKBV6TGRU returns the v6 Telegram frame text, ready for RenderPrompt.
+func FrameShopKBV6TGRU() string {
+	return frameShopKBV6TGRU
+}

@@ -11,7 +11,8 @@ package kbstore
 // deletable, only ever patched or approved as a whole pending edit.
 var changeKinds = map[string]string{
 	"topics": "topic", "tariffs": "tariff", "products": "product",
-	"contacts": "contact", "policies": "policy", "delivery_zones": "delivery_zone",
+	"contacts": "contact", "policies": "policy", "tariff_info": "tariff_info",
+	"delivery_zones": "delivery_zone",
 }
 
 // singularToPlural is changeKinds inverted — built once at init so
@@ -46,14 +47,14 @@ func PluralChangeKind(singular string) string {
 }
 
 // IsSingletonKind reports whether the singular kind identifies a true
-// singleton (contact | policy) — Key is ignored on the read/match side
-// entirely for these: there is exactly one row per org, so the natural key
-// is the org, not a value carried on the row. Writers keep writing whatever
-// key they write (the Playground path's own "", MCPDelete's NaturalKeyMain
-// "main", the approve route's domain.ContactSlug/PolicySlug) — this just
-// means matching never compares it.
+// singleton (contact | policy | tariff_info) — Key is ignored on the
+// read/match side entirely for these: there is exactly one row per org, so
+// the natural key is the org, not a value carried on the row. Writers keep
+// writing whatever key they write (the Playground path's own "",
+// MCPDelete's NaturalKeyMain "main", the approve route's domain.
+// ContactSlug/PolicySlug) — this just means matching never compares it.
 func IsSingletonKind(singular string) bool {
-	return singular == "contact" || singular == "policy"
+	return singular == "contact" || singular == "policy" || singular == "tariff_info"
 }
 
 // deleteMatches reports whether a DraftDelete entry addresses the given

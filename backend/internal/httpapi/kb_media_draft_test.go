@@ -76,7 +76,7 @@ func TestPlaygroundUpsertProduct_MediaReferenceRejections422(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body := map[string]any{"ref": "reject-" + tc.name, "name": "Товар", "in_stock": true}
+			body := map[string]any{"ref": "reject-" + tc.name, "name": "Товар", "availability_status": "in_stock"}
 			if tc.field == "demo_videos" {
 				body[tc.field] = []string{tc.id.String()}
 			} else {
@@ -102,7 +102,7 @@ func TestPlaygroundUpsertProduct_FeaturedImageTriState(t *testing.T) {
 
 	// Set.
 	resp, env := h.postJSON("/xchats/api/v1/playground/draft/products", map[string]any{
-		"ref": "tri", "name": "Товар", "in_stock": true, "featured_image": img.String(),
+		"ref": "tri", "name": "Товар", "availability_status": "in_stock", "featured_image": img.String(),
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("set: status=%d body=%s", resp.StatusCode, env["message"])
@@ -113,7 +113,7 @@ func TestPlaygroundUpsertProduct_FeaturedImageTriState(t *testing.T) {
 
 	// Absent — leaves the value untouched.
 	resp, env = h.postJSON("/xchats/api/v1/playground/draft/products", map[string]any{
-		"ref": "tri", "name": "Товар v2", "in_stock": true,
+		"ref": "tri", "name": "Товар v2", "availability_status": "in_stock",
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("absent: status=%d body=%s", resp.StatusCode, env["message"])
@@ -124,7 +124,7 @@ func TestPlaygroundUpsertProduct_FeaturedImageTriState(t *testing.T) {
 
 	// Explicit null — clears it.
 	resp, env = h.postJSON("/xchats/api/v1/playground/draft/products", map[string]any{
-		"ref": "tri", "name": "Товар v3", "in_stock": true, "featured_image": nil,
+		"ref": "tri", "name": "Товар v3", "availability_status": "in_stock", "featured_image": nil,
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("clear: status=%d body=%s", resp.StatusCode, env["message"])
@@ -142,7 +142,7 @@ func TestPlaygroundUpsertProduct_PluralEmptyArrayDetaches(t *testing.T) {
 	img := h.seedKBMaterial(t, h.orgID, "g1.png", "image/png", []byte("g1"), true)
 
 	resp, env := h.postJSON("/xchats/api/v1/playground/draft/products", map[string]any{
-		"ref": "plural", "name": "Товар", "in_stock": true, "gallery_images": []string{img.String()},
+		"ref": "plural", "name": "Товар", "availability_status": "in_stock", "gallery_images": []string{img.String()},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("set: status=%d body=%s", resp.StatusCode, env["message"])
@@ -152,7 +152,7 @@ func TestPlaygroundUpsertProduct_PluralEmptyArrayDetaches(t *testing.T) {
 	}
 
 	resp, env = h.postJSON("/xchats/api/v1/playground/draft/products", map[string]any{
-		"ref": "plural", "name": "Товар v2", "in_stock": true,
+		"ref": "plural", "name": "Товар v2", "availability_status": "in_stock",
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("absent: status=%d body=%s", resp.StatusCode, env["message"])
@@ -162,7 +162,7 @@ func TestPlaygroundUpsertProduct_PluralEmptyArrayDetaches(t *testing.T) {
 	}
 
 	resp, env = h.postJSON("/xchats/api/v1/playground/draft/products", map[string]any{
-		"ref": "plural", "name": "Товар v3", "in_stock": true, "gallery_images": []string{},
+		"ref": "plural", "name": "Товар v3", "availability_status": "in_stock", "gallery_images": []string{},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("detach: status=%d body=%s", resp.StatusCode, env["message"])
@@ -201,14 +201,14 @@ func TestKBLiveProduct_IgnoresMediaKeys(t *testing.T) {
 	img := h.seedKBMaterial(t, h.orgID, "live.png", "image/png", []byte("live"), true)
 
 	resp, env := h.postJSON("/xchats/api/v1/kb/products", map[string]any{
-		"ref": "live-p", "name": "Товар", "in_stock": true,
+		"ref": "live-p", "name": "Товар", "availability_status": "in_stock",
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create live product: status=%d body=%s", resp.StatusCode, env["message"])
 	}
 
 	resp, env = h.postJSON("/xchats/api/v1/kb/products", map[string]any{
-		"ref": "live-p", "name": "Товар (edit)", "in_stock": true,
+		"ref": "live-p", "name": "Товар (edit)", "availability_status": "in_stock",
 		"featured_image": img.String(), "gallery_images": []string{img.String()},
 	})
 	if resp.StatusCode != http.StatusOK {

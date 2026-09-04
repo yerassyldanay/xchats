@@ -328,12 +328,12 @@ ai_products:
   - ref: coffee-machine
     name: "Кофемашина DeLonghi"
     price: "129 900 ₸"
-    in_stock: true
+    availability_status: in_stock
     sales_status: active
   - ref: cookware-set
     name: "Набор посуды"
     price: "24 900 ₸"
-    in_stock: false
+    availability_status: unavailable
     sales_status: active
 `
 

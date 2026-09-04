@@ -17,7 +17,7 @@ import { useKbModal } from '@/composables/useKbModal'
 import { useDraftSelection, type SelectionTarget } from '@/composables/useDraftSelection'
 import { useCancelConfirm } from '@/composables/useCancelConfirm'
 import type { ChangeEntry, ChangeKind } from '@/composables/draftChanges'
-import type { ContactRow, DeliveryZoneRow, PolicyRow } from '@/types'
+import type { ContactRow, DeliveryZoneRow, PolicyRow, TariffInfoRow } from '@/types'
 import { Button } from '@/components/ui/button'
 import EntityTabs from './EntityTabs.vue'
 import StatTiles from './StatTiles.vue'
@@ -28,6 +28,7 @@ import KbIngestPanel from './KbIngestPanel.vue'
 import DeliveryZoneRecord from './records/DeliveryZoneRecord.vue'
 import ContactsRecord from './records/ContactsRecord.vue'
 import PoliciesRecord from './records/PoliciesRecord.vue'
+import TariffInfoRecord from './records/TariffInfoRecord.vue'
 import { kbActions } from './records/actions'
 import KbModalForms from './forms/KbModalForms.vue'
 import ConfirmDeleteDialog from './forms/ConfirmDeleteDialog.vue'
@@ -142,19 +143,21 @@ function entityTabLabel(kind: string): string {
 function goToTab(kind: string) {
   active.value = kind
 }
-function editEntry(kind: 'delivery_zones' | 'contacts' | 'policies', entry: ChangeEntry) {
+function editEntry(kind: 'delivery_zones' | 'contacts' | 'policies' | 'tariff_info', entry: ChangeEntry) {
   const row = entry.type === 'removed' ? entry.liveRow : entry.draftRow
   if (row) modal.openEdit(kind, row)
 }
 
-// delivery_zones/contacts/policies need extra props ChangeList's generic
-// three (topics/products/tariffs) don't — allZones for the parent picker,
-// zonesExist for the delivery-answer-is-governed-elsewhere hint — so they
-// render directly here rather than through ChangeList.
+// delivery_zones/contacts/policies/tariff_info need extra props ChangeList's
+// generic three (topics/products/tariffs) don't — allZones for the parent
+// picker, zonesExist for the delivery-answer-is-governed-elsewhere hint (or,
+// for the singletons, simply no natural key to show) — so they render
+// directly here rather than through ChangeList.
 const zoneEntries = computed(() => entriesFor('delivery_zones'))
 const allZonesForDisplay = computed(() => [...(pg.live?.zones ?? []), ...(pg.changes?.zones ?? [])])
 const contactEntry = computed(() => entriesFor('contacts')[0])
 const policyEntry = computed(() => entriesFor('policies')[0])
+const tariffInfoEntry = computed(() => entriesFor('tariff_info')[0])
 const zonesExist = computed(() => (pg.live?.zones.length ?? 0) > 0)
 
 // entriesFor(kind) is runtime-guaranteed to return only entries of that
@@ -169,6 +172,9 @@ function contactRowOf(entry: ChangeEntry) {
 }
 function policyRowOf(entry: ChangeEntry) {
   return (entry.type === 'removed' ? entry.liveRow : entry.draftRow) as PolicyRow | undefined
+}
+function tariffInfoRowOf(entry: ChangeEntry) {
+  return (entry.type === 'removed' ? entry.liveRow : entry.draftRow) as TariffInfoRow | undefined
 }
 
 // --- cancel confirmation copy -------------------------------------------
@@ -365,6 +371,21 @@ const confirmAcceptKey = computed(() => {
               @edit="editEntry('policies', policyEntry)"
               @publish="pg.approveEntity('policies', policyEntry.key)"
               @cancel="cancelConfirm.requestOne('policies', policyEntry.key, policyEntry.type)"
+            />
+          </div>
+
+          <div v-show="active === 'tariff_info'" class="space-y-3 max-w-2xl">
+            <TariffInfoRecord
+              v-if="tariffInfoEntry"
+              :row="tariffInfoRowOf(tariffInfoEntry)"
+              :live-row="tariffInfoEntry.type === 'removed' ? undefined : (tariffInfoEntry.liveRow as TariffInfoRow | undefined)"
+              :change-type="tariffInfoEntry.type"
+              :actions="kbActions({ page: 'draft', changeType: tariffInfoEntry.type, singleton: true })"
+              :busy="isBusy('tariff_info', tariffInfoEntry.key)"
+              :blocked-note="blockedNote('tariff_info', tariffInfoEntry.key)"
+              @edit="editEntry('tariff_info', tariffInfoEntry)"
+              @publish="pg.approveEntity('tariff_info', tariffInfoEntry.key)"
+              @cancel="cancelConfirm.requestOne('tariff_info', tariffInfoEntry.key, tariffInfoEntry.type)"
             />
           </div>
         </template>

@@ -5,7 +5,7 @@
 // map/pricing-type options (previously ~150 duplicated lines across the two
 // pages).
 import type { Component } from 'vue'
-import { Globe, Hash, ListTree, MapPinned, Package, Phone, Receipt, ShieldCheck, Sparkles, Target, Truck, UserRound } from 'lucide-vue-next'
+import { Globe, Hash, Info, ListTree, MapPinned, Package, Phone, Receipt, ShieldCheck, Sparkles, Target, Truck, UserRound } from 'lucide-vue-next'
 import type { ChangeKind, KbRow } from '@/composables/draftChanges'
 import type { DraftChangeSet, DraftView } from '@/types'
 
@@ -22,7 +22,7 @@ export const NATURAL_KEY_MAIN = 'main'
 // kinds in the same order the pre-redesign pages already used. Черновик
 // filters this down to kinds with pending entries (useEntityTabs); Знаний
 // база shows all seven plus Промпт/Файлы.
-export const KB_ENTITY_ORDER: ChangeKind[] = ['config', 'topics', 'products', 'tariffs', 'delivery_zones', 'contacts', 'policies']
+export const KB_ENTITY_ORDER: ChangeKind[] = ['config', 'topics', 'products', 'tariffs', 'tariff_info', 'delivery_zones', 'contacts', 'policies']
 
 // payloadField is DraftChangeSet/DraftView's own field name for this kind —
 // almost always identical to the kind, with ONE deliberate exception:
@@ -30,7 +30,7 @@ export const KB_ENTITY_ORDER: ChangeKind[] = ['config', 'topics', 'products', 't
 // struct tag `json:"zones"` — see kbstore.DraftView.Zones's doc comment).
 // Every array lookup goes through this, never `changes[kind]` directly, so
 // that trap can only ever be wrong in one place.
-type PayloadField = 'config' | 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies' | 'zones'
+type PayloadField = 'config' | 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies' | 'tariff_info' | 'zones'
 
 export interface EntityMeta {
   icon: Component
@@ -50,6 +50,7 @@ export const ENTITY_META: Record<ChangeKind, EntityMeta> = {
   delivery_zones: { icon: MapPinned, i18nKey: 'kb.entities.delivery_zones', singleton: false, keyOf: idOf, payloadField: 'zones' },
   contacts: { icon: Phone, i18nKey: 'kb.entities.contacts', singleton: true, keyOf: idOf, payloadField: 'contacts' },
   policies: { icon: Truck, i18nKey: 'kb.entities.policies', singleton: true, keyOf: idOf, payloadField: 'policies' },
+  tariff_info: { icon: Info, i18nKey: 'kb.entities.tariff_info', singleton: true, keyOf: idOf, payloadField: 'tariff_info' },
 }
 
 // rowsOf/deletesOf are the one place a caller reads a ChangeKind's array out
@@ -64,6 +65,13 @@ export type PricingType = (typeof PRICING_TYPES)[number]
 
 export const ZONE_LEVELS = ['city', 'region', 'country'] as const
 export type ZoneLevel = (typeof ZONE_LEVELS)[number]
+
+// AVAILABILITY_STATUSES mirrors aiprompt's closed vocabulary
+// (backend/aiprompt/types.go's Product.AvailabilityStatus doc comment):
+// in_stock/preorder/on_demand render full prose+facts+media in the customer
+// prompt, unavailable suppresses all of it down to the name alone.
+export const AVAILABILITY_STATUSES = ['in_stock', 'preorder', 'on_demand', 'unavailable'] as const
+export type AvailabilityStatus = (typeof AVAILABILITY_STATUSES)[number]
 
 // --- Обзор (assistant config) sections --------------------------------------
 

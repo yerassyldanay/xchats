@@ -24,7 +24,59 @@ const (
 	KindNumber       ValueKind = "number"        // bare number; unit word comes from the column meaning
 	KindNumberRange  ValueKind = "number_range"  // bare number or range like 1–3
 	KindDeliveryFlag ValueKind = "delivery_flag" // boolean; code substitutes reviewed Russian wording
+
+	// KindVirtualNumber/KindVirtualBoolean/KindVirtualString are the three
+	// substitution kinds a seller-authored additional fact (facts.go) can
+	// carry — derived from the JSON scalar type of its Value, never
+	// code-chosen the way a registry FactColumn's Kind is. Unlike
+	// KindNumber, a virtual number's unit/phrasing guidance comes from the
+	// fact's own Instruction (rendered beside its token), not from a fixed
+	// Unit word, because the column itself is not code-owned.
+	KindVirtualNumber  ValueKind = "virtual_number"
+	KindVirtualBoolean ValueKind = "virtual_boolean"
+	KindVirtualString  ValueKind = "virtual_string"
 )
+
+// isVirtualKind reports whether kind identifies a seller-authored
+// additional-fact token (facts.go) rather than a code-owned registry
+// column — the two are resolved through entirely different lookups
+// (resolveVirtualFact vs. the per-table concrete-column switch) in
+// contract.go's currentFactValue.
+func isVirtualKind(kind ValueKind) bool {
+	switch kind {
+	case KindVirtualNumber, KindVirtualBoolean, KindVirtualString:
+		return true
+	default:
+		return false
+	}
+}
+
+// FactBoolWordingRU is the reviewed Russian yes/no wording a boolean
+// additional fact substitutes to — generic (unlike DeliveryWordingRU's
+// "доставляем"/"не доставляем", which is specific to delivery-availability
+// phrasing), since a virtual boolean fact's own meaning is only known
+// through its seller-authored Instruction.
+var FactBoolWordingRU = map[bool]string{
+	true:  "да",
+	false: "нет",
+}
+
+// FactBoolWordingKK is FactBoolWordingRU's Kazakh counterpart, selected for
+// a "kk" reply_language — DRAFT, pending native Kazakh speaker review
+// (same doctrine as DeliveryWordingKK).
+var FactBoolWordingKK = map[bool]string{
+	true:  "иә",
+	false: "жоқ",
+}
+
+// factBoolWording selects the reviewed wording table for a response's
+// declared reply language, mirroring deliveryWording.
+func factBoolWording(lang string) map[bool]string {
+	if lang == "kk" {
+		return FactBoolWordingKK
+	}
+	return FactBoolWordingRU
+}
 
 // DeliveryWordingRU is the reviewed Russian wording code substitutes for the
 // delivery_available boolean. The model never writes the boolean literal, and

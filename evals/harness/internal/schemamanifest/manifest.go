@@ -1,6 +1,6 @@
 // Package schemamanifest turns evals/harness/internal/kbfixture's struct tags
 // — the eval family's own authoring source of truth — into a structural
-// description of what the seven approved-KB production tables plus
+// description of what the eight approved-KB production tables plus
 // kbd_materials must look like, with zero hand-maintained column lists.
 //
 // Two things feed the manifest, and they are cross-checked against each
@@ -15,11 +15,11 @@
 // Deliberately NOT derived here: fine-grained NULL/NOT NULL for plain text
 // columns. kbfixture's YAML shape has no way to distinguish "this field is
 // NULL in the DB" from "this field is an empty string" — every business
-// column is a plain Go string, never a pointer, except the two StrictBool
-// flags. Asserting a specific nullability for every text column from that
-// shape would be a guess, not a derivation, so this package only asserts
-// nullability/default for the two columns kbfixture DOES encode
-// unambiguously via *StrictBool: in_stock and delivery_available.
+// column is a plain Go string, never a pointer, except the one remaining
+// StrictBool flag. Asserting a specific nullability for every text column
+// from that shape would be a guess, not a derivation, so this package only
+// asserts nullability/default for the one column kbfixture DOES encode
+// unambiguously via *StrictBool: delivery_available.
 package schemamanifest
 
 import (
@@ -34,11 +34,11 @@ import (
 // ColumnSpec is one business column's expected shape.
 type ColumnSpec struct {
 	Name string
-	// SQLType is one of: text | integer | boolean | uuid | uuid[].
+	// SQLType is one of: text | integer | boolean | uuid | uuid[] | jsonb.
 	SQLType string
-	// StrictNullability is true only for the two StrictBool-backed columns
-	// (in_stock, delivery_available) — see the package doc comment for why
-	// plain text columns don't carry an asserted nullability here.
+	// StrictNullability is true only for the StrictBool-backed
+	// delivery_available column — see the package doc comment for why plain
+	// text columns don't carry an asserted nullability here.
 	StrictNullability bool
 	// NotNull / NoDefault apply only when StrictNullability is true.
 	NotNull   bool
@@ -61,7 +61,7 @@ type TableSpec struct {
 	BusinessColumns []ColumnSpec
 }
 
-// Manifest is the full comparison target for the seven approved-KB tables.
+// Manifest is the full comparison target for the eight approved-KB tables.
 type Manifest struct {
 	Tables []TableSpec
 	// InfrastructureColumns are the only non-business, non-natural-key
@@ -79,26 +79,28 @@ var InfrastructureColumns = []string{"id", "organization_id", "created_at", "upd
 // comment. ai_contacts/ai_policies are true singletons (organization_id
 // alone); every other table adds its own natural ref/slug.
 var naturalKeys = map[string][]string{
-	"ai_assistants":      {"organization_id"},
-	"ai_topics":          {"organization_id", "slug"},
-	"ai_products":        {"organization_id", "ref"},
-	"ai_tariffs":         {"organization_id", "ref"},
-	"ai_contacts":        {"organization_id"},
-	"ai_policies":        {"organization_id"},
-	"ai_delivery_zones":  {"organization_id", "ref"},
+	"ai_assistants":     {"organization_id"},
+	"ai_topics":         {"organization_id", "slug"},
+	"ai_products":       {"organization_id", "ref"},
+	"ai_tariffs":        {"organization_id", "ref"},
+	"ai_contacts":       {"organization_id"},
+	"ai_policies":       {"organization_id"},
+	"ai_tariff_info":    {"organization_id"},
+	"ai_delivery_zones": {"organization_id", "ref"},
 }
 
 // tableGoType pairs each physical table name with the kbfixture Go type that
 // mirrors one of its rows (or its singleton object, for ai_assistants /
 // ai_contacts / ai_policies) — the reflection root BuildManifest walks.
 var tableGoType = map[string]reflect.Type{
-	"ai_assistants":      reflect.TypeOf(kbfixture.AIAssistant{}),
-	"ai_topics":          reflect.TypeOf(kbfixture.AITopic{}),
-	"ai_products":        reflect.TypeOf(kbfixture.AIProduct{}),
-	"ai_tariffs":         reflect.TypeOf(kbfixture.AITariff{}),
-	"ai_contacts":        reflect.TypeOf(kbfixture.AIContacts{}),
-	"ai_policies":        reflect.TypeOf(kbfixture.AIPolicies{}),
-	"ai_delivery_zones":  reflect.TypeOf(kbfixture.AIDeliveryZone{}),
+	"ai_assistants":     reflect.TypeOf(kbfixture.AIAssistant{}),
+	"ai_topics":         reflect.TypeOf(kbfixture.AITopic{}),
+	"ai_products":       reflect.TypeOf(kbfixture.AIProduct{}),
+	"ai_tariffs":        reflect.TypeOf(kbfixture.AITariff{}),
+	"ai_contacts":       reflect.TypeOf(kbfixture.AIContacts{}),
+	"ai_policies":       reflect.TypeOf(kbfixture.AIPolicies{}),
+	"ai_tariff_info":    reflect.TypeOf(kbfixture.AITariffInfo{}),
+	"ai_delivery_zones": reflect.TypeOf(kbfixture.AIDeliveryZone{}),
 }
 
 // mediaTableSegment maps a physical table name to the model-facing table
@@ -106,14 +108,14 @@ var tableGoType = map[string]reflect.Type{
 // not "ai_topics" — the registry is keyed on the media-token vocabulary, the
 // fixture/DB side is keyed on the physical table name).
 var mediaTableSegment = map[string]string{
-	"ai_topics":         "topics",
-	"ai_products":       "products",
-	"ai_tariffs":        "tariffs",
-	"ai_contacts":       "contacts",
-	"ai_policies":       "policies",
+	"ai_topics":   "topics",
+	"ai_products": "products",
+	"ai_tariffs":  "tariffs",
+	"ai_contacts": "contacts",
+	"ai_policies": "policies",
 }
 
-// TableNames returns the seven approved-KB table names in a stable order.
+// TableNames returns the eight approved-KB table names in a stable order.
 func TableNames() []string {
 	names := make([]string, 0, len(tableGoType))
 	for t := range tableGoType {
@@ -127,6 +129,14 @@ func TableNames() []string {
 // BuildManifest recognizes the pointer-to-StrictBool shape regardless of
 // which field carries it, rather than hardcoding field names.
 var strictBoolType = reflect.TypeOf((*kbfixture.StrictBool)(nil))
+
+// additionalFactsType is []kbfixture.AIAdditionalFact — matched by identity,
+// the same technique strictBoolType uses, so BuildManifest recognizes the
+// virtual-fact-columns shape shared by ai_products/ai_tariffs/ai_tariff_info
+// (backend/aiprompt/facts.go's AdditionalFact) regardless of field name. It
+// always maps to SQLType "jsonb": a JSON array column, never a nullable
+// scalar or a media-registry column.
+var additionalFactsType = reflect.TypeOf([]kbfixture.AIAdditionalFact{})
 
 // BuildManifest reflects over kbfixture's struct tags and cross-checks every
 // []string / *StrictBool field against backend/aiprompt's media registry,
@@ -220,12 +230,14 @@ func scalarColumnSpec(field reflect.StructField, colName string) (ColumnSpec, er
 	switch {
 	case field.Type == strictBoolType:
 		return ColumnSpec{Name: colName, SQLType: "boolean", StrictNullability: true, NotNull: true, NoDefault: true}, nil
+	case field.Type == additionalFactsType:
+		return ColumnSpec{Name: colName, SQLType: "jsonb"}, nil
 	case field.Type.Kind() == reflect.String:
 		return ColumnSpec{Name: colName, SQLType: "text"}, nil
 	case field.Type.Kind() == reflect.Int || field.Type.Kind() == reflect.Int64:
 		return ColumnSpec{Name: colName, SQLType: "integer"}, nil
 	default:
-		return ColumnSpec{}, fmt.Errorf("field %s (column %q) has unrecognized type %s — not a media column, string, int, or *StrictBool",
+		return ColumnSpec{}, fmt.Errorf("field %s (column %q) has unrecognized type %s — not a media column, string, int, *StrictBool, or []AIAdditionalFact",
 			field.Name, colName, field.Type)
 	}
 }

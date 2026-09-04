@@ -8,6 +8,13 @@
 // see MediaFieldPicker.vue's doc comment on why the form always sends the
 // picker's full current state), a plural reference is `string[]` (never
 // undefined; an empty array IS "detach everything").
+//
+// additional_facts follows the SAME whole-list-replace convention as a
+// plural media field: omit it to leave existing facts unchanged, send it
+// (an empty array included) to replace the complete list — see
+// AdditionalFactsEditor.vue's own doc comment.
+import type { AdditionalFact } from '@/types'
+
 export interface TopicPayload {
   kind: 'topics'
   slug: string
@@ -30,6 +37,9 @@ export interface TariffPayload {
   pricing_type?: string
   advantages?: string
   disadvantages?: string
+  best_for?: string
+  not_for?: string
+  additional_facts?: AdditionalFact[]
   sales_status?: string
   featured_image?: string | null
   pricing_images?: string[]
@@ -44,8 +54,17 @@ export interface ProductPayload {
   price?: string
   description?: string
   category?: string
+  brand?: string
+  advantages?: string
+  disadvantages?: string
+  best_for?: string
+  not_for?: string
+  availability_status?: string
+  availability_note?: string
+  installation_terms?: string
+  warranty_terms?: string
+  additional_facts?: AdditionalFact[]
   sales_status?: string
-  in_stock?: boolean
   featured_image?: string | null
   gallery_images?: string[]
   demo_videos?: string[]
@@ -96,6 +115,14 @@ export interface PoliciesPayload {
   commerce_policy_documents?: string[]
 }
 
+// TariffInfoPayload — the ai_tariff_info singleton: org-wide tariff facts
+// not specific to any one tariff. No prose fields at all, only
+// additional_facts (see TariffInfoRow).
+export interface TariffInfoPayload {
+  kind: 'tariff_info'
+  additional_facts?: AdditionalFact[]
+}
+
 export type KbFormPayload =
   | TopicPayload
   | TariffPayload
@@ -103,3 +130,4 @@ export type KbFormPayload =
   | DeliveryZonePayload
   | ContactsPayload
   | PoliciesPayload
+  | TariffInfoPayload

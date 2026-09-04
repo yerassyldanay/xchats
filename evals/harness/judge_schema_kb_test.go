@@ -245,13 +245,13 @@ ai_products:
     name: "Кофемашина DeLonghi"
     price: "129 900 ₸"
     description: "Автоматическая кофемашина для дома."
-    in_stock: true
+    availability_status: in_stock
     sales_status: active
     featured_image: "22222222-2222-2222-2222-222222222222"
   - ref: blender-x
     name: "Блендер X"
     price: "9 900 ₸"
-    in_stock: true
+    availability_status: in_stock
     sales_status: active
 
 ai_policies:

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
 
@@ -163,6 +164,35 @@ func optMaterialIDs(m map[string]json.RawMessage, key string) (*[]uuid.UUID, err
 		ids = append(ids, id)
 	}
 	return &ids, nil
+}
+
+// optAdditionalFacts: key absent → nil (unchanged); null or [] → replace
+// with an empty list (clears every virtual fact); an array of {ref, value,
+// instruction} objects → that list, in order — the same nil-means-
+// unchanged/non-nil-means-replace shape optMaterialIDs uses for a plural
+// media field, applied here to a fact list instead. Per-entry shape
+// validation (value must be a JSON number/boolean/string, unknown keys
+// rejected) happens inside aiprompt.AdditionalFact's own UnmarshalJSON;
+// semantic validation (ref syntax, uniqueness, collision with a concrete
+// column, instruction hygiene) is aiprompt.ValidateFacts, run by kbstore at
+// write time — this function only decodes the wire shape.
+func optAdditionalFacts(m map[string]json.RawMessage, key string) (*[]aiprompt.AdditionalFact, error) {
+	raw, ok := m[key]
+	if !ok {
+		return nil, nil
+	}
+	if isJSONNull(raw) {
+		empty := []aiprompt.AdditionalFact{}
+		return &empty, nil
+	}
+	var facts []aiprompt.AdditionalFact
+	if err := json.Unmarshal(raw, &facts); err != nil {
+		return nil, fmt.Errorf("%s: %w", key, err)
+	}
+	if facts == nil {
+		facts = []aiprompt.AdditionalFact{}
+	}
+	return &facts, nil
 }
 
 // optExpectedVersion reads the common expected_draft_version?  top-level

@@ -192,7 +192,7 @@ func synthesisState(t *testing.T, kb *kbstore.Store, orgID, runID uuid.UUID) *kb
 
 func TestRunSynthesis_ValidMultiCallLands(t *testing.T) {
 	resp := `{"calls":[
-		{"tool":"kb_product_upsert","args":{"ref":"drill-zt40h","changes":{"name":"Станок ZT-40H","price":"180 000 ₸","in_stock":true}}},
+		{"tool":"kb_product_upsert","args":{"ref":"drill-zt40h","changes":{"name":"Станок ZT-40H","price":"180 000 ₸","availability_status":"in_stock"}}},
 		{"tool":"kb_topic_upsert","args":{"slug":"warranty","changes":{"title":"Гарантия","body_md":"Гарантия 12 месяцев."}}}
 	],"notes":"Добавлены товар и тема.","unmapped":[]}`
 	client := &scriptedClient{responses: []string{resp}}
@@ -223,8 +223,8 @@ func TestRunSynthesis_ValidMultiCallLands(t *testing.T) {
 
 func TestRunSynthesis_BadEnumDropsOneKeepsOther(t *testing.T) {
 	resp := `{"calls":[
-		{"tool":"kb_product_upsert","args":{"ref":"good-1","changes":{"name":"Хороший товар","in_stock":true,"sales_status":"not-a-real-status"}}},
-		{"tool":"kb_product_upsert","args":{"ref":"good-2","changes":{"name":"Другой товар","in_stock":true}}}
+		{"tool":"kb_product_upsert","args":{"ref":"good-1","changes":{"name":"Хороший товар","availability_status":"in_stock","sales_status":"not-a-real-status"}}},
+		{"tool":"kb_product_upsert","args":{"ref":"good-2","changes":{"name":"Другой товар","availability_status":"in_stock"}}}
 	],"notes":"","unmapped":[]}`
 	client := &scriptedClient{responses: []string{resp}}
 	svc, kb, orgID, _ := newTestService(t, client)
@@ -251,7 +251,7 @@ func TestRunSynthesis_BadEnumDropsOneKeepsOther(t *testing.T) {
 
 func TestRunSynthesis_UploadHandleResolvesToFeaturedImage(t *testing.T) {
 	resp := `{"calls":[
-		{"tool":"kb_product_upsert","args":{"ref":"drill-zt40h","changes":{"name":"Станок","in_stock":true,"featured_image":"upload.1"}}}
+		{"tool":"kb_product_upsert","args":{"ref":"drill-zt40h","changes":{"name":"Станок","availability_status":"in_stock","featured_image":"upload.1"}}}
 	],"notes":"","unmapped":[]}`
 	client := &scriptedClient{responses: []string{resp}}
 	svc, kb, orgID, _ := newTestService(t, client)
@@ -274,7 +274,7 @@ func TestRunSynthesis_UploadHandleResolvesToFeaturedImage(t *testing.T) {
 
 func TestRunSynthesis_EvidenceHandleInMediaFieldDropsCall(t *testing.T) {
 	resp := `{"calls":[
-		{"tool":"kb_product_upsert","args":{"ref":"drill-zt40h","changes":{"name":"Станок","in_stock":true,"featured_image":"evidence.1"}}},
+		{"tool":"kb_product_upsert","args":{"ref":"drill-zt40h","changes":{"name":"Станок","availability_status":"in_stock","featured_image":"evidence.1"}}},
 		{"tool":"kb_topic_upsert","args":{"slug":"ok-topic","changes":{"title":"ОК","body_md":"Текст."}}}
 	],"notes":"","unmapped":[]}`
 	client := &scriptedClient{responses: []string{resp}}
@@ -301,7 +301,7 @@ func TestRunSynthesis_EvidenceHandleInMediaFieldDropsCall(t *testing.T) {
 func TestRunSynthesis_BareUUIDInMediaFieldDropsCall(t *testing.T) {
 	fakeUUID := uuid.New().String()
 	resp := fmt.Sprintf(`{"calls":[
-		{"tool":"kb_product_upsert","args":{"ref":"drill-zt40h","changes":{"name":"Станок","in_stock":true,"featured_image":%q}}}
+		{"tool":"kb_product_upsert","args":{"ref":"drill-zt40h","changes":{"name":"Станок","availability_status":"in_stock","featured_image":%q}}}
 	],"notes":"","unmapped":[]}`, fakeUUID)
 	client := &scriptedClient{responses: []string{resp, resp}} // the zero-survivor path re-asks once
 	svc, kb, orgID, _ := newTestService(t, client)
@@ -354,7 +354,7 @@ func TestRunSynthesis_UnparseableOutput_OneRetryThenFailed_NothingWritten(t *tes
 func TestRunSynthesis_ExplicitTargetDropsForeignToolCall(t *testing.T) {
 	resp := `{"calls":[
 		{"tool":"kb_topic_upsert","args":{"slug":"wrong-type","changes":{"title":"Не тот тип","body_md":"Текст."}}},
-		{"tool":"kb_product_upsert","args":{"ref":"right-type","changes":{"name":"Товар","in_stock":true}}}
+		{"tool":"kb_product_upsert","args":{"ref":"right-type","changes":{"name":"Товар","availability_status":"in_stock"}}}
 	],"notes":"","unmapped":[]}`
 	client := &scriptedClient{responses: []string{resp}}
 	svc, kb, orgID, _ := newTestService(t, client)
@@ -380,6 +380,81 @@ func TestRunSynthesis_ExplicitTargetDropsForeignToolCall(t *testing.T) {
 	}
 	if len(v.Topics) != 0 {
 		t.Fatalf("draft topics = %+v, want none — target_type=products must exclude kb_topic_upsert", v.Topics)
+	}
+}
+
+// TestRunSynthesis_TariffInfoUpsertLands proves the org-wide tariff_info
+// singleton is reachable through the exact same synthesis seam as every
+// other content type — required test scenario "MCP/import round trips" for
+// kb_tariff_info_upsert, added alongside UpsertTools/targetTypeToTool.
+func TestRunSynthesis_TariffInfoUpsertLands(t *testing.T) {
+	resp := `{"calls":[
+		{"tool":"kb_tariff_info_upsert","args":{"changes":{"additional_facts":[
+			{"ref":"trial_in_days","value":3,"instruction":"Продолжительность общего пробного периода."}
+		]}}}
+	],"notes":"Добавлена тарифная информация.","unmapped":[]}`
+	client := &scriptedClient{responses: []string{resp}}
+	svc, kb, orgID, _ := newTestService(t, client)
+
+	runID, _ := seedRun(t, kb, orgID, uuid.Nil, "auto", []seedMaterial{
+		{handle: "evidence.1", text: "Пробный период 3 дня для всех тарифов"},
+	})
+	svc.maybeSynthesize(context.Background(), orgID, runID)
+
+	st := synthesisState(t, kb, orgID, runID)
+	if st == nil || st.Status != kbstore.SynthesisBuilt {
+		t.Fatalf("Synthesis = %+v, want built", st)
+	}
+	if len(st.Applied) != 1 || st.Applied[0].Tool != "kb_tariff_info_upsert" {
+		t.Fatalf("Applied = %+v, want exactly the tariff_info call", st.Applied)
+	}
+
+	v, err := kb.DraftOnly(context.Background(), orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.TariffInfo) != 1 || len(v.TariffInfo[0].AdditionalFacts) != 1 ||
+		v.TariffInfo[0].AdditionalFacts[0].Ref != "trial_in_days" {
+		t.Fatalf("draft tariff_info = %+v, want one fact trial_in_days", v.TariffInfo)
+	}
+}
+
+// TestRunSynthesis_ExplicitTariffInfoTargetDropsForeignToolCall is
+// TestRunSynthesis_ExplicitTargetDropsForeignToolCall's tariff_info
+// counterpart — proves target_type="tariff_info" restricts synthesis to
+// kb_tariff_info_upsert alone, the same closed-vocabulary contract every
+// other explicit target already enforces.
+func TestRunSynthesis_ExplicitTariffInfoTargetDropsForeignToolCall(t *testing.T) {
+	resp := `{"calls":[
+		{"tool":"kb_product_upsert","args":{"ref":"wrong-type","changes":{"name":"Не тот тип","availability_status":"in_stock"}}},
+		{"tool":"kb_tariff_info_upsert","args":{"changes":{"additional_facts":[
+			{"ref":"trial_in_days","value":3,"instruction":"Продолжительность общего пробного периода."}
+		]}}}
+	],"notes":"","unmapped":[]}`
+	client := &scriptedClient{responses: []string{resp}}
+	svc, kb, orgID, _ := newTestService(t, client)
+
+	runID, _ := seedRun(t, kb, orgID, uuid.Nil, "tariff_info", []seedMaterial{
+		{handle: "evidence.1", text: "текст"},
+	})
+	svc.maybeSynthesize(context.Background(), orgID, runID)
+
+	st := synthesisState(t, kb, orgID, runID)
+	if st == nil || st.Status != kbstore.SynthesisBuilt {
+		t.Fatalf("Synthesis = %+v, want built", st)
+	}
+	if len(st.Applied) != 1 || st.Applied[0].Tool != "kb_tariff_info_upsert" {
+		t.Fatalf("Applied = %+v, want only the tariff_info call", st.Applied)
+	}
+	if len(st.Dropped) != 1 || st.Dropped[0].Tool != "kb_product_upsert" {
+		t.Fatalf("Dropped = %+v, want the product call dropped for target mismatch", st.Dropped)
+	}
+	v, err := kb.DraftOnly(context.Background(), orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Products) != 0 {
+		t.Fatalf("draft products = %+v, want none — target_type=tariff_info must exclude kb_product_upsert", v.Products)
 	}
 }
 

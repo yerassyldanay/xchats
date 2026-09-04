@@ -11,7 +11,7 @@ import (
 )
 
 // UpsertTools is the closed set of tool names ParseUpsertCall accepts — the
-// seven typed kb_*_upsert tools, in Tools()' own declared order. kb_delete
+// eight typed kb_*_upsert tools, in Tools()' own declared order. kb_delete
 // is deliberately ABSENT: a second caller of this seam (internal/kbimport,
 // staging draft entries from internet-sourced content) must never be able
 // to construct a delete call — there is structurally no code path from
@@ -19,7 +19,7 @@ import (
 // this list happens to follow (plan/mcp.md §10).
 var UpsertTools = []string{
 	toolKBTopicUpsert, toolKBProductUpsert, toolKBTariffUpsert,
-	toolKBContactsUpsert, toolKBPoliciesUpsert, toolKBDeliveryZoneUpsert,
+	toolKBContactsUpsert, toolKBPoliciesUpsert, toolKBTariffInfoUpsert, toolKBDeliveryZoneUpsert,
 	toolKBAssistantUpsert,
 }
 
@@ -144,6 +144,18 @@ func ParseUpsertCall(tool string, args map[string]json.RawMessage) (UpsertCall, 
 			Tool: tool, Key: kbstore.NaturalKeyMain,
 			apply: func(ctx context.Context, kb *kbstore.Store, orgID, userID uuid.UUID, expectedVersion *int64, prov kbstore.MCPProvenance) (kbstore.UpsertResult, error) {
 				return kb.MCPUpsertPolicies(ctx, orgID, userID, ch, expectedVersion, prov)
+			},
+		}, nil
+
+	case toolKBTariffInfoUpsert:
+		ch, err := parseTariffInfoChanges(changes)
+		if err != nil {
+			return UpsertCall{}, err
+		}
+		return UpsertCall{
+			Tool: tool, Key: kbstore.NaturalKeyMain,
+			apply: func(ctx context.Context, kb *kbstore.Store, orgID, userID uuid.UUID, expectedVersion *int64, prov kbstore.MCPProvenance) (kbstore.UpsertResult, error) {
+				return kb.MCPUpsertTariffInfo(ctx, orgID, userID, ch, expectedVersion, prov)
 			},
 		}, nil
 

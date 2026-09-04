@@ -28,8 +28,8 @@ const CANCEL: KbAction = { key: 'cancel', labelKey: 'kb.actions.cancel', variant
 const REMOVE_FROM_DRAFT: KbAction = { key: 'cancel', labelKey: 'kb.actions.removeFromDraft', variant: 'ghost', destructive: true }
 const DELETE: KbAction = { key: 'delete', labelKey: 'kb.actions.delete', variant: 'ghost', destructive: true }
 
-// kbActions is the action row for the six content kinds (topics, tariffs,
-// products, delivery zones, contacts, policies) on BOTH pages:
+// kbActions is the action row for the seven content kinds (topics, tariffs,
+// products, delivery zones, contacts, policies, tariff_info) on BOTH pages:
 //   - page 'live' (Знаний база — RecordList.vue): Изменить + Удалить, minus
 //     Удалить for a singleton (contacts/policies have no delete affordance
 //     at all — there is nothing to "delete back to").

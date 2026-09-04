@@ -1,7 +1,6 @@
 package kbfixture
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -31,19 +30,19 @@ ai_products:
     price: "129 900 ₸"
     description: "Автоматическая кофемашина для дома."
     category: "Кофемашины"
-    in_stock: true
+    availability_status: in_stock
     sales_status: active
     featured_image: "22222222-2222-2222-2222-222222222222"
     gallery_images: ["33333333-3333-3333-3333-333333333333"]
   - ref: cookware-set
     name: "Набор посуды"
     price: "24 900 ₸"
-    in_stock: false
+    availability_status: unavailable
     sales_status: active
   - ref: toaster
     name: "Тостер Philips"
     price: "15 000 ₸"
-    in_stock: true
+    availability_status: in_stock
     sales_status: active
 
 ai_tariffs:
@@ -101,14 +100,14 @@ func TestDecode_Valid(t *testing.T) {
 	if len(kb.Products) != 3 {
 		t.Fatalf("expected 3 products, got %d", len(kb.Products))
 	}
-	if kb.Products[0].Ref != "coffee-machine" || !kb.Products[0].InStock {
+	if kb.Products[0].Ref != "coffee-machine" || kb.Products[0].AvailabilityStatus != "in_stock" {
 		t.Errorf("Products[0] = %+v", kb.Products[0])
 	}
 	if kb.Products[1].SalesStatus != "active" {
 		t.Errorf("cookware-set SalesStatus = %q, want active", kb.Products[1].SalesStatus)
 	}
-	if kb.Products[1].InStock {
-		t.Error("cookware-set must be in_stock=false")
+	if kb.Products[1].AvailabilityStatus != "unavailable" {
+		t.Error("cookware-set must be availability_status=unavailable")
 	}
 	if len(kb.Tariffs) != 1 || kb.Tariffs[0].PricingType != "fixed" {
 		t.Errorf("Tariffs = %+v", kb.Tariffs)
@@ -147,13 +146,13 @@ some_unknown_key: 1
 `,
 		},
 		{
-			name: "product availability alias for in_stock",
+			name: "product availability alias for availability_status",
 			yaml: `
 organization_id: "org-1"
 ai_products:
   - ref: p1
     name: "P1"
-    in_stock: true
+    availability_status: in_stock
     sales_status: active
     availability: "В наличии"
 `,
@@ -181,7 +180,7 @@ organization_id: "org-1"
 ai_products:
   - ref: p1
     name: "P1"
-    in_stock: true
+    availability_status: in_stock
     sales_status: active
     values: { price: "1000" }
 `,
@@ -217,11 +216,19 @@ kbd_materials:
 	}
 }
 
-// TestDecode_InStockStrictBoolean: in_stock must be an actual YAML boolean.
-// Quoted strings — even ones that spell out true/false — are rejected, and
-// omitting the key entirely is rejected too (NOT NULL, no default).
-func TestDecode_InStockStrictBoolean(t *testing.T) {
-	reject := []string{`"yes"`, `"no"`, `"true"`, `"false"`, `yes`, `no`}
+// TestDecode_AvailabilityStatusEnum: availability_status, when given, must
+// be one of the closed in_stock|preorder|on_demand|unavailable vocabulary.
+// Unlike the boolean columns (StrictBool), omitting the key is accepted —
+// the real column has a DEFAULT 'in_stock', so the loader mirrors that
+// exact default instead of demanding an explicit value (see AIProduct's own
+// doc comment for why this is NOT the same NOT-NULL-no-default discipline
+// TestDecode_DeliveryZones' delivery_available cases pin). Quoting a valid
+// value ("in_stock" instead of in_stock) is NOT in the reject list: unlike
+// StrictBool, this is a plain string field with no custom UnmarshalYAML, so
+// YAML's !!str vs unquoted-scalar distinction is irrelevant to it — both
+// spellings decode to the identical Go string.
+func TestDecode_AvailabilityStatusEnum(t *testing.T) {
+	reject := []string{"in-stock", "IN_STOCK", "yes", "true", "unknown_status"}
 	for _, v := range reject {
 		t.Run("reject_"+v, func(t *testing.T) {
 			yamlSrc := `
@@ -230,14 +237,14 @@ ai_products:
   - ref: p1
     name: "P1"
     sales_status: active
-    in_stock: ` + v + "\n"
+    availability_status: ` + v + "\n"
 			if _, err := Decode([]byte(yamlSrc)); err == nil {
-				t.Fatalf("expected in_stock: %s to be rejected", v)
+				t.Fatalf("expected availability_status: %s to be rejected", v)
 			}
 		})
 	}
 
-	t.Run("reject_omitted", func(t *testing.T) {
+	t.Run("omitted_defaults_to_in_stock", func(t *testing.T) {
 		yamlSrc := `
 organization_id: "org-1"
 ai_products:
@@ -245,14 +252,16 @@ ai_products:
     name: "P1"
     sales_status: active
 `
-		if _, err := Decode([]byte(yamlSrc)); err == nil {
-			t.Fatal("expected an omitted in_stock key to be rejected")
-		} else if !strings.Contains(err.Error(), "in_stock") {
-			t.Errorf("expected the error to name in_stock, got: %v", err)
+		kb, err := Decode([]byte(yamlSrc))
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		if kb.Products[0].AvailabilityStatus != "in_stock" {
+			t.Errorf("AvailabilityStatus = %q, want the column default \"in_stock\"", kb.Products[0].AvailabilityStatus)
 		}
 	})
 
-	for _, v := range []string{"true", "false"} {
+	for _, v := range []string{"in_stock", "preorder", "on_demand", "unavailable"} {
 		t.Run("accept_"+v, func(t *testing.T) {
 			yamlSrc := `
 organization_id: "org-1"
@@ -260,14 +269,13 @@ ai_products:
   - ref: p1
     name: "P1"
     sales_status: active
-    in_stock: ` + v + "\n"
+    availability_status: ` + v + "\n"
 			kb, err := Decode([]byte(yamlSrc))
 			if err != nil {
 				t.Fatalf("Decode: %v", err)
 			}
-			want := v == "true"
-			if kb.Products[0].InStock != want {
-				t.Errorf("InStock = %v, want %v", kb.Products[0].InStock, want)
+			if kb.Products[0].AvailabilityStatus != v {
+				t.Errorf("AvailabilityStatus = %q, want %q", kb.Products[0].AvailabilityStatus, v)
 			}
 		})
 	}
@@ -284,7 +292,6 @@ ai_products:
   - ref: p1
     name: "P1"
     sales_status: active
-    in_stock: true
     featured_image: ["id-1", "id-2"]
 `
 	if _, err := Decode([]byte(yamlSrc)); err == nil {
@@ -313,7 +320,6 @@ ai_topics:
 organization_id: "org-1"
 ai_products:
   - ref: p1
-    in_stock: true
     sales_status: active
 `},
 		{"tariff missing pricing_type", `
@@ -351,7 +357,6 @@ organization_id: "org-1"
 ai_products:
   - ref: p1
     name: "P1"
-    in_stock: true
     sales_status: discontinued
 `},
 		{"bad pricing_type", `
@@ -400,8 +405,8 @@ func TestDecode_DuplicateNaturalKeys(t *testing.T) {
 		{"duplicate product ref", `
 organization_id: "org-1"
 ai_products:
-  - {ref: p1, name: "A", in_stock: true, sales_status: active}
-  - {ref: p1, name: "B", in_stock: true, sales_status: active}
+  - {ref: p1, name: "A", sales_status: active}
+  - {ref: p1, name: "B", sales_status: active}
 `},
 		{"duplicate topic slug", `
 organization_id: "org-1"
@@ -455,8 +460,11 @@ kbd_materials:
 
 // TestDecode_DeliveryZones covers the loader's own shape validation for
 // ai_delivery_zones — required fields, the closed zone_level/sales_status
-// enums, delivery_available as a required StrictBool (same NOT-NULL
-// discipline as in_stock), and duplicate refs. Cross-row business rules
+// enums, delivery_available as a required StrictBool ("delivery_available
+// omitted" and "delivery_available non-canonical spelling" below pin the
+// same NOT-NULL, no-default discipline TestDecode_AvailabilityStatusEnum's
+// product-side rejections used to pin for in_stock), and duplicate refs.
+// Cross-row business rules
 // (available/cost consistency, parent_ref existence, the flat/zone
 // mutual-exclusion invariant) are aiprompt.BuildCatalog's job, not the
 // loader's — see delivery_test.go in backend/aiprompt and this package's

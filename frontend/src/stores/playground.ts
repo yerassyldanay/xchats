@@ -5,7 +5,7 @@ import { connectRealtime } from '../lib/sse'
 import type { CancelChangeResponse, DraftChangeSet, DraftView, KbGateReason, KbMaterial, PromptView } from '../types'
 import type { ChangeKind } from '@/composables/draftChanges'
 import type {
-  ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, TariffPayload, TopicPayload,
+  ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, TariffInfoPayload, TariffPayload, TopicPayload,
 } from '@/components/kb/forms/payloads'
 
 // usePlayground backs the two KB pages — Черновик (/draft) and Знаний
@@ -66,7 +66,8 @@ export const usePlayground = defineStore('playground', {
     pendingTotal(s): number {
       const c = s.changes
       if (!c) return 0
-      const rows = c.topics.length + c.tariffs.length + c.products.length + c.contacts.length + c.policies.length + c.zones.length
+      const rows =
+        c.topics.length + c.tariffs.length + c.products.length + c.contacts.length + c.policies.length + c.tariff_info.length + c.zones.length
       const configFields = c.config
         ? (['persona', 'mission', 'guardrails', 'language_policy', 'reply_max_words'] as const).filter((k) => c.config![k] !== undefined).length
         : 0
@@ -193,6 +194,11 @@ export const usePlayground = defineStore('playground', {
       return this.write(async () => this.setChanges(await api.patch<DraftChangeSet>('/playground/draft/policies', patch, this.ifMatch())))
     },
 
+    // --- draft tariff_info (the 'main' singleton — one org, one PATCH) -------
+    patchTariffInfo(patch: Omit<TariffInfoPayload, 'kind'>) {
+      return this.write(async () => this.setChanges(await api.patch<DraftChangeSet>('/playground/draft/tariff-info', patch, this.ifMatch())))
+    },
+
     // --- draft config -----------------------------------------------------------
     patchConfig(patch: { persona?: string; mission?: string; guardrails?: string; language_policy?: string; reply_max_words?: number }) {
       return this.write(async () => this.setChanges(await api.patch<DraftChangeSet>('/playground/draft/config', patch, this.ifMatch())))
@@ -228,6 +234,10 @@ export const usePlayground = defineStore('playground', {
         case 'policies': {
           const { kind: _k, ...rest } = payload as PoliciesPayload
           return this.patchPolicies(rest).then(() => !this.error)
+        }
+        case 'tariff_info': {
+          const { kind: _k, ...rest } = payload as TariffInfoPayload
+          return this.patchTariffInfo(rest).then(() => !this.error)
         }
       }
     },
@@ -392,6 +402,9 @@ export const usePlayground = defineStore('playground', {
     patchLivePolicies(patch: Omit<PoliciesPayload, 'kind'>) {
       return this.writeLive(async () => { this.live = await api.patch<DraftView>('/kb/policies', patch) })
     },
+    patchLiveTariffInfo(patch: Omit<TariffInfoPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.patch<DraftView>('/kb/tariff-info', patch) })
+    },
     patchLiveConfig(patch: { persona?: string; mission?: string; guardrails?: string; language_policy?: string; reply_max_words?: number }) {
       return this.writeLive(async () => { this.live = await api.patch<DraftView>('/kb/config', patch) })
     },
@@ -425,6 +438,10 @@ export const usePlayground = defineStore('playground', {
         case 'policies': {
           const { kind: _k, ...rest } = payload as PoliciesPayload
           return this.patchLivePolicies(rest).then(() => !this.error)
+        }
+        case 'tariff_info': {
+          const { kind: _k, ...rest } = payload as TariffInfoPayload
+          return this.patchLiveTariffInfo(rest).then(() => !this.error)
         }
       }
     },

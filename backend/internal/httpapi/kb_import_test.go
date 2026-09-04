@@ -308,7 +308,7 @@ func TestKBImports_EndToEnd_FirecrawlURLLandsInDraftOnly(t *testing.T) {
 	modelResp, err := json.Marshal(map[string]any{
 		"calls": []map[string]any{{
 			"tool": "kb_product_upsert",
-			"args": map[string]any{"ref": "zt40h", "changes": map[string]any{"name": "Станок ZT-40H", "price": "180 000 ₸", "in_stock": true}},
+			"args": map[string]any{"ref": "zt40h", "changes": map[string]any{"name": "Станок ZT-40H", "price": "180 000 ₸", "availability_status": "in_stock"}},
 		}},
 		"notes": "готово", "unmapped": []string{},
 	})

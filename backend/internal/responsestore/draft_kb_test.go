@@ -22,7 +22,7 @@ func TestBuildKBFromDraftView_MapsEveryEntityKind(t *testing.T) {
 			{Slug: "faq", Title: "Частые вопросы", BodyMD: "Текст.", FeaturedImage: &featuredImage},
 		},
 		Products: []kbstore.ProductRow{
-			{Ref: "widget", Name: "Виджет", Price: "1000", InStock: true, SalesStatus: "active", GalleryImages: []uuid.UUID{gallery}},
+			{Ref: "widget", Name: "Виджет", Price: "1000", AvailabilityStatus: "in_stock", SalesStatus: "active", GalleryImages: []uuid.UUID{gallery}},
 		},
 		Tariffs: []kbstore.TariffRow{
 			{Ref: "pro", Name: "Про", Price: "5000", SalesStatus: "active"},

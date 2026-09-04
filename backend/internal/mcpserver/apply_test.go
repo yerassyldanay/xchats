@@ -56,12 +56,12 @@ func TestUpsertTools_ExcludesDelete(t *testing.T) {
 		}
 		seen[name] = true
 	}
-	if len(mcpserver.UpsertTools) != 7 {
-		t.Fatalf("UpsertTools has %d entries, want the 7 typed upserts", len(mcpserver.UpsertTools))
+	if len(mcpserver.UpsertTools) != 8 {
+		t.Fatalf("UpsertTools has %d entries, want the 8 typed upserts", len(mcpserver.UpsertTools))
 	}
 	for _, want := range []string{
 		"kb_topic_upsert", "kb_product_upsert", "kb_tariff_upsert", "kb_contacts_upsert",
-		"kb_policies_upsert", "kb_delivery_zone_upsert", "kb_assistant_upsert",
+		"kb_policies_upsert", "kb_tariff_info_upsert", "kb_delivery_zone_upsert", "kb_assistant_upsert",
 	} {
 		if !seen[want] {
 			t.Errorf("UpsertTools is missing %q", want)
@@ -147,7 +147,7 @@ func TestParseUpsertCall_EquivalentToHandler(t *testing.T) {
 
 		changes := func(img uuid.UUID) map[string]any {
 			return map[string]any{
-				"name": "Магнитный сверлильный станок", "price": "180 000 ₸", "in_stock": true,
+				"name": "Магнитный сверлильный станок", "price": "180 000 ₸", "availability_status": "in_stock",
 				"sales_status": "active", "gallery_images": []string{img.String()},
 			}
 		}
@@ -168,7 +168,7 @@ func TestParseUpsertCall_EquivalentToHandler(t *testing.T) {
 			t.Fatalf("expected exactly one draft product each, got %d / %d", len(viewA.Products), len(viewB.Products))
 		}
 		a, b := viewA.Products[0], viewB.Products[0]
-		if a.Ref != b.Ref || a.Name != b.Name || a.Price != b.Price || a.InStock != b.InStock || a.SalesStatus != b.SalesStatus {
+		if a.Ref != b.Ref || a.Name != b.Name || a.Price != b.Price || a.AvailabilityStatus != b.AvailabilityStatus || a.SalesStatus != b.SalesStatus {
 			t.Fatalf("product business fields diverged:\n  handler: %+v\n  apply:   %+v", a, b)
 		}
 		if len(a.GalleryImages) != 1 || len(b.GalleryImages) != 1 {

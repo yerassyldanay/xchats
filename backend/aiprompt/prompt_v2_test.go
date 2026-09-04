@@ -22,14 +22,14 @@ func v2KB() *KB {
 	kb.Products = append(kb.Products,
 		Product{
 			Ref: "blender-bosch", Name: "Блендер Bosch", Price: "9 900 ₸",
-			InStock: true, SalesStatus: "active",
+			AvailabilityStatus: "in_stock", SalesStatus: "active",
 		},
 		Product{
 			Ref: "blender-tefal", Name: "Блендер Tefal", Price: "14 900 ₸",
-			InStock:       true,
-			SalesStatus:   "active",
-			GalleryImages: []string{"m-bt-gallery-1"},
-			DemoVideos:    []string{"m-bt-video-1"},
+			AvailabilityStatus: "in_stock",
+			SalesStatus:        "active",
+			GalleryImages:      []string{"m-bt-gallery-1"},
+			DemoVideos:         []string{"m-bt-video-1"},
 		},
 	)
 	return kb
@@ -182,11 +182,11 @@ func TestRenderBusinessFacts_ExcludesProductFactsIncludesRest(t *testing.T) {
 // time (never duplicated across the per-product/topic blocks and BUSINESS_FACTS
 // the way the v1 flat rendering could in principle repeat a concept across
 // sections), and no %%SLOT%% marker survives. cat.Facts/cat.Media themselves
-// still carry entries the v2 frame deliberately never renders — an out-of-stock
-// product's price fact (BuildCatalog is shared with the legacy v1 rendering,
-// which still shows it, so it is NOT changed to drop it) and tariff facts (no
-// v2 tariff block yet, see renderBusinessFacts) — those are correctly EXCLUDED
-// from this check, not a violation of the invariant.
+// still carry entries the v2 frame deliberately never renders — tariff facts
+// (no v2 tariff block yet, see renderBusinessFacts) are correctly EXCLUDED
+// from this check, not a violation of the invariant. An unavailable
+// product's facts/media are no longer generated at all (productVisible,
+// catalog.go), so there is nothing left to exclude for those.
 func TestRenderPrompt_V2Frame_EveryTokenExactlyOnceNoLeftoverSlots(t *testing.T) {
 	kb := v2KB()
 	prompt, cat, err := BuildPrompt(v2Frame, kb)
@@ -196,17 +196,17 @@ func TestRenderPrompt_V2Frame_EveryTokenExactlyOnceNoLeftoverSlots(t *testing.T)
 	if strings.Contains(prompt, "%%") {
 		t.Errorf("prompt still contains an unfilled slot marker:\n%s", prompt)
 	}
-	inStock := map[string]bool{}
-	for _, p := range kb.Products {
-		if active(p.SalesStatus) && p.InStock {
-			inStock[p.Ref] = true
+	visible := map[string]bool{}
+	for i := range kb.Products {
+		if productVisible(&kb.Products[i]) {
+			visible[kb.Products[i].Ref] = true
 		}
 	}
 	for _, f := range cat.Facts {
 		switch f.Table {
 		case "product":
-			if !inStock[f.Ref] {
-				continue // out-of-stock product: deliberately never rendered by v2
+			if !visible[f.Ref] {
+				continue // unavailable product: no longer cataloged at all
 			}
 		case "tariff":
 			continue // no v2 tariff block yet (renderBusinessFacts's own doc comment)
@@ -216,8 +216,8 @@ func TestRenderPrompt_V2Frame_EveryTokenExactlyOnceNoLeftoverSlots(t *testing.T)
 		}
 	}
 	for _, m := range cat.Media {
-		if m.Table == "products" && !inStock[m.Ref] {
-			continue // out-of-stock product: v2 never renders its media
+		if m.Table == "products" && !visible[m.Ref] {
+			continue // unavailable product: no longer cataloged at all
 		}
 		if n := strings.Count(prompt, m.Token); n != 1 {
 			t.Errorf("media token %s appears %d times, want exactly 1:\n%s", m.Token, n, prompt)

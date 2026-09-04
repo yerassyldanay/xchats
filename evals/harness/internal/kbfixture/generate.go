@@ -366,11 +366,23 @@ func generateProducts(mb *materialBuilder) []AIProduct {
 	return products
 }
 
+// availabilityStatusFromBool preserves generateProducts' original two-state
+// pattern (true/false driving a deterministic ~2-in-3 in-stock spread) as
+// the two availability_status values it maps onto 1:1: true -> "in_stock",
+// false -> "unavailable" — the same mapping backend migration 0017 backfills
+// the old in_stock column into. Neither preorder nor on_demand is generated
+// here; a scenario wanting one authors it directly in a YAML fixture.
+func availabilityStatusFromBool(inStock bool) string {
+	if inStock {
+		return "in_stock"
+	}
+	return "unavailable"
+}
+
 func buildProduct(mb *materialBuilder, ref, name, price, description string, inStock bool, plan productMediaPlan) AIProduct {
-	stock := StrictBool(inStock)
 	p := AIProduct{
 		Ref: ref, Name: name, Price: price, Description: description,
-		InStock: &stock, SalesStatus: "active",
+		AvailabilityStatus: availabilityStatusFromBool(inStock), SalesStatus: "active",
 	}
 	if plan.featured {
 		p.FeaturedImage = mb.add("products/"+ref+"/featured_image", "image")

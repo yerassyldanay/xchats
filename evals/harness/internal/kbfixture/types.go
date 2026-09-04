@@ -13,8 +13,8 @@
 //
 //   - Every business column defined in DECISIONS.md §"Canonical knowledge-base
 //     schema" is preserved under its exact column name (no aliases: e.g.
-//     "in_stock" not "availability", "working_hours" not "work_hours",
-//     "delivery_in_days" not "delivery_time").
+//     "availability_status" not "availability", "working_hours" not
+//     "work_hours", "delivery_in_days" not "delivery_time").
 //   - Infrastructure columns the prompt path never reads are omitted entirely
 //     from ai_* rows: no "id", "created_at", or "updated_at". Business rows are
 //     addressed by their natural key (ref/slug, or the fixed "main" singleton)
@@ -42,6 +42,7 @@
 package kbfixture
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -49,8 +50,8 @@ import (
 
 // Fixture is the top-level schema-shaped YAML document. Its keys are exactly
 // organization_id, ai_assistants, ai_topics, ai_products, ai_tariffs,
-// ai_contacts, ai_policies, ai_delivery_zones, and kbd_materials — nothing
-// else.
+// ai_contacts, ai_policies, ai_tariff_info, ai_delivery_zones, and
+// kbd_materials — nothing else.
 type Fixture struct {
 	OrganizationID  string           `yaml:"organization_id"`
 	AIAssistants    *AIAssistant     `yaml:"ai_assistants"`
@@ -59,6 +60,7 @@ type Fixture struct {
 	AITariffs       []AITariff       `yaml:"ai_tariffs"`
 	AIContacts      *AIContacts      `yaml:"ai_contacts"`
 	AIPolicies      *AIPolicies      `yaml:"ai_policies"`
+	AITariffInfo    *AITariffInfo    `yaml:"ai_tariff_info"`
 	AIDeliveryZones []AIDeliveryZone `yaml:"ai_delivery_zones"`
 	KBDMaterials    []KBDMaterial    `yaml:"kbd_materials"`
 }
@@ -74,23 +76,27 @@ type AIAssistant struct {
 
 // AITopic mirrors one ai_topics row.
 type AITopic struct {
-	Slug                string   `yaml:"slug"`
-	Title               string   `yaml:"title"`
-	BodyMD              string   `yaml:"body_md"`
-	FeaturedImage       string   `yaml:"featured_image"`
-	IllustrationImages  []string `yaml:"illustration_images"`
-	ExplainerVideos     []string `yaml:"explainer_videos"`
-	ReferenceDocuments  []string `yaml:"reference_documents"`
+	Slug               string   `yaml:"slug"`
+	Title              string   `yaml:"title"`
+	BodyMD             string   `yaml:"body_md"`
+	FeaturedImage      string   `yaml:"featured_image"`
+	IllustrationImages []string `yaml:"illustration_images"`
+	ExplainerVideos    []string `yaml:"explainer_videos"`
+	ReferenceDocuments []string `yaml:"reference_documents"`
 }
 
 // StrictBool decodes only the literal YAML booleans true/false — never the
 // legacy YAML 1.1 words (yes/no/on/off, in any letter case, quoted or not)
 // that gopkg.in/yaml.v3 otherwise still accepts as a backward-compatibility
 // fallback when unmarshaling into a plain Go bool, and never a quoted
-// "true"/"false" string either (quoting forces a !!str node tag). See
-// UnmarshalYAML below for exactly what is and is not accepted; load_test.go's
-// TestDecode_InStockStrictBoolean pins the full accept/reject matrix this
-// exists to guarantee.
+// "true"/"false" string either (quoting forces a !!str node tag). Used by
+// AIDeliveryZone.DeliveryAvailable, the one remaining NOT-NULL-no-default
+// boolean column in this schema (ai_products.in_stock, the type's original
+// motivation, was replaced by the availability_status enum — see AIProduct).
+// See UnmarshalYAML below for exactly what is and is not accepted;
+// load_test.go's TestDecode_DeliveryZones ("delivery_available omitted" and
+// "delivery_available non-canonical spelling") pins the full accept/reject
+// matrix this exists to guarantee.
 type StrictBool bool
 
 // UnmarshalYAML accepts only an unquoted, exact-lowercase true/false scalar
@@ -105,41 +111,110 @@ func (b *StrictBool) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// AIProduct mirrors one ai_products row. InStock is a *StrictBool, not bool:
-// the pointer lets the loader tell "key omitted" (nil — rejected, in_stock is
-// NOT NULL with no default in the schema) apart from "explicitly false", and
-// StrictBool itself rejects every non-canonical boolean spelling.
+// AIFactValue decodes one additional_facts[].value scalar into exactly the
+// shape aiprompt.AdditionalFact.Value expects (backend/aiprompt/facts.go):
+// a bool, a json.Number (the source digits verbatim — no float64 rounding),
+// or a string. Inspecting the YAML node's own tag (the same technique
+// StrictBool uses) instead of decoding into `any` is what makes this
+// lossless: yaml.v3 would otherwise hand back a float64/int for a number,
+// already rounded the way encoding/json without UseNumber would be. A YAML
+// null, sequence, or mapping is a decode error here, matching
+// aiprompt.ValidateFacts' own null/array/object rejection.
+type AIFactValue struct {
+	V any
+}
+
+func (v *AIFactValue) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.ScalarNode {
+		return fmt.Errorf("value must be a scalar (a number, boolean, or string), not a %v", node.Tag)
+	}
+	switch node.Tag {
+	case "!!bool":
+		if node.Value != "true" && node.Value != "false" {
+			return fmt.Errorf("value: must be exactly true or false, got %q", node.Value)
+		}
+		v.V = node.Value == "true"
+	case "!!int", "!!float":
+		v.V = json.Number(node.Value)
+	case "!!str":
+		v.V = node.Value
+	case "!!null":
+		return fmt.Errorf("value must not be null")
+	default:
+		return fmt.Errorf("value has unsupported YAML tag %q", node.Tag)
+	}
+	return nil
+}
+
+// AIAdditionalFact mirrors one additional_facts[] entry — the seller-defined
+// "virtual fact column" wire shape shared by ai_products, ai_tariffs, and
+// ai_tariff_info (backend/aiprompt/facts.go's AdditionalFact). Structural
+// validation (ref syntax, uniqueness, no collision with a concrete column,
+// instruction hygiene, ...) is aiprompt.ValidateFacts' job, invoked by
+// toKB — this type only carries the three wire fields through decode.
+type AIAdditionalFact struct {
+	Ref         string      `yaml:"ref"`
+	Value       AIFactValue `yaml:"value"`
+	Instruction string      `yaml:"instruction"`
+}
+
+// AIProduct mirrors one ai_products row. AvailabilityStatus is a plain
+// string (not a pointer): the real column is NOT NULL DEFAULT 'in_stock', so
+// an omitted key defaults to "in_stock" exactly as a live INSERT would,
+// unlike the pointer-typed StrictBool fields below whose columns have no
+// default at all. An explicit value is still validated against the closed
+// in_stock|preorder|on_demand|unavailable vocabulary (load.go).
 type AIProduct struct {
-	Ref                    string      `yaml:"ref"`
-	Name                   string      `yaml:"name"`
-	Price                  string      `yaml:"price"`
-	Description            string      `yaml:"description"`
-	Category               string      `yaml:"category"`
-	InStock                *StrictBool `yaml:"in_stock"`
-	SalesStatus            string      `yaml:"sales_status"`
-	FeaturedImage          string      `yaml:"featured_image"`
-	GalleryImages          []string    `yaml:"gallery_images"`
-	DemoVideos             []string    `yaml:"demo_videos"`
-	CertificateDocuments   []string    `yaml:"certificate_documents"`
-	GuaranteeDocuments     []string    `yaml:"guarantee_documents"`
+	Ref                  string             `yaml:"ref"`
+	Name                 string             `yaml:"name"`
+	Price                string             `yaml:"price"`
+	Description          string             `yaml:"description"`
+	Category             string             `yaml:"category"`
+	Brand                string             `yaml:"brand"`
+	Advantages           string             `yaml:"advantages"`
+	Disadvantages        string             `yaml:"disadvantages"`
+	BestFor              string             `yaml:"best_for"`
+	NotFor               string             `yaml:"not_for"`
+	AvailabilityStatus   string             `yaml:"availability_status"`
+	AvailabilityNote     string             `yaml:"availability_note"`
+	InstallationTerms    string             `yaml:"installation_terms"`
+	WarrantyTerms        string             `yaml:"warranty_terms"`
+	AdditionalFacts      []AIAdditionalFact `yaml:"additional_facts"`
+	SalesStatus          string             `yaml:"sales_status"`
+	FeaturedImage        string             `yaml:"featured_image"`
+	GalleryImages        []string           `yaml:"gallery_images"`
+	DemoVideos           []string           `yaml:"demo_videos"`
+	CertificateDocuments []string           `yaml:"certificate_documents"`
+	GuaranteeDocuments   []string           `yaml:"guarantee_documents"`
 }
 
 // AITariff mirrors one ai_tariffs row.
 type AITariff struct {
-	Ref             string   `yaml:"ref"`
-	Name            string   `yaml:"name"`
-	Price           string   `yaml:"price"`
-	LimitText       string   `yaml:"limit_text"`
-	Fee             string   `yaml:"fee"`
-	Summary         string   `yaml:"summary"`
-	PricingType     string   `yaml:"pricing_type"`
-	Advantages      string   `yaml:"advantages"`
-	Disadvantages   string   `yaml:"disadvantages"`
-	SalesStatus     string   `yaml:"sales_status"`
-	FeaturedImage   string   `yaml:"featured_image"`
-	PricingImages   []string `yaml:"pricing_images"`
-	ExplainerVideos []string `yaml:"explainer_videos"`
-	TermsDocuments  []string `yaml:"terms_documents"`
+	Ref             string             `yaml:"ref"`
+	Name            string             `yaml:"name"`
+	Price           string             `yaml:"price"`
+	LimitText       string             `yaml:"limit_text"`
+	Fee             string             `yaml:"fee"`
+	Summary         string             `yaml:"summary"`
+	PricingType     string             `yaml:"pricing_type"`
+	Advantages      string             `yaml:"advantages"`
+	Disadvantages   string             `yaml:"disadvantages"`
+	BestFor         string             `yaml:"best_for"`
+	NotFor          string             `yaml:"not_for"`
+	AdditionalFacts []AIAdditionalFact `yaml:"additional_facts"`
+	SalesStatus     string             `yaml:"sales_status"`
+	FeaturedImage   string             `yaml:"featured_image"`
+	PricingImages   []string           `yaml:"pricing_images"`
+	ExplainerVideos []string           `yaml:"explainer_videos"`
+	TermsDocuments  []string           `yaml:"terms_documents"`
+}
+
+// AITariffInfo mirrors the ai_tariff_info singleton (natural key "main") —
+// organization-wide tariff facts not specific to any one tariff (e.g. a
+// trial period shared by every plan). It carries no prose column at all,
+// only additional_facts.
+type AITariffInfo struct {
+	AdditionalFacts []AIAdditionalFact `yaml:"additional_facts"`
 }
 
 // AIContacts mirrors the ai_contacts singleton (natural ref "main").

@@ -27,6 +27,7 @@ const (
 	KBTypeTariff       = "tariff"
 	KBTypeContacts     = "contacts"
 	KBTypePolicies     = "policies"
+	KBTypeTariffInfo   = "tariff_info"
 	KBTypeDeliveryZone = "delivery_zone"
 )
 
@@ -34,7 +35,7 @@ const (
 // requested `types` filter and to drive an "every type" scan.
 var AllKBTypes = []string{
 	KBTypeAssistant, KBTypeTopic, KBTypeProduct, KBTypeTariff,
-	KBTypeContacts, KBTypePolicies, KBTypeDeliveryZone,
+	KBTypeContacts, KBTypePolicies, KBTypeTariffInfo, KBTypeDeliveryZone,
 }
 
 // NaturalKeyMain is the fixed stable key for every singleton KB type

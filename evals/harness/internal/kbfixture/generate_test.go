@@ -25,16 +25,16 @@ func TestGenerate_StructuralShape(t *testing.T) {
 	}
 
 	cm := fx.AIProducts[0]
-	if cm.Ref != "coffee-machine" || cm.InStock == nil || !bool(*cm.InStock) {
-		t.Errorf("want product[0] = in-stock coffee-machine, got ref=%q in_stock=%v", cm.Ref, cm.InStock)
+	if cm.Ref != "coffee-machine" || cm.AvailabilityStatus != "in_stock" {
+		t.Errorf("want product[0] = in-stock coffee-machine, got ref=%q availability_status=%v", cm.Ref, cm.AvailabilityStatus)
 	}
 	if cm.FeaturedImage == "" || len(cm.GalleryImages) == 0 || len(cm.DemoVideos) == 0 || len(cm.CertificateDocuments) == 0 {
 		t.Errorf("want product[0] to carry featured+gallery+video+certificate media, got %+v", cm)
 	}
 
 	cw := fx.AIProducts[1]
-	if cw.Ref != "cookware-set" || cw.InStock == nil || bool(*cw.InStock) {
-		t.Errorf("want product[1] = out-of-stock cookware-set, got ref=%q in_stock=%v", cw.Ref, cw.InStock)
+	if cw.Ref != "cookware-set" || cw.AvailabilityStatus != "unavailable" {
+		t.Errorf("want product[1] = unavailable cookware-set, got ref=%q availability_status=%v", cw.Ref, cw.AvailabilityStatus)
 	}
 	if len(cw.GalleryImages) == 0 {
 		t.Errorf("want product[1] to carry gallery media, got %+v", cw)
@@ -83,7 +83,7 @@ func TestGenerate_StructuralShape(t *testing.T) {
 			t.Errorf("duplicate product ref %q at index %d", p.Ref, i)
 		}
 		seenRef[p.Ref] = true
-		if p.InStock != nil && bool(*p.InStock) {
+		if p.AvailabilityStatus == "in_stock" {
 			inStockTrue++
 		}
 		if p.FeaturedImage != "" || len(p.GalleryImages) > 0 || len(p.DemoVideos) > 0 || len(p.CertificateDocuments) > 0 {

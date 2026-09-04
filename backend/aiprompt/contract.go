@@ -414,12 +414,18 @@ func ResolveFactLang(token string, kb *KB, cat *Catalog, lang string) (string, e
 	if fact.Token != canonical {
 		return "", fmt.Errorf("aiprompt: fact token %q has inconsistent catalog metadata", token)
 	}
-	spec, err := factColumnSpec(fact.Table, fact.Column)
-	if err != nil {
-		return "", err
-	}
-	if fact.Kind != spec.Kind {
-		return "", fmt.Errorf("aiprompt: fact token %q has value kind %q, want %q", token, fact.Kind, spec.Kind)
+	// A virtual fact's Column is a seller-authored ref, not a code-owned
+	// registry column — factColumnSpec's closed lookup does not (and must
+	// not) know about it; resolveVirtualFact (via currentFactValue) is its
+	// own sanity check (a stale/tampered Kind fails there instead).
+	if !isVirtualKind(fact.Kind) {
+		spec, err := factColumnSpec(fact.Table, fact.Column)
+		if err != nil {
+			return "", err
+		}
+		if fact.Kind != spec.Kind {
+			return "", fmt.Errorf("aiprompt: fact token %q has value kind %q, want %q", token, fact.Kind, spec.Kind)
+		}
 	}
 	return currentFactValue(kb, fact, lang)
 }
@@ -430,7 +436,10 @@ func currentFactValue(kb *KB, fact *FactEntry, lang string) (string, error) {
 	case "product":
 		product := currentProduct(kb, fact.Ref)
 		if product == nil {
-			return "", fmt.Errorf("aiprompt: fact token %q no longer has an active product row", fact.Token)
+			return "", fmt.Errorf("aiprompt: fact token %q no longer has an active, available product row", fact.Token)
+		}
+		if isVirtualKind(fact.Kind) {
+			return resolveVirtualFact(product.AdditionalFacts, fact, lang)
 		}
 		switch fact.Column {
 		case "price":
@@ -441,12 +450,20 @@ func currentFactValue(kb *KB, fact *FactEntry, lang string) (string, error) {
 		if tariff == nil {
 			return "", fmt.Errorf("aiprompt: fact token %q no longer has an active tariff row", fact.Token)
 		}
+		if isVirtualKind(fact.Kind) {
+			return resolveVirtualFact(tariff.AdditionalFacts, fact, lang)
+		}
 		switch fact.Column {
 		case "price":
 			value = tariff.Price
 		case "fee":
 			value = tariff.Fee
 		}
+	case "tariff_info":
+		if fact.Ref != SingletonRef || kb.TariffInfo == nil {
+			return "", fmt.Errorf("aiprompt: fact token %q no longer has a tariff_info row", fact.Token)
+		}
+		return resolveVirtualFact(kb.TariffInfo.AdditionalFacts, fact, lang)
 	case "contact":
 		if fact.Ref != SingletonRef || kb.Contacts == nil {
 			return "", fmt.Errorf("aiprompt: fact token %q no longer has a contacts row", fact.Token)
@@ -490,13 +507,51 @@ func currentFactValue(kb *KB, fact *FactEntry, lang string) (string, error) {
 	return value, nil
 }
 
+// currentProduct re-reads the CURRENT product row for ref, applying the
+// same visibility rule BuildCatalog used to decide whether to emit a token
+// for it in the first place (productVisible, catalog.go): active AND not
+// unavailable. Substitution must apply the identical rule the catalog
+// applied, not just "still active" — a product that went unavailable
+// between catalog build and substitution must fail closed exactly as one
+// that was already unavailable at build time never got a token at all.
 func currentProduct(kb *KB, ref string) *Product {
 	for i := range kb.Products {
-		if kb.Products[i].Ref == ref && active(kb.Products[i].SalesStatus) {
+		if kb.Products[i].Ref == ref && productVisible(&kb.Products[i]) {
 			return &kb.Products[i]
 		}
 	}
 	return nil
+}
+
+// resolveVirtualFact re-reads the CURRENT approved value of a virtual fact
+// (facts.go's AdditionalFact) by ref within facts — the owning entity's
+// live AdditionalFacts list at the moment of substitution, never the
+// catalog's own (deliberately value-free) FactEntry. Missing, malformed,
+// or type-changed ("stale": a fact edited to a different JSON scalar type
+// since the prompt was generated) facts fail closed, matching every other
+// ResolveFactLang error path.
+func resolveVirtualFact(facts []AdditionalFact, fact *FactEntry, lang string) (string, error) {
+	for _, f := range facts {
+		if f.Ref != fact.Column {
+			continue
+		}
+		text, kind, ok := valueKindAndText(f.Value)
+		if !ok {
+			return "", fmt.Errorf("aiprompt: fact token %q now has a malformed value", fact.Token)
+		}
+		if kind != fact.Kind {
+			return "", fmt.Errorf("aiprompt: fact token %q changed type since the prompt was generated", fact.Token)
+		}
+		if kind == KindVirtualBoolean {
+			b, _ := f.Value.(bool)
+			return factBoolWording(lang)[b], nil
+		}
+		if strings.TrimSpace(text) == "" {
+			return "", fmt.Errorf("aiprompt: fact token %q now resolves to an empty value", fact.Token)
+		}
+		return text, nil
+	}
+	return "", fmt.Errorf("aiprompt: fact token %q no longer has a matching additional fact", fact.Token)
 }
 
 func currentTariff(kb *KB, ref string) *Tariff {

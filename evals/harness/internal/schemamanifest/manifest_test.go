@@ -15,8 +15,8 @@ func TestBuildManifest_Succeeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildManifest: %v — kbfixture and aiprompt's media registry have drifted apart, see the package doc comment", err)
 	}
-	if len(m.Tables) != 7 {
-		t.Fatalf("want 7 approved-KB tables, got %d: %+v", len(m.Tables), m.Tables)
+	if len(m.Tables) != 8 {
+		t.Fatalf("want 8 approved-KB tables, got %d: %+v", len(m.Tables), m.Tables)
 	}
 }
 
@@ -27,7 +27,7 @@ func TestBuildManifest_TableNames(t *testing.T) {
 	}
 	want := map[string]bool{
 		"ai_assistants": true, "ai_topics": true, "ai_products": true, "ai_tariffs": true,
-		"ai_contacts": true, "ai_policies": true, "ai_delivery_zones": true,
+		"ai_contacts": true, "ai_policies": true, "ai_tariff_info": true, "ai_delivery_zones": true,
 	}
 	got := map[string]bool{}
 	for _, ts := range m.Tables {
@@ -89,15 +89,16 @@ func TestBuildManifest_ProductsMediaColumns(t *testing.T) {
 	}
 }
 
-// TestBuildManifest_StrictBoolColumns pins the two columns kbfixture encodes
-// unambiguously as NOT NULL / no-default booleans.
+// TestBuildManifest_StrictBoolColumns pins the one column kbfixture encodes
+// unambiguously as a NOT NULL / no-default boolean (ai_products.in_stock,
+// this test's other original case, was replaced by the availability_status
+// text enum — see kbfixture.AIProduct's own doc comment).
 func TestBuildManifest_StrictBoolColumns(t *testing.T) {
 	m, err := BuildManifest()
 	if err != nil {
 		t.Fatalf("BuildManifest: %v", err)
 	}
 	cases := []struct{ table, column string }{
-		{"ai_products", "in_stock"},
 		{"ai_delivery_zones", "delivery_available"},
 	}
 	for _, c := range cases {
@@ -108,6 +109,26 @@ func TestBuildManifest_StrictBoolColumns(t *testing.T) {
 		if col.SQLType != "boolean" || !col.StrictNullability || !col.NotNull || !col.NoDefault {
 			t.Errorf("%s.%s: want boolean/NOT NULL/no-default, got %+v", c.table, c.column, col)
 		}
+	}
+}
+
+// TestBuildManifest_AdditionalFactsJSONBColumns pins the virtual-fact-columns
+// shape ([]kbfixture.AIAdditionalFact) as "jsonb" on exactly the three tables
+// that carry it — ai_tariff_info's ONLY business column, alongside one of
+// several on ai_products/ai_tariffs.
+func TestBuildManifest_AdditionalFactsJSONBColumns(t *testing.T) {
+	m, err := BuildManifest()
+	if err != nil {
+		t.Fatalf("BuildManifest: %v", err)
+	}
+	for _, table := range []string{"ai_products", "ai_tariffs", "ai_tariff_info"} {
+		c, ok := columnsOf(t, m, table)["additional_facts"]
+		if !ok || c.SQLType != "jsonb" {
+			t.Errorf("%s.additional_facts: want SQLType jsonb, got %+v (present=%v)", table, c, ok)
+		}
+	}
+	if cols := columnsOf(t, m, "ai_tariff_info"); len(cols) != 1 {
+		t.Errorf("ai_tariff_info: want exactly 1 business column (additional_facts), got %+v", cols)
 	}
 }
 

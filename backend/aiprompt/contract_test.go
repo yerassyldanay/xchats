@@ -599,8 +599,8 @@ func TestValidateResponse_RejectsModelAuthoredExactValues(t *testing.T) {
 func TestValidateResponse_SharedWordingNeverFlaggedAsLiteralLeak(t *testing.T) {
 	kb := baseKB()
 	kb.Products = append(kb.Products,
-		Product{Ref: "blender-a", Name: "Блендер A", Price: "9 900 ₸", InStock: true, SalesStatus: "active"},
-		Product{Ref: "blender-b", Name: "Блендер B", Price: "10 900 ₸", InStock: true, SalesStatus: "active"},
+		Product{Ref: "blender-a", Name: "Блендер A", Price: "9 900 ₸", AvailabilityStatus: "in_stock", SalesStatus: "active"},
+		Product{Ref: "blender-b", Name: "Блендер B", Price: "10 900 ₸", AvailabilityStatus: "in_stock", SalesStatus: "active"},
 	)
 	cat, err := BuildCatalog(kb)
 	if err != nil {
