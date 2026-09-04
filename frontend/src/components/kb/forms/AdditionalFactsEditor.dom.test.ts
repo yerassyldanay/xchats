@@ -207,4 +207,19 @@ describe('AdditionalFactsEditor — numeric precision', () => {
     const wrapper = mountEditor([{ ref: 'limit_on_devices', value: 185000, instruction: 'i' }])
     expect(wrapper.find('[data-testid="additional-fact-value"]').classes()).not.toContain('border-destructive')
   })
+
+  // Regression: the number branch's warning <p v-if> was a sibling to the
+  // number <Input v-else-if>, which breaks Vue's v-if/v-else-if/v-else
+  // chain — the <p> starts its OWN chain, so the checkbox's v-else
+  // attaches to THAT <p> instead of the string/number chain. For an
+  // ordinary (non-imprecise) number this rendered the number input AND
+  // the boolean checkbox at once. Fixed by wrapping each value type in
+  // its own <template>.
+  it('renders exactly one value control for a numeric fact, never also the checkbox', () => {
+    const wrapper = mountEditor([{ ref: 'limit_on_devices', value: 5, instruction: 'i' }])
+    const controls = wrapper.findAll('[data-testid="additional-fact-value"]')
+    expect(controls).toHaveLength(1)
+    expect(controls[0].attributes('type')).toBe('number')
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+  })
 })

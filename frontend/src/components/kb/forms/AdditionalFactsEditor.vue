@@ -166,36 +166,40 @@ function removeFact(i: number) {
         </select>
 
         <div>
-          <Input
-            v-if="valueTypeOf(fact.value) === 'string'"
-            :model-value="fact.value as string"
-            :placeholder="t('kb.facts.valuePlaceholder')"
-            class="h-9 text-sm"
-            data-testid="additional-fact-value"
-            @update:model-value="(v) => updateAt(i, { value: String(v) })"
-          />
-          <Input
-            v-else-if="valueTypeOf(fact.value) === 'number'"
-            type="number"
-            :model-value="fact.value as number"
-            class="h-9 font-mono text-sm"
-            :class="{ 'border-destructive': numberValueImprecise(fact.value as number) }"
-            data-testid="additional-fact-value"
-            @update:model-value="(v) => setNumberValue(i, String(v))"
-          />
-          <p v-if="valueTypeOf(fact.value) === 'number' && numberValueImprecise(fact.value as number)" class="text-[11px] text-destructive mt-1">
-            {{ t('kb.facts.valueImprecise') }}
-          </p>
-          <label v-else class="flex items-center gap-2 h-9 px-1">
-            <input
-              type="checkbox"
-              :checked="fact.value as boolean"
-              class="h-4 w-4 rounded border-border"
+          <template v-if="valueTypeOf(fact.value) === 'string'">
+            <Input
+              :model-value="fact.value as string"
+              :placeholder="t('kb.facts.valuePlaceholder')"
+              class="h-9 text-sm"
               data-testid="additional-fact-value"
-              @change="updateAt(i, { value: ($event.target as HTMLInputElement).checked })"
+              @update:model-value="(v) => updateAt(i, { value: String(v) })"
             />
-            <span class="text-sm text-muted-foreground">{{ fact.value ? t('common.yes') : t('common.no') }}</span>
-          </label>
+          </template>
+          <template v-else-if="valueTypeOf(fact.value) === 'number'">
+            <Input
+              type="number"
+              :model-value="fact.value as number"
+              class="h-9 font-mono text-sm"
+              :class="{ 'border-destructive': numberValueImprecise(fact.value as number) }"
+              data-testid="additional-fact-value"
+              @update:model-value="(v) => setNumberValue(i, String(v))"
+            />
+            <p v-if="numberValueImprecise(fact.value as number)" class="text-[11px] text-destructive mt-1">
+              {{ t('kb.facts.valueImprecise') }}
+            </p>
+          </template>
+          <template v-else>
+            <label class="flex items-center gap-2 h-9 px-1">
+              <input
+                type="checkbox"
+                :checked="fact.value as boolean"
+                class="h-4 w-4 rounded border-border"
+                data-testid="additional-fact-value"
+                @change="updateAt(i, { value: ($event.target as HTMLInputElement).checked })"
+              />
+              <span class="text-sm text-muted-foreground">{{ fact.value ? t('common.yes') : t('common.no') }}</span>
+            </label>
+          </template>
         </div>
 
         <Button
