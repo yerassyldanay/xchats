@@ -377,7 +377,7 @@ func (s *Store) PatchLiveTariffInfo(ctx context.Context, orgID uuid.UUID, actor 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	cur, err := currentLiveTariffInfoTx(ctx, tx, orgID)
 	if err != nil {
 		return err
