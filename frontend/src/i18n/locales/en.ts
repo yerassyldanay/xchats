@@ -197,6 +197,7 @@ export default {
       refInvalid: 'Lowercase letters, digits, and _, starting with a letter',
       refDuplicate: 'This ref is already used on this record',
       valuePlaceholder: 'Value',
+      valueImprecise: 'This number is too large or too precise to edit exactly here — store it as text instead',
       valueType: { string: 'Text', number: 'Number', boolean: 'Yes/no' },
       instructionPlaceholder: 'How the assistant may safely mention this fact (without stating the exact value)',
     },

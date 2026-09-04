@@ -74,6 +74,18 @@ func BuildCatalog(kb *KB) (*Catalog, error) {
 
 func active(salesStatus string) bool { return salesStatus == "active" }
 
+// validAvailabilityStatuses is the closed four-value enum
+// migration 0017 introduced. There is deliberately no SQL CHECK constraint
+// enforcing it, so a manual DB edit or a future write path that skips
+// application-level validation is the only way an unrecognized value ever
+// reaches here — buildFacts rejects that outright (a hard BuildCatalog
+// error, the same fail-closed treatment every other KB invariant in this
+// file gets — see buildDeliveryZoneFacts) rather than letting productVisible
+// silently guess which way to treat it.
+var validAvailabilityStatuses = map[string]bool{
+	"in_stock": true, "preorder": true, "on_demand": true, "unavailable": true,
+}
+
 // productVisible reports whether a product is eligible for ANY prompt
 // visibility at all — prose, fact tokens, and media alike. An inactive
 // product (sales_status) was already fully suppressed before availability_
@@ -82,8 +94,22 @@ func active(salesStatus string) bool { return salesStatus == "active" }
 // visible, unavailable becomes name-only (renderProductsUnavailable) and
 // must never carry a fact or media token (buildFacts/buildMedia below, and
 // currentProduct in contract.go for the same rule at substitution time).
+//
+// Deliberately an allowlist of the three visible statuses, not a
+// not-equal-unavailable check: buildFacts already rejects anything outside
+// the four known values before this is ever asked, but this function stays
+// correct in isolation too — an unrecognized status must never default to
+// visible.
 func productVisible(p *Product) bool {
-	return active(p.SalesStatus) && p.AvailabilityStatus != "unavailable"
+	if !active(p.SalesStatus) {
+		return false
+	}
+	switch p.AvailabilityStatus {
+	case "in_stock", "preorder", "on_demand":
+		return true
+	default:
+		return false
+	}
 }
 
 // productConcreteColumns/tariffConcreteColumns are the reservedRefs
@@ -188,6 +214,9 @@ func addDeliveryFlagFact(cat *Catalog, ref string, col FactColumn, available boo
 func buildFacts(kb *KB, cat *Catalog) error {
 	for i := range kb.Products {
 		p := &kb.Products[i]
+		if !validAvailabilityStatuses[p.AvailabilityStatus] {
+			return fmt.Errorf("aiprompt: product %s has invalid availability_status %q", p.Ref, p.AvailabilityStatus)
+		}
 		if !productVisible(p) {
 			continue // unavailable/inactive: no fact token at all — see productVisible
 		}

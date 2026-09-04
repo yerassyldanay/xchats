@@ -348,10 +348,21 @@ var availabilityStatusRUWords = map[string]string{
 }
 
 func availabilityStatusRU(status string) string {
-	if s, ok := availabilityStatusRUWords[status]; ok {
-		return s
+	s, ok := availabilityStatusRUWords[status]
+	if !ok {
+		// Unreachable through the normal Generate/BuildPrompt path:
+		// BuildCatalog's validAvailabilityStatuses check (catalog.go) rejects
+		// any status outside the four known values before RenderPrompt is
+		// ever called, and renderProductsAvailable only calls this for a
+		// productVisible row (in_stock/preorder/on_demand). A caller that
+		// renders without building the catalog first is the only way to
+		// reach this — rendering an unrecognized status as if it were safe
+		// prose is exactly the leak this feature exists to prevent, so this
+		// fails loud (panic, recovered by the HTTP layer's gin.Recovery())
+		// rather than silently passing an unvetted string through.
+		panic(fmt.Sprintf("aiprompt: availabilityStatusRU: unrecognized status %q — BuildCatalog should have rejected it first", status))
 	}
-	return status
+	return s
 }
 
 // renderAdditionalFactLines renders one "fact: <instruction> — {{token}}"

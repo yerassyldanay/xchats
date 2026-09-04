@@ -51,6 +51,41 @@ function refInvalid(ref: string): boolean {
   return ref.length > 0 && !REF_PATTERN.test(ref)
 }
 
+// MAX_SAFE_INTEGER_MAGNITUDE mirrors Number.MAX_SAFE_INTEGER: the largest
+// whole number a JS `number` — and therefore this field's own wire value —
+// can hold exactly. MAX_SAFE_SIGNIFICANT_DIGITS mirrors the backend's own
+// decimal guard. Both are literals rather than references to a shared
+// module so the boundary this component checks against is visible right
+// where it's used — kept in lockstep with backend/aiprompt/facts.go's
+// maxSafeIntegerMagnitude/maxSafeSignificantDigits by facts_test.go /
+// this component's own dom test asserting the same two example values.
+const MAX_SAFE_INTEGER_MAGNITUDE = 9007199254740991
+const MAX_SAFE_SIGNIFICANT_DIGITS = 15
+
+// numberValueImprecise flags a numeric fact whose CURRENT stored value the
+// KB editor could not have edited exactly: this UI's number <input> parses
+// every keystroke through JS `Number()`, which silently rounds a whole
+// number beyond Number.MAX_SAFE_INTEGER and can likewise strip digits from
+// an overly precise decimal — the same exact-value guarantee
+// aiprompt.ValidateFacts (facts.go) enforces on submit. Reading off the
+// already-stored number (not the raw keystroke) keeps this component
+// buffer-free, per its own doc comment: a value big or precise enough to
+// trip this either stayed the same magnitude after rounding (an integer
+// past the safe boundary does) or printed back out just as long (an
+// over-precise decimal's shortest round-trip form rarely gets shorter), so
+// checking the stored value still catches both cases. Advisory only, the
+// same non-blocking role refInvalid/duplicateRefs already play — the
+// backend is still the authoritative check.
+function numberValueImprecise(n: number): boolean {
+  if (!Number.isFinite(n)) return false
+  if (Number.isInteger(n)) return Math.abs(n) > MAX_SAFE_INTEGER_MAGNITUDE
+  const digits = String(Math.abs(n))
+    .replace(/[-.]/g, '')
+    .replace(/^0+/, '')
+    .replace(/0+$/, '')
+  return digits.length > MAX_SAFE_SIGNIFICANT_DIGITS
+}
+
 // duplicateRefs marks every ref that collides with another row in THIS
 // list, so the editor can flag it before the round trip that aiprompt.
 // ValidateFacts' own duplicate check would otherwise catch first.
@@ -73,8 +108,15 @@ function setType(i: number, type: ValueType) {
   updateAt(i, { value })
 }
 function setNumberValue(i: number, raw: string) {
-  const n = raw === '' || raw === '-' ? 0 : Number(raw)
-  updateAt(i, { value: Number.isNaN(n) ? 0 : n })
+  // An incomplete edit ('' while clearing the field, '-' as the first
+  // keystroke of a negative number) is not yet a value — leaving it
+  // unemitted keeps the row at its last real value instead of silently
+  // coercing a not-yet-finished edit into a stored 0 (a value the operator
+  // never actually typed).
+  if (raw === '' || raw === '-') return
+  const n = Number(raw)
+  if (Number.isNaN(n)) return
+  updateAt(i, { value: n })
 }
 function addFact() {
   emit('update:modelValue', [...props.modelValue, { ref: '', value: '', instruction: '' }])
@@ -137,9 +179,13 @@ function removeFact(i: number) {
             type="number"
             :model-value="fact.value as number"
             class="h-9 font-mono text-sm"
+            :class="{ 'border-destructive': numberValueImprecise(fact.value as number) }"
             data-testid="additional-fact-value"
             @update:model-value="(v) => setNumberValue(i, String(v))"
           />
+          <p v-if="valueTypeOf(fact.value) === 'number' && numberValueImprecise(fact.value as number)" class="text-[11px] text-destructive mt-1">
+            {{ t('kb.facts.valueImprecise') }}
+          </p>
           <label v-else class="flex items-center gap-2 h-9 px-1">
             <input
               type="checkbox"

@@ -151,3 +151,60 @@ describe('AdditionalFactsEditor — client-side ref hints', () => {
     }
   })
 })
+
+describe('AdditionalFactsEditor — numeric precision', () => {
+  it('an incomplete edit ("-") does not emit a coerced 0', async () => {
+    const wrapper = mountEditor([{ ref: 'limit_on_devices', value: 5, instruction: 'i' }])
+    await wrapper.find('[data-testid="additional-fact-value"]').setValue('-')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('clearing the number input does not emit a coerced 0', async () => {
+    const wrapper = mountEditor([{ ref: 'limit_on_devices', value: 5, instruction: 'i' }])
+    await wrapper.find('[data-testid="additional-fact-value"]').setValue('')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('finishing a negative number after the incomplete "-" keystroke emits the real value', async () => {
+    const wrapper = mountEditor([{ ref: 'limit_on_devices', value: 5, instruction: 'i' }])
+    const input = wrapper.find('[data-testid="additional-fact-value"]')
+    await input.setValue('-')
+    await input.setValue('-3')
+    expect(lastEmitted(wrapper)).toEqual([{ ref: 'limit_on_devices', value: -3, instruction: 'i' }])
+  })
+
+  // AdditionalFactsEditor is a pure controlled component (see the ref-hints
+  // describe block's own note above): imprecision is read off
+  // props.modelValue, so these mount with the shape a real parent would
+  // re-render with AFTER an emit, not by simulating keystrokes.
+  it('flags an integer one past Number.MAX_SAFE_INTEGER as imprecise', () => {
+    const wrapper = mountEditor([{ ref: 'serial', value: 9007199254740992, instruction: 'i' }])
+    expect(wrapper.find('[data-testid="additional-fact-value"]').classes()).toContain('border-destructive')
+  })
+
+  it('does not flag Number.MAX_SAFE_INTEGER itself', () => {
+    const wrapper = mountEditor([{ ref: 'serial', value: 9007199254740991, instruction: 'i' }])
+    expect(wrapper.find('[data-testid="additional-fact-value"]').classes()).not.toContain('border-destructive')
+  })
+
+  it('flags a decimal with more significant digits than float64 can carry', () => {
+    // Built via Number() at runtime, not a source literal: a 19-digit
+    // decimal literal would itself already lose precision the moment this
+    // file is parsed, before the test ever runs (the same class of bug
+    // this component's own fix addresses) — ESLint's no-loss-of-precision
+    // rule catches exactly that if written as a literal.
+    const value = Number('1.234567890123456789')
+    const wrapper = mountEditor([{ ref: 'ratio', value, instruction: 'i' }])
+    expect(wrapper.find('[data-testid="additional-fact-value"]').classes()).toContain('border-destructive')
+  })
+
+  it('does not flag an ordinary decimal like 0.3', () => {
+    const wrapper = mountEditor([{ ref: 'ratio', value: 0.3, instruction: 'i' }])
+    expect(wrapper.find('[data-testid="additional-fact-value"]').classes()).not.toContain('border-destructive')
+  })
+
+  it('does not flag an ordinary whole number', () => {
+    const wrapper = mountEditor([{ ref: 'limit_on_devices', value: 185000, instruction: 'i' }])
+    expect(wrapper.find('[data-testid="additional-fact-value"]').classes()).not.toContain('border-destructive')
+  })
+})

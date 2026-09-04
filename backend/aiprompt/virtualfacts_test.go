@@ -56,6 +56,20 @@ func TestAvailability_AllFourStatusesBuildCatalogWithoutError(t *testing.T) {
 	}
 }
 
+// TestAvailability_InvalidStatusFailsBuildCatalogClosed guards the fail-closed
+// contract productVisible's doc comment promises: an availability_status
+// outside the four known values (reachable only via a manual DB edit or a
+// future write path that skips enum validation, since the migration has no
+// SQL CHECK) must fail the WHOLE BuildCatalog call, never default to fully
+// visible.
+func TestAvailability_InvalidStatusFailsBuildCatalogClosed(t *testing.T) {
+	kb := virtualFactsKB()
+	kb.Products[0].AvailabilityStatus = "discontinued" // not one of in_stock/preorder/on_demand/unavailable
+	if _, err := BuildCatalog(kb); err == nil {
+		t.Fatal("BuildCatalog must reject a product with an unrecognized availability_status, got nil error")
+	}
+}
+
 func TestAvailability_PreorderAndOnDemandAreFullyVisible(t *testing.T) {
 	kb := virtualFactsKB()
 	cat, err := BuildCatalog(kb)

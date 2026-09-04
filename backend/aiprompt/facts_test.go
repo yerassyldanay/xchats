@@ -206,6 +206,73 @@ func TestValidateFacts_RejectsOverLongStringValue(t *testing.T) {
 	}
 }
 
+// TestValidateFacts_LengthLimitsCountUnicodeCharactersNotBytes guards the
+// byte-vs-rune-count bug MaxFactStringValueLen/MaxFactInstructionLen exist
+// to avoid: a Cyrillic or Kazakh string at exactly the documented character
+// limit must be accepted, and one character over must be rejected. Every
+// character here is 2 bytes in UTF-8, so a byte-length check would reject
+// the "exactly at the limit" case at roughly half the advertised length —
+// this is the boundary a byte-based regression would actually trip on.
+func TestValidateFacts_LengthLimitsCountUnicodeCharactersNotBytes(t *testing.T) {
+	atLimit := strings.Repeat("б", MaxFactStringValueLen)
+	overLimit := strings.Repeat("б", MaxFactStringValueLen+1)
+
+	if err := ValidateFacts([]AdditionalFact{{Ref: "x", Value: atLimit, Instruction: "инструкция"}}, nil, nil); err != nil {
+		t.Fatalf("a %d-character Cyrillic value at the limit must be accepted, got: %v", MaxFactStringValueLen, err)
+	}
+	if err := ValidateFacts([]AdditionalFact{{Ref: "x", Value: overLimit, Instruction: "инструкция"}}, nil, nil); err == nil {
+		t.Fatalf("a %d-character Cyrillic value one over the limit must be rejected, got nil", MaxFactStringValueLen+1)
+	}
+
+	atLimitInstruction := strings.Repeat("ә", MaxFactInstructionLen) // Kazakh-specific letter, still 2 bytes in UTF-8
+	overLimitInstruction := strings.Repeat("ә", MaxFactInstructionLen+1)
+
+	if err := ValidateFacts([]AdditionalFact{{Ref: "y", Value: json.Number("1"), Instruction: atLimitInstruction}}, nil, nil); err != nil {
+		t.Fatalf("a %d-character Kazakh instruction at the limit must be accepted, got: %v", MaxFactInstructionLen, err)
+	}
+	if err := ValidateFacts([]AdditionalFact{{Ref: "y", Value: json.Number("1"), Instruction: overLimitInstruction}}, nil, nil); err == nil {
+		t.Fatalf("a %d-character Kazakh instruction one over the limit must be rejected, got nil", MaxFactInstructionLen+1)
+	}
+}
+
+// TestValidateFacts_RejectsNumbersTheKBEditorCannotEditExactly guards the
+// exact-value guarantee a json.Number's UseNumber decoding promises: this
+// package can hold arbitrary source digits, but the frontend's number
+// <input> parses through JS `Number()` on every keystroke, which silently
+// rounds anything outside these two cases — so ValidateFacts must reject
+// them rather than accept a value the KB editor cannot round-trip.
+func TestValidateFacts_RejectsNumbersTheKBEditorCannotEditExactly(t *testing.T) {
+	cases := []struct {
+		name  string
+		value json.Number
+	}{
+		{"integer one past Number.MAX_SAFE_INTEGER", json.Number("9007199254740993")},
+		{"long decimal beyond float64 precision", json.Number("1.234567890123456789")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			facts := []AdditionalFact{{Ref: "x", Value: c.value, Instruction: "i"}}
+			if err := ValidateFacts(facts, nil, nil); err == nil {
+				t.Fatalf("want error for %s (%s), got nil", c.name, c.value)
+			}
+		})
+	}
+}
+
+// TestValidateFacts_AllowsOrdinaryNumbers is the counterpart to the test
+// above: everyday whole numbers and decimals — including ones with no
+// special binary-fraction relationship, like 0.3 — must still pass, since
+// the guard is significant-digit count, not bit-exact float64
+// representability (which almost no ordinary decimal has).
+func TestValidateFacts_AllowsOrdinaryNumbers(t *testing.T) {
+	for _, v := range []json.Number{"5", "-12", "185000", "0.3", "12.5", "9007199254740991", "-9007199254740991"} {
+		facts := []AdditionalFact{{Ref: "x", Value: v, Instruction: "i"}}
+		if err := ValidateFacts(facts, nil, nil); err != nil {
+			t.Errorf("ordinary number %s must be accepted, got: %v", v, err)
+		}
+	}
+}
+
 func TestValidateFacts_RejectsTooManyFacts(t *testing.T) {
 	facts := make([]AdditionalFact, MaxAdditionalFacts+1)
 	for i := range facts {

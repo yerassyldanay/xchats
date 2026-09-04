@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // facts.go is the "virtual fact column" data contract: a seller-authored,
@@ -34,10 +35,14 @@ const (
 	// — generous enough for a real spec sheet, small enough that a prompt
 	// can never be blown out by an unbounded list.
 	MaxAdditionalFacts = 50
-	// MaxFactInstructionLen bounds Instruction's length (prompt-visible
-	// prose, rendered once per eligible request — see renderAdditionalFacts).
+	// MaxFactInstructionLen bounds Instruction's length in Unicode code
+	// points, not bytes (prompt-visible prose, rendered once per eligible
+	// request — see renderAdditionalFacts) — ValidateFacts checks it with
+	// utf8.RuneCountInString so Cyrillic/Kazakh text gets the same limit in
+	// characters a Latin-only string would, not half of it.
 	MaxFactInstructionLen = 500
-	// MaxFactStringValueLen bounds a string-typed Value's length.
+	// MaxFactStringValueLen bounds a string-typed Value's length in Unicode
+	// code points, the same way MaxFactInstructionLen does.
 	MaxFactStringValueLen = 300
 )
 
@@ -194,6 +199,56 @@ func valueKindAndText(v any) (text string, kind ValueKind, ok bool) {
 	}
 }
 
+const (
+	// maxSafeIntegerMagnitude is JavaScript's Number.MAX_SAFE_INTEGER
+	// (2^53 - 1): the largest-magnitude whole number a float64 — and
+	// therefore the number <input> AdditionalFactsEditor.vue's
+	// setNumberValue uses — can hold without rounding. This package itself
+	// preserves a json.Number's exact source digits (UnmarshalJSON's
+	// UseNumber path), but that guarantee is worthless if the browser
+	// already mangled the digits before the request left the KB editor, so
+	// ValidateFacts rejects what the frontend cannot edit exactly rather
+	// than accepting a value only the backend can represent.
+	maxSafeIntegerMagnitude = 9007199254740991
+	// maxSafeSignificantDigits bounds a decimal (non-integer) numeric
+	// fact's significant digits to what a float64 reliably round-trips —
+	// comfortably inside its guaranteed ~15-17 digit precision. Ordinary
+	// decimals (0.3, 12.5) are nowhere near this and are unaffected; this
+	// only catches a value with more digits than anyone reads or types by
+	// hand, e.g. an unrounded computed result pasted in.
+	maxSafeSignificantDigits = 15
+)
+
+// numberIsJSSafe reports whether n can round-trip through a JS `Number` —
+// what the KB editor's number <input> parses every keystroke into, and what
+// JSON.stringify re-serializes on submit — without silently losing digits.
+// A whole number is checked by exact magnitude (Number.isSafeInteger's own
+// rule); a decimal is checked by significant-digit count rather than
+// bit-exact float64 representability, since almost no ordinary decimal
+// (0.3 included) is bit-exact and that would reject nearly everything.
+func numberIsJSSafe(n json.Number) bool {
+	s := string(n)
+	mantissa := s
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		mantissa = s[:i]
+	}
+	if !strings.Contains(mantissa, ".") {
+		i, err := n.Int64()
+		if err != nil {
+			return false // more digits than even int64 holds — well past float64-safe
+		}
+		return i <= maxSafeIntegerMagnitude && i >= -maxSafeIntegerMagnitude
+	}
+	digits := strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, mantissa)
+	digits = strings.Trim(digits, "0")
+	return len(digits) <= maxSafeSignificantDigits
+}
+
 // ValidateFacts enforces the full semantic contract for one entity's
 // additional_facts list (a product, a tariff, or the tariff_info
 // singleton). reservedRefs is that entity's own concrete fact-column names
@@ -239,15 +294,20 @@ func ValidateFacts(facts []AdditionalFact, reservedRefs []string, prose map[stri
 		if kind == KindVirtualString && text == "" {
 			return fmt.Errorf("aiprompt: additional fact %q: string value must be non-empty after trimming", f.Ref)
 		}
-		if kind == KindVirtualString && len(text) > MaxFactStringValueLen {
+		if kind == KindVirtualString && utf8.RuneCountInString(text) > MaxFactStringValueLen {
 			return fmt.Errorf("aiprompt: additional fact %q: value exceeds %d characters", f.Ref, MaxFactStringValueLen)
+		}
+		if kind == KindVirtualNumber && !numberIsJSSafe(f.Value.(json.Number)) {
+			return fmt.Errorf("aiprompt: additional fact %q: numeric value cannot be edited exactly in the KB editor "+
+				"(whole numbers must stay within ±%d, decimals within %d significant digits) — store it as a string instead",
+				f.Ref, maxSafeIntegerMagnitude, maxSafeSignificantDigits)
 		}
 
 		instruction := strings.TrimSpace(f.Instruction)
 		if instruction == "" {
 			return fmt.Errorf("aiprompt: additional fact %q: instruction is required", f.Ref)
 		}
-		if len(instruction) > MaxFactInstructionLen {
+		if utf8.RuneCountInString(instruction) > MaxFactInstructionLen {
 			return fmt.Errorf("aiprompt: additional fact %q: instruction exceeds %d characters", f.Ref, MaxFactInstructionLen)
 		}
 		if placeholderPattern.MatchString(instruction) {
