@@ -35,7 +35,7 @@ func TestUpsertProduct_MediaAbsentPreservesMCPAuthored(t *testing.T) {
 	img := mkAttachMaterial(t, kb, orgID, "image/jpeg", "visible", true)
 
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "coffee-machine", kbstore.ProductChanges{
-		Name: strp("Кофемашина"), InStock: boolp(true),
+		Name: strp("Кофемашина"), AvailabilityStatus: strp("in_stock"),
 		FeaturedImage: uuidpp(img), GalleryImages: idsp(img),
 	}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("seed via MCP: %v", err)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
@@ -60,35 +61,59 @@ type DraftTopic struct {
 }
 
 type DraftTariff struct {
-	Ref             string      `json:"ref"`
-	Name            string      `json:"name"`
-	Price           string      `json:"price"`
-	LimitText       string      `json:"limit_text"`
-	Fee             string      `json:"fee"`
-	Summary         string      `json:"summary"`
-	PricingType     string      `json:"pricing_type"`
-	Advantages      string      `json:"advantages"`
-	Disadvantages   string      `json:"disadvantages"`
-	SalesStatus     string      `json:"sales_status"`
-	FeaturedImage   *uuid.UUID  `json:"featured_image"`
-	PricingImages   []uuid.UUID `json:"pricing_images"`
-	ExplainerVideos []uuid.UUID `json:"explainer_videos"`
-	TermsDocuments  []uuid.UUID `json:"terms_documents"`
+	Ref             string                    `json:"ref"`
+	Name            string                    `json:"name"`
+	Price           string                    `json:"price"`
+	LimitText       string                    `json:"limit_text"`
+	Fee             string                    `json:"fee"`
+	Summary         string                    `json:"summary"`
+	PricingType     string                    `json:"pricing_type"`
+	Advantages      string                    `json:"advantages"`
+	Disadvantages   string                    `json:"disadvantages"`
+	BestFor         string                    `json:"best_for"`
+	NotFor          string                    `json:"not_for"`
+	AdditionalFacts []aiprompt.AdditionalFact `json:"additional_facts"`
+	SalesStatus     string                    `json:"sales_status"`
+	FeaturedImage   *uuid.UUID                `json:"featured_image"`
+	PricingImages   []uuid.UUID               `json:"pricing_images"`
+	ExplainerVideos []uuid.UUID               `json:"explainer_videos"`
+	TermsDocuments  []uuid.UUID               `json:"terms_documents"`
 }
 
+// DraftProduct's AvailabilityStatus REPLACES the legacy in_stock boolean
+// (migration 0017_kb_virtual_facts) as the availability source of truth —
+// see aiprompt.Product's doc comment for the four-state model
+// (in_stock|preorder|on_demand|unavailable) this mirrors.
 type DraftProduct struct {
-	Ref                  string      `json:"ref"`
-	Name                 string      `json:"name"`
-	Price                string      `json:"price"`
-	Description          string      `json:"description"`
-	Category             string      `json:"category"`
-	InStock              bool        `json:"in_stock"`
-	SalesStatus          string      `json:"sales_status"`
-	FeaturedImage        *uuid.UUID  `json:"featured_image"`
-	GalleryImages        []uuid.UUID `json:"gallery_images"`
-	DemoVideos           []uuid.UUID `json:"demo_videos"`
-	CertificateDocuments []uuid.UUID `json:"certificate_documents"`
-	GuaranteeDocuments   []uuid.UUID `json:"guarantee_documents"`
+	Ref                  string                    `json:"ref"`
+	Name                 string                    `json:"name"`
+	Price                string                    `json:"price"`
+	Description          string                    `json:"description"`
+	Category             string                    `json:"category"`
+	Brand                string                    `json:"brand"`
+	Advantages           string                    `json:"advantages"`
+	Disadvantages        string                    `json:"disadvantages"`
+	BestFor              string                    `json:"best_for"`
+	NotFor               string                    `json:"not_for"`
+	AvailabilityStatus   string                    `json:"availability_status"`
+	AvailabilityNote     string                    `json:"availability_note"`
+	InstallationTerms    string                    `json:"installation_terms"`
+	WarrantyTerms        string                    `json:"warranty_terms"`
+	AdditionalFacts      []aiprompt.AdditionalFact `json:"additional_facts"`
+	SalesStatus          string                    `json:"sales_status"`
+	FeaturedImage        *uuid.UUID                `json:"featured_image"`
+	GalleryImages        []uuid.UUID               `json:"gallery_images"`
+	DemoVideos           []uuid.UUID               `json:"demo_videos"`
+	CertificateDocuments []uuid.UUID               `json:"certificate_documents"`
+	GuaranteeDocuments   []uuid.UUID               `json:"guarantee_documents"`
+}
+
+// DraftTariffInfo is the org's single pending organization-wide tariff-facts
+// entry — a true singleton (no natural key), structurally a smaller clone
+// of DraftContact/DraftPolicy: it carries only AdditionalFacts, no prose or
+// media columns (aiprompt.TariffInfo's doc comment).
+type DraftTariffInfo struct {
+	AdditionalFacts []aiprompt.AdditionalFact `json:"additional_facts"`
 }
 
 // DraftContact is the org's single pending support-contact entry — a true
@@ -157,6 +182,7 @@ type DraftBlob struct {
 	Products      []DraftProduct      `json:"products"`
 	Contacts      []DraftContact      `json:"contacts"`
 	Policies      []DraftPolicy       `json:"policies"`
+	TariffInfo    []DraftTariffInfo   `json:"tariff_info"`
 	DeliveryZones []DraftDeliveryZone `json:"delivery_zones"`
 	Deletes       []DraftDelete       `json:"deletes"`
 }
@@ -239,6 +265,16 @@ func (b *DraftBlob) upsertPolicy(p DraftPolicy) {
 
 func (b *DraftBlob) removePolicy() {
 	b.Policies = nil
+}
+
+// upsertTariffInfo / removeTariffInfo — exact clone of upsertContact/
+// removeContact (ai_tariff_info is a singleton table like ai_contacts).
+func (b *DraftBlob) upsertTariffInfo(ti DraftTariffInfo) {
+	b.TariffInfo = []DraftTariffInfo{ti}
+}
+
+func (b *DraftBlob) removeTariffInfo() {
+	b.TariffInfo = nil
 }
 
 func (b *DraftBlob) upsertZone(z DraftDeliveryZone) {
@@ -728,41 +764,64 @@ type TopicRow struct {
 }
 
 type TariffRow struct {
-	ID              string      `json:"id"`
-	Ref             string      `json:"ref"`
-	Name            string      `json:"name"`
-	Price           string      `json:"price"`
-	LimitText       string      `json:"limit_text"`
-	Fee             string      `json:"fee"`
-	Summary         string      `json:"summary"`
-	PricingType     string      `json:"pricing_type"`
-	Advantages      string      `json:"advantages"`
-	Disadvantages   string      `json:"disadvantages"`
-	SalesStatus     string      `json:"sales_status"`
-	FeaturedImage   *uuid.UUID  `json:"featured_image"`
-	PricingImages   []uuid.UUID `json:"pricing_images"`
-	ExplainerVideos []uuid.UUID `json:"explainer_videos"`
-	TermsDocuments  []uuid.UUID `json:"terms_documents"`
-	Draft           bool        `json:"draft"`
-	UpdatedAt       time.Time   `json:"updated_at"`
+	ID              string                    `json:"id"`
+	Ref             string                    `json:"ref"`
+	Name            string                    `json:"name"`
+	Price           string                    `json:"price"`
+	LimitText       string                    `json:"limit_text"`
+	Fee             string                    `json:"fee"`
+	Summary         string                    `json:"summary"`
+	PricingType     string                    `json:"pricing_type"`
+	Advantages      string                    `json:"advantages"`
+	Disadvantages   string                    `json:"disadvantages"`
+	BestFor         string                    `json:"best_for"`
+	NotFor          string                    `json:"not_for"`
+	AdditionalFacts []aiprompt.AdditionalFact `json:"additional_facts"`
+	SalesStatus     string                    `json:"sales_status"`
+	FeaturedImage   *uuid.UUID                `json:"featured_image"`
+	PricingImages   []uuid.UUID               `json:"pricing_images"`
+	ExplainerVideos []uuid.UUID               `json:"explainer_videos"`
+	TermsDocuments  []uuid.UUID               `json:"terms_documents"`
+	Draft           bool                      `json:"draft"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
 }
 
 type ProductRow struct {
-	ID                   string      `json:"id"`
-	Ref                  string      `json:"ref"`
-	Name                 string      `json:"name"`
-	Price                string      `json:"price"`
-	Description          string      `json:"description"`
-	Category             string      `json:"category"`
-	InStock              bool        `json:"in_stock"`
-	SalesStatus          string      `json:"sales_status"`
-	FeaturedImage        *uuid.UUID  `json:"featured_image"`
-	GalleryImages        []uuid.UUID `json:"gallery_images"`
-	DemoVideos           []uuid.UUID `json:"demo_videos"`
-	CertificateDocuments []uuid.UUID `json:"certificate_documents"`
-	GuaranteeDocuments   []uuid.UUID `json:"guarantee_documents"`
-	Draft                bool        `json:"draft"`
-	UpdatedAt            time.Time   `json:"updated_at"`
+	ID                   string                    `json:"id"`
+	Ref                  string                    `json:"ref"`
+	Name                 string                    `json:"name"`
+	Price                string                    `json:"price"`
+	Description          string                    `json:"description"`
+	Category             string                    `json:"category"`
+	Brand                string                    `json:"brand"`
+	Advantages           string                    `json:"advantages"`
+	Disadvantages        string                    `json:"disadvantages"`
+	BestFor              string                    `json:"best_for"`
+	NotFor               string                    `json:"not_for"`
+	AvailabilityStatus   string                    `json:"availability_status"`
+	AvailabilityNote     string                    `json:"availability_note"`
+	InstallationTerms    string                    `json:"installation_terms"`
+	WarrantyTerms        string                    `json:"warranty_terms"`
+	AdditionalFacts      []aiprompt.AdditionalFact `json:"additional_facts"`
+	SalesStatus          string                    `json:"sales_status"`
+	FeaturedImage        *uuid.UUID                `json:"featured_image"`
+	GalleryImages        []uuid.UUID               `json:"gallery_images"`
+	DemoVideos           []uuid.UUID               `json:"demo_videos"`
+	CertificateDocuments []uuid.UUID               `json:"certificate_documents"`
+	GuaranteeDocuments   []uuid.UUID               `json:"guarantee_documents"`
+	Draft                bool                      `json:"draft"`
+	UpdatedAt            time.Time                 `json:"updated_at"`
+}
+
+// TariffInfoRow is the editor-facing ai_tariff_info row — ID/Slug the
+// singleton NaturalKeyMain ("main"), same convention ContactRow/PolicyRow
+// use with domain.ContactSlug/PolicySlug.
+type TariffInfoRow struct {
+	ID              string                    `json:"id"`
+	Slug            string                    `json:"slug"`
+	AdditionalFacts []aiprompt.AdditionalFact `json:"additional_facts"`
+	Draft           bool                      `json:"draft"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
 }
 
 type ContactRow struct {
@@ -806,12 +865,13 @@ type PolicyRow struct {
 // DraftView is the whole working KB for the editor + builder: live rows merged
 // with pending blob entries.
 type DraftView struct {
-	Config   DraftConfig  `json:"config"`
-	Topics   []TopicRow   `json:"topics"`
-	Tariffs  []TariffRow  `json:"tariffs"`
-	Products []ProductRow `json:"products"`
-	Contacts []ContactRow `json:"contacts"`
-	Policies []PolicyRow  `json:"policies"`
+	Config     DraftConfig     `json:"config"`
+	Topics     []TopicRow      `json:"topics"`
+	Tariffs    []TariffRow     `json:"tariffs"`
+	Products   []ProductRow    `json:"products"`
+	Contacts   []ContactRow    `json:"contacts"`
+	Policies   []PolicyRow     `json:"policies"`
+	TariffInfo []TariffInfoRow `json:"tariff_info"`
 	// Zones is live ai_delivery_zones rows overlaid by pending
 	// blob.DeliveryZones entries — same live+blob merge as every other
 	// entity kind (see mergedView's zones section).
@@ -951,7 +1011,8 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 		}
 		v.Tariffs = append(v.Tariffs, TariffRow{ID: t.Ref, Ref: t.Ref, Name: t.Name, Price: t.Price,
 			LimitText: t.LimitText, Fee: t.Fee, Summary: t.Summary, PricingType: t.PricingType,
-			Advantages: t.Advantages, Disadvantages: t.Disadvantages, SalesStatus: t.SalesStatus,
+			Advantages: t.Advantages, Disadvantages: t.Disadvantages, BestFor: t.BestFor, NotFor: t.NotFor,
+			AdditionalFacts: t.AdditionalFacts, SalesStatus: t.SalesStatus,
 			FeaturedImage: t.FeaturedImage, PricingImages: t.PricingImages, ExplainerVideos: t.ExplainerVideos,
 			TermsDocuments: t.TermsDocuments,
 			Draft:          true, UpdatedAt: updatedAt})
@@ -961,7 +1022,11 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 			continue
 		}
 		v.Products = append(v.Products, ProductRow{ID: p.Ref, Ref: p.Ref, Name: p.Name, Price: p.Price,
-			Description: p.Description, Category: p.Category, InStock: p.InStock, SalesStatus: p.SalesStatus,
+			Description: p.Description, Category: p.Category, Brand: p.Brand, Advantages: p.Advantages,
+			Disadvantages: p.Disadvantages, BestFor: p.BestFor, NotFor: p.NotFor,
+			AvailabilityStatus: p.AvailabilityStatus, AvailabilityNote: p.AvailabilityNote,
+			InstallationTerms: p.InstallationTerms, WarrantyTerms: p.WarrantyTerms, AdditionalFacts: p.AdditionalFacts,
+			SalesStatus:   p.SalesStatus,
 			FeaturedImage: p.FeaturedImage, GalleryImages: p.GalleryImages, DemoVideos: p.DemoVideos,
 			CertificateDocuments: p.CertificateDocuments, GuaranteeDocuments: p.GuaranteeDocuments,
 			Draft: true, UpdatedAt: updatedAt})
@@ -983,6 +1048,11 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 			ReturnPeriodInDays: p.ReturnPeriodInDays, Warranty: p.Warranty, OutsideZonesNote: p.OutsideZonesNote,
 			CommercePolicyDocuments: p.CommercePolicyDocuments,
 			Draft:                   true, UpdatedAt: updatedAt})
+	}
+	if len(blob.TariffInfo) > 0 && !deletedSingleton(blob, "tariff_info") {
+		ti := blob.TariffInfo[0]
+		v.TariffInfo = append(v.TariffInfo, TariffInfoRow{ID: NaturalKeyMain, Slug: NaturalKeyMain,
+			AdditionalFacts: ti.AdditionalFacts, Draft: true, UpdatedAt: updatedAt})
 	}
 	for _, z := range blob.DeliveryZones {
 		if deleted["delivery_zone:"+z.Ref] {
@@ -1010,6 +1080,9 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 	if v.Policies == nil {
 		v.Policies = []PolicyRow{}
 	}
+	if v.TariffInfo == nil {
+		v.TariffInfo = []TariffInfoRow{}
+	}
 	if v.Zones == nil {
 		v.Zones = []ZoneRow{}
 	}
@@ -1036,6 +1109,7 @@ type DraftChangeSet struct {
 	Products    []ProductRow        `json:"products"`
 	Contacts    []ContactRow        `json:"contacts"`
 	Policies    []PolicyRow         `json:"policies"`
+	TariffInfo  []TariffInfoRow     `json:"tariff_info"`
 	Zones       []ZoneRow           `json:"zones"`
 	Deletes     []DraftChangeDelete `json:"deletes"`
 }
@@ -1067,6 +1141,7 @@ func (s *Store) DraftChanges(ctx context.Context, orgID uuid.UUID) (*DraftChange
 		Products:    rows.Products,
 		Contacts:    rows.Contacts,
 		Policies:    rows.Policies,
+		TariffInfo:  rows.TariffInfo,
 		Zones:       rows.Zones,
 		Deletes:     make([]DraftChangeDelete, 0, len(blob.Deletes)),
 	}
@@ -1155,7 +1230,8 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	// tariffs
 	tariffIdx := map[string]int{}
 	trrows, err := db.Query(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
-		disadvantages, sales_status, featured_image, pricing_images, explainer_videos, terms_documents, updated_at
+		disadvantages, best_for, not_for, additional_facts, sales_status,
+		featured_image, pricing_images, explainer_videos, terms_documents, updated_at
 		FROM ai_tariffs WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -1163,7 +1239,8 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	for trrows.Next() {
 		var t TariffRow
 		if err := trrows.Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages,
-			&t.Disadvantages, &t.SalesStatus, &t.FeaturedImage, (*dbx.UUIDArray)(&t.PricingImages), (*dbx.UUIDArray)(&t.ExplainerVideos), (*dbx.UUIDArray)(&t.TermsDocuments),
+			&t.Disadvantages, &t.BestFor, &t.NotFor, (*aiprompt.FactsColumn)(&t.AdditionalFacts), &t.SalesStatus,
+			&t.FeaturedImage, (*dbx.UUIDArray)(&t.PricingImages), (*dbx.UUIDArray)(&t.ExplainerVideos), (*dbx.UUIDArray)(&t.TermsDocuments),
 			&t.UpdatedAt); err != nil {
 			trrows.Close()
 			return nil, err
@@ -1179,7 +1256,8 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	for _, bt := range blob.Tariffs {
 		row := TariffRow{ID: bt.Ref, Ref: bt.Ref, Name: bt.Name, Price: bt.Price, LimitText: bt.LimitText,
 			Fee: bt.Fee, Summary: bt.Summary, PricingType: bt.PricingType, Advantages: bt.Advantages,
-			Disadvantages: bt.Disadvantages, SalesStatus: bt.SalesStatus, FeaturedImage: bt.FeaturedImage,
+			Disadvantages: bt.Disadvantages, BestFor: bt.BestFor, NotFor: bt.NotFor, AdditionalFacts: bt.AdditionalFacts,
+			SalesStatus: bt.SalesStatus, FeaturedImage: bt.FeaturedImage,
 			PricingImages: bt.PricingImages, ExplainerVideos: bt.ExplainerVideos, TermsDocuments: bt.TermsDocuments,
 			Draft: true, UpdatedAt: updatedAt}
 		if i, ok := tariffIdx[bt.Ref]; ok {
@@ -1197,17 +1275,20 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	}
 	v.Tariffs = kt
 
-	// products (availability is a dead legacy column — not selected)
+	// products
 	productIdx := map[string]int{}
-	prows, err := db.Query(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
-		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents, updated_at
+	prows, err := db.Query(ctx, `SELECT ref, name, price, description, category, brand, advantages, disadvantages,
+		best_for, not_for, availability_status, availability_note, installation_terms, warranty_terms, additional_facts,
+		sales_status, featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents, updated_at
 		FROM ai_products WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	for prows.Next() {
 		var p ProductRow
-		if err := prows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
+		if err := prows.Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.Brand, &p.Advantages, &p.Disadvantages,
+			&p.BestFor, &p.NotFor, &p.AvailabilityStatus, &p.AvailabilityNote, &p.InstallationTerms, &p.WarrantyTerms,
+			(*aiprompt.FactsColumn)(&p.AdditionalFacts), &p.SalesStatus,
 			&p.FeaturedImage, (*dbx.UUIDArray)(&p.GalleryImages), (*dbx.UUIDArray)(&p.DemoVideos), (*dbx.UUIDArray)(&p.CertificateDocuments),
 			(*dbx.UUIDArray)(&p.GuaranteeDocuments), &p.UpdatedAt); err != nil {
 			prows.Close()
@@ -1223,7 +1304,11 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	}
 	for _, bp := range blob.Products {
 		row := ProductRow{ID: bp.Ref, Ref: bp.Ref, Name: bp.Name, Price: bp.Price,
-			Description: bp.Description, Category: bp.Category, InStock: bp.InStock, SalesStatus: bp.SalesStatus,
+			Description: bp.Description, Category: bp.Category, Brand: bp.Brand, Advantages: bp.Advantages,
+			Disadvantages: bp.Disadvantages, BestFor: bp.BestFor, NotFor: bp.NotFor,
+			AvailabilityStatus: bp.AvailabilityStatus, AvailabilityNote: bp.AvailabilityNote,
+			InstallationTerms: bp.InstallationTerms, WarrantyTerms: bp.WarrantyTerms, AdditionalFacts: bp.AdditionalFacts,
+			SalesStatus:   bp.SalesStatus,
 			FeaturedImage: bp.FeaturedImage, GalleryImages: bp.GalleryImages, DemoVideos: bp.DemoVideos,
 			CertificateDocuments: bp.CertificateDocuments, GuaranteeDocuments: bp.GuaranteeDocuments,
 			Draft: true, UpdatedAt: updatedAt}
@@ -1330,6 +1415,33 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 		v.Policies = nil
 	}
 
+	// tariff_info — a true singleton (organization-wide tariff facts), same
+	// merge pattern as contacts/policies above.
+	var tiFacts []aiprompt.AdditionalFact
+	err = db.QueryRow(ctx, `SELECT additional_facts FROM ai_tariff_info WHERE organization_id = $1`, orgID).
+		Scan((*aiprompt.FactsColumn)(&tiFacts))
+	if err != nil && !errors.Is(err, dbx.ErrNoRows) {
+		return nil, err
+	}
+	if err == nil {
+		v.TariffInfo = append(v.TariffInfo, TariffInfoRow{
+			ID: NaturalKeyMain, Slug: NaturalKeyMain, AdditionalFacts: tiFacts,
+		})
+	}
+	if len(blob.TariffInfo) > 0 {
+		bti := blob.TariffInfo[0]
+		row := TariffInfoRow{ID: NaturalKeyMain, Slug: NaturalKeyMain, AdditionalFacts: bti.AdditionalFacts,
+			Draft: true, UpdatedAt: updatedAt}
+		if len(v.TariffInfo) > 0 {
+			v.TariffInfo[0] = row
+		} else {
+			v.TariffInfo = append(v.TariffInfo, row)
+		}
+	}
+	if deletedSingleton(blob, "tariff_info") {
+		v.TariffInfo = nil
+	}
+
 	// zones — live rows overlaid by pending blob.DeliveryZones entries, same
 	// pattern as tariffs/products above (no media columns in v1).
 	zoneIdx := map[string]int{}
@@ -1381,6 +1493,9 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	}
 	if v.Policies == nil {
 		v.Policies = []PolicyRow{}
+	}
+	if v.TariffInfo == nil {
+		v.TariffInfo = []TariffInfoRow{}
 	}
 	return v, nil
 }
@@ -1477,10 +1592,15 @@ func (s *Store) DeleteTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUI
 // --- typed facts: tariffs / products / contacts -----------------------------
 
 // TariffInput is an upsert payload for a draft tariff. Media is nil-means-
-// absent, same contract as TopicInput.Media above.
+// absent, same contract as TopicInput.Media above. AdditionalFacts is
+// nil-means-unchanged, non-nil (even empty) means replace — the same
+// pointer-to-slice convention media fields use (media_apply.go's doc
+// comment), because a whole-list replace is the only sane patch semantics
+// for a set of {ref, value, instruction} triples.
 type TariffInput struct {
-	Ref, Name, Price, LimitText, Fee, Summary, PricingType, Advantages, Disadvantages, SalesStatus string
-	Media                                                                                           TariffMedia
+	Ref, Name, Price, LimitText, Fee, Summary, PricingType, Advantages, Disadvantages, BestFor, NotFor, SalesStatus string
+	AdditionalFacts                                                                                                 *[]aiprompt.AdditionalFact
+	Media                                                                                                           TariffMedia
 }
 
 // UpsertTariff stages a tariff create/update in the draft blob, by ref.
@@ -1496,7 +1616,14 @@ func (s *Store) UpsertTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 		cur.Fee, cur.Summary = in.Fee, in.Summary
 		cur.PricingType = orDefault(in.PricingType, "fixed")
 		cur.Advantages, cur.Disadvantages = in.Advantages, in.Disadvantages
+		cur.BestFor, cur.NotFor = in.BestFor, in.NotFor
+		if in.AdditionalFacts != nil {
+			cur.AdditionalFacts = *in.AdditionalFacts
+		}
 		cur.SalesStatus = orDefault(in.SalesStatus, "active")
+		if err := validateTariffFacts(cur); err != nil {
+			return err
+		}
 		refs := applyTariffMedia(&cur, in.Media)
 		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
 			return err
@@ -1515,14 +1642,20 @@ func (s *Store) DeleteTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 	})
 }
 
-// ProductInput is an upsert payload for a draft product. InStock is nil-able:
-// nil leaves the column at its current merged value, matching the same
-// nil-means-unchanged idiom PutLiveProduct uses (live.go). Media is
-// nil-means-absent, same contract as TopicInput.Media above.
+// ProductInput is an upsert payload for a draft product. AvailabilityStatus
+// is nil-able: nil leaves the column at its current merged value, matching
+// the same nil-means-unchanged idiom PutLiveProduct uses (live.go) and the
+// legacy InStock field it replaces (migration 0017_kb_virtual_facts).
+// AdditionalFacts is nil-means-unchanged, non-nil (even empty) means
+// replace (TariffInput's doc comment). Media is nil-means-absent, same
+// contract as TopicInput.Media above.
 type ProductInput struct {
-	Ref, Name, Price, Description, Category, SalesStatus string
-	InStock                                              *bool
-	Media                                                 ProductMedia
+	Ref, Name, Price, Description, Category, Brand, Advantages, Disadvantages, BestFor, NotFor string
+	AvailabilityStatus                                                                         *string
+	AvailabilityNote, InstallationTerms, WarrantyTerms                                         string
+	AdditionalFacts                                                                            *[]aiprompt.AdditionalFact
+	SalesStatus                                                                                string
+	Media                                                                                      ProductMedia
 }
 
 // UpsertProduct stages a product create/update in the draft blob, by ref.
@@ -1536,9 +1669,21 @@ func (s *Store) UpsertProduct(ctx context.Context, orgID uuid.UUID, actor uuid.U
 		}
 		cur.Name, cur.Price = in.Name, in.Price
 		cur.Description, cur.Category = in.Description, in.Category
+		cur.Brand, cur.Advantages, cur.Disadvantages = in.Brand, in.Advantages, in.Disadvantages
+		cur.BestFor, cur.NotFor = in.BestFor, in.NotFor
+		cur.AvailabilityNote, cur.InstallationTerms, cur.WarrantyTerms = in.AvailabilityNote, in.InstallationTerms, in.WarrantyTerms
 		cur.SalesStatus = orDefault(in.SalesStatus, "active")
-		if in.InStock != nil {
-			cur.InStock = *in.InStock
+		if in.AvailabilityStatus != nil {
+			if err := validateEnum("availability_status", *in.AvailabilityStatus, "in_stock", "preorder", "on_demand", "unavailable"); err != nil {
+				return err
+			}
+			cur.AvailabilityStatus = *in.AvailabilityStatus
+		}
+		if in.AdditionalFacts != nil {
+			cur.AdditionalFacts = *in.AdditionalFacts
+		}
+		if err := validateProductFacts(cur); err != nil {
+			return err
 		}
 		refs := applyProductMedia(&cur, in.Media)
 		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
@@ -1714,6 +1859,35 @@ func (s *Store) PatchPolicies(ctx context.Context, orgID uuid.UUID, actor uuid.U
 	})
 }
 
+// TariffInfoPatch carries an optional edit to the org's singleton
+// organization-wide tariff-facts row (nil = leave unchanged) — a smaller
+// clone of PolicyPatch: AdditionalFacts is the only field, so unlike the
+// *string patches above it uses the same nil-means-unchanged/non-nil-means-
+// replace pointer-to-slice convention TariffInput.AdditionalFacts does.
+type TariffInfoPatch struct {
+	AdditionalFacts *[]aiprompt.AdditionalFact
+}
+
+// PatchTariffInfo stages an edit to the org's singleton tariff_info row,
+// starting from its current merged shape — an exact clone of
+// PatchPolicies, minus media (tariff_info carries none).
+func (s *Store) PatchTariffInfo(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p TariffInfoPatch) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentTariffInfo(ctx, db, orgID, b)
+		if err != nil {
+			return err
+		}
+		if p.AdditionalFacts != nil {
+			cur.AdditionalFacts = *p.AdditionalFacts
+		}
+		if err := validateTariffInfoFacts(cur); err != nil {
+			return err
+		}
+		b.upsertTariffInfo(cur)
+		return nil
+	})
+}
+
 // SetFactField upserts a SINGLE field on a typed fact (tariff/product/contact),
 // starting from the entity's current merged shape so the other columns are
 // preserved. This is the confirm_fact write path: a detected price is confirmed
@@ -1877,14 +2051,32 @@ func (s *Store) currentTariff(ctx context.Context, db dbtx, orgID uuid.UUID, ref
 	}
 	var t DraftTariff
 	err := db.QueryRow(ctx, `SELECT ref, name, price, limit_text, fee, summary, pricing_type, advantages,
-		disadvantages, sales_status, featured_image, pricing_images, explainer_videos, terms_documents
+		disadvantages, best_for, not_for, additional_facts, sales_status,
+		featured_image, pricing_images, explainer_videos, terms_documents
 		FROM ai_tariffs WHERE organization_id=$1 AND ref=$2`, orgID, ref).
 		Scan(&t.Ref, &t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages,
-			&t.Disadvantages, &t.SalesStatus, &t.FeaturedImage, (*dbx.UUIDArray)(&t.PricingImages), (*dbx.UUIDArray)(&t.ExplainerVideos), (*dbx.UUIDArray)(&t.TermsDocuments))
+			&t.Disadvantages, &t.BestFor, &t.NotFor, (*aiprompt.FactsColumn)(&t.AdditionalFacts), &t.SalesStatus,
+			&t.FeaturedImage, (*dbx.UUIDArray)(&t.PricingImages), (*dbx.UUIDArray)(&t.ExplainerVideos), (*dbx.UUIDArray)(&t.TermsDocuments))
 	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftTariff{Ref: ref, PricingType: "fixed"}, nil
 	}
 	return t, err
+}
+
+// currentTariffInfo resolves the merged current shape of the org's
+// singleton tariff_info row — the same pattern currentContact/
+// currentPolicy establish.
+func (s *Store) currentTariffInfo(ctx context.Context, db dbtx, orgID uuid.UUID, b *DraftBlob) (DraftTariffInfo, error) {
+	if len(b.TariffInfo) > 0 {
+		return b.TariffInfo[0], nil
+	}
+	var ti DraftTariffInfo
+	err := db.QueryRow(ctx, `SELECT additional_facts FROM ai_tariff_info WHERE organization_id = $1`, orgID).
+		Scan((*aiprompt.FactsColumn)(&ti.AdditionalFacts))
+	if errors.Is(err, dbx.ErrNoRows) {
+		return DraftTariffInfo{}, nil
+	}
+	return ti, err
 }
 
 func (s *Store) currentProduct(ctx context.Context, db dbtx, orgID uuid.UUID, ref string, b *DraftBlob) (DraftProduct, error) {
@@ -1894,13 +2086,16 @@ func (s *Store) currentProduct(ctx context.Context, db dbtx, orgID uuid.UUID, re
 		}
 	}
 	var p DraftProduct
-	err := db.QueryRow(ctx, `SELECT ref, name, price, description, category, in_stock, sales_status,
-		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
+	err := db.QueryRow(ctx, `SELECT ref, name, price, description, category, brand, advantages, disadvantages,
+		best_for, not_for, availability_status, availability_note, installation_terms, warranty_terms, additional_facts,
+		sales_status, featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
 		FROM ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).
-		Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
+		Scan(&p.Ref, &p.Name, &p.Price, &p.Description, &p.Category, &p.Brand, &p.Advantages, &p.Disadvantages,
+			&p.BestFor, &p.NotFor, &p.AvailabilityStatus, &p.AvailabilityNote, &p.InstallationTerms, &p.WarrantyTerms,
+			(*aiprompt.FactsColumn)(&p.AdditionalFacts), &p.SalesStatus,
 			&p.FeaturedImage, (*dbx.UUIDArray)(&p.GalleryImages), (*dbx.UUIDArray)(&p.DemoVideos), (*dbx.UUIDArray)(&p.CertificateDocuments), (*dbx.UUIDArray)(&p.GuaranteeDocuments))
 	if errors.Is(err, dbx.ErrNoRows) {
-		return DraftProduct{Ref: ref, InStock: true}, nil
+		return DraftProduct{Ref: ref, AvailabilityStatus: "in_stock"}, nil
 	}
 	return p, err
 }
@@ -1988,23 +2183,24 @@ func orDefault(v, def string) string {
 // domain.ContactSlug/domain.PolicySlug constant (there is nothing else to key
 // on — the natural key IS the org).
 type ApproveSelector struct {
-	Kind string // "" | "topics" | "tariffs" | "products" | "contacts" | "policies" | "delivery_zones" | "config"
-	Key  string // slug | ref | ref | domain.ContactSlug | domain.PolicySlug | ref | NaturalKeyMain
+	Kind string // "" | "topics" | "tariffs" | "products" | "contacts" | "policies" | "tariff_info" | "delivery_zones" | "config"
+	Key  string // slug | ref | ref | domain.ContactSlug | domain.PolicySlug | NaturalKeyMain | ref | NaturalKeyMain
 }
 
 type approveSet struct {
-	topics   []DraftTopic
-	tariffs  []DraftTariff
-	products []DraftProduct
-	contacts []DraftContact
-	policies []DraftPolicy
-	zones    []DraftDeliveryZone
-	config   bool // a pending assistant-config edit is targeted by this selector
-	deletes  []DraftDelete
+	topics     []DraftTopic
+	tariffs    []DraftTariff
+	products   []DraftProduct
+	contacts   []DraftContact
+	policies   []DraftPolicy
+	tariffInfo []DraftTariffInfo
+	zones      []DraftDeliveryZone
+	config     bool // a pending assistant-config edit is targeted by this selector
+	deletes    []DraftDelete
 }
 
 func (a approveSet) empty() bool {
-	return len(a.topics)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.zones)+len(a.deletes) == 0 && !a.config
+	return len(a.topics)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.tariffInfo)+len(a.zones)+len(a.deletes) == 0 && !a.config
 }
 
 // errApproveNothingPending is an internal control-flow sentinel:
@@ -2117,6 +2313,11 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 				return err
 			}
 		}
+		for _, ti := range set.tariffInfo {
+			if err := upsertTariffInfoRow(ctx, db, orgID, ti); err != nil {
+				return err
+			}
+		}
 		for _, z := range set.zones {
 			if err := upsertZoneRow(ctx, db, orgID, ZoneInput{
 				Ref: z.Ref, Name: z.Name, ZoneLevel: z.ZoneLevel, ParentRef: z.ParentRef,
@@ -2160,8 +2361,8 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 		// comment above).
 		//
 		// A whole-draft approve just materialized EVERY entry the blob held
-		// (selectApproved's own sel.Kind == "" branch takes all eight fields,
-		// and DraftBlob has exactly those eight — base_version/updated_at/
+		// (selectApproved's own sel.Kind == "" branch takes all nine fields,
+		// and DraftBlob has exactly those nine — base_version/updated_at/
 		// updated_by are sibling COLUMNS written by persistDraftBlob, never
 		// part of the JSON). So the cleared result is by definition the empty
 		// blob, and resetting it outright is both cheaper and strictly safer
@@ -2189,6 +2390,9 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 		}
 		if len(set.policies) > 0 {
 			b.removePolicy()
+		}
+		if len(set.tariffInfo) > 0 {
+			b.removeTariffInfo()
 		}
 		for _, z := range set.zones {
 			b.removeZone(z.Ref)
@@ -2228,6 +2432,9 @@ func applyDelete(ctx context.Context, tx execer, orgID uuid.UUID, d DraftDelete)
 	case "policy":
 		_, err := tx.Exec(ctx, `DELETE FROM ai_policies WHERE organization_id=$1`, orgID)
 		return err
+	case "tariff_info":
+		_, err := tx.Exec(ctx, `DELETE FROM ai_tariff_info WHERE organization_id=$1`, orgID)
+		return err
 	case "delivery_zone":
 		_, err := tx.Exec(ctx, `DELETE FROM ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
 		return err
@@ -2243,8 +2450,8 @@ func approveNote(sel ApproveSelector, set approveSet) string {
 		}
 		return fmt.Sprintf("approved %s %s", singular, sel.Key)
 	}
-	return fmt.Sprintf("approved %d topic(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d zone(s), %d deletion(s)",
-		len(set.topics), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.zones), len(set.deletes))
+	return fmt.Sprintf("approved %d topic(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d tariff_info, %d zone(s), %d deletion(s)",
+		len(set.topics), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.tariffInfo), len(set.zones), len(set.deletes))
 }
 
 // selectApproved picks the blob entries an ApproveSelector targets. Deletes are
@@ -2264,14 +2471,15 @@ func approveNote(sel ApproveSelector, set approveSet) string {
 func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	if sel.Kind == "" {
 		return approveSet{
-			topics:   append([]DraftTopic(nil), b.Topics...),
-			tariffs:  append([]DraftTariff(nil), b.Tariffs...),
-			products: append([]DraftProduct(nil), b.Products...),
-			contacts: append([]DraftContact(nil), b.Contacts...),
-			policies: append([]DraftPolicy(nil), b.Policies...),
-			zones:    append([]DraftDeliveryZone(nil), b.DeliveryZones...),
-			config:   b.Config.hasPending(),
-			deletes:  append([]DraftDelete(nil), b.Deletes...),
+			topics:     append([]DraftTopic(nil), b.Topics...),
+			tariffs:    append([]DraftTariff(nil), b.Tariffs...),
+			products:   append([]DraftProduct(nil), b.Products...),
+			contacts:   append([]DraftContact(nil), b.Contacts...),
+			policies:   append([]DraftPolicy(nil), b.Policies...),
+			tariffInfo: append([]DraftTariffInfo(nil), b.TariffInfo...),
+			zones:      append([]DraftDeliveryZone(nil), b.DeliveryZones...),
+			config:     b.Config.hasPending(),
+			deletes:    append([]DraftDelete(nil), b.Deletes...),
 		}
 	}
 	var set approveSet
@@ -2312,6 +2520,10 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	case "policies":
 		if sel.Key == domain.PolicySlug || sel.Key == NaturalKeyMain {
 			set.policies = append([]DraftPolicy(nil), b.Policies...)
+		}
+	case "tariff_info":
+		if sel.Key == NaturalKeyMain {
+			set.tariffInfo = append([]DraftTariffInfo(nil), b.TariffInfo...)
 		}
 	case "delivery_zones":
 		for _, z := range b.DeliveryZones {

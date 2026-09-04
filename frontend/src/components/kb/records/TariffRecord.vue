@@ -28,9 +28,10 @@ defineEmits<{ edit: []; publish: []; cancel: []; delete: []; 'toggle-select': []
 const { t } = useI18n()
 
 const state = computed(() => (props.changeType ? stateForChange(props.changeType) : 'published'))
+// additional_facts is deliberately excluded — see ProductRecord.vue's note.
 const diff = computed(() =>
   changedFields(props.row, props.liveRow, [
-    'name', 'price', 'limit_text', 'fee', 'summary', 'pricing_type', 'advantages', 'disadvantages', 'sales_status',
+    'name', 'price', 'limit_text', 'fee', 'summary', 'pricing_type', 'advantages', 'disadvantages', 'best_for', 'not_for', 'sales_status',
   ])
 )
 </script>
@@ -101,6 +102,26 @@ const diff = computed(() =>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.disadvantages') }}</span>
         <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.disadvantages || '—' }}</p>
         <FieldDiffNote :show="diff.includes('disadvantages')" :was="liveRow?.disadvantages ?? ''" :now="row.disadvantages" />
+      </div>
+      <div v-if="row.best_for">
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.bestFor') }}</span>
+        <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.best_for }}</p>
+        <FieldDiffNote :show="diff.includes('best_for')" :was="liveRow?.best_for ?? ''" :now="row.best_for" />
+      </div>
+      <div v-if="row.not_for">
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.notFor') }}</span>
+        <p class="text-sm mt-0.5 whitespace-pre-line">{{ row.not_for }}</p>
+        <FieldDiffNote :show="diff.includes('not_for')" :was="liveRow?.not_for ?? ''" :now="row.not_for" />
+      </div>
+    </div>
+    <div v-if="row.additional_facts.length" class="space-y-1.5">
+      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.facts.title') }}</span>
+      <div v-for="fact in row.additional_facts" :key="fact.ref" class="rounded-md border border-border p-2 text-sm">
+        <div class="flex items-center justify-between gap-2">
+          <code class="text-xs font-mono text-muted-foreground">{{ fact.ref }}</code>
+          <span class="font-medium">{{ fact.value }}</span>
+        </div>
+        <p class="text-xs text-muted-foreground mt-0.5">{{ fact.instruction }}</p>
       </div>
     </div>
     <div class="flex flex-col gap-2">

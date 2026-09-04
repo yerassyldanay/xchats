@@ -29,11 +29,18 @@ func Load(path string) (*aiprompt.KB, error) {
 // into an *aiprompt.KB. Unknown top-level or nested keys — including every
 // generic alias this family does not support (values, media, files,
 // availability, delivery_time, work_hours, ...) — are decode errors.
-// in_stock must be an explicit YAML boolean; a quoted "yes"/"no"/"true"/
-// "false" string is rejected, and an omitted in_stock key is rejected too
-// (the column is NOT NULL with no default). Closed enum columns
+// delivery_available must be an explicit YAML boolean; a quoted "yes"/"no"/
+// "true"/"false" string is rejected, and an omitted delivery_available key is
+// rejected too (the column is NOT NULL with no default). availability_status
+// may be omitted (it defaults to "in_stock", mirroring the column's own DB
+// default) but an explicit value must be one of the closed
+// in_stock|preorder|on_demand|unavailable vocabulary. Closed enum columns
 // (source_type, processing_status, customer_visibility, sales_status,
-// pricing_type) are validated against their exact DECISIONS.md vocabulary.
+// pricing_type, availability_status) are validated against their exact
+// DECISIONS.md vocabulary. Every additional_facts entry is validated by
+// aiprompt.ValidateFacts (ref syntax, uniqueness, no collision with a
+// concrete column, instruction hygiene, ...) before it ever reaches the
+// returned KB.
 func Decode(data []byte) (*aiprompt.KB, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -51,7 +58,24 @@ var (
 	validSalesStatus        = set("active", "inactive")
 	validPricingType        = set("fixed", "percentage", "tiered", "hybrid")
 	validZoneLevel          = set("city", "region", "country")
+	validAvailabilityStatus = set("in_stock", "preorder", "on_demand", "unavailable")
 )
+
+// toAdditionalFacts converts a fixture's additional_facts wire list into
+// aiprompt's own type — a 1:1 field copy; every semantic rule (ref syntax,
+// duplicates, reserved-column collisions, instruction hygiene, ...) is
+// enforced once, centrally, by aiprompt.ValidateFacts (called from each of
+// this file's three call sites below), not duplicated here.
+func toAdditionalFacts(facts []AIAdditionalFact) []aiprompt.AdditionalFact {
+	if len(facts) == 0 {
+		return nil
+	}
+	out := make([]aiprompt.AdditionalFact, len(facts))
+	for i, f := range facts {
+		out[i] = aiprompt.AdditionalFact{Ref: f.Ref, Value: f.Value.V, Instruction: f.Instruction}
+	}
+	return out
+}
 
 func set(vals ...string) map[string]bool {
 	m := make(map[string]bool, len(vals))
@@ -120,15 +144,30 @@ func toKB(fx *Fixture) (*aiprompt.KB, error) {
 		if strings.TrimSpace(p.Name) == "" {
 			return nil, fmt.Errorf("ai_products[%s]: name is required", p.Ref)
 		}
-		if p.InStock == nil {
-			return nil, fmt.Errorf("ai_products[%s]: in_stock is required (NOT NULL, no default)", p.Ref)
+		availabilityStatus := p.AvailabilityStatus
+		if availabilityStatus == "" {
+			availabilityStatus = "in_stock"
+		}
+		if !validAvailabilityStatus[availabilityStatus] {
+			return nil, fmt.Errorf("ai_products[%s]: availability_status must be one of in_stock|preorder|on_demand|unavailable, got %q", p.Ref, availabilityStatus)
 		}
 		if !validSalesStatus[p.SalesStatus] {
 			return nil, fmt.Errorf("ai_products[%s]: sales_status must be \"active\" or \"inactive\", got %q", p.Ref, p.SalesStatus)
 		}
+		productFacts := toAdditionalFacts(p.AdditionalFacts)
+		if err := aiprompt.ValidateFacts(productFacts, []string{"price"}, map[string]string{
+			"description": p.Description, "advantages": p.Advantages, "disadvantages": p.Disadvantages,
+			"best_for": p.BestFor, "not_for": p.NotFor, "availability_note": p.AvailabilityNote,
+			"installation_terms": p.InstallationTerms, "warranty_terms": p.WarrantyTerms,
+		}); err != nil {
+			return nil, fmt.Errorf("ai_products[%s]: additional_facts: %w", p.Ref, err)
+		}
 		kb.Products = append(kb.Products, aiprompt.Product{
 			Ref: p.Ref, Name: p.Name, Price: p.Price, Description: p.Description,
-			Category: p.Category, InStock: bool(*p.InStock), SalesStatus: p.SalesStatus,
+			Category: p.Category, Brand: p.Brand, Advantages: p.Advantages, Disadvantages: p.Disadvantages,
+			BestFor: p.BestFor, NotFor: p.NotFor, AvailabilityStatus: availabilityStatus,
+			AvailabilityNote: p.AvailabilityNote, InstallationTerms: p.InstallationTerms, WarrantyTerms: p.WarrantyTerms,
+			AdditionalFacts: productFacts, SalesStatus: p.SalesStatus,
 			FeaturedImage: p.FeaturedImage, GalleryImages: p.GalleryImages,
 			DemoVideos: p.DemoVideos, CertificateDocuments: p.CertificateDocuments,
 			GuaranteeDocuments: p.GuaranteeDocuments,
@@ -153,10 +192,18 @@ func toKB(fx *Fixture) (*aiprompt.KB, error) {
 		if !validPricingType[tf.PricingType] {
 			return nil, fmt.Errorf("ai_tariffs[%s]: pricing_type must be one of fixed|percentage|tiered|hybrid, got %q", tf.Ref, tf.PricingType)
 		}
+		tariffFacts := toAdditionalFacts(tf.AdditionalFacts)
+		if err := aiprompt.ValidateFacts(tariffFacts, []string{"price", "fee"}, map[string]string{
+			"summary": tf.Summary, "limit_text": tf.LimitText, "advantages": tf.Advantages,
+			"disadvantages": tf.Disadvantages, "best_for": tf.BestFor, "not_for": tf.NotFor,
+		}); err != nil {
+			return nil, fmt.Errorf("ai_tariffs[%s]: additional_facts: %w", tf.Ref, err)
+		}
 		kb.Tariffs = append(kb.Tariffs, aiprompt.Tariff{
 			Ref: tf.Ref, Name: tf.Name, Price: tf.Price, LimitText: tf.LimitText,
 			Fee: tf.Fee, Summary: tf.Summary, PricingType: tf.PricingType,
-			Advantages: tf.Advantages, Disadvantages: tf.Disadvantages, SalesStatus: tf.SalesStatus,
+			Advantages: tf.Advantages, Disadvantages: tf.Disadvantages, BestFor: tf.BestFor, NotFor: tf.NotFor,
+			AdditionalFacts: tariffFacts, SalesStatus: tf.SalesStatus,
 			FeaturedImage: tf.FeaturedImage, PricingImages: tf.PricingImages,
 			ExplainerVideos: tf.ExplainerVideos, TermsDocuments: tf.TermsDocuments,
 		})
@@ -181,6 +228,14 @@ func toKB(fx *Fixture) (*aiprompt.KB, error) {
 			OutsideZonesNote:        p.OutsideZonesNote,
 			CommercePolicyDocuments: p.CommercePolicyDocuments,
 		}
+	}
+
+	if ti := fx.AITariffInfo; ti != nil {
+		tariffInfoFacts := toAdditionalFacts(ti.AdditionalFacts)
+		if err := aiprompt.ValidateFacts(tariffInfoFacts, nil, nil); err != nil {
+			return nil, fmt.Errorf("ai_tariff_info: additional_facts: %w", err)
+		}
+		kb.TariffInfo = &aiprompt.TariffInfo{AdditionalFacts: tariffInfoFacts}
 	}
 
 	seenZoneRef := map[string]bool{}

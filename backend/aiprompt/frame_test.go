@@ -151,3 +151,91 @@ func TestPromptRefShopKBV5_Value(t *testing.T) {
 		t.Fatalf("PromptRefShopKBV5TG = %q, want %q", PromptRefShopKBV5TG, "shop-kb@v5-tg")
 	}
 }
+
+// --- v6: virtual fact columns (0017_kb_virtual_facts). Pinned exactly as
+// v4/v5 are; the same doctrine applies going forward (cut a v7, never edit
+// v6 in place once shipped). v4 and v5 stay embedded and pinned above,
+// completely untouched by this migration. ------------------------------
+
+const frameShopKBV6RUSHA256 = "4ee9bda3f0862fda6a01a8fcd43f655c075593e0c986daa2eb23be79c66ebc11"
+
+func TestFrameShopKBV6RU_MatchesPinnedHash(t *testing.T) {
+	sum := sha256.Sum256([]byte(FrameShopKBV6RU()))
+	got := hex.EncodeToString(sum[:])
+	if got != frameShopKBV6RUSHA256 {
+		t.Fatalf("frames/shop-kb-v6-ru.txt sha256 = %s, want %s (the embedded frame changed — see doc comment)", got, frameShopKBV6RUSHA256)
+	}
+}
+
+const frameShopKBV6TGRUSHA256 = "6bc800df6d24e9021ba0288e7ce5cf85563d1eafc2a741546120f24660060135"
+
+func TestFrameShopKBV6TGRU_MatchesPinnedHash(t *testing.T) {
+	sum := sha256.Sum256([]byte(FrameShopKBV6TGRU()))
+	got := hex.EncodeToString(sum[:])
+	if got != frameShopKBV6TGRUSHA256 {
+		t.Fatalf("frames/shop-kb-v6-tg-ru.txt sha256 = %s, want %s (the embedded frame changed — see doc comment)", got, frameShopKBV6TGRUSHA256)
+	}
+}
+
+// TestFrameShopKBV6TGRU_BodyMatchesGradedFrame is v6's copy of the
+// guarantee TestFrameShopKBV5TGRU_BodyMatchesGradedFrame makes for v5: the
+// RU and TG frames may differ ONLY in their persona line.
+func TestFrameShopKBV6TGRU_BodyMatchesGradedFrame(t *testing.T) {
+	ru := FrameShopKBV6RU()
+	tg := FrameShopKBV6TGRU()
+
+	ri := strings.Index(ru, "\n")
+	ti := strings.Index(tg, "\n")
+	if ri < 0 || ti < 0 {
+		t.Fatal("a frame has no newline — cannot split off the persona line")
+	}
+	if ru[ri:] != tg[ti:] {
+		t.Fatal("the v6 Telegram frame's body diverged from the v6 RU frame — only the first line may differ")
+	}
+	if strings.Contains(strings.ToLower(tg[:ti]), "whatsapp") {
+		t.Fatalf("the v6 Telegram frame still names WhatsApp in its persona line: %q", tg[:ti])
+	}
+	if ru[:ri] == tg[:ti] {
+		t.Fatal("the v6 Telegram frame's persona line is unchanged — it should be channel-neutral")
+	}
+}
+
+// TestFrameShopKBV6_IsStrictSupersetOfSlots pins v6's slot surface: every
+// v5 slot EXCEPT the two v6 replaces outright (SlotProductsInStock/
+// SlotProductsOutOfStock -> SlotProductsAvailable/SlotProductsUnavailable,
+// SlotTariffs -> SlotTariffCatalog) must still be present, plus the new
+// SlotTariffInfo — the cheap guard against a v6 edit that quietly drops a
+// slot its renderer still expects to fill.
+func TestFrameShopKBV6_IsStrictSupersetOfSlots(t *testing.T) {
+	for _, f := range []struct{ name, text string }{
+		{"v6 RU", FrameShopKBV6RU()},
+		{"v6 TG", FrameShopKBV6TGRU()},
+	} {
+		for _, slot := range []string{
+			SlotResponseSchema, SlotAssistant, SlotTopics, SlotDeliveryZones, SlotBusinessFacts,
+			SlotProductsAvailable, SlotProductsUnavailable, SlotTariffCatalog, SlotTariffInfo,
+		} {
+			if !strings.Contains(f.text, slot) {
+				t.Errorf("%s is missing the %s slot", f.name, slot)
+			}
+		}
+		for _, retired := range []string{SlotProductsInStock, SlotProductsOutOfStock, SlotTariffs} {
+			if strings.Contains(f.text, retired) {
+				t.Errorf("%s unexpectedly contains the retired slot %s — v6 uses its own product/tariff slots", f.name, retired)
+			}
+		}
+	}
+	// v4/v5 must stay completely untouched by this migration.
+	if strings.Contains(FrameShopKBV4RU(), SlotProductsAvailable) || strings.Contains(FrameShopKBV5RU(), SlotProductsAvailable) {
+		t.Error("v4/v5 unexpectedly contain a v6-only slot — they must stay frozen")
+	}
+}
+
+func TestPromptRefShopKBV6_Value(t *testing.T) {
+	if PromptRefShopKBV6 != "shop-kb@v6" {
+		t.Fatalf("PromptRefShopKBV6 = %q, want %q", PromptRefShopKBV6, "shop-kb@v6")
+	}
+	if PromptRefShopKBV6TG != "shop-kb@v6-tg" {
+		t.Fatalf("PromptRefShopKBV6TG = %q, want %q", PromptRefShopKBV6TG, "shop-kb@v6-tg")
+	}
+}

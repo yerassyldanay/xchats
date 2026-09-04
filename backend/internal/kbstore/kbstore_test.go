@@ -624,56 +624,58 @@ func TestDraftBaseVersionAdvances(t *testing.T) {
 	}
 }
 
-// queryInStock reads ai_products.in_stock directly, bypassing kbstore's own
-// view builders — the tests below are asserting on the COLUMN upsertProductRow
-// actually wrote, not on a read path that could hide the same bug.
-func queryInStock(t *testing.T, db *dbx.DB, orgID uuid.UUID, ref string) bool {
+// queryAvailabilityStatus reads ai_products.availability_status directly,
+// bypassing kbstore's own view builders — the tests below are asserting on
+// the COLUMN upsertProductRow actually wrote, not on a read path that could
+// hide the same bug.
+func queryAvailabilityStatus(t *testing.T, db *dbx.DB, orgID uuid.UUID, ref string) string {
 	t.Helper()
-	var v bool
+	var v string
 	if err := db.QueryRow(context.Background(),
-		`SELECT in_stock FROM ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).Scan(&v); err != nil {
-		t.Fatalf("query in_stock: %v", err)
+		`SELECT availability_status FROM ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).Scan(&v); err != nil {
+		t.Fatalf("query availability_status: %v", err)
 	}
 	return v
 }
 
-// PutLiveProduct's InStock is nil-able: nil means "no opinion" (schema
-// default on insert, PRESERVE the existing value on update); only an explicit
-// pointer overwrites it.
+// PutLiveProduct's AvailabilityStatus is nil-able: nil means "no opinion"
+// (schema default on insert, PRESERVE the existing value on update); only an
+// explicit pointer overwrites it — the same contract the legacy InStock
+// *bool field had (0017_kb_virtual_facts).
 func TestPutLiveProduct_InStockDefaultInsertPreserveUpdateExplicitFalse(t *testing.T) {
 	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
-	// insert, InStock nil -> schema default true.
+	// insert, AvailabilityStatus nil -> schema default in_stock.
 	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
 		Ref: "kettle", Name: "Чайник", Price: "1 ₸",
 	}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	if !queryInStock(t, db, orgID, "kettle") {
-		t.Fatal("insert with nil InStock should default to true")
+	if got := queryAvailabilityStatus(t, db, orgID, "kettle"); got != "in_stock" {
+		t.Fatalf("insert with nil AvailabilityStatus should default to in_stock, got %q", got)
 	}
 
-	// explicit false persists.
-	f := false
+	// explicit unavailable persists.
+	unavailable := "unavailable"
 	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
-		Ref: "kettle", Name: "Чайник", Price: "1 ₸", InStock: &f,
+		Ref: "kettle", Name: "Чайник", Price: "1 ₸", AvailabilityStatus: &unavailable,
 	}); err != nil {
-		t.Fatalf("update explicit false: %v", err)
+		t.Fatalf("update explicit unavailable: %v", err)
 	}
-	if queryInStock(t, db, orgID, "kettle") {
-		t.Fatal("explicit false InStock should persist as false")
+	if got := queryAvailabilityStatus(t, db, orgID, "kettle"); got != "unavailable" {
+		t.Fatalf("explicit unavailable AvailabilityStatus should persist as unavailable, got %q", got)
 	}
 
-	// a later write with InStock nil PRESERVES the existing (false) value —
-	// never silently resets it back to true.
+	// a later write with AvailabilityStatus nil PRESERVES the existing
+	// (unavailable) value — never silently resets it back to in_stock.
 	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
 		Ref: "kettle", Name: "Чайник (переименован)", Price: "2 ₸",
 	}); err != nil {
-		t.Fatalf("update nil InStock: %v", err)
+		t.Fatalf("update nil AvailabilityStatus: %v", err)
 	}
-	if queryInStock(t, db, orgID, "kettle") {
-		t.Fatal("update with nil InStock should preserve the existing false value, not reset to true")
+	if got := queryAvailabilityStatus(t, db, orgID, "kettle"); got != "unavailable" {
+		t.Fatalf("update with nil AvailabilityStatus should preserve the existing unavailable value, got %q", got)
 	}
 }
 
@@ -1017,7 +1019,7 @@ func TestApproveVersioned_WholeDraftClearsEveryEntry(t *testing.T) {
 	for i := 0; i < n; i++ {
 		suffix := string(rune('a' + i))
 		if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "product-"+suffix, kbstore.ProductChanges{
-			Name: strp("Товар " + suffix), InStock: boolp(true),
+			Name: strp("Товар " + suffix), AvailabilityStatus: strp("in_stock"),
 		}, nil, kbstore.MCPProvenance{}); err != nil {
 			t.Fatalf("stage product %d: %v", i, err)
 		}

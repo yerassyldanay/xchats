@@ -117,7 +117,7 @@ func issueSummary(issues []aiprompt.ContractIssue) string {
 // fields, bad reply_language, and unknown media tokens are ALL rejected by the same
 // strict decode judge.go's own hand-rolled map checks only partially covered — while
 // the diagnostic fields escalation_reason/confidence never gate anything), fact
-// substitution via aiprompt.SubstituteFactsLang (gets in_stock's wording right in
+// substitution via aiprompt.SubstituteFactsLang (gets delivery_available's wording right in
 // whichever language — ru or kk — the response itself declares), and
 // a media_files_to_send re-resolution check via aiprompt.ResolveSend that the legacy
 // pipeline has no equivalent of (it has no kbd_materials to resolve against). Every

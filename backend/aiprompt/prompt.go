@@ -36,20 +36,36 @@ import (
 // them, so an operator who priced a tariff in its typed columns watched the
 // assistant escalate ("нет этой информации") rather than quote it. See
 // renderTariffs.
+//
+// SlotProductsAvailable/SlotProductsUnavailable/SlotTariffCatalog/
+// SlotTariffInfo are the v6 addition (virtual fact columns,
+// 0017_kb_virtual_facts): v6 renders every product/tariff block through
+// renderProductsAvailable/renderTariffCatalog instead of
+// renderProductsInStock/renderTariffs, adding brand/advantages/
+// disadvantages/best_for/not_for/availability/installation/warranty prose
+// and each entity's virtual facts beside their instructions
+// (renderAdditionalFactLines) — new slots, not new behavior grafted onto
+// the v4/v5 ones, so an old pinned frame's rendering never changes shape.
+// SlotTariffInfo carries the organization-wide tariff_info singleton's own
+// virtual facts, which have no per-tariff or per-product block to live in.
 const (
-	SlotAssistant          = "%%ASSISTANT%%"
-	SlotKnowledgeBase      = "%%KNOWLEDGE_BASE%%"
-	SlotDescriptions       = "%%DESCRIPTIONS%%"
-	SlotFacts              = "%%FACTS%%"
-	SlotMedia              = "%%MEDIA%%"
-	SlotMediaAbsent        = "%%MEDIA_ABSENT%%"
-	SlotProductsInStock    = "%%PRODUCTS_IN_STOCK%%"
-	SlotProductsOutOfStock = "%%PRODUCTS_OUT_OF_STOCK%%"
-	SlotTariffs            = "%%TARIFFS%%"
-	SlotTopics             = "%%TOPICS%%"
-	SlotBusinessFacts      = "%%BUSINESS_FACTS%%"
-	SlotDeliveryZones      = "%%DELIVERY_ZONES%%"
-	SlotResponseSchema     = "%%RESPONSE_SCHEMA%%"
+	SlotAssistant           = "%%ASSISTANT%%"
+	SlotKnowledgeBase       = "%%KNOWLEDGE_BASE%%"
+	SlotDescriptions        = "%%DESCRIPTIONS%%"
+	SlotFacts               = "%%FACTS%%"
+	SlotMedia               = "%%MEDIA%%"
+	SlotMediaAbsent         = "%%MEDIA_ABSENT%%"
+	SlotProductsInStock     = "%%PRODUCTS_IN_STOCK%%"
+	SlotProductsOutOfStock  = "%%PRODUCTS_OUT_OF_STOCK%%"
+	SlotTariffs             = "%%TARIFFS%%"
+	SlotProductsAvailable   = "%%PRODUCTS_AVAILABLE%%"
+	SlotProductsUnavailable = "%%PRODUCTS_UNAVAILABLE%%"
+	SlotTariffCatalog       = "%%TARIFF_CATALOG%%"
+	SlotTariffInfo          = "%%TARIFF_INFO%%"
+	SlotTopics              = "%%TOPICS%%"
+	SlotBusinessFacts       = "%%BUSINESS_FACTS%%"
+	SlotDeliveryZones       = "%%DELIVERY_ZONES%%"
+	SlotResponseSchema      = "%%RESPONSE_SCHEMA%%"
 )
 
 // BuildPrompt is the explicit two-step orchestration: BuildCatalog validates
@@ -96,6 +112,10 @@ func RenderPrompt(frame string, input *PromptInput, cat *Catalog) (string, error
 	out = strings.ReplaceAll(out, SlotProductsInStock, renderProductsInStock(input, cat))
 	out = strings.ReplaceAll(out, SlotProductsOutOfStock, renderProductsOutOfStock(input))
 	out = strings.ReplaceAll(out, SlotTariffs, renderTariffs(input, cat))
+	out = strings.ReplaceAll(out, SlotProductsAvailable, renderProductsAvailable(input, cat))
+	out = strings.ReplaceAll(out, SlotProductsUnavailable, renderProductsUnavailable(input))
+	out = strings.ReplaceAll(out, SlotTariffCatalog, renderTariffCatalog(input, cat))
+	out = strings.ReplaceAll(out, SlotTariffInfo, renderTariffInfo(input, cat))
 	out = strings.ReplaceAll(out, SlotTopics, renderTopicBlocks(input, cat))
 	out = strings.ReplaceAll(out, SlotBusinessFacts, renderBusinessFacts(cat.Facts))
 	out = strings.ReplaceAll(out, SlotDeliveryZones, renderDeliveryZones(input.DeliveryZones))
@@ -277,7 +297,7 @@ func mediaRefLines(cat *Catalog, table, ref string) []string {
 func renderProductsInStock(input *PromptInput, cat *Catalog) string {
 	var blocks []string
 	for _, p := range input.Products {
-		if !active(p.SalesStatus) || !p.InStock {
+		if !productVisible(&p) {
 			continue
 		}
 		lines := []string{"product: " + p.Ref, "name: " + p.Name}
@@ -304,11 +324,174 @@ func renderProductsInStock(input *PromptInput, cat *Catalog) string {
 func renderProductsOutOfStock(input *PromptInput) string {
 	var lines []string
 	for _, p := range input.Products {
-		if !active(p.SalesStatus) || p.InStock {
+		if !active(p.SalesStatus) || p.AvailabilityStatus != "unavailable" {
 			continue
 		}
 		lines = append(lines, "- "+p.Name)
 	}
+	if len(lines) == 0 {
+		return "—"
+	}
+	return strings.Join(lines, "\n")
+}
+
+// availabilityStatusRUWords is the reviewed Russian wording for each
+// availability_status value, shown as plain descriptive text directly in a
+// v6 product block (like pricing_type on a tariff block) — not a hidden
+// exact value, so it is interpolated as-is rather than hidden behind a
+// fact token. unavailable never reaches this: renderProductsAvailable only
+// calls it for a productVisible row.
+var availabilityStatusRUWords = map[string]string{
+	"in_stock":  "в наличии",
+	"preorder":  "предзаказ",
+	"on_demand": "под заказ",
+}
+
+func availabilityStatusRU(status string) string {
+	s, ok := availabilityStatusRUWords[status]
+	if !ok {
+		// Unreachable through the normal Generate/BuildPrompt path:
+		// BuildCatalog's validAvailabilityStatuses check (catalog.go) rejects
+		// any status outside the four known values before RenderPrompt is
+		// ever called, and renderProductsAvailable only calls this for a
+		// productVisible row (in_stock/preorder/on_demand). A caller that
+		// renders without building the catalog first is the only way to
+		// reach this — rendering an unrecognized status as if it were safe
+		// prose is exactly the leak this feature exists to prevent, so this
+		// fails loud (panic, recovered by the HTTP layer's gin.Recovery())
+		// rather than silently passing an unvetted string through.
+		panic(fmt.Sprintf("aiprompt: availabilityStatusRU: unrecognized status %q — BuildCatalog should have rejected it first", status))
+	}
+	return s
+}
+
+// renderAdditionalFactLines renders one "fact: <instruction> — {{token}}"
+// line per entry of facts that BuildCatalog actually approved a token for
+// (cat.FactByToken != nil) — an entry BuildCatalog dropped (empty/invalid
+// value) is omitted entirely, never rendered as an "unavailable:" line,
+// matching mediaRefLines' own omission-only convention. Shared by every
+// v6 block (product, tariff, tariff_info) that carries virtual facts.
+func renderAdditionalFactLines(cat *Catalog, table, ref string, facts []AdditionalFact) []string {
+	var lines []string
+	for _, f := range facts {
+		token := "{{" + table + "." + ref + "." + f.Ref + "}}"
+		if cat.FactByToken(token) == nil {
+			continue
+		}
+		lines = append(lines, "fact: "+strings.TrimSpace(f.Instruction)+" — "+token)
+	}
+	return lines
+}
+
+// renderProductsAvailable renders the v6 frame's available-product list
+// (%%PRODUCTS_AVAILABLE%%): one block per productVisible product (in_stock
+// | preorder | on_demand, active) with every prose field, the availability
+// status/note, price placeholder, virtual facts beside their instructions,
+// and every populated media reference — the v6 replacement for
+// renderProductsInStock (kept, frozen, for v4/v5 — see this file's slot
+// doc comment).
+func renderProductsAvailable(input *PromptInput, cat *Catalog) string {
+	var blocks []string
+	for _, p := range input.Products {
+		if !productVisible(&p) {
+			continue
+		}
+		lines := []string{"product: " + p.Ref, "name: " + p.Name}
+		for _, f := range []struct{ field, text string }{
+			{"brand", p.Brand},
+			{"description", p.Description},
+			{"advantages", p.Advantages},
+			{"disadvantages", p.Disadvantages},
+			{"best_for", p.BestFor},
+			{"not_for", p.NotFor},
+		} {
+			if s := strings.TrimSpace(f.text); s != "" {
+				lines = append(lines, f.field+": "+s)
+			}
+		}
+		lines = append(lines, "availability_status: "+availabilityStatusRU(p.AvailabilityStatus))
+		for _, f := range []struct{ field, text string }{
+			{"availability_note", p.AvailabilityNote},
+			{"installation_terms", p.InstallationTerms},
+			{"warranty_terms", p.WarrantyTerms},
+		} {
+			if s := strings.TrimSpace(f.text); s != "" {
+				lines = append(lines, f.field+": "+s)
+			}
+		}
+		if cat.FactByToken("{{product."+p.Ref+".price}}") != nil {
+			lines = append(lines, "price_placeholder: {{product."+p.Ref+".price}}")
+		}
+		lines = append(lines, renderAdditionalFactLines(cat, "product", p.Ref, p.AdditionalFacts)...)
+		lines = append(lines, mediaRefLines(cat, "products", p.Ref)...)
+		blocks = append(blocks, strings.Join(lines, "\n"))
+	}
+	if len(blocks) == 0 {
+		return "—"
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+// renderProductsUnavailable renders the v6 frame's unavailable-product list
+// (%%PRODUCTS_UNAVAILABLE%%): NAME ONLY, the same shape as v4/v5's
+// renderProductsOutOfStock — an unavailable product is known but must
+// never carry a fact or media token (productVisible/buildFacts/buildMedia).
+func renderProductsUnavailable(input *PromptInput) string {
+	return renderProductsOutOfStock(input)
+}
+
+// renderTariffCatalog renders the v6 frame's tariff list
+// (%%TARIFF_CATALOG%%) — renderTariffs plus best_for/not_for prose and
+// virtual facts beside their instructions. The v6 replacement for
+// renderTariffs (kept, frozen, for v5 — see this file's slot doc comment).
+func renderTariffCatalog(input *PromptInput, cat *Catalog) string {
+	var blocks []string
+	for _, t := range input.Tariffs {
+		if !active(t.SalesStatus) {
+			continue
+		}
+		lines := []string{"tariff: " + t.Ref, "name: " + t.Name}
+		if s := strings.TrimSpace(t.PricingType); s != "" {
+			lines = append(lines, "pricing_type: "+s)
+		}
+		for _, f := range []struct{ field, text string }{
+			{"summary", t.Summary},
+			{"limit", t.LimitText},
+			{"advantages", t.Advantages},
+			{"disadvantages", t.Disadvantages},
+			{"best_for", t.BestFor},
+			{"not_for", t.NotFor},
+		} {
+			if s := strings.TrimSpace(f.text); s != "" {
+				lines = append(lines, f.field+": "+s)
+			}
+		}
+		for _, col := range []string{"price", "fee"} {
+			token := "{{tariff." + t.Ref + "." + col + "}}"
+			if cat.FactByToken(token) != nil {
+				lines = append(lines, col+"_placeholder: "+token)
+			}
+		}
+		lines = append(lines, renderAdditionalFactLines(cat, "tariff", t.Ref, t.AdditionalFacts)...)
+		lines = append(lines, mediaRefLines(cat, "tariffs", t.Ref)...)
+		blocks = append(blocks, strings.Join(lines, "\n"))
+	}
+	if len(blocks) == 0 {
+		return "—"
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+// renderTariffInfo renders the v6 frame's organization-wide tariff_info
+// block (%%TARIFF_INFO%%): every virtual fact BuildCatalog approved for
+// the tariff_info singleton, beside its instruction — "—" when the
+// singleton is absent or carries no (approved) facts, same convention as
+// every other possibly-empty slot in this file.
+func renderTariffInfo(input *PromptInput, cat *Catalog) string {
+	if input.TariffInfo == nil {
+		return "—"
+	}
+	lines := renderAdditionalFactLines(cat, "tariff_info", SingletonRef, input.TariffInfo.AdditionalFacts)
 	if len(lines) == 0 {
 		return "—"
 	}

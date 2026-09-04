@@ -4,12 +4,12 @@
 // (DraftChangeSet from GET /playground/draft, DraftView from GET /kb) and
 // get back groups ready to render.
 import { ENTITY_META, KB_ENTITY_ORDER } from '@/components/kb/kbEntities'
-import type { ContactRow, DeliveryZoneRow, DraftChangeSet, DraftView, PolicyRow, ProductRow, TariffRow, TopicRow } from '@/types'
+import type { ContactRow, DeliveryZoneRow, DraftChangeSet, DraftView, PolicyRow, ProductRow, TariffInfoRow, TariffRow, TopicRow } from '@/types'
 
-export type ChangeKind = 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies' | 'delivery_zones' | 'config'
+export type ChangeKind = 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies' | 'tariff_info' | 'delivery_zones' | 'config'
 export type ChangeType = 'added' | 'updated' | 'removed'
 export type ConfigField = 'persona' | 'mission' | 'guardrails' | 'language_policy' | 'reply_max_words'
-export type KbRow = TopicRow | TariffRow | ProductRow | ContactRow | PolicyRow | DeliveryZoneRow
+export type KbRow = TopicRow | TariffRow | ProductRow | ContactRow | PolicyRow | TariffInfoRow | DeliveryZoneRow
 
 export interface ChangeEntry<T extends KbRow = KbRow> {
   kind: ChangeKind

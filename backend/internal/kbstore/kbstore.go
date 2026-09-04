@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
@@ -263,7 +264,7 @@ func insertLiveContent(ctx context.Context, tx execer, orgID uuid.UUID, snap *do
 	for _, p := range snap.Products {
 		if err := upsertProductRow(ctx, tx, orgID, DraftProduct{
 			Ref: p.Ref, Name: p.Name, Price: p.Price, Description: p.Description, Category: p.Category,
-			InStock: true,
+			AvailabilityStatus: "in_stock",
 		}); err != nil {
 			return err
 		}
@@ -325,41 +326,64 @@ func upsertTopicRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTopi
 func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTariff) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_tariffs
 		(organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages,
+		 best_for, not_for, additional_facts,
 		 sales_status, featured_image, pricing_images, explainer_videos, terms_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, limit_text=EXCLUDED.limit_text, fee=EXCLUDED.fee,
 			summary=EXCLUDED.summary, pricing_type=EXCLUDED.pricing_type, advantages=EXCLUDED.advantages,
-			disadvantages=EXCLUDED.disadvantages, sales_status=EXCLUDED.sales_status,
+			disadvantages=EXCLUDED.disadvantages, best_for=EXCLUDED.best_for, not_for=EXCLUDED.not_for,
+			additional_facts=EXCLUDED.additional_facts, sales_status=EXCLUDED.sales_status,
 			featured_image=EXCLUDED.featured_image, pricing_images=EXCLUDED.pricing_images,
 			explainer_videos=EXCLUDED.explainer_videos, terms_documents=EXCLUDED.terms_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, t.Ref, t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
-		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages, orDefault(t.SalesStatus, "active"),
+		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages, t.BestFor, t.NotFor,
+		aiprompt.FactsColumn(t.AdditionalFacts), orDefault(t.SalesStatus, "active"),
 		t.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(t.PricingImages)), dbx.UUIDArray(nonNilUUIDs(t.ExplainerVideos)), dbx.UUIDArray(nonNilUUIDs(t.TermsDocuments))); err != nil {
 		return fmt.Errorf("insert tariff %s: %w", t.Ref, err)
 	}
 	return nil
 }
 
-// upsertProductRow writes one ai_products row. availability is a dead legacy
-// column (plan/database-schema.md: not part of the target) and is no longer
-// written.
+// upsertProductRow writes one ai_products row.
 func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftProduct) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_products
-		(organization_id, ref, name, price, description, category, in_stock, sales_status,
+		(organization_id, ref, name, price, description, category, brand, advantages, disadvantages,
+		 best_for, not_for, availability_status, availability_note, installation_terms, warranty_terms,
+		 additional_facts, sales_status,
 		 featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
-			category=EXCLUDED.category, in_stock=EXCLUDED.in_stock, sales_status=EXCLUDED.sales_status,
+			category=EXCLUDED.category, brand=EXCLUDED.brand, advantages=EXCLUDED.advantages,
+			disadvantages=EXCLUDED.disadvantages, best_for=EXCLUDED.best_for, not_for=EXCLUDED.not_for,
+			availability_status=EXCLUDED.availability_status, availability_note=EXCLUDED.availability_note,
+			installation_terms=EXCLUDED.installation_terms, warranty_terms=EXCLUDED.warranty_terms,
+			additional_facts=EXCLUDED.additional_facts, sales_status=EXCLUDED.sales_status,
 			featured_image=EXCLUDED.featured_image, gallery_images=EXCLUDED.gallery_images,
 			demo_videos=EXCLUDED.demo_videos, certificate_documents=EXCLUDED.certificate_documents,
 			guarantee_documents=EXCLUDED.guarantee_documents,
 			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
-		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, p.InStock, orDefault(p.SalesStatus, "active"),
+		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, p.Brand, p.Advantages, p.Disadvantages,
+		p.BestFor, p.NotFor, orDefault(p.AvailabilityStatus, "in_stock"), p.AvailabilityNote, p.InstallationTerms, p.WarrantyTerms,
+		aiprompt.FactsColumn(p.AdditionalFacts), orDefault(p.SalesStatus, "active"),
 		p.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(p.GalleryImages)), dbx.UUIDArray(nonNilUUIDs(p.DemoVideos)),
 		dbx.UUIDArray(nonNilUUIDs(p.CertificateDocuments)), dbx.UUIDArray(nonNilUUIDs(p.GuaranteeDocuments))); err != nil {
 		return fmt.Errorf("insert product %s: %w", p.Ref, err)
+	}
+	return nil
+}
+
+// upsertTariffInfoRow writes the org's ai_tariff_info singleton row — a
+// smaller clone of upsertContactRow/upsertPolicyRow (ON CONFLICT on
+// organization_id alone, no natural key).
+func upsertTariffInfoRow(ctx context.Context, tx execer, orgID uuid.UUID, ti DraftTariffInfo) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_tariff_info (organization_id, additional_facts)
+		VALUES ($1,$2)
+		ON CONFLICT (organization_id) DO UPDATE SET
+			additional_facts=EXCLUDED.additional_facts, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+		orgID, aiprompt.FactsColumn(ti.AdditionalFacts)); err != nil {
+		return fmt.Errorf("insert tariff_info: %w", err)
 	}
 	return nil
 }

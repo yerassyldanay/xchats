@@ -104,8 +104,8 @@ func cmdJudgeLLM(args []string) error {
 
 	// Ground truth for the auto-generated stock-correctness dimension (StockCheckRef)
 	// comes from the catalog, schema_kb_v1 only — a legacy fact_tables scenario has no
-	// per-product InStock signal this command knows how to read, so kb stays nil and
-	// every stockChecksFor call below is a no-op for it.
+	// per-product AvailabilityStatus signal this command knows how to read, so kb stays
+	// nil and every stockChecksFor call below is a no-op for it.
 	var kb *aiprompt.KB
 	if scenario.Pipeline == "schema_kb_v1" && inputs.FixturePath != "" {
 		loaded, err := kbfixture.Load(inputs.FixturePath)
@@ -310,12 +310,21 @@ func parseLLMVerdict(raw string) (bool, bool) {
 // "out_of_stock", plus the product's display name for the judge prompt. ok is false
 // when ref names no active product in THIS (possibly size-limited) catalog, e.g. a
 // StockCheckRef the current -limits truncation no longer includes.
+//
+// This stays a coarse two-way split even though aiprompt.Product now carries
+// four availability states: only AvailabilityStatus=="in_stock" counts as
+// "in_stock" ground truth, and preorder/on_demand/unavailable all fold into
+// "out_of_stock" — the same bucket unavailable alone occupied before the
+// availability_status enum replaced the old in_stock boolean (migration
+// 0017 backfills true/false into exactly those two values). A real
+// preorder-vs-on_demand-vs-unavailable judge dimension is future work, not
+// something this binary classification can express today.
 func stockGroundTruth(kb *aiprompt.KB, ref string) (expected, displayName string, ok bool) {
 	for _, p := range kb.Products {
 		if p.Ref != ref || p.SalesStatus != "active" {
 			continue
 		}
-		if p.InStock {
+		if p.AvailabilityStatus == "in_stock" {
 			return "in_stock", p.Name, true
 		}
 		return "out_of_stock", p.Name, true

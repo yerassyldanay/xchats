@@ -413,6 +413,19 @@ export interface TopicRow {
   draft: boolean
   updated_at: string
 }
+// AdditionalFact mirrors aiprompt.AdditionalFact — one seller-authored
+// "virtual fact column" on a product, tariff, or the tariff_info singleton:
+// {ref, value, instruction}. value is the exact fact the customer prompt
+// keeps hidden behind a {{table.ref.fact_ref}} token, substituted only
+// alongside `instruction`'s safe-phrasing guidance (aiprompt/facts.go) —
+// never rendered verbatim into the prompt itself. ref is lowercase
+// snake_case, unique within the record, and must not collide with one of
+// the record's own concrete field names (e.g. "price").
+export interface AdditionalFact {
+  ref: string
+  value: number | boolean | string
+  instruction: string
+}
 // Facts lane — typed entity rows. Every exact fact (price, limit, phone, …) is a
 // CONCRETE COLUMN here, never a generic key→value; the brain quotes it in replies
 // as a {{table.slug.field}} token. `id` = the row's natural key (ref, or the
@@ -428,6 +441,9 @@ export interface TariffRow {
   pricing_type: string // fixed | percentage | tiered
   advantages: string
   disadvantages: string
+  best_for: string
+  not_for: string
+  additional_facts: AdditionalFact[]
   sales_status: string // active | inactive
   featured_image: string | null
   pricing_images: string[]
@@ -443,7 +459,16 @@ export interface ProductRow {
   price: string
   description: string
   category: string
-  in_stock: boolean
+  brand: string
+  advantages: string
+  disadvantages: string
+  best_for: string
+  not_for: string
+  availability_status: string // in_stock | preorder | on_demand | unavailable
+  availability_note: string
+  installation_terms: string
+  warranty_terms: string
+  additional_facts: AdditionalFact[]
   sales_status: string // active | inactive
   featured_image: string | null
   gallery_images: string[]
@@ -486,6 +511,17 @@ export interface PolicyRow {
   warranty: string
   outside_zones_note: string
   commerce_policy_documents: string[]
+  draft: boolean
+  updated_at: string
+}
+// TariffInfoRow — the ai_tariff_info singleton (id/slug always "main"):
+// organization-wide tariff facts not specific to any one tariff (e.g. a
+// trial period shared by every plan). Carries no prose column at all, only
+// additional_facts — a structural clone of ContactRow/PolicyRow otherwise.
+export interface TariffInfoRow {
+  id: string
+  slug: string
+  additional_facts: AdditionalFact[]
   draft: boolean
   updated_at: string
 }
@@ -552,6 +588,7 @@ export interface DraftView {
   products: ProductRow[]
   contacts: ContactRow[]
   policies: PolicyRow[]
+  tariff_info: TariffInfoRow[]
   zones: DeliveryZoneRow[]
   materials: KbMaterial[]
   requests: KbRequest[]
@@ -585,6 +622,7 @@ export interface DraftChangeSet {
   products: ProductRow[]
   contacts: ContactRow[]
   policies: PolicyRow[]
+  tariff_info: TariffInfoRow[]
   zones: DeliveryZoneRow[]
   deletes: DraftChangeDelete[]
 }
@@ -593,7 +631,7 @@ export interface DraftChangeSet {
 // vocabulary POST /playground/draft/approve/:kind/:id and DELETE
 // /playground/draft/changes/:kind/:key use.
 export interface DraftChangeDelete {
-  kind: string // topics|tariffs|products|contacts|policies|delivery_zones
+  kind: string // topics|tariffs|products|contacts|policies|tariff_info|delivery_zones
   key: string
 }
 
@@ -1360,7 +1398,7 @@ export type KbSource = 'REAL_KB' | 'DRAFT_KB'
 // KbRecordKind is the same plural entity vocabulary the KB editor pages use
 // (see components/kb/kbEntities.ts's ENTITY_META), so a chat card can borrow
 // their icon and localized entity name instead of inventing its own.
-export type KbRecordKind = 'topics' | 'products' | 'tariffs' | 'delivery_zones' | 'contacts' | 'policies' | 'config'
+export type KbRecordKind = 'topics' | 'products' | 'tariffs' | 'delivery_zones' | 'contacts' | 'policies' | 'tariff_info' | 'config'
 
 export interface KbRecordField {
   key: string

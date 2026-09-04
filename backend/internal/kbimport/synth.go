@@ -263,7 +263,7 @@ func parseModelOutput(raw string) (modelOutput, bool) {
 // last for stable ordering."
 func applyRank(tool string) int {
 	switch tool {
-	case "kb_contacts_upsert", "kb_policies_upsert":
+	case "kb_contacts_upsert", "kb_policies_upsert", "kb_tariff_info_upsert":
 		return 1
 	default:
 		return 0

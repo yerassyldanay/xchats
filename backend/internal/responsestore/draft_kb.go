@@ -46,7 +46,11 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 	for _, p := range dv.Products {
 		kb.Products = append(kb.Products, aiprompt.Product{
 			Ref: p.Ref, Name: p.Name, Price: p.Price, Description: p.Description,
-			Category: p.Category, InStock: p.InStock, SalesStatus: p.SalesStatus,
+			Category: p.Category, Brand: p.Brand, Advantages: p.Advantages, Disadvantages: p.Disadvantages,
+			BestFor: p.BestFor, NotFor: p.NotFor,
+			AvailabilityStatus: p.AvailabilityStatus, AvailabilityNote: p.AvailabilityNote,
+			InstallationTerms: p.InstallationTerms, WarrantyTerms: p.WarrantyTerms,
+			AdditionalFacts: p.AdditionalFacts, SalesStatus: p.SalesStatus,
 			FeaturedImage:        uuidPtrString(p.FeaturedImage),
 			GalleryImages:        mediaArray(p.GalleryImages),
 			DemoVideos:           mediaArray(p.DemoVideos),
@@ -58,12 +62,17 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 		kb.Tariffs = append(kb.Tariffs, aiprompt.Tariff{
 			Ref: t.Ref, Name: t.Name, Price: t.Price, LimitText: t.LimitText, Fee: t.Fee,
 			Summary: t.Summary, PricingType: t.PricingType, Advantages: t.Advantages,
-			Disadvantages: t.Disadvantages, SalesStatus: t.SalesStatus,
+			Disadvantages: t.Disadvantages, BestFor: t.BestFor, NotFor: t.NotFor,
+			AdditionalFacts: t.AdditionalFacts, SalesStatus: t.SalesStatus,
 			FeaturedImage:   uuidPtrString(t.FeaturedImage),
 			PricingImages:   mediaArray(t.PricingImages),
 			ExplainerVideos: mediaArray(t.ExplainerVideos),
 			TermsDocuments:  mediaArray(t.TermsDocuments),
 		})
+	}
+	if len(dv.TariffInfo) > 0 {
+		ti := dv.TariffInfo[0]
+		kb.TariffInfo = &aiprompt.TariffInfo{AdditionalFacts: ti.AdditionalFacts}
 	}
 	for _, z := range dv.Zones {
 		kb.DeliveryZones = append(kb.DeliveryZones, aiprompt.DeliveryZone{

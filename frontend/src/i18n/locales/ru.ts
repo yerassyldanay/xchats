@@ -101,6 +101,7 @@ export default {
       delivery_zones: { singular: 'Зона доставки', plural: 'Зоны доставки' },
       contacts: { singular: 'Контакты', plural: 'Контакты' },
       policies: { singular: 'Политики', plural: 'Политики' },
+      tariff_info: { singular: 'Тарифная информация', plural: 'Тарифная информация' },
     },
     fields: {
       title: 'Название',
@@ -109,8 +110,15 @@ export default {
       price: 'Цена',
       category: 'Категория',
       description: 'Описание',
-      inStockYes: 'В наличии',
-      inStockNo: 'Нет в наличии',
+      brand: 'Бренд',
+      bestFor: 'Кому подходит',
+      notFor: 'Кому не подходит',
+      availabilityStatus: 'Доступность',
+      availabilityNote: 'Комментарий о доступности',
+      availabilityNoteHint: 'Качественное описание сроков (например «отправляем партиями каждую неделю»). Точный срок в днях — через дополнительный факт.',
+      installationTerms: 'Условия установки',
+      warrantyTerms: 'Условия гарантии',
+      warrantyTermsHint: 'Переопределяет общие условия гарантии для этого товара. Точный срок гарантии — через дополнительный факт (например warranty_in_months).',
       salesStatusActive: 'Активен для продажи',
       salesStatusInactive: 'Не активен для продажи',
       pricingType: 'Тип цены',
@@ -143,7 +151,6 @@ export default {
       outsideZonesHint: 'Ответ ассистента, когда направление клиента не входит ни в одну зону доставки.',
       managedByZones: 'Управляется в «Зонах доставки»',
       salesStatus: 'Активен для продажи',
-      inStock: 'В наличии',
       deliveryAvailable: 'Доставка доступна',
       updatedAt: 'Обновлено:',
     },
@@ -176,8 +183,29 @@ export default {
     },
     pricingType: { fixed: 'Фиксированная', percentage: 'Процент', tiered: 'Пороговая' },
     zoneLevel: { city: 'Город', region: 'Регион', country: 'Страна' },
+    availabilityStatus: { in_stock: 'В наличии', preorder: 'Под предзаказ', on_demand: 'Под заказ', unavailable: 'Недоступен' },
     state: { published: 'Опубликовано', new: 'Новый', changed: 'Изменён', to_delete: 'На удаление' },
     actions: { edit: 'Изменить', publish: 'Опубликовать', cancel: 'Отменить изменение', removeFromDraft: 'Удалить из черновика', delete: 'Удалить' },
+    // facts.* — the repeatable ref/value/instruction editor (AdditionalFactsEditor.vue)
+    // for aiprompt.AdditionalFact: seller-defined "virtual fact columns" on a
+    // product, tariff, or the tariff_info singleton. instruction is the ONLY part
+    // the customer-facing prompt ever quotes verbatim — value stays hidden behind
+    // a token there (backend/aiprompt/facts.go) — but this staff-facing editor
+    // shows both, since an operator must be able to confirm what they entered.
+    facts: {
+      title: 'Дополнительные факты',
+      hint: 'Скрытые значения для промпта ассистента',
+      empty: 'Дополнительных фактов нет.',
+      addFact: 'Добавить факт',
+      removeFact: 'Удалить факт',
+      refPlaceholder: 'напр. limit_on_devices',
+      refInvalid: 'Строчные латинские буквы, цифры и _, начиная с буквы',
+      refDuplicate: 'Такой ref уже используется в этой записи',
+      valuePlaceholder: 'Значение',
+      valueImprecise: 'Это число слишком большое или слишком точное, чтобы отредактировать его здесь без потерь — сохраните его как текст',
+      valueType: { string: 'Текст', number: 'Число', boolean: 'Да/нет' },
+      instructionPlaceholder: 'Как ассистенту безопасно упомянуть этот факт (без указания точного значения)',
+    },
     config: {
       persona: { title: 'Персона', hint: 'Кто ассистент и как он общается с клиентом.' },
       mission: { title: 'Миссия', hint: 'Главная цель ассистента в каждом диалоге.' },
@@ -289,6 +317,7 @@ export default {
         delivery_zones: 'Региональные тарифы доставки, сроки и зоны покрытия.',
         contacts: 'Как клиенту связаться с человеком — телефон, email, часы работы.',
         policies: 'Возврат, гарантия и условия доставки, которые видит клиент.',
+        tariff_info: 'Общие факты обо всех тарифах сразу (например пробный период), не привязанные к одному тарифу.',
       },
       addTopic: 'Добавить тему',
       addProduct: 'Добавить товар',
@@ -296,6 +325,7 @@ export default {
       addZone: 'Добавить зону',
       editContacts: 'Изменить контакты',
       editPolicies: 'Изменить политики',
+      editTariffInfo: 'Изменить тарифную информацию',
       emptyTopics: 'Тем пока нет.',
       emptyProducts: 'Товаров пока нет.',
       emptyTariffs: 'Тарифов пока нет.',
@@ -322,6 +352,8 @@ export default {
       editZone: 'Изменить зону доставки',
       editContacts: 'Изменить контакты',
       editPolicies: 'Изменить политики',
+      editTariffInfo: 'Изменить тарифную информацию',
+      tariffInfoHint: 'Факты, общие для всех тарифов сразу (например пробный период). Факт конкретного тарифа добавляйте в его собственную карточку.',
       slug: 'Slug',
       slugHint: 'напр. tariffs',
       ref: 'Артикул',
@@ -1615,6 +1647,8 @@ export default {
   // when at least two unrelated screens need the SAME word; anything screen-specific
   // stays in its own namespace so a wording change there can't leak sideways.
   common: {
+    yes: 'Да',
+    no: 'Нет',
     close: 'Закрыть',
     copy: 'Копировать',
     copied: 'Скопировано',

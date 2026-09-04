@@ -157,7 +157,7 @@ func TestDownloadOneImage_StagedImagePassesValidateMediaRef(t *testing.T) {
 	}
 
 	res, err := kb.MCPUpsertProduct(context.Background(), orgID, userID, "widget-1",
-		kbstore.ProductChanges{Name: strPtr("Товар"), InStock: boolPtr(true), FeaturedImage: uuidPtrPtr(id)},
+		kbstore.ProductChanges{Name: strPtr("Товар"), AvailabilityStatus: strPtr("in_stock"), FeaturedImage: uuidPtrPtr(id)},
 		nil, kbstore.MCPProvenance{})
 	if err != nil {
 		t.Fatalf("MCPUpsertProduct with a staged embedded image: %v", err)

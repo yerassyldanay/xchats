@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
 
@@ -87,33 +88,54 @@ func recordsFromView(v *kbstore.DraftView, src Source) []Record {
 	}
 
 	for _, p := range v.Products {
+		fields := []Field{
+			{Key: "name", Label: "Name", Value: p.Name},
+			{Key: "price", Label: "Price", Value: p.Price},
+			{Key: "description", Label: "Description", Value: p.Description},
+			{Key: "category", Label: "Category", Value: p.Category},
+			{Key: "brand", Label: "Brand", Value: p.Brand},
+			{Key: "advantages", Label: "Advantages", Value: p.Advantages},
+			{Key: "disadvantages", Label: "Disadvantages", Value: p.Disadvantages},
+			{Key: "best_for", Label: "Best for", Value: p.BestFor},
+			{Key: "not_for", Label: "Not for", Value: p.NotFor},
+			{Key: "availability_status", Label: "Availability status", Value: p.AvailabilityStatus},
+			{Key: "availability_note", Label: "Availability note", Value: p.AvailabilityNote},
+			{Key: "installation_terms", Label: "Installation terms", Value: p.InstallationTerms},
+			{Key: "warranty_terms", Label: "Warranty terms", Value: p.WarrantyTerms},
+			{Key: "sales_status", Label: "Sales status", Value: p.SalesStatus},
+		}
+		fields = append(fields, factFields(p.AdditionalFacts)...)
 		out = append(out, Record{
 			Kind: KindProducts, Key: p.Ref, Title: orKey(p.Name, p.Ref), Source: src,
-			Fields: nonEmpty([]Field{
-				{Key: "name", Label: "Name", Value: p.Name},
-				{Key: "price", Label: "Price", Value: p.Price},
-				{Key: "description", Label: "Description", Value: p.Description},
-				{Key: "category", Label: "Category", Value: p.Category},
-				{Key: "in_stock", Label: "In stock", Value: yesNo(p.InStock)},
-				{Key: "sales_status", Label: "Sales status", Value: p.SalesStatus},
-			}),
+			Fields: nonEmpty(fields),
 		})
 	}
 
 	for _, t := range v.Tariffs {
+		fields := []Field{
+			{Key: "name", Label: "Name", Value: t.Name},
+			{Key: "price", Label: "Price", Value: t.Price},
+			{Key: "pricing_type", Label: "Pricing type", Value: t.PricingType},
+			{Key: "fee", Label: "Fee", Value: t.Fee},
+			{Key: "limit_text", Label: "Limits", Value: t.LimitText},
+			{Key: "summary", Label: "Summary", Value: t.Summary},
+			{Key: "advantages", Label: "Advantages", Value: t.Advantages},
+			{Key: "disadvantages", Label: "Disadvantages", Value: t.Disadvantages},
+			{Key: "best_for", Label: "Best for", Value: t.BestFor},
+			{Key: "not_for", Label: "Not for", Value: t.NotFor},
+			{Key: "sales_status", Label: "Sales status", Value: t.SalesStatus},
+		}
+		fields = append(fields, factFields(t.AdditionalFacts)...)
 		out = append(out, Record{
 			Kind: KindTariffs, Key: t.Ref, Title: orKey(t.Name, t.Ref), Source: src,
-			Fields: nonEmpty([]Field{
-				{Key: "name", Label: "Name", Value: t.Name},
-				{Key: "price", Label: "Price", Value: t.Price},
-				{Key: "pricing_type", Label: "Pricing type", Value: t.PricingType},
-				{Key: "fee", Label: "Fee", Value: t.Fee},
-				{Key: "limit_text", Label: "Limits", Value: t.LimitText},
-				{Key: "summary", Label: "Summary", Value: t.Summary},
-				{Key: "advantages", Label: "Advantages", Value: t.Advantages},
-				{Key: "disadvantages", Label: "Disadvantages", Value: t.Disadvantages},
-				{Key: "sales_status", Label: "Sales status", Value: t.SalesStatus},
-			}),
+			Fields: nonEmpty(fields),
+		})
+	}
+
+	for _, ti := range v.TariffInfo {
+		out = append(out, Record{
+			Kind: KindTariffInfo, Key: ti.Slug, Title: "Tariff information", Source: src,
+			Fields: nonEmpty(factFields(ti.AdditionalFacts)),
 		})
 	}
 
@@ -197,4 +219,22 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// factFields flattens a virtual fact list (facts.go's AdditionalFact) into
+// diff-able Fields, one per fact, keyed "fact_<ref>" so a real/draft pair
+// lines up even if fact ORDER differs between the two states. Unlike the
+// customer-facing prompt (which only ever shows the token and Instruction —
+// see aiprompt.FactEntry), this internal staff-facing comparison view shows
+// the exact Value too: the whole point of the KB chat assistant is letting
+// an operator see and reason about their own configured data.
+func factFields(facts []aiprompt.AdditionalFact) []Field {
+	out := make([]Field, 0, len(facts))
+	for _, f := range facts {
+		out = append(out, Field{
+			Key: "fact_" + f.Ref, Label: "Fact: " + f.Ref,
+			Value: fmt.Sprintf("%v — %s", f.Value, f.Instruction),
+		})
+	}
+	return out
 }

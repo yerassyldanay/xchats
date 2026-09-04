@@ -47,7 +47,7 @@ func TestSeedDemoKB_InsertsFullDataset(t *testing.T) {
 
 	var inStock int
 	if err := db.QueryRow(ctx,
-		"SELECT count(*) FROM ai_products WHERE organization_id = $1 AND in_stock", orgID).Scan(&inStock); err != nil {
+		"SELECT count(*) FROM ai_products WHERE organization_id = $1 AND availability_status != 'unavailable'", orgID).Scan(&inStock); err != nil {
 		t.Fatalf("count in-stock products: %v", err)
 	}
 	if inStock != 3 {

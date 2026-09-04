@@ -118,7 +118,16 @@ ai_products:
       price: 129 900 ₸
       description: Автоматическая кофемашина для дома с капучинатором и жерновковой кофемолкой.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 5dca16d3-926b-5c30-8e16-75297f4faed4
       gallery_images:
@@ -135,7 +144,16 @@ ai_products:
       price: 24 900 ₸
       description: 'Набор посуды из нержавеющей стали: кастрюли, сковороды и крышки, 12 предметов.'
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -149,7 +167,16 @@ ai_products:
       price: 11 200 ₸
       description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -161,7 +188,16 @@ ai_products:
       price: 15 400 ₸
       description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -175,7 +211,16 @@ ai_products:
       price: 19 500 ₸
       description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -187,7 +232,16 @@ ai_products:
       price: 23 600 ₸
       description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -202,7 +256,16 @@ ai_products:
       price: 27 800 ₸
       description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -214,7 +277,16 @@ ai_products:
       price: 31 900 ₸
       description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: d0f8f533-6f13-5356-877b-7cc5a57f8d68
       gallery_images:
@@ -229,7 +301,16 @@ ai_products:
       price: 36 000 ₸
       description: Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -241,7 +322,16 @@ ai_products:
       price: 40 200 ₸
       description: Электрический чайник с быстрым закипанием и автоматическим отключением.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 51455145-7ec4-5ba0-873a-613167eccc60
       gallery_images: []
@@ -253,7 +343,16 @@ ai_products:
       price: 44 300 ₸
       description: Электрический чайник с быстрым закипанием и автоматическим отключением.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -265,7 +364,16 @@ ai_products:
       price: 48 500 ₸
       description: Электрический чайник с быстрым закипанием и автоматическим отключением.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -279,7 +387,16 @@ ai_products:
       price: 52 600 ₸
       description: Электрический чайник с быстрым закипанием и автоматическим отключением.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -291,7 +408,16 @@ ai_products:
       price: 56 700 ₸
       description: Электрический чайник с быстрым закипанием и автоматическим отключением.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -306,7 +432,16 @@ ai_products:
       price: 60 900 ₸
       description: Электрический чайник с быстрым закипанием и автоматическим отключением.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -318,7 +453,16 @@ ai_products:
       price: 65 000 ₸
       description: Электрический чайник с быстрым закипанием и автоматическим отключением.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 519112ae-8b22-5338-8a07-ea1de3560d90
       gallery_images:
@@ -333,7 +477,16 @@ ai_products:
       price: 69 100 ₸
       description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -345,7 +498,16 @@ ai_products:
       price: 73 300 ₸
       description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: f565f409-7250-5d7b-b2dc-792b7397fbe7
       gallery_images: []
@@ -357,7 +519,16 @@ ai_products:
       price: 77 400 ₸
       description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -369,7 +540,16 @@ ai_products:
       price: 81 600 ₸
       description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -383,7 +563,16 @@ ai_products:
       price: 85 700 ₸
       description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -395,7 +584,16 @@ ai_products:
       price: 89 800 ₸
       description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -410,7 +608,16 @@ ai_products:
       price: 94 000 ₸
       description: Компактный тостер с регулировкой степени поджаривания и функцией разморозки.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -422,7 +629,16 @@ ai_products:
       price: 98 100 ₸
       description: Мультиварка с несколькими программами приготовления и отложенным стартом.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: b0529039-1582-569c-8069-ca715b8caf16
       gallery_images:
@@ -437,7 +653,16 @@ ai_products:
       price: 5 200 ₸
       description: Мультиварка с несколькими программами приготовления и отложенным стартом.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -449,7 +674,16 @@ ai_products:
       price: 9 400 ₸
       description: Мультиварка с несколькими программами приготовления и отложенным стартом.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: a9e5b6a7-47f7-5bc7-b8e8-ea98beb7e752
       gallery_images: []
@@ -461,7 +695,16 @@ ai_products:
       price: 13 500 ₸
       description: Мультиварка с несколькими программами приготовления и отложенным стартом.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -473,7 +716,16 @@ ai_products:
       price: 17 600 ₸
       description: Мультиварка с несколькими программами приготовления и отложенным стартом.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -487,7 +739,16 @@ ai_products:
       price: 21 800 ₸
       description: Мультиварка с несколькими программами приготовления и отложенным стартом.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -499,7 +760,16 @@ ai_products:
       price: 25 900 ₸
       description: Мультиварка с несколькими программами приготовления и отложенным стартом.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -514,7 +784,16 @@ ai_products:
       price: 30 100 ₸
       description: Микроволновая печь с грилем и несколькими режимами мощности.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -526,7 +805,16 @@ ai_products:
       price: 34 200 ₸
       description: Микроволновая печь с грилем и несколькими режимами мощности.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: a94462b0-f50f-521d-b707-ed29aa4a3eb2
       gallery_images:
@@ -541,7 +829,16 @@ ai_products:
       price: 38 300 ₸
       description: Микроволновая печь с грилем и несколькими режимами мощности.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -553,7 +850,16 @@ ai_products:
       price: 42 500 ₸
       description: Микроволновая печь с грилем и несколькими режимами мощности.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 0becd3a9-a2ac-52cd-877d-f634d257fb61
       gallery_images: []
@@ -565,7 +871,16 @@ ai_products:
       price: 46 600 ₸
       description: Микроволновая печь с грилем и несколькими режимами мощности.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -577,7 +892,16 @@ ai_products:
       price: 50 700 ₸
       description: Микроволновая печь с грилем и несколькими режимами мощности.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -591,7 +915,16 @@ ai_products:
       price: 54 900 ₸
       description: Микроволновая печь с грилем и несколькими режимами мощности.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -603,7 +936,16 @@ ai_products:
       price: 59 000 ₸
       description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -618,7 +960,16 @@ ai_products:
       price: 63 200 ₸
       description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -630,7 +981,16 @@ ai_products:
       price: 67 300 ₸
       description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: d68ba890-aec0-53b1-affc-8ff32d4079c9
       gallery_images:
@@ -645,7 +1005,16 @@ ai_products:
       price: 71 400 ₸
       description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -657,7 +1026,16 @@ ai_products:
       price: 75 600 ₸
       description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: cddf2010-a849-5b59-ade9-e28359a5af12
       gallery_images: []
@@ -669,7 +1047,16 @@ ai_products:
       price: 79 700 ₸
       description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -681,7 +1068,16 @@ ai_products:
       price: 83 800 ₸
       description: Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -695,7 +1091,16 @@ ai_products:
       price: 88 000 ₸
       description: Утюг с функцией отпаривания и керамической подошвой.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -707,7 +1112,16 @@ ai_products:
       price: 92 100 ₸
       description: Утюг с функцией отпаривания и керамической подошвой.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -722,7 +1136,16 @@ ai_products:
       price: 96 300 ₸
       description: Утюг с функцией отпаривания и керамической подошвой.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -734,7 +1157,16 @@ ai_products:
       price: 3 400 ₸
       description: Утюг с функцией отпаривания и керамической подошвой.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: e5202ca7-658f-5933-b3ad-fe7b2e8065be
       gallery_images:
@@ -749,7 +1181,16 @@ ai_products:
       price: 7 500 ₸
       description: Утюг с функцией отпаривания и керамической подошвой.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -761,7 +1202,16 @@ ai_products:
       price: 11 700 ₸
       description: Утюг с функцией отпаривания и керамической подошвой.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ff3d71fd-6c44-5e17-a576-1f5044666ce8
       gallery_images: []
@@ -773,7 +1223,16 @@ ai_products:
       price: 15 800 ₸
       description: Утюг с функцией отпаривания и керамической подошвой.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -785,7 +1244,16 @@ ai_products:
       price: 19 900 ₸
       description: Напольный вентилятор с несколькими скоростями обдува и таймером.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -799,7 +1267,16 @@ ai_products:
       price: 24 100 ₸
       description: Напольный вентилятор с несколькими скоростями обдува и таймером.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -811,7 +1288,16 @@ ai_products:
       price: 28 200 ₸
       description: Напольный вентилятор с несколькими скоростями обдува и таймером.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -826,7 +1312,16 @@ ai_products:
       price: 32 300 ₸
       description: Напольный вентилятор с несколькими скоростями обдува и таймером.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -838,7 +1333,16 @@ ai_products:
       price: 36 500 ₸
       description: Напольный вентилятор с несколькими скоростями обдува и таймером.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 3caefb56-6536-5593-95d4-a60cf97f2ae3
       gallery_images:
@@ -853,7 +1357,16 @@ ai_products:
       price: 40 600 ₸
       description: Напольный вентилятор с несколькими скоростями обдува и таймером.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -865,7 +1378,16 @@ ai_products:
       price: 44 800 ₸
       description: Напольный вентилятор с несколькими скоростями обдува и таймером.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 3d87f274-3166-531d-a769-c994cba2ac5c
       gallery_images: []
@@ -877,7 +1399,16 @@ ai_products:
       price: 48 900 ₸
       description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -889,7 +1420,16 @@ ai_products:
       price: 53 000 ₸
       description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -903,7 +1443,16 @@ ai_products:
       price: 57 200 ₸
       description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -915,7 +1464,16 @@ ai_products:
       price: 61 300 ₸
       description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -930,7 +1488,16 @@ ai_products:
       price: 65 400 ₸
       description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -942,7 +1509,16 @@ ai_products:
       price: 69 600 ₸
       description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 5d0d6424-d04f-5200-bc08-204610bfdc30
       gallery_images:
@@ -957,7 +1533,16 @@ ai_products:
       price: 73 700 ₸
       description: Компактный обогреватель для дома с термостатом и защитой от перегрева.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -969,7 +1554,16 @@ ai_products:
       price: 77 900 ₸
       description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 7a77be63-c832-5c9c-8a41-fe3cdb76f3e1
       gallery_images: []
@@ -981,7 +1575,16 @@ ai_products:
       price: 82 000 ₸
       description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -993,7 +1596,16 @@ ai_products:
       price: 86 100 ₸
       description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -1007,7 +1619,16 @@ ai_products:
       price: 90 300 ₸
       description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1019,7 +1640,16 @@ ai_products:
       price: 94 400 ₸
       description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -1034,7 +1664,16 @@ ai_products:
       price: 98 500 ₸
       description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1046,7 +1685,16 @@ ai_products:
       price: 5 700 ₸
       description: Очиститель воздуха с многоступенчатой фильтрацией для дома.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 4c117e3e-d49a-574c-88f4-35dce623b52d
       gallery_images:
@@ -1061,7 +1709,16 @@ ai_products:
       price: 9 800 ₸
       description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1073,7 +1730,16 @@ ai_products:
       price: 14 000 ₸
       description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 8cd02f03-bce7-5148-9ec8-6ecf885913a2
       gallery_images: []
@@ -1085,7 +1751,16 @@ ai_products:
       price: 18 100 ₸
       description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1097,7 +1772,16 @@ ai_products:
       price: 22 200 ₸
       description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -1111,7 +1795,16 @@ ai_products:
       price: 26 400 ₸
       description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1123,7 +1816,16 @@ ai_products:
       price: 30 500 ₸
       description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -1138,7 +1840,16 @@ ai_products:
       price: 34 600 ₸
       description: Соковыжималка для фруктов и овощей с большим загрузочным отверстием.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1150,7 +1861,16 @@ ai_products:
       price: 38 800 ₸
       description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 60c5e075-0355-5132-a16a-b5fad9e9226e
       gallery_images:
@@ -1165,7 +1885,16 @@ ai_products:
       price: 42 900 ₸
       description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1177,7 +1906,16 @@ ai_products:
       price: 47 000 ₸
       description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: a2c7af23-6b67-5559-a43c-5baea19904cb
       gallery_images: []
@@ -1189,7 +1927,16 @@ ai_products:
       price: 51 200 ₸
       description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1201,7 +1948,16 @@ ai_products:
       price: 55 300 ₸
       description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -1215,7 +1971,16 @@ ai_products:
       price: 59 500 ₸
       description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1227,7 +1992,16 @@ ai_products:
       price: 63 600 ₸
       description: Кухонный комбайн с набором насадок для нарезки, измельчения и замеса.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -1242,7 +2016,16 @@ ai_products:
       price: 67 700 ₸
       description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1254,7 +2037,16 @@ ai_products:
       price: 71 900 ₸
       description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: a9358bce-dd69-5ed8-867b-6a872868a770
       gallery_images:
@@ -1269,7 +2061,16 @@ ai_products:
       price: 76 000 ₸
       description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1281,7 +2082,16 @@ ai_products:
       price: 80 100 ₸
       description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: aa255089-7a06-57da-894a-a98fd6275204
       gallery_images: []
@@ -1293,7 +2103,16 @@ ai_products:
       price: 84 300 ₸
       description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1305,7 +2124,16 @@ ai_products:
       price: 88 400 ₸
       description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -1319,7 +2147,16 @@ ai_products:
       price: 92 600 ₸
       description: Вафельница с антипригарным покрытием для венских и бельгийских вафель.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1331,7 +2168,16 @@ ai_products:
       price: 96 700 ₸
       description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -1346,7 +2192,16 @@ ai_products:
       price: 3 800 ₸
       description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1358,7 +2213,16 @@ ai_products:
       price: 8 000 ₸
       description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 7f018c0b-09d0-5945-b441-20d6c439c202
       gallery_images:
@@ -1373,7 +2237,16 @@ ai_products:
       price: 12 100 ₸
       description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1385,7 +2258,16 @@ ai_products:
       price: 16 200 ₸
       description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: 3f05ea68-501e-5996-8ae2-e8a50cccfe46
       gallery_images: []
@@ -1397,7 +2279,16 @@ ai_products:
       price: 20 400 ₸
       description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
       category: ""
-      in_stock: true
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: in_stock
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images: []
@@ -1409,7 +2300,16 @@ ai_products:
       price: 24 500 ₸
       description: Сэндвичница с антипригарными пластинами для быстрого завтрака.
       category: ""
-      in_stock: false
+      brand: ""
+      advantages: ""
+      disadvantages: ""
+      best_for: ""
+      not_for: ""
+      availability_status: unavailable
+      availability_note: ""
+      installation_terms: ""
+      warranty_terms: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       gallery_images:
@@ -1428,6 +2328,9 @@ ai_tariffs:
       pricing_type: fixed
       advantages: ""
       disadvantages: ""
+      best_for: ""
+      not_for: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       pricing_images: []
@@ -1443,6 +2346,9 @@ ai_tariffs:
       pricing_type: fixed
       advantages: Мастер настраивает технику под ваши задачи и показывает, как ей пользоваться.
       disadvantages: Занимает больше времени и требует согласования даты заранее.
+      best_for: ""
+      not_for: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       pricing_images: []
@@ -1457,6 +2363,9 @@ ai_tariffs:
       pricing_type: percentage
       advantages: ""
       disadvantages: ""
+      best_for: ""
+      not_for: ""
+      additional_facts: []
       sales_status: active
       featured_image: ""
       pricing_images: []
@@ -1471,6 +2380,9 @@ ai_tariffs:
       pricing_type: fixed
       advantages: ""
       disadvantages: ""
+      best_for: ""
+      not_for: ""
+      additional_facts: []
       sales_status: inactive
       featured_image: ""
       pricing_images: []
@@ -1500,6 +2412,7 @@ ai_policies:
     warranty: ""
     outside_zones_note: В другие города, регионы и страны за пределами Казахстана мы не доставляем.
     commerce_policy_documents: []
+ai_tariff_info: null
 ai_delivery_zones:
     - ref: kazakhstan
       name: Казахстан (остальные города)

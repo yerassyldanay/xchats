@@ -161,9 +161,9 @@ func (h *harness) newChatConversation() string {
 func (h *harness) seedChatKB() {
 	h.t.Helper()
 	ctx := context.Background()
-	inStock := true
+	availabilityStatus := "in_stock"
 	live := kbstore.ProductInput{
-		Ref: "vitamin-d", Name: "Vitamin D", Price: "12 000 KZT", InStock: &inStock, SalesStatus: "active",
+		Ref: "vitamin-d", Name: "Vitamin D", Price: "12 000 KZT", AvailabilityStatus: &availabilityStatus, SalesStatus: "active",
 	}
 	actor := h.adminUserID(h.t)
 	if err := h.kb.PutLiveProduct(ctx, h.orgID, actor, live); err != nil {

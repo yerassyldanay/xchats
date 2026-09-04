@@ -161,6 +161,7 @@ const (
 	toolKBTariffUpsert       = "kb_tariff_upsert"
 	toolKBContactsUpsert     = "kb_contacts_upsert"
 	toolKBPoliciesUpsert     = "kb_policies_upsert"
+	toolKBTariffInfoUpsert   = "kb_tariff_info_upsert"
 	toolKBDeliveryZoneUpsert = "kb_delivery_zone_upsert"
 	toolKBRead               = "kb_read"
 	toolKBDelete             = "kb_delete"
@@ -177,6 +178,7 @@ var requiredScope = map[string]string{
 	toolKBTariffUpsert:       mcpauth.ScopeKBDraftWrite,
 	toolKBContactsUpsert:     mcpauth.ScopeKBDraftWrite,
 	toolKBPoliciesUpsert:     mcpauth.ScopeKBDraftWrite,
+	toolKBTariffInfoUpsert:   mcpauth.ScopeKBDraftWrite,
 	toolKBDeliveryZoneUpsert: mcpauth.ScopeKBDraftWrite,
 	toolKBRead:               mcpauth.ScopeKBRead,
 	toolKBDelete:             mcpauth.ScopeKBDraftWrite,
@@ -210,6 +212,8 @@ func (s *Server) callTool(ctx context.Context, orgID uuid.UUID, userID uuid.UUID
 		return s.handleContactsUpsert(ctx, orgID, userID, args)
 	case toolKBPoliciesUpsert:
 		return s.handlePoliciesUpsert(ctx, orgID, userID, args)
+	case toolKBTariffInfoUpsert:
+		return s.handleTariffInfoUpsert(ctx, orgID, userID, args)
 	case toolKBDeliveryZoneUpsert:
 		return s.handleDeliveryZoneUpsert(ctx, orgID, userID, args)
 	case toolKBRead:
@@ -336,7 +340,9 @@ func (s *Server) handleTopicUpsert(ctx context.Context, orgID uuid.UUID, userID 
 // parseProductChanges is kb_product_upsert's `changes` parser — see
 // parseAssistantChanges's doc comment for why this is factored out.
 func parseProductChanges(changes map[string]json.RawMessage) (kbstore.ProductChanges, error) {
-	if err := rejectUnknownFields(changes, "name", "price", "description", "category", "in_stock", "sales_status",
+	if err := rejectUnknownFields(changes, "name", "price", "description", "category", "brand", "advantages",
+		"disadvantages", "best_for", "not_for", "availability_status", "availability_note", "installation_terms",
+		"warranty_terms", "additional_facts", "sales_status",
 		"featured_image", "gallery_images", "demo_videos", "certificate_documents", "guarantee_documents"); err != nil {
 		return kbstore.ProductChanges{}, err
 	}
@@ -354,7 +360,34 @@ func parseProductChanges(changes map[string]json.RawMessage) (kbstore.ProductCha
 	if ch.Category, err = optString(changes, "category"); err != nil {
 		return kbstore.ProductChanges{}, err
 	}
-	if ch.InStock, err = optBool(changes, "in_stock"); err != nil {
+	if ch.Brand, err = optString(changes, "brand"); err != nil {
+		return kbstore.ProductChanges{}, err
+	}
+	if ch.Advantages, err = optString(changes, "advantages"); err != nil {
+		return kbstore.ProductChanges{}, err
+	}
+	if ch.Disadvantages, err = optString(changes, "disadvantages"); err != nil {
+		return kbstore.ProductChanges{}, err
+	}
+	if ch.BestFor, err = optString(changes, "best_for"); err != nil {
+		return kbstore.ProductChanges{}, err
+	}
+	if ch.NotFor, err = optString(changes, "not_for"); err != nil {
+		return kbstore.ProductChanges{}, err
+	}
+	if ch.AvailabilityStatus, err = optString(changes, "availability_status"); err != nil {
+		return kbstore.ProductChanges{}, err
+	}
+	if ch.AvailabilityNote, err = optString(changes, "availability_note"); err != nil {
+		return kbstore.ProductChanges{}, err
+	}
+	if ch.InstallationTerms, err = optString(changes, "installation_terms"); err != nil {
+		return kbstore.ProductChanges{}, err
+	}
+	if ch.WarrantyTerms, err = optString(changes, "warranty_terms"); err != nil {
+		return kbstore.ProductChanges{}, err
+	}
+	if ch.AdditionalFacts, err = optAdditionalFacts(changes, "additional_facts"); err != nil {
 		return kbstore.ProductChanges{}, err
 	}
 	if ch.SalesStatus, err = optString(changes, "sales_status"); err != nil {
@@ -406,8 +439,8 @@ func (s *Server) handleProductUpsert(ctx context.Context, orgID uuid.UUID, userI
 // parseAssistantChanges's doc comment for why this is factored out.
 func parseTariffChanges(changes map[string]json.RawMessage) (kbstore.TariffChanges, error) {
 	if err := rejectUnknownFields(changes, "name", "price", "limit_text", "fee", "summary", "pricing_type",
-		"advantages", "disadvantages", "sales_status", "featured_image", "pricing_images", "explainer_videos",
-		"terms_documents"); err != nil {
+		"advantages", "disadvantages", "best_for", "not_for", "additional_facts", "sales_status",
+		"featured_image", "pricing_images", "explainer_videos", "terms_documents"); err != nil {
 		return kbstore.TariffChanges{}, err
 	}
 	ch := kbstore.TariffChanges{}
@@ -434,6 +467,15 @@ func parseTariffChanges(changes map[string]json.RawMessage) (kbstore.TariffChang
 		return kbstore.TariffChanges{}, err
 	}
 	if ch.Disadvantages, err = optString(changes, "disadvantages"); err != nil {
+		return kbstore.TariffChanges{}, err
+	}
+	if ch.BestFor, err = optString(changes, "best_for"); err != nil {
+		return kbstore.TariffChanges{}, err
+	}
+	if ch.NotFor, err = optString(changes, "not_for"); err != nil {
+		return kbstore.TariffChanges{}, err
+	}
+	if ch.AdditionalFacts, err = optAdditionalFacts(changes, "additional_facts"); err != nil {
 		return kbstore.TariffChanges{}, err
 	}
 	if ch.SalesStatus, err = optString(changes, "sales_status"); err != nil {
@@ -586,6 +628,44 @@ func (s *Server) handlePoliciesUpsert(ctx context.Context, orgID uuid.UUID, user
 		return mapKBError(kerr), nil
 	}
 	return s.toolResult(fmt.Sprintf("Policies updated in draft (draft_version=%d).", res.DraftVersion), res, "draft", orgID, userID), nil
+}
+
+// parseTariffInfoChanges is kb_tariff_info_upsert's `changes` parser — see
+// parseAssistantChanges's doc comment for why this is factored out.
+func parseTariffInfoChanges(changes map[string]json.RawMessage) (kbstore.TariffInfoChanges, error) {
+	if err := rejectUnknownFields(changes, "additional_facts"); err != nil {
+		return kbstore.TariffInfoChanges{}, err
+	}
+	ch := kbstore.TariffInfoChanges{}
+	var err error
+	if ch.AdditionalFacts, err = optAdditionalFacts(changes, "additional_facts"); err != nil {
+		return kbstore.TariffInfoChanges{}, err
+	}
+	return ch, nil
+}
+
+func (s *Server) handleTariffInfoUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+	changes, err := rawObject(args["changes"])
+	if err != nil {
+		return nil, fmt.Errorf("changes: %w", err)
+	}
+	ch, err := parseTariffInfoChanges(changes)
+	if err != nil {
+		return nil, err
+	}
+	expected, err := optExpectedVersion(args)
+	if err != nil {
+		return nil, err
+	}
+	prov, err := parseProvenance(args)
+	if err != nil {
+		return nil, err
+	}
+	res, kerr := s.Deps.KB.MCPUpsertTariffInfo(ctx, orgID, userID, ch, expected, prov)
+	if kerr != nil {
+		return mapKBError(kerr), nil
+	}
+	return s.toolResult(fmt.Sprintf("Tariff information updated in draft (draft_version=%d).", res.DraftVersion), res, "draft", orgID, userID), nil
 }
 
 // parseDeliveryZoneChanges is kb_delivery_zone_upsert's `changes` parser —

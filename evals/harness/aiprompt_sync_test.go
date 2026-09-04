@@ -80,7 +80,7 @@ func TestAipromptSync_RetryFeedbackMatchesHarnessCorrectiveFeedback(t *testing.T
 	kb := &aiprompt.KB{
 		OrganizationID: "11111111-1111-1111-1111-111111111111",
 		Products: []aiprompt.Product{
-			{Ref: "widget", Name: "Виджет", Price: "1 000 ₸", InStock: true, SalesStatus: "active"},
+			{Ref: "widget", Name: "Виджет", Price: "1 000 ₸", AvailabilityStatus: "in_stock", SalesStatus: "active"},
 		},
 	}
 	cat, err := aiprompt.BuildCatalog(kb)

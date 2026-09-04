@@ -34,8 +34,8 @@ func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
 		VALUES ($1, 'Персона', 'Миссия', 'Правила', 'Языковая политика', 100)`, orgID)
 	mustExec(t, db, `INSERT INTO ai_topics (organization_id, slug, title, body_md)
 		VALUES ($1, 'delivery', 'Доставка', 'Доставляем по городу.')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_products (organization_id, ref, name, price, description, category, in_stock)
-		VALUES ($1, 'widget', 'Виджет', '1 000 ₸', 'Описание', '', true)`, orgID)
+	mustExec(t, db, `INSERT INTO ai_products (organization_id, ref, name, price, description, category, availability_status)
+		VALUES ($1, 'widget', 'Виджет', '1 000 ₸', 'Описание', '', 'in_stock')`, orgID)
 	mustExec(t, db, `INSERT INTO ai_tariffs (organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
 		VALUES ($1, 'basic', 'Базовый', '5 000 ₸', '', '', '', 'fixed', '', '')`, orgID)
 	mustExec(t, db, `INSERT INTO ai_contacts (organization_id, phone, working_hours)
@@ -54,7 +54,7 @@ func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
 	if len(kb.Topics) != 1 || kb.Topics[0].Title != "Доставка" {
 		t.Fatalf("topics = %+v", kb.Topics)
 	}
-	if len(kb.Products) != 1 || kb.Products[0].SalesStatus != "active" || !kb.Products[0].InStock {
+	if len(kb.Products) != 1 || kb.Products[0].SalesStatus != "active" || kb.Products[0].AvailabilityStatus != "in_stock" {
 		t.Fatalf("products = %+v", kb.Products)
 	}
 	if len(kb.Tariffs) != 1 || kb.Tariffs[0].Ref != "basic" {

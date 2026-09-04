@@ -68,12 +68,12 @@ func TestKBLoad_RoundTrip(t *testing.T) {
 		t.Fatalf("after load: assistants=%d contacts=%d policies=%d topics=%d products=%d tariffs=%d zones=%d",
 			assistants, contacts, policies, topics, products, tariffs, zones)
 	}
-	var kettleInStock bool
-	if err := db.QueryRow(ctx, `SELECT in_stock FROM ai_products WHERE organization_id=$1 AND ref='demo_kettle'`, org.ID).Scan(&kettleInStock); err != nil {
+	var kettleAvailability string
+	if err := db.QueryRow(ctx, `SELECT availability_status FROM ai_products WHERE organization_id=$1 AND ref='demo_kettle'`, org.ID).Scan(&kettleAvailability); err != nil {
 		t.Fatalf("read demo_kettle: %v", err)
 	}
-	if kettleInStock {
-		t.Fatal("demo_kettle should load with in_stock=false per testdata/demo_kb.json")
+	if kettleAvailability != "unavailable" {
+		t.Fatalf("demo_kettle should load with availability_status=unavailable per testdata/demo_kb.json, got %q", kettleAvailability)
 	}
 
 	// idempotent: loading the same file again must not duplicate anything.

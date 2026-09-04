@@ -2,13 +2,14 @@
 import { reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useKbModal } from '@/composables/useKbModal'
-import type { TariffRow } from '@/types'
+import type { AdditionalFact, TariffRow } from '@/types'
 import { PRICING_TYPES } from '@/components/kb/kbEntities'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import KbFormDialog from './KbFormDialog.vue'
 import MediaFieldPicker from './MediaFieldPicker.vue'
+import AdditionalFactsEditor from './AdditionalFactsEditor.vue'
 import type { TariffPayload } from './payloads'
 
 const modal = useKbModal()
@@ -16,7 +17,9 @@ const { t } = useI18n()
 
 const buf = reactive({
   ref: '', name: '', price: '', limit_text: '', fee: '', summary: '',
-  pricing_type: 'fixed', advantages: '', disadvantages: '', sales_status: 'active',
+  pricing_type: 'fixed', advantages: '', disadvantages: '', best_for: '', not_for: '',
+  additional_facts: [] as AdditionalFact[],
+  sales_status: 'active',
   featured_image: null as string | null,
   pricing_images: [] as string[],
   explainer_videos: [] as string[],
@@ -40,6 +43,9 @@ watch(
     buf.pricing_type = snap?.pricing_type || 'fixed'
     buf.advantages = snap?.advantages ?? ''
     buf.disadvantages = snap?.disadvantages ?? ''
+    buf.best_for = snap?.best_for ?? ''
+    buf.not_for = snap?.not_for ?? ''
+    buf.additional_facts = [...(snap?.additional_facts ?? [])]
     buf.sales_status = snap?.sales_status || 'active'
     buf.featured_image = snap?.featured_image ?? null
     buf.pricing_images = [...(snap?.pricing_images ?? [])]
@@ -117,7 +123,16 @@ function retry() {
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.disadvantages') }}</span>
         <Textarea v-model="buf.disadvantages" rows="2" class="min-h-0 text-[14px] mt-1" />
       </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.bestFor') }}</span>
+        <Textarea v-model="buf.best_for" rows="2" class="min-h-0 text-[14px] mt-1" />
+      </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.notFor') }}</span>
+        <Textarea v-model="buf.not_for" rows="2" class="min-h-0 text-[14px] mt-1" />
+      </div>
     </div>
+    <AdditionalFactsEditor v-model="buf.additional_facts" />
     <MediaFieldPicker
       :label="t('kb.media.image')" field="featured_image" :multiple="false"
       :model-value="buf.featured_image" @update:model-value="(v) => (buf.featured_image = v as string | null)"

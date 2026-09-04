@@ -14,7 +14,7 @@ import { useEntityTabs } from '@/composables/useEntityTabs'
 import { usePendingIndex } from '@/composables/usePendingIndex'
 import { useKbModal } from '@/composables/useKbModal'
 import { shortTime, formatBytes } from '@/lib/format'
-import type { ContactRow, KbMaterial, PolicyRow } from '@/types'
+import type { ContactRow, KbMaterial, PolicyRow, TariffInfoRow } from '@/types'
 import { CONFIG_SECTIONS } from '@/components/kb/kbEntities'
 import { kbActions, LIVE_CONFIG_ACTIONS } from '@/components/kb/records/actions'
 import { kindOfMime, materialContentURL } from '@/components/kb/records/shared'
@@ -27,6 +27,7 @@ import DraftBanner from '@/components/kb/DraftBanner.vue'
 import DeliveryZoneRecord from '@/components/kb/records/DeliveryZoneRecord.vue'
 import ContactsRecord from '@/components/kb/records/ContactsRecord.vue'
 import PoliciesRecord from '@/components/kb/records/PoliciesRecord.vue'
+import TariffInfoRecord from '@/components/kb/records/TariffInfoRecord.vue'
 import AssistantFieldRecord from '@/components/kb/records/AssistantFieldRecord.vue'
 import KbModalForms from '@/components/kb/forms/KbModalForms.vue'
 import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
@@ -39,7 +40,7 @@ const { markFor } = usePendingIndex()
 // KB-06: the entity guide's fixed kind order — all six content tabs (config/
 // materials/prompt are structural, not "which kind does this fact belong
 // to", so they're excluded), matching KB_ENTITY_ORDER's own order.
-const ENTITY_GUIDE_KINDS = ['topics', 'products', 'tariffs', 'delivery_zones', 'contacts', 'policies'] as const
+const ENTITY_GUIDE_KINDS = ['topics', 'products', 'tariffs', 'tariff_info', 'delivery_zones', 'contacts', 'policies'] as const
 
 onMounted(async () => {
   // Both slices: `live` is what this page lists, `changes` is what
@@ -90,6 +91,8 @@ const toolbar = computed(() => {
       return { label: t('kb.page.editContacts'), action: () => modal.openEdit('contacts', (pg.live?.contacts[0] ?? {}) as ContactRow, LIVE) }
     case 'policies':
       return { label: t('kb.page.editPolicies'), action: () => modal.openEdit('policies', (pg.live?.policies[0] ?? {}) as PolicyRow, LIVE) }
+    case 'tariff_info':
+      return { label: t('kb.page.editTariffInfo'), action: () => modal.openEdit('tariff_info', (pg.live?.tariff_info[0] ?? {}) as TariffInfoRow, LIVE) }
     default:
       return null
   }
@@ -230,6 +233,16 @@ watch(active, (a) => {
           :actions="kbActions({ page: 'live', singleton: true })"
           :busy="pg.busy"
           @edit="modal.openEdit('policies', (pg.live?.policies[0] ?? {}) as PolicyRow, LIVE)"
+        />
+      </div>
+
+      <div v-show="active === 'tariff_info'" class="space-y-3 max-w-2xl">
+        <TariffInfoRecord
+          :row="pg.live?.tariff_info[0]"
+          :pending-mark="markFor('tariff_info', 'main')"
+          :actions="kbActions({ page: 'live', singleton: true })"
+          :busy="pg.busy"
+          @edit="modal.openEdit('tariff_info', (pg.live?.tariff_info[0] ?? {}) as TariffInfoRow, LIVE)"
         />
       </div>
 

@@ -23,7 +23,7 @@ function mountWithMaterials(materials: KbMaterial[], props: { label: string; fie
       organization_id: 'org-1', persona: '', mission: '', guardrails: '', language_policy: '',
       reply_max_words: 120, draft: false, base_version: 0, updated_at: '',
     },
-    topics: [], tariffs: [], products: [], contacts: [], policies: [], zones: [], materials, requests: [],
+    topics: [], tariffs: [], products: [], contacts: [], policies: [], tariff_info: [], zones: [], materials, requests: [],
   } as DraftView
   return mountKb(MediaStrip, { pinia, props })
 }

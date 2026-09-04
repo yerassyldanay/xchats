@@ -117,7 +117,7 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 
 	topics := []DraftTopic{
 		{Slug: "demo_catalog", Title: "Каталог",
-			BodyMD: "В каталоге бытовая техника для дома и кухни. Актуальные позиции, цены и наличие — только из блоков товаров, не перечисляй товары по памяти.",
+			BodyMD:        "В каталоге бытовая техника для дома и кухни. Актуальные позиции, цены и наличие — только из блоков товаров, не перечисляй товары по памяти.",
 			FeaturedImage: parcelMatID},
 		{Slug: "demo_payment", Title: "Оплата",
 			BodyMD: "Принимаем оплату картой, через Kaspi и наличными при получении. Оформление — прямо в WhatsApp."},
@@ -132,17 +132,17 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 
 	products := []DraftProduct{
 		{Ref: "demo_coffee-machine", Name: "Кофемашина DeLonghi", Price: "129 900 ₸",
-			Description: "Автоматическая кофемашина для дома с капучинатором и жерновковой кофемолкой.", InStock: true,
+			Description: "Автоматическая кофемашина для дома с капучинатором и жерновковой кофемолкой.", AvailabilityStatus: "in_stock",
 			FeaturedImage: coffeeMatID},
 		{Ref: "demo_blender", Name: "Блендер Bosch", Price: "11 200 ₸",
-			Description: "Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.", InStock: true,
+			Description: "Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.", AvailabilityStatus: "in_stock",
 			FeaturedImage: blenderMatID},
 		{Ref: "demo_kettle", Name: "Чайник Bosch", Price: "40 200 ₸",
-			Description: "Электрический чайник с быстрым закипанием и автоматическим отключением.", InStock: false},
+			Description: "Электрический чайник с быстрым закипанием и автоматическим отключением.", AvailabilityStatus: "unavailable"},
 		{Ref: "demo_toaster", Name: "Тостер Tefal", Price: "81 600 ₸",
-			Description: "Компактный тостер с регулировкой степени поджаривания и функцией разморозки.", InStock: true},
+			Description: "Компактный тостер с регулировкой степени поджаривания и функцией разморозки.", AvailabilityStatus: "in_stock"},
 		{Ref: "demo_vacuum", Name: "Пылесос Samsung", Price: "83 800 ₸",
-			Description: "Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.", InStock: false},
+			Description: "Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.", AvailabilityStatus: "unavailable"},
 	}
 	for _, p := range products {
 		if err := upsertProductRow(ctx, tx, orgID, p); err != nil {
@@ -188,11 +188,11 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 		},
 		Products: []DraftProduct{
 			{
-				Ref:         "demo_toaster",
-				Name:        "Тостер Tefal OptiGrill",
-				Price:       "74 900 ₸",
-				Description: "Компактный тостер с 7 режимами обжаривания и съемным поддоном для крошек. Специальная осенняя цена!",
-				InStock:     true,
+				Ref:                "demo_toaster",
+				Name:               "Тостер Tefal OptiGrill",
+				Price:              "74 900 ₸",
+				Description:        "Компактный тостер с 7 режимами обжаривания и съемным поддоном для крошек. Специальная осенняя цена!",
+				AvailabilityStatus: "in_stock",
 			},
 		},
 		DeliveryZones: []DraftDeliveryZone{

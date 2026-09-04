@@ -39,7 +39,9 @@ function topic(over: Partial<TopicRow> = {}): TopicRow {
 function product(over: Partial<ProductRow> = {}): ProductRow {
   return {
     id: 'coffee-machine', ref: 'coffee-machine', name: 'Кофемашина', price: '100000', description: '', category: '',
-    in_stock: true, sales_status: 'active',
+    brand: '', advantages: '', disadvantages: '', best_for: '', not_for: '',
+    availability_status: 'in_stock', availability_note: '', installation_terms: '', warranty_terms: '', additional_facts: [],
+    sales_status: 'active',
     featured_image: null, gallery_images: [], demo_videos: [], certificate_documents: [], guarantee_documents: [],
     draft: false, updated_at: '',
     ...over,
@@ -51,7 +53,7 @@ function emptyLive(over: Partial<DraftView> = {}): DraftView {
       organization_id: 'org-1', persona: '', mission: '', guardrails: '', language_policy: '',
       reply_max_words: 120, draft: false, base_version: 0, updated_at: '',
     },
-    topics: [], tariffs: [], products: [], contacts: [], policies: [], zones: [], materials: [], requests: [],
+    topics: [], tariffs: [], products: [], contacts: [], policies: [], tariff_info: [], zones: [], materials: [], requests: [],
     ...over,
   }
 }
@@ -68,7 +70,7 @@ function material(over: Partial<KbMaterial> = {}): KbMaterial {
 function emptyChanges(over: Partial<DraftChangeSet> = {}): DraftChangeSet {
   return {
     base_version: 1, updated_at: '', config: null,
-    topics: [], tariffs: [], products: [], contacts: [], policies: [], zones: [], deletes: [],
+    topics: [], tariffs: [], products: [], contacts: [], policies: [], tariff_info: [], zones: [], deletes: [],
     ...over,
   }
 }

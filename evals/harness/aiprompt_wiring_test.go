@@ -20,7 +20,7 @@ func TestAipromptCrossModuleWiring(t *testing.T) {
 		OrganizationID: "11111111-1111-1111-1111-111111111111",
 		Assistant:      &aiprompt.Assistant{Persona: "Ты — тестовый ассистент."},
 		Products: []aiprompt.Product{
-			{Ref: "smoke-test", Name: "Тест", Price: "1 000 ₸", InStock: true, SalesStatus: "active"},
+			{Ref: "smoke-test", Name: "Тест", Price: "1 000 ₸", AvailabilityStatus: "in_stock", SalesStatus: "active"},
 		},
 	}
 	cat, err := aiprompt.BuildCatalog(kb)

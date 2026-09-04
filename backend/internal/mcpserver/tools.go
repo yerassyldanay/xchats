@@ -68,7 +68,7 @@ func destructiveAnnotations() *ToolAnnotations {
 	return &ToolAnnotations{DestructiveHint: boolPtr(true), IdempotentHint: boolPtr(false)}
 }
 
-// notIdempotentAnnotations marks the seven typed upserts: writeDraftBlobVersioned
+// notIdempotentAnnotations marks the eight typed upserts: writeDraftBlobVersioned
 // unconditionally bumps base_version and rewrites updated_at (and updated_by)
 // on every call, so calling the same upsert twice is NOT a no-op at the
 // storage layer even when the resulting content is identical. No-op
@@ -152,6 +152,28 @@ func materialIDs(desc string) map[string]any {
 	return strArray(desc + " (kb_media_upload material_id values, in send order)")
 }
 
+// additionalFactsArray is the schema for a virtual-fact-columns `changes`
+// field (products, tariffs, and the tariff_info singleton): a whole-list
+// replace, same nil-means-unchanged/present-means-replace semantics
+// materialIDs' plural media fields already use. Each entry is exactly
+// {ref, value, instruction} — aiprompt.AdditionalFact's wire shape (facts.go):
+// ref a lowercase snake_case virtual column name that must not collide with
+// one of this record's own concrete fields, value the exact hidden scalar
+// (number, boolean, or string — never null/array/object), instruction the
+// prompt-visible explanation shown beside the fact's token instead of the
+// value itself.
+func additionalFactsArray(desc string) map[string]any {
+	return map[string]any{
+		"type":        "array",
+		"description": desc + " Whole-list replace: omit this field to leave existing facts unchanged; provide it (an empty array included) to replace the complete list.",
+		"items": obj(map[string]any{
+			"ref":         str(`Virtual column name: lowercase snake_case matching ^[a-z][a-z0-9_]{0,63}$ (e.g. "limit_on_devices"). Must be unique within this record and must not collide with one of its concrete field names (e.g. "price").`),
+			"value":       map[string]any{"type": []string{"number", "boolean", "string"}, "description": "The exact hidden value the model never sees — a JSON number, boolean, or string. Never null, an array, or an object."},
+			"instruction": str("Prompt-visible Russian explanation of the fact and how to phrase it safely (e.g. neutral wording for a number, with no unit word directly appended). Must not restate the exact value and must not contain a {{...}} token."),
+		}, "ref", "value", "instruction"),
+	}
+}
+
 // changesObject wraps one tool's editable-fields schema into the shared
 // `changes` parameter shape every typed upsert tool uses.
 func changesObject(fields map[string]any) map[string]any {
@@ -174,9 +196,10 @@ func upsertCommon() map[string]any {
 }
 
 // upsertOutputSchema documents kbstore.UpsertResult — the shared
-// structuredContent shape all seven typed upsert tools return (including
-// kb_assistant_upsert/kb_contacts_upsert/kb_policies_upsert, whose message
-// text only mentions draft_version but whose result is the same struct).
+// structuredContent shape all eight typed upsert tools return (including
+// kb_assistant_upsert/kb_contacts_upsert/kb_policies_upsert/kb_tariff_info_upsert,
+// whose message text only mentions draft_version but whose result is the
+// same struct).
 func upsertOutputSchema() map[string]any {
 	return obj(map[string]any{
 		"type":          str("The KB type written."),
@@ -277,8 +300,8 @@ func merge(a, b map[string]any) map[string]any {
 	return out
 }
 
-// Tools is the closed, ordered 13-tool contract (plan/mcp.md §5 plus
-// kb_media_attach).
+// Tools is the closed, ordered 14-tool contract (plan/mcp.md §5 plus
+// kb_media_attach and kb_tariff_info_upsert).
 func Tools() []Tool {
 	tools := []Tool{
 		assistantUpsertTool(),
@@ -287,6 +310,7 @@ func Tools() []Tool {
 		tariffUpsertTool(),
 		contactsUpsertTool(),
 		policiesUpsertTool(),
+		tariffInfoUpsertTool(),
 		deliveryZoneUpsertTool(),
 		kbReadTool(),
 		kbDeleteTool(),
@@ -333,12 +357,12 @@ func topicUpsertTool() Tool {
 		InputSchema: obj(merge(map[string]any{
 			"slug": str("Existing topic's slug to update, or a new slug to create with. Omit to derive a slug from changes.title."),
 			"changes": changesObject(map[string]any{
-				"title":                 clearableStr("Russian topic title. Required when creating."),
-				"body_md":               clearableStr("Approved Russian Markdown knowledge — pure prose, no {{...}} tokens or literal prices."),
-				"featured_image":        materialID("Single main topic image."),
-				"illustration_images":   materialIDs("Supporting topic illustrations."),
-				"explainer_videos":      materialIDs("Videos that explain the topic."),
-				"reference_documents":   materialIDs("Documents supporting the topic."),
+				"title":               clearableStr("Russian topic title. Required when creating."),
+				"body_md":             clearableStr("Approved Russian Markdown knowledge — pure prose, no {{...}} tokens or literal prices."),
+				"featured_image":      materialID("Single main topic image."),
+				"illustration_images": materialIDs("Supporting topic illustrations."),
+				"explainer_videos":    materialIDs("Videos that explain the topic."),
+				"reference_documents": materialIDs("Documents supporting the topic."),
 			}),
 		}, upsertCommon()), "changes"),
 		Meta:         widgetMeta(),
@@ -350,21 +374,30 @@ func topicUpsertTool() Tool {
 func productUpsertTool() Tool {
 	return Tool{
 		Name:        "kb_product_upsert",
-		Description: "Create or patch a sellable product. Key is `ref`. Provide ref to update an existing product or create with that exact ref; omit ref to derive one from the name (after duplicate checks). `in_stock` is required when creating.",
+		Description: "Create or patch a sellable product. Key is `ref`. Provide ref to update an existing product or create with that exact ref; omit ref to derive one from the name (after duplicate checks). `availability_status` is required when creating. An `unavailable` product is shown to customers by name only — it carries no facts (price included) or media, so give it a real availability_status rather than leaving it in that state indefinitely once it can be described again.",
 		InputSchema: obj(merge(map[string]any{
 			"ref": str("Existing product's ref to update, or a new ref to create with. Omit to derive a ref from changes.name."),
 			"changes": changesObject(map[string]any{
-				"name":                    clearableStr("Russian product name. Required when creating."),
-				"price":                   clearableStr("Exact approved price, including currency/range formatting."),
-				"description":             clearableStr("Trusted Russian product description."),
-				"category":                clearableStr("Product category."),
-				"in_stock":                boolean("Stock state. Required when creating."),
-				"sales_status":            enumStr("active or inactive.", "active", "inactive"),
-				"featured_image":          materialID("Single main product image."),
-				"gallery_images":          materialIDs("Product gallery images."),
-				"demo_videos":             materialIDs("Product demonstration videos."),
-				"certificate_documents":   materialIDs("Product certificates."),
-				"guarantee_documents":     materialIDs("Product guarantee documents."),
+				"name":                  clearableStr("Russian product name. Required when creating."),
+				"price":                 clearableStr("Exact approved price, including currency/range formatting."),
+				"description":           clearableStr("Trusted Russian product description."),
+				"category":              clearableStr("Product category."),
+				"brand":                 clearableStr("Product brand/manufacturer."),
+				"advantages":            clearableStr("Trusted Russian advantages."),
+				"disadvantages":         clearableStr("Trusted Russian limitations/disadvantages."),
+				"best_for":              clearableStr("Trusted Russian description of who/what this product suits best."),
+				"not_for":               clearableStr("Trusted Russian description of who/what this product does NOT suit."),
+				"availability_status":   enumStr("Required when creating. in_stock/preorder/on_demand are all fully shown to customers (prose, facts, media); unavailable is shown by name only, with nothing else.", "in_stock", "preorder", "on_demand", "unavailable"),
+				"availability_note":     clearableStr("Qualitative Russian prose about availability (e.g. \"ships from our regional warehouse\"). Never an exact lead time — put that in additional_facts instead (e.g. a lead_time_in_days fact)."),
+				"installation_terms":    clearableStr("Trusted Russian installation terms/requirements."),
+				"warranty_terms":        clearableStr("Trusted Russian warranty terms for THIS product — overrides the organization's general warranty policy when non-blank. An exact warranty duration belongs in additional_facts (e.g. a warranty_in_months fact), not written out here."),
+				"additional_facts":      additionalFactsArray("Seller-defined virtual fact columns beyond the fields above (e.g. a device limit, a technical spec, a lead time) — see the additional_facts item schema."),
+				"sales_status":          enumStr("active or inactive.", "active", "inactive"),
+				"featured_image":        materialID("Single main product image."),
+				"gallery_images":        materialIDs("Product gallery images."),
+				"demo_videos":           materialIDs("Product demonstration videos."),
+				"certificate_documents": materialIDs("Product certificates."),
+				"guarantee_documents":   materialIDs("Product guarantee documents."),
 			}),
 		}, upsertCommon()), "changes"),
 		Meta:         widgetMeta(),
@@ -388,11 +421,33 @@ func tariffUpsertTool() Tool {
 				"pricing_type":     enumStr("Required when creating.", "fixed", "percentage", "tiered", "hybrid"),
 				"advantages":       clearableStr("Trusted Russian advantages."),
 				"disadvantages":    clearableStr("Trusted Russian limitations/disadvantages."),
+				"best_for":         clearableStr("Trusted Russian description of who/what this tariff suits best."),
+				"not_for":          clearableStr("Trusted Russian description of who/what this tariff does NOT suit."),
+				"additional_facts": additionalFactsArray("Seller-defined virtual fact columns beyond the fields above (e.g. a device limit, an included quota, a THIS-TARIFF-ONLY trial length) — see the additional_facts item schema. An organization-wide fact shared by every tariff belongs on kb_tariff_info_upsert instead."),
 				"sales_status":     enumStr("active or inactive.", "active", "inactive"),
 				"featured_image":   materialID("Single main tariff image."),
 				"pricing_images":   materialIDs("Price cards and pricing illustrations."),
 				"explainer_videos": materialIDs("Videos explaining the tariff."),
 				"terms_documents":  materialIDs("Tariff terms and conditions documents."),
+			}),
+		}, upsertCommon()), "changes"),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
+	}
+}
+
+// tariffInfoUpsertTool creates or patches the tariff_info singleton
+// (organization-wide tariff facts belonging to no single plan) — the
+// structural twin of contactsUpsertTool/policiesUpsertTool, minus media
+// (tariff_info carries none).
+func tariffInfoUpsertTool() Tool {
+	return Tool{
+		Name:        "kb_tariff_info_upsert",
+		Description: "Create or patch the organization-wide tariff-facts singleton (facts shared by every tariff, e.g. a trial period every plan gets). Key is \"main\". A fact that differs by tariff belongs on that tariff's own kb_tariff_upsert additional_facts instead.",
+		InputSchema: obj(merge(map[string]any{
+			"changes": changesObject(map[string]any{
+				"additional_facts": additionalFactsArray("Organization-wide virtual fact columns — see the additional_facts item schema."),
 			}),
 		}, upsertCommon()), "changes"),
 		Meta:         widgetMeta(),

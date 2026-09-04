@@ -52,7 +52,7 @@
       "price": "129 900 ₸",
       "description": "Автоматическая кофемашина для дома с капучинатором и жерновковой кофемолкой.",
       "category": "",
-      "in_stock": true
+      "availability_status": "in_stock"
     },
     {
       "ref": "demo_blender",
@@ -60,7 +60,7 @@
       "price": "11 200 ₸",
       "description": "Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.",
       "category": "",
-      "in_stock": true
+      "availability_status": "in_stock"
     },
     {
       "ref": "demo_kettle",
@@ -68,7 +68,7 @@
       "price": "40 200 ₸",
       "description": "Электрический чайник с быстрым закипанием и автоматическим отключением.",
       "category": "",
-      "in_stock": false
+      "availability_status": "unavailable"
     },
     {
       "ref": "demo_toaster",
@@ -76,7 +76,7 @@
       "price": "81 600 ₸",
       "description": "Компактный тостер с регулировкой степени поджаривания и функцией разморозки.",
       "category": "",
-      "in_stock": true
+      "availability_status": "in_stock"
     },
     {
       "ref": "demo_vacuum",
@@ -84,7 +84,7 @@
       "price": "83 800 ₸",
       "description": "Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.",
       "category": "",
-      "in_stock": false
+      "availability_status": "unavailable"
     }
   ],
   "tariffs": [

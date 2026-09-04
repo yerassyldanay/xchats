@@ -28,7 +28,7 @@ ai_products:
     name: "Кофемашина DeLonghi"
     price: "129 900 ₸"
     description: "Автоматическая кофемашина для дома."
-    in_stock: true
+    availability_status: in_stock
     sales_status: active
     featured_image: "22222222-2222-2222-2222-222222222222"
 
@@ -55,7 +55,7 @@ ai_products:
   - ref: coffee-machine
     name: "Кофемашина DeLonghi"
     price: "129 900 ₸"
-    in_stock: true
+    availability_status: in_stock
     sales_status: active
     featured_image: "dangling-material-id-does-not-exist"
 `

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
 
@@ -191,7 +192,13 @@ type tariffReq struct {
 	PricingType   string `json:"pricing_type"`
 	Advantages    string `json:"advantages"`
 	Disadvantages string `json:"disadvantages"`
+	BestFor       string `json:"best_for"`
+	NotFor        string `json:"not_for"`
 	SalesStatus   string `json:"sales_status"`
+	// AdditionalFacts is nil-means-unchanged, non-nil (even empty) means
+	// replace — kbstore.TariffInput.AdditionalFacts' own pointer-to-slice
+	// convention.
+	AdditionalFacts *[]aiprompt.AdditionalFact `json:"additional_facts"`
 
 	FeaturedImage   optionalUUID `json:"featured_image"`
 	PricingImages   *[]uuid.UUID `json:"pricing_images"`
@@ -224,6 +231,7 @@ func (s *Server) handlePlaygroundUpsertTariff(c *gin.Context) {
 	if err := s.kb.UpsertTariff(ctx(c), orgID, currentUser(c).ID, kbstore.TariffInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
 		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
+		BestFor: req.BestFor, NotFor: req.NotFor, AdditionalFacts: req.AdditionalFacts,
 		SalesStatus: req.SalesStatus,
 		Media: kbstore.TariffMedia{
 			FeaturedImage:   req.FeaturedImage.ptr(),
@@ -254,15 +262,28 @@ func (s *Server) handlePlaygroundDeleteTariff(c *gin.Context) {
 // (handleKBUpsertProduct, kb_live.go) — see topicReq's doc comment: the
 // media fields are draft-lane only.
 type productReq struct {
-	Ref         string `json:"ref"`
-	Name        string `json:"name"`
-	Price       string `json:"price"`
-	Description string `json:"description"`
-	Category    string `json:"category"`
-	SalesStatus string `json:"sales_status"`
-	// InStock is nil-able: omitted/null leaves the draft's current merged
-	// value unchanged (kbstore.ProductInput's own nil-means-unchanged idiom).
-	InStock *bool `json:"in_stock"`
+	Ref           string `json:"ref"`
+	Name          string `json:"name"`
+	Price         string `json:"price"`
+	Description   string `json:"description"`
+	Category      string `json:"category"`
+	Brand         string `json:"brand"`
+	Advantages    string `json:"advantages"`
+	Disadvantages string `json:"disadvantages"`
+	BestFor       string `json:"best_for"`
+	NotFor        string `json:"not_for"`
+	// AvailabilityStatus is nil-able: omitted/null leaves the draft's current
+	// merged value unchanged (kbstore.ProductInput's own nil-means-unchanged
+	// idiom — the same contract the legacy InStock *bool field had).
+	AvailabilityStatus *string `json:"availability_status"`
+	AvailabilityNote   string  `json:"availability_note"`
+	InstallationTerms  string  `json:"installation_terms"`
+	WarrantyTerms      string  `json:"warranty_terms"`
+	// AdditionalFacts is nil-means-unchanged, non-nil (even empty) means
+	// replace — kbstore.ProductInput.AdditionalFacts' own pointer-to-slice
+	// convention.
+	AdditionalFacts *[]aiprompt.AdditionalFact `json:"additional_facts"`
+	SalesStatus     string                     `json:"sales_status"`
 
 	FeaturedImage        optionalUUID `json:"featured_image"`
 	GalleryImages        *[]uuid.UUID `json:"gallery_images"`
@@ -300,7 +321,11 @@ func (s *Server) handlePlaygroundUpsertProduct(c *gin.Context) {
 	if err := s.kb.UpsertProduct(ctx(c), orgID, currentUser(c).ID, kbstore.ProductInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price,
 		Description: req.Description, Category: req.Category,
-		SalesStatus: req.SalesStatus, InStock: req.InStock,
+		Brand: req.Brand, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
+		BestFor: req.BestFor, NotFor: req.NotFor,
+		AvailabilityNote: req.AvailabilityNote, InstallationTerms: req.InstallationTerms, WarrantyTerms: req.WarrantyTerms,
+		AdditionalFacts: req.AdditionalFacts,
+		SalesStatus:     req.SalesStatus, AvailabilityStatus: req.AvailabilityStatus,
 		Media: kbstore.ProductMedia{
 			FeaturedImage:        req.FeaturedImage.ptr(),
 			GalleryImages:        gallery,
@@ -472,6 +497,33 @@ func (s *Server) handlePlaygroundPatchPolicies(c *gin.Context) {
 	s.kbChanged(c, orgID)
 }
 
+// --- tariff info (organization-wide tariff facts) ---------------------------
+
+// tariffInfoReq is shared by the draft lane (handlePlaygroundPatchTariffInfo
+// below) and the live lane (handleKBPatchTariffInfo, kb_live.go).
+type tariffInfoReq struct {
+	AdditionalFacts *[]aiprompt.AdditionalFact `json:"additional_facts"`
+}
+
+func (s *Server) handlePlaygroundPatchTariffInfo(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	var req tariffInfoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "bad tariff info")
+		return
+	}
+	if err := s.kb.PatchTariffInfo(ctx(c), orgID, currentUser(c).ID, kbstore.TariffInfoPatch{
+		AdditionalFacts: req.AdditionalFacts,
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
 // --- config ----------------------------------------------------------------
 
 type configReq struct {
@@ -551,9 +603,9 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	}
 	kind := c.Param("kind")
 	switch kind {
-	case "topics", "tariffs", "products", "contacts", "policies", "delivery_zones", "config":
+	case "topics", "tariffs", "products", "contacts", "policies", "tariff_info", "delivery_zones", "config":
 	default:
-		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|tariffs|products|contacts|policies|delivery_zones|config")
+		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|tariffs|products|contacts|policies|tariff_info|delivery_zones|config")
 		return
 	}
 	key := c.Param("id")

@@ -23,7 +23,7 @@ func deleteKindFor(kbType string) string {
 	case KBTypePolicies:
 		return "policy"
 	default:
-		return kbType
+		return kbType // tariff_info's MCP name already matches the blob's DraftDelete.Kind
 	}
 }
 
@@ -172,6 +172,16 @@ func (s *Store) identityIndex(ctx context.Context, db dbtx, orgID uuid.UUID, typ
 		for range draft.Policies {
 			e := get(KBTypePolicies, NaturalKeyMain)
 			e.Title, e.ExistsInDraft = "Политики", true
+		}
+	}
+	if typeWanted(want, KBTypeTariffInfo) {
+		for range live.TariffInfo {
+			e := get(KBTypeTariffInfo, NaturalKeyMain)
+			e.Title, e.ExistsInLive = "Тарифная информация", true
+		}
+		for range draft.TariffInfo {
+			e := get(KBTypeTariffInfo, NaturalKeyMain)
+			e.Title, e.ExistsInDraft = "Тарифная информация", true
 		}
 	}
 	if typeWanted(want, KBTypeDeliveryZone) {
@@ -425,6 +435,11 @@ func flattenRecords(v *DraftView, source string, want map[string]bool, key, qnor
 	if typeWanted(want, KBTypePolicies) && (key == "" || key == NaturalKeyMain) {
 		for _, p := range v.Policies {
 			out = append(out, KBRecord{Type: KBTypePolicies, Source: source, Data: p})
+		}
+	}
+	if typeWanted(want, KBTypeTariffInfo) && (key == "" || key == NaturalKeyMain) {
+		for _, ti := range v.TariffInfo {
+			out = append(out, KBRecord{Type: KBTypeTariffInfo, Source: source, Data: ti})
 		}
 	}
 	if typeWanted(want, KBTypeDeliveryZone) {

@@ -22,7 +22,8 @@ func uuidpp(u uuid.UUID) **uuid.UUID {
 }
 
 // TestMCPUpsertProduct_CreateRequiresInStock enforces plan/mcp.md §5's
-// "in_stock is required on create".
+// "availability_status is required on create" (the field this test's own
+// name predates — see 0017_kb_virtual_facts).
 func TestMCPUpsertProduct_CreateRequiresInStock(t *testing.T) {
 	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
@@ -40,7 +41,7 @@ func TestMCPUpsertProduct_CreateDerivesSlugFromCyrillicTitle(t *testing.T) {
 	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	res, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "", kbstore.ProductChanges{
-		Name: strp("Кофемашина DeLonghi"), Price: strp("129 900 ₸"), InStock: boolp(true),
+		Name: strp("Кофемашина DeLonghi"), Price: strp("129 900 ₸"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -62,7 +63,7 @@ func TestMCPUpsertProduct_CreateDerivesSlugFromCyrillicTitle(t *testing.T) {
 		t.Fatalf("expected exactly 1 draft product, got %d", len(page.Items))
 	}
 	row := page.Items[0].Data.(kbstore.ProductRow)
-	if row.Name != "Кофемашина DeLonghi" || row.Price != "129 900 ₸" || !row.InStock {
+	if row.Name != "Кофемашина DeLonghi" || row.Price != "129 900 ₸" || row.AvailabilityStatus != "in_stock" {
 		t.Fatalf("round-tripped row wrong: %+v", row)
 	}
 }
@@ -73,7 +74,7 @@ func TestMCPUpsertProduct_UpdateByKeyPreservesOmittedFields(t *testing.T) {
 	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	res, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "coffee-machine", kbstore.ProductChanges{
-		Name: strp("Кофемашина"), Price: strp("100000"), Category: strp("Кухня"), InStock: boolp(true),
+		Name: strp("Кофемашина"), Price: strp("100000"), Category: strp("Кухня"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -90,7 +91,7 @@ func TestMCPUpsertProduct_UpdateByKeyPreservesOmittedFields(t *testing.T) {
 	if row.Price != "120000" {
 		t.Fatalf("price not updated: %+v", row)
 	}
-	if row.Name != "Кофемашина" || row.Category != "Кухня" || !row.InStock {
+	if row.Name != "Кофемашина" || row.Category != "Кухня" || row.AvailabilityStatus != "in_stock" {
 		t.Fatalf("omitted fields were clobbered: %+v", row)
 	}
 }
@@ -257,7 +258,7 @@ func TestMCPUpsertProduct_MediaValidation_Rejects(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p-"+c.name, kbstore.ProductChanges{
-				Name: strp("Товар"), InStock: boolp(true), FeaturedImage: uuidpp(c.id),
+				Name: strp("Товар"), AvailabilityStatus: strp("in_stock"), FeaturedImage: uuidpp(c.id),
 			}, nil, kbstore.MCPProvenance{})
 			var mediaErr *kbstore.ErrMediaReference
 			if !errors.As(err, &mediaErr) {
@@ -267,7 +268,7 @@ func TestMCPUpsertProduct_MediaValidation_Rejects(t *testing.T) {
 	}
 
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p-valid", kbstore.ProductChanges{
-		Name: strp("Товар"), InStock: boolp(true), FeaturedImage: uuidpp(valid),
+		Name: strp("Товар"), AvailabilityStatus: strp("in_stock"), FeaturedImage: uuidpp(valid),
 	}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("expected the valid material to be accepted, got %v", err)
 	}
@@ -458,12 +459,12 @@ func TestReadRecords_CrossOrgIsolation(t *testing.T) {
 	orgB := orgBRow.ID
 
 	if _, err := kb.MCPUpsertProduct(ctx, orgA, uuid.Nil, "a-product", kbstore.ProductChanges{
-		Name: strp("Товар A"), InStock: boolp(true),
+		Name: strp("Товар A"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("seed org a product: %v", err)
 	}
 	if _, err := kb.MCPUpsertProduct(ctx, orgB, uuid.Nil, "b-product", kbstore.ProductChanges{
-		Name: strp("Товар B"), InStock: boolp(true),
+		Name: strp("Товар B"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("seed org b product: %v", err)
 	}
@@ -526,7 +527,7 @@ func TestReadRecords_PaginationCoversAllItemsExactlyOnce(t *testing.T) {
 	for i := 0; i < n; i++ {
 		ref := fmt.Sprintf("product-%02d", i)
 		if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, ref, kbstore.ProductChanges{
-			Name: strp(fmt.Sprintf("Товар %02d", i)), InStock: boolp(true),
+			Name: strp(fmt.Sprintf("Товар %02d", i)), AvailabilityStatus: strp("in_stock"),
 		}, nil, kbstore.MCPProvenance{}); err != nil {
 			t.Fatalf("seed %s: %v", ref, err)
 		}
@@ -857,7 +858,7 @@ func TestMCPUpsert_SourceURLProvenanceCreatesDurableMaterial(t *testing.T) {
 	ctx := context.Background()
 
 	res, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "coffee-machine", kbstore.ProductChanges{
-		Name: strp("Кофемашина"), Price: strp("100000"), InStock: boolp(true),
+		Name: strp("Кофемашина"), Price: strp("100000"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{SourceURL: "https://shop.example/coffee-machine"})
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -945,7 +946,7 @@ func TestMCPUpsert_CrossOrgMaterialIDProvenanceRejected(t *testing.T) {
 	}
 
 	_, err = kb.MCPUpsertProduct(ctx, orgA, uuid.Nil, "a-product", kbstore.ProductChanges{
-		Name: strp("Товар A"), InStock: boolp(true),
+		Name: strp("Товар A"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{MaterialIDs: []uuid.UUID{materialB}})
 	var mediaErr *kbstore.ErrMediaReference
 	if !errors.As(err, &mediaErr) {
@@ -973,7 +974,7 @@ func TestMCPUpsert_InvalidEnumValueRejected(t *testing.T) {
 	}
 
 	_, err = kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "widget", kbstore.ProductChanges{
-		Name: strp("Widget"), InStock: boolp(true), SalesStatus: strp("discontinued"),
+		Name: strp("Widget"), AvailabilityStatus: strp("in_stock"), SalesStatus: strp("discontinued"),
 	}, nil, kbstore.MCPProvenance{})
 	if !errors.As(err, &enumErr) {
 		t.Fatalf("expected ErrInvalidEnumValue for an invalid sales_status, got %v", err)

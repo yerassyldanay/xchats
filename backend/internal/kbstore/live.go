@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
@@ -106,7 +107,14 @@ func (s *Store) PutLiveTariff(ctx context.Context, orgID uuid.UUID, actor uuid.U
 	cur.Name, cur.Price, cur.LimitText = in.Name, in.Price, in.LimitText
 	cur.Fee, cur.Summary, cur.PricingType = in.Fee, in.Summary, in.PricingType
 	cur.Advantages, cur.Disadvantages = in.Advantages, in.Disadvantages
+	cur.BestFor, cur.NotFor = in.BestFor, in.NotFor
+	if in.AdditionalFacts != nil {
+		cur.AdditionalFacts = *in.AdditionalFacts
+	}
 	cur.SalesStatus = orDefault(in.SalesStatus, "active")
+	if err := validateTariffFacts(cur); err != nil {
+		return err
+	}
 	if err := upsertTariffRow(ctx, tx, orgID, cur); err != nil {
 		return err
 	}
@@ -119,9 +127,11 @@ func (s *Store) PutLiveTariff(ctx context.Context, orgID uuid.UUID, actor uuid.U
 func currentLiveTariffTx(ctx context.Context, tx dbtx, orgID uuid.UUID, ref string) (DraftTariff, error) {
 	t := DraftTariff{Ref: ref, PricingType: "fixed"}
 	err := tx.QueryRow(ctx, `SELECT name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages,
+		best_for, not_for, additional_facts,
 		sales_status, featured_image, pricing_images, explainer_videos, terms_documents
 		FROM ai_tariffs WHERE organization_id=$1 AND ref=$2`, orgID, ref).
 		Scan(&t.Name, &t.Price, &t.LimitText, &t.Fee, &t.Summary, &t.PricingType, &t.Advantages, &t.Disadvantages,
+			&t.BestFor, &t.NotFor, (*aiprompt.FactsColumn)(&t.AdditionalFacts),
 			&t.SalesStatus, &t.FeaturedImage, (*dbx.UUIDArray)(&t.PricingImages), (*dbx.UUIDArray)(&t.ExplainerVideos), (*dbx.UUIDArray)(&t.TermsDocuments))
 	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftTariff{Ref: ref, PricingType: "fixed"}, nil
@@ -146,10 +156,10 @@ func (s *Store) DeleteLiveTariff(ctx context.Context, orgID uuid.UUID, actor uui
 }
 
 // PutLiveProduct upserts a product row directly into the live table. Reads
-// the row FOR UPDATE first and merges the text fields plus InStock (when
-// given — nil preserves the current value, same contract as before), so
-// this caller cannot blank out sales_status/media an MCP tool already
-// published.
+// the row FOR UPDATE first and merges the text fields plus AvailabilityStatus
+// (when given — nil preserves the current value, same contract the legacy
+// InStock field had), so this caller cannot blank out sales_status/media an
+// MCP tool already published.
 func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ProductInput) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -162,9 +172,21 @@ func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.
 	}
 	cur.Name, cur.Price = in.Name, in.Price
 	cur.Description, cur.Category = in.Description, in.Category
+	cur.Brand, cur.Advantages, cur.Disadvantages = in.Brand, in.Advantages, in.Disadvantages
+	cur.BestFor, cur.NotFor = in.BestFor, in.NotFor
+	cur.AvailabilityNote, cur.InstallationTerms, cur.WarrantyTerms = in.AvailabilityNote, in.InstallationTerms, in.WarrantyTerms
 	cur.SalesStatus = orDefault(in.SalesStatus, "active")
-	if in.InStock != nil {
-		cur.InStock = *in.InStock
+	if in.AvailabilityStatus != nil {
+		if err := validateEnum("availability_status", *in.AvailabilityStatus, "in_stock", "preorder", "on_demand", "unavailable"); err != nil {
+			return err
+		}
+		cur.AvailabilityStatus = *in.AvailabilityStatus
+	}
+	if in.AdditionalFacts != nil {
+		cur.AdditionalFacts = *in.AdditionalFacts
+	}
+	if err := validateProductFacts(cur); err != nil {
+		return err
 	}
 	if err := upsertProductRow(ctx, tx, orgID, cur); err != nil {
 		return err
@@ -176,14 +198,17 @@ func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.
 }
 
 func currentLiveProductTx(ctx context.Context, tx dbtx, orgID uuid.UUID, ref string) (DraftProduct, error) {
-	p := DraftProduct{Ref: ref, InStock: true}
-	err := tx.QueryRow(ctx, `SELECT name, price, description, category, in_stock, sales_status,
-		featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
+	p := DraftProduct{Ref: ref, AvailabilityStatus: "in_stock"}
+	err := tx.QueryRow(ctx, `SELECT name, price, description, category, brand, advantages, disadvantages,
+		best_for, not_for, availability_status, availability_note, installation_terms, warranty_terms, additional_facts,
+		sales_status, featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents
 		FROM ai_products WHERE organization_id=$1 AND ref=$2`, orgID, ref).
-		Scan(&p.Name, &p.Price, &p.Description, &p.Category, &p.InStock, &p.SalesStatus,
-			&p.FeaturedImage, (*dbx.UUIDArray)(&p.GalleryImages), (*dbx.UUIDArray)(&p.DemoVideos), (*dbx.UUIDArray)(&p.CertificateDocuments), (*dbx.UUIDArray)(&p.GuaranteeDocuments))
+		Scan(&p.Name, &p.Price, &p.Description, &p.Category, &p.Brand, &p.Advantages, &p.Disadvantages,
+			&p.BestFor, &p.NotFor, &p.AvailabilityStatus, &p.AvailabilityNote, &p.InstallationTerms, &p.WarrantyTerms,
+			(*aiprompt.FactsColumn)(&p.AdditionalFacts),
+			&p.SalesStatus, &p.FeaturedImage, (*dbx.UUIDArray)(&p.GalleryImages), (*dbx.UUIDArray)(&p.DemoVideos), (*dbx.UUIDArray)(&p.CertificateDocuments), (*dbx.UUIDArray)(&p.GuaranteeDocuments))
 	if errors.Is(err, dbx.ErrNoRows) {
-		return DraftProduct{Ref: ref, InStock: true}, nil
+		return DraftProduct{Ref: ref, AvailabilityStatus: "in_stock"}, nil
 	}
 	return p, err
 }
@@ -344,6 +369,44 @@ func currentLivePolicyTx(ctx context.Context, tx dbtx, orgID uuid.UUID) (DraftPo
 	return p, err
 }
 
+// PatchLiveTariffInfo edits the org's live singleton tariff_info row —
+// an exact clone of PatchLiveContacts, minus media (tariff_info carries
+// none).
+func (s *Store) PatchLiveTariffInfo(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, p TariffInfoPatch) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	cur, err := currentLiveTariffInfoTx(ctx, tx, orgID)
+	if err != nil {
+		return err
+	}
+	if p.AdditionalFacts != nil {
+		cur.AdditionalFacts = *p.AdditionalFacts
+	}
+	if err := validateTariffInfoFacts(cur); err != nil {
+		return err
+	}
+	if err := upsertTariffInfoRow(ctx, tx, orgID, cur); err != nil {
+		return err
+	}
+	if err := auditRow(ctx, tx, orgID, actor, "edit", "tariff_info"); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func currentLiveTariffInfoTx(ctx context.Context, tx dbtx, orgID uuid.UUID) (DraftTariffInfo, error) {
+	var ti DraftTariffInfo
+	err := tx.QueryRow(ctx, `SELECT additional_facts FROM ai_tariff_info WHERE organization_id = $1`, orgID).
+		Scan((*aiprompt.FactsColumn)(&ti.AdditionalFacts))
+	if errors.Is(err, dbx.ErrNoRows) {
+		return DraftTariffInfo{}, nil
+	}
+	return ti, err
+}
+
 // PatchLiveConfig edits the org's live assistant config (only non-nil fields).
 // Uses upsertConfigRow (not a bare UPDATE) so a fresh org with no ai_assistants
 // row yet gets one created instead of the patch silently hitting zero rows.
@@ -385,6 +448,11 @@ func (s *Store) DeleteLiveContacts(ctx context.Context, orgID uuid.UUID, actor u
 // DeleteLivePolicies removes the org's live policies row.
 func (s *Store) DeleteLivePolicies(ctx context.Context, orgID uuid.UUID, actor uuid.UUID) error {
 	return s.deleteLiveSingleton(ctx, orgID, actor, "ai_policies", "policies")
+}
+
+// DeleteLiveTariffInfo removes the org's live tariff_info row.
+func (s *Store) DeleteLiveTariffInfo(ctx context.Context, orgID uuid.UUID, actor uuid.UUID) error {
+	return s.deleteLiveSingleton(ctx, orgID, actor, "ai_tariff_info", "tariff_info")
 }
 
 // deleteLiveSingleton is the shared body of the three above. table is never

@@ -2,19 +2,25 @@
 import { reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useKbModal } from '@/composables/useKbModal'
-import type { ProductRow } from '@/types'
+import type { AdditionalFact, ProductRow } from '@/types'
+import { AVAILABILITY_STATUSES } from '@/components/kb/kbEntities'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import KbFormDialog from './KbFormDialog.vue'
 import MediaFieldPicker from './MediaFieldPicker.vue'
+import AdditionalFactsEditor from './AdditionalFactsEditor.vue'
 import type { ProductPayload } from './payloads'
 
 const modal = useKbModal()
 const { t } = useI18n()
 
 const buf = reactive({
-  ref: '', name: '', price: '', category: '', description: '', sales_status: 'active', in_stock: true,
+  ref: '', name: '', price: '', category: '', description: '',
+  brand: '', advantages: '', disadvantages: '', best_for: '', not_for: '',
+  availability_status: 'in_stock', availability_note: '', installation_terms: '', warranty_terms: '',
+  additional_facts: [] as AdditionalFact[],
+  sales_status: 'active',
   featured_image: null as string | null,
   gallery_images: [] as string[],
   demo_videos: [] as string[],
@@ -35,8 +41,17 @@ watch(
     buf.price = snap?.price ?? ''
     buf.category = snap?.category ?? ''
     buf.description = snap?.description ?? ''
+    buf.brand = snap?.brand ?? ''
+    buf.advantages = snap?.advantages ?? ''
+    buf.disadvantages = snap?.disadvantages ?? ''
+    buf.best_for = snap?.best_for ?? ''
+    buf.not_for = snap?.not_for ?? ''
+    buf.availability_status = snap?.availability_status || 'in_stock'
+    buf.availability_note = snap?.availability_note ?? ''
+    buf.installation_terms = snap?.installation_terms ?? ''
+    buf.warranty_terms = snap?.warranty_terms ?? ''
+    buf.additional_facts = [...(snap?.additional_facts ?? [])]
     buf.sales_status = snap?.sales_status || 'active'
-    buf.in_stock = snap?.in_stock ?? true
     buf.featured_image = snap?.featured_image ?? null
     buf.gallery_images = [...(snap?.gallery_images ?? [])]
     buf.demo_videos = [...(snap?.demo_videos ?? [])]
@@ -86,9 +101,19 @@ function retry() {
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.category') }}</span>
         <Input v-model="buf.category" class="h-9 mt-1" />
       </div>
-      <label class="flex items-center gap-2 px-1 h-9 mt-4">
-        <Switch v-model="buf.in_stock" /> <span class="text-sm text-muted-foreground">{{ t('kb.fields.inStockYes') }}</span>
-      </label>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.brand') }}</span>
+        <Input v-model="buf.brand" class="h-9 mt-1" />
+      </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.availabilityStatus') }}</span>
+        <select
+          v-model="buf.availability_status"
+          class="h-9 mt-1 w-full rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <option v-for="s in AVAILABILITY_STATUSES" :key="s" :value="s">{{ t('kb.availabilityStatus.' + s) }}</option>
+        </select>
+      </div>
       <label class="flex items-center gap-2 px-1 h-9 mt-4">
         <Switch :model-value="buf.sales_status === 'active'" @update:model-value="(v) => (buf.sales_status = v ? 'active' : 'inactive')" />
         <span class="text-sm text-muted-foreground">{{ t('kb.fields.salesStatusActive') }}</span>
@@ -98,6 +123,39 @@ function retry() {
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.description') }}</span>
       <Textarea v-model="buf.description" rows="3" class="min-h-0 text-[14px] mt-1" />
     </div>
+    <div>
+      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.availabilityNote') }}</span>
+      <Textarea v-model="buf.availability_note" rows="2" class="min-h-0 text-[14px] mt-1" :placeholder="t('kb.fields.availabilityNoteHint')" />
+      <p class="text-xs text-muted-foreground mt-1">{{ t('kb.fields.availabilityNoteHint') }}</p>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.advantages') }}</span>
+        <Textarea v-model="buf.advantages" rows="2" class="min-h-0 text-[14px] mt-1" />
+      </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.disadvantages') }}</span>
+        <Textarea v-model="buf.disadvantages" rows="2" class="min-h-0 text-[14px] mt-1" />
+      </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.bestFor') }}</span>
+        <Textarea v-model="buf.best_for" rows="2" class="min-h-0 text-[14px] mt-1" />
+      </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.notFor') }}</span>
+        <Textarea v-model="buf.not_for" rows="2" class="min-h-0 text-[14px] mt-1" />
+      </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.installationTerms') }}</span>
+        <Textarea v-model="buf.installation_terms" rows="2" class="min-h-0 text-[14px] mt-1" />
+      </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.warrantyTerms') }}</span>
+        <Textarea v-model="buf.warranty_terms" rows="2" class="min-h-0 text-[14px] mt-1" />
+        <p class="text-xs text-muted-foreground mt-1">{{ t('kb.fields.warrantyTermsHint') }}</p>
+      </div>
+    </div>
+    <AdditionalFactsEditor v-model="buf.additional_facts" />
     <MediaFieldPicker
       :label="t('kb.media.image')" field="featured_image" :multiple="false"
       :model-value="buf.featured_image" @update:model-value="(v) => (buf.featured_image = v as string | null)"

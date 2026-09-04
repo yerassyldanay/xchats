@@ -74,6 +74,111 @@ func BuildCatalog(kb *KB) (*Catalog, error) {
 
 func active(salesStatus string) bool { return salesStatus == "active" }
 
+// validAvailabilityStatuses is the closed four-value enum
+// migration 0017 introduced. There is deliberately no SQL CHECK constraint
+// enforcing it, so a manual DB edit or a future write path that skips
+// application-level validation is the only way an unrecognized value ever
+// reaches here — buildFacts rejects that outright (a hard BuildCatalog
+// error, the same fail-closed treatment every other KB invariant in this
+// file gets — see buildDeliveryZoneFacts) rather than letting productVisible
+// silently guess which way to treat it.
+var validAvailabilityStatuses = map[string]bool{
+	"in_stock": true, "preorder": true, "on_demand": true, "unavailable": true,
+}
+
+// productVisible reports whether a product is eligible for ANY prompt
+// visibility at all — prose, fact tokens, and media alike. An inactive
+// product (sales_status) was already fully suppressed before availability_
+// status existed; an unavailable product (availability_status) is the new
+// rule this migration adds: in_stock/preorder/on_demand stay fully
+// visible, unavailable becomes name-only (renderProductsUnavailable) and
+// must never carry a fact or media token (buildFacts/buildMedia below, and
+// currentProduct in contract.go for the same rule at substitution time).
+//
+// Deliberately an allowlist of the three visible statuses, not a
+// not-equal-unavailable check: buildFacts already rejects anything outside
+// the four known values before this is ever asked, but this function stays
+// correct in isolation too — an unrecognized status must never default to
+// visible.
+func productVisible(p *Product) bool {
+	if !active(p.SalesStatus) {
+		return false
+	}
+	switch p.AvailabilityStatus {
+	case "in_stock", "preorder", "on_demand":
+		return true
+	default:
+		return false
+	}
+}
+
+// productConcreteColumns/tariffConcreteColumns are the reservedRefs
+// ValidateFacts checks a virtual ref against — the same column names
+// factColumns["product"]/["tariff"] declare, kept in lockstep by
+// facts_test.go rather than derived by reflection (the registry is small
+// and this keeps the dependency direction obvious).
+var (
+	productConcreteColumns = []string{"price"}
+	tariffConcreteColumns  = []string{"price", "fee"}
+)
+
+// productProse collects every OTHER prompt-visible field a product carries
+// — everything ValidateFacts must confirm no additional-fact value leaks
+// into (facts.go's doc comment).
+func productProse(p *Product) map[string]string {
+	return map[string]string{
+		"description":        p.Description,
+		"advantages":         p.Advantages,
+		"disadvantages":      p.Disadvantages,
+		"best_for":           p.BestFor,
+		"not_for":            p.NotFor,
+		"availability_note":  p.AvailabilityNote,
+		"installation_terms": p.InstallationTerms,
+		"warranty_terms":     p.WarrantyTerms,
+	}
+}
+
+func tariffProse(t *Tariff) map[string]string {
+	return map[string]string{
+		"summary":       t.Summary,
+		"limit_text":    t.LimitText,
+		"advantages":    t.Advantages,
+		"disadvantages": t.Disadvantages,
+		"best_for":      t.BestFor,
+		"not_for":       t.NotFor,
+	}
+}
+
+// addVirtualFacts appends one FactEntry per eligible entry of facts (a
+// product/tariff/tariff_info's AdditionalFacts) — validated first
+// (ValidateFacts; defense in depth, see facts.go's doc comment), then
+// skipping any entry whose value resolves empty exactly as addFact does
+// for a concrete column (an empty exact value generates no placeholder, so
+// a question needing it escalates rather than quoting nothing).
+func addVirtualFacts(cat *Catalog, table, ref string, facts []AdditionalFact, reservedRefs []string, prose map[string]string) error {
+	if len(facts) == 0 {
+		return nil
+	}
+	if err := ValidateFacts(facts, reservedRefs, prose); err != nil {
+		return fmt.Errorf("aiprompt: %s %s: %w", table, ref, err)
+	}
+	for _, f := range facts {
+		text, kind, ok := valueKindAndText(f.Value)
+		if !ok {
+			continue // unreachable once ValidateFacts passed; defensive only
+		}
+		if kind == KindVirtualString && strings.TrimSpace(text) == "" {
+			continue
+		}
+		cat.Facts = append(cat.Facts, FactEntry{
+			Token: "{{" + table + "." + ref + "." + f.Ref + "}}",
+			Table: table, Ref: ref, Column: f.Ref,
+			Label: f.Ref, Kind: kind, UsageNote: f.Instruction,
+		})
+	}
+	return nil
+}
+
 func validRef(ref string) error {
 	if !refPattern.MatchString(ref) || strings.Contains(ref, ".") {
 		return fmt.Errorf("aiprompt: invalid natural ref %q", ref)
@@ -107,9 +212,13 @@ func addDeliveryFlagFact(cat *Catalog, ref string, col FactColumn, available boo
 }
 
 func buildFacts(kb *KB, cat *Catalog) error {
-	for _, p := range kb.Products {
-		if !active(p.SalesStatus) {
-			continue
+	for i := range kb.Products {
+		p := &kb.Products[i]
+		if !validAvailabilityStatuses[p.AvailabilityStatus] {
+			return fmt.Errorf("aiprompt: product %s has invalid availability_status %q", p.Ref, p.AvailabilityStatus)
+		}
+		if !productVisible(p) {
+			continue // unavailable/inactive: no fact token at all — see productVisible
 		}
 		if err := validRef(p.Ref); err != nil {
 			return err
@@ -120,8 +229,12 @@ func buildFacts(kb *KB, cat *Catalog) error {
 				addFact(cat, "product", p.Ref, col, p.Price)
 			}
 		}
+		if err := addVirtualFacts(cat, "product", p.Ref, p.AdditionalFacts, productConcreteColumns, productProse(p)); err != nil {
+			return err
+		}
 	}
-	for _, t := range kb.Tariffs {
+	for i := range kb.Tariffs {
+		t := &kb.Tariffs[i]
 		if !active(t.SalesStatus) {
 			continue
 		}
@@ -135,6 +248,14 @@ func buildFacts(kb *KB, cat *Catalog) error {
 			case "fee":
 				addFact(cat, "tariff", t.Ref, col, t.Fee)
 			}
+		}
+		if err := addVirtualFacts(cat, "tariff", t.Ref, t.AdditionalFacts, tariffConcreteColumns, tariffProse(t)); err != nil {
+			return err
+		}
+	}
+	if ti := kb.TariffInfo; ti != nil {
+		if err := addVirtualFacts(cat, "tariff_info", SingletonRef, ti.AdditionalFacts, nil, nil); err != nil {
+			return err
 		}
 	}
 	if c := kb.Contacts; c != nil {
@@ -273,10 +394,10 @@ func resolvedFeaturedImage(explicit string, primaryImages []string) []string {
 // one row, in registry order. Singular columns yield zero or one id.
 func topicMedia(t *Topic) map[string][]string {
 	return map[string][]string{
-		"featured_image":       resolvedFeaturedImage(t.FeaturedImage, t.IllustrationImages),
-		"illustration_images":  t.IllustrationImages,
-		"explainer_videos":     t.ExplainerVideos,
-		"reference_documents":  t.ReferenceDocuments,
+		"featured_image":      resolvedFeaturedImage(t.FeaturedImage, t.IllustrationImages),
+		"illustration_images": t.IllustrationImages,
+		"explainer_videos":    t.ExplainerVideos,
+		"reference_documents": t.ReferenceDocuments,
 	}
 }
 
@@ -335,8 +456,8 @@ func buildMedia(kb *KB, cat *Catalog) error {
 	}
 	for i := range kb.Products {
 		p := &kb.Products[i]
-		if !active(p.SalesStatus) {
-			continue
+		if !productVisible(p) {
+			continue // unavailable/inactive: no media token, no Absent entry either
 		}
 		owners = append(owners, owner{"products", p.Ref, p.Name, productMedia(p)})
 	}

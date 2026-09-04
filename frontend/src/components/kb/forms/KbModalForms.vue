@@ -9,6 +9,7 @@ import TariffForm from './TariffForm.vue'
 import DeliveryZoneForm from './DeliveryZoneForm.vue'
 import ContactsForm from './ContactsForm.vue'
 import PoliciesForm from './PoliciesForm.vue'
+import TariffInfoForm from './TariffInfoForm.vue'
 import AssistantFieldForm from './AssistantFieldForm.vue'
 </script>
 
@@ -19,5 +20,6 @@ import AssistantFieldForm from './AssistantFieldForm.vue'
   <DeliveryZoneForm />
   <ContactsForm />
   <PoliciesForm />
+  <TariffInfoForm />
   <AssistantFieldForm />
 </template>

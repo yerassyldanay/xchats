@@ -98,7 +98,7 @@ func TestMCPAttachMedia_RejectsRecordStagedForDeletion(t *testing.T) {
 	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "doomed", kbstore.ProductChanges{
-		Name: strp("Товар"), InStock: boolp(true),
+		Name: strp("Товар"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestMCPAttachMedia_MediaValidation(t *testing.T) {
 		t.Fatalf("seed other org: %v", err)
 	}
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p", kbstore.ProductChanges{
-		Name: strp("Товар"), InStock: boolp(true),
+		Name: strp("Товар"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("create product: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestMCPAttachMedia_PluralAppendsWithoutDuplicates(t *testing.T) {
 	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p", kbstore.ProductChanges{
-		Name: strp("Товар"), InStock: boolp(true),
+		Name: strp("Товар"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("create product: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestMCPAttachMedia_WritesOnlyDraftAndReturnsNewVersion(t *testing.T) {
 	kb, orgID, _, _ := newTestKB(t)
 	ctx := context.Background()
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p", kbstore.ProductChanges{
-		Name: strp("Товар"), InStock: boolp(true),
+		Name: strp("Товар"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("create product: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestMediaIDsIn_CoversEveryMediaColumn(t *testing.T) {
 		t.Fatalf("create topic: %v", err)
 	}
 	if _, err := kb.MCPUpsertProduct(ctx, orgID, uuid.Nil, "p", kbstore.ProductChanges{
-		Name: strp("Товар"), InStock: boolp(true),
+		Name: strp("Товар"), AvailabilityStatus: strp("in_stock"),
 	}, nil, kbstore.MCPProvenance{}); err != nil {
 		t.Fatalf("create product: %v", err)
 	}

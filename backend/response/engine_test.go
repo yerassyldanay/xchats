@@ -37,7 +37,7 @@ func testKB() *aiprompt.KB {
 		OrganizationID: "org-1",
 		Assistant:      &aiprompt.Assistant{Persona: "Тестовый ассистент.", ReplyMaxWords: 120},
 		Products: []aiprompt.Product{
-			{Ref: "widget", Name: "Виджет", Price: "1 000 ₸", InStock: true, SalesStatus: "active"},
+			{Ref: "widget", Name: "Виджет", Price: "1 000 ₸", AvailabilityStatus: "in_stock", SalesStatus: "active"},
 		},
 		Contacts: &aiprompt.Contacts{Phone: "+7 700 000 00 00"},
 		Policies: &aiprompt.Policies{DeliveryCost: "1 000 ₸", DeliveryInDays: "1-2"},

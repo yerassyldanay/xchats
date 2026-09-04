@@ -955,11 +955,94 @@
           "default_raw": "now()"
         },
         {
-          "name": "in_stock",
-          "position": 14,
-          "pg_type": "boolean",
+          "name": "brand",
+          "position": 23,
+          "pg_type": "text",
           "nullable": false,
-          "has_default": false
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "advantages",
+          "position": 24,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "disadvantages",
+          "position": 25,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "best_for",
+          "position": 26,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "not_for",
+          "position": 27,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "availability_status",
+          "position": 28,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:in_stock",
+          "default_raw": "'in_stock'::text"
+        },
+        {
+          "name": "availability_note",
+          "position": 29,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "installation_terms",
+          "position": 30,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "warranty_terms",
+          "position": 31,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "additional_facts",
+          "position": 32,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_array",
+          "default_raw": "'[]'::jsonb"
         },
         {
           "name": "sales_status",
@@ -1060,6 +1143,88 @@
         },
         {
           "name": "ai_products_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "ai_tariff_info": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "additional_facts",
+          "position": 3,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_array",
+          "default_raw": "'[]'::jsonb"
+        },
+        {
+          "name": "created_at",
+          "position": 4,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 5,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "ai_tariff_info_organization_id_key",
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ai_tariff_info_organization_id_key",
+          "columns": [
+            "organization_id"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "ai_tariff_info_organization_id_fkey",
           "columns": [
             "organization_id"
           ],
@@ -1229,6 +1394,33 @@
           "has_default": true,
           "default_kind": "raw:'{}'::uuid[]",
           "default_raw": "'{}'::uuid[]"
+        },
+        {
+          "name": "best_for",
+          "position": 22,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "not_for",
+          "position": 23,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "additional_facts",
+          "position": 24,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_array",
+          "default_raw": "'[]'::jsonb"
         }
       ],
       "primary_key": [

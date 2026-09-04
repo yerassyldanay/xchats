@@ -88,16 +88,23 @@ jobs:
       # needs no external service — nothing here reads an API key or shells
       # out to a live network call.
       #
-      # -timeout=20m: go test's own default is 10m PER PACKAGE, not for the
+      # -timeout=30m: go test's own default is 10m PER PACKAGE, not for the
       # whole `./...` run — a single large package (internal/httpapi, which
       # carries the inbox/campaigns/CRM/chat integration suites and spins up
       # a real httptest.Server per test) now legitimately needs more than
       # that under -race, and hits the default alarm even though nothing is
       # hung (see the panic: "test timed out after 10m0s" trace on a plain
-      # master run). 20m is measured headroom, not a guess at a hang.
+      # master run). Bumped from 20m to 30m after PR #98's virtual-fact-
+      # columns suite grew internal/httpapi further and a run still hit the
+      # wall at 1200.059s — the goroutine dump showed genuinely in-flight
+      # net/http and database/sql work, not a stuck/looped deadlock, i.e.
+      # the same "package-level go test parallelism under -race contends
+      # for CPU/disk across every package's own SQLite DB" pressure the
+      # first bump already diagnosed, just now enough to clear 20m too.
+      # Measured headroom, still not a guess at a hang.
       - name: Test
         working-directory: backend
-        run: go test -race -count=1 -timeout=20m ./...
+        run: go test -race -count=1 -timeout=30m ./...
 
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9

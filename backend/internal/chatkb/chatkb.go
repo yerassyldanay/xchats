@@ -47,12 +47,13 @@ const (
 type Kind string
 
 const (
-	KindTopics   Kind = "topics"
-	KindProducts Kind = "products"
-	KindTariffs  Kind = "tariffs"
-	KindZones    Kind = "delivery_zones"
-	KindContacts Kind = "contacts"
-	KindPolicies Kind = "policies"
+	KindTopics     Kind = "topics"
+	KindProducts   Kind = "products"
+	KindTariffs    Kind = "tariffs"
+	KindZones      Kind = "delivery_zones"
+	KindContacts   Kind = "contacts"
+	KindPolicies   Kind = "policies"
+	KindTariffInfo Kind = "tariff_info"
 	// KindConfig is the assistant's own configuration (persona, mission,
 	// guardrails, ...) — "config" in the same vocabulary, and the one kind
 	// that is a true singleton with no natural key of its own.

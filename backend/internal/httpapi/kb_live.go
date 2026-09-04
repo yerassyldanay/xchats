@@ -122,6 +122,7 @@ func (s *Server) handleKBUpsertTariff(c *gin.Context) {
 	if err := s.kb.PutLiveTariff(ctx(c), orgID, currentUser(c).ID, kbstore.TariffInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
 		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
+		BestFor: req.BestFor, NotFor: req.NotFor, AdditionalFacts: req.AdditionalFacts,
 		SalesStatus: req.SalesStatus,
 	}); err != nil {
 		s.kbFail(c, err)
@@ -155,7 +156,11 @@ func (s *Server) handleKBUpsertProduct(c *gin.Context) {
 	if err := s.kb.PutLiveProduct(ctx(c), orgID, currentUser(c).ID, kbstore.ProductInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price,
 		Description: req.Description, Category: req.Category,
-		InStock: req.InStock, SalesStatus: req.SalesStatus,
+		Brand: req.Brand, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
+		BestFor: req.BestFor, NotFor: req.NotFor,
+		AvailabilityNote: req.AvailabilityNote, InstallationTerms: req.InstallationTerms, WarrantyTerms: req.WarrantyTerms,
+		AdditionalFacts:    req.AdditionalFacts,
+		AvailabilityStatus: req.AvailabilityStatus, SalesStatus: req.SalesStatus,
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -213,6 +218,27 @@ func (s *Server) handleKBPatchPolicies(c *gin.Context) {
 		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
 		Installment: req.Installment, ReturnPeriodInDays: req.ReturnPeriodInDays, Warranty: req.Warranty,
 		OutsideZonesNote: req.OutsideZonesNote,
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbLiveChanged(c, orgID)
+}
+
+// --- tariff info (organization-wide tariff facts) ----------------------------
+
+func (s *Server) handleKBPatchTariffInfo(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	var req tariffInfoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "bad tariff info")
+		return
+	}
+	if err := s.kb.PatchLiveTariffInfo(ctx(c), orgID, currentUser(c).ID, kbstore.TariffInfoPatch{
+		AdditionalFacts: req.AdditionalFacts,
 	}); err != nil {
 		s.kbFail(c, err)
 		return

@@ -75,7 +75,10 @@ type kbLoadProduct struct {
 	Price       string `json:"price"`
 	Description string `json:"description"`
 	Category    string `json:"category"`
-	InStock     bool   `json:"in_stock"`
+	// AvailabilityStatus is one of in_stock|preorder|on_demand|unavailable
+	// (replaces the legacy in_stock boolean — migration
+	// 0017_kb_virtual_facts); empty defaults to "in_stock".
+	AvailabilityStatus string `json:"availability_status"`
 }
 
 type kbLoadTariff struct {
@@ -188,10 +191,13 @@ func applyKBLoadDoc(ctx context.Context, kb *kbstore.Store, orgID uuid.UUID, doc
 	}
 	log.Info("kb-load: topics upserted", "count", len(doc.Topics))
 	for _, p := range doc.Products {
-		inStock := p.InStock
+		status := p.AvailabilityStatus
+		if status == "" {
+			status = "in_stock"
+		}
 		if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
 			Ref: p.Ref, Name: p.Name, Price: p.Price, Description: p.Description,
-			Category: p.Category, InStock: &inStock,
+			Category: p.Category, AvailabilityStatus: &status,
 		}); err != nil {
 			fatal("kb-load: product "+p.Ref, err)
 		}

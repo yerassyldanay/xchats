@@ -27,8 +27,8 @@ func BenchmarkKnowledgeBaseRepo_Load(b *testing.B) {
 			org.ID, slug, slug, fmt.Sprintf("Содержимое темы номер %d.", i))
 	}
 	for i := 0; i < 20; i++ {
-		mustExec(b, db, `INSERT INTO ai_products (organization_id, ref, name, price, description, category, in_stock)
-			VALUES ($1, $2, $3, '1 000 ₸', 'Описание', '', true)`,
+		mustExec(b, db, `INSERT INTO ai_products (organization_id, ref, name, price, description, category, availability_status)
+			VALUES ($1, $2, $3, '1 000 ₸', 'Описание', '', 'in_stock')`,
 			org.ID, fmt.Sprintf("product-%d", i), fmt.Sprintf("Товар %d", i))
 	}
 	mustExec(b, db, `INSERT INTO ai_contacts (organization_id, phone, working_hours) VALUES ($1, '+7 700 000 00 00', '9:00-18:00')`, org.ID)

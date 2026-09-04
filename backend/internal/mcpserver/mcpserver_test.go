@@ -84,8 +84,8 @@ func TestInitialize_ReturnsProtocolShape(t *testing.T) {
 	}
 }
 
-// TestToolsList_HasAllThirteenTools confirms the closed contract's shape.
-func TestToolsList_HasAllThirteenTools(t *testing.T) {
+// TestToolsList_HasAllFourteenTools confirms the closed contract's shape.
+func TestToolsList_HasAllFourteenTools(t *testing.T) {
 	srv, principal := newTestServer(t)
 	resp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "tools/list"})
 	if resp.Error != nil {
@@ -93,8 +93,8 @@ func TestToolsList_HasAllThirteenTools(t *testing.T) {
 	}
 	result := resp.Result.(map[string]any)
 	tools := result["tools"].([]mcpserver.Tool)
-	if len(tools) != 13 {
-		t.Fatalf("expected 13 tools, got %d", len(tools))
+	if len(tools) != 14 {
+		t.Fatalf("expected 14 tools, got %d", len(tools))
 	}
 	names := map[string]bool{}
 	for _, tool := range tools {
@@ -105,7 +105,7 @@ func TestToolsList_HasAllThirteenTools(t *testing.T) {
 	}
 	for _, want := range []string{
 		"kb_assistant_upsert", "kb_topic_upsert", "kb_product_upsert", "kb_tariff_upsert",
-		"kb_contacts_upsert", "kb_policies_upsert", "kb_delivery_zone_upsert",
+		"kb_contacts_upsert", "kb_policies_upsert", "kb_tariff_info_upsert", "kb_delivery_zone_upsert",
 		"kb_read", "kb_delete", "kb_summary", "kb_info", "kb_media_upload", "kb_media_attach",
 	} {
 		if !names[want] {
@@ -252,17 +252,17 @@ func TestToolsCall_MissingScopeIsRejectedAsToolError(t *testing.T) {
 func TestProductUpsert_EndToEnd(t *testing.T) {
 	srv, principal := newTestServer(t)
 
-	// Missing in_stock on create → isError, not a hard failure.
+	// Missing availability_status on create → isError, not a hard failure.
 	res := callTool(t, srv, principal, "kb_product_upsert", map[string]any{
 		"changes": map[string]any{"name": "Кофемашина"},
 	})
 	if res["isError"] != true {
-		t.Fatalf("expected isError for missing in_stock, got %+v", res)
+		t.Fatalf("expected isError for missing availability_status, got %+v", res)
 	}
 
 	// A clean create.
 	res = callTool(t, srv, principal, "kb_product_upsert", map[string]any{
-		"changes": map[string]any{"name": "Кофемашина", "price": "129900", "in_stock": true},
+		"changes": map[string]any{"name": "Кофемашина", "price": "129900", "availability_status": "in_stock"},
 	})
 	if res["isError"] == true {
 		t.Fatalf("expected success, got %+v", res)
@@ -277,7 +277,7 @@ func TestProductUpsert_EndToEnd(t *testing.T) {
 	// actionable guidance mentioning the existing key.
 	res = callTool(t, srv, principal, "kb_product_upsert", map[string]any{
 		"ref":     "another-ref",
-		"changes": map[string]any{"name": "Кофемашина", "in_stock": true},
+		"changes": map[string]any{"name": "Кофемашина", "availability_status": "in_stock"},
 	})
 	if res["isError"] != true {
 		t.Fatalf("expected a duplicate-conflict isError, got %+v", res)
@@ -538,7 +538,7 @@ func TestProductUpsert_JSONWireFormat(t *testing.T) {
 		JSONRPC: "2.0", ID: rpcID(7), Method: "tools/call",
 		Params: mustMarshal(t, map[string]any{
 			"name":      "kb_product_upsert",
-			"arguments": map[string]any{"changes": map[string]any{"name": "Товар", "in_stock": true}},
+			"arguments": map[string]any{"changes": map[string]any{"name": "Товар", "availability_status": "in_stock"}},
 		}),
 	}
 	resp := srv.Handle(context.Background(), principal, req)
@@ -562,6 +562,78 @@ func TestProductUpsert_JSONWireFormat(t *testing.T) {
 		if _, ok := sc[key]; !ok {
 			t.Fatalf("expected snake_case key %q in structuredContent, got %s", key, wire)
 		}
+	}
+}
+
+// TestProductUpsert_AdditionalFactsJSONTriState proves additional_facts'
+// wire contract end to end through the real JSON args path: an omitted key
+// leaves previously staged facts unchanged, explicit JSON null clears them,
+// and explicit [] clears them too — required test scenarios
+// "missing-patch-field-unchanged" and "explicit-[]-clears" for the MCP
+// upsert lane specifically (kbstore already covers the same contract at the
+// Go-pointer level in facts_apply_test.go).
+func TestProductUpsert_AdditionalFactsJSONTriState(t *testing.T) {
+	srv, principal := newTestServer(t)
+
+	callTool(t, srv, principal, "kb_product_upsert", map[string]any{
+		"ref": "widget-1",
+		"changes": map[string]any{
+			"name": "Товар", "availability_status": "in_stock",
+			"additional_facts": []map[string]any{
+				{"ref": "has_wifi", "value": true, "instruction": "Поддерживает ли товар Wi-Fi."},
+			},
+		},
+	})
+	readFacts := func() []kbstore.ProductRow {
+		read := callTool(t, srv, principal, "kb_read", map[string]any{"types": []string{"product"}, "key": "widget-1", "source": "draft"})
+		page := read["structuredContent"].(kbstore.ReadPage)
+		out := make([]kbstore.ProductRow, len(page.Items))
+		for i, item := range page.Items {
+			out[i] = item.Data.(kbstore.ProductRow)
+		}
+		return out
+	}
+	rows := readFacts()
+	if len(rows) != 1 || len(rows[0].AdditionalFacts) != 1 || rows[0].AdditionalFacts[0].Ref != "has_wifi" {
+		t.Fatalf("expected one fact has_wifi after create, got %+v", rows)
+	}
+
+	// Omitted key — a text-only edit must not blank out the staged fact.
+	callTool(t, srv, principal, "kb_product_upsert", map[string]any{
+		"ref":     "widget-1",
+		"changes": map[string]any{"name": "Товар (ред.)"},
+	})
+	rows = readFacts()
+	if len(rows) != 1 || len(rows[0].AdditionalFacts) != 1 || rows[0].AdditionalFacts[0].Ref != "has_wifi" {
+		t.Fatalf("an omitted additional_facts key must leave facts unchanged, got %+v", rows)
+	}
+
+	// Explicit JSON null — clears.
+	callTool(t, srv, principal, "kb_product_upsert", map[string]any{
+		"ref":     "widget-1",
+		"changes": map[string]any{"additional_facts": nil},
+	})
+	rows = readFacts()
+	if len(rows) != 1 || len(rows[0].AdditionalFacts) != 0 {
+		t.Fatalf("explicit null additional_facts must clear, got %+v", rows)
+	}
+
+	// Re-add, then clear via an explicit empty array instead of null.
+	callTool(t, srv, principal, "kb_product_upsert", map[string]any{
+		"ref": "widget-1",
+		"changes": map[string]any{
+			"additional_facts": []map[string]any{
+				{"ref": "has_wifi", "value": true, "instruction": "Поддерживает ли товар Wi-Fi."},
+			},
+		},
+	})
+	callTool(t, srv, principal, "kb_product_upsert", map[string]any{
+		"ref":     "widget-1",
+		"changes": map[string]any{"additional_facts": []map[string]any{}},
+	})
+	rows = readFacts()
+	if len(rows) != 1 || len(rows[0].AdditionalFacts) != 0 {
+		t.Fatalf("explicit empty-array additional_facts must clear, got %+v", rows)
 	}
 }
 
@@ -670,7 +742,7 @@ func TestKBMediaAttach_EndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	callTool(t, srv, principal, "kb_product_upsert", map[string]any{
-		"ref": "widget-1", "changes": map[string]any{"name": "Товар", "in_stock": true},
+		"ref": "widget-1", "changes": map[string]any{"name": "Товар", "availability_status": "in_stock"},
 	})
 
 	materialID, err := srv.Deps.KB.CreateUploadMaterial(ctx, principal.OrganizationID, kbstore.UploadMaterialInput{
@@ -727,7 +799,7 @@ func TestKBUpsert_MalformedProvenanceRejected(t *testing.T) {
 		Params: mustMarshal(t, map[string]any{
 			"name": "kb_product_upsert",
 			"arguments": map[string]any{
-				"changes":    map[string]any{"name": "Товар", "in_stock": true},
+				"changes":    map[string]any{"name": "Товар", "availability_status": "in_stock"},
 				"provenance": map[string]any{"material_ids": []string{"not-a-uuid"}},
 			},
 		}),
@@ -1004,7 +1076,7 @@ func TestToolsList_DeclaresAnnotations(t *testing.T) {
 	}
 }
 
-// TestToolsList_DeclaresOutputSchema confirms every one of the 13 tools
+// TestToolsList_DeclaresOutputSchema confirms every one of the 14 tools
 // documents its structuredContent shape (plan Task 9) — every tool sets
 // structuredContent via handlers.go's toolResult, kb_delete included (via
 // kbstore.DeleteResult).
@@ -1012,8 +1084,8 @@ func TestToolsList_DeclaresOutputSchema(t *testing.T) {
 	srv, principal := newTestServer(t)
 	resp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "tools/list"})
 	tools := resp.Result.(map[string]any)["tools"].([]mcpserver.Tool)
-	if len(tools) != 13 {
-		t.Fatalf("expected 13 tools, got %d", len(tools))
+	if len(tools) != 14 {
+		t.Fatalf("expected 14 tools, got %d", len(tools))
 	}
 	for _, tool := range tools {
 		if tool.OutputSchema == nil {
@@ -1104,7 +1176,7 @@ func TestKBRead_MediaMetaDoesNotChangeStructuredContent(t *testing.T) {
 	ctx := context.Background()
 
 	callTool(t, srv, principal, "kb_product_upsert", map[string]any{
-		"ref": "meta-1", "changes": map[string]any{"name": "Товар", "in_stock": true},
+		"ref": "meta-1", "changes": map[string]any{"name": "Товар", "availability_status": "in_stock"},
 	})
 	materialID, err := srv.Deps.KB.CreateUploadMaterial(ctx, principal.OrganizationID, kbstore.UploadMaterialInput{
 		Filename: "снимок.jpg", MimeType: "image/jpeg", SizeBytes: 1234,
