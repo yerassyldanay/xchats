@@ -55,8 +55,8 @@ func TestKBPrompt_OkWithSeededKB(t *testing.T) {
 	if got.Status != "ok" {
 		t.Fatalf("status = %q, want ok (error=%q)", got.Status, got.Error)
 	}
-	if got.PromptRef != "shop-kb@v5" {
-		t.Fatalf("prompt_ref = %q, want shop-kb@v5", got.PromptRef)
+	if got.PromptRef != "shop-kb@v6" {
+		t.Fatalf("prompt_ref = %q, want shop-kb@v6", got.PromptRef)
 	}
 	if !strings.Contains(got.RenderedText, "ЗОНЫ ДОСТАВКИ") {
 		t.Fatalf("rendered_text missing the ЗОНЫ ДОСТАВКИ section marker:\n%s", got.RenderedText)
@@ -82,7 +82,7 @@ func TestKBPrompt_OkWithSeededKB(t *testing.T) {
 	if got.ApproxTokens != got.CharCount/4 {
 		t.Fatalf("approx_tokens = %d, want %d (char_count/4)", got.ApproxTokens, got.CharCount/4)
 	}
-	if !strings.Contains(got.FrameText, "%%PRODUCTS_IN_STOCK%%") {
+	if !strings.Contains(got.FrameText, "%%PRODUCTS_AVAILABLE%%") {
 		t.Fatalf("frame_text should be the raw frame with unfilled slots")
 	}
 }

@@ -175,15 +175,19 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 // WhatsApp one. An unset channel — a caller that predates GenerateRequest
 // carrying it — keeps the base frame rather than guessing.
 //
-// v5 (not v4) since 2026-08: v4 could not render tariffs at all, so a priced
-// ai_tariffs row was invisible to the model and every tariff question escalated.
-// v5 is v4 plus the ТАРИФЫ block — see aiprompt.PromptRefShopKBV5, which also
-// records that the eval pipeline has not been re-run against it yet.
+// v6 (not v5) since 2026-09: v5 could not render availability_status,
+// product/tariff prose (brand/advantages/disadvantages/best_for/not_for/
+// installation_terms/warranty_terms), the tariff_info singleton, or any
+// seller-authored virtual fact — 0017_kb_virtual_facts data an operator
+// could stage and publish, but that no frame ever told the model about,
+// so it stayed invisible to every customer draft. v6 is v5 plus those —
+// see aiprompt.PromptRefShopKBV6, which also records that the eval
+// pipeline has not been run against it yet.
 func frameFor(channel messaging.Channel) string {
 	if channel == messaging.ChannelTelegram {
-		return aiprompt.FrameShopKBV5TGRU()
+		return aiprompt.FrameShopKBV6TGRU()
 	}
-	return aiprompt.FrameShopKBV5RU()
+	return aiprompt.FrameShopKBV6RU()
 }
 
 // PromptRefFor names the frame frameFor would pick, for logs and draft records.
@@ -191,9 +195,9 @@ func frameFor(channel messaging.Channel) string {
 // frame did not produce it is unreproducible.
 func PromptRefFor(channel messaging.Channel) string {
 	if channel == messaging.ChannelTelegram {
-		return aiprompt.PromptRefShopKBV5TG
+		return aiprompt.PromptRefShopKBV6TG
 	}
-	return aiprompt.PromptRefShopKBV5
+	return aiprompt.PromptRefShopKBV6
 }
 
 func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string, params LLMParams) (string, error) {
