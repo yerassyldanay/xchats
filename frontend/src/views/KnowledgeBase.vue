@@ -8,7 +8,7 @@
 // actually publish it.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, FileText, Plus, WandSparkles } from 'lucide-vue-next'
+import { CircleAlert, FileText, Plus, TriangleAlert, WandSparkles } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
 import { useEntityTabs } from '@/composables/useEntityTabs'
 import { usePendingIndex } from '@/composables/usePendingIndex'
@@ -21,6 +21,7 @@ import { kindOfMime, materialContentURL } from '@/components/kb/records/shared'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import PromptTab from '@/components/kb/PromptTab.vue'
+import GapsTab from '@/components/kb/GapsTab.vue'
 import EntityTabs from '@/components/kb/EntityTabs.vue'
 import RecordList from '@/components/kb/RecordList.vue'
 import DraftBanner from '@/components/kb/DraftBanner.vue'
@@ -54,6 +55,7 @@ const { tabs, active } = useEntityTabs({
   source: 'live',
   extra: [
     { key: 'prompt', label: t('kb.page.promptTab'), icon: WandSparkles },
+    { key: 'gaps', label: t('kb.page.gapsTab'), icon: TriangleAlert },
     { key: 'materials', label: t('kb.page.materialsTab'), icon: FileText },
   ],
 })
@@ -128,6 +130,7 @@ function materialKind(m: KbMaterial): string {
 
 watch(active, (a) => {
   if (a === 'prompt' && !pg.promptView) pg.loadPrompt()
+  if (a === 'gaps' && !pg.gapsReport) pg.loadGaps()
 })
 </script>
 
@@ -248,6 +251,10 @@ watch(active, (a) => {
 
       <div v-show="active === 'prompt'">
         <PromptTab />
+      </div>
+
+      <div v-show="active === 'gaps'" data-testid="live-tab-gaps">
+        <GapsTab />
       </div>
 
       <div v-show="active === 'materials'" class="space-y-3">

@@ -582,6 +582,7 @@ func (s *Server) Router() *gin.Engine {
 	// redesign").
 	auth.GET("/kb", s.handleKBGet)
 	auth.GET("/kb/prompt", s.handleKBPrompt)
+	auth.GET("/kb/gaps", s.handleKBGaps)
 	kb := auth.Group("/kb")
 	kb.POST("/topics", s.handleKBUpsertTopic)
 	kb.DELETE("/topics/:slug", s.handleKBDeleteTopic)

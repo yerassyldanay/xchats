@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/response"
@@ -72,6 +73,56 @@ func TestDraftRepo_ReplaceSuggested_PersistsAndSupersedes(t *testing.T) {
 	}
 	if firstFromDB.DraftState != "superseded" {
 		t.Fatalf("first draft state = %q, want superseded", firstFromDB.DraftState)
+	}
+}
+
+// TestDraftRepo_ReplaceSuggested_PersistsKBGapEvent is the end-to-end proof
+// for 0018_kb_gap_telemetry's whole point: a DraftToPersist carrying a
+// structured KBGap diagnostic must land as a real, queryable
+// ai_kb_gap_events row (with its missing_fields children) atomically
+// alongside the draft — DraftRepo.ReplaceSuggested is response.Service's
+// only route into the store for a real (non-automation) draft.
+func TestDraftRepo_ReplaceSuggested_PersistsKBGapEvent(t *testing.T) {
+	st, _, accountID := newTestStore(t)
+	ctx := context.Background()
+
+	res, err := st.UpsertInbound(ctx, store.InboundUpsert{
+		AccountID: accountID, PhoneJID: "77022222222@s.whatsapp.net", RemoteJID: "77022222222@s.whatsapp.net",
+		PhoneNumber: "77022222222", Direction: "in", SenderKind: "contact",
+		ExternalMessageID: "TRIG-GAP", MessageKind: "conversation", Body: "Сколько стоит?", Source: "live_webhook",
+	})
+	if err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+
+	repo := &responsestore.DraftRepo{Store: st}
+	if _, err := repo.ReplaceSuggested(ctx, response.DraftToPersist{
+		ConversationID: res.ChatID.String(), TriggerMessageID: res.MessageID.String(),
+		Text: "Секунду, уточню.", ReplyLanguage: "ru", Escalate: true, EscalationReason: "нет цены",
+		KBGap: &aiprompt.KBGapDiagnostic{
+			ReasonCode: aiprompt.KBGapReasonMissingField, TargetEntityType: aiprompt.KBGapEntityProduct,
+			TargetEntityRef: "widget", MissingFields: []string{"price"}, Source: aiprompt.KBGapSourceModel,
+		},
+	}); err != nil {
+		t.Fatalf("ReplaceSuggested: %v", err)
+	}
+
+	events, err := st.GapEventsForChat(ctx, res.ChatID)
+	if err != nil {
+		t.Fatalf("GapEventsForChat: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("want exactly 1 gap event, got %d: %+v", len(events), events)
+	}
+	e := events[0]
+	if e.ReasonCode != "missing_field" || e.TargetEntityType != "product" || e.TargetEntityRef != "widget" {
+		t.Fatalf("unexpected event: %+v", e)
+	}
+	if len(e.MissingFields) != 1 || e.MissingFields[0] != "price" {
+		t.Fatalf("MissingFields = %v, want [price]", e.MissingFields)
+	}
+	if e.Source != "model" {
+		t.Fatalf("Source = %q, want model", e.Source)
 	}
 }
 

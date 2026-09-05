@@ -113,10 +113,16 @@ describe('KnowledgeBase — published rows are read-only', () => {
     expect(wrapper.text()).toContain('Тарифы')
     // Every tab's body is mounted at once (v-show, not v-if — see switchTab's
     // own doc comment), so this really does scan the whole page, not just
-    // the active one. /knowledge-base has no interactive/ingest surface at
-    // all any more (that moved to Черновик's KbIngestPanel) — every tab
-    // here (record lists, Промпт, Файлы) is read-only display.
-    expect(wrapper.findAll('input')).toHaveLength(0)
+    // the active one. /knowledge-base has no KB-content editing surface at
+    // all any more (that moved to Черновик's KbIngestPanel) — every tab here
+    // (record lists, Промпт, Файлы) is read-only display of KB content.
+    // Пробелы (Gaps) is the one deliberate exception: its filter controls
+    // (reason/entity/date) only narrow what its own read-only report
+    // displays — they never write to the knowledge base — so its inputs are
+    // excluded here rather than asserted away.
+    const gapsTab = wrapper.get('[data-testid="live-tab-gaps"]')
+    const nonGapsInputs = wrapper.findAll('input').filter((i) => !gapsTab.element.contains(i.element))
+    expect(nonGapsInputs).toHaveLength(0)
     expect(wrapper.findAll('textarea')).toHaveLength(0)
   })
 

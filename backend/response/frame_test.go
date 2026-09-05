@@ -11,10 +11,11 @@ import (
 // TestFrameForChannel pins the mapping GenerateRequest.Channel now drives.
 // The WhatsApp and simulator rows are the important ones: they must stay on the
 // same byte-identical frame, so adding Telegram cannot move the prompt the
-// schema_kb_v1 eval grades. Every row moved v5 -> v6 in 2026-09 (v5 could not
-// render virtual fact columns at all); the pairing that actually matters is
-// that frameFor and PromptRefFor never disagree, since a draft stamped with a
-// ref whose frame did not produce it is unreproducible.
+// schema_kb_v1 eval grades. Every row moved v6 -> v7 in 2026-09 (v6 had no
+// structured way for an escalation to report why — see aiprompt.frameFor's
+// doc comment); the pairing that actually matters is that frameFor and
+// PromptRefFor never disagree, since a draft stamped with a ref whose frame
+// did not produce it is unreproducible.
 func TestFrameForChannel(t *testing.T) {
 	cases := []struct {
 		channel   messaging.Channel
@@ -22,11 +23,11 @@ func TestFrameForChannel(t *testing.T) {
 		wantRef   string
 		wantLabel string
 	}{
-		{messaging.ChannelWhatsApp, aiprompt.FrameShopKBV6RU(), aiprompt.PromptRefShopKBV6, "whatsapp"},
-		{messaging.ChannelSimulator, aiprompt.FrameShopKBV6RU(), aiprompt.PromptRefShopKBV6, "simulator"},
-		{messaging.ChannelTelegram, aiprompt.FrameShopKBV6TGRU(), aiprompt.PromptRefShopKBV6TG, "telegram"},
-		{messaging.Channel(""), aiprompt.FrameShopKBV6RU(), aiprompt.PromptRefShopKBV6, "unset"},
-		{messaging.Channel("something-else"), aiprompt.FrameShopKBV6RU(), aiprompt.PromptRefShopKBV6, "unknown"},
+		{messaging.ChannelWhatsApp, aiprompt.FrameShopKBV7RU(), aiprompt.PromptRefShopKBV7, "whatsapp"},
+		{messaging.ChannelSimulator, aiprompt.FrameShopKBV7RU(), aiprompt.PromptRefShopKBV7, "simulator"},
+		{messaging.ChannelTelegram, aiprompt.FrameShopKBV7TGRU(), aiprompt.PromptRefShopKBV7TG, "telegram"},
+		{messaging.Channel(""), aiprompt.FrameShopKBV7RU(), aiprompt.PromptRefShopKBV7, "unset"},
+		{messaging.Channel("something-else"), aiprompt.FrameShopKBV7RU(), aiprompt.PromptRefShopKBV7, "unknown"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.wantLabel, func(t *testing.T) {
@@ -41,7 +42,7 @@ func TestFrameForChannel(t *testing.T) {
 }
 
 func TestTelegramFrameIsADistinctFrame(t *testing.T) {
-	if aiprompt.FrameShopKBV6TGRU() == aiprompt.FrameShopKBV6RU() {
+	if aiprompt.FrameShopKBV7TGRU() == aiprompt.FrameShopKBV7RU() {
 		t.Fatal("the Telegram frame is identical to the WhatsApp one — the persona line was not neutralized")
 	}
 }

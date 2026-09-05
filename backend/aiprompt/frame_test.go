@@ -239,3 +239,87 @@ func TestPromptRefShopKBV6_Value(t *testing.T) {
 		t.Fatalf("PromptRefShopKBV6TG = %q, want %q", PromptRefShopKBV6TG, "shop-kb@v6-tg")
 	}
 }
+
+// --- v7: kb_gap structured escalation diagnostic (0018_kb_gap_telemetry).
+// Pinned exactly as v4/v5/v6 are; the same doctrine applies going forward
+// (cut a v8, never edit v7 in place once shipped). v4/v5/v6 stay embedded
+// and pinned above, completely untouched by this addition. -----------------
+
+const frameShopKBV7RUSHA256 = "bc96db14bbda4cc0c7fc3445892e874b16ef09d7772e2279187f7fe4e22ed183"
+
+func TestFrameShopKBV7RU_MatchesPinnedHash(t *testing.T) {
+	sum := sha256.Sum256([]byte(FrameShopKBV7RU()))
+	got := hex.EncodeToString(sum[:])
+	if got != frameShopKBV7RUSHA256 {
+		t.Fatalf("frames/shop-kb-v7-ru.txt sha256 = %s, want %s (the embedded frame changed — see doc comment)", got, frameShopKBV7RUSHA256)
+	}
+}
+
+const frameShopKBV7TGRUSHA256 = "df6b0aced899cc426e9c877e559a4db8e0427700a776d6ab85eb77ae137effb8"
+
+func TestFrameShopKBV7TGRU_MatchesPinnedHash(t *testing.T) {
+	sum := sha256.Sum256([]byte(FrameShopKBV7TGRU()))
+	got := hex.EncodeToString(sum[:])
+	if got != frameShopKBV7TGRUSHA256 {
+		t.Fatalf("frames/shop-kb-v7-tg-ru.txt sha256 = %s, want %s (the embedded frame changed — see doc comment)", got, frameShopKBV7TGRUSHA256)
+	}
+}
+
+// TestFrameShopKBV7TGRU_BodyMatchesGradedFrame is v7's copy of
+// TestFrameShopKBV6TGRU_BodyMatchesGradedFrame: the RU and TG frames may
+// differ ONLY in their persona line.
+func TestFrameShopKBV7TGRU_BodyMatchesGradedFrame(t *testing.T) {
+	ru := FrameShopKBV7RU()
+	tg := FrameShopKBV7TGRU()
+
+	ri := strings.Index(ru, "\n")
+	ti := strings.Index(tg, "\n")
+	if ri < 0 || ti < 0 {
+		t.Fatal("a frame has no newline — cannot split off the persona line")
+	}
+	if ru[ri:] != tg[ti:] {
+		t.Fatal("the v7 Telegram frame's body diverged from the v7 RU frame — only the first line may differ")
+	}
+	if strings.Contains(strings.ToLower(tg[:ti]), "whatsapp") {
+		t.Fatalf("the v7 Telegram frame still names WhatsApp in its persona line: %q", tg[:ti])
+	}
+	if ru[:ri] == tg[:ti] {
+		t.Fatal("the v7 Telegram frame's persona line is unchanged — it should be channel-neutral")
+	}
+}
+
+// TestFrameShopKBV7_IsV6PlusKBGapRule pins v7's relationship to v6: v7 adds
+// exactly one new rule (the "kb_gap" diagnostic, rule 9) and changes
+// nothing else — every v6 slot stays present, no new %%SLOT%% token is
+// introduced (kb_gap rides the existing %%RESPONSE_SCHEMA%% slot via
+// RenderResponseSchemaV7), and v6 itself stays completely untouched.
+func TestFrameShopKBV7_IsV6PlusKBGapRule(t *testing.T) {
+	for _, f := range []struct{ name, text string }{
+		{"v7 RU", FrameShopKBV7RU()},
+		{"v7 TG", FrameShopKBV7TGRU()},
+	} {
+		for _, slot := range []string{
+			SlotResponseSchema, SlotAssistant, SlotTopics, SlotDeliveryZones, SlotBusinessFacts,
+			SlotProductsAvailable, SlotProductsUnavailable, SlotTariffCatalog, SlotTariffInfo,
+		} {
+			if !strings.Contains(f.text, slot) {
+				t.Errorf("%s is missing the %s slot", f.name, slot)
+			}
+		}
+		if !strings.Contains(f.text, "kb_gap") {
+			t.Errorf("%s is missing the new kb_gap rule", f.name)
+		}
+	}
+	if strings.Contains(FrameShopKBV6RU(), "kb_gap") || strings.Contains(FrameShopKBV6TGRU(), "kb_gap") {
+		t.Error("v6 unexpectedly mentions kb_gap — it must stay frozen")
+	}
+}
+
+func TestPromptRefShopKBV7_Value(t *testing.T) {
+	if PromptRefShopKBV7 != "shop-kb@v7" {
+		t.Fatalf("PromptRefShopKBV7 = %q, want %q", PromptRefShopKBV7, "shop-kb@v7")
+	}
+	if PromptRefShopKBV7TG != "shop-kb@v7-tg" {
+		t.Fatalf("PromptRefShopKBV7TG = %q, want %q", PromptRefShopKBV7TG, "shop-kb@v7-tg")
+	}
+}

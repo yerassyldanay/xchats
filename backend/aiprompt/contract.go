@@ -30,6 +30,11 @@ type Response struct {
 	// "absent or unparseable", which is fine — logging only, never a gate.
 	EscalationReason string  `json:"escalation_reason"`
 	Confidence       float64 `json:"confidence"`
+	// KBGap is the optional v7+ structured escalation diagnostic (kbgap.go).
+	// Only ValidateResponseV7 ever populates it — ValidateResponse (v6 and
+	// earlier) never looks for a "kb_gap" property at all, so it stays nil
+	// on that path exactly as it would for any caller that predates v7.
+	KBGap *KBGapDiagnostic `json:"kb_gap,omitempty"`
 }
 
 // propertyDescriptions are part of the contract, not optional comments; they
@@ -90,6 +95,33 @@ func ResponseJSONSchema() map[string]any {
 // %%RESPONSE_SCHEMA%% prompt slot.
 func RenderResponseSchema() string {
 	b, err := json.MarshalIndent(ResponseJSONSchema(), "", "  ")
+	if err != nil {
+		panic(err) // static value; cannot fail
+	}
+	return string(b)
+}
+
+// ResponseJSONSchemaV7 is ResponseJSONSchema plus the optional "kb_gap"
+// diagnostic (kbgap.go) — the v7 frame's %%RESPONSE_SCHEMA%% slot, used by
+// PromptRefShopKBV7/V7TG only. It must never be substituted for
+// ResponseJSONSchema on the v4/v5/v6 path: those frames are embedded,
+// pinned, and reproduce historical drafts exactly as originally rendered —
+// silently adding kb_gap to the schema they show the model would change
+// bytes those pins guard. ResponseJSONSchema returns a freshly built map on
+// every call, so extending its result here can never mutate shared state a
+// v6 caller might also be holding.
+func ResponseJSONSchemaV7() map[string]any {
+	schema := ResponseJSONSchema()
+	if props, ok := schema["properties"].(map[string]any); ok {
+		props["kb_gap"] = kbGapJSONSchema()
+	}
+	return schema
+}
+
+// RenderResponseSchemaV7 renders ResponseJSONSchemaV7 as indented JSON for
+// the v7 frame's %%RESPONSE_SCHEMA%% slot.
+func RenderResponseSchemaV7() string {
+	b, err := json.MarshalIndent(ResponseJSONSchemaV7(), "", "  ")
 	if err != nil {
 		panic(err) // static value; cannot fail
 	}
@@ -172,6 +204,87 @@ func ValidateResponse(raw string, kb *KB, cat *Catalog) (*Response, []ContractIs
 	}
 
 	resp := decodeResponse(m)
+	if wrongType {
+		return nil, issues
+	}
+
+	if resp.ReplyLanguage != "ru" && resp.ReplyLanguage != "kk" {
+		issues = append(issues, ContractIssue{Code: "bad_language", Detail: fmt.Sprintf("reply_language %q; only \"ru\" or \"kk\" is allowed", resp.ReplyLanguage)})
+	}
+	if cat != nil {
+		for _, tok := range resp.MediaFilesToSend {
+			if cat.MediaByToken(tok) == nil {
+				issues = append(issues, ContractIssue{Code: "unknown_media_token", Detail: tok})
+			}
+		}
+	}
+	if kb == nil || cat == nil {
+		issues = append(issues, ContractIssue{
+			Code:   "validation_context",
+			Detail: "current KB and request catalog are required",
+		})
+		return resp, issues
+	}
+	issues = append(issues, validateFactContract(*resp, kb, cat)...)
+	return resp, issues
+}
+
+// ValidateResponseV7 is ValidateResponse plus the optional "kb_gap"
+// diagnostic: identical strictness on the four operational fields, and
+// identical best-effort, never-a-gate treatment of every diagnostic field
+// including the new one. It is a deliberate near-duplicate of ValidateResponse
+// (this package's established way of freezing a shipped contract — see
+// frame.go's Vn frame functions) rather than a shared function with a version
+// switch: ValidateResponse must keep behaving exactly as before for any
+// existing caller, including treating an unrecognized "kb_gap" property as
+// unknown_property, which is what happens automatically here by NOT calling
+// this function.
+//
+// A malformed or fabricated kb_gap is sanitized (sanitizeKBGap), never
+// surfaced as an issue: exactly like escalation_reason and confidence, it can
+// only make an otherwise-valid reply's diagnostics less complete, never
+// invalid.
+func ValidateResponseV7(raw string, kb *KB, cat *Catalog) (*Response, []ContractIssue) {
+	issues := []ContractIssue{}
+	blob := strings.TrimSpace(stripMarkdownFences(raw))
+	if blob == "" {
+		return nil, []ContractIssue{{Code: "parse", Detail: "empty model output"}}
+	}
+
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(blob), &m); err != nil {
+		return nil, []ContractIssue{{Code: "parse", Detail: err.Error()}}
+	}
+	if m == nil {
+		return nil, []ContractIssue{{Code: "parse", Detail: "top-level JSON value must be an object"}}
+	}
+	known := map[string]bool{"kb_gap": true}
+	wrongType := false
+	for _, p := range propertyDescriptions {
+		known[p.Name] = true
+		if p.Diagnostic {
+			continue
+		}
+		rawProperty, ok := m[p.Name]
+		if !ok {
+			issues = append(issues, ContractIssue{Code: "missing_property", Detail: p.Name})
+			continue
+		}
+		if !responsePropertyTypeOK(p.Name, rawProperty) {
+			wrongType = true
+			issues = append(issues, ContractIssue{Code: "wrong_property_type", Detail: p.Name})
+		}
+	}
+	for k := range m {
+		if !known[k] {
+			issues = append(issues, ContractIssue{Code: "unknown_property", Detail: k})
+		}
+	}
+
+	resp := decodeResponse(m)
+	if rawGap, ok := m["kb_gap"]; ok {
+		resp.KBGap = sanitizeKBGap(decodeKBGap(rawGap), kb)
+	}
 	if wrongType {
 		return nil, issues
 	}

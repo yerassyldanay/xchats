@@ -53,6 +53,13 @@ type DraftToPersist struct {
 	Confidence       *float64
 	Escalate         bool
 	EscalationReason string
+	// KBGap is the optional v7 structured escalation diagnostic
+	// (0018_kb_gap_telemetry) — nil for a plain (pre-v7, or undiagnosed)
+	// escalation. A DraftRepository implementation persists it as an
+	// ai_kb_gap_events row alongside the draft, in the same transaction,
+	// whenever Escalate is true; see internal/responsestore.DraftRepo and
+	// internal/automation's versionGatedDrafts.
+	KBGap *aiprompt.KBGapDiagnostic
 }
 
 // PersistedDraft is a DraftToPersist after being written, with its assigned id.

@@ -127,3 +127,47 @@ func TestClassifyRetry_ContractShapeWinsOverMediaNotFound(t *testing.T) {
 		t.Fatalf("RetryFeedback() = %q, want empty — contract_shape retries are an identical re-roll", fb)
 	}
 }
+
+// TestClassifyRetryV7_ValidKBGapNeedsNoRetry is the regression guard for the
+// bug fixed alongside ClassifyRetryV7's introduction: ClassifyRetry (v6)
+// treats a "kb_gap" property as unknown_property (contract_shape), which
+// would force a wasted retry on nearly every v7 escalation. ClassifyRetryV7
+// must not.
+func TestClassifyRetryV7_ValidKBGapNeedsNoRetry(t *testing.T) {
+	kb, cat := retryTestCatalog(t)
+	raw := `{"reply_text":"Секунду, уточню.","reply_language":"ru","media_files_to_send":[],"escalate":true,` +
+		`"escalation_reason":"нет цены","kb_gap":{"reason_code":"missing_field","target_entity_type":"product",` +
+		`"target_entity_ref":"coffee-machine","missing_fields":["price"]}}`
+
+	if got := ClassifyRetryV7(raw, kb, cat); got != RetryReasonNone {
+		t.Fatalf("ClassifyRetryV7() = %q, want %q — a valid kb_gap must never force a retry", got, RetryReasonNone)
+	}
+	if fb := RetryFeedbackV7(raw, kb, cat); fb != "" {
+		t.Fatalf("RetryFeedbackV7() = %q, want empty", fb)
+	}
+
+	// The bug this guards against: the OLD (v6) function really does
+	// misclassify the identical response as contract_shape.
+	if got := ClassifyRetry(raw, kb, cat); got != RetryReasonContractShape {
+		t.Fatalf("ClassifyRetry() = %q, want %q — kb_gap must be unknown_property on the v6 path (documents why ClassifyRetryV7 exists)", got, RetryReasonContractShape)
+	}
+}
+
+func TestClassifyRetryV7_UnparseableJSONIsContractShape(t *testing.T) {
+	kb, cat := retryTestCatalog(t)
+	if got := ClassifyRetryV7("not json at all", kb, cat); got != RetryReasonContractShape {
+		t.Fatalf("ClassifyRetryV7() = %q, want %q", got, RetryReasonContractShape)
+	}
+}
+
+func TestClassifyRetryV7_MediaNotFoundStillDetected(t *testing.T) {
+	kb, cat := retryTestCatalog(t)
+	raw := `{"reply_text":"Вот фото.","reply_language":"ru","media_files_to_send":["products.nope.featured_image"],"escalate":false}`
+	if got := ClassifyRetryV7(raw, kb, cat); got != RetryReasonMediaNotFound {
+		t.Fatalf("ClassifyRetryV7() = %q, want %q", got, RetryReasonMediaNotFound)
+	}
+	fb := RetryFeedbackV7(raw, kb, cat)
+	if !strings.Contains(fb, "products.nope.featured_image") {
+		t.Fatalf("feedback %q does not name the bad token", fb)
+	}
+}

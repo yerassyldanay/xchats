@@ -72,6 +72,30 @@ func TestService_Respond_HappyPath(t *testing.T) {
 	}
 }
 
+// TestService_Respond_ModelKBGapReachesDraftToPersist proves generate()
+// copies GenerateResult.KBGap onto the persisted draft unchanged — the last
+// hop before internal/responsestore.DraftRepo turns it into an
+// ai_kb_gap_events row.
+func TestService_Respond_ModelKBGapReachesDraftToPersist(t *testing.T) {
+	convRepo := &fakeConversationRepo{ctx: ConversationContext{Channel: messaging.ChannelWhatsApp}}
+	draftRepo := &fakeDraftRepo{}
+	raw := `{"reply_text":"Секунду.","reply_language":"ru","media_files_to_send":[],"escalate":true,` +
+		`"kb_gap":{"reason_code":"unsupported_request"}}`
+	client := &fakeClient{responses: []llm.ChatResponse{{Text: raw}}}
+	svc := testService(convRepo, &fakeKBRepo{kb: testKB()}, draftRepo, client)
+
+	if _, err := svc.Respond(context.Background(), messaging.ChannelWhatsApp, "conv-1", RespondOptions{}); err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	got := draftRepo.written[0].KBGap
+	if got == nil || got.ReasonCode != aiprompt.KBGapReasonUnsupportedRequest {
+		t.Fatalf("KBGap = %+v, want reason_code unsupported_request", got)
+	}
+	if got.Source != aiprompt.KBGapSourceModel {
+		t.Errorf("Source = %q, want %q", got.Source, aiprompt.KBGapSourceModel)
+	}
+}
+
 func TestService_Respond_ChannelMismatchFailsClosed(t *testing.T) {
 	convRepo := &fakeConversationRepo{ctx: ConversationContext{Channel: messaging.ChannelWhatsApp}}
 	draftRepo := &fakeDraftRepo{}
@@ -100,6 +124,26 @@ func TestService_Respond_KBLoadFailureProducesHoldingDraft(t *testing.T) {
 	if draftRepo.written[0].TriggerMessageID != "trigger-1" {
 		t.Fatalf("holding draft must still tie to the trigger message: %+v", draftRepo.written[0])
 	}
+	assertEngineErrorKBGap(t, draftRepo.written[0])
+}
+
+// assertEngineErrorKBGap checks the KBGap holdingDraft stamps on every hard
+// Generate failure: KBGapReasonEngineError/KBGapSourceEngine, never a
+// fabricated KB entity or a code the model could have claimed itself.
+func assertEngineErrorKBGap(t *testing.T, draft DraftToPersist) {
+	t.Helper()
+	if draft.KBGap == nil {
+		t.Fatal("a holding draft must carry a KBGap diagnostic")
+	}
+	if draft.KBGap.ReasonCode != aiprompt.KBGapReasonEngineError {
+		t.Errorf("KBGap.ReasonCode = %q, want %q", draft.KBGap.ReasonCode, aiprompt.KBGapReasonEngineError)
+	}
+	if draft.KBGap.Source != aiprompt.KBGapSourceEngine {
+		t.Errorf("KBGap.Source = %q, want %q", draft.KBGap.Source, aiprompt.KBGapSourceEngine)
+	}
+	if draft.KBGap.TargetEntityType != "" || draft.KBGap.TargetEntityRef != "" {
+		t.Errorf("a hard engine failure must never claim a specific KB entity: %+v", draft.KBGap)
+	}
 }
 
 func TestService_Respond_EngineFailureProducesHoldingDraft(t *testing.T) {
@@ -115,6 +159,7 @@ func TestService_Respond_EngineFailureProducesHoldingDraft(t *testing.T) {
 	if len(out) != 1 || out[0].Text != HoldingText || !out[0].Escalate {
 		t.Fatalf("unexpected result: %+v", out)
 	}
+	assertEngineErrorKBGap(t, draftRepo.written[0])
 }
 
 func TestService_Respond_ConversationLoadFailurePropagates(t *testing.T) {

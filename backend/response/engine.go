@@ -84,6 +84,13 @@ type GenerateResult struct {
 	Escalate         bool
 	EscalationReason string
 	Confidence       float64
+	// KBGap is the optional v7 structured escalation diagnostic
+	// (aiprompt.KBGapDiagnostic), already sanitized against the loaded KB by
+	// aiprompt.ValidateResponseV7. Nil whenever the model did not send one
+	// (including every case sanitizeKBGap drops as untrustworthy) — a nil
+	// KBGap alongside Escalate=true is normal and expected, not an error;
+	// callers fall back to EscalationReason's free text exactly as before.
+	KBGap *aiprompt.KBGapDiagnostic
 }
 
 // Generate renders the prompt, calls the LLM (retrying once when the response
@@ -102,7 +109,7 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	if err != nil {
 		return nil, fmt.Errorf("response: build catalog: %w", err)
 	}
-	rendered, err := aiprompt.RenderPrompt(frameFor(req.Channel), req.KB.PromptInput(), cat)
+	rendered, err := aiprompt.RenderPromptV7(frameFor(req.Channel), req.KB.PromptInput(), cat)
 	if err != nil {
 		return nil, fmt.Errorf("response: render prompt: %w", err)
 	}
@@ -130,8 +137,8 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 		return nil, fmt.Errorf("response: llm call: %w", err)
 	}
 
-	if reason := aiprompt.ClassifyRetry(raw, req.KB, cat); reason != aiprompt.RetryReasonNone && params.RetryEnabled {
-		retryPrompt := prompt + aiprompt.RetryFeedback(raw, req.KB, cat)
+	if reason := aiprompt.ClassifyRetryV7(raw, req.KB, cat); reason != aiprompt.RetryReasonNone && params.RetryEnabled {
+		retryPrompt := prompt + aiprompt.RetryFeedbackV7(raw, req.KB, cat)
 		retryRaw, err := e.complete(ctx, client, modelRef, retryPrompt, params)
 		if err != nil {
 			return nil, fmt.Errorf("response: llm retry call: %w", err)
@@ -143,7 +150,7 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	if !ok {
 		return nil, fmt.Errorf("response: model output has no extractable final answer")
 	}
-	resp, issues := aiprompt.ValidateResponse(ext.Final, req.KB, cat)
+	resp, issues := aiprompt.ValidateResponseV7(ext.Final, req.KB, cat)
 	if resp == nil {
 		return nil, fmt.Errorf("response: response fails the contract shape: %+v", issues)
 	}
@@ -165,6 +172,7 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 		Escalate:         resp.Escalate,
 		EscalationReason: resp.EscalationReason,
 		Confidence:       resp.Confidence,
+		KBGap:            resp.KBGap,
 	}, nil
 }
 
@@ -175,19 +183,21 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 // WhatsApp one. An unset channel — a caller that predates GenerateRequest
 // carrying it — keeps the base frame rather than guessing.
 //
-// v6 (not v5) since 2026-09: v5 could not render availability_status,
-// product/tariff prose (brand/advantages/disadvantages/best_for/not_for/
-// installation_terms/warranty_terms), the tariff_info singleton, or any
-// seller-authored virtual fact — 0017_kb_virtual_facts data an operator
-// could stage and publish, but that no frame ever told the model about,
-// so it stayed invisible to every customer draft. v6 is v5 plus those —
-// see aiprompt.PromptRefShopKBV6, which also records that the eval
-// pipeline has not been run against it yet.
+// v7 (not v6) since 2026-09 (0018_kb_gap_telemetry): v6 had no way for an
+// escalation to report WHY in any queryable shape — every gap in the
+// knowledge base (an unpriced product, a request outside the supported
+// scope, an unknown item) landed as the same free-text escalation_reason
+// prose, unreportable except by reading chat transcripts one at a time. v7
+// is v6 plus the optional "kb_gap" structured diagnostic (rule 9) — see
+// aiprompt.PromptRefShopKBV7, which also records that the eval pipeline has
+// not been run against it yet. Generate must call ValidateResponseV7 (not
+// ValidateResponse) whenever this function returns a v7 frame — the two
+// move in lockstep exactly as frameFor and PromptRefFor do.
 func frameFor(channel messaging.Channel) string {
 	if channel == messaging.ChannelTelegram {
-		return aiprompt.FrameShopKBV6TGRU()
+		return aiprompt.FrameShopKBV7TGRU()
 	}
-	return aiprompt.FrameShopKBV6RU()
+	return aiprompt.FrameShopKBV7RU()
 }
 
 // PromptRefFor names the frame frameFor would pick, for logs and draft records.
@@ -195,9 +205,9 @@ func frameFor(channel messaging.Channel) string {
 // frame did not produce it is unreproducible.
 func PromptRefFor(channel messaging.Channel) string {
 	if channel == messaging.ChannelTelegram {
-		return aiprompt.PromptRefShopKBV6TG
+		return aiprompt.PromptRefShopKBV7TG
 	}
-	return aiprompt.PromptRefShopKBV6
+	return aiprompt.PromptRefShopKBV7
 }
 
 func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string, params LLMParams) (string, error) {
