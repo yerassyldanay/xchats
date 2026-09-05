@@ -50,7 +50,7 @@ func (s *Store) GapEventsForChat(ctx context.Context, chatID uuid.UUID) ([]KBGap
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []KBGapEvent
 	for rows.Next() {
 		var e KBGapEvent
@@ -87,7 +87,7 @@ func attachMissingFields(ctx context.Context, db *dbx.DB, events []KBGapEvent) e
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var eventID, field string
 		if err := rows.Scan(&eventID, &field); err != nil {
@@ -171,16 +171,18 @@ func (s *Store) KBGapReportFor(ctx context.Context, f KBGapFilter) (KBGapReport,
 		var code string
 		var n int
 		if err := countRows.Scan(&code, &n); err != nil {
-			countRows.Close()
+			_ = countRows.Close()
 			return KBGapReport{}, err
 		}
 		counts[code] = n
 	}
 	if err := countRows.Err(); err != nil {
-		countRows.Close()
+		_ = countRows.Close()
 		return KBGapReport{}, err
 	}
-	countRows.Close()
+	if err := countRows.Close(); err != nil {
+		return KBGapReport{}, err
+	}
 
 	limit := f.Limit
 	if limit <= 0 {
@@ -198,16 +200,18 @@ func (s *Store) KBGapReportFor(ctx context.Context, f KBGapFilter) (KBGapReport,
 	for rows.Next() {
 		var e KBGapEvent
 		if err := rows.Scan(scanKBGapEventDst(&e)...); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return KBGapReport{}, err
 		}
 		recent = append(recent, e)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return KBGapReport{}, err
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return KBGapReport{}, err
+	}
 	if err := attachMissingFields(ctx, s.db, recent); err != nil {
 		return KBGapReport{}, err
 	}
