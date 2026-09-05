@@ -967,6 +967,20 @@ func (s *Store) draftOnly(ctx context.Context, db dbtx, orgID uuid.UUID) (*Draft
 	return draftRowsFromBlob(orgID, blob, ver, updatedAt), nil
 }
 
+// nonNilFacts guarantees a non-nil slice for a row built from a DraftBlob
+// entry: additional_facts round-trips through plain JSON (marshaled into
+// kbd_draft.draft, later unmarshaled back out — see DraftProduct et al.), so
+// a blob entry that never set it (e.g. a patch that only touched other
+// fields) decodes to a nil Go slice, which json.Marshal would then send to
+// the frontend as additional_facts: null — a contract every Row type here
+// promises never to break (its own field is always an array).
+func nonNilFacts(v []aiprompt.AdditionalFact) []aiprompt.AdditionalFact {
+	if v == nil {
+		return []aiprompt.AdditionalFact{}
+	}
+	return v
+}
+
 // draftRowsFromBlob is draftOnly's pure core: exactly what the given blob has
 // staged, with every row's origin explicit (Draft: true) and a staged
 // deletion suppressed for every kind — no database access, no error return,
@@ -1012,7 +1026,7 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 		v.Tariffs = append(v.Tariffs, TariffRow{ID: t.Ref, Ref: t.Ref, Name: t.Name, Price: t.Price,
 			LimitText: t.LimitText, Fee: t.Fee, Summary: t.Summary, PricingType: t.PricingType,
 			Advantages: t.Advantages, Disadvantages: t.Disadvantages, BestFor: t.BestFor, NotFor: t.NotFor,
-			AdditionalFacts: t.AdditionalFacts, SalesStatus: t.SalesStatus,
+			AdditionalFacts: nonNilFacts(t.AdditionalFacts), SalesStatus: t.SalesStatus,
 			FeaturedImage: t.FeaturedImage, PricingImages: t.PricingImages, ExplainerVideos: t.ExplainerVideos,
 			TermsDocuments: t.TermsDocuments,
 			Draft:          true, UpdatedAt: updatedAt})
@@ -1025,7 +1039,7 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 			Description: p.Description, Category: p.Category, Brand: p.Brand, Advantages: p.Advantages,
 			Disadvantages: p.Disadvantages, BestFor: p.BestFor, NotFor: p.NotFor,
 			AvailabilityStatus: p.AvailabilityStatus, AvailabilityNote: p.AvailabilityNote,
-			InstallationTerms: p.InstallationTerms, WarrantyTerms: p.WarrantyTerms, AdditionalFacts: p.AdditionalFacts,
+			InstallationTerms: p.InstallationTerms, WarrantyTerms: p.WarrantyTerms, AdditionalFacts: nonNilFacts(p.AdditionalFacts),
 			SalesStatus:   p.SalesStatus,
 			FeaturedImage: p.FeaturedImage, GalleryImages: p.GalleryImages, DemoVideos: p.DemoVideos,
 			CertificateDocuments: p.CertificateDocuments, GuaranteeDocuments: p.GuaranteeDocuments,
@@ -1052,7 +1066,7 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 	if len(blob.TariffInfo) > 0 && !deletedSingleton(blob, "tariff_info") {
 		ti := blob.TariffInfo[0]
 		v.TariffInfo = append(v.TariffInfo, TariffInfoRow{ID: NaturalKeyMain, Slug: NaturalKeyMain,
-			AdditionalFacts: ti.AdditionalFacts, Draft: true, UpdatedAt: updatedAt})
+			AdditionalFacts: nonNilFacts(ti.AdditionalFacts), Draft: true, UpdatedAt: updatedAt})
 	}
 	for _, z := range blob.DeliveryZones {
 		if deleted["delivery_zone:"+z.Ref] {
@@ -1256,7 +1270,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	for _, bt := range blob.Tariffs {
 		row := TariffRow{ID: bt.Ref, Ref: bt.Ref, Name: bt.Name, Price: bt.Price, LimitText: bt.LimitText,
 			Fee: bt.Fee, Summary: bt.Summary, PricingType: bt.PricingType, Advantages: bt.Advantages,
-			Disadvantages: bt.Disadvantages, BestFor: bt.BestFor, NotFor: bt.NotFor, AdditionalFacts: bt.AdditionalFacts,
+			Disadvantages: bt.Disadvantages, BestFor: bt.BestFor, NotFor: bt.NotFor, AdditionalFacts: nonNilFacts(bt.AdditionalFacts),
 			SalesStatus: bt.SalesStatus, FeaturedImage: bt.FeaturedImage,
 			PricingImages: bt.PricingImages, ExplainerVideos: bt.ExplainerVideos, TermsDocuments: bt.TermsDocuments,
 			Draft: true, UpdatedAt: updatedAt}
@@ -1307,7 +1321,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			Description: bp.Description, Category: bp.Category, Brand: bp.Brand, Advantages: bp.Advantages,
 			Disadvantages: bp.Disadvantages, BestFor: bp.BestFor, NotFor: bp.NotFor,
 			AvailabilityStatus: bp.AvailabilityStatus, AvailabilityNote: bp.AvailabilityNote,
-			InstallationTerms: bp.InstallationTerms, WarrantyTerms: bp.WarrantyTerms, AdditionalFacts: bp.AdditionalFacts,
+			InstallationTerms: bp.InstallationTerms, WarrantyTerms: bp.WarrantyTerms, AdditionalFacts: nonNilFacts(bp.AdditionalFacts),
 			SalesStatus:   bp.SalesStatus,
 			FeaturedImage: bp.FeaturedImage, GalleryImages: bp.GalleryImages, DemoVideos: bp.DemoVideos,
 			CertificateDocuments: bp.CertificateDocuments, GuaranteeDocuments: bp.GuaranteeDocuments,
@@ -1430,7 +1444,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	}
 	if len(blob.TariffInfo) > 0 {
 		bti := blob.TariffInfo[0]
-		row := TariffInfoRow{ID: NaturalKeyMain, Slug: NaturalKeyMain, AdditionalFacts: bti.AdditionalFacts,
+		row := TariffInfoRow{ID: NaturalKeyMain, Slug: NaturalKeyMain, AdditionalFacts: nonNilFacts(bti.AdditionalFacts),
 			Draft: true, UpdatedAt: updatedAt}
 		if len(v.TariffInfo) > 0 {
 			v.TariffInfo[0] = row
