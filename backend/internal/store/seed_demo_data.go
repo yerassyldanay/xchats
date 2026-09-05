@@ -96,34 +96,34 @@ func (s *Store) SeedDemoCRM(ctx context.Context, orgID, adminUserID uuid.UUID) e
 			Name: "Алия Мухамеджанова", Phone: "+7 777 123 4567", Email: "aliya.m@example.kz",
 			StatusID: newStatusID, Tags: []string{"VIP", "Постоянный", "Алматы"},
 			Notes: []string{
-				"Клиент интересуется оптовыми закупками спортивного инвентаря.",
+				"Выбирает кофемашину для небольшой студии и уточняет условия оптовой скидки.",
 				"Предпочитает общение в WhatsApp в первой половине дня.",
 			},
-			Channel: "whatsapp", ExtID: "77771234567@c.us",
+			Channel: "whatsapp", ExtID: "77771234567@s.whatsapp.net",
 		},
 		{
 			Name: "Данияр Сериков", Phone: "+7 701 987 6543", Email: "daniyar.s@example.kz",
 			StatusID: inProgStatusID, Tags: []string{"Новый лид", "Астана"},
-			Notes: []string{"Запрос на расчет индивидуального тарифа по доставке."},
-			Channel: "telegram", ExtID: "tg_daniyar_s", Username: "daniyar_serik",
+			Notes:   []string{"Запрос на расчет индивидуального тарифа по доставке."},
+			Channel: "telegram", ExtID: "7019876543", Username: "daniyar_serik",
 		},
 		{
 			Name: "Камила Нурланова", Phone: "+7 705 555 8899", Email: "kamila.n@example.kz",
 			StatusID: waitingStatusID, Tags: []string{"В процессе", "Срочно"},
-			Notes: []string{"Уточняет статус возврата товара по гарантии."},
+			Notes:   []string{"Уточняет статус возврата товара по гарантии."},
 			Channel: "instagram", ExtID: "ig_kamila_n", Username: "kamila_style",
 		},
 		{
 			Name: "Бауыржан Ахметов", Phone: "+7 775 444 1122", Email: "bauyrzhan.a@example.kz",
 			StatusID: inProgStatusID, Tags: []string{"Партнер", "Шымкент"},
-			Notes: []string{"Договорились о сотрудничестве по франшизе."},
-			Channel: "telegram", ExtID: "tg_bauyrzhan_a", Username: "bauyr_kz",
+			Notes:   []string{"Запросил коммерческое предложение на технику для кухни нового кафе."},
+			Channel: "messenger", ExtID: "psid_bauyrzhan_a", Username: "bauyr_kz",
 		},
 		{
 			Name: "Елена Васильева", Phone: "+7 702 333 7711", Email: "elena.v@example.com",
 			StatusID: wonStatusID, Tags: []string{"Успешно", "Архив"},
-			Notes: []string{"Заказ успешно доставлен и оплачен. Клиент оставил положительный отзыв."},
-			Channel: "whatsapp", ExtID: "77023337711@c.us",
+			Notes:   []string{"Заказ успешно доставлен и оплачен. Клиент оставил положительный отзыв."},
+			Channel: "whatsapp", ExtID: "77023337711@s.whatsapp.net",
 		},
 	}
 
@@ -153,10 +153,18 @@ func (s *Store) SeedDemoCRM(ctx context.Context, orgID, adminUserID uuid.UUID) e
 			_, _ = s.AddCustomerNote(ctx, orgID, cust.ID, actor, note)
 		}
 		if cd.Channel != "" {
-			_, _ = s.db.Exec(ctx, `
-				INSERT INTO crm_customer_identities (organization_id, customer_id, channel, external_id, username, phone, display_name)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-				orgID, cust.ID, cd.Channel, cd.ExtID, cd.Username, cd.Phone, cd.Name)
+			accountID := demoAccountIDForChannel(cd.Channel)
+			// contact_id is required but deliberately has no FK: use a stable
+			// placeholder until the corresponding seeded conversation is ingested.
+			// ResolveCustomerForContact finds this row by account/external identity
+			// and replaces the placeholder with the real transport contact id.
+			contactID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("xchats-demo-contact:"+cd.Channel+":"+cd.ExtID))
+			if _, err := s.db.Exec(ctx, `
+				INSERT INTO crm_customer_identities (organization_id, customer_id, channel, account_id, contact_id, external_id, username, phone, display_name)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+				orgID, cust.ID, cd.Channel, accountID, contactID, cd.ExtID, cd.Username, cd.Phone, cd.Name); err != nil {
+				return fmt.Errorf("seed identity for %s: %w", cd.Name, err)
+			}
 		}
 		createdCustomers = append(createdCustomers, cust)
 	}
@@ -214,20 +222,20 @@ func (s *Store) SeedDemoCRM(ctx context.Context, orgID, adminUserID uuid.UUID) e
 	templates := []CampaignTemplate{
 		{
 			OrganizationID: orgID,
-			Name:           "Приветственная скидка 15%",
-			MessageBody:    "Здравствуйте, {{name}}! 👋 Спасибо за интерес к нашей компании. Дарим вам скидку 15% на первый заказ по промокоду WELCOME15.",
+			Name:           "Скидка 15% на первый заказ",
+			MessageBody:    "Здравствуйте, {{name}}! 👋 Спасибо за интерес к Qazan Home. Дарим скидку 15% на первую покупку кухонной техники по промокоду WELCOME15.",
 			CreatedBy:      adminUserID,
 		},
 		{
 			OrganizationID: orgID,
-			Name:           "Напоминание о записи / бронировании",
-			MessageBody:    "Добрый день, {{name}}! Напоминаем о вашей записи на завтра в {{time}}. Будем рады видеть вас! Если планы изменились, пожалуйста, сообщите нам.",
+			Name:           "Напоминание о доставке",
+			MessageBody:    "Добрый день, {{name}}! Ваш заказ кухонной техники запланирован к доставке завтра в {{time}}. Если время неудобно, пожалуйста, сообщите нам.",
 			CreatedBy:      adminUserID,
 		},
 		{
 			OrganizationID: orgID,
-			Name:           "Специальное предложение недели",
-			MessageBody:    "Приветствуем, {{name}}! 🔥 Только на этой неделе действуют специальные условия на популярные тарифы. Ознакомьтесь с каталогом на нашем сайте.",
+			Name:           "Техника недели",
+			MessageBody:    "Приветствуем, {{name}}! 🔥 Только на этой неделе действуют специальные цены на кофемашины, блендеры и тостеры. Ответьте на сообщение — поможем выбрать модель.",
 			CreatedBy:      adminUserID,
 		},
 	}
@@ -241,9 +249,9 @@ func (s *Store) SeedDemoCRM(ctx context.Context, orgID, adminUserID uuid.UUID) e
 		camp1, err := s.CreateCampaign(ctx, Campaign{
 			OrganizationID: orgID,
 			AccountID:      simAccount.ID,
-			Name:           "Рассылка: Осенние скидки на кофемашины",
+			Name:           "Осенние скидки на кофемашины",
 			Channel:        purecampaign.ChannelSimulator,
-			MessageBody:    "Здравствуйте, {{name}}! ☕ У нас отличные новости — стартовала осенняя распродажа премиальных кофемашин DeLonghi со скидкой 20%! Подробности в каталоге или у нашего менеджера.",
+			MessageBody:    "Здравствуйте, {{name}}! ☕ В Qazan Home стартовала осенняя распродажа кофемашин Aurora со скидкой 20%. Подробности в каталоге или у нашего менеджера.",
 			CreatedBy:      adminUserID,
 		})
 		if err == nil {
@@ -254,6 +262,18 @@ func (s *Store) SeedDemoCRM(ctx context.Context, orgID, adminUserID uuid.UUID) e
 				{NormalizedIdentity: "+77754441122", Name: "Бауыржан", RawInput: "+77754441122, Бауыржан"},
 				{NormalizedIdentity: "+77023337711", Name: "Елена", RawInput: "+77023337711, Елена"},
 			})
+			// Keep the example stable and safe: it looks like a real campaign
+			// with delivery progress, but it is paused so no background worker
+			// can send anything when a seeded instance starts.
+			_, _ = s.db.Exec(ctx, `
+				UPDATE campaigns SET status = 'paused', started_at = $2 WHERE id = $1`,
+				camp1.ID, now.Add(-2*time.Hour))
+			for _, phone := range []string{"+77771234567", "+77019876543", "+77055558899"} {
+				_, _ = s.db.Exec(ctx, `UPDATE campaign_recipients SET status = 'sent', attempts = 1 WHERE campaign_id = $1 AND normalized_identity = $2`, camp1.ID, phone)
+			}
+			_, _ = s.db.Exec(ctx, `
+				UPDATE campaign_recipients SET status = 'failed', attempts = 1, failure_reason = 'Demo: номер временно недоступен'
+				WHERE campaign_id = $1 AND normalized_identity = '+77754441122'`, camp1.ID)
 		}
 
 		camp2, err := s.CreateCampaign(ctx, Campaign{

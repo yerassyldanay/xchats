@@ -18,7 +18,7 @@ always approves before it sends.
 
 </div>
 
-![xchats overview](docs/images/hero-banner.png)
+![xchats overview](docs/images/social-preview.png)
 
 ---
 
@@ -28,10 +28,13 @@ always approves before it sends.
 git clone https://github.com/yerassyldanay/xchats.git
 cd xchats
 make up
+make seed
 ```
 
 Open **http://localhost:8081** — sign in with `admin@xchat.kz` /
 `xchat-admin-change-me` (public default; change it after your first login).
+`make seed` fills the local instance with the Qazan Home kitchen-appliance
+demo and is safe to run again.
 
 ## Key superpowers
 
@@ -47,82 +50,78 @@ Open **http://localhost:8081** — sign in with `admin@xchat.kz` /
 - **Configurable from ChatGPT / Claude** — an MCP connector lets an LLM
   client read your documents and stage knowledge-base edits for your review.
 
-## Visual Tour
+## Visual tour
 
-Every screenshot below comes straight from a live, self-hosted xchats instance. Nothing here is a mockup.
+These are real screens from a seeded Qazan Home instance, not mockups.
 
-### 1. Team Inbox & Omnichannel Sync
+### 1. Shared inbox
 
-![xchats team inbox: a conversation open with the customer's message on the left and the assistant's grounded, ready-to-approve draft reply on the right](docs/images/inbox.png)
+![A customer conversation beside a grounded AI reply ready for human review](docs/images/inbox.png)
 
-Every conversation from WhatsApp, Telegram, Instagram, Messenger and the
-WhatsApp Cloud API lands in **one shared inbox**, with the assistant's
-suggested reply waiting beside it for a human to approve, edit, or discard.
-Nothing sends itself — a teammate always makes the final call before a
-customer sees a word of it.
+WhatsApp, Telegram, Instagram, Messenger and WhatsApp Cloud conversations
+share one queue. AI replies remain suggestions until a teammate edits,
+approves or discards them.
 
-### 2. Grounded Knowledge Base & Strict Token Replacement
+### 2. Channels and automation
 
-![The Knowledge Base products catalog, showing real product photos, names and exact prices](docs/images/knowledge-base.png)
+![Channel dashboard with platform filters, health and automation states](docs/images/channels.png)
+![The channel picker for WhatsApp, Telegram, WhatsApp Cloud, Instagram and Messenger](docs/images/channel-connect.png)
 
-The Knowledge Base holds the exact facts the assistant is allowed to answer
-from — products, prices, delivery zones, tariffs and policies, each with real
-photos and current values. The model never writes a number itself; it emits a
-`{{token}}` placeholder that the backend substitutes with the stored value, so
-a wrong price is structurally impossible, not just unlikely — see the
-[grounding diagram](docs/images/grounding.svg) for the full five-stage pipeline.
+Connect QR-based WhatsApp, Telegram, WhatsApp Cloud, Instagram or Messenger.
+Each account has health checks and independent automation controls.
 
-### 3. Staged Knowledge Ingestion & Visual Diff Review
+### 3. Grounded knowledge base
 
-![The Draft page showing a pending product price change as a before/after diff, with Publish all and Discard all actions](docs/images/draft-staging.png)
+![Products with photos, names and exact prices in the Knowledge Base](docs/images/knowledge-base.png)
 
-Every edit — typed by hand, imported from a URL or document, or written by an
-LLM over MCP (§7) — lands in a staging area first, showing exactly what will
-be **added, changed or removed** with a full before/after diff. Nothing
-reaches the live knowledge base, and nothing the assistant can quote, until a
-human reviews and publishes it.
+Products, tariffs, delivery zones, contacts and policies are the only facts
+the assistant may use. Numbers become `{{token}}` placeholders and are filled
+from stored values; see the [grounding pipeline](docs/images/grounding.svg).
 
-### 4. Mini CRM & Time-Grouped Daily Follow-up Board
+### 4. Imports, review and ChatGPT / Claude
 
-![The Customers grid, showing profile cards with status, tags and channel identities](docs/images/customers.png)
-![The Follow-ups board, grouped into Overdue, Today, Tomorrow and Later, with a completed-tasks history tab](docs/images/followups.png)
+![A staged price change shown as a before and after diff](docs/images/draft-staging.png)
+![The ChatGPT and Claude MCP connector setup inside the Draft page](docs/images/mcp-connect.png)
 
-Every contact gets a lightweight CRM profile — status, tags, notes and every
-channel identity in one place — and every promised next step becomes a
-follow-up task, automatically grouped into **Overdue, Today, Tomorrow and
-Later** (with a Completed tab for history). It's the minimum structure a
-small sales or support team actually needs, without a separate CRM
-subscription.
+Links, files and the MCP connector all write to the same Draft. ChatGPT or
+Claude can use 13 `kb_*` tools after OAuth 2.1 authorization, but every change
+still needs human review before publishing.
 
-### 5. Campaigns: Bulk Outbound with Live Delivery Tracking
+### 5. Knowledge Base assistant
 
-![The Campaigns list showing one running broadcast with a live delivery progress bar and one draft campaign](docs/images/campaigns.png)
+![The private operator assistant with example questions about live and staged knowledge](docs/images/assistant.png)
 
-Paste or upload a recipient list, write one templated message, and xchats
-sends it out rate-limited and confined to a send window — no accidental
-floods, no banned numbers. Each campaign tracks **delivery status per
-recipient live**, and any reply a customer sends back lands right in the
-shared inbox like any other conversation.
+Ask about live facts, pending changes, or compare both versions. This private
+operator workspace never sends messages to customers.
 
-### 6. Built-in Channel Simulator & AI Evals
+### 6. Customers and follow-ups
 
-![The Simulator's empty state, with one-click example questions to test the assistant against the live knowledge base or a staged draft](docs/images/simulator.png)
+![Customer profiles with status, tags and channel identities](docs/images/customers.png)
+![Follow-ups grouped into Overdue, Today, Tomorrow and Later](docs/images/followups.png)
 
-The Simulator lets you test exactly how the assistant would answer a real
-customer question — against the **live** knowledge base or a **staged
-draft** — without touching a real WhatsApp or Telegram account. Pair it with
-the open evaluation harness ([`evals/`](evals/)) to grade response quality
-automatically whenever the prompt, model or knowledge base changes.
+The mini CRM keeps identities, notes, tags and ownership together; its daily
+board tracks overdue, upcoming and completed follow-ups.
 
-### 7. Configuring xchats via ChatGPT / Claude Desktop using MCP
+### 7. Campaigns
 
-Point ChatGPT or Claude Desktop at your own xchats instance as an MCP
-connector (**Draft → ChatGPT / Claude**), authorize once over OAuth 2.1 with
-PKCE, and the assistant can read documents you hand it and store structured
-facts through 13 `kb_*` tools — products, tariffs, delivery zones, policies
-and more. Every write lands in the **same staging area** shown in §3, so an
-LLM configuring your knowledge base over chat is exactly as safe as typing it
-in yourself.
+![Campaign delivery progress and draft broadcasts](docs/images/campaigns.png)
+
+Import recipients, preview templates, set rate limits and send windows, then
+track every delivery and reply in the shared inbox.
+
+### 8. Simulator and evaluations
+
+![The customer-reply simulator with suggested test questions](docs/images/simulator.png)
+
+Rehearse customer questions against the live Knowledge Base or Draft, then
+compare prompts and models with the open [`evals/`](evals/) harness.
+
+### 9. Settings
+
+![Settings for AI models, parsers, monitoring, remote access, channels, team and backups](docs/images/settings.png)
+
+Configure model providers, extraction, Langfuse monitoring, ngrok, channels,
+team access and backups from the UI—no secrets belong in `config.yaml`.
 
 ## How it works
 
@@ -131,9 +130,8 @@ in yourself.
 3. The assistant drafts a reply from your approved knowledge base only.
 4. A person reviews, edits or discards it — then sends.
 
-The full design lives in [`docs/overview.md`](docs/overview.md); the
-grounding mechanism above is diagrammed in the
-[visual tour](#2-grounded-knowledge-base--strict-token-replacement).
+The full design lives in [`docs/overview.md`](docs/overview.md); the grounding
+mechanism is summarized in the [visual tour](#3-grounded-knowledge-base).
 
 ## Run it another way
 
@@ -146,7 +144,7 @@ grounding mechanism above is diagrammed in the
 > [!WARNING]
 > The WhatsApp channel connects like WhatsApp Web (no Business API fee), but
 > it is an unofficial client — start with a number you can afford to lose.
-> Details in the [visual tour](#1-team-inbox--omnichannel-sync).
+> Details in the [visual tour](#2-channels-and-automation).
 
 ## Documentation
 

@@ -10,8 +10,8 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 )
 
-// SeedDemoKB inserts a small, complete "Demo Shop" knowledge base — assistant
-// config, contacts, policies, 3 topics, 5 products (3 in stock, 2 not), 2
+// SeedDemoKB inserts a small, complete "Qazan Home" knowledge base — assistant
+// config, contacts, policies, 3 topics, 5 photographed products, 2
 // tariffs, 3 delivery zones, and staged draft changes into an org that has none yet.
 func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool, err error) {
 	return s.SeedDemoKBWithBlob(ctx, orgID, nil)
@@ -34,64 +34,60 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. Media Assets
-	var coffeeMatID, blenderMatID, parcelMatID *uuid.UUID
-	if len(demoCoffeeMachineJpg) > 0 {
-		id := uuid.New()
-		coffeeMatID = &id
-		sha := sha256.Sum256(demoCoffeeMachineJpg)
-		key := "demo-coffee-machine-" + id.String() + ".jpg"
-		if blobStore != nil {
-			_, _ = blobStore.Put(key, demoCoffeeMachineJpg, blob.Meta{
-				MediaType: "image", Mimetype: "image/jpeg", FileName: "coffee-machine.jpg",
-				FileSize: int64(len(demoCoffeeMachineJpg)), OrgID: orgID.String(),
-			})
+	// 1. Media assets. Every catalog product gets a real image so the demo is
+	// useful for both visual evaluation and grounded media replies.
+	seedImage := func(data []byte, slug, filename string) (*uuid.UUID, error) {
+		if len(data) == 0 {
+			return nil, nil
 		}
-		_, _ = tx.Exec(ctx, `
+		id := uuid.New()
+		sha := sha256.Sum256(data)
+		key := "demo-" + slug + "-" + id.String() + ".jpg"
+		if blobStore != nil {
+			if _, err := blobStore.Put(key, data, blob.Meta{
+				MediaType: "image", Mimetype: "image/jpeg", FileName: filename,
+				FileSize: int64(len(data)), OrgID: orgID.String(),
+			}); err != nil {
+				return nil, err
+			}
+		}
+		if _, err := tx.Exec(ctx, `
 			INSERT INTO kbd_materials (id, organization_id, source_type, filename, mime_type, size_bytes,
 				sha256_checksum, processing_status, customer_visibility, storage_backend, storage_key)
-			VALUES ($1, $2, 'file', 'delonghi-coffee-machine.jpg', 'image/jpeg', $3, $4, 'parsed', 'visible', 'disk', $5)`,
-			id, orgID, int64(len(demoCoffeeMachineJpg)), hex.EncodeToString(sha[:]), key)
-	}
-
-	if len(demoBlenderJpg) > 0 {
-		id := uuid.New()
-		blenderMatID = &id
-		sha := sha256.Sum256(demoBlenderJpg)
-		key := "demo-blender-" + id.String() + ".jpg"
-		if blobStore != nil {
-			_, _ = blobStore.Put(key, demoBlenderJpg, blob.Meta{
-				MediaType: "image", Mimetype: "image/jpeg", FileName: "blender.jpg",
-				FileSize: int64(len(demoBlenderJpg)), OrgID: orgID.String(),
-			})
+			VALUES ($1, $2, 'file', $3, 'image/jpeg', $4, $5, 'parsed', 'visible', 'disk', $6)`,
+			id, orgID, filename, int64(len(data)), hex.EncodeToString(sha[:]), key); err != nil {
+			return nil, err
 		}
-		_, _ = tx.Exec(ctx, `
-			INSERT INTO kbd_materials (id, organization_id, source_type, filename, mime_type, size_bytes,
-				sha256_checksum, processing_status, customer_visibility, storage_backend, storage_key)
-			VALUES ($1, $2, 'file', 'bosch-blender.jpg', 'image/jpeg', $3, $4, 'parsed', 'visible', 'disk', $5)`,
-			id, orgID, int64(len(demoBlenderJpg)), hex.EncodeToString(sha[:]), key)
+		return &id, nil
 	}
 
-	if len(demoDeliveryParcelJpg) > 0 {
-		id := uuid.New()
-		parcelMatID = &id
-		sha := sha256.Sum256(demoDeliveryParcelJpg)
-		key := "demo-delivery-parcel-" + id.String() + ".jpg"
-		if blobStore != nil {
-			_, _ = blobStore.Put(key, demoDeliveryParcelJpg, blob.Meta{
-				MediaType: "image", Mimetype: "image/jpeg", FileName: "delivery-parcel.jpg",
-				FileSize: int64(len(demoDeliveryParcelJpg)), OrgID: orgID.String(),
-			})
-		}
-		_, _ = tx.Exec(ctx, `
-			INSERT INTO kbd_materials (id, organization_id, source_type, filename, mime_type, size_bytes,
-				sha256_checksum, processing_status, customer_visibility, storage_backend, storage_key)
-			VALUES ($1, $2, 'file', 'express-delivery.jpg', 'image/jpeg', $3, $4, 'parsed', 'visible', 'disk', $5)`,
-			id, orgID, int64(len(demoDeliveryParcelJpg)), hex.EncodeToString(sha[:]), key)
+	coffeeMatID, err := seedImage(demoCoffeeMachineJpg, "coffee-machine", "aurora-coffee-machine.jpg")
+	if err != nil {
+		return false, err
+	}
+	blenderMatID, err := seedImage(demoBlenderJpg, "blender", "pulse-blender.jpg")
+	if err != nil {
+		return false, err
+	}
+	parcelMatID, err := seedImage(demoDeliveryParcelJpg, "delivery-parcel", "express-delivery.jpg")
+	if err != nil {
+		return false, err
+	}
+	kettleMatID, err := seedImage(demoElectricKettleJpg, "electric-kettle", "ember-electric-kettle.jpg")
+	if err != nil {
+		return false, err
+	}
+	toasterMatID, err := seedImage(demoToasterJpg, "toaster", "sage-two-slot-toaster.jpg")
+	if err != nil {
+		return false, err
+	}
+	airFryerMatID, err := seedImage(demoAirFryerJpg, "air-fryer", "compact-air-fryer.jpg")
+	if err != nil {
+		return false, err
 	}
 
-	persona := "Ты — ассистент по подготовке ответов клиентам интернет-магазина «Demo Shop» в WhatsApp. Ты готовишь ОДИН черновик ответа, который проверит и отправит человек — ты никогда не отправляешь сообщения сам."
-	mission := "Помогай клиентам выбрать товар, узнать актуальную цену и наличие, и оформить заказ."
+	persona := "Ты — ассистент по подготовке ответов клиентам интернет-магазина кухонной техники «Qazan Home». Ты готовишь ОДИН черновик ответа, который проверит и отправит человек — ты никогда не отправляешь сообщения сам."
+	mission := "Помогай клиентам выбрать технику для кухни, узнать актуальную цену и наличие, подобрать доставку и оформить заказ."
 	guardrails := "Никогда не выдумывай цены, наличие, сроки или контактные данные — используй только подтверждённые значения. Никогда не обещай медиафайл, которого нет в каталоге."
 	languagePolicy := "Отвечай на языке сообщения клиента — по-русски или по-казахски."
 	replyMaxWords := 120
@@ -103,7 +99,7 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 	}
 
 	if err := upsertContactRow(ctx, tx, orgID, DraftContact{
-		WorkingHours: "Пн–Сб, 9:00–19:00", Phone: "+7 700 000 00 00", Instagram: "@demo.shop",
+		WorkingHours: "Пн–Сб, 9:00–19:00", Phone: "+7 700 700 70 70", Instagram: "@qazan.home",
 	}); err != nil {
 		return false, err
 	}
@@ -117,7 +113,7 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 
 	topics := []DraftTopic{
 		{Slug: "demo_catalog", Title: "Каталог",
-			BodyMD:        "В каталоге бытовая техника для дома и кухни. Актуальные позиции, цены и наличие — только из блоков товаров, не перечисляй товары по памяти.",
+			BodyMD:        "В каталоге кофемашины, блендеры, чайники, тостеры и другая техника для кухни. Актуальные позиции, цены и наличие — только из блоков товаров, не перечисляй товары по памяти.",
 			FeaturedImage: parcelMatID},
 		{Slug: "demo_payment", Title: "Оплата",
 			BodyMD: "Принимаем оплату картой, через Kaspi и наличными при получении. Оформление — прямо в WhatsApp."},
@@ -131,18 +127,21 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 	}
 
 	products := []DraftProduct{
-		{Ref: "demo_coffee-machine", Name: "Кофемашина DeLonghi", Price: "129 900 ₸",
-			Description: "Автоматическая кофемашина для дома с капучинатором и жерновковой кофемолкой.", AvailabilityStatus: "in_stock",
+		{Ref: "demo_coffee-machine", Name: "Кофемашина Aurora Barista Pro", Price: "289 900 ₸",
+			Description: "Автоматическая кофемашина с жерновковой кофемолкой, капучинатором и пятью напитками в одно касание.", AvailabilityStatus: "in_stock",
 			FeaturedImage: coffeeMatID},
-		{Ref: "demo_blender", Name: "Блендер Bosch", Price: "11 200 ₸",
-			Description: "Мощный блендер для смузи, соусов и супов-пюре — несколько скоростей и импульсный режим.", AvailabilityStatus: "in_stock",
+		{Ref: "demo_blender", Name: "Блендер Pulse 1200", Price: "59 900 ₸",
+			Description: "Стационарный блендер 1200 Вт со стеклянной чашей, шестью скоростями и импульсным режимом.", AvailabilityStatus: "in_stock",
 			FeaturedImage: blenderMatID},
-		{Ref: "demo_kettle", Name: "Чайник Bosch", Price: "40 200 ₸",
-			Description: "Электрический чайник с быстрым закипанием и автоматическим отключением.", AvailabilityStatus: "unavailable"},
-		{Ref: "demo_toaster", Name: "Тостер Tefal", Price: "81 600 ₸",
-			Description: "Компактный тостер с регулировкой степени поджаривания и функцией разморозки.", AvailabilityStatus: "in_stock"},
-		{Ref: "demo_vacuum", Name: "Пылесос Samsung", Price: "83 800 ₸",
-			Description: "Пылесос с мешком для сбора пыли и насадками для разных типов покрытий.", AvailabilityStatus: "unavailable"},
+		{Ref: "demo_kettle", Name: "Чайник Ember 1.7", Price: "34 900 ₸",
+			Description: "Матовый электрический чайник 1,7 л с быстрым закипанием, защитой от сухого включения и автоотключением.", AvailabilityStatus: "in_stock",
+			FeaturedImage: kettleMatID},
+		{Ref: "demo_toaster", Name: "Тостер Sage Toast 2", Price: "39 900 ₸",
+			Description: "Двухслотовый тостер с семью степенями поджаривания, разморозкой и съёмным поддоном для крошек.", AvailabilityStatus: "in_stock",
+			FeaturedImage: toasterMatID},
+		{Ref: "demo_air-fryer", Name: "Аэрофритюрница Crisp Air 5L", Price: "74 900 ₸",
+			Description: "Компактная аэрофритюрница на 5 литров с восемью программами и съёмной корзиной.", AvailabilityStatus: "unavailable",
+			FeaturedImage: airFryerMatID},
 	}
 	for _, p := range products {
 		if err := upsertProductRow(ctx, tx, orgID, p); err != nil {
@@ -189,10 +188,11 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 		Products: []DraftProduct{
 			{
 				Ref:                "demo_toaster",
-				Name:               "Тостер Tefal OptiGrill",
-				Price:              "74 900 ₸",
-				Description:        "Компактный тостер с 7 режимами обжаривания и съемным поддоном для крошек. Специальная осенняя цена!",
+				Name:               "Тостер Sage Toast 2",
+				Price:              "34 900 ₸",
+				Description:        "Двухслотовый тостер с семью степенями поджаривания, разморозкой и съёмным поддоном для крошек. Специальная осенняя цена!",
 				AvailabilityStatus: "in_stock",
+				FeaturedImage:      toasterMatID,
 			},
 		},
 		DeliveryZones: []DraftDeliveryZone{

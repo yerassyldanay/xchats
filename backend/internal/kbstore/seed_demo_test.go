@@ -50,8 +50,17 @@ func TestSeedDemoKB_InsertsFullDataset(t *testing.T) {
 		"SELECT count(*) FROM ai_products WHERE organization_id = $1 AND availability_status != 'unavailable'", orgID).Scan(&inStock); err != nil {
 		t.Fatalf("count in-stock products: %v", err)
 	}
-	if inStock != 3 {
-		t.Errorf("in-stock products = %d, want 3 (3 in stock, 2 not, per the fixed dataset)", inStock)
+	if inStock != 4 {
+		t.Errorf("in-stock products = %d, want 4 (4 in stock, 1 awaiting restock)", inStock)
+	}
+
+	var photographed int
+	if err := db.QueryRow(ctx,
+		"SELECT count(*) FROM ai_products WHERE organization_id = $1 AND featured_image IS NOT NULL", orgID).Scan(&photographed); err != nil {
+		t.Fatalf("count photographed products: %v", err)
+	}
+	if photographed != 5 {
+		t.Errorf("photographed products = %d, want 5", photographed)
 	}
 
 	var baikonurAvailable bool

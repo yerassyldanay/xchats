@@ -1,6 +1,6 @@
 // Command xchats is the xchats backend: API edge + webhook ingress + in-process
 // workers + the multichannel response service. Subcommands: serve (default),
-// migrate, seed, seed-kb-demo, simulate-message, kb-load, backup, check,
+// migrate, seed, seed-demo, simulate-message, kb-load, backup, check,
 // restore, admin-credential, reset-admin-password.
 package main
 
@@ -144,7 +144,8 @@ func main() {
 	case "seed":
 		st := mustStore(cfg, log)
 		defer st.Close()
-		seed(context.Background(), cfg, st, log)
+		seedBase(context.Background(), cfg, st, log)
+		runSeedDemo(context.Background(), cfg, st, log)
 	case "seed-demo", "seed-kb-demo":
 		st := mustStore(cfg, log)
 		defer st.Close()
@@ -221,7 +222,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	if minted {
 		log.Info("one-time admin password created", "retrieve_with", "xchats admin-credential show")
 	}
-	seed(ctx, cfg, st, log)
+	seedBase(ctx, cfg, st, log)
 	orgID := seededOrgID(ctx, cfg, st, log)
 
 	// kb (internal/kbstore) is unrelated to the response service's own KB loader
@@ -955,9 +956,10 @@ func seededOrgID(ctx context.Context, cfg *config.Config, st *store.Store, log *
 	return org.ID
 }
 
-// runSeedDemo inserts the complete demo dataset (CRM customers, follow-ups,
-// campaign templates, simulator campaigns, KB topics/products/images, and staged
-// draft changes) — explicit and opt-in only ("xchats seed-demo" / "make seed-demo").
+// runSeedDemo inserts the complete Qazan Home demo dataset: photographed
+// products, CRM records, follow-ups, campaigns, channel accounts, customer
+// conversations, grounded drafts, assistant history, and staged KB changes.
+// It is explicit and opt-in ("xchats seed"; "seed-demo" remains an alias).
 func runSeedDemo(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) {
 	orgID := seededOrgID(ctx, cfg, st, log)
 	if orgID == uuid.Nil {
@@ -967,6 +969,14 @@ func runSeedDemo(ctx context.Context, cfg *config.Config, st *store.Store, log *
 		log.Warn("seed-demo: crm seed failed", "err", err)
 	} else {
 		log.Info("seed-demo: demo CRM, followups & campaigns seeded", "org_id", orgID)
+	}
+	insertedWorkspace, err := st.SeedDemoWorkspace(ctx, orgID, uuid.MustParse("00000000-0000-0000-0000-000000000002"))
+	if err != nil {
+		log.Warn("seed-demo: workspace seed failed", "err", err)
+	} else if insertedWorkspace {
+		log.Info("seed-demo: channels, inbox drafts & assistant history seeded", "org_id", orgID)
+	} else {
+		log.Info("seed-demo: org has real channel accounts — demo workspace skipped", "org_id", orgID)
 	}
 
 	blobStore, err := blob.NewDisk(cfg.Storage.BlobDir)
@@ -1056,13 +1066,13 @@ func runRestore(log *slog.Logger, args []string) {
 	log.Info("restore complete", "backup", args[0], "dest", args[1])
 }
 
-// seed ensures the configured organization exists. WhatsApp accounts are no
+// seedBase ensures the configured organization exists. WhatsApp accounts are no
 // longer pre-configured or seeded here — they are paired dynamically via the
 // UI (internal/whatsmeow), so the derived account id only ever comes into
 // existence once a phone actually completes pairing. Admin user credentials
 // are created by migration 0006_init_admin — no boot-time user creation is
 // performed here either.
-func seed(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) {
+func seedBase(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) {
 	if _, err := st.SeedOrganization(ctx, cfg.OrgName); err != nil {
 		fatal("seed org", err)
 	}

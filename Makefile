@@ -7,9 +7,10 @@ FRONTEND := frontend
 # deploy/config.docker.yaml (mounted into the container), so there is nothing
 # to source or export before `make up`. The only interpolated values left are
 # the two host port mappings, which default to 8080/8081 when unset — export
-# BACKEND_PORT/FRONTEND_PORT for a run if either collides. -p pins a stable
-# project name so the volumes survive across invocations.
-COMPOSE := docker compose -p xchats -f deploy/docker-compose.yaml
+# BACKEND_PORT/FRONTEND_PORT for a run if either collides. PROJECT_NAME is
+# overridable so documentation capture/tests can use a disposable volume set.
+PROJECT_NAME ?= xchats
+COMPOSE := docker compose -p $(PROJECT_NAME) -f deploy/docker-compose.yaml
 GORUN := go run ./cmd/xchats -config ../config.yaml
 
 # --- Wails desktop packaging (see docs/desktop.md) --------------------------
@@ -35,7 +36,7 @@ WAILS_FLAGS := -skipbindings $(WAILS_TAGS)
 # there via a local compose override, so a stale container may still hold it.
 PORTS ?= 8080 8090 5173 8081
 
-.PHONY: help up up-fg down logs ps kill-ports migrate seed seed-demo seed-kb-demo dev-backend dev-frontend \
+.PHONY: help up up-fg down logs ps kill-ports migrate seed seed-local seed-demo seed-kb-demo dev-backend dev-frontend \
         test test-backend test-frontend test-e2e build screenshots lint lint-backend lint-frontend notices ruleset-apply \
         desktop-tools desktop-assets desktop-dev desktop-build desktop-clean
 
@@ -71,14 +72,21 @@ kill-ports: ## Free backend/frontend ports (default 8080 8090 5173 8081; overrid
 migrate: ## Apply DB migrations
 	cd $(BACKEND) && $(GORUN) migrate
 
-seed: ## Seed the default organization + admin login
+seed: ## Fill the Docker database with the complete Qazan Home demo (safe to re-run; restarts backend if needed)
+	@set -e; \
+	  was_running="$$( $(COMPOSE) ps --status running -q backend )"; \
+	  if [ -n "$$was_running" ]; then $(COMPOSE) stop backend >/dev/null; fi; \
+	  status=0; \
+	  $(COMPOSE) run --build --rm --no-deps backend -config /config.yaml seed || status=$$?; \
+	  if [ -n "$$was_running" ]; then $(COMPOSE) start backend >/dev/null; fi; \
+	  exit $$status
+
+seed-local: ## Fill config.yaml's local database with the same complete demo (backend must be stopped)
 	cd $(BACKEND) && $(GORUN) seed
 
-seed-demo: ## Seed full demo dataset (KB + products/images + draft + customers + followups + campaigns)
-	cd $(BACKEND) && $(GORUN) seed-demo
+seed-demo: seed ## Alias for seed (legacy)
 
-seed-kb-demo: ## Alias for seed-demo (legacy)
-	cd $(BACKEND) && $(GORUN) seed-demo
+seed-kb-demo: seed ## Alias for seed (legacy)
 
 dev-backend: ## Run the backend (go) on :8080
 	cd $(BACKEND) && $(GORUN) serve
@@ -103,7 +111,7 @@ build: ## Build backend binary + frontend bundle
 	cd $(BACKEND) && go build -o bin/xchats ./cmd/xchats
 	cd $(FRONTEND) && npm ci && npm run build
 
-screenshots: ## Regenerate docs/images/*.png from a running, seeded instance (needs `make up`/`dev-backend`+`dev-frontend` on :8081 AND `make seed-demo` first — see frontend/scripts/capture-screenshots.mjs)
+screenshots: ## Regenerate docs/images/*.png from a running demo (`make up && make seed` first)
 	cd $(FRONTEND) && node scripts/capture-screenshots.mjs
 
 desktop-tools: ## Install the pinned Wails CLI (one-off; see docs/desktop.md for the OS packages it needs)
