@@ -16,12 +16,26 @@ import (
 type kbGapReportPayload struct {
 	Counts            []kbGapReasonCountPayload `json:"counts"`
 	OperationalCounts []kbGapReasonCountPayload `json:"operational_counts"`
+	TopTargetEntities []kbGapEntityCountPayload `json:"top_target_entities"`
+	TopMissingFields  []kbGapFieldCountPayload  `json:"top_missing_fields"`
 	Recent            []kbGapEventPayload       `json:"recent"`
 }
 
 type kbGapReasonCountPayload struct {
 	ReasonCode string `json:"reason_code"`
 	Count      int    `json:"count"`
+}
+
+type kbGapEntityCountPayload struct {
+	TargetEntityType string `json:"target_entity_type"`
+	TargetEntityRef  string `json:"target_entity_ref"`
+	Count            int    `json:"count"`
+}
+
+type kbGapFieldCountPayload struct {
+	TargetEntityType string `json:"target_entity_type"`
+	FieldName        string `json:"field_name"`
+	Count            int    `json:"count"`
 }
 
 type kbGapEventPayload struct {
@@ -43,8 +57,8 @@ func TestKBGaps_EmptyByDefault(t *testing.T) {
 	var got kbGapReportPayload
 	h.get("/xchats/api/v1/kb/gaps", &got)
 
-	if len(got.Counts) != 5 {
-		t.Fatalf("Counts = %+v, want the 5 default content-gap codes, zero-filled", got.Counts)
+	if len(got.Counts) != 4 {
+		t.Fatalf("Counts = %+v, want the 4 default content-gap codes, zero-filled", got.Counts)
 	}
 	for _, c := range got.Counts {
 		if c.Count != 0 {
@@ -105,6 +119,12 @@ func TestKBGaps_ReturnsSeededEventNeverExposingDraftText(t *testing.T) {
 	}
 	if e.Source != "model" {
 		t.Errorf("Source = %q, want model", e.Source)
+	}
+	if len(got.TopTargetEntities) != 1 || got.TopTargetEntities[0].TargetEntityRef != "coffee-machine" || got.TopTargetEntities[0].Count != 1 {
+		t.Errorf("TopTargetEntities = %+v, want exactly product/coffee-machine at count 1", got.TopTargetEntities)
+	}
+	if len(got.TopMissingFields) != 1 || got.TopMissingFields[0].FieldName != "price" || got.TopMissingFields[0].Count != 1 {
+		t.Errorf("TopMissingFields = %+v, want exactly product/price at count 1", got.TopMissingFields)
 	}
 
 	// Filters work over HTTP, not just at the store layer.

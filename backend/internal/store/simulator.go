@@ -77,6 +77,20 @@ func (s *Store) PurgeSimulatorData(ctx context.Context, orgID uuid.UUID) (Simula
 		return res, wrap("purge simulator drafts", err)
 	}
 
+	// ai_kb_gap_events.chat_id has no FK either (same channel-neutral design
+	// as ai_drafts above), and its draft_id is ON DELETE SET NULL rather than
+	// CASCADE — so without this, every telemetry event a simulator test ever
+	// produced would survive the drafts/chats/customers purge above and keep
+	// permanently inflating KBGapReportFor's "real conversations" counts
+	// (kbGapFilterClause's own channel != 'simulator' exclusion only affects
+	// the aggregate report, not what's actually stored). organization_id
+	// alone would over-match nothing else — 'simulator' is this narrow
+	// account's own channel value — but scoping by both is free and explicit.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM ai_kb_gap_events WHERE organization_id = $1 AND channel = 'simulator'`, orgID); err != nil {
+		return res, wrap("purge simulator kb-gap events", err)
+	}
+
 	// Simulator-only customers: cascades crm_customer_identities/notes/
 	// followups/timeline/tags automatically (all ON DELETE CASCADE from
 	// crm_customers — see 0013_crm.up.sql). A customer with a mix of

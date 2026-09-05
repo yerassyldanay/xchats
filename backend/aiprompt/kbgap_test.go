@@ -115,6 +115,91 @@ func TestValidateResponseV7_ValidKBGapMissingField(t *testing.T) {
 	}
 }
 
+// TestValidateResponseV7_ConflictingKBDataIsValid proves conflicting_kb_data
+// is a genuinely reachable reason code (P2 finding: rule 9a used to never
+// define when to emit it, silently falling through to "other" instead) — it
+// must sanitize exactly like every other model-facing reason code.
+func TestValidateResponseV7_ConflictingKBDataIsValid(t *testing.T) {
+	cat := validCatalog(t)
+	raw := `{
+  "reply_text": "Секунду, уточню.",
+  "reply_language": "ru",
+  "media_files_to_send": [],
+  "escalate": true,
+  "escalation_reason": "цена указана по-разному в двух местах",
+  "kb_gap": {
+    "reason_code": "conflicting_kb_data",
+    "target_entity_type": "product",
+    "target_entity_ref": "coffee-machine"
+  }
+}`
+	resp, issues := ValidateResponseV7(raw, baseKB(), cat)
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %+v", issues)
+	}
+	if resp.KBGap == nil || resp.KBGap.ReasonCode != KBGapReasonConflictingKBData {
+		t.Fatalf("KBGap = %+v, want reason_code %q kept", resp.KBGap, KBGapReasonConflictingKBData)
+	}
+	if resp.KBGap.TargetEntityType != KBGapEntityProduct || resp.KBGap.TargetEntityRef != "coffee-machine" {
+		t.Errorf("target = %q/%q, want product/coffee-machine", resp.KBGap.TargetEntityType, resp.KBGap.TargetEntityRef)
+	}
+}
+
+// TestValidateResponseV7_UnavailableEntityNoLongerValid proves the P2
+// removal actually took effect: "unavailable_entity" was retired from the
+// closed vocabulary (no reachable, non-conflicting decision branch existed
+// for it — see the reason-code const block's doc comment), so a model that
+// still claims it must be treated exactly like any other unrecognized
+// reason code — the whole kb_gap dropped, never emitted as "other" behind
+// the model's back.
+func TestValidateResponseV7_UnavailableEntityNoLongerValid(t *testing.T) {
+	cat := validCatalog(t)
+	raw := `{
+  "reply_text": "ok", "reply_language": "ru", "media_files_to_send": [], "escalate": true,
+  "kb_gap": {"reason_code": "unavailable_entity"}
+}`
+	resp, issues := ValidateResponseV7(raw, baseKB(), cat)
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %+v", issues)
+	}
+	if resp.KBGap != nil {
+		t.Errorf("expected KBGap dropped entirely for a retired reason code, got %+v", resp.KBGap)
+	}
+}
+
+// TestValidateResponseV7_DuplicateMissingFieldsDeduped proves a schema-valid
+// (uniqueItems is not set) but repeated missing_fields entry is deduped
+// rather than passed straight through: ai_kb_gap_missing_fields has
+// UNIQUE(event_id, field_name), so a duplicate reaching persistence would
+// otherwise roll back the whole draft write over an optional diagnostic.
+func TestValidateResponseV7_DuplicateMissingFieldsDeduped(t *testing.T) {
+	cat := validCatalog(t)
+	raw := `{
+  "reply_text": "Секунду, уточню.",
+  "reply_language": "ru",
+  "media_files_to_send": [],
+  "escalate": true,
+  "escalation_reason": "нет цены",
+  "kb_gap": {
+    "reason_code": "missing_field",
+    "target_entity_type": "product",
+    "target_entity_ref": "coffee-machine",
+    "missing_fields": ["price", "price", "warranty_terms", "price"]
+  }
+}`
+	resp, issues := ValidateResponseV7(raw, baseKB(), cat)
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %+v", issues)
+	}
+	if resp.KBGap == nil {
+		t.Fatal("expected a populated KBGap")
+	}
+	want := []string{"price", "warranty_terms"}
+	if len(resp.KBGap.MissingFields) != len(want) || resp.KBGap.MissingFields[0] != want[0] || resp.KBGap.MissingFields[1] != want[1] {
+		t.Errorf("MissingFields = %v, want %v (deduped, first-occurrence order)", resp.KBGap.MissingFields, want)
+	}
+}
+
 // --- kb_gap: every sanitization case must NEVER become a ContractIssue ---
 
 func TestValidateResponseV7_InvalidKBGapNeverInvalidatesReply(t *testing.T) {

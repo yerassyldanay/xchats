@@ -36,15 +36,32 @@ type kbGapReasonCountView struct {
 	Count      int    `json:"count"`
 }
 
+type kbGapEntityCountView struct {
+	TargetEntityType string `json:"target_entity_type"`
+	TargetEntityRef  string `json:"target_entity_ref"`
+	Count            int    `json:"count"`
+}
+
+type kbGapFieldCountView struct {
+	TargetEntityType string `json:"target_entity_type"`
+	FieldName        string `json:"field_name"`
+	Count            int    `json:"count"`
+}
+
 // kbGapReportView is GET /kb/gaps' payload: Counts is the default report
 // (genuine content gaps only, aiprompt.DefaultReportReasonCodes,
 // zero-filled); OperationalCounts keeps unsupported_request/
 // human_requested/engine_error/other distinguishable rather than either
-// hidden or blended into Counts; Recent is a bounded, newest-first page of
-// representative events under the same filter.
+// hidden or blended into Counts; TopTargetEntities/TopMissingFields rank
+// which specific entity/field drives those counts (bounded, most-frequent
+// first — see KBGapReport's own doc comment for why Counts and Recent
+// cannot answer that on their own); Recent is a bounded, newest-first page
+// of representative events under the same filter.
 type kbGapReportView struct {
 	Counts            []kbGapReasonCountView `json:"counts"`
 	OperationalCounts []kbGapReasonCountView `json:"operational_counts"`
+	TopTargetEntities []kbGapEntityCountView `json:"top_target_entities"`
+	TopMissingFields  []kbGapFieldCountView  `json:"top_missing_fields"`
 	Recent            []kbGapEventView       `json:"recent"`
 }
 
@@ -93,6 +110,8 @@ func mapKBGapReport(r store.KBGapReport) kbGapReportView {
 	return kbGapReportView{
 		Counts:            mapKBGapCounts(r.Counts),
 		OperationalCounts: mapKBGapCounts(r.OperationalCounts),
+		TopTargetEntities: mapKBGapEntityCounts(r.TopTargetEntities),
+		TopMissingFields:  mapKBGapFieldCounts(r.TopMissingFields),
 		Recent:            mapKBGapEvents(r.Recent),
 	}
 }
@@ -101,6 +120,22 @@ func mapKBGapCounts(cs []store.KBGapReasonCount) []kbGapReasonCountView {
 	out := make([]kbGapReasonCountView, len(cs))
 	for i, rc := range cs {
 		out[i] = kbGapReasonCountView{ReasonCode: rc.ReasonCode, Count: rc.Count}
+	}
+	return out
+}
+
+func mapKBGapEntityCounts(cs []store.KBGapTargetEntityCount) []kbGapEntityCountView {
+	out := make([]kbGapEntityCountView, len(cs))
+	for i, c := range cs {
+		out[i] = kbGapEntityCountView{TargetEntityType: c.TargetEntityType, TargetEntityRef: c.TargetEntityRef, Count: c.Count}
+	}
+	return out
+}
+
+func mapKBGapFieldCounts(cs []store.KBGapMissingFieldCount) []kbGapFieldCountView {
+	out := make([]kbGapFieldCountView, len(cs))
+	for i, c := range cs {
+		out[i] = kbGapFieldCountView{TargetEntityType: c.TargetEntityType, FieldName: c.FieldName, Count: c.Count}
 	}
 	return out
 }

@@ -115,7 +115,10 @@ type KBGapFilter struct {
 	TargetEntityType string
 	TargetEntityRef  string
 	// Limit bounds the "recent representative events" page; <= 0 defaults
-	// to defaultKBGapRecentLimit.
+	// to defaultKBGapRecentLimit, and anything above maxKBGapRecentLimit is
+	// clamped to it — GET /kb/gaps describes this as a bounded page, so an
+	// oversized caller value (e.g. ?limit=2147483647) must not be able to
+	// materialize every matching event instead.
 	Limit int
 }
 
@@ -123,6 +126,27 @@ type KBGapFilter struct {
 type KBGapReasonCount struct {
 	ReasonCode string
 	Count      int
+}
+
+// KBGapTargetEntityCount is one target entity's escalation count within a
+// filter, most-frequent first — the per-product/tariff/etc. rollup a reason-
+// code count alone cannot answer ("which product causes the most
+// escalations"), and Recent alone cannot either once matching events exceed
+// its own bounded page.
+type KBGapTargetEntityCount struct {
+	TargetEntityType string
+	TargetEntityRef  string
+	Count            int
+}
+
+// KBGapMissingFieldCount is one (entity type, field name) pair's count
+// within a filter, most-frequent first. Scoped by entity type because the
+// same field name can mean different things on different entities (e.g.
+// "price" on a product vs. a tariff) — see kbGapFieldAllowlist.
+type KBGapMissingFieldCount struct {
+	TargetEntityType string
+	FieldName        string
+	Count            int
 }
 
 // KBGapReport is GET /kb/gaps' payload: aggregated counts plus a bounded
@@ -141,8 +165,23 @@ type KBGapReport struct {
 	// or a customer's own request for a human is never miscounted as a
 	// knowledge-base gap.
 	OperationalCounts []KBGapReasonCount
+	// TopTargetEntities and TopMissingFields are rollups over the SAME
+	// filter as Counts/Recent, bounded at maxKBGapRollupRows — see their
+	// types' own doc comments for why a reason-code count and a bounded
+	// Recent sample cannot answer "which entity/field" on their own.
+	TopTargetEntities []KBGapTargetEntityCount
+	TopMissingFields  []KBGapMissingFieldCount
 	Recent            []KBGapEvent
 }
+
+// defaultKBGapRecentLimit's ceiling — see KBGapFilter.Limit's doc comment.
+const maxKBGapRecentLimit = 500
+
+// maxKBGapRollupRows bounds TopTargetEntities/TopMissingFields: both are
+// "which ones matter most" rollups an operator scans by eye, not a paged
+// listing, so a fixed, generous cap (rather than a caller-controlled one)
+// keeps the query answerable without inventing a second pagination scheme.
+const maxKBGapRollupRows = 20
 
 // operationalReasonCodes is the closed vocabulary's remainder after
 // aiprompt.DefaultReportReasonCodes — see KBGapReport.OperationalCounts.
@@ -156,7 +195,7 @@ var operationalReasonCodes = []string{
 // see KBGapReport) plus a bounded page of recent events, all under the same
 // filter.
 func (s *Store) KBGapReportFor(ctx context.Context, f KBGapFilter) (KBGapReport, error) {
-	where, args := kbGapFilterClause(f)
+	where, args := kbGapFilterClause(f, "")
 	clause := strings.Join(where, " AND ")
 
 	countRows, err := s.db.Query(ctx, `
@@ -187,6 +226,8 @@ func (s *Store) KBGapReportFor(ctx context.Context, f KBGapFilter) (KBGapReport,
 	limit := f.Limit
 	if limit <= 0 {
 		limit = defaultKBGapRecentLimit
+	} else if limit > maxKBGapRecentLimit {
+		limit = maxKBGapRecentLimit
 	}
 	recentArgs := append(append([]any{}, args...), limit)
 	rows, err := s.db.Query(ctx, `
@@ -216,11 +257,82 @@ func (s *Store) KBGapReportFor(ctx context.Context, f KBGapFilter) (KBGapReport,
 		return KBGapReport{}, err
 	}
 
+	topEntities, err := topTargetEntitiesFor(ctx, s.db, clause, args)
+	if err != nil {
+		return KBGapReport{}, err
+	}
+	topFields, err := topMissingFieldsFor(ctx, s.db, f, args)
+	if err != nil {
+		return KBGapReport{}, err
+	}
+
 	return KBGapReport{
 		Counts:            reasonCountsFor(aiprompt.DefaultReportReasonCodes(), counts),
 		OperationalCounts: reasonCountsFor(operationalReasonCodes, counts),
+		TopTargetEntities: topEntities,
+		TopMissingFields:  topFields,
 		Recent:            recent,
 	}, nil
+}
+
+// topTargetEntitiesFor ranks target entities by escalation count under the
+// same filter clause KBGapReportFor already built (target_entity_ref = ”
+// rows — no target at all — are meaningless here and excluded, unlike the
+// reason-code counts above which count every matching event regardless of
+// whether it named a target).
+func topTargetEntitiesFor(ctx context.Context, db *dbx.DB, clause string, args []any) ([]KBGapTargetEntityCount, error) {
+	rows, err := db.Query(ctx, `
+		SELECT target_entity_type, target_entity_ref, count(*) AS n FROM ai_kb_gap_events
+		WHERE `+clause+` AND target_entity_ref != ''
+		GROUP BY target_entity_type, target_entity_ref
+		ORDER BY n DESC, target_entity_type, target_entity_ref
+		LIMIT `+itoa(maxKBGapRollupRows), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []KBGapTargetEntityCount
+	for rows.Next() {
+		var c KBGapTargetEntityCount
+		if err := rows.Scan(&c.TargetEntityType, &c.TargetEntityRef, &c.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// topMissingFieldsFor ranks (entity type, field name) pairs by how often
+// each was cited as missing, under the SAME filter as everything else in
+// KBGapReportFor — field names live in ai_kb_gap_missing_fields, so this is
+// the one query here that joins back to ai_kb_gap_events for the filter and
+// for target_entity_type (a field's own row has no entity-type column of
+// its own; see 0018_kb_gap_telemetry.up.sql). kbGapFilterClause(f, "e.")
+// yields the same filter values as the caller's own args, qualified for the
+// "e" alias — a fresh call rather than string-editing the caller's clause.
+func topMissingFieldsFor(ctx context.Context, db *dbx.DB, f KBGapFilter, args []any) ([]KBGapMissingFieldCount, error) {
+	whereJoined, _ := kbGapFilterClause(f, "e.")
+	clauseJoined := strings.Join(whereJoined, " AND ")
+	rows, err := db.Query(ctx, `
+		SELECT e.target_entity_type, mf.field_name, count(*) AS n
+		FROM ai_kb_gap_missing_fields mf JOIN ai_kb_gap_events e ON mf.event_id = e.id
+		WHERE `+clauseJoined+`
+		GROUP BY e.target_entity_type, mf.field_name
+		ORDER BY n DESC, e.target_entity_type, mf.field_name
+		LIMIT `+itoa(maxKBGapRollupRows), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []KBGapMissingFieldCount
+	for rows.Next() {
+		var c KBGapMissingFieldCount
+		if err := rows.Scan(&c.TargetEntityType, &c.FieldName, &c.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func reasonCountsFor(codes []string, counts map[string]int) []KBGapReasonCount {
@@ -234,28 +346,40 @@ func reasonCountsFor(codes []string, counts map[string]int) []KBGapReasonCount {
 // kbGapFilterClause builds KBGapFilter's WHERE clause and positional args —
 // organization_id is always present (never optional), matching every other
 // filter in this codebase's own dynamic-query convention (see ListChats).
-func kbGapFilterClause(f KBGapFilter) ([]string, []any) {
+// prefix qualifies every column (e.g. "e." for a query that joins
+// ai_kb_gap_events under an "e" alias, "" for a query against that table
+// alone) — every column referenced here belongs to ai_kb_gap_events itself,
+// never to a joined table, so one prefix covers the whole clause.
+func kbGapFilterClause(f KBGapFilter, prefix string) ([]string, []any) {
 	args := []any{f.OrgID}
-	where := []string{"organization_id = $1"}
+	// The simulator (GetOrCreateSimulatorAccount) drives real drafts through
+	// the SAME response.Service pipeline as a genuine customer, so prompt
+	// testing produces genuine ai_kb_gap_events rows too — deliberately
+	// excluded from this operator-facing report so testing a prompt never
+	// inflates the "real conversations" counts it exists to track. A per-chat
+	// drill-down (GapEventsForChat) is unaffected: it never calls this
+	// clause, so a chat that happens to be a simulator conversation still
+	// shows its own gap history when opened directly.
+	where := []string{prefix + "organization_id = $1", prefix + "channel != 'simulator'"}
 	if f.From != nil {
 		args = append(args, f.From.UTC().Format("2006-01-02 15:04:05.000"))
-		where = append(where, "created_at >= $"+itoa(len(args)))
+		where = append(where, prefix+"created_at >= $"+itoa(len(args)))
 	}
 	if f.To != nil {
 		args = append(args, f.To.UTC().Format("2006-01-02 15:04:05.000"))
-		where = append(where, "created_at <= $"+itoa(len(args)))
+		where = append(where, prefix+"created_at <= $"+itoa(len(args)))
 	}
 	if f.ReasonCode != "" {
 		args = append(args, f.ReasonCode)
-		where = append(where, "reason_code = $"+itoa(len(args)))
+		where = append(where, prefix+"reason_code = $"+itoa(len(args)))
 	}
 	if f.TargetEntityType != "" {
 		args = append(args, f.TargetEntityType)
-		where = append(where, "target_entity_type = $"+itoa(len(args)))
+		where = append(where, prefix+"target_entity_type = $"+itoa(len(args)))
 	}
 	if f.TargetEntityRef != "" {
 		args = append(args, f.TargetEntityRef)
-		where = append(where, "target_entity_ref = $"+itoa(len(args)))
+		where = append(where, prefix+"target_entity_ref = $"+itoa(len(args)))
 	}
 	return where, args
 }
@@ -333,27 +457,60 @@ func chatOrganizationIDTx(ctx context.Context, tx *dbx.Tx, chatID uuid.UUID) (st
 	return orgID, nil
 }
 
+// allKBGapReasonCodes/allKBGapEntityTypes are this package's own copies of
+// aiprompt's closed vocabularies (built once, not per insert), checked
+// again in insertKBGapEventTx — the final gate before a row exists in the
+// DB at all (migration 0018 deliberately carries no CHECK constraint of its
+// own; see 0018_kb_gap_telemetry.up.sql). DraftOption is exported, so
+// aiprompt.sanitizeKBGap having already validated a MODEL-authored
+// diagnostic is not a guarantee every caller went through it — a value
+// outside the closed set here is normalized to the same default an absent
+// one already gets, never rejected outright: an optional diagnostic must
+// never fail the draft write it rides in on.
+var (
+	allKBGapReasonCodes = stringSet(aiprompt.AllKBGapReasonCodes())
+	allKBGapEntityTypes = stringSet(aiprompt.AllKBGapEntityTypes())
+)
+
+func stringSet(items []string) map[string]bool {
+	out := make(map[string]bool, len(items))
+	for _, s := range items {
+		out[s] = true
+	}
+	return out
+}
+
 // insertKBGapEventTx records one ai_kb_gap_events row (plus its
 // missing_fields children) for a draft option that escalated.
 //
-// reason_code defaults to "other" when the option carries no structured
-// diagnostic at all (a v6-and-earlier response, or a v7 response whose
-// kb_gap aiprompt.ValidateResponseV7 sanitized away entirely): every
-// escalation gets exactly one event, never zero, or the "KB gaps" report
-// would silently undercount however many escalations the model failed (or
-// was never asked, pre-v7) to classify.
+// reason_code defaults to "other" — both when the option carries no
+// structured diagnostic at all (a v6-and-earlier response, or a v7 response
+// whose kb_gap aiprompt.ValidateResponseV7 sanitized away entirely) and
+// when it names a value outside the closed vocabulary (see
+// allKBGapReasonCodes above): every escalation gets exactly one event,
+// never zero, or the "KB gaps" report would silently undercount however
+// many escalations went unclassified.
 //
-// source defaults to "model": the only caller that sets KBGapSource to
-// "engine" explicitly is response/service.go's holdingDraft, a hard engine
-// failure that never reached the model contract at all.
+// source defaults to "model" the same way — the only caller that sets
+// KBGapSource to "engine" explicitly is response/service.go's holdingDraft,
+// a hard engine failure that never reached the model contract at all.
+//
+// target_entity_type/target_entity_ref are cleared together (never one
+// without the other) unless the type is one of the closed
+// AllKBGapEntityTypes — the same "both valid or neither" invariant
+// aiprompt.sanitizeKBGap enforces for a model-authored diagnostic.
 func insertKBGapEventTx(ctx context.Context, tx *dbx.Tx, orgID, channel string, chatID uuid.UUID, trigger uuid.NullUUID, draftID uuid.UUID, o DraftOption) error {
 	reasonCode := o.KBGapReasonCode
-	if reasonCode == "" {
-		reasonCode = "other"
+	if !allKBGapReasonCodes[reasonCode] {
+		reasonCode = aiprompt.KBGapReasonOther
 	}
 	source := o.KBGapSource
-	if source == "" {
-		source = "model"
+	if source != aiprompt.KBGapSourceModel && source != aiprompt.KBGapSourceEngine {
+		source = aiprompt.KBGapSourceModel
+	}
+	targetEntityType, targetEntityRef := o.KBGapTargetEntityType, o.KBGapTargetEntityRef
+	if targetEntityType == "" || targetEntityRef == "" || !allKBGapEntityTypes[targetEntityType] {
+		targetEntityType, targetEntityRef = "", ""
 	}
 	var eventID uuid.UUID
 	if err := tx.QueryRow(ctx, `
@@ -361,7 +518,7 @@ func insertKBGapEventTx(ctx context.Context, tx *dbx.Tx, orgID, channel string, 
 			(organization_id, draft_id, channel, chat_id, trigger_message_id, reason_code, target_entity_type, target_entity_ref, escalation_reason, source)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id`,
-		orgID, draftID, channel, chatID, trigger, reasonCode, o.KBGapTargetEntityType, o.KBGapTargetEntityRef, o.EscalationReason, source).
+		orgID, draftID, channel, chatID, trigger, reasonCode, targetEntityType, targetEntityRef, o.EscalationReason, source).
 		Scan(&eventID); err != nil {
 		return err
 	}
@@ -369,8 +526,15 @@ func insertKBGapEventTx(ctx context.Context, tx *dbx.Tx, orgID, channel string, 
 		if field == "" {
 			continue
 		}
+		// ON CONFLICT DO NOTHING makes this insert idempotent against a
+		// repeated field name: aiprompt.sanitizeKBGap already dedupes a
+		// model-authored diagnostic, but DraftOption is exported, so a
+		// caller that builds one directly must not be able to roll back
+		// the whole draft write over UNIQUE(event_id, field_name) — an
+		// optional diagnostic must never be able to fail a customer draft.
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO ai_kb_gap_missing_fields (event_id, field_name) VALUES ($1, $2)`,
+			`INSERT INTO ai_kb_gap_missing_fields (event_id, field_name) VALUES ($1, $2)
+				ON CONFLICT (event_id, field_name) DO NOTHING`,
 			eventID, field); err != nil {
 			return err
 		}

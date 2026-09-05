@@ -27,16 +27,22 @@ type KBGapDiagnostic struct {
 }
 
 // Reason codes are the closed KB-gap vocabulary (DECISIONS.md-equivalent for
-// this contract): the first five are genuine knowledge-gap categories and
+// this contract): the first four are genuine knowledge-gap categories and
 // are the only ones the default "KB gaps" report aggregates; the remaining
 // four are operational/non-gap escalations that must stay distinguishable
 // from an actual content gap, never blended into the same count.
+//
+// There is deliberately no "unavailable_entity": a known-but-currently-
+// unavailable product (rule 1a) and a known delivery zone with no coverage
+// (rule 2) are BOTH answered directly, never escalated — and kb_gap is only
+// ever filled in on escalation — so no reachable, non-conflicting trigger
+// for it exists in this contract's design. Removed rather than shipped dead
+// (see the v7 frames' rule 9a decision table).
 const (
 	KBGapReasonMissingEntity     = "missing_entity"
 	KBGapReasonMissingField      = "missing_field"
 	KBGapReasonAmbiguousEntity   = "ambiguous_entity"
 	KBGapReasonConflictingKBData = "conflicting_kb_data"
-	KBGapReasonUnavailableEntity = "unavailable_entity"
 
 	KBGapReasonUnsupportedRequest = "unsupported_request"
 	KBGapReasonHumanRequested     = "human_requested"
@@ -61,7 +67,7 @@ const (
 func DefaultReportReasonCodes() []string {
 	return []string{
 		KBGapReasonMissingEntity, KBGapReasonMissingField, KBGapReasonAmbiguousEntity,
-		KBGapReasonConflictingKBData, KBGapReasonUnavailableEntity,
+		KBGapReasonConflictingKBData,
 	}
 }
 
@@ -71,7 +77,7 @@ func DefaultReportReasonCodes() []string {
 func AllKBGapReasonCodes() []string {
 	return []string{
 		KBGapReasonMissingEntity, KBGapReasonMissingField, KBGapReasonAmbiguousEntity,
-		KBGapReasonConflictingKBData, KBGapReasonUnavailableEntity,
+		KBGapReasonConflictingKBData,
 		KBGapReasonUnsupportedRequest, KBGapReasonHumanRequested, KBGapReasonEngineError, KBGapReasonOther,
 	}
 }
@@ -87,7 +93,6 @@ var modelKBGapReasonCodes = map[string]bool{
 	KBGapReasonMissingField:       true,
 	KBGapReasonAmbiguousEntity:    true,
 	KBGapReasonConflictingKBData:  true,
-	KBGapReasonUnavailableEntity:  true,
 	KBGapReasonUnsupportedRequest: true,
 	KBGapReasonHumanRequested:     true,
 	KBGapReasonOther:              true,
@@ -147,10 +152,10 @@ var kbGapFieldAllowlist = map[string]map[string]bool{
 }
 
 // kbGapEntityExists validates a target ref against the LOADED KB (every row
-// the organization owns), not the customer-visible catalog: an inactive
-// tariff or an unavailable product is still a real KB entity an operator can
-// act on (e.g. KBGapReasonUnavailableEntity or a missing price on a
-// currently-unavailable product), so it must not be scrubbed as invented.
+// the organization owns), not the customer-visible catalog: an unavailable
+// product is still a real KB entity an operator can act on (e.g. a
+// missing_field diagnostic about a currently-unavailable product's
+// installation_terms), so it must not be scrubbed as invented.
 func kbGapEntityExists(kb *KB, entityType, ref string) bool {
 	if kb == nil || ref == "" {
 		return false
@@ -244,8 +249,15 @@ func sanitizeKBGap(gap *KBGapDiagnostic, kb *KB) *KBGapDiagnostic {
 		out.TargetEntityType = gap.TargetEntityType
 		out.TargetEntityRef = gap.TargetEntityRef
 		if allowed := kbGapFieldAllowlist[gap.TargetEntityType]; allowed != nil {
+			seen := make(map[string]bool, len(gap.MissingFields))
 			for _, f := range gap.MissingFields {
-				if allowed[f] {
+				// The v7 schema has no uniqueItems constraint, so a
+				// schema-valid model response can repeat an allowed field
+				// (e.g. ["price","price"]); ai_kb_gap_missing_fields has
+				// UNIQUE(event_id, field_name), and this diagnostic must
+				// never be able to roll back the draft it rides in on.
+				if allowed[f] && !seen[f] {
+					seen[f] = true
 					out.MissingFields = append(out.MissingFields, f)
 				}
 			}
@@ -263,7 +275,7 @@ const kbGapDescription = "Optional structured escalation diagnostic. Diagnostic 
 func kbGapJSONSchema() map[string]any {
 	reasonCodes := []string{
 		KBGapReasonMissingEntity, KBGapReasonMissingField, KBGapReasonAmbiguousEntity,
-		KBGapReasonConflictingKBData, KBGapReasonUnavailableEntity, KBGapReasonUnsupportedRequest,
+		KBGapReasonConflictingKBData, KBGapReasonUnsupportedRequest,
 		KBGapReasonHumanRequested, KBGapReasonOther,
 	}
 	return map[string]any{

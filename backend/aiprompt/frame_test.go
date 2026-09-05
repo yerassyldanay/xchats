@@ -245,7 +245,7 @@ func TestPromptRefShopKBV6_Value(t *testing.T) {
 // (cut a v8, never edit v7 in place once shipped). v4/v5/v6 stay embedded
 // and pinned above, completely untouched by this addition. -----------------
 
-const frameShopKBV7RUSHA256 = "bc96db14bbda4cc0c7fc3445892e874b16ef09d7772e2279187f7fe4e22ed183"
+const frameShopKBV7RUSHA256 = "8f6a055e4cc99188db666cae4c5f2f5efb37367d4810becc29d9bb6cad2139ae"
 
 func TestFrameShopKBV7RU_MatchesPinnedHash(t *testing.T) {
 	sum := sha256.Sum256([]byte(FrameShopKBV7RU()))
@@ -255,7 +255,7 @@ func TestFrameShopKBV7RU_MatchesPinnedHash(t *testing.T) {
 	}
 }
 
-const frameShopKBV7TGRUSHA256 = "df6b0aced899cc426e9c877e559a4db8e0427700a776d6ab85eb77ae137effb8"
+const frameShopKBV7TGRUSHA256 = "52ddf991041429a0aa57cacfb63c43c111afcdfbc3bfe76a6dc6f2f9f59b59b9"
 
 func TestFrameShopKBV7TGRU_MatchesPinnedHash(t *testing.T) {
 	sum := sha256.Sum256([]byte(FrameShopKBV7TGRU()))
@@ -289,10 +289,11 @@ func TestFrameShopKBV7TGRU_BodyMatchesGradedFrame(t *testing.T) {
 }
 
 // TestFrameShopKBV7_IsV6PlusKBGapRule pins v7's relationship to v6: v7 adds
-// exactly one new rule (the "kb_gap" diagnostic, rule 9) and changes
-// nothing else — every v6 slot stays present, no new %%SLOT%% token is
-// introduced (kb_gap rides the existing %%RESPONSE_SCHEMA%% slot via
-// RenderResponseSchemaV7), and v6 itself stays completely untouched.
+// the new "kb_gap" diagnostic (rule 9) and, to make conflicting_kb_data a
+// reachable reason_code, broadens rule 1b to also cover contradictory (not
+// just absent) facts — every v6 slot still stays present, no new %%SLOT%%
+// token is introduced (kb_gap rides the existing %%RESPONSE_SCHEMA%% slot
+// via RenderResponseSchemaV7), and v6 itself stays completely untouched.
 func TestFrameShopKBV7_IsV6PlusKBGapRule(t *testing.T) {
 	for _, f := range []struct{ name, text string }{
 		{"v7 RU", FrameShopKBV7RU()},
