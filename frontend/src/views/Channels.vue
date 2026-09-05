@@ -48,21 +48,23 @@ const working = ref<string | null>(null)
 // actionError surfaces a failed retry/check on the card that caused it, rather
 // than as a toast that disappears before anyone reads it.
 const actionError = ref<Record<string, string>>({})
-// oauthBanner surfaces the ONE-SHOT ?instagram_connected / ?instagram_error
+// connectionBanner surfaces the ONE-SHOT ?instagram_connected / ?instagram_error
 // (or their messenger_* twins) query params a redirect back from Meta's
 // OAuth consent screen lands with (see AddAccountDialog.vue's
 // connectInstagram/connectMessenger and the backend's meta_oauth.go /
-// meta_oauth_messenger.go) — cleared from the URL on mount. The banner
-// itself now outlives that: see saveOauthBanner/restoreOauthBanner below.
-const oauthBanner = ref<{ kind: 'success' | 'error'; message: string; detail?: string } | null>(null)
+// meta_oauth_messenger.go) — cleared from the URL on mount. It carries only
+// a display kind/message/detail for THIS UI banner, never any OAuth
+// token/code/credential. The banner itself now outlives that: see
+// saveConnectionBanner/restoreConnectionBanner below.
+const connectionBanner = ref<{ kind: 'success' | 'error'; message: string; detail?: string } | null>(null)
 
-// oauthErrorBanner translates a stable ..._error_code (see backend/internal/
-// httpapi/meta_oauth.go's metaOAuthErr* constants) into a localized message
-// instead of showing the backend's raw (Russian) fallback text verbatim in
-// every locale. An unrecognized/absent code just keeps the old raw-message
-// behavior. CONNECT_FAILED wraps an arbitrary upstream error that cannot be
-// localized, so its raw message survives as `detail` under the translated
-// headline rather than being discarded.
+// connectionErrorBanner translates a stable ..._error_code (see backend/
+// internal/httpapi/meta_oauth.go's metaOAuthErr* constants) into a localized
+// message instead of showing the backend's raw (Russian) fallback text
+// verbatim in every locale. An unrecognized/absent code just keeps the old
+// raw-message behavior. CONNECT_FAILED wraps an arbitrary upstream error
+// that cannot be localized, so its raw message survives as `detail` under
+// the translated headline rather than being discarded.
 const OAUTH_ERROR_KEYS: Record<string, string> = {
   MISSING_PARAMS: 'accounts.page.oauthErrors.missingParams',
   SESSION_EXPIRED: 'accounts.page.oauthErrors.sessionExpired',
@@ -70,45 +72,46 @@ const OAUTH_ERROR_KEYS: Record<string, string> = {
   NO_PAGES: 'accounts.page.oauthErrors.noPages',
   MULTIPLE_PAGES: 'accounts.page.oauthErrors.multiplePages',
 }
-function oauthErrorBanner(message: string, code: unknown): { kind: 'error'; message: string; detail?: string } {
+function connectionErrorBanner(message: string, code: unknown): { kind: 'error'; message: string; detail?: string } {
   const key = typeof code === 'string' ? OAUTH_ERROR_KEYS[code] : undefined
   if (!key) return { kind: 'error', message }
   return code === 'CONNECT_FAILED' ? { kind: 'error', message: t(key), detail: message } : { kind: 'error', message: t(key) }
 }
 
-// The OAuth banner is otherwise a true one-shot: query params are stripped
-// on mount, so a reload or an accidental dismiss used to lose the
+// The connection banner is otherwise a true one-shot: query params are
+// stripped on mount, so a reload or an accidental dismiss used to lose the
 // connection result for good. sessionStorage survives a reload without
 // needing a new backend activity feed; a TTL keeps a stale result from
-// lingering into unrelated later visits.
-const OAUTH_BANNER_KEY = 'xchats.accounts.oauthBanner'
-const OAUTH_BANNER_TTL_MS = 5 * 60 * 1000
-function saveOauthBanner(banner: typeof oauthBanner.value) {
+// lingering into unrelated later visits. Only ever holds the display object
+// above (kind/message/detail/ts) — never a token, code, or credential.
+const CONNECTION_BANNER_KEY = 'xchats.accounts.connectionBanner'
+const CONNECTION_BANNER_TTL_MS = 5 * 60 * 1000
+function saveConnectionBanner(banner: typeof connectionBanner.value) {
   try {
-    if (banner) sessionStorage.setItem(OAUTH_BANNER_KEY, JSON.stringify({ ...banner, ts: Date.now() }))
-    else sessionStorage.removeItem(OAUTH_BANNER_KEY)
+    if (banner) sessionStorage.setItem(CONNECTION_BANNER_KEY, JSON.stringify({ ...banner, ts: Date.now() }))
+    else sessionStorage.removeItem(CONNECTION_BANNER_KEY)
   } catch {
     // Unavailable storage (locked-down/private browsing) — the banner just
     // won't survive a refresh there; nothing else depends on it.
   }
 }
-function restoreOauthBanner() {
+function restoreConnectionBanner() {
   try {
-    const raw = sessionStorage.getItem(OAUTH_BANNER_KEY)
+    const raw = sessionStorage.getItem(CONNECTION_BANNER_KEY)
     if (!raw) return
     const parsed = JSON.parse(raw)
-    if (Date.now() - parsed.ts > OAUTH_BANNER_TTL_MS) {
-      sessionStorage.removeItem(OAUTH_BANNER_KEY)
+    if (Date.now() - parsed.ts > CONNECTION_BANNER_TTL_MS) {
+      sessionStorage.removeItem(CONNECTION_BANNER_KEY)
       return
     }
-    oauthBanner.value = { kind: parsed.kind, message: parsed.message, detail: parsed.detail }
+    connectionBanner.value = { kind: parsed.kind, message: parsed.message, detail: parsed.detail }
   } catch {
     // Malformed/unavailable storage — same as "nothing to restore".
   }
 }
-function dismissOauthBanner() {
-  oauthBanner.value = null
-  saveOauthBanner(null)
+function dismissConnectionBanner() {
+  connectionBanner.value = null
+  saveConnectionBanner(null)
 }
 
 // connection tone -> badge + dot classes (connected keeps WhatsApp green)
@@ -200,19 +203,19 @@ onMounted(() => {
   const fbConnected = route.query.messenger_connected
   const fbError = route.query.messenger_error
   if (igConnected) {
-    oauthBanner.value = { kind: 'success', message: t('accounts.page.instagramConnected') }
+    connectionBanner.value = { kind: 'success', message: t('accounts.page.instagramConnected') }
   } else if (typeof igError === 'string' && igError) {
-    oauthBanner.value = oauthErrorBanner(igError, route.query.instagram_error_code)
+    connectionBanner.value = connectionErrorBanner(igError, route.query.instagram_error_code)
   } else if (fbConnected) {
-    oauthBanner.value = { kind: 'success', message: t('accounts.page.messengerConnected') }
+    connectionBanner.value = { kind: 'success', message: t('accounts.page.messengerConnected') }
   } else if (typeof fbError === 'string' && fbError) {
-    oauthBanner.value = oauthErrorBanner(fbError, route.query.messenger_error_code)
+    connectionBanner.value = connectionErrorBanner(fbError, route.query.messenger_error_code)
   }
   if (igConnected || igError || fbConnected || fbError) {
     router.replace({ path: route.path, query: {} })
-    saveOauthBanner(oauthBanner.value)
+    saveConnectionBanner(connectionBanner.value)
   } else {
-    restoreOauthBanner()
+    restoreConnectionBanner()
   }
 })
 
@@ -351,17 +354,17 @@ async function remove(a: Account) {
       <TabsContent value="accounts" class="flex-1 overflow-y-auto px-8 py-6 space-y-6 mt-0">
         <!-- one-shot result of an Instagram OAuth redirect landing back here -->
         <div
-          v-if="oauthBanner"
+          v-if="connectionBanner"
           class="flex items-start gap-2 rounded-lg px-4 py-3 text-sm"
-          :class="oauthBanner.kind === 'success' ? 'bg-wa/10 text-wa' : 'bg-destructive/10 text-destructive'"
+          :class="connectionBanner.kind === 'success' ? 'bg-wa/10 text-wa' : 'bg-destructive/10 text-destructive'"
         >
-          <CircleCheck v-if="oauthBanner.kind === 'success'" class="w-4 h-4 shrink-0 mt-0.5" />
+          <CircleCheck v-if="connectionBanner.kind === 'success'" class="w-4 h-4 shrink-0 mt-0.5" />
           <CircleAlert v-else class="w-4 h-4 shrink-0 mt-0.5" />
           <span class="min-w-0 flex-1">
-            {{ oauthBanner.message }}
-            <span v-if="oauthBanner.detail" class="block text-xs opacity-80">{{ oauthBanner.detail }}</span>
+            {{ connectionBanner.message }}
+            <span v-if="connectionBanner.detail" class="block text-xs opacity-80">{{ connectionBanner.detail }}</span>
           </span>
-          <button class="text-xs underline shrink-0" @click="dismissOauthBanner">{{ t('accounts.page.dismiss') }}</button>
+          <button class="text-xs underline shrink-0" @click="dismissConnectionBanner">{{ t('accounts.page.dismiss') }}</button>
         </div>
 
         <!-- one-time nudge toward the Knowledge Base right after the first channel ever connects -->

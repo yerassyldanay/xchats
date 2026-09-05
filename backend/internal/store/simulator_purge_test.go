@@ -64,6 +64,58 @@ func TestPurgeSimulatorData_RemovesConversationAndCustomer(t *testing.T) {
 	}
 }
 
+// TestPurgeSimulatorData_RemovesKBGapEvents proves the P1 finding: a
+// simulator escalation's ai_kb_gap_events row has no FK back to wa_chats
+// (chat_id is polymorphic, like ai_drafts.chat_id) and draft_id is ON DELETE
+// SET NULL rather than CASCADE, so without an explicit delete here it would
+// silently outlive the chat/customer purge above and keep counting toward
+// KBGapReportFor's "real conversations" report forever (kbGapFilterClause's
+// channel != 'simulator' exclusion only hides it from that report's
+// aggregates — it does nothing to the stored row). Also checks org
+// scoping, the same way ScopedToOwnOrganization does for chats/customers.
+func TestPurgeSimulatorData_RemovesKBGapEvents(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	org1, err := st.SeedOrganization(ctx, "gap-purge-org-1")
+	if err != nil {
+		t.Fatalf("seed org1: %v", err)
+	}
+	org2, err := st.SeedOrganization(ctx, "gap-purge-org-2")
+	if err != nil {
+		t.Fatalf("seed org2: %v", err)
+	}
+
+	res1 := seedSimulatorConversation(t, st, org1.ID, "sim-gap-1")
+	res2 := seedSimulatorConversation(t, st, org2.ID, "sim-gap-2")
+	for _, r := range []store.InboundResult{res1, res2} {
+		if _, err := st.WriteDraftSet(ctx, "simulator", r.ChatID, uuid.NullUUID{}, []store.DraftOption{
+			{Ordinal: 1, Text: "x", ReplyLanguage: "ru", Escalate: true, KBGapReasonCode: "missing_field"},
+		}); err != nil {
+			t.Fatalf("seed simulator gap event: %v", err)
+		}
+	}
+
+	if _, err := st.PurgeSimulatorData(ctx, org1.ID); err != nil {
+		t.Fatalf("purge org1: %v", err)
+	}
+
+	events1, err := st.GapEventsForChat(ctx, res1.ChatID)
+	if err != nil {
+		t.Fatalf("GapEventsForChat(org1): %v", err)
+	}
+	if len(events1) != 0 {
+		t.Errorf("org1's kb-gap events survived its own purge: %+v", events1)
+	}
+
+	events2, err := st.GapEventsForChat(ctx, res2.ChatID)
+	if err != nil {
+		t.Fatalf("GapEventsForChat(org2): %v", err)
+	}
+	if len(events2) != 1 {
+		t.Errorf("org2's kb-gap event was deleted by org1's purge: %+v", events2)
+	}
+}
+
 func TestPurgeSimulatorData_NeverUsedSimulator_NoOp(t *testing.T) {
 	st := dbtest.New(t)
 	ctx := context.Background()

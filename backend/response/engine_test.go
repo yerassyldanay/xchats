@@ -102,6 +102,43 @@ func TestEngine_Generate_HappyPath(t *testing.T) {
 	}
 }
 
+// TestEngine_Generate_PopulatesKBGapFromModelOutput proves Generate wires
+// the v7 contract all the way through: frameFor now serves PromptRefShopKBV7
+// (not v6), so a model response carrying a valid "kb_gap" must be decoded by
+// ValidateResponseV7 (not the v6 ValidateResponse, which would flag it
+// unknown_property) and surface on GenerateResult.KBGap, tagged
+// Source=model.
+func TestEngine_Generate_PopulatesKBGapFromModelOutput(t *testing.T) {
+	raw := `{"reply_text":"Секунду, уточню.","reply_language":"ru","media_files_to_send":[],` +
+		`"escalate":true,"escalation_reason":"нет цены",` +
+		`"kb_gap":{"reason_code":"missing_field","target_entity_type":"product","target_entity_ref":"widget","missing_fields":["price"]}}`
+	client := &fakeClient{responses: []llm.ChatResponse{{Text: raw}}}
+	e := testEngine(client)
+
+	res, err := e.Generate(context.Background(), GenerateRequest{KB: testKB(), IncomingText: "Сколько стоит?"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if !res.Escalate {
+		t.Fatal("want Escalate=true")
+	}
+	if res.KBGap == nil {
+		t.Fatal("want a populated KBGap")
+	}
+	if res.KBGap.ReasonCode != aiprompt.KBGapReasonMissingField {
+		t.Errorf("ReasonCode = %q, want %q", res.KBGap.ReasonCode, aiprompt.KBGapReasonMissingField)
+	}
+	if res.KBGap.TargetEntityType != aiprompt.KBGapEntityProduct || res.KBGap.TargetEntityRef != "widget" {
+		t.Errorf("target = %q/%q, want product/widget", res.KBGap.TargetEntityType, res.KBGap.TargetEntityRef)
+	}
+	if res.KBGap.Source != aiprompt.KBGapSourceModel {
+		t.Errorf("Source = %q, want %q", res.KBGap.Source, aiprompt.KBGapSourceModel)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("a valid kb_gap must never trigger a retry (ClassifyRetryV7, not v6, must be used) — got %d calls", len(client.calls))
+	}
+}
+
 func TestEngine_Generate_ContractShapeRetryResendsIdenticalPrompt(t *testing.T) {
 	client := &fakeClient{responses: []llm.ChatResponse{
 		{Text: "not json"},

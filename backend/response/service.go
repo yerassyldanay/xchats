@@ -99,6 +99,7 @@ func (s *Service) generate(ctx context.Context, conversationID string, convCtx C
 	draft.ReplyLanguage = result.ReplyLanguage
 	draft.Escalate = result.Escalate
 	draft.EscalationReason = result.EscalationReason
+	draft.KBGap = result.KBGap
 	if result.Confidence != 0 {
 		c := result.Confidence
 		draft.Confidence = &c
@@ -108,11 +109,19 @@ func (s *Service) generate(ctx context.Context, conversationID string, convCtx C
 
 // holdingDraft is the explicit hard-failure fallback: the canned holding
 // text, always escalated, with cause recorded as the (internal-only)
-// escalation reason for operator visibility.
+// escalation reason for operator visibility. KBGap is stamped
+// KBGapReasonEngineError/KBGapSourceEngine — a hard Generate error (a KB
+// load failure, a provider error, a response that still fails contract
+// validation) never reached the model contract at all, so it must never be
+// attributed to a fabricated KB entity or reason the model supposedly gave.
 func holdingDraft(draft DraftToPersist, cause error) DraftToPersist {
 	draft.Text = HoldingText
 	draft.ReplyLanguage = "ru"
 	draft.Escalate = true
 	draft.EscalationReason = "engine_error: " + cause.Error()
+	draft.KBGap = &aiprompt.KBGapDiagnostic{
+		ReasonCode: aiprompt.KBGapReasonEngineError,
+		Source:     aiprompt.KBGapSourceEngine,
+	}
 	return draft
 }

@@ -57,6 +57,79 @@ func ClassifyRetry(raw string, kb *KB, cat *Catalog) RetryReason {
 	return RetryReasonNone
 }
 
+// ClassifyRetryV7 is ClassifyRetry for the v7+ contract: identical
+// classification, using ValidateResponseV7 instead of ValidateResponse so a
+// legitimate "kb_gap" property is never misread as unknown_property. This
+// distinction matters in practice, not just in principle: ValidateResponse
+// treats any "kb_gap" key as unknown_property (contract_shape, v6's correct
+// behavior), which would otherwise force a wasted retry on every v7 response
+// that includes a valid diagnostic — i.e. on most escalations. Engine.Generate
+// must call this (never ClassifyRetry) whenever it rendered a v7 frame.
+func ClassifyRetryV7(raw string, kb *KB, cat *Catalog) RetryReason {
+	ext, ok := ExtractFinalOutput(raw)
+	if !ok {
+		return RetryReasonContractShape
+	}
+	resp, issues := ValidateResponseV7(ext.Final, kb, cat)
+	if resp == nil {
+		return RetryReasonContractShape
+	}
+	for _, issue := range issues {
+		switch issue.Code {
+		case "missing_property", "unknown_property", "validation_context", "bad_language":
+			return RetryReasonContractShape
+		}
+	}
+	for _, issue := range issues {
+		if issue.Code == "unknown_media_token" {
+			return RetryReasonMediaNotFound
+		}
+	}
+	if len(resp.MediaFilesToSend) > 0 {
+		if _, err := ResolveSend(resp.MediaFilesToSend, kb, cat); err != nil {
+			return RetryReasonMediaNotFound
+		}
+	}
+	return RetryReasonNone
+}
+
+// RetryFeedbackV7 is RetryFeedback for the v7+ contract — see
+// ClassifyRetryV7 for why this must be the sibling Engine.Generate calls
+// instead of RetryFeedback whenever it rendered a v7 frame.
+func RetryFeedbackV7(raw string, kb *KB, cat *Catalog) string {
+	if ClassifyRetryV7(raw, kb, cat) != RetryReasonMediaNotFound {
+		return ""
+	}
+	ext, ok := ExtractFinalOutput(raw)
+	if !ok {
+		return ""
+	}
+	resp, _ := ValidateResponseV7(ext.Final, kb, cat)
+	if resp == nil {
+		return ""
+	}
+	var badTokens []string
+	for _, tok := range resp.MediaFilesToSend {
+		if cat.MediaByToken(tok) == nil {
+			badTokens = append(badTokens, tok)
+			continue
+		}
+		if _, err := ResolveSend([]string{tok}, kb, cat); err != nil {
+			badTokens = append(badTokens, tok)
+		}
+	}
+	if len(badTokens) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"\n\nВАЖНО — медиа не найдено, исправь и попробуй снова: в предыдущем ответе поле %q "+
+			"содержало значения, для которых сейчас нет медиафайла: %s. Скопируй нужный токен "+
+			"ТОЧНО из блока товара или темы выше — не изменяй, не сокращай и не придумывай "+
+			"новый; если подходящего медиа действительно нет, верни пустой список.",
+		"media_files_to_send", strings.Join(badTokens, ", "),
+	)
+}
+
 // RetryFeedback returns the Russian corrective feedback text to append to a
 // retry's prompt, verbatim-matching the eval harness's
 // correctiveFeedbackTextSchemaKB (evals/harness/retry.go:148-178): it names

@@ -33,14 +33,9 @@ func (r *DraftRepo) ReplaceSuggested(ctx context.Context, draft response.DraftTo
 		trigger = uuid.NullUUID{UUID: tid, Valid: true}
 	}
 
-	written, err := r.Store.WriteDraftSet(ctx, string(draft.Channel), chatID, trigger, []store.DraftOption{{
-		Ordinal:          1,
-		Text:             draft.Text,
-		ReplyLanguage:    draft.ReplyLanguage,
-		Confidence:       draft.Confidence,
-		Escalate:         draft.Escalate,
-		EscalationReason: draft.EscalationReason,
-	}})
+	written, err := r.Store.WriteDraftSet(ctx, string(draft.Channel), chatID, trigger, []store.DraftOption{
+		draftOptionFrom(draft),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("responsestore: write draft: %w", err)
 	}
@@ -60,6 +55,30 @@ func (r *DraftRepo) ReplaceSuggested(ctx context.Context, draft response.DraftTo
 		})
 	}
 	return out, nil
+}
+
+// draftOptionFrom flattens a response.DraftToPersist into the single
+// store.DraftOption WriteDraftSet writes — including its optional kb-gap
+// diagnostic (0018_kb_gap_telemetry), which store.DraftOption carries as
+// plain fields rather than an aiprompt.KBGapDiagnostic so the persistence
+// layer stays free of an aiprompt dependency.
+func draftOptionFrom(draft response.DraftToPersist) store.DraftOption {
+	opt := store.DraftOption{
+		Ordinal:          1,
+		Text:             draft.Text,
+		ReplyLanguage:    draft.ReplyLanguage,
+		Confidence:       draft.Confidence,
+		Escalate:         draft.Escalate,
+		EscalationReason: draft.EscalationReason,
+	}
+	if gap := draft.KBGap; gap != nil {
+		opt.KBGapReasonCode = gap.ReasonCode
+		opt.KBGapTargetEntityType = gap.TargetEntityType
+		opt.KBGapTargetEntityRef = gap.TargetEntityRef
+		opt.KBGapMissingFields = gap.MissingFields
+		opt.KBGapSource = gap.Source
+	}
+	return opt
 }
 
 func nullUUIDString(id uuid.NullUUID) string {

@@ -716,6 +716,253 @@
         }
       ]
     },
+    "ai_kb_gap_events": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "draft_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "channel",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:whatsapp",
+          "default_raw": "'whatsapp'::text"
+        },
+        {
+          "name": "chat_id",
+          "position": 5,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "trigger_message_id",
+          "position": 6,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "reason_code",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "target_entity_type",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "target_entity_ref",
+          "position": 9,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "escalation_reason",
+          "position": 10,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "source",
+          "position": 11,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:model",
+          "default_raw": "'model'::text"
+        },
+        {
+          "name": "created_at",
+          "position": 12,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "name": "ai_kb_gap_events_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "ai_kb_gap_events_draft_id_fkey",
+          "columns": [
+            "draft_id"
+          ],
+          "ref_table": "ai_drafts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ai_kb_gap_events_draft_id_key",
+          "columns": [
+            "draft_id"
+          ],
+          "unique": true,
+          "where": "",
+          "backs_constraint": true
+        },
+        {
+          "name": "ai_kb_gap_events_org_created_idx",
+          "columns": [
+            "organization_id",
+            "created_at"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "ai_kb_gap_events_org_reason_idx",
+          "columns": [
+            "organization_id",
+            "reason_code"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "ai_kb_gap_events_org_entity_idx",
+          "columns": [
+            "organization_id",
+            "target_entity_type",
+            "target_entity_ref"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ]
+    },
+    "ai_kb_gap_missing_fields": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "event_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "field_name",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 4,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "name": "ai_kb_gap_missing_fields_event_id_fkey",
+          "columns": [
+            "event_id"
+          ],
+          "ref_table": "ai_kb_gap_events",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ai_kb_gap_missing_fields_event_id_field_name_key",
+          "columns": [
+            "event_id",
+            "field_name"
+          ],
+          "unique": true,
+          "where": "",
+          "backs_constraint": true
+        },
+        {
+          "name": "ai_kb_gap_missing_fields_event_idx",
+          "columns": [
+            "event_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ]
+    },
     "ai_policies": {
       "columns": [
         {

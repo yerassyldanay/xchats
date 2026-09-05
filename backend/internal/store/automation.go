@@ -488,9 +488,6 @@ func (s *Store) RecoverableDispatchJobs(ctx context.Context, stuckSince time.Tim
 // written=true on a normal persist. The check and the write happen in the
 // same transaction, so no third writer can land between them.
 func (s *Store) WriteDraftSetIfVersionCurrent(ctx context.Context, channel string, chatID uuid.UUID, expectedVersion int64, trigger uuid.NullUUID, opts []DraftOption) (drafts []Draft, written bool, err error) {
-	if channel == "" {
-		channel = "whatsapp"
-	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, false, err
@@ -508,23 +505,13 @@ func (s *Store) WriteDraftSetIfVersionCurrent(ctx context.Context, channel strin
 		return nil, false, tx.Commit(ctx) // nothing written; not an error
 	}
 
-	if _, err := tx.Exec(ctx, `
-		UPDATE ai_drafts SET draft_state='superseded', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE chat_id = $1 AND draft_state='suggested'`, chatID); err != nil {
+	// writeDraftOptionsTx (kbgap.go) is the body WriteDraftSet also runs:
+	// sharing it is what guarantees a stale generation — discarded above,
+	// before this ever runs — produces neither a draft nor a kb-gap
+	// telemetry event, not just the draft.
+	out, err := writeDraftOptionsTx(ctx, tx, channel, chatID, trigger, opts)
+	if err != nil {
 		return nil, false, err
-	}
-	out := make([]Draft, 0, len(opts))
-	for _, o := range opts {
-		var d Draft
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO ai_drafts (chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, confidence, escalate, escalation_reason, draft_state)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'suggested')
-			RETURNING `+draftCols,
-			chatID, channel, trigger, o.Ordinal, o.Text, o.ReplyLanguage, o.Confidence, o.Escalate, o.EscalationReason).
-			Scan(scanDraftDst(&d)...); err != nil {
-			return nil, false, err
-		}
-		out = append(out, d)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, err

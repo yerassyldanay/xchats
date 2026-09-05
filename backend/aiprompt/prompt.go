@@ -94,6 +94,22 @@ func BuildPrompt(frame string, kb *KB) (string, *Catalog, error) {
 	return out, cat, nil
 }
 
+// BuildPromptV7 is BuildPrompt for the v7+ frame family — see RenderPromptV7.
+func BuildPromptV7(frame string, kb *KB) (string, *Catalog, error) {
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		return "", nil, err
+	}
+	out, err := RenderPromptV7(frame, kb.PromptInput(), cat)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := ValidateNoMaterialLeak(out, kb.Materials); err != nil {
+		return "", nil, err
+	}
+	return out, cat, nil
+}
+
 // RenderPrompt renders the stable prompt prefix — frame + assistant config +
 // approved prose + fact-placeholder catalog + semantic media catalog +
 // media-absence list + response schema — from approved ai_* content (input)
@@ -102,6 +118,26 @@ func BuildPrompt(frame string, kb *KB) (string, *Catalog, error) {
 // reduced to a Catalog by BuildCatalog before this is called, so the renderer
 // itself has no route to read a material record or ID.
 func RenderPrompt(frame string, input *PromptInput, cat *Catalog) (string, error) {
+	return renderPromptWithSchema(frame, input, cat, RenderResponseSchema())
+}
+
+// RenderPromptV7 is RenderPrompt for the v7+ frame family (PromptRefShopKBV7/
+// V7TG): identical rendering for every slot except %%RESPONSE_SCHEMA%%, which
+// substitutes RenderResponseSchemaV7 (the schema including the optional
+// kb_gap diagnostic — see contract.go/kbgap.go) instead of
+// RenderResponseSchema. RenderPrompt itself must keep substituting exactly
+// the v6-and-earlier schema, unconditionally, for every existing caller — see
+// ValidateResponseV7's doc comment for why that means a sibling function
+// here rather than a parameter on RenderPrompt.
+func RenderPromptV7(frame string, input *PromptInput, cat *Catalog) (string, error) {
+	return renderPromptWithSchema(frame, input, cat, RenderResponseSchemaV7())
+}
+
+// renderPromptWithSchema is RenderPrompt/RenderPromptV7's shared
+// implementation, parameterized only by which rendered %%RESPONSE_SCHEMA%%
+// text to substitute — every other slot is identical across every frame
+// version, so only the schema choice needs to vary, not this whole function.
+func renderPromptWithSchema(frame string, input *PromptInput, cat *Catalog, schemaJSON string) (string, error) {
 	out := frame
 	out = strings.ReplaceAll(out, SlotAssistant, renderAssistant(input.Assistant))
 	out = strings.ReplaceAll(out, SlotKnowledgeBase, renderTopics(input.Topics))
@@ -119,7 +155,7 @@ func RenderPrompt(frame string, input *PromptInput, cat *Catalog) (string, error
 	out = strings.ReplaceAll(out, SlotTopics, renderTopicBlocks(input, cat))
 	out = strings.ReplaceAll(out, SlotBusinessFacts, renderBusinessFacts(cat.Facts))
 	out = strings.ReplaceAll(out, SlotDeliveryZones, renderDeliveryZones(input.DeliveryZones))
-	out = strings.ReplaceAll(out, SlotResponseSchema, RenderResponseSchema())
+	out = strings.ReplaceAll(out, SlotResponseSchema, schemaJSON)
 	if err := ValidatePrompt(out, cat); err != nil {
 		return "", err
 	}

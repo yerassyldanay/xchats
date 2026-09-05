@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { t } from '../i18n'
 import { connectRealtime } from '../lib/sse'
-import type { CancelChangeResponse, DraftChangeSet, DraftView, KbGateReason, KbMaterial, PromptView } from '../types'
+import type { CancelChangeResponse, DraftChangeSet, DraftView, KbGapFilter, KbGapReport, KbGateReason, KbMaterial, PromptView } from '../types'
 import type { ChangeKind } from '@/composables/draftChanges'
 import type {
   ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, TariffInfoPayload, TariffPayload, TopicPayload,
@@ -52,6 +52,17 @@ export const usePlayground = defineStore('playground', {
     promptView: null as PromptView | null,
     promptLoading: false,
     promptLoadError: '' as string,
+
+    // --- gaps (Пробелы в базе tab) — GET /kb/gaps' aggregated counts plus a
+    // bounded page of recent representative events, auto-refreshed alongside
+    // `live`/`promptView` on every kb.row.changed SSE event once the tab has
+    // been opened at least once (see startRealtime below). gapsFilter is the
+    // last filter loadGaps() was called with, so a realtime refresh re-applies
+    // it instead of silently resetting to "no filter."
+    gapsReport: null as KbGapReport | null,
+    gapsLoading: false,
+    gapsLoadError: '' as string,
+    gapsFilter: {} as KbGapFilter,
 
     // --- shared realtime plumbing --------------------------------------------
     disconnect: null as null | (() => void),
@@ -523,6 +534,29 @@ export const usePlayground = defineStore('playground', {
       }
     },
 
+    // --- gaps (Пробелы в базе tab) — GET /kb/gaps, filtered.
+    async loadGaps(filter?: KbGapFilter) {
+      filter ??= this.gapsFilter
+      this.gapsFilter = filter
+      this.gapsLoading = true
+      this.gapsLoadError = ''
+      try {
+        const params = new URLSearchParams()
+        if (filter.reason) params.set('reason', filter.reason)
+        if (filter.entity_type) params.set('entity_type', filter.entity_type)
+        if (filter.entity_ref) params.set('entity_ref', filter.entity_ref)
+        if (filter.from) params.set('from', filter.from)
+        if (filter.to) params.set('to', filter.to)
+        if (filter.limit) params.set('limit', String(filter.limit))
+        const qs = params.toString()
+        this.gapsReport = await api.get<KbGapReport>('/kb/gaps' + (qs ? '?' + qs : ''))
+      } catch (e) {
+        this.gapsLoadError = e instanceof ApiError ? e.message : t('kb.gaps.errLoad')
+      } finally {
+        this.gapsLoading = false
+      }
+    },
+
     // --- realtime -----------------------------------------------------------
     // Refreshes whichever slice(s) this page has actually loaded — a page that
     // never called load()/loadLive() never fetches that slice. MCP kb_*_upsert
@@ -541,10 +575,12 @@ export const usePlayground = defineStore('playground', {
           }
           if (this.changes) this.load()
           if (this.live) this.loadLive()
-          // promptView starts null and is only ever set by loadPrompt() (the
-          // Промпт tab's own onMounted/"Обновить"), so this is a no-op until
-          // that tab has been opened at least once — same pattern as `live`.
+          // promptView/gapsReport start null and are only ever set by
+          // loadPrompt()/loadGaps() (each tab's own onMounted/"Обновить"), so
+          // these are no-ops until that tab has been opened at least once —
+          // same pattern as `live`.
           if (this.promptView) this.loadPrompt()
+          if (this.gapsReport) this.loadGaps()
         }, 250)
       }
       this.disconnect = connectRealtime({

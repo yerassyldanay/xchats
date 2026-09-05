@@ -34,6 +34,10 @@ const diff = computed(() =>
     'name', 'price', 'limit_text', 'fee', 'summary', 'pricing_type', 'advantages', 'disadvantages', 'best_for', 'not_for', 'sales_status',
   ])
 )
+// A staged draft patch that never touched additional_facts round-trips
+// through the backend's JSON blob as null, not [] (see kbstore.nonNilFacts) —
+// guard here the same way TariffInfoRecord.vue's own facts computed does.
+const facts = computed(() => props.row.additional_facts ?? [])
 </script>
 
 <template>
@@ -114,9 +118,9 @@ const diff = computed(() =>
         <FieldDiffNote :show="diff.includes('not_for')" :was="liveRow?.not_for ?? ''" :now="row.not_for" />
       </div>
     </div>
-    <div v-if="row.additional_facts.length" class="space-y-1.5">
+    <div v-if="facts.length" class="space-y-1.5">
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.facts.title') }}</span>
-      <div v-for="fact in row.additional_facts" :key="fact.ref" class="rounded-md border border-border p-2 text-sm">
+      <div v-for="fact in facts" :key="fact.ref" class="rounded-md border border-border p-2 text-sm">
         <div class="flex items-center justify-between gap-2">
           <code class="text-xs font-mono text-muted-foreground">{{ fact.ref }}</code>
           <span class="font-medium">{{ fact.value }}</span>

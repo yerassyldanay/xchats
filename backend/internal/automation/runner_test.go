@@ -39,6 +39,21 @@ func (f *fakeChatClient) Complete(ctx context.Context, req llm.ChatRequest) (llm
 	return llm.ChatResponse{Text: string(b)}, nil
 }
 
+// fakeEscalatingChatClient always returns an escalating v7 response carrying
+// a structured kb_gap diagnostic — used to prove Runner's versionGatedDrafts
+// persists kb-gap telemetry through WriteDraftSetIfVersionCurrent exactly as
+// response.Service's own DraftRepo does through WriteDraftSet.
+type fakeEscalatingChatClient struct{}
+
+func (fakeEscalatingChatClient) Complete(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	b, _ := json.Marshal(map[string]any{
+		"reply_text": "Секунду, уточню.", "reply_language": "ru", "media_files_to_send": []string{},
+		"escalate": true, "escalation_reason": "нет данных",
+		"kb_gap": map[string]any{"reason_code": "unsupported_request"},
+	})
+	return llm.ChatResponse{Text: string(b)}, nil
+}
+
 type fakeRegistry struct{ client llm.ChatClient }
 
 func (r *fakeRegistry) Client(ref llm.ModelRef) (llm.ChatClient, error) { return r.client, nil }
@@ -111,12 +126,19 @@ func (q *fakeQueue) outboundSends() []queue.Message {
 // a fake KB, and a scripted LLM — everything needed to exercise generation,
 // version-gating, and the auto-send decision without a network call.
 func testRunner(st *store.Store, replyText string, hub *fakeHub, q *fakeQueue) *Runner {
+	return testRunnerWithClient(st, &fakeChatClient{replyText: replyText}, hub, q)
+}
+
+// testRunnerWithClient is testRunner generalized to any scripted
+// llm.ChatClient — used by tests that need more than a fixed reply_text
+// (e.g. an escalating response carrying a kb_gap diagnostic).
+func testRunnerWithClient(st *store.Store, client llm.ChatClient, hub *fakeHub, q *fakeQueue) *Runner {
 	svc := &response.Service{
 		Conversations: &responsestore.ConversationRepo{Store: st},
 		KnowledgeBase: fakeKBRepo{},
 		Drafts:        nil, // Runner always swaps in its own versionGatedDrafts
 		Engine: &response.Engine{
-			LLMs: &fakeRegistry{client: &fakeChatClient{replyText: replyText}},
+			LLMs: &fakeRegistry{client: client},
 			Params: func() response.LLMParams {
 				return response.LLMParams{DefaultModel: llm.ModelRef{Provider: "openrouter", Model: "test-model"}, MaxTokens: 200, Temperature: 0.3}
 			},
@@ -205,6 +227,52 @@ func TestRunnerSuggestionsModeGeneratesButNeverSends(t *testing.T) {
 	}
 	if _, err := st.DispatchJobByID(ctx, jobID); err != store.ErrNotFound {
 		t.Fatalf("dispatch job should be deleted once settled: %v", err)
+	}
+}
+
+// TestRunnerEscalatingReplyRecordsKBGapEvent proves versionGatedDrafts
+// (Runner's own response.DraftRepository implementation) persists kb-gap
+// telemetry through WriteDraftSetIfVersionCurrent exactly as
+// internal/responsestore.DraftRepo does through WriteDraftSet — the two
+// deliberately-duplicated ReplaceSuggested implementations (see
+// versionGatedDrafts' doc comment) must not have silently diverged on this.
+func TestRunnerEscalatingReplyRecordsKBGapEvent(t *testing.T) {
+	st := dbtest.New(t)
+	ctx := context.Background()
+	accountID, chatID := seedRunnerChat(t, st)
+
+	if err := (&Scheduler{Store: st}).OnInboundMessage(ctx, chatID, accountID, "whatsapp", time.Now()); err != nil {
+		t.Fatalf("OnInboundMessage: %v", err)
+	}
+	version, err := st.CurrentBurstVersion(ctx, chatID)
+	if err != nil || version != 1 {
+		t.Fatalf("burst version = %d, %v, want 1", version, err)
+	}
+	jobID, err := st.CreateDispatchJob(ctx, chatID, accountID, "whatsapp", version)
+	if err != nil {
+		t.Fatalf("CreateDispatchJob: %v", err)
+	}
+
+	r := testRunnerWithClient(st, fakeEscalatingChatClient{}, &fakeHub{}, &fakeQueue{})
+	r.HandleRun(ctx, jobID)
+
+	pending, err := st.PendingDrafts(ctx, chatID)
+	if err != nil || len(pending) != 1 || !pending[0].Escalate {
+		t.Fatalf("pending drafts = %+v, %v, want exactly 1 escalating draft", pending, err)
+	}
+
+	events, err := st.GapEventsForChat(ctx, chatID)
+	if err != nil {
+		t.Fatalf("GapEventsForChat: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("want exactly 1 gap event, got %d: %+v", len(events), events)
+	}
+	if events[0].ReasonCode != "unsupported_request" {
+		t.Errorf("ReasonCode = %q, want unsupported_request", events[0].ReasonCode)
+	}
+	if !events[0].DraftID.Valid || events[0].DraftID.UUID != pending[0].ID {
+		t.Errorf("DraftID = %+v, want the pending draft's id %s", events[0].DraftID, pending[0].ID)
 	}
 }
 

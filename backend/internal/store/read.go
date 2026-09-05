@@ -360,38 +360,37 @@ type DraftOption struct {
 	Confidence       *float64
 	Escalate         bool
 	EscalationReason string
+	// KB-gap telemetry (0018_kb_gap_telemetry, aiprompt.KBGapDiagnostic) —
+	// see writeDraftOptionsTx/insertKBGapEventTx (kbgap.go) for how these
+	// are used. KBGapReasonCode == "" does NOT mean "record no event": an
+	// escalating option always gets exactly one ai_kb_gap_events row,
+	// defaulting reason_code to "other" when this is empty. Leave every
+	// field zero for a plain (non-diagnostic) escalation — the pre-v7 shape.
+	KBGapReasonCode       string
+	KBGapTargetEntityType string
+	KBGapTargetEntityRef  string
+	KBGapMissingFields    []string
+	// KBGapSource is "model" or "engine" ("" defaults to "model" — see
+	// insertKBGapEventTx). Only response/service.go's holdingDraft (a hard
+	// engine failure that never reached the model contract) sets "engine".
+	KBGapSource string
 }
 
 // WriteDraftSet supersedes any prior pending options for the chat and inserts the
 // new 1–3 options atomically, returning the written drafts. channel is stamped on
 // each row: ai_drafts is channel-neutral (migration 0013 dropped its FKs into
 // wa_*), so the column is the only record of which transport the chat lives on.
+// See writeDraftOptionsTx (kbgap.go) for the shared body this and
+// WriteDraftSetIfVersionCurrent both run inside their own transaction.
 func (s *Store) WriteDraftSet(ctx context.Context, channel string, chatID uuid.UUID, trigger uuid.NullUUID, opts []DraftOption) ([]Draft, error) {
-	if channel == "" {
-		channel = "whatsapp"
-	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `
-		UPDATE ai_drafts SET draft_state='superseded', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE chat_id = $1 AND draft_state='suggested'`, chatID); err != nil {
+	out, err := writeDraftOptionsTx(ctx, tx, channel, chatID, trigger, opts)
+	if err != nil {
 		return nil, err
-	}
-	var out []Draft
-	for _, o := range opts {
-		var d Draft
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO ai_drafts (chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, confidence, escalate, escalation_reason, draft_state)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'suggested')
-			RETURNING id, chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, context_state, confidence, escalate, escalation_reason, draft_state, created_at`,
-			chatID, channel, trigger, o.Ordinal, o.Text, o.ReplyLanguage, o.Confidence, o.Escalate, o.EscalationReason).
-			Scan(&d.ID, &d.ChatID, &d.Channel, &d.TriggerMessageID, &d.OptionOrdinal, &d.DraftText, &d.ReplyLanguage, &d.ContextState, &d.Confidence, &d.Escalate, &d.EscalationReason, &d.DraftState, &d.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, d)
 	}
 	return out, tx.Commit(ctx)
 }

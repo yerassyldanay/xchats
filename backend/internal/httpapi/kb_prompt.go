@@ -58,8 +58,8 @@ func (s *Server) handleKBPrompt(c *gin.Context) {
 
 	// The default (non-Telegram) frame, matching response.frameFor's own
 	// default branch — this tab shows what the engine would send right now.
-	frame := aiprompt.FrameShopKBV6RU()
-	view := promptView{PromptRef: aiprompt.PromptRefShopKBV6, FrameText: frame, BuiltAt: time.Now()}
+	frame := aiprompt.FrameShopKBV7RU()
+	view := promptView{PromptRef: aiprompt.PromptRefShopKBV7, FrameText: frame, BuiltAt: time.Now()}
 
 	kb, err := s.kbRepo.Load(ctx(c), orgID.String())
 	if err != nil {
@@ -83,7 +83,7 @@ func (s *Server) handleKBPrompt(c *gin.Context) {
 		ok(c, view)
 		return
 	}
-	rendered, err := aiprompt.RenderPrompt(frame, kb.PromptInput(), cat)
+	rendered, err := aiprompt.RenderPromptV7(frame, kb.PromptInput(), cat)
 	if err != nil {
 		view.Status, view.Error = "error", err.Error()
 		ok(c, view)

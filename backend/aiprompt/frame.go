@@ -132,3 +132,52 @@ var frameShopKBV6TGRU string
 func FrameShopKBV6TGRU() string {
 	return frameShopKBV6TGRU
 }
+
+// PromptRefShopKBV7 identifies the v7 frame — v6's whole rule body plus new
+// rule 9, the optional "kb_gap" structured escalation diagnostic
+// (backend/aiprompt/kbgap.go, 0018_kb_gap_telemetry): when the model
+// escalates, it may now also report a closed reason code and, where a
+// single known entity/field is genuinely involved, which one — so KB
+// content gaps (missing prices, unknown products, unsupported request
+// types, ...) become queryable telemetry instead of only free-text
+// escalation_reason prose. Every other rule, block contract and output
+// shape is unchanged from v6.
+//
+// Cut as a NEW version, never an edit to v6, for the same reason v6 was cut
+// instead of editing v5: frame_test.go's hash pin says so in as many words,
+// and v6 is the frame every draft record stamped "shop-kb@v6" actually
+// used — reproducing one means rendering the frame it actually used, not
+// today's. v4/v5/v6 stay embedded and pinned exactly as before this file.
+//
+// v7 also switches which Response contract function validates the model's
+// output: aiprompt.ValidateResponseV7 (not ValidateResponse) is the only
+// function that recognizes "kb_gap" as a known, diagnostic property — see
+// contract.go's doc comment on why that is a separate function rather than
+// a change to ValidateResponse itself. RenderResponseSchemaV7 (not
+// RenderResponseSchema) is the corresponding %%RESPONSE_SCHEMA%% renderer.
+//
+// GRADING STATUS: like v5 and v6 were at the time they shipped, v7 is
+// covered by unit tests and the frame's own rules, not yet by a graded eval
+// run.
+const PromptRefShopKBV7 = "shop-kb@v7"
+
+//go:embed frames/shop-kb-v7-ru.txt
+var frameShopKBV7RU string
+
+// FrameShopKBV7RU returns the v7 frame text, ready for RenderPrompt.
+func FrameShopKBV7RU() string {
+	return frameShopKBV7RU
+}
+
+// PromptRefShopKBV7TG identifies the Telegram variant of the v7 frame,
+// related to it exactly as V6TG is to V6: byte-identical but for the
+// persona line.
+const PromptRefShopKBV7TG = "shop-kb@v7-tg"
+
+//go:embed frames/shop-kb-v7-tg-ru.txt
+var frameShopKBV7TGRU string
+
+// FrameShopKBV7TGRU returns the v7 Telegram frame text, ready for RenderPrompt.
+func FrameShopKBV7TGRU() string {
+	return frameShopKBV7TGRU
+}
