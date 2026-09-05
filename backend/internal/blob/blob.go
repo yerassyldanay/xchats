@@ -46,8 +46,19 @@ func NewDisk(dir string) (*Disk, error) {
 	return &Disk{dir: dir}, nil
 }
 
-func (d *Disk) bytesPath(id string) string { return filepath.Join(d.dir, idSanitize.ReplaceAllString(id, "_")) }
-func (d *Disk) metaPath(id string) string  { return d.bytesPath(id) + ".meta.json" }
+// bytesPath confines id to a direct child of d.dir. idSanitize strips every
+// path separator, but leaves "." and ".." themselves untouched (both are
+// valid in the allowed charset) — either one, as the WHOLE sanitized name,
+// is a traversal component (filepath.Join(d.dir, "..") is d.dir's parent),
+// so they're rejected the same as an empty name rather than joined as-is.
+func (d *Disk) bytesPath(id string) string {
+	safe := idSanitize.ReplaceAllString(id, "_")
+	if safe == "" || safe == "." || safe == ".." {
+		safe = "_"
+	}
+	return filepath.Join(d.dir, safe)
+}
+func (d *Disk) metaPath(id string) string { return d.bytesPath(id) + ".meta.json" }
 
 // Put writes bytes + sidecar meta under a deterministic, id-derived path; a
 // re-delivery of the same id overwrites the same bytes (idempotent).
