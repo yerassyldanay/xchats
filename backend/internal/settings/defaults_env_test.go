@@ -4,9 +4,10 @@ import "testing"
 
 func TestDefaultsFromEnvFallsBackWhenUnset(t *testing.T) {
 	for _, name := range []string{
-		"LLM_DEFAULT_PROVIDER", "LLM_DEFAULT_MODEL",
+		"LLM_DEFAULT_PROVIDER", "LLM_DEFAULT_MODEL", "LLM_VISION_MODEL",
 		"LLM_DRAFT_MAX_TOKENS", "LLM_DRAFT_TEMPERATURE",
 		"LLM_DRAFT_TIMEOUT_SECONDS", "LLM_DRAFT_RETRY",
+		"STT_PROVIDER", "STT_MODEL", "STT_LANGUAGE", "STT_VOCABULARY",
 	} {
 		t.Setenv(name, "")
 	}
@@ -14,6 +15,7 @@ func TestDefaultsFromEnvFallsBackWhenUnset(t *testing.T) {
 	want := LLMSettings{
 		DefaultProvider: "openrouter",
 		DefaultModel:    "google/gemini-2.5-flash",
+		STTLanguage:     "auto",
 		MaxTokens:       500,
 		Temperature:     0.3,
 		TimeoutSeconds:  60,
@@ -31,11 +33,21 @@ func TestDefaultsFromEnvAdoptsSetValues(t *testing.T) {
 	t.Setenv("LLM_DRAFT_TEMPERATURE", "0.7")
 	t.Setenv("LLM_DRAFT_TIMEOUT_SECONDS", "30")
 	t.Setenv("LLM_DRAFT_RETRY", "false")
+	t.Setenv("LLM_VISION_MODEL", "gpt-4o-mini")
+	t.Setenv("STT_PROVIDER", "groq")
+	t.Setenv("STT_MODEL", "whisper-large-v3-turbo")
+	t.Setenv("STT_LANGUAGE", "ru")
+	t.Setenv("STT_VOCABULARY", "Kaspi, kolesa.kz")
 
 	got := defaultsFromEnv()
 	want := LLMSettings{
 		DefaultProvider: "openai",
 		DefaultModel:    "gpt-4o",
+		VisionModel:     "gpt-4o-mini",
+		STTProvider:     "groq",
+		STTModel:        "whisper-large-v3-turbo",
+		STTLanguage:     "ru",
+		STTVocabulary:   "Kaspi, kolesa.kz",
 		MaxTokens:       750,
 		Temperature:     0.7,
 		TimeoutSeconds:  30,

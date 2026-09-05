@@ -22,7 +22,7 @@ func TestProvidersReturnsACopy(t *testing.T) {
 }
 
 func TestProviderByID(t *testing.T) {
-	for _, id := range []string{"openrouter", "openai", "gemini", "ngrok", "langfuse", "meta", "firecrawl", "llamaparse"} {
+	for _, id := range []string{"openrouter", "openai", "gemini", "groq", "ngrok", "langfuse", "meta", "firecrawl", "llamaparse"} {
 		t.Run(id, func(t *testing.T) {
 			p, ok := ProviderByID(id)
 			if !ok {
@@ -72,6 +72,7 @@ var validatorCases = []struct {
 	{"openrouter", validateOpenRouter, func(v string) map[Key]string { return map[Key]string{"openrouter.api_key": v} }},
 	{"openai", validateOpenAI, func(v string) map[Key]string { return map[Key]string{"openai.api_key": v} }},
 	{"gemini", validateGemini, func(v string) map[Key]string { return map[Key]string{"gemini.api_key": v} }},
+	{"groq", validateGroq, func(v string) map[Key]string { return map[Key]string{"groq.api_key": v} }},
 	{"langfuse", validateLangfuse, func(v string) map[Key]string {
 		return map[Key]string{"langfuse.public_key": "pub", "langfuse.secret_key": v}
 	}},

@@ -80,6 +80,25 @@ var providers = []Provider{
 		Validate:      validateGemini,
 	},
 	{
+		// Groq is the audio-transcription provider seam (internal/stt), a
+		// separate axis from the three chat-model providers above: it never
+		// registers an llm.ChatClient (cmd/xchats' populateLLMRegistry
+		// iterates its own fixed provider list, not credentials.Providers(),
+		// so a non-chat provider here can never accidentally become a bogus
+		// "default model" choice). HasModel: false keeps it out of the AI
+		// Engine tab's chat/vision provider dropdown; its transcription
+		// model is chosen via LLMSettings.STTModel instead. HasBaseURL:
+		// true because a self-hosted/proxied Groq-compatible endpoint is a
+		// real, if uncommon, deployment.
+		ID: "groq", DisplayName: "Groq",
+		Fields:        []Field{{Key: "groq.api_key", Label: "API Key"}},
+		CredentialURL: "https://console.groq.com/keys",
+		DocsURL:       "https://console.groq.com/docs/speech-to-text",
+		HasBaseURL:    true,
+		HasModel:      false,
+		Validate:      validateGroq,
+	},
+	{
 		ID: "ngrok", DisplayName: "ngrok",
 		Fields: []Field{
 			{Key: KeyNgrokAuthtoken, Label: "Authtoken"},
@@ -261,6 +280,20 @@ func validateGemini(ctx context.Context, values map[Key]string) error {
 		return ErrValidationUnavailable
 	}
 	return classify(resp, isGeminiInvalidKeyBody)
+}
+
+// validateGroq mirrors validateOpenAI: Groq serves an OpenAI-compatible
+// /openai/v1/models listing, so the same "can we list models with this key"
+// check proves it without a transcription-specific endpoint to call.
+func validateGroq(ctx context.Context, values map[Key]string) error {
+	base := baseURLFor(values, "groq", "https://api.groq.com/openai/v1")
+	resp, err := doGet(ctx, base+"/models", func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+values["groq.api_key"])
+	})
+	if err != nil {
+		return ErrValidationUnavailable
+	}
+	return classify(resp, nil)
 }
 
 // validateNgrok verifies the account API key by listing reserved domains.

@@ -24,8 +24,33 @@ type LLMSettings struct {
 	DefaultModel    string `json:"default_model"`
 	// VisionModel is the model used for drafts that need to reason about an
 	// attached image — "" means none configured (image attachments are
-	// described to the model as text only).
-	VisionModel    string  `json:"vision_model"`
+	// described to the model as text only). It always runs on
+	// DefaultProvider: xchats offers one model string here, not a second
+	// provider selector, since every provider the response engine calls is
+	// the same OpenAI-wire-compatible surface for both chat and vision.
+	VisionModel string `json:"vision_model"`
+	// STTProvider selects which credential-backed integration transcribes
+	// audio notes — "" means STT is not configured (a voice note is left
+	// untranscribed; the assistant sees only "[Голосовое сообщение]" with no
+	// text). Only "openai" and "groq" are valid: both serve the identical
+	// OpenAI-wire-compatible /audio/transcriptions multipart endpoint
+	// internal/stt.OpenAITranscriber calls — OpenRouter has no audio
+	// endpoint at all, and Gemini's multimodal audio input uses a different,
+	// non-multipart wire shape, so neither belongs here (see
+	// internal/httpapi/settings.go's validation and internal/stt.DefaultBaseURL).
+	STTProvider string `json:"stt_provider"`
+	// STTModel is a provider-specific transcription model id (e.g.
+	// "whisper-1" on OpenAI, "whisper-large-v3-turbo" on Groq).
+	STTModel string `json:"stt_model"`
+	// STTLanguage is an ISO-639-1 hint ("kk", "ru", "en") or "auto" — a
+	// language hint measurably improves accuracy on a short voice note the
+	// model would otherwise have too little audio to confidently detect.
+	STTLanguage string `json:"stt_language"`
+	// STTVocabulary is operator-authored domain jargon (comma/newline
+	// separated: brand names, local terms, SKUs) folded into the
+	// transcription prompt alongside the live catalog — see
+	// internal/stt.BuildPrompt.
+	STTVocabulary  string  `json:"stt_vocabulary"`
 	MaxTokens      int     `json:"max_tokens"`
 	Temperature    float64 `json:"temperature"`
 	TimeoutSeconds int     `json:"timeout_seconds"`
