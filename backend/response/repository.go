@@ -30,6 +30,44 @@ type ConversationContext struct {
 	// the conversation has no customer. Implementations that do not know about
 	// the CRM layer simply leave it nil, and the prompt is unchanged.
 	Customer *aiprompt.CustomerContext
+	// Attachments are the trigger message's own media, already resolved to
+	// what the engine can act on (a vision-ready data URI, or a finished
+	// audio transcript) — see IncomingAttachment. An implementation with no
+	// blob-storage access, or a trigger message with no media, simply leaves
+	// this nil.
+	Attachments []IncomingAttachment
+}
+
+// AttachmentKind distinguishes what an IncomingAttachment is, for both the
+// vision-routing decision (image) and the conversation-tail rendering
+// (image vs audio use different bracketed labels — see attachmentTailSuffix
+// in engine.go).
+type AttachmentKind string
+
+const (
+	AttachmentImage AttachmentKind = "image"
+	AttachmentAudio AttachmentKind = "audio"
+)
+
+// IncomingAttachment is one media attachment on the customer's current
+// message, already resolved to what Engine can act on directly — Engine
+// itself has no blob-storage dependency (see its own doc comment), so
+// turning a stored media reference into a DataURI or a Transcript is the
+// ConversationRepository implementation's job (see
+// internal/responsestore.ConversationRepo).
+type IncomingAttachment struct {
+	Kind AttachmentKind
+	// DataURI is set only for Kind == AttachmentImage: a data URI
+	// ("data:image/jpeg;base64,...") the engine attaches verbatim to the
+	// vision model's user message.
+	DataURI string
+	// Transcript is set only for Kind == AttachmentAudio: the voice note's
+	// speech-to-text result (internal/stt), rendered into the conversation
+	// tail as ordinary customer text.
+	Transcript string
+	// Caption is the attachment's own message body, if the customer sent one
+	// alongside it (e.g. a photo with "is this in stock?").
+	Caption string
 }
 
 // ConversationRepository loads the response-relevant context for a

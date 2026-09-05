@@ -395,11 +395,26 @@ type updateLLMSettingsReq struct {
 	DefaultProvider string  `json:"default_provider"`
 	DefaultModel    string  `json:"default_model"`
 	VisionModel     string  `json:"vision_model"`
+	STTProvider     string  `json:"stt_provider"`
+	STTModel        string  `json:"stt_model"`
+	STTLanguage     string  `json:"stt_language"`
+	STTVocabulary   string  `json:"stt_vocabulary"`
 	MaxTokens       int     `json:"max_tokens"`
 	Temperature     float64 `json:"temperature"`
 	TimeoutSeconds  int     `json:"timeout_seconds"`
 	Retry           bool    `json:"retry"`
 }
+
+// sttProviders is the closed set of providers internal/stt actually knows
+// how to call — see internal/stt.DefaultBaseURL's own doc comment for why
+// OpenRouter and Gemini are excluded (neither serves the OpenAI-compatible
+// /audio/transcriptions endpoint this feature depends on).
+var sttProviders = map[string]bool{"": true, "openai": true, "groq": true}
+
+// sttLanguages is the closed set of language hints the Settings UI offers —
+// "auto" (the zero-configuration default) plus the three languages xchats'
+// customer base actually messages in.
+var sttLanguages = map[string]bool{"": true, "auto": true, "kk": true, "ru": true, "en": true}
 
 func (s *Server) handleUpdateLLMSettings(c *gin.Context) {
 	if s.settings == nil {
@@ -427,10 +442,19 @@ func (s *Server) handleUpdateLLMSettings(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "timeout_seconds must be positive")
 		return
 	}
+	if !sttProviders[req.STTProvider] {
+		fail(c, http.StatusBadRequest, ErrValidation, fmt.Sprintf("unknown stt_provider %q (must be empty, \"openai\", or \"groq\")", req.STTProvider))
+		return
+	}
+	if !sttLanguages[req.STTLanguage] {
+		fail(c, http.StatusBadRequest, ErrValidation, fmt.Sprintf("unknown stt_language %q", req.STTLanguage))
+		return
+	}
 
 	updated, err := s.settings.Update(func(st *settings.Settings) {
 		st.LLM = settings.LLMSettings{
 			DefaultProvider: req.DefaultProvider, DefaultModel: req.DefaultModel, VisionModel: req.VisionModel,
+			STTProvider: req.STTProvider, STTModel: req.STTModel, STTLanguage: req.STTLanguage, STTVocabulary: req.STTVocabulary,
 			MaxTokens: req.MaxTokens, Temperature: req.Temperature, TimeoutSeconds: req.TimeoutSeconds, Retry: req.Retry,
 		}
 	})

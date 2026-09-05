@@ -57,8 +57,8 @@ func TestListIntegrationsShowsAllProvidersNoneConfigured(t *testing.T) {
 	if !got.CredentialStoreAvailable {
 		t.Error("CredentialStoreAvailable = false, want true (harness forces a file-backed store)")
 	}
-	if len(got.Providers) != 8 {
-		t.Fatalf("providers = %d, want 8 (openrouter, openai, gemini, ngrok, langfuse, meta, firecrawl, llamaparse)", len(got.Providers))
+	if len(got.Providers) != 9 {
+		t.Fatalf("providers = %d, want 9 (openrouter, openai, gemini, groq, ngrok, langfuse, meta, firecrawl, llamaparse)", len(got.Providers))
 	}
 	seen := map[string]bool{}
 	for _, p := range got.Providers {
@@ -67,7 +67,7 @@ func TestListIntegrationsShowsAllProvidersNoneConfigured(t *testing.T) {
 			t.Errorf("provider %q reports configured=true before anything was saved", p.ID)
 		}
 	}
-	for _, id := range []string{"openrouter", "openai", "gemini", "ngrok", "langfuse", "meta", "firecrawl", "llamaparse"} {
+	for _, id := range []string{"openrouter", "openai", "gemini", "groq", "ngrok", "langfuse", "meta", "firecrawl", "llamaparse"} {
 		if !seen[id] {
 			t.Errorf("provider %q missing from the list", id)
 		}
@@ -379,6 +379,8 @@ func TestUpdateLLMSettingsValidation(t *testing.T) {
 		{"non-positive max_tokens", map[string]any{"default_provider": "openrouter", "default_model": "m", "max_tokens": 0, "temperature": 0.3, "timeout_seconds": 60}},
 		{"temperature out of range", map[string]any{"default_provider": "openrouter", "default_model": "m", "max_tokens": 500, "temperature": 3.0, "timeout_seconds": 60}},
 		{"non-positive timeout", map[string]any{"default_provider": "openrouter", "default_model": "m", "max_tokens": 500, "temperature": 0.3, "timeout_seconds": 0}},
+		{"unknown stt_provider", map[string]any{"default_provider": "openrouter", "default_model": "m", "max_tokens": 500, "temperature": 0.3, "timeout_seconds": 60, "stt_provider": "openrouter"}},
+		{"unknown stt_language", map[string]any{"default_provider": "openrouter", "default_model": "m", "max_tokens": 500, "temperature": 0.3, "timeout_seconds": 60, "stt_language": "fr"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -391,6 +393,7 @@ func TestUpdateLLMSettingsValidation(t *testing.T) {
 
 	resp, env := h.do(http.MethodPut, "/xchats/api/v1/settings/llm", map[string]any{
 		"default_provider": "openai", "default_model": "gpt-4o", "vision_model": "gpt-4o",
+		"stt_provider": "groq", "stt_model": "whisper-large-v3-turbo", "stt_language": "kk", "stt_vocabulary": "Kaspi, kolesa.kz",
 		"max_tokens": 800, "temperature": 0.5, "timeout_seconds": 45, "retry": false,
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -399,21 +402,32 @@ func TestUpdateLLMSettingsValidation(t *testing.T) {
 	var got struct {
 		DefaultProvider string `json:"default_provider"`
 		MaxTokens       int    `json:"max_tokens"`
+		STTProvider     string `json:"stt_provider"`
+		STTModel        string `json:"stt_model"`
+		STTLanguage     string `json:"stt_language"`
+		STTVocabulary   string `json:"stt_vocabulary"`
 	}
 	mustDecode(t, env, &got)
 	if got.DefaultProvider != "openai" || got.MaxTokens != 800 {
 		t.Errorf("got = %+v, want DefaultProvider=openai MaxTokens=800", got)
+	}
+	if got.STTProvider != "groq" || got.STTModel != "whisper-large-v3-turbo" || got.STTLanguage != "kk" || got.STTVocabulary != "Kaspi, kolesa.kz" {
+		t.Errorf("got STT fields = %+v, want groq/whisper-large-v3-turbo/kk/\"Kaspi, kolesa.kz\"", got)
 	}
 
 	_, settingsEnv := h.get("/xchats/api/v1/settings")
 	var full struct {
 		LLM struct {
 			DefaultProvider string `json:"default_provider"`
+			STTProvider     string `json:"stt_provider"`
 		} `json:"llm"`
 	}
 	mustDecode(t, settingsEnv, &full)
 	if full.LLM.DefaultProvider != "openai" {
 		t.Errorf("GET /settings after PUT /settings/llm = %q, want %q", full.LLM.DefaultProvider, "openai")
+	}
+	if full.LLM.STTProvider != "groq" {
+		t.Errorf("GET /settings after PUT /settings/llm: STTProvider = %q, want groq", full.LLM.STTProvider)
 	}
 }
 

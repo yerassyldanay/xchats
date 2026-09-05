@@ -80,6 +80,65 @@ func TestComplete_WireShapeMatchesEvaluatedPipeline(t *testing.T) {
 	}
 }
 
+// TestComplete_SerializesImageParts covers a vision call: Message.Parts
+// (text + one image) must serialize as an OpenAI-compatible multi-part
+// content array, with the image as {"type":"image_url","image_url":{"url":...}}.
+func TestComplete_SerializesImageParts(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		io.WriteString(w, `{"choices":[{"message":{"content":"это смартфон"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	const dataURI = "data:image/jpeg;base64,/9j/4AAQ=="
+	c := NewOpenAICompatible(srv.URL, "test-key", "openai", 5*time.Second)
+	resp, err := c.Complete(context.Background(), llm.ChatRequest{
+		Model: "gpt-4o-mini",
+		Messages: []llm.Message{{
+			Role: "user",
+			Parts: []llm.ContentPart{
+				{Kind: llm.PartText, Text: "Что на этом фото?"},
+				{Kind: llm.PartImage, ImageURL: dataURI},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if resp.Text != "это смартфон" {
+		t.Fatalf("resp.Text = %q", resp.Text)
+	}
+
+	messages, ok := gotBody["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages = %v", gotBody["messages"])
+	}
+	msg := messages[0].(map[string]any)
+	content, ok := msg["content"].([]any)
+	if !ok || len(content) != 2 {
+		t.Fatalf("content = %v, want exactly 2 parts (text + image)", msg["content"])
+	}
+	textPart := content[0].(map[string]any)
+	if textPart["type"] != "text" || textPart["text"] != "Что на этом фото?" {
+		t.Fatalf("unexpected text part: %v", textPart)
+	}
+	imagePart := content[1].(map[string]any)
+	if imagePart["type"] != "image_url" {
+		t.Fatalf("unexpected image part type: %v", imagePart)
+	}
+	imageURL, ok := imagePart["image_url"].(map[string]any)
+	if !ok || imageURL["url"] != dataURI {
+		t.Fatalf("image_url = %v, want url %q", imagePart["image_url"], dataURI)
+	}
+	if _, hasText := imagePart["text"]; hasText {
+		t.Error("image part must not also carry a text field")
+	}
+}
+
 func TestComplete_PropagatesProviderError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"error":{"message":"rate limited"}}`)

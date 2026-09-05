@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/stt"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsappcloud"
 	"github.com/yerassyldanay/xchats/backend/messaging"
@@ -78,7 +80,30 @@ type Worker struct {
 	Hub        *realtime.Hub
 	Response   *response.Service         // the multichannel response engine's entry point
 	Senders    *messaging.SenderRegistry // channel -> ChannelSender, for outbound sends
+	// STT resolves the CURRENT speech-to-text configuration — called fresh
+	// on every audio attachment (mirrors response.Engine.Params), so a
+	// Settings UI change takes effect on the very next voice note with no
+	// restart. nil (a wiring with no STT provider configured at all) makes
+	// transcribeIfAudio a no-op — a composition root that never sets this
+	// simply never transcribes, exactly like a nil VisionModel never routes
+	// to vision.
+	STT func(ctx context.Context) stt.Params
+	// Automation, when set, re-arms a chat's debounce/version-gated
+	// generation once a voice note's transcript arrives — see
+	// TranscribeAudio's own doc comment. nil falls back to a direct
+	// KindAIDraft enqueue, the pre-automation behavior.
+	Automation Automation
 	Log        *slog.Logger
+}
+
+// Automation is the narrow surface TranscribeAudio needs to re-arm a chat's
+// debounce/version-gated draft generation once a transcript becomes
+// available — the same shape internal/tgingest.Automation and
+// internal/whatsmeow.AutomationScheduler already declare independently for
+// the exact same "hand off a customer message without a direct import"
+// reason, so *automation.Scheduler satisfies this with zero adapter code.
+type Automation interface {
+	OnInboundMessage(ctx context.Context, chatID, accountID uuid.UUID, channel string, lastMessageAt time.Time) error
 }
 
 // publishTimeout bounds every enqueue a handler makes. A worker that fans work
@@ -163,6 +188,8 @@ func (w *Worker) downloadTelegramMedia(ctx context.Context, t MediaDownloadTask)
 	}
 	w.Log.Info("telegram media downloaded", "message_id", t.MessageID, "bytes", len(data))
 	w.emitMessage(ctx, "message.updated", t.MessageID)
+	w.transcribeIfAudio(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType, t.BlobID)
+	w.rearmAfterMediaReady(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType)
 	return nil
 }
 
@@ -281,6 +308,8 @@ func (w *Worker) downloadMetaMedia(ctx context.Context, t MediaDownloadTask) err
 	}
 	w.Log.Info("meta media downloaded", "message_id", t.MessageID, "bytes", len(data))
 	w.emitMessage(ctx, "message.updated", t.MessageID)
+	w.transcribeIfAudio(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType, t.BlobID)
+	w.rearmAfterMediaReady(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType)
 	return nil
 }
 
@@ -347,6 +376,8 @@ func (w *Worker) downloadDirectMedia(ctx context.Context, t MediaDownloadTask) e
 	}
 	w.Log.Info("meta media downloaded (direct)", "message_id", t.MessageID, "bytes", len(data))
 	w.emitMessage(ctx, "message.updated", t.MessageID)
+	w.transcribeIfAudio(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType, t.BlobID)
+	w.rearmAfterMediaReady(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType)
 	return nil
 }
 
@@ -434,6 +465,222 @@ func (w *Worker) handleAIDraft(ctx context.Context, t AIDraftTask) error {
 		w.Hub.Broadcast("ai_draft.created", dto.MapDraft(d))
 	}
 	return nil
+}
+
+// --- audio transcription (STT) ---------------------------------------------
+
+// transcribeIfAudio is a thin TranscribeAudio wrapper over w's own
+// dependencies — see TranscribeAudio for the actual logic.
+func (w *Worker) transcribeIfAudio(ctx context.Context, messageID, accountID uuid.UUID, channel, mediaType, blobID string) {
+	TranscribeAudio(ctx, TranscriptionDeps{
+		Store: w.Store, Blob: w.Blob, Hub: w.Hub, Response: w.Response,
+		Queue: w.Queue, STT: w.STT, Automation: w.Automation, Log: w.Log,
+	}, messageID, accountID, channel, mediaType, blobID)
+}
+
+// TranscriptionDeps groups the dependencies TranscribeAudio needs. It exists
+// as its own type, separate from *Worker, so internal/whatsmeow's own
+// media-download completion path — which has no queue task of its own (see
+// this package's doc comment: "WhatsApp's own inbound ingestion and media
+// download live entirely inside internal/whatsmeow") — can call the exact
+// same transcription logic Telegram/Meta channels use instead of
+// duplicating it, by building one of these from its own fields.
+type TranscriptionDeps struct {
+	Store *store.Store
+	Blob  blob.Store
+	Hub   *realtime.Hub
+	// Response resolves the organization's knowledge base for vocabulary
+	// priming (see stt.BuildPrompt). nil skips priming, never transcription.
+	Response *response.Service
+	// Queue is the fallback path's enqueue target when Automation is nil.
+	Queue queue.Queue
+	STT   func(ctx context.Context) stt.Params
+	// Automation, when set, re-arms a chat's debounce/version-gated
+	// generation instead of a direct KindAIDraft enqueue — see
+	// TranscribeAudio's own doc comment.
+	Automation Automation
+	Log        *slog.Logger
+}
+
+// TranscribeAudio runs the speech-to-text step for one attachment right
+// after its bytes finish downloading (see the "Emit message.updated" call
+// in each of Worker's three download functions above, and
+// internal/whatsmeow.Manager.downloadAndAttachMedia's own call, right
+// before this one runs in each). It is a best-effort enhancement, never a
+// reason to fail a media download that has already succeeded: an
+// unconfigured deps.STT, a Transcribe error, or anything but an audio
+// attachment is logged (where relevant) and silently skipped rather than
+// returned as an error.
+//
+// The transcript is persisted exactly once — store.UpdateMediaTranscript is
+// the durable "already done" marker (see its own doc comment) — and this
+// function itself checks it before calling Transcribe, so a second call for
+// an attachment that already has one (today: only a hand-crafted call from
+// a test; internal/queue's in-memory driver has no redelivery, and
+// PendingTelegramMedia/PendingChannelMedia both exclude 'ready' rows — see
+// their own WHERE clauses — so a legitimate redelivery cannot reach here
+// twice yet, but a future queue driver, per internal/queue's own doc
+// comment, might) never re-runs the paid STT call or re-enqueues a draft.
+// Once persisted, this also refreshes the chat list's preview (audio's own
+// placeholder, "🎙 Аудио", becomes the transcribed words) and hands the chat
+// to Automation (or, with none configured, enqueues a direct AI draft) —
+// the very first draft attempt, fired by the ingest webhook the moment the
+// message arrived, ran with no transcript at all, so the customer's actual
+// words deserve their own generation.
+func TranscribeAudio(ctx context.Context, deps TranscriptionDeps, messageID, accountID uuid.UUID, channel, mediaType, blobID string) {
+	if mediaType != "audio" || deps.STT == nil {
+		return
+	}
+	params := deps.STT(ctx)
+	if params.Transcriber == nil {
+		return
+	}
+
+	if existing, err := deps.Store.MessageByID(ctx, messageID); err == nil {
+		for _, md := range existing.Media {
+			if md.MediaType == "audio" && md.Transcript != "" {
+				return
+			}
+		}
+	}
+
+	data, meta, err := deps.Blob.Get(blobID)
+	if err != nil {
+		deps.Log.Error("transcribe: read blob", "message_id", messageID, "err", err)
+		return
+	}
+	if int64(len(data)) > stt.MaxAudioBytes {
+		deps.Log.Warn("transcribe: audio exceeds the transcription provider's size limit, skipping",
+			"message_id", messageID, "bytes", len(data))
+		return
+	}
+
+	// Vocabulary priming is best-effort: a KB load failure (or no
+	// organization/KnowledgeBase at all) just falls back to the operator's
+	// own custom vocabulary alone, never blocks transcription.
+	prompt := params.Vocabulary
+	if deps.Response != nil && deps.Response.KnowledgeBase != nil {
+		if account, err := deps.Store.AccountByID(ctx, accountID); err == nil && account.OrganizationID.Valid {
+			if kb, err := deps.Response.KnowledgeBase.Load(ctx, account.OrganizationID.UUID.String()); err == nil {
+				prompt = stt.BuildPrompt(kb, params.Vocabulary)
+			}
+		}
+	}
+
+	text, err := params.Transcriber.Transcribe(ctx, data, meta.FileName, meta.Mimetype, stt.TranscribeOptions{
+		Language: params.Language, Prompt: prompt,
+	})
+	if err != nil {
+		deps.Log.Warn("audio transcription failed", "message_id", messageID, "err", err)
+		return
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+
+	if err := deps.Store.UpdateMediaTranscript(ctx, channel, messageID, text); err != nil {
+		deps.Log.Error("persist transcript", "message_id", messageID, "err", err)
+		return
+	}
+	msg, err := deps.Store.MessageByID(ctx, messageID)
+	if err != nil {
+		deps.Log.Error("reload transcribed message", "message_id", messageID, "err", err)
+		return
+	}
+	deps.Hub.Broadcast("message.updated", dto.MapMessage(msg))
+
+	if err := deps.Store.UpdateChatPreviewIfCurrent(ctx, msg.ChatID, msg.MessageTS, TranscriptPreview(text)); err != nil {
+		deps.Log.Error("update chat preview after transcription", "chat_id", msg.ChatID, "err", err)
+	} else if chat, err := deps.Store.ChatByID(ctx, msg.ChatID); err == nil {
+		deps.Hub.Broadcast("chat.updated", dto.MapChat(chat))
+	}
+
+	// A transcript becoming available is new customer content, exactly like
+	// a fresh inbound message: re-arming Automation gives it the SAME
+	// version-gated generation and scheduled_auto auto-send eligibility a
+	// customer's own follow-up text would get (see
+	// automation.Scheduler.OnInboundMessage), and correctly no-ops in "off"
+	// mode instead of drafting regardless of the account's automation
+	// setting. A nil Automation (a wiring with none configured, or a test)
+	// falls back to the original direct KindAIDraft enqueue — the exact
+	// optional-dependency shape internal/tgingest.Processor's own Automation
+	// field already uses.
+	rearmOrEnqueue(ctx, deps, msg.ChatID, accountID, channel, "automation: re-arm after transcription failed", "enqueue AI draft after transcription")
+	deps.Log.Info("audio transcribed", "message_id", messageID, "chars", len(text))
+}
+
+// RearmAfterMediaReady hands messageID's chat to Automation (or, with none
+// configured, enqueues a direct AI draft) once an IMAGE attachment finishes
+// downloading — the same problem TranscribeAudio's own post-transcription
+// re-arm solves for audio, but firing right after download instead of after
+// an extra step, since an image's bytes are themselves what
+// responsestore.resolveAttachments needs to embed it as vision input (there
+// is no equivalent to a transcript to wait for). Without this, a debounce
+// that fires (or a direct draft that generates) before a slow download
+// finishes produces a response with no attachment at all, and — unlike
+// audio, which always gets a second, transcript-bearing attempt — nothing
+// would ever re-run Generate once the image became ready.
+//
+// Deliberately scoped to "image" alone, not every non-audio media type:
+// resolveAttachments only ever acts on an image attachment today, so
+// re-arming for a video/document/sticker download would only cost an extra
+// LLM call for a request nothing downstream reads any differently.
+func RearmAfterMediaReady(ctx context.Context, deps TranscriptionDeps, messageID, accountID uuid.UUID, channel, mediaType string) {
+	if mediaType != "image" {
+		return
+	}
+	msg, err := deps.Store.MessageByID(ctx, messageID)
+	if err != nil {
+		deps.Log.Error("rearm after media ready: reload message", "message_id", messageID, "err", err)
+		return
+	}
+	rearmOrEnqueue(ctx, deps, msg.ChatID, accountID, channel, "automation: re-arm after media ready failed", "enqueue AI draft after media ready")
+}
+
+// rearmOrEnqueue is TranscribeAudio's and RearmAfterMediaReady's shared
+// "tell automation about new content, or fall back to a raw enqueue"
+// tail — see TranscribeAudio's own doc comment for why Automation is
+// preferred whenever it is configured.
+func rearmOrEnqueue(ctx context.Context, deps TranscriptionDeps, chatID, accountID uuid.UUID, channel, automationErrMsg, enqueueErrMsg string) {
+	if deps.Automation != nil {
+		if err := deps.Automation.OnInboundMessage(ctx, chatID, accountID, channel, time.Now()); err != nil {
+			deps.Log.Error(automationErrMsg, "chat_id", chatID, "err", err)
+		}
+		return
+	}
+	if deps.Queue == nil {
+		return
+	}
+	pctx, cancel := context.WithTimeout(ctx, publishTimeout)
+	defer cancel()
+	if err := deps.Queue.Publish(pctx, queue.Message{Kind: queue.KindAIDraft, Payload: AIDraftTask{ChatID: chatID}}); err != nil {
+		deps.Log.Error(enqueueErrMsg, "chat_id", chatID, "err", err)
+	}
+}
+
+// rearmAfterMediaReady is a thin RearmAfterMediaReady wrapper over w's own
+// dependencies — see transcribeIfAudio's identical shape.
+func (w *Worker) rearmAfterMediaReady(ctx context.Context, messageID, accountID uuid.UUID, channel, mediaType string) {
+	RearmAfterMediaReady(ctx, TranscriptionDeps{
+		Store: w.Store, Blob: w.Blob, Hub: w.Hub, Response: w.Response,
+		Queue: w.Queue, STT: w.STT, Automation: w.Automation, Log: w.Log,
+	}, messageID, accountID, channel, mediaType)
+}
+
+// TranscriptPreview mirrors previewFor's/Preview's own audio placeholder
+// ("🎙 Аудио" — see internal/whatsmeow/manager.go and
+// internal/tgingest/mapping.go) now that the actual words are known, capped
+// the same way whatsmeow's previewFor already caps a text message (120
+// runes) rather than a fresh, possibly very different, truncation rule.
+// Exported so internal/httpapi's manual re-transcribe endpoint renders the
+// exact same chat-list preview text this automatic path does.
+func TranscriptPreview(text string) string {
+	r := []rune(text)
+	if len(r) > 120 {
+		text = string(r[:120])
+	}
+	return "🎙 " + text
 }
 
 // --- helpers --------------------------------------------------------------

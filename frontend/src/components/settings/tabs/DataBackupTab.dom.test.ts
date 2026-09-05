@@ -14,7 +14,11 @@ function seed() {
   const store = useSettings()
   store.settings = {
     version: 1,
-    llm: { default_provider: 'openrouter', default_model: 'm', vision_model: '', max_tokens: 500, temperature: 0.3, timeout_seconds: 60, retry: true },
+    llm: {
+      default_provider: 'openrouter', default_model: 'm', vision_model: '',
+      stt_provider: '', stt_model: '', stt_language: 'auto', stt_vocabulary: '',
+      max_tokens: 500, temperature: 0.3, timeout_seconds: 60, retry: true,
+    },
     providers: {},
     ngrok: {},
     credential_file_fallback_accepted: false,

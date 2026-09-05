@@ -13,6 +13,14 @@ function mountPanel() {
   return mountKb(AssistantPanel, { pinia })
 }
 
+// The "based on ..." draft source badge (Component 4 of the multimodal
+// plan) is covered at the logic level in lib/draftSource.test.ts rather
+// than here: driving reka-ui's Tabs from "Клиент" to "ИИ-помощник" via
+// synthetic pointer events in jsdom does not reliably flip the underlying
+// state in this test environment, for reasons unrelated to the badge logic
+// itself — sourceOf() is a plain, directly-testable function specifically
+// so its correctness does not depend on that interaction working here.
+
 // INB-02: collapsing reclaims the fixed 340px this panel used to always
 // take, on the 13"/14" laptop widths the flow doc calls out.
 describe('AssistantPanel — collapse toggle (INB-02)', () => {

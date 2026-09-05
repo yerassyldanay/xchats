@@ -3168,6 +3168,15 @@
           "has_default": true,
           "default_kind": "now",
           "default_raw": "now()"
+        },
+        {
+          "name": "transcript",
+          "position": 11,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
         }
       ],
       "primary_key": [
@@ -4045,6 +4054,15 @@
           "has_default": true,
           "default_kind": "now",
           "default_raw": "now()"
+        },
+        {
+          "name": "transcript",
+          "position": 13,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
         }
       ],
       "primary_key": [
@@ -6004,6 +6022,15 @@
           "has_default": true,
           "default_kind": "now",
           "default_raw": "now()"
+        },
+        {
+          "name": "transcript",
+          "position": 13,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
         }
       ],
       "primary_key": [
@@ -8828,6 +8855,7 @@
         "size",
         "storage_key",
         "download_status",
+        "transcript",
         "created_at"
       ],
       "definition": " SELECT mm.id,\n    mm.message_id,\n    a.channel,\n    mm.media_type,\n    mm.mimetype,\n    mm.file_name AS filename,\n    mm.file_size AS size,\n    mm.storage_url AS storage_key,\n    mm.download_status,\n    mm.created_at\n   FROM ((xchats.message_media mm\n     JOIN xchats.wa_messages m ON ((m.id = mm.message_id)))\n     JOIN xchats.wa_accounts a ON ((a.id = m.account_id)))\nUNION ALL\n SELECT tm.id,\n    tm.message_id,\n    'telegram'::text AS channel,\n    tm.media_type,\n    tm.mimetype,\n    tm.filename,\n    tm.size,\n    tm.storage_key,\n    tm.download_status,\n    tm.created_at\n   FROM xchats.tg_message_media tm;"

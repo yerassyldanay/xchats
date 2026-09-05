@@ -415,6 +415,17 @@ export const useInbox = defineStore('inbox', {
         log.warn('dismiss drafts failed', { chatId, error: String(e) })
       }
     },
+    // retranscribe re-runs speech-to-text on one voice note, optionally with
+    // a language override (the ChatThread "Re-transcribe as..." action, for
+    // a note whose language was misdetected). Applies the returned message
+    // immediately rather than waiting on the message.updated SSE echo — the
+    // operator who just clicked this is looking straight at the bubble.
+    async retranscribe(messageId: string, language?: string) {
+      const chatId = this.activeId
+      if (!chatId) return
+      const res = await api.post<Message>(`/chats/${chatId}/messages/${messageId}/retranscribe`, language ? { language } : {})
+      this.applyMessage(res)
+    },
 
     // --- realtime deltas ---------------------------------------------------
     startRealtime() {

@@ -190,6 +190,17 @@ type MediaRef struct {
 	Mimetype  string
 	FileName  string
 	FileSize  int
+	// StorageKey is the blob.Store id the bytes live under — "" until the
+	// download completes (see DownloadStatus). responsestore's
+	// ConversationRepo reads it to fetch an image's bytes for a vision call.
+	StorageKey string
+	// DownloadStatus mirrors the owning channel's media table: "pending" |
+	// "ready" | "failed". Only a "ready" attachment has retrievable bytes.
+	DownloadStatus string
+	// Transcript is a "ready" audio attachment's speech-to-text result, ""
+	// until worker.go's transcription step completes (or for anything that
+	// isn't audio, or when no STT provider is configured).
+	Transcript string
 }
 
 type Draft struct {

@@ -22,10 +22,22 @@ func defaultsFromEnv() LLMSettings {
 	return LLMSettings{
 		DefaultProvider: envOr("LLM_DEFAULT_PROVIDER", "openrouter"),
 		DefaultModel:    envOr("LLM_DEFAULT_MODEL", "google/gemini-2.5-flash"),
-		MaxTokens:       envIntOr("LLM_DRAFT_MAX_TOKENS", 500),
-		Temperature:     envFloatOr("LLM_DRAFT_TEMPERATURE", 0.3),
-		TimeoutSeconds:  envIntOr("LLM_DRAFT_TIMEOUT_SECONDS", 60),
-		Retry:           envBoolOr("LLM_DRAFT_RETRY", true),
+		VisionModel:     envOr("LLM_VISION_MODEL", ""),
+		// STT has no prior env-var-only existence (unlike the four fields
+		// above, which predate the Settings UI) — these three env vars exist
+		// only so a headless/scripted deployment can preconfigure it the
+		// same way it already can for the chat model, not to preserve any
+		// legacy behavior. Unset means "not configured" (see
+		// LLMSettings.STTProvider's own doc comment), so the fallback is "",
+		// not a guessed provider.
+		STTProvider:    envOr("STT_PROVIDER", ""),
+		STTModel:       envOr("STT_MODEL", ""),
+		STTLanguage:    envOr("STT_LANGUAGE", "auto"),
+		STTVocabulary:  envOr("STT_VOCABULARY", ""),
+		MaxTokens:      envIntOr("LLM_DRAFT_MAX_TOKENS", 500),
+		Temperature:    envFloatOr("LLM_DRAFT_TEMPERATURE", 0.3),
+		TimeoutSeconds: envIntOr("LLM_DRAFT_TIMEOUT_SECONDS", 60),
+		Retry:          envBoolOr("LLM_DRAFT_RETRY", true),
 	}
 }
 

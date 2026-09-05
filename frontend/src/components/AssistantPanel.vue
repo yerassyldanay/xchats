@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LoaderCircle, PanelRightClose, PanelRightOpen, PenLine, RotateCw, Send, UserRound, WandSparkles, X } from 'lucide-vue-next'
+import { ImageIcon, LoaderCircle, Mic, PanelRightClose, PanelRightOpen, PenLine, RotateCw, Send, UserRound, WandSparkles, X } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { vAutosize } from '../lib/autosize'
 import { usePanelCollapsed } from '../lib/panelCollapse'
+import { sourceOf } from '../lib/draftSource'
 import type { AiDraft } from '../types'
 import CustomerPanel from './CustomerPanel.vue'
 import { Button } from '@/components/ui/button'
@@ -34,6 +35,16 @@ const tab = ref<'customer' | 'assistant'>('customer')
 // per-option local edit state, keyed by draft id
 const edits = reactive<Record<string, { text: string }>>({})
 const busy = reactive<Record<string, boolean>>({})
+
+// Each draft's "based on ..." badge (template below) needs sourceOf's result
+// up to 3 times per render; sourceOf itself does a linear find()+some() over
+// inbox.messages, so this computes it once per draft rather than repeating
+// that search on every reference.
+const draftSources = computed(() => {
+  const map = new Map<string, ReturnType<typeof sourceOf>>()
+  for (const d of inbox.drafts) map.set(d.id, sourceOf(d, inbox.messages))
+  return map
+})
 
 function vm(d: AiDraft) {
   if (!edits[d.id]) edits[d.id] = { text: d.draft_text }
@@ -197,6 +208,12 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
               <PenLine class="w-3.5 h-3.5" />
             </Button>
           </div>
+
+          <p v-if="draftSources.get(d.id)" class="flex items-center gap-1 px-4 pb-1.5 text-[11px] text-muted-foreground">
+            <Mic v-if="draftSources.get(d.id) === 'audio'" class="w-3 h-3 shrink-0" />
+            <ImageIcon v-else class="w-3 h-3 shrink-0" />
+            {{ draftSources.get(d.id) === 'audio' ? t('assistant.sourceAudio') : t('assistant.sourceImage') }}
+          </p>
 
           <!-- editable reply: grows to fit the whole text, never scrolls -->
           <div class="px-4 pt-1.5">

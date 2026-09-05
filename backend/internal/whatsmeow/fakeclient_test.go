@@ -33,6 +33,9 @@ type fakeWAClient struct {
 	uploadResp wm.UploadResponse
 	uploadErr  error
 
+	downloadResp []byte
+	downloadErr  error
+
 	isOnWhatsAppResp    []types.IsOnWhatsAppResponse
 	isOnWhatsAppErr     error
 	isOnWhatsAppQueries [][]string // every call's phones, for assertions
@@ -138,7 +141,10 @@ func (f *fakeWAClient) Upload(ctx context.Context, data []byte, appInfo wm.Media
 }
 
 func (f *fakeWAClient) Download(ctx context.Context, msg wm.DownloadableMessage) ([]byte, error) {
-	return nil, fmt.Errorf("fakeWAClient: Download not configured")
+	if f.downloadResp == nil && f.downloadErr == nil {
+		return nil, fmt.Errorf("fakeWAClient: Download not configured")
+	}
+	return f.downloadResp, f.downloadErr
 }
 
 // IsOnWhatsApp returns whatever isOnWhatsAppResp/isOnWhatsAppErr a test

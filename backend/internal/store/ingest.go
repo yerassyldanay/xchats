@@ -388,6 +388,28 @@ func (s *Store) SetMediaReady(ctx context.Context, messageID uuid.UUID, fileSize
 	return err
 }
 
+// UpdateMediaTranscript persists an audio attachment's speech-to-text result
+// on the channel's own media table — dispatched exactly like
+// UpsertOutboundMedia, since "which table owns this message's media row"
+// only ever depends on the channel. worker.go calls this once per audio
+// note, right after internal/stt.Transcriber.Transcribe returns, so a
+// redelivered download task (or a page reopened mid-transcription) never
+// re-runs the STT call: the transcript column is the durable "already done"
+// marker, not a queue state.
+func (s *Store) UpdateMediaTranscript(ctx context.Context, channel string, messageID uuid.UUID, transcript string) error {
+	table := "message_media"
+	switch {
+	case channel == string(chanTelegram):
+		table = "tg_message_media"
+	case isChannelCoreChannel(channel):
+		table = "channel_message_media"
+	}
+	_, err := s.db.Exec(ctx, `
+		UPDATE `+table+` SET transcript = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE message_id = $1 AND media_type = 'audio'`, messageID, transcript)
+	return err
+}
+
 // MediaStorageURL resolves a public media id to its blob key, on any
 // channel, SCOPED to orgID — a media row belonging to a different
 // organization (or no row at all) is indistinguishable from ErrNotFound to

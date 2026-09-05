@@ -28,15 +28,33 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/stt"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/messaging"
+	"github.com/yerassyldanay/xchats/backend/response"
 )
 
 // mediaDownloadTimeout bounds one attachment's background download — well
 // past any reasonable WhatsApp media size, short enough that a stuck
-// download doesn't accumulate goroutines under sustained media traffic.
-const mediaDownloadTimeout = 2 * time.Minute
+// download doesn't accumulate goroutines under sustained media traffic. A
+// var, not a const, solely so a test can shrink it to deterministically
+// prove downloadAndAttachMedia's post-download work no longer shares this
+// budget (see postMediaReadyTimeout) — production code never assigns it.
+var mediaDownloadTimeout = 2 * time.Minute
+
+// postMediaReadyTimeout bounds transcription and the automation re-arm —
+// deliberately its OWN fresh budget rather than reusing the download's
+// context, and longer than mediaDownloadTimeout: a slow download can eat
+// most or all of that deadline before these even start, and once
+// SetMediaReady has committed, the media row is 'ready' and neither
+// PendingTelegramMedia-style sweep nor anything else will ever retry a
+// transcription/re-arm that failed only because its context had already
+// expired. 3 minutes comfortably covers STT's own configurable timeout
+// (internal/stt.ResolveParams defaults to 60s, operator-adjustable) plus
+// the KB load and the few fast DB calls TranscribeAudio/RearmAfterMediaReady
+// make.
+const postMediaReadyTimeout = 3 * time.Minute
 
 // aiDraftEnqueueTimeout bounds the fire-and-forget AI-draft enqueue — a full
 // queue becomes a logged error rather than blocking event ingestion.
@@ -67,9 +85,22 @@ type ManagerConfig struct {
 	// see ingestMessage. Optional: nil (as in most of this package's own
 	// tests, which don't exercise automation) falls back to the pre-
 	// automation behavior of enqueueing an AI draft immediately, with no
-	// debounce and no mode gating.
+	// debounce and no mode gating. downloadAndAttachMedia also passes this
+	// straight through to worker.TranscribeAudio (it is worker.Automation-
+	// shaped too), so a voice note's transcript re-arms the exact same way a
+	// fresh text message would.
 	Automation AutomationScheduler
-	Log        *slog.Logger
+	// Response resolves the organization's knowledge base for a transcribed
+	// voice note's vocabulary priming (see worker.TranscribeAudio). nil
+	// skips priming, never transcription itself.
+	Response *response.Service
+	// STT resolves the CURRENT speech-to-text configuration — called fresh
+	// on every voice note (mirrors internal/worker.Worker's identical
+	// field), so a Settings UI change takes effect with no restart. nil (a
+	// wiring with no STT provider configured) makes downloadAndAttachMedia's
+	// transcription step a no-op, exactly like internal/worker's own.
+	STT func(ctx context.Context) stt.Params
+	Log *slog.Logger
 }
 
 // Manager is the whatsmeow adapter's composition root: a registry of
@@ -347,6 +378,23 @@ func (m *Manager) downloadAndAttachMedia(accountID string, messageID uuid.UUID, 
 			return
 		}
 		m.broadcastMessage(ctx, messageID, "message.updated")
+
+		if acctID, err := uuid.Parse(accountID); err == nil {
+			// A fresh, independent deadline — not ctx, whose
+			// mediaDownloadTimeout budget the download itself may have
+			// already spent most or all of. The media row is already
+			// 'ready' by this point, so a transcription/re-arm that failed
+			// only because ctx had expired would never be retried by
+			// anything else (see postMediaReadyTimeout's own doc comment).
+			postCtx, postCancel := context.WithTimeout(context.Background(), postMediaReadyTimeout)
+			defer postCancel()
+			deps := worker.TranscriptionDeps{
+				Store: m.cfg.Store, Blob: m.cfg.Blob, Hub: m.cfg.Hub, Response: m.cfg.Response,
+				Queue: m.cfg.Queue, STT: m.cfg.STT, Automation: m.cfg.Automation, Log: m.log,
+			}
+			worker.TranscribeAudio(postCtx, deps, messageID, acctID, string(messaging.ChannelWhatsApp), meta.MediaType, mediaBlobID(messageID))
+			worker.RearmAfterMediaReady(postCtx, deps, messageID, acctID, string(messaging.ChannelWhatsApp), meta.MediaType)
+		}
 	}()
 }
 

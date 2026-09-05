@@ -46,8 +46,13 @@ func NewOpenAICompatible(baseURL, apiKey, provider string, timeout time.Duration
 }
 
 type wireContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *wireImageURL `json:"image_url,omitempty"`
+}
+
+type wireImageURL struct {
+	URL string `json:"url"`
 }
 
 type wireMessage struct {
@@ -106,16 +111,53 @@ func (c *OpenAICompatible) Complete(ctx context.Context, req llm.ChatRequest) (l
 func toWireMessages(msgs []llm.Message) []wireMessage {
 	out := make([]wireMessage, len(msgs))
 	for i, m := range msgs {
-		out[i] = wireMessage{Role: m.Role, Content: []wireContentPart{{Type: "text", Text: m.Content}}}
+		out[i] = wireMessage{Role: m.Role, Content: toWireContentParts(m)}
 	}
 	return out
 }
 
+// toWireContentParts serializes one Message's content. m.Parts, when set,
+// takes priority over m.Content (see llm.Message's own doc comment) — a
+// PartText becomes a {"type":"text",...} part and a PartImage becomes
+// {"type":"image_url","image_url":{"url":...}}, the OpenAI-compatible shape
+// every provider this client calls (OpenAI, OpenRouter, Gemini's
+// OpenAI-compatible endpoint) accepts for a vision-capable model. Falling
+// back to a single text part for m.Content keeps every existing (non-Parts)
+// caller's wire shape byte-identical to before Parts existed.
+func toWireContentParts(m llm.Message) []wireContentPart {
+	if len(m.Parts) == 0 {
+		return []wireContentPart{{Type: "text", Text: m.Content}}
+	}
+	parts := make([]wireContentPart, len(m.Parts))
+	for i, p := range m.Parts {
+		switch p.Kind {
+		case llm.PartImage:
+			parts[i] = wireContentPart{Type: "image_url", ImageURL: &wireImageURL{URL: p.ImageURL}}
+		default:
+			parts[i] = wireContentPart{Type: "text", Text: p.Text}
+		}
+	}
+	return parts
+}
+
+// lastContent returns the last message's text, for tracing's "input" field.
+// A Parts-carrying message (a vision call) has no top-level Content — its
+// text lives in a PartText part instead, so this falls back to that rather
+// than tracing an empty input for every multimodal generation.
 func lastContent(msgs []llm.Message) string {
 	if len(msgs) == 0 {
 		return ""
 	}
-	return msgs[len(msgs)-1].Content
+	m := msgs[len(msgs)-1]
+	if m.Content != "" || len(m.Parts) == 0 {
+		return m.Content
+	}
+	for _, p := range m.Parts {
+		if p.Kind == llm.PartText {
+			return p.Text
+		}
+	}
+	return ""
 }
 
 func (c *OpenAICompatible) complete(ctx context.Context, wreq wireRequest) (llm.ChatResponse, error) {
