@@ -374,8 +374,11 @@ func TestEngine_Generate_ImageAttachmentRoutesToVisionModel(t *testing.T) {
 	if sent.Parts[1].Kind != llm.PartImage || sent.Parts[1].ImageURL != dataURI {
 		t.Fatalf("Parts[1] = %+v, want the image data URI %q", sent.Parts[1], dataURI)
 	}
-	if !strings.Contains(sent.Parts[0].Text, "[Прикреплено фото] что это?") {
+	if !strings.Contains(sent.Parts[0].Text, "[Прикреплено фото]") {
 		t.Fatalf("prompt text should also note the attached photo: %q", sent.Parts[0].Text)
+	}
+	if n := strings.Count(sent.Parts[0].Text, "что это?"); n != 1 {
+		t.Fatalf("prompt text contains %q %d times, want exactly once (IncomingText already carries the caption — the tail must not repeat it)", "что это?", n)
 	}
 }
 

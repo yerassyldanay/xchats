@@ -10,7 +10,11 @@ export function sourceOf(draft: AiDraft, messages: Message[]): 'audio' | 'image'
   if (!draft.trigger_message_id) return null
   const msg = messages.find((m) => m.id === draft.trigger_message_id)
   if (!msg) return null
-  if (msg.media.some((md) => md.media_type === 'audio')) return 'audio'
-  if (msg.media.some((md) => md.media_type === 'image')) return 'image'
+  // Matches ChatThread.vue's own isAudio/isImage: media_type is the primary
+  // signal, with a mimetype fallback for a row whose media_type came back
+  // generic — keeping the two checks in sync means a voice note that renders
+  // an audio player in the thread always gets the same badge here.
+  if (msg.media.some((md) => md.media_type === 'audio' || md.mimetype.startsWith('audio/'))) return 'audio'
+  if (msg.media.some((md) => md.media_type === 'image' || md.mimetype.startsWith('image/'))) return 'image'
   return null
 }

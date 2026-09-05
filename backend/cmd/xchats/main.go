@@ -352,6 +352,8 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Queue:        q,
 		Hub:          hub,
 		Automation:   automationScheduler,
+		Response:     responseService,
+		STT:          func(ctx context.Context) stt.Params { return resolveSTTParams(ctx, credsChain, settingsStore, cfg) },
 		Log:          log,
 	})
 	if err != nil {
@@ -396,7 +398,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 
 	w := &worker.Worker{
 		Store: st, Queue: q, TG: tg, WACloud: waCloudClient, MetaClient: metaClient, Blob: blobStore, Hub: hub,
-		Response: responseService, Senders: senders, Log: log,
+		Response: responseService, Senders: senders, Log: log, Automation: automationScheduler,
 		STT: func(ctx context.Context) stt.Params { return resolveSTTParams(ctx, credsChain, settingsStore, cfg) },
 	}
 	q.Start(ctx, w.Handle)

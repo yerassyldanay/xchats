@@ -406,7 +406,7 @@ func (s *Store) UpdateMediaTranscript(ctx context.Context, channel string, messa
 	}
 	_, err := s.db.Exec(ctx, `
 		UPDATE `+table+` SET transcript = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE message_id = $1`, messageID, transcript)
+		WHERE message_id = $1 AND media_type = 'audio'`, messageID, transcript)
 	return err
 }
 

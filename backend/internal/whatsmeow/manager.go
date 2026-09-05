@@ -28,9 +28,11 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/stt"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 	"github.com/yerassyldanay/xchats/backend/messaging"
+	"github.com/yerassyldanay/xchats/backend/response"
 )
 
 // mediaDownloadTimeout bounds one attachment's background download — well
@@ -67,9 +69,22 @@ type ManagerConfig struct {
 	// see ingestMessage. Optional: nil (as in most of this package's own
 	// tests, which don't exercise automation) falls back to the pre-
 	// automation behavior of enqueueing an AI draft immediately, with no
-	// debounce and no mode gating.
+	// debounce and no mode gating. downloadAndAttachMedia also passes this
+	// straight through to worker.TranscribeAudio (it is worker.Automation-
+	// shaped too), so a voice note's transcript re-arms the exact same way a
+	// fresh text message would.
 	Automation AutomationScheduler
-	Log        *slog.Logger
+	// Response resolves the organization's knowledge base for a transcribed
+	// voice note's vocabulary priming (see worker.TranscribeAudio). nil
+	// skips priming, never transcription itself.
+	Response *response.Service
+	// STT resolves the CURRENT speech-to-text configuration — called fresh
+	// on every voice note (mirrors internal/worker.Worker's identical
+	// field), so a Settings UI change takes effect with no restart. nil (a
+	// wiring with no STT provider configured) makes downloadAndAttachMedia's
+	// transcription step a no-op, exactly like internal/worker's own.
+	STT func(ctx context.Context) stt.Params
+	Log *slog.Logger
 }
 
 // Manager is the whatsmeow adapter's composition root: a registry of
@@ -347,6 +362,15 @@ func (m *Manager) downloadAndAttachMedia(accountID string, messageID uuid.UUID, 
 			return
 		}
 		m.broadcastMessage(ctx, messageID, "message.updated")
+
+		if acctID, err := uuid.Parse(accountID); err == nil {
+			deps := worker.TranscriptionDeps{
+				Store: m.cfg.Store, Blob: m.cfg.Blob, Hub: m.cfg.Hub, Response: m.cfg.Response,
+				Queue: m.cfg.Queue, STT: m.cfg.STT, Automation: m.cfg.Automation, Log: m.log,
+			}
+			worker.TranscribeAudio(ctx, deps, messageID, acctID, string(messaging.ChannelWhatsApp), meta.MediaType, mediaBlobID(messageID))
+			worker.RearmAfterMediaReady(ctx, deps, messageID, acctID, string(messaging.ChannelWhatsApp), meta.MediaType)
+		}
 	}()
 }
 

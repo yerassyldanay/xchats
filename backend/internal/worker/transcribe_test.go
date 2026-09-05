@@ -288,6 +288,226 @@ func TestTranscribeIfAudio_TranscribeErrorLeavesTranscriptEmpty(t *testing.T) {
 	}
 }
 
+// TestTranscribeIfAudio_SkipsWhenAlreadyTranscribed proves a second call for
+// an attachment that already has a transcript (a redelivered download task,
+// or a test calling this twice) never re-runs the paid STT call or
+// re-enqueues a draft — see TranscribeAudio's own idempotency doc comment.
+func TestTranscribeIfAudio_SkipsWhenAlreadyTranscribed(t *testing.T) {
+	ctx := context.Background()
+	stStore := dbtest.New(t)
+	blobStore, err := blob.NewDisk(t.TempDir())
+	if err != nil {
+		t.Fatalf("blob: %v", err)
+	}
+	accountID, _, messageID, _ := seedAudioMessage(t, stStore, "blob-7")
+	if _, err := blobStore.Put("blob-7", []byte("audio-bytes"), blob.Meta{Mimetype: "audio/ogg"}); err != nil {
+		t.Fatalf("put blob: %v", err)
+	}
+	if err := stStore.UpdateMediaTranscript(ctx, "whatsapp", messageID, "уже расшифровано"); err != nil {
+		t.Fatalf("seed existing transcript: %v", err)
+	}
+
+	transcriber := &fakeTranscriber{text: "should never run"}
+	pub := &recordingQueue{}
+	w := &Worker{
+		Store: stStore, Blob: blobStore, Hub: realtime.NewHub(), Queue: pub, Log: testLogger(),
+		STT: func(ctx context.Context) stt.Params { return stt.Params{Transcriber: transcriber} },
+	}
+
+	w.transcribeIfAudio(ctx, messageID, accountID, "whatsapp", "audio", "blob-7")
+
+	if len(transcriber.calls) != 0 {
+		t.Fatal("must not call Transcribe for an attachment that already has a transcript")
+	}
+	if len(pub.published) != 0 {
+		t.Fatal("must not enqueue a second AI draft for an attachment that already has a transcript")
+	}
+}
+
+// TestTranscribeIfAudio_SkipsOversizedAudio proves a blob over
+// stt.MaxAudioBytes is never even handed to the transcriber — both OpenAI
+// and Groq reject it anyway, so failing fast here saves the buffering cost.
+func TestTranscribeIfAudio_SkipsOversizedAudio(t *testing.T) {
+	ctx := context.Background()
+	stStore := dbtest.New(t)
+	blobStore, err := blob.NewDisk(t.TempDir())
+	if err != nil {
+		t.Fatalf("blob: %v", err)
+	}
+	accountID, _, messageID, _ := seedAudioMessage(t, stStore, "blob-8")
+	oversized := make([]byte, stt.MaxAudioBytes+1)
+	if _, err := blobStore.Put("blob-8", oversized, blob.Meta{Mimetype: "audio/ogg"}); err != nil {
+		t.Fatalf("put blob: %v", err)
+	}
+	transcriber := &fakeTranscriber{text: "should never run"}
+	pub := &recordingQueue{}
+	w := &Worker{
+		Store: stStore, Blob: blobStore, Hub: realtime.NewHub(), Queue: pub, Log: testLogger(),
+		STT: func(ctx context.Context) stt.Params { return stt.Params{Transcriber: transcriber} },
+	}
+
+	w.transcribeIfAudio(ctx, messageID, accountID, "whatsapp", "audio", "blob-8")
+
+	if len(transcriber.calls) != 0 {
+		t.Fatal("must not call Transcribe for audio over the provider size cap")
+	}
+	if len(pub.published) != 0 {
+		t.Fatal("must not enqueue an AI draft for audio over the provider size cap")
+	}
+}
+
+// fakeAutomation is a scripted worker.Automation double that records every
+// OnInboundMessage call it receives.
+type fakeAutomation struct {
+	calls []fakeAutomationCall
+	err   error
+}
+
+type fakeAutomationCall struct {
+	chatID, accountID uuid.UUID
+	channel           string
+}
+
+func (f *fakeAutomation) OnInboundMessage(ctx context.Context, chatID, accountID uuid.UUID, channel string, lastMessageAt time.Time) error {
+	f.calls = append(f.calls, fakeAutomationCall{chatID: chatID, accountID: accountID, channel: channel})
+	return f.err
+}
+
+// TestTranscribeIfAudio_RearmsAutomationInsteadOfRawEnqueue proves that with
+// an Automation dependency configured, a fresh transcript re-arms the
+// chat's debounce (the same treatment a new inbound message gets) instead
+// of the raw, unconditional KindAIDraft enqueue — see TranscribeAudio's own
+// doc comment on why that matters for scheduled_auto accounts.
+func TestTranscribeIfAudio_RearmsAutomationInsteadOfRawEnqueue(t *testing.T) {
+	ctx := context.Background()
+	stStore := dbtest.New(t)
+	blobStore, err := blob.NewDisk(t.TempDir())
+	if err != nil {
+		t.Fatalf("blob: %v", err)
+	}
+	accountID, chatID, messageID, _ := seedAudioMessage(t, stStore, "blob-9")
+	if _, err := blobStore.Put("blob-9", []byte("audio-bytes"), blob.Meta{Mimetype: "audio/ogg"}); err != nil {
+		t.Fatalf("put blob: %v", err)
+	}
+	transcriber := &fakeTranscriber{text: "привет"}
+	pub := &recordingQueue{}
+	auto := &fakeAutomation{}
+	w := &Worker{
+		Store: stStore, Blob: blobStore, Hub: realtime.NewHub(), Queue: pub, Log: testLogger(),
+		Automation: auto,
+		STT:        func(ctx context.Context) stt.Params { return stt.Params{Transcriber: transcriber} },
+	}
+
+	w.transcribeIfAudio(ctx, messageID, accountID, "whatsapp", "audio", "blob-9")
+
+	if len(pub.published) != 0 {
+		t.Fatalf("published = %+v, want no raw enqueue when Automation is configured", pub.published)
+	}
+	if len(auto.calls) != 1 {
+		t.Fatalf("automation calls = %d, want exactly 1", len(auto.calls))
+	}
+	call := auto.calls[0]
+	if call.chatID != chatID || call.accountID != accountID || call.channel != "whatsapp" {
+		t.Fatalf("automation call = %+v, want chat %s / account %s / channel whatsapp", call, chatID, accountID)
+	}
+}
+
+// seedImageMessage mirrors seedAudioMessage for an image attachment — the
+// fixture RearmAfterMediaReady's own tests need.
+func seedImageMessage(t *testing.T, st *store.Store, blobID string) (accountID, chatID, messageID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	org, err := st.SeedOrganization(ctx, "worker-image-test-"+blobID)
+	if err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	ownerJID := "77022200001@s.whatsapp.net"
+	accountID = config.AccountID(ownerJID)
+	if _, err := st.SeedAccount(ctx, store.Account{
+		ID: accountID, OrganizationID: uuid.NullUUID{UUID: org.ID, Valid: true},
+		DisplayName: "WhatsApp", ExternalAccountRef: ownerJID, ExternalHandle: "77022200001", ConnectionState: "connected",
+	}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	res, err := st.UpsertInbound(ctx, store.InboundUpsert{
+		AccountID: accountID, PhoneJID: "77000008888@s.whatsapp.net", RemoteJID: "77000008888@s.whatsapp.net",
+		PhoneNumber: "77000008888", Direction: "in", SenderKind: "contact",
+		ExternalMessageID: "IMAGEMSG-" + blobID, MessageKind: "imageMessage", Source: "live_webhook",
+		MessageTS: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("seed inbound: %v", err)
+	}
+	if _, _, err := st.UpsertMessageMedia(ctx, res.MessageID,
+		store.MediaRef{MediaType: "image", Mimetype: "image/jpeg"}, blobID, "ready"); err != nil {
+		t.Fatalf("seed media: %v", err)
+	}
+	return accountID, res.ChatID, res.MessageID
+}
+
+// TestRearmAfterMediaReady_ImageRearmsAutomation proves an image finishing
+// download hands its chat to Automation — without this, a debounce or
+// direct draft that fires before a slow download completes would generate
+// with no attachment at all, and (unlike audio, which always gets a second
+// attempt once transcribed) nothing would ever re-run Generate once the
+// image became ready.
+func TestRearmAfterMediaReady_ImageRearmsAutomation(t *testing.T) {
+	ctx := context.Background()
+	stStore := dbtest.New(t)
+	accountID, chatID, messageID := seedImageMessage(t, stStore, "img-1")
+	auto := &fakeAutomation{}
+	w := &Worker{Store: stStore, Hub: realtime.NewHub(), Log: testLogger(), Automation: auto}
+
+	w.rearmAfterMediaReady(ctx, messageID, accountID, "whatsapp", "image")
+
+	if len(auto.calls) != 1 {
+		t.Fatalf("automation calls = %d, want exactly 1", len(auto.calls))
+	}
+	call := auto.calls[0]
+	if call.chatID != chatID || call.accountID != accountID || call.channel != "whatsapp" {
+		t.Fatalf("automation call = %+v, want chat %s / account %s / channel whatsapp", call, chatID, accountID)
+	}
+}
+
+// TestRearmAfterMediaReady_FallsBackToRawEnqueue proves the no-Automation
+// wiring still gets a fresh draft, exactly like TranscribeAudio's own
+// fallback.
+func TestRearmAfterMediaReady_FallsBackToRawEnqueue(t *testing.T) {
+	ctx := context.Background()
+	stStore := dbtest.New(t)
+	accountID, chatID, messageID := seedImageMessage(t, stStore, "img-2")
+	pub := &recordingQueue{}
+	w := &Worker{Store: stStore, Hub: realtime.NewHub(), Queue: pub, Log: testLogger()}
+
+	w.rearmAfterMediaReady(ctx, messageID, accountID, "whatsapp", "image")
+
+	if len(pub.published) != 1 {
+		t.Fatalf("published = %d, want exactly 1", len(pub.published))
+	}
+	task, ok := pub.published[0].Payload.(AIDraftTask)
+	if !ok || task.ChatID != chatID {
+		t.Fatalf("published task = %+v (%T), want AIDraftTask{ChatID: %s}", pub.published[0].Payload, pub.published[0].Payload, chatID)
+	}
+}
+
+// TestRearmAfterMediaReady_NonImageIsANoop proves a document/video/sticker
+// download never re-arms generation — resolveAttachments only ever acts on
+// an image attachment, so there is nothing for a fresh generation pass to
+// pick up differently.
+func TestRearmAfterMediaReady_NonImageIsANoop(t *testing.T) {
+	ctx := context.Background()
+	stStore := dbtest.New(t)
+	auto := &fakeAutomation{}
+	pub := &recordingQueue{}
+	w := &Worker{Store: stStore, Hub: realtime.NewHub(), Queue: pub, Log: testLogger(), Automation: auto}
+
+	w.rearmAfterMediaReady(ctx, uuid.New(), uuid.New(), "whatsapp", "document")
+
+	if len(auto.calls) != 0 || len(pub.published) != 0 {
+		t.Fatal("must not re-arm or enqueue anything for a non-image attachment")
+	}
+}
+
 func TestTranscribeIfAudio_EmptyTranscriptIsNotPersisted(t *testing.T) {
 	ctx := context.Background()
 	stStore := dbtest.New(t)

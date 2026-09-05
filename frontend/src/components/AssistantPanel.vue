@@ -36,6 +36,16 @@ const tab = ref<'customer' | 'assistant'>('customer')
 const edits = reactive<Record<string, { text: string }>>({})
 const busy = reactive<Record<string, boolean>>({})
 
+// Each draft's "based on ..." badge (template below) needs sourceOf's result
+// up to 3 times per render; sourceOf itself does a linear find()+some() over
+// inbox.messages, so this computes it once per draft rather than repeating
+// that search on every reference.
+const draftSources = computed(() => {
+  const map = new Map<string, ReturnType<typeof sourceOf>>()
+  for (const d of inbox.drafts) map.set(d.id, sourceOf(d, inbox.messages))
+  return map
+})
+
 function vm(d: AiDraft) {
   if (!edits[d.id]) edits[d.id] = { text: d.draft_text }
   return edits[d.id]
@@ -199,10 +209,10 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
             </Button>
           </div>
 
-          <p v-if="sourceOf(d, inbox.messages)" class="flex items-center gap-1 px-4 pb-1.5 text-[11px] text-muted-foreground">
-            <Mic v-if="sourceOf(d, inbox.messages) === 'audio'" class="w-3 h-3 shrink-0" />
+          <p v-if="draftSources.get(d.id)" class="flex items-center gap-1 px-4 pb-1.5 text-[11px] text-muted-foreground">
+            <Mic v-if="draftSources.get(d.id) === 'audio'" class="w-3 h-3 shrink-0" />
             <ImageIcon v-else class="w-3 h-3 shrink-0" />
-            {{ sourceOf(d, inbox.messages) === 'audio' ? t('assistant.sourceAudio') : t('assistant.sourceImage') }}
+            {{ draftSources.get(d.id) === 'audio' ? t('assistant.sourceAudio') : t('assistant.sourceImage') }}
           </p>
 
           <!-- editable reply: grows to fit the whole text, never scrolls -->

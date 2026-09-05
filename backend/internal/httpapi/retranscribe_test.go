@@ -38,6 +38,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/settings"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/stt"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
 )
 
@@ -290,6 +291,66 @@ func TestHandleRetranscribeMessage_HappyPath(t *testing.T) {
 	task, ok := published[0].Payload.(worker.AIDraftTask)
 	if !ok || task.ChatID != chatID {
 		t.Fatalf("published task = %+v (%T), want AIDraftTask{ChatID: %s}", published[0].Payload, published[0].Payload, chatID)
+	}
+}
+
+// TestHandleRetranscribeMessage_UpdatesChatPreview proves a manual
+// re-transcribe refreshes the chat list's own preview text too, not just
+// the message inside the open thread — worker.TranscribeAudio's automatic
+// run already does this (see worker.TranscriptPreview), and the two paths
+// must not drift out of sync.
+func TestHandleRetranscribeMessage_UpdatesChatPreview(t *testing.T) {
+	h := newRetranscribeHarness(t)
+	sttSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"text":"здравствуйте, привет"}`)
+	}))
+	defer sttSrv.Close()
+	h.configureSTT(t, sttSrv.URL)
+
+	chatID, messageID := h.seedAudioMessage("blob-preview", "ready")
+	if _, err := h.blob.Put("blob-preview", []byte("audio-bytes"), blob.Meta{Mimetype: "audio/ogg"}); err != nil {
+		t.Fatalf("put blob: %v", err)
+	}
+
+	resp, env := h.do(http.MethodPost, "/xchats/api/v1/chats/"+chatID.String()+"/messages/"+messageID.String()+"/retranscribe", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, env["message"])
+	}
+
+	chat, err := h.store.ChatByID(context.Background(), chatID)
+	if err != nil {
+		t.Fatalf("ChatByID: %v", err)
+	}
+	if chat.LastMessagePreview != "🎙 здравствуйте, привет" {
+		t.Fatalf("LastMessagePreview = %q, want the transcribed snippet", chat.LastMessagePreview)
+	}
+}
+
+// TestHandleRetranscribeMessage_OversizedAudioIs413 proves a blob over
+// stt.MaxAudioBytes is rejected before the bytes are ever handed to the
+// transcription provider — both OpenAI and Groq reject it anyway.
+func TestHandleRetranscribeMessage_OversizedAudioIs413(t *testing.T) {
+	h := newRetranscribeHarness(t)
+	called := false
+	sttSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		io.WriteString(w, `{"text":"should never be requested"}`)
+	}))
+	defer sttSrv.Close()
+	h.configureSTT(t, sttSrv.URL)
+
+	chatID, messageID := h.seedAudioMessage("blob-big", "ready")
+	oversized := make([]byte, stt.MaxAudioBytes+1)
+	if _, err := h.blob.Put("blob-big", oversized, blob.Meta{Mimetype: "audio/ogg"}); err != nil {
+		t.Fatalf("put blob: %v", err)
+	}
+
+	resp, env := h.do(http.MethodPost, "/xchats/api/v1/chats/"+chatID.String()+"/messages/"+messageID.String()+"/retranscribe", nil)
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d, want 413; body=%s", resp.StatusCode, env["message"])
+	}
+	if called {
+		t.Fatal("must not call the transcription provider for audio over the size cap")
 	}
 }
 

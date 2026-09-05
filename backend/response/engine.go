@@ -136,7 +136,7 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 		return nil, fmt.Errorf("response: %w", err)
 	}
 	incomingText := req.IncomingText
-	if suffix := attachmentTailSuffix(req.Attachments); suffix != "" {
+	if suffix := attachmentTailSuffix(req.Attachments, incomingText); suffix != "" {
 		if incomingText != "" {
 			incomingText += "\n" + suffix
 		} else {
@@ -303,7 +303,16 @@ func userMessage(prompt string, attachments []IncomingAttachment) llm.Message {
 // input (hasImageAttachment/userMessage) — a model with no VisionModel
 // configured still needs to know a photo arrived, even though it cannot see
 // it.
-func attachmentTailSuffix(atts []IncomingAttachment) string {
+//
+// incomingText is the caller's OWN incoming text (before this suffix is
+// appended to it) — an image's Caption is the trigger message's own body
+// (see responsestore.resolveAttachments), which is already incomingText
+// itself in the overwhelmingly common case of one photo with one caption.
+// Appending it again here would put the customer's words in the prompt
+// twice; it is only worth restating next to "[Прикреплено фото]" when
+// incomingText is empty (an image with no other text at all), so the model
+// still sees it once.
+func attachmentTailSuffix(atts []IncomingAttachment, incomingText string) string {
 	var lines []string
 	for _, a := range atts {
 		switch a.Kind {
@@ -313,7 +322,7 @@ func attachmentTailSuffix(atts []IncomingAttachment) string {
 			}
 		case AttachmentImage:
 			label := "[Прикреплено фото]"
-			if a.Caption != "" {
+			if a.Caption != "" && incomingText == "" {
 				label += " " + a.Caption
 			}
 			lines = append(lines, label)

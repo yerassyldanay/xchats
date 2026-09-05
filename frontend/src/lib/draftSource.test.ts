@@ -46,6 +46,11 @@ describe('sourceOf', () => {
     expect(sourceOf(draft({}), messages)).toBeNull()
   })
 
+  it('falls back to the mimetype when media_type is generic, matching ChatThread.vue', () => {
+    const messages = [message({ media: [media({ media_type: 'document', mimetype: 'audio/ogg' })] })]
+    expect(sourceOf(draft({}), messages)).toBe('audio')
+  })
+
   it('returns null when the draft has no trigger_message_id', () => {
     const messages = [message({ media: [media({ media_type: 'audio' })] })]
     expect(sourceOf(draft({ trigger_message_id: null }), messages)).toBeNull()

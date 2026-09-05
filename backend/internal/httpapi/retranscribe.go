@@ -95,6 +95,10 @@ func (s *Server) handleRetranscribeMessage(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, "read audio bytes: "+err.Error())
 		return
 	}
+	if int64(len(data)) > stt.MaxAudioBytes {
+		fail(c, http.StatusRequestEntityTooLarge, ErrValidation, "audio exceeds the transcription provider's size limit")
+		return
+	}
 
 	// Vocabulary priming is best-effort — a KB load failure (or no
 	// organization/KnowledgeBase at all) just falls back to the operator's
@@ -131,6 +135,14 @@ func (s *Server) handleRetranscribeMessage(c *gin.Context) {
 		return
 	}
 	s.hub.Broadcast("message.updated", dto.MapMessage(updated))
+	// Keep the chat list's sidebar preview in sync too — worker.transcribeIfAudio's
+	// automatic run already does this; a manual re-transcribe correcting the
+	// same field deserves the same UI refresh, not just the open thread.
+	if err := s.store.UpdateChatPreviewIfCurrent(ctx(c), chatID, updated.MessageTS, worker.TranscriptPreview(text)); err != nil {
+		s.log.Error("update chat preview after retranscribe", "chat_id", chatID, "err", err)
+	} else if chat, err := s.store.ChatByID(ctx(c), chatID); err == nil {
+		s.hub.Broadcast("chat.updated", dto.MapChat(chat))
+	}
 	// A fresh transcript deserves a fresh draft, exactly like handleSuggest's
 	// own direct KindAIDraft enqueue (drafts.go) — never through automation's
 	// debounce, which already ran once when the message first arrived.

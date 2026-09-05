@@ -108,6 +108,16 @@ func NewOpenAITranscriber(baseURL, apiKey, model string, timeout time.Duration) 
 // llmprovider.OpenAICompatible's identical 4<<20 cap on a chat response).
 const maxTranscriptionResponseBody = 4 << 20
 
+// MaxAudioBytes bounds how large an audio attachment's raw bytes may be
+// before a caller (internal/worker's automatic transcription step, the
+// manual re-transcribe endpoint) even attempts to read the blob and call
+// Transcribe: both OpenAI's and Groq's /audio/transcriptions endpoints
+// reject anything over 25 MB with an HTTP 413, and buffering a
+// multi-hundred-megabyte blob into memory (once for the blob read, again for
+// the multipart body) to discover that is wasted work — mirrors
+// responsestore's identical maxVisionImageBytes cap on the image side.
+const MaxAudioBytes = 25 << 20
+
 type transcriptionResponse struct {
 	Text  string `json:"text"`
 	Error *struct {
@@ -160,7 +170,7 @@ func (c *OpenAITranscriber) Transcribe(ctx context.Context, audio []byte, filena
 	if err != nil {
 		return "", fmt.Errorf("stt: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranscriptionResponseBody))
 	if err != nil {
 		return "", err
