@@ -49,6 +49,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/simreceipts"
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/stt"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
 	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
@@ -273,7 +274,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	}
 	cachedKB := responsestore.NewCachedKBRepo(kbRepo)
 	responseService := &response.Service{
-		Conversations: &responsestore.ConversationRepo{Store: st},
+		Conversations: &responsestore.ConversationRepo{Store: st, Blob: blobStore},
 		KnowledgeBase: cachedKB,
 		Drafts:        &responsestore.DraftRepo{Store: st},
 		Engine:        engine,
@@ -396,6 +397,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	w := &worker.Worker{
 		Store: st, Queue: q, TG: tg, WACloud: waCloudClient, MetaClient: metaClient, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, Log: log,
+		STT: func(ctx context.Context) stt.Params { return resolveSTTParams(ctx, credsChain, settingsStore, cfg) },
 	}
 	q.Start(ctx, w.Handle)
 
@@ -767,10 +769,27 @@ func resolveLLMParams(settingsStore *settings.Store, cfg *config.Config) respons
 	}
 	return response.LLMParams{
 		DefaultModel: llm.ModelRef{Provider: st.LLM.DefaultProvider, Model: st.LLM.DefaultModel},
+		// VisionModel always shares DefaultProvider — see LLMSettings.VisionModel's
+		// own doc comment for why there is no separate vision provider
+		// selector. A blank st.LLM.VisionModel yields a zero ModelRef, which
+		// Engine.Generate already treats as "vision not configured."
+		VisionModel:  llm.ModelRef{Provider: st.LLM.DefaultProvider, Model: st.LLM.VisionModel},
 		MaxTokens:    st.LLM.MaxTokens,
 		Temperature:  st.LLM.Temperature,
 		RetryEnabled: st.LLM.Retry,
 	}
+}
+
+// resolveSTTParams reads the audio-transcription engine's CURRENT
+// configuration — worker.Worker calls this fresh on every voice note (see
+// Worker.STT), so a Settings UI change (provider, model, language,
+// vocabulary) takes effect on the very next one with no restart. A thin
+// wrapper over stt.ResolveParams (shared with internal/httpapi's manual
+// "re-transcribe" endpoint, so the two paths can never resolve a different
+// provider/model/key than each other) that just supplies this process's own
+// timeout default.
+func resolveSTTParams(ctx context.Context, creds *credentials.Chain, settingsStore *settings.Store, cfg *config.Config) stt.Params {
+	return stt.ResolveParams(ctx, creds, settingsStore, cfg.LLMDraftTimeoutSeconds)
 }
 
 // resolveChatParams is resolveLLMParams' Knowledge-Base-chat counterpart:

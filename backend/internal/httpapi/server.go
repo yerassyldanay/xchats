@@ -454,6 +454,7 @@ func (s *Server) Router() *gin.Engine {
 	auth.GET("/chats/:id", s.handleGetChat)
 	auth.GET("/chats/:id/messages", s.handleListMessages)
 	auth.POST("/chats/:id/messages", s.handleSendMessage)
+	auth.POST("/chats/:id/messages/:message_id/retranscribe", s.handleRetranscribeMessage)
 	auth.POST("/chats/:id/read", s.handleReadChat)
 	auth.PATCH("/chats/:id/assignee", s.handleAssignChat)
 	auth.PATCH("/chats/:id/status", s.handleSetChatStatus)

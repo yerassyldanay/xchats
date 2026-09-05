@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/stt"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsappcloud"
 	"github.com/yerassyldanay/xchats/backend/messaging"
@@ -78,7 +80,15 @@ type Worker struct {
 	Hub        *realtime.Hub
 	Response   *response.Service         // the multichannel response engine's entry point
 	Senders    *messaging.SenderRegistry // channel -> ChannelSender, for outbound sends
-	Log        *slog.Logger
+	// STT resolves the CURRENT speech-to-text configuration — called fresh
+	// on every audio attachment (mirrors response.Engine.Params), so a
+	// Settings UI change takes effect on the very next voice note with no
+	// restart. nil (a wiring with no STT provider configured at all) makes
+	// transcribeIfAudio a no-op — a composition root that never sets this
+	// simply never transcribes, exactly like a nil VisionModel never routes
+	// to vision.
+	STT func(ctx context.Context) stt.Params
+	Log *slog.Logger
 }
 
 // publishTimeout bounds every enqueue a handler makes. A worker that fans work
@@ -163,6 +173,7 @@ func (w *Worker) downloadTelegramMedia(ctx context.Context, t MediaDownloadTask)
 	}
 	w.Log.Info("telegram media downloaded", "message_id", t.MessageID, "bytes", len(data))
 	w.emitMessage(ctx, "message.updated", t.MessageID)
+	w.transcribeIfAudio(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType, t.BlobID)
 	return nil
 }
 
@@ -281,6 +292,7 @@ func (w *Worker) downloadMetaMedia(ctx context.Context, t MediaDownloadTask) err
 	}
 	w.Log.Info("meta media downloaded", "message_id", t.MessageID, "bytes", len(data))
 	w.emitMessage(ctx, "message.updated", t.MessageID)
+	w.transcribeIfAudio(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType, t.BlobID)
 	return nil
 }
 
@@ -347,6 +359,7 @@ func (w *Worker) downloadDirectMedia(ctx context.Context, t MediaDownloadTask) e
 	}
 	w.Log.Info("meta media downloaded (direct)", "message_id", t.MessageID, "bytes", len(data))
 	w.emitMessage(ctx, "message.updated", t.MessageID)
+	w.transcribeIfAudio(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType, t.BlobID)
 	return nil
 }
 
@@ -436,6 +449,100 @@ func (w *Worker) handleAIDraft(ctx context.Context, t AIDraftTask) error {
 	return nil
 }
 
+// --- audio transcription (STT) ---------------------------------------------
+
+// transcribeIfAudio runs the speech-to-text step for one attachment right
+// after its bytes finish downloading (see the "Emit message.updated" call
+// in each of the three download functions above, right before this one).
+// It is a best-effort enhancement, never a reason to fail a media download
+// that has already succeeded: an unconfigured w.STT, a Transcribe error, or
+// anything but an audio attachment is logged (where relevant) and silently
+// skipped rather than returned as an error.
+//
+// The transcript is persisted exactly once (store.UpdateMediaTranscript is
+// the durable "already done" marker — see its own doc comment), so a
+// redelivered download task never re-runs the STT call. Once persisted,
+// this also refreshes the chat list's preview (audio's own placeholder,
+// "🎙 Аудио", becomes the transcribed words) and enqueues a fresh AI draft —
+// the very first draft attempt, fired by the ingest webhook the moment the
+// message arrived, ran with no transcript at all, so the customer's actual
+// words deserve their own generation, exactly like the operator's own
+// "regenerate" action (internal/httpapi/drafts.go) triggers one via this
+// same direct KindAIDraft enqueue.
+func (w *Worker) transcribeIfAudio(ctx context.Context, messageID, accountID uuid.UUID, channel, mediaType, blobID string) {
+	if mediaType != "audio" || w.STT == nil {
+		return
+	}
+	params := w.STT(ctx)
+	if params.Transcriber == nil {
+		return
+	}
+	data, meta, err := w.Blob.Get(blobID)
+	if err != nil {
+		w.Log.Error("transcribe: read blob", "message_id", messageID, "err", err)
+		return
+	}
+
+	// Vocabulary priming is best-effort: a KB load failure (or no
+	// organization/KnowledgeBase at all) just falls back to the operator's
+	// own custom vocabulary alone, never blocks transcription.
+	prompt := params.Vocabulary
+	if w.Response != nil && w.Response.KnowledgeBase != nil {
+		if account, err := w.Store.AccountByID(ctx, accountID); err == nil && account.OrganizationID.Valid {
+			if kb, err := w.Response.KnowledgeBase.Load(ctx, account.OrganizationID.UUID.String()); err == nil {
+				prompt = stt.BuildPrompt(kb, params.Vocabulary)
+			}
+		}
+	}
+
+	text, err := params.Transcriber.Transcribe(ctx, data, meta.FileName, meta.Mimetype, stt.TranscribeOptions{
+		Language: params.Language, Prompt: prompt,
+	})
+	if err != nil {
+		w.Log.Warn("audio transcription failed", "message_id", messageID, "err", err)
+		return
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+
+	if err := w.Store.UpdateMediaTranscript(ctx, channel, messageID, text); err != nil {
+		w.Log.Error("persist transcript", "message_id", messageID, "err", err)
+		return
+	}
+	msg, err := w.Store.MessageByID(ctx, messageID)
+	if err != nil {
+		w.Log.Error("reload transcribed message", "message_id", messageID, "err", err)
+		return
+	}
+	w.Hub.Broadcast("message.updated", dto.MapMessage(msg))
+
+	if err := w.Store.UpdateChatPreviewIfCurrent(ctx, msg.ChatID, msg.MessageTS, transcriptPreview(text)); err != nil {
+		w.Log.Error("update chat preview after transcription", "chat_id", msg.ChatID, "err", err)
+	} else {
+		w.emitChat(ctx, "chat.updated", msg.ChatID)
+	}
+
+	if err := w.publish(ctx, queue.Message{Kind: queue.KindAIDraft, Payload: AIDraftTask{ChatID: msg.ChatID}}); err != nil {
+		w.Log.Error("enqueue AI draft after transcription", "message_id", messageID, "err", err)
+	}
+	w.Log.Info("audio transcribed", "message_id", messageID, "chars", len(text))
+}
+
+// transcriptPreview mirrors previewFor's/Preview's own audio placeholder
+// ("🎙 Аудио" — see internal/whatsmeow/manager.go and
+// internal/tgingest/mapping.go) now that the actual words are known, capped
+// the same way whatsmeow's previewFor already caps a text message (120
+// runes) rather than a fresh, possibly very different, truncation rule.
+func transcriptPreview(text string) string {
+	r := []rune(text)
+	if len(r) > 120 {
+		text = string(r[:120])
+	}
+	return "🎙 " + text
+}
+
 // --- helpers --------------------------------------------------------------
 
 func (w *Worker) emitMessage(ctx context.Context, name string, id uuid.UUID) {
@@ -445,4 +552,13 @@ func (w *Worker) emitMessage(ctx context.Context, name string, id uuid.UUID) {
 		return
 	}
 	w.Hub.Broadcast(name, dto.MapMessage(msg))
+}
+
+func (w *Worker) emitChat(ctx context.Context, name string, id uuid.UUID) {
+	chat, err := w.Store.ChatByID(ctx, id)
+	if err != nil {
+		w.Log.Error("emit chat", "err", err)
+		return
+	}
+	w.Hub.Broadcast(name, dto.MapChat(chat))
 }
