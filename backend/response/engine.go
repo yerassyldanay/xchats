@@ -11,6 +11,7 @@ package response
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/llm"
@@ -21,6 +22,15 @@ import (
 // which provider/model to call by default, and the sampling/retry knobs.
 type LLMParams struct {
 	DefaultModel llm.ModelRef
+	// VisionModel is the model Generate routes to instead of DefaultModel
+	// when the request carries an image attachment — a zero ModelRef (Model
+	// == "") means vision is not configured, so an image attachment is
+	// described to the model as text only (see GenerateRequest.Attachments
+	// and attachmentTailSuffix). It always shares DefaultModel's Provider:
+	// the Settings UI offers one model string, not a second provider
+	// selector, since every provider this engine calls is the same
+	// OpenAI-wire-compatible surface for both chat and vision.
+	VisionModel  llm.ModelRef
 	MaxTokens    int
 	Temperature  float64
 	RetryEnabled bool
@@ -72,6 +82,12 @@ type GenerateRequest struct {
 	// and only to a registered provider; nil in production (the WhatsApp path
 	// never sets it).
 	ModelOverride *llm.ModelRef
+	// Attachments are the trigger message's own media (images, transcribed
+	// audio) — see IncomingAttachment. An image attachment routes the call
+	// to LLMParams.VisionModel (when configured) and is attached to the
+	// model's user message as an extra content part; an audio attachment's
+	// transcript is folded into the conversation tail as ordinary text.
+	Attachments []IncomingAttachment
 }
 
 // GenerateResult is the engine's grounded, contract-validated output.
@@ -119,27 +135,49 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	if err := aiprompt.ValidateNoStorageLocatorLeak(rendered); err != nil {
 		return nil, fmt.Errorf("response: %w", err)
 	}
+	incomingText := req.IncomingText
+	if suffix := attachmentTailSuffix(req.Attachments); suffix != "" {
+		if incomingText != "" {
+			incomingText += "\n" + suffix
+		} else {
+			incomingText = suffix
+		}
+	}
 	prompt := rendered + aiprompt.RenderCustomerContext(req.Customer) +
-		aiprompt.ConversationTail(aiprompt.RenderHistory(req.History), req.IncomingText)
+		aiprompt.ConversationTail(aiprompt.RenderHistory(req.History), incomingText)
 
 	params := e.Params()
+	// attachVision gates whether an image is actually attached as vision
+	// input, not just whether one is present: with no VisionModel
+	// configured, DefaultModel may not even be multimodal-capable, so an
+	// image attachment stays a text-only note (attachmentTailSuffix above)
+	// rather than being sent as an image part it might reject outright.
+	attachVision := hasImageAttachment(req.Attachments) && params.VisionModel.Model != ""
 	modelRef := params.DefaultModel
-	if req.ModelOverride != nil {
+	switch {
+	case req.ModelOverride != nil:
 		modelRef = *req.ModelOverride
+	case attachVision:
+		modelRef = params.VisionModel
 	}
 	client, err := e.LLMs.Client(modelRef)
 	if err != nil {
 		return nil, fmt.Errorf("response: resolve model client: %w", err)
 	}
 
-	raw, err := e.complete(ctx, client, modelRef, prompt, params)
+	var visionAttachments []IncomingAttachment
+	if attachVision {
+		visionAttachments = req.Attachments
+	}
+
+	raw, err := e.complete(ctx, client, modelRef, prompt, visionAttachments, params)
 	if err != nil {
 		return nil, fmt.Errorf("response: llm call: %w", err)
 	}
 
 	if reason := aiprompt.ClassifyRetryV7(raw, req.KB, cat); reason != aiprompt.RetryReasonNone && params.RetryEnabled {
 		retryPrompt := prompt + aiprompt.RetryFeedbackV7(raw, req.KB, cat)
-		retryRaw, err := e.complete(ctx, client, modelRef, retryPrompt, params)
+		retryRaw, err := e.complete(ctx, client, modelRef, retryPrompt, visionAttachments, params)
 		if err != nil {
 			return nil, fmt.Errorf("response: llm retry call: %w", err)
 		}
@@ -210,10 +248,10 @@ func PromptRefFor(channel messaging.Channel) string {
 	return aiprompt.PromptRefShopKBV7
 }
 
-func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string, params LLMParams) (string, error) {
+func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string, attachments []IncomingAttachment, params LLMParams) (string, error) {
 	resp, err := client.Complete(ctx, llm.ChatRequest{
 		Model:       modelRef.Model,
-		Messages:    []llm.Message{{Role: "user", Content: prompt}},
+		Messages:    []llm.Message{userMessage(prompt, attachments)},
 		Temperature: params.Temperature,
 		MaxTokens:   params.MaxTokens,
 	})
@@ -224,4 +262,62 @@ func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef l
 		return "", err
 	}
 	return resp.Text, nil
+}
+
+// hasImageAttachment reports whether atts contains at least one image
+// resolved to a data URI and therefore ready to attach to a vision call.
+func hasImageAttachment(atts []IncomingAttachment) bool {
+	for _, a := range atts {
+		if a.Kind == AttachmentImage && a.DataURI != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// userMessage builds the model-facing user turn: plain text for the common
+// (no-image) case, or a multi-part message — the rendered prompt as one
+// text part, followed by one image part per attachment — once any image is
+// present. See llm.Message.Parts' own doc comment for why Parts, not
+// Content, carries a multimodal turn.
+func userMessage(prompt string, attachments []IncomingAttachment) llm.Message {
+	var images []llm.ContentPart
+	for _, a := range attachments {
+		if a.Kind == AttachmentImage && a.DataURI != "" {
+			images = append(images, llm.ContentPart{Kind: llm.PartImage, ImageURL: a.DataURI})
+		}
+	}
+	if len(images) == 0 {
+		return llm.Message{Role: "user", Content: prompt}
+	}
+	parts := append([]llm.ContentPart{{Kind: llm.PartText, Text: prompt}}, images...)
+	return llm.Message{Role: "user", Parts: parts}
+}
+
+// attachmentTailSuffix renders the trigger message's non-text attachments as
+// bracketed labels appended to the customer's own text, so the conversation
+// tail the model reads never silently drops that the customer sent media —
+// a transcribed voice note becomes "[Голосовое сообщение]: <transcript>"
+// and an image becomes "[Прикреплено фото]" (plus its caption, if any).
+// This runs regardless of whether an image is ALSO attached as vision
+// input (hasImageAttachment/userMessage) — a model with no VisionModel
+// configured still needs to know a photo arrived, even though it cannot see
+// it.
+func attachmentTailSuffix(atts []IncomingAttachment) string {
+	var lines []string
+	for _, a := range atts {
+		switch a.Kind {
+		case AttachmentAudio:
+			if a.Transcript != "" {
+				lines = append(lines, "[Голосовое сообщение]: "+a.Transcript)
+			}
+		case AttachmentImage:
+			label := "[Прикреплено фото]"
+			if a.Caption != "" {
+				label += " " + a.Caption
+			}
+			lines = append(lines, label)
+		}
+	}
+	return strings.Join(lines, "\n")
 }

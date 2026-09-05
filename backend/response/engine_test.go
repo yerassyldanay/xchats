@@ -304,6 +304,144 @@ func TestEngine_StatusHook_CalledWithErrProviderAuthOnAuthFailure(t *testing.T) 
 	}
 }
 
+// TestEngine_Generate_AudioAttachmentFoldedIntoTail proves a transcribed
+// voice note reaches the model as ordinary bracketed text in the
+// conversation tail, sent as a plain single-string Content (no Parts) since
+// there is no image to attach.
+func TestEngine_Generate_AudioAttachmentFoldedIntoTail(t *testing.T) {
+	client := &fakeClient{responses: []llm.ChatResponse{
+		{Text: responseJSON("Уточню и вернусь с ответом.", nil, false, "")},
+	}}
+	e := testEngine(client)
+
+	res, err := e.Generate(context.Background(), GenerateRequest{
+		KB:           testKB(),
+		IncomingText: "",
+		Attachments:  []IncomingAttachment{{Kind: AttachmentAudio, Transcript: "а есть доставка?"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.FinalText != "Уточню и вернусь с ответом." {
+		t.Fatalf("FinalText = %q", res.FinalText)
+	}
+	sent := client.calls[0].Messages[0]
+	if len(sent.Parts) != 0 {
+		t.Fatalf("an audio-only attachment must not produce Parts: %+v", sent.Parts)
+	}
+	if !strings.Contains(sent.Content, "[Голосовое сообщение]: а есть доставка?") {
+		t.Fatalf("prompt missing the transcribed voice note: %q", sent.Content)
+	}
+}
+
+// TestEngine_Generate_ImageAttachmentRoutesToVisionModel proves an image
+// attachment, with a VisionModel configured, is (a) attached to the user
+// message as an extra image_url part and (b) routes the call to
+// VisionModel instead of DefaultModel.
+func TestEngine_Generate_ImageAttachmentRoutesToVisionModel(t *testing.T) {
+	const dataURI = "data:image/jpeg;base64,/9j/4AAQ=="
+	client := &fakeClient{responses: []llm.ChatResponse{
+		{Text: responseJSON("Это виджет.", nil, false, "")},
+	}}
+	e := testEngine(client)
+	e.Params = func() LLMParams {
+		p := testParams()
+		p.VisionModel = llm.ModelRef{Provider: "openrouter", Model: "vision-model"}
+		return p
+	}
+
+	res, err := e.Generate(context.Background(), GenerateRequest{
+		KB:           testKB(),
+		IncomingText: "что это?",
+		Attachments:  []IncomingAttachment{{Kind: AttachmentImage, DataURI: dataURI, Caption: "что это?"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.FinalText != "Это виджет." {
+		t.Fatalf("FinalText = %q", res.FinalText)
+	}
+	if client.calls[0].Model != "vision-model" {
+		t.Fatalf("Model = %q, want vision-model (image attachment present + VisionModel configured)", client.calls[0].Model)
+	}
+	sent := client.calls[0].Messages[0]
+	if len(sent.Parts) != 2 {
+		t.Fatalf("want 2 parts (text + image), got %+v", sent.Parts)
+	}
+	if sent.Parts[0].Kind != llm.PartText || !strings.Contains(sent.Parts[0].Text, "Клиент пишет") {
+		t.Fatalf("Parts[0] should be the rendered prompt text: %+v", sent.Parts[0])
+	}
+	if sent.Parts[1].Kind != llm.PartImage || sent.Parts[1].ImageURL != dataURI {
+		t.Fatalf("Parts[1] = %+v, want the image data URI %q", sent.Parts[1], dataURI)
+	}
+	if !strings.Contains(sent.Parts[0].Text, "[Прикреплено фото] что это?") {
+		t.Fatalf("prompt text should also note the attached photo: %q", sent.Parts[0].Text)
+	}
+}
+
+// TestEngine_Generate_ImageAttachmentWithoutVisionModelStaysTextOnly proves
+// that with no VisionModel configured, an image attachment still shows up
+// in the tail as a bracketed note (so the model at least knows a photo
+// arrived) but is never attached as a vision part, and the default model is
+// used rather than failing.
+func TestEngine_Generate_ImageAttachmentWithoutVisionModelStaysTextOnly(t *testing.T) {
+	client := &fakeClient{responses: []llm.ChatResponse{
+		{Text: responseJSON("Уточню у менеджера.", nil, false, "")},
+	}}
+	e := testEngine(client) // testParams() leaves VisionModel unset
+
+	res, err := e.Generate(context.Background(), GenerateRequest{
+		KB:           testKB(),
+		IncomingText: "",
+		Attachments:  []IncomingAttachment{{Kind: AttachmentImage, DataURI: "data:image/jpeg;base64,xxx"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.FinalText != "Уточню у менеджера." {
+		t.Fatalf("FinalText = %q", res.FinalText)
+	}
+	if client.calls[0].Model != "test-model" {
+		t.Fatalf("Model = %q, want the default model (no VisionModel configured)", client.calls[0].Model)
+	}
+	sent := client.calls[0].Messages[0]
+	if len(sent.Parts) != 0 {
+		t.Fatalf("must not attach an image part with no VisionModel configured: %+v", sent.Parts)
+	}
+	if !strings.Contains(sent.Content, "[Прикреплено фото]") {
+		t.Fatalf("prompt should still note the attached photo as text: %q", sent.Content)
+	}
+}
+
+// TestEngine_Generate_ModelOverrideBeatsVisionModel proves the simulator's
+// ModelOverride still wins even when an image attachment and a configured
+// VisionModel would otherwise route elsewhere — ModelOverride is an
+// explicit, authenticated caller choice and must never be second-guessed.
+func TestEngine_Generate_ModelOverrideBeatsVisionModel(t *testing.T) {
+	client := &fakeClient{responses: []llm.ChatResponse{
+		{Text: responseJSON("ok", nil, false, "")},
+	}}
+	e := testEngine(client)
+	e.Params = func() LLMParams {
+		p := testParams()
+		p.VisionModel = llm.ModelRef{Provider: "openrouter", Model: "vision-model"}
+		return p
+	}
+	override := llm.ModelRef{Provider: "openrouter", Model: "override-model"}
+
+	if _, err := e.Generate(context.Background(), GenerateRequest{
+		KB:            testKB(),
+		IncomingText:  "hi",
+		Attachments:   []IncomingAttachment{{Kind: AttachmentImage, DataURI: "data:image/jpeg;base64,xxx"}},
+		ModelOverride: &override,
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if client.calls[0].Model != "override-model" {
+		t.Fatalf("Model = %q, want override-model", client.calls[0].Model)
+	}
+}
+
 func TestEngine_StatusHook_NilIsSafeToLeaveUnset(t *testing.T) {
 	client := &fakeClient{responses: []llm.ChatResponse{{Text: responseJSON("ok", nil, false, "")}}}
 	e := testEngine(client) // StatusHook left nil

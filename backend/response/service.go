@@ -90,6 +90,7 @@ func (s *Service) generate(ctx context.Context, conversationID string, convCtx C
 		KB:             kb,
 		Customer:       convCtx.Customer,
 		ModelOverride:  opts.ModelOverride,
+		Attachments:    convCtx.Attachments,
 	})
 	if err != nil {
 		return holdingDraft(draft, err)
