@@ -23,9 +23,38 @@ var ErrProviderAuth = errors.New("llm: provider rejected the request as unauthor
 // one "user" message containing the whole rendered prompt (no system message,
 // no history as separate turns — history is rendered into the prompt text
 // itself); callers outside a retry follow that same shape.
+//
+// Parts, when non-empty, OVERRIDES Content: it is how a multimodal call (an
+// image attachment routed to a configured vision model — see
+// response.Engine.Generate) attaches one or more images alongside the
+// rendered prompt text. Every existing caller leaves Parts nil and sets
+// Content alone, which a ChatClient must keep treating exactly as before —
+// Parts is strictly additive to the contract.
 type Message struct {
 	Role    string
 	Content string
+	Parts   []ContentPart
+}
+
+// ContentPartKind discriminates one piece of a multimodal message.
+type ContentPartKind string
+
+const (
+	PartText  ContentPartKind = "text"
+	PartImage ContentPartKind = "image"
+)
+
+// ContentPart is one piece of a multimodal Message. A PartText carries Text;
+// a PartImage carries ImageURL — a data URI ("data:image/jpeg;base64,...")
+// in every caller today, since xchats resolves an attachment's bytes from
+// its own blob storage rather than handing a provider a fetchable public
+// URL (see responsestore.ConversationRepo). The OpenAI-compatible wire
+// format's image_url.url field accepts either shape, so a provider adapter
+// may pass ImageURL through unchanged.
+type ContentPart struct {
+	Kind     ContentPartKind
+	Text     string
+	ImageURL string
 }
 
 // ChatRequest is one chat-completion call. Model is a provider-specific model
