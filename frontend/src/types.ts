@@ -790,13 +790,14 @@ export interface PromptView {
 }
 
 // KbGapReasonCode/KbGapEntityType mirror aiprompt's closed vocabularies
-// (backend/aiprompt/kbgap.go) — see KbGapReport below.
+// (backend/aiprompt/kbgap.go) — see KbGapReport below. There is deliberately
+// no "unavailable_entity": see the reason-code const block's doc comment in
+// kbgap.go for why no reachable, non-conflicting trigger for it exists.
 export type KbGapReasonCode =
   | 'missing_entity'
   | 'missing_field'
   | 'ambiguous_entity'
   | 'conflicting_kb_data'
-  | 'unavailable_entity'
   | 'unsupported_request'
   | 'human_requested'
   | 'engine_error'
@@ -824,6 +825,20 @@ export interface KbGapReasonCount {
   reason_code: KbGapReasonCode
   count: number
 }
+// KbGapEntityCount/KbGapFieldCount rank which specific entity/field drives
+// the counts above — most-frequent first, bounded server-side — answering
+// "which product/field causes the most escalations" that counts/recent
+// alone cannot once matching events exceed recent's own bounded page.
+export interface KbGapEntityCount {
+  target_entity_type: KbGapEntityType
+  target_entity_ref: string
+  count: number
+}
+export interface KbGapFieldCount {
+  target_entity_type: KbGapEntityType
+  field_name: string
+  count: number
+}
 // KbGapReport mirrors GET /kb/gaps' payload: counts is the default report
 // (genuine content gaps only, zero-filled); operational_counts keeps
 // unsupported_request/human_requested/engine_error/other distinguishable
@@ -831,6 +846,8 @@ export interface KbGapReasonCount {
 export interface KbGapReport {
   counts: KbGapReasonCount[]
   operational_counts: KbGapReasonCount[]
+  top_target_entities: KbGapEntityCount[]
+  top_missing_fields: KbGapFieldCount[]
   recent: KbGapEvent[]
 }
 // KbGapFilter is GET /kb/gaps' query-param shape (all optional).

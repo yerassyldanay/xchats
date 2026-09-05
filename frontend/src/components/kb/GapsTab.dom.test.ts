@@ -45,7 +45,6 @@ function zeroReport(): KbGapReport {
       { reason_code: 'missing_field', count: 0 },
       { reason_code: 'ambiguous_entity', count: 0 },
       { reason_code: 'conflicting_kb_data', count: 0 },
-      { reason_code: 'unavailable_entity', count: 0 },
     ],
     operational_counts: [
       { reason_code: 'unsupported_request', count: 0 },
@@ -53,6 +52,8 @@ function zeroReport(): KbGapReport {
       { reason_code: 'engine_error', count: 0 },
       { reason_code: 'other', count: 0 },
     ],
+    top_target_entities: [],
+    top_missing_fields: [],
     recent: [],
   }
 }
@@ -64,7 +65,6 @@ function seededReport(): KbGapReport {
       { reason_code: 'missing_field', count: 2 },
       { reason_code: 'ambiguous_entity', count: 0 },
       { reason_code: 'conflicting_kb_data', count: 0 },
-      { reason_code: 'unavailable_entity', count: 0 },
     ],
     operational_counts: [
       { reason_code: 'unsupported_request', count: 1 },
@@ -72,6 +72,8 @@ function seededReport(): KbGapReport {
       { reason_code: 'engine_error', count: 0 },
       { reason_code: 'other', count: 0 },
     ],
+    top_target_entities: [{ target_entity_type: 'product', target_entity_ref: 'coffee-machine', count: 2 }],
+    top_missing_fields: [{ target_entity_type: 'product', field_name: 'price', count: 2 }],
     recent: [
       {
         id: 'evt-1', channel: 'whatsapp', chat_id: 'chat-1', draft_id: 'draft-1',
@@ -112,8 +114,29 @@ describe('GapsTab', () => {
 
     expect(api.get).toHaveBeenCalledWith('/kb/gaps')
     const tiles = wrapper.findAll('[data-testid="gaps-count-tile"]')
-    expect(tiles).toHaveLength(5)
+    expect(tiles).toHaveLength(4)
     for (const tile of tiles) expect(tile.text()).toContain('0')
+
+    // No rollup rows to rank yet — the section stays hidden rather than
+    // showing two empty lists.
+    expect(wrapper.find('[data-testid="gaps-top-entity-row"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="gaps-top-field-row"]').exists()).toBe(false)
+  })
+
+  it('ranks the top gap-causing entity and field, answering "which one" a count alone cannot', async () => {
+    const { wrapper } = await mountWithGaps(seededReport())
+    await switchTab(wrapper, 'Пробелы в базе')
+    await flushPromises()
+
+    const entityRows = wrapper.findAll('[data-testid="gaps-top-entity-row"]')
+    expect(entityRows).toHaveLength(1)
+    expect(entityRows[0]?.text()).toContain('coffee-machine')
+    expect(entityRows[0]?.text()).toContain('2')
+
+    const fieldRows = wrapper.findAll('[data-testid="gaps-top-field-row"]')
+    expect(fieldRows).toHaveLength(1)
+    expect(fieldRows[0]?.text()).toContain('price')
+    expect(fieldRows[0]?.text()).toContain('2')
   })
 
   it('renders a seeded event with its diagnostic fields, never a draft/message-text column', async () => {
@@ -152,5 +175,29 @@ describe('GapsTab', () => {
     expect(api.get).toHaveBeenCalledTimes(1)
     const calledPath = vi.mocked(api.get).mock.calls[0]?.[0] as string
     expect(calledPath).toContain('entity_ref=coffee-machine')
+  })
+
+  // P2 finding: pg.gapsReport stays non-null after a first success, so a
+  // LATER failed reload must not just silently keep showing the old report
+  // with no indication anything went wrong.
+  it('flags a failed reload after an initial success instead of silently keeping stale data', async () => {
+    const { wrapper, api } = await mountWithGaps(seededReport())
+    await switchTab(wrapper, 'Пробелы в базе')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="gaps-retry-after-stale"]').exists()).toBe(false)
+
+    vi.mocked(api.get).mockRejectedValueOnce(new Error('boom'))
+    await wrapper.get('[data-testid="gaps-filter-apply"]').trigger('click')
+    await flushPromises()
+
+    // The error is now visible, with a way to retry...
+    const retry = wrapper.find('[data-testid="gaps-retry-after-stale"]')
+    expect(retry.exists()).toBe(true)
+    expect(wrapper.text()).toContain('Не удалось загрузить пробелы')
+    // ...but the PREVIOUS (now stale) report stays on screen rather than
+    // vanishing into a blank/error-only state.
+    const rows = wrapper.findAll('[data-testid="gaps-event-row"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.text()).toContain('coffee-machine')
   })
 })

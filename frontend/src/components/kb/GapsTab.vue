@@ -20,7 +20,7 @@ const pg = usePlayground()
 const { t } = useI18n()
 
 const REASON_CODES: KbGapReasonCode[] = [
-  'missing_entity', 'missing_field', 'ambiguous_entity', 'conflicting_kb_data', 'unavailable_entity',
+  'missing_entity', 'missing_field', 'ambiguous_entity', 'conflicting_kb_data',
   'unsupported_request', 'human_requested', 'engine_error', 'other',
 ]
 const ENTITY_TYPES: KbGapEntityType[] = ['product', 'tariff', 'tariff_info', 'contact', 'policy', 'delivery_zone', 'topic']
@@ -146,6 +146,19 @@ const totalOperational = computed(() => (pg.gapsReport?.operational_counts ?? []
       </div>
 
       <template v-else-if="pg.gapsReport">
+        <!-- A later failed reload (Apply/Обновить after an initial success)
+             must never silently keep showing the OLD report with no
+             indication anything went wrong — that would look like the new
+             filter took effect when it didn't. Keep the stale data visible
+             (better than a jarring blank state) but flag it clearly. -->
+        <div v-if="pg.gapsLoadError" class="p-5 border-b border-border">
+          <p class="flex items-start gap-2 text-sm text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+            <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" />
+            <span class="min-w-0 flex-1">{{ pg.gapsLoadError }} — {{ t('kb.gaps.staleNotice') }}</span>
+            <Button size="sm" variant="outline" class="shrink-0" data-testid="gaps-retry-after-stale" @click="pg.loadGaps()">{{ t('common.retry') }}</Button>
+          </p>
+        </div>
+
         <!-- content-gap counts (default report) -->
         <div class="p-5 border-b border-border">
           <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">{{ t('kb.gaps.countsTitle') }}</h4>
@@ -173,6 +186,46 @@ const totalOperational = computed(() => (pg.gapsReport?.operational_counts ?? []
             <Badge v-for="c in pg.gapsReport.operational_counts.filter((c) => c.count > 0)" :key="c.reason_code" variant="secondary">
               {{ reasonLabel(c.reason_code) }}: {{ c.count }}
             </Badge>
+          </div>
+        </div>
+
+        <!-- top target entities / missing fields — the "which product/field
+             causes the most escalations" rollup a reason-code count alone,
+             or manually scanning the bounded recent sample below, cannot
+             answer once matching events exceed that sample. -->
+        <div
+          v-if="pg.gapsReport.top_target_entities.length || pg.gapsReport.top_missing_fields.length"
+          class="p-5 border-b border-border grid grid-cols-1 sm:grid-cols-2 gap-6"
+        >
+          <div>
+            <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">{{ t('kb.gaps.topEntitiesTitle') }}</h4>
+            <p v-if="!pg.gapsReport.top_target_entities.length" class="text-sm text-muted-foreground">{{ t('kb.gaps.recentEmpty') }}</p>
+            <ul v-else class="space-y-1.5">
+              <li
+                v-for="c in pg.gapsReport.top_target_entities"
+                :key="c.target_entity_type + ':' + c.target_entity_ref"
+                class="flex items-center justify-between gap-2 text-sm"
+                data-testid="gaps-top-entity-row"
+              >
+                <span class="min-w-0 truncate text-muted-foreground">{{ entityTypeLabel(c.target_entity_type) }}: {{ c.target_entity_ref }}</span>
+                <Badge variant="secondary" class="shrink-0">{{ c.count }}</Badge>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">{{ t('kb.gaps.topFieldsTitle') }}</h4>
+            <p v-if="!pg.gapsReport.top_missing_fields.length" class="text-sm text-muted-foreground">{{ t('kb.gaps.recentEmpty') }}</p>
+            <ul v-else class="space-y-1.5">
+              <li
+                v-for="c in pg.gapsReport.top_missing_fields"
+                :key="c.target_entity_type + ':' + c.field_name"
+                class="flex items-center justify-between gap-2 text-sm"
+                data-testid="gaps-top-field-row"
+              >
+                <span class="min-w-0 truncate text-muted-foreground">{{ entityTypeLabel(c.target_entity_type) }}: {{ c.field_name }}</span>
+                <Badge variant="secondary" class="shrink-0">{{ c.count }}</Badge>
+              </li>
+            </ul>
           </div>
         </div>
 
