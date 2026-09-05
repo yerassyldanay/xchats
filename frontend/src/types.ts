@@ -30,6 +30,14 @@ export interface LLMSettings {
   default_provider: string
   default_model: string
   vision_model: string
+  // stt_provider is "" (not configured), "openai", or "groq" — see
+  // internal/settings.LLMSettings.STTProvider's own doc comment for why no
+  // other provider is valid here.
+  stt_provider: string
+  stt_model: string
+  // stt_language is "auto", "kk", "ru", or "en".
+  stt_language: string
+  stt_vocabulary: string
   max_tokens: number
   temperature: number
   timeout_seconds: number
@@ -160,6 +168,11 @@ export interface Media {
   mimetype: string
   file_name: string
   file_size: number
+  // download_status is "pending" | "ready" | "failed".
+  download_status: string
+  // transcript is a "ready" audio attachment's speech-to-text result, "" if
+  // not yet transcribed (or not audio, or STT is not configured).
+  transcript: string
 }
 export interface Message {
   id: string

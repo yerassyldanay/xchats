@@ -257,6 +257,45 @@ describe('inbox store — draft dismissal is persisted, not just local (INB-14)'
   })
 })
 
+describe('inbox store — retranscribe (audio transcript retry)', () => {
+  it('posts to the active chat\'s retranscribe endpoint and applies the returned message', async () => {
+    testPinia()
+    const { api } = await import('@/api/client')
+    const inbox = useInbox()
+    inbox.activeId = 'A'
+    const updated = { id: 'm-1', chat_id: 'A', media: [{ id: 'md-1', transcript: 'привет' }] } as unknown as Message
+    vi.mocked(api.post).mockResolvedValue(updated as never)
+
+    await inbox.retranscribe('m-1', 'kk')
+
+    expect(api.post).toHaveBeenCalledWith('/chats/A/messages/m-1/retranscribe', { language: 'kk' })
+    expect(inbox.messages).toContainEqual(updated)
+  })
+
+  it('omits the body entirely when no language override is given', async () => {
+    testPinia()
+    const { api } = await import('@/api/client')
+    const inbox = useInbox()
+    inbox.activeId = 'A'
+    vi.mocked(api.post).mockResolvedValue({ id: 'm-1', chat_id: 'A', media: [] } as unknown as Message as never)
+
+    await inbox.retranscribe('m-1')
+
+    expect(api.post).toHaveBeenCalledWith('/chats/A/messages/m-1/retranscribe', {})
+  })
+
+  it('is a no-op with no active chat', async () => {
+    testPinia()
+    const { api } = await import('@/api/client')
+    const inbox = useInbox()
+    inbox.activeId = null
+
+    await inbox.retranscribe('m-1')
+
+    expect(api.post).not.toHaveBeenCalled()
+  })
+})
+
 describe('inbox store — draft-cleared notice (INB-05)', () => {
   it('explains a realtime draftUpdated wipe for the active chat, and clears once a fresh set actually arrives', () => {
     testPinia()

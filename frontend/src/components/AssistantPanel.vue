@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LoaderCircle, PanelRightClose, PanelRightOpen, PenLine, RotateCw, Send, UserRound, WandSparkles, X } from 'lucide-vue-next'
+import { ImageIcon, LoaderCircle, Mic, PanelRightClose, PanelRightOpen, PenLine, RotateCw, Send, UserRound, WandSparkles, X } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { vAutosize } from '../lib/autosize'
 import { usePanelCollapsed } from '../lib/panelCollapse'
+import { sourceOf } from '../lib/draftSource'
 import type { AiDraft } from '../types'
 import CustomerPanel from './CustomerPanel.vue'
 import { Button } from '@/components/ui/button'
@@ -197,6 +198,12 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
               <PenLine class="w-3.5 h-3.5" />
             </Button>
           </div>
+
+          <p v-if="sourceOf(d, inbox.messages)" class="flex items-center gap-1 px-4 pb-1.5 text-[11px] text-muted-foreground">
+            <Mic v-if="sourceOf(d, inbox.messages) === 'audio'" class="w-3 h-3 shrink-0" />
+            <ImageIcon v-else class="w-3 h-3 shrink-0" />
+            {{ sourceOf(d, inbox.messages) === 'audio' ? t('assistant.sourceAudio') : t('assistant.sourceImage') }}
+          </p>
 
           <!-- editable reply: grows to fit the whole text, never scrolls -->
           <div class="px-4 pt-1.5">
