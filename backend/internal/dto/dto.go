@@ -67,6 +67,14 @@ type Media struct {
 	Mimetype  string `json:"mimetype"`
 	FileName  string `json:"file_name"`
 	FileSize  int    `json:"file_size"`
+	// DownloadStatus is "pending" | "ready" | "failed" — the inbox uses it to
+	// tell "still downloading" apart from "downloaded, no transcript yet"
+	// for an audio attachment.
+	DownloadStatus string `json:"download_status"`
+	// Transcript is a "ready" audio attachment's speech-to-text result, ""
+	// until worker.go's transcription step completes (or when no STT
+	// provider is configured, or for anything that isn't audio).
+	Transcript string `json:"transcript"`
 }
 
 // Message is the API message shape.
@@ -327,6 +335,7 @@ func MapMessage(m store.Message) Message {
 		media = append(media, Media{
 			ID: r.ID.String(), URL: mediaURL(r.ID), MediaType: r.MediaType,
 			Mimetype: r.Mimetype, FileName: r.FileName, FileSize: r.FileSize,
+			DownloadStatus: r.DownloadStatus, Transcript: r.Transcript,
 		})
 	}
 	return Message{

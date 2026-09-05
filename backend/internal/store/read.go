@@ -222,6 +222,32 @@ func (s *Store) SetChatState(ctx context.Context, id uuid.UUID, state string) (C
 	return s.ChatByID(ctx, id)
 }
 
+// UpdateChatPreviewIfCurrent overwrites a chat's list preview with a freshly
+// transcribed audio note's text — but ONLY while messageTS is still the
+// chat's most recent message. worker.go's transcription step can finish
+// seconds after the voice note arrived; a newer message may have already
+// taken over the chat list's preview by then, and resurrecting the stale
+// audio placeholder over it would be a visible regression, not a fix. nil
+// messageTS (a message with no timestamp at all) is a no-op rather than an
+// error — every real inbound message carries one.
+func (s *Store) UpdateChatPreviewIfCurrent(ctx context.Context, chatID uuid.UUID, messageTS *time.Time, preview string) error {
+	if messageTS == nil {
+		return nil
+	}
+	chat, err := s.ChatByID(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	table, err := chatsTableFor(chat.Channel)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(ctx, `
+		UPDATE `+table+` SET last_message_preview = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE id = $1 AND last_message_at = $3`, chatID, preview, *messageTS)
+	return err
+}
+
 // MessagesForChat returns up to limit messages older than `before` (chronological asc),
 // with their media refs attached, plus the next cursor.
 func (s *Store) MessagesForChat(ctx context.Context, chatID uuid.UUID, before time.Time, limit int) ([]Message, *time.Time, error) {
@@ -315,7 +341,7 @@ func (s *Store) attachMedia(ctx context.Context, msgs []Message) error {
 	// = ANY($1) -> IN (SELECT value FROM json_each($1)), binding the id list
 	// as a dbx.UUIDArray (JSON array in TEXT) — see the per-PG-ism table.
 	rows, err := s.db.Query(ctx, `
-		SELECT message_id, id, media_type, mimetype, filename, size
+		SELECT message_id, id, media_type, mimetype, filename, size, storage_key, download_status, transcript
 		FROM inbox_message_media_v
 		WHERE message_id IN (SELECT value FROM json_each($1))
 		ORDER BY created_at`, dbx.UUIDArray(ids))
@@ -326,7 +352,8 @@ func (s *Store) attachMedia(ctx context.Context, msgs []Message) error {
 	for rows.Next() {
 		var mid uuid.UUID
 		var r MediaRef
-		if err := rows.Scan(&mid, &r.ID, &r.MediaType, &r.Mimetype, &r.FileName, &r.FileSize); err != nil {
+		if err := rows.Scan(&mid, &r.ID, &r.MediaType, &r.Mimetype, &r.FileName, &r.FileSize,
+			&r.StorageKey, &r.DownloadStatus, &r.Transcript); err != nil {
 			return err
 		}
 		if i, ok := idx[mid]; ok {
