@@ -1112,6 +1112,13 @@ export default {
         list: 'List view',
       },
       openChannelChat: 'Open this conversation',
+      chatlessEdit: {
+        title: 'Customer details',
+        description: 'This customer has no conversation yet — fill in their contact details manually.',
+        save: 'Save',
+        close: 'Close',
+        failed: 'Could not save.',
+      },
       merge: {
         action: 'Merge',
         title: 'Merge customers',

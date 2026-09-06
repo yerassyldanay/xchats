@@ -72,7 +72,7 @@ func (s *Store) seedDemoChannelAccounts(ctx context.Context, orgID uuid.UUID) er
 		OrganizationID:     uuid.NullUUID{UUID: orgID, Valid: true},
 		DisplayName:        "Qazan Home · Sales",
 		ExternalAccountRef: "77007007070@s.whatsapp.net",
-		ExternalHandle:     "+7 700 700 70 70",
+		ExternalHandle:     "77007007070",
 		ConnectionState:    "connected",
 	}); err != nil {
 		return fmt.Errorf("seed demo WhatsApp account: %w", err)
@@ -200,7 +200,7 @@ func (s *Store) seedDemoInbox(ctx context.Context, adminUserID uuid.UUID) error 
 		offset                              time.Duration
 	}{
 		{
-			accountID: demoInstagramAccountID, channel: "instagram", externalID: "ig_kamila_n", handle: "@kamila_style", name: "Камила Нурланова",
+			accountID: demoInstagramAccountID, channel: "instagram", externalID: "ig_kamila_n", handle: "kamila_style", name: "Камила Нурланова",
 			threadID: "demo-ig-thread-kamila", messageID: "demo-ig-1", offset: 12 * time.Minute,
 			message: "У тостера Sage Toast 2 есть гарантия?", reply: "Да, Камила. На Sage Toast 2 действует гарантия производителя; для обращения понадобится чек или подтверждение заказа. Тостер сейчас есть в наличии по цене 39 900 ₸.",
 		},
