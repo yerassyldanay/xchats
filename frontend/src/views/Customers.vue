@@ -36,6 +36,15 @@ const selected = ref<string[]>([])
 const showMerge = ref(false)
 const merging = ref(false)
 const mergeError = ref('')
+// A customer with no conversation yet has nowhere for openCustomer() to jump
+// to (see its own doc comment) — this dialog is the fallback so "+ New
+// customer" and clicking such a card are not silent no-ops.
+const chatlessCustomer = ref<Customer | null>(null)
+const editName = ref('')
+const editPhone = ref('')
+const editEmail = ref('')
+const editSaving = ref(false)
+const editError = ref('')
 // TODO.md Customers phase: grid is the richer default (avatar, status, tags,
 // channels all at a glance); list stays available for anyone who wants the
 // denser view back. Not persisted — a per-session preference, not a setting.
@@ -115,6 +124,32 @@ async function openCustomer(c: Customer) {
   const chat = profile?.conversations?.[0]
   if (chat) {
     await router.push({ name: 'chatboard', params: { chatId: chat.id } })
+  } else {
+    openChatlessEdit(c)
+  }
+}
+
+function openChatlessEdit(c: Customer) {
+  chatlessCustomer.value = c
+  editName.value = c.display_name
+  editPhone.value = c.phone
+  editEmail.value = c.email
+  editError.value = ''
+}
+
+async function saveChatlessEdit() {
+  const c = chatlessCustomer.value
+  if (!c) return
+  editSaving.value = true
+  editError.value = ''
+  try {
+    await crm.patchCustomer(c.id, { display_name: editName.value, phone: editPhone.value, email: editEmail.value })
+    if (crm.profileError) throw new Error(crm.profileError)
+    chatlessCustomer.value = null
+  } catch {
+    editError.value = t('crm.list.chatlessEdit.failed')
+  } finally {
+    editSaving.value = false
   }
 }
 
@@ -428,6 +463,38 @@ function assigneeName(id: string | null): string {
           </Button>
           <Button :disabled="merging || !mergeSource" @click="doMerge">
             <Merge class="w-4 h-4" /> {{ t('crm.list.merge.confirm') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="!!chatlessCustomer" @update:open="(v) => { if (!v) chatlessCustomer = null }">
+      <DialogContent class="sm:max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('crm.list.chatlessEdit.title') }}</DialogTitle>
+          <DialogDescription>{{ t('crm.list.chatlessEdit.description') }}</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-2">
+          <label class="block">
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground">{{ t('crm.panel.name') }}</span>
+            <Input v-model="editName" class="mt-0.5 h-8 text-[13px]" @keyup.enter="saveChatlessEdit" />
+          </label>
+          <label class="block">
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground">{{ t('crm.panel.phone') }}</span>
+            <Input v-model="editPhone" class="mt-0.5 h-8 text-[13px]" @keyup.enter="saveChatlessEdit" />
+          </label>
+          <label class="block">
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground">{{ t('crm.panel.email') }}</span>
+            <Input v-model="editEmail" class="mt-0.5 h-8 text-[13px]" @keyup.enter="saveChatlessEdit" />
+          </label>
+          <p v-if="editError" class="text-destructive text-[13px]">{{ editError }}</p>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" :disabled="editSaving" @click="chatlessCustomer = null">
+            {{ t('crm.list.chatlessEdit.close') }}
+          </Button>
+          <Button :disabled="editSaving" @click="saveChatlessEdit">
+            {{ t('crm.list.chatlessEdit.save') }}
           </Button>
         </DialogFooter>
       </DialogContent>
