@@ -937,12 +937,11 @@ func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Stor
 		fatal("mcpauth store", err)
 	}
 	authorizer := mcpauth.New(mcpStore, key, mcpauth.Config{
-		Issuer:            cfg.ResolvedAPIBaseURL(),
-		Audience:          cfg.MCPResourceURL(),
-		AllowPrivateHosts: cfg.KBAllowPrivateFetch,
-		AccessTokenTTL:    time.Duration(cfg.MCP.AccessTokenTTLSeconds) * time.Second,
-		RefreshTokenTTL:   time.Duration(cfg.MCP.RefreshTokenTTLDays) * 24 * time.Hour,
-		AuthCodeTTL:       time.Duration(cfg.MCP.AuthCodeTTLSeconds) * time.Second,
+		Issuer:          cfg.ResolvedAPIBaseURL(),
+		Audience:        cfg.MCPResourceURL(),
+		AccessTokenTTL:  time.Duration(cfg.MCP.AccessTokenTTLSeconds) * time.Second,
+		RefreshTokenTTL: time.Duration(cfg.MCP.RefreshTokenTTLDays) * 24 * time.Hour,
+		AuthCodeTTL:     time.Duration(cfg.MCP.AuthCodeTTLSeconds) * time.Second,
 	})
 	uploadSigner := mcpauth.NewUploadTokenSigner(key)
 	mediaSigner := mcpauth.NewMediaReadTokenSigner(key)

@@ -5,12 +5,27 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/password"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
+
+func TestLoadOrCreateBootstrapAdminCredentialDoesNotExposeSensitiveInput(t *testing.T) {
+	const configuredPassword = "too-short-secret"
+	const configuredMinimum = 123456789
+	t.Setenv(bootstrapAdminPasswordEnv, configuredPassword)
+
+	_, _, err := loadOrCreateBootstrapAdminCredential(filepath.Join(t.TempDir(), "credential"), configuredMinimum)
+	if err == nil {
+		t.Fatal("loadOrCreateBootstrapAdminCredential succeeded with a password below the configured minimum")
+	}
+	if strings.Contains(err.Error(), configuredPassword) || strings.Contains(err.Error(), "123456789") {
+		t.Fatalf("validation error exposes password input or policy detail: %v", err)
+	}
+}
 
 func TestEnsureBootstrapAdminPasswordMintsOnceAndPersists(t *testing.T) {
 	dataDir := t.TempDir()

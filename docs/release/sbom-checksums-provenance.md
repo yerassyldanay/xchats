@@ -73,7 +73,7 @@ cover this with no extra infrastructure:
 
 An operator verifies with `gh attestation verify xchats-linux-amd64 --owner
 yerassyldanay`. This is the recommended starting point over a hand-rolled
-[SLSA](https://slsa.dev/) attestation — it produces a SLSA-compatible
+[SLSA](https://slsa.dev/spec/v1.2/provenance) attestation — it produces a SLSA-compatible
 provenance statement without a custom pipeline to maintain.
 
 ## Where these attach

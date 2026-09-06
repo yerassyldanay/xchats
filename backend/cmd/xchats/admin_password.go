@@ -89,7 +89,7 @@ func loadOrCreateBootstrapAdminCredential(path string, minLength int) (plaintext
 		plaintext = defaultBootstrapAdminPassword
 	}
 	if len(plaintext) < minLength {
-		return "", false, fmt.Errorf("%s must contain at least %d characters", bootstrapAdminPasswordEnv, minLength)
+		return "", false, fmt.Errorf("%s does not satisfy the configured minimum length", bootstrapAdminPasswordEnv)
 	}
 
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: path is bootstrapAdminCredentialPath()'s fixed app-data location, never user input

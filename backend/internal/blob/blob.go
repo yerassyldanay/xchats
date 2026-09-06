@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 )
 
@@ -46,19 +45,18 @@ func NewDisk(dir string) (*Disk, error) {
 	return &Disk{dir: dir}, nil
 }
 
-// bytesPath confines id to a direct child of d.dir. idSanitize strips every
-// path separator, but leaves "." and ".." themselves untouched (both are
-// valid in the allowed charset) — either one, as the WHOLE sanitized name,
-// is a traversal component (filepath.Join(d.dir, "..") is d.dir's parent),
-// so they're rejected the same as an empty name rather than joined as-is.
-func (d *Disk) bytesPath(id string) string {
+// blobName turns an external blob id into one direct-child name. Root-scoped
+// file operations below provide the actual traversal and symlink boundary;
+// sanitizing here also preserves the store's existing deterministic filenames.
+func blobName(id string) string {
 	safe := idSanitize.ReplaceAllString(id, "_")
 	if safe == "" || safe == "." || safe == ".." {
 		safe = "_"
 	}
-	return filepath.Join(d.dir, safe)
+	return safe
 }
-func (d *Disk) metaPath(id string) string { return d.bytesPath(id) + ".meta.json" }
+
+func metaName(id string) string { return blobName(id) + ".meta.json" }
 
 // Put writes bytes + sidecar meta under a deterministic, id-derived path; a
 // re-delivery of the same id overwrites the same bytes (idempotent).
@@ -66,14 +64,19 @@ func (d *Disk) Put(id string, data []byte, meta Meta) (string, error) {
 	if meta.FileSize == 0 {
 		meta.FileSize = int64(len(data))
 	}
-	if err := os.WriteFile(d.bytesPath(id), data, 0o644); err != nil {
+	root, err := os.OpenRoot(d.dir)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.WriteFile(blobName(id), data, 0o644); err != nil {
 		return "", err
 	}
 	mb, err := json.Marshal(meta)
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(d.metaPath(id), mb, 0o644); err != nil {
+	if err := root.WriteFile(metaName(id), mb, 0o644); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -81,17 +84,31 @@ func (d *Disk) Put(id string, data []byte, meta Meta) (string, error) {
 
 // Get returns bytes + meta for an id.
 func (d *Disk) Get(id string) ([]byte, Meta, error) {
-	data, err := os.ReadFile(d.bytesPath(id))
+	root, err := os.OpenRoot(d.dir)
+	if err != nil {
+		return nil, Meta{}, err
+	}
+	defer func() { _ = root.Close() }()
+	data, err := root.ReadFile(blobName(id))
 	if err != nil {
 		return nil, Meta{}, fmt.Errorf("blob bytes %s: %w", id, err)
 	}
-	meta, _ := d.Meta(id)
+	meta, _ := readMeta(root, id)
 	return data, meta, nil
 }
 
 // Meta returns just the descriptor.
 func (d *Disk) Meta(id string) (Meta, bool) {
-	mb, err := os.ReadFile(d.metaPath(id))
+	root, err := os.OpenRoot(d.dir)
+	if err != nil {
+		return Meta{}, false
+	}
+	defer func() { _ = root.Close() }()
+	return readMeta(root, id)
+}
+
+func readMeta(root *os.Root, id string) (Meta, bool) {
+	mb, err := root.ReadFile(metaName(id))
 	if err != nil {
 		return Meta{}, false
 	}
@@ -104,6 +121,11 @@ func (d *Disk) Meta(id string) (Meta, bool) {
 
 // Exists reports whether bytes are present for an id.
 func (d *Disk) Exists(id string) bool {
-	_, err := os.Stat(d.bytesPath(id))
+	root, err := os.OpenRoot(d.dir)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = root.Close() }()
+	_, err = root.Stat(blobName(id))
 	return err == nil
 }
