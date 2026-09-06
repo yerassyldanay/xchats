@@ -63,7 +63,7 @@ func (s *Server) validateAuthorizeParams(c *gin.Context) (authorizeParams, mcpau
 	if _, err := mcpauth.ValidateScope(p.Scope); err != nil {
 		return p, mcpauth.Client{}, err.Error()
 	}
-	client, err := s.mcpAuth.Store.ResolveClient(ctx(c), p.ClientID, s.cfg.KBAllowPrivateFetch)
+	client, err := s.mcpAuth.Store.ResolveClient(ctx(c), p.ClientID)
 	if err != nil {
 		return p, mcpauth.Client{}, "unknown client_id — register it first (Dynamic Client Registration or a Client ID Metadata Document)"
 	}
@@ -217,7 +217,7 @@ func (s *Server) handleOAuthDecision(c *gin.Context) {
 	clientID := c.PostForm("client_id")
 	redirectURI := c.PostForm("redirect_uri")
 	state := c.PostForm("state")
-	client, err := s.mcpAuth.Store.ResolveClient(ctx(c), clientID, s.cfg.KBAllowPrivateFetch)
+	client, err := s.mcpAuth.Store.ResolveClient(ctx(c), clientID)
 	if err != nil || !client.AllowsRedirect(redirectURI) {
 		s.renderOAuthError(c, "Недействительный запрос авторизации.")
 		return
