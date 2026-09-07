@@ -12,7 +12,7 @@ name: Desktop build
 # desktop binary — not on every backend change, which backend-test in ci.yml
 # already compiles and tests. workflow_dispatch is the manual escape hatch,
 # and workflow_call lets release.yml invoke this as a reusable workflow on tag
-# pushes so all release assets publish atomically.
+# pushes so all release assets pass through one verified draft gate.
 on:
   pull_request:
     paths:
@@ -28,6 +28,11 @@ on:
     inputs:
       version:
         description: 'Version string to stamp into internal/version.Version'
+        type: string
+        required: false
+        default: ''
+      source_ref:
+        description: 'Git ref or SHA to build; defaults to the triggering ref'
         type: string
         required: false
         default: ''
@@ -87,6 +92,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
 
       - uses: actions/setup-go@v7
         with:
@@ -119,9 +126,11 @@ jobs:
       - name: Resolve version
         id: version
         shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          if [ -n "$REQUESTED_VERSION" ]; then
+            echo "value=$REQUESTED_VERSION" >> "$GITHUB_OUTPUT"
           elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
@@ -139,13 +148,15 @@ jobs:
       - name: Build desktop app
         working-directory: backend/cmd/xchats
         shell: bash
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.value }}
         run: |
           wails build \
             -clean \
             -skipbindings \
             -platform "${{ matrix.platform }}" \
             ${{ matrix.tags && format('-tags {0}', matrix.tags) || '' }} \
-            -ldflags "-X github.com/yerassyldanay/xchats/backend/internal/version.Version=${{ steps.version.outputs.value }}"
+            -ldflags "-X github.com/yerassyldanay/xchats/backend/internal/version.Version=${BUILD_VERSION}"
           ls -l build/bin
 
       # One archive per platform, in the shape that platform's users expect:
@@ -186,4 +197,3 @@ jobs:
           path: |
             backend/cmd/xchats/build/bin/${{ matrix.artifact }}.*
           if-no-files-found: error
-

@@ -240,8 +240,14 @@ orchestrates the full release pipeline: it invokes `desktop-build.yml` via
 bundle. Because this repository enforces GitHub's **Immutable Releases** policy
 (published releases cannot accept subsequent asset uploads), `release.yml`'s
 final `publish-release` job collects all 8 release assets (3 desktop archives,
-1 source bundle, and their 4 checksums), creates a draft release, uploads all
-assets atomically, and then publishes the release.
+1 source bundle, and their 4 checksums), verifies their names and checksums,
+uploads them to a draft, verifies the draft's remote asset list, and only then
+publishes the release. A manual run of `release.yml` requires an existing
+version tag and follows the same path.
+
+The draft gate covers GitHub Release assets. Container images are pushed to
+GHCR by a parallel job and remain independently retriable if a later desktop,
+source, or release-publication step fails.
 
 ---
 

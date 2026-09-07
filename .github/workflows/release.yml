@@ -6,8 +6,10 @@ name: Release
 # Because GitHub's "Immutable Releases" policy is enabled on this repository,
 # releases cannot have assets uploaded, updated, or deleted once published.
 # Therefore, all parallel build jobs upload their output as workflow artifacts,
-# and a final publish-release job gathers all 8 release assets, creates a draft
-# release, attaches all assets atomically, and publishes it with --draft=false.
+# and a final publish-release job gathers and verifies all 8 release assets,
+# attaches them to a draft release, and publishes it only after the draft has
+# been checked. This draft gate applies to GitHub Release assets; GHCR image
+# publication is an independently retriable part of the pipeline.
 #
 # Staged deliberately: this covers build + publish + SLSA provenance attestation.
 # cosign image signing and a full SBOM are tracked as v1.1 (see docs/release/signing.md
@@ -17,12 +19,63 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing version tag to release (for example, v1.0.1)"
+        required: true
+        type: string
+
+# A draft is mutable, so overlapping attempts for one tag must never inspect,
+# upload to, or publish the same draft concurrently. Queue a second attempt;
+# it will verify the completed release and exit successfully if the first won.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  # Resolve tag pushes and manual dispatches into one validated, immutable build
+  # input. All build jobs check out this exact commit rather than the branch from
+  # which a manual workflow dispatch happened to be started.
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      release_tag: ${{ steps.release.outputs.tag }}
+      release_sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        id: release
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$REQUESTED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "Release tag must be vMAJOR.MINOR.PATCH with an optional SemVer prerelease suffix; got: $REQUESTED_TAG" >&2
+            exit 1
+          fi
+
+          if ! git show-ref --verify --quiet "refs/tags/$REQUESTED_TAG"; then
+            echo "Release tag does not exist in the checked-out repository: $REQUESTED_TAG" >&2
+            exit 1
+          fi
+
+          RELEASE_SHA=$(git rev-list -n 1 "$REQUESTED_TAG")
+          echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "Preparing $REQUESTED_TAG at $RELEASE_SHA"
+
   build-and-push:
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,6 +87,8 @@ jobs:
         component: [backend, frontend]
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
 
       - uses: docker/setup-buildx-action@v4
 
@@ -48,8 +103,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}-${{ matrix.component }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ needs.prepare.outputs.release_tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare.outputs.release_tag }}
 
       - id: build
         uses: docker/build-push-action@v7
@@ -63,7 +118,7 @@ jobs:
           # the frontend image doesn't read this build-arg (no ARG VERSION
           # in frontend/Dockerfile), so it's a harmless no-op there.
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ needs.prepare.outputs.release_tag }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
@@ -78,10 +133,11 @@ jobs:
   # Reusable workflow call to compile native desktop binaries for Linux, macOS,
   # and Windows. Each platform produces an archive and .sha256 checksum artifact.
   desktop-build:
+    needs: prepare
     uses: ./.github/workflows/desktop-build.yml
     with:
-      version: ${{ github.ref_name }}
-    secrets: inherit
+      version: ${{ needs.prepare.outputs.release_tag }}
+      source_ref: ${{ needs.prepare.outputs.release_sha }}
 
   # AGPL-3.0/GPL-3.0 sec 6 — every release that publishes binaries/images also
   # publishes complete corresponding source: the repo at this tag plus the
@@ -94,6 +150,7 @@ jobs:
   # source rides along in the tarball, but its own dependency graph is
   # deliberately not vendored.
   source-bundle:
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -103,6 +160,8 @@ jobs:
       GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
 
       - uses: actions/setup-go@v7
         with:
@@ -121,8 +180,11 @@ jobs:
           go mod vendor
 
       - name: Build corresponding-source tarball
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
-          TAG='${{ github.ref_name }}'
+          set -euo pipefail
+          TAG="$RELEASE_TAG"
           OUT="$RUNNER_TEMP/xchats-${TAG}-corresponding-source.tar.gz"
           # Deterministic archive: stable order, neutral ownership, mtimes
           # pinned to the tag's commit date, gzip without embedded timestamp
@@ -146,53 +208,140 @@ jobs:
           if-no-files-found: error
 
   # Gathers all built assets from the parallel jobs (3 desktop archives + 3 sha256,
-  # 1 source bundle + 1 sha256 = 8 files total), creates a draft GitHub Release,
-  # attaches all assets, and publishes the release atomically to satisfy GitHub's
-  # Immutable Releases policy.
+  # 1 source bundle + 1 sha256 = 8 files total), verifies the local files and
+  # checksums, uploads them to a draft, verifies the remote draft's exact asset
+  # set, and only then publishes it under GitHub's Immutable Releases policy.
   publish-release:
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [build-and-push, desktop-build, source-bundle]
+    needs: [prepare, build-and-push, desktop-build, source-bundle]
     permissions:
       contents: write # create Release, upload assets, and publish
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.release_tag }}
+          fetch-depth: 0
+
+      # Download only release assets. docker/build-push-action may also attach
+      # .dockerbuild records to this run; those are useful diagnostics but are
+      # not GitHub Release assets.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: xchats-desktop-*
+          path: artifacts
+          merge-multiple: true
 
       - uses: actions/download-artifact@v8
         with:
+          name: source-bundle
           path: artifacts
-          merge-multiple: true
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
         run: |
-          TAG='${{ github.ref_name }}'
+          set -euo pipefail
+
+          TAG="$RELEASE_TAG"
           ls -la artifacts
 
-          # Check existing release state for idempotency / safe re-runs.
-          # Under Immutable Releases, published releases cannot be modified.
-          # Leftover draft releases from an interrupted attempt can and must be deleted
-          # so we can re-create cleanly.
-          IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft 2>/dev/null || echo "not_found")
-          if [ "$IS_DRAFT" = "false" ]; then
-            echo "Release $TAG is already published and immutable — nothing to do."
-            exit 0
-          elif [ "$IS_DRAFT" = "true" ]; then
-            echo "Found leftover draft release for $TAG from a previous attempt. Deleting draft before re-creating..."
-            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
+          if [ "$(git rev-parse HEAD)" != "$RELEASE_SHA" ]; then
+            echo "Tag $TAG no longer resolves to the commit validated by the prepare job." >&2
+            exit 1
           fi
 
-          # Step 1: Create draft release and upload all 8 assets
-          echo "Creating draft release for $TAG and uploading assets..."
-          gh release create "$TAG" \
-            --draft \
-            --verify-tag \
-            --title "$TAG" \
-            --generate-notes \
-            --repo "$GITHUB_REPOSITORY" \
-            artifacts/*
+          expected_assets=(
+            "xchats-desktop-linux-amd64.tar.gz"
+            "xchats-desktop-linux-amd64.tar.gz.sha256"
+            "xchats-desktop-macos-universal.zip"
+            "xchats-desktop-macos-universal.zip.sha256"
+            "xchats-desktop-windows-amd64.zip"
+            "xchats-desktop-windows-amd64.zip.sha256"
+            "xchats-${TAG}-corresponding-source.tar.gz"
+            "xchats-${TAG}-corresponding-source.tar.gz.sha256"
+          )
+          EXPECTED_LIST="$RUNNER_TEMP/expected-assets.txt"
+          ACTUAL_LIST="$RUNNER_TEMP/actual-assets.txt"
+          REMOTE_LIST="$RUNNER_TEMP/remote-assets.txt"
+          RELEASE_JSON="$RUNNER_TEMP/release.json"
+          RELEASE_ERROR="$RUNNER_TEMP/release-error.txt"
+          printf '%s\n' "${expected_assets[@]}" | sort > "$EXPECTED_LIST"
 
-          # Step 2: Publish release (locks release permanently under Immutable Releases policy)
+          find artifacts -maxdepth 1 -type f -printf '%f\n' | sort > "$ACTUAL_LIST"
+          if ! diff -u "$EXPECTED_LIST" "$ACTUAL_LIST"; then
+            echo "Refusing to publish: local release assets do not match the required 8-file contract." >&2
+            exit 1
+          fi
+          for asset in "${expected_assets[@]}"; do
+            if [ ! -s "artifacts/$asset" ]; then
+              echo "Refusing to publish an empty asset: $asset" >&2
+              exit 1
+            fi
+          done
+          (cd artifacts && sha256sum --strict -c ./*.sha256)
+
+          # Query the release API without turning authorization or server errors
+          # into a false "not found" result.
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RELEASE_JSON" 2> "$RELEASE_ERROR"; then
+            IS_DRAFT=$(jq -r '.draft' "$RELEASE_JSON")
+            if [ "$IS_DRAFT" = "false" ]; then
+              jq -r '.assets[].name' "$RELEASE_JSON" | sort > "$REMOTE_LIST"
+              if ! diff -u "$EXPECTED_LIST" "$REMOTE_LIST"; then
+                echo "Release $TAG is already published but does not contain the exact expected asset set." >&2
+                echo "The immutable release cannot be repaired; publish a new version tag." >&2
+                exit 1
+              fi
+              if [ "$(jq -r '.immutable' "$RELEASE_JSON")" != "true" ]; then
+                echo "Release $TAG exists with the expected assets but is not immutable." >&2
+                exit 1
+              fi
+              echo "Release $TAG is already published, immutable, and complete."
+              exit 0
+            fi
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "Unexpected release state for $TAG." >&2
+              exit 1
+            fi
+            echo "Reusing existing draft release for $TAG."
+          else
+            if ! grep -q 'HTTP 404' "$RELEASE_ERROR"; then
+              cat "$RELEASE_ERROR" >&2
+              exit 1
+            fi
+            echo "Creating draft release for $TAG..."
+            gh release create "$TAG" \
+              --draft \
+              --verify-tag \
+              --title "$TAG" \
+              --generate-notes \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+
+          # Drafts remain mutable. A failed upload leaves a recoverable draft;
+          # the queued retry replaces only the eight workflow-owned assets.
+          echo "Uploading release assets to the draft..."
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY" artifacts/*
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RELEASE_JSON"
+          if [ "$(jq -r '.draft' "$RELEASE_JSON")" != "true" ]; then
+            echo "Release $TAG stopped being a draft before verification." >&2
+            exit 1
+          fi
+          jq -r '.assets[].name' "$RELEASE_JSON" | sort > "$REMOTE_LIST"
+          if ! diff -u "$EXPECTED_LIST" "$REMOTE_LIST"; then
+            echo "Refusing to publish: the draft does not contain the exact expected asset set." >&2
+            exit 1
+          fi
+
           echo "Publishing release for $TAG..."
           gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RELEASE_JSON"
+          if [ "$(jq -r '.draft' "$RELEASE_JSON")" != "false" ] || \
+             [ "$(jq -r '.immutable' "$RELEASE_JSON")" != "true" ]; then
+            echo "Release $TAG was published but GitHub did not report it as immutable." >&2
+            exit 1
+          fi
+          echo "Release $TAG is published, immutable, and complete."

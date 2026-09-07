@@ -1,8 +1,11 @@
 # Release checklist
 
-There is no automated release pipeline yet (no `.github/workflows/`) — this
-checklist is the manual process until one exists, and the spec for what that
-automation should do once it's built.
+The automated [release workflow](../../.github/workflows/release.yml) builds
+and pushes the backend and frontend container images, builds native desktop
+archives on all three operating systems, creates the corresponding-source
+bundle, and publishes the eight downloadable assets through a verified draft.
+This checklist covers the human preparation and post-publication checks around
+that automation.
 
 ## Before cutting a release
 
@@ -42,19 +45,25 @@ bump for your own compatibility policy.
 
 ## Build artifacts
 
-- [ ] `docker build -f backend/Dockerfile -t xchats-backend:vX.Y.Z backend/`
-- [ ] `docker build -f frontend/Dockerfile -t xchats-frontend:vX.Y.Z frontend/`
-- [ ] (if publishing native binaries) cross-compile with the version ldflags
-      above for each target platform.
+- [ ] Optionally preflight the container builds locally:
+      `docker build -f backend/Dockerfile -t xchats-backend:vX.Y.Z backend/`
+      and `docker build -f frontend/Dockerfile -t xchats-frontend:vX.Y.Z frontend/`.
+- [ ] Confirm the desktop workflow is green on the release commit. Its Linux,
+      macOS, and Windows builds are native because Wails links against each
+      platform's WebView toolchain; see [`../desktop.md`](../desktop.md).
 
 ## Tag and publish
 
 - [ ] `git tag -s vX.Y.Z -m "vX.Y.Z"` (signed — see
       [`signing.md`](signing.md)) and `git push origin vX.Y.Z`.
-- [ ] Push the built images to the registry; sign them (`cosign sign`, see
-      [`signing.md`](signing.md)).
-- [ ] Generate and attach an SBOM, checksums, and a provenance attestation
-      (see [`sbom-checksums-provenance.md`](sbom-checksums-provenance.md)).
+- [ ] Watch `.github/workflows/release.yml` through `prepare`, the parallel
+      image/desktop/source builds, and `publish-release`. For a manual retry,
+      dispatch the workflow with the existing version tag; branch-name manual
+      releases are deliberately rejected.
+- [ ] Confirm both versioned container images exist in GHCR with their build
+      provenance attestations. Cosign image signing and SBOM generation remain
+      planned follow-ups; see [`signing.md`](signing.md) and
+      [`sbom-checksums-provenance.md`](sbom-checksums-provenance.md).
 - [ ] Confirm `.github/workflows/release.yml`'s `publish-release` job attached
       all 8 release assets to the GitHub Release:
       - Native desktop executables for Linux (`.tar.gz`), macOS (`.zip`), and Windows (`.zip`) + their `.sha256` checksums.
@@ -63,9 +72,10 @@ bump for your own compatibility policy.
         [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)'s libsignal
         section).
       Runs automatically on the tag push; this is a confirm step, not a manual one.
-- [ ] Review GitHub release notes generated from git tags/commits, verifying
-      all binaries, checksums, and images are linked. Note: under the repository's
-      Immutable Releases policy, once published, no assets can be added or modified.
+- [ ] Review the generated GitHub release notes, verify the eight downloadable
+      assets are listed, and add the two versioned GHCR image references if they
+      are not already documented. Release notes remain editable, but under the
+      repository's Immutable Releases policy the tag and assets cannot be replaced.
 
 ## After publishing
 
