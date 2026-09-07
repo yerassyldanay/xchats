@@ -7,12 +7,19 @@ name: Desktop build
 # (WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux) through cgo,
 # so there is no cross-compiling to do and each platform gets its own runner.
 #
-# Triggers are deliberately narrow. This is three jobs including a macOS
-# runner, so it runs on pull requests that actually touch what goes into the
-# desktop binary — not on every backend change, which backend-test in ci.yml
-# already compiles and tests. workflow_dispatch is the manual escape hatch,
-# and workflow_call lets release.yml invoke this as a reusable workflow on tag
-# pushes so all release assets pass through one verified draft gate.
+# Two very different things happen here depending on why the workflow ran,
+# in two separate jobs (a job-level `if:` cannot reference `matrix.*`, so
+# "only Linux, only on a PR" has to be its own job rather than a condition on
+# one matrix entry of the other):
+#   - pr-compile-check (pull_request only): ONE ubuntu runner, ONLY the
+#     compile — `wails build`, nothing after. No installers, no checksums,
+#     no archive, no artifact upload, no macOS/Windows runner spent. This
+#     proves what a PR touched still builds as a desktop binary, not a
+#     packaging dry run.
+#   - build (workflow_dispatch / workflow_call — a version tag, via
+#     release.yml — never a pull_request): all three platforms build,
+#     package a portable archive AND an installer format (.deb / NSIS .exe /
+#     .dmg) each, checksum every file, and upload it all as release assets.
 on:
   pull_request:
     paths:
@@ -23,6 +30,8 @@ on:
       - 'frontend/**'
       - '.nvmrc'
       - '.github/workflows/desktop-build.yml'
+      - 'scripts/package-deb.sh'
+      - 'scripts/package-dmg.sh'
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -59,8 +68,48 @@ env:
   WAILS_VERSION: v2.15.0
 
 jobs:
+  # Pull requests only need proof the desktop-tagged code still compiles —
+  # see this file's header comment. No packaging, no other platforms.
+  pr-compile-check:
+    name: linux (compile check)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Linux WebView dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install the Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      # -skipbindings: see the release build job's own comment below — same
+      # reason. No -nsis, no packaging, no checksum, no upload, no version
+      # stamping: this step is the entire compile check.
+      - name: Build desktop app
+        working-directory: backend/cmd/xchats
+        run: wails build -clean -skipbindings -platform linux/amd64 -tags webkit2_41
+
+  # Only ever runs for a real release: a version tag (via release.yml's
+  # workflow_call) or an explicit workflow_dispatch. Never a pull_request —
+  # see pr-compile-check above.
   build:
     name: ${{ matrix.name }}
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
       # One platform's toolchain breaking should still tell us about the
@@ -116,6 +165,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libgtk-3-dev libwebkit2gtk-4.1-dev
 
+      # NSIS (makensis) — this job only ever runs for a release (see the
+      # job-level `if:` above), so the installer is always built here. Not
+      # preinstalled on windows-latest.
+      - name: Install NSIS
+        if: matrix.name == 'windows'
+        run: choco install -y nsis --no-progress
+
       - name: Install the Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
 
@@ -145,6 +201,17 @@ jobs:
       # wails build runs the frontend build first (wails.json's
       # frontend:install/frontend:build), which is what mirrors the SPA into
       # the binary's go:embed directory.
+      #
+      # -nsis (Windows): also builds the NSIS installer via makensis, from
+      # Wails' own default template (build/windows/installer/project.nsi —
+      # gitignored and regenerated fresh here every run, see .gitignore's
+      # own comment on backend/cmd/xchats/build/*). That default template
+      # already provides install-directory selection, Start Menu/desktop
+      # shortcuts, an uninstaller that removes only what it installed (never
+      # touching the app's own %LOCALAPPDATA%\xchats data directory, which
+      # it has no knowledge of), and MULTIUSER_EXECUTIONLEVEL Highest — a
+      # per-user install needing no administrator access unless actually
+      # launched elevated.
       - name: Build desktop app
         working-directory: backend/cmd/xchats
         shell: bash
@@ -156,44 +223,111 @@ jobs:
             -skipbindings \
             -platform "${{ matrix.platform }}" \
             ${{ matrix.tags && format('-tags {0}', matrix.tags) || '' }} \
+            ${{ matrix.name == 'windows' && '-nsis' || '' }} \
             -ldflags "-X github.com/yerassyldanay/xchats/backend/internal/version.Version=${BUILD_VERSION}"
           ls -l build/bin
 
-      # One archive per platform, in the shape that platform's users expect:
-      # a .app bundle has to stay a bundle (ditto preserves the symlinks and
-      # the executable bit that a plain zip would flatten), and a tarball
-      # preserves the executable bit on Linux where a zip would not.
-      - name: Package (linux)
+      # One portable archive per platform, in the shape that platform's
+      # users expect: a .app bundle has to stay a bundle (ditto preserves the
+      # symlinks and the executable bit that a plain zip would flatten), and
+      # a tarball preserves the executable bit on Linux where a zip would
+      # not. These remain the arbitrary-install-location option alongside
+      # the installer formats below.
+      - name: Package portable archive (linux)
         if: matrix.name == 'linux'
         working-directory: backend/cmd/xchats/build/bin
         run: tar -czf "${{ matrix.artifact }}.tar.gz" xchats
 
-      - name: Package (macos)
+      - name: Package portable archive (macos)
         if: matrix.name == 'macos'
         working-directory: backend/cmd/xchats/build/bin
         run: ditto -c -k --keepParent xchats.app "${{ matrix.artifact }}.zip"
 
-      - name: Package (windows)
+      - name: Package portable archive (windows)
         if: matrix.name == 'windows'
         working-directory: backend/cmd/xchats/build/bin
         shell: pwsh
         run: Compress-Archive -Path xchats.exe -DestinationPath "${{ matrix.artifact }}.zip"
 
+      # Conventional-install-path formats — see docs/desktop.md and each
+      # script's own header comment for what goes where.
+      - name: Package .deb (linux)
+        if: matrix.name == 'linux'
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          # Debian package versions must start with a digit; a tag's leading
+          # "v" (or a "dev-<sha>" build) needs stripping/normalizing.
+          DEB_VERSION="${BUILD_VERSION#v}"
+          case "$DEB_VERSION" in
+            [0-9]*) ;;
+            *) DEB_VERSION="0~${DEB_VERSION}" ;;
+          esac
+          ./scripts/package-deb.sh \
+            "$DEB_VERSION" \
+            backend/cmd/xchats/build/bin/xchats \
+            backend/cmd/xchats/build/appicon.png \
+            backend/cmd/xchats/build/bin/xchats-desktop-linux-amd64.deb
+
+      - name: Package .dmg (macos)
+        if: matrix.name == 'macos'
+        run: |
+          ./scripts/package-dmg.sh \
+            backend/cmd/xchats/build/bin/xchats.app \
+            backend/cmd/xchats/build/bin/xchats-desktop-macos-universal.dmg
+
+      # wails build -nsis names the installer <outputfilename>-<goarch>-
+      # installer.exe (wails.json's outputfilename: "xchats" → xchats-amd64-
+      # installer.exe); matched by glob rather than hardcoded so a Wails CLI
+      # upgrade that changes the exact naming fails this rename step loudly
+      # instead of silently uploading nothing.
+      - name: Rename NSIS installer (windows)
+        if: matrix.name == 'windows'
+        working-directory: backend/cmd/xchats/build/bin
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          candidates=(*installer*.exe)
+          if [ "${#candidates[@]}" -ne 1 ]; then
+            echo "expected exactly one *installer*.exe from wails build -nsis, found: ${candidates[*]:-none}" >&2
+            ls -l .
+            exit 1
+          fi
+          mv "${candidates[0]}" xchats-desktop-windows-amd64-installer.exe
+
+      # Each platform now produces TWO release files (a portable archive plus
+      # an installer format), so this checksums an explicit list rather than
+      # a single glob — matrix.artifact.* would ambiguously match both the
+      # linux .tar.gz and .deb (and the macos .zip and .dmg) in one ls.
       - name: Checksum
         working-directory: backend/cmd/xchats/build/bin
         shell: bash
         run: |
-          archive=$(ls ${{ matrix.artifact }}.*)
-          if command -v sha256sum >/dev/null; then
-            sha256sum "$archive" > "$archive.sha256"
-          else
-            shasum -a 256 "$archive" > "$archive.sha256"
-          fi
-          cat "$archive.sha256"
+          set -euo pipefail
+          case "${{ matrix.name }}" in
+            linux)   files=("${{ matrix.artifact }}.tar.gz" "xchats-desktop-linux-amd64.deb") ;;
+            macos)   files=("${{ matrix.artifact }}.zip" "xchats-desktop-macos-universal.dmg") ;;
+            windows) files=("${{ matrix.artifact }}.zip" "xchats-desktop-windows-amd64-installer.exe") ;;
+          esac
+          sha256_cmd=sha256sum
+          command -v sha256sum >/dev/null || sha256_cmd="shasum -a 256"
+          for f in "${files[@]}"; do
+            [ -s "$f" ] || { echo "expected release file missing or empty: $f" >&2; exit 1; }
+            $sha256_cmd "$f" > "$f.sha256"
+            cat "$f.sha256"
+          done
 
+      # matrix.artifact.* catches the portable archive and the .deb (linux)
+      # or .dmg (macos) — same basename, different extension — plus both
+      # .sha256 files. Windows' installer diverges from that basename
+      # (…-installer.exe), so it needs its own line; it simply matches
+      # nothing on the other two platforms, which is fine — the step only
+      # errors if EVERY pattern combined matches zero files.
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: |
             backend/cmd/xchats/build/bin/${{ matrix.artifact }}.*
+            backend/cmd/xchats/build/bin/xchats-desktop-windows-amd64-installer.exe*
           if-no-files-found: error
