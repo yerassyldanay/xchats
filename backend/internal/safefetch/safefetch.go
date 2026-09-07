@@ -1,11 +1,7 @@
 // Package safefetch is the SSRF-hardened HTTP client shared by every fetch
-// surface the import pipeline owns: the native URL extractor (fetching a
-// submitted page directly) and embedded-image downloads (internal/kbimport's
-// images.go). It is a standalone port of the guard internal/mcpauth/cimd.go
-// already applies to Client ID Metadata Document fetches — the two are
-// different trust boundaries that happen to want the exact same primitive,
-// so this package exists to be imported by both instead of copied a third
-// time.
+// surface that accepts a remote URL: the native URL extractor, embedded-image
+// downloads, and OAuth Client ID Metadata Document fetches. These are separate
+// trust boundaries that share the same network-level protections.
 //
 // Layered defence: CheckURL is a synchronous, best-effort pre-check — reject
 // an obviously-internal host at submit time (a 400 before any async job
@@ -41,13 +37,11 @@ var ErrBlockedHost = errors.New("safefetch: blocked non-public host")
 var ErrTooLarge = errors.New("safefetch: response exceeds the maximum allowed size")
 
 // dialTimeout bounds the TCP handshake itself, independent of the overall
-// per-request Timeout a Client caller supplies — mirrors mcpauth/cimd.go's
-// safeHTTPClient exactly.
+// per-request Timeout a Client caller supplies.
 const dialTimeout = 10 * time.Second
 
-// maxRedirects mirrors mcpauth/cimd.go's safeHTTPClient: enough to follow a
-// normal canonical-URL/tracking-redirect chain, never enough to be useful as
-// an amplification or loop vector.
+// maxRedirects is enough to follow a normal canonical-URL/tracking-redirect
+// chain, never enough to be useful as an amplification or loop vector.
 const maxRedirects = 5
 
 // Client builds an SSRF-hardened *http.Client: a net.Dialer.Control hook
@@ -160,9 +154,21 @@ func CheckURL(ctx context.Context, rawURL string, allowPrivate bool) error {
 // has its Body already fully drained and closed — safe to inspect
 // StatusCode/Header, never to read Body again.
 func Get(ctx context.Context, client *http.Client, rawURL string, maxBytes int64) ([]byte, *http.Response, error) {
+	return get(ctx, client, rawURL, maxBytes, "")
+}
+
+// GetJSON is Get with an explicit JSON response preference.
+func GetJSON(ctx context.Context, client *http.Client, rawURL string, maxBytes int64) ([]byte, *http.Response, error) {
+	return get(ctx, client, rawURL, maxBytes, "application/json")
+}
+
+func get(ctx context.Context, client *http.Client, rawURL string, maxBytes int64, accept string) ([]byte, *http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, nil, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

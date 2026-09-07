@@ -208,3 +208,18 @@ func TestGet_AllowsBodyUnderCap(t *testing.T) {
 		t.Fatalf("Get() body = %q, want %q", data, "small")
 	}
 }
+
+func TestGetJSON_SendsJSONAcceptHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("Accept = %q, want application/json", got)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	client := Client(true, 2*time.Second)
+	if _, _, err := GetJSON(context.Background(), client, srv.URL, 1024); err != nil {
+		t.Fatalf("GetJSON() = %v, want success", err)
+	}
+}

@@ -17,12 +17,11 @@ type Config struct {
 	// IssuerFunc/AudienceFunc make the advertised endpoint runtime-aware for
 	// embedded tunnels. Tests and fixed deployments can keep using the string
 	// fields; when present, the functions are the live source of truth.
-	IssuerFunc        func() string
-	AudienceFunc      func() string
-	AllowPrivateHosts bool   // config.Config.KBAllowPrivateFetch, reused for CIMD fetches
-	AccessTokenTTL    time.Duration
-	RefreshTokenTTL   time.Duration
-	AuthCodeTTL       time.Duration
+	IssuerFunc      func() string
+	AudienceFunc    func() string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
+	AuthCodeTTL     time.Duration
 }
 
 // Authorizer is the composed OAuth 2.1 authorization server: DB-backed

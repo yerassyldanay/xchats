@@ -305,7 +305,7 @@ func TestVerifyAccessToken_RejectsTamperedSignature(t *testing.T) {
 func TestResolveClient_UnregisteredNonURLIsNotFound(t *testing.T) {
 	authz, _, _ := newTestAuthorizer(t)
 	ctx := context.Background()
-	if _, err := authz.Store.ResolveClient(ctx, "some-opaque-unregistered-id", false); !errors.Is(err, mcpauth.ErrClientNotFound) {
+	if _, err := authz.Store.ResolveClient(ctx, "some-opaque-unregistered-id"); !errors.Is(err, mcpauth.ErrClientNotFound) {
 		t.Fatalf("expected ErrClientNotFound, got %v", err)
 	}
 }

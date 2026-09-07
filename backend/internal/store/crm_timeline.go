@@ -109,7 +109,10 @@ func (s *Store) CustomerTimeline(ctx context.Context, orgID, customerID uuid.UUI
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	out := make([]TimelineEntry, 0, limit)
+	// Do not derive an allocation directly from the request-controlled limit.
+	// The query still enforces the validated cap and append grows only for rows
+	// the database actually returns.
+	out := make([]TimelineEntry, 0)
 
 	rows, err := s.db.Query(ctx, `
 		SELECT id, kind, actor_user_id, summary, detail, occurred_at

@@ -5,6 +5,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 )
@@ -59,13 +60,22 @@ func NewInMem(buffer, workers int, log *slog.Logger) *InMem {
 	return &InMem{ch: make(chan Message, buffer), workers: workers, log: log}
 }
 
+// ErrQueueClosed is returned when Publish is called on a closed queue.
+var ErrQueueClosed = errors.New("queue is closed")
+
 // Publish enqueues a message, tracking it as in-flight so Wait() can drain.
 // When the buffer is full it blocks only until ctx is done, then returns
 // ctx.Err() and undoes the in-flight accounting — so backpressure surfaces as a
 // retryable error at the producer instead of wedging the calling goroutine
 // forever (the send is a plain `q.ch <- m` otherwise).
-func (q *InMem) Publish(ctx context.Context, m Message) error {
+func (q *InMem) Publish(ctx context.Context, m Message) (err error) {
 	q.wg.Add(1)
+	defer func() {
+		if r := recover(); r != nil {
+			q.wg.Done()
+			err = ErrQueueClosed
+		}
+	}()
 	select {
 	case q.ch <- m:
 		return nil

@@ -73,3 +73,13 @@ func TestPublishReturnsOnFullBufferInsteadOfBlocking(t *testing.T) {
 		t.Fatal("Wait() still counts the rejected publish as in-flight")
 	}
 }
+
+func TestPublishAfterCloseReturnsErrQueueClosed(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	q := NewInMem(1, 1, log)
+	q.Close()
+	err := q.Publish(context.Background(), Message{Kind: KindAIDraft, Payload: 1})
+	if !errors.Is(err, ErrQueueClosed) {
+		t.Fatalf("Publish after Close = %v, want ErrQueueClosed", err)
+	}
+}

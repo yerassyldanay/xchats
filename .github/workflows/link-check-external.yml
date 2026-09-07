@@ -31,6 +31,7 @@ jobs:
             --scheme https --scheme http
             --exclude-all-private
             --max-retries 4
+            --timeout 60
             --exclude-path 'THIRD_PARTY_NOTICES\.md$'
             --no-progress
             --format markdown
@@ -46,7 +47,6 @@ jobs:
       # should keep re-reporting.
       - name: Find existing link-rot issue
         id: find-issue
-        if: steps.lychee.outputs.exit_code != 0
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -61,3 +61,10 @@ jobs:
           content-filepath: ./lychee/out.md
           labels: link-rot
           issue-number: ${{ steps.find-issue.outputs.number }}
+
+      - name: Close resolved link-rot issue
+        if: steps.lychee.outputs.exit_code == 0 && steps.find-issue.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.find-issue.outputs.number }}
+        run: gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --comment "The scheduled external-link check is clean again; closing this rolling report."

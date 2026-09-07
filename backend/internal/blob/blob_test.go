@@ -1,6 +1,7 @@
 package blob
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,21 +24,17 @@ func TestDisk_PutGetRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDisk_TraversalIDsStayInsideDir proves an id of exactly "." or ".."
-// (the only sanitized values idSanitize's charset lets through unchanged
-// that carry special meaning to filepath.Join) can never resolve outside
-// the blob directory — see bytesPath's own doc comment for the mechanism.
+// TestDisk_TraversalIDsStayInsideDir proves traversal components are reduced
+// to ordinary direct-child names before they reach the root-scoped file API.
 func TestDisk_TraversalIDsStayInsideDir(t *testing.T) {
-	dir := t.TempDir()
-	d, err := NewDisk(dir)
+	d, err := NewDisk(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewDisk: %v", err)
 	}
 	for _, id := range []string{"..", ".", ""} {
-		bp := d.bytesPath(id)
-		rel, err := filepath.Rel(dir, bp)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			t.Fatalf("bytesPath(%q) = %q, escapes blob dir %q (rel=%q, err=%v)", id, bp, dir, rel, err)
+		name := blobName(id)
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+			t.Fatalf("blobName(%q) = %q, want a safe direct-child name", id, name)
 		}
 		if _, _, err := d.Get(id); err == nil {
 			t.Fatalf("Get(%q) unexpectedly succeeded — want not-found, since nothing was ever Put at that id", id)
@@ -48,22 +45,44 @@ func TestDisk_TraversalIDsStayInsideDir(t *testing.T) {
 	}
 }
 
-// TestDisk_SanitizesSeparatorsInID proves a slash embedded in an id can
-// never be used to address a subdirectory or an already-cleaned traversal
-// (e.g. "../etc/passwd", whose slashes idSanitize replaces before the ".."
-// component check ever sees them).
+// TestDisk_SanitizesSeparatorsInID proves separators embedded in an id cannot
+// address a subdirectory or an already-cleaned traversal.
 func TestDisk_SanitizesSeparatorsInID(t *testing.T) {
-	dir := t.TempDir()
+	for _, id := range []string{"../../../etc/passwd", `..\..\secret`} {
+		if name := blobName(id); strings.ContainsAny(name, `/\`) {
+			t.Fatalf("blobName(%q) = %q, still contains a path separator", id, name)
+		}
+	}
+}
+
+func TestDisk_RootRejectsSymlinksOutsideDir(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "blobs")
 	d, err := NewDisk(dir)
 	if err != nil {
 		t.Fatalf("NewDisk: %v", err)
 	}
-	bp := d.bytesPath("../../../etc/passwd")
-	rel, err := filepath.Rel(dir, bp)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		t.Fatalf("bytesPath with embedded traversal = %q, escapes blob dir %q (rel=%q, err=%v)", bp, dir, rel, err)
+
+	outside := filepath.Join(parent, "outside")
+	if err := os.WriteFile(outside, []byte("do not touch"), 0o600); err != nil {
+		t.Fatalf("write outside fixture: %v", err)
 	}
-	if filepath.Dir(bp) != dir {
-		t.Fatalf("bytesPath with embedded traversal = %q, want a direct child of %q", bp, dir)
+	inside := filepath.Join(dir, blobName("escape"))
+	if err := os.Symlink(outside, inside); err != nil {
+		t.Skipf("cannot create symlink fixture: %v", err)
+	}
+
+	if _, _, err := d.Get("escape"); err == nil {
+		t.Fatal("Get followed a symlink outside the blob root")
+	}
+	if _, err := d.Put("escape", []byte("overwritten"), Meta{}); err == nil {
+		t.Fatal("Put followed a symlink outside the blob root")
+	}
+	got, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatalf("read outside fixture: %v", err)
+	}
+	if string(got) != "do not touch" {
+		t.Fatalf("outside file was modified: %q", got)
 	}
 }

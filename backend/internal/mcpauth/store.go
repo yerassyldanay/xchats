@@ -75,10 +75,9 @@ func (s *Store) RegisterClient(ctx context.Context, clientName string, redirectU
 
 // ResolveClient looks up a previously registered client; for a client_id that
 // is itself an https:// URL and not already cached, it fetches and caches the
-// Client ID Metadata Document (plan/mcp.md §3). allowPrivateHosts is forwarded
-// to the CIMD fetch's SSRF guard (config.KBAllowPrivateFetch — a trusted
-// self-hosted-only escape hatch).
-func (s *Store) ResolveClient(ctx context.Context, clientID string, allowPrivateHosts bool) (Client, error) {
+// Client ID Metadata Document (plan/mcp.md §3). CIMD fetches are always
+// restricted to public hosts because clientID is remote-client-controlled.
+func (s *Store) ResolveClient(ctx context.Context, clientID string) (Client, error) {
 	c, err := s.getClient(ctx, clientID)
 	if err == nil {
 		return c, nil
@@ -89,7 +88,7 @@ func (s *Store) ResolveClient(ctx context.Context, clientID string, allowPrivate
 	if !looksLikeCIMDClientID(clientID) {
 		return Client{}, ErrClientNotFound
 	}
-	fetched, ferr := FetchCIMD(ctx, clientID, allowPrivateHosts)
+	fetched, ferr := FetchCIMD(ctx, clientID)
 	if ferr != nil {
 		return Client{}, fmt.Errorf("%w: %s", ErrClientNotFound, ferr)
 	}
