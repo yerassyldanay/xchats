@@ -18,6 +18,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -110,10 +111,16 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 	ctx := context.Background()
 	st, _ := dbtest.Open(t)
 
+	testDataDir := t.TempDir()
 	cfg := &config.Config{
 		System:   config.SystemConfig{SessionTTLHours: 1, MinPasswordLen: 8},
 		PageSize: 50,
 		Server:   config.ServerConfig{CORSOrigins: []string{"*"}},
+		Storage: config.StorageConfig{
+			DBPath:         filepath.Join(testDataDir, "data", "xchats.db"),
+			WADeviceDBPath: filepath.Join(testDataDir, "data", "whatsmeow.db"),
+			BlobDir:        filepath.Join(testDataDir, "blobdata"),
+		},
 	}
 
 	org, err := st.SeedOrganization(ctx, "xchats")
@@ -142,6 +149,9 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 		Credentials: creds, Settings: sets, Tunnel: tun,
 		LLMRefresh:     func() { atomic.AddInt32(&llmRefreshCalls, 1) },
 		ProviderHealth: health,
+		ResolvedConfigPath: filepath.Join(testDataDir, "config.yaml"),
+		ResolvedConfigDir:  testDataDir,
+		ResolvedDataDir:    testDataDir,
 	})
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)

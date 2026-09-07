@@ -81,6 +81,15 @@ type Server struct {
 	orgID    uuid.UUID
 	log      *slog.Logger
 
+	// Resolved storage locations, for the read-only display in GET
+	// /settings (see settings.go's handleGetSettings/storageLocations) —
+	// never used for any decision inside this package, only surfaced to the
+	// operator for troubleshooting. resolvedConfigPath is "" when the process
+	// is running on its built-in defaults with no config.yaml found.
+	resolvedConfigPath string
+	resolvedConfigDir  string
+	resolvedDataDir    string
+
 	// chat is the Knowledge Base chat assistant (/chat — chat_assistant.go),
 	// nil when the feature is not wired. Distinct from `response`, which is
 	// the CUSTOMER-facing reply engine: this one answers an operator's own
@@ -190,6 +199,11 @@ type Deps struct {
 	OrgID         uuid.UUID
 	Log           *slog.Logger
 
+	// Resolved storage locations — see Server's own field doc comment.
+	ResolvedConfigPath string
+	ResolvedConfigDir  string
+	ResolvedDataDir    string
+
 	// Meta channels — see Server's own field doc comment.
 	MetaClient       *meta.Client
 	MetaProcessor    *metaingest.Processor
@@ -227,6 +241,7 @@ func New(d Deps) *Server {
 		tgProc: d.TGProcessor, tgPoller: d.TGPoller, kb: d.KB, kbImport: d.KBImport, chat: d.Chat,
 		kbRepo: d.KBRepo, kbInvalidator: d.KBInvalidator,
 		orgID: d.OrgID, log: d.Log,
+		resolvedConfigPath: d.ResolvedConfigPath, resolvedConfigDir: d.ResolvedConfigDir, resolvedDataDir: d.ResolvedDataDir,
 		metaClient: d.MetaClient, metaCreds: metaCredentialsAdapter{chain: d.Credentials},
 		metaProc: d.MetaProcessor, waCloud: d.WACloudClient, inboxSigner: d.InboxMediaSigner,
 		mcpAuth: d.MCPAuth, mcpServer: d.MCPServer,

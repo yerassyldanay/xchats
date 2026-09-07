@@ -698,6 +698,14 @@ export default {
       credentialStorageBody:
         'Бұл серверде кілттер ОЖ кілттер бумасында емес, шифрланған жергілікті файлда сақталады. Бұл кілттер бумасына қарағанда әлсіз кепілдік: файлдық жүйеге және қолданба кілтіне қолы жеткен адам оларды шеше алады.',
       credentialStorageAccept: 'Мен бұл шектеуді түсінемін және қабылдаймын',
+      storageLocationsTitle: 'Деректер орналасқан жерлер',
+      storageLocationsBody:
+        'Бұл орналастыру конфигурацияны қайдан оқитынын және деректерді қайда сақтайтынын көрсетеді — тек оқу үшін, ақаулықтарды жою немесе қолмен сақтық көшірме жасау үшін.',
+      storageLocationsConfigFile: 'Конфигурация файлы',
+      storageLocationsConfigDefaults: 'Кірістірілген әдепкі мәндер қолданылуда (config.yaml табылмады)',
+      storageLocationsDataDir: 'Деректер қалтасы',
+      storageLocationsDatabase: 'Дерекқор',
+      storageLocationsBlobDir: 'Медиа қоймасы',
     },
   },
   // AddAccountDialog.vue's channel-connect wizard (dialog.*) and

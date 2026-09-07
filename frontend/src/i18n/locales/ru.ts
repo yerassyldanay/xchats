@@ -702,6 +702,14 @@ export default {
       credentialStorageBody:
         'На этом сервере ключи хранятся в зашифрованном локальном файле, а не в связке ключей ОС. Это более слабая гарантия, чем связка ключей: тот, у кого есть доступ к файловой системе и ключу приложения, сможет их расшифровать.',
       credentialStorageAccept: 'Я понимаю и принимаю это ограничение',
+      storageLocationsTitle: 'Расположение данных',
+      storageLocationsBody:
+        'Где это развёртывание читает конфигурацию и хранит данные — только для чтения, для диагностики или ручного бэкапа.',
+      storageLocationsConfigFile: 'Файл конфигурации',
+      storageLocationsConfigDefaults: 'Используются встроенные значения по умолчанию (config.yaml не найден)',
+      storageLocationsDataDir: 'Каталог данных',
+      storageLocationsDatabase: 'База данных',
+      storageLocationsBlobDir: 'Хранилище медиафайлов',
     },
   },
   // AddAccountDialog.vue's channel-connect wizard (dialog.*) and

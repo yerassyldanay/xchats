@@ -63,6 +63,21 @@ export interface Settings {
   providers: Record<string, ProviderSettings>
   ngrok: NgrokSettings
   credential_file_fallback_accepted: boolean
+  storage_locations: StorageLocations
+}
+
+// StorageLocations mirrors internal/httpapi.storageLocations — the
+// read-only "where is my stuff" answer for Settings' Data & backup tab. Not
+// user-editable: no relocation control, just the resolved paths for
+// troubleshooting. config_path is '' when the process found no config.yaml
+// and is running on built-in defaults.
+export interface StorageLocations {
+  config_path: string
+  config_dir: string
+  data_dir: string
+  db_path: string
+  wa_device_db_path: string
+  blob_dir: string
 }
 
 // IntegrationField mirrors internal/httpapi.fieldSummary.

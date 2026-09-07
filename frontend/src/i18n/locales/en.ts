@@ -697,6 +697,14 @@ export default {
       credentialStorageBody:
         "Credentials are stored in an encrypted local file rather than your OS keychain on this deployment. This is a weaker guarantee than a keychain — anyone with filesystem access and the app's key could decrypt them.",
       credentialStorageAccept: 'I understand and accept this trade-off',
+      storageLocationsTitle: 'Storage locations',
+      storageLocationsBody:
+        'Where this deployment reads its configuration and stores its data — read-only, for troubleshooting or a manual backup.',
+      storageLocationsConfigFile: 'Config file',
+      storageLocationsConfigDefaults: 'Using built-in defaults (no config.yaml found)',
+      storageLocationsDataDir: 'Data directory',
+      storageLocationsDatabase: 'Database',
+      storageLocationsBlobDir: 'Media storage',
     },
   },
   // AddAccountDialog.vue's channel-connect wizard (dialog.*) and
