@@ -63,7 +63,7 @@ func FetchCIMD(ctx context.Context, clientIDURL string) (Client, error) {
 		return Client{}, errors.New("mcpauth: client metadata document has no redirect_uris")
 	}
 	for _, ru := range doc.RedirectURIs {
-		if err := validateRedirectURI(ru); err != nil {
+		if err := validateCIMDRedirectURI(u, ru); err != nil {
 			return Client{}, fmt.Errorf("mcpauth: client metadata redirect_uris: %w", err)
 		}
 	}
@@ -71,6 +71,50 @@ func FetchCIMD(ctx context.Context, clientIDURL string) (Client, error) {
 		ClientID: clientIDURL, ClientName: doc.ClientName, RedirectURIs: doc.RedirectURIs, Source: "cimd",
 	}, nil
 }
+
+// validateCIMDRedirectURI verifies that each redirect_uri in a Client ID Metadata
+// Document either matches the origin (scheme, host, port) of the client_id URL,
+// or is a loopback URI (draft-ietf-oauth-client-id-metadata-document §3).
+func validateCIMDRedirectURI(clientURL *url.URL, raw string) error {
+	if err := validateRedirectURI(raw); err != nil {
+		return err
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid redirect_uri %q", raw)
+	}
+	if isLoopbackHost(u.Hostname()) {
+		return nil
+	}
+	if !sameOrigin(clientURL, u) {
+		return fmt.Errorf("redirect_uri %q does not match client_id origin %q", raw, clientURL.String())
+	}
+	return nil
+}
+
+func sameOrigin(a, b *url.URL) bool {
+	if a.Scheme != b.Scheme {
+		return false
+	}
+	if !strings.EqualFold(a.Hostname(), b.Hostname()) {
+		return false
+	}
+	return effectivePort(a) == effectivePort(b)
+}
+
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	if u.Scheme == "http" {
+		return "80"
+	}
+	return ""
+}
+
 
 // validateRedirectURI enforces https, except for loopback http (127.0.0.1,
 // ::1, localhost) — the native-app/CLI/MCP-Inspector pattern OAuth 2.1
