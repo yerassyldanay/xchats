@@ -214,8 +214,9 @@ builds all three platforms natively, on `windows-latest`, `macos-latest` and
 
 **Triggers.** Pull requests that touch what actually goes into the desktop
 binary (`backend/cmd/xchats/**`, `backend/internal/desktop/**`,
-`backend/go.{mod,sum}`, `frontend/**`, `.nvmrc`, the workflow itself); every
-`v*.*.*` tag; and `workflow_dispatch` for a build on demand. Ordinary backend
+`backend/go.{mod,sum}`, `frontend/**`, `.nvmrc`, the workflow itself);
+`workflow_dispatch` for a build on demand; and `workflow_call` so
+`release.yml` can reuse this build matrix when cutting a release. Ordinary backend
 changes are already compiled and tested by `ci.yml`'s `backend-test` job, so
 they do not spend a macOS runner here.
 
@@ -231,14 +232,16 @@ bundle into the embed directory), archives the result and attaches a
 | `windows` | `xchats-desktop-windows-amd64.zip` + `.sha256` |
 
 On a pull request or a manual run these are workflow artifacts (downloadable
-from the run's summary page, kept for the repo's retention window). On a
-`v*.*.*` tag a final job attaches the same three archives to the GitHub
-Release for that tag — idempotently, the same way `release.yml`'s
-`source-bundle` job does, so whichever workflow reaches the tag first creates
-the release and the other uploads into it.
+from the run's summary page, kept for the repo's retention window).
 
-`release.yml` is untouched: it still builds and publishes the backend and
-frontend container images and the corresponding-source tarball.
+On a `v*.*.*` tag push, [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+orchestrates the full release pipeline: it invokes `desktop-build.yml` via
+`workflow_call` alongside container image builds and the corresponding-source
+bundle. Because this repository enforces GitHub's **Immutable Releases** policy
+(published releases cannot accept subsequent asset uploads), `release.yml`'s
+final `publish-release` job collects all 8 release assets (3 desktop archives,
+1 source bundle, and their 4 checksums), creates a draft release, uploads all
+assets atomically, and then publishes the release.
 
 ---
 

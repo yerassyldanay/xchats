@@ -55,15 +55,17 @@ bump for your own compatibility policy.
       [`signing.md`](signing.md)).
 - [ ] Generate and attach an SBOM, checksums, and a provenance attestation
       (see [`sbom-checksums-provenance.md`](sbom-checksums-provenance.md)).
-- [ ] Confirm `.github/workflows/release.yml`'s `source-bundle` job attached
-      `xchats-vX.Y.Z-corresponding-source.tar.gz` (+ `.sha256`) to the GitHub
-      Release — the AGPL-3.0/GPL-3.0 §6 corresponding-source obligation for
-      the images just published (see
-      [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)'s libsignal
-      section). Runs automatically on the tag push; this is a confirm step,
-      not a manual one.
-- [ ] Publish GitHub release notes from the changelog entry, linking the
-      images/checksums/SBOM as release assets.
+- [ ] Confirm `.github/workflows/release.yml`'s `publish-release` job attached
+      all 8 release assets to the GitHub Release:
+      - Native desktop executables for Linux (`.tar.gz`), macOS (`.zip`), and Windows (`.zip`) + their `.sha256` checksums.
+      - `xchats-vX.Y.Z-corresponding-source.tar.gz` (+ `.sha256`) — the AGPL-3.0/GPL-3.0 §6
+        corresponding-source obligation for the published images and binaries (see
+        [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)'s libsignal
+        section).
+      Runs automatically on the tag push; this is a confirm step, not a manual one.
+- [ ] Review GitHub release notes generated from git tags/commits, verifying
+      all binaries, checksums, and images are linked. Note: under the repository's
+      Immutable Releases policy, once published, no assets can be added or modified.
 
 ## After publishing
 

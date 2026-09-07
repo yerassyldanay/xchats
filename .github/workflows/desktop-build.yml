@@ -10,8 +10,9 @@ name: Desktop build
 # Triggers are deliberately narrow. This is three jobs including a macOS
 # runner, so it runs on pull requests that actually touch what goes into the
 # desktop binary — not on every backend change, which backend-test in ci.yml
-# already compiles and tests. Tag pushes build the release artifacts;
-# workflow_dispatch is the manual escape hatch.
+# already compiles and tests. workflow_dispatch is the manual escape hatch,
+# and workflow_call lets release.yml invoke this as a reusable workflow on tag
+# pushes so all release assets publish atomically.
 on:
   pull_request:
     paths:
@@ -22,10 +23,14 @@ on:
       - 'frontend/**'
       - '.nvmrc'
       - '.github/workflows/desktop-build.yml'
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version string to stamp into internal/version.Version'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -107,7 +112,7 @@ jobs:
       - name: Install the Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
 
-      # A tag build stamps internal/version.Version so the Settings page and
+      # A tag or release build stamps internal/version.Version so the Settings page and
       # GET /settings/update-check report the real release, exactly as
       # backend/Dockerfile's VERSION build-arg does for the images. Anything
       # else is a dev build.
@@ -115,7 +120,9 @@ jobs:
         id: version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
             echo "value=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
@@ -180,31 +187,3 @@ jobs:
             backend/cmd/xchats/build/bin/${{ matrix.artifact }}.*
           if-no-files-found: error
 
-  # Attach the three archives to the GitHub Release for the tag. Separate
-  # from the matrix so one upload step sees all three, and idempotent in the
-  # same way release.yml's own source-bundle job is: whichever workflow
-  # reaches the tag first creates the release, the other uploads into it.
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # create the Release + upload assets
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Upload to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG='${{ github.ref_name }}'
-          ls -l artifacts
-          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes \
-            --repo "$GITHUB_REPOSITORY" \
-            || echo "release for $TAG already exists — uploading assets only"
-          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY" artifacts/*
