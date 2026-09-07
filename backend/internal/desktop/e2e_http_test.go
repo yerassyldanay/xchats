@@ -3,6 +3,7 @@ package desktop
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -110,12 +111,25 @@ func TestServeE2EHTTP_ServesSPAAndAPI(t *testing.T) {
 		}
 	})
 
-	t.Run("asset file serves verbatim", func(t *testing.T) {
+	t.Run("asset file serves its own bytes and content-type, not the SPA index", func(t *testing.T) {
+		// A status-code-only check here previously passed even when this
+		// path fell through to the SPA handler (a real bug, caught only by
+		// actually running the app: the browser then refuses to execute the
+		// response as a module script, since its Content-Type is text/html,
+		// not text/javascript). Asserting the body and content-type is what
+		// actually distinguishes "served the real file" from "served
+		// index.html with a 200".
 		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
-			t.Errorf("GET /assets/app.js = %d, want 200", rec.Code)
+			t.Fatalf("GET /assets/app.js = %d, want 200", rec.Code)
+		}
+		if got := rec.Body.String(); got != "console.log('stub')" {
+			t.Errorf("GET /assets/app.js body = %q, want the actual asset bytes (not the SPA index)", got)
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
+			t.Errorf("GET /assets/app.js Content-Type = %q, want a javascript MIME type", ct)
 		}
 	})
 

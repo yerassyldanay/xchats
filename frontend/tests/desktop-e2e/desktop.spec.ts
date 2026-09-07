@@ -95,10 +95,16 @@ test('product media survives save, reload, and a full app restart', async ({ bro
   await expect(featuredThumb).toBeVisible({ timeout: 15_000 })
 
   // Step 4: attach the SAME uploaded image as gallery media too, via
-  // "attach existing" rather than uploading a second copy — this is now
-  // the only <select> in the dialog (the video/document pickers have no
-  // eligible materials for a PNG upload).
-  await dialog.locator('select').selectOption({ label: 'test-image.png' })
+  // "attach existing" rather than uploading a second copy. dialog has
+  // TWO <select> elements at this point — availability_status (a plain
+  // form field, always present) and the gallery MediaFieldPicker's
+  // "attach existing" dropdown — so filter by option content rather than
+  // assume this is the only one: only the gallery picker offers an option
+  // naming the uploaded file.
+  await dialog
+    .locator('select')
+    .filter({ hasText: 'test-image.png' })
+    .selectOption({ label: 'test-image.png' })
 
   // Step 5: save and verify the card renders the image.
   await dialog.getByRole('button', { name: 'Сохранить' }).click()

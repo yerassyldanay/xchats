@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
+	"strings"
 	"sync/atomic"
 )
 
@@ -83,13 +85,43 @@ func ServeE2EHTTP(next http.Handler, api http.Handler, assets fs.FS, addr string
 	if !isLoopbackHostPort(addr) {
 		return next
 	}
-	assetServer := NewMiddleware(api)(NewSPAHandler(assets))
+	assetServer := NewMiddleware(api)(serveAssetsOrSPA(assets))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == readyPath {
 			serveReadiness(w, ready)
 			return
 		}
 		assetServer.ServeHTTP(w, r)
+	})
+}
+
+// serveAssetsOrSPA serves an existing file from assets verbatim — correct
+// Content-Type included, via the stdlib file server — and falls back to
+// NewSPAHandler's index.html for anything else (a vue-router history-mode
+// path, or a real 404). This is the split Wails' own AssetServer options
+// handle internally (Assets for a hit, Handler for a miss — see shell.go);
+// ServeE2EHTTP has to do it explicitly because it drives net/http directly
+// rather than going through Wails' asset server. Getting this wrong means
+// every asset request (index-*.js, index-*.css, ...) instead receives
+// index.html's bytes with a 200 — which a browser then refuses to execute
+// as a module script, since the Content-Type is text/html, not
+// text/javascript ("strict MIME type checking" — this exact failure is what
+// an earlier version of this function produced).
+func serveAssetsOrSPA(assets fs.FS) http.Handler {
+	fileServer := http.FileServerFS(assets)
+	spaHandler := NewSPAHandler(assets)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			spaHandler.ServeHTTP(w, r)
+			return
+		}
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		info, err := fs.Stat(assets, name)
+		if name == "" || name == "." || err != nil || info.IsDir() {
+			spaHandler.ServeHTTP(w, r)
+			return
+		}
+		fileServer.ServeHTTP(w, r)
 	})
 }
 
