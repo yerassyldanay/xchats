@@ -157,6 +157,28 @@ throwaway instance without touching your real one:
 XCHATS_DATA_DIR=/tmp/xchats-scratch XCHATS_CONFIG_DIR=/tmp/xchats-scratch /tmp/xchats
 ```
 
+`--data-dir <absolute-path>` does the same job as `XCHATS_DATA_DIR` for the
+data half, with higher precedence (a flag beats the environment), and with
+its own validation up front: the path must be absolute, it is created with
+owner-only permissions if missing, and a startup error names the path and
+the reason if it turns out not to be writable — rather than that surfacing
+later as a confusing failure inside the store or blob layer.
+
+```bash
+/tmp/xchats --data-dir /tmp/xchats-scratch
+```
+
+There is no equivalent `--config-dir` flag; use `XCHATS_CONFIG_DIR` for that
+half, exactly as before. The precedence for the data root is: `--data-dir`,
+then `XCHATS_DATA_DIR`, then the OS default above.
+
+The resolved config file path, config directory, data directory, and the
+database/blob paths derived from it are shown read-only in **Settings → Data
+& backup**, and in `GET /settings`'s `storage_locations` field — for
+troubleshooting and for copying into a bug report or a manual backup script.
+There is no graphical relocation control; moving the profile means using one
+of the mechanisms above and restarting.
+
 See [`release/data-locations-and-privacy.md`](release/data-locations-and-privacy.md)
 for what each of those files holds.
 
@@ -209,41 +231,61 @@ wails build -clean -skipbindings -tags webkit2_41 \
 ## What CI produces
 
 [`.github/workflows/desktop-build.yml`](../.github/workflows/desktop-build.yml)
-builds all three platforms natively, on `windows-latest`, `macos-latest` and
-`ubuntu-24.04`.
+has two very different jobs depending on why it ran — a job-level `if:`
+cannot see which matrix entry is running, so "only Linux, only on a PR" is
+its own job rather than a condition on one matrix entry of the other:
 
-**Triggers.** Pull requests that touch what actually goes into the desktop
-binary (`backend/cmd/xchats/**`, `backend/internal/desktop/**`,
-`backend/go.{mod,sum}`, `frontend/**`, `.nvmrc`, the workflow itself);
-`workflow_dispatch` for a build on demand; and `workflow_call` so
-`release.yml` can reuse this build matrix when cutting a release. Ordinary backend
-changes are already compiled and tested by `ci.yml`'s `backend-test` job, so
-they do not spend a macOS runner here.
+- **`pr-compile-check`** — pull requests that touch what actually goes into
+  the desktop binary (`backend/cmd/xchats/**`, `backend/internal/desktop/**`,
+  `backend/go.{mod,sum}`, `frontend/**`, `.nvmrc`, `scripts/package-*.sh`, the
+  workflow itself). One `ubuntu-24.04` runner, `wails build` and nothing
+  else — no installers, no checksums, no archives, no artifact upload, no
+  Playwright browser install, no launching the app. This proves the
+  desktop-tagged code still compiles; it is not a packaging dry run.
+  Ordinary backend changes are already compiled and tested by `ci.yml`'s
+  `backend-test` job, so they do not spend a macOS runner here either.
+- **`build`** — `workflow_dispatch` for a build on demand, or `workflow_call`
+  so `release.yml` can reuse this job when cutting a release on a `v*.*.*`
+  tag. Never a pull request. All three platforms build natively (on
+  `windows-latest`, `macos-latest` and `ubuntu-24.04`), each producing both
+  the portable archive and an installer format, checksummed and uploaded.
 
-**Each job** installs the platform's WebView toolchain, installs the pinned
-Wails CLI, runs `wails build` (which runs the frontend build and mirrors the
-bundle into the embed directory), archives the result and attaches a
-`.sha256`.
+**Each `build` job** installs the platform's WebView toolchain (plus NSIS on
+Windows), installs the pinned Wails CLI, runs `wails build` (`-nsis` on
+Windows — see below), packages both formats, checksums every file, and
+uploads them.
 
 | Job | Uploads |
 |---|---|
-| `linux` | `xchats-desktop-linux-amd64.tar.gz` + `.sha256` |
-| `macos` | `xchats-desktop-macos-universal.zip` + `.sha256` |
-| `windows` | `xchats-desktop-windows-amd64.zip` + `.sha256` |
+| `linux` | `xchats-desktop-linux-amd64.tar.gz` + `.sha256`, `xchats-desktop-linux-amd64.deb` + `.sha256` |
+| `macos` | `xchats-desktop-macos-universal.zip` + `.sha256`, `xchats-desktop-macos-universal.dmg` + `.sha256` |
+| `windows` | `xchats-desktop-windows-amd64.zip` + `.sha256`, `xchats-desktop-windows-amd64-installer.exe` + `.sha256` |
 
-On a pull request or a manual run these are workflow artifacts (downloadable
-from the run's summary page, kept for the repo's retention window).
+The `.deb` is built by [`scripts/package-deb.sh`](../scripts/package-deb.sh)
+(conventional paths — `/usr/bin/xchats`, a `.desktop` entry, a hicolor icon,
+declared `libgtk-3-0`/`libwebkit2gtk-4.1-0` runtime deps) and the `.dmg` by
+[`scripts/package-dmg.sh`](../scripts/package-dmg.sh) (the `.app` plus an
+`/Applications` symlink). The NSIS installer comes from Wails' own `-nsis`
+flag — see [Wails' Windows installer guide](https://v2.wails.io/docs/guides/windows-installer/)
+— using its default template (`build/windows/installer/project.nsi`,
+gitignored and regenerated fresh on every build from `build/appicon.png` and
+`wails.json`'s `info` fields, same as `Info.plist`/`icon.ico`).
+
+On a manual `workflow_dispatch` run these are workflow artifacts
+(downloadable from the run's summary page, kept for the repo's retention
+window).
 
 On a `v*.*.*` tag push, [`.github/workflows/release.yml`](../.github/workflows/release.yml)
-orchestrates the full release pipeline: it invokes `desktop-build.yml` via
-`workflow_call` alongside container image builds and the corresponding-source
-bundle. Because this repository enforces GitHub's **Immutable Releases** policy
-(published releases cannot accept subsequent asset uploads), `release.yml`'s
-final `publish-release` job collects all 8 release assets (3 desktop archives,
-1 source bundle, and their 4 checksums), verifies their names and checksums,
-uploads them to a draft, verifies the draft's remote asset list, and only then
-publishes the release. A manual run of `release.yml` requires an existing
-version tag and follows the same path.
+orchestrates the full release pipeline: it invokes `desktop-build.yml`'s
+`build` job via `workflow_call` alongside container image builds and the
+corresponding-source bundle. Because this repository enforces GitHub's
+**Immutable Releases** policy (published releases cannot accept subsequent
+asset uploads), `release.yml`'s final `publish-release` job collects all 14
+release assets (six desktop packages, one source bundle, and their seven
+checksums), verifies their names and checksums, uploads them to a draft,
+verifies the draft's remote asset list, and only then publishes the release.
+A manual run of `release.yml` requires an existing version tag and follows
+the same path.
 
 The draft gate covers GitHub Release assets. Container images are pushed to
 GHCR by a parallel job and remain independently retriable if a later desktop,
@@ -253,16 +295,29 @@ source, or release-publication step fails.
 
 ## What users receive
 
-| Platform | Download | How they run it |
-|---|---|---|
-| Windows | `xchats-desktop-windows-amd64.zip` → `xchats.exe` | Unzip, run the `.exe`. Portable — no installer, nothing written outside `%APPDATA%`/`%LOCALAPPDATA%`. |
-| macOS | `xchats-desktop-macos-universal.zip` → `xchats.app` | Unzip, drag to `/Applications`. Universal: native on Apple Silicon and Intel. |
-| Linux | `xchats-desktop-linux-amd64.tar.gz` → `xchats` | Extract and run. Needs GTK3 and WebKitGTK 4.1 from the distro. |
+Each platform gets an installer (the default, linked first below) and a
+portable archive (the alternative, for an arbitrary install location):
 
-Each download is a single self-contained executable: the Vue bundle, the
-migrations and the sample media are all compiled into it. There is nothing to
-install alongside it and no separate server to start — launching it boots the
-backend and opens the UI.
+| Platform | Installer (default) | Portable (alternative) |
+|---|---|---|
+| Windows | `xchats-desktop-windows-amd64-installer.exe` — NSIS: pick the install folder, Start Menu/desktop shortcuts, clean uninstall, no administrator rights needed for the default per-user install. | `xchats-desktop-windows-amd64.zip` → `xchats.exe`. Unzip, run — nothing written outside `%APPDATA%`/`%LOCALAPPDATA%`. |
+| macOS | `xchats-desktop-macos-universal.dmg` — open it, drag `xchats.app` to `/Applications`. Universal: native on Apple Silicon and Intel. | `xchats-desktop-macos-universal.zip` → `xchats.app`. Unzip, drag to wherever you like. |
+| Linux | `xchats-desktop-linux-amd64.deb` — `sudo apt install ./xchats-desktop-linux-amd64.deb`. Installs to `/usr/bin/xchats`, adds it to the application menu (GTK3 + WebKitGTK 4.1 declared as package dependencies). | `xchats-desktop-linux-amd64.tar.gz` → `xchats`. Extract and run anywhere; needs GTK3 and WebKitGTK 4.1 from the distro. |
+
+Uninstalling (either the `.deb`, via `apt remove`, or the NSIS installer's own
+uninstaller) removes only what was installed — the binary, icon, `.desktop`
+entry, shortcuts and registry uninstall entry. Neither has any knowledge of
+`~/.config/xchats`/`~/.local/share/xchats` (or their Windows/macOS
+equivalents) — configuration, the database, credentials and uploaded media
+are never touched by an uninstall.
+
+Every download — installer or portable — is built from the same single
+self-contained executable: the Vue bundle, the migrations and the sample
+media are all compiled into it. There is nothing to install alongside it and
+no separate server to start — launching it boots the backend and opens the
+UI, with the same zero-configuration first launch either way (see
+[Where your data goes](#where-your-data-goes) above — no first-launch storage
+prompt, no migration wizard).
 
 **Not signed or notarized.** The binaries carry no code-signing certificate,
 so Windows SmartScreen will warn on first run and macOS will refuse to open
@@ -273,6 +328,52 @@ attribute). Signing is tracked with the image-signing work in
 **No auto-update.** Deliberately out of scope for now. The app still performs
 its existing update *check* (`GET /settings/update-check`, surfaced in
 Settings); acting on it means downloading the next release by hand.
+
+---
+
+## Local Executable UI Testing
+
+`XCHATS_DESKTOP_E2E_HTTP=1` is an opt-in switch on the desktop executable
+(`backend/internal/desktop/e2e_http.go`) that serves the exact embedded
+production SPA, and routes API/media requests to the real in-process
+backend, through the app's existing loopback HTTP listener — the same
+`NewMiddleware`/`NewSPAHandler` the Wails window itself uses, just also
+mounted where an ordinary browser can reach it. This exists because
+Playwright cannot drive Wails' own asset server (a custom URL scheme on
+macOS/Linux, WebView2's buffered writer on Windows), so there was previously
+no way to browser-test the real packaged app end to end. It refuses to
+activate on anything but a loopback listener, and every route it adds is
+completely absent unless the env var is set — production behavior does not
+change.
+
+```bash
+make desktop-test-ui
+```
+
+Builds the desktop executable for your platform (unless `DESKTOP_E2E_BINARY`
+already points at one), launches it in full isolation — a temporary
+`--data-dir`/`XCHATS_CONFIG_DIR`, a dynamic loopback port, file-backed
+credentials, staged under a temp path with a space in its name — and drives
+it with Playwright: log in, create a Knowledge Base product, upload a
+checked-in image fixture, attach it as the featured image and gallery media,
+save, reload, then **stop and restart the executable against the same data
+root** and confirm the product and its image survived. See
+[`frontend/tests/desktop-e2e/README.md`](../frontend/tests/desktop-e2e/README.md)
+for the full scenario and prerequisites (Linux without a display needs
+`xvfb`).
+
+**Never run this in CI.** It is not invoked from any GitHub Actions workflow,
+any other Make target, or an npm lifecycle hook, and it never will be — it
+builds and launches a real GUI application. Run it locally, on demand, after
+a change to the desktop shell, the Knowledge Base media flow, or the storage
+paths above.
+
+Native Wails startup, the desktop asset-server middleware, cookie-jar
+behavior, and the realtime (SSE vs. Wails-events) transport are deliberately
+NOT re-tested by this suite — they already have focused Go/frontend test
+coverage (`backend/internal/desktop/*_test.go`). Its job is the one thing
+only the real packaged executable can prove: that a user's data actually
+survives a save, a reload, and a restart.
 
 ---
 
@@ -335,10 +436,14 @@ before a release that ships desktop binaries.
 | `backend/internal/desktop/desktop.go` | Config-path and storage-path resolution, loopback binding. No build tag — covered by `go test ./...`. |
 | `backend/internal/desktop/handler.go` | The asset-server middleware: API-vs-SPA routing, the cookie jar, the history-mode fallback. No build tag. |
 | `backend/internal/desktop/realtime.go` | `realtime.Hub` → Wails events pump. No build tag. |
-| `backend/internal/desktop/shell.go` | Wails app options and window lifecycle. `//go:build desktop`. |
+| `backend/internal/desktop/e2e_http.go` | `XCHATS_DESKTOP_E2E_HTTP=1`'s loopback SPA-over-HTTP mode and readiness endpoint — see [Local Executable UI Testing](#local-executable-ui-testing). No build tag. |
+| `backend/internal/appdirs/appdirs.go` | OS default config/data directories, and `--data-dir`'s validation (`ValidateOverrideDir`). No build tag. |
+| `backend/internal/desktop/shell.go` | Wails app options and window lifecycle; marks `e2e_http.go`'s `Readiness` window-ready on `OnStartup`. `//go:build desktop`. |
 | `backend/internal/desktop/assets.go` | `go:embed` of the mirrored SPA. `//go:build desktop`. |
-| `backend/cmd/xchats/desktop{,_on,_off}.go` | The two-line hook in `runServe`, in both build flavours. |
+| `backend/cmd/xchats/desktop{,_on,_off}.go` | The `--data-dir`/E2E-HTTP-wrapping hooks in `runServe`, in both build flavours. |
 | `backend/cmd/xchats/bindings.go` | The binding-generator guard. `//go:build bindings`. |
 | `backend/cmd/xchats/wails.json` | Wails project config (it lives next to the `main` package it builds). |
+| `scripts/package-deb.sh` / `scripts/package-dmg.sh` | Build the `.deb`/`.dmg` from an already-built `wails build` output — see [What CI produces](#what-ci-produces). |
+| `frontend/tests/desktop-e2e/` | The Playwright suite `make desktop-test-ui` runs — see its own README. |
 | `frontend/src/lib/desktop.ts` | Runtime detection of the Wails shell. |
 | `frontend/src/lib/sse.ts` | Picks SSE or Wails events. |

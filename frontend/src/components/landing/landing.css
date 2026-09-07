@@ -790,6 +790,25 @@
   font-size: 13px;
   font-weight: 650;
   color: var(--blog-accent);
+  text-decoration: none;
+}
+.landing-link-card__cta:hover {
+  text-decoration: underline;
+}
+/* The portable-archive alternative under each installer's primary CTA —
+   visually subordinate (smaller, muted) since the installer is the default
+   choice; see docs/desktop.md. */
+.landing-link-card__cta-secondary {
+  font-size: 12px;
+  color: var(--blog-muted);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.landing-link-card__cta-secondary:hover {
+  color: var(--blog-accent);
 }
 @media (max-width: 640px) {
   .landing-links {

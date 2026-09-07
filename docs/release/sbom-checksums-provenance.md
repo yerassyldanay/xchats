@@ -78,7 +78,8 @@ custom provenance pipeline.
 
 ## Where these attach
 
-The current workflow's eight-asset contract is three desktop archives, one
-corresponding-source archive, and their four checksum files. Future SBOMs and
-archive attestations will expand that contract deliberately; the publisher
-validates the exact set before making a release immutable.
+The current workflow's 14-asset contract is six desktop packages (a portable
+archive and an installer per platform), one corresponding-source archive, and
+their seven checksum files. Future SBOMs and archive attestations will expand
+that contract deliberately; the publisher validates the exact set before
+making a release immutable.

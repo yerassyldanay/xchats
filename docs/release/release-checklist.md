@@ -65,17 +65,25 @@ bump for your own compatibility policy.
       planned follow-ups; see [`signing.md`](signing.md) and
       [`sbom-checksums-provenance.md`](sbom-checksums-provenance.md).
 - [ ] Confirm `.github/workflows/release.yml`'s `publish-release` job attached
-      all 8 release assets to the GitHub Release:
-      - Native desktop executables for Linux (`.tar.gz`), macOS (`.zip`), and Windows (`.zip`) + their `.sha256` checksums.
+      all 14 release assets to the GitHub Release:
+      - Six native desktop packages + their `.sha256` checksums: Linux portable
+        (`.tar.gz`) and installer (`.deb`), macOS portable (`.zip`) and installer
+        (`.dmg`), Windows portable (`.zip`) and installer (NSIS `.exe`).
       - `xchats-vX.Y.Z-corresponding-source.tar.gz` (+ `.sha256`) — the AGPL-3.0/GPL-3.0 §6
         corresponding-source obligation for the published images and binaries (see
         [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)'s libsignal
         section).
       Runs automatically on the tag push; this is a confirm step, not a manual one.
-- [ ] Review the generated GitHub release notes, verify the eight downloadable
+- [ ] Review the generated GitHub release notes, verify all 14 downloadable
       assets are listed, and add the two versioned GHCR image references if they
       are not already documented. Release notes remain editable, but under the
       repository's Immutable Releases policy the tag and assets cannot be replaced.
+- [ ] Manually confirm (see [`desktop.md`](../desktop.md)'s own Test and
+      Acceptance Criteria): the `.deb` installs on a supported Ubuntu, appears
+      in the application launcher, and opens without a terminal; the Windows
+      NSIS installer permits choosing an install directory and cleanly
+      uninstalls without deleting user data; the macOS `.dmg` supports the
+      conventional drag-install flow.
 
 ## After publishing
 
