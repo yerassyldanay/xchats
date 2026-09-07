@@ -1,10 +1,10 @@
 # SBOM, checksums, and provenance
 
-**Status: not implemented yet** — like [`signing.md`](signing.md), this
-describes a recommended process for when release automation exists, not
-something this repo currently produces. Nothing here requires deviating from
-the existing toolchain (Go modules, npm) or adding infrastructure beyond a
-CI pipeline.
+**Status: partially implemented.** The release workflow publishes SHA-256
+checksums for every desktop/source archive and GitHub build-provenance
+attestations for both container images. A full backend/frontend SBOM, signed
+checksum manifest, and provenance attestations for the downloadable archives
+remain planned work.
 
 ## Software Bill of Materials (SBOM)
 
@@ -41,12 +41,11 @@ was generated from.
 
 ## Checksums
 
-Every published artifact (Docker image digest, and any binary if native
-builds are ever published — see [`signing.md`](signing.md)) should have a
-`sha256sum` recorded and published in the release notes or a `checksums.txt`
-file, so a downstream user can confirm what they downloaded matches what was
-published without needing to trust the transport (a mirror, a CDN) it came
-through:
+Every published desktop and corresponding-source archive has an adjacent
+`.sha256` file. Docker image digests are recorded by GHCR and used as the
+subjects of the build-provenance attestations. A signed aggregate checksum
+manifest remains a useful follow-up because unsigned checksums detect transport
+corruption but do not independently authenticate the publisher:
 
 ```bash
 sha256sum xchats-linux-amd64 xchats-darwin-arm64 > checksums.txt
@@ -60,25 +59,26 @@ what build environment actually produced this artifact" — the difference
 between trusting a checksum because you have to, and being able to verify
 the whole chain from source to artifact.
 
-For a GitHub Actions-based pipeline (the natural fit once one exists — see
-[`release-checklist.md`](release-checklist.md)), [GitHub's native artifact
+The current pipeline uses [GitHub's native artifact
 attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)
-cover this with no extra infrastructure:
+for both GHCR images:
 
 ```yaml
-- uses: actions/attest-build-provenance@v1
+- uses: actions/attest-build-provenance@v4
   with:
-    subject-path: 'xchats-*'
+    subject-name: ghcr.io/OWNER/IMAGE
+    subject-digest: ${{ steps.build.outputs.digest }}
+    push-to-registry: true
 ```
 
-An operator verifies with `gh attestation verify xchats-linux-amd64 --owner
-yerassyldanay`. This is the recommended starting point over a hand-rolled
-[SLSA](https://slsa.dev/spec/v1.2/provenance) attestation — it produces a SLSA-compatible
-provenance statement without a custom pipeline to maintain.
+Extending the same mechanism to downloadable desktop/source archives is
+planned. GitHub's native attestation is preferred over a hand-rolled
+[SLSA](https://slsa.dev/spec/v1.2/provenance) statement because it avoids a
+custom provenance pipeline.
 
 ## Where these attach
 
-Once produced, all three (SBOM, checksums, provenance attestations) should
-be uploaded as release assets alongside the versioned Docker images/binaries
-themselves — see [`release-checklist.md`](release-checklist.md)'s publish
-step.
+The current workflow's eight-asset contract is three desktop archives, one
+corresponding-source archive, and their four checksum files. Future SBOMs and
+archive attestations will expand that contract deliberately; the publisher
+validates the exact set before making a release immutable.

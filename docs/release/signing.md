@@ -1,10 +1,10 @@
 # Signing releases
 
-**Status: not implemented yet.** No CI pipeline exists in this repo today
-(no `.github/workflows/`), so nothing currently signs a build automatically.
-This page is a recommendation for when release automation is set up, not a
-description of an existing process — track its adoption in
-[`release-checklist.md`](release-checklist.md) once it exists.
+**Status: partially implemented.** The release workflow publishes immutable
+GitHub Releases, records SHA-256 checksums for every desktop/source archive,
+and creates GitHub build-provenance attestations for the container images.
+Cosign image signing, a signed checksum manifest, macOS notarization, and
+Windows Authenticode signing are not implemented yet.
 
 ## Why it matters here specifically
 
@@ -22,10 +22,10 @@ the cheapest step and the foundation everything else can point back to —
 `git tag -v vX.Y.Z` lets anyone confirm a checkout matches a tag the
 maintainer actually signed.
 
-**2. Container image signing (Docker Hub / GHCR).** [Sigstore
+**2. Container image signing (GHCR).** [Sigstore
 cosign](https://docs.sigstore.dev/cosign/signing/overview/), keyless mode via OIDC
-from GitHub Actions — no long-lived signing key to manage or leak. Once CI
-exists:
+from GitHub Actions — no long-lived signing key to manage or leak. This remains
+planned work beyond the existing provenance attestations:
 
 ```bash
 cosign sign ghcr.io/yerassyldanay/xchats-backend:vX.Y.Z
@@ -40,12 +40,10 @@ cosign verify ghcr.io/yerassyldanay/xchats-backend:vX.Y.Z \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-**3. Checksums for any binary artifact.** If native binaries are ever
-published (beyond the Docker images), publish a `checksums.txt`
-(`sha256sum xchats-* > checksums.txt`) alongside the release and sign *that
-file* with cosign or a minisign key — signing the checksum manifest instead
-of every binary individually is the standard pattern and scales to however
-many platform builds a release produces.
+**3. Checksums for binary artifacts.** Native desktop and corresponding-source
+archives are now published with individual `.sha256` files. A future signing
+stage should consolidate or sign those checksums with cosign or minisign so
+users can authenticate the checksum values, not merely detect corruption.
 
 **4. Provenance.** See
 [`sbom-checksums-provenance.md`](sbom-checksums-provenance.md) for
@@ -56,7 +54,7 @@ both fit a GitHub Actions-based pipeline without extra infrastructure.
 
 ## What this is not proposing
 
-Not proposing a custom PKI, a paid code-signing certificate, or
-platform-specific signing (macOS notarization, Windows Authenticode) —
-xchats ships as a Docker image and a Go binary, not a distributed desktop
-app, so none of those apply today. Revisit if that changes.
+Not proposing a custom PKI. Platform-specific signing does now apply to the
+distributed desktop app, but macOS notarization and Windows Authenticode need
+separate credentials and are intentionally deferred from the current unsigned
+portable archives.
