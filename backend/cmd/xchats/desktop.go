@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/yerassyldanay/xchats/backend/internal/desktop"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
 )
 
@@ -20,4 +21,9 @@ type shellDeps struct {
 	Hub    *realtime.Hub
 	Log    *slog.Logger
 	Addr   string
+	// Ready is the shared XCHATS_DESKTOP_E2E_HTTP readiness signal (see
+	// internal/desktop/e2e_http.go) — always constructed and threaded
+	// through so shell.go can mark the window ready regardless of whether
+	// E2E HTTP mode is actually enabled this run.
+	Ready *desktop.Readiness
 }

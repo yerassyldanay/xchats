@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
+	"github.com/yerassyldanay/xchats/backend/internal/desktop"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/inboxmedia"
 	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
@@ -537,9 +539,15 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	}
 	srv.SetTunnel(tunnelMgr)
 
+	// e2eReady is the XCHATS_DESKTOP_E2E_HTTP readiness signal (see
+	// internal/desktop/e2e_http.go) — constructed unconditionally so
+	// shell.go can mark the window ready with nothing to check, and cheap
+	// enough that doing so regardless of whether E2E HTTP mode is actually
+	// enabled this run costs nothing.
+	e2eReady := &desktop.Readiness{}
 	httpServer := &http.Server{
 		Addr:    cfg.Server.HTTPAddr,
-		Handler: router,
+		Handler: wrapE2EHTTP(router, cfg.Server.HTTPAddr, e2eReady),
 		// A8: an unauthenticated peer that opens a connection and trickles
 		// headers/body one byte at a time (Slowloris) previously tied up a
 		// connection indefinitely — net/http's zero-value Server has no
@@ -554,9 +562,19 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 		MaxHeaderBytes:    1 << 20, // 1 MiB
 	}
 
+	// Bound synchronously (rather than inside ListenAndServe, in the
+	// goroutine below) so e2eReady.SetBackendReady only fires once the
+	// socket is actually bound and queuing connections — the readiness
+	// endpoint's "backend" signal would otherwise be able to report true a
+	// moment before the port is really open.
+	listener, err := net.Listen("tcp", cfg.Server.HTTPAddr)
+	if err != nil {
+		fatal("listen", err)
+	}
+	e2eReady.SetBackendReady()
 	go func() {
 		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			fatal("listen", err)
 		}
 	}()
@@ -578,7 +596,7 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// (-tags desktop) instead runs the Wails window on this goroutine and
 	// returns when the user closes it, cancelling ctx on the way out — so
 	// the teardown below is the same sequence in both cases.
-	runUntilShutdown(ctx, stop, shellDeps{Router: router, Hub: hub, Log: log, Addr: cfg.Server.HTTPAddr})
+	runUntilShutdown(ctx, stop, shellDeps{Router: router, Hub: hub, Log: log, Addr: cfg.Server.HTTPAddr, Ready: e2eReady})
 	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

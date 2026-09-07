@@ -4,8 +4,10 @@ package main
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/desktop"
 )
 
 // This file is the server build: `go build ./cmd/xchats`, the Docker image,
@@ -22,6 +24,12 @@ func resolveConfigPath(explicit string) string { return config.ResolveConfigPath
 // listen address come from config.yaml and the environment, exactly as
 // documented.
 func applyDesktopDefaults(*config.Config) error { return nil }
+
+// wrapE2EHTTP is a no-op here: there is no embedded SPA bundle in the
+// server build for XCHATS_DESKTOP_E2E_HTTP to serve (assets.go is
+// desktop-tagged), so the flag has nothing to do and the listener's
+// handler is returned exactly as given.
+func wrapE2EHTTP(next http.Handler, _ string, _ *desktop.Readiness) http.Handler { return next }
 
 // runUntilShutdown blocks until SIGINT/SIGTERM — the behavior runServe has
 // always had at this point.

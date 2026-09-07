@@ -147,8 +147,8 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 	srv := httpapi.New(httpapi.Deps{
 		Cfg: cfg, Store: st, OrgID: org.ID, Log: log,
 		Credentials: creds, Settings: sets, Tunnel: tun,
-		LLMRefresh:     func() { atomic.AddInt32(&llmRefreshCalls, 1) },
-		ProviderHealth: health,
+		LLMRefresh:         func() { atomic.AddInt32(&llmRefreshCalls, 1) },
+		ProviderHealth:     health,
 		ResolvedConfigPath: filepath.Join(testDataDir, "config.yaml"),
 		ResolvedConfigDir:  testDataDir,
 		ResolvedDataDir:    testDataDir,
