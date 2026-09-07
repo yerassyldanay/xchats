@@ -38,7 +38,7 @@ PORTS ?= 8080 8090 5173 8081
 
 .PHONY: help up up-fg down logs ps kill-ports migrate seed seed-local seed-demo seed-kb-demo dev-backend dev-frontend \
         test test-backend test-frontend test-e2e build screenshots lint lint-backend lint-frontend notices ruleset-apply \
-        desktop-tools desktop-assets desktop-dev desktop-build desktop-clean
+        desktop-tools desktop-assets desktop-dev desktop-build desktop-clean desktop-test-ui
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -131,6 +131,13 @@ desktop-build: ## Build the packaged desktop app for THIS platform into backend/
 desktop-clean: ## Remove desktop build output and the mirrored SPA bundle
 	rm -rf $(DESKTOP)/build/bin $(DESKTOP)/wailsjs
 	find $(BACKEND)/internal/desktop/dist -mindepth 1 ! -name .gitkeep -exec rm -rf {} +
+
+desktop-test-ui: ## Playwright against the REAL packaged executable (builds it first if DESKTOP_E2E_BINARY is unset). Local only — see docs/desktop.md. NEVER run this in CI.
+	@if [ -z "$$DESKTOP_E2E_BINARY" ]; then \
+		echo "DESKTOP_E2E_BINARY not set — building the desktop executable for this platform…"; \
+		$(MAKE) desktop-build; \
+	fi
+	cd $(FRONTEND) && npm run test:e2e:desktop
 
 lint: lint-backend lint-frontend ## Run every linter (same checks as CI's lint jobs)
 
