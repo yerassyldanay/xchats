@@ -86,8 +86,26 @@ func (s *Server) handleKBUpsertTopic(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "slug required")
 		return
 	}
+	illustrations, ok := s.validateMediaList(c, "illustration_images", req.IllustrationImages)
+	if !ok {
+		return
+	}
+	videos, ok := s.validateMediaList(c, "explainer_videos", req.ExplainerVideos)
+	if !ok {
+		return
+	}
+	docs, ok := s.validateMediaList(c, "reference_documents", req.ReferenceDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.PutLiveTopic(ctx(c), orgID, currentUser(c).ID, kbstore.TopicInput{
 		Slug: req.Slug, Title: req.Title, BodyMD: req.BodyMD,
+		Media: kbstore.TopicMedia{
+			FeaturedImage:      req.FeaturedImage.ptr(),
+			IllustrationImages: illustrations,
+			ExplainerVideos:    videos,
+			ReferenceDocuments: docs,
+		},
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -119,11 +137,29 @@ func (s *Server) handleKBUpsertTariff(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
 		return
 	}
+	pricingImages, ok := s.validateMediaList(c, "pricing_images", req.PricingImages)
+	if !ok {
+		return
+	}
+	videos, ok := s.validateMediaList(c, "explainer_videos", req.ExplainerVideos)
+	if !ok {
+		return
+	}
+	terms, ok := s.validateMediaList(c, "terms_documents", req.TermsDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.PutLiveTariff(ctx(c), orgID, currentUser(c).ID, kbstore.TariffInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price, LimitText: req.LimitText, Fee: req.Fee,
 		Summary: req.Summary, PricingType: req.PricingType, Advantages: req.Advantages, Disadvantages: req.Disadvantages,
 		BestFor: req.BestFor, NotFor: req.NotFor, AdditionalFacts: req.AdditionalFacts,
 		SalesStatus: req.SalesStatus,
+		Media: kbstore.TariffMedia{
+			FeaturedImage:   req.FeaturedImage.ptr(),
+			PricingImages:   pricingImages,
+			ExplainerVideos: videos,
+			TermsDocuments:  terms,
+		},
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -153,6 +189,22 @@ func (s *Server) handleKBUpsertProduct(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
 		return
 	}
+	gallery, ok := s.validateMediaList(c, "gallery_images", req.GalleryImages)
+	if !ok {
+		return
+	}
+	demo, ok := s.validateMediaList(c, "demo_videos", req.DemoVideos)
+	if !ok {
+		return
+	}
+	certs, ok := s.validateMediaList(c, "certificate_documents", req.CertificateDocuments)
+	if !ok {
+		return
+	}
+	guarantee, ok := s.validateMediaList(c, "guarantee_documents", req.GuaranteeDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.PutLiveProduct(ctx(c), orgID, currentUser(c).ID, kbstore.ProductInput{
 		Ref: req.Ref, Name: req.Name, Price: req.Price,
 		Description: req.Description, Category: req.Category,
@@ -161,6 +213,13 @@ func (s *Server) handleKBUpsertProduct(c *gin.Context) {
 		AvailabilityNote: req.AvailabilityNote, InstallationTerms: req.InstallationTerms, WarrantyTerms: req.WarrantyTerms,
 		AdditionalFacts:    req.AdditionalFacts,
 		AvailabilityStatus: req.AvailabilityStatus, SalesStatus: req.SalesStatus,
+		Media: kbstore.ProductMedia{
+			FeaturedImage:        req.FeaturedImage.ptr(),
+			GalleryImages:        gallery,
+			DemoVideos:           demo,
+			CertificateDocuments: certs,
+			GuaranteeDocuments:   guarantee,
+		},
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -190,10 +249,19 @@ func (s *Server) handleKBPatchContacts(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "bad contacts")
 		return
 	}
+	legalDocs, ok := s.validateMediaList(c, "company_legal_documents", req.CompanyLegalDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.PatchLiveContacts(ctx(c), orgID, currentUser(c).ID, kbstore.ContactPatch{
 		WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
 		LegalInformation: req.LegalInformation, CallbackTime: req.CallbackTime,
 		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
+		Media: kbstore.ContactsMedia{
+			ContactCardImage:      req.ContactCardImage.ptr(),
+			LocationMapImage:      req.LocationMapImage.ptr(),
+			CompanyLegalDocuments: legalDocs,
+		},
 	}); err != nil {
 		s.kbFail(c, err)
 		return
@@ -213,11 +281,18 @@ func (s *Server) handleKBPatchPolicies(c *gin.Context) {
 		fail(c, http.StatusBadRequest, ErrValidation, "bad policies")
 		return
 	}
+	docs, ok := s.validateMediaList(c, "commerce_policy_documents", req.CommercePolicyDocuments)
+	if !ok {
+		return
+	}
 	if err := s.kb.PatchLivePolicies(ctx(c), orgID, currentUser(c).ID, kbstore.PolicyPatch{
 		DeliveryCost: req.DeliveryCost, DeliveryInDays: req.DeliveryInDays,
 		FreeDeliveryFrom: req.FreeDeliveryFrom, MinOrder: req.MinOrder, Prepayment: req.Prepayment,
 		Installment: req.Installment, ReturnPeriodInDays: req.ReturnPeriodInDays, Warranty: req.Warranty,
 		OutsideZonesNote: req.OutsideZonesNote,
+		Media: kbstore.PoliciesMedia{
+			CommercePolicyDocuments: docs,
+		},
 	}); err != nil {
 		s.kbFail(c, err)
 		return

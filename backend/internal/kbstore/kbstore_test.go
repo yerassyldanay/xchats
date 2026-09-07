@@ -540,6 +540,162 @@ func TestPutLiveTariffAndProduct_SalesStatusIsWired(t *testing.T) {
 	}
 }
 
+func TestPutLive_MediaPersistence(t *testing.T) {
+	kb, orgID, _, _ := newTestKB(t)
+	ctx := context.Background()
+
+	imgID, err := kb.CreateUploadMaterial(ctx, orgID, kbstore.UploadMaterialInput{
+		Filename: "hero.jpg", MimeType: "image/jpeg", SizeBytes: 5, CustomerVisibility: "visible",
+	})
+	if err != nil {
+		t.Fatalf("create upload material: %v", err)
+	}
+	if err := kb.CompleteMaterialUpload(ctx, imgID, "disk", "org/x/"+imgID.String(), 5, ""); err != nil {
+		t.Fatalf("complete upload: %v", err)
+	}
+
+	docID, err := kb.CreateUploadMaterial(ctx, orgID, kbstore.UploadMaterialInput{
+		Filename: "terms.pdf", MimeType: "application/pdf", SizeBytes: 10, CustomerVisibility: "visible",
+	})
+	if err != nil {
+		t.Fatalf("create upload doc: %v", err)
+	}
+	if err := kb.CompleteMaterialUpload(ctx, docID, "disk", "org/x/"+docID.String(), 10, ""); err != nil {
+		t.Fatalf("complete doc upload: %v", err)
+	}
+
+	// Product
+	imgPtr := &imgID
+	if err := kb.PutLiveProduct(ctx, orgID, uuid.Nil, kbstore.ProductInput{
+		Ref: "prod-1", Name: "Продукт",
+		Media: kbstore.ProductMedia{
+			FeaturedImage: &imgPtr,
+			GalleryImages: &[]uuid.UUID{imgID},
+		},
+	}); err != nil {
+		t.Fatalf("put live product: %v", err)
+	}
+
+	// Topic
+	if err := kb.PutLiveTopic(ctx, orgID, uuid.Nil, kbstore.TopicInput{
+		Slug: "topic-1", Title: "Тема", BodyMD: "Текст темы.",
+		Media: kbstore.TopicMedia{
+			FeaturedImage:      &imgPtr,
+			ReferenceDocuments: &[]uuid.UUID{docID},
+		},
+	}); err != nil {
+		t.Fatalf("put live topic: %v", err)
+	}
+
+	// Tariff
+	if err := kb.PutLiveTariff(ctx, orgID, uuid.Nil, kbstore.TariffInput{
+		Ref: "tariff-1", Name: "Тариф",
+		Media: kbstore.TariffMedia{
+			PricingImages:  &[]uuid.UUID{imgID},
+			TermsDocuments: &[]uuid.UUID{docID},
+		},
+	}); err != nil {
+		t.Fatalf("put live tariff: %v", err)
+	}
+
+	// Contacts
+	if err := kb.PatchLiveContacts(ctx, orgID, uuid.Nil, kbstore.ContactPatch{
+		Media: kbstore.ContactsMedia{
+			ContactCardImage:      &imgPtr,
+			CompanyLegalDocuments: &[]uuid.UUID{docID},
+		},
+	}); err != nil {
+		t.Fatalf("patch live contacts: %v", err)
+	}
+
+	// Policies
+	if err := kb.PatchLivePolicies(ctx, orgID, uuid.Nil, kbstore.PolicyPatch{
+		Media: kbstore.PoliciesMedia{
+			CommercePolicyDocuments: &[]uuid.UUID{docID},
+		},
+	}); err != nil {
+		t.Fatalf("patch live policies: %v", err)
+	}
+
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("live view: %v", err)
+	}
+
+	// Verify product
+	var prodFound bool
+	for _, p := range live.Products {
+		if p.Ref == "prod-1" {
+			prodFound = true
+			if p.FeaturedImage == nil || *p.FeaturedImage != imgID {
+				t.Errorf("product featured_image = %v, want %v", p.FeaturedImage, imgID)
+			}
+			if len(p.GalleryImages) != 1 || p.GalleryImages[0] != imgID {
+				t.Errorf("product gallery_images = %v, want [%v]", p.GalleryImages, imgID)
+			}
+			break
+		}
+	}
+	if !prodFound {
+		t.Errorf("product 'prod-1' not found in LiveView")
+	}
+
+	// Verify topic
+	var topicFound bool
+	for _, top := range live.Topics {
+		if top.Slug == "topic-1" {
+			topicFound = true
+			if top.FeaturedImage == nil || *top.FeaturedImage != imgID {
+				t.Errorf("topic featured_image = %v, want %v", top.FeaturedImage, imgID)
+			}
+			if len(top.ReferenceDocuments) != 1 || top.ReferenceDocuments[0] != docID {
+				t.Errorf("topic reference_documents = %v, want [%v]", top.ReferenceDocuments, docID)
+			}
+			break
+		}
+	}
+	if !topicFound {
+		t.Errorf("topic 'topic-1' not found in LiveView")
+	}
+
+	// Verify tariff
+	var tariffFound bool
+	for _, tr := range live.Tariffs {
+		if tr.Ref == "tariff-1" {
+			tariffFound = true
+			if len(tr.PricingImages) != 1 || tr.PricingImages[0] != imgID {
+				t.Errorf("tariff pricing_images = %v, want [%v]", tr.PricingImages, imgID)
+			}
+			if len(tr.TermsDocuments) != 1 || tr.TermsDocuments[0] != docID {
+				t.Errorf("tariff terms_documents = %v, want [%v]", tr.TermsDocuments, docID)
+			}
+			break
+		}
+	}
+	if !tariffFound {
+		t.Errorf("tariff 'tariff-1' not found in LiveView")
+	}
+
+	// Verify contacts
+	if len(live.Contacts) != 1 {
+		t.Fatalf("len(live.Contacts) = %d, want 1", len(live.Contacts))
+	}
+	if live.Contacts[0].ContactCardImage == nil || *live.Contacts[0].ContactCardImage != imgID {
+		t.Errorf("contacts contact_card_image = %v, want %v", live.Contacts[0].ContactCardImage, imgID)
+	}
+	if len(live.Contacts[0].CompanyLegalDocuments) != 1 || live.Contacts[0].CompanyLegalDocuments[0] != docID {
+		t.Errorf("contacts company_legal_documents = %v, want [%v]", live.Contacts[0].CompanyLegalDocuments, docID)
+	}
+
+	// Verify policies
+	if len(live.Policies) != 1 {
+		t.Fatalf("len(live.Policies) = %d, want 1", len(live.Policies))
+	}
+	if len(live.Policies[0].CommercePolicyDocuments) != 1 || live.Policies[0].CommercePolicyDocuments[0] != docID {
+		t.Errorf("policies commerce_policy_documents = %v, want [%v]", live.Policies[0].CommercePolicyDocuments, docID)
+	}
+}
+
 // A per-entity approve must not be held hostage by an unrelated unanswered
 // popup — only the whole-draft approve is blocked by pending requests.
 func TestApprove_PerEntitySkipsPendingRequestsGate(t *testing.T) {
