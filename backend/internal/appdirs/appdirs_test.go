@@ -205,7 +205,7 @@ func TestValidateOverrideDir(t *testing.T) {
 		if err := os.Mkdir(dir, 0o500); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) // #nosec G302 -- restoring this dir's own exec bit so t.TempDir's cleanup can remove it; G302 doesn't know 0600 can't be traversed
 		if err := ValidateOverrideDir(dir); err == nil {
 			t.Fatal("ValidateOverrideDir(unwritable) = nil, want an error")
 		}

@@ -66,7 +66,7 @@ func TestApplyDataDirFlag_NotWritable(t *testing.T) {
 	if err := os.Mkdir(locked, 0o500); err != nil {
 		t.Fatalf("mkdir locked dir: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) }) // #nosec G302 -- restoring this dir's own exec bit so t.TempDir's cleanup can remove it; G302 doesn't know 0600 can't be traversed
 
 	if err := applyDataDirFlag(locked); err == nil {
 		t.Fatal("applyDataDirFlag(unwritable dir) = nil, want an error")
