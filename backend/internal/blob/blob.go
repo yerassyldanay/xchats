@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 )
 
@@ -49,7 +50,7 @@ func NewDisk(dir string) (*Disk, error) {
 // file operations below provide the actual traversal and symlink boundary;
 // sanitizing here also preserves the store's existing deterministic filenames.
 func blobName(id string) string {
-	safe := idSanitize.ReplaceAllString(id, "_")
+	safe := filepath.Base(idSanitize.ReplaceAllString(id, "_"))
 	if safe == "" || safe == "." || safe == ".." {
 		safe = "_"
 	}
