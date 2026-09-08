@@ -108,12 +108,7 @@ func (s *Server) handlePlaygroundDiscardDraft(c *gin.Context) {
 // --- topics ----------------------------------------------------------------
 
 // topicReq is shared by the draft lane (handlePlaygroundUpsertTopic below)
-// and the live lane (handleKBUpsertTopic, kb_live.go). The media fields are
-// DRAFT-LANE ONLY: PutLiveTopic's TopicInput construction never reads
-// req.FeaturedImage/etc, so these keys are silently accepted-and-ignored on
-// POST /kb/topics (see TestKBLiveTopic_IgnoresMediaKeys) — the browser never
-// calls that route anyway (only /playground/draft/* and GET /kb), but the
-// struct is shared so this is worth calling out explicitly.
+// and the live lane (handleKBUpsertTopic, kb_live.go).
 type topicReq struct {
 	Slug   string `json:"slug"`
 	Title  string `json:"title"`
@@ -259,8 +254,7 @@ func (s *Server) handlePlaygroundDeleteTariff(c *gin.Context) {
 }
 
 // productReq is shared by the draft lane (below) and the live lane
-// (handleKBUpsertProduct, kb_live.go) — see topicReq's doc comment: the
-// media fields are draft-lane only.
+// (handleKBUpsertProduct, kb_live.go).
 type productReq struct {
 	Ref           string `json:"ref"`
 	Name          string `json:"name"`
@@ -388,8 +382,7 @@ func (s *Server) handlePlaygroundDeleteZone(c *gin.Context) {
 }
 
 // contactsReq is shared by the draft lane (below) and the live lane
-// (handleKBPatchContacts, kb_live.go) — see topicReq's doc comment: the
-// media fields are draft-lane only.
+// (handleKBPatchContacts, kb_live.go).
 type contactsReq struct {
 	WhatsApp         *string `json:"whatsapp"`
 	Email            *string `json:"email"`
@@ -439,8 +432,7 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 // --- typed facts: commerce policies -----------------------------------------
 
 // policiesReq is shared by the draft lane (handlePlaygroundPatchPolicies
-// below) and the live lane (handleKBPatchPolicies, kb_live.go) — see
-// topicReq's doc comment: the media field is draft-lane only.
+// below) and the live lane (handleKBPatchPolicies, kb_live.go).
 type policiesReq struct {
 	DeliveryCost       *string `json:"delivery_cost"`
 	DeliveryInDays     *string `json:"delivery_in_days"`

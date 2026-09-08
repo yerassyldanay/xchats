@@ -6,10 +6,12 @@ name: Release
 # Because GitHub's "Immutable Releases" policy is enabled on this repository,
 # releases cannot have assets uploaded, updated, or deleted once published.
 # Therefore, all parallel build jobs upload their output as workflow artifacts,
-# and a final publish-release job gathers and verifies all 8 release assets,
-# attaches them to a draft release, and publishes it only after the draft has
-# been checked. This draft gate applies to GitHub Release assets; GHCR image
-# publication is an independently retriable part of the pipeline.
+# and a final publish-release job gathers and verifies all 14 release assets
+# (six desktop packages, their six checksums, and the corresponding-source
+# bundle plus its checksum), attaches them to a draft release, and publishes
+# it only after the draft has been checked. This draft gate applies to GitHub
+# Release assets; GHCR image publication is an independently retriable part
+# of the pipeline.
 #
 # Staged deliberately: this covers build + publish + SLSA provenance attestation.
 # cosign image signing and a full SBOM are tracked as v1.1 (see docs/release/signing.md
@@ -207,10 +209,11 @@ jobs:
             ${{ runner.temp }}/xchats-*-corresponding-source.tar.gz*
           if-no-files-found: error
 
-  # Gathers all built assets from the parallel jobs (3 desktop archives + 3 sha256,
-  # 1 source bundle + 1 sha256 = 8 files total), verifies the local files and
-  # checksums, uploads them to a draft, verifies the remote draft's exact asset
-  # set, and only then publishes it under GitHub's Immutable Releases policy.
+  # Gathers all built assets from the parallel jobs (6 desktop packages + 6
+  # sha256, 1 source bundle + 1 sha256 = 14 files total), verifies the local
+  # files and checksums, uploads them to a draft, verifies the remote draft's
+  # exact asset set, and only then publishes it under GitHub's Immutable
+  # Releases policy.
   publish-release:
     runs-on: ubuntu-latest
     needs: [prepare, build-and-push, desktop-build, source-bundle]
@@ -255,10 +258,16 @@ jobs:
           expected_assets=(
             "xchats-desktop-linux-amd64.tar.gz"
             "xchats-desktop-linux-amd64.tar.gz.sha256"
+            "xchats-desktop-linux-amd64.deb"
+            "xchats-desktop-linux-amd64.deb.sha256"
             "xchats-desktop-macos-universal.zip"
             "xchats-desktop-macos-universal.zip.sha256"
+            "xchats-desktop-macos-universal.dmg"
+            "xchats-desktop-macos-universal.dmg.sha256"
             "xchats-desktop-windows-amd64.zip"
             "xchats-desktop-windows-amd64.zip.sha256"
+            "xchats-desktop-windows-amd64-installer.exe"
+            "xchats-desktop-windows-amd64-installer.exe.sha256"
             "xchats-${TAG}-corresponding-source.tar.gz"
             "xchats-${TAG}-corresponding-source.tar.gz.sha256"
           )
@@ -271,7 +280,7 @@ jobs:
 
           find artifacts -maxdepth 1 -type f -printf '%f\n' | sort > "$ACTUAL_LIST"
           if ! diff -u "$EXPECTED_LIST" "$ACTUAL_LIST"; then
-            echo "Refusing to publish: local release assets do not match the required 8-file contract." >&2
+            echo "Refusing to publish: local release assets do not match the required 14-file contract." >&2
             exit 1
           fi
           for asset in "${expected_assets[@]}"; do
@@ -320,7 +329,7 @@ jobs:
           fi
 
           # Drafts remain mutable. A failed upload leaves a recoverable draft;
-          # the queued retry replaces only the eight workflow-owned assets.
+          # the queued retry replaces only the 14 workflow-owned assets.
           echo "Uploading release assets to the draft..."
           gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY" artifacts/*
 

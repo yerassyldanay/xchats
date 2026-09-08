@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
+	"github.com/yerassyldanay/xchats/backend/internal/desktop"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/inboxmedia"
 	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
@@ -115,11 +117,23 @@ const (
 
 func main() {
 	cfgPath := flag.String("config", "", "path to config.yaml (default: $XCHATS_CONFIG, then ./config.yaml, then the OS config directory)")
+	dataDirFlag := flag.String("data-dir", "", "absolute path to the application data directory (SQLite databases, blob storage, credentials); overrides $XCHATS_DATA_DIR; default: the OS data directory")
 	flag.Parse()
 
 	cmd := "serve"
 	if flag.NArg() > 0 {
 		cmd = flag.Arg(0)
+	}
+
+	// -data-dir outranks $XCHATS_DATA_DIR (appdirs.DataDir's own top
+	// precedence level) by being applied as that exact environment variable
+	// before anything downstream — every existing appdirs.DataDir call site
+	// (the credential store's file fallback, applyDesktopDefaults' storage
+	// rebasing) picks it up with no further plumbing. Validated up front so a
+	// bad path fails fast with a path-naming error instead of surfacing later
+	// as a confusing store/blob-layer failure.
+	if err := applyDataDirFlag(*dataDirFlag); err != nil {
+		fatal("--data-dir", err)
 	}
 
 	// resolveConfigPath/applyDesktopDefaults are no-ops in the server build
@@ -128,7 +142,8 @@ func main() {
 	// than the launcher's working directory, and resolve storage paths
 	// against the OS application data directory. Everything after this point
 	// is identical in both builds.
-	cfg, err := config.Load(resolveConfigPath(*cfgPath))
+	resolvedConfigPath := resolveConfigPath(*cfgPath)
+	cfg, err := config.Load(resolvedConfigPath)
 	if err != nil {
 		fatal("load config", err)
 	}
@@ -139,7 +154,7 @@ func main() {
 
 	switch cmd {
 	case "serve":
-		runServe(cfg, log)
+		runServe(cfg, log, resolvedConfigPath)
 	case "migrate":
 		runMigrate(cfg, log)
 	case "seed":
@@ -171,7 +186,7 @@ func main() {
 	}
 }
 
-func runServe(cfg *config.Config, log *slog.Logger) {
+func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -503,6 +518,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		Response: responseService, WA: waMgr, TG: tg, TGProcessor: tgProc, TGPoller: tgMgr, KB: kb,
 		KBRepo: cachedKB, KBInvalidator: cachedKB,
 		OrgID: orgID, Log: log,
+		ResolvedConfigPath: resolvedConfigPath, ResolvedConfigDir: resolveConfigDir(log), ResolvedDataDir: resolveDataDir(log),
 		MetaClient: metaClient, MetaProcessor: metaProc, WACloudClient: waCloudClient, InboxMediaSigner: inboxSigner,
 		MCPAuth: mcpAuthorizer, MCPServer: mcpSrv,
 		BootstrapAdminCredentialPath: bootstrapCredentialPath,
@@ -523,9 +539,15 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	}
 	srv.SetTunnel(tunnelMgr)
 
+	// e2eReady is the XCHATS_DESKTOP_E2E_HTTP readiness signal (see
+	// internal/desktop/e2e_http.go) — constructed unconditionally so
+	// shell.go can mark the window ready with nothing to check, and cheap
+	// enough that doing so regardless of whether E2E HTTP mode is actually
+	// enabled this run costs nothing.
+	e2eReady := &desktop.Readiness{}
 	httpServer := &http.Server{
 		Addr:    cfg.Server.HTTPAddr,
-		Handler: router,
+		Handler: wrapE2EHTTP(router, cfg.Server.HTTPAddr, e2eReady),
 		// A8: an unauthenticated peer that opens a connection and trickles
 		// headers/body one byte at a time (Slowloris) previously tied up a
 		// connection indefinitely — net/http's zero-value Server has no
@@ -540,9 +562,19 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 		MaxHeaderBytes:    1 << 20, // 1 MiB
 	}
 
+	// Bound synchronously (rather than inside ListenAndServe, in the
+	// goroutine below) so e2eReady.SetBackendReady only fires once the
+	// socket is actually bound and queuing connections — the readiness
+	// endpoint's "backend" signal would otherwise be able to report true a
+	// moment before the port is really open.
+	listener, err := net.Listen("tcp", cfg.Server.HTTPAddr)
+	if err != nil {
+		fatal("listen", err)
+	}
+	e2eReady.SetBackendReady()
 	go func() {
 		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			fatal("listen", err)
 		}
 	}()
@@ -564,7 +596,7 @@ func runServe(cfg *config.Config, log *slog.Logger) {
 	// (-tags desktop) instead runs the Wails window on this goroutine and
 	// returns when the user closes it, cancelling ctx on the way out — so
 	// the teardown below is the same sequence in both cases.
-	runUntilShutdown(ctx, stop, shellDeps{Router: router, Hub: hub, Log: log, Addr: cfg.Server.HTTPAddr})
+	runUntilShutdown(ctx, stop, shellDeps{Router: router, Hub: hub, Log: log, Addr: cfg.Server.HTTPAddr, Ready: e2eReady})
 	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -606,6 +638,40 @@ func resolveConfigDir(log *slog.Logger) string {
 	if err != nil {
 		log.Warn("could not resolve the OS application config directory; Settings will be written to the current directory instead", "err", err)
 		return "."
+	}
+	return dir
+}
+
+// applyDataDirFlag validates and applies --data-dir: an empty v (the flag
+// was not passed) is a no-op, so $XCHATS_DATA_DIR (or the OS default) still
+// applies exactly as before. A non-empty v is validated by
+// appdirs.ValidateOverrideDir (absolute, creatable, writable) and then set
+// as XCHATS_DATA_DIR itself — the top of appdirs.DataDir's own precedence
+// chain — so every existing call site (the credential store's file
+// fallback, applyDesktopDefaults' storage rebasing) picks it up with no
+// further plumbing, and the flag correctly outranks a pre-existing
+// $XCHATS_DATA_DIR in the process environment.
+func applyDataDirFlag(v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	if err := appdirs.ValidateOverrideDir(v); err != nil {
+		return err
+	}
+	return os.Setenv("XCHATS_DATA_DIR", v)
+}
+
+// resolveDataDir resolves the same OS application data directory
+// openCredentialsAndProvisionSecrets does, purely for display: the
+// read-only "where is my data" line in GET /settings (see
+// handleGetSettings/StorageLocations). A resolution failure is not fatal
+// here either — the rest of boot already tolerated it once.
+func resolveDataDir(log *slog.Logger) string {
+	dir, err := appdirs.DataDir("xchats")
+	if err != nil {
+		log.Warn("could not resolve the OS application data directory for display in Settings", "err", err)
+		return ""
 	}
 	return dir
 }

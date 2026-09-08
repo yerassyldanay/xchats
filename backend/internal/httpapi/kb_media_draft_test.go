@@ -189,14 +189,11 @@ func draftProduct(t *testing.T, env map[string]json.RawMessage, ref string) kbst
 	return kbstore.ProductRow{}
 }
 
-// TestKBLiveProduct_IgnoresMediaKeys proves the draft/live boundary Stage 3
-// documents on productReq: POST /kb/products (the LIVE lane) shares the
-// struct with media fields, but PutLiveProduct's ProductInput construction
-// never reads them, so a request carrying media keys leaves live media
-// completely untouched instead of corrupting it. The browser SPA never
-// calls this route (only /playground/draft/* and GET /kb), but the
-// contract must hold regardless of caller.
-func TestKBLiveProduct_IgnoresMediaKeys(t *testing.T) {
+// TestKBLiveProduct_AppliesMediaKeys proves POST /kb/products (the LIVE lane)
+// applies and persists media keys (featured_image, gallery_images, etc.) into
+// the live ai_products table, and supports tri-state featured_image and
+// detach-all gallery_images.
+func TestKBLiveProduct_AppliesMediaKeys(t *testing.T) {
 	h := newHarness(t)
 	img := h.seedKBMaterial(t, h.orgID, "live.png", "image/png", []byte("live"), true)
 
@@ -217,20 +214,165 @@ func TestKBLiveProduct_IgnoresMediaKeys(t *testing.T) {
 
 	var live kbstore.DraftView
 	h.get("/xchats/api/v1/kb", &live)
+	var found bool
 	for _, p := range live.Products {
 		if p.Ref != "live-p" {
 			continue
 		}
-		if p.FeaturedImage != nil {
-			t.Errorf("live featured_image = %v, want nil — media keys must be ignored on the live lane", *p.FeaturedImage)
+		found = true
+		if p.FeaturedImage == nil || *p.FeaturedImage != img {
+			t.Errorf("live featured_image = %v, want %v", p.FeaturedImage, img)
 		}
-		if len(p.GalleryImages) != 0 {
-			t.Errorf("live gallery_images = %v, want empty — media keys must be ignored on the live lane", p.GalleryImages)
+		if len(p.GalleryImages) != 1 || p.GalleryImages[0] != img {
+			t.Errorf("live gallery_images = %v, want [%v]", p.GalleryImages, img)
 		}
 		if p.Name != "Товар (edit)" {
-			t.Errorf("live name = %q, want the text edit to still apply", p.Name)
+			t.Errorf("live name = %q, want 'Товар (edit)'", p.Name)
 		}
-		return
+		break
 	}
-	t.Fatalf("live product 'live-p' not found in GET /kb")
+	if !found {
+		t.Fatalf("live product 'live-p' not found in GET /kb")
+	}
+
+	// Absent media keys leave existing media unchanged.
+	resp, env = h.postJSON("/xchats/api/v1/kb/products", map[string]any{
+		"ref": "live-p", "name": "Товар (edit 2)", "availability_status": "in_stock",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("edit live product absent media: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	h.get("/xchats/api/v1/kb", &live)
+	for _, p := range live.Products {
+		if p.Ref == "live-p" {
+			if p.FeaturedImage == nil || *p.FeaturedImage != img {
+				t.Errorf("live featured_image after absent write = %v, want unchanged %v", p.FeaturedImage, img)
+			}
+			if len(p.GalleryImages) != 1 || p.GalleryImages[0] != img {
+				t.Errorf("live gallery_images after absent write = %v, want unchanged [%v]", p.GalleryImages, img)
+			}
+			break
+		}
+	}
+
+	// Explicit null / empty array detaches media.
+	resp, env = h.postJSON("/xchats/api/v1/kb/products", map[string]any{
+		"ref": "live-p", "name": "Товар (edit 3)", "availability_status": "in_stock",
+		"featured_image": nil, "gallery_images": []string{},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("edit live product clear media: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	h.get("/xchats/api/v1/kb", &live)
+	for _, p := range live.Products {
+		if p.Ref == "live-p" {
+			if p.FeaturedImage != nil {
+				t.Errorf("live featured_image after null = %v, want nil", *p.FeaturedImage)
+			}
+			if len(p.GalleryImages) != 0 {
+				t.Errorf("live gallery_images after empty = %v, want empty", p.GalleryImages)
+			}
+			break
+		}
+	}
+}
+
+// TestKBLiveOtherEntities_AppliesMediaKeys verifies topics, tariffs, contacts,
+// and policies live endpoints persist media references into the database.
+func TestKBLiveOtherEntities_AppliesMediaKeys(t *testing.T) {
+	h := newHarness(t)
+	img := h.seedKBMaterial(t, h.orgID, "live.png", "image/png", []byte("live"), true)
+	doc := h.seedKBMaterial(t, h.orgID, "doc.pdf", "application/pdf", []byte("pdf"), true)
+
+	// Topic
+	resp, env := h.postJSON("/xchats/api/v1/kb/topics", map[string]any{
+		"slug": "live-topic", "title": "Заголовок", "body_md": "Текст темы.",
+		"featured_image": img.String(), "reference_documents": []string{doc.String()},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create live topic: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+
+	// Tariff
+	resp, env = h.postJSON("/xchats/api/v1/kb/tariffs", map[string]any{
+		"ref": "live-tariff", "name": "Тариф", "pricing_images": []string{img.String()},
+		"terms_documents": []string{doc.String()},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create live tariff: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+
+	// Contacts
+	resp, env = h.patchJSON("/xchats/api/v1/kb/contacts", map[string]any{
+		"contact_card_image": img.String(), "company_legal_documents": []string{doc.String()},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch live contacts: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+
+	// Policies
+	resp, env = h.patchJSON("/xchats/api/v1/kb/policies", map[string]any{
+		"commerce_policy_documents": []string{doc.String()},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch live policies: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+
+	var live kbstore.DraftView
+	h.get("/xchats/api/v1/kb", &live)
+
+	// Verify topic
+	var topicFound bool
+	for _, top := range live.Topics {
+		if top.Slug == "live-topic" {
+			topicFound = true
+			if top.FeaturedImage == nil || *top.FeaturedImage != img {
+				t.Errorf("live topic featured_image = %v, want %v", top.FeaturedImage, img)
+			}
+			if len(top.ReferenceDocuments) != 1 || top.ReferenceDocuments[0] != doc {
+				t.Errorf("live topic reference_documents = %v, want [%v]", top.ReferenceDocuments, doc)
+			}
+			break
+		}
+	}
+	if !topicFound {
+		t.Errorf("live topic 'live-topic' not found in GET /kb")
+	}
+
+	// Verify tariff
+	var tariffFound bool
+	for _, tr := range live.Tariffs {
+		if tr.Ref == "live-tariff" {
+			tariffFound = true
+			if len(tr.PricingImages) != 1 || tr.PricingImages[0] != img {
+				t.Errorf("live tariff pricing_images = %v, want [%v]", tr.PricingImages, img)
+			}
+			if len(tr.TermsDocuments) != 1 || tr.TermsDocuments[0] != doc {
+				t.Errorf("live tariff terms_documents = %v, want [%v]", tr.TermsDocuments, doc)
+			}
+			break
+		}
+	}
+	if !tariffFound {
+		t.Errorf("live tariff 'live-tariff' not found in GET /kb")
+	}
+
+	// Verify contacts
+	if len(live.Contacts) != 1 {
+		t.Fatalf("len(live.Contacts) = %d, want 1", len(live.Contacts))
+	}
+	if live.Contacts[0].ContactCardImage == nil || *live.Contacts[0].ContactCardImage != img {
+		t.Errorf("live contacts contact_card_image = %v, want %v", live.Contacts[0].ContactCardImage, img)
+	}
+	if len(live.Contacts[0].CompanyLegalDocuments) != 1 || live.Contacts[0].CompanyLegalDocuments[0] != doc {
+		t.Errorf("live contacts company_legal_documents = %v, want [%v]", live.Contacts[0].CompanyLegalDocuments, doc)
+	}
+
+	// Verify policies
+	if len(live.Policies) != 1 {
+		t.Fatalf("len(live.Policies) = %d, want 1", len(live.Policies))
+	}
+	if len(live.Policies[0].CommercePolicyDocuments) != 1 || live.Policies[0].CommercePolicyDocuments[0] != doc {
+		t.Errorf("live policies commerce_policy_documents = %v, want [%v]", live.Policies[0].CommercePolicyDocuments, doc)
+	}
 }

@@ -22,6 +22,14 @@ function seed() {
     providers: {},
     ngrok: {},
     credential_file_fallback_accepted: false,
+    storage_locations: {
+      config_path: '/home/op/.config/xchats/config.yaml',
+      config_dir: '/home/op/.config/xchats',
+      data_dir: '/home/op/.local/share/xchats',
+      db_path: '/home/op/.local/share/xchats/data/xchats.db',
+      wa_device_db_path: '/home/op/.local/share/xchats/data/whatsmeow.db',
+      blob_dir: '/home/op/.local/share/xchats/blobdata',
+    },
   }
   return pinia
 }

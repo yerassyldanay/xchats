@@ -19,6 +19,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:blog": "playwright test --config=playwright.blog.config.ts",
+    "test:e2e:desktop": "playwright test --config=playwright.desktop.config.ts",
     "e2e:install": "playwright install chromium"
   },
   "dependencies": {
@@ -45,6 +46,7 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/typography": "^0.5.20",
     "@types/markdown-it": "^14.2.0",
+    "@types/node": "^22.20.1",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/server-renderer": "^3.5.41",
     "@vue/test-utils": "^2.5.0",

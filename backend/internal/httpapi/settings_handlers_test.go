@@ -39,6 +39,49 @@ func TestGetSettingsReturnsDefaults(t *testing.T) {
 	}
 }
 
+// TestGetSettingsExposesStorageLocations proves GET /settings surfaces the
+// resolved config/data paths read-only, for the "where does my data live"
+// panel in Settings — see storageLocations' own doc comment. These come
+// from httpapi.Deps (set once at boot from resolveConfigPath/appdirs), not
+// from settings.json, so they must appear even though nothing ever writes
+// them through the settings store.
+func TestGetSettingsExposesStorageLocations(t *testing.T) {
+	h := newSettingsHarness(t)
+	resp, env := h.get("/xchats/api/v1/settings")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /settings: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var got struct {
+		StorageLocations struct {
+			ConfigPath     string `json:"config_path"`
+			ConfigDir      string `json:"config_dir"`
+			DataDir        string `json:"data_dir"`
+			DBPath         string `json:"db_path"`
+			WADeviceDBPath string `json:"wa_device_db_path"`
+			BlobDir        string `json:"blob_dir"`
+		} `json:"storage_locations"`
+	}
+	mustDecode(t, env, &got)
+	if got.StorageLocations.ConfigPath == "" {
+		t.Error("storage_locations.config_path is empty, want the resolved config file path")
+	}
+	if got.StorageLocations.ConfigDir == "" {
+		t.Error("storage_locations.config_dir is empty, want the resolved config directory")
+	}
+	if got.StorageLocations.DataDir == "" {
+		t.Error("storage_locations.data_dir is empty, want the resolved data directory")
+	}
+	if got.StorageLocations.DBPath == "" {
+		t.Error("storage_locations.db_path is empty, want cfg.Storage.DBPath")
+	}
+	if got.StorageLocations.WADeviceDBPath == "" {
+		t.Error("storage_locations.wa_device_db_path is empty, want cfg.Storage.WADeviceDBPath")
+	}
+	if got.StorageLocations.BlobDir == "" {
+		t.Error("storage_locations.blob_dir is empty, want cfg.Storage.BlobDir")
+	}
+}
+
 func TestListIntegrationsShowsAllProvidersNoneConfigured(t *testing.T) {
 	h := newSettingsHarness(t)
 	resp, env := h.get("/xchats/api/v1/settings/integrations")

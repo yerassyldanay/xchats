@@ -11,6 +11,7 @@ package appdirs
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -63,6 +64,33 @@ func DataDir(app string) (string, error) {
 // creation.
 func EnsureDir(dir string) error {
 	return os.MkdirAll(dir, 0o700)
+}
+
+// ValidateOverrideDir checks a user-supplied directory override (a --data-dir
+// or --config-dir style flag) before anything is resolved against it: it must
+// be an absolute path, it must be possible to create it (owner-only
+// permissions, via EnsureDir), and it must actually be writable. An existing
+// directory that MkdirAll happily no-ops on but that the process cannot
+// write into (wrong owner, read-only filesystem) would otherwise surface as
+// a confusing failure deep inside the store/blob layer at first use — this
+// probes it once, up front, with a message that names the actual path.
+func ValidateOverrideDir(dir string) error {
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("must be an absolute path, got %q", dir)
+	}
+	if err := EnsureDir(dir); err != nil {
+		return fmt.Errorf("create directory %q: %w", dir, err)
+	}
+	probe, err := os.CreateTemp(dir, ".xchats-write-test-*")
+	if err != nil {
+		return fmt.Errorf("directory %q is not writable: %w", dir, err)
+	}
+	name := probe.Name()
+	_ = probe.Close()
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("directory %q is not writable: %w", dir, err)
+	}
+	return nil
 }
 
 // configDirFor/dataDirFor take goos explicitly (rather than reading

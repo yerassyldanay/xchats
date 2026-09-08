@@ -36,6 +36,12 @@ type Deps struct {
 	// startup log so a user can still reach the API from a browser or an MCP
 	// client.
 	Addr string
+	// Ready receives the "window finished starting" signal OnStartup fires
+	// below — the other half of ServeE2EHTTP's readiness endpoint (see
+	// e2e_http.go), which cmd/xchats always constructs and threads through
+	// regardless of whether E2E HTTP mode is enabled. Nil-tolerant: a caller
+	// that has no use for it (there is none today) simply gets no signal.
+	Ready *Readiness
 }
 
 // Run opens the desktop window and blocks until the user closes it or ctx is
@@ -113,6 +119,9 @@ func Run(ctx context.Context, d Deps) error {
 			wailsCtx, pumpStop = c, cancel
 			mu.Unlock()
 			log.Info("desktop window ready", "version", version.Version, "backend", "http://"+d.Addr)
+			if d.Ready != nil {
+				d.Ready.SetWindowReady()
+			}
 			go func() {
 				defer closePump()
 				// The realtime layer's desktop transport: hub events become

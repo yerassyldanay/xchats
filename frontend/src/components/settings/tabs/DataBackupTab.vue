@@ -79,5 +79,26 @@ onMounted(() => {
         {{ store.updateCheckLoading ? t('settings.common.loading') : t('settings.backup.checkUpdates') }}
       </Button>
     </div>
+
+    <div v-if="store.settings?.storage_locations" class="rounded-lg border border-border bg-card p-5 space-y-3">
+      <h4 class="font-medium">{{ t('settings.backup.storageLocationsTitle') }}</h4>
+      <p class="text-sm text-muted-foreground">{{ t('settings.backup.storageLocationsBody') }}</p>
+      <dl class="grid grid-cols-1 sm:grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
+        <template v-if="store.settings.storage_locations.config_path">
+          <dt class="text-muted-foreground">{{ t('settings.backup.storageLocationsConfigFile') }}</dt>
+          <dd class="font-mono break-all">{{ store.settings.storage_locations.config_path }}</dd>
+        </template>
+        <template v-else>
+          <dt class="text-muted-foreground">{{ t('settings.backup.storageLocationsConfigFile') }}</dt>
+          <dd class="text-muted-foreground italic">{{ t('settings.backup.storageLocationsConfigDefaults') }}</dd>
+        </template>
+        <dt class="text-muted-foreground">{{ t('settings.backup.storageLocationsDataDir') }}</dt>
+        <dd class="font-mono break-all">{{ store.settings.storage_locations.data_dir }}</dd>
+        <dt class="text-muted-foreground">{{ t('settings.backup.storageLocationsDatabase') }}</dt>
+        <dd class="font-mono break-all">{{ store.settings.storage_locations.db_path }}</dd>
+        <dt class="text-muted-foreground">{{ t('settings.backup.storageLocationsBlobDir') }}</dt>
+        <dd class="font-mono break-all">{{ store.settings.storage_locations.blob_dir }}</dd>
+      </dl>
+    </div>
   </div>
 </template>

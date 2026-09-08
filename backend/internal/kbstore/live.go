@@ -34,9 +34,8 @@ import (
 // PutLiveTopic upserts a topic directly into the live table. Rejects a body
 // that is not pure prose (a fact token or a literal currency amount) — the
 // exact check the approve gate runs, just enforced at write time here. Reads
-// the row FOR UPDATE first (currentLiveTopicTx) and merges only title/body_md
-// from in, so this text-only caller (the live editor has no media inputs)
-// cannot blank out media an MCP tool already published.
+// the row FOR UPDATE first (currentLiveTopicTx) and merges title, body_md,
+// and media (when provided; nil leaves existing media unchanged).
 func (s *Store) PutLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TopicInput) error {
 	if reasons := gateTopicBody(in.Slug, in.BodyMD); len(reasons) > 0 {
 		return &GateError{Reasons: reasons}
@@ -51,6 +50,10 @@ func (s *Store) PutLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid.UU
 		return err
 	}
 	cur.Title, cur.BodyMD = in.Title, in.BodyMD
+	refs := applyTopicMedia(&cur, in.Media)
+	if err := validateMediaRefs(ctx, tx, orgID, refs); err != nil {
+		return err
+	}
 	if err := upsertTopicRow(ctx, tx, orgID, cur); err != nil {
 		return err
 	}
@@ -91,9 +94,8 @@ func (s *Store) DeleteLiveTopic(ctx context.Context, orgID uuid.UUID, actor uuid
 
 // PutLiveTariff upserts a tariff row directly into the live table (no content
 // gate — typed fact columns are validated at reply-render time, fail closed).
-// Reads the row FOR UPDATE first and merges only the text fields TariffInput
-// carries, so this caller (no media inputs) cannot blank out media/
-// sales_status an MCP tool already published.
+// Reads the row FOR UPDATE first and merges text fields, additional facts,
+// and media (when provided; nil leaves existing media unchanged).
 func (s *Store) PutLiveTariff(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in TariffInput) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -113,6 +115,10 @@ func (s *Store) PutLiveTariff(ctx context.Context, orgID uuid.UUID, actor uuid.U
 	}
 	cur.SalesStatus = orDefault(in.SalesStatus, "active")
 	if err := validateTariffFacts(cur); err != nil {
+		return err
+	}
+	refs := applyTariffMedia(&cur, in.Media)
+	if err := validateMediaRefs(ctx, tx, orgID, refs); err != nil {
 		return err
 	}
 	if err := upsertTariffRow(ctx, tx, orgID, cur); err != nil {
@@ -156,10 +162,9 @@ func (s *Store) DeleteLiveTariff(ctx context.Context, orgID uuid.UUID, actor uui
 }
 
 // PutLiveProduct upserts a product row directly into the live table. Reads
-// the row FOR UPDATE first and merges the text fields plus AvailabilityStatus
-// (when given — nil preserves the current value, same contract the legacy
-// InStock field had), so this caller cannot blank out sales_status/media an
-// MCP tool already published.
+// the row FOR UPDATE first and merges the text fields, AvailabilityStatus
+// (when given — nil preserves the current value), additional facts, and
+// media (when provided; nil leaves existing media unchanged).
 func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ProductInput) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -186,6 +191,10 @@ func (s *Store) PutLiveProduct(ctx context.Context, orgID uuid.UUID, actor uuid.
 		cur.AdditionalFacts = *in.AdditionalFacts
 	}
 	if err := validateProductFacts(cur); err != nil {
+		return err
+	}
+	refs := applyProductMedia(&cur, in.Media)
+	if err := validateMediaRefs(ctx, tx, orgID, refs); err != nil {
 		return err
 	}
 	if err := upsertProductRow(ctx, tx, orgID, cur); err != nil {
@@ -270,6 +279,10 @@ func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, actor uu
 	if p.Instagram != nil {
 		cur.Instagram = *p.Instagram
 	}
+	refs := applyContactsMedia(&cur, p.Media)
+	if err := validateMediaRefs(ctx, tx, orgID, refs); err != nil {
+		return err
+	}
 	if err := upsertContactRow(ctx, tx, orgID, cur); err != nil {
 		return err
 	}
@@ -339,6 +352,10 @@ func (s *Store) PatchLivePolicies(ctx context.Context, orgID uuid.UUID, actor uu
 	}
 	if p.OutsideZonesNote != nil {
 		cur.OutsideZonesNote = *p.OutsideZonesNote
+	}
+	refs := applyPoliciesMedia(&cur, p.Media)
+	if err := validateMediaRefs(ctx, tx, orgID, refs); err != nil {
+		return err
 	}
 	if err := upsertPolicyRow(ctx, tx, orgID, cur); err != nil {
 		return err

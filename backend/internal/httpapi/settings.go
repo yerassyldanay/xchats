@@ -18,11 +18,50 @@ import (
 
 // --- GET /settings ----------------------------------------------------
 
+// settingsResponse is GET /settings' wire shape: the persisted
+// settings.Settings verbatim, plus read-only, never-persisted diagnostic
+// info a troubleshooting operator needs but that has no business living in
+// settings.json (it is recomputed at every boot, not user-editable).
+type settingsResponse struct {
+	settings.Settings
+	StorageLocations storageLocations `json:"storage_locations"`
+}
+
+// storageLocations is the "where is my stuff" answer for Settings' Advanced
+// panel: read-only, no graphical relocation control — the resolved paths
+// exist to be copy-pasted into a bug report or a manual backup, not edited.
+// ConfigPath is "" when this process found no config.yaml and is running on
+// built-in defaults; every other field is always populated.
+type storageLocations struct {
+	ConfigPath     string `json:"config_path"`
+	ConfigDir      string `json:"config_dir"`
+	DataDir        string `json:"data_dir"`
+	DBPath         string `json:"db_path"`
+	WADeviceDBPath string `json:"wa_device_db_path"`
+	BlobDir        string `json:"blob_dir"`
+}
+
+func (s *Server) storageLocations() storageLocations {
+	loc := storageLocations{
+		ConfigPath: s.resolvedConfigPath,
+		ConfigDir:  s.resolvedConfigDir,
+		DataDir:    s.resolvedDataDir,
+	}
+	if s.cfg != nil {
+		loc.DBPath = s.cfg.Storage.DBPath
+		loc.WADeviceDBPath = s.cfg.Storage.WADeviceDBPath
+		loc.BlobDir = s.cfg.Storage.BlobDir
+	}
+	return loc
+}
+
 // handleGetSettings returns the full Settings object: LLM defaults, ngrok's
-// region/domain, and the two onboarding flags. Provider-specific credential
-// state (configured/source) is NOT here — see handleListIntegrations,
-// which merges this same Settings.Providers data with live credential-store
-// lookups the way a provider CARD in the UI needs, one call each.
+// region/domain, the two onboarding flags, and the resolved storage
+// locations (read-only, for troubleshooting — see storageLocations).
+// Provider-specific credential state (configured/source) is NOT here — see
+// handleListIntegrations, which merges this same Settings.Providers data
+// with live credential-store lookups the way a provider CARD in the UI
+// needs, one call each.
 func (s *Server) handleGetSettings(c *gin.Context) {
 	if s.settings == nil {
 		fail(c, http.StatusServiceUnavailable, ErrInternal, "settings store is unavailable")
@@ -33,7 +72,7 @@ func (s *Server) handleGetSettings(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	ok(c, st)
+	ok(c, settingsResponse{Settings: st, StorageLocations: s.storageLocations()})
 }
 
 // --- GET /settings/integrations ----------------------------------------

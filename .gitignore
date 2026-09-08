@@ -73,6 +73,7 @@ frontend/package.json.md5
 # playwright e2e artifacts
 frontend/test-results/
 frontend/playwright-report/
+frontend/desktop-e2e-report/
 frontend/blob-report/
 frontend/playwright/.cache/
 frontend/test-screens/

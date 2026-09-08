@@ -1,9 +1,14 @@
 # Installation
 
-Two ways to run xchats: Docker Compose (recommended — one command, nothing
-else to install) or from source (Go + Node, for local development). Both
-produce the same app: a Go backend (`:8080`) and a Vue frontend (`:8081` in
-Docker, `:5173` in dev).
+This covers running xchats as a **server** — Docker Compose (recommended —
+one command, nothing else to install) or from source (Go + Node, for local
+development). Both produce the same app: a Go backend (`:8080`) and a Vue
+frontend (`:8081` in Docker, `:5173` in dev).
+
+Prefer a native app on your own Windows, macOS, or Linux machine instead — no
+Docker, no separate frontend/backend? See [`../desktop.md`](../desktop.md):
+download an installer (or a portable archive) and run it, with the same
+zero-configuration first launch described below.
 
 ## Option A — Docker Compose
 
