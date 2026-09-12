@@ -29,19 +29,27 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/chatstore"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
+	"github.com/yerassyldanay/xchats/backend/internal/credentials/credentialsmock"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
 	"github.com/yerassyldanay/xchats/backend/internal/desktop"
+	"github.com/yerassyldanay/xchats/backend/internal/extractor/extractormock"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/inboxmedia"
 	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
+	"github.com/yerassyldanay/xchats/backend/internal/kbimport/kbimportmock"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
+	"github.com/yerassyldanay/xchats/backend/internal/llmmock"
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
+	"github.com/yerassyldanay/xchats/backend/internal/mcpauth/mcpauthmock"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
 	"github.com/yerassyldanay/xchats/backend/internal/messengerish"
 	"github.com/yerassyldanay/xchats/backend/internal/meta"
+	"github.com/yerassyldanay/xchats/backend/internal/meta/metamock"
 	"github.com/yerassyldanay/xchats/backend/internal/metaingest"
 	"github.com/yerassyldanay/xchats/backend/internal/ngrokapi"
+	"github.com/yerassyldanay/xchats/backend/internal/ngrokmock"
+	"github.com/yerassyldanay/xchats/backend/internal/pprofserver"
 	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
@@ -52,16 +60,21 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/stt"
+	"github.com/yerassyldanay/xchats/backend/internal/sttmock"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
+	"github.com/yerassyldanay/xchats/backend/internal/telegrammock"
 	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
 	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
 	"github.com/yerassyldanay/xchats/backend/internal/tgpoller"
 	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
+	"github.com/yerassyldanay/xchats/backend/internal/tunnelmock"
 	"github.com/yerassyldanay/xchats/backend/internal/updatecheck"
 	"github.com/yerassyldanay/xchats/backend/internal/version"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsappcloud"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsmeow"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
+	"github.com/yerassyldanay/xchats/backend/internal/worker/workermock"
 	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
 	"github.com/yerassyldanay/xchats/backend/response"
@@ -207,6 +220,16 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	if err := checkMockExternalsAllowed(cfg); err != nil {
 		fatal("mock externals", err)
 	}
+	// Package-level swaps for the two boundaries with no per-call injection
+	// point (credentials.Provider.Validate's shared HTTP client; mcpauth's
+	// Client ID Metadata Document fetch) — set once, before anything below
+	// can trigger either. Every other boundary is swapped locally, per
+	// dependency, further down.
+	if cfg.System.MockExternals {
+		log.Warn("mock externals enabled — every outbound-network integration answers locally; never use this in production")
+		credentials.SetValidateHTTPClient(credentialsmock.Client())
+		mcpauth.SetCIMDFetcher(mcpauthmock.FetchCIMD)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -218,7 +241,20 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// signal of deploy-for-real intent — has to be read before that call, not
 	// after. See shouldValidateProductionConfig.
 	configuredAPIBaseURL := cfg.Server.APIBaseURL
-	autoStartTunnel, err := applyNgrokPublicOrigin(ctx, cfg, ngrokCredsFrom(credsChain), settingsStore, ngrokapi.NewClient())
+	var ngrokDomains ngrokDomainLister = ngrokapi.NewClient()
+	if cfg.System.MockExternals {
+		// A stateless, zero-network domain lister answering with one
+		// plausible reserved domain — guarantees this discovery step never
+		// dials the real ngrok API, regardless of whether a real ngrok API
+		// key happens to already be sitting in the credential store from
+		// prior real use. shouldValidateProductionConfig below reads
+		// configuredAPIBaseURL (captured just above, before this call can
+		// overwrite cfg.Server.APIBaseURL with the mock domain), so letting
+		// autoStartTunnel go true here never risks tripping the production
+		// gate on a dev/profiling box.
+		ngrokDomains = ngrokmock.New()
+	}
+	autoStartTunnel, err := applyNgrokPublicOrigin(ctx, cfg, ngrokCredsFrom(credsChain), settingsStore, ngrokDomains)
 	if err != nil {
 		log.Warn("ngrok static domain is not usable as the MCP public origin", "err", err)
 	}
@@ -234,7 +270,11 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 
 	// Langfuse LLM tracing (best-effort): install a global OTel TracerProvider so
 	// the LLM clients export each call as a generation. Never fatal.
-	if cfg.LangfuseTracingEnabled() {
+	// Force-disabled in mock mode regardless of configuration — the mock LLM
+	// registry below is entirely local, so there is nothing genuine to trace,
+	// and this guarantees zero Langfuse network I/O even if real-looking
+	// Langfuse keys happen to already be configured.
+	if cfg.LangfuseTracingEnabled() && !cfg.System.MockExternals {
 		if tp, err := telemetry.NewLangfuseProvider(ctx, cfg, "xchats"); err != nil {
 			log.Warn("langfuse tracing init failed; continuing without it", "err", err)
 		} else {
@@ -281,17 +321,27 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 		fatal("blob", err)
 	}
 
-	llmRegistry := llmprovider.NewRegistry()
-	populateLLMRegistry(ctx, llmRegistry, credsChain, settingsStore, cfg)
-	// llmRefresh re-resolves every provider's client from scratch — the
-	// Settings UI's save/delete-credential handlers call this (httpapi.Deps.
-	// LLMRefresh) so a just-saved key (or a just-deleted one) takes effect
-	// on the very next draft, with no restart. context.Background(): this
-	// runs on whatever goroutine an HTTP handler triggers it from, well
-	// after that request's own context is a meaningful deadline for a
-	// background maintenance op like this one.
-	llmRefresh := func() {
-		populateLLMRegistry(context.Background(), llmRegistry, credsChain, settingsStore, cfg)
+	var llmRegistry llm.Registry
+	var llmRefresh func()
+	if cfg.System.MockExternals {
+		llmRegistry = llmmock.NewRegistry()
+		// Settings-driven credential save/delete must never be able to
+		// swap the mock LLM back to a real client mid-run.
+		llmRefresh = func() {}
+	} else {
+		reg := llmprovider.NewRegistry()
+		populateLLMRegistry(ctx, reg, credsChain, settingsStore, cfg)
+		llmRegistry = reg
+		// llmRefresh re-resolves every provider's client from scratch — the
+		// Settings UI's save/delete-credential handlers call this (httpapi.Deps.
+		// LLMRefresh) so a just-saved key (or a just-deleted one) takes effect
+		// on the very next draft, with no restart. context.Background(): this
+		// runs on whatever goroutine an HTTP handler triggers it from, well
+		// after that request's own context is a meaningful deadline for a
+		// background maintenance op like this one.
+		llmRefresh = func() {
+			populateLLMRegistry(context.Background(), reg, credsChain, settingsStore, cfg)
+		}
 	}
 	llmParams := func() response.LLMParams { return resolveLLMParams(settingsStore, cfg) }
 	engine := &response.Engine{LLMs: llmRegistry, Params: llmParams}
@@ -347,10 +397,22 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 
 	// updateChecker asks GitHub's public releases API, cached well past any
 	// single request — see internal/updatecheck's own doc comment for why a
-	// failed/empty check is never treated as an error.
-	updateChecker := updatecheck.NewChecker("yerassyldanay/xchats", version.Version)
+	// failed/empty check is never treated as an error. Left nil in mock
+	// mode: GET /settings/update-check is already nil-tolerant (reports
+	// update_available:false rather than checking GitHub), so simply never
+	// constructing a real Checker is sufficient to guarantee zero calls —
+	// updatecheck.Checker exposes no injectable transport of its own.
+	var updateChecker *updatecheck.Checker
+	if !cfg.System.MockExternals {
+		updateChecker = updatecheck.NewChecker("yerassyldanay/xchats", version.Version)
+	}
 
-	tg := telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
+	var tg telegram.Client
+	if cfg.System.MockExternals {
+		tg = telegrammock.New(1, "mockbot")
+	} else {
+		tg = telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
+	}
 
 	// Credentials at rest. Without a key the Telegram lifecycle refuses to store
 	// or read a bot token (an explicit error, never silent plaintext); WhatsApp
@@ -381,21 +443,53 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 		go tgMgr.Start(ctx)
 	}
 
-	waMgr, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
-		DeviceDBPath: cfg.Storage.WADeviceDBPath,
-		Store:        st,
-		Blob:         blobStore,
-		Queue:        q,
-		Hub:          hub,
-		Automation:   automationScheduler,
-		Response:     responseService,
-		STT:          func(ctx context.Context) stt.Params { return resolveSTTParams(ctx, credsChain, settingsStore, cfg) },
-		Log:          log,
-	})
-	if err != nil {
-		fatal("whatsmeow", err)
+	// sttParams resolves the CURRENT speech-to-text configuration — shared by
+	// whatsmeow's voice-note pipeline and worker.Worker.STT below, so both
+	// resolve identically. Mock mode never resolves a real provider/key at
+	// all, regardless of what's configured in Settings.
+	sttParams := func(ctx context.Context) stt.Params { return resolveSTTParams(ctx, credsChain, settingsStore, cfg) }
+	if cfg.System.MockExternals {
+		mockTranscriber := sttmock.New()
+		sttParams = func(ctx context.Context) stt.Params { return stt.Params{Transcriber: mockTranscriber} }
 	}
-	defer waMgr.Close()
+
+	// waMgr is the WhatsApp port every downstream consumer (senders,
+	// httpapi.Deps.WA) holds — whatsmeow.NewManager()/whatsapp.NewFake() are
+	// its only two implementations. waStart/waClose stand in for the real
+	// Manager's own Start/Close (reconnect-on-boot, device-store teardown),
+	// which whatsapp.Manager itself does not declare (a fake has neither a
+	// device store nor a live connection to tear down) — waSender likewise
+	// stands in for ChannelSender(), a method both implementations happen to
+	// share but whatsapp.Manager also does not declare.
+	var waMgr whatsapp.Manager
+	var waSender messaging.ChannelSender
+	waStart := func(context.Context) {}
+	waClose := func() {}
+	if cfg.System.MockExternals {
+		fakeWA := whatsapp.NewFake(st, hub, q)
+		waMgr = fakeWA
+		waSender = fakeWA.ChannelSender()
+	} else {
+		realWA, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
+			DeviceDBPath: cfg.Storage.WADeviceDBPath,
+			Store:        st,
+			Blob:         blobStore,
+			Queue:        q,
+			Hub:          hub,
+			Automation:   automationScheduler,
+			Response:     responseService,
+			STT:          sttParams,
+			Log:          log,
+		})
+		if err != nil {
+			fatal("whatsmeow", err)
+		}
+		waMgr = realWA
+		waSender = realWA.ChannelSender()
+		waStart = realWA.Start
+		waClose = realWA.Close
+	}
+	defer waClose()
 
 	// Meta channels (Instagram Direct, Messenger, WhatsApp Cloud API — see
 	// internal/meta's package doc). metaClient/waCloudClient/inboxSigner are
@@ -404,7 +498,15 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// (metaCredentialsAdapter, internal/httpapi), not baked in here, so a
 	// deployment with no Meta App ID/Secret saved yet still boots cleanly —
 	// every Meta route just answers META_APP_NOT_CONFIGURED until one is.
-	metaClient := meta.NewHTTP(cfg.MetaResolvedGraphAPIVersion(), log)
+	var metaClient meta.API
+	if cfg.System.MockExternals {
+		metaClient = metamock.New()
+	} else {
+		metaClient = meta.NewHTTP(cfg.MetaResolvedGraphAPIVersion(), log)
+	}
+	// whatsappcloud.Client/messengerish.Client below run their own real
+	// Send/Profile/Subscribe/... logic completely unmodified atop metaClient
+	// — mock or real, they contain no mock-specific branch of their own.
 	waCloudClient := whatsappcloud.NewClient(metaClient)
 	// messengerishClient is shared by Instagram Direct and Messenger (Phase
 	// 5) — both speak the same Graph send/webhook shape, see
@@ -418,7 +520,7 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	metaProc := metaingest.New(metaingest.Deps{Store: st, Queue: q, Hub: hub, Automation: automationScheduler, Log: log})
 
 	senders := messaging.NewSenderRegistry()
-	senders.Register(messaging.ChannelWhatsApp, waMgr.ChannelSender())
+	senders.Register(messaging.ChannelWhatsApp, waSender)
 	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
 	senders.Register(messaging.ChannelTelegram, telegram.NewChannelSender(tg, st, blobStore))
 	// *store.Store satisfies whatsappcloud.AccountSource and MediaSource
@@ -435,7 +537,12 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	w := &worker.Worker{
 		Store: st, Queue: q, TG: tg, WACloud: waCloudClient, MetaClient: metaClient, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, Log: log, Automation: automationScheduler,
-		STT: func(ctx context.Context) stt.Params { return resolveSTTParams(ctx, credsChain, settingsStore, cfg) },
+		STT: sttParams,
+	}
+	if cfg.System.MockExternals {
+		// The one outbound call in internal/worker not already covered by
+		// WACloud/MetaClient above — see workermock's own doc comment.
+		w.DirectMediaHTTP = workermock.DirectMediaClient{}
 	}
 	q.Start(ctx, w.Handle)
 
@@ -484,8 +591,9 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 			log.Info("meta origin repair", "repaired", repaired, "stale", stale)
 		}
 	}()
-	// Reconnects every saved WhatsApp account without re-scanning a QR code.
-	go waMgr.Start(ctx)
+	// Reconnects every saved WhatsApp account without re-scanning a QR code
+	// (a no-op in mock mode — waStart is whatsapp.Fake's own placeholder).
+	go waStart(ctx)
 	// Claims due debounce deadlines into dispatch jobs and runs them; its
 	// own startup pass re-publishes whatever a crash left mid-flight, the
 	// same recovery philosophy as the Telegram media sweeper above.
@@ -502,10 +610,15 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// both landing in kbd_draft only — see that package's own doc comment
 	// for the safety boundary. Started before httpapi.New so the first
 	// request the server ever handles already sees a non-nil pipeline.
-	kbImportSvc := kbimport.New(kbimport.Deps{
+	kbImportDeps := kbimport.Deps{
 		KB: kb, Blob: blobStore, Credentials: credsChain, Settings: settingsStore,
 		LLM: llmRegistry, Hub: hub, Log: log, AllowPrivateFetch: cfg.KBAllowPrivateFetch,
-	}, kbimport.DefaultConfig())
+	}
+	if cfg.System.MockExternals {
+		kbImportDeps.Extractors = extractormock.NewRegistry()
+		kbImportDeps.Fetcher = kbimportmock.New()
+	}
+	kbImportSvc := kbimport.New(kbImportDeps, kbimport.DefaultConfig())
 	kbImportSvc.Start(ctx)
 
 	// The Knowledge Base chat assistant (/chat). It shares this process's one
@@ -553,12 +666,30 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// none, the tunnel has no way to ever retrieve an authtoken, so it is
 	// absent (nil) rather than present-but-guaranteed-to-fail; every
 	// /settings/tunnel/* route already handles a nil Tunnel as "feature not
-	// available" (503 ErrTunnelUnavailable).
+	// available" (503 ErrTunnelUnavailable). Mock mode always gets a working
+	// (in-memory) tunnel regardless of credential store availability, so
+	// /settings/tunnel/* stays fully exercisable while profiling.
 	var tunnelMgr tunnel.Tunnel
-	if credsChain != nil {
+	switch {
+	case cfg.System.MockExternals:
+		tunnelMgr = tunnelmock.New()
+	case credsChain != nil:
 		tunnelMgr = tunnel.NewManager(tunnel.Deps{Creds: credsChain, Settings: settingsStore, Handler: router, Log: log})
 	}
 	srv.SetTunnel(tunnelMgr)
+
+	// The dedicated pprof listener (system.pprof_addr/PPROF_ADDR/--pprof-addr)
+	// — entirely separate from the router above, loopback-only, bound
+	// synchronously so an address conflict fails startup immediately rather
+	// than surfacing on the first profiling attempt.
+	var pprofSrv *pprofserver.Server
+	if cfg.System.PprofAddr != "" {
+		pprofSrv, err = pprofserver.Start(cfg.System.PprofAddr)
+		if err != nil {
+			fatal("pprof", err)
+		}
+		log.Info("pprof server listening", "addr", pprofSrv.Addr())
+	}
 
 	// e2eReady is the XCHATS_DESKTOP_E2E_HTTP readiness signal (see
 	// internal/desktop/e2e_http.go) — constructed unconditionally so
@@ -622,6 +753,9 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+	if pprofSrv != nil {
+		_ = pprofSrv.Shutdown(shutdownCtx)
+	}
 	if tunnelStartDone != nil {
 		<-tunnelStartDone
 	}
@@ -1118,6 +1252,28 @@ func runSeedDemo(ctx context.Context, cfg *config.Config, st *store.Store, log *
 		log.Info("seed-demo: channels, inbox drafts & assistant history seeded", "org_id", orgID)
 	} else {
 		log.Info("seed-demo: org has real channel accounts — demo workspace skipped", "org_id", orgID)
+	}
+	if cfg.System.MockExternals {
+		// The hermetic load harness's outbound-send route rotates through
+		// every seeded channel — without a resolvable credential, a send
+		// through the demo Telegram/Instagram/Messenger/WhatsApp Cloud
+		// accounts fails at credential lookup before ever reaching a mock
+		// transport. openCredentialsAndProvisionSecrets resolves the SAME
+		// durable encryption key runServe itself installs (writing it back
+		// into cfg.TelegramCredentialsEncKey as a side effect), so a token
+		// encrypted here decrypts correctly once the server boots against
+		// this same database — see SeedDemoMockCredentials' own doc comment.
+		openCredentialsAndProvisionSecrets(ctx, cfg, log)
+		if box, err := secretbox.FromEnvValue(cfg.TelegramCredentialsEncKey); err != nil {
+			log.Warn("seed-demo: no credentials box available; demo Telegram/Meta channel accounts will have no mock credential", "err", err)
+		} else {
+			st.UseCredentialsBox(box)
+			if err := st.SeedDemoMockCredentials(ctx); err != nil {
+				log.Warn("seed-demo: mock credential backfill failed", "err", err)
+			} else {
+				log.Info("seed-demo: mock credentials backfilled for telegram/instagram/messenger/whatsapp_cloud demo accounts", "org_id", orgID)
+			}
+		}
 	}
 
 	blobStore, err := blob.NewDisk(cfg.Storage.BlobDir)
