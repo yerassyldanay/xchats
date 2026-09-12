@@ -53,7 +53,7 @@ const RELEASES_URL = 'https://github.com/yerassyldanay/xchats/releases/latest'
     </div>
 
     <div class="landing-hero__panel">
-      <img src="/screenshots/overview-bento.png" :alt="t('landing.hero.screenshotAlt')" />
+      <img src="/screenshots/hero-product-card.png" :alt="t('landing.hero.screenshotAlt')" />
     </div>
   </section>
 </template>

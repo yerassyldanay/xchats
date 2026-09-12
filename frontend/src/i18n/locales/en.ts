@@ -1583,7 +1583,7 @@ export default {
       trust1: 'No installer — unzip and run',
       trust2: 'No Docker or external database required',
       trust3: 'Zero telemetry — runs on your own machine',
-      screenshotAlt: 'A four-panel overview of xchats: the shared team inbox, MCP-configured knowledge base, CRM follow-ups, and the anti-hallucination grounding pipeline',
+      screenshotAlt: 'xchats omnichannel architecture: connected customer channels, knowledge base grounding with verified tokens, and human-in-the-loop approval',
     },
     platforms: {
       eyebrow: 'CHANNELS',
