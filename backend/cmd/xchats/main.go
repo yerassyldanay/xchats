@@ -220,6 +220,116 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	if err := checkMockExternalsAllowed(cfg); err != nil {
 		fatal("mock externals", err)
 	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	bundle, err := buildServer(ctx, cfg, log, resolvedConfigPath)
+	if err != nil {
+		fatal("build server", err)
+	}
+	router := bundle.Router
+
+	// e2eReady is the XCHATS_DESKTOP_E2E_HTTP readiness signal (see
+	// internal/desktop/e2e_http.go) — constructed unconditionally so
+	// shell.go can mark the window ready with nothing to check, and cheap
+	// enough that doing so regardless of whether E2E HTTP mode is actually
+	// enabled this run costs nothing.
+	e2eReady := &desktop.Readiness{}
+	httpServer := &http.Server{
+		Addr:    cfg.Server.HTTPAddr,
+		Handler: wrapE2EHTTP(router, cfg.Server.HTTPAddr, e2eReady),
+		// A8: an unauthenticated peer that opens a connection and trickles
+		// headers/body one byte at a time (Slowloris) previously tied up a
+		// connection indefinitely — net/http's zero-value Server has no
+		// timeouts at all. WriteTimeout is deliberately left at its zero
+		// value (unlimited): GET /xchats/api/v1/realtime is a long-lived SSE
+		// stream (internal/httpapi/sse.go) that must not be cut off mid-
+		// stream, and frontend/nginx.conf's proxy already assumes exactly
+		// that (proxy_read_timeout 1h).
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MiB
+	}
+
+	// Bound synchronously (rather than inside ListenAndServe, in the
+	// goroutine below) so e2eReady.SetBackendReady only fires once the
+	// socket is actually bound and queuing connections — the readiness
+	// endpoint's "backend" signal would otherwise be able to report true a
+	// moment before the port is really open.
+	listener, err := net.Listen("tcp", cfg.Server.HTTPAddr)
+	if err != nil {
+		fatal("listen", err)
+	}
+	e2eReady.SetBackendReady()
+	go func() {
+		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
+		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+			fatal("listen", err)
+		}
+	}()
+
+	var tunnelStartDone chan struct{}
+	if bundle.AutoStartTunnel && bundle.TunnelMgr != nil {
+		tunnelStartDone = make(chan struct{})
+		go func() {
+			defer close(tunnelStartDone)
+			if err := bundle.TunnelMgr.Start(ctx); err != nil {
+				log.Warn("automatic ngrok tunnel start failed", "last_error", bundle.TunnelMgr.Status().LastError)
+				return
+			}
+			log.Info("ngrok tunnel started automatically", "public_url", bundle.TunnelMgr.Status().PublicURL)
+		}()
+	}
+
+	// The server build blocks here until SIGINT/SIGTERM. The desktop build
+	// (-tags desktop) instead runs the Wails window on this goroutine and
+	// returns when the user closes it, cancelling ctx on the way out — so
+	// the teardown below is the same sequence in both cases.
+	runUntilShutdown(ctx, stop, shellDeps{Router: router, Hub: bundle.Hub, Log: log, Addr: cfg.Server.HTTPAddr, Ready: e2eReady})
+	log.Info("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = httpServer.Shutdown(shutdownCtx)
+	if bundle.PprofSrv != nil {
+		_ = bundle.PprofSrv.Shutdown(shutdownCtx)
+	}
+	if tunnelStartDone != nil {
+		<-tunnelStartDone
+	}
+	bundle.Teardown(shutdownCtx)
+}
+
+// serverBundle is buildServer's output: everything runServe needs to bind a
+// listener and serve, plus a Teardown that runs the exact same shutdown
+// sequence runServe's own tail used to run inline before this split —
+// separated out so tests can exercise the REAL composition root (mock or
+// real) via httptest.NewServer(bundle.Router), with no parallel/duplicated
+// wiring that could drift from this file's own behavior.
+type serverBundle struct {
+	Router          http.Handler
+	Hub             *realtime.Hub
+	TunnelMgr       tunnel.Tunnel
+	PprofSrv        *pprofserver.Server
+	AutoStartTunnel bool
+	// Teardown stops every background worker/scheduler and closes every
+	// store/connection buildServer opened, in the same order runServe's own
+	// explicit shutdown steps plus its deferred closes used to run (both
+	// collapsed into this one closure since buildServer returns long before
+	// the process's real shutdown moment, unlike a same-function defer).
+	// The caller owns — and shuts down separately — the HTTP listener and
+	// any pprof server, since it owns the listener buildServer never binds.
+	Teardown func(shutdownCtx context.Context)
+}
+
+// buildServer is the composition root: it wires every dependency — real, or
+// under system.mock_externals an in-memory fake selected here and ONLY here
+// (see docs/profiling.md) — into a fully-routed server, without binding a
+// listener or blocking. Split out of runServe so the exact same wiring
+// runServe uses in production is also what an end-to-end test drives via
+// httptest.NewServer, rather than a second, hand-maintained copy of it.
+func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger, resolvedConfigPath string) (*serverBundle, error) {
 	// Package-level swaps for the two boundaries with no per-call injection
 	// point (credentials.Provider.Validate's shared HTTP client; mcpauth's
 	// Client ID Metadata Document fetch) — set once, before anything below
@@ -230,9 +340,6 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 		credentials.SetValidateHTTPClient(credentialsmock.Client())
 		mcpauth.SetCIMDFetcher(mcpauthmock.FetchCIMD)
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	credsChain := openCredentialsAndProvisionSecrets(ctx, cfg, log)
 	settingsStore := settings.NewStore(resolveConfigDir(log))
@@ -264,7 +371,7 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 
 	if shouldValidateProductionConfig(cfg, configuredAPIBaseURL) {
 		if problems := validateProductionConfig(cfg, credsChain != nil); len(problems) > 0 {
-			fatal("production config", fmt.Errorf("%s", strings.Join(problems, "; ")))
+			return nil, fmt.Errorf("production config: %s", strings.Join(problems, "; "))
 		}
 	}
 
@@ -274,16 +381,17 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// registry below is entirely local, so there is nothing genuine to trace,
 	// and this guarantees zero Langfuse network I/O even if real-looking
 	// Langfuse keys happen to already be configured.
+	langfuseShutdown := func() {}
 	if cfg.LangfuseTracingEnabled() && !cfg.System.MockExternals {
 		if tp, err := telemetry.NewLangfuseProvider(ctx, cfg, "xchats"); err != nil {
 			log.Warn("langfuse tracing init failed; continuing without it", "err", err)
 		} else {
 			log.Info("langfuse tracing enabled", "host", cfg.LangfuseHost)
-			defer func() {
+			langfuseShutdown = func() {
 				shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				_ = tp.Shutdown(shutCtx)
-			}()
+			}
 		}
 	}
 
@@ -291,10 +399,9 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// (see internal/store.New's doc comment), so there is no separate migrate
 	// step here any more.
 	st := mustStore(cfg, log)
-	defer st.Close()
 	bootstrapCredentialPath, minted, err := ensureBootstrapAdminPassword(ctx, cfg, st)
 	if err != nil {
-		fatal("bootstrap admin password", err)
+		return nil, fmt.Errorf("bootstrap admin password: %w", err)
 	}
 	if minted {
 		log.Info("one-time admin password created", "retrieve_with", "xchats admin-credential show")
@@ -312,13 +419,12 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// connection rather than racing a second one against the same file.
 	kb, err := kbstore.New(ctx, cfg.Storage.DBPath)
 	if err != nil {
-		fatal("kbstore", err)
+		return nil, fmt.Errorf("kbstore: %w", err)
 	}
-	defer kb.Close()
 
 	blobStore, err := blob.NewDisk(cfg.Storage.BlobDir)
 	if err != nil {
-		fatal("blob", err)
+		return nil, fmt.Errorf("blob: %w", err)
 	}
 
 	var llmRegistry llm.Registry
@@ -356,7 +462,7 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// never a second, possibly-divergent rendering of the same data.
 	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.Storage.DBPath)
 	if err != nil {
-		fatal("kb repo", err)
+		return nil, fmt.Errorf("kb repo: %w", err)
 	}
 	cachedKB := responsestore.NewCachedKBRepo(kbRepo)
 	responseService := &response.Service{
@@ -482,14 +588,13 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 			Log:          log,
 		})
 		if err != nil {
-			fatal("whatsmeow", err)
+			return nil, fmt.Errorf("whatsmeow: %w", err)
 		}
 		waMgr = realWA
 		waSender = realWA.ChannelSender()
 		waStart = realWA.Start
 		waClose = realWA.Close
 	}
-	defer waClose()
 
 	// Meta channels (Instagram Direct, Messenger, WhatsApp Cloud API — see
 	// internal/meta's package doc). metaClient/waCloudClient/inboxSigner are
@@ -629,9 +734,8 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// never reads a KB table itself.
 	chatDB, err := chatstore.New(ctx, cfg.Storage.DBPath)
 	if err != nil {
-		fatal("chatstore", err)
+		return nil, fmt.Errorf("chatstore: %w", err)
 	}
-	defer chatDB.Close()
 	chatSvc := chat.New(chat.Deps{
 		Store:  chatDB,
 		KB:     chatkb.NewStoreService(kb),
@@ -686,100 +790,50 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	if cfg.System.PprofAddr != "" {
 		pprofSrv, err = pprofserver.Start(cfg.System.PprofAddr)
 		if err != nil {
-			fatal("pprof", err)
+			return nil, fmt.Errorf("pprof: %w", err)
 		}
 		log.Info("pprof server listening", "addr", pprofSrv.Addr())
 	}
 
-	// e2eReady is the XCHATS_DESKTOP_E2E_HTTP readiness signal (see
-	// internal/desktop/e2e_http.go) — constructed unconditionally so
-	// shell.go can mark the window ready with nothing to check, and cheap
-	// enough that doing so regardless of whether E2E HTTP mode is actually
-	// enabled this run costs nothing.
-	e2eReady := &desktop.Readiness{}
-	httpServer := &http.Server{
-		Addr:    cfg.Server.HTTPAddr,
-		Handler: wrapE2EHTTP(router, cfg.Server.HTTPAddr, e2eReady),
-		// A8: an unauthenticated peer that opens a connection and trickles
-		// headers/body one byte at a time (Slowloris) previously tied up a
-		// connection indefinitely — net/http's zero-value Server has no
-		// timeouts at all. WriteTimeout is deliberately left at its zero
-		// value (unlimited): GET /xchats/api/v1/realtime is a long-lived SSE
-		// stream (internal/httpapi/sse.go) that must not be cut off mid-
-		// stream, and frontend/nginx.conf's proxy already assumes exactly
-		// that (proxy_read_timeout 1h).
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1 MiB
-	}
-
-	// Bound synchronously (rather than inside ListenAndServe, in the
-	// goroutine below) so e2eReady.SetBackendReady only fires once the
-	// socket is actually bound and queuing connections — the readiness
-	// endpoint's "backend" signal would otherwise be able to report true a
-	// moment before the port is really open.
-	listener, err := net.Listen("tcp", cfg.Server.HTTPAddr)
-	if err != nil {
-		fatal("listen", err)
-	}
-	e2eReady.SetBackendReady()
-	go func() {
-		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
-		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-			fatal("listen", err)
+	teardown := func(shutdownCtx context.Context) {
+		if tunnelMgr != nil {
+			_ = tunnelMgr.Stop(shutdownCtx)
 		}
-	}()
-
-	var tunnelStartDone chan struct{}
-	if autoStartTunnel && tunnelMgr != nil {
-		tunnelStartDone = make(chan struct{})
-		go func() {
-			defer close(tunnelStartDone)
-			if err := tunnelMgr.Start(ctx); err != nil {
-				log.Warn("automatic ngrok tunnel start failed", "last_error", tunnelMgr.Status().LastError)
-				return
-			}
-			log.Info("ngrok tunnel started automatically", "public_url", tunnelMgr.Status().PublicURL)
-		}()
+		// tgMgr and automationScheduler before q: the poller (via tgProc) and a
+		// scheduled_auto auto-send (via Runner.dispatchSend) both publish to the
+		// queue, so both producers must stop before the queue stops accepting.
+		// campaignScheduler never publishes to q (see its own construction
+		// comment above) so has no ordering requirement against q.Close() —
+		// stopped alongside the others here anyway, before waMgr.Close()/
+		// st.Close() below, so a tick already in flight finishes against
+		// still-live dependencies.
+		tgMgr.Close()
+		automationScheduler.Stop()
+		campaignScheduler.Stop()
+		simulatorReceipts.Stop()
+		q.Close()
+		// kbImportSvc has no producer/consumer relationship with q (its job
+		// queue is kbd_materials, claimed directly via kbstore) — it only needs
+		// to stop before kb.Close()/st.Close() run.
+		kbImportSvc.Stop()
+		// The same order runServe's own defers used to unwind in (LIFO by
+		// construction order) before this split: chatDB, then waMgr, then kb,
+		// then st, then Langfuse last.
+		chatDB.Close()
+		waClose()
+		kb.Close()
+		st.Close()
+		langfuseShutdown()
 	}
 
-	// The server build blocks here until SIGINT/SIGTERM. The desktop build
-	// (-tags desktop) instead runs the Wails window on this goroutine and
-	// returns when the user closes it, cancelling ctx on the way out — so
-	// the teardown below is the same sequence in both cases.
-	runUntilShutdown(ctx, stop, shellDeps{Router: router, Hub: hub, Log: log, Addr: cfg.Server.HTTPAddr, Ready: e2eReady})
-	log.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = httpServer.Shutdown(shutdownCtx)
-	if pprofSrv != nil {
-		_ = pprofSrv.Shutdown(shutdownCtx)
-	}
-	if tunnelStartDone != nil {
-		<-tunnelStartDone
-	}
-	if tunnelMgr != nil {
-		_ = tunnelMgr.Stop(shutdownCtx)
-	}
-	// tgMgr and automationScheduler before q: the poller (via tgProc) and a
-	// scheduled_auto auto-send (via Runner.dispatchSend) both publish to the
-	// queue, so both producers must stop before the queue stops accepting.
-	// Explicit here (not a defer) so the ordering relative to q.Close() is
-	// guaranteed rather than left to defer's LIFO stacking. campaignScheduler
-	// never publishes to q (see its own construction comment above) so has
-	// no ordering requirement against q.Close() — stopped alongside the
-	// others here anyway, before the deferred waMgr.Close()/st.Close(), so a
-	// tick already in flight finishes against still-live dependencies.
-	tgMgr.Close()
-	automationScheduler.Stop()
-	campaignScheduler.Stop()
-	simulatorReceipts.Stop()
-	q.Close()
-	// kbImportSvc has no producer/consumer relationship with q (its job
-	// queue is kbd_materials, claimed directly via kbstore) — it only needs
-	// to stop before the deferred kb.Close()/st.Close() run.
-	kbImportSvc.Stop()
+	return &serverBundle{
+		Router:          router,
+		Hub:             hub,
+		TunnelMgr:       tunnelMgr,
+		PprofSrv:        pprofSrv,
+		AutoStartTunnel: autoStartTunnel,
+		Teardown:        teardown,
+	}, nil
 }
 
 // resolveConfigDir resolves the OS-appropriate per-user config directory
