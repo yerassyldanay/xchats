@@ -6,6 +6,55 @@ import (
 	"testing"
 )
 
+// TestLoad_MockExternalsAndPprofAddrPrecedence covers the hermetic-profiling
+// harness's two new SystemConfig fields: config.yaml sets a value, then
+// MOCK_EXTERNALS/PPROF_ADDR (env overrides config.yaml for ops — see Load's
+// own doc comment) overrides it. CLI-over-both is cmd/xchats' own concern
+// (applyCLIOverrides), not this package's.
+func TestLoad_MockExternalsAndPprofAddrPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := "system:\n  mock_externals: true\n  pprof_addr: \"127.0.0.1:9000\"\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+
+	t.Run("yaml alone", func(t *testing.T) {
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !cfg.System.MockExternals || cfg.System.PprofAddr != "127.0.0.1:9000" {
+			t.Errorf("got MockExternals=%v PprofAddr=%q, want true/127.0.0.1:9000", cfg.System.MockExternals, cfg.System.PprofAddr)
+		}
+	})
+
+	t.Run("env overrides yaml", func(t *testing.T) {
+		t.Setenv("MOCK_EXTERNALS", "false")
+		t.Setenv("PPROF_ADDR", "127.0.0.1:6060")
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.System.MockExternals {
+			t.Error("MOCK_EXTERNALS=false must override config.yaml's mock_externals: true")
+		}
+		if cfg.System.PprofAddr != "127.0.0.1:6060" {
+			t.Errorf("PPROF_ADDR must override config.yaml, got %q", cfg.System.PprofAddr)
+		}
+	})
+
+	t.Run("defaults are off/empty with no config or env at all", func(t *testing.T) {
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.System.MockExternals || cfg.System.PprofAddr != "" {
+			t.Errorf("expected zero-value defaults, got MockExternals=%v PprofAddr=%q", cfg.System.MockExternals, cfg.System.PprofAddr)
+		}
+	})
+}
+
 func TestAccountIDDeterministic(t *testing.T) {
 	a := AccountID("77011111111@s.whatsapp.net")
 	b := AccountID(" 77011111111@S.WhatsApp.Net ") // different case/spacing, same number

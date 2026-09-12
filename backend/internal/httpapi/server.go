@@ -105,7 +105,7 @@ type Server struct {
 	// ID/Secret saved yet still serves every route, just failing each one
 	// individually with META_APP_NOT_CONFIGURED (metaAppCredentials) rather
 	// than 404ing in a way that would look like the feature doesn't exist.
-	metaClient  *meta.Client
+	metaClient  meta.API
 	metaCreds   meta.Source
 	metaProc    *metaingest.Processor
 	waCloud     *whatsappcloud.Client
@@ -204,8 +204,10 @@ type Deps struct {
 	ResolvedConfigDir  string
 	ResolvedDataDir    string
 
-	// Meta channels — see Server's own field doc comment.
-	MetaClient       *meta.Client
+	// Meta channels — see Server's own field doc comment. MetaClient is
+	// meta.API (not the concrete *meta.Client) so cmd/xchats' mock-externals
+	// mode can supply an in-memory fake — see meta.API's own doc comment.
+	MetaClient       meta.API
 	MetaProcessor    *metaingest.Processor
 	WACloudClient    *whatsappcloud.Client
 	InboxMediaSigner *inboxmedia.Signer

@@ -31,6 +31,25 @@ type cimdDocument struct {
 	RedirectURIs []string `json:"redirect_uris"`
 }
 
+// fetchCIMD is FetchCIMD's own value, indirected through a package-level
+// variable so ResolveClient's call (store.go) can be redirected — see
+// SetCIMDFetcher.
+var fetchCIMD = FetchCIMD
+
+// SetCIMDFetcher overrides the function ResolveClient uses to fetch a
+// remote Client ID Metadata Document — cmd/xchats' mock-externals
+// composition root's seam, so an MCP client presenting an https:// URL as
+// its client_id never triggers a real outbound fetch. Passing nil restores
+// FetchCIMD. Not safe to call concurrently with a ResolveClient call in
+// flight — callers set this once at boot, before the HTTP server starts
+// accepting requests.
+func SetCIMDFetcher(f func(ctx context.Context, clientIDURL string) (Client, error)) {
+	if f == nil {
+		f = FetchCIMD
+	}
+	fetchCIMD = f
+}
+
 // FetchCIMD retrieves and validates the Client ID Metadata Document at
 // clientIDURL. Unlike operator-configured knowledge-base imports, an OAuth
 // client_id is controlled by an unauthenticated remote client, so CIMD never

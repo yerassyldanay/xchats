@@ -118,6 +118,8 @@ const (
 func main() {
 	cfgPath := flag.String("config", "", "path to config.yaml (default: $XCHATS_CONFIG, then ./config.yaml, then the OS config directory)")
 	dataDirFlag := flag.String("data-dir", "", "absolute path to the application data directory (SQLite databases, blob storage, credentials); overrides $XCHATS_DATA_DIR; default: the OS data directory")
+	mockExternalsFlag := flag.Bool("mock-externals", false, "replace every outbound-network integration with in-memory fakes (dev/profiling only; refused when environment=production); overrides system.mock_externals/MOCK_EXTERNALS")
+	pprofAddrFlag := flag.String("pprof-addr", "", "loopback address (e.g. 127.0.0.1:6060) for a dedicated pprof HTTP server; overrides system.pprof_addr/PPROF_ADDR")
 	flag.Parse()
 
 	cmd := "serve"
@@ -150,6 +152,14 @@ func main() {
 	if err := applyDesktopDefaults(cfg); err != nil {
 		fatal("desktop config", err)
 	}
+	// Explicit CLI values outrank whatever config.Load resolved from
+	// config.yaml/env — flag.Visit only fires for flags actually passed on
+	// this invocation's command line, so an unset flag never clobbers an
+	// env/yaml value with its own zero-value default (mirrors
+	// applyDataDirFlag's "empty means untouched" contract above, but via
+	// flag.Visit rather than a sentinel empty string, since MockExternals'
+	// zero value (false) is otherwise indistinguishable from "not passed").
+	applyCLIOverrides(flag.CommandLine, cfg, mockExternalsFlag, pprofAddrFlag)
 	log := newLogger(cfg)
 
 	switch cmd {
@@ -187,6 +197,17 @@ func main() {
 }
 
 func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
+	// A11 (hermetic profiling harness): mock externals is a dev/profiling
+	// convenience that answers every outbound call locally with canned
+	// success — booting a real deployment with it on would silently fake
+	// every LLM draft, channel send, and OAuth exchange while looking
+	// healthy. Checked before anything else so it fails exactly like every
+	// other startup-blocking misconfiguration (fatal + exit 2), never a
+	// warning a real deploy could miss.
+	if err := checkMockExternalsAllowed(cfg); err != nil {
+		fatal("mock externals", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -660,6 +681,40 @@ func applyDataDirFlag(v string) error {
 		return err
 	}
 	return os.Setenv("XCHATS_DATA_DIR", v)
+}
+
+// checkMockExternalsAllowed is runServe's A11 startup gate: mock externals
+// may never combine with environment=production (see MockExternals' own doc
+// comment on config.SystemConfig for what it fakes). Split out from runServe
+// so it's testable without booting a server.
+func checkMockExternalsAllowed(cfg *config.Config) error {
+	if cfg.System.MockExternals && cfg.IsProduction() {
+		return fmt.Errorf(
+			"system.mock_externals (MOCK_EXTERNALS/--mock-externals) is enabled but environment=production — " +
+				"refusing to start with fake external integrations in a production deployment")
+	}
+	return nil
+}
+
+// applyCLIOverrides applies --mock-externals/--pprof-addr onto cfg IN PLACE,
+// but only for flags actually present on this process's command line — fs.
+// Visit walks exactly those (unlike VisitAll, every registered flag), so
+// running with neither flag leaves whatever config.Load already resolved
+// from config.yaml/MOCK_EXTERNALS/PPROF_ADDR completely untouched, and
+// passing either flag always wins over both of those, matching every other
+// CLI-vs-config/env precedence rule in this file (see applyDataDirFlag). fs
+// is a parameter (main passes flag.CommandLine) rather than a hardcoded
+// package-level flag.Visit call so tests can exercise this against a
+// throwaway FlagSet instead of the process's real command line.
+func applyCLIOverrides(fs *flag.FlagSet, cfg *config.Config, mockExternals *bool, pprofAddr *string) {
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "mock-externals":
+			cfg.System.MockExternals = *mockExternals
+		case "pprof-addr":
+			cfg.System.PprofAddr = *pprofAddr
+		}
+	})
 }
 
 // resolveDataDir resolves the same OS application data directory

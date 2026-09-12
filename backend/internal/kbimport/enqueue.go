@@ -11,7 +11,6 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/extractor"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
-	"github.com/yerassyldanay/xchats/backend/internal/safefetch"
 )
 
 // TargetTypes is the closed, operator-facing vocabulary POST
@@ -71,7 +70,7 @@ const maxGuidanceRunes = 2000
 //
 // Handler order matches plan spec exactly: validate vocabulary -> resolve
 // + precheck the provider (credential missing -> ErrProviderNotConfigured,
-// 422) -> safefetch.CheckURL every URL -> provider.Supports() precheck
+// 422) -> fetcher().CheckURL every URL -> provider.Supports() precheck
 // every URL/file (so an unsupported pairing like PDF+Firecrawl fails here,
 // synchronously, never as an async job failure) -> ActiveImportRun gate
 // (ErrRunActive, 409) -> stage every file's bytes -> EnqueueImport each
@@ -102,7 +101,7 @@ func (s *Service) Submit(ctx context.Context, orgID, userID uuid.UUID, in Submit
 	}
 
 	for _, u := range in.URLs {
-		if err := safefetch.CheckURL(ctx, u, s.deps.AllowPrivateFetch); err != nil {
+		if err := s.fetcher().CheckURL(ctx, u, s.deps.AllowPrivateFetch); err != nil {
 			return RunSummary{}, fmt.Errorf("%w: %s: %v", ErrValidation, u, err)
 		}
 		if !provider.Supports(extractor.Source{Kind: extractor.SourceURL, URL: u}) {

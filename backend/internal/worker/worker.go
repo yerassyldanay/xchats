@@ -75,7 +75,10 @@ type Worker struct {
 	WACloud *whatsappcloud.Client // nil when no Meta channel is configured; the media sweep no-ops
 	// MetaClient backs RefreshExpiringInstagramTokens (meta_tokens.go) — nil
 	// in a wiring with no Meta channels configured; the refresher no-ops.
-	MetaClient *meta.Client
+	// meta.API rather than the concrete *meta.Client so cmd/xchats' mock-
+	// externals mode can supply an in-memory fake — see meta.API's own doc
+	// comment.
+	MetaClient meta.API
 	Blob       blob.Store
 	Hub        *realtime.Hub
 	Response   *response.Service         // the multichannel response engine's entry point
@@ -94,6 +97,18 @@ type Worker struct {
 	// KindAIDraft enqueue, the pre-automation behavior.
 	Automation Automation
 	Log        *slog.Logger
+	// DirectMediaHTTP, when set, replaces directMediaHTTPClient as
+	// downloadDirectMedia's transport — cmd/xchats' mock-externals
+	// composition root's seam for the one remaining unguarded outbound call
+	// in this package (a plain CDN GET behind none of the interfaces
+	// above). nil (the default) uses directMediaHTTPClient, unchanged.
+	DirectMediaHTTP httpDoer
+}
+
+// httpDoer is the minimal *http.Client surface downloadDirectMedia needs —
+// satisfied by *http.Client itself with no adapter.
+type httpDoer interface {
+	Do(*http.Request) (*http.Response, error)
 }
 
 // Automation is the narrow surface TranscribeAudio needs to re-arm a chat's
@@ -328,6 +343,16 @@ func (w *Worker) markChannelMediaFailed(ctx context.Context, messageID uuid.UUID
 // timeout at all.
 var directMediaHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
+// directMediaClient returns Worker.DirectMediaHTTP when set, else the real
+// directMediaHTTPClient — the one place downloadDirectMedia decides which
+// to use.
+func (w *Worker) directMediaClient() httpDoer {
+	if w.DirectMediaHTTP != nil {
+		return w.DirectMediaHTTP
+	}
+	return directMediaHTTPClient
+}
+
 // downloadDirectMedia fetches an Instagram/Messenger attachment's bytes
 // directly from the CDN url the webhook payload already carried — unlike
 // WhatsApp Cloud's two-step media-id -> signed-url resolution, that url is
@@ -346,7 +371,7 @@ func (w *Worker) downloadDirectMedia(ctx context.Context, t MediaDownloadTask) e
 	if err != nil {
 		return err
 	}
-	resp, err := directMediaHTTPClient.Do(req)
+	resp, err := w.directMediaClient().Do(req)
 	if err != nil {
 		w.markChannelMediaFailed(ctx, t.MessageID, err)
 		return fmt.Errorf("meta media: direct download: %w", err)

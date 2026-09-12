@@ -88,7 +88,7 @@ func (s *Store) ResolveClient(ctx context.Context, clientID string) (Client, err
 	if !looksLikeCIMDClientID(clientID) {
 		return Client{}, ErrClientNotFound
 	}
-	fetched, ferr := FetchCIMD(ctx, clientID)
+	fetched, ferr := fetchCIMD(ctx, clientID)
 	if ferr != nil {
 		return Client{}, fmt.Errorf("%w: %s", ErrClientNotFound, ferr)
 	}

@@ -7,18 +7,20 @@ import (
 )
 
 // Client is Instagram Direct's and Messenger's shared Graph operations,
-// layered on the shared meta.Client transport — see whatsappcloud.Client's
+// layered on the shared meta.API transport — see whatsappcloud.Client's
 // identical shape. graphURL selects WHICH Graph host a call resolves
 // against: Instagram Login's own graph.instagram.com for Instagram, plain
 // graph.facebook.com for Messenger — passed in per-call rather than baked
 // into the Client, since one process may run both channels at once with the
-// SAME underlying meta.Client.
+// SAME underlying meta.API.
 type Client struct {
-	http *meta.Client
+	http meta.API
 }
 
-// NewClient wraps an already-constructed meta.Client.
-func NewClient(http *meta.Client) *Client {
+// NewClient wraps an already-constructed meta.API (the real *meta.Client in
+// production; a fake in cmd/xchats' mock-externals mode — see meta.API's own
+// doc comment).
+func NewClient(http meta.API) *Client {
 	return &Client{http: http}
 }
 
