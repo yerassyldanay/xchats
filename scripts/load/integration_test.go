@@ -176,6 +176,48 @@ func TestAuthentication_BootstrapWithRotation(t *testing.T) {
 	}
 }
 
+// TestAuthentication_FallsBackToNewPasswordWhenAlreadyRotated covers a
+// repeated invocation against the SAME already-seeded server — exactly
+// profile-load followed by profile-trace in the Makefile workflow: the
+// account was already rotated to newPassword by a PRIOR run, so the
+// original bootstrap password is now rejected.
+func TestAuthentication_FallsBackToNewPasswordWhenAlreadyRotated(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /xchats/api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Password string }
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Password != "already-rotated-password" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"errcode":"UNAUTHORIZED","message":"invalid credentials"}`))
+			return
+		}
+		envelopeOK(w, map[string]any{"user": map[string]any{"must_change_password": false}})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client, _ := newAPIClient(srv.URL)
+	err := client.EnsureAuthenticated(context.Background(), "admin@xchat.kz", "xchat-admin-change-me", "already-rotated-password")
+	if err != nil {
+		t.Fatalf("EnsureAuthenticated: %v", err)
+	}
+}
+
+func TestAuthentication_FailsWhenNeitherPasswordWorks(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /xchats/api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"errcode":"UNAUTHORIZED","message":"invalid credentials"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client, _ := newAPIClient(srv.URL)
+	if err := client.EnsureAuthenticated(context.Background(), "admin@xchat.kz", "wrong1", "wrong2"); err == nil {
+		t.Fatal("expected an error when neither password is accepted")
+	}
+}
+
 func TestAuthentication_LoginFailurePropagates(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /xchats/api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {

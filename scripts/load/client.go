@@ -111,12 +111,22 @@ type mePayload struct {
 // fresh-install password-rotation flow (POST /auth/password) when the
 // account's password must be changed — after this call, c's cookie jar
 // carries a valid session for every subsequent request from any worker.
+//
+// If login with password is rejected, it retries once with newPassword
+// before giving up: a repeated invocation against the SAME already-seeded
+// server (e.g. the Makefile's profile-load then profile-trace, both
+// authenticating fresh against one long-lived profile-server) finds the
+// account already rotated by a prior run, and the original bootstrap
+// password no longer works — this is not a fresh 401, just stale local
+// knowledge of which password is current.
 func (c *apiClient) EnsureAuthenticated(ctx context.Context, email, password, newPassword string) error {
-	var me mePayload
-	if _, err := c.do(ctx, http.MethodPost, "/xchats/api/v1/auth/login", map[string]string{
-		"email": email, "password": password,
-	}, &me); err != nil {
-		return fmt.Errorf("login: %w", err)
+	me, loginErr := c.login(ctx, email, password)
+	if loginErr != nil {
+		var err error
+		me, err = c.login(ctx, email, newPassword)
+		if err != nil {
+			return fmt.Errorf("login failed with both the given password and --new-password (likely already rotated by a prior run): %w", loginErr)
+		}
 	}
 	if !me.User.MustChangePassword {
 		return nil
@@ -127,4 +137,14 @@ func (c *apiClient) EnsureAuthenticated(ctx context.Context, email, password, ne
 		return fmt.Errorf("password rotation: %w", err)
 	}
 	return nil
+}
+
+func (c *apiClient) login(ctx context.Context, email, password string) (mePayload, error) {
+	var me mePayload
+	if _, err := c.do(ctx, http.MethodPost, "/xchats/api/v1/auth/login", map[string]string{
+		"email": email, "password": password,
+	}, &me); err != nil {
+		return mePayload{}, fmt.Errorf("login: %w", err)
+	}
+	return me, nil
 }
