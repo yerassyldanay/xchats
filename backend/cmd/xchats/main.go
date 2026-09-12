@@ -29,19 +29,27 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/chatstore"
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/credentials"
+	"github.com/yerassyldanay/xchats/backend/internal/credentials/credentialsmock"
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
 	"github.com/yerassyldanay/xchats/backend/internal/desktop"
+	"github.com/yerassyldanay/xchats/backend/internal/extractor/extractormock"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
 	"github.com/yerassyldanay/xchats/backend/internal/inboxmedia"
 	"github.com/yerassyldanay/xchats/backend/internal/kbimport"
+	"github.com/yerassyldanay/xchats/backend/internal/kbimport/kbimportmock"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
+	"github.com/yerassyldanay/xchats/backend/internal/llmmock"
 	"github.com/yerassyldanay/xchats/backend/internal/llmprovider"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
+	"github.com/yerassyldanay/xchats/backend/internal/mcpauth/mcpauthmock"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpserver"
 	"github.com/yerassyldanay/xchats/backend/internal/messengerish"
 	"github.com/yerassyldanay/xchats/backend/internal/meta"
+	"github.com/yerassyldanay/xchats/backend/internal/meta/metamock"
 	"github.com/yerassyldanay/xchats/backend/internal/metaingest"
 	"github.com/yerassyldanay/xchats/backend/internal/ngrokapi"
+	"github.com/yerassyldanay/xchats/backend/internal/ngrokmock"
+	"github.com/yerassyldanay/xchats/backend/internal/pprofserver"
 	"github.com/yerassyldanay/xchats/backend/internal/providerhealth"
 	"github.com/yerassyldanay/xchats/backend/internal/queue"
 	"github.com/yerassyldanay/xchats/backend/internal/realtime"
@@ -52,16 +60,21 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/simulator"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 	"github.com/yerassyldanay/xchats/backend/internal/stt"
+	"github.com/yerassyldanay/xchats/backend/internal/sttmock"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
+	"github.com/yerassyldanay/xchats/backend/internal/telegrammock"
 	"github.com/yerassyldanay/xchats/backend/internal/telemetry"
 	"github.com/yerassyldanay/xchats/backend/internal/tgingest"
 	"github.com/yerassyldanay/xchats/backend/internal/tgpoller"
 	"github.com/yerassyldanay/xchats/backend/internal/tunnel"
+	"github.com/yerassyldanay/xchats/backend/internal/tunnelmock"
 	"github.com/yerassyldanay/xchats/backend/internal/updatecheck"
 	"github.com/yerassyldanay/xchats/backend/internal/version"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsappcloud"
 	"github.com/yerassyldanay/xchats/backend/internal/whatsmeow"
 	"github.com/yerassyldanay/xchats/backend/internal/worker"
+	"github.com/yerassyldanay/xchats/backend/internal/worker/workermock"
 	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
 	"github.com/yerassyldanay/xchats/backend/response"
@@ -118,6 +131,8 @@ const (
 func main() {
 	cfgPath := flag.String("config", "", "path to config.yaml (default: $XCHATS_CONFIG, then ./config.yaml, then the OS config directory)")
 	dataDirFlag := flag.String("data-dir", "", "absolute path to the application data directory (SQLite databases, blob storage, credentials); overrides $XCHATS_DATA_DIR; default: the OS data directory")
+	mockExternalsFlag := flag.Bool("mock-externals", false, "replace every outbound-network integration with in-memory fakes (dev/profiling only; refused when environment=production); overrides system.mock_externals/MOCK_EXTERNALS")
+	pprofAddrFlag := flag.String("pprof-addr", "", "loopback address (e.g. 127.0.0.1:6060) for a dedicated pprof HTTP server; overrides system.pprof_addr/PPROF_ADDR")
 	flag.Parse()
 
 	cmd := "serve"
@@ -150,6 +165,14 @@ func main() {
 	if err := applyDesktopDefaults(cfg); err != nil {
 		fatal("desktop config", err)
 	}
+	// Explicit CLI values outrank whatever config.Load resolved from
+	// config.yaml/env — flag.Visit only fires for flags actually passed on
+	// this invocation's command line, so an unset flag never clobbers an
+	// env/yaml value with its own zero-value default (mirrors
+	// applyDataDirFlag's "empty means untouched" contract above, but via
+	// flag.Visit rather than a sentinel empty string, since MockExternals'
+	// zero value (false) is otherwise indistinguishable from "not passed").
+	applyCLIOverrides(flag.CommandLine, cfg, mockExternalsFlag, pprofAddrFlag)
 	log := newLogger(cfg)
 
 	switch cmd {
@@ -187,8 +210,136 @@ func main() {
 }
 
 func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
+	// A11 (hermetic profiling harness): mock externals is a dev/profiling
+	// convenience that answers every outbound call locally with canned
+	// success — booting a real deployment with it on would silently fake
+	// every LLM draft, channel send, and OAuth exchange while looking
+	// healthy. Checked before anything else so it fails exactly like every
+	// other startup-blocking misconfiguration (fatal + exit 2), never a
+	// warning a real deploy could miss.
+	if err := checkMockExternalsAllowed(cfg); err != nil {
+		fatal("mock externals", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	bundle, err := buildServer(ctx, cfg, log, resolvedConfigPath)
+	if err != nil {
+		fatal("build server", err)
+	}
+	router := bundle.Router
+
+	// e2eReady is the XCHATS_DESKTOP_E2E_HTTP readiness signal (see
+	// internal/desktop/e2e_http.go) — constructed unconditionally so
+	// shell.go can mark the window ready with nothing to check, and cheap
+	// enough that doing so regardless of whether E2E HTTP mode is actually
+	// enabled this run costs nothing.
+	e2eReady := &desktop.Readiness{}
+	httpServer := &http.Server{
+		Addr:    cfg.Server.HTTPAddr,
+		Handler: wrapE2EHTTP(router, cfg.Server.HTTPAddr, e2eReady),
+		// A8: an unauthenticated peer that opens a connection and trickles
+		// headers/body one byte at a time (Slowloris) previously tied up a
+		// connection indefinitely — net/http's zero-value Server has no
+		// timeouts at all. WriteTimeout is deliberately left at its zero
+		// value (unlimited): GET /xchats/api/v1/realtime is a long-lived SSE
+		// stream (internal/httpapi/sse.go) that must not be cut off mid-
+		// stream, and frontend/nginx.conf's proxy already assumes exactly
+		// that (proxy_read_timeout 1h).
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MiB
+	}
+
+	// Bound synchronously (rather than inside ListenAndServe, in the
+	// goroutine below) so e2eReady.SetBackendReady only fires once the
+	// socket is actually bound and queuing connections — the readiness
+	// endpoint's "backend" signal would otherwise be able to report true a
+	// moment before the port is really open.
+	listener, err := net.Listen("tcp", cfg.Server.HTTPAddr)
+	if err != nil {
+		fatal("listen", err)
+	}
+	e2eReady.SetBackendReady()
+	go func() {
+		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
+		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+			fatal("listen", err)
+		}
+	}()
+
+	var tunnelStartDone chan struct{}
+	if bundle.AutoStartTunnel && bundle.TunnelMgr != nil {
+		tunnelStartDone = make(chan struct{})
+		go func() {
+			defer close(tunnelStartDone)
+			if err := bundle.TunnelMgr.Start(ctx); err != nil {
+				log.Warn("automatic ngrok tunnel start failed", "last_error", bundle.TunnelMgr.Status().LastError)
+				return
+			}
+			log.Info("ngrok tunnel started automatically", "public_url", bundle.TunnelMgr.Status().PublicURL)
+		}()
+	}
+
+	// The server build blocks here until SIGINT/SIGTERM. The desktop build
+	// (-tags desktop) instead runs the Wails window on this goroutine and
+	// returns when the user closes it, cancelling ctx on the way out — so
+	// the teardown below is the same sequence in both cases.
+	runUntilShutdown(ctx, stop, shellDeps{Router: router, Hub: bundle.Hub, Log: log, Addr: cfg.Server.HTTPAddr, Ready: e2eReady})
+	log.Info("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = httpServer.Shutdown(shutdownCtx)
+	if bundle.PprofSrv != nil {
+		_ = bundle.PprofSrv.Shutdown(shutdownCtx)
+	}
+	if tunnelStartDone != nil {
+		<-tunnelStartDone
+	}
+	bundle.Teardown(shutdownCtx)
+}
+
+// serverBundle is buildServer's output: everything runServe needs to bind a
+// listener and serve, plus a Teardown that runs the exact same shutdown
+// sequence runServe's own tail used to run inline before this split —
+// separated out so tests can exercise the REAL composition root (mock or
+// real) via httptest.NewServer(bundle.Router), with no parallel/duplicated
+// wiring that could drift from this file's own behavior.
+type serverBundle struct {
+	Router          http.Handler
+	Hub             *realtime.Hub
+	TunnelMgr       tunnel.Tunnel
+	PprofSrv        *pprofserver.Server
+	AutoStartTunnel bool
+	// Teardown stops every background worker/scheduler and closes every
+	// store/connection buildServer opened, in the same order runServe's own
+	// explicit shutdown steps plus its deferred closes used to run (both
+	// collapsed into this one closure since buildServer returns long before
+	// the process's real shutdown moment, unlike a same-function defer).
+	// The caller owns — and shuts down separately — the HTTP listener and
+	// any pprof server, since it owns the listener buildServer never binds.
+	Teardown func(shutdownCtx context.Context)
+}
+
+// buildServer is the composition root: it wires every dependency — real, or
+// under system.mock_externals an in-memory fake selected here and ONLY here
+// (see docs/profiling.md) — into a fully-routed server, without binding a
+// listener or blocking. Split out of runServe so the exact same wiring
+// runServe uses in production is also what an end-to-end test drives via
+// httptest.NewServer, rather than a second, hand-maintained copy of it.
+func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger, resolvedConfigPath string) (*serverBundle, error) {
+	// Package-level swaps for the two boundaries with no per-call injection
+	// point (credentials.Provider.Validate's shared HTTP client; mcpauth's
+	// Client ID Metadata Document fetch) — set once, before anything below
+	// can trigger either. Every other boundary is swapped locally, per
+	// dependency, further down.
+	if cfg.System.MockExternals {
+		log.Warn("mock externals enabled — every outbound-network integration answers locally; never use this in production")
+		credentials.SetValidateHTTPClient(credentialsmock.Client())
+		mcpauth.SetCIMDFetcher(mcpauthmock.FetchCIMD)
+	}
 
 	credsChain := openCredentialsAndProvisionSecrets(ctx, cfg, log)
 	settingsStore := settings.NewStore(resolveConfigDir(log))
@@ -197,7 +348,20 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// signal of deploy-for-real intent — has to be read before that call, not
 	// after. See shouldValidateProductionConfig.
 	configuredAPIBaseURL := cfg.Server.APIBaseURL
-	autoStartTunnel, err := applyNgrokPublicOrigin(ctx, cfg, ngrokCredsFrom(credsChain), settingsStore, ngrokapi.NewClient())
+	var ngrokDomains ngrokDomainLister = ngrokapi.NewClient()
+	if cfg.System.MockExternals {
+		// A stateless, zero-network domain lister answering with one
+		// plausible reserved domain — guarantees this discovery step never
+		// dials the real ngrok API, regardless of whether a real ngrok API
+		// key happens to already be sitting in the credential store from
+		// prior real use. shouldValidateProductionConfig below reads
+		// configuredAPIBaseURL (captured just above, before this call can
+		// overwrite cfg.Server.APIBaseURL with the mock domain), so letting
+		// autoStartTunnel go true here never risks tripping the production
+		// gate on a dev/profiling box.
+		ngrokDomains = ngrokmock.New()
+	}
+	autoStartTunnel, err := applyNgrokPublicOrigin(ctx, cfg, ngrokCredsFrom(credsChain), settingsStore, ngrokDomains)
 	if err != nil {
 		log.Warn("ngrok static domain is not usable as the MCP public origin", "err", err)
 	}
@@ -207,22 +371,27 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 
 	if shouldValidateProductionConfig(cfg, configuredAPIBaseURL) {
 		if problems := validateProductionConfig(cfg, credsChain != nil); len(problems) > 0 {
-			fatal("production config", fmt.Errorf("%s", strings.Join(problems, "; ")))
+			return nil, fmt.Errorf("production config: %s", strings.Join(problems, "; "))
 		}
 	}
 
 	// Langfuse LLM tracing (best-effort): install a global OTel TracerProvider so
 	// the LLM clients export each call as a generation. Never fatal.
-	if cfg.LangfuseTracingEnabled() {
+	// Force-disabled in mock mode regardless of configuration — the mock LLM
+	// registry below is entirely local, so there is nothing genuine to trace,
+	// and this guarantees zero Langfuse network I/O even if real-looking
+	// Langfuse keys happen to already be configured.
+	langfuseShutdown := func() {}
+	if cfg.LangfuseTracingEnabled() && !cfg.System.MockExternals {
 		if tp, err := telemetry.NewLangfuseProvider(ctx, cfg, "xchats"); err != nil {
 			log.Warn("langfuse tracing init failed; continuing without it", "err", err)
 		} else {
 			log.Info("langfuse tracing enabled", "host", cfg.LangfuseHost)
-			defer func() {
+			langfuseShutdown = func() {
 				shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				_ = tp.Shutdown(shutCtx)
-			}()
+			}
 		}
 	}
 
@@ -230,10 +399,9 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// (see internal/store.New's doc comment), so there is no separate migrate
 	// step here any more.
 	st := mustStore(cfg, log)
-	defer st.Close()
 	bootstrapCredentialPath, minted, err := ensureBootstrapAdminPassword(ctx, cfg, st)
 	if err != nil {
-		fatal("bootstrap admin password", err)
+		return nil, fmt.Errorf("bootstrap admin password: %w", err)
 	}
 	if minted {
 		log.Info("one-time admin password created", "retrieve_with", "xchats admin-credential show")
@@ -251,26 +419,35 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// connection rather than racing a second one against the same file.
 	kb, err := kbstore.New(ctx, cfg.Storage.DBPath)
 	if err != nil {
-		fatal("kbstore", err)
+		return nil, fmt.Errorf("kbstore: %w", err)
 	}
-	defer kb.Close()
 
 	blobStore, err := blob.NewDisk(cfg.Storage.BlobDir)
 	if err != nil {
-		fatal("blob", err)
+		return nil, fmt.Errorf("blob: %w", err)
 	}
 
-	llmRegistry := llmprovider.NewRegistry()
-	populateLLMRegistry(ctx, llmRegistry, credsChain, settingsStore, cfg)
-	// llmRefresh re-resolves every provider's client from scratch — the
-	// Settings UI's save/delete-credential handlers call this (httpapi.Deps.
-	// LLMRefresh) so a just-saved key (or a just-deleted one) takes effect
-	// on the very next draft, with no restart. context.Background(): this
-	// runs on whatever goroutine an HTTP handler triggers it from, well
-	// after that request's own context is a meaningful deadline for a
-	// background maintenance op like this one.
-	llmRefresh := func() {
-		populateLLMRegistry(context.Background(), llmRegistry, credsChain, settingsStore, cfg)
+	var llmRegistry llm.Registry
+	var llmRefresh func()
+	if cfg.System.MockExternals {
+		llmRegistry = llmmock.NewRegistry()
+		// Settings-driven credential save/delete must never be able to
+		// swap the mock LLM back to a real client mid-run.
+		llmRefresh = func() {}
+	} else {
+		reg := llmprovider.NewRegistry()
+		populateLLMRegistry(ctx, reg, credsChain, settingsStore, cfg)
+		llmRegistry = reg
+		// llmRefresh re-resolves every provider's client from scratch — the
+		// Settings UI's save/delete-credential handlers call this (httpapi.Deps.
+		// LLMRefresh) so a just-saved key (or a just-deleted one) takes effect
+		// on the very next draft, with no restart. context.Background(): this
+		// runs on whatever goroutine an HTTP handler triggers it from, well
+		// after that request's own context is a meaningful deadline for a
+		// background maintenance op like this one.
+		llmRefresh = func() {
+			populateLLMRegistry(context.Background(), reg, credsChain, settingsStore, cfg)
+		}
 	}
 	llmParams := func() response.LLMParams { return resolveLLMParams(settingsStore, cfg) }
 	engine := &response.Engine{LLMs: llmRegistry, Params: llmParams}
@@ -285,7 +462,7 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// never a second, possibly-divergent rendering of the same data.
 	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.Storage.DBPath)
 	if err != nil {
-		fatal("kb repo", err)
+		return nil, fmt.Errorf("kb repo: %w", err)
 	}
 	cachedKB := responsestore.NewCachedKBRepo(kbRepo)
 	responseService := &response.Service{
@@ -326,10 +503,22 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 
 	// updateChecker asks GitHub's public releases API, cached well past any
 	// single request — see internal/updatecheck's own doc comment for why a
-	// failed/empty check is never treated as an error.
-	updateChecker := updatecheck.NewChecker("yerassyldanay/xchats", version.Version)
+	// failed/empty check is never treated as an error. Left nil in mock
+	// mode: GET /settings/update-check is already nil-tolerant (reports
+	// update_available:false rather than checking GitHub), so simply never
+	// constructing a real Checker is sufficient to guarantee zero calls —
+	// updatecheck.Checker exposes no injectable transport of its own.
+	var updateChecker *updatecheck.Checker
+	if !cfg.System.MockExternals {
+		updateChecker = updatecheck.NewChecker("yerassyldanay/xchats", version.Version)
+	}
 
-	tg := telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
+	var tg telegram.Client
+	if cfg.System.MockExternals {
+		tg = telegrammock.New(1, "mockbot")
+	} else {
+		tg = telegram.NewHTTP(cfg.TelegramResolvedAPIBaseURL(), log)
+	}
 
 	// Credentials at rest. Without a key the Telegram lifecycle refuses to store
 	// or read a bot token (an explicit error, never silent plaintext); WhatsApp
@@ -360,21 +549,52 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 		go tgMgr.Start(ctx)
 	}
 
-	waMgr, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
-		DeviceDBPath: cfg.Storage.WADeviceDBPath,
-		Store:        st,
-		Blob:         blobStore,
-		Queue:        q,
-		Hub:          hub,
-		Automation:   automationScheduler,
-		Response:     responseService,
-		STT:          func(ctx context.Context) stt.Params { return resolveSTTParams(ctx, credsChain, settingsStore, cfg) },
-		Log:          log,
-	})
-	if err != nil {
-		fatal("whatsmeow", err)
+	// sttParams resolves the CURRENT speech-to-text configuration — shared by
+	// whatsmeow's voice-note pipeline and worker.Worker.STT below, so both
+	// resolve identically. Mock mode never resolves a real provider/key at
+	// all, regardless of what's configured in Settings.
+	sttParams := func(ctx context.Context) stt.Params { return resolveSTTParams(ctx, credsChain, settingsStore, cfg) }
+	if cfg.System.MockExternals {
+		mockTranscriber := sttmock.New()
+		sttParams = func(ctx context.Context) stt.Params { return stt.Params{Transcriber: mockTranscriber} }
 	}
-	defer waMgr.Close()
+
+	// waMgr is the WhatsApp port every downstream consumer (senders,
+	// httpapi.Deps.WA) holds — whatsmeow.NewManager()/whatsapp.NewFake() are
+	// its only two implementations. waStart/waClose stand in for the real
+	// Manager's own Start/Close (reconnect-on-boot, device-store teardown),
+	// which whatsapp.Manager itself does not declare (a fake has neither a
+	// device store nor a live connection to tear down) — waSender likewise
+	// stands in for ChannelSender(), a method both implementations happen to
+	// share but whatsapp.Manager also does not declare.
+	var waMgr whatsapp.Manager
+	var waSender messaging.ChannelSender
+	waStart := func(context.Context) {}
+	waClose := func() {}
+	if cfg.System.MockExternals {
+		fakeWA := whatsapp.NewFake(st, hub, q)
+		waMgr = fakeWA
+		waSender = fakeWA.ChannelSender()
+	} else {
+		realWA, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
+			DeviceDBPath: cfg.Storage.WADeviceDBPath,
+			Store:        st,
+			Blob:         blobStore,
+			Queue:        q,
+			Hub:          hub,
+			Automation:   automationScheduler,
+			Response:     responseService,
+			STT:          sttParams,
+			Log:          log,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("whatsmeow: %w", err)
+		}
+		waMgr = realWA
+		waSender = realWA.ChannelSender()
+		waStart = realWA.Start
+		waClose = realWA.Close
+	}
 
 	// Meta channels (Instagram Direct, Messenger, WhatsApp Cloud API — see
 	// internal/meta's package doc). metaClient/waCloudClient/inboxSigner are
@@ -383,7 +603,15 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// (metaCredentialsAdapter, internal/httpapi), not baked in here, so a
 	// deployment with no Meta App ID/Secret saved yet still boots cleanly —
 	// every Meta route just answers META_APP_NOT_CONFIGURED until one is.
-	metaClient := meta.NewHTTP(cfg.MetaResolvedGraphAPIVersion(), log)
+	var metaClient meta.API
+	if cfg.System.MockExternals {
+		metaClient = metamock.New()
+	} else {
+		metaClient = meta.NewHTTP(cfg.MetaResolvedGraphAPIVersion(), log)
+	}
+	// whatsappcloud.Client/messengerish.Client below run their own real
+	// Send/Profile/Subscribe/... logic completely unmodified atop metaClient
+	// — mock or real, they contain no mock-specific branch of their own.
 	waCloudClient := whatsappcloud.NewClient(metaClient)
 	// messengerishClient is shared by Instagram Direct and Messenger (Phase
 	// 5) — both speak the same Graph send/webhook shape, see
@@ -397,7 +625,7 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	metaProc := metaingest.New(metaingest.Deps{Store: st, Queue: q, Hub: hub, Automation: automationScheduler, Log: log})
 
 	senders := messaging.NewSenderRegistry()
-	senders.Register(messaging.ChannelWhatsApp, waMgr.ChannelSender())
+	senders.Register(messaging.ChannelWhatsApp, waSender)
 	senders.Register(messaging.ChannelSimulator, simulator.NewChannelSender())
 	senders.Register(messaging.ChannelTelegram, telegram.NewChannelSender(tg, st, blobStore))
 	// *store.Store satisfies whatsappcloud.AccountSource and MediaSource
@@ -414,7 +642,12 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	w := &worker.Worker{
 		Store: st, Queue: q, TG: tg, WACloud: waCloudClient, MetaClient: metaClient, Blob: blobStore, Hub: hub,
 		Response: responseService, Senders: senders, Log: log, Automation: automationScheduler,
-		STT: func(ctx context.Context) stt.Params { return resolveSTTParams(ctx, credsChain, settingsStore, cfg) },
+		STT: sttParams,
+	}
+	if cfg.System.MockExternals {
+		// The one outbound call in internal/worker not already covered by
+		// WACloud/MetaClient above — see workermock's own doc comment.
+		w.DirectMediaHTTP = workermock.DirectMediaClient{}
 	}
 	q.Start(ctx, w.Handle)
 
@@ -463,8 +696,9 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 			log.Info("meta origin repair", "repaired", repaired, "stale", stale)
 		}
 	}()
-	// Reconnects every saved WhatsApp account without re-scanning a QR code.
-	go waMgr.Start(ctx)
+	// Reconnects every saved WhatsApp account without re-scanning a QR code
+	// (a no-op in mock mode — waStart is whatsapp.Fake's own placeholder).
+	go waStart(ctx)
 	// Claims due debounce deadlines into dispatch jobs and runs them; its
 	// own startup pass re-publishes whatever a crash left mid-flight, the
 	// same recovery philosophy as the Telegram media sweeper above.
@@ -481,10 +715,15 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// both landing in kbd_draft only — see that package's own doc comment
 	// for the safety boundary. Started before httpapi.New so the first
 	// request the server ever handles already sees a non-nil pipeline.
-	kbImportSvc := kbimport.New(kbimport.Deps{
+	kbImportDeps := kbimport.Deps{
 		KB: kb, Blob: blobStore, Credentials: credsChain, Settings: settingsStore,
 		LLM: llmRegistry, Hub: hub, Log: log, AllowPrivateFetch: cfg.KBAllowPrivateFetch,
-	}, kbimport.DefaultConfig())
+	}
+	if cfg.System.MockExternals {
+		kbImportDeps.Extractors = extractormock.NewRegistry()
+		kbImportDeps.Fetcher = kbimportmock.New()
+	}
+	kbImportSvc := kbimport.New(kbImportDeps, kbimport.DefaultConfig())
 	kbImportSvc.Start(ctx)
 
 	// The Knowledge Base chat assistant (/chat). It shares this process's one
@@ -495,9 +734,8 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// never reads a KB table itself.
 	chatDB, err := chatstore.New(ctx, cfg.Storage.DBPath)
 	if err != nil {
-		fatal("chatstore", err)
+		return nil, fmt.Errorf("chatstore: %w", err)
 	}
-	defer chatDB.Close()
 	chatSvc := chat.New(chat.Deps{
 		Store:  chatDB,
 		KB:     chatkb.NewStoreService(kb),
@@ -532,99 +770,70 @@ func runServe(cfg *config.Config, log *slog.Logger, resolvedConfigPath string) {
 	// none, the tunnel has no way to ever retrieve an authtoken, so it is
 	// absent (nil) rather than present-but-guaranteed-to-fail; every
 	// /settings/tunnel/* route already handles a nil Tunnel as "feature not
-	// available" (503 ErrTunnelUnavailable).
+	// available" (503 ErrTunnelUnavailable). Mock mode always gets a working
+	// (in-memory) tunnel regardless of credential store availability, so
+	// /settings/tunnel/* stays fully exercisable while profiling.
 	var tunnelMgr tunnel.Tunnel
-	if credsChain != nil {
+	switch {
+	case cfg.System.MockExternals:
+		tunnelMgr = tunnelmock.New()
+	case credsChain != nil:
 		tunnelMgr = tunnel.NewManager(tunnel.Deps{Creds: credsChain, Settings: settingsStore, Handler: router, Log: log})
 	}
 	srv.SetTunnel(tunnelMgr)
 
-	// e2eReady is the XCHATS_DESKTOP_E2E_HTTP readiness signal (see
-	// internal/desktop/e2e_http.go) — constructed unconditionally so
-	// shell.go can mark the window ready with nothing to check, and cheap
-	// enough that doing so regardless of whether E2E HTTP mode is actually
-	// enabled this run costs nothing.
-	e2eReady := &desktop.Readiness{}
-	httpServer := &http.Server{
-		Addr:    cfg.Server.HTTPAddr,
-		Handler: wrapE2EHTTP(router, cfg.Server.HTTPAddr, e2eReady),
-		// A8: an unauthenticated peer that opens a connection and trickles
-		// headers/body one byte at a time (Slowloris) previously tied up a
-		// connection indefinitely — net/http's zero-value Server has no
-		// timeouts at all. WriteTimeout is deliberately left at its zero
-		// value (unlimited): GET /xchats/api/v1/realtime is a long-lived SSE
-		// stream (internal/httpapi/sse.go) that must not be cut off mid-
-		// stream, and frontend/nginx.conf's proxy already assumes exactly
-		// that (proxy_read_timeout 1h).
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1 MiB
-	}
-
-	// Bound synchronously (rather than inside ListenAndServe, in the
-	// goroutine below) so e2eReady.SetBackendReady only fires once the
-	// socket is actually bound and queuing connections — the readiness
-	// endpoint's "backend" signal would otherwise be able to report true a
-	// moment before the port is really open.
-	listener, err := net.Listen("tcp", cfg.Server.HTTPAddr)
-	if err != nil {
-		fatal("listen", err)
-	}
-	e2eReady.SetBackendReady()
-	go func() {
-		log.Info("backend listening", "addr", cfg.Server.HTTPAddr)
-		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-			fatal("listen", err)
+	// The dedicated pprof listener (system.pprof_addr/PPROF_ADDR/--pprof-addr)
+	// — entirely separate from the router above, loopback-only, bound
+	// synchronously so an address conflict fails startup immediately rather
+	// than surfacing on the first profiling attempt.
+	var pprofSrv *pprofserver.Server
+	if cfg.System.PprofAddr != "" {
+		pprofSrv, err = pprofserver.Start(cfg.System.PprofAddr)
+		if err != nil {
+			return nil, fmt.Errorf("pprof: %w", err)
 		}
-	}()
-
-	var tunnelStartDone chan struct{}
-	if autoStartTunnel && tunnelMgr != nil {
-		tunnelStartDone = make(chan struct{})
-		go func() {
-			defer close(tunnelStartDone)
-			if err := tunnelMgr.Start(ctx); err != nil {
-				log.Warn("automatic ngrok tunnel start failed", "last_error", tunnelMgr.Status().LastError)
-				return
-			}
-			log.Info("ngrok tunnel started automatically", "public_url", tunnelMgr.Status().PublicURL)
-		}()
+		log.Info("pprof server listening", "addr", pprofSrv.Addr())
 	}
 
-	// The server build blocks here until SIGINT/SIGTERM. The desktop build
-	// (-tags desktop) instead runs the Wails window on this goroutine and
-	// returns when the user closes it, cancelling ctx on the way out — so
-	// the teardown below is the same sequence in both cases.
-	runUntilShutdown(ctx, stop, shellDeps{Router: router, Hub: hub, Log: log, Addr: cfg.Server.HTTPAddr, Ready: e2eReady})
-	log.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = httpServer.Shutdown(shutdownCtx)
-	if tunnelStartDone != nil {
-		<-tunnelStartDone
+	teardown := func(shutdownCtx context.Context) {
+		if tunnelMgr != nil {
+			_ = tunnelMgr.Stop(shutdownCtx)
+		}
+		// tgMgr and automationScheduler before q: the poller (via tgProc) and a
+		// scheduled_auto auto-send (via Runner.dispatchSend) both publish to the
+		// queue, so both producers must stop before the queue stops accepting.
+		// campaignScheduler never publishes to q (see its own construction
+		// comment above) so has no ordering requirement against q.Close() —
+		// stopped alongside the others here anyway, before waMgr.Close()/
+		// st.Close() below, so a tick already in flight finishes against
+		// still-live dependencies.
+		tgMgr.Close()
+		automationScheduler.Stop()
+		campaignScheduler.Stop()
+		simulatorReceipts.Stop()
+		q.Close()
+		// kbImportSvc has no producer/consumer relationship with q (its job
+		// queue is kbd_materials, claimed directly via kbstore) — it only needs
+		// to stop before kb.Close()/st.Close() run.
+		kbImportSvc.Stop()
+		// The same order runServe's own defers used to unwind in (LIFO by
+		// construction order) before this split: chatDB, then waMgr, then kb,
+		// then st, then Langfuse last.
+		chatDB.Close()
+		waClose()
+		kb.Close()
+		st.Close()
+		langfuseShutdown()
 	}
-	if tunnelMgr != nil {
-		_ = tunnelMgr.Stop(shutdownCtx)
-	}
-	// tgMgr and automationScheduler before q: the poller (via tgProc) and a
-	// scheduled_auto auto-send (via Runner.dispatchSend) both publish to the
-	// queue, so both producers must stop before the queue stops accepting.
-	// Explicit here (not a defer) so the ordering relative to q.Close() is
-	// guaranteed rather than left to defer's LIFO stacking. campaignScheduler
-	// never publishes to q (see its own construction comment above) so has
-	// no ordering requirement against q.Close() — stopped alongside the
-	// others here anyway, before the deferred waMgr.Close()/st.Close(), so a
-	// tick already in flight finishes against still-live dependencies.
-	tgMgr.Close()
-	automationScheduler.Stop()
-	campaignScheduler.Stop()
-	simulatorReceipts.Stop()
-	q.Close()
-	// kbImportSvc has no producer/consumer relationship with q (its job
-	// queue is kbd_materials, claimed directly via kbstore) — it only needs
-	// to stop before the deferred kb.Close()/st.Close() run.
-	kbImportSvc.Stop()
+
+	return &serverBundle{
+		Router:          router,
+		Hub:             hub,
+		TunnelMgr:       tunnelMgr,
+		PprofSrv:        pprofSrv,
+		AutoStartTunnel: autoStartTunnel,
+		Teardown:        teardown,
+	}, nil
 }
 
 // resolveConfigDir resolves the OS-appropriate per-user config directory
@@ -660,6 +869,40 @@ func applyDataDirFlag(v string) error {
 		return err
 	}
 	return os.Setenv("XCHATS_DATA_DIR", v)
+}
+
+// checkMockExternalsAllowed is runServe's A11 startup gate: mock externals
+// may never combine with environment=production (see MockExternals' own doc
+// comment on config.SystemConfig for what it fakes). Split out from runServe
+// so it's testable without booting a server.
+func checkMockExternalsAllowed(cfg *config.Config) error {
+	if cfg.System.MockExternals && cfg.IsProduction() {
+		return fmt.Errorf(
+			"system.mock_externals (MOCK_EXTERNALS/--mock-externals) is enabled but environment=production — " +
+				"refusing to start with fake external integrations in a production deployment")
+	}
+	return nil
+}
+
+// applyCLIOverrides applies --mock-externals/--pprof-addr onto cfg IN PLACE,
+// but only for flags actually present on this process's command line — fs.
+// Visit walks exactly those (unlike VisitAll, every registered flag), so
+// running with neither flag leaves whatever config.Load already resolved
+// from config.yaml/MOCK_EXTERNALS/PPROF_ADDR completely untouched, and
+// passing either flag always wins over both of those, matching every other
+// CLI-vs-config/env precedence rule in this file (see applyDataDirFlag). fs
+// is a parameter (main passes flag.CommandLine) rather than a hardcoded
+// package-level flag.Visit call so tests can exercise this against a
+// throwaway FlagSet instead of the process's real command line.
+func applyCLIOverrides(fs *flag.FlagSet, cfg *config.Config, mockExternals *bool, pprofAddr *string) {
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "mock-externals":
+			cfg.System.MockExternals = *mockExternals
+		case "pprof-addr":
+			cfg.System.PprofAddr = *pprofAddr
+		}
+	})
 }
 
 // resolveDataDir resolves the same OS application data directory
@@ -1063,6 +1306,28 @@ func runSeedDemo(ctx context.Context, cfg *config.Config, st *store.Store, log *
 		log.Info("seed-demo: channels, inbox drafts & assistant history seeded", "org_id", orgID)
 	} else {
 		log.Info("seed-demo: org has real channel accounts — demo workspace skipped", "org_id", orgID)
+	}
+	if cfg.System.MockExternals {
+		// The hermetic load harness's outbound-send route rotates through
+		// every seeded channel — without a resolvable credential, a send
+		// through the demo Telegram/Instagram/Messenger/WhatsApp Cloud
+		// accounts fails at credential lookup before ever reaching a mock
+		// transport. openCredentialsAndProvisionSecrets resolves the SAME
+		// durable encryption key runServe itself installs (writing it back
+		// into cfg.TelegramCredentialsEncKey as a side effect), so a token
+		// encrypted here decrypts correctly once the server boots against
+		// this same database — see SeedDemoMockCredentials' own doc comment.
+		openCredentialsAndProvisionSecrets(ctx, cfg, log)
+		if box, err := secretbox.FromEnvValue(cfg.TelegramCredentialsEncKey); err != nil {
+			log.Warn("seed-demo: no credentials box available; demo Telegram/Meta channel accounts will have no mock credential", "err", err)
+		} else {
+			st.UseCredentialsBox(box)
+			if err := st.SeedDemoMockCredentials(ctx); err != nil {
+				log.Warn("seed-demo: mock credential backfill failed", "err", err)
+			} else {
+				log.Info("seed-demo: mock credentials backfilled for telegram/instagram/messenger/whatsapp_cloud demo accounts", "org_id", orgID)
+			}
+		}
 	}
 
 	blobStore, err := blob.NewDisk(cfg.Storage.BlobDir)

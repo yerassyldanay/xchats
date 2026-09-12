@@ -38,7 +38,8 @@ PORTS ?= 8080 8090 5173 8081
 
 .PHONY: help up up-fg down logs ps kill-ports migrate seed seed-local seed-demo seed-kb-demo dev-backend dev-frontend \
         test test-backend test-frontend test-e2e build screenshots lint lint-backend lint-frontend notices ruleset-apply \
-        desktop-tools desktop-assets desktop-dev desktop-build desktop-clean desktop-test-ui
+        desktop-tools desktop-assets desktop-dev desktop-build desktop-clean desktop-test-ui \
+        profile-server profile-load profile-view profile-trace profile-bench profile-compare
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -106,6 +107,29 @@ test-e2e: ## Full demo loop + KB/response service DB-backed suites (subset of te
 	cd $(BACKEND) && go test -count=1 \
 		./internal/httpapi/ ./internal/kbstore/ \
 		./internal/responsestore/ ./internal/store/
+
+# --- Hermetic profiling / load harness (see scripts/profile/) -------------
+# Every target below is a thin wrapper over scripts/profile/*.sh — see
+# scripts/profile/lib.sh's own header comment for the run-directory layout
+# and the active-run marker these scripts share. All state lives under
+# .cache/profiles/ (gitignored) unless PROFILE_DATA_DIR overrides it.
+profile-server: ## Build+seed (mock-externals) an isolated backend and run it in the foreground with pprof enabled. PROFILE_RACE=1 builds with -race; PROFILE_DATA_DIR=dir pins the run directory (never auto-deleted); PROFILE_CLEAN=1 deletes an auto-created one on exit.
+	@./scripts/profile/server.sh
+
+profile-load: ## Run load against the active profile-server; capture CPU (30s) + heap/goroutine/mutex/block; open the CPU pprof UI (PROFILE_VIEW=none for headless). LOAD_CONCURRENCY/LOAD_WARMUP/LOAD_DURATION/LOAD_SEED override the load harness's own defaults.
+	@./scripts/profile/load.sh
+
+profile-view: ## Reopen a captured profile's pprof UI: make profile-view PROFILE=cpu|heap-alloc|heap-inuse|mutex|block (defaults to the active run, else the latest one).
+	@./scripts/profile/view.sh
+
+profile-trace: ## Run load against the active profile-server, capture+validate a 10s execution trace, then open `go tool trace`.
+	@./scripts/profile/trace.sh
+
+profile-bench: ## Ten-sample benchmark run for profile-compare: make profile-bench OUT=.cache/profiles/baseline.txt
+	@./scripts/profile/bench.sh
+
+profile-compare: ## Compare two profile-bench outputs with benchstat: make profile-compare BASE=... NEW=...
+	@./scripts/profile/compare.sh
 
 build: ## Build backend binary + frontend bundle
 	cd $(BACKEND) && go build -o bin/xchats ./cmd/xchats
