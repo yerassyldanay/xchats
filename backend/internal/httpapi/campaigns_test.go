@@ -479,6 +479,41 @@ func TestCampaignRetryFailed(t *testing.T) {
 	}
 }
 
+// TestCampaignRetryFailed_RejectedWhenCampaignTerminal guards against a
+// recipient silently stuck forever: a terminal campaign (completed here) has
+// no transition back to running (purecampaign.CanTransition), and the
+// Scheduler only ever claims recipients from a RUNNING campaign — so
+// resetting a failed recipient to 'pending' on one would leave it visibly
+// "pending" but never actually resent. The request must be rejected instead
+// of silently no-oping the recipient into that stuck state.
+func TestCampaignRetryFailed_RejectedWhenCampaignTerminal(t *testing.T) {
+	h := newHarness(t)
+	c := h.createCampaign(t, "Promo", "Hi!")
+	h.replaceRecipients(t, c.ID, "77011234567,Aigul")
+	h.startCampaign(t, c.ID)
+	rid := h.markOneRecipientFailed(t, c.ID)
+
+	cid, err := uuid.Parse(c.ID)
+	if err != nil {
+		t.Fatalf("parse campaign id: %v", err)
+	}
+	if _, err := h.store.SetCampaignStatus(context.Background(), cid, purecampaign.StatusCompleted, uuid.NullUUID{}, "completed", nil); err != nil {
+		t.Fatalf("complete campaign: %v", err)
+	}
+
+	resp, env := h.postJSON("/xchats/api/v1/campaigns/"+c.ID+"/recipients/retry-failed", map[string]any{"recipient_ids": []string{rid}})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status=%d body=%s, want 409", resp.StatusCode, env["message"])
+	}
+	if string(env["errcode"]) != `"CAMPAIGN_LOCKED"` {
+		t.Errorf("errcode = %s", env["errcode"])
+	}
+	counts := h.campaignCounts(t, c.ID)
+	if counts["failed"] != 1 || counts["pending"] != 0 {
+		t.Errorf("counts after rejected retry = %v, want failed=1 pending=0 (recipient must stay put)", counts)
+	}
+}
+
 func TestAccountSendingBudgetAndLimits(t *testing.T) {
 	h := newHarness(t)
 

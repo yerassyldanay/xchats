@@ -82,6 +82,14 @@ watch(campaignId, () => {
 // write regardless.
 const canEditContent = computed(() => (campaign.value?.recipient_counts.sent ?? 0) === 0)
 const canEditPacing = computed(() => !!campaign.value && ['draft', 'scheduled', 'paused'].includes(campaign.value.status))
+// Mirrors backend/campaign.IsTerminal: once a campaign is completed, failed,
+// or cancelled there is no transition back to running (CanTransition), and
+// the Scheduler only ever claims recipients from a RUNNING campaign — so
+// resetting a failed recipient to pending here would leave it stuck forever,
+// looking "pending" but never actually resent. See internal/httpapi/
+// campaigns.go's handleRetryFailedCampaignRecipients, which enforces the
+// same rule server-side.
+const canRetryFailed = computed(() => !!campaign.value && !['completed', 'failed', 'cancelled'].includes(campaign.value.status))
 
 function formatWhen(iso: string | null): string {
   if (!iso) return ''
@@ -399,7 +407,7 @@ function setEventsPage(p: number) {
               </Button>
             </div>
             <div class="flex items-center gap-2">
-              <Button type="button" size="sm" variant="outline" :disabled="retrying" @click="retryFailed">
+              <Button v-if="canRetryFailed" type="button" size="sm" variant="outline" :disabled="retrying" @click="retryFailed">
                 <RotateCcw class="w-4 h-4" /> {{ t('campaigns.actions.retryFailed') }}
               </Button>
               <Button v-if="canEditPacing" type="button" size="sm" variant="outline" @click="replacing = !replacing">

@@ -576,6 +576,16 @@ func (s *Server) handleRetryFailedCampaignRecipients(c *gin.Context) {
 	if !okC {
 		return
 	}
+	// A terminal campaign (completed/failed/cancelled) has no outgoing
+	// transition back to running (purecampaign.CanTransition) and the
+	// Scheduler only ever claims recipients from a RUNNING campaign
+	// (store.ClaimNextRecipient's own query) — resetting a recipient to
+	// 'pending' here without this guard would leave it permanently stuck:
+	// visibly "pending" forever, with nothing that will ever send it.
+	if purecampaign.IsTerminal(purecampaign.Status(camp.Status)) {
+		fail(c, http.StatusConflict, ErrCampaignLocked, "cannot retry recipients on a campaign that has already completed, failed, or been cancelled")
+		return
+	}
 	var req retryFailedCampaignRecipientsReq
 	_ = c.ShouldBindJSON(&req)
 	ids := make([]uuid.UUID, 0, len(req.RecipientIDs))
