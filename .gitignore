@@ -105,3 +105,7 @@ id_rsa*
 
 .claude
 .cache
+
+# scripts/load's own build output (`go build ./...` with no -o writes a
+# binary named after the module into the current directory).
+scripts/load/xchats-load

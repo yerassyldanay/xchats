@@ -33,5 +33,7 @@ ln -s /Applications "$STAGE/Applications"
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
-hdiutil create -volname "xchats" -srcfolder "$STAGE" -ov -format UDZO "$OUT"
+STAGE_MB="$(du -sm "$STAGE" | cut -f1)"
+STAGE_SIZE_MB="$((STAGE_MB + 128))"
+hdiutil create -volname "xchats" -srcfolder "$STAGE" -ov -format UDZO -size "${STAGE_SIZE_MB}m" "$OUT"
 hdiutil imageinfo "$OUT" | head -5

@@ -13,13 +13,15 @@ import (
 )
 
 // Client is WhatsApp Cloud API's own Graph operations, layered on the
-// shared meta.Client transport.
+// shared meta.API transport.
 type Client struct {
-	http *meta.Client
+	http meta.API
 }
 
-// NewClient wraps an already-constructed meta.Client.
-func NewClient(http *meta.Client) *Client {
+// NewClient wraps an already-constructed meta.API (the real *meta.Client in
+// production; a fake in cmd/xchats' mock-externals mode — see meta.API's own
+// doc comment).
+func NewClient(http meta.API) *Client {
 	return &Client{http: http}
 }
 

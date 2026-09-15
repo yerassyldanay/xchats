@@ -170,7 +170,11 @@ jobs:
       # preinstalled on windows-latest.
       - name: Install NSIS
         if: matrix.name == 'windows'
-        run: choco install -y nsis --no-progress
+        run: |
+          choco install -y nsis --no-progress
+          $nsisDir = if (Test-Path "C:\Program Files (x86)\NSIS") { "C:\Program Files (x86)\NSIS" } elseif (Test-Path "C:\Program Files\NSIS") { "C:\Program Files\NSIS" } else { "C:\ProgramData\chocolatey\bin" }
+          $nsisDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $nsisDir "makensis.exe") /VERSION
 
       - name: Install the Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}

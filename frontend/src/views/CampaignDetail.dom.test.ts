@@ -357,3 +357,39 @@ describe('CampaignDetail — post-creation launch banner (CAM-07)', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 })
+
+// Retrying a failed recipient on a terminal campaign (completed/failed/
+// cancelled) would reset it to 'pending' with no way for it to ever
+// actually go out again — the Scheduler only claims from a RUNNING
+// campaign, and a terminal campaign has no transition back to running
+// (backend/campaign.CanTransition). The button must not offer an action
+// that silently strands the recipient — see internal/httpapi/campaigns.go's
+// handleRetryFailedCampaignRecipients, which enforces the same rule
+// server-side.
+describe('CampaignDetail — Retry failed hidden on a terminal campaign', () => {
+  it('hides Retry failed once the campaign has completed', async () => {
+    const { wrapper } = await mountDetail({ status: 'completed' })
+    await openRecipientsTab(wrapper)
+
+    const retryButton = wrapper.findAll('button').find((b) => b.text().includes('Повторить ошибки'))
+    expect(retryButton).toBeUndefined()
+  })
+
+  it('hides Retry failed once the campaign was cancelled or failed', async () => {
+    for (const status of ['cancelled', 'failed'] as const) {
+      const { wrapper } = await mountDetail({ status })
+      await openRecipientsTab(wrapper)
+      const retryButton = wrapper.findAll('button').find((b) => b.text().includes('Повторить ошибки'))
+      expect(retryButton, `status=${status}`).toBeUndefined()
+    }
+  })
+
+  it('still shows Retry failed while the campaign is running or paused', async () => {
+    for (const status of ['running', 'paused'] as const) {
+      const { wrapper } = await mountDetail({ status })
+      await openRecipientsTab(wrapper)
+      const retryButton = wrapper.findAll('button').find((b) => b.text().includes('Повторить ошибки'))
+      expect(retryButton, `status=${status}`).toBeDefined()
+    }
+  })
+})

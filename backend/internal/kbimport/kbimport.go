@@ -77,6 +77,17 @@ type Deps struct {
 	// allow a private host (self-hosting either vendor on the operator's
 	// own network is a real, intentional use case; see resolveProvider).
 	AllowPrivateFetch bool
+	// Extractors, when set, is used INSTEAD of resolveProvider's own
+	// per-call construction — cmd/xchats' mock-externals composition root's
+	// seam (see extractor/extractormock). nil (the default) preserves
+	// today's real construction (native/firecrawl/llamaparse, credential-
+	// gated) exactly.
+	Extractors *extractor.Registry
+	// Fetcher, when set, replaces every direct safefetch call this package
+	// makes for an operator-submitted URL (Submit's own precheck,
+	// downloadOneImage) — see URLFetcher's own doc comment. nil (the
+	// default) uses safefetch directly, unchanged.
+	Fetcher URLFetcher
 }
 
 // Config is the pipeline's tunables — see DefaultConfig for the shipped
@@ -210,6 +221,13 @@ func (s *Service) notify() {
 // credentials/settings fresh on every call — "keys resolve per run, not at
 // boot, so a just-saved key works without a restart."
 func (s *Service) resolveProvider(ctx context.Context, name string) (extractor.Provider, error) {
+	if s.deps.Extractors != nil {
+		p, ok := s.deps.Extractors.Get(name)
+		if !ok {
+			return nil, fmt.Errorf("%w: unknown provider %q", ErrValidation, name)
+		}
+		return p, nil
+	}
 	switch name {
 	case "native":
 		return extractor.NewNative(safefetch.Client(s.deps.AllowPrivateFetch, s.cfg.ExtractTimeout), s.cfg.MaxPageBytes), nil
@@ -241,6 +259,10 @@ func (s *Service) resolveProvider(ctx context.Context, name string) (extractor.P
 // unknown name reports (false, false), matching Submit's own rejection of
 // it.
 func (s *Service) ProviderStatus(ctx context.Context, name string) (requiresCredential, configured bool) {
+	if s.deps.Extractors != nil {
+		_, ok := s.deps.Extractors.Get(name)
+		return false, ok
+	}
 	switch name {
 	case "native":
 		return false, true

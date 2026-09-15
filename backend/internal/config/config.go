@@ -81,6 +81,19 @@ type SystemConfig struct {
 	// automation.EffectiveWaitSeconds, the one place default-vs-override
 	// resolution happens.
 	CustomerMessageWaitSeconds int `yaml:"customer_message_wait_seconds" env:"CUSTOMER_MESSAGE_WAIT_SECONDS"`
+	// MockExternals switches every outbound-network integration (LLM
+	// providers, WhatsApp/Telegram/Meta channels, STT, ngrok, KB import
+	// extractors, update checks, credential probes, MCP client-metadata
+	// discovery) to in-memory fakes, for hermetic local profiling/load
+	// testing — see cmd/xchats' composition root. cmd/xchats refuses to boot
+	// with this set while Environment is "production" (see
+	// runServe/shouldRefuseMockExternalsInProduction). CLI --mock-externals
+	// outranks this env/yaml value — see applyCLIOverrides.
+	MockExternals bool `yaml:"mock_externals" env:"MOCK_EXTERNALS"`
+	// PprofAddr, when non-empty, starts a dedicated pprof HTTP server bound
+	// to this loopback address (e.g. "127.0.0.1:6060") — see cmd/xchats'
+	// profiling listener. CLI --pprof-addr outranks this env/yaml value.
+	PprofAddr string `yaml:"pprof_addr" env:"PPROF_ADDR"`
 }
 
 // TelegramModeConfig groups the Telegram settings that are boot/infra shaped

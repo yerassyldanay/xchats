@@ -15,7 +15,6 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/extractor"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
-	"github.com/yerassyldanay/xchats/backend/internal/safefetch"
 )
 
 // downloadEmbeddedImages fetches and stages up to Config.MaxImagesPerJob
@@ -66,7 +65,7 @@ func (s *Service) downloadEmbeddedImages(ctx context.Context, orgID, runID, pare
 // intent is uncertain, which is exactly what kb_media_upload's own "auto"
 // default is for (validateMediaRef only rejects "invisible").
 func (s *Service) downloadOneImage(ctx context.Context, orgID uuid.UUID, rawURL, alt string, runBudget int64) (uuid.UUID, int64, error) {
-	if err := safefetch.CheckURL(ctx, rawURL, s.deps.AllowPrivateFetch); err != nil {
+	if err := s.fetcher().CheckURL(ctx, rawURL, s.deps.AllowPrivateFetch); err != nil {
 		return uuid.Nil, 0, err
 	}
 	maxBytes := s.cfg.MaxImageBytes
@@ -77,16 +76,15 @@ func (s *Service) downloadOneImage(ctx context.Context, orgID uuid.UUID, rawURL,
 		return uuid.Nil, 0, fmt.Errorf("run image budget exhausted")
 	}
 
-	client := safefetch.Client(s.deps.AllowPrivateFetch, s.cfg.ExtractTimeout)
-	data, resp, err := safefetch.Get(ctx, client, rawURL, maxBytes)
+	data, statusCode, contentType, err := s.fetcher().Get(ctx, rawURL, s.deps.AllowPrivateFetch, s.cfg.ExtractTimeout, maxBytes)
 	if err != nil {
 		return uuid.Nil, 0, err
 	}
-	if resp.StatusCode != http.StatusOK {
-		return uuid.Nil, 0, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	if statusCode != http.StatusOK {
+		return uuid.Nil, 0, fmt.Errorf("unexpected status %d", statusCode)
 	}
 
-	mimeType := firstMediaType(resp.Header.Get("Content-Type"))
+	mimeType := firstMediaType(contentType)
 	if mimeType == "" {
 		mimeType = http.DetectContentType(data)
 	}
