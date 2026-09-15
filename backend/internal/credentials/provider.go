@@ -201,6 +201,20 @@ const maxValidateBody = 64 * 1024
 
 var validateHTTPClient = &http.Client{Timeout: validateTimeout}
 
+// SetValidateHTTPClient overrides the shared HTTP client every provider's
+// Validate hook sends its "test connection" request through (doGet) — the
+// one seam cmd/xchats' mock-externals composition root needs to guarantee a
+// Settings UI credential probe never reaches a real vendor. Passing nil
+// restores the real default. Not safe to call concurrently with a Validate
+// call in flight — callers set this once at boot, before the HTTP server
+// starts accepting requests.
+func SetValidateHTTPClient(c *http.Client) {
+	if c == nil {
+		c = &http.Client{Timeout: validateTimeout}
+	}
+	validateHTTPClient = c
+}
+
 // doGet issues a GET against url, applying setAuth (if non-nil) to the
 // request before sending it — the one place every validator's HTTP call
 // goes through, so the timeout and body cap apply uniformly.

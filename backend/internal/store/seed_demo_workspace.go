@@ -18,6 +18,39 @@ var (
 	demoWhatsAppCloudAccountID = uuid.MustParse("10000000-0000-4000-8000-000000000005")
 )
 
+// demoTelegramBotID/demoTelegramBotUsername mirror the literal values
+// seedDemoChannelAccounts writes into tg_accounts below — SeedDemoMockCredentials
+// must match them exactly, since ReplaceTelegramToken only succeeds against
+// an existing (id, bot_id) pair.
+const (
+	demoTelegramBotID       = 7007007070
+	demoTelegramBotUsername = "qazan_home_demo_bot"
+)
+
+// SeedDemoMockCredentials backfills a resolvable (fake) credential for every
+// demo-seeded Telegram/Instagram/Messenger/WhatsApp Cloud channel account —
+// cmd/xchats' mock-externals mode calls this once, after SeedDemoWorkspace,
+// so the hermetic load harness's outbound-send route can actually reach a
+// channel's ChannelSender instead of failing at credential resolution
+// before ever reaching an in-memory mock transport. WhatsApp itself needs no
+// entry: whatsmeow/whatsapp.Fake's pairing model carries no separate
+// "credential" row at all. A credentials box must already be installed
+// (UseCredentialsBox) — this returns ErrNoCredentialsKey otherwise, exactly
+// like every other credential write in this package; callers should treat
+// that as "skip, not fatal" (a run with no secure credential store simply
+// leaves the outbound-send bucket exercising WhatsApp/Simulator only).
+func (s *Store) SeedDemoMockCredentials(ctx context.Context) error {
+	if err := s.ReplaceTelegramToken(ctx, demoTelegramAccountID, demoTelegramBotID, demoTelegramBotUsername, "mock-telegram-bot-token"); err != nil {
+		return fmt.Errorf("seed demo mock credentials: telegram: %w", err)
+	}
+	for _, id := range []uuid.UUID{demoInstagramAccountID, demoMessengerAccountID, demoWhatsAppCloudAccountID} {
+		if err := s.SetChannelCredentials(ctx, ChannelCredentialsWrite{AccountID: id, Secret: "mock-channel-token", TokenKind: "mock"}); err != nil {
+			return fmt.Errorf("seed demo mock credentials: %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
 func demoAccountIDForChannel(channel string) uuid.UUID {
 	switch channel {
 	case "whatsapp":
