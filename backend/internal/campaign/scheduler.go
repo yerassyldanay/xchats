@@ -215,12 +215,13 @@ func (s *Scheduler) runMaintenance(ctx context.Context) {
 		s.Log.Error("campaign: list due scheduled campaigns failed", "err", err)
 	}
 	for _, id := range due {
-		if _, err := s.Store.SetCampaignStatus(ctx, id, purecampaign.StatusRunning, uuid.NullUUID{}, "auto_started",
-			map[string]any{"reason": "schedule_at reached"}); err != nil {
+		updated, err := s.Store.SetCampaignStatus(ctx, id, purecampaign.StatusRunning, uuid.NullUUID{}, "auto_started",
+			map[string]any{"reason": "schedule_at reached"})
+		if err != nil {
 			s.Log.Error("campaign: auto-start scheduled campaign failed", "campaign_id", id, "err", err)
 			continue
 		}
-		s.Runner.Hub.Broadcast("campaign.status_changed", dto.CampaignStatusEvent{CampaignID: id.String(), Status: string(purecampaign.StatusRunning)})
+		s.Runner.Hub.BroadcastScoped(updated.OrganizationID, "campaign.status_changed", dto.CampaignStatusEvent{CampaignID: id.String(), Status: string(purecampaign.StatusRunning)})
 	}
 
 	running, err := s.Store.RunningCampaignIDs(ctx)
@@ -267,7 +268,7 @@ func (s *Scheduler) checkDisconnects(ctx context.Context) {
 		}
 		if n > 0 {
 			s.Log.Warn("campaign: auto-paused campaigns on disconnected account", "account_id", id, "count", n)
-			s.Runner.Hub.Broadcast("campaign.account_auto_paused", accountAutoPausedEvent{AccountID: id.String(), Count: n})
+			s.Runner.Hub.BroadcastScoped(acct.OrganizationID.UUID, "campaign.account_auto_paused", accountAutoPausedEvent{AccountID: id.String(), Count: n})
 		}
 	}
 	s.forgetReconnected(seen)

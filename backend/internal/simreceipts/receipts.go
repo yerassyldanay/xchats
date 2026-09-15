@@ -32,6 +32,7 @@ import (
 // receipt webhook would also trigger).
 type Broadcaster interface {
 	Broadcast(name string, data any)
+	BroadcastScoped(orgID uuid.UUID, name string, data any)
 }
 
 // Config is ReceiptSimulator's runtime tunables. NewReceiptSimulator fills
@@ -151,22 +152,34 @@ func (r *ReceiptSimulator) advance(ctx context.Context, olderThan time.Time, fro
 		if eligible != nil && !eligible(c.Destination) {
 			continue
 		}
-		msgID, chatID, err := r.Store.AdvanceDeliveryState(ctx, "simulator", c.AccountID, c.ExternalMessageID, toState, toRank)
+		msgID, _, err := r.Store.AdvanceDeliveryState(ctx, "simulator", c.AccountID, c.ExternalMessageID, toState, toRank)
 		if err != nil {
 			if !errors.Is(err, store.ErrNotFound) {
 				r.Log.Error("simulator: advance delivery state failed", "message_id", c.MessageID, "to", toState, "err", err)
 			}
 			continue
 		}
-		r.emitMessage(ctx, msgID, chatID)
+		r.emitMessage(ctx, msgID, c.AccountID)
 	}
 }
 
-func (r *ReceiptSimulator) emitMessage(ctx context.Context, messageID, _ uuid.UUID) {
+func (r *ReceiptSimulator) emitMessage(ctx context.Context, messageID, accountID uuid.UUID) {
 	msg, err := r.Store.MessageByID(ctx, messageID)
 	if err != nil {
 		r.Log.Error("simulator: load message for broadcast failed", "message_id", messageID, "err", err)
 		return
 	}
-	r.Hub.Broadcast("message.updated", dto.MapMessage(msg))
+	r.Hub.BroadcastScoped(r.orgIDFor(ctx, accountID), "message.updated", dto.MapMessage(msg))
+}
+
+// orgIDFor resolves accountID's owning organization for realtime scoping —
+// best-effort: a lookup failure yields uuid.Nil, which BroadcastScoped
+// treats as unscoped rather than silently dropping the event for every
+// subscriber. Mirrors internal/outbound.Deps.orgIDFor.
+func (r *ReceiptSimulator) orgIDFor(ctx context.Context, accountID uuid.UUID) uuid.UUID {
+	acct, err := r.Store.AccountByID(ctx, accountID)
+	if err != nil {
+		return uuid.Nil
+	}
+	return acct.OrganizationID.UUID
 }

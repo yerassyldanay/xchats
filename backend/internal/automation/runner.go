@@ -30,6 +30,7 @@ const maxDispatchAttempts = 5
 // Broadcaster.
 type Broadcaster interface {
 	Broadcast(name string, data any)
+	BroadcastScoped(orgID uuid.UUID, name string, data any)
 }
 
 // Runner executes one dispatch job: generate a draft (version-gated against
@@ -115,6 +116,7 @@ func (r *Runner) HandleRun(ctx context.Context, dispatchJobID uuid.UUID) {
 		return
 	}
 
+	orgID := r.orgIDFor(ctx, job.AccountID)
 	for _, p := range persisted {
 		id, perr := uuid.Parse(p.ID)
 		if perr != nil {
@@ -126,9 +128,9 @@ func (r *Runner) HandleRun(ctx context.Context, dispatchJobID uuid.UUID) {
 			r.Log.Error("automation: reload persisted draft failed", "draft_id", p.ID, "err", derr)
 			continue
 		}
-		r.Hub.Broadcast("ai_draft.created", dto.MapDraft(d))
+		r.Hub.BroadcastScoped(orgID, "ai_draft.created", dto.MapDraft(d))
 		if settings.Mode == string(pureautomation.ModeScheduledAuto) {
-			r.maybeAutoSend(ctx, job, d, settings)
+			r.maybeAutoSend(ctx, job, d, settings, orgID)
 		}
 	}
 	_ = r.Store.DeleteDispatchJob(ctx, job.ID)
@@ -169,7 +171,7 @@ func (r *Runner) generate(ctx context.Context, job store.DispatchJob) (persisted
 // more atomic recheck (mode, human replies, the latest inbound message,
 // draft state) immediately before claiming — any failed check falls back to
 // the exact same "leave it as a suggestion" outcome, never an error.
-func (r *Runner) maybeAutoSend(ctx context.Context, job store.DispatchJob, d store.Draft, settings store.AutomationSettings) {
+func (r *Runner) maybeAutoSend(ctx context.Context, job store.DispatchJob, d store.Draft, settings store.AutomationSettings, orgID uuid.UUID) {
 	windows, err := r.Store.AutomationWindowsForAccount(ctx, job.AccountID)
 	if err != nil {
 		r.Log.Error("automation: load schedule windows failed", "account_id", job.AccountID, "err", err)
@@ -187,13 +189,13 @@ func (r *Runner) maybeAutoSend(ctx context.Context, job store.DispatchJob, d sto
 	if !ok {
 		return
 	}
-	r.dispatchSend(ctx, job, sent)
+	r.dispatchSend(ctx, job, sent, orgID)
 }
 
 // dispatchSend records the auto-sent message (without clearing unread — see
 // store.InsertAutomationOutbound) and hands it to the same channel-neutral
 // outbound queue every manual and approved-AI send already uses.
-func (r *Runner) dispatchSend(ctx context.Context, job store.DispatchJob, d store.Draft) {
+func (r *Runner) dispatchSend(ctx context.Context, job store.DispatchJob, d store.Draft, orgID uuid.UUID) {
 	chat, err := r.Store.ChatByID(ctx, job.ChatID)
 	if err != nil {
 		r.Log.Error("automation: load chat for auto-send failed", "chat_id", job.ChatID, "err", err)
@@ -208,9 +210,9 @@ func (r *Runner) dispatchSend(ctx context.Context, job store.DispatchJob, d stor
 		r.Log.Error("automation: set draft sent failed", "draft_id", d.ID, "err", err)
 	}
 	if msg, merr := r.Store.MessageByID(ctx, msgID); merr == nil {
-		r.Hub.Broadcast("message.created", dto.MapMessage(msg))
+		r.Hub.BroadcastScoped(orgID, "message.created", dto.MapMessage(msg))
 	}
-	r.Hub.Broadcast("ai_draft.updated", dto.MapDraft(d))
+	r.Hub.BroadcastScoped(orgID, "ai_draft.updated", dto.MapDraft(d))
 
 	pctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -220,6 +222,18 @@ func (r *Runner) dispatchSend(ctx context.Context, job store.DispatchJob, d stor
 	}}); err != nil {
 		r.Log.Error("automation: enqueue auto-send failed", "message_id", msgID, "err", err)
 	}
+}
+
+// orgIDFor resolves accountID's owning organization for realtime scoping —
+// best-effort: a lookup failure yields uuid.Nil, which BroadcastScoped
+// treats as unscoped rather than silently dropping the event for every
+// subscriber. Mirrors internal/outbound.Deps.orgIDFor.
+func (r *Runner) orgIDFor(ctx context.Context, accountID uuid.UUID) uuid.UUID {
+	acct, err := r.Store.AccountByID(ctx, accountID)
+	if err != nil {
+		return uuid.Nil
+	}
+	return acct.OrganizationID.UUID
 }
 
 func toPureWindows(ws []store.AutomationWindow) []pureautomation.Window {

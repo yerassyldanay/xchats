@@ -105,14 +105,26 @@ type CampaignRecipientInput struct {
 	Attributes         map[string]string
 }
 
-// CampaignEvent is one row of a campaign's audit timeline.
+// CampaignEvent is one row of a campaign's audit timeline — a campaign-
+// lifecycle event (actor_user_id set, or NULL for a system-originated one,
+// e.g. auto_paused) with every recipient/attempt/connection field below
+// NULL, or a recipient/attempt-level diagnostic event (actor_user_id always
+// NULL — the campaign engine, never a person, produces these) with
+// CampaignRecipientID set and the rest populated as available. See
+// migrations/sqlite/0020_campaign_diagnostics.up.sql's own doc comment.
 type CampaignEvent struct {
-	ID          uuid.UUID
-	CampaignID  uuid.UUID
-	Event       string
-	ActorUserID uuid.NullUUID
-	Detail      map[string]any
-	CreatedAt   time.Time
+	ID                  uuid.UUID
+	CampaignID          uuid.UUID
+	Event               string
+	ActorUserID         uuid.NullUUID
+	Detail              map[string]any
+	CreatedAt           time.Time
+	CampaignRecipientID uuid.NullUUID
+	AttemptID           uuid.NullUUID
+	AccountID           string
+	ChatID              uuid.NullUUID
+	MessageID           uuid.NullUUID
+	ErrorCode           string
 }
 
 // CampaignAccountSettings is one account's pace + manual pause switch.
@@ -160,8 +172,10 @@ type CampaignWindow struct {
 // the campaign runner needs to render and send, in one round trip.
 type Claim struct {
 	LogID              uuid.UUID
+	AttemptID          uuid.UUID
 	RecipientID        uuid.UUID
 	CampaignID         uuid.UUID
+	OrganizationID     uuid.UUID
 	AccountID          uuid.UUID
 	Channel            string
 	NormalizedIdentity string
@@ -169,12 +183,20 @@ type Claim struct {
 	Attributes         map[string]string
 	MessageBody        string
 	Attempts           int // the NEW attempt count, post-increment (1 on a first try)
+	// ChatID/MessageID are the recipient's ALREADY-resolved chat/message from
+	// an earlier attempt, if any (NULL on a first attempt). The runner must
+	// reuse them rather than resolving a chat or inserting a message again —
+	// see internal/campaign.Runner.send's own doc comment: retrying a send
+	// must never create a second logical message for the same recipient.
+	ChatID    uuid.NullUUID
+	MessageID uuid.NullUUID
 }
 
 // FinalizeAttemptParams is FinalizeAttempt's input — see that method's doc
 // comment for the at-most-once story this closes out.
 type FinalizeAttemptParams struct {
 	LogID         uuid.UUID
+	AttemptID     uuid.UUID
 	RecipientID   uuid.UUID
 	NewStatus     purecampaign.RecipientStatus // Sent, Pending (will retry) or Failed (terminal)
 	FailureReason string
@@ -183,6 +205,23 @@ type FinalizeAttemptParams struct {
 	// NextAttemptAt is the backoff floor a transient failure being retried
 	// (NewStatus == RecipientPending) sets; ignored otherwise.
 	NextAttemptAt *time.Time
+
+	// The fields below extend the at-most-once claim/finalize story with
+	// structured, non-pruned diagnostics on campaign_send_attempts — see
+	// migrations/sqlite/0020_campaign_diagnostics.up.sql's own doc comment.
+	// AttemptOutcome is the attempt's own outcome, which is NOT always the
+	// same thing as NewStatus: an ambiguous timeout finalizes the RECIPIENT
+	// as 'failed' (existing vocabulary, unchanged) while the ATTEMPT itself
+	// is honestly recorded as 'unknown', never 'failed' — see
+	// internal/campaign.Runner.finalize's own doc comment.
+	AttemptOutcome    string // "provider_accepted" | "failed" | "unknown"
+	ErrorCode         string
+	Retryable         *bool
+	ProviderMessageID string
+	// Event, when non-empty, appends one campaign_events row alongside the
+	// attempt/recipient update, in the SAME transaction — see
+	// insertDiagnosticEvent.
+	Event string
 }
 
 // SendingBudgetTier is one tier's live usage, for the UI's budget widget.
@@ -529,24 +568,101 @@ func (s *Store) AppendCampaignEvent(ctx context.Context, campaignID uuid.UUID, e
 	return insertCampaignEvent(ctx, s.db, campaignID, event, actorUserID, detail)
 }
 
-// ListCampaignEvents returns a campaign's timeline, newest first, plus the total.
+// diagnosticEvent is insertDiagnosticEvent's input — the recipient/attempt-
+// level counterpart to insertCampaignEvent's campaign-lifecycle shape (see
+// migrations/sqlite/0020_campaign_diagnostics.up.sql). Every ID field is
+// optional; a zero-value NullUUID/empty string is stored as NULL.
+type diagnosticEvent struct {
+	CampaignID          uuid.UUID
+	Event               string
+	CampaignRecipientID uuid.NullUUID
+	AttemptID           uuid.NullUUID
+	AccountID           string
+	ChatID              uuid.NullUUID
+	MessageID           uuid.NullUUID
+	ErrorCode           string
+	Detail              map[string]any
+}
+
+// insertDiagnosticEvent appends one recipient/attempt-level row to the SAME
+// campaign_events table insertCampaignEvent writes campaign-lifecycle rows
+// to — reusing the existing append-only timeline model rather than adding a
+// parallel one, per this feature's own design constraint.
+func insertDiagnosticEvent(ctx context.Context, q dbx.DBTX, e diagnosticEvent) error {
+	if e.Detail == nil {
+		e.Detail = map[string]any{}
+	}
+	detailJSON, err := json.Marshal(e.Detail)
+	if err != nil {
+		return wrap("marshal diagnostic event detail", err)
+	}
+	var recipientArg, attemptArg, accountArg, chatArg, msgArg, errorCodeArg any
+	if e.CampaignRecipientID.Valid {
+		recipientArg = e.CampaignRecipientID.UUID
+	}
+	if e.AttemptID.Valid {
+		attemptArg = e.AttemptID.UUID
+	}
+	if e.AccountID != "" {
+		accountArg = e.AccountID
+	}
+	if e.ChatID.Valid {
+		chatArg = e.ChatID.UUID
+	}
+	if e.MessageID.Valid {
+		msgArg = e.MessageID.UUID
+	}
+	if e.ErrorCode != "" {
+		errorCodeArg = e.ErrorCode
+	}
+	_, err = q.Exec(ctx, `
+		INSERT INTO campaign_events (campaign_id, event, campaign_recipient_id, attempt_id, account_id, chat_id, message_id, error_code, detail)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		e.CampaignID, e.Event, recipientArg, attemptArg, accountArg, chatArg, msgArg, errorCodeArg, string(detailJSON))
+	return wrap("insert diagnostic event", err)
+}
+
+const campaignEventCols = `id, campaign_id, event, actor_user_id, detail, created_at,
+	campaign_recipient_id, attempt_id, account_id, chat_id, message_id, error_code`
+
+func scanCampaignEvent(row dbx.Scanner) (CampaignEvent, error) {
+	var e CampaignEvent
+	var detailRaw string
+	var accountID *string
+	var errorCode *string
+	if err := row.Scan(&e.ID, &e.CampaignID, &e.Event, &e.ActorUserID, &detailRaw, &e.CreatedAt,
+		&e.CampaignRecipientID, &e.AttemptID, &accountID, &e.ChatID, &e.MessageID, &errorCode); err != nil {
+		return e, err
+	}
+	e.Detail = decodeAnyMap(detailRaw)
+	if accountID != nil {
+		e.AccountID = *accountID
+	}
+	if errorCode != nil {
+		e.ErrorCode = *errorCode
+	}
+	return e, nil
+}
+
+// ListCampaignEvents returns a campaign's timeline, newest first, plus the
+// total — every campaign-lifecycle AND recipient/attempt-level diagnostic
+// event this campaign has, undifferentiated (callers distinguish by
+// CampaignRecipientID being set, or by Event's own name).
 func (s *Store) ListCampaignEvents(ctx context.Context, campaignID uuid.UUID, limit, offset int) ([]CampaignEvent, int, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, campaign_id, event, actor_user_id, detail, created_at
+		SELECT `+campaignEventCols+`
 		FROM campaign_events WHERE campaign_id = $1
-		ORDER BY created_at DESC LIMIT $2 OFFSET $3`, campaignID, limit, offset)
+		ORDER BY created_at DESC, rowid DESC LIMIT $2 OFFSET $3`, campaignID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []CampaignEvent
 	for rows.Next() {
-		var e CampaignEvent
-		var detailRaw string
-		if err := rows.Scan(&e.ID, &e.CampaignID, &e.Event, &e.ActorUserID, &detailRaw, &e.CreatedAt); err != nil {
+		e, err := scanCampaignEvent(rows)
+		if err != nil {
 			return nil, 0, err
 		}
-		e.Detail = decodeAnyMap(detailRaw)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -1132,8 +1248,8 @@ func (s *Store) ClaimNextRecipient(ctx context.Context, accountID uuid.UUID, now
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT cr.id, cr.campaign_id, cr.normalized_identity, cr.raw_input, cr.name, cr.attributes,
-			c.channel, c.message_body, cr.attempts
+		SELECT cr.id, cr.campaign_id, c.organization_id, cr.normalized_identity, cr.raw_input, cr.name, cr.attributes,
+			c.channel, c.message_body, cr.attempts, cr.chat_id, cr.message_id
 		FROM campaign_recipients cr
 		JOIN campaigns c ON c.id = cr.campaign_id
 		WHERE c.account_id = $1 AND c.status = 'running' AND cr.status = 'pending'
@@ -1146,6 +1262,7 @@ func (s *Store) ClaimNextRecipient(ctx context.Context, accountID uuid.UUID, now
 	type candidate struct {
 		recipientID uuid.UUID
 		campaignID  uuid.UUID
+		orgID       uuid.UUID
 		identity    string
 		rawInput    string
 		name        string
@@ -1153,11 +1270,14 @@ func (s *Store) ClaimNextRecipient(ctx context.Context, accountID uuid.UUID, now
 		channel     string
 		messageBody string
 		attempts    int
+		chatID      uuid.NullUUID
+		messageID   uuid.NullUUID
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.recipientID, &c.campaignID, &c.identity, &c.rawInput, &c.name, &c.attrsRaw, &c.channel, &c.messageBody, &c.attempts); err != nil {
+		if err := rows.Scan(&c.recipientID, &c.campaignID, &c.orgID, &c.identity, &c.rawInput, &c.name, &c.attrsRaw,
+			&c.channel, &c.messageBody, &c.attempts, &c.chatID, &c.messageID); err != nil {
 			_ = rows.Close()
 			return Claim{}, false, err
 		}
@@ -1261,10 +1381,45 @@ func (s *Store) ClaimNextRecipient(ctx context.Context, accountID uuid.UUID, now
 		return Claim{}, false, tx.Commit(ctx)
 	}
 
+	newAttemptNumber := chosen.attempts + 1
+	var chatArg, msgArg any
+	if chosen.chatID.Valid {
+		chatArg = chosen.chatID.UUID
+	}
+	if chosen.messageID.Valid {
+		msgArg = chosen.messageID.UUID
+	}
+	// campaign_send_attempts is the non-pruned, per-attempt diagnostic
+	// counterpart to campaign_send_log above (which stays untouched — its
+	// 7-day retention is load-bearing for the rate-limit tiers, see this
+	// migration's own doc comment). Recorded in the SAME transaction as the
+	// claim itself, so an attempt row exists for every claim exactly once,
+	// with no separate round trip that a crash could split from it.
+	var attemptID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO campaign_send_attempts
+			(organization_id, campaign_id, campaign_recipient_id, account_id, attempt_number, chat_id, message_id, started_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+		chosen.orgID, chosen.campaignID, chosen.recipientID, accountID, newAttemptNumber, chatArg, msgArg, now).Scan(&attemptID); err != nil {
+		return Claim{}, false, wrap("insert campaign send attempt", err)
+	}
+	if err := insertDiagnosticEvent(ctx, tx, diagnosticEvent{
+		CampaignID:          chosen.campaignID,
+		Event:               "send_attempt_started",
+		CampaignRecipientID: uuid.NullUUID{UUID: chosen.recipientID, Valid: true},
+		AttemptID:           uuid.NullUUID{UUID: attemptID, Valid: true},
+		AccountID:           accountID.String(),
+		Detail:              map[string]any{"attempt_number": newAttemptNumber},
+	}); err != nil {
+		return Claim{}, false, err
+	}
+
 	claim := Claim{
-		LogID: logID, RecipientID: chosen.recipientID, CampaignID: chosen.campaignID, AccountID: accountID,
+		LogID: logID, AttemptID: attemptID, RecipientID: chosen.recipientID, CampaignID: chosen.campaignID,
+		OrganizationID: chosen.orgID, AccountID: accountID,
 		Channel: chosen.channel, NormalizedIdentity: chosen.identity, Name: chosen.name,
-		Attributes: decodeStringMap(chosen.attrsRaw), MessageBody: chosen.messageBody, Attempts: chosen.attempts + 1,
+		Attributes: decodeStringMap(chosen.attrsRaw), MessageBody: chosen.messageBody, Attempts: newAttemptNumber,
+		ChatID: chosen.chatID, MessageID: chosen.messageID,
 	}
 	return claim, true, tx.Commit(ctx)
 }
@@ -1305,6 +1460,64 @@ func (s *Store) FinalizeAttempt(ctx context.Context, p FinalizeAttemptParams) er
 		p.RecipientID, string(p.NewStatus), p.FailureReason, chatArg, msgArg, p.NextAttemptAt); err != nil {
 		return wrap("finalize campaign recipient", err)
 	}
+
+	// campaign_send_attempts is completed in the SAME transaction as the
+	// recipient's own status update — the attempt row and the coarse status
+	// it explains can never disagree about whether (and how) this attempt
+	// ended. AttemptID is empty for a caller with nothing to complete (there
+	// is none today, but this keeps the method safe for any future direct
+	// caller that skips ClaimNextRecipient's own attempt row).
+	if p.AttemptID != uuid.Nil {
+		var retryableArg any
+		if p.Retryable != nil {
+			retryableArg = *p.Retryable
+		}
+		var errorCodeArg, providerMsgIDArg any
+		if p.ErrorCode != "" {
+			errorCodeArg = p.ErrorCode
+		}
+		if p.ProviderMessageID != "" {
+			providerMsgIDArg = p.ProviderMessageID
+		}
+		outcome := p.AttemptOutcome
+		if outcome == "" {
+			outcome = "failed"
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE campaign_send_attempts SET
+				completed_at = strftime('%Y-%m-%d %H:%M:%f','now'),
+				outcome = $2, error_code = $3, error_detail = $4, retryable = $5,
+				next_attempt_at = $6, provider_message_id = $7,
+				chat_id = COALESCE($8, chat_id), message_id = COALESCE($9, message_id)
+			WHERE id = $1`,
+			p.AttemptID, outcome, errorCodeArg, p.FailureReason, retryableArg, p.NextAttemptAt, providerMsgIDArg, chatArg, msgArg); err != nil {
+			return wrap("finalize campaign send attempt", err)
+		}
+	}
+
+	if p.Event != "" {
+		var campaignID uuid.UUID
+		if err := tx.QueryRow(ctx, `SELECT campaign_id FROM campaign_recipients WHERE id = $1`, p.RecipientID).Scan(&campaignID); err != nil {
+			return wrap("resolve campaign for finalize event", err)
+		}
+		detail := map[string]any{"status": string(p.NewStatus)}
+		if p.ErrorCode != "" {
+			detail["error_code"] = p.ErrorCode
+		}
+		event := diagnosticEvent{
+			CampaignID: campaignID, Event: p.Event,
+			CampaignRecipientID: uuid.NullUUID{UUID: p.RecipientID, Valid: true},
+			ChatID:              p.ChatID, MessageID: p.MessageID,
+			ErrorCode: p.ErrorCode, Detail: detail,
+		}
+		if p.AttemptID != uuid.Nil {
+			event.AttemptID = uuid.NullUUID{UUID: p.AttemptID, Valid: true}
+		}
+		if err := insertDiagnosticEvent(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit(ctx)
 }
 
@@ -1314,14 +1527,83 @@ func (s *Store) FinalizeAttempt(ctx context.Context, p FinalizeAttemptParams) er
 // 'failed' with a reason that says delivery is genuinely unknown. It is
 // NEVER retried automatically: a duplicate send is worse than a missed one.
 // Called once at the campaign Scheduler's boot.
+//
+// The recipient's own coarse status becomes 'failed' — unchanged, existing
+// vocabulary — but the crash-interrupted attempt itself (still open, never
+// finalized) is closed out as outcome='unknown' on campaign_send_attempts,
+// the same honest distinction internal/campaign.Runner.finalize makes for an
+// ambiguous timeout, plus one campaign_events row per affected recipient so
+// this reconciliation is visible on the campaign's own timeline, not only in
+// process logs.
 func (s *Store) ReconcileStuckSending(ctx context.Context) (int, error) {
-	tag, err := s.db.Exec(ctx, `
-		UPDATE campaign_recipients SET status = 'failed', failure_reason = $1, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE status = 'sending'`, "interrupted — delivery unknown")
+	const reason = "interrupted — delivery unknown"
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `SELECT id, campaign_id FROM campaign_recipients WHERE status = 'sending'`)
+	if err != nil {
+		return 0, err
+	}
+	type stuck struct {
+		recipientID uuid.UUID
+		campaignID  uuid.UUID
+	}
+	var stuckRows []stuck
+	for rows.Next() {
+		var s stuck
+		if err := rows.Scan(&s.recipientID, &s.campaignID); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		stuckRows = append(stuckRows, s)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if len(stuckRows) == 0 {
+		return 0, tx.Commit(ctx)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE campaign_recipients SET status = 'failed', failure_reason = $1, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE status = 'sending'`, reason); err != nil {
 		return 0, wrap("reconcile stuck campaign sends", err)
 	}
-	return int(tag.RowsAffected()), nil
+	for _, s := range stuckRows {
+		var attemptID uuid.NullUUID
+		if err := tx.QueryRow(ctx, `
+			SELECT id FROM campaign_send_attempts
+			WHERE campaign_recipient_id = $1 AND completed_at IS NULL
+			ORDER BY started_at DESC LIMIT 1`, s.recipientID).Scan(&attemptID); err != nil && !errors.Is(err, dbx.ErrNoRows) {
+			return 0, wrap("find stuck campaign send attempt", err)
+		}
+		if attemptID.Valid {
+			if _, err := tx.Exec(ctx, `
+				UPDATE campaign_send_attempts SET
+					completed_at = strftime('%Y-%m-%d %H:%M:%f','now'), outcome = 'unknown', error_detail = $2
+				WHERE id = $1`, attemptID.UUID, reason); err != nil {
+				return 0, wrap("finalize stuck campaign send attempt", err)
+			}
+		}
+		event := diagnosticEvent{
+			CampaignID: s.campaignID, Event: "recipient_outcome_unknown",
+			CampaignRecipientID: uuid.NullUUID{UUID: s.recipientID, Valid: true},
+			Detail:              map[string]any{"reason": reason, "cause": "crash_recovery"},
+		}
+		if attemptID.Valid {
+			event.AttemptID = attemptID
+		}
+		if err := insertDiagnosticEvent(ctx, tx, event); err != nil {
+			return 0, err
+		}
+	}
+	return len(stuckRows), tx.Commit(ctx)
 }
 
 // PruneCampaignSendLog deletes every ledger row older than olderThan — a

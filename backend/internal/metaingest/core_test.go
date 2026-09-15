@@ -78,6 +78,10 @@ func (h *fakeHub) Broadcast(name string, data any) {
 	h.calls = append(h.calls, broadcastCall{Name: name, Data: data})
 }
 
+func (h *fakeHub) BroadcastScoped(orgID uuid.UUID, name string, data any) {
+	h.Broadcast(name, data)
+}
+
 func (h *fakeHub) Calls() []broadcastCall {
 	h.mu.Lock()
 	defer h.mu.Unlock()

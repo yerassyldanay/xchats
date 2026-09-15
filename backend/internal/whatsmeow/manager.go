@@ -290,6 +290,7 @@ func (m *Manager) ingestMessage(ctx context.Context, evt whatsapp.MessageReceive
 	if err != nil {
 		return store.InboundResult{}, fmt.Errorf("whatsmeow: invalid account id %q: %w", evt.AccountID, err)
 	}
+	orgID := m.orgIDFor(ctx, accountID)
 
 	direction, senderKind := "in", "contact"
 	if evt.FromMe {
@@ -321,22 +322,22 @@ func (m *Manager) ingestMessage(ctx context.Context, evt whatsapp.MessageReceive
 		// Dedup, or the fromMe echo collapsing onto the send that produced
 		// it — enrichment only, matching the pre-whatsmeow worker's own
 		// "duplicate" branch.
-		m.broadcastMessage(ctx, res.MessageID, "message.updated")
+		m.broadcastMessage(ctx, res.MessageID, "message.updated", orgID)
 		return res, nil
 	}
 
-	m.broadcastMessage(ctx, res.MessageID, "message.created")
+	m.broadcastMessage(ctx, res.MessageID, "message.created", orgID)
 	if res.ChatCreated {
-		m.broadcastChat(ctx, res.ChatID, "chat.created")
+		m.broadcastChat(ctx, res.ChatID, "chat.created", orgID)
 	} else {
-		m.broadcastChat(ctx, res.ChatID, "chat.updated")
+		m.broadcastChat(ctx, res.ChatID, "chat.updated", orgID)
 	}
 	if evt.Media != nil {
 		ref := store.MediaRef{MediaType: evt.Media.Kind, Mimetype: evt.Media.Mimetype, FileName: evt.Media.FileName, FileSize: int(evt.Media.FileSize)}
 		if _, _, err := m.cfg.Store.UpsertMessageMedia(ctx, res.MessageID, ref, mediaBlobID(res.MessageID), "pending"); err != nil {
 			m.log.Error("whatsmeow: upsert media row failed", "message_id", res.MessageID, "err", err)
 		} else {
-			m.broadcastMessage(ctx, res.MessageID, "message.updated")
+			m.broadcastMessage(ctx, res.MessageID, "message.updated", orgID)
 		}
 	}
 	if direction == "in" {
@@ -377,9 +378,14 @@ func (m *Manager) downloadAndAttachMedia(accountID string, messageID uuid.UUID, 
 			m.log.Error("whatsmeow: mark media ready failed", "message_id", messageID, "err", err)
 			return
 		}
-		m.broadcastMessage(ctx, messageID, "message.updated")
+		acctID, acctErr := uuid.Parse(accountID)
+		var orgID uuid.UUID
+		if acctErr == nil {
+			orgID = m.orgIDFor(ctx, acctID)
+		}
+		m.broadcastMessage(ctx, messageID, "message.updated", orgID)
 
-		if acctID, err := uuid.Parse(accountID); err == nil {
+		if acctErr == nil {
 			// A fresh, independent deadline — not ctx, whose
 			// mediaDownloadTimeout budget the download itself may have
 			// already spent most or all of. The media row is already
@@ -455,6 +461,7 @@ func (m *Manager) applyReceiptUpdate(ctx context.Context, evt whatsapp.ReceiptUp
 		m.log.Error("whatsmeow: invalid account id on receipt", "account_id", evt.AccountID, "err", err)
 		return
 	}
+	orgID := m.orgIDFor(ctx, accountID)
 	rank := deliveryRank(evt.DeliveryState)
 	for _, extID := range evt.ExternalIDs {
 		msgID, _, err := m.cfg.Store.AdvanceDeliveryState(ctx, string(messaging.ChannelWhatsApp), accountID, extID, evt.DeliveryState, rank)
@@ -464,7 +471,7 @@ func (m *Manager) applyReceiptUpdate(ctx context.Context, evt whatsapp.ReceiptUp
 			}
 			continue
 		}
-		m.broadcastMessage(ctx, msgID, "message.updated")
+		m.broadcastMessage(ctx, msgID, "message.updated", orgID)
 	}
 }
 
@@ -483,8 +490,18 @@ func (m *Manager) setConnectionState(ctx context.Context, accountID, state, reas
 	} else {
 		m.log.Info("whatsmeow: connection state changed", "account_id", accountID, "state", state)
 	}
-	if acct, err := m.cfg.Store.AccountByID(ctx, id); err == nil {
-		m.cfg.Hub.Broadcast("wa_account.status_changed", dto.MapAccount(acct, state))
+	acct, err := m.cfg.Store.AccountByID(ctx, id)
+	if err == nil {
+		m.cfg.Hub.BroadcastScoped(acct.OrganizationID.UUID, "wa_account.status_changed", dto.MapAccount(acct, state))
+	}
+	// A durable history side effect alongside the existing current-state
+	// write above — see migrations/sqlite/0020_campaign_diagnostics.up.sql's
+	// own doc comment for why wa_accounts.connection_state alone cannot
+	// answer "was this account disconnected between 14:02 and 14:15" after
+	// the fact. Best-effort: a failure here must never abort a real
+	// connection-state transition, only be logged.
+	if err := m.cfg.Store.RecordWAConnectionEvent(ctx, id, acct.OrganizationID, state, reason); err != nil {
+		m.log.Error("whatsmeow: record connection event failed", "account_id", accountID, "state", state, "err", err)
 	}
 }
 
@@ -540,22 +557,34 @@ func (m *Manager) onInboundCustomerMessage(ctx context.Context, chatID, accountI
 	}
 }
 
-func (m *Manager) broadcastMessage(ctx context.Context, id uuid.UUID, name string) {
+func (m *Manager) broadcastMessage(ctx context.Context, id uuid.UUID, name string, orgID uuid.UUID) {
 	msg, err := m.cfg.Store.MessageByID(ctx, id)
 	if err != nil {
 		m.log.Error("whatsmeow: load message for broadcast failed", "message_id", id, "err", err)
 		return
 	}
-	m.cfg.Hub.Broadcast(name, dto.MapMessage(msg))
+	m.cfg.Hub.BroadcastScoped(orgID, name, dto.MapMessage(msg))
 }
 
-func (m *Manager) broadcastChat(ctx context.Context, id uuid.UUID, name string) {
+func (m *Manager) broadcastChat(ctx context.Context, id uuid.UUID, name string, orgID uuid.UUID) {
 	chat, err := m.cfg.Store.ChatByID(ctx, id)
 	if err != nil {
 		m.log.Error("whatsmeow: load chat for broadcast failed", "chat_id", id, "err", err)
 		return
 	}
-	m.cfg.Hub.Broadcast(name, dto.MapChat(chat))
+	m.cfg.Hub.BroadcastScoped(orgID, name, dto.MapChat(chat))
+}
+
+// orgIDFor resolves accountID's owning organization for realtime scoping —
+// best-effort: a lookup failure yields uuid.Nil, which BroadcastScoped
+// treats as unscoped rather than silently dropping the event for every
+// subscriber. Mirrors internal/outbound.Deps.orgIDFor.
+func (m *Manager) orgIDFor(ctx context.Context, accountID uuid.UUID) uuid.UUID {
+	acct, err := m.cfg.Store.AccountByID(ctx, accountID)
+	if err != nil {
+		return uuid.Nil
+	}
+	return acct.OrganizationID.UUID
 }
 
 // ---------------------------------------------------------------------------

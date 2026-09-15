@@ -57,6 +57,21 @@ type Chat struct {
 	// for a chat on an unassigned account and for chats that predate the CRM
 	// migration.
 	CustomerID *string `json:"customer_id"`
+	// Campaigns lists every campaign with explicit, persisted participation
+	// in this conversation (see store.campaignMembershipClause) — omitted
+	// entirely for a chat with none, so an existing client that never reads
+	// this field sees no behavior change. Always attached by the caller
+	// (never by MapChat itself, which stays a pure function of store.Chat)
+	// via a batched lookup — see handleListChats.
+	Campaigns []CampaignRef `json:"campaigns,omitempty"`
+}
+
+// CampaignRef is the minimal, non-technical identification of a campaign a
+// chat or message is linked to — an id (for a UI deep-link) and its
+// operator-facing name, never any recipient/audience data.
+type CampaignRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // Media is one media item on a message (a "list of URLs", each enriched).

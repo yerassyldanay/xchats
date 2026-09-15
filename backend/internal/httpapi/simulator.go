@@ -114,7 +114,7 @@ func (s *Server) handleSimulatorMessage(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	s.emitInbound(c, res)
+	s.emitInbound(c, res, org.ID)
 
 	if !req.WaitForResponse {
 		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindAIDraft, Payload: worker.AIDraftTask{ChatID: res.ChatID}})
@@ -137,7 +137,7 @@ func (s *Server) handleSimulatorMessage(c *gin.Context) {
 		fail(c, http.StatusBadGateway, ErrAIUnavailable, err.Error())
 		return
 	}
-	s.emitDrafts(c, persisted)
+	s.emitDrafts(c, persisted, org.ID)
 	if len(persisted) == 0 {
 		fail(c, http.StatusInternalServerError, ErrInternal, "no draft produced")
 		return
@@ -173,25 +173,25 @@ func (s *Server) handleSimulatorPurgeData(c *gin.Context) {
 
 // emitInbound broadcasts the same SSE events handleWaEvent emits for a real
 // inbound message, so a simulator conversation shows up live in the inbox too.
-func (s *Server) emitInbound(c *gin.Context, res store.InboundResult) {
+func (s *Server) emitInbound(c *gin.Context, res store.InboundResult, orgID uuid.UUID) {
 	if !res.MessageInserted {
 		return
 	}
 	if msg, err := s.store.MessageByID(ctx(c), res.MessageID); err == nil {
-		s.hub.Broadcast("message.created", dto.MapMessage(msg))
+		s.hub.BroadcastScoped(orgID, "message.created", dto.MapMessage(msg))
 	}
 	if chat, err := s.store.ChatByID(ctx(c), res.ChatID); err == nil {
 		name := "chat.updated"
 		if res.ChatCreated {
 			name = "chat.created"
 		}
-		s.hub.Broadcast(name, dto.MapChat(chat))
+		s.hub.BroadcastScoped(orgID, name, dto.MapChat(chat))
 	}
 }
 
 // emitDrafts broadcasts ai_draft.created for each persisted draft, mirroring
 // worker.handleAIDraft's own broadcast for the async path.
-func (s *Server) emitDrafts(c *gin.Context, persisted []response.PersistedDraft) {
+func (s *Server) emitDrafts(c *gin.Context, persisted []response.PersistedDraft, orgID uuid.UUID) {
 	for _, p := range persisted {
 		id, err := uuid.Parse(p.ID)
 		if err != nil {
@@ -201,6 +201,6 @@ func (s *Server) emitDrafts(c *gin.Context, persisted []response.PersistedDraft)
 		if err != nil {
 			continue
 		}
-		s.hub.Broadcast("ai_draft.created", dto.MapDraft(d))
+		s.hub.BroadcastScoped(orgID, "ai_draft.created", dto.MapDraft(d))
 	}
 }

@@ -21,9 +21,20 @@ import (
 	"github.com/yerassyldanay/xchats/backend/messaging"
 )
 
+// inboxViewValues is the closed set handleListChats' own view param accepts
+// — see store.ChatFilter.View's own doc comment for what each one means.
+// An unrecognized value is rejected rather than silently falling back to
+// the default, so a client typo never quietly returns the wrong population.
+var inboxViewValues = map[string]bool{"": true, "inbox": true, "campaign": true, "all": true}
+
 func (s *Server) handleListChats(c *gin.Context) {
 	org, okOrg := s.orgOf(c)
 	if !okOrg {
+		return
+	}
+	view := c.Query("view")
+	if !inboxViewValues[view] {
+		fail(c, http.StatusBadRequest, ErrValidation, "view must be one of: inbox, campaign, all")
 		return
 	}
 	limit, offset, pageNum, pageSize := s.pageParams(c)
@@ -35,6 +46,7 @@ func (s *Server) handleListChats(c *gin.Context) {
 		Query:    c.Query("q"),
 		Limit:    limit,
 		Offset:   offset,
+		View:     view,
 	}
 	// account_id is the neutral filter; wa_account_id is kept as a deprecated
 	// alias so an older client keeps working through the transition.
@@ -50,14 +62,51 @@ func (s *Server) handleListChats(c *gin.Context) {
 		}
 		f.AccountID = uuid.NullUUID{UUID: id, Valid: true}
 	}
+	if cid := c.Query("campaign_id"); cid != "" {
+		if view != "campaign" {
+			fail(c, http.StatusBadRequest, ErrValidation, "campaign_id requires view=campaign")
+			return
+		}
+		id, err := uuid.Parse(cid)
+		if err != nil {
+			fail(c, http.StatusBadRequest, ErrValidation, "invalid campaign_id")
+			return
+		}
+		// orgCampaign is the SAME ownership check every /campaigns/:id route
+		// uses — a campaign_id from another org 404s here exactly like it
+		// would there, rather than silently returning zero rows (which would
+		// leak "this campaign does not exist for you" vs. "this campaign
+		// exists but returns nothing" as distinguishable responses).
+		if _, ok := s.orgCampaign(c, id); !ok {
+			return
+		}
+		f.CampaignID = uuid.NullUUID{UUID: id, Valid: true}
+	}
 	chats, total, err := s.store.ListChatsForOrg(ctx(c), f)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
+		return
+	}
+	chatIDs := make([]uuid.UUID, len(chats))
+	for i, ch := range chats {
+		chatIDs[i] = ch.ID
+	}
+	// One batched lookup for the whole page rather than one query per row —
+	// see CampaignRefsForChats' own doc comment. A chat absent from the
+	// result (the common case outside View=campaign/all) just gets no
+	// Campaigns field, exactly as it did before this existed.
+	refs, err := s.store.CampaignRefsForChats(ctx(c), chatIDs)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
 	items := make([]dto.Chat, 0, len(chats))
 	for _, ch := range chats {
-		items = append(items, dto.MapChat(ch))
+		mapped := dto.MapChat(ch)
+		for _, ref := range refs[ch.ID] {
+			mapped.Campaigns = append(mapped.Campaigns, dto.CampaignRef{ID: ref.ID.String(), Name: ref.Name})
+		}
+		items = append(items, mapped)
 	}
 	ok(c, page{Items: items, Page: pageNum, PageSize: pageSize, Total: total})
 }
@@ -91,7 +140,13 @@ func (s *Server) handleGetChat(c *gin.Context) {
 	if !okChat {
 		return
 	}
-	ok(c, dto.MapChat(chat))
+	mapped := dto.MapChat(chat)
+	if refs, err := s.store.CampaignRefsForChats(ctx(c), []uuid.UUID{chat.ID}); err == nil {
+		for _, ref := range refs[chat.ID] {
+			mapped.Campaigns = append(mapped.Campaigns, dto.CampaignRef{ID: ref.ID.String(), Name: ref.Name})
+		}
+	}
+	ok(c, mapped)
 }
 
 func (s *Server) handleListMessages(c *gin.Context) {
@@ -161,6 +216,16 @@ func (s *Server) handleSendMessage(c *gin.Context) {
 // (sender_kind=user) and AI approve (sender_kind=ai).
 func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, senderUserID uuid.NullUUID, text string, mediaIDs []string) ([]dto.Message, error) {
 	var out []dto.Message
+	// Every caller already authorized this chat under the current session's
+	// org (orgChat, or a freshly-resolved compose account) before reaching
+	// here — re-resolving it is one more cheap session lookup, needed so the
+	// message.created broadcasts below never reach a different org's
+	// connected clients. orgID stays uuid.Nil (unscoped, existing behavior)
+	// only in the defensive case this somehow fails.
+	var orgID uuid.UUID
+	if org, okOrg := s.orgOf(c); okOrg {
+		orgID = org.ID
+	}
 	// The channel comes from the chat itself (the view already carries it) when
 	// set; falling back to a fresh account lookup only covers rows written
 	// before the channel column existed.
@@ -182,7 +247,7 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 			return err
 		}
 		msg, _ := s.store.MessageByID(ctx(c), msgID)
-		s.hub.Broadcast("message.created", dto.MapMessage(msg))
+		s.hub.BroadcastScoped(orgID, "message.created", dto.MapMessage(msg))
 		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
 			Destination: chat.ExternalConversationRef, Text: text,
@@ -229,7 +294,7 @@ func (s *Server) sendParts(c *gin.Context, chat store.Chat, senderKind string, s
 			return nil, err
 		}
 		msg, _ := s.store.MessageByID(ctx(c), msgID)
-		s.hub.Broadcast("message.created", dto.MapMessage(msg))
+		s.hub.BroadcastScoped(orgID, "message.created", dto.MapMessage(msg))
 		s.publishOrLog(ctx(c), queue.Message{Kind: queue.KindOutboundSend, Payload: worker.OutboundTask{
 			MessageID: msgID, AccountID: chat.AccountID, Channel: messaging.Channel(channel),
 			Destination: chat.ExternalConversationRef, MediaID: mid, Caption: caption,
@@ -341,7 +406,7 @@ func (s *Server) handleCreateChat(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	s.hub.Broadcast("chat.updated", dto.MapChat(chat))
+	s.hub.BroadcastScoped(acct.OrganizationID.UUID, "chat.updated", dto.MapChat(chat))
 
 	u := currentUser(c)
 	items, err := s.sendParts(c, chat, "user", uuid.NullUUID{UUID: u.ID, Valid: true}, req.Text, req.MediaIDs)
@@ -360,12 +425,16 @@ func (s *Server) handleReadChat(c *gin.Context) {
 	if _, ok := s.orgChat(c, chatID); !ok {
 		return
 	}
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
 	chat, err := s.store.MarkChatRead(ctx(c), chatID)
 	if err != nil {
 		fail(c, http.StatusNotFound, ErrNotFound, "chat not found")
 		return
 	}
-	s.hub.Broadcast("chat.updated", dto.MapChat(chat))
+	s.hub.BroadcastScoped(org.ID, "chat.updated", dto.MapChat(chat))
 	ok(c, gin.H{"unread_count": 0})
 }
 
@@ -414,7 +483,7 @@ func (s *Server) handleAssignChat(c *gin.Context) {
 		return
 	}
 	mapped := dto.MapChat(chat)
-	s.hub.Broadcast("chat.updated", mapped)
+	s.hub.BroadcastScoped(org.ID, "chat.updated", mapped)
 	ok(c, mapped)
 }
 
@@ -435,6 +504,10 @@ func (s *Server) handleSetChatStatus(c *gin.Context) {
 	if _, ok := s.orgChat(c, chatID); !ok {
 		return
 	}
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
 	var req setChatStatusReq
 	if err := c.ShouldBindJSON(&req); err != nil || !chatStatusValues[req.Status] {
 		fail(c, http.StatusBadRequest, ErrValidation, "status must be one of: open, resolved")
@@ -446,7 +519,7 @@ func (s *Server) handleSetChatStatus(c *gin.Context) {
 		return
 	}
 	mapped := dto.MapChat(chat)
-	s.hub.Broadcast("chat.updated", mapped)
+	s.hub.BroadcastScoped(org.ID, "chat.updated", mapped)
 	ok(c, mapped)
 }
 

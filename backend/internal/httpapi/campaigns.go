@@ -653,7 +653,7 @@ func (s *Server) campaignStatusTransition(c *gin.Context, to purecampaign.Status
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	s.hub.Broadcast("campaign.status_changed", dto.CampaignStatusEvent{CampaignID: updated.ID.String(), Status: updated.Status})
+	s.hub.BroadcastScoped(camp.OrganizationID, "campaign.status_changed", dto.CampaignStatusEvent{CampaignID: updated.ID.String(), Status: updated.Status})
 	ok(c, s.campaignDTO(c, updated))
 }
 
@@ -703,7 +703,7 @@ func (s *Server) handleStartCampaign(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	s.hub.Broadcast("campaign.status_changed", dto.CampaignStatusEvent{CampaignID: updated.ID.String(), Status: updated.Status})
+	s.hub.BroadcastScoped(camp.OrganizationID, "campaign.status_changed", dto.CampaignStatusEvent{CampaignID: updated.ID.String(), Status: updated.Status})
 	ok(c, s.campaignDTO(c, updated))
 }
 

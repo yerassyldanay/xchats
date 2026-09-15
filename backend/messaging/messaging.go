@@ -45,6 +45,53 @@ var ErrOutsideServiceWindow = errors.New("messaging: outside the provider's free
 // rather than stepping it through the transient-retry ladder.
 var ErrRecipientUnreachable = errors.New("messaging: recipient is permanently unreachable")
 
+// The sentinels below give ChannelSender implementations (and
+// internal/outbound.Deliver itself) a channel-neutral vocabulary for the
+// failure modes a caller needs to classify without guessing from an
+// adapter's free-text error string — see internal/campaign's error
+// classifier, the first consumer. An adapter that cannot attribute a
+// failure to any of these (or to ErrOutsideServiceWindow/
+// ErrRecipientUnreachable above) should leave it unwrapped: an unrecognized
+// error is classified as an unknown reason, never guessed from its text.
+
+// ErrChannelUnavailable is returned when no ChannelSender is registered for
+// the destination channel at all — a configuration/wiring problem, not a
+// live connection's own state.
+var ErrChannelUnavailable = errors.New("messaging: no sender is registered for this channel")
+
+// ErrAccountDisconnected is returned when the sending account has no live
+// provider connection right now (e.g. WhatsApp's own client is not
+// connected). Distinct from ErrChannelUnavailable: the channel itself is
+// wired up, this one specific account just is not currently reachable.
+var ErrAccountDisconnected = errors.New("messaging: sending account is not connected")
+
+// ErrInvalidRecipient is returned when the destination address itself is
+// malformed (cannot be parsed into the provider's own addressing format) —
+// a local, pre-flight rejection, never a provider round trip. Like
+// ErrRecipientUnreachable, a retry cannot fix a malformed address, so
+// callers treat the two identically (permanent, no retry).
+var ErrInvalidRecipient = errors.New("messaging: destination address is invalid")
+
+// ErrMessageBuildFailed is returned when building the outbound message
+// content itself fails (e.g. reading or uploading attached media) — before
+// any send request ever reached the provider.
+var ErrMessageBuildFailed = errors.New("messaging: failed to build the outbound message content")
+
+// ErrSendTimeout is returned when a send request was made but no response
+// was received in time. This is the AMBIGUOUS case: the provider may have
+// received and even accepted the message, so callers must not treat this as
+// a confirmed failure automatically eligible for the same retry ladder as
+// other transient errors — see internal/campaign.Runner.finalize's own doc
+// comment.
+var ErrSendTimeout = errors.New("messaging: send timed out waiting for a provider response")
+
+// ErrNetwork is returned for a network-level failure that occurred before
+// any request was known to reach the provider (connection refused, DNS
+// failure, and similar) — unlike ErrSendTimeout, safe to treat as an
+// ordinary transient error, since nothing indicates the provider ever saw
+// the request.
+var ErrNetwork = errors.New("messaging: network error communicating with the provider")
+
 // Message is one normalized inbound (or outbound) message, independent of
 // which channel produced it.
 type Message struct {

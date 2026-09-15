@@ -27,11 +27,12 @@ func (r *SenderRegistry) Register(ch Channel, s ChannelSender) {
 	r.senders[ch] = s
 }
 
-// Sender returns the sender registered for ch, or an error if none is.
+// Sender returns the sender registered for ch, or an error wrapping
+// ErrChannelUnavailable if none is.
 func (r *SenderRegistry) Sender(ch Channel) (ChannelSender, error) {
 	s, ok := r.senders[ch]
 	if !ok {
-		return nil, fmt.Errorf("messaging: no channel sender registered for channel %q", ch)
+		return nil, fmt.Errorf("%w: no channel sender registered for channel %q", ErrChannelUnavailable, ch)
 	}
 	return s, nil
 }

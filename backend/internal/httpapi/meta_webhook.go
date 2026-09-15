@@ -117,6 +117,7 @@ func (s *Server) handleWhatsAppCloudWebhook(c *gin.Context) {
 				if _, aerr := s.metaProc.ApplyStatus(ctx(c), metaingest.StatusUpdate{
 					AccountID: acct.ID, Channel: string(messaging.ChannelWhatsAppCloud),
 					ExternalMessageID: st.ID, Status: st.Status, Rank: whatsappcloud.DeliveryRank(st.Status),
+					OrgID: acct.OrganizationID.UUID,
 				}); aerr != nil {
 					s.log.Error("whatsapp cloud status update failed; not acking", "account_id", acct.ID, "err", aerr)
 					fail(c, http.StatusInternalServerError, ErrInternal, "processing failed")

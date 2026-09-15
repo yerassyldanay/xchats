@@ -183,7 +183,7 @@ func (m *Manager) completePairing(cli waClient, orgID uuid.UUID, sessionID strin
 	m.registerClient(acct.ID.String(), cli)
 
 	m.log.Info("whatsmeow: account paired", "account_id", acct.ID, "owner_jid", ownerJID)
-	m.cfg.Hub.Broadcast("wa_account.status_changed", dto.MapAccount(acct, "connected"))
+	m.cfg.Hub.BroadcastScoped(orgID, "wa_account.status_changed", dto.MapAccount(acct, "connected"))
 	m.pairings.finish(whatsapp.PairingUpdate{SessionID: sessionID, Status: "connected", AccountID: acct.ID.String()})
 }
 
