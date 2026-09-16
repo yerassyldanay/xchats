@@ -48,7 +48,9 @@ demo and is safe to run again.
 - **Model-agnostic** — OpenAI, Claude, Gemini, OpenRouter or a local
   Ollama model; swap providers from Settings, not code.
 - **Configurable from ChatGPT / Claude** — an MCP connector lets an LLM
-  client read your documents and stage knowledge-base edits for your review.
+  client read your documents and stage knowledge-base edits for your review,
+  and separately, read-only, diagnose why a WhatsApp campaign send failed —
+  see [`docs/mcp-connector.md`](docs/mcp-connector.md).
 
 ## Visual tour
 
@@ -84,7 +86,7 @@ from stored values; see the [grounding pipeline](docs/images/grounding.svg).
 ![The ChatGPT and Claude MCP connector setup inside the Draft page](docs/images/mcp-connect.png)
 
 Links, files and the MCP connector all write to the same Draft. ChatGPT or
-Claude can use 13 `kb_*` tools after OAuth 2.1 authorization, but every change
+Claude can use 14 `kb_*` tools after OAuth 2.1 authorization, but every change
 still needs human review before publishing.
 
 ### 5. Knowledge Base assistant

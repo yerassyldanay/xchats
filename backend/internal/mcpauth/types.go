@@ -8,18 +8,26 @@ import (
 	"github.com/google/uuid"
 )
 
-// The three scopes plan/mcp.md §3 defines. There is no wildcard: a client
+// The scopes this connector defines. There is no wildcard: a client
 // requests exactly the scopes it wants and the consent page shows exactly
 // those to the user.
 const (
 	ScopeKBRead       = "kb:read"
 	ScopeKBDraftWrite = "kb:draft:write"
 	ScopeMediaWrite   = "media:write"
+	// ScopeCampaignsRead grants the read-only campaign/WhatsApp-connection
+	// diagnostic tools (diagnose_campaign, campaign_recipients,
+	// whatsapp_connection_status, campaign_events) — deliberately separate
+	// from ScopeKBRead: campaign/recipient/connection data is a different
+	// resource domain than knowledge-base content, so granting one must
+	// never imply the other. No tool under this scope ever mutates
+	// application state.
+	ScopeCampaignsRead = "campaigns:read"
 )
 
 // AllScopes is the closed, ordered vocabulary — used both to validate a
 // requested scope string and to render the consent page's checklist.
-var AllScopes = []string{ScopeKBRead, ScopeKBDraftWrite, ScopeMediaWrite}
+var AllScopes = []string{ScopeKBRead, ScopeKBDraftWrite, ScopeMediaWrite, ScopeCampaignsRead}
 
 // ParseScope splits a space-separated OAuth scope string into its known
 // members, dropping anything unrecognized (fail-closed: an unknown scope

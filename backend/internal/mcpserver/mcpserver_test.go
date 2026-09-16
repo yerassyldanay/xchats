@@ -84,8 +84,10 @@ func TestInitialize_ReturnsProtocolShape(t *testing.T) {
 	}
 }
 
-// TestToolsList_HasAllFourteenTools confirms the closed contract's shape.
-func TestToolsList_HasAllFourteenTools(t *testing.T) {
+// TestToolsList_HasAllEighteenTools confirms the closed contract's shape:
+// the original 14 KB tools plus the 4 read-only campaign/WhatsApp-connection
+// diagnostic tools.
+func TestToolsList_HasAllEighteenTools(t *testing.T) {
 	srv, principal := newTestServer(t)
 	resp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "tools/list"})
 	if resp.Error != nil {
@@ -93,8 +95,8 @@ func TestToolsList_HasAllFourteenTools(t *testing.T) {
 	}
 	result := resp.Result.(map[string]any)
 	tools := result["tools"].([]mcpserver.Tool)
-	if len(tools) != 14 {
-		t.Fatalf("expected 14 tools, got %d", len(tools))
+	if len(tools) != 18 {
+		t.Fatalf("expected 18 tools, got %d", len(tools))
 	}
 	names := map[string]bool{}
 	for _, tool := range tools {
@@ -107,6 +109,7 @@ func TestToolsList_HasAllFourteenTools(t *testing.T) {
 		"kb_assistant_upsert", "kb_topic_upsert", "kb_product_upsert", "kb_tariff_upsert",
 		"kb_contacts_upsert", "kb_policies_upsert", "kb_tariff_info_upsert", "kb_delivery_zone_upsert",
 		"kb_read", "kb_delete", "kb_summary", "kb_info", "kb_media_upload", "kb_media_attach",
+		"diagnose_campaign", "campaign_recipients", "whatsapp_connection_status", "campaign_events",
 	} {
 		if !names[want] {
 			t.Fatalf("missing tool %q", want)
@@ -125,12 +128,16 @@ func TestToolsList_DeclaresSecuritySchemes(t *testing.T) {
 	}
 	tools := resp.Result.(map[string]any)["tools"].([]mcpserver.Tool)
 	wantScope := map[string]string{
-		"kb_read":         mcpauth.ScopeKBRead,
-		"kb_summary":      mcpauth.ScopeKBRead,
-		"kb_info":         mcpauth.ScopeKBRead,
-		"kb_topic_upsert": mcpauth.ScopeKBDraftWrite,
-		"kb_delete":       mcpauth.ScopeKBDraftWrite,
-		"kb_media_upload": mcpauth.ScopeMediaWrite,
+		"kb_read":                    mcpauth.ScopeKBRead,
+		"kb_summary":                 mcpauth.ScopeKBRead,
+		"kb_info":                    mcpauth.ScopeKBRead,
+		"kb_topic_upsert":            mcpauth.ScopeKBDraftWrite,
+		"kb_delete":                  mcpauth.ScopeKBDraftWrite,
+		"kb_media_upload":            mcpauth.ScopeMediaWrite,
+		"diagnose_campaign":          mcpauth.ScopeCampaignsRead,
+		"campaign_recipients":        mcpauth.ScopeCampaignsRead,
+		"whatsapp_connection_status": mcpauth.ScopeCampaignsRead,
+		"campaign_events":            mcpauth.ScopeCampaignsRead,
 	}
 	found := map[string]bool{}
 	for _, tool := range tools {
@@ -1050,7 +1057,10 @@ func TestToolsList_DeclaresAnnotations(t *testing.T) {
 		byName[tool.Name] = tool
 	}
 
-	for _, name := range []string{"kb_read", "kb_summary", "kb_info"} {
+	for _, name := range []string{
+		"kb_read", "kb_summary", "kb_info",
+		"diagnose_campaign", "campaign_recipients", "whatsapp_connection_status", "campaign_events",
+	} {
 		ann := byName[name].Annotations
 		if ann == nil || ann.ReadOnlyHint == nil || !*ann.ReadOnlyHint {
 			t.Fatalf("%s: expected annotations.readOnlyHint=true, got %+v", name, ann)
@@ -1076,16 +1086,17 @@ func TestToolsList_DeclaresAnnotations(t *testing.T) {
 	}
 }
 
-// TestToolsList_DeclaresOutputSchema confirms every one of the 14 tools
+// TestToolsList_DeclaresOutputSchema confirms every one of the 18 tools
 // documents its structuredContent shape (plan Task 9) — every tool sets
-// structuredContent via handlers.go's toolResult, kb_delete included (via
+// structuredContent via handlers.go's toolResult (or campaign_tools.go's
+// diagResult for the 4 diagnostic tools), kb_delete included (via
 // kbstore.DeleteResult).
 func TestToolsList_DeclaresOutputSchema(t *testing.T) {
 	srv, principal := newTestServer(t)
 	resp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "tools/list"})
 	tools := resp.Result.(map[string]any)["tools"].([]mcpserver.Tool)
-	if len(tools) != 14 {
-		t.Fatalf("expected 14 tools, got %d", len(tools))
+	if len(tools) != 18 {
+		t.Fatalf("expected 18 tools, got %d", len(tools))
 	}
 	for _, tool := range tools {
 		if tool.OutputSchema == nil {

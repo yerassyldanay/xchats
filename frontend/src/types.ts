@@ -175,6 +175,18 @@ export interface Chat {
   /** The CRM customer this conversation belongs to; null for a chat on an
    *  unassigned account and for chats that predate the CRM layer. */
   customer_id: string | null
+  /** Every campaign with explicit, persisted participation in this
+   *  conversation (see dto.Chat.Campaigns' own doc comment) — absent
+   *  entirely (not []) for a chat with none, so existing code that never
+   *  reads this key is unaffected. Can hold more than one entry when
+   *  several campaigns touched the same chat; never render duplicates. */
+  campaigns?: CampaignRef[]
+}
+// CampaignRef mirrors dto.CampaignRef — the minimal, non-technical
+// identification of a campaign a chat or message is linked to.
+export interface CampaignRef {
+  id: string
+  name: string
 }
 export interface Media {
   id: string

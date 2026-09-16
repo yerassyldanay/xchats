@@ -15,6 +15,7 @@ import {
   Download,
   FileText,
   LoaderCircle,
+  Megaphone,
   MessagesSquare,
   RotateCw,
   TriangleAlert,
@@ -28,6 +29,7 @@ import { api, ApiError } from '../api/client'
 import { shortTime, tick, initials, colorFor, type TickStatus } from '../lib/format'
 import { channelDot, channelIcon } from '../lib/channelBrand'
 import Composer from './Composer.vue'
+import CampaignBadge from './CampaignBadge.vue'
 import type { Message } from '../types'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -185,6 +187,7 @@ async function retranscribe(messageId: string, mediaId: string, language?: strin
               >
                 <Bot class="w-2.5 h-2.5" /> {{ t('simulator.navLabel') }}
               </span>
+              <CampaignBadge :campaigns="chat.campaigns" />
             </div>
             <div class="text-xs text-muted-foreground truncate">{{ chat.contact.phone_number || chat.contact.phone_jid }}</div>
           </div>
@@ -364,6 +367,13 @@ async function retranscribe(messageId: string, mediaId: string, language?: strin
               class="mt-1 flex items-center justify-end gap-1.5 text-[11px]"
               :class="m.direction === 'out' ? 'text-white/70' : 'text-muted-foreground'"
             >
+              <!-- "this particular message was a campaign send", to
+                   disambiguate it from a manual/AI reply in the same
+                   thread — the chat-level CampaignBadge above already
+                   carries which campaign(s), so this stays a bare tag. -->
+              <span v-if="m.sender_type === 'campaign'" data-testid="campaign-message-tag" class="inline-flex items-center gap-0.5">
+                <Megaphone class="w-3 h-3" /> {{ t('campaigns.badge.label') }}
+              </span>
               <span>{{ shortTime(m.timestamp, locale) }}</span>
               <component
                 :is="tickMeta[tick(m.status)].icon"

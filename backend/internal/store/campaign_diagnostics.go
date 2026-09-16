@@ -276,6 +276,49 @@ func (s *Store) CampaignRefsForChats(ctx context.Context, chatIDs []uuid.UUID) (
 	return out, rows.Err()
 }
 
+// ListCampaignRecipientsUnknownOutcome returns recipients whose MOST RECENT
+// attempt ended 'unknown' (an ambiguous timeout, or a crash-interrupted
+// send never safely retried) — the campaign_recipients MCP tool's
+// status="unknown" pseudo-filter, since 'unknown' is not one of
+// campaign_recipients.status' own five persisted values (see
+// migrations/sqlite/0020_campaign_diagnostics.up.sql's own doc comment for
+// why that column was deliberately left untouched). Ordered oldest first,
+// like ListCampaignRecipients.
+func (s *Store) ListCampaignRecipientsUnknownOutcome(ctx context.Context, campaignID uuid.UUID, channel string, limit, offset int) ([]CampaignRecipient, int, error) {
+	msgTable, err := messagesTableFor(channel)
+	if err != nil {
+		return nil, 0, err
+	}
+	const unknownWhere = `r.campaign_id = $1 AND EXISTS (
+		SELECT 1 FROM campaign_send_attempts a
+		WHERE a.campaign_recipient_id = r.id AND a.outcome = 'unknown'
+		  AND a.attempt_number = (SELECT MAX(a2.attempt_number) FROM campaign_send_attempts a2 WHERE a2.campaign_recipient_id = r.id)
+	)`
+	rows, err := s.db.Query(ctx, `
+		SELECT `+campaignRecipientCols+`
+		FROM campaign_recipients r LEFT JOIN `+msgTable+` m ON m.id = r.message_id
+		WHERE `+unknownWhere+`
+		ORDER BY r.created_at LIMIT $2 OFFSET $3`, campaignID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []CampaignRecipient
+	for rows.Next() {
+		r, err := scanCampaignRecipient(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var total int
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM campaign_recipients r WHERE `+unknownWhere, campaignID).Scan(&total)
+	return out, total, rows.Err()
+}
+
 func (s *Store) campaignChannel(ctx context.Context, campaignID uuid.UUID) (string, error) {
 	var channel string
 	err := s.db.QueryRow(ctx, `SELECT channel FROM campaigns WHERE id = $1`, campaignID).Scan(&channel)

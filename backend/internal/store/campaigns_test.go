@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -544,6 +546,137 @@ func TestClaimNextRecipient_PoolsBudgetAcrossConcurrentCampaigns(t *testing.T) {
 		}
 		if counts["pending"] != 0 || counts["sending"] != 0 {
 			t.Errorf("campaign %s final counts = %+v, want everything resolved", c.ID, counts)
+		}
+	}
+}
+
+// TestClaimNextRecipient_ConcurrentWorkersNeverDuplicateAClaim is the
+// explicit regression guard for "concurrent workers do not create duplicate
+// logical sends". It races several goroutines against EACH of several
+// accounts' single pending recipient at once (mirroring multiple
+// worker/scheduler goroutines converging on the same account), relying on
+// nothing but the existing claiming mechanism — the single-writer database
+// (dbx's MaxOpenConns(1) + _txlock=immediate) serializing each claim's
+// transaction — to guarantee that recipient is claimed by EXACTLY ONE
+// caller, never zero and never two.
+//
+// Each account gets its own campaign with exactly one recipient and no
+// prior send history, so this is deliberately that account's very first
+// claim ever: the per-account pacing gate (MinIntervalSeconds) can never
+// block it regardless of how tightly the racing goroutines cluster in real
+// wall-clock time, keeping this test about claim-uniqueness under
+// concurrency rather than about pacing.
+func TestClaimNextRecipient_ConcurrentWorkersNeverDuplicateAClaim(t *testing.T) {
+	ctx := context.Background()
+	st := dbtest.New(t)
+	orgID, userID, _ := seedCampaignFixture(t, st, ctx)
+
+	const numAccounts = 15
+	const workersPerAccount = 4
+	acctIDs := make([]uuid.UUID, numAccounts)
+	campIDs := make([]uuid.UUID, numAccounts)
+	for i := 0; i < numAccounts; i++ {
+		acctID := uuid.New()
+		if _, err := st.SeedAccount(ctx, store.Account{
+			ID: acctID, OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
+			DisplayName: fmt.Sprintf("Concurrent WA %d", i), ExternalAccountRef: fmt.Sprintf("7700%06d@s.whatsapp.net", i),
+			ExternalHandle: fmt.Sprintf("7700%06d", i), ConnectionState: "connected",
+		}); err != nil {
+			t.Fatalf("seed account %d: %v", i, err)
+		}
+		if _, _, _, err := st.SetCampaignAccountLimits(ctx, acctID,
+			store.CampaignAccountSettingsInput{LimitMode: "custom", MinIntervalSeconds: 1, JitterSeconds: 0},
+			[]purecampaign.Tier{{WindowSeconds: 3600, MaxSends: 1000}}, nil); err != nil {
+			t.Fatalf("SetCampaignAccountLimits %d: %v", i, err)
+		}
+		c := mustCreateCampaign(t, st, ctx, orgID, acctID, userID, fmt.Sprintf("Concurrent Campaign %d", i), "Hi!")
+		if err := st.ReplaceCampaignRecipients(ctx, c.ID, []store.CampaignRecipientInput{
+			{NormalizedIdentity: fmt.Sprintf("7701%07d", i), Name: fmt.Sprintf("R%d", i)},
+		}); err != nil {
+			t.Fatalf("ReplaceCampaignRecipients %d: %v", i, err)
+		}
+		if _, err := st.SetCampaignStatus(ctx, c.ID, purecampaign.StatusRunning, uuid.NullUUID{}, "started", nil); err != nil {
+			t.Fatalf("start campaign %d: %v", i, err)
+		}
+		acctIDs[i] = acctID
+		campIDs[i] = c.ID
+	}
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		claimed []store.Claim
+	)
+	wg.Add(numAccounts * workersPerAccount)
+	for _, acctID := range acctIDs {
+		acctID := acctID
+		for w := 0; w < workersPerAccount; w++ {
+			go func() {
+				defer wg.Done()
+				claim, ok, err := st.ClaimNextRecipient(ctx, acctID, time.Now())
+				if err != nil {
+					t.Errorf("ClaimNextRecipient(%s): %v", acctID, err)
+					return
+				}
+				if !ok {
+					return
+				}
+				mu.Lock()
+				claimed = append(claimed, claim)
+				mu.Unlock()
+			}()
+		}
+	}
+	wg.Wait()
+
+	if len(claimed) != numAccounts {
+		t.Fatalf("got %d successful claims across %d accounts x %d workers, want exactly %d (one per account)",
+			len(claimed), numAccounts, workersPerAccount, numAccounts)
+	}
+	seenAccount := map[uuid.UUID]int{}
+	seenRecipient := map[uuid.UUID]int{}
+	seenLog := map[uuid.UUID]int{}
+	seenAttempt := map[uuid.UUID]int{}
+	for _, cl := range claimed {
+		seenAccount[cl.AccountID]++
+		seenRecipient[cl.RecipientID]++
+		seenLog[cl.LogID]++
+		seenAttempt[cl.AttemptID]++
+	}
+	for id, n := range seenAccount {
+		if n != 1 {
+			t.Errorf("account %s was claimed from %d times, want exactly 1 (its single recipient claimed by exactly one worker)", id, n)
+		}
+	}
+	for id, n := range seenRecipient {
+		if n != 1 {
+			t.Errorf("recipient %s was claimed %d times, want exactly 1", id, n)
+		}
+	}
+	if len(seenRecipient) != numAccounts {
+		t.Fatalf("distinct recipients claimed = %d, want %d", len(seenRecipient), numAccounts)
+	}
+	for id, n := range seenLog {
+		if n != 1 {
+			t.Errorf("send_log id %s was handed out %d times, want exactly 1 (no two concurrent claims shared one log row)", id, n)
+		}
+	}
+	for id, n := range seenAttempt {
+		if n != 1 {
+			t.Errorf("attempt id %s was handed out %d times, want exactly 1", id, n)
+		}
+	}
+
+	// Every account's own campaign agrees: its single recipient moved to
+	// 'sending' (claimed, unfinalized here — orthogonal to what this test is
+	// proving), none stuck at 'pending'.
+	for i, campID := range campIDs {
+		counts, err := st.CampaignRecipientCounts(ctx, campID)
+		if err != nil {
+			t.Fatalf("CampaignRecipientCounts(campaign %d): %v", i, err)
+		}
+		if counts["pending"] != 0 || counts["sending"] != 1 {
+			t.Errorf("campaign %d (account %s): counts=%+v, want 0 pending / 1 sending", i, acctIDs[i], counts)
 		}
 	}
 }

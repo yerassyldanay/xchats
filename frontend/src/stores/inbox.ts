@@ -7,6 +7,11 @@ import { useCrm } from './crm'
 import type { AiDraft, Chat, Message, User } from '../types'
 
 type Assignee = 'me' | 'unassigned' | 'all'
+// InboxView mirrors store.ChatFilter.View on the backend (backend/internal/
+// store/read.go) — "" there is this store's own default 'inbox', never sent
+// as a literal empty-string param (chatsParams omits it entirely, same as
+// every other unset filter).
+type InboxView = 'inbox' | 'campaign' | 'all'
 
 interface ListChats {
   items: Chat[]
@@ -57,6 +62,12 @@ export const useInbox = defineStore('inbox', {
     users: [] as User[],
     filter: 'all' as Assignee,
     accountFilter: null as string | null, // account_id (any channel); null = all
+    view: 'inbox' as InboxView,
+    // campaignFilter narrows view='campaign' to one specific campaign's own
+    // chats (backend's campaign_id) — only ever sent alongside view='campaign'
+    // (chatsParams enforces this), since the backend 400s on any other
+    // combination. null = every campaign chat, not narrowed to one.
+    campaignFilter: null as string | null,
     query: '',
     composerText: '',
     loadingChats: false,
@@ -103,6 +114,14 @@ export const useInbox = defineStore('inbox', {
       if (this.filter !== 'all') params.set('assignee', this.filter)
       if (this.accountFilter) params.set('account_id', this.accountFilter)
       if (this.query) params.set('q', this.query)
+      // view='inbox' (the default) is omitted entirely rather than sent as a
+      // literal string — GET /chats' own doc comment: omitting the param
+      // behaves EXACTLY as before this feature existed.
+      if (this.view !== 'inbox') params.set('view', this.view)
+      // campaign_id is only valid alongside view=campaign (a 400 otherwise) —
+      // gated here so a stale campaignFilter from a previous campaign-view
+      // visit can never leak into an inbox/all request.
+      if (this.view === 'campaign' && this.campaignFilter) params.set('campaign_id', this.campaignFilter)
       params.set('page', String(page))
       return params
     },

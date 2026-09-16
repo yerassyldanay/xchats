@@ -48,11 +48,15 @@ watch(
 // dialog opening its new chat) into the route. Guarded against the watcher
 // above so the two never fight: this only pushes when the store is ahead of
 // the URL, never when a route change is what caused the store to update.
+//
+// query: route.query carries the current query string (e.g. ChatList's own
+// ?view=campaign) forward — a named-route push with no query of its own
+// would otherwise silently reset it to empty on every chat selection.
 watch(
   () => inbox.activeId,
   (id) => {
     if (id === routeChatId()) return
-    router.push({ name: 'chatboard', params: id ? { chatId: id } : {} })
+    router.push({ name: 'chatboard', params: id ? { chatId: id } : {}, query: route.query })
   },
 )
 
