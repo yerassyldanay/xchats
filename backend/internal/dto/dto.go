@@ -4,6 +4,7 @@
 package dto
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -57,6 +58,21 @@ type Chat struct {
 	// for a chat on an unassigned account and for chats that predate the CRM
 	// migration.
 	CustomerID *string `json:"customer_id"`
+	// Campaigns lists every campaign with explicit, persisted participation
+	// in this conversation (see store.campaignMembershipClause) — omitted
+	// entirely for a chat with none, so an existing client that never reads
+	// this field sees no behavior change. Always attached by the caller
+	// (never by MapChat itself, which stays a pure function of store.Chat)
+	// via a batched lookup — see handleListChats.
+	Campaigns []CampaignRef `json:"campaigns,omitempty"`
+}
+
+// CampaignRef is the minimal, non-technical identification of a campaign a
+// chat or message is linked to — an id (for a UI deep-link) and its
+// operator-facing name, never any recipient/audience data.
+type CampaignRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // Media is one media item on a message (a "list of URLs", each enriched).
@@ -324,6 +340,42 @@ func MapChat(c store.Chat) Chat {
 	}
 	if channel == string(messaging.ChannelWhatsApp) || channel == string(messaging.ChannelSimulator) {
 		out.WaAccountID = c.AccountID.String()
+	}
+	return out
+}
+
+// campaignRefsLookup is the one method MapChatWithCampaigns needs — narrow
+// on purpose so any package's own narrow store-facing interface (tgingest.
+// Ingestor, metaingest.Ingestor, ...) can add this single method and pass
+// itself straight through, instead of every caller needing the full
+// concrete *store.Store. *store.Store already satisfies this with zero
+// adapter code.
+type campaignRefsLookup interface {
+	CampaignRefsForChats(ctx context.Context, chatIDs []uuid.UUID) (map[uuid.UUID][]store.CampaignRef, error)
+}
+
+// MapChatWithCampaigns is MapChat plus its campaign refs, attached
+// best-effort (a lookup failure degrades to no badge — the same shape a chat
+// with no campaign participation at all already has — never a hard failure
+// for what is, at every call site, a secondary enrichment of an otherwise-
+// complete response or broadcast).
+//
+// Every emitter of a Chat — an HTTP response AND a chat.updated/chat.created
+// realtime broadcast alike — must go through this, not bare MapChat, or a
+// realtime update silently drops the campaign badge from every OTHER
+// client's already-rendered row: the frontend's chat store replaces its
+// cached row wholesale on each chat.updated event, so a Chat with Campaigns
+// omitted (the zero value) overwrites one that had it populated. This bit a
+// real flow: opening a campaign-linked chat (which POSTs /chats/:id/read)
+// used to broadcast the read receipt via bare MapChat, making the sender's
+// own badge disappear from every connected client's list the moment
+// anyone opened it.
+func MapChatWithCampaigns(ctx context.Context, st campaignRefsLookup, c store.Chat) Chat {
+	out := MapChat(c)
+	if refs, err := st.CampaignRefsForChats(ctx, []uuid.UUID{c.ID}); err == nil {
+		for _, ref := range refs[c.ID] {
+			out.Campaigns = append(out.Campaigns, CampaignRef{ID: ref.ID.String(), Name: ref.Name})
+		}
 	}
 	return out
 }

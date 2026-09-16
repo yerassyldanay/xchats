@@ -42,6 +42,10 @@ type Ingestor interface {
 	HasDraftForTrigger(ctx context.Context, triggerMessageID uuid.UUID) (bool, error)
 	MessageByID(ctx context.Context, id uuid.UUID) (store.Message, error)
 	ChatByID(ctx context.Context, id uuid.UUID) (store.Chat, error)
+	// CampaignRefsForChats backs dto.MapChatWithCampaigns's realtime-broadcast
+	// enrichment — see that function's own doc comment for why a bare
+	// dto.MapChat must never feed a chat.updated/chat.created broadcast.
+	CampaignRefsForChats(ctx context.Context, chatIDs []uuid.UUID) (map[uuid.UUID][]store.CampaignRef, error)
 }
 
 // Publisher is the enqueue surface Process needs — satisfied by any
@@ -55,6 +59,7 @@ type Publisher interface {
 // *realtime.Hub with zero adapter code.
 type Broadcaster interface {
 	Broadcast(name string, data any)
+	BroadcastScoped(orgID uuid.UUID, name string, data any)
 }
 
 // Automation is the narrow surface Process needs from
@@ -182,14 +187,14 @@ func (p *Processor) Process(ctx context.Context, acct store.TelegramAccount, upd
 		// between the commit and the enqueue. If no draft exists for this
 		// trigger, publish again. WriteDraftSet's supersede semantics make a
 		// rare double generation harmless.
-		p.emitMessage(ctx, "message.updated", res.MessageID)
+		p.emitMessage(ctx, "message.updated", res.MessageID, acct.OrganizationID.UUID)
 		if err := p.reenqueueMissingDraft(ctx, res, acct.ID); err != nil {
 			return Outcome{Status: "duplicate", Result: res}, fmt.Errorf("%w: %v", ErrEnqueue, err)
 		}
 		return Outcome{Status: "duplicate", Result: res}, nil
 	}
 
-	p.emitMessage(ctx, "message.created", res.MessageID)
+	p.emitMessage(ctx, "message.created", res.MessageID, acct.OrganizationID.UUID)
 
 	// Attachment bytes are fetched off the request path. A lost enqueue is
 	// not fatal — the media row stays 'pending' and the sweeper picks it up
@@ -205,7 +210,7 @@ func (p *Processor) Process(ctx context.Context, acct store.TelegramAccount, upd
 		if res.ChatCreated {
 			name = "chat.created"
 		}
-		p.hub.Broadcast(name, dto.MapChat(chat))
+		p.hub.BroadcastScoped(acct.OrganizationID.UUID, name, dto.MapChatWithCampaigns(ctx, p.store, chat))
 	}
 
 	// Handing this off to automation is part of the durable unit as far as
@@ -256,7 +261,7 @@ func (p *Processor) reenqueueMissingDraft(ctx context.Context, res store.TgInbou
 	return nil
 }
 
-func (p *Processor) emitMessage(ctx context.Context, name string, id uuid.UUID) {
+func (p *Processor) emitMessage(ctx context.Context, name string, id, orgID uuid.UUID) {
 	msg, err := p.store.MessageByID(ctx, id)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
@@ -264,7 +269,7 @@ func (p *Processor) emitMessage(ctx context.Context, name string, id uuid.UUID) 
 		}
 		return
 	}
-	p.hub.Broadcast(name, dto.MapMessage(msg))
+	p.hub.BroadcastScoped(orgID, name, dto.MapMessage(msg))
 }
 
 // publish enqueues with a bounded deadline (see Deps.PublishTimeout).

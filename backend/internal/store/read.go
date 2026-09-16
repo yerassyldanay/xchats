@@ -23,6 +23,22 @@ type ChatFilter struct {
 	Query     string
 	Limit     int
 	Offset    int
+	// View selects which population of chats to return:
+	//   ""/"inbox" — the existing, unchanged default: every chat except a
+	//     never-replied-to cold-send campaign chat (chat_state='campaign'),
+	//     unless Status explicitly asks for exactly that.
+	//   "campaign" — ONLY chats with explicit, persisted campaign
+	//     participation (see campaignMembershipClause) — a chat a campaign
+	//     created, AND an existing chat a campaign reused, but never a chat
+	//     merely because its contact appears in some campaign's audience
+	//     list before processing ever touched it.
+	//   "all"      — every chat_state, no exclusion: the union of the two
+	//     views above, since nothing the default view hides is hidden for
+	//     any OTHER reason (authorization/soft-delete still apply the same).
+	View string
+	// CampaignID narrows View="campaign" to one specific campaign's own
+	// chats. Ignored for every other View.
+	CampaignID uuid.NullUUID
 }
 
 // chatCols is the canonical inbox_chats_v projection — one shape for every
@@ -62,13 +78,14 @@ func scanChatDst(c *Chat) []any {
 // accounts' chats" rule are the same two predicates they always were.
 //
 // A chat_state='campaign' row (a cold-send campaign's own recipient, before
-// any reply — see MarkChatCampaignOnly) is excluded from the default,
-// unfiltered listing: an inbox full of one-way campaign sends nobody has
-// answered yet would bury the conversations an operator actually needs to
-// see. f.Status="campaign" still reaches them explicitly (the campaign
-// detail page's own "view in inbox" links use this), and any OTHER explicit
-// f.Status is unaffected — this carve-out only changes the "no filter at
-// all" default.
+// any reply — see MarkChatCampaignOnly) is excluded from the default
+// (View="" or "inbox"), unfiltered listing: an inbox full of one-way
+// campaign sends nobody has answered yet would bury the conversations an
+// operator actually needs to see. f.Status="campaign" still reaches them
+// explicitly (the campaign detail page's own "view in inbox" links use
+// this), and any OTHER explicit f.Status is unaffected — this carve-out
+// only changes the "no filter at all" default. See ChatFilter.View's own
+// doc comment for "campaign"/"all".
 func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int, error) {
 	var where []string
 	var args []any
@@ -79,11 +96,28 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 		args = append(args, f.AccountID.UUID)
 		where = append(where, "c.account_id = $"+itoa(len(args)))
 	}
-	if f.Status != "" {
-		args = append(args, f.Status)
-		where = append(where, "c.chat_state = $"+itoa(len(args)))
-	} else {
-		where = append(where, "c.chat_state <> 'campaign'")
+	switch f.View {
+	case "campaign":
+		memberClause, memberArgs := campaignMembershipClause(f.CampaignID, len(args))
+		where = append(where, memberClause)
+		args = append(args, memberArgs...)
+		if f.Status != "" {
+			args = append(args, f.Status)
+			where = append(where, "c.chat_state = $"+itoa(len(args)))
+		}
+	case "all":
+		if f.Status != "" {
+			args = append(args, f.Status)
+			where = append(where, "c.chat_state = $"+itoa(len(args)))
+		}
+		// else: no chat_state predicate at all — every state included.
+	default: // "" or "inbox"
+		if f.Status != "" {
+			args = append(args, f.Status)
+			where = append(where, "c.chat_state = $"+itoa(len(args)))
+		} else {
+			where = append(where, "c.chat_state <> 'campaign'")
+		}
 	}
 	switch {
 	case f.Assignee == "me":
@@ -131,6 +165,40 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 	var total int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM `+from+` WHERE `+clause, args[:len(args)-2]...).Scan(&total)
 	return out, total, rows.Err()
+}
+
+// campaignMembershipClause is View="campaign"'s membership test: a chat
+// qualifies if — and only if — some campaign_recipients row was stamped
+// with this chat's id (by store.FinalizeAttempt, once a send to that
+// recipient actually resolved a chat), optionally narrowed to one specific
+// campaignID. This is the ONLY membership signal used — never chat_state
+// alone — so it correctly includes both a cold-send-created chat AND an
+// existing warm chat a campaign reused (FinalizeAttempt stamps chat_id in
+// both cases identically), and correctly excludes a chat whose contact
+// merely appears in a campaign's audience list before any send was ever
+// attempted (no campaign_recipients row references it yet).
+//
+// An EXISTS subquery (never a JOIN) is what keeps a chat touched by several
+// campaigns — or a recipient retried into several campaign_send_attempts —
+// appearing in the result exactly once; there is nothing here for a caller
+// to additionally deduplicate.
+//
+// With no campaignID, the subquery still implicitly stays inside the
+// caller's own org: campaign_recipients.chat_id is only ever stamped for a
+// chat FinalizeAttempt resolved through THAT SAME campaign's own account,
+// and a campaign can only ever be created against an account already
+// inside its own organization — so a chat in a DIFFERENT org can never
+// carry a campaign_recipients row for a campaign outside it. With an
+// explicit campaignID, the caller (internal/httpapi's orgCampaign) has
+// already independently verified that id belongs to the caller's org
+// before this is ever reached, so no redundant join to campaigns is needed
+// here either.
+func campaignMembershipClause(campaignID uuid.NullUUID, argOffset int) (string, []any) {
+	if campaignID.Valid {
+		return "EXISTS (SELECT 1 FROM campaign_recipients cr WHERE cr.chat_id = c.id AND cr.campaign_id = $" + itoa(argOffset+1) + ")",
+			[]any{campaignID.UUID}
+	}
+	return "EXISTS (SELECT 1 FROM campaign_recipients cr WHERE cr.chat_id = c.id)", nil
 }
 
 // ChatByID returns a chat with its contact, on any channel.

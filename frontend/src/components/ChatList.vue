@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { Bot, CircleAlert, LoaderCircle, MessagesSquare, PanelLeftClose, PanelLeftOpen, Search, SearchX, SquarePen } from 'lucide-vue-next'
 import { useInbox } from '../stores/inbox'
 import { useAccounts } from '../stores/accounts'
@@ -8,6 +9,7 @@ import { initials, colorFor, shortTime } from '../lib/format'
 import { channelDot, channelIcon, channelText } from '../lib/channelBrand'
 import { usePanelCollapsed } from '../lib/panelCollapse'
 import NewMessageDialog from './NewMessageDialog.vue'
+import CampaignBadge from './CampaignBadge.vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,7 +21,46 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 const inbox = useInbox()
 const accounts = useAccounts()
 const { t, locale } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const showNew = ref(false)
+
+// Inbox/Campaign/All view tabs — a second, independent tab dimension from
+// the assignee filter below, same idea as Campaigns.vue's own Campaigns-vs-
+// Templates row (?tab=templates): restore from the URL on arrival (a reload
+// or a deep link), same query key going forward. Read once at setup, same
+// point Campaigns.vue reads route.query.tab — inbox.view/campaignFilter
+// live in the store (unlike Campaigns.vue's plain local ref) since they
+// also have to survive ChatList's own filter/search changes untouched.
+const VIEW_VALUES = ['inbox', 'campaign', 'all'] as const
+const initialView = route.query.view
+if (typeof initialView === 'string' && (VIEW_VALUES as readonly string[]).includes(initialView)) {
+  inbox.view = initialView as typeof inbox.view
+}
+if (inbox.view === 'campaign' && typeof route.query.campaign_id === 'string') {
+  inbox.campaignFilter = route.query.campaign_id
+}
+
+const views = computed<{ key: 'inbox' | 'campaign' | 'all'; label: string }[]>(() => [
+  { key: 'inbox', label: t('inbox.views.inbox') },
+  { key: 'campaign', label: t('inbox.views.campaign') },
+  { key: 'all', label: t('inbox.views.all') },
+])
+
+function setView(v: 'inbox' | 'campaign' | 'all') {
+  inbox.view = v
+  // The 3-way switcher has no notion of one specific campaign (that's a
+  // deep-link-only refinement — see campaignFilter's own doc comment in
+  // inbox.ts), so any tab click clears it rather than silently keeping a
+  // stale narrowing from an earlier ?campaign_id= visit.
+  inbox.campaignFilter = null
+  const query: Record<string, string> = { ...(route.query as Record<string, string>) }
+  if (v === 'inbox') delete query.view
+  else query.view = v
+  delete query.campaign_id
+  void router.replace({ query })
+  inbox.loadChats()
+}
 
 // INB-02: the 340px chat list is fixed width — on a 13"/14" laptop that
 // plus the 340px assistant panel leaves the thread under 550px. Collapsing
@@ -29,8 +70,13 @@ const totalUnread = computed(() => inbox.chats.reduce((sum, c) => sum + c.unread
 
 // isFiltered distinguishes "nothing matches this search/filter" (INB-15)
 // from a genuinely empty inbox — the copy and the fix (clear the filter vs.
-// wait for messages) are different.
-const isFiltered = computed(() => !!inbox.query || inbox.filter !== 'all' || !!inbox.accountFilter)
+// wait for messages) are different. view='campaign' counts as a filter the
+// same way the assignee/account ones do (a deliberate narrowing); view='all'
+// does not — it's strictly broader than the default 'inbox' view, so an
+// empty result there is never explained by narrowing.
+const isFiltered = computed(
+  () => !!inbox.query || inbox.filter !== 'all' || !!inbox.accountFilter || inbox.view === 'campaign',
+)
 
 const ALL = '__all__'
 
@@ -120,8 +166,24 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
         />
       </div>
       <Tabs
-        :model-value="inbox.filter"
+        :model-value="inbox.view"
         class="mt-3"
+        @update:model-value="(v) => setView(v as 'inbox' | 'campaign' | 'all')"
+      >
+        <TabsList class="w-full">
+          <TabsTrigger
+            v-for="v in views"
+            :key="v.key"
+            :value="v.key"
+            :data-testid="`view-tab-${v.key}`"
+          >
+            {{ v.label }}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+      <Tabs
+        :model-value="inbox.filter"
+        class="mt-2"
         @update:model-value="(v) => setFilter(v as 'me' | 'unassigned' | 'all')"
       >
         <TabsList class="w-full">
@@ -221,6 +283,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
             >
               <Bot class="w-2.5 h-2.5" /> {{ t('simulator.navLabel') }}
             </span>
+            <CampaignBadge :campaigns="c.campaigns" />
             <span class="ml-auto text-[11px] text-muted-foreground shrink-0">{{ shortTime(c.last_message_at, locale) }}</span>
           </div>
           <div

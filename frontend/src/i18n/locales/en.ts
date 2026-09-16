@@ -1344,6 +1344,13 @@ export default {
       failed: 'Failed',
       skipped: 'Skipped',
     },
+    // badge.* — CampaignBadge.vue's chip (a chat/message's campaign
+    // participation) and ChatThread's per-message campaign tag. Deliberately
+    // one generic word, never a specific campaign name — see CampaignBadge's
+    // own doc comment for why.
+    badge: {
+      label: 'Campaign',
+    },
     actions: {
       start: 'Start',
       pause: 'Pause',
@@ -1848,6 +1855,14 @@ export default {
     filters: {
       me: 'Mine',
       unassigned: 'Unassigned',
+      all: 'All',
+    },
+    // views.* — the Inbox/Campaign/All tab row (a second, independent
+    // dimension from filters.* above): which population of chats to list,
+    // not who they're assigned to. Mirrors store.ChatFilter.View's values.
+    views: {
+      inbox: 'Inbox',
+      campaign: 'Campaign',
       all: 'All',
     },
     assign: {

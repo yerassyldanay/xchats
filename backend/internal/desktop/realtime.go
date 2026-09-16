@@ -20,6 +20,12 @@ type Emitter func(name string, data any)
 // "kb.row.changed" … handlers over either transport and nothing downstream of
 // connectRealtime can tell which one it got.
 //
+// Uses SubscribeAll, not Subscribe(orgID): the desktop app is one local
+// install with one active session at a time, not a multi-tenant server
+// several different organizations' browsers connect to concurrently — the
+// org-scoping BroadcastScoped/Subscribe add for the browser SSE endpoint
+// does not apply here.
+//
 // The hub already drops events for a slow consumer rather than blocking a
 // producer (realtime.Hub.Broadcast), and this subscriber does no I/O of its
 // own — EventsEmit hands the payload to the WebView's own queue — so the
@@ -28,7 +34,7 @@ func PumpRealtime(ctx context.Context, hub *realtime.Hub, emit Emitter) {
 	if hub == nil || emit == nil {
 		return
 	}
-	events, unsubscribe := hub.Subscribe()
+	events, unsubscribe := hub.SubscribeAll()
 	defer unsubscribe()
 	for {
 		select {

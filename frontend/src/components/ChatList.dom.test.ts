@@ -1,10 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { VueWrapper } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { mountKb, testPinia } from '@/test/mount'
 import { useInbox } from '@/stores/inbox'
 import ChatList from './ChatList.vue'
 import NewMessageDialog from './NewMessageDialog.vue'
 import type { Chat, ChannelName } from '@/types'
+
+// loadChats() (fired by the new view tabs, and reachable via the Retry
+// button below) talks to the backend exclusively through api.get — mocking
+// it here is inert for every test that never triggers a load, same as
+// inbox.test.ts's own mock.
+vi.mock('@/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/client')>()
+  return { ...actual, api: { ...actual.api, get: vi.fn() } }
+})
 
 function chat(id: string, channel: ChannelName): Chat {
   return {
@@ -28,10 +38,26 @@ function chat(id: string, channel: ChannelName): Chat {
   }
 }
 
+// ChatList reads useRoute/useRouter now (the Inbox/Campaign/All tabs' own
+// URL sync) — a real in-memory router, same pattern NavRail.dom.test.ts
+// already established for a component (as opposed to a routed view) that
+// needs one, rather than mocking the 'vue-router' module wholesale.
+function testRouter(): Router {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/chatboard', name: 'chatboard', component: { template: '<div/>' } }],
+  })
+}
+
+// Fire-and-forget push: every test in this file except the view-tabs block
+// below only cares about the rendered list, never about route.query timing,
+// so there's nothing to gain by making every mountWith call site async.
 function mountWith(chats: Chat[]) {
   const pinia = testPinia()
   useInbox().chats = chats
-  return mountKb(ChatList, { pinia })
+  const router = testRouter()
+  void router.push('/chatboard')
+  return mountKb(ChatList, { pinia, global: { plugins: [router] } })
 }
 
 describe('ChatList channel badges', () => {
@@ -84,7 +110,7 @@ describe('ChatList loading/failed/filtered-empty/empty states', () => {
     const inbox = useInbox()
     inbox.chats = []
     inbox.loadingChats = true
-    const wrapper = mountKb(ChatList, { pinia })
+    const wrapper = mountKb(ChatList, { pinia, global: { plugins: [testRouter()] } })
     expect(wrapper.text()).not.toContain('Пока нет чатов')
     expect(wrapper.findAll('.animate-pulse').length).toBeGreaterThan(0)
   })
@@ -95,7 +121,7 @@ describe('ChatList loading/failed/filtered-empty/empty states', () => {
     inbox.chats = []
     inbox.loadingChats = false
     inbox.chatsError = 'Could not load chats.'
-    const wrapper = mountKb(ChatList, { pinia })
+    const wrapper = mountKb(ChatList, { pinia, global: { plugins: [testRouter()] } })
     expect(wrapper.text()).toContain('Could not load chats.')
     expect(wrapper.text()).not.toContain('Пока нет чатов')
     expect(wrapper.find('button').exists()).toBe(true)
@@ -107,7 +133,7 @@ describe('ChatList loading/failed/filtered-empty/empty states', () => {
     inbox.chats = []
     inbox.loadingChats = false
     inbox.query = 'nobody'
-    const wrapper = mountKb(ChatList, { pinia })
+    const wrapper = mountKb(ChatList, { pinia, global: { plugins: [testRouter()] } })
     // The app's default test locale is ru (i18n/index.ts falls back to it
     // whenever localStorage is unavailable, as under vitest's node project).
     expect(wrapper.text()).toContain('Ничего не найдено')
@@ -119,7 +145,7 @@ describe('ChatList loading/failed/filtered-empty/empty states', () => {
     const inbox = useInbox()
     inbox.chats = []
     inbox.loadingChats = false
-    const wrapper = mountKb(ChatList, { pinia })
+    const wrapper = mountKb(ChatList, { pinia, global: { plugins: [testRouter()] } })
     expect(wrapper.text()).toContain('Пока нет чатов')
   })
 })
@@ -139,7 +165,9 @@ describe('ChatList — C opens New Message unless typing', () => {
   function mountAttached(chats: Chat[]) {
     const pinia = testPinia()
     useInbox().chats = chats
-    wrapper = mountKb(ChatList, { pinia, attachTo: document.body })
+    const router = testRouter()
+    void router.push('/chatboard')
+    wrapper = mountKb(ChatList, { pinia, attachTo: document.body, global: { plugins: [router] } })
     return wrapper
   }
 
@@ -198,5 +226,98 @@ describe('ChatList — collapse toggle (INB-02)', () => {
 
     const second = mountWith([])
     expect(second.find('input').exists()).toBe(false)
+  })
+})
+
+// Campaign chats becoming discoverable in the Inbox: the Inbox/Campaign/All
+// view tabs are a second, independent tab row from the assignee filter
+// above (Campaigns.vue's own Campaigns-vs-Templates row, via ?tab=, is the
+// precedent — see CAM-14's own test below).
+describe('ChatList — Inbox/Campaign/All view tabs', () => {
+  async function mountWithRouter(initialPath = '/chatboard') {
+    const pinia = testPinia()
+    useInbox().chats = []
+    const router = testRouter()
+    await router.push(initialPath)
+    const wrapper = mountKb(ChatList, { pinia, global: { plugins: [router] } })
+    await flushPromises()
+    return { wrapper, router }
+  }
+
+  it('clicking the Campaign tab requests view=campaign and mirrors it into the URL', async () => {
+    const { api } = await import('@/api/client')
+    let lastPath = ''
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      lastPath = path
+      return { items: [], page: 1, page_size: 50, total: 0 } as never
+    })
+
+    const { wrapper, router } = await mountWithRouter()
+    // reka-ui's TabsTrigger selects on mousedown, not click (see the same
+    // note in SimulatorPanel.dom.test.ts).
+    await wrapper.find('[data-testid="view-tab-campaign"]').trigger('mousedown', { button: 0 })
+    await flushPromises()
+
+    expect(lastPath).toContain('view=campaign')
+    expect(router.currentRoute.value.query.view).toBe('campaign')
+  })
+
+  it('clicking back to the Inbox tab omits view from the request and clears it from the URL', async () => {
+    const { api } = await import('@/api/client')
+    let lastPath = ''
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      lastPath = path
+      return { items: [], page: 1, page_size: 50, total: 0 } as never
+    })
+
+    const { wrapper, router } = await mountWithRouter('/chatboard?view=campaign')
+    await wrapper.find('[data-testid="view-tab-inbox"]').trigger('mousedown', { button: 0 })
+    await flushPromises()
+
+    expect(lastPath).not.toContain('view=')
+    expect(router.currentRoute.value.query.view).toBeUndefined()
+  })
+
+  // "so a reload/deep-link keeps the selected view" — restoring FROM the
+  // URL is the other half of the sync, exercised at the store level (not
+  // the DOM) since it's the store's inbox.view a deep link needs to land on.
+  it('a ?view=campaign deep link restores the Campaign view into the store on mount', async () => {
+    const { api } = await import('@/api/client')
+    vi.mocked(api.get).mockResolvedValue({ items: [], page: 1, page_size: 50, total: 0 } as never)
+
+    await mountWithRouter('/chatboard?view=campaign')
+
+    expect(useInbox().view).toBe('campaign')
+  })
+})
+
+// Campaign badge (chat-list row) — CampaignBadge.vue's own render, seen from
+// the one call site required to actually go out and touch the DOM here.
+describe('ChatList — campaign badge', () => {
+  it('renders the campaign badge for a chat with campaign participation', () => {
+    const wrapper = mountWith([{ ...chat('c1', 'whatsapp'), campaigns: [{ id: 'camp-1', name: 'Spring Promo' }] }])
+    const badge = wrapper.find('[data-testid="campaign-badge"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.attributes('title')).toBe('Spring Promo')
+  })
+
+  it('renders no campaign badge for a chat with no campaign participation', () => {
+    const wrapper = mountWith([chat('c1', 'whatsapp')])
+    expect(wrapper.find('[data-testid="campaign-badge"]').exists()).toBe(false)
+  })
+
+  it('shows a count once more than one campaign touched the same chat', () => {
+    const wrapper = mountWith([
+      {
+        ...chat('c1', 'whatsapp'),
+        campaigns: [
+          { id: 'camp-1', name: 'Spring Promo' },
+          { id: 'camp-2', name: 'Autumn Sale' },
+        ],
+      },
+    ])
+    const badge = wrapper.find('[data-testid="campaign-badge"]')
+    expect(badge.text()).toContain('×2')
+    expect(badge.attributes('title')).toBe('Spring Promo, Autumn Sale')
   })
 })

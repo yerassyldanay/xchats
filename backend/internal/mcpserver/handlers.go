@@ -171,6 +171,11 @@ const (
 	toolKBMediaAttach        = "kb_media_attach"
 )
 
+// The 4 read-only campaign/WhatsApp-connection diagnostic tools' name
+// constants (toolDiagnoseCampaign etc.) are declared in campaign_tools.go,
+// alongside their Tool builders and handlers — see that file's own package
+// doc comment.
+
 var requiredScope = map[string]string{
 	toolKBAssistantUpsert:    mcpauth.ScopeKBDraftWrite,
 	toolKBTopicUpsert:        mcpauth.ScopeKBDraftWrite,
@@ -191,6 +196,14 @@ var requiredScope = map[string]string{
 	// different privilege than attaching an already-staged material to a KB
 	// record).
 	toolKBMediaAttach: mcpauth.ScopeKBDraftWrite,
+
+	// The 4 read-only campaign/WhatsApp-connection diagnostic tools share one
+	// scope, deliberately separate from every kb:* scope above — see
+	// mcpauth.ScopeCampaignsRead's own doc comment.
+	toolDiagnoseCampaign:         mcpauth.ScopeCampaignsRead,
+	toolCampaignRecipients:       mcpauth.ScopeCampaignsRead,
+	toolWhatsAppConnectionStatus: mcpauth.ScopeCampaignsRead,
+	toolCampaignEvents:           mcpauth.ScopeCampaignsRead,
 }
 
 // callTool routes to the specific per-tool implementation. The returned
@@ -228,6 +241,14 @@ func (s *Server) callTool(ctx context.Context, orgID uuid.UUID, userID uuid.UUID
 		return s.handleKBMediaUpload(ctx, orgID, userID, args)
 	case toolKBMediaAttach:
 		return s.handleKBMediaAttach(ctx, orgID, userID, args)
+	case toolDiagnoseCampaign:
+		return s.handleDiagnoseCampaign(ctx, orgID, userID, args)
+	case toolCampaignRecipients:
+		return s.handleCampaignRecipients(ctx, orgID, userID, args)
+	case toolWhatsAppConnectionStatus:
+		return s.handleWhatsAppConnectionStatus(ctx, orgID, userID, args)
+	case toolCampaignEvents:
+		return s.handleCampaignEvents(ctx, orgID, userID, args)
 	default:
 		return toolError("unknown tool: " + name), nil
 	}

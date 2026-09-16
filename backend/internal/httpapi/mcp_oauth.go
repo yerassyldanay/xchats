@@ -175,9 +175,10 @@ func displayName(c mcpauth.Client) string {
 
 func scopeDescriptions(scope string) []string {
 	labels := map[string]string{
-		mcpauth.ScopeKBRead:       "Просматривать базу знаний (товары, тарифы, темы, контакты, политики)",
-		mcpauth.ScopeKBDraftWrite: "Создавать и изменять черновик базы знаний",
-		mcpauth.ScopeMediaWrite:   "Загружать изображения и файлы",
+		mcpauth.ScopeKBRead:         "Просматривать базу знаний (товары, тарифы, темы, контакты, политики)",
+		mcpauth.ScopeKBDraftWrite:   "Создавать и изменять черновик базы знаний",
+		mcpauth.ScopeMediaWrite:     "Загружать изображения и файлы",
+		mcpauth.ScopeCampaignsRead:  "Просматривать диагностику рассылок и статус подключения WhatsApp (только чтение)",
 	}
 	var out []string
 	for _, sc := range mcpauth.ParseScope(scope) {

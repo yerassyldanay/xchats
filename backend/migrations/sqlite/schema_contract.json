@@ -6713,6 +6713,24 @@
           "unique": false,
           "where": "",
           "backs_constraint": false
+        },
+        {
+          "name": "campaign_recipients_chat_idx",
+          "columns": [
+            "chat_id"
+          ],
+          "unique": false,
+          "where": "(chat_id IS NOT NULL)",
+          "backs_constraint": false
+        },
+        {
+          "name": "campaign_recipients_message_idx",
+          "columns": [
+            "message_id"
+          ],
+          "unique": false,
+          "where": "(message_id IS NOT NULL)",
+          "backs_constraint": false
         }
       ],
       "checks": [
@@ -6785,6 +6803,48 @@
           "has_default": true,
           "default_kind": "now",
           "default_raw": "now()"
+        },
+        {
+          "name": "campaign_recipient_id",
+          "position": 7,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "attempt_id",
+          "position": 8,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "account_id",
+          "position": 9,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "chat_id",
+          "position": 10,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "message_id",
+          "position": 11,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "error_code",
+          "position": 12,
+          "pg_type": "text",
+          "nullable": true,
+          "has_default": false
         }
       ],
       "primary_key": [
@@ -6796,6 +6856,15 @@
           "columns": [
             "campaign_id",
             "created_at"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "campaign_events_recipient_idx",
+          "columns": [
+            "campaign_recipient_id"
           ],
           "unique": false,
           "where": "",
@@ -6821,6 +6890,30 @@
             "actor_user_id"
           ],
           "ref_table": "users",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "campaign_events_campaign_recipient_id_fkey",
+          "columns": [
+            "campaign_recipient_id"
+          ],
+          "ref_table": "campaign_recipients",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "campaign_events_attempt_id_fkey",
+          "columns": [
+            "attempt_id"
+          ],
+          "ref_table": "campaign_send_attempts",
           "ref_columns": [
             "id"
           ],
@@ -8793,6 +8886,323 @@
             "id"
           ],
           "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "campaign_send_attempts": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "campaign_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "campaign_recipient_id",
+          "position": 4,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "account_id",
+          "position": 5,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "attempt_number",
+          "position": 6,
+          "pg_type": "integer",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "chat_id",
+          "position": 7,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "message_id",
+          "position": 8,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "provider_message_id",
+          "position": 9,
+          "pg_type": "text",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "started_at",
+          "position": 10,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "completed_at",
+          "position": 11,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "outcome",
+          "position": 12,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:sending",
+          "default_raw": "'sending'::text"
+        },
+        {
+          "name": "error_code",
+          "position": 13,
+          "pg_type": "text",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "error_detail",
+          "position": 14,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "retryable",
+          "position": 15,
+          "pg_type": "boolean",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "next_attempt_at",
+          "position": 16,
+          "pg_type": "timestamp with time zone",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "created_at",
+          "position": 17,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "campaign_send_attempts_org_campaign_idx",
+          "columns": [
+            "organization_id",
+            "campaign_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "campaign_send_attempts_recipient_idx",
+          "columns": [
+            "campaign_recipient_id"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "campaign_send_attempts_campaign_started_idx",
+          "columns": [
+            "campaign_id",
+            "started_at"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [
+        {
+          "name": "campaign_send_attempts_attempt_number_check",
+          "definition": "CHECK ((attempt_number > 0))"
+        },
+        {
+          "name": "campaign_send_attempts_outcome_check",
+          "definition": "CHECK ((outcome = ANY (ARRAY['sending'::text, 'provider_accepted'::text, 'failed'::text, 'unknown'::text])))"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "campaign_send_attempts_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "campaign_send_attempts_campaign_id_fkey",
+          "columns": [
+            "campaign_id"
+          ],
+          "ref_table": "campaigns",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "campaign_send_attempts_campaign_recipient_id_fkey",
+          "columns": [
+            "campaign_recipient_id"
+          ],
+          "ref_table": "campaign_recipients",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "wa_account_connection_events": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "account_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "organization_id",
+          "position": 3,
+          "pg_type": "uuid",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "event",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "reason",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "created_at",
+          "position": 6,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "wa_account_connection_events_account_idx",
+          "columns": [
+            "account_id",
+            "created_at"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        },
+        {
+          "name": "wa_account_connection_events_org_idx",
+          "columns": [
+            "organization_id",
+            "created_at"
+          ],
+          "unique": false,
+          "where": "",
+          "backs_constraint": false
+        }
+      ],
+      "checks": [],
+      "foreign_keys": [
+        {
+          "name": "wa_account_connection_events_account_id_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "ref_table": "wa_accounts",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        },
+        {
+          "name": "wa_account_connection_events_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
           "on_update": "NO ACTION"
         }
       ]

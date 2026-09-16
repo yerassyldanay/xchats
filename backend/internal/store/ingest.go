@@ -315,7 +315,37 @@ func (s *Store) AdvanceDeliveryState(ctx context.Context, channel string, accoun
 	if errors.Is(err, dbx.ErrNoRows) {
 		return msgID, chatID, ErrNotFound
 	}
+	if err == nil && (newState == "delivered" || newState == "read") {
+		// Best-effort: a campaign diagnostics side effect must never turn a
+		// real, successfully-advanced delivery receipt into an error for
+		// the caller (a live webhook/receipt handler) — every caller of
+		// this shared, channel-neutral method gets this for free, whatever
+		// triggered the receipt (a real WhatsApp/Cloud webhook, or the
+		// simulator's own synthetic sweep).
+		s.recordDeliveryReceiptEvent(ctx, msgID, newState)
+	}
 	return msgID, chatID, err
+}
+
+// recordDeliveryReceiptEvent appends a "delivery_receipt_received"
+// diagnostic event when msgID is linked from a campaign_recipients row (the
+// common case: most messages are not campaign sends, so this is a no-op for
+// them) — see campaign_recipients_message_idx, added specifically for this
+// lookup. Errors are swallowed: this is a diagnostic sidecar, never allowed
+// to affect the delivery-state advancement it rides along with.
+func (s *Store) recordDeliveryReceiptEvent(ctx context.Context, msgID uuid.UUID, newState string) {
+	var recipientID, campaignID uuid.UUID
+	err := s.db.QueryRow(ctx, `SELECT id, campaign_id FROM campaign_recipients WHERE message_id = $1 LIMIT 1`, msgID).
+		Scan(&recipientID, &campaignID)
+	if err != nil {
+		return
+	}
+	_ = insertDiagnosticEvent(ctx, s.db, diagnosticEvent{
+		CampaignID: campaignID, Event: "delivery_receipt_received",
+		CampaignRecipientID: uuid.NullUUID{UUID: recipientID, Valid: true},
+		MessageID:           uuid.NullUUID{UUID: msgID, Valid: true},
+		Detail:              map[string]any{"delivery_state": newState},
+	})
 }
 
 // UpsertOutboundMedia records the attachment on an outbound message in the

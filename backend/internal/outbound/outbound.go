@@ -64,6 +64,7 @@ type Deps struct {
 // own SSE events, matching internal/automation.Runner's precedent.
 type Broadcaster interface {
 	Broadcast(name string, data any)
+	BroadcastScoped(orgID uuid.UUID, name string, data any)
 }
 
 // Deliver resolves t.Channel's sender, builds the OutboundMessage (hydrating
@@ -85,10 +86,12 @@ func Deliver(ctx context.Context, d Deps, t Task) (messaging.SendResult, error) 
 	d.Log.Info("outbound send start", "message_id", t.MessageID, "account_id", t.AccountID,
 		"channel", t.Channel, "to", maskDestination(t.Destination), "kind", kind)
 
+	orgID := d.orgIDFor(ctx, t.AccountID)
+
 	sender, err := d.Senders.Sender(t.Channel)
 	if err != nil {
 		d.Log.Error("outbound send failed", "message_id", t.MessageID, "channel", t.Channel, "err", err)
-		d.markFailed(ctx, t)
+		d.markFailed(ctx, t, orgID)
 		return messaging.SendResult{}, err
 	}
 
@@ -110,7 +113,7 @@ func Deliver(ctx context.Context, d Deps, t Task) (messaging.SendResult, error) 
 	if err != nil {
 		d.Log.Error("outbound send failed", "message_id", t.MessageID, "channel", t.Channel,
 			"to", maskDestination(t.Destination), "kind", kind, "err", err)
-		d.markFailed(ctx, t)
+		d.markFailed(ctx, t, orgID)
 		return messaging.SendResult{}, err
 	}
 	if res.ExternalID == "" {
@@ -129,22 +132,34 @@ func Deliver(ctx context.Context, d Deps, t Task) (messaging.SendResult, error) 
 	if err := d.Store.StampOutboundSent(ctx, string(t.Channel), t.MessageID, res.ExternalID); err != nil {
 		return res, err
 	}
-	d.emitMessage(ctx, t.MessageID)
+	d.emitMessage(ctx, t.MessageID, orgID)
 	return res, nil
 }
 
-func (d Deps) markFailed(ctx context.Context, t Task) {
+func (d Deps) markFailed(ctx context.Context, t Task, orgID uuid.UUID) {
 	_ = d.Store.SetDeliveryStateFor(ctx, string(t.Channel), t.MessageID, "failed")
-	d.emitMessage(ctx, t.MessageID)
+	d.emitMessage(ctx, t.MessageID, orgID)
 }
 
-func (d Deps) emitMessage(ctx context.Context, id uuid.UUID) {
+func (d Deps) emitMessage(ctx context.Context, id uuid.UUID, orgID uuid.UUID) {
 	msg, err := d.Store.MessageByID(ctx, id)
 	if err != nil {
 		d.Log.Error("emit message", "err", err)
 		return
 	}
-	d.Hub.Broadcast("message.updated", dto.MapMessage(msg))
+	d.Hub.BroadcastScoped(orgID, "message.updated", dto.MapMessage(msg))
+}
+
+// orgIDFor resolves accountID's owning organization for realtime scoping —
+// best-effort: a lookup failure (or an account with no organization set)
+// yields uuid.Nil, which BroadcastScoped treats as unscoped rather than
+// silently dropping the event for every subscriber.
+func (d Deps) orgIDFor(ctx context.Context, accountID uuid.UUID) uuid.UUID {
+	acct, err := d.Store.AccountByID(ctx, accountID)
+	if err != nil {
+		return uuid.Nil
+	}
+	return acct.OrganizationID.UUID
 }
 
 // maskDestination keeps only the last four characters of the provider's user

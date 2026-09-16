@@ -40,6 +40,10 @@ func (s *Server) handleRetranscribeMessage(c *gin.Context) {
 	if !okChat {
 		return
 	}
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
 	var req retranscribeReq
 	_ = c.ShouldBindJSON(&req) // an empty/absent body just keeps the configured language hint
 	if req.Language != "" && !sttLanguages[req.Language] {
@@ -134,14 +138,14 @@ func (s *Server) handleRetranscribeMessage(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	s.hub.Broadcast("message.updated", dto.MapMessage(updated))
+	s.hub.BroadcastScoped(org.ID, "message.updated", dto.MapMessage(updated))
 	// Keep the chat list's sidebar preview in sync too — worker.transcribeIfAudio's
 	// automatic run already does this; a manual re-transcribe correcting the
 	// same field deserves the same UI refresh, not just the open thread.
 	if err := s.store.UpdateChatPreviewIfCurrent(ctx(c), chatID, updated.MessageTS, worker.TranscriptPreview(text)); err != nil {
 		s.log.Error("update chat preview after retranscribe", "chat_id", chatID, "err", err)
 	} else if chat, err := s.store.ChatByID(ctx(c), chatID); err == nil {
-		s.hub.Broadcast("chat.updated", dto.MapChat(chat))
+		s.hub.BroadcastScoped(org.ID, "chat.updated", s.mapChatWithCampaigns(ctx(c), chat))
 	}
 	// A fresh transcript deserves a fresh draft, exactly like handleSuggest's
 	// own direct KindAIDraft enqueue (drafts.go) — never through automation's

@@ -34,6 +34,10 @@ func (h *fakeHub) Broadcast(name string, data any) {
 	h.calls = append(h.calls, name)
 }
 
+func (h *fakeHub) BroadcastScoped(orgID uuid.UUID, name string, data any) {
+	h.Broadcast(name, data)
+}
+
 func (h *fakeHub) count(name string) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
