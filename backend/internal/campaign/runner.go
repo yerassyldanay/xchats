@@ -169,7 +169,7 @@ func (r *Runner) send(ctx context.Context, claim store.Claim) {
 		if created {
 			chatEvent = "chat.created"
 		}
-		r.Hub.BroadcastScoped(claim.OrganizationID, chatEvent, dto.MapChat(chat))
+		r.Hub.BroadcastScoped(claim.OrganizationID, chatEvent, dto.MapChatWithCampaigns(ctx, r.Store, chat))
 		if msg, merr := r.Store.MessageByID(ctx, msgID); merr == nil {
 			r.Hub.BroadcastScoped(claim.OrganizationID, "message.created", dto.MapMessage(msg))
 		}

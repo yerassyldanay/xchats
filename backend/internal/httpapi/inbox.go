@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"io"
 	"mime"
@@ -140,13 +141,15 @@ func (s *Server) handleGetChat(c *gin.Context) {
 	if !okChat {
 		return
 	}
-	mapped := dto.MapChat(chat)
-	if refs, err := s.store.CampaignRefsForChats(ctx(c), []uuid.UUID{chat.ID}); err == nil {
-		for _, ref := range refs[chat.ID] {
-			mapped.Campaigns = append(mapped.Campaigns, dto.CampaignRef{ID: ref.ID.String(), Name: ref.Name})
-		}
-	}
-	ok(c, mapped)
+	ok(c, s.mapChatWithCampaigns(ctx(c), chat))
+}
+
+// mapChatWithCampaigns is the httpapi-local spelling of
+// dto.MapChatWithCampaigns — see that function's own doc comment for why
+// every Chat emitted here (an HTTP response or a chat.updated/chat.created
+// broadcast alike) must go through it instead of bare dto.MapChat.
+func (s *Server) mapChatWithCampaigns(ctx context.Context, chat store.Chat) dto.Chat {
+	return dto.MapChatWithCampaigns(ctx, s.store, chat)
 }
 
 func (s *Server) handleListMessages(c *gin.Context) {
@@ -406,7 +409,8 @@ func (s *Server) handleCreateChat(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	s.hub.BroadcastScoped(acct.OrganizationID.UUID, "chat.updated", dto.MapChat(chat))
+	mappedChat := s.mapChatWithCampaigns(ctx(c), chat)
+	s.hub.BroadcastScoped(acct.OrganizationID.UUID, "chat.updated", mappedChat)
 
 	u := currentUser(c)
 	items, err := s.sendParts(c, chat, "user", uuid.NullUUID{UUID: u.ID, Valid: true}, req.Text, req.MediaIDs)
@@ -414,7 +418,7 @@ func (s *Server) handleCreateChat(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, err.Error())
 		return
 	}
-	created(c, gin.H{"chat": dto.MapChat(chat), "items": items})
+	created(c, gin.H{"chat": mappedChat, "items": items})
 }
 
 func (s *Server) handleReadChat(c *gin.Context) {
@@ -434,7 +438,7 @@ func (s *Server) handleReadChat(c *gin.Context) {
 		fail(c, http.StatusNotFound, ErrNotFound, "chat not found")
 		return
 	}
-	s.hub.BroadcastScoped(org.ID, "chat.updated", dto.MapChat(chat))
+	s.hub.BroadcastScoped(org.ID, "chat.updated", s.mapChatWithCampaigns(ctx(c), chat))
 	ok(c, gin.H{"unread_count": 0})
 }
 
@@ -482,7 +486,7 @@ func (s *Server) handleAssignChat(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, "failed to update assignee")
 		return
 	}
-	mapped := dto.MapChat(chat)
+	mapped := s.mapChatWithCampaigns(ctx(c), chat)
 	s.hub.BroadcastScoped(org.ID, "chat.updated", mapped)
 	ok(c, mapped)
 }
@@ -518,7 +522,7 @@ func (s *Server) handleSetChatStatus(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, ErrInternal, "failed to update chat status")
 		return
 	}
-	mapped := dto.MapChat(chat)
+	mapped := s.mapChatWithCampaigns(ctx(c), chat)
 	s.hub.BroadcastScoped(org.ID, "chat.updated", mapped)
 	ok(c, mapped)
 }

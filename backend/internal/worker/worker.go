@@ -619,7 +619,7 @@ func TranscribeAudio(ctx context.Context, deps TranscriptionDeps, messageID, acc
 	if err := deps.Store.UpdateChatPreviewIfCurrent(ctx, msg.ChatID, msg.MessageTS, TranscriptPreview(text)); err != nil {
 		deps.Log.Error("update chat preview after transcription", "chat_id", msg.ChatID, "err", err)
 	} else if chat, err := deps.Store.ChatByID(ctx, msg.ChatID); err == nil {
-		deps.Hub.BroadcastScoped(orgID, "chat.updated", dto.MapChat(chat))
+		deps.Hub.BroadcastScoped(orgID, "chat.updated", dto.MapChatWithCampaigns(ctx, deps.Store, chat))
 	}
 
 	// A transcript becoming available is new customer content, exactly like

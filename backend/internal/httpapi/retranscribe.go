@@ -145,7 +145,7 @@ func (s *Server) handleRetranscribeMessage(c *gin.Context) {
 	if err := s.store.UpdateChatPreviewIfCurrent(ctx(c), chatID, updated.MessageTS, worker.TranscriptPreview(text)); err != nil {
 		s.log.Error("update chat preview after retranscribe", "chat_id", chatID, "err", err)
 	} else if chat, err := s.store.ChatByID(ctx(c), chatID); err == nil {
-		s.hub.BroadcastScoped(org.ID, "chat.updated", dto.MapChat(chat))
+		s.hub.BroadcastScoped(org.ID, "chat.updated", s.mapChatWithCampaigns(ctx(c), chat))
 	}
 	// A fresh transcript deserves a fresh draft, exactly like handleSuggest's
 	// own direct KindAIDraft enqueue (drafts.go) — never through automation's

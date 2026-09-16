@@ -572,7 +572,7 @@ func (m *Manager) broadcastChat(ctx context.Context, id uuid.UUID, name string, 
 		m.log.Error("whatsmeow: load chat for broadcast failed", "chat_id", id, "err", err)
 		return
 	}
-	m.cfg.Hub.BroadcastScoped(orgID, name, dto.MapChat(chat))
+	m.cfg.Hub.BroadcastScoped(orgID, name, dto.MapChatWithCampaigns(ctx, m.cfg.Store, chat))
 }
 
 // orgIDFor resolves accountID's owning organization for realtime scoping —

@@ -42,6 +42,10 @@ type Ingestor interface {
 	HasDraftForTrigger(ctx context.Context, triggerMessageID uuid.UUID) (bool, error)
 	MessageByID(ctx context.Context, id uuid.UUID) (store.Message, error)
 	ChatByID(ctx context.Context, id uuid.UUID) (store.Chat, error)
+	// CampaignRefsForChats backs dto.MapChatWithCampaigns's realtime-broadcast
+	// enrichment — see that function's own doc comment for why a bare
+	// dto.MapChat must never feed a chat.updated/chat.created broadcast.
+	CampaignRefsForChats(ctx context.Context, chatIDs []uuid.UUID) (map[uuid.UUID][]store.CampaignRef, error)
 }
 
 // Publisher is the enqueue surface Process needs — satisfied by any
@@ -206,7 +210,7 @@ func (p *Processor) Process(ctx context.Context, acct store.TelegramAccount, upd
 		if res.ChatCreated {
 			name = "chat.created"
 		}
-		p.hub.BroadcastScoped(acct.OrganizationID.UUID, name, dto.MapChat(chat))
+		p.hub.BroadcastScoped(acct.OrganizationID.UUID, name, dto.MapChatWithCampaigns(ctx, p.store, chat))
 	}
 
 	// Handing this off to automation is part of the durable unit as far as

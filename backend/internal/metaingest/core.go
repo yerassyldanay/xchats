@@ -45,6 +45,10 @@ type Ingestor interface {
 	MessageByID(ctx context.Context, id uuid.UUID) (store.Message, error)
 	ChatByID(ctx context.Context, id uuid.UUID) (store.Chat, error)
 	AdvanceDeliveryState(ctx context.Context, channel string, accountID uuid.UUID, externalMessageID, newState string, newRank int) (uuid.UUID, uuid.UUID, error)
+	// CampaignRefsForChats backs dto.MapChatWithCampaigns's realtime-broadcast
+	// enrichment — see that function's own doc comment for why a bare
+	// dto.MapChat must never feed a chat.updated/chat.created broadcast.
+	CampaignRefsForChats(ctx context.Context, chatIDs []uuid.UUID) (map[uuid.UUID][]store.CampaignRef, error)
 }
 
 // Publisher is the enqueue surface Process needs — satisfied by any
@@ -227,7 +231,7 @@ func (p *Processor) Process(ctx context.Context, acct store.ChannelAccount, msg 
 		if res.ChatCreated {
 			name = "chat.created"
 		}
-		p.hub.BroadcastScoped(acct.OrganizationID.UUID, name, dto.MapChat(chat))
+		p.hub.BroadcastScoped(acct.OrganizationID.UUID, name, dto.MapChatWithCampaigns(ctx, p.store, chat))
 	}
 
 	// Only a genuinely inbound message ever arms automation — an echo of our

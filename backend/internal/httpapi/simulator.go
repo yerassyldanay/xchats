@@ -185,7 +185,7 @@ func (s *Server) emitInbound(c *gin.Context, res store.InboundResult, orgID uuid
 		if res.ChatCreated {
 			name = "chat.created"
 		}
-		s.hub.BroadcastScoped(orgID, name, dto.MapChat(chat))
+		s.hub.BroadcastScoped(orgID, name, s.mapChatWithCampaigns(ctx(c), chat))
 	}
 }
 

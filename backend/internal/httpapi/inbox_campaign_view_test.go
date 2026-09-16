@@ -151,6 +151,76 @@ func TestListChats_CampaignIDCrossOrgIs404(t *testing.T) {
 	}
 }
 
+// TestSetChatStatus_ResponseIncludesCampaigns is the regression guard for a
+// real bug this feature had: handleSetChatStatus (and, by the same fix,
+// handleReadChat/handleAssignChat/handleCreateChat) used to map its chat
+// through bare dto.MapChat for both its HTTP response and its chat.updated
+// broadcast, silently omitting Campaigns — so resolving/reopening a
+// campaign-linked chat erased its own badge from every connected client's
+// already-rendered row (including the actor's own, via the same envelope
+// this test reads). All four now route through dto.MapChatWithCampaigns
+// (mapChatWithCampaigns locally); this asserts the wiring on one of them
+// whose response body actually carries the mapped chat.
+func TestSetChatStatus_ResponseIncludesCampaigns(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	c, err := h.store.CreateCampaign(ctx, store.Campaign{
+		OrganizationID: h.orgID, Name: "Status Badge Campaign", AccountID: h.accountID, Channel: "whatsapp",
+		MessageBody: "Hi!", CreatedBy: mustAdminUserID(t, h),
+	})
+	if err != nil {
+		t.Fatalf("CreateCampaign: %v", err)
+	}
+	chatID, _, err := h.store.FindOrCreateChat(ctx, h.accountID, "77098887777@s.whatsapp.net", "77098887777")
+	if err != nil {
+		t.Fatalf("FindOrCreateChat: %v", err)
+	}
+	if err := h.store.ReplaceCampaignRecipients(ctx, c.ID, []store.CampaignRecipientInput{
+		{NormalizedIdentity: "77098887777", Name: "Askar"},
+	}); err != nil {
+		t.Fatalf("ReplaceCampaignRecipients: %v", err)
+	}
+	msgID, err := h.store.InsertCampaignOutbound(ctx, "whatsapp", chatID, h.accountID, "Hi!", "Hi!")
+	if err != nil {
+		t.Fatalf("InsertCampaignOutbound: %v", err)
+	}
+	if _, _, _, err := h.store.SetCampaignAccountLimits(ctx, h.accountID,
+		store.CampaignAccountSettingsInput{LimitMode: "custom", MinIntervalSeconds: 1, JitterSeconds: 0},
+		[]purecampaign.Tier{{WindowSeconds: 1, MaxSends: 1000}}, nil); err != nil {
+		t.Fatalf("SetCampaignAccountLimits: %v", err)
+	}
+	if _, err := h.store.SetCampaignStatus(ctx, c.ID, purecampaign.StatusRunning, uuid.NullUUID{}, "started", nil); err != nil {
+		t.Fatalf("start campaign: %v", err)
+	}
+	claim, ok, err := h.store.ClaimNextRecipient(ctx, h.accountID, time.Now())
+	if err != nil || !ok {
+		t.Fatalf("ClaimNextRecipient: %v, ok=%v", err, ok)
+	}
+	if err := h.store.FinalizeAttempt(ctx, store.FinalizeAttemptParams{
+		LogID: claim.LogID, AttemptID: claim.AttemptID, RecipientID: claim.RecipientID,
+		NewStatus: purecampaign.RecipientSent,
+		ChatID:    uuid.NullUUID{UUID: chatID, Valid: true}, MessageID: uuid.NullUUID{UUID: msgID, Valid: true},
+	}); err != nil {
+		t.Fatalf("FinalizeAttempt: %v", err)
+	}
+
+	resp, env := h.patchJSON("/xchats/api/v1/chats/"+chatID.String()+"/status", map[string]any{"status": "resolved"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var mapped map[string]any
+	mustPayload(t, env, &mapped)
+	campaigns, ok := mapped["campaigns"].([]any)
+	if !ok || len(campaigns) != 1 {
+		t.Fatalf("expected the status-change response to still carry campaigns, got %+v", mapped["campaigns"])
+	}
+	first, _ := campaigns[0].(map[string]any)
+	if first["id"] != c.ID.String() || first["name"] != "Status Badge Campaign" {
+		t.Fatalf("unexpected campaign ref: %+v", first)
+	}
+}
+
 func mustAdminUserID(t *testing.T, h *harness) uuid.UUID {
 	t.Helper()
 	u, err := h.store.UserByEmail(context.Background(), adminEmail)
