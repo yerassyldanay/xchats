@@ -9,7 +9,17 @@ import (
 
 // handleRealtime is the SSE stream. It hydrates nothing (the panes GET on mount);
 // it is purely the live delta layer: message.*, chat.*, ai_draft.*.
+//
+// Subscribes scoped to the caller's own current organization (resolved the
+// same way every other org-scoped handler does, s.orgOf) — a
+// chat/message/campaign/account event fired for a DIFFERENT organization is
+// never even delivered to this connection, not merely filtered client-side.
+// See internal/realtime.Hub's own doc comment.
 func (s *Server) handleRealtime(c *gin.Context) {
+	org, okOrg := s.orgOf(c)
+	if !okOrg {
+		return
+	}
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		fail(c, http.StatusInternalServerError, ErrInternal, "streaming unsupported")
@@ -20,7 +30,7 @@ func (s *Server) handleRealtime(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
 
-	events, unsubscribe := s.hub.Subscribe()
+	events, unsubscribe := s.hub.Subscribe(org.ID)
 	defer unsubscribe()
 
 	// initial comment so proxies flush headers

@@ -17,6 +17,8 @@ type fakeHub struct {
 
 func (f *fakeHub) Broadcast(name string, _ any) { f.events = append(f.events, name) }
 
+func (f *fakeHub) BroadcastScoped(orgID uuid.UUID, name string, data any) { f.Broadcast(name, data) }
+
 func seedSimulatorMessage(t *testing.T, st *store.Store, ctx context.Context, orgSuffix, destination string) (msgID uuid.UUID, externalID string, acctID uuid.UUID) {
 	t.Helper()
 	org, err := st.SeedOrganization(ctx, "receipts-org-"+orgSuffix)

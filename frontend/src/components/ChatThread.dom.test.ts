@@ -97,6 +97,27 @@ describe('ChatThread — audio transcript', () => {
   })
 })
 
+// Campaign message label: "this particular message was a campaign send",
+// distinguishing it from a manual/AI reply in the same thread — separate
+// from (and unrelated to) delivery-tick status, which sender_type does not
+// touch at all.
+describe('ChatThread — campaign message label', () => {
+  it('shows the campaign label on a campaign-sent message', () => {
+    const wrapper = mountWith([baseMessage({ direction: 'out', sender_type: 'campaign', content: 'Hello!', status: 'sent' })])
+    expect(wrapper.find('[data-testid="campaign-message-tag"]').exists()).toBe(true)
+  })
+
+  it('shows no campaign label on a regular user-sent message', () => {
+    const wrapper = mountWith([baseMessage({ direction: 'out', sender_type: 'user', content: 'Hello!', status: 'sent' })])
+    expect(wrapper.find('[data-testid="campaign-message-tag"]').exists()).toBe(false)
+  })
+
+  it('shows no campaign label on an AI-sent message either', () => {
+    const wrapper = mountWith([baseMessage({ direction: 'out', sender_type: 'ai', content: 'Hello!', status: 'delivered' })])
+    expect(wrapper.find('[data-testid="campaign-message-tag"]').exists()).toBe(false)
+  })
+})
+
 describe('ChatThread — image lightbox', () => {
   it('opens the lightbox with the clicked image on click', async () => {
     const wrapper = mountWith([baseMessage({ media: [media({ media_type: 'image', mimetype: 'image/jpeg', file_name: 'photo.jpg' })] })])

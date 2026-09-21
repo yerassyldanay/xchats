@@ -131,7 +131,12 @@ func newMCPHarness(t *testing.T) *mcpHarness {
 	uploadSigner := mcpauth.NewUploadTokenSigner(key)
 	mediaSigner := mcpauth.NewMediaReadTokenSigner(key)
 	mcpSrv := mcpserver.New(mcpserver.Deps{
-		KB: kb, Blob: blobStore, Log: log,
+		// WA is left nil deliberately: no test in this file exercises the
+		// live-connection-check path (whatsapp_connection_status/
+		// diagnose_campaign fall back to the stored, "stale" connection
+		// state, which is itself a legitimate, tested degraded mode — see
+		// internal/mcpserver's own TestWhatsAppConnectionStatus_LiveAndStaleFreshness).
+		KB: kb, Blob: blobStore, Store: st, Log: log,
 		UploadBaseURL: cfg.Server.APIBaseURL, SignUpload: uploadSigner.Sign, UploadTTLSeconds: cfg.MCP.UploadTokenTTLSeconds,
 		SignMediaRead: mediaSigner.Sign, MediaTTLSeconds: cfg.MCP.MediaTokenTTLSeconds,
 	})
@@ -506,8 +511,8 @@ func TestMCPOAuthFullFlow_ThroughToolsCall(t *testing.T) {
 		t.Fatalf("tools/list result not an object: %#v", list.Result)
 	}
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 14 {
-		t.Fatalf("expected 14 tools, got %d: %#v", len(tools), tools)
+	if len(tools) != 18 {
+		t.Fatalf("expected 18 tools, got %d: %#v", len(tools), tools)
 	}
 }
 

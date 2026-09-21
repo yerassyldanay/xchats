@@ -5,6 +5,7 @@
 | [`overview.md`](overview.md) | Product and architectural overview: system design, core invariants, data flows, and tech stack. |
 | [`release/`](release/) | Operating a real deployment: installation, Docker, credentials, backups, upgrades, troubleshooting, and the release process itself. Start at [`release/installation.md`](release/installation.md). |
 | [`desktop.md`](desktop.md) | The Wails desktop app: running and building it locally, what the GitHub Actions matrix produces, and what a user downloads. |
+| [`mcp-connector.md`](mcp-connector.md) | The MCP connector ChatGPT/Claude use to read the knowledge base and diagnose WhatsApp campaigns: starting it, environment variables, authentication/scopes, transports, Claude/ChatGPT setup, local testing, and status/retry semantics. |
 | [`i18n/`](i18n/) | Russian and Kazakh translations of the root community documents (`CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`). The English root files are authoritative on any divergence. |
 
 Looking for the product and architectural overview? See [`overview.md`](overview.md).

@@ -45,6 +45,10 @@ type Ingestor interface {
 	MessageByID(ctx context.Context, id uuid.UUID) (store.Message, error)
 	ChatByID(ctx context.Context, id uuid.UUID) (store.Chat, error)
 	AdvanceDeliveryState(ctx context.Context, channel string, accountID uuid.UUID, externalMessageID, newState string, newRank int) (uuid.UUID, uuid.UUID, error)
+	// CampaignRefsForChats backs dto.MapChatWithCampaigns's realtime-broadcast
+	// enrichment — see that function's own doc comment for why a bare
+	// dto.MapChat must never feed a chat.updated/chat.created broadcast.
+	CampaignRefsForChats(ctx context.Context, chatIDs []uuid.UUID) (map[uuid.UUID][]store.CampaignRef, error)
 }
 
 // Publisher is the enqueue surface Process needs — satisfied by any
@@ -57,6 +61,7 @@ type Publisher interface {
 // *realtime.Hub with zero adapter code.
 type Broadcaster interface {
 	Broadcast(name string, data any)
+	BroadcastScoped(orgID uuid.UUID, name string, data any)
 }
 
 // Automation is the narrow surface Process needs from
@@ -193,7 +198,7 @@ func (p *Processor) Process(ctx context.Context, acct store.ChannelAccount, msg 
 		// but the FOLLOW-UP may not be: the first attempt could have died
 		// between the commit and the enqueue. See tgingest.Process's
 		// identical reasoning.
-		p.emitMessage(ctx, "message.updated", res.MessageID)
+		p.emitMessage(ctx, "message.updated", res.MessageID, acct.OrganizationID.UUID)
 		if msg.Direction == "in" {
 			if err := p.reenqueueMissingDraft(ctx, res, acct); err != nil {
 				return Outcome{Status: "duplicate", Result: res}, fmt.Errorf("%w: %v", ErrEnqueue, err)
@@ -202,7 +207,7 @@ func (p *Processor) Process(ctx context.Context, acct store.ChannelAccount, msg 
 		return Outcome{Status: "duplicate", Result: res}, nil
 	}
 
-	p.emitMessage(ctx, "message.created", res.MessageID)
+	p.emitMessage(ctx, "message.created", res.MessageID, acct.OrganizationID.UUID)
 
 	if msg.Attachment != nil {
 		if err := p.store.InsertChannelMediaPending(ctx, res.MessageID, store.ChannelMediaMeta{
@@ -226,7 +231,7 @@ func (p *Processor) Process(ctx context.Context, acct store.ChannelAccount, msg 
 		if res.ChatCreated {
 			name = "chat.created"
 		}
-		p.hub.Broadcast(name, dto.MapChat(chat))
+		p.hub.BroadcastScoped(acct.OrganizationID.UUID, name, dto.MapChatWithCampaigns(ctx, p.store, chat))
 	}
 
 	// Only a genuinely inbound message ever arms automation — an echo of our
@@ -257,6 +262,13 @@ type StatusUpdate struct {
 	ExternalMessageID string
 	Status            string
 	Rank              int
+	// OrgID scopes the resulting message.updated broadcast to this account's
+	// owning organization. The caller already has the account loaded (it
+	// resolved AccountID from it), so setting this costs no extra lookup —
+	// see internal/httpapi/meta_webhook.go's own call site. Left as uuid.Nil
+	// (unscoped, the pre-scoping behavior) never blocks the status update
+	// itself.
+	OrgID uuid.UUID
 }
 
 // ApplyStatus advances a message's delivery state, monotonically — mirrors
@@ -272,7 +284,7 @@ func (p *Processor) ApplyStatus(ctx context.Context, upd StatusUpdate) (applied 
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", ErrIngest, err)
 	}
-	p.emitMessage(ctx, "message.updated", msgID)
+	p.emitMessage(ctx, "message.updated", msgID, upd.OrgID)
 	return true, nil
 }
 
@@ -304,7 +316,7 @@ func (p *Processor) reenqueueMissingDraft(ctx context.Context, res store.Channel
 	return nil
 }
 
-func (p *Processor) emitMessage(ctx context.Context, name string, id uuid.UUID) {
+func (p *Processor) emitMessage(ctx context.Context, name string, id, orgID uuid.UUID) {
 	msg, err := p.store.MessageByID(ctx, id)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
@@ -312,7 +324,7 @@ func (p *Processor) emitMessage(ctx context.Context, name string, id uuid.UUID) 
 		}
 		return
 	}
-	p.hub.Broadcast(name, dto.MapMessage(msg))
+	p.hub.BroadcastScoped(orgID, name, dto.MapMessage(msg))
 }
 
 // publish enqueues with a bounded deadline (see Deps.PublishTimeout).

@@ -170,7 +170,7 @@ func (f *Fake) injectMessage(ctx context.Context, accountID uuid.UUID, evt Debug
 		name = "chat.created"
 	}
 	if chat, err := f.Store.ChatByID(ctx, res.ChatID); err == nil {
-		f.Hub.Broadcast(name, dto.MapChat(chat))
+		f.Hub.Broadcast(name, dto.MapChatWithCampaigns(ctx, f.Store, chat))
 	}
 	// Mirrors internal/whatsmeow.Manager's own auto-draft-on-inbound: a fresh
 	// customer message queues an AI suggestion without anyone pressing

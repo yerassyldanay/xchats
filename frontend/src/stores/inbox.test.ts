@@ -241,6 +241,70 @@ describe('inbox store — pagination (INB-11)', () => {
   })
 })
 
+// Campaign chats becoming discoverable in the Inbox: view/campaignFilter
+// thread into chatsParams()/loadChats() the same way assignee/account_id
+// already do — omitted when at their default, included when set.
+describe('inbox store — view/campaign_id params', () => {
+  it('chatsParams omits view and campaign_id on the default inbox view', () => {
+    testPinia()
+    const inbox = useInbox()
+    expect(inbox.chatsParams(1).toString()).toBe('page=1')
+  })
+
+  it('chatsParams includes view=campaign and campaign_id together when both are set', () => {
+    testPinia()
+    const inbox = useInbox()
+    inbox.view = 'campaign'
+    inbox.campaignFilter = 'camp-1'
+    expect(inbox.chatsParams(1).toString()).toBe('view=campaign&campaign_id=camp-1&page=1')
+  })
+
+  it('chatsParams includes view=all without campaign_id, even if campaignFilter is stale-set', () => {
+    testPinia()
+    const inbox = useInbox()
+    inbox.view = 'all'
+    inbox.campaignFilter = 'camp-1' // only valid alongside view=campaign — must never leak here
+    expect(inbox.chatsParams(1).toString()).toBe('view=all&page=1')
+  })
+
+  it('chatsParams omits campaign_id when view=campaign but no campaign is picked', () => {
+    testPinia()
+    const inbox = useInbox()
+    inbox.view = 'campaign'
+    expect(inbox.chatsParams(1).toString()).toBe('view=campaign&page=1')
+  })
+
+  it('loadChats() sends the view/campaign_id combination end to end, same mocking idiom as the pagination test above', async () => {
+    testPinia()
+    const { api } = await import('@/api/client')
+    const inbox = useInbox()
+    inbox.view = 'campaign'
+    inbox.campaignFilter = 'camp-1'
+
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      expect(path).toBe('/chats?view=campaign&campaign_id=camp-1&page=1')
+      return { items: [], page: 1, page_size: 50, total: 0 } as never
+    })
+
+    await inbox.loadChats()
+    expect(api.get).toHaveBeenCalledTimes(1)
+  })
+
+  it('loadChats() omits both params again once the view is back to inbox', async () => {
+    testPinia()
+    const { api } = await import('@/api/client')
+    const inbox = useInbox()
+
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      expect(path).toBe('/chats?page=1')
+      return { items: [], page: 1, page_size: 50, total: 0 } as never
+    })
+
+    await inbox.loadChats()
+    expect(api.get).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('inbox store — draft dismissal is persisted, not just local (INB-14)', () => {
   it('calls the backend dismiss endpoint for the chat the drafts belong to', async () => {
     testPinia()

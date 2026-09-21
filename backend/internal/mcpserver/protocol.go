@@ -24,6 +24,8 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/mcpauth"
+	"github.com/yerassyldanay/xchats/backend/internal/store"
+	"github.com/yerassyldanay/xchats/backend/internal/whatsapp"
 )
 
 // ProtocolVersion is the MCP protocol date-version this server implements
@@ -69,6 +71,17 @@ type Deps struct {
 	KB   *kbstore.Store
 	Blob blob.Store
 	Log  *slog.Logger
+	// Store backs the read-only campaign/recipient/connection diagnostic
+	// tools (diagnose_campaign, campaign_recipients, campaign_events,
+	// whatsapp_connection_status). Nil-safe: absent only in tests that don't
+	// exercise those tools (the KB tools never touch it).
+	Store *store.Store
+	// WA backs whatsapp_connection_status' live connection check and
+	// diagnose_campaign's "current sending-account connection status".
+	// Nil-safe: when nil, current connection state falls back to the last
+	// value persisted on wa_accounts (store.Account.ConnectionState) with
+	// freshness explicitly reported as stale rather than live.
+	WA whatsapp.Manager
 	// UploadBaseURL is the public base URL kb_media_upload's signed PUT
 	// target is built against (e.g. https://xchats.kz).
 	UploadBaseURL string

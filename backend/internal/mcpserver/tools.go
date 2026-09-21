@@ -300,8 +300,9 @@ func merge(a, b map[string]any) map[string]any {
 	return out
 }
 
-// Tools is the closed, ordered 14-tool contract (plan/mcp.md §5 plus
-// kb_media_attach and kb_tariff_info_upsert).
+// Tools is the closed, ordered 18-tool contract (plan/mcp.md §5 plus
+// kb_media_attach and kb_tariff_info_upsert, plus the 4 read-only campaign/
+// WhatsApp-connection diagnostic tools).
 func Tools() []Tool {
 	tools := []Tool{
 		assistantUpsertTool(),
@@ -318,6 +319,10 @@ func Tools() []Tool {
 		kbInfoTool(),
 		kbMediaUploadTool(),
 		kbMediaAttachTool(),
+		diagnoseCampaignTool(),
+		campaignRecipientsTool(),
+		whatsappConnectionStatusTool(),
+		campaignEventsTool(),
 	}
 	// SecuritySchemes is derived from requiredScope (handlers.go) — the SAME
 	// map dispatchToolsCall enforces against — rather than repeated as a

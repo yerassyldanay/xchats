@@ -202,7 +202,7 @@ func (w *Worker) downloadTelegramMedia(ctx context.Context, t MediaDownloadTask)
 		return err
 	}
 	w.Log.Info("telegram media downloaded", "message_id", t.MessageID, "bytes", len(data))
-	w.emitMessage(ctx, "message.updated", t.MessageID)
+	w.emitMessage(ctx, "message.updated", t.MessageID, t.AccountID)
 	w.transcribeIfAudio(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType, t.BlobID)
 	w.rearmAfterMediaReady(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType)
 	return nil
@@ -322,7 +322,7 @@ func (w *Worker) downloadMetaMedia(ctx context.Context, t MediaDownloadTask) err
 		return err
 	}
 	w.Log.Info("meta media downloaded", "message_id", t.MessageID, "bytes", len(data))
-	w.emitMessage(ctx, "message.updated", t.MessageID)
+	w.emitMessage(ctx, "message.updated", t.MessageID, t.AccountID)
 	w.transcribeIfAudio(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType, t.BlobID)
 	w.rearmAfterMediaReady(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType)
 	return nil
@@ -400,7 +400,7 @@ func (w *Worker) downloadDirectMedia(ctx context.Context, t MediaDownloadTask) e
 		return err
 	}
 	w.Log.Info("meta media downloaded (direct)", "message_id", t.MessageID, "bytes", len(data))
-	w.emitMessage(ctx, "message.updated", t.MessageID)
+	w.emitMessage(ctx, "message.updated", t.MessageID, t.AccountID)
 	w.transcribeIfAudio(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType, t.BlobID)
 	w.rearmAfterMediaReady(ctx, t.MessageID, t.AccountID, string(t.Channel), meta.MediaType)
 	return nil
@@ -487,7 +487,7 @@ func (w *Worker) handleAIDraft(ctx context.Context, t AIDraftTask) error {
 			w.Log.Error("reload persisted draft", "draft_id", p.ID, "err", derr)
 			continue
 		}
-		w.Hub.Broadcast("ai_draft.created", dto.MapDraft(d))
+		w.Hub.BroadcastScoped(account.OrganizationID.UUID, "ai_draft.created", dto.MapDraft(d))
 	}
 	return nil
 }
@@ -613,12 +613,13 @@ func TranscribeAudio(ctx context.Context, deps TranscriptionDeps, messageID, acc
 		deps.Log.Error("reload transcribed message", "message_id", messageID, "err", err)
 		return
 	}
-	deps.Hub.Broadcast("message.updated", dto.MapMessage(msg))
+	orgID := orgIDFor(ctx, deps.Store, accountID)
+	deps.Hub.BroadcastScoped(orgID, "message.updated", dto.MapMessage(msg))
 
 	if err := deps.Store.UpdateChatPreviewIfCurrent(ctx, msg.ChatID, msg.MessageTS, TranscriptPreview(text)); err != nil {
 		deps.Log.Error("update chat preview after transcription", "chat_id", msg.ChatID, "err", err)
 	} else if chat, err := deps.Store.ChatByID(ctx, msg.ChatID); err == nil {
-		deps.Hub.Broadcast("chat.updated", dto.MapChat(chat))
+		deps.Hub.BroadcastScoped(orgID, "chat.updated", dto.MapChatWithCampaigns(ctx, deps.Store, chat))
 	}
 
 	// A transcript becoming available is new customer content, exactly like
@@ -710,11 +711,25 @@ func TranscriptPreview(text string) string {
 
 // --- helpers --------------------------------------------------------------
 
-func (w *Worker) emitMessage(ctx context.Context, name string, id uuid.UUID) {
+func (w *Worker) emitMessage(ctx context.Context, name string, id, accountID uuid.UUID) {
 	msg, err := w.Store.MessageByID(ctx, id)
 	if err != nil {
 		w.Log.Error("emit message", "err", err)
 		return
 	}
-	w.Hub.Broadcast(name, dto.MapMessage(msg))
+	w.Hub.BroadcastScoped(orgIDFor(ctx, w.Store, accountID), name, dto.MapMessage(msg))
+}
+
+// orgIDFor resolves accountID's owning organization for realtime scoping —
+// best-effort: a lookup failure yields uuid.Nil, which BroadcastScoped
+// treats as unscoped rather than silently dropping the event for every
+// subscriber. Mirrors internal/outbound.Deps.orgIDFor; a free function (not
+// a *Worker method) since TranscribeAudio, which also needs it, is a
+// package-level function taking TranscriptionDeps, not a *Worker receiver.
+func orgIDFor(ctx context.Context, s *store.Store, accountID uuid.UUID) uuid.UUID {
+	acct, err := s.AccountByID(ctx, accountID)
+	if err != nil {
+		return uuid.Nil
+	}
+	return acct.OrganizationID.UUID
 }

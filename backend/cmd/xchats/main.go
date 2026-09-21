@@ -708,7 +708,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger, reso
 	campaignScheduler.Start(ctx)
 	simulatorReceipts.Start(ctx)
 
-	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, log)
+	mcpAuthorizer, mcpSrv := buildMCPConnector(ctx, cfg, kb, blobStore, st, waMgr, log)
 
 	// kbImportSvc runs the structured KB import pipeline's background
 	// workers (internal/kbimport): pass-1 extraction and pass-2 synthesis,
@@ -1232,7 +1232,7 @@ func isLocalBaseURL(raw string) bool {
 // use; the cost is that every token issued before a restart stops verifying
 // after one, which is unacceptable only in a real deployment (where the
 // operator is expected to set the env var).
-func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Store, blobStore blob.Store, log *slog.Logger) (*mcpauth.Authorizer, *mcpserver.Server) {
+func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Store, blobStore blob.Store, st *store.Store, waMgr whatsapp.Manager, log *slog.Logger) (*mcpauth.Authorizer, *mcpserver.Server) {
 	key, err := mcpauth.NewSigningKeyFromSeed(cfg.MCPJWTSigningKey)
 	if err != nil {
 		log.Warn("MCP_JWT_SIGNING_KEY not set; using an ephemeral key for this process — issued MCP tokens will not survive a restart",
@@ -1257,7 +1257,7 @@ func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Stor
 	apiBase := cfg.ResolvedAPIBaseURL()
 	reviewSigner := mcpauth.NewReviewHandoffSigner(key, apiBase, time.Duration(cfg.MCP.ReviewHandoffTTLSeconds)*time.Second)
 	mcpSrv := mcpserver.New(mcpserver.Deps{
-		KB: kb, Blob: blobStore, Log: log,
+		KB: kb, Blob: blobStore, Store: st, WA: waMgr, Log: log,
 		UploadBaseURL:    apiBase,
 		SignUpload:       uploadSigner.Sign,
 		UploadTTLSeconds: cfg.MCP.UploadTokenTTLSeconds,
