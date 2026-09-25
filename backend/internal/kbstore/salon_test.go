@@ -2,6 +2,7 @@ package kbstore_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -250,6 +251,104 @@ func TestPutLiveService_ArchiveCascade(t *testing.T) {
 	for _, ref := range []string{"haircut-short", "hair-spa-mask"} {
 		if sv := findService(live.Services, ref); sv == nil || sv.SalesStatus != "inactive" {
 			t.Errorf("%s.sales_status = %+v, want to STAY inactive — restoring the base must not auto-restore children", ref, sv)
+		}
+	}
+}
+
+// TestApproveVersioned_RejectsOrphanedActiveChild is the draft-approve
+// gate's regression test for the exact defect TestPutLiveService_ArchiveCascade
+// proves fixed on the LIVE-write path: ApproveVersioned deliberately does
+// not auto-cascade a base's archival to its children (see its own doc
+// comment — a staged draft entry is still under human review), so without
+// serviceGateReasons, approving "archive haircut-women" alone — leaving its
+// active variant haircut-short unstaged — would silently materialize the
+// exact orphaned state aiprompt.buildServiceFacts hard-errors on for every
+// subsequent customer reply for the org.
+func TestApproveVersioned_RejectsOrphanedActiveChild(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	must := func(in kbstore.ServiceInput) {
+		t.Helper()
+		if err := kb.PutLiveService(ctx, orgID, actor, in); err != nil {
+			t.Fatalf("PutLiveService(%s): %v", in.Ref, err)
+		}
+	}
+	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "active"})
+	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "active"})
+
+	// Stage ONLY the base's archival in the draft — the active child is left
+	// untouched, exactly the operator mistake the gate exists to catch.
+	if err := kb.UpsertService(ctx, orgID, actor, kbstore.ServiceInput{
+		Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "inactive",
+	}); err != nil {
+		t.Fatalf("UpsertService (draft): %v", err)
+	}
+
+	err := kb.ApproveVersioned(ctx, orgID, kbstore.ApproveSelector{}, nil, actor)
+	var gateErr *kbstore.GateError
+	if !errors.As(err, &gateErr) {
+		t.Fatalf("ApproveVersioned error = %v (%T), want a *GateError", err, err)
+	}
+	found := false
+	for _, r := range gateErr.Reasons {
+		if r.Kind == "services" && r.Key == "haircut-short" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("GateError.Reasons = %+v, want a reason naming orphaned child haircut-short", gateErr.Reasons)
+	}
+
+	// The reject must be atomic: live must be untouched.
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if sv := findService(live.Services, "haircut-women"); sv == nil || sv.SalesStatus != "active" {
+		t.Errorf("live haircut-women = %+v, want still active — a rejected approve must not partially apply", sv)
+	}
+}
+
+// TestApproveVersioned_AllowsCascadedArchive proves the gate added for
+// TestApproveVersioned_RejectsOrphanedActiveChild does not block the
+// legitimate case: archiving a base and its active children together in the
+// same draft batch.
+func TestApproveVersioned_AllowsCascadedArchive(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	must := func(in kbstore.ServiceInput) {
+		t.Helper()
+		if err := kb.PutLiveService(ctx, orgID, actor, in); err != nil {
+			t.Fatalf("PutLiveService(%s): %v", in.Ref, err)
+		}
+	}
+	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "active"})
+	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "active"})
+
+	for _, in := range []kbstore.ServiceInput{
+		{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "inactive"},
+		{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "inactive"},
+	} {
+		if err := kb.UpsertService(ctx, orgID, actor, in); err != nil {
+			t.Fatalf("UpsertService(%s) (draft): %v", in.Ref, err)
+		}
+	}
+
+	if err := kb.ApproveVersioned(ctx, orgID, kbstore.ApproveSelector{}, nil, actor); err != nil {
+		t.Fatalf("ApproveVersioned: %v", err)
+	}
+
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	for _, ref := range []string{"haircut-women", "haircut-short"} {
+		if sv := findService(live.Services, ref); sv == nil || sv.SalesStatus != "inactive" {
+			t.Errorf("%s = %+v, want inactive", ref, sv)
 		}
 	}
 }

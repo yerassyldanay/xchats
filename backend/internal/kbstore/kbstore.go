@@ -497,6 +497,73 @@ func loadServiceRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]ServiceRo
 	return out, rows.Err()
 }
 
+// resultingServicesForGate is resultingZonesForGate's (zones.go) twin for
+// ai_services: live, overridden/extended by this approve batch's pending
+// service upserts, minus anything staged for deletion — the same
+// live-∪-approved-minus-deletes shape serviceGateReasons is checked against.
+func resultingServicesForGate(live []ServiceRow, upserts []DraftService, deletes []DraftDelete) []ServiceRow {
+	del := map[string]bool{}
+	for _, d := range deletes {
+		if d.Kind == deleteKindFor(KBTypeService) {
+			del[d.Key] = true
+		}
+	}
+	idx := map[string]int{}
+	var out []ServiceRow
+	for _, sv := range live {
+		if del[sv.Ref] {
+			continue
+		}
+		out = append(out, sv)
+		idx[sv.Ref] = len(out) - 1
+	}
+	for _, u := range upserts {
+		row := ServiceRow{
+			Ref: u.Ref, ParentRef: u.ParentRef, ServiceType: orDefault(u.ServiceType, "base"),
+			Category: u.Category, Name: u.Name, Price: u.Price, Duration: u.Duration,
+			Description: u.Description, SpecialistRefs: u.SpecialistRefs, SalesStatus: orDefault(u.SalesStatus, "active"),
+		}
+		if i, ok := idx[u.Ref]; ok {
+			out[i] = row
+		} else {
+			out = append(out, row)
+			idx[u.Ref] = len(out) - 1
+		}
+	}
+	return out
+}
+
+// serviceGateReasons is the pure, table-tested invariant over one org's
+// resulting (post-approve) service tree — mirrors aiprompt.buildServiceFacts'
+// own fail-closed rule (backend/aiprompt/catalog.go: "archiving a base must
+// archive its active children"), enforced here at approve time instead of
+// only being discovered later as a hard error breaking every customer reply
+// for the org. The live-write path (PutLiveService, live.go) already
+// cascades a base's archival to its children automatically; the draft-approve
+// path deliberately does not (a staged entry is still under human review —
+// see ApproveVersioned's own comment), so this gate is what turns "publish
+// an archived base without also archiving its active children" into a clear,
+// rejected-up-front error instead of a silently corrupted live KB.
+func serviceGateReasons(services []ServiceRow) []GateReason {
+	var reasons []GateReason
+	byRef := make(map[string]ServiceRow, len(services))
+	for _, sv := range services {
+		byRef[sv.Ref] = sv
+	}
+	for _, sv := range services {
+		if sv.ServiceType == "base" || sv.ParentRef == "" || sv.SalesStatus != "active" {
+			continue
+		}
+		parent, ok := byRef[sv.ParentRef]
+		if !ok || parent.SalesStatus != "active" {
+			reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
+				"service %q is active but its base service %q is not — archive %q too, or restore %q, before publishing",
+				sv.Ref, sv.ParentRef, sv.Ref, sv.ParentRef)})
+		}
+	}
+	return reasons
+}
+
 // upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow.
 func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPolicy) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_policies

@@ -532,8 +532,8 @@ func (s *Server) handleTariffUpsert(ctx context.Context, orgID uuid.UUID, userID
 // parseAssistantChanges's doc comment for why this is factored out.
 func parseContactsChanges(changes map[string]json.RawMessage) (kbstore.ContactsChanges, error) {
 	if err := rejectUnknownFields(changes, "whatsapp", "email", "address", "legal_information", "callback_time",
-		"working_hours", "phone", "website", "instagram", "contact_card_image", "location_map_image",
-		"company_legal_documents"); err != nil {
+		"working_hours", "phone", "website", "instagram", "booking_url", "schedule", "contact_card_image",
+		"location_map_image", "company_legal_documents"); err != nil {
 		return kbstore.ContactsChanges{}, err
 	}
 	ch := kbstore.ContactsChanges{}
@@ -541,6 +541,7 @@ func parseContactsChanges(changes map[string]json.RawMessage) (kbstore.ContactsC
 		"whatsapp": &ch.WhatsApp, "email": &ch.Email, "address": &ch.Address,
 		"legal_information": &ch.LegalInformation, "callback_time": &ch.CallbackTime,
 		"working_hours": &ch.WorkingHours, "phone": &ch.Phone, "website": &ch.Website, "instagram": &ch.Instagram,
+		"booking_url": &ch.BookingURL,
 	} {
 		v, err := optString(changes, field)
 		if err != nil {
@@ -549,6 +550,9 @@ func parseContactsChanges(changes map[string]json.RawMessage) (kbstore.ContactsC
 		*dst = v
 	}
 	var err error
+	if ch.Schedule, err = optSchedule(changes, "schedule"); err != nil {
+		return kbstore.ContactsChanges{}, err
+	}
 	if ch.ContactCardImage, err = optMaterialID(changes, "contact_card_image"); err != nil {
 		return kbstore.ContactsChanges{}, err
 	}

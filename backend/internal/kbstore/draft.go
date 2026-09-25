@@ -2688,6 +2688,11 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 			return err
 		}
 		reasons = append(reasons, zoneGateReasons(resultingZonesForGate(liveZones, set.zones, set.deletes), resultPolicies)...)
+		liveServices, err := loadServiceRows(ctx, db, orgID)
+		if err != nil {
+			return err
+		}
+		reasons = append(reasons, serviceGateReasons(resultingServicesForGate(liveServices, set.services, set.deletes))...)
 		if len(reasons) > 0 {
 			return &GateError{Reasons: reasons}
 		}
@@ -2735,8 +2740,12 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 		// other entity above — the archive-cascade rule (PLAN.md: archiving a
 		// base service atomically archives its active children) is a
 		// LIVE-write-path-only concern (PutLiveService, live.go); a staged
-		// draft entry is still under human review, so it does not cascade
-		// here even for a whole-draft approve.
+		// draft entry is still under human review, so it does not auto-cascade
+		// here even for a whole-draft approve. The gate above (serviceGateReasons)
+		// still refuses to materialize the one state that rule exists to
+		// prevent — an active child left pointing at a now-archived base — so
+		// an operator gets a clear rejection here instead of a silently
+		// corrupted live KB and a hard error on the next customer reply.
 		for _, sp := range set.specialists {
 			if err := upsertSpecialistRow(ctx, db, orgID, sp); err != nil {
 				return err

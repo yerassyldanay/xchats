@@ -11,7 +11,7 @@ import (
 )
 
 // UpsertTools is the closed set of tool names ParseUpsertCall accepts — the
-// eight typed kb_*_upsert tools, in Tools()' own declared order. kb_delete
+// ten typed kb_*_upsert tools, in Tools()' own declared order. kb_delete
 // is deliberately ABSENT: a second caller of this seam (internal/kbimport,
 // staging draft entries from internet-sourced content) must never be able
 // to construct a delete call — there is structurally no code path from
@@ -20,6 +20,7 @@ import (
 var UpsertTools = []string{
 	toolKBTopicUpsert, toolKBProductUpsert, toolKBTariffUpsert,
 	toolKBContactsUpsert, toolKBPoliciesUpsert, toolKBTariffInfoUpsert, toolKBDeliveryZoneUpsert,
+	toolKBSpecialistUpsert, toolKBServiceUpsert,
 	toolKBAssistantUpsert,
 }
 
@@ -169,6 +170,32 @@ func ParseUpsertCall(tool string, args map[string]json.RawMessage) (UpsertCall, 
 			Tool: tool, Key: ref,
 			apply: func(ctx context.Context, kb *kbstore.Store, orgID, userID uuid.UUID, expectedVersion *int64, prov kbstore.MCPProvenance) (kbstore.UpsertResult, error) {
 				return kb.MCPUpsertDeliveryZone(ctx, orgID, userID, ref, ch, expectedVersion, prov)
+			},
+		}, nil
+
+	case toolKBSpecialistUpsert:
+		ch, err := parseSpecialistChanges(changes)
+		if err != nil {
+			return UpsertCall{}, err
+		}
+		ref := stringField(args, "ref")
+		return UpsertCall{
+			Tool: tool, Key: ref,
+			apply: func(ctx context.Context, kb *kbstore.Store, orgID, userID uuid.UUID, expectedVersion *int64, prov kbstore.MCPProvenance) (kbstore.UpsertResult, error) {
+				return kb.MCPUpsertSpecialist(ctx, orgID, userID, ref, ch, expectedVersion, prov)
+			},
+		}, nil
+
+	case toolKBServiceUpsert:
+		ch, err := parseServiceChanges(changes)
+		if err != nil {
+			return UpsertCall{}, err
+		}
+		ref := stringField(args, "ref")
+		return UpsertCall{
+			Tool: tool, Key: ref,
+			apply: func(ctx context.Context, kb *kbstore.Store, orgID, userID uuid.UUID, expectedVersion *int64, prov kbstore.MCPProvenance) (kbstore.UpsertResult, error) {
+				return kb.MCPUpsertService(ctx, orgID, userID, ref, ch, expectedVersion, prov)
 			},
 		}, nil
 

@@ -517,6 +517,8 @@ func contactsUpsertTool() Tool {
 				"phone":                   clearableStr("Exact approved support phone."),
 				"website":                 clearableStr("Exact approved website."),
 				"instagram":               clearableStr("Exact approved Instagram account."),
+				"booking_url":             clearableStr("The organization's own booking link — the fallback every specialist without a personal booking_url resolves to."),
+				"schedule":                scheduleArray("The organization's own weekly working schedule — the salon's general hours, independent of any specialist's own schedule."),
 				"contact_card_image":      materialID("Single contact-card image."),
 				"location_map_image":      materialID("Single location/map image."),
 				"company_legal_documents": materialIDs("Customer-sendable company/legal documents."),
@@ -695,7 +697,7 @@ func kbMediaUploadTool() Tool {
 			"size_bytes":      integer("Declared size in bytes."),
 			"sha256_checksum": str("Declared SHA-256 checksum, if known."),
 			"target": obj(map[string]any{
-				"type":  enumStr("KB type the media will be attached to.", "topic", "product", "tariff", "contacts", "policies"),
+				"type":  enumStr("KB type the media will be attached to.", "topic", "product", "tariff", "contacts", "policies", "specialist"),
 				"key":   str("The record's ref/slug/\"main\", if known."),
 				"field": str("The semantic media field this upload is intended for, e.g. gallery_images, illustration_images — must be one of kb_info.media_attachment_fields' entries for type."),
 			}, "type", "field"),
@@ -711,7 +713,7 @@ func kbMediaAttachTool() Tool {
 		Description: "App-only, widget-invoked tool: attaches an already-uploaded material (kb_media_upload's material_id, with a completed PUT) to one media field of an EXISTING draft or live record. Never creates a record — an unknown key is rejected, not created. A plural field appends (no duplicates); a singular field replaces. Writes only the draft. The model never calls this tool itself.",
 		InputSchema: obj(map[string]any{
 			"material_id":            str("A kb_media_upload material_id whose PUT has completed."),
-			"type":                   enumStr("KB type owning the field.", "topic", "product", "tariff", "contacts", "policies"),
+			"type":                   enumStr("KB type owning the field.", "topic", "product", "tariff", "contacts", "policies", "specialist"),
 			"key":                    str("The record's ref/slug/\"main\". The record must already exist (live or draft) and must not be staged for deletion."),
 			"field":                  str("The media field to attach to — must be one of kb_info.media_attachment_fields' entries for type. Never featured_image, which is not an attachment target."),
 			"expected_draft_version": integer("Optional optimistic-concurrency token from a prior kb_summary/kb_read/upsert result."),

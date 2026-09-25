@@ -247,6 +247,69 @@ func TestRunSynthesis_BadEnumDropsOneKeepsOther(t *testing.T) {
 	}
 }
 
+// TestRunSynthesis_ServiceHierarchyAppliesRegardlessOfModelOrder is
+// applyRank's regression test: MCPUpsertService/MCPUpsertSpecialist reject a
+// specialist_ref/parent_ref that does not YET resolve to an existing live or
+// draft row (salon_validate.go), so a batch that creates a whole
+// specialist+base+variant chain in one synthesis pass only works if
+// specialists land before base services, which land before variant/addon
+// services — regardless of what order the model happened to list them in.
+// The model output here is deliberately worst-case backwards (variant,
+// then base, then specialist) to prove the sort — not the model — is what
+// makes this land.
+func TestRunSynthesis_ServiceHierarchyAppliesRegardlessOfModelOrder(t *testing.T) {
+	resp := `{"calls":[
+		{"tool":"kb_service_upsert","args":{"ref":"haircut-short","changes":{"parent_ref":"haircut-women","service_type":"variant","name":"Короткая стрижка","price":"8 000 ₸"}}},
+		{"tool":"kb_service_upsert","args":{"ref":"haircut-women","changes":{"service_type":"base","category":"Волосы","name":"Женская стрижка","price":"10 000 ₸","specialist_refs":["alina-kim"]}}},
+		{"tool":"kb_specialist_upsert","args":{"ref":"alina-kim","changes":{"full_name":"Алина Ким","sales_status":"active"}}}
+	],"notes":"Специалист и услуги.","unmapped":[]}`
+	client := &scriptedClient{responses: []string{resp}}
+	svc, kb, orgID, _ := newTestService(t, client)
+
+	runID, _ := seedRun(t, kb, orgID, uuid.Nil, "auto", []seedMaterial{
+		{handle: "evidence.1", text: "Алина Ким делает женскую стрижку за 10 000 тенге, короткую версию — за 8 000"},
+	})
+	svc.maybeSynthesize(context.Background(), orgID, runID)
+
+	st := synthesisState(t, kb, orgID, runID)
+	if st == nil || st.Status != kbstore.SynthesisBuilt {
+		t.Fatalf("Synthesis = %+v, want built", st)
+	}
+	if len(st.Applied) != 3 || len(st.Dropped) != 0 {
+		t.Fatalf("Applied=%d Dropped=%d, want 3/0 — a correctly-reordered batch should have nothing to drop (%+v / %+v)",
+			len(st.Applied), len(st.Dropped), st.Applied, st.Dropped)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("model called %d times, want exactly 1 — reordering must not require a retry", len(client.calls))
+	}
+
+	v, err := kb.DraftOnly(context.Background(), orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Specialists) != 1 || v.Specialists[0].Ref != "alina-kim" {
+		t.Fatalf("draft specialists = %+v", v.Specialists)
+	}
+	if len(v.Services) != 2 {
+		t.Fatalf("draft services = %+v, want 2", v.Services)
+	}
+	var base, variant *kbstore.ServiceRow
+	for i := range v.Services {
+		switch v.Services[i].Ref {
+		case "haircut-women":
+			base = &v.Services[i]
+		case "haircut-short":
+			variant = &v.Services[i]
+		}
+	}
+	if base == nil || base.ServiceType != "base" {
+		t.Fatalf("base service = %+v", base)
+	}
+	if variant == nil || variant.ParentRef != "haircut-women" {
+		t.Fatalf("variant service = %+v", variant)
+	}
+}
+
 // --- media handle resolution -----------------------------------------------------
 
 func TestRunSynthesis_UploadHandleResolvesToFeaturedImage(t *testing.T) {
